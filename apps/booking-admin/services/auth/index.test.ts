@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { authService } from "./index";
+import { AuthStateError, authService } from "./index";
 import {
   clearAuthData,
   getAuthBearerToken,
@@ -87,6 +87,67 @@ describe("booking admin auth service", () => {
     expect(isAuthOrganizationSelectionResponse(response)).toBe(true);
     expect(getAuthBearerToken()).toBeNull();
     expect(getAuthCsrfToken()).toBe("selection-csrf-token");
+  });
+
+  it("preserves password workspace choices and retries the selected organization", async () => {
+    vi.stubEnv("NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED", "false");
+    const session = {
+      accessToken: "selected-workos-token",
+      csrfToken: "csrf-token",
+      organizationId: "org_hotel_group",
+      user: {
+        id: "user_hotel",
+        email: "owner@example.test",
+        status: "active",
+      },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            state: "organization_selection_required",
+            message: "Choose workspace",
+            organizations: [
+              { id: "org_workos_one", name: "First Hotel" },
+              { id: "org_workos_two", name: "Second Hotel" },
+            ],
+          },
+          403,
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse(session));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      authService.login({ email: "owner@example.test", password: "secret" }),
+    ).rejects.toMatchObject({
+      state: "organization_selection_required",
+      organizations: [
+        { id: "org_workos_one", name: "First Hotel" },
+        { id: "org_workos_two", name: "Second Hotel" },
+      ],
+    } satisfies Partial<AuthStateError>);
+    await expect(
+      authService.login({
+        email: "owner@example.test",
+        password: "secret",
+        organizationId: "org_workos_two",
+      }),
+    ).resolves.toMatchObject({ accessToken: "selected-workos-token" });
+
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/auth/password/login",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          email: "owner@example.test",
+          password: "secret",
+          organizationId: "org_workos_two",
+          surface: "booking-admin",
+        }),
+      }),
+    );
   });
 
   it("starts Google login through the AuthKit backend", () => {

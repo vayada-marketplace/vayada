@@ -6,11 +6,28 @@ import {
   VAY_1350_ACTIVE_SOURCE_TABLES,
 } from "./productionIdentitySnapshotReader.js";
 import { VAY_1350_INVENTORY_REVISION } from "./sourceExtraction.js";
+import { HISTORICAL_SOURCE_TABLES } from "./rawSourceDispositions.js";
 
 const RUN = "vay1351-0123456789abcdef01234567";
 const USER = "11111111-1111-4111-8111-111111111111";
 
 describe("production identity snapshot reader", () => {
+  it("accepts a complete historical PMS ledger and rejects a partial one", async () => {
+    const complete = new SnapshotFixture();
+    complete.addHistoricalTables();
+    await expect(readProductionIdentitySnapshot(complete as never, RUN)).resolves.toMatchObject({
+      rows: expect.any(Array),
+    });
+
+    const partial = new SnapshotFixture();
+    partial.addHistoricalTables();
+    partial.tables.pop();
+    partial.rebuildSources();
+    await expect(readProductionIdentitySnapshot(partial as never, RUN)).rejects.toThrow(
+      "incomplete historical PMS table set",
+    );
+  });
+
   it("accepts only ledger-matching immutable rows from all consumed tables", async () => {
     const fixture = new SnapshotFixture();
 
@@ -139,6 +156,21 @@ class SnapshotFixture {
       checksum: checksum.digest("hex"),
     };
   });
+
+  addHistoricalTables(): void {
+    for (const qualified of HISTORICAL_SOURCE_TABLES) {
+      const [sourceSchema, sourceTable] = qualified.split(".") as [string, string];
+      this.tables.push({
+        sourceDatabase: "pms",
+        sourceSchema,
+        sourceTable,
+        status: "completed",
+        rowCount: "0",
+        checksum: createHash("sha256").digest("hex"),
+      });
+    }
+    this.rebuildSources();
+  }
 
   rebuildSources(): void {
     this.sources = Object.keys(VAY_1350_ACTIVE_SOURCE_TABLES).map((sourceDatabase) => {

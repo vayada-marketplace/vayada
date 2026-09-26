@@ -25,6 +25,8 @@ export type AffiliatePayoutCandidate = {
   payoutStatus: string;
   providerPayoutId: string | null;
   payoutMethod: string;
+  settlementReady: boolean;
+  scheduledAt: string | null;
 };
 
 type EvidenceRow = Omit<
@@ -118,10 +120,13 @@ export async function lockAffiliatePayouts(
        payout.id::text AS "payoutId",
        payout.amount::text, payout.payout_status AS "payoutStatus",
        payout.provider_payout_id AS "providerPayoutId",
-       CASE COALESCE(account.provider, settings.payout_method, 'manual')
+       COALESCE((payout.payout_metadata->>'affiliateSettlementReady')::boolean,FALSE)
+         AS "settlementReady",
+       payout.scheduled_at AS "scheduledAt",
+       CASE COALESCE(payout.payout_metadata->>'affiliatePayoutMethod', account.provider, settings.payout_method, 'manual')
          WHEN 'bank' THEN 'bank_transfer'
          WHEN 'bank_account' THEN 'bank_transfer'
-         ELSE COALESCE(account.provider, settings.payout_method, 'manual')
+         ELSE COALESCE(payout.payout_metadata->>'affiliatePayoutMethod', account.provider, settings.payout_method, 'manual')
        END AS "payoutMethod"
      FROM finance.payouts payout
      LEFT JOIN finance.payout_settings settings
@@ -229,10 +234,10 @@ export async function applyAffiliatePayoutPaidState(
            payout.payout_metadata ->> 'resourceId'
          ) = $6
          AND payout.currency = $7
-         AND CASE COALESCE(account.provider, settings.payout_method, 'manual')
+         AND CASE COALESCE(payout.payout_metadata->>'affiliatePayoutMethod', account.provider, settings.payout_method, 'manual')
            WHEN 'bank' THEN 'bank_transfer'
            WHEN 'bank_account' THEN 'bank_transfer'
-           ELSE COALESCE(account.provider, settings.payout_method, 'manual')
+           ELSE COALESCE(payout.payout_metadata->>'affiliatePayoutMethod', account.provider, settings.payout_method, 'manual')
          END IN ('manual', 'bank_transfer')
      )
      UPDATE finance.payouts payout

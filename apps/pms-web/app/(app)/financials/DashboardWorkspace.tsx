@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ArrowDownTrayIcon,
   ArrowPathIcon,
   ChartBarIcon,
   ExclamationTriangleIcon,
@@ -14,6 +13,8 @@ import { ApiErrorResponse } from "@/services/api/client";
 import { resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
 import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
 import { getFinanceDashboard } from "@/services/finance/financialReports";
+
+import { ReportExportButton } from "./ReportExportButton";
 
 import { RevenueTab } from "./RevenueTab";
 import { ExpensesTab } from "./ExpensesTab";
@@ -133,15 +134,11 @@ export function DashboardWorkspace({ canManage }: { canManage: boolean }) {
               />
             </label>
           )}
-          {(tab === "dashboard" || tab === "revenue") && (
-            <button
-              className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-500"
-              type="button"
-              disabled
-              title="Exports will be added through the Financials export flow."
-            >
-              <ArrowDownTrayIcon className="h-4 w-4" aria-hidden="true" /> Export
-            </button>
+          {tab === "dashboard" && state.kind === "ready" && (
+            <ReportExportButton
+              propertyId={state.propertyId}
+              input={{ tab: "dashboard", filters: { asOf: asOf || undefined } }}
+            />
           )}
           <button
             className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-700 px-3 text-sm font-medium text-white disabled:opacity-60"

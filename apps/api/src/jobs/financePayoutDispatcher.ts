@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type {
   FinanceAffiliatePayoutProvider,
@@ -7,7 +7,9 @@ import type {
 import pg from "pg";
 
 export const FINANCE_PROPERTY_PAYOUT_DISPATCH_QUEUE = "finance-property-payout-dispatch";
+export const FINANCE_AFFILIATE_PAYOUT_DISPATCH_QUEUE = "finance-affiliate-payout-dispatch";
 export const DEFAULT_FINANCE_PROPERTY_PAYOUT_DISPATCH_LIMIT = 100;
+export const DEFAULT_FINANCE_AFFILIATE_PAYOUT_DISPATCH_LIMIT = 100;
 
 export type FinancePropertyPayoutDispatchCandidate = {
   payoutId: string;
@@ -30,6 +32,28 @@ export type FinancePropertyPayoutDispatchContext = {
   workerId: string;
   correlationId: string;
 };
+
+export type FinanceAffiliatePayoutDispatchCandidate = {
+  payoutId: string;
+  affiliateId: string;
+  organizationId: string;
+  amount: string;
+  currency: string;
+  provider: FinanceAffiliatePayoutProvider;
+  providerAccountId: string | null;
+  providerIdempotencyKey: string;
+  leaseToken: string | null;
+  retryCount: number;
+  maxAttempts: number;
+  scheduledAt: string;
+  payoutSchedule: "manual" | "monthly" | "threshold";
+  affiliateResourceLinked: boolean;
+  settlementReady: boolean;
+  readinessCurrent: boolean;
+  providerPayoutId: string | null;
+};
+
+export type FinanceAffiliatePayoutDispatchContext = FinancePropertyPayoutDispatchContext;
 
 export type FinancePayoutProviderSuccess = {
   ok: true;
@@ -62,6 +86,13 @@ export type FinancePayoutProvider = {
   ): Promise<FinancePayoutProviderResult>;
 };
 
+export type FinanceAffiliatePayoutProviderClient = {
+  dispatchAffiliatePayout(
+    candidate: FinanceAffiliatePayoutDispatchCandidate,
+    context: FinanceAffiliatePayoutDispatchContext,
+  ): Promise<FinancePayoutProviderResult>;
+};
+
 export type FinancePayoutProviderAttemptRecord = {
   payoutId: string;
   propertyId: string | null;
@@ -89,6 +120,14 @@ export type FinancePropertyPayoutDispatchMutationResult = {
   providerPayoutId: string | null;
 };
 
+export type FinanceAffiliatePayoutDispatchMutationResult = {
+  payoutId: string;
+  affiliateId: string;
+  organizationId: string;
+  status: "dispatched" | "retry_scheduled" | "failed";
+  providerPayoutId: string | null;
+};
+
 export type FinancePropertyPayoutDispatcherStore = {
   findDuePropertyPayoutDispatchCandidates(
     now: Date,
@@ -111,6 +150,29 @@ export type FinancePropertyPayoutDispatcherStore = {
     attempt: FinancePayoutProviderAttemptRecord,
     context: FinancePropertyPayoutDispatchContext,
   ): Promise<FinancePropertyPayoutDispatchMutationResult>;
+};
+
+export type FinanceAffiliatePayoutDispatcherStore = {
+  findDueAffiliatePayoutDispatchCandidates(
+    now: Date,
+    limit: number,
+  ): Promise<FinanceAffiliatePayoutDispatchCandidate[]>;
+  claimAffiliatePayoutDispatch(
+    candidate: FinanceAffiliatePayoutDispatchCandidate,
+    context: FinanceAffiliatePayoutDispatchContext,
+  ): Promise<FinanceAffiliatePayoutDispatchCandidate | null>;
+  markAffiliatePayoutDispatched(
+    candidate: FinanceAffiliatePayoutDispatchCandidate,
+    result: FinancePayoutProviderSuccess,
+    attempt: FinancePayoutProviderAttemptRecord,
+    context: FinanceAffiliatePayoutDispatchContext,
+  ): Promise<FinanceAffiliatePayoutDispatchMutationResult>;
+  markAffiliatePayoutDispatchFailed(
+    candidate: FinanceAffiliatePayoutDispatchCandidate,
+    result: FinancePayoutProviderFailure,
+    attempt: FinancePayoutProviderAttemptRecord,
+    context: FinanceAffiliatePayoutDispatchContext,
+  ): Promise<FinanceAffiliatePayoutDispatchMutationResult>;
 };
 
 export type FinancePropertyPayoutDispatcherOptions = {
@@ -142,6 +204,24 @@ type PropertyPayoutCandidateRow = {
   providerPayoutId: string | null;
 };
 
+type AffiliatePayoutCandidateRow = {
+  payoutId: string;
+  affiliateId: string | null;
+  organizationId: string;
+  amount: string;
+  currency: string;
+  provider: FinanceAffiliatePayoutProvider | "bank" | "bank_account" | null;
+  providerAccountId: string | null;
+  retryCount: number;
+  maxAttempts: number | null;
+  scheduledAt: Date | string;
+  payoutSchedule: string | null;
+  affiliateResourceLinked: boolean | null;
+  settlementReady: boolean | null;
+  readinessCurrent: boolean | null;
+  providerPayoutId: string | null;
+};
+
 export type FinancePropertyPayoutDispatcherSkipReason =
   | "reconciliation_not_ready"
   | "legacy_scheduler_not_frozen"
@@ -161,6 +241,29 @@ export type FinancePropertyPayoutDispatcherResult = {
   retryScheduled: number;
   failed: number;
   skipped: FinancePropertyPayoutDispatcherSkipped[];
+  attempts: FinancePayoutProviderAttemptRecord[];
+};
+
+export type FinanceAffiliatePayoutDispatcherSkipReason =
+  | "affiliate_resource_not_linked"
+  | "manual_schedule"
+  | "settlement_not_ready"
+  | "readiness_revoked"
+  | "payout_already_dispatched"
+  | "dispatch_claim_conflict";
+
+export type FinanceAffiliatePayoutDispatcherSkipped = {
+  payoutId: string;
+  affiliateId: string;
+  reason: FinanceAffiliatePayoutDispatcherSkipReason;
+};
+
+export type FinanceAffiliatePayoutDispatcherResult = {
+  scanned: number;
+  dispatched: number;
+  retryScheduled: number;
+  failed: number;
+  skipped: FinanceAffiliatePayoutDispatcherSkipped[];
   attempts: FinancePayoutProviderAttemptRecord[];
 };
 
@@ -244,6 +347,85 @@ export async function runFinancePropertyPayoutDispatcher(
   };
 }
 
+export async function runFinanceAffiliatePayoutDispatcher(
+  store: FinanceAffiliatePayoutDispatcherStore,
+  provider: FinanceAffiliatePayoutProviderClient,
+  options: FinancePropertyPayoutDispatcherOptions = {},
+): Promise<FinanceAffiliatePayoutDispatcherResult> {
+  const now = options.now ?? new Date();
+  const context: FinanceAffiliatePayoutDispatchContext = {
+    now,
+    workerId: options.workerId ?? "finance-affiliate-payout-dispatcher",
+    correlationId: `finance.dispatch-affiliate-payout:${now.toISOString()}`,
+  };
+  const candidates = await store.findDueAffiliatePayoutDispatchCandidates(
+    now,
+    options.limit ?? DEFAULT_FINANCE_AFFILIATE_PAYOUT_DISPATCH_LIMIT,
+  );
+  const skipped: FinanceAffiliatePayoutDispatcherSkipped[] = [];
+  const attempts: FinancePayoutProviderAttemptRecord[] = [];
+  let dispatched = 0;
+  let retryScheduled = 0;
+  let failed = 0;
+
+  for (const candidate of candidates) {
+    const skipReason = affiliatePayoutDispatchBlocker(candidate);
+    if (skipReason) {
+      skipped.push({
+        payoutId: candidate.payoutId,
+        affiliateId: candidate.affiliateId,
+        reason: skipReason,
+      });
+      continue;
+    }
+
+    const claimed = await store.claimAffiliatePayoutDispatch(candidate, context);
+    if (!claimed) {
+      skipped.push({
+        payoutId: candidate.payoutId,
+        affiliateId: candidate.affiliateId,
+        reason: "dispatch_claim_conflict",
+      });
+      continue;
+    }
+
+    const providerResult = await providerPayoutResultFromDispatch(() =>
+      provider.dispatchAffiliatePayout(claimed, context),
+    );
+    const attempt = buildAffiliateProviderAttempt(claimed, providerResult, context);
+    attempts.push(attempt);
+
+    if (providerResult.ok) {
+      const mutation = await store.markAffiliatePayoutDispatched(
+        claimed,
+        providerResult,
+        attempt,
+        context,
+      );
+      if (mutation.status === "dispatched") dispatched += 1;
+      continue;
+    }
+
+    const mutation = await store.markAffiliatePayoutDispatchFailed(
+      claimed,
+      providerResult,
+      attempt,
+      context,
+    );
+    if (mutation.status === "retry_scheduled") retryScheduled += 1;
+    if (mutation.status === "failed") failed += 1;
+  }
+
+  return {
+    scanned: candidates.length,
+    dispatched,
+    retryScheduled,
+    failed,
+    skipped,
+    attempts,
+  };
+}
+
 export function createPgFinancePropertyPayoutDispatcherStore(
   config: PgFinancePropertyPayoutDispatcherStoreConfig,
 ): FinancePropertyPayoutDispatcherStore & { close(): Promise<void> } {
@@ -274,6 +456,33 @@ export function createPgFinancePropertyPayoutDispatcherStore(
   };
 }
 
+export function createPgFinanceAffiliatePayoutDispatcherStore(
+  config: PgFinancePropertyPayoutDispatcherStoreConfig,
+): FinanceAffiliatePayoutDispatcherStore & { close(): Promise<void> } {
+  const pool = new pg.Pool({
+    connectionString: config.connectionString,
+    max: config.max,
+  });
+
+  return {
+    async findDueAffiliatePayoutDispatchCandidates(now, limit) {
+      return selectDueAffiliatePayoutDispatchCandidates(pool, now, limit);
+    },
+    async claimAffiliatePayoutDispatch(candidate, context) {
+      return claimAffiliatePayoutDispatch(pool, candidate, context);
+    },
+    async markAffiliatePayoutDispatched(candidate, result, attempt, context) {
+      return markAffiliatePayoutDispatched(pool, candidate, result, attempt, context);
+    },
+    async markAffiliatePayoutDispatchFailed(candidate, result, attempt, context) {
+      return markAffiliatePayoutDispatchFailed(pool, candidate, result, attempt, context);
+    },
+    async close() {
+      await pool.end();
+    },
+  };
+}
+
 export function propertyPayoutDispatchBlocker(
   candidate: FinancePropertyPayoutDispatchCandidate,
 ): FinancePropertyPayoutDispatcherSkipReason | null {
@@ -284,11 +493,29 @@ export function propertyPayoutDispatchBlocker(
   return null;
 }
 
+export function affiliatePayoutDispatchBlocker(
+  candidate: FinanceAffiliatePayoutDispatchCandidate,
+): FinanceAffiliatePayoutDispatcherSkipReason | null {
+  if (!candidate.affiliateResourceLinked) return "affiliate_resource_not_linked";
+  if (candidate.payoutSchedule === "manual") return "manual_schedule";
+  if (!candidate.settlementReady) return "settlement_not_ready";
+  if (!candidate.readinessCurrent || !candidate.providerAccountId) return "readiness_revoked";
+  if (candidate.providerPayoutId) return "payout_already_dispatched";
+  return null;
+}
+
 export function buildPropertyPayoutDispatchJobKey(input: {
   propertyId: string;
   payoutId: string;
 }): string {
   return `finance.dispatch-property-payout:property:${input.propertyId}:payout:${input.payoutId}:v1`;
+}
+
+export function buildAffiliatePayoutDispatchJobKey(input: {
+  affiliateId: string;
+  payoutId: string;
+}): string {
+  return `finance.dispatch-affiliate-payout:affiliate:${input.affiliateId}:payout:${input.payoutId}:v1`;
 }
 
 async function providerPayoutResultFromDispatch(
@@ -385,6 +612,100 @@ async function selectDuePropertyPayoutDispatchCandidates(
   }));
 }
 
+async function selectDueAffiliatePayoutDispatchCandidates(
+  db: Queryable,
+  now: Date,
+  limit: number,
+): Promise<FinanceAffiliatePayoutDispatchCandidate[]> {
+  const result = await db.query<AffiliatePayoutCandidateRow>(
+    `SELECT
+       payout.id::text AS "payoutId",
+       COALESCE(payout.payout_metadata ->> 'affiliateId', settings.payout_preferences ->> 'affiliateId') AS "affiliateId",
+       payout.organization_id::text AS "organizationId",
+       payout.amount::text,
+       payout.currency,
+       COALESCE(account.provider, settings.payout_method, 'manual') AS provider,
+       account.provider_account_id AS "providerAccountId",
+       payout.retry_count AS "retryCount",
+       COALESCE((payout.payout_metadata ->> 'maxDispatchAttempts')::int, 3) AS "maxAttempts",
+       COALESCE(payout.scheduled_at, payout.created_at) AS "scheduledAt",
+       COALESCE(settings.schedule ->> 'type', 'monthly') AS "payoutSchedule",
+       link.id IS NOT NULL AS "affiliateResourceLinked",
+       COALESCE((payout.payout_metadata ->> 'affiliateSettlementReady')::boolean, false)
+         AS "settlementReady",
+       (organization.id IS NOT NULL
+         AND settings.id IS NOT NULL
+         AND settings.status = 'active'
+         AND settings.default_currency = payout.currency
+         AND settings.payout_method = 'stripe'
+         AND account.id IS NOT NULL
+         AND account.provider = 'stripe') AS "readinessCurrent",
+       payout.provider_payout_id AS "providerPayoutId"
+     FROM finance.payouts payout
+     LEFT JOIN finance.payout_settings settings
+       ON settings.id = payout.payout_setting_id
+      AND settings.organization_id = payout.organization_id
+      AND settings.owner_scope = 'organization'
+     LEFT JOIN identity.organizations organization
+       ON organization.id = payout.organization_id
+      AND organization.kind = 'affiliate_partner'
+      AND organization.status = 'active'
+     LEFT JOIN identity.organization_resource_links link
+       ON link.organization_id = payout.organization_id
+      AND link.product = 'affiliate'
+      AND link.resource_type = 'affiliate'
+      AND link.resource_id = COALESCE(payout.payout_metadata ->> 'affiliateId', settings.payout_preferences ->> 'affiliateId')
+      AND link.status = 'active'
+     JOIN platform.jobs dispatch_job
+       ON dispatch_job.queue_name = 'finance-affiliate-payout-dispatch'
+      AND dispatch_job.job_key = 'finance.dispatch-affiliate-payout:affiliate:' || COALESCE(payout.payout_metadata ->> 'affiliateId', settings.payout_preferences ->> 'affiliateId') || ':payout:' || payout.id::text || ':v1'
+      AND ((dispatch_job.status = 'pending' AND dispatch_job.run_after <= $1::timestamptz)
+        OR (dispatch_job.status = 'running'
+          AND dispatch_job.locked_at <= $1::timestamptz - interval '5 minutes'))
+     LEFT JOIN finance.payment_provider_accounts account
+       ON account.id = payout.organization_provider_account_id
+      AND account.organization_id = payout.organization_id
+      AND account.account_scope = 'organization'
+      AND account.status = 'active'
+      AND account.payouts_enabled = TRUE
+     WHERE payout.owner_scope = 'organization'
+       AND (payout.payout_status IN ('pending', 'scheduled', 'failed') OR (
+         payout.payout_status = 'processing'
+         AND COALESCE((payout.payout_metadata ->> 'affiliateDispatchLeaseExpiresAt')::timestamptz,
+           '-infinity'::timestamptz) <= $1::timestamptz
+       ))
+       AND payout.provider_payout_id IS NULL
+       AND COALESCE(payout.scheduled_at, payout.created_at) <= $1::timestamptz
+       AND payout.retry_count < COALESCE((payout.payout_metadata ->> 'maxDispatchAttempts')::int, 3)
+       AND COALESCE(settings.schedule ->> 'type', 'monthly') IN ('monthly', 'threshold')
+     ORDER BY COALESCE(payout.scheduled_at, payout.created_at), payout.id
+     LIMIT $2`,
+    [now.toISOString(), limit],
+  );
+  return result.rows.map((row) => ({
+    payoutId: row.payoutId,
+    affiliateId: row.affiliateId ?? "unlinked",
+    organizationId: row.organizationId,
+    amount: row.amount,
+    currency: row.currency,
+    provider: affiliatePayoutProvider(row.provider),
+    providerAccountId: row.providerAccountId,
+    providerIdempotencyKey: buildAffiliatePayoutDispatchJobKey({
+      affiliateId: row.affiliateId ?? "unlinked",
+      payoutId: row.payoutId,
+    }),
+    leaseToken: null,
+    retryCount: row.retryCount,
+    maxAttempts: row.maxAttempts ?? 3,
+    scheduledAt: dateString(row.scheduledAt),
+    payoutSchedule: affiliatePayoutSchedule(row.payoutSchedule),
+    affiliateResourceLinked: Boolean(row.affiliateResourceLinked && row.affiliateId),
+    settlementReady: Boolean(row.settlementReady),
+    readinessCurrent: Boolean(row.readinessCurrent),
+    providerPayoutId: row.providerPayoutId,
+  }));
+}
+
 async function insertProviderAttempt(
   db: Queryable,
   attempt: FinancePayoutProviderAttemptRecord,
@@ -416,18 +737,17 @@ async function insertProviderAttempt(
        error_metadata
      )
      SELECT
-       $9::uuid,
+       $8::uuid,
+       $1,
        $2,
        $3,
-       $4,
-       $5::timestamptz,
-       $5::timestamptz,
+       $4::timestamptz,
+       $4::timestamptz,
+       $5,
        $6,
-       $7,
-       $8::jsonb
+       $7::jsonb
      ON CONFLICT (job_id, attempt_number) DO NOTHING`,
     [
-      attempt.idempotencyKey,
       attempt.attemptNumber,
       attempt.status === "succeeded" ? "succeeded" : "failed",
       attempt.workerId,
@@ -573,6 +893,305 @@ async function markPropertyPayoutDispatchFailed(
   };
 }
 
+async function claimAffiliatePayoutDispatch(
+  db: Queryable,
+  candidate: FinanceAffiliatePayoutDispatchCandidate,
+  context: FinanceAffiliatePayoutDispatchContext,
+): Promise<FinanceAffiliatePayoutDispatchCandidate | null> {
+  const leaseToken = randomUUID();
+  const result = await db.query<{
+    amount: string;
+    currency: string;
+    providerAccountId: string;
+  }>(
+    `UPDATE finance.payouts
+     SET payout_status = 'processing',
+         updated_at = $1::timestamptz,
+         payout_metadata = payout_metadata || $2::jsonb
+     WHERE id = $3::uuid
+       AND organization_id = $4::uuid
+       AND owner_scope = 'organization'
+       AND provider_payout_id IS NULL
+       AND (payout_status IN ('pending', 'scheduled', 'failed') OR (
+         payout_status = 'processing'
+         AND COALESCE((payout_metadata ->> 'affiliateDispatchLeaseExpiresAt')::timestamptz,
+           '-infinity'::timestamptz) <= $1::timestamptz
+       ))
+       AND COALESCE((payout_metadata ->> 'affiliateSettlementReady')::boolean, false)
+       AND payout_metadata ->> 'affiliateId' = $5
+       AND EXISTS (
+         SELECT 1
+         FROM identity.organizations organization
+         JOIN identity.organization_resource_links link
+           ON link.organization_id = organization.id
+          AND link.product = 'affiliate'
+          AND link.resource_type = 'affiliate'
+          AND link.resource_id = $5
+          AND link.status = 'active'
+         JOIN finance.payout_settings settings
+           ON settings.id = finance.payouts.payout_setting_id
+          AND settings.organization_id = organization.id
+          AND settings.owner_scope = 'organization'
+          AND settings.status = 'active'
+          AND settings.payout_method = 'stripe'
+          AND settings.default_currency = finance.payouts.currency
+          AND COALESCE(settings.schedule ->> 'type', 'monthly') IN ('monthly', 'threshold')
+          AND settings.organization_provider_account_id = finance.payouts.organization_provider_account_id
+         JOIN finance.payment_provider_accounts account
+           ON account.id = finance.payouts.organization_provider_account_id
+          AND account.organization_id = organization.id
+          AND account.account_scope = 'organization'
+          AND account.provider = 'stripe'
+          AND account.status = 'active'
+          AND account.payouts_enabled = TRUE
+         WHERE organization.id = $4::uuid
+           AND organization.kind = 'affiliate_partner'
+           AND organization.status = 'active'
+       )
+     RETURNING amount::text, currency,
+       organization_provider_account_id::text AS "providerAccountId"`,
+    [
+      context.now.toISOString(),
+      JSON.stringify({
+        affiliateDispatchClaimedAt: context.now.toISOString(),
+        affiliateDispatchLeaseExpiresAt: new Date(context.now.getTime() + 5 * 60_000).toISOString(),
+        affiliateDispatchLeaseToken: leaseToken,
+        affiliateDispatchWorkerId: context.workerId,
+        affiliateDispatchJobKey: candidate.providerIdempotencyKey,
+      }),
+      candidate.payoutId,
+      candidate.organizationId,
+      candidate.affiliateId,
+    ],
+  );
+  const claimed = result.rows[0];
+  if (!claimed) return null;
+  const job = await db.query(
+    `UPDATE platform.jobs SET status='running',locked_at=$1::timestamptz,locked_by=$2,
+       updated_at=$1::timestamptz
+     WHERE queue_name=$3 AND job_key=$4 AND (
+       (status='pending' AND run_after <= $1::timestamptz)
+       OR (status='running' AND locked_at <= $1::timestamptz - interval '5 minutes')
+     ) RETURNING id`,
+    [
+      context.now.toISOString(),
+      `${context.workerId}:${leaseToken}`,
+      FINANCE_AFFILIATE_PAYOUT_DISPATCH_QUEUE,
+      candidate.providerIdempotencyKey,
+    ],
+  );
+  return (job.rowCount ?? 0) > 0
+    ? {
+        ...candidate,
+        amount: claimed.amount,
+        currency: claimed.currency,
+        providerAccountId: claimed.providerAccountId,
+        leaseToken,
+      }
+    : null;
+}
+
+async function markAffiliatePayoutDispatched(
+  db: Queryable,
+  candidate: FinanceAffiliatePayoutDispatchCandidate,
+  result: FinancePayoutProviderSuccess,
+  attempt: FinancePayoutProviderAttemptRecord,
+  context: FinanceAffiliatePayoutDispatchContext,
+): Promise<FinanceAffiliatePayoutDispatchMutationResult> {
+  if (!candidate.leaseToken) throw new Error("Affiliate payout dispatch lease is missing.");
+  const update = await db.query(
+    `WITH payout_update AS (
+     UPDATE finance.payouts
+     SET payout_status = $1,
+         provider_payout_id = $2,
+         retry_count = GREATEST(retry_count, $3),
+         paid_at = CASE WHEN $1 = 'paid' THEN $4::timestamptz ELSE paid_at END,
+         updated_at = $4::timestamptz,
+         payout_metadata = payout_metadata || $5::jsonb
+     WHERE id = $6::uuid
+       AND organization_id = $7::uuid
+       AND owner_scope = 'organization'
+       AND provider_payout_id IS NULL
+       AND payout_status = 'processing'
+       AND payout_metadata ->> 'affiliateDispatchLeaseToken' = $10
+       AND EXISTS (SELECT 1 FROM platform.jobs job WHERE job.queue_name=$8
+         AND job.job_key=$9 AND job.status='running' AND job.locked_by=$11)
+     RETURNING id
+     ), audit_insert AS (
+       INSERT INTO platform.product_audit_events (
+         audit_key,product,action,action_version,occurred_at,tenant_scope,organization_id,
+         property_id,actor_type,actor_user_id,target_resource_product,target_resource_type,
+         target_resource_id,correlation_id,causation_id,redacted_payload,private_payload,
+         audit_metadata,retention_class,privacy_scope
+       )
+       SELECT $12,'finance','finance.affiliate_payout.notification_audited',1,$4::timestamptz,
+         'organization',$7::uuid,NULL,'system',NULL,'finance','payout',$6::uuid::text,$13,$9,
+         $14::jsonb,'{}'::jsonb,$15::jsonb,'financial','confidential'
+       FROM payout_update
+       ON CONFLICT (product,audit_key) DO NOTHING
+     ), attempt_insert AS (
+       INSERT INTO platform.job_attempts (
+         job_id,attempt_number,status,worker_id,started_at,finished_at,
+         error_type,error_message,error_metadata
+       )
+       SELECT job.id,$3,'succeeded',$16,$4::timestamptz,$4::timestamptz,
+         NULL,NULL,$17::jsonb
+       FROM platform.jobs job, payout_update
+       WHERE job.queue_name=$8 AND job.job_key=$9
+         AND job.status='running' AND job.locked_by=$11
+       ON CONFLICT (job_id,attempt_number) DO NOTHING
+     )
+     UPDATE platform.jobs SET status='succeeded',attempts_count=attempts_count+1,
+       finished_at=$4::timestamptz,locked_at=NULL,locked_by=NULL,updated_at=$4::timestamptz
+     WHERE queue_name=$8 AND job_key=$9 AND EXISTS (SELECT 1 FROM payout_update)
+     RETURNING id`,
+    [
+      result.status,
+      result.providerPayoutId,
+      attempt.attemptNumber,
+      context.now.toISOString(),
+      JSON.stringify({
+        lastAffiliateDispatchAttemptAt: attempt.recordedAt,
+        lastAffiliateDispatchWorkerId: context.workerId,
+        providerRequestId: result.providerRequestId,
+        notificationAuditRecordedAt: context.now.toISOString(),
+      }),
+      candidate.payoutId,
+      candidate.organizationId,
+      FINANCE_AFFILIATE_PAYOUT_DISPATCH_QUEUE,
+      candidate.providerIdempotencyKey,
+      candidate.leaseToken,
+      `${context.workerId}:${candidate.leaseToken}`,
+      `finance.affiliate-payout.notification-audit.affiliate.${candidate.affiliateId}.payout.${candidate.payoutId}.v1`,
+      context.correlationId,
+      JSON.stringify({
+        affiliateId: candidate.affiliateId,
+        payoutId: candidate.payoutId,
+        provider: candidate.provider,
+        providerPayoutId: result.providerPayoutId,
+      }),
+      JSON.stringify({
+        notificationAuditReadyAt: context.now.toISOString(),
+        payoutSchedule: candidate.payoutSchedule,
+      }),
+      attempt.workerId,
+      JSON.stringify({
+        affiliateId: attempt.affiliateId ?? null,
+        organizationId: attempt.organizationId ?? null,
+        provider: attempt.provider,
+        providerRequestId: attempt.providerRequestId,
+        providerPayoutId: attempt.providerPayoutId,
+        requestPayloadHash: attempt.requestPayloadHash,
+        retryable: attempt.retryable,
+      }),
+    ],
+  );
+  assertSinglePayoutMutation(
+    update.rowCount,
+    "mark affiliate payout dispatched",
+    candidate.payoutId,
+  );
+  return {
+    payoutId: candidate.payoutId,
+    affiliateId: candidate.affiliateId,
+    organizationId: candidate.organizationId,
+    status: "dispatched",
+    providerPayoutId: result.providerPayoutId,
+  };
+}
+
+async function markAffiliatePayoutDispatchFailed(
+  db: Queryable,
+  candidate: FinanceAffiliatePayoutDispatchCandidate,
+  result: FinancePayoutProviderFailure,
+  attempt: FinancePayoutProviderAttemptRecord,
+  context: FinanceAffiliatePayoutDispatchContext,
+): Promise<FinanceAffiliatePayoutDispatchMutationResult> {
+  if (!candidate.leaseToken) throw new Error("Affiliate payout dispatch lease is missing.");
+  const exhausted = !result.retryable || attempt.attemptNumber >= candidate.maxAttempts;
+  const update = await db.query(
+    `WITH payout_update AS (
+     UPDATE finance.payouts
+     SET payout_status = $1,
+         retry_count = GREATEST(retry_count, $2),
+         failure_code = $3,
+         failed_at = CASE WHEN $1 = 'failed' THEN $4::timestamptz ELSE failed_at END,
+         updated_at = $4::timestamptz,
+         payout_metadata = payout_metadata || $5::jsonb
+     WHERE id = $6::uuid
+       AND organization_id = $7::uuid
+       AND owner_scope = 'organization'
+       AND provider_payout_id IS NULL
+       AND payout_status = 'processing'
+       AND payout_metadata ->> 'affiliateDispatchLeaseToken' = $11
+       AND EXISTS (SELECT 1 FROM platform.jobs job WHERE job.queue_name=$9
+         AND job.job_key=$10 AND job.status='running' AND job.locked_by=$12)
+     RETURNING id
+     ), attempt_insert AS (
+       INSERT INTO platform.job_attempts (
+         job_id,attempt_number,status,worker_id,started_at,finished_at,
+         error_type,error_message,error_metadata
+       )
+       SELECT job.id,$2,'failed',$13,$4::timestamptz,$4::timestamptz,
+         $3,$14,$15::jsonb
+       FROM platform.jobs job, payout_update
+       WHERE job.queue_name=$9 AND job.job_key=$10
+         AND job.status='running' AND job.locked_by=$12
+       ON CONFLICT (job_id,attempt_number) DO NOTHING
+     )
+     UPDATE platform.jobs SET status=$8,attempts_count=attempts_count+1,
+       run_after=CASE WHEN $8='pending' THEN $4::timestamptz+interval '15 minutes' ELSE run_after END,
+       finished_at=CASE WHEN $8='failed' THEN $4::timestamptz ELSE NULL END,
+       locked_at=NULL,locked_by=NULL,updated_at=$4::timestamptz
+     WHERE queue_name=$9 AND job_key=$10 AND EXISTS (SELECT 1 FROM payout_update)
+     RETURNING id`,
+    [
+      exhausted ? "failed" : "scheduled",
+      attempt.attemptNumber,
+      result.errorCategory,
+      context.now.toISOString(),
+      JSON.stringify({
+        lastAffiliateDispatchAttemptAt: attempt.recordedAt,
+        lastAffiliateDispatchWorkerId: context.workerId,
+        providerRequestId: result.providerRequestId ?? null,
+        retryable: result.retryable,
+        rollbackRule:
+          "No provider payout id was recorded; retry only with the same finance payout and provider idempotency key.",
+      }),
+      candidate.payoutId,
+      candidate.organizationId,
+      exhausted ? "failed" : "pending",
+      FINANCE_AFFILIATE_PAYOUT_DISPATCH_QUEUE,
+      candidate.providerIdempotencyKey,
+      candidate.leaseToken,
+      `${context.workerId}:${candidate.leaseToken}`,
+      attempt.workerId,
+      attempt.errorMessage,
+      JSON.stringify({
+        affiliateId: attempt.affiliateId ?? null,
+        organizationId: attempt.organizationId ?? null,
+        provider: attempt.provider,
+        providerRequestId: attempt.providerRequestId,
+        providerPayoutId: attempt.providerPayoutId,
+        requestPayloadHash: attempt.requestPayloadHash,
+        retryable: attempt.retryable,
+      }),
+    ],
+  );
+  assertSinglePayoutMutation(
+    update.rowCount,
+    "mark affiliate payout dispatch failed",
+    candidate.payoutId,
+  );
+  return {
+    payoutId: candidate.payoutId,
+    affiliateId: candidate.affiliateId,
+    organizationId: candidate.organizationId,
+    status: exhausted ? "failed" : "retry_scheduled",
+    providerPayoutId: null,
+  };
+}
+
 async function markDispatchJobFinished(
   db: Queryable,
   candidate: FinancePropertyPayoutDispatchCandidate,
@@ -644,6 +1263,42 @@ function buildProviderAttempt(
   };
 }
 
+function buildAffiliateProviderAttempt(
+  candidate: FinanceAffiliatePayoutDispatchCandidate,
+  result: FinancePayoutProviderResult,
+  context: FinanceAffiliatePayoutDispatchContext,
+): FinancePayoutProviderAttemptRecord {
+  return {
+    payoutId: candidate.payoutId,
+    propertyId: null,
+    affiliateId: candidate.affiliateId,
+    organizationId: candidate.organizationId,
+    provider: candidate.provider,
+    attemptNumber: candidate.retryCount + 1,
+    idempotencyKey: candidate.providerIdempotencyKey,
+    queueName: FINANCE_AFFILIATE_PAYOUT_DISPATCH_QUEUE,
+    requestPayloadHash: sha256(
+      stableJson({
+        payoutId: candidate.payoutId,
+        affiliateId: candidate.affiliateId,
+        amount: candidate.amount,
+        currency: candidate.currency,
+        provider: candidate.provider,
+        providerAccountId: candidate.providerAccountId,
+        providerIdempotencyKey: candidate.providerIdempotencyKey,
+      }),
+    ),
+    status: result.ok ? "succeeded" : "failed",
+    providerPayoutId: result.ok ? result.providerPayoutId : null,
+    providerRequestId: result.providerRequestId ?? null,
+    errorCategory: result.ok ? null : result.errorCategory,
+    errorMessage: result.ok ? null : result.message,
+    retryable: result.ok ? false : result.retryable,
+    recordedAt: context.now.toISOString(),
+    workerId: context.workerId,
+  };
+}
+
 function stableJson(value: unknown): string {
   return JSON.stringify(sortJsonValue(value));
 }
@@ -664,4 +1319,17 @@ function sha256(value: string): string {
 
 function dateString(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+function affiliatePayoutProvider(value: unknown): FinanceAffiliatePayoutProvider {
+  if (value === "stripe" || value === "manual" || value === "bank_transfer") return value;
+  if (value === "bank" || value === "bank_account") return "bank_transfer";
+  return "manual";
+}
+
+function affiliatePayoutSchedule(
+  value: unknown,
+): FinanceAffiliatePayoutDispatchCandidate["payoutSchedule"] {
+  if (value === "manual" || value === "monthly" || value === "threshold") return value;
+  return "monthly";
 }

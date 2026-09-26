@@ -58,6 +58,8 @@
   "auth.login.subtitle": "Accedi per gestire la tua struttura",
   "auth.login.chooseHotelGroup": "Scegli gruppo hotel",
   "auth.login.chooseHotelGroupSubtitle": "Seleziona il gruppo hotel che vuoi gestire.",
+  "auth.login.unnamedHotelGroup": "Gruppo hotel {index}",
+  "auth.login.useAnotherAccount": "Usa un altro account",
   "auth.login.redirecting": "Reindirizzamento all'accesso...",
   "auth.login.emailLabel": "Indirizzo email",
   "auth.login.emailPlaceholder": "admin@example.com",

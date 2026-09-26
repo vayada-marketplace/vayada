@@ -3,6 +3,31 @@
 VAY-2017 — PMS-only product intent approved; technical contract under review.
 Not authorization to execute a production migration.
 
+## Identity migration provenance (VAY-2017)
+
+Migration `0425` records immutable before/after evidence for PMS-owner identity
+chains written by `target:identity:migrate`. Receipts bind the verified extraction
+run, deterministic plan checksum, exact table/row ID, existing full-row fingerprint
+format, statuses before/after, and the writing transaction's full PostgreSQL XID.
+They commit with the identity writes after post-write verification. Dry runs,
+rollbacks, unchanged replays, and newer untouched target restrictions produce no
+receipt. Existing rows are never retroactively attributed. No runtime grant is added.
+
+This is origin evidence, **not eligibility or access**. Consumers must still verify
+proven prior PMS use, current owner/WorkOS control, the exact property chain,
+approvals/revocations, and status eligibility. An already-restricted before-state
+is not a migration-created restriction merely because another field changed.
+Marketplace eligibility remains independent.
+
+After-state fingerprints cannot detect later updates restoring identical values,
+including timestamps. A consumer must also match current `xmin` to the low 32 bits
+of receipt `transaction_id`, and fail closed unless the current full transaction
+ID is at least the recorded ID and less than `2^31` transactions newer. Even benign
+later updates invalidate this evidence and require an independently approved
+transition, not timestamp/status equality or relabeling the old receipt. Database
+restore/rebuild requires fresh evidence. This prerequisite introduces no login
+fallback, disposition, provider action, canonical-link transition, or binding activation.
+
 ## Evidence and problem
 
 The VAY-1362 September 11 source snapshot retains eight exact PMS hotel/user
