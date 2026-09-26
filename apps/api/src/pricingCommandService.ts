@@ -183,6 +183,8 @@ export function buildPricingCommandService(options: PricingCommandServiceOptions
     ),
   });
 
+  app.get("/internal/ready", async () => ({ status: "ready" }));
+
   const authorized = new WeakMap<object, RequestContext>();
   const authorizeRequest = async (
     request: Parameters<typeof authorizeOwner>[0] & {

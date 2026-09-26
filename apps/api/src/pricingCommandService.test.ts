@@ -127,6 +127,25 @@ function fixture(
 }
 
 describe("private pricing command service owner boundary", () => {
+  it("exposes only token-protected, detail-free readiness after service construction", async () => {
+    const f = fixture();
+    const denied = await f.app.inject({ method: "GET", url: "/internal/ready" });
+    expect(denied.statusCode).toBe(401);
+
+    const ready = await f.app.inject({
+      method: "GET",
+      url: "/internal/ready",
+      headers: { "x-vayada-internal-token": internalToken },
+    });
+    expect(ready.statusCode).toBe(200);
+    expect(ready.json()).toEqual({ status: "ready" });
+    expect(ready.headers["cache-control"]).toBe("no-store");
+    expect(f.ownerRead).not.toHaveBeenCalled();
+    expect(f.ownerManage).not.toHaveBeenCalled();
+    expect(f.publicOffers).not.toHaveBeenCalled();
+    expect(f.publicQuote).not.toHaveBeenCalled();
+  });
+
   it("independently resolves the original bearer and selects read versus manage operations", async () => {
     const f = fixture();
     const read = await f.app.inject({
