@@ -5,12 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   read: vi.fn(),
   record: vi.fn(),
+  lifecycle: vi.fn(),
 }));
 
 vi.mock("@vayada/marketplace-shared/api/collaborations", async (original) => ({
   ...(await original<object>()),
   getMarketplaceCollaborationAffiliateAssent: mocks.read,
   recordMarketplaceCollaborationAffiliateAssent: mocks.record,
+  changeMarketplaceCollaborationAffiliateLifecycle: mocks.lifecycle,
 }));
 
 import { ApiErrorResponse } from "@vayada/marketplace-shared/api/client";
@@ -33,6 +35,7 @@ const agreement = {
   },
   hotelApprovedAt: "2026-09-10T08:00:00.000Z",
   creatorAcceptedAt: "2026-09-11T08:00:00.000Z",
+  lifecycle: null,
 };
 
 describe("AffiliateAgreementPanel", () => {
@@ -57,6 +60,7 @@ describe("AffiliateAgreementPanel", () => {
           collaborationId: "Existing:QA",
           currentUserType,
           affiliateExpected,
+          collaborationStatus: "accepted",
         }),
       );
     });
@@ -67,11 +71,11 @@ describe("AffiliateAgreementPanel", () => {
     mocks.read.mockResolvedValue(agreement);
     const output = await render();
 
-    expect(output()).toContain("Agreement accepted");
+    expect(output()).toContain("Terms accepted — activation pending");
     expect(output()).toContain("commission");
     expect(output()).toContain("12.50%");
     expect(output()).toContain("windowDays");
-    expect(output()).toContain("earning eligibility are checked separately");
+    expect(output()).toContain("checking activation and earning eligibility");
     expect(mocks.read).toHaveBeenCalledWith("Existing:QA", {
       signal: expect.any(AbortSignal),
     });
@@ -111,7 +115,7 @@ describe("AffiliateAgreementPanel", () => {
   it("shows a sanitized unavailable state when affiliate terms were advertised", async () => {
     mocks.read.mockRejectedValue(new ApiErrorResponse(404, { code: "scope_unavailable" }));
     const output = await render(true);
-    expect(output()).toContain("Affiliate agreement unavailable");
+    expect(output()).toContain("Affiliate partnership not eligible yet");
     expect(output()).not.toContain("scope_unavailable");
   });
 
@@ -123,7 +127,7 @@ describe("AffiliateAgreementPanel", () => {
     await act(async () => {
       view?.root.findByProps({ children: "Try again" }).props.onClick();
     });
-    expect(output()).toContain("Agreement accepted");
+    expect(output()).toContain("Terms accepted — activation pending");
     expect(mocks.read).toHaveBeenCalledTimes(2);
   });
 
@@ -144,6 +148,7 @@ describe("AffiliateAgreementPanel", () => {
           collaborationId: "Later:QA",
           currentUserType: "creator",
           affiliateExpected: true,
+          collaborationStatus: "accepted",
         }),
       );
     });
@@ -187,7 +192,7 @@ describe("AffiliateAgreementPanel", () => {
     });
 
     expect(mocks.record).toHaveBeenCalledWith("Existing:QA", expect.any(String));
-    expect(output()).toContain("Agreement accepted");
+    expect(output()).toContain("Terms accepted — activation pending");
     expect(output()).not.toContain("Accept affiliate terms");
   });
 
@@ -213,5 +218,59 @@ describe("AffiliateAgreementPanel", () => {
     });
     expect(failed()).toContain("Could not record your decision");
     expect(failed()).not.toContain("private database detail");
+  });
+
+  it("shows active and paused lifecycle controls without tying them to collaboration completion", async () => {
+    mocks.read
+      .mockResolvedValueOnce({
+        ...agreement,
+        lifecycle: { status: "active", revision: 0, pausedBy: [] },
+      })
+      .mockResolvedValueOnce({
+        ...agreement,
+        lifecycle: { status: "paused", revision: 1, pausedBy: ["creator"] },
+      });
+    mocks.lifecycle.mockResolvedValue({
+      ok: true,
+      eventId: "event-1",
+      revision: 1,
+      effectiveAt: "2026-09-27T00:00:00.000Z",
+      replayed: false,
+    });
+    const output = await render();
+    expect(output()).toContain("Affiliate agreement active");
+    expect(output()).toContain("independently of the hosted collaboration");
+    await act(async () => {
+      await view?.root.findByProps({ children: "Pause affiliate agreement" }).props.onClick();
+    });
+    expect(mocks.lifecycle).toHaveBeenCalledWith(
+      "Existing:QA",
+      { action: "pause", reason: "Paused in Marketplace", expectedRevision: 0 },
+      expect.any(String),
+    );
+    expect(output()).toContain("Affiliate agreement paused");
+    expect(output()).toContain("Resume affiliate agreement");
+  });
+
+  it("explains a declined partnership and offers no assent action", async () => {
+    mocks.read.mockResolvedValue({
+      ...agreement,
+      assentState: "pending",
+      creatorAcceptedAt: null,
+      hotelApprovedAt: null,
+    });
+    await act(async () => {
+      view = create(
+        createElement(AffiliateAgreementPanel, {
+          collaborationId: "Existing:QA",
+          currentUserType: "creator",
+          affiliateExpected: true,
+          collaborationStatus: "declined",
+        }),
+      );
+    });
+    const output = JSON.stringify(view?.toJSON());
+    expect(output).toContain("Affiliate partnership declined");
+    expect(output).not.toContain("Accept affiliate terms");
   });
 });

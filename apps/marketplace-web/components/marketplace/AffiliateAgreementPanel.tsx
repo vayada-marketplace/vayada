@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { CheckCircleIcon, ClockIcon } from "@heroicons/react/24/outline";
 
 import {
+  changeMarketplaceCollaborationAffiliateLifecycle,
   getMarketplaceCollaborationAffiliateAssent,
   recordMarketplaceCollaborationAffiliateAssent,
   type MarketplaceAffiliateAssentRead,
@@ -20,12 +21,14 @@ type AffiliateAgreementPanelProps = {
   collaborationId: string;
   currentUserType: "creator" | "hotel";
   affiliateExpected: boolean;
+  collaborationStatus: string;
 };
 
 export function AffiliateAgreementPanel({
   collaborationId,
   currentUserType,
   affiliateExpected,
+  collaborationStatus,
 }: AffiliateAgreementPanelProps) {
   const [state, setState] = useState<AgreementState>({ kind: "loading", collaborationId });
   const [retry, setRetry] = useState(0);
@@ -72,7 +75,9 @@ export function AffiliateAgreementPanel({
         Affiliate agreement
       </h5>
       {currentState.kind === "loading" && <AgreementSkeleton />}
-      {currentState.kind === "unavailable" && <AgreementUnavailable />}
+      {currentState.kind === "unavailable" && (
+        <AgreementUnavailable currentUserType={currentUserType} />
+      )}
       {currentState.kind === "error" && (
         <AgreementError onRetry={() => setRetry((value) => value + 1)} />
       )}
@@ -81,10 +86,9 @@ export function AffiliateAgreementPanel({
           agreement={currentState.agreement}
           collaborationId={collaborationId}
           currentUserType={currentUserType}
-          onRecorded={(replayed) => {
-            setCommandNotice(
-              replayed ? "Your decision was already recorded." : "Your decision was recorded.",
-            );
+          collaborationStatus={collaborationStatus}
+          onRecorded={(notice) => {
+            setCommandNotice(notice);
             setRetry((value) => value + 1);
           }}
         />
@@ -112,13 +116,14 @@ function AgreementSkeleton() {
   );
 }
 
-function AgreementUnavailable() {
+function AgreementUnavailable({ currentUserType }: { currentUserType: "creator" | "hotel" }) {
   return (
     <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-      <p className="font-semibold text-amber-950">Affiliate agreement unavailable</p>
+      <p className="font-semibold text-amber-950">Affiliate partnership not eligible yet</p>
       <p className="mt-1 text-sm leading-relaxed text-amber-900">
-        This collaboration advertises affiliate terms, but this screen cannot verify a retained
-        agreement or earning eligibility.
+        {currentUserType === "creator"
+          ? "Marketplace cannot verify published terms and eligibility. Ask the hotel to review its affiliate offer before trying again."
+          : "Marketplace cannot verify published terms and eligibility. Review this offer’s affiliate terms before trying again."}
       </p>
     </div>
   );
@@ -146,16 +151,22 @@ function AgreementDetails({
   agreement,
   collaborationId,
   currentUserType,
+  collaborationStatus,
   onRecorded,
 }: {
   agreement: MarketplaceAffiliateAssentRead;
   collaborationId: string;
   currentUserType: "creator" | "hotel";
-  onRecorded: (replayed: boolean) => void;
+  collaborationStatus: string;
+  onRecorded: (notice: string) => void;
 }) {
   const [action, setAction] = useState<"idle" | "saving" | "error">("idle");
+  const [lifecycleAction, setLifecycleAction] = useState<"idle" | "saving" | "error">("idle");
   const idempotencyKey = useRef<{ scope: string; key: string } | null>(null);
+  const lifecycleKey = useRef<{ scope: string; key: string } | null>(null);
   const matched = agreement.assentState === "matched";
+  const closedBeforeActivation =
+    !agreement.lifecycle && ["declined", "cancelled", "rejected"].includes(collaborationStatus);
   const currentSideComplete =
     currentUserType === "creator" ? agreement.creatorAcceptedAt : agreement.hotelApprovedAt;
   const otherSideComplete =
@@ -176,21 +187,35 @@ function AgreementDetails({
         )}
         <div>
           <p className="font-semibold text-gray-900">
-            {matched ? "Agreement accepted" : pendingTitle}
+            {closedBeforeActivation
+              ? "Affiliate partnership declined"
+              : agreement.lifecycle
+                ? lifecycleTitle(agreement.lifecycle.status)
+                : matched
+                  ? "Terms accepted — activation pending"
+                  : pendingTitle}
           </p>
           <p className="mt-1 text-sm leading-relaxed text-gray-600">
-            {matched
-              ? "Both sides accepted the same retained terms. Link activation and earning eligibility are checked separately."
-              : otherSideComplete
-                ? "The other side has recorded its decision. This agreement is not active from assent alone."
-                : "Review the retained terms below. Recording this decision does not activate links or earnings."}
+            {closedBeforeActivation
+              ? "This request cannot be activated. Start a new collaboration to propose affiliate terms again."
+              : agreement.lifecycle
+                ? lifecycleDescription(
+                    agreement.lifecycle.status,
+                    agreement.lifecycle.pausedBy,
+                    currentUserType,
+                  )
+                : matched
+                  ? "Both sides accepted the same retained terms. Marketplace is still checking activation and earning eligibility."
+                  : otherSideComplete
+                    ? "The other side has recorded its decision. This agreement is not active from assent alone."
+                    : "Review the retained terms below. Recording this decision does not activate links or earnings."}
           </p>
         </div>
       </div>
 
       <Disclosure disclosure={agreement.terms.disclosure} />
 
-      {!currentSideComplete && (
+      {!currentSideComplete && !closedBeforeActivation && (
         <button
           type="button"
           disabled={action === "saving"}
@@ -203,7 +228,11 @@ function AgreementDetails({
                 collaborationId,
                 idempotencyKey.current.key,
               );
-              onRecorded(result.replayed);
+              onRecorded(
+                result.replayed
+                  ? "Your decision was already recorded."
+                  : "Your decision was recorded.",
+              );
             } catch {
               setAction("error");
             }
@@ -231,6 +260,36 @@ function AgreementDetails({
         </div>
       )}
 
+      {agreement.lifecycle && agreement.lifecycle.status !== "ended" && (
+        <div className="flex flex-wrap gap-2 border-t border-gray-200 pt-4">
+          {agreement.lifecycle.status === "active" ||
+          !agreement.lifecycle.pausedBy.includes(currentUserType) ? (
+            <LifecycleButton
+              label="Pause affiliate agreement"
+              disabled={lifecycleAction === "saving"}
+              onClick={() => runLifecycle("pause")}
+            />
+          ) : (
+            <LifecycleButton
+              label="Resume affiliate agreement"
+              disabled={lifecycleAction === "saving"}
+              onClick={() => runLifecycle("resume")}
+            />
+          )}
+          <LifecycleButton
+            label="End affiliate agreement"
+            disabled={lifecycleAction === "saving"}
+            onClick={() => runLifecycle("end")}
+          />
+        </div>
+      )}
+
+      {lifecycleAction === "error" && (
+        <p role="alert" className="text-sm text-red-800">
+          Could not update the affiliate agreement. Refresh and try again.
+        </p>
+      )}
+
       <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Decision
           label="Hotel approval"
@@ -245,6 +304,83 @@ function AgreementDetails({
       </dl>
     </div>
   );
+
+  async function runLifecycle(nextAction: "pause" | "resume" | "end") {
+    if (nextAction === "end" && !window.confirm("End this affiliate agreement permanently?"))
+      return;
+    const scope = `${collaborationId}:${nextAction}:${agreement.lifecycle?.revision}`;
+    if (lifecycleKey.current?.scope !== scope)
+      lifecycleKey.current = { scope, key: crypto.randomUUID() };
+    setLifecycleAction("saving");
+    try {
+      const result = await changeMarketplaceCollaborationAffiliateLifecycle(
+        collaborationId,
+        {
+          action: nextAction,
+          reason: {
+            pause: "Paused in Marketplace",
+            resume: "Resumed in Marketplace",
+            end: "Ended in Marketplace",
+          }[nextAction],
+          expectedRevision: agreement.lifecycle!.revision,
+        },
+        lifecycleKey.current.key,
+      );
+      setLifecycleAction("idle");
+      onRecorded(
+        result.replayed ? "That update was already recorded." : "Affiliate agreement updated.",
+      );
+    } catch {
+      setLifecycleAction("error");
+    }
+  }
+}
+
+function LifecycleButton({
+  label,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {label}
+    </button>
+  );
+}
+
+function lifecycleTitle(status: "active" | "paused" | "ended") {
+  return status === "active"
+    ? "Affiliate agreement active"
+    : status === "paused"
+      ? "Affiliate agreement paused"
+      : "Affiliate agreement ended";
+}
+
+function lifecycleDescription(
+  status: "active" | "paused" | "ended",
+  pausedBy: ("hotel" | "creator")[],
+  currentUserType: "creator" | "hotel",
+) {
+  if (status === "active")
+    return "The agreement remains active independently of the hosted collaboration.";
+  if (status === "ended")
+    return "No new referrals can qualify. Existing attribution and earnings history remain available.";
+  const yours = pausedBy.includes(currentUserType);
+  const other = pausedBy.includes(currentUserType === "creator" ? "hotel" : "creator");
+  return yours && other
+    ? "Both sides paused this agreement. Each side must resume before new referrals can qualify."
+    : yours
+      ? "You paused this agreement. Resume it when new referrals should qualify again."
+      : "The other side paused this agreement. Existing attribution and earnings are preserved.";
 }
 
 function Disclosure({ disclosure }: { disclosure: string }) {
