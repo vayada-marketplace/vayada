@@ -10,6 +10,10 @@ import {
 import type { AffiliateAssentRepository } from "./domains/marketplaceAffiliateAssentRepository.js";
 import { registerMarketplaceAffiliateAssentRoutes } from "./routes/marketplaceAffiliateAssent.js";
 import {
+  registerMarketplaceAffiliatePerformanceRoutes,
+  type MarketplaceAffiliatePerformanceRoutesOptions,
+} from "./routes/marketplaceAffiliatePerformance.js";
+import {
   registerChannexOfferPreviewRoutes,
   type ChannexOfferPreviewRoutesOptions,
 } from "./routes/channexOfferPreview.js";
@@ -408,6 +412,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   marketplaceAffiliateDestinationRepository?: AffiliateDestinationRepository;
   marketplaceAffiliateCompletionRepository?: AffiliateCompletionRepository;
   marketplaceAffiliateAdminRepository?: MarketplaceAffiliateAdminRepository;
+  marketplaceAffiliatePerformance?: MarketplaceAffiliatePerformanceRoutesOptions;
   marketplaceAffiliatePublicLink?: MarketplaceAffiliatePublicLinkRoutesOptions;
   financeAffiliateCommissions?: FinanceAffiliateCommissionRoutesOptions;
   marketplaceCreatorSelfServiceRepository?: MarketplaceCreatorSelfServiceRepository;
@@ -607,6 +612,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       repository: options.marketplaceCollaborationRepository,
     });
   }
+  app.register(registerMarketplaceAffiliatePerformanceRoutes, {
+    prefix: "/api/marketplace",
+    ...options.marketplaceAffiliatePerformance,
+  });
   if (options.marketplaceTripRepository) {
     app.register(registerMarketplaceTripRoutes, {
       prefix: "/api/marketplace",
