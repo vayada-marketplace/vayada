@@ -11,6 +11,14 @@ type Table =
   | "identity.organization_resource_links";
 type Row = { table: Table; id: string; status: string; xmin: string; rowStateSha256: string };
 
+export const identityMigrationXmin = (transactionId: string): bigint =>
+  BigInt(transactionId) % 4_294_967_296n;
+
+export function identityMigrationXidWithinHorizon(transactionId: string, currentXid: string) {
+  const age = BigInt(currentXid) - BigInt(transactionId);
+  return age >= 0n && age < 2_147_483_648n;
+}
+
 /** Only planned PMS-owner chains; no global identity history or retroactive attribution. */
 export async function readProductionIdentityProvenance(
   client: QueryClient,
@@ -91,7 +99,7 @@ export async function writeProductionIdentityProvenance(
   input: { sourceRunId: string; checksum: string; before: Row[]; after: Row[] },
 ): Promise<void> {
   const transaction = await client.query<{ id: string }>("SELECT pg_current_xact_id()::text AS id");
-  const xid = BigInt(transaction.rows[0]!.id) % 4_294_967_296n;
+  const xid = identityMigrationXmin(transaction.rows[0]!.id);
   const previous = new Map(input.before.map((row) => [`${row.table}:${row.id}`, row]));
   for (const row of input.after) {
     const before = previous.get(`${row.table}:${row.id}`);
