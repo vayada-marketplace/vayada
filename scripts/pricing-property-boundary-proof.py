@@ -134,6 +134,26 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
         INSERT INTO identity.users(id,email) VALUES ('{ACTOR}','proof@example.invalid');
         INSERT INTO hotel_catalog.properties(id,public_id,display_name)
           VALUES ('{A}','proof-a','Proof A'),('{B}','proof-b','Proof B');
+        UPDATE hotel_catalog.properties SET lifecycle_status='active',profile_status='complete'
+          WHERE id IN ('{A}','{B}');
+        INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose)
+          VALUES ('{A}','proof-a','canonical'),('{B}','proof-b','canonical');
+        INSERT INTO hotel_catalog.property_locations(property_id,timezone)
+          VALUES ('{A}','Etc/UTC'),('{B}','Etc/UTC');
+        INSERT INTO hotel_catalog.property_public_profile_read_model
+          (property_id,public_id,display_name,canonical_slug,default_locale,supported_locales,profile_status)
+          VALUES ('{A}','proof-a','Proof A','proof-a','en',ARRAY['en'],'complete'),
+                 ('{B}','proof-b','Proof B','proof-b','en',ARRAY['en'],'complete');
+        INSERT INTO distribution.public_hotel_bookability_profiles
+          (property_id,public_id,canonical_slug,canonical_url,booking_base_url,timezone,
+           default_currency,supported_currencies,profile_status,freshness_status,
+           public_setup_completeness,capabilities)
+          VALUES ('{A}','proof-a','proof-a','https://example.test/a','https://example.test/a',
+                  'Etc/UTC','EUR',ARRAY['EUR'],'public','fresh','{{"status":"ready"}}',
+                  '{{"paymentMethods":["pay_at_property"]}}'),
+                 ('{B}','proof-b','proof-b','https://example.test/b','https://example.test/b',
+                  'Etc/UTC','EUR',ARRAY['EUR'],'public','fresh','{{"status":"ready"}}',
+                  '{{"paymentMethods":["pay_at_property"]}}');
         INSERT INTO identity.organization_memberships
           (id,organization_id,user_id,role_key,access_origin,property_access_mode)
           VALUES ('{MEMBERSHIP}','{ORG}','{ACTOR}','proof_staff','agency','assigned');
@@ -156,13 +176,16 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
           ('{PUBLIC_A}','public','{A}','{ORG}'),
           ('{PUBLIC_B}','public','{B}','{ORG}'),
           ('{READER_A}','owner_read','{A}','{ORG}');
-        GRANT USAGE ON SCHEMA booking, platform, identity, hotel_catalog TO {roles};
+        GRANT USAGE ON SCHEMA booking, platform, identity, hotel_catalog, distribution TO {roles};
         GRANT SELECT, UPDATE ON identity.organizations TO {roles};
         GRANT SELECT, UPDATE ON identity.users, hotel_catalog.properties TO {roles};
         GRANT SELECT, UPDATE ON identity.organization_memberships,
           identity.organization_resource_links,
           identity.membership_property_assignments,
           identity.role_permission_grants, identity.product_entitlements TO {roles};
+        GRANT SELECT, UPDATE ON hotel_catalog.property_slugs,
+          hotel_catalog.property_locations,
+          distribution.public_hotel_bookability_profiles TO {roles};
         GRANT SELECT ON booking.pricing_quotes,booking.pricing_authority_revisions,
           booking.pricing_authority_heads TO {roles};
         GRANT INSERT ON booking.pricing_quotes TO {PUBLIC_A},{PUBLIC_B};
@@ -223,10 +246,15 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
                 "status",
             ),
         )
+        discovery_locks = (
+            ("hotel_catalog.property_slugs", "property_id", "slug"),
+            ("hotel_catalog.property_locations", "property_id", "timezone"),
+            ("distribution.public_hotel_bookability_profiles", "property_id", "profile_status"),
+        )
         sql(
-            f"GRANT USAGE ON SCHEMA identity TO {PROVISIONER};"
+            f"GRANT USAGE ON SCHEMA identity, hotel_catalog, distribution TO {PROVISIONER};"
             + "GRANT SELECT, UPDATE ON "
-            + ", ".join(table for table, _, _ in identity_locks)
+            + ", ".join(table for table, _, _ in identity_locks + discovery_locks)
             + f" TO {PROVISIONER}"
         )
         # CREATEROLE receives ADMIN-only membership in a role it creates. It
@@ -246,6 +274,12 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
         for table, predicate, column in identity_locks:
             sql(
                 f"UPDATE {table} SET {column}={column} WHERE {predicate}",
+                PROVISIONER,
+                denied=True,
+            )
+        for table, key, column in discovery_locks:
+            sql(
+                f"UPDATE {table} SET {column}={column} WHERE {key}='{A}'",
                 PROVISIONER,
                 denied=True,
             )
@@ -288,9 +322,58 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
                 )
                 == "proof_staff"
             )
+        # This is the public gate's joined discovery lock shape. A pricing
+        # login may lock either property, but cannot edit even its own rows.
+        for role in (OWNER_A, PUBLIC_A, READER_A):
+            for property_id, slug in ((A, "proof-a"), (B, "proof-b")):
+                assert (
+                    sql(
+                        f"""BEGIN;
+                    SELECT s.property_id FROM hotel_catalog.property_slugs s
+                    JOIN hotel_catalog.properties p ON p.id=s.property_id
+                    JOIN hotel_catalog.property_locations location ON location.property_id=p.id
+                    JOIN distribution.public_hotel_bookability_profiles profile ON profile.property_id=p.id
+                    WHERE s.slug='{slug}' AND s.locale IS NULL AND s.property_id='{property_id}'
+                      AND s.purpose='canonical' AND s.status='active'
+                      AND p.lifecycle_status='active' AND p.profile_status='complete'
+                      AND profile.public_visibility='public_safe' AND profile.profile_status='public'
+                      AND profile.canonical_slug=s.slug AND profile.public_id=p.public_id
+                      AND profile.freshness_status='fresh'
+                      AND profile.public_setup_completeness->>'status'='ready'
+                      AND CASE WHEN jsonb_typeof(profile.capabilities->'paymentMethods')='array'
+                        THEN jsonb_array_length(profile.capabilities->'paymentMethods')>0 ELSE false END
+                    FOR SHARE OF s,p,location,profile;
+                    ROLLBACK;""",
+                        role,
+                    )
+                    == property_id
+                )
+        for table, key, column in discovery_locks:
+            for property_id in (A, B):
+                for role in (OWNER_A, PUBLIC_A, READER_A):
+                    sql(
+                        f"UPDATE {table} SET {column}={column} WHERE {key}='{property_id}'",
+                        role,
+                        denied=True,
+                    )
+            assert (
+                sql(
+                    f"BEGIN; UPDATE {table} SET {column}={column} WHERE {key}='{A}' RETURNING 1; ROLLBACK;",
+                    LEGACY,
+                )
+                == "1"
+            )
         assert sql(f"SELECT name FROM identity.organizations WHERE id='{ORG}'") == "Proof"
         sql(quote(A, 1), PUBLIC_A)
         sql(quote(B, 2), PUBLIC_B)
+        sql(
+            "BEGIN;"
+            + quote(A, 15)
+            + f"UPDATE distribution.public_hotel_bookability_profiles SET profile_status=profile_status WHERE property_id='{A}'; COMMIT;",
+            PUBLIC_A,
+            denied=True,
+        )
+        assert sql("SELECT count(*) FROM booking.pricing_quotes") == "2"
         sql(quote(B, 3), PUBLIC_A, denied=True)
         sql(f"SET app.property_id = '{B}';" + quote(B, 4), PUBLIC_A, denied=True)
         sql(quote(A, 9, OTHER_ORG), PUBLIC_A, denied=True)
@@ -320,6 +403,12 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
         for table, predicate, column in identity_locks:
             sql(
                 f"UPDATE {table} SET {column}={column} WHERE {predicate}",
+                LEGACY,
+                denied=True,
+            )
+        for table, key, column in discovery_locks:
+            sql(
+                f"UPDATE {table} SET {column}={column} WHERE {key}='{A}'",
                 LEGACY,
                 denied=True,
             )
@@ -482,7 +571,7 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
             f"PASS PostgreSQL {sql('SHOW server_version')}: {len(migrations)} migrations through {migrations[-1].name}"
         )
         print(
-            "PASS owner/public separation; identity authorization lock-only denials; admin-only provisioner denial; attestation-safe scope views; property/org/GUC/inherited-role/ACL/RLS-bypass denials; exact joined locks; rollback; scope revocation"
+            "PASS owner/public separation; identity and public-discovery lock-only denials; admin-only provisioner denial; attestation-safe scope views; property/org/GUC/inherited-role/ACL/RLS-bypass denials; exact joined locks; rollback; scope revocation"
         )
         print(
             "LIMIT: DB primitive only; no request identity issuer, actor binding, full route/lock matrix, or live rollout proof"
