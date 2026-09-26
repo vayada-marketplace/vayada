@@ -16,6 +16,8 @@
   "auth.login.subtitle": "Im Admin-Bereich anmelden",
   "auth.login.chooseHotelGroup": "Hotelgruppe auswählen",
   "auth.login.chooseHotelGroupSubtitle": "Wählen Sie die Hotelgruppe aus, die Sie verwalten möchten.",
+  "auth.login.unnamedHotelGroup": "Hotelgruppe {index}",
+  "auth.login.useAnotherAccount": "Anderes Konto verwenden",
   "auth.login.errorInvalidCredentials": "Ungültige E-Mail-Adresse oder Passwort.",
   "auth.login.errorSuspended": "Ihr Konto wurde gesperrt. Bitte kontaktieren Sie den Support.",
   "auth.login.errorValidation": "Validierungsfehler.",

@@ -16,6 +16,8 @@
   "auth.login.subtitle": "管理パネルにログイン",
   "auth.login.chooseHotelGroup": "ホテルグループを選択",
   "auth.login.chooseHotelGroupSubtitle": "管理するホテルグループを選択してください。",
+  "auth.login.unnamedHotelGroup": "ホテルグループ {index}",
+  "auth.login.useAnotherAccount": "別のアカウントを使用",
   "auth.login.errorInvalidCredentials": "メールアドレスまたはパスワードが正しくありません。",
   "auth.login.errorSuspended": "アカウントが停止されています。サポートにお問い合わせください。",
   "auth.login.errorValidation": "入力エラーです。",

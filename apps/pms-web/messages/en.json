@@ -64,6 +64,8 @@
   "auth.login.subtitle": "Sign in to manage your property",
   "auth.login.chooseHotelGroup": "Choose hotel group",
   "auth.login.chooseHotelGroupSubtitle": "Select the hotel group you want to manage.",
+  "auth.login.unnamedHotelGroup": "Hotel group {index}",
+  "auth.login.useAnotherAccount": "Use another account",
   "auth.login.redirecting": "Redirecting to sign in...",
   "auth.login.emailLabel": "Email address",
   "auth.login.emailPlaceholder": "admin@example.com",
