@@ -78,6 +78,27 @@ async function readTargetRow(
   table: string,
   id: string,
 ): Promise<{ id: string; rowStateSha256: string }> {
+  const row = await readCanonicalTargetRow(client, table, id);
+  const [schema, relation] = table.split(".") as [string, string];
+  const normalizedId = id.toLowerCase();
+  return {
+    id: normalizedId,
+    rowStateSha256: hashTargetRow({ schema, table: relation, primaryKey: normalizedId, row }),
+  };
+}
+
+/** Package-internal proof input, deliberately absent from the package exports. */
+export async function readOrganizationMappingRow(client: AdoptionQueryClient, id: string) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id))
+    rejectAdoption("TARGET_ROW_MISMATCH");
+  return readCanonicalTargetRow(client, "identity.organizations", id);
+}
+
+async function readCanonicalTargetRow(
+  client: AdoptionQueryClient,
+  table: string,
+  id: string,
+): Promise<Record<string, Json>> {
   const [schema, relation] = table.split(".") as [string, string];
   const columns = await client.query<Column>(
     `SELECT column_name AS "columnName", data_type AS "dataType", udt_name AS "udtName"
@@ -95,17 +116,7 @@ async function readTargetRow(
   );
   if (result.rows.length !== 1)
     rejectAdoption("TARGET_ROW_MISMATCH", `Target row ${table}:${id} is not unique`);
-  const normalizedId = id.toLowerCase();
-  const row = normalizeJsonColumns(result.rows[0]!, columns.rows);
-  return {
-    id: normalizedId,
-    rowStateSha256: hashTargetRow({
-      schema,
-      table: relation,
-      primaryKey: normalizedId,
-      row: row as Json,
-    }),
-  };
+  return normalizeJsonColumns(result.rows[0]!, columns.rows) as Record<string, Json>;
 }
 
 function normalizeJsonColumns(
