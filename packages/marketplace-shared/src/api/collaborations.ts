@@ -25,12 +25,25 @@ export type MarketplaceAffiliateAssentRead = {
   };
   hotelApprovedAt: string | null;
   creatorAcceptedAt: string | null;
+  lifecycle: null | {
+    status: "active" | "paused" | "ended";
+    revision: number;
+    pausedBy: ("hotel" | "creator")[];
+  };
 };
 
 export type MarketplaceAffiliateAssentCommandResponse = {
   ok: true;
   revision: number;
   state: "pending" | "matched";
+  replayed: boolean;
+};
+
+export type MarketplaceAffiliateLifecycleCommandResponse = {
+  ok: true;
+  eventId: string;
+  revision: number;
+  effectiveAt: string;
   replayed: boolean;
 };
 
@@ -369,6 +382,8 @@ export const marketplaceCollaborationEndpoints = {
     `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}?side=${side}`,
   affiliateAssent: (collaborationId: string) =>
     `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/affiliate-assent`,
+  affiliateLifecycle: (collaborationId: string) =>
+    `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/affiliate-lifecycle`,
   conversations: (
     input: {
       side?: MarketplaceCollaborationSide;
@@ -435,6 +450,22 @@ export async function recordMarketplaceCollaborationAffiliateAssent(
   return vayadaApiClient.post<MarketplaceAffiliateAssentCommandResponse>(
     marketplaceCollaborationEndpoints.affiliateAssent(collaborationId),
     undefined,
+    toIdempotencyOptions(idempotencyKey),
+  );
+}
+
+export async function changeMarketplaceCollaborationAffiliateLifecycle(
+  collaborationId: string,
+  input: {
+    action: "pause" | "resume" | "end";
+    reason: string;
+    expectedRevision: number;
+  },
+  idempotencyKey: string,
+): Promise<MarketplaceAffiliateLifecycleCommandResponse> {
+  return vayadaApiClient.post<MarketplaceAffiliateLifecycleCommandResponse>(
+    marketplaceCollaborationEndpoints.affiliateLifecycle(collaborationId),
+    input,
     toIdempotencyOptions(idempotencyKey),
   );
 }

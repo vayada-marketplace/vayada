@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { assentCommandFixture, assentInput } from "./affiliateAssentCommandTestFixture.js";
+import { beforeEach, describe, expect, it } from "vitest";
+import {
+  assentCommandFixture,
+  assentInput,
+  installAffiliateAgreementLifecycleFixture,
+} from "./affiliateAssentCommandTestFixture.js";
 import { databaseUrl, id } from "./affiliatePublicationTestFixture.js";
 import { disclosure, disclosureHash } from "./affiliateAssentTestFixture.js";
 import { recordAffiliateAssent } from "./marketplaceAffiliateAssentCommand.js";
@@ -12,6 +16,7 @@ const context = (hotel = true) => {
 };
 describe.skipIf(!databaseUrl)("Affiliate assent historical read", () => {
   const fixture = assentCommandFixture();
+  beforeEach(() => installAffiliateAgreementLifecycleFixture(fixture.pool()));
   const read = (c = context(), attemptId = id(100)) =>
     readAffiliateAssent(fixture.pool(), c, attemptId);
   const seed = () => recordAffiliateAssent(fixture.pool(), assentInput());
@@ -31,6 +36,7 @@ describe.skipIf(!databaseUrl)("Affiliate assent historical read", () => {
       terms: { id: id(51), disclosure, disclosureHash },
       hotelApprovedAt: expect.any(String),
       creatorAcceptedAt: null,
+      lifecycle: null,
     });
     expect(await read(context(false))).toEqual(pending);
     await recordAffiliateAssent(fixture.pool(), { ...assentInput(false), expectedRevision: 1 });

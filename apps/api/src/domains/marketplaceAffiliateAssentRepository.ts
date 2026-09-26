@@ -9,6 +9,8 @@ import {
   requireResourceAccess,
 } from "@vayada/backend-authorization";
 import { recordAffiliateAssent } from "./marketplaceAffiliateAssentCommand.js";
+import { changeMarketplaceAffiliateAgreementLifecycle } from "./marketplaceAffiliateAgreementLifecycleCommand.js";
+import { readMarketplaceAffiliateAgreementLifecycle } from "./marketplaceAffiliateAgreementLifecycle.js";
 
 export type AffiliateAssentRead = {
   participationId: string | null;
@@ -23,6 +25,11 @@ export type AffiliateAssentRead = {
   terms: { id: string; disclosure: string; disclosureHash: string };
   hotelApprovedAt: string | null;
   creatorAcceptedAt: string | null;
+  lifecycle: null | {
+    status: "active" | "paused" | "ended";
+    revision: number;
+    pausedBy: ("hotel" | "creator")[];
+  };
 };
 export type AffiliateAssentRepository = {
   read(context: RequestContext, attemptId: string): Promise<AffiliateAssentRead | null>;
@@ -35,6 +42,11 @@ export type AffiliateAssentRepository = {
     collaborationId: string,
     idempotencyKey: string,
   ): Promise<AffiliateAssentCommandResult>;
+  changeLifecycleForCollaboration(
+    context: RequestContext,
+    collaborationId: string,
+    input: AffiliateLifecycleCommandInput,
+  ): Promise<AffiliateLifecycleCommandResult>;
   close(): Promise<void>;
 };
 export type AffiliateAssentCommandResult =
@@ -45,6 +57,15 @@ export type AffiliateAssentCommandResult =
       replayed: boolean;
     }
   | { ok: false; code: string };
+export type AffiliateLifecycleCommandInput = {
+  action: "pause" | "resume" | "end";
+  reason: string;
+  expectedRevision: number;
+  idempotencyKey: string;
+};
+export type AffiliateLifecycleCommandResult = Awaited<
+  ReturnType<typeof changeMarketplaceAffiliateAgreementLifecycle>
+>;
 export function createPgMarketplaceAffiliateAssentRepository(
   connectionString: string,
 ): AffiliateAssentRepository {
@@ -54,6 +75,8 @@ export function createPgMarketplaceAffiliateAssentRepository(
     readForCollaboration: (context, id) => readCollaborationAffiliateAssent(pool, context, id),
     recordForCollaboration: (context, id, key) =>
       recordCollaborationAffiliateAssent(pool, context, id, key),
+    changeLifecycleForCollaboration: (context, id, input) =>
+      changeCollaborationAffiliateLifecycle(pool, context, id, input),
     close: () => pool.end(),
   };
 }
@@ -75,7 +98,7 @@ export async function readAffiliateAssent(
     return null;
   const result = await pool.query(
     `SELECT a.id,a.participation_id,a.program_id,a.origin,p.property_id,p.offer_id,
-      m.creator_profile_id,t.id AS terms_id,t.disclosure,t.disclosure_hash,
+      m.creator_profile_id,t.id AS terms_id,t.disclosure,t.disclosure_hash,x.agreement_id,
       (SELECT recorded_at FROM marketplace.affiliate_assent_decisions
         WHERE attempt_id=a.id AND decision='hotel_approval') AS hotel_approved_at,
       (SELECT recorded_at FROM marketplace.affiliate_assent_decisions
@@ -84,6 +107,7 @@ export async function readAffiliateAssent(
     JOIN marketplace.affiliate_participations m ON m.id=a.participation_id
     JOIN marketplace.affiliate_programs p ON p.id=m.program_id
     JOIN marketplace.affiliate_published_terms t ON t.id=a.terms_id AND t.program_id=p.id
+    LEFT JOIN marketplace.affiliate_agreement_activations x ON x.attempt_id=a.id
     JOIN marketplace.creator_profiles c ON c.id=m.creator_profile_id AND c.organization_id=m.creator_organization_id
     WHERE a.id=$1 AND (
       ($4 AND p.organization_id=$2) OR
@@ -113,6 +137,7 @@ export async function readAffiliateAssent(
     throw new Error("Stored affiliate disclosure is invalid");
   const hotelApprovedAt = row.hotel_approved_at?.toISOString() ?? null;
   const creatorAcceptedAt = row.creator_accepted_at?.toISOString() ?? null;
+  const lifecycle = row.agreement_id ? await readAffiliateLifecycle(pool, row.agreement_id) : null;
   return {
     participationId: row.participation_id,
     attemptId: row.id,
@@ -126,6 +151,7 @@ export async function readAffiliateAssent(
     terms: { id: row.terms_id, disclosure: row.disclosure, disclosureHash: row.disclosure_hash },
     hotelApprovedAt,
     creatorAcceptedAt,
+    lifecycle,
   };
 }
 
@@ -211,7 +237,10 @@ export async function readCollaborationAffiliateAssent(
     JOIN marketplace.affiliate_participations m ON m.program_id=p.id
       AND m.creator_profile_id=c.creator_profile_id AND m.creator_organization_id=c.creator_organization_id
     JOIN marketplace.affiliate_participation_attempts a ON a.participation_id=m.id
-    WHERE c.matches=1 ORDER BY a.attempt_number DESC LIMIT 1`,
+    WHERE c.matches=1
+    ORDER BY EXISTS (
+      SELECT 1 FROM marketplace.affiliate_agreement_activations x WHERE x.attempt_id=a.id
+    ) DESC,a.attempt_number DESC LIMIT 1`,
     [collaborationId, context.selectedOrganization.organizationId, hotel],
   );
   // Reuse exact-version disclosure, persisted-resource and canonical property authorization.
@@ -241,7 +270,15 @@ export async function readCollaborationAffiliateAssent(
     },
     hotelApprovedAt: null,
     creatorAcceptedAt: null,
+    lifecycle: null,
   };
+}
+
+async function readAffiliateLifecycle(pool: pg.Pool, agreementId: string) {
+  const lifecycle = await readMarketplaceAffiliateAgreementLifecycle(pool, agreementId, false);
+  if (lifecycle.status === "invalid_history")
+    throw new Error("Invalid affiliate lifecycle history");
+  return lifecycle.status === "unavailable" ? null : lifecycle;
 }
 
 export async function recordCollaborationAffiliateAssent(
@@ -294,6 +331,7 @@ export async function recordCollaborationAffiliateAssent(
     idempotencyKey,
     decision: hotel ? "hotel_approval" : "creator_acceptance",
     disclosureHash: target.disclosure_hash,
+    collaborationId,
   });
   return result.ok
     ? {
@@ -303,6 +341,26 @@ export async function recordCollaborationAffiliateAssent(
         replayed: result.replayed,
       }
     : result;
+}
+
+export async function changeCollaborationAffiliateLifecycle(
+  pool: pg.Pool,
+  context: RequestContext,
+  collaborationId: string,
+  input: AffiliateLifecycleCommandInput,
+): Promise<AffiliateLifecycleCommandResult> {
+  const target = await resolveCollaborationAffiliateAssentTarget(pool, context, collaborationId);
+  if (!target?.attempt_id) return { ok: false, code: "scope_unavailable" };
+  const agreement = await pool.query<{ agreement_id: string }>(
+    `SELECT agreement_id FROM marketplace.affiliate_agreement_activations WHERE attempt_id=$1`,
+    [target.attempt_id],
+  );
+  if (!agreement.rows[0]) return { ok: false, code: "scope_unavailable" };
+  return changeMarketplaceAffiliateAgreementLifecycle(pool, {
+    context,
+    agreementId: agreement.rows[0].agreement_id,
+    ...input,
+  });
 }
 
 type CollaborationAffiliateTarget = {
@@ -343,7 +401,10 @@ async function resolveCollaborationAffiliateAssentTarget(
       AND m.creator_organization_id=c.creator_organization_id
     LEFT JOIN LATERAL (
       SELECT candidate.id,candidate.terms_id FROM marketplace.affiliate_participation_attempts candidate
-      WHERE candidate.participation_id=m.id ORDER BY candidate.attempt_number DESC LIMIT 1
+      WHERE candidate.participation_id=m.id
+      ORDER BY EXISTS (
+        SELECT 1 FROM marketplace.affiliate_agreement_activations x WHERE x.attempt_id=candidate.id
+      ) DESC,candidate.attempt_number DESC LIMIT 1
     ) a ON true
     LEFT JOIN marketplace.affiliate_published_terms at ON at.id=a.terms_id AND at.program_id=p.id
     LEFT JOIN LATERAL (

@@ -11,12 +11,13 @@ export type AffiliateAgreementLifecycle =
 
 /** Read in the caller's transaction when this status gates a write. */
 export async function readMarketplaceAffiliateAgreementLifecycle(
-  client: pg.PoolClient,
+  client: pg.Pool | pg.PoolClient,
   agreementId: string,
+  lock = true,
 ): Promise<AffiliateAgreementLifecycle> {
   const activation = await client.query(
     `SELECT agreement_id FROM marketplace.affiliate_agreement_activations
-     WHERE agreement_id=$1 FOR UPDATE`,
+     WHERE agreement_id=$1${lock ? " FOR UPDATE" : ""}`,
     [agreementId],
   );
   if (!activation.rowCount) return { status: "unavailable" };
@@ -25,7 +26,7 @@ export async function readMarketplaceAffiliateAgreementLifecycle(
     await client.query(
       `SELECT revision,action,actor_side
        FROM marketplace.affiliate_agreement_lifecycle_events
-       WHERE agreement_id=$1 ORDER BY revision FOR SHARE`,
+       WHERE agreement_id=$1 ORDER BY revision${lock ? " FOR SHARE" : ""}`,
       [agreementId],
     )
   ).rows as { revision: number; action: string; actor_side: string }[];

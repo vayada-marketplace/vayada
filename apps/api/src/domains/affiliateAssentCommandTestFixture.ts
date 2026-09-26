@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import type pg from "pg";
 import type { RequestContext } from "@vayada/backend-auth";
 import { beforeEach } from "vitest";
 import { assentFixture, disclosureHash } from "./affiliateAssentTestFixture.js";
@@ -40,6 +41,18 @@ export function assentCommandFixture() {
     );
   });
   return fixture;
+}
+export async function installAffiliateAgreementLifecycleFixture(pool: pg.Pool) {
+  for (const migration of [
+    "0214_marketplace_affiliate_agreement_activation.sql",
+    "0326_marketplace_affiliate_agreement_lifecycle.sql",
+  ])
+    await pool.query(
+      await readFile(
+        new URL(`../../../../packages/backend-migration/migrations/${migration}`, import.meta.url),
+        "utf8",
+      ),
+    );
 }
 export function assentInput(hotel = true) {
   const context: RequestContext = {
