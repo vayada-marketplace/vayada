@@ -58,6 +58,8 @@
   "auth.login.subtitle": "Log in om uw accommodatie te beheren",
   "auth.login.chooseHotelGroup": "Hotelgroep kiezen",
   "auth.login.chooseHotelGroupSubtitle": "Selecteer de hotelgroep die u wilt beheren.",
+  "auth.login.unnamedHotelGroup": "Hotelgroep {index}",
+  "auth.login.useAnotherAccount": "Ander account gebruiken",
   "auth.login.redirecting": "Doorsturen naar inloggen...",
   "auth.login.emailLabel": "E-mailadres",
   "auth.login.emailPlaceholder": "admin@example.com",

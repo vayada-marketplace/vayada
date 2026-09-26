@@ -25,6 +25,7 @@ const AUTH_SURFACE = "pms-web";
 const AUTH_BROWSER_BASE_PATH = "/auth";
 
 export interface LoginRequest {
+  organizationId?: string;
   email: string;
   password: string;
 }
@@ -36,6 +37,7 @@ export interface SignupRequest {
 }
 
 export type AuthStateResponse = {
+  organizations?: { id: string; name?: string | null }[];
   state:
     | "invalid_credentials"
     | "email_verification_required"
@@ -50,6 +52,7 @@ export type AuthStateResponse = {
 };
 
 export class AuthStateError extends Error {
+  organizations?: { id: string; name?: string | null }[];
   status: number;
   state: AuthStateResponse["state"];
   pendingAuthenticationToken?: string;
@@ -61,6 +64,7 @@ export class AuthStateError extends Error {
     this.name = "AuthStateError";
     this.status = status;
     this.state = response.state;
+    this.organizations = response.organizations;
     this.pendingAuthenticationToken = response.pendingAuthenticationToken;
     this.email = response.email;
     this.emailVerificationId = response.emailVerificationId;

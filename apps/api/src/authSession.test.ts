@@ -747,6 +747,78 @@ describe("AuthKit session routes", () => {
     expect(authenticateWithCode).not.toHaveBeenCalled();
   });
 
+  it("filters password workspace choices to active organizations allowed on the surface", async () => {
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://pms.localhost"],
+      surfacePolicies: {
+        "pms-web": { requiredOrganizationKind: "hotel_group" },
+      },
+      identityRepository: createIdentityRepository({
+        organizationByWorkosOrgId: async (id) => {
+          if (id === "org_hotel") {
+            return {
+              organizationId: "hotel",
+              workosOrgId: id,
+              name: "Hotel Group",
+              kind: "hotel_group",
+              status: "active",
+            };
+          }
+          if (id === "org_inactive") {
+            return {
+              organizationId: "inactive",
+              workosOrgId: id,
+              name: "Inactive Hotel",
+              kind: "hotel_group",
+              status: "suspended",
+            };
+          }
+          if (id === "org_platform") {
+            return {
+              organizationId: "platform",
+              workosOrgId: id,
+              name: "Platform",
+              kind: "platform",
+              status: "active",
+            };
+          }
+          return null;
+        },
+      }),
+      authKitClient: createAuthKitClient({
+        async authenticateWithPassword() {
+          throw {
+            code: "organization_selection_required",
+            pending_authentication_token: "pending-secret",
+            organizations: [
+              { id: "org_hotel", name: "Hotel Group" },
+              { id: "org_inactive", name: "Inactive Hotel" },
+              { id: "org_platform", name: "Platform" },
+              { id: "org_unmapped", name: "Unmapped" },
+            ],
+          };
+        },
+      }),
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/password/login",
+      headers: { origin: "https://pms.localhost" },
+      payload: {
+        email: "owner@example.test",
+        password: "correct-password",
+        surface: "pms-web",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({
+      state: "organization_selection_required",
+      organizations: [{ id: "org_hotel", name: "Hotel Group" }],
+    });
+  });
+
   it("uses host-only HttpOnly cookies and response CSRF tokens in first-party mode", async () => {
     app = buildAuthSessionApp({
       cookieSecure: true,
@@ -1653,6 +1725,15 @@ describe("AuthKit session routes", () => {
     const auditEvents: ProductAuditEvent[] = [];
     app = buildAuthSessionApp({
       allowedOrigins: ["https://marketplace.localhost"],
+      identityRepository: createIdentityRepository({
+        organizationByWorkosOrgId: async (id) => ({
+          organizationId: id,
+          workosOrgId: id,
+          name: "Creator Workspace",
+          kind: "creator_workspace",
+          status: "active",
+        }),
+      }),
       authKitClient: createAuthKitClient({
         async authenticateWithPassword() {
           throw error;

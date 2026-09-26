@@ -24,7 +24,7 @@ import {
 } from "@vayada/backend-authorization";
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 
-import { mapWorkOSAuthError } from "../platform/workosAuthState.js";
+import { mapWorkOSAuthError, type VayadaAuthStateResponse } from "../platform/workosAuthState.js";
 import type {
   AuthHandoffRoutingHints,
   AuthSessionHandoff,
@@ -645,7 +645,17 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         userAgent: request.headers["user-agent"],
       });
     } catch (error) {
-      const mapped = mapWorkOSAuthError(error);
+      let mapped = mapWorkOSAuthError(error);
+      try {
+        mapped = await filterPasswordOrganizationChoices(
+          mapped,
+          options.identityRepository,
+          surfacePolicy,
+        );
+      } catch (filterError) {
+        request.log.error({ err: filterError }, "Password workspace filtering failed");
+        mapped = mapWorkOSAuthError(filterError);
+      }
       const canSelectRequestedOrganization =
         parsed.organizationId &&
         mapped.state === "organization_selection_required" &&
@@ -2387,6 +2397,32 @@ function statusForPasswordAuthFailure(state: string): 401 | 403 | 502 {
   if (state === "invalid_credentials") return 401;
   if (state === "auth_failed") return 502;
   return 403;
+}
+
+async function filterPasswordOrganizationChoices(
+  mapped: VayadaAuthStateResponse,
+  repository: IdentityRepository,
+  surfacePolicy: AuthSurfacePolicy,
+): Promise<VayadaAuthStateResponse> {
+  if (mapped.state !== "organization_selection_required" || !mapped.organizations?.length) {
+    return mapped;
+  }
+  const organizations = await Promise.all(
+    mapped.organizations.map(async (offered) => ({
+      offered,
+      organization: await repository.findOrganizationByWorkosOrgId(offered.id),
+    })),
+  );
+  return {
+    ...mapped,
+    organizations: organizations
+      .filter(
+        ({ organization }) =>
+          organization?.status === "active" &&
+          matchesOrganizationKind(organization.kind, surfacePolicy.requiredOrganizationKind),
+      )
+      .map(({ offered }) => offered),
+  };
 }
 
 async function recordPasswordLoginFailure(
