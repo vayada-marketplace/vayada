@@ -384,27 +384,4 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
       }
     }
   });
-  it("resolves verified alerts through the one approved definer function", async () => {
-    const alertId = randomUUID();
-    await owner.query(
-      `INSERT INTO pms.channel_operational_alerts(id,property_id,connection_id,binding_generation,problem_key,event_type,impact,first_occurred_at,last_occurred_at,recovery_started_at,recovery_jobs)
-       SELECT $5::uuid,$1,c.id,c.binding_generation,$3,'non_acked_booking','{}',now(),now(),now(),ARRAY[$4::uuid]
-       FROM pms.channel_connections c WHERE c.id=$2`,
-      [property, connection, randomUUID(), jobId, alertId],
-    );
-    await owner.query(
-      "UPDATE platform.jobs SET status='succeeded',job_metadata=job_metadata||'{\"alertRecoveryVerified\":true}'::jsonb WHERE id=$1",
-      [jobId],
-    );
-
-    await pool.query("SELECT pms.resolve_verified_channex_alert($1::uuid)", [jobId]);
-
-    expect(
-      (
-        await owner.query("SELECT resolved_at FROM pms.channel_operational_alerts WHERE id=$1", [
-          alertId,
-        ])
-      ).rows[0].resolved_at,
-    ).not.toBeNull();
-  });
 });

@@ -14,8 +14,6 @@ export const channexManagementWorkerFunctions = [
   "platform.valid_tenant_scope(text,uuid,uuid)",
   "pms.claim_channex_external_rate(uuid,text,text,uuid,jsonb)",
   "pms.enqueue_restriction_ari(uuid,text)",
-  // This SECURITY DEFINER function only resolves alerts after linked jobs are verified.
-  "pms.resolve_verified_channex_alert(uuid)",
 ] as const;
 const pricingScopeViews = new Set([
   "booking.pricing_runtime_effective_property_scopes",
@@ -72,7 +70,7 @@ export async function assertChannexManagementWorkerBoundary(
   const ddl = await client.query(
     `SELECT 1 WHERE has_database_privilege($1,current_database(),'CREATE') OR has_database_privilege($1,current_database(),'TEMP')
     UNION ALL SELECT 1 FROM pg_namespace WHERE nspname NOT LIKE 'pg_%' AND has_schema_privilege($1,oid,'CREATE')
-    UNION ALL SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema' AND p.prosecdef AND p.oid<>to_regprocedure('pms.resolve_verified_channex_alert(uuid)') AND has_function_privilege($1,p.oid,'EXECUTE')
+    UNION ALL SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema' AND p.prosecdef AND has_function_privilege($1,p.oid,'EXECUTE')
     UNION ALL SELECT 1 FROM pg_parameter_acl WHERE has_parameter_privilege($1,parname,'SET') OR has_parameter_privilege($1,parname,'ALTER SYSTEM')
     UNION ALL SELECT 1 FROM pg_class WHERE relkind='S' AND (has_sequence_privilege($1,oid,'USAGE') OR has_sequence_privilege($1,oid,'SELECT') OR has_sequence_privilege($1,oid,'UPDATE'))`,
     [role],
