@@ -1,5 +1,6 @@
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { expect, test, type Page, type Route, type TestInfo } from "@playwright/test";
 
+import { createAdaptiveHotelSetupStatusMock } from "../support/sharedHotelSetupMocks";
 import { watchNoLegacyCalls } from "../support/noLegacyCalls";
 import { watchPageHealth } from "../support/pageHealth";
 import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
@@ -83,19 +84,16 @@ test("shows filtered multi-currency results and status explanations", async ({
   await expect(page.getByText("EUR 123.45", { exact: true })).toBeVisible();
   await expect(page.getByText("USD 67.89", { exact: true })).toBeVisible();
   await expect(page.getByText(/EUR -1\.00 latest adjustment/)).toBeVisible();
-  for (const state of [
-    "Estimated",
-    "Awaiting verification",
-    "Eligible",
-    "Processing",
-    "Paid",
-    "Adjusted",
-  ])
+  for (const state of ["Calculated estimate", "Awaiting verification", "Latest adjustment"])
     await expect(
       page.getByRole("heading", { name: "What each status means" }).locator("..").getByText(state, {
         exact: true,
       }),
     ).toBeVisible();
+  await expect(
+    page.getByText("Payout status is not available in this results view."),
+  ).toBeVisible();
+  await expect(page.getByText(/does not infer them from commission calculations/)).toBeVisible();
 
   await page.getByLabel("Source").selectOption("tiktok");
   await page.getByLabel("Campaign").fill("autumn_launch");
@@ -124,6 +122,97 @@ test("explains stale or missing evidence instead of claiming zero", async ({ pag
   await expect(page.getByText("Some evidence is delayed or missing.")).toBeVisible();
   await expect(page.getByText(/not the same as confirmed zero bookings/)).toBeVisible();
   await expect(page.getByText("Evidence is stale", { exact: true })).toBeVisible();
+  await expect(page.getByText("Recorded bookings", { exact: true })).toBeVisible();
+  await expect(page.getByText("≥0", { exact: true })).toBeVisible();
+  await expect(page.getByText("0 bookings", { exact: true })).toHaveCount(0);
+  await verify();
+});
+
+test("waits for the authorized hotel property before loading results", async ({
+  page,
+}, testInfo) => {
+  const verify = checks(page, testInfo);
+  const propertyId = "22222222-2222-4222-8222-222222222222";
+  await page.unroute(/\/auth\/session(?:\?|$)/);
+  await page.route(/\/auth\/session(?:\?|$)/, (route) =>
+    route.fulfill({
+      json: {
+        accessToken: "hotel-access",
+        organizationId: "11111111-1111-4111-8111-111111111111",
+        organizationKind: "hotel_group",
+        user: {
+          id: "hotel-user",
+          email: "hotel@example.test",
+          name: "Hotel Owner",
+          status: "active",
+        },
+      },
+    }),
+  );
+  await page.route(/\/api\/hotel-setup\/status(?:\?|$)/, async (route) => {
+    if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+    await route.fulfill({
+      status: 200,
+      headers: corsHeaders(route),
+      json: createAdaptiveHotelSetupStatusMock({
+        entryProduct: "marketplace",
+        organizationId: "11111111-1111-4111-8111-111111111111",
+        organizationDisplayName: "Alpine Group",
+        propertyId,
+      }),
+    });
+  });
+  const requests: URL[] = [];
+  await routePerformance(page, (url) => {
+    requests.push(url);
+    return performancePage({ partnerships: [partnership()] });
+  });
+
+  await page.goto("/earnings");
+  await expect(page.getByText("Alpine House", { exact: true })).toBeVisible();
+  await expect.poll(() => requests.length).toBe(1);
+  expect(requests[0]?.searchParams.get("propertyId")).toBe(propertyId);
+  await verify();
+});
+
+test("does not append an old pagination response after filters change", async ({
+  page,
+}, testInfo) => {
+  const verify = checks(page, testInfo);
+  let pendingPage: Route | undefined;
+  await page.route(/\/api\/marketplace\/affiliate-performance(?:\?|$)/, async (route) => {
+    if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+    const url = new URL(route.request().url());
+    if (url.searchParams.has("cursor")) {
+      pendingPage = route;
+      return;
+    }
+    const filtered = url.searchParams.get("source") === "tiktok";
+    await route.fulfill({
+      status: 200,
+      headers: corsHeaders(route),
+      ...performancePage({
+        partnerships: [partnership({ propertyName: filtered ? "Filtered Hotel" : "First Hotel" })],
+        nextCursor: filtered ? null : "old-page",
+      }),
+    });
+  });
+
+  await page.goto("/earnings");
+  await page.getByRole("button", { name: "Load more partnerships" }).click();
+  await expect.poll(() => Boolean(pendingPage)).toBe(true);
+  await page.getByLabel("Source").selectOption("tiktok");
+  await page.getByRole("button", { name: "Apply filters" }).click();
+  await expect(page.getByText("Filtered Hotel", { exact: true })).toBeVisible();
+  if (pendingPage)
+    await pendingPage
+      .fulfill({
+        status: 200,
+        headers: corsHeaders(pendingPage),
+        ...performancePage({ partnerships: [partnership({ propertyName: "Old Page Hotel" })] }),
+      })
+      .catch(() => undefined);
+  await expect(page.getByText("Old Page Hotel", { exact: true })).toHaveCount(0);
   await verify();
 });
 
