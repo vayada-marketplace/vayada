@@ -84,7 +84,7 @@ async function seed(client: pg.Client) {
        (id,organization_id,owner_scope,payout_method,default_currency,status,schedule,
         payout_preferences,sensitive_destination_ref)
      VALUES($1,$2,'organization','manual','EUR','active','{"type":"manual"}',
-       jsonb_build_object('affiliateId',$3),'vault://destination/secret')`,
+       jsonb_build_object('affiliateId',$3::text),'vault://destination/secret')`,
     [settings, org, affiliate],
   );
   await client.query(
@@ -92,7 +92,7 @@ async function seed(client: pg.Client) {
        (id,payout_setting_id,owner_scope,organization_id,related_property_id,source_system,
         source_payout_id,payout_status,amount,fee_amount,net_amount,currency,paid_at,payout_metadata)
      VALUES($1,$2,'organization',$3,$4,'finance','portal-1515','paid',12,0,12,'EUR',now(),
-       jsonb_build_object('affiliateId',$5))`,
+       jsonb_build_object('affiliateId',$5::text))`,
     [payout, settings, org, property, affiliate],
   );
   await client.query(
