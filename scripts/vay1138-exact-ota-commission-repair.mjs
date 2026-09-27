@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import pg from "pg";
 
 const PROPERTY = "65f6b2fc-c783-4963-9d6b-a85f82319769";
-const APPROVED_RELEASE = "f0fdc908f9d30468beca555f8b90b884888f14fa";
+const APPROVED_RELEASE = "e8105bdd75df3e92a0e5e9b5f7e5c85a005c9378";
 const EVIDENCE = [
   "501d6763-3c14-48d9-a7d5-2b6615816d26",
   "5a9bdc83-14f9-4e35-a07c-fa161d5c2112",
