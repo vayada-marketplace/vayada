@@ -74,6 +74,7 @@ import { createBookingGuestPolicyProductionApplication } from "./domains/booking
 import { createPgBookingGuestPolicyScopeAuthorizationPort } from "./domains/bookingGuestPolicyScopeAuthorization.js";
 import { createPgHotelCatalogCurrentOwnerEvidencePorts } from "./domains/hotelCatalogCurrentOwnerEvidence.js";
 import { createPgHotelCatalogStep1Repository } from "./domains/hotelCatalogStep1Repository.js";
+import { createPgAffiliatePerformanceReadModel } from "./domains/affiliatePerformanceReadModel.js";
 import { createPgFinanceAffiliatePercentagePolicyRepository } from "./domains/financeAffiliatePercentagePolicyRepository.js";
 import { createPgMarketplaceAffiliateDraftRepository } from "./domains/marketplaceAffiliateDraftRepository.js";
 import { createPgMarketplaceHotelCollaborationPreferencesRepository } from "./domains/marketplaceHotelCollaborationPreferencesRepository.js";
@@ -1971,6 +1972,9 @@ const app = buildApp({
     connectionString: targetDatabaseUrl,
     attachmentMedia: platformMediaRuntime?.collaborationAttachments,
   }),
+  marketplaceAffiliatePerformance: {
+    repository: createPgAffiliatePerformanceReadModel(targetDatabaseUrl),
+  },
   marketplaceTripRepository: createPgMarketplaceTripRepository({
     connectionString: targetDatabaseUrl,
   }),
