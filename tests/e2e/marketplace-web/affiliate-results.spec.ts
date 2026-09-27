@@ -1,0 +1,202 @@
+import { expect, test, type Page, type TestInfo } from "@playwright/test";
+
+import { watchNoLegacyCalls } from "../support/noLegacyCalls";
+import { watchPageHealth } from "../support/pageHealth";
+import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
+
+test.beforeEach(async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    localStorage.setItem("userType", "creator");
+    localStorage.setItem("isLoggedIn", "true");
+    localStorage.setItem(
+      "vayada_cookie_consent",
+      JSON.stringify({ necessary: true, functional: true, analytics: false, marketing: false }),
+    );
+  });
+  await page.route(/\/auth\/session(?:\?|$)/, (route) =>
+    route.fulfill({
+      json: {
+        accessToken: "creator-access",
+        organizationId: "11111111-1111-4111-8111-111111111111",
+        organizationKind: "creator_workspace",
+        user: {
+          id: "creator-user",
+          email: "creator@example.test",
+          name: "Lina Creator",
+          status: "active",
+        },
+      },
+    }),
+  );
+  await page.route(/\/api\/identity\/consent\/cookies(?:\?|$)/, async (route) => {
+    if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+    await route.fulfill({
+      status: 200,
+      headers: corsHeaders(route),
+      json: {
+        id: "consent-e2e",
+        visitor_id: "visitor-e2e",
+        user_id: null,
+        necessary: true,
+        functional: true,
+        analytics: false,
+        marketing: false,
+        created_at: "2026-09-27T08:00:00.000Z",
+        updated_at: "2026-09-27T08:00:00.000Z",
+      },
+    });
+  });
+});
+
+test("shows filtered multi-currency results and status explanations", async ({
+  page,
+}, testInfo) => {
+  const verify = checks(page, testInfo);
+  const requests: URL[] = [];
+  await routePerformance(page, (url) => {
+    requests.push(url);
+    return performancePage({
+      partnerships: [
+        partnership({
+          commissions: [
+            {
+              currency: "EUR",
+              currencyMinorUnit: 2,
+              calculatedMinor: "12345",
+              adjustmentMinor: "-100",
+            },
+            {
+              currency: "USD",
+              currencyMinorUnit: 2,
+              calculatedMinor: "6789",
+              adjustmentMinor: "0",
+            },
+          ],
+        }),
+      ],
+    });
+  });
+
+  await page.goto("/earnings");
+  await expect(page.getByRole("heading", { name: "Results & earnings" })).toBeVisible();
+  await expect(page.getByText("EUR 123.45", { exact: true })).toBeVisible();
+  await expect(page.getByText("USD 67.89", { exact: true })).toBeVisible();
+  await expect(page.getByText(/EUR -1\.00 latest adjustment/)).toBeVisible();
+  for (const state of [
+    "Estimated",
+    "Awaiting verification",
+    "Eligible",
+    "Processing",
+    "Paid",
+    "Adjusted",
+  ])
+    await expect(
+      page.getByRole("heading", { name: "What each status means" }).locator("..").getByText(state, {
+        exact: true,
+      }),
+    ).toBeVisible();
+
+  await page.getByLabel("Source").selectOption("tiktok");
+  await page.getByLabel("Campaign").fill("autumn_launch");
+  await page.getByRole("button", { name: "Apply filters" }).click();
+  await expect.poll(() => requests.length).toBe(2);
+  expect(requests[1]?.searchParams.get("source")).toBe("tiktok");
+  expect(requests[1]?.searchParams.get("campaign")).toBe("autumn_launch");
+  await verify();
+});
+
+test("keeps an empty partnership list distinct from zero bookings", async ({ page }, testInfo) => {
+  const verify = checks(page, testInfo);
+  await routePerformance(page, () => performancePage({ partnerships: [] }));
+  await page.goto("/earnings");
+  await expect(page.getByText("No affiliate partnerships yet", { exact: true })).toBeVisible();
+  await expect(page.getByText("0 bookings", { exact: true })).toHaveCount(0);
+  await verify();
+});
+
+test("explains stale or missing evidence instead of claiming zero", async ({ page }, testInfo) => {
+  const verify = checks(page, testInfo);
+  await routePerformance(page, () =>
+    performancePage({ partnerships: [partnership({ bookings: 0, freshness: "stale" })] }),
+  );
+  await page.goto("/earnings");
+  await expect(page.getByText("Some evidence is delayed or missing.")).toBeVisible();
+  await expect(page.getByText(/not the same as confirmed zero bookings/)).toBeVisible();
+  await expect(page.getByText("Evidence is stale", { exact: true })).toBeVisible();
+  await verify();
+});
+
+test("shows a retryable target read error without changing account data", async ({
+  page,
+}, testInfo) => {
+  const verify = checks(page, testInfo, false);
+  await routePerformance(page, () => ({ status: 503, json: { code: "read_model_unavailable" } }));
+  await page.goto("/earnings");
+  const alert = page.getByText("Could not load affiliate results").locator("..");
+  await expect(alert).toContainText("Could not load affiliate results");
+  await expect(alert).toContainText("Your existing partnerships and earnings are unchanged.");
+  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  await verify();
+});
+
+function checks(page: Page, testInfo: TestInfo, checkHealth = true) {
+  const healthy = checkHealth ? watchPageHealth(page, testInfo) : null;
+  const targetOnly = watchNoLegacyCalls(page, testInfo, "marketplace-web-offer-discovery");
+  return async () => {
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+    await targetOnly();
+    await healthy?.();
+  };
+}
+
+async function routePerformance(
+  page: Page,
+  response: (url: URL) => { status?: number; json: unknown },
+) {
+  await page.route(/\/api\/marketplace\/affiliate-performance(?:\?|$)/, async (route) => {
+    if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+    const result = response(new URL(route.request().url()));
+    await route.fulfill({
+      status: result.status ?? 200,
+      headers: corsHeaders(route),
+      json: result.json,
+    });
+  });
+}
+
+function performancePage(overrides: Record<string, unknown> = {}) {
+  return {
+    json: {
+      contractVersion: "affiliate-performance.v1",
+      coverage: "available",
+      readAt: "2026-09-27T08:00:00.000Z",
+      period: { from: "2026-06-27T08:00:00.000Z", to: "2026-09-27T08:00:00.000Z" },
+      filters: { propertyId: null, source: null, campaign: null },
+      partnerships: [],
+      nextCursor: null,
+      ...overrides,
+    },
+  };
+}
+
+function partnership(overrides: Record<string, unknown> = {}) {
+  return {
+    agreementId: "agreement-1",
+    propertyId: "22222222-2222-4222-8222-222222222222",
+    propertyName: "Alpine House",
+    creatorProfileId: "creator-profile-1",
+    clicks: 12,
+    bookings: 2,
+    stays: { total: 2, calculated: 1, pending: 1, needsReview: 0 },
+    commissions: [],
+    sources: [{ source: "instagram", clicks: 12 }],
+    campaigns: [{ campaign: "autumn_launch", clicks: 12 }],
+    freshness: "current",
+    ...overrides,
+  };
+}

@@ -363,7 +363,7 @@ function formatMinor(value: bigint, currency: string, scale: number) {
   const sign = value < BigInt(0) ? "-" : "";
   const absolute = value < BigInt(0) ? -value : value;
   const digits = absolute.toString().padStart(scale + 1, "0");
-  return `${sign}${currency} ${scale ? `${digits.slice(0, -scale)}.${digits.slice(-scale)}` : digits}`;
+  return `${currency} ${sign}${scale ? `${digits.slice(0, -scale)}.${digits.slice(-scale)}` : digits}`;
 }
 function aggregateMoney(
   commissions: AffiliatePerformancePage["partnerships"][number]["commissions"],
