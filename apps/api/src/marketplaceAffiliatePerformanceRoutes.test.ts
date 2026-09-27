@@ -83,7 +83,14 @@ describe("Marketplace affiliate performance HTTP", () => {
     expect(unavailableResponse.statusCode).toBe(503);
     expect(unavailableResponse.json()).toEqual({ code: "read_model_unavailable" });
     const invalid = await setup(creatorContext());
-    for (const query of ["period=2m", "source=direct", "campaign=bad%20label", "limit=51"])
+    for (const query of [
+      "period=2m",
+      "period=constructor",
+      "period=toString",
+      "source=direct",
+      "campaign=bad%20label",
+      "limit=51",
+    ])
       expect(
         (await invalid.app.inject({ method: "GET", url: `/affiliate-performance?${query}` }))
           .statusCode,
