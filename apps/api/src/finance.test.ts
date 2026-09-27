@@ -1358,10 +1358,7 @@ describe("finance route contracts", () => {
   });
 
   it("passes F1i affiliate payout settings and payout ledger fixtures in target mode", async () => {
-    app = buildFinanceApp({
-      permissions: ["affiliate.payout.manage"],
-      entitlements: [affiliatePayoutEntitlement()],
-    });
+    app = buildAffiliateFinanceApp({ repository: financeRepository });
 
     for (const caseId of [
       "affiliate-payout-settings-read",
@@ -4132,11 +4129,15 @@ const financeRepository: FinancePropertyReadRepository = {
       sourceFreshness,
     };
   },
-  async getAffiliatePayoutSettings(requestedAffiliateId) {
-    return requestedAffiliateId === affiliateId ? affiliatePayoutSettings : null;
+  async getAffiliatePayoutSettings(requestedAffiliateId, requestedOrganizationId) {
+    return requestedAffiliateId === affiliateId &&
+      requestedOrganizationId === affiliateOrganizationId
+      ? affiliatePayoutSettings
+      : null;
   },
-  async listAffiliatePayouts(requestedAffiliateId, query) {
-    if (requestedAffiliateId !== affiliateId) return null;
+  async listAffiliatePayouts(requestedAffiliateId, query, requestedOrganizationId) {
+    if (requestedAffiliateId !== affiliateId || requestedOrganizationId !== affiliateOrganizationId)
+      return null;
     const filtered = filterAffiliatePayouts(query);
     return {
       payouts: filtered.slice(query.offset, query.offset + query.limit),

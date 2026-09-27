@@ -13,6 +13,7 @@ import {
   setupIncompleteAffiliatePayoutSettings,
   setupIncompletePaymentSettings,
   type FinanceAffiliatePayoutListResponse,
+  type FinanceAffiliatePayoutDetail,
   type FinanceAffiliatePayoutProvider,
   type FinanceAffiliatePayoutSettingsPatchCommand,
   type FinanceAffiliatePayoutSettingsPatchResult,
@@ -307,6 +308,24 @@ type FinancePayoutRow = {
   retryCount: number;
   total: string | number;
   sourceFreshness: unknown;
+};
+
+type FinanceAffiliatePayoutDetailRow = FinancePayoutRow & {
+  sensitiveDestinationRef: string | null;
+  providerAccountRef: string | null;
+};
+
+type FinanceAffiliatePayoutAllocationRow = {
+  earningEntryId: string;
+  propertyId: string;
+  bookingId: string;
+  agreementId: string;
+  recordedAt: Date | string;
+  currency: string;
+  currencyMinorUnit: number;
+  commissionMinor: string;
+  adjustmentMinor: string;
+  appliedMinor: string;
 };
 
 type FinanceReconciliationRow = {
@@ -873,9 +892,13 @@ export async function registerFinanceRoutes(
     "/finance/affiliates/:affiliateId/payout-settings",
     async (request, reply) => {
       const affiliateId = request.params.affiliateId;
-      if (!enforceFinanceAffiliatePolicy(request, reply, affiliateId)) return reply;
+      const context = enforceFinanceAffiliatePolicy(request, reply, affiliateId);
+      if (!context) return reply;
 
-      const settings = await options.repository.getAffiliatePayoutSettings?.(affiliateId);
+      const settings = await options.repository.getAffiliatePayoutSettings?.(
+        affiliateId,
+        context.selectedOrganization.organizationId,
+      );
       if (!settings) {
         reply.code(404);
         return {
@@ -927,14 +950,19 @@ export async function registerFinanceRoutes(
     "/finance/affiliates/:affiliateId/payouts",
     async (request, reply) => {
       const affiliateId = request.params.affiliateId;
-      if (!enforceFinanceAffiliatePolicy(request, reply, affiliateId)) return reply;
+      const context = enforceFinanceAffiliatePolicy(request, reply, affiliateId);
+      if (!context) return reply;
       const query = parsePayoutListQuery(request.query);
       if ("statusCode" in query) {
         reply.code(query.statusCode);
         return query;
       }
 
-      const result = await options.repository.listAffiliatePayouts?.(affiliateId, query);
+      const result = await options.repository.listAffiliatePayouts?.(
+        affiliateId,
+        query,
+        context.selectedOrganization.organizationId,
+      );
       if (!result) {
         reply.code(404);
         return {
@@ -1437,8 +1465,8 @@ export function createTargetFinancePropertySettingsRepository(config: {
       const result = await loadPayoutRows(pool, propertyId, query);
       return toPayoutListResponseBody(result, query);
     },
-    async getAffiliatePayoutSettings(affiliateId) {
-      const resource = await resolveAffiliateResource(pool, affiliateId);
+    async getAffiliatePayoutSettings(affiliateId, organizationId) {
+      const resource = await resolveAffiliateResource(pool, affiliateId, organizationId);
       if (!resource) return null;
       const row = await loadAffiliatePayoutSettingsRow(pool, affiliateId, resource.organizationId);
       if (row) return toAffiliatePayoutSettingsReadModel(row);
@@ -1450,8 +1478,8 @@ export function createTargetFinancePropertySettingsRepository(config: {
           )
         : null;
     },
-    async listAffiliatePayouts(affiliateId, query) {
-      const resource = await resolveAffiliateResource(pool, affiliateId);
+    async listAffiliatePayouts(affiliateId, query, organizationId) {
+      const resource = await resolveAffiliateResource(pool, affiliateId, organizationId);
       if (!resource) return null;
       const result = await loadAffiliatePayoutRows(
         pool,
@@ -1460,6 +1488,9 @@ export function createTargetFinancePropertySettingsRepository(config: {
         query,
       );
       return toAffiliatePayoutListResponseBody(result, query);
+    },
+    async getAffiliatePayoutDetail(affiliateId, organizationId, payoutId, currency) {
+      return loadAffiliatePayoutDetail(pool, affiliateId, organizationId, payoutId, currency);
     },
     async listReconciliationItems(propertyId, view, query) {
       const result = await loadReconciliationRows(pool, propertyId, view, query);
@@ -4555,7 +4586,13 @@ async function updateAffiliatePayoutSettingsInClient(
   client: FinancePropertySettingsWriteClient,
   command: FinanceAffiliatePayoutSettingsPatchCommand,
 ): Promise<FinanceAffiliatePayoutSettingsPatchResult> {
-  const affiliateResource = await resolveAffiliateResource(client, command.affiliateId);
+  const organizationId =
+    command.audit.actor.kind === "user" ? command.audit.actor.organizationId : undefined;
+  const affiliateResource = await resolveAffiliateResource(
+    client,
+    command.affiliateId,
+    organizationId,
+  );
   if (!affiliateResource) {
     return {
       ok: false,
@@ -5402,21 +5439,23 @@ async function loadPaymentSettingsRow(
 async function resolveAffiliateResource(
   pool: FinanceQueryExecutor,
   affiliateId: string,
+  organizationId?: string,
 ): Promise<FinanceAffiliateResourceRow | null> {
   const result = await pool.query<FinanceAffiliateResourceRow>(
     `SELECT link.organization_id::text AS "organizationId"
      FROM identity.organization_resource_links link
      JOIN identity.organizations organization
        ON organization.id = link.organization_id
-      AND organization.kind = 'affiliate_partner'
+      AND organization.kind IN ('affiliate_partner', 'creator_workspace')
       AND organization.status = 'active'
      WHERE link.product = 'affiliate'
        AND link.resource_type = 'affiliate'
        AND link.resource_id = $1
+       AND ($2::uuid IS NULL OR link.organization_id = $2::uuid)
        AND link.status = 'active'
      ORDER BY link.updated_at DESC
      LIMIT 1`,
-    [affiliateId],
+    [affiliateId, organizationId ?? null],
   );
   return result.rows[0] ?? null;
 }
@@ -5446,7 +5485,7 @@ async function loadAffiliatePayoutSettingsRow(
      FROM identity.organization_resource_links link
      JOIN identity.organizations organization
        ON organization.id = link.organization_id
-      AND organization.kind = 'affiliate_partner'
+      AND organization.kind IN ('affiliate_partner', 'creator_workspace')
       AND organization.status = 'active'
      LEFT JOIN finance.payout_settings settings
        ON settings.organization_id = link.organization_id
@@ -5642,6 +5681,76 @@ async function loadAffiliatePayoutRows(
       sql: affiliatePayoutTotalSql(),
       values: [affiliateId, organizationId, query.status ?? null, query.provider ?? null],
     }),
+  };
+}
+
+async function loadAffiliatePayoutDetail(
+  pool: FinanceQueryExecutor,
+  affiliateId: string,
+  organizationId: string,
+  payoutId: string,
+  currency: string,
+): Promise<FinanceAffiliatePayoutDetail | null> {
+  const payout = await pool.query<FinanceAffiliatePayoutDetailRow>(
+    `SELECT payout.id::text AS "payoutId",payout.owner_scope AS "ownerScope",
+       payout.property_id::text AS "propertyId",payout.organization_id::text AS "organizationId",
+       payout.related_property_id::text AS "relatedPropertyId",
+       payout.guest_booking_id::text AS "guestBookingId",payout.payment_id::text AS "paymentId",
+       payout.payout_status AS "payoutStatus",payout.amount::text,payout.fee_amount::text AS "feeAmount",
+       payout.net_amount::text AS "netAmount",payout.currency,
+       COALESCE(account.provider,'manual') AS provider,payout.provider_payout_id AS "providerPayoutId",
+       payout.scheduled_at AS "scheduledAt",payout.paid_at AS "paidAt",
+       payout.failed_at AS "failedAt",payout.failure_code AS "failureCode",
+       payout.retry_count AS "retryCount",'1'::text AS total,'{}'::jsonb AS "sourceFreshness",
+       settings.sensitive_destination_ref AS "sensitiveDestinationRef",
+       account.provider_account_id AS "providerAccountRef"
+     FROM finance.payouts payout
+     LEFT JOIN finance.payout_settings settings ON settings.id=payout.payout_setting_id
+       AND settings.organization_id=payout.organization_id
+     LEFT JOIN finance.payment_provider_accounts account
+       ON account.id=payout.organization_provider_account_id
+       AND account.organization_id=payout.organization_id AND account.account_scope='organization'
+     WHERE payout.id=$1::uuid AND payout.organization_id=$2::uuid
+       AND payout.owner_scope='organization' AND payout.currency=$3
+       AND COALESCE(payout.payout_metadata->>'affiliateId',payout.payout_metadata->>'affiliate_id')=$4`,
+    [payoutId, organizationId, currency, affiliateId],
+  );
+  const row = payout.rows[0];
+  if (!row) return null;
+  const allocations = await pool.query<FinanceAffiliatePayoutAllocationRow>(
+    `SELECT allocation.earning_entry_id::text AS "earningEntryId",
+       allocation.property_id::text AS "propertyId",allocation.booking_id AS "bookingId",
+       allocation.agreement_id AS "agreementId",allocation.recorded_at AS "recordedAt",
+       allocation.currency,allocation.currency_minor_unit AS "currencyMinorUnit",
+       allocation.commission_minor::text AS "commissionMinor",
+       allocation.adjustment_minor::text AS "adjustmentMinor",item.applied_minor::text AS "appliedMinor"
+     FROM finance.affiliate_earning_allocation_items item
+     JOIN finance.affiliate_earning_allocations allocation
+       ON allocation.earning_entry_id=item.earning_entry_id
+     WHERE item.payout_id=$1::uuid AND allocation.organization_id=$2::uuid
+       AND allocation.affiliate_id=$3 AND allocation.currency=$4
+     ORDER BY allocation.recorded_at,allocation.earning_entry_id`,
+    [payoutId, organizationId, affiliateId, currency],
+  );
+  return {
+    ...toPayout(row),
+    guestBookingId: null,
+    paymentId: null,
+    providerPayoutId: null,
+    maskedDestination: row.sensitiveDestinationRef ? "Destination ••••" : null,
+    maskedProviderReference: maskReference(row.providerPayoutId ?? row.providerAccountRef),
+    includedEarnings: allocations.rows.map((allocation) => ({
+      earningEntryId: allocation.earningEntryId,
+      propertyId: allocation.propertyId,
+      bookingReference: maskReference(allocation.bookingId) ?? "••••",
+      agreementId: allocation.agreementId,
+      recordedAt: utcDateTime(allocation.recordedAt, ""),
+      currency: currencyCode(allocation.currency),
+      currencyMinorUnit: allocation.currencyMinorUnit,
+      commissionMinor: minorInteger(allocation.commissionMinor),
+      adjustmentMinor: minorInteger(allocation.adjustmentMinor),
+      appliedMinor: minorInteger(allocation.appliedMinor),
+    })),
   };
 }
 
@@ -7152,16 +7261,16 @@ function enforceFinanceAffiliatePolicy(
   request: FastifyRequest,
   reply: FastifyReply,
   affiliateId: string,
-): boolean {
+): RequestContext | null {
   const policy = financeAffiliatePolicy(affiliateId);
   try {
     enforceRoutePolicy(request, policy);
-    return true;
+    return requireAuthContext(request);
   } catch (error) {
     const accessError = toFinanceAffiliateAccessError(error, request, affiliateId);
     if (!accessError) throw error;
     reply.code(accessError.statusCode).send(accessError);
-    return false;
+    return null;
   }
 }
 
@@ -7741,6 +7850,15 @@ function decimalString(value: unknown): string {
   if (typeof value === "number" && Number.isFinite(value)) return value.toFixed(2);
   if (typeof value === "string" && value.trim()) return value;
   return "0.00";
+}
+
+function minorInteger(value: unknown): string {
+  return typeof value === "string" && /^-?\d+$/.test(value) ? value : "0";
+}
+
+function maskReference(value: string | null): string | null {
+  if (!value) return null;
+  return value.length > 4 ? `••••${value.slice(-4)}` : "••••";
 }
 
 function sha256(value: string): string {

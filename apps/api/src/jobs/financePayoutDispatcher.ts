@@ -648,7 +648,7 @@ async function selectDueAffiliatePayoutDispatchCandidates(
       AND settings.owner_scope = 'organization'
      LEFT JOIN identity.organizations organization
        ON organization.id = payout.organization_id
-      AND organization.kind = 'affiliate_partner'
+      AND organization.kind IN ('affiliate_partner', 'creator_workspace')
       AND organization.status = 'active'
      LEFT JOIN identity.organization_resource_links link
        ON link.organization_id = payout.organization_id
@@ -945,7 +945,7 @@ async function claimAffiliatePayoutDispatch(
           AND account.status = 'active'
           AND account.payouts_enabled = TRUE
          WHERE organization.id = $4::uuid
-           AND organization.kind = 'affiliate_partner'
+           AND organization.kind IN ('affiliate_partner', 'creator_workspace')
            AND organization.status = 'active'
        )
      RETURNING amount::text, currency,

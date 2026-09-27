@@ -135,6 +135,11 @@ describe("Platform Finance affiliate payout mark-paid transaction", () => {
     });
     expect(statements).toContain("BEGIN");
     expect(statements).toContain("COMMIT");
+    expect(
+      statements.some((sql) =>
+        sql.includes("organization.kind IN ('affiliate_partner', 'creator_workspace')"),
+      ),
+    ).toBe(true);
     expect(statements.some((sql) => sql.includes("UPDATE finance.payouts"))).toBe(true);
     expect(statements.some((sql) => sql.includes("UPDATE platform.jobs"))).toBe(true);
     expect(

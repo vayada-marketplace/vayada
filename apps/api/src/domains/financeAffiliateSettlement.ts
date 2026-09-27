@@ -231,7 +231,8 @@ async function loadSettings(
        account.payouts_enabled AS "providerPayoutsEnabled"
      FROM identity.organization_resource_links link
      JOIN identity.organizations organization ON organization.id=link.organization_id
-       AND organization.kind='affiliate_partner' AND organization.status='active'
+       AND organization.kind IN ('affiliate_partner','creator_workspace')
+       AND organization.status='active'
      JOIN finance.payout_settings settings ON settings.organization_id=link.organization_id
        AND settings.owner_scope='organization' AND settings.status='active'
        AND settings.payout_preferences->>'affiliateId'=link.resource_id
