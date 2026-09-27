@@ -65,23 +65,35 @@ describe.skipIf(!url)("creator payout reconciliation PostgreSQL boundary", () =>
 async function seed(client: pg.Client) {
   await client.query(
     `INSERT INTO identity.organizations(id,kind,name,slug,status)
-     VALUES($1,'creator_workspace','Creator 1515','creator-1515','active');
-     INSERT INTO identity.organization_resource_links
+     VALUES($1,'creator_workspace','Creator 1515','creator-1515','active')`,
+    [org],
+  );
+  await client.query(
+    `INSERT INTO identity.organization_resource_links
        (organization_id,product,resource_type,resource_id,relationship,status)
-     VALUES($1,'affiliate','affiliate',$2,'owner','active');
-     INSERT INTO hotel_catalog.properties(id,public_id,display_name)
-     VALUES($3,'property-1515','Hotel 1515');
-     INSERT INTO finance.payout_settings
+     VALUES($1,'affiliate','affiliate',$2,'owner','active')`,
+    [org, affiliate],
+  );
+  await client.query(
+    `INSERT INTO hotel_catalog.properties(id,public_id,display_name)
+     VALUES($1,'property-1515','Hotel 1515')`,
+    [property],
+  );
+  await client.query(
+    `INSERT INTO finance.payout_settings
        (id,organization_id,owner_scope,payout_method,default_currency,status,schedule,
         payout_preferences,sensitive_destination_ref)
-     VALUES($4,$1,'organization','manual','EUR','active','{"type":"manual"}',
-       jsonb_build_object('affiliateId',$2),'vault://destination/secret');
-     INSERT INTO finance.payouts
+     VALUES($1,$2,'organization','manual','EUR','active','{"type":"manual"}',
+       jsonb_build_object('affiliateId',$3),'vault://destination/secret')`,
+    [settings, org, affiliate],
+  );
+  await client.query(
+    `INSERT INTO finance.payouts
        (id,payout_setting_id,owner_scope,organization_id,related_property_id,source_system,
         source_payout_id,payout_status,amount,fee_amount,net_amount,currency,paid_at,payout_metadata)
-     VALUES($5,$4,'organization',$1,$3,'finance','portal-1515','paid',12,0,12,'EUR',now(),
-       jsonb_build_object('affiliateId',$2));`,
-    [org, affiliate, property, settings, payout],
+     VALUES($1,$2,'organization',$3,$4,'finance','portal-1515','paid',12,0,12,'EUR',now(),
+       jsonb_build_object('affiliateId',$5))`,
+    [payout, settings, org, property, affiliate],
   );
   await client.query(
     `INSERT INTO finance.affiliate_earning_allocations
@@ -91,8 +103,7 @@ async function seed(client: pg.Client) {
         recorded_at,allocated_at)
      VALUES($1,$2,$3,'creator-1515',$4,$5,$6,'booking-reference-1515','stay-1515',
        'agreement-1515','policy-1515',1,'EUR',2,1200,1200,'allocated',now(),now());
-     INSERT INTO finance.affiliate_earning_allocation_items
-       (earning_entry_id,payout_id,applied_minor) VALUES($1,$7,1200)`,
+    `,
     [
       earning,
       "a".repeat(64),
@@ -100,7 +111,11 @@ async function seed(client: pg.Client) {
       affiliate,
       org,
       property,
-      payout,
     ],
+  );
+  await client.query(
+    `INSERT INTO finance.affiliate_earning_allocation_items
+       (earning_entry_id,payout_id,applied_minor) VALUES($1,$2,1200)`,
+    [earning, payout],
   );
 }
