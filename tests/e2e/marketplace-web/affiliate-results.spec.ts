@@ -48,6 +48,7 @@ test.beforeEach(async ({ page }) => {
       },
     });
   });
+  await routePayouts(page, { payouts: [] });
 });
 
 test("shows filtered multi-currency results and status explanations", async ({
@@ -232,6 +233,50 @@ test("shows a retryable target read error without changing account data", async 
   await verify();
 });
 
+test("reconciles a paid payout to included commissions and downloads its scoped statement", async ({
+  page,
+}, testInfo) => {
+  const verify = checks(page, testInfo);
+  await routePerformance(page, () => performancePage({ partnerships: [partnership()] }));
+  await page.unroute(/\/api\/marketplace\/affiliate-payouts(?:[/?]|$)/);
+  await routePayouts(page, { payouts: [payout()] });
+  await page.goto("/earnings");
+  await expect(page.getByRole("heading", { name: "Payouts & statements" })).toBeVisible();
+  await expect(page.getByText("EUR 12.00 · Paid", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Only Finance-confirmed payouts appear as paid/)).toBeVisible();
+  await page.getByRole("button", { name: "View detail" }).click();
+  await expect(page.getByRole("heading", { name: "Included commissions" })).toBeVisible();
+  await expect(page.getByText(/EUR 12.00 applied · booking ••••1515/)).toBeVisible();
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download statement" }).click();
+  expect((await download).suggestedFilename()).toBe(`payout-${payout().payoutId}.csv`);
+  await verify();
+});
+
+test("recovers payout history after a failed read without presenting eligible earnings as paid", async ({
+  page,
+}, testInfo) => {
+  const verify = checks(page, testInfo, false);
+  await routePerformance(page, () => performancePage({ partnerships: [partnership()] }));
+  await page.unroute(/\/api\/marketplace\/affiliate-payouts(?:[/?]|$)/);
+  let attempts = 0;
+  await routePayouts(
+    page,
+    { payouts: [payout({ payoutStatus: "failed", failureCode: "provider_rejected" })] },
+    () => ++attempts === 1,
+  );
+  await page.goto("/earnings");
+  await expect(page.getByRole("alert").filter({ hasText: "Payout details are" })).toContainText(
+    "Payout details are temporarily unavailable",
+  );
+  await page.getByRole("button", { name: "Retry" }).last().click();
+  await expect(
+    page.getByText("EUR 12.00 · Failed — action may be required", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("EUR 123.45 · Paid", { exact: true })).toHaveCount(0);
+  await verify();
+});
+
 function checks(page: Page, testInfo: TestInfo, checkHealth = true) {
   const healthy = checkHealth ? watchPageHealth(page, testInfo) : null;
   const targetOnly = watchNoLegacyCalls(page, testInfo, "marketplace-web-offer-discovery");
@@ -259,6 +304,107 @@ async function routePerformance(
       json: result.json,
     });
   });
+}
+
+async function routePayouts(
+  page: Page,
+  overrides: Record<string, unknown>,
+  failList: () => boolean = () => false,
+) {
+  await page.route(/\/api\/marketplace\/affiliate-payouts(?:[/?]|$)/, async (route) => {
+    if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith("/statement"))
+      return route.fulfill({
+        status: 200,
+        headers: {
+          ...corsHeaders(route),
+          "Content-Type": "text/csv",
+          "Content-Disposition": `attachment; filename="payout-${payout().payoutId}.csv"`,
+        },
+        body: '"payout_id"\r\n',
+      });
+    if (/\/affiliate-payouts\/[^/]+$/.test(url.pathname))
+      return route.fulfill({
+        status: 200,
+        headers: corsHeaders(route),
+        json: {
+          contractVersion: "finance-route-contracts.v1",
+          affiliateId: "affiliate-1515",
+          payout: payoutDetail(),
+        },
+      });
+    if (failList())
+      return route.fulfill({
+        status: 503,
+        headers: corsHeaders(route),
+        json: { code: "read_model_unavailable" },
+      });
+    return route.fulfill({ status: 200, headers: corsHeaders(route), json: payoutPage(overrides) });
+  });
+}
+
+function payoutPage(overrides: Record<string, unknown> = {}) {
+  return {
+    contractVersion: "finance-route-contracts.v1",
+    affiliateId: "affiliate-1515",
+    payoutSettings: {
+      payoutsEnabled: true,
+      payoutProvider: "stripe",
+      payoutCurrency: "EUR",
+      payoutSchedule: "monthly",
+      payoutThresholdAmount: null,
+      providerAccount: {
+        status: "active",
+        onboardingStatus: "completed",
+        payoutsEnabled: true,
+        maskedReference: "••••1515",
+      },
+    },
+    payouts: [],
+    total: 0,
+    limit: 25,
+    offset: 0,
+    sourceFreshness: {},
+    ...overrides,
+  };
+}
+function payout(overrides: Record<string, unknown> = {}) {
+  return {
+    payoutId: "15150000-0000-4000-8000-000000000003",
+    payoutStatus: "paid",
+    amount: "12.00",
+    feeAmount: "0.00",
+    netAmount: "12.00",
+    currency: "EUR",
+    scheduledAt: null,
+    paidAt: "2026-09-27T10:00:00.000Z",
+    failedAt: null,
+    failureCode: null,
+    retryCount: 0,
+    ...overrides,
+  };
+}
+function payoutDetail() {
+  return {
+    ...payout(),
+    maskedDestination: "Destination ••••",
+    maskedProviderReference: "••••1515",
+    includedEarnings: [
+      {
+        earningEntryId: "entry-1515",
+        propertyId: "property-1515",
+        bookingReference: "••••1515",
+        agreementId: "agreement-1515",
+        recordedAt: "2026-09-26T10:00:00.000Z",
+        currency: "EUR",
+        currencyMinorUnit: 2,
+        commissionMinor: "1200",
+        adjustmentMinor: "1200",
+        appliedMinor: "1200",
+      },
+    ],
+  };
 }
 
 function performancePage(overrides: Record<string, unknown> = {}) {
