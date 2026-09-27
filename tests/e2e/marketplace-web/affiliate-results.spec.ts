@@ -199,6 +199,9 @@ test("does not append an old pagination response after filters change", async ({
   });
 
   await page.goto("/earnings");
+  await expect(
+    page.getByText("Totals for partnerships shown; load more to expand them."),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Load more partnerships" }).click();
   await expect.poll(() => Boolean(pendingPage)).toBe(true);
   await page.getByLabel("Source").selectOption("tiktok");

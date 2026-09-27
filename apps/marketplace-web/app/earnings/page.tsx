@@ -204,7 +204,13 @@ function Performance({
           confirmed zero bookings; earnings may change after verification.
         </div>
       )}
-      <section aria-label="Affiliate totals" className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <p className="mt-5 text-xs text-gray-500">
+        Totals for partnerships shown{result.nextCursor ? "; load more to expand them." : "."}
+      </p>
+      <section
+        aria-label="Affiliate totals for partnerships shown"
+        className="mt-2 grid grid-cols-2 gap-3 lg:grid-cols-4"
+      >
         <Metric label="Clicks" value={String(totals.clicks)} />
         <Metric
           label={stale ? "Recorded bookings" : "Bookings"}
