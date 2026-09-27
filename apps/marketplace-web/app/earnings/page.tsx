@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { AuthenticatedNavigation } from "@/components/layout";
 import { useSidebar } from "@/components/layout/AuthenticatedNavigation";
+import { AffiliatePayouts } from "@/components/marketplace/AffiliatePayouts";
 import { resolveMarketplaceSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import {
   AFFILIATE_PERFORMANCE_PERIODS,
@@ -305,6 +306,7 @@ function Performance({
         </button>
       )}
       <StatusGuide />
+      {authService.getUserType() !== "hotel" && <AffiliatePayouts />}
     </>
   );
 }
