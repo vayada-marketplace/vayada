@@ -80,7 +80,7 @@ function parseQuery(value: unknown, now: Date): AffiliatePerformanceQuery | stri
       ? (value as Record<string, unknown>)
       : {};
   const period = typeof query["period"] === "string" ? query["period"] : "3m";
-  if (!(period in periods)) return "invalid_period";
+  if (!Object.hasOwn(periods, period)) return "invalid_period";
   const source = query["source"];
   if (
     source !== undefined &&
