@@ -10,13 +10,20 @@ const EVIDENCE = [
   "5a9bdc83-14f9-4e35-a07c-fa161d5c2112",
   "8d73d6da-8030-4788-8ff2-5be801084e24",
 ];
-const apply = process.env.VAY1138_APPLY_PROPERTY_ID === PROPERTY;
+const mode = process.env.VAY1138_MODE ?? "dry_run";
+const apply = mode !== "dry_run";
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const assert = (condition, code) => {
   if (!condition) throw new Error(code);
 };
 
-if (process.env.VAY1138_APPLY_PROPERTY_ID && !apply) throw new Error("apply_property_mismatch");
+assert(["dry_run", "rollback_capture", "commit_capture"].includes(mode), "mode_untrusted");
+assert(
+  apply
+    ? process.env.VAY1138_APPLY_PROPERTY_ID === PROPERTY
+    : !process.env.VAY1138_APPLY_PROPERTY_ID,
+  "apply_property_mismatch",
+);
 assert(process.env.TARGET_DATABASE_URL && process.env.VAYADA_DB_RDS_CA_BUNDLE, "connection_missing");
 const url = new URL(process.env.TARGET_DATABASE_URL);
 assert(
@@ -205,14 +212,22 @@ try {
       [PROPERTY, EVIDENCE],
     );
     assert(inserted.rows[0].count === EVIDENCE.length, "postflight_drift");
-    await client.query("COMMIT");
+    await client.query(mode === "commit_capture" ? "COMMIT" : "ROLLBACK");
+    if (mode === "rollback_capture") {
+      const persisted = await client.query(
+        `SELECT count(*)::int AS count FROM finance.ota_commission_evidence
+         WHERE property_id=$1::uuid AND booking_revenue_evidence_id=ANY($2::uuid[])`,
+        [PROPERTY, EVIDENCE],
+      );
+      assert(persisted.rows[0].count === 0, "rollback_persisted_rows");
+    }
   } else {
     await client.query("ROLLBACK");
   }
   console.log(
     JSON.stringify({
       status: "PASS",
-      mode: apply ? "apply" : "dry_run",
+      mode,
       propertyId: PROPERTY,
       exactEvidenceIds: EVIDENCE,
       expectedState: "missing_rule",
