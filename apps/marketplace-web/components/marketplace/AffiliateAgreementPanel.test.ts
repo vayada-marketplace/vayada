@@ -240,6 +240,9 @@ describe("AffiliateAgreementPanel", () => {
     const output = await render();
     expect(output()).toContain("Affiliate agreement active");
     expect(output()).toContain("independently of the hosted collaboration");
+    expect(view?.root.findByProps({ children: "View results & earnings" }).props.href).toBe(
+      "/earnings?propertyId=property-1",
+    );
     await act(async () => {
       await view?.root.findByProps({ children: "Pause affiliate agreement" }).props.onClick();
     });
