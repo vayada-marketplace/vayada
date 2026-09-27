@@ -296,6 +296,15 @@ async function validLines(
   for (const line of command.lines)
     groups.set(line.source.type, [...(groups.get(line.source.type) ?? []), line]);
   if ([...groups.keys()].some((type) => !SOURCE_TYPES.has(type))) return false;
+  if (
+    (groups.get("manual") ?? []).some(
+      (line) =>
+        line.kind !== "adjustment" ||
+        line.source.id !== command.commandId ||
+        line.source.revision !== 1,
+    )
+  )
+    return false;
   const bookingId = command.bookingId;
   const nights = groups.get("booking.nightly_revenue") ?? [];
   if (nights.length) {
@@ -382,6 +391,7 @@ async function validLines(
 }
 
 const SOURCE_TYPES = new Set([
+  "manual",
   "booking.nightly_revenue",
   "booking.addon_purchase",
   "finance.provider_fee",
