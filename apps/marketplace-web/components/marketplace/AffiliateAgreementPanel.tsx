@@ -215,6 +215,15 @@ function AgreementDetails({
 
       <Disclosure disclosure={agreement.terms.disclosure} />
 
+      {agreement.lifecycle && (
+        <a
+          href={`/earnings?propertyId=${encodeURIComponent(agreement.propertyId)}`}
+          className="inline-block text-sm font-semibold text-primary-700 underline"
+        >
+          View results & earnings
+        </a>
+      )}
+
       {!currentSideComplete && !closedBeforeActivation && (
         <button
           type="button"

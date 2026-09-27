@@ -14,7 +14,11 @@ import {
   resolveMarketplaceSetupGuard,
 } from "@/lib/utils/sharedSetupGuard";
 import { HotelIcon, ProfileIcon, CalendarIcon, MessageIcon } from "@/components/ui";
-import { ArrowRightOnRectangleIcon, ViewColumnsIcon } from "@heroicons/react/24/outline";
+import {
+  ArrowRightOnRectangleIcon,
+  ChartBarIcon,
+  ViewColumnsIcon,
+} from "@heroicons/react/24/outline";
 import { AppSwitcher } from "./AppSwitcher";
 import { HotelSelector } from "./HotelSelector";
 import type { UserType } from "@/lib/types";
@@ -127,6 +131,11 @@ export default function AuthenticatedNavigation() {
       href: ROUTES.CHAT,
       label: "Messages",
       icon: MessageIcon,
+    },
+    {
+      href: ROUTES.EARNINGS,
+      label: "Results & earnings",
+      icon: ChartBarIcon,
     },
     {
       href: ROUTES.PROFILE,

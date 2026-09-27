@@ -17,6 +17,7 @@ export const ROUTES = {
   HOTEL_BENEFITS: "/hotel-benefits",
   CALENDAR: "/calendar",
   CHAT: "/chat",
+  EARNINGS: "/earnings",
 
   // Auth routes
   LOGIN: "/login",
