@@ -1,10 +1,10 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { AuthenticatedNavigation } from "@/components/layout";
 import { useSidebar } from "@/components/layout/AuthenticatedNavigation";
-import { SELECTED_SHARED_PROPERTY_ID_KEY } from "@/lib/utils/sharedSetupGuard";
+import { resolveMarketplaceSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import {
   AFFILIATE_PERFORMANCE_PERIODS,
   AFFILIATE_PERFORMANCE_SOURCES,
@@ -25,18 +25,18 @@ export default function EarningsPage() {
   const [error, setError] = useState(false);
   const [retry, setRetry] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
+  const loadMoreController = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
+    loadMoreController.current?.abort();
     setLoading(true);
     setError(false);
     void (async () => {
       try {
         await authService.ensureSession(controller.signal);
-        const propertyId =
-          authService.getUserType() === "hotel"
-            ? localStorage.getItem(SELECTED_SHARED_PROPERTY_ID_KEY)?.trim()
-            : requestedPropertyId();
+        const propertyId = await performancePropertyId();
+        if (propertyId === null || controller.signal.aborted) return;
         const page = await getAffiliatePerformance(
           { ...filters, ...(propertyId && { propertyId }) },
           controller.signal,
@@ -62,22 +62,33 @@ export default function EarningsPage() {
 
   async function loadMore() {
     if (!result?.nextCursor) return;
+    const cursor = result.nextCursor;
+    const controller = new AbortController();
+    loadMoreController.current?.abort();
+    loadMoreController.current = controller;
     setLoadingMore(true);
     try {
-      const propertyId =
-        authService.getUserType() === "hotel"
-          ? localStorage.getItem(SELECTED_SHARED_PROPERTY_ID_KEY)?.trim()
-          : requestedPropertyId();
-      const page = await getAffiliatePerformance({
-        ...filters,
-        ...(propertyId && { propertyId }),
-        cursor: result.nextCursor,
-      });
-      setResult({ ...page, partnerships: [...result.partnerships, ...page.partnerships] });
+      const page = await getAffiliatePerformance(
+        {
+          ...filters,
+          ...(result.filters.propertyId && { propertyId: result.filters.propertyId }),
+          cursor,
+        },
+        controller.signal,
+      );
+      if (!controller.signal.aborted)
+        setResult((current) =>
+          current?.nextCursor === cursor
+            ? { ...page, partnerships: [...current.partnerships, ...page.partnerships] }
+            : current,
+        );
     } catch {
-      setError(true);
+      if (!controller.signal.aborted) setError(true);
     } finally {
-      setLoadingMore(false);
+      if (loadMoreController.current === controller) {
+        loadMoreController.current = null;
+        setLoadingMore(false);
+      }
     }
   }
 
@@ -193,9 +204,18 @@ function Performance({
           confirmed zero bookings; earnings may change after verification.
         </div>
       )}
-      <section aria-label="Affiliate totals" className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <p className="mt-5 text-xs text-gray-500">
+        Totals for partnerships shown{result.nextCursor ? "; load more to expand them." : "."}
+      </p>
+      <section
+        aria-label="Affiliate totals for partnerships shown"
+        className="mt-2 grid grid-cols-2 gap-3 lg:grid-cols-4"
+      >
         <Metric label="Clicks" value={String(totals.clicks)} />
-        <Metric label="Bookings" value={String(totals.bookings)} />
+        <Metric
+          label={stale ? "Recorded bookings" : "Bookings"}
+          value={stale ? `≥${totals.bookings}` : String(totals.bookings)}
+        />
         <Metric label="Awaiting verification" value={String(totals.pending)} />
         <Metric label="Calculated stays" value={String(totals.calculated)} />
       </section>
@@ -250,7 +270,10 @@ function Performance({
                 </p>
               </div>
               <p className="text-sm font-medium text-gray-700">
-                {item.clicks} clicks · {item.bookings} bookings
+                {item.clicks} clicks ·{" "}
+                {item.freshness === "current"
+                  ? `${item.bookings} bookings`
+                  : "bookings not confirmed"}
               </p>
             </div>
             <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-600">
@@ -288,12 +311,9 @@ function Performance({
 
 function StatusGuide() {
   const states = [
-    ["Estimated", "Attribution exists, but the commission is not verified yet."],
+    ["Calculated estimate", "Verified stay evidence produced a commission calculation."],
     ["Awaiting verification", "Booking or stay evidence is delayed, incomplete, or needs review."],
-    ["Eligible", "Confirmed only by payout records; a calculation alone is not eligible."],
-    ["Processing", "A payout has started. A date is uncertain until settlement."],
-    ["Paid", "A payout statement confirms settlement and retains the payment evidence."],
-    ["Adjusted", "A reversal or correction changed an earlier amount."],
+    ["Latest adjustment", "A reversal or correction changed the latest calculated amount."],
   ];
   return (
     <section className="mt-5 rounded-xl border bg-white p-4">
@@ -306,6 +326,11 @@ function StatusGuide() {
           </div>
         ))}
       </dl>
+      <div className="mt-4 rounded-lg bg-gray-50 p-3 text-sm text-gray-700">
+        <strong>Payout status is not available in this results view.</strong> Eligibility,
+        processing, paid confirmation, and payout dates require Finance payout records; this page
+        does not infer them from commission calculations.
+      </div>
     </section>
   );
 }
@@ -356,6 +381,13 @@ function label(value: string) {
 function requestedPropertyId() {
   return new URLSearchParams(window.location.search).get("propertyId")?.trim() || undefined;
 }
+async function performancePropertyId(): Promise<string | null | undefined> {
+  if (authService.getUserType() !== "hotel") return requestedPropertyId();
+  const decision = await resolveMarketplaceSetupGuard(
+    `${window.location.pathname}${window.location.search}`,
+  );
+  return decision.action === "enter_product" ? decision.propertyId : null;
+}
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(value));
 }
@@ -363,7 +395,7 @@ function formatMinor(value: bigint, currency: string, scale: number) {
   const sign = value < BigInt(0) ? "-" : "";
   const absolute = value < BigInt(0) ? -value : value;
   const digits = absolute.toString().padStart(scale + 1, "0");
-  return `${sign}${currency} ${scale ? `${digits.slice(0, -scale)}.${digits.slice(-scale)}` : digits}`;
+  return `${currency} ${sign}${scale ? `${digits.slice(0, -scale)}.${digits.slice(-scale)}` : digits}`;
 }
 function aggregateMoney(
   commissions: AffiliatePerformancePage["partnerships"][number]["commissions"],
