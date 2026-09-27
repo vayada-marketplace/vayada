@@ -187,6 +187,38 @@ describe.skipIf(!URL)("PostgreSQL Finance folio command repository", () => {
     ).rejects.toThrow("folio command failed contract validation");
   });
 
+  it("prepares a manual adjustment folio but rejects unbound manual sources", async () => {
+    const { bookingId: _bookingId, ...base } = command(FOLIO, "manual");
+    const manual: CreateFinanceFolioCommand = {
+      ...base,
+      paymentRefs: [],
+      lines: [
+        {
+          ...base.lines[0]!,
+          kind: "adjustment",
+          source: { type: "manual", id: FOLIO, revision: 1 },
+        },
+      ],
+    };
+    await expect(
+      repository.create({
+        ...manual,
+        lines: [{ ...manual.lines[0]!, source: { type: "manual", id: EVIDENCE, revision: 1 } }],
+      }),
+    ).resolves.toEqual({ status: "invalid_evidence" });
+    await expect(
+      repository.create({ ...manual, lines: [{ ...manual.lines[0]!, kind: "room" }] }),
+    ).resolves.toEqual({ status: "invalid_evidence" });
+    await expect(repository.create(manual)).resolves.toEqual({
+      status: "created",
+      folioId: FOLIO,
+      revision: 1,
+    });
+    await expect(
+      repository.ready({ ...transition(REVISION_2, "manual-ready", 1), folioId: FOLIO }),
+    ).resolves.toEqual({ status: "updated", folioId: FOLIO, revision: 2 });
+  });
+
   it("rejects empty ready state and rolls back a codec failure", async () => {
     const { bookingId: _bookingId, ...base } = command(EMPTY_FOLIO, "empty");
     await repository.create({ ...base, lines: [], paymentRefs: [] });
