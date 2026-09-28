@@ -15,8 +15,10 @@ export function AffiliatePayouts() {
   const [page, setPage] = useState<AffiliatePayoutPage | null>(null);
   const [detail, setDetail] = useState<AffiliatePayoutDetail | null>(null);
   const [country, setCountry] = useState("");
-  const stripeCommandId = useRef<string | null>(null);
+  const stripeCommand = useRef<{ country: string; id: string } | null>(null);
+  const detailController = useRef<AbortController | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [actionError, setActionError] = useState(false);
 
   async function load(signal?: AbortSignal) {
     setState("loading");
@@ -31,31 +33,42 @@ export function AffiliatePayouts() {
   useEffect(() => {
     const controller = new AbortController();
     void load(controller.signal);
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      detailController.current?.abort();
+    };
   }, []);
 
   async function open(payoutId: string, currency: string) {
+    detailController.current?.abort();
+    const controller = new AbortController();
+    detailController.current = controller;
+    setActionError(false);
     try {
-      setDetail((await getAffiliatePayout(payoutId, currency)).payout);
+      const response = await getAffiliatePayout(payoutId, currency, controller.signal);
+      if (!controller.signal.aborted) setDetail(response.payout);
     } catch {
-      setState("error");
+      if (!controller.signal.aborted) setActionError(true);
+    } finally {
+      if (detailController.current === controller) detailController.current = null;
     }
   }
 
   async function connectStripe() {
+    const normalizedCountry = country.trim().toUpperCase();
+    setActionError(false);
     try {
-      stripeCommandId.current ??= crypto.randomUUID();
-      const result = await startAffiliateStripeSetup(
-        country.trim().toUpperCase(),
-        stripeCommandId.current,
-      );
+      if (stripeCommand.current?.country !== normalizedCountry)
+        stripeCommand.current = { country: normalizedCountry, id: crypto.randomUUID() };
+      const result = await startAffiliateStripeSetup(normalizedCountry, stripeCommand.current.id);
       window.location.assign(result.onboardingUrl);
     } catch {
-      setState("error");
+      setActionError(true);
     }
   }
 
   async function download(payoutId: string, currency: string) {
+    setActionError(false);
     try {
       const blob = await downloadAffiliatePayoutStatement(payoutId, currency);
       const url = URL.createObjectURL(blob);
@@ -65,9 +78,13 @@ export function AffiliatePayouts() {
       link.click();
       URL.revokeObjectURL(url);
     } catch {
-      setState("error");
+      setActionError(true);
     }
   }
+
+  const payoutsReady = Boolean(
+    page?.payoutSettings.payoutsEnabled && page.payoutSettings.providerAccount.payoutsEnabled,
+  );
 
   return (
     <section className="mt-5 rounded-xl border bg-white p-4" aria-labelledby="payouts-heading">
@@ -96,6 +113,12 @@ export function AffiliatePayouts() {
           </button>
         </div>
       )}
+      {actionError && (
+        <div role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-900">
+          That payout action could not be completed. Your payout records are unchanged; try the
+          action again.
+        </div>
+      )}
       {state === "ready" && page && (
         <>
           <div className="mt-4 rounded-lg bg-gray-50 p-3 text-sm text-gray-700">
@@ -105,9 +128,9 @@ export function AffiliatePayouts() {
             </p>
             <p>
               <strong>Readiness:</strong>{" "}
-              {page.payoutSettings.providerAccount.payoutsEnabled ? "Ready" : "Setup required"}
+              {payoutsReady ? "Ready" : "Setup required"}
             </p>
-            {!page.payoutSettings.providerAccount.payoutsEnabled && (
+            {!payoutsReady && page.payoutSettings.payoutProvider === "stripe" && (
               <div className="mt-3 flex flex-wrap items-end gap-2">
                 <label className="text-xs font-semibold text-gray-600">
                   Country
@@ -183,7 +206,10 @@ export function AffiliatePayouts() {
             </div>
             <button
               type="button"
-              onClick={() => setDetail(null)}
+              onClick={() => {
+                detailController.current?.abort();
+                setDetail(null);
+              }}
               aria-label="Close payout detail"
               className="text-sm underline"
             >
