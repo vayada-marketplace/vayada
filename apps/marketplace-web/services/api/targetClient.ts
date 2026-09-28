@@ -15,6 +15,11 @@ export const targetApiClient = {
     return client.get<T>(endpoint, authenticatedOptions(options));
   },
 
+  async getBlob(endpoint: string, options?: RequestInit): Promise<Blob> {
+    await requireAuthKitSession(options?.signal ?? undefined);
+    return client.request<Blob>(endpoint, authenticatedOptions(options), "blob");
+  },
+
   async put<T>(endpoint: string, data?: unknown, options?: RequestInit): Promise<T> {
     await requireAuthKitSession(options?.signal ?? undefined);
     return client.put<T>(endpoint, data, authenticatedOptions(options));
