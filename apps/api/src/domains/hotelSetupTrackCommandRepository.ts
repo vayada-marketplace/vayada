@@ -115,7 +115,6 @@ export function createPgHotelSetupTrackCommandRepository(config: {
       try {
         await client.query("BEGIN");
         if (command.adminActivation) {
-          await lockHotelSetupOrganization(client, command.organizationId);
           await requireAuthorizedPlatformActor(
             client,
             {
@@ -279,9 +278,10 @@ export async function lockHotelSetupOrganization(
   organizationId: string,
   targetAccountUserId: string | null = null,
 ): Promise<void> {
-  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
-    `hotel-setup-tracks:${organizationId}`,
-  ]);
+  await client.query(
+    "SELECT pg_advisory_xact_lock(hashtextextended('hotel-setup-tracks:' || $1::uuid::text, 0))",
+    [organizationId],
+  );
   const result = await client.query(
     `SELECT id
      FROM identity.organizations

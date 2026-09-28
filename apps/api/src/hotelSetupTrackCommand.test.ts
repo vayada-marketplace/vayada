@@ -43,8 +43,8 @@ describe("stored hotel setup track command results", () => {
     await lockHotelSetupOrganization(client, organizationId);
 
     expect(queries[0]).toEqual({
-      text: "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-      values: [`hotel-setup-tracks:${organizationId}`],
+      text: "SELECT pg_advisory_xact_lock(hashtextextended('hotel-setup-tracks:' || $1::uuid::text, 0))",
+      values: [organizationId],
     });
     expect(queries[1]?.text).not.toContain("FOR UPDATE");
   });
