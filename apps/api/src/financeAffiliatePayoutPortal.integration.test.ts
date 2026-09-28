@@ -15,7 +15,8 @@ describe.skipIf(!url)("creator payout reconciliation PostgreSQL boundary", () =>
   const client = new pg.Client({ connectionString: url ?? "postgresql://disabled" });
 
   beforeAll(async () => {
-    if (!/localhost|127\.0\.0\.1|postgres-test|postgres_pg/.test(url!))
+    const hostname = new URL(url!).hostname;
+    if (!["localhost", "127.0.0.1", "postgres-test", "postgres_pg"].includes(hostname))
       throw new Error("Refusing to use a non-test PostgreSQL host");
     await client.connect();
   });

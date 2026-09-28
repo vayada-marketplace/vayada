@@ -140,7 +140,7 @@ const cancellationPolicy: CancellationPolicy = {
 
 const affiliatePayoutSettings: FinanceAffiliatePayoutSettingsReadModel = {
   affiliateId,
-  marketplaceOrganizationId: "a6000000-0000-0000-0000-000000000686",
+  marketplaceOrganizationId: affiliateOrganizationId,
   payoutsEnabled: true,
   payoutProvider: "stripe",
   payoutCurrency: "EUR",
@@ -199,7 +199,7 @@ const affiliatePayoutItems: FinancePayout[] = [
     payoutId: "affiliate_payout_2026_06",
     ownerScope: "organization",
     propertyId: null,
-    organizationId: "a6000000-0000-0000-0000-000000000686",
+    organizationId: affiliateOrganizationId,
     relatedPropertyId: propertyId,
     guestBookingId: payoutGuestBookingId,
     paymentId: payoutPaymentId,
@@ -1382,6 +1382,14 @@ describe("finance route contracts", () => {
       expect(response.statusCode, caseId).toBe(contractCase!.expected.status);
       if (contractCase!.expected.itemCount !== undefined) {
         expect(response.body.payouts, caseId).toHaveLength(contractCase!.expected.itemCount);
+      }
+      if (caseId === "affiliate-payout-settings-read") {
+        expect(response.body.marketplaceOrganizationId).toBe(affiliateOrganizationId);
+      }
+      if (caseId === "affiliate-payout-list-read") {
+        expect(response.body.payouts).toEqual([
+          expect.objectContaining({ organizationId: affiliateOrganizationId }),
+        ]);
       }
       assertIncludes(response.body, contractCase!.expected.mustInclude ?? [], caseId);
       assertExcludes(response.body, contractCase!.expected.mustExclude ?? [], caseId);
