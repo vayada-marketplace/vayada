@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AdoptionQueryClient } from "./channexAdoptionTargetRows.js";
+import { SINGLE_HUMAN_DUAL_AUTHORITY_DECISION } from "./channexAdoptionConsumer.js";
 import type { verifyLegacyOwnerApprovals } from "./legacyOwnerApprovalRegistry.js";
 import { verifyLegacyHistoricalBindingEnvelope } from "./legacyHistoricalBindingEnvelope.js";
 
@@ -100,11 +101,16 @@ export async function lockAndVerifyLegacyHistoricalBindingApprovals(
         throw new Error();
       principals.push(actor.principal);
     }
-    if (
-      principals[0] === principals[1] &&
-      (!dual?.decisionId.trim() || result.rows.some((row) => row.actorId !== dual.actorUserId))
-    )
-      throw new Error();
+    if (principals[0] === principals[1]) {
+      const actor = result.rows[0]!.actorId;
+      if (
+        dual?.decisionId !== SINGLE_HUMAN_DUAL_AUTHORITY_DECISION ||
+        dual.actorUserId !== actor ||
+        principals.some((principal) => principal !== dual.principal) ||
+        result.rows.some((row) => row.actorId !== actor)
+      )
+        throw new Error();
+    }
     verifyLegacyHistoricalBindingEnvelope({ ...captured, now: clock() });
     await client.query("RELEASE SAVEPOINT vay2017_historical_approvals");
     return { outcome: "approvals_locked_requires_eligibility", executable: false };

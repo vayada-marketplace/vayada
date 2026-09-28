@@ -50,7 +50,7 @@ describe("source proof transaction boundary", () => {
       });
       await expect(
         read({ connect: async () => ({ query, release }) } as never, request),
-      ).rejects.toThrow();
+      ).rejects.toThrow("visibility incomplete");
       expect(query).toHaveBeenNthCalledWith(1, "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
       expect(query).toHaveBeenLastCalledWith("ROLLBACK");
       expect(release).toHaveBeenCalledWith(cleanupFails);
