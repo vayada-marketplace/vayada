@@ -68,13 +68,15 @@ export function publicationCommandFixture() {
     pool = new pg.Pool({ connectionString: isolatedUrl.toString(), max: 3 });
   });
   beforeEach(async () => {
-    await pool.query(`DROP SCHEMA IF EXISTS marketplace,platform,identity,hotel_catalog,finance,booking CASCADE;
-      CREATE SCHEMA booking; CREATE SCHEMA finance; CREATE SCHEMA marketplace; CREATE SCHEMA platform; CREATE SCHEMA identity; CREATE SCHEMA hotel_catalog;
+    await pool.query(`DROP SCHEMA IF EXISTS marketplace,platform,identity,hotel_catalog,finance,booking,pms CASCADE;
+      CREATE SCHEMA booking; CREATE SCHEMA finance; CREATE SCHEMA marketplace; CREATE SCHEMA platform; CREATE SCHEMA identity; CREATE SCHEMA hotel_catalog; CREATE SCHEMA pms;
       CREATE TABLE identity.users(id UUID PRIMARY KEY);
       CREATE TABLE identity.organizations(id UUID PRIMARY KEY);
       CREATE TABLE hotel_catalog.properties(id UUID PRIMARY KEY, profile_status TEXT DEFAULT 'active');
       CREATE TABLE marketplace.marketplace_offers(id UUID PRIMARY KEY, property_id UUID, organization_id UUID,
-        offer_status TEXT DEFAULT 'verified', UNIQUE(id,property_id,organization_id));`);
+        offer_status TEXT DEFAULT 'verified', UNIQUE(id,property_id,organization_id));
+      CREATE TABLE pms.property_pricing_settings(property_id UUID PRIMARY KEY REFERENCES hotel_catalog.properties(id),
+        currency CHAR(3) NOT NULL, pricing_currency_revision BIGINT NOT NULL);`);
     const platform = await migration("0010_platform_jobs_events_audit.sql");
     await pool.query(
       platform.slice(
@@ -98,6 +100,7 @@ export function publicationCommandFixture() {
     await pool.query("INSERT INTO identity.users VALUES ($1);", [id(1)]);
     await pool.query("INSERT INTO identity.organizations VALUES ($1)", [id(4)]);
     await pool.query("INSERT INTO hotel_catalog.properties VALUES ($1),($2)", [id(3), id(6)]);
+    await pool.query("INSERT INTO pms.property_pricing_settings VALUES ($1,'EUR',1)", [id(3)]);
     await pool.query(`CREATE TABLE identity.organization_resource_links(id UUID PRIMARY KEY, organization_id UUID, resource_id TEXT,
       product TEXT, resource_type TEXT, status TEXT, relationship TEXT);
       INSERT INTO identity.organization_resource_links VALUES ('${id(90)}','${id(4)}','${id(3)}','marketplace','hotel_profile','active','owner'),
