@@ -18,12 +18,14 @@ describe("affiliate payout client", () => {
   it("uses server-derived scope and currency-bound detail and statement paths", async () => {
     vi.mocked(targetApiClient.get).mockResolvedValue({});
     vi.mocked(targetApiClient.getBlob).mockResolvedValue(new Blob());
-    await getAffiliatePayouts();
+    await getAffiliatePayouts({ limit: 25, offset: 50 });
     await getAffiliatePayout("payout/id", "EUR");
     await downloadAffiliatePayoutStatement("payout/id", "EUR");
-    expect(targetApiClient.get).toHaveBeenNthCalledWith(1, "/api/marketplace/affiliate-payouts", {
-      signal: undefined,
-    });
+    expect(targetApiClient.get).toHaveBeenNthCalledWith(
+      1,
+      "/api/marketplace/affiliate-payouts?limit=25&offset=50",
+      { signal: undefined },
+    );
     expect(targetApiClient.get).toHaveBeenNthCalledWith(
       2,
       "/api/marketplace/affiliate-payouts/payout%2Fid?currency=EUR",

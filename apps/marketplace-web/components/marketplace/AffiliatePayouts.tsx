@@ -11,6 +11,8 @@ import {
   type AffiliatePayoutPage,
 } from "@/services/api/affiliatePayouts";
 
+const PAGE_SIZE = 25;
+
 export function AffiliatePayouts() {
   const [page, setPage] = useState<AffiliatePayoutPage | null>(null);
   const [detail, setDetail] = useState<AffiliatePayoutDetail | null>(null);
@@ -19,11 +21,12 @@ export function AffiliatePayouts() {
   const detailController = useRef<AbortController | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [actionError, setActionError] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   async function load(signal?: AbortSignal) {
     setState("loading");
     try {
-      setPage(await getAffiliatePayouts(signal));
+      setPage(await getAffiliatePayouts({ limit: PAGE_SIZE, offset: 0 }, signal));
       setState("ready");
     } catch {
       if (!signal?.aborted) setState("error");
@@ -80,6 +83,25 @@ export function AffiliatePayouts() {
       URL.revokeObjectURL(url);
     } catch {
       setActionError(true);
+    }
+  }
+
+  async function loadMore() {
+    if (!page || page.payouts.length >= page.total) return;
+    const offset = page.payouts.length;
+    setLoadingMore(true);
+    setActionError(false);
+    try {
+      const next = await getAffiliatePayouts({ limit: PAGE_SIZE, offset });
+      setPage((current) =>
+        current?.payouts.length === offset
+          ? { ...next, payouts: [...current.payouts, ...next.payouts] }
+          : current,
+      );
+    } catch {
+      setActionError(true);
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -197,6 +219,16 @@ export function AffiliatePayouts() {
             </ul>
           ) : (
             <p className="mt-4 text-sm text-gray-600">No Finance payout records yet.</p>
+          )}
+          {page.payouts.length < page.total && (
+            <button
+              type="button"
+              disabled={loadingMore}
+              onClick={() => void loadMore()}
+              className="mt-4 rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold disabled:opacity-50"
+            >
+              {loadingMore ? "Loading…" : "Load more payouts"}
+            </button>
           )}
         </>
       )}

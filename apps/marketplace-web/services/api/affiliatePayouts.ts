@@ -39,6 +39,8 @@ export type AffiliatePayoutPage = {
   };
   payouts: AffiliatePayout[];
   total: number;
+  limit: number;
+  offset: number;
 };
 
 export type AffiliatePayoutDetail = AffiliatePayout & {
@@ -58,8 +60,14 @@ export type AffiliatePayoutDetail = AffiliatePayout & {
   }>;
 };
 
-export const getAffiliatePayouts = (signal?: AbortSignal) =>
-  targetApiClient.get<AffiliatePayoutPage>("/api/marketplace/affiliate-payouts", { signal });
+export const getAffiliatePayouts = (
+  query: { limit: number; offset: number },
+  signal?: AbortSignal,
+) =>
+  targetApiClient.get<AffiliatePayoutPage>(
+    `/api/marketplace/affiliate-payouts?limit=${query.limit}&offset=${query.offset}`,
+    { signal },
+  );
 
 export const getAffiliatePayout = (payoutId: string, currency: string, signal?: AbortSignal) =>
   targetApiClient.get<{ payout: AffiliatePayoutDetail }>(
