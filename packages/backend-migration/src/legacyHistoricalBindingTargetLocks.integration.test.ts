@@ -30,7 +30,7 @@ describe.skipIf(!url)("historical prepare target locks on disposable PostgreSQL"
     if (
       !["postgres:", "postgresql:"].includes(parsed.protocol) ||
       parsed.hostname !== "127.0.0.1" ||
-      !["56636", "56637"].includes(parsed.port) ||
+      !["5432", "56636", "56637"].includes(parsed.port) ||
       parsed.pathname !== "/vay2017_target_lock_fixture" ||
       parsed.search ||
       parsed.hash
