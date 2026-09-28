@@ -8,6 +8,7 @@ import type {
 } from "@vayada/domain-hotels";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
+import { lockHotelSetupOrganization } from "../domains/hotelSetupTrackCommandRepository.js";
 import type {
   AdaptivePropertySetupFacts,
   AdaptiveSetupTaskFact,
@@ -634,25 +635,11 @@ async function writePropertyProfile(
     );
     try {
       await client.query("BEGIN");
-      const organization = await client.query(
-        `SELECT id
-         FROM identity.organizations
-         WHERE id = $1::uuid
-           AND kind = 'hotel_group'
-           AND status = 'active'
-           AND ($2::uuid IS NULL OR EXISTS (
-             SELECT 1 FROM identity.organization_memberships membership
-             JOIN identity.users account ON account.id = membership.user_id
-             WHERE membership.organization_id = identity.organizations.id
-               AND membership.user_id = $2::uuid
-               AND membership.status = 'active' AND account.status = 'active'
-           ))
-         FOR UPDATE`,
-        [input.organizationId, input.targetAccountUserId ?? null],
+      await lockHotelSetupOrganization(
+        client,
+        input.organizationId,
+        input.targetAccountUserId ?? null,
       );
-      if (organization.rows.length !== 1) {
-        throw new Error("Active hotel-group organization was not found");
-      }
       if (input.provisioningReference) {
         await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
           input.provisioningReference,
