@@ -72,3 +72,25 @@ be independently verified; combining them does not make two reads atomic. A
 future executor needs its own locked combined verification, not cached output.
 Synthetic tests use parent-migrated disposable PG16/17 databases; no production
 read, provider call, claim transition or clean-adoption boundary change is added.
+
+## Immutable connection source proof
+
+`readLegacyHistoricalBindingSourceProof` owns a separate read-only repeatable-read
+snapshot over source ledgers/staging only. It binds run, environment, inventory
+revision, recomputed ledger hash and hashed PMS snapshot tag to independently
+authenticated expected evidence. It does not verify a signature itself; an
+untrusted caller choosing its own expected hashes gains no authority.
+
+It uses the real default PMS snapshot reader and its identity/inventory validator:
+four-source/table ledger completeness, source aggregates, tag/ordinal continuity
+and raw PostgreSQL JSON row/table checksums are recomputed. Source table is fixed
+to `pms.public.channex_connections`. Exact connection UUID, ordinal, checksum,
+original hotel/external pair and a real boolean activity value must match.
+Hotel OR external-ID enumeration rejects missing or competing connection rows.
+False activity is retained for the preflight's explicit inactive hold, not
+converted to true or treated as automatic transition eligibility.
+
+Only frozen identifiers, hashes and boolean source state are returned. Source
+proof neither verifies hotel-owner identity nor consults mutable canonical state.
+Source/target readers still take separate snapshots; a locked combined verifier,
+fresh owner eligibility and distinct signed transition authority remain unwired.
