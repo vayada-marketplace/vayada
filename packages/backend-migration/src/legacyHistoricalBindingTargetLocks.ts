@@ -63,7 +63,8 @@ export async function lockLegacyHistoricalBindingTarget(
     );
     const access = await client.query<{ complete: boolean }>(
       `SELECT count(*)=3
-      AND bool_and(NOT pg_catalog.row_security_active(oid) AND has_table_privilege(oid,'SELECT')) AS complete
+      AND bool_and(NOT relforcerowsecurity AND NOT pg_catalog.row_security_active(oid)
+        AND has_table_privilege(oid,'SELECT')) AS complete
       FROM pg_class WHERE oid=ANY($1::regclass[])`,
       [tables],
     );

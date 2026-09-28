@@ -18,13 +18,11 @@ Stop before activation if any dependency is unmerged, its revision is not
 serving, its migration has not applied, or an acceptance check below is
 blocked. The approved Feature Hub path and explicit production authority are
 required for activation; do not insert entitlements directly to bypass it.
-As of this snapshot, that path does not exist: the Feature Hub registry has no
-modules, the PMS activation API advertises no supported modules, and its
-mutation route returns 410. Financials cannot be activated or rolled back
-through Feature Hub until a reviewed control and its authorization are shipped
-and verified on the serving revision.
+The Feature Hub control now exists for approved properties. Verify its current
+serving revision, owner authorization, entitlement write, audit event, and
+rollback behavior for each activation candidate.
 
-The proposed control in PR #2541 is property-scoped and fails closed: the API
+The control introduced in PR #2541 is property-scoped and fails closed: the API
 setting `PMS_FINANCIALS_ACTIVATION_PROPERTY_IDS` defaults to an empty list. After the
 control is reviewed and serving, add only the explicitly approved property ID
 to that setting and verify the running API picked it up. The allowlist permits
@@ -42,7 +40,9 @@ for both entitlement and audit tables before adding any live property ID.
 1. Confirm the exact running API and PMS image digests and map them to source
    commits. A successful image build or merge alone does not prove deployment.
 2. Confirm the target migration chain applied and the property has a currency
-   and PMS pricing settings. Keep `module:financials` inactive through rehearsal.
+   and PMS pricing settings. Keep `module:financials` inactive through a new
+   property's rehearsal. For an already approved active test property, use
+   `--expect-active`; do not toggle it merely to satisfy the inactive audit.
 3. Confirm `pms.finance.read` and `pms.finance.manage` grants and the selected
    property's `owner` or `finance_manager` link. Review the effect of granting
    `pms.finance.read` to `finance_manager` on older Finance routes before its
@@ -171,3 +171,43 @@ five-tab real-account smoke before acceptance. No VAY-1138 live backfill or
 Financials activation was performed for this snapshot.
 Replace it with a new timestamped record after a relevant change; do not reuse
 these image SHAs as proof of a later deployment.
+
+## Evidence snapshot — 2026-09-28 12:06 UTC
+
+The approved synthetic property `65f6b2fc-c783-4963-9d6b-a85f82319769`
+remains active from its earlier VAY-1128 smoke. New properties remain inactive
+by default. The serving API `vayada-next-api:1168` is source
+`a3adca84e77a7c43fe4474d28c216c1c94677309` at runtime digest
+`sha256:2ff7ec1d356b4eddb713ef8fce2925c9130981768cb6f0c3f7bc3b5a56803f7e`.
+The serving PMS frontend `vayada-next-pms-frontend:627` is source
+`ada6119ebb553d8b1cdb28290192cc161fe0745b` at runtime digest
+`sha256:bebbbb442ee348c0d500e232c0625606cc4056ba0c951da81210a914a9d9a338`.
+Both ECS services have one running task and one completed primary deployment.
+
+The bounded five-tab test passed: Dashboard, Revenue, Expenses, Profit & Loss,
+and a synthetic operational Folio prepared as draft then ready. All five CSV
+paths returned files; the ready Folios CSV contained one data row. The Folio
+amount was EUR 0.01 with no booking or payment reference, and it was not
+labeled an official invoice. The narrow Folio command grant and both live
+runtime preflights passed. A GET-only live check allowed the reusable Owner and
+denied Front Desk and anonymous users on direct Financials routes. Manager and
+Housekeeping behavior, sidebar hiding, and entitlement rollback have code and
+integration test evidence, without separate live logins or a live off/on
+rehearsal. [App PR #2662 CI](https://github.com/vayada-marketplace/vayada/actions/runs/36313105396)
+passed required checks and PostgreSQL 16/17 integration. The test property
+stays active.
+
+The read-only audit rerun with `--expect-active` confirmed the module is active,
+all default categories exist, and unresolved revenue and pending commission
+expense counts are zero. Its strict result is still `BLOCKED` with seven
+findings on five old records: two bookings each count once for missing assignment
+and once for missing nightly revenue, and three OTA snapshots have no historical
+commission rule. Flamur accepted these as visible, unchanged legacy exceptions;
+no rate or amount was inferred. Do not report the strict audit as passing.
+
+Sanitized request results, CSV hashes, exact Folio ID, active audit output,
+limitations, and scripts are in
+`/Users/flamurmaliqi/.local/share/vayada-testing/evidence/vay1138-final-five-tab-20260927/RESULTS.md`.
+No real reservation, payment, provider write, or official invoice was created.
+VAY-1138 remains In Progress until Flamur accepts this evidence and the stated
+legacy and live-role limitations.

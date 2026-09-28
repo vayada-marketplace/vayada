@@ -10,9 +10,13 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Internal Finance read. Callers authorize the property; availability covers only commission policy. */
 export async function resolvePgFinanceAffiliatePercentagePolicy(
   database: Pick<pg.Pool, "query">,
-  request: { propertyId: string; policyVersionId: string },
+  request: { propertyId: string; policyVersionId: string; organizationId?: string },
 ): Promise<FinanceAffiliatePolicyResolution> {
-  if (!uuid.test(request.propertyId) || !uuid.test(request.policyVersionId))
+  if (
+    !uuid.test(request.propertyId) ||
+    !uuid.test(request.policyVersionId) ||
+    (request.organizationId !== undefined && !uuid.test(request.organizationId))
+  )
     return { status: "unavailable", reason: "not_found" };
   const scope = {
     propertyId: request.propertyId.toLowerCase(),
@@ -26,8 +30,10 @@ export async function resolvePgFinanceAffiliatePercentagePolicy(
      LEFT JOIN finance.affiliate_percentage_policy_approvals approval
        ON approval.policy_version_id=policy.id AND approval.property_id=policy.property_id
        AND approval.approved_by_organization_id=policy.created_by_organization_id
-     WHERE policy.id=$1 AND policy.property_id=$2`,
-    [scope.policyVersionId, scope.propertyId],
+     WHERE policy.id=$1 AND policy.property_id=$2
+       AND ($3::uuid IS NULL OR (policy.created_by_organization_id=$3
+         AND approval.approved_by_organization_id=$3))`,
+    [scope.policyVersionId, scope.propertyId, request.organizationId?.toLowerCase() ?? null],
   );
   const row = result.rows[0];
   if (!row) return resolveFinanceAffiliatePercentagePolicy(null, scope);
