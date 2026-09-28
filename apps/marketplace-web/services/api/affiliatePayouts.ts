@@ -3,7 +3,13 @@ import { targetApiClient } from "./targetClient";
 export type AffiliatePayout = {
   payoutId: string;
   payoutStatus:
-    "pending" | "scheduled" | "processing" | "paid" | "failed" | "canceled" | "reversed";
+    | "pending"
+    | "scheduled"
+    | "processing"
+    | "paid"
+    | "failed"
+    | "canceled"
+    | "reversed";
   amount: string;
   feeAmount: string;
   netAmount: string;

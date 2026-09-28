@@ -95,8 +95,7 @@ export function AffiliatePayouts() {
       const next = await getAffiliatePayouts({ limit: PAGE_SIZE, offset });
       const existingIds = new Set(page.payouts.map((payout) => payout.payoutId));
       const pageChanged =
-        next.total !== page.total ||
-        next.payouts.some((payout) => existingIds.has(payout.payoutId));
+        next.total !== page.total || next.payouts.some((payout) => existingIds.has(payout.payoutId));
       if (pageChanged) {
         const fresh = await getAffiliatePayouts({ limit: PAGE_SIZE, offset: 0 });
         setPage((current) => (current?.payouts.length === offset ? fresh : current));
@@ -169,28 +168,28 @@ export function AffiliatePayouts() {
             {page.payoutSettings.payoutsEnabled &&
               !page.payoutSettings.providerAccount.payoutsEnabled &&
               page.payoutSettings.payoutProvider === "stripe" && (
-                <div className="mt-3 flex flex-wrap items-end gap-2">
-                  <label className="text-xs font-semibold text-gray-600">
-                    Country
-                    <input
-                      aria-label="Payout country"
-                      value={country}
-                      maxLength={2}
-                      placeholder="DE"
-                      onChange={(event) => setCountry(event.target.value)}
-                      className="ml-2 w-16 rounded border px-2 py-1 uppercase"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    disabled={!/^[A-Za-z]{2}$/.test(country)}
-                    onClick={() => void connectStripe()}
-                    className="rounded bg-primary-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
-                  >
-                    Connect Stripe
-                  </button>
-                </div>
-              )}
+              <div className="mt-3 flex flex-wrap items-end gap-2">
+                <label className="text-xs font-semibold text-gray-600">
+                  Country
+                  <input
+                    aria-label="Payout country"
+                    value={country}
+                    maxLength={2}
+                    placeholder="DE"
+                    onChange={(event) => setCountry(event.target.value)}
+                    className="ml-2 w-16 rounded border px-2 py-1 uppercase"
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={!/^[A-Za-z]{2}$/.test(country)}
+                  onClick={() => void connectStripe()}
+                  className="rounded bg-primary-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                >
+                  Connect Stripe
+                </button>
+              </div>
+            )}
           </div>
           {page.payouts.length ? (
             <ul className="mt-4 divide-y">
