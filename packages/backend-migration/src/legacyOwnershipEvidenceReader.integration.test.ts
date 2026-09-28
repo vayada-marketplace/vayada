@@ -222,7 +222,11 @@ describe.skipIf(!url)("ownership reader on disposable local PostgreSQL", () => {
     ];
     await client.query(`CREATE ROLE ${role};
       GRANT USAGE ON SCHEMA identity,hotel_catalog TO ${role};
-      GRANT SELECT ON ${tables.join(",")} TO ${role};
+      GRANT SELECT,UPDATE ON ${tables.join(",")} TO ${role}`);
+    await beginBounded();
+    await client.query(`SET LOCAL ROLE ${role}; LOCK TABLE identity.users IN SHARE MODE NOWAIT`);
+    await client.query("ROLLBACK");
+    await client.query(`
       ALTER TABLE identity.users ENABLE ROW LEVEL SECURITY;
       CREATE POLICY fixture_hidden ON identity.users TO ${role} USING (false)`);
     await beginBounded();
