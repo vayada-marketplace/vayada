@@ -122,13 +122,13 @@ describe.skipIf(!url)("signed historical registry and retained row locks", () =>
   const revocations = "platform.legacy_owner_approval_revocations";
   const begin = (db = client) =>
     db.query("BEGIN; SET LOCAL lock_timeout='150ms'; SET LOCAL statement_timeout='3s'");
-  const seed = async (change: Record<string, unknown> = {}) => {
+  const seed = async (change: Record<string, unknown> = {}, offset = 0) => {
     for (const [n, authority] of [
       [31, "migration_owner"],
       [32, "security_owner"],
     ] as const) {
       const row = {
-        approval_record_id: id(n),
+        approval_record_id: id(n + offset),
         command_id: envelope.commandId,
         contract_version: envelope.contractVersion,
         environment: "local",
@@ -158,7 +158,7 @@ describe.skipIf(!url)("signed historical registry and retained row locks", () =>
     if (
       !["postgres:", "postgresql:"].includes(parsed.protocol) ||
       parsed.hostname !== "127.0.0.1" ||
-      !["56636", "56637"].includes(parsed.port) ||
+      !["5432", "56636", "56637"].includes(parsed.port) ||
       parsed.pathname !== "/vay2017_binding_approval_fixture" ||
       parsed.search ||
       parsed.hash
@@ -205,6 +205,17 @@ describe.skipIf(!url)("signed historical registry and retained row locks", () =>
     await revoke();
     await expect(verify(client, input, policy(), clock)).rejects.toThrow("APPROVALS_INVALID");
   });
+  it("pins catalog resolution despite a shadowed session search path", async () => {
+    await client.query(`CREATE FUNCTION public.current_setting(text) RETURNS text
+      LANGUAGE sql AS $$ SELECT CASE WHEN $1='transaction_isolation' THEN 'read committed' ELSE '1s' END $$;
+      SET LOCAL search_path=public,pg_catalog;
+      SET LOCAL lock_timeout='0'`);
+    expect(
+      (await client.query("SELECT current_setting('lock_timeout') AS value")).rows[0]?.value,
+    ).toBe("1s");
+    await expect(verify(client, input, policy(), clock)).rejects.toThrow("APPROVALS_INVALID");
+    expect((await client.query("SHOW search_path")).rows[0]?.search_path).toBe("pg_catalog");
+  });
   it.each(["missing", "executor", "signer", "authority", "dual"])(
     "rejects invalid principal policy: %s",
     async (kind) => {
@@ -215,6 +226,50 @@ describe.skipIf(!url)("signed historical registry and retained row locks", () =>
       if (kind === "authority") p.actors.delete(id(2));
       if (kind === "dual") p.actors.get(id(2))!.principal = "human:1";
       await expect(verify(client, input, p, clock)).rejects.toThrow("APPROVALS_INVALID");
+    },
+  );
+  it.each(["valid", "wrong-decision", "wrong-principal"])(
+    "pins authorized single-human policy: %s",
+    async (kind) => {
+      const command = {
+        ...envelope,
+        commandId: id(50),
+        migrationApprovalRecordId: id(51),
+        securityApprovalRecordId: id(52),
+      };
+      const payload = canonicalizeJson(command);
+      await seed(
+        {
+          command_id: command.commandId,
+          actor_user_id: id(1),
+          envelope_sha256: hashLegacyHistoricalBindingEnvelope(payload),
+        },
+        20,
+      );
+      const signed = {
+        ...input,
+        canonicalPayload: payload,
+        detachedSignature: sign(
+          null,
+          Buffer.from(`vayada:legacy-historical-binding-transition:v1\0envelope\0${payload}`),
+          keys.privateKey,
+        ).toString("base64url"),
+      };
+      const p = policy();
+      p.actors.delete(id(2));
+      if (kind === "wrong-decision")
+        p.singleHumanDualAuthority = {
+          ...p.singleHumanDualAuthority,
+          decisionId: "wrong" as never,
+        };
+      if (kind === "wrong-principal")
+        p.singleHumanDualAuthority = { ...p.singleHumanDualAuthority, principal: "human:other" };
+      if (kind === "valid")
+        expect(await verify(client, signed, p, clock)).toEqual({
+          outcome: "approvals_locked_requires_eligibility",
+          executable: false,
+        });
+      else await expect(verify(client, signed, p, clock)).rejects.toThrow("APPROVALS_INVALID");
     },
   );
   it("rejects invalid signature and changed evidence", async () => {
@@ -230,6 +285,63 @@ describe.skipIf(!url)("signed historical registry and retained row locks", () =>
       ),
     ).rejects.toThrow();
   });
+  it.each([
+    { envelope_sha256: "b".repeat(64) },
+    { contract_version: "legacy-pms-owner-evidence.v1" },
+    { environment: "staging" },
+  ])("rejects mismatched stored authority %j", async (change) => {
+    const command = {
+      ...envelope,
+      commandId: id(40),
+      migrationApprovalRecordId: id(41),
+      securityApprovalRecordId: id(42),
+    };
+    const payload = canonicalizeJson(command);
+    await seed(
+      {
+        command_id: command.commandId,
+        envelope_sha256: hashLegacyHistoricalBindingEnvelope(payload),
+        ...change,
+      },
+      10,
+    );
+    const signed = {
+      ...input,
+      canonicalPayload: payload,
+      detachedSignature: sign(
+        null,
+        Buffer.from(`vayada:legacy-historical-binding-transition:v1\0envelope\0${payload}`),
+        keys.privateKey,
+      ).toString("base64url"),
+    };
+    await expect(verify(client, signed, policy(), clock)).rejects.toThrow("APPROVALS_INVALID");
+  });
+  it.each(["none", "records", "revocations"])(
+    "restricted role RLS control: %s",
+    async (restriction) => {
+      await client.query(`CREATE ROLE historical_approval_fixture_role;
+      GRANT USAGE ON SCHEMA platform TO historical_approval_fixture_role;
+      GRANT SELECT, UPDATE ON ${records} TO historical_approval_fixture_role;
+      GRANT SELECT ON ${revocations} TO historical_approval_fixture_role`);
+      if (restriction !== "none") {
+        await revoke();
+        const table = restriction === "records" ? records : revocations;
+        await client.query(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY;
+        CREATE POLICY fixture_hidden ON ${table} TO historical_approval_fixture_role USING (false)`);
+      }
+      await client.query("SET LOCAL ROLE historical_approval_fixture_role");
+      if (restriction === "none") {
+        expect(await verify(client, input, policy(), clock)).toEqual({
+          outcome: "approvals_locked_requires_eligibility",
+          executable: false,
+        });
+      } else {
+        const table = restriction === "records" ? records : revocations;
+        expect((await client.query(`SELECT 1 FROM ${table}`)).rowCount).toBe(0);
+        await expect(verify(client, input, policy(), clock)).rejects.toThrow("APPROVALS_INVALID");
+      }
+    },
+  );
   it.each(["REPEATABLE READ", "SERIALIZABLE"])("rejects isolation %s", async (isolation) => {
     await client.query(
       `ROLLBACK; BEGIN ISOLATION LEVEL ${isolation}; SET LOCAL lock_timeout='1s'; SET LOCAL statement_timeout='3s'`,

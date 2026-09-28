@@ -58,7 +58,7 @@ describe.skipIf(!url)("historical binding transition storage", () => {
     if (
       !["postgres:", "postgresql:"].includes(parsed.protocol) ||
       parsed.hostname !== "127.0.0.1" ||
-      !["56636", "56637"].includes(parsed.port) ||
+      !["5432", "56636", "56637"].includes(parsed.port) ||
       parsed.pathname !== "/vay2017_transition_fixture" ||
       parsed.search ||
       parsed.hash

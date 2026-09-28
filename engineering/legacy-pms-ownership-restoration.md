@@ -285,7 +285,7 @@ Pinned keys/environment/clock remain trusted. Signature matching alone requires
 registry authorities, revocation and locked eligibility; it authorizes no write.
 
 Migration 0433 admits the transition contract without replacing owner/setup
-contracts; coordinated integration must apply owner admission 0211 first.
+contracts; coordinated integration must apply the owner approval registry 0211 first.
 The registry verifier requires a caller-owned READ COMMITTED transaction with
 bounded timeouts, locks the exact two approval rows in ID order FOR UPDATE and
 then reads current revocations in a separate statement. Revocation inserts'

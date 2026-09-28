@@ -37,6 +37,7 @@ export async function lockAndVerifyLegacyHistoricalBindingApprovals(
     const ids = [envelope.migrationApprovalRecordId, envelope.securityApprovalRecordId];
     // SAVEPOINT refuses autocommit. Releasing it retains locks in the outer transaction.
     await client.query("SAVEPOINT vay2017_historical_approvals");
+    await client.query("SET LOCAL search_path = pg_catalog");
     const settings = await client.query<{ allowed: boolean }>(`SELECT
       current_setting('transaction_isolation') = 'read committed'
       AND current_setting('lock_timeout') <> '0' AND current_setting('statement_timeout') <> '0' AS allowed`);
@@ -101,16 +102,13 @@ export async function lockAndVerifyLegacyHistoricalBindingApprovals(
         throw new Error();
       principals.push(actor.principal);
     }
-    if (principals[0] === principals[1]) {
-      const actor = result.rows[0]!.actorId;
-      if (
-        dual?.decisionId !== SINGLE_HUMAN_DUAL_AUTHORITY_DECISION ||
-        dual.actorUserId !== actor ||
-        principals.some((principal) => principal !== dual.principal) ||
-        result.rows.some((row) => row.actorId !== actor)
-      )
-        throw new Error();
-    }
+    if (
+      principals[0] === principals[1] &&
+      (dual?.decisionId !== SINGLE_HUMAN_DUAL_AUTHORITY_DECISION ||
+        result.rows.some((row) => row.actorId !== dual.actorUserId) ||
+        principals.some((principal) => principal !== dual.principal))
+    )
+      throw new Error();
     verifyLegacyHistoricalBindingEnvelope({ ...captured, now: clock() });
     await client.query("RELEASE SAVEPOINT vay2017_historical_approvals");
     return { outcome: "approvals_locked_requires_eligibility", executable: false };
