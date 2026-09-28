@@ -68,11 +68,14 @@ describe.skipIf(!url)("parent-migrated disposable PostgreSQL target reader", () 
     )
       throw new Error("Only the dedicated loopback fixture database is allowed");
     pool = new pg.Pool({ connectionString: url });
-    await pool.query("CREATE ROLE vay2017_binding_reader LOGIN");
+    await pool.query(
+      "CREATE ROLE vay2017_binding_reader LOGIN PASSWORD 'binding_reader_test_only'",
+    );
     ownsRole = true;
     await pool.query("GRANT USAGE ON SCHEMA hotel_catalog,pms TO vay2017_binding_reader");
     await pool.query(`GRANT SELECT ON ${tables.join(",")} TO vay2017_binding_reader`);
     parsed.username = "vay2017_binding_reader";
+    parsed.password = "binding_reader_test_only";
     reader = new pg.Pool({ connectionString: parsed.toString() });
     // Fail on duplicate fixture IDs; parent owns schema setup and DB disposal.
     for (const n of [601, 602, 603, 604])
