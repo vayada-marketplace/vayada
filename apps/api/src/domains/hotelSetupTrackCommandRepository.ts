@@ -21,6 +21,10 @@ import {
 
 import { hotelSetupTrackRequestFingerprint } from "./hotelSetupTrackCommandFingerprint.js";
 
+type HotelSetupOrganizationLockClient = {
+  query(text: string, values?: readonly unknown[]): Promise<{ rows: unknown[] }>;
+};
+
 export type HotelSetupTrackCommand = UpdateTracksRequest & {
   organizationId: string;
   idempotencyKey: string;
@@ -111,22 +115,25 @@ export function createPgHotelSetupTrackCommandRepository(config: {
       try {
         await client.query("BEGIN");
         if (command.adminActivation) {
-          await lockOrganization(client, command.organizationId);
-          await requireAuthorizedPlatformActor(client, {
-            actorUserId: command.actorUserId,
-            organizationId: command.adminActivation.platformOrganizationId,
-            requestId: command.audit.requestId,
-            correlationId: command.audit.correlationId ?? command.audit.requestId,
-            requestedAt: command.audit.receivedAt,
-          });
+          await lockHotelSetupOrganization(client, command.organizationId);
+          await requireAuthorizedPlatformActor(
+            client,
+            {
+              actorUserId: command.actorUserId,
+              organizationId: command.adminActivation.platformOrganizationId,
+              requestId: command.audit.requestId,
+              correlationId: command.audit.correlationId ?? command.audit.requestId,
+              requestedAt: command.audit.receivedAt,
+            },
+            { lockRows: false },
+          );
           const account = await client.query(
             `SELECT membership.id FROM identity.organization_memberships membership
              JOIN identity.users account ON account.id = membership.user_id AND account.status = 'active'
              JOIN identity.organizations organization ON organization.id = membership.organization_id
                AND organization.kind = 'hotel_group' AND organization.status = 'active'
              WHERE membership.user_id = $1::uuid AND membership.organization_id = $2::uuid
-               AND membership.status = 'active'
-             FOR SHARE OF membership, account, organization`,
+               AND membership.status = 'active'`,
             [command.adminActivation.accountUserId, command.organizationId],
           );
           if (
@@ -156,7 +163,7 @@ export function createPgHotelSetupTrackCommandRepository(config: {
           return concurrentReplay ?? conflict("command_in_progress");
         }
 
-        await lockOrganization(client, command.organizationId);
+        await lockHotelSetupOrganization(client, command.organizationId);
         const previous = await loadIntent(client, command.organizationId);
         const result = await executeCommand(client, command, previous, occurredAt);
 
@@ -267,17 +274,31 @@ async function executeCommand(
   return { ok: true, response };
 }
 
-async function lockOrganization(client: PoolClient, organizationId: string): Promise<void> {
+export async function lockHotelSetupOrganization(
+  client: HotelSetupOrganizationLockClient,
+  organizationId: string,
+  targetAccountUserId: string | null = null,
+): Promise<void> {
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+    `hotel-setup-tracks:${organizationId}`,
+  ]);
   const result = await client.query(
     `SELECT id
      FROM identity.organizations
      WHERE id = $1::uuid
        AND kind = 'hotel_group'
        AND status = 'active'
-     FOR UPDATE`,
-    [organizationId],
+       AND ($2::uuid IS NULL OR EXISTS (
+         SELECT 1 FROM identity.organization_memberships membership
+         JOIN identity.users account ON account.id = membership.user_id
+         WHERE membership.organization_id = identity.organizations.id
+           AND membership.user_id = $2::uuid
+           AND membership.status = 'active'
+           AND account.status = 'active'
+       ))`,
+    [organizationId, targetAccountUserId],
   );
-  if (result.rowCount !== 1) throw new Error("Active hotel-group organization was not found");
+  if (result.rows.length !== 1) throw new Error("Active hotel-group organization was not found");
 }
 
 async function loadIntent(

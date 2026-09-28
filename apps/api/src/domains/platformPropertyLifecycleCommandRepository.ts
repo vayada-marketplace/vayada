@@ -185,6 +185,7 @@ async function runRetirementCommand(
 export async function requireAuthorizedPlatformActor(
   client: CommandClient,
   audit: PlatformPropertyLifecycleAudit,
+  options: { lockRows?: boolean } = {},
 ): Promise<void> {
   const result = await client.query(
     `SELECT membership.id
@@ -203,7 +204,7 @@ export async function requireAuthorizedPlatformActor(
       AND resource.status = 'active'
      WHERE organization.id = $1::uuid AND organization.kind = 'platform'
        AND organization.status = 'active' AND actor.id = $2::uuid
-     FOR SHARE OF organization, membership, actor, resource`,
+     ${options.lockRows === false ? "" : "FOR SHARE OF organization, membership, actor, resource"}`,
     [audit.organizationId, audit.actorUserId],
   );
   if (result.rows.length !== 1) {

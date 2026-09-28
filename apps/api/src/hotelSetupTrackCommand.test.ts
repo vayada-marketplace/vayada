@@ -8,10 +8,12 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createPgHotelSetupTrackCommandRepository,
+  lockHotelSetupOrganization,
   parseStoredHotelSetupTrackCommandResult,
   type HotelSetupTrackCommand,
   type HotelSetupTrackCommandRepository,
 } from "./domains/hotelSetupTrackCommandRepository.js";
+import { requireAuthorizedPlatformActor } from "./domains/platformPropertyLifecycleCommandRepository.js";
 import { createPgSharedHotelSetupStatusRepository } from "./platform/sharedHotelSetupStatusReadModel.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
@@ -26,6 +28,51 @@ const safetyCases = JSON.parse(
 };
 
 describe("stored hotel setup track command results", () => {
+  it("serializes setup writes without locking the identity organization row", async () => {
+    const queries: Array<{ text: string; values?: readonly unknown[] }> = [];
+    const organizationId = "11111111-1111-4111-8111-111111111111";
+    const client = {
+      async query(text: string, values?: readonly unknown[]) {
+        queries.push({ text, values });
+        return text.includes("FROM identity.organizations")
+          ? { rows: [{ id: organizationId }], rowCount: 1 }
+          : { rows: [], rowCount: 1 };
+      },
+    };
+
+    await lockHotelSetupOrganization(client, organizationId);
+
+    expect(queries[0]).toEqual({
+      text: "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      values: [`hotel-setup-tracks:${organizationId}`],
+    });
+    expect(queries[1]?.text).not.toContain("FOR UPDATE");
+  });
+
+  it("authorizes runtime admin activation without locking identity rows", async () => {
+    const queries: string[] = [];
+    const client = {
+      async query(text: string) {
+        queries.push(text);
+        return { rows: [{ id: "membership" }], rowCount: 1 };
+      },
+    };
+
+    await requireAuthorizedPlatformActor(
+      client as never,
+      {
+        actorUserId: "22222222-2222-4222-8222-222222222222",
+        organizationId: "33333333-3333-4333-8333-333333333333",
+        requestId: "request-admin-activation",
+        correlationId: "correlation-admin-activation",
+        requestedAt: occurredAt,
+      },
+      { lockRows: false },
+    );
+
+    expect(queries[0]).not.toContain("FOR SHARE");
+  });
+
   it("accepts complete success and conflict results", () => {
     expect(
       parseStoredHotelSetupTrackCommandResult({
@@ -923,7 +970,7 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
         correlationId: "setup-property-create-race",
         profile: completePropertyProfile("Concurrent Track Test Hotel"),
       });
-      await waitForBlockedQuery("FROM identity.organizations");
+      await waitForBlockedQuery("pg_advisory_xact_lock");
       await client.query("COMMIT");
       blockerOpen = false;
 
