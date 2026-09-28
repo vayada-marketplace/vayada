@@ -21,6 +21,7 @@ import { createPgPmsRoomClosureRepository } from "./domains/pmsRoomClosureComman
 import { createPgPreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
 import { createPgPmsAffiliateCompletionRepository } from "./domains/pmsAffiliateCompletionRepository.js";
 import { createPgBookingAffiliateDestinationRepository } from "./domains/bookingAffiliateDestinationRepository.js";
+import { readAffiliateDestinationTrackingConfiguration } from "./domains/bookingAffiliateDestinationTrackingReadiness.js";
 import { assertAffiliateCaptureRoleHasVisitReadCapabilities } from "./domains/affiliateCaptureRoleBoundary.js";
 import { createMarketplaceAffiliateVisit } from "./domains/marketplaceAffiliateVisit.js";
 import { createMarketplaceAffiliatePublicLinkQuota } from "./domains/marketplaceAffiliatePublicLinkQuota.js";
@@ -2003,8 +2004,12 @@ const app = buildApp({
     createPgMarketplaceAffiliateDraftRepository(targetDatabaseUrl),
   marketplaceAffiliatePolicyRepository:
     createPgFinanceAffiliatePercentagePolicyRepository(targetDatabaseUrl),
-  marketplaceAffiliateDestinationRepository:
-    createPgBookingAffiliateDestinationRepository(targetDatabaseUrl),
+  marketplaceAffiliateDestinationRepository: createPgBookingAffiliateDestinationRepository(
+    targetDatabaseUrl,
+    {
+      configuration: readAffiliateDestinationTrackingConfiguration,
+    },
+  ),
   marketplaceAffiliateCompletionRepository:
     createPgPmsAffiliateCompletionRepository(targetDatabaseUrl),
   financeAffiliateCommissions: {

@@ -210,6 +210,10 @@ describe.skipIf(!databaseUrl)("affiliate destination save (PostgreSQL)", () => {
     try {
       const saved = await repository.save(input());
       if (!saved.ok) throw new Error("fixture failed");
+      await expect(repository.list(id(3), id(4))).resolves.toMatchObject({
+        destinations: [{ trackingStatus: "not_validated" }],
+      });
+      expect(clients.size).toBe(0);
       await expect(repository.get(id(3), id(4), saved.destinationVersionId)).resolves.toMatchObject(
         {
           destinationVersionId: saved.destinationVersionId,
