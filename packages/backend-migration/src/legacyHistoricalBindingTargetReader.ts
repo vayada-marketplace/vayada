@@ -21,6 +21,7 @@ export async function readLegacyHistoricalBindingTargetSnapshot(
     throw new Error("Invalid historical binding target identifiers");
   const client = await pool.connect();
   let discard = false;
+  let primaryError: unknown;
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
     // Hold relation definitions stable before checking privileges/RLS or hashing.
@@ -107,12 +108,15 @@ export async function readLegacyHistoricalBindingTargetSnapshot(
       claims: Object.freeze(claimRows),
       connections: Object.freeze(connectionRows),
     });
+  } catch (error) {
+    primaryError = error;
+    throw error;
   } finally {
     try {
       await client.query("ROLLBACK");
     } catch (error) {
       discard = true;
-      throw error;
+      if (primaryError === undefined) throw error;
     } finally {
       client.release(discard);
     }

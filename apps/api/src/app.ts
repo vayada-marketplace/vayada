@@ -140,6 +140,10 @@ import { registerMarketplaceAffiliatePolicyRoutes } from "./routes/marketplaceAf
 import type { AffiliatePolicyRepository } from "./domains/financeAffiliatePercentagePolicyRepository.js";
 import { registerMarketplaceAffiliateDraftRoutes } from "./routes/marketplaceAffiliateDrafts.js";
 import type { AffiliateDraftRepository } from "./domains/marketplaceAffiliateDraftRepository.js";
+import {
+  registerMarketplaceAffiliatePublicationRoutes,
+  type MarketplaceAffiliatePublicationRoutesOptions,
+} from "./routes/marketplaceAffiliatePublication.js";
 import type { MarketplaceAffiliateAdminRepository } from "@vayada/domain-marketplace";
 import {
   registerFinanceAffiliateCommissionRoutes,
@@ -409,6 +413,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   marketplaceHotelSelfServiceRepository?: MarketplaceHotelSelfServiceRepository;
   marketplaceAffiliateAssentRepository?: AffiliateAssentRepository;
   marketplaceAffiliateDraftRepository?: AffiliateDraftRepository;
+  marketplaceAffiliatePublication?: MarketplaceAffiliatePublicationRoutesOptions;
   marketplaceAffiliatePolicyRepository?: AffiliatePolicyRepository;
   marketplaceAffiliateDestinationRepository?: AffiliateDestinationRepository;
   marketplaceAffiliateCompletionRepository?: AffiliateCompletionRepository;
@@ -691,6 +696,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerMarketplaceAffiliateDraftRoutes, {
       prefix: "/api/marketplace",
       repository: options.marketplaceAffiliateDraftRepository,
+    });
+  }
+  if (options.marketplaceAffiliatePublication) {
+    app.register(registerMarketplaceAffiliatePublicationRoutes, {
+      prefix: "/api/marketplace",
+      ...options.marketplaceAffiliatePublication,
     });
   }
   if (options.financeAffiliateCommissions) {
