@@ -93,6 +93,14 @@ export function AffiliatePayouts() {
     setActionError(false);
     try {
       const next = await getAffiliatePayouts({ limit: PAGE_SIZE, offset });
+      const existingIds = new Set(page.payouts.map((payout) => payout.payoutId));
+      const pageChanged =
+        next.total !== page.total || next.payouts.some((payout) => existingIds.has(payout.payoutId));
+      if (pageChanged) {
+        const fresh = await getAffiliatePayouts({ limit: PAGE_SIZE, offset: 0 });
+        setPage((current) => (current?.payouts.length === offset ? fresh : current));
+        return;
+      }
       setPage((current) =>
         current?.payouts.length === offset
           ? { ...next, payouts: [...current.payouts, ...next.payouts] }
