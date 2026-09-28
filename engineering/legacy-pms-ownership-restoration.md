@@ -246,7 +246,7 @@ original success after revocation is a receipt, not renewed eligibility.
 
 ## Required tests and implementation slices
 
-### Retained transition storage (0214)
+### Retained transition storage (0432)
 
 `platform.legacy_historical_binding_transitions` stores append-only `prepare`
 and `compensate` events under `legacy-historical-binding-transition.v1`. Each
