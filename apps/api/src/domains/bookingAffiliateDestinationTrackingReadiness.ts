@@ -7,6 +7,7 @@ import {
 } from "@vayada/domain-booking";
 import {
   AFFILIATE_REFERRAL_READINESS_MAX_AGE_SECONDS,
+  readAffiliateReferralRuntimeConfiguration,
   readAffiliateReferralRoundTripReadiness,
   requireAffiliateReadinessTransaction,
 } from "./bookingAffiliateReferralReadiness.js";
@@ -62,6 +63,88 @@ export type AffiliateDestinationTrackingReadinessPort = (
   client: pg.PoolClient,
   input: AffiliateDestinationTrackingReadinessInput,
 ) => Promise<AffiliateDestinationTrackingReadiness>;
+
+/** Selects the one current Booking-owned source configuration for every purpose. */
+export const readAffiliateDestinationTrackingConfiguration: AffiliateDestinationTrackingConfigurationPort =
+  async (client, scope) => {
+    const referral = await readAffiliateReferralRuntimeConfiguration(client, scope);
+    if (!referral) return undefined;
+    const rows = (
+      await client.query(
+        `SELECT DISTINCT certification.capability,
+          certification.environment AS "certificationEnvironment",
+          certification.connection_reference AS "certificationConnectionReference",
+          preflight.connection_reference AS "productionConnectionReference",
+          certification.adapter_version AS "adapterVersion"
+        FROM booking.affiliate_source_capability_certifications certification
+        JOIN booking.affiliate_validation_probes probe
+          ON probe.id=certification.probe_id
+         AND probe.property_id=certification.property_id
+         AND probe.destination_version_id=certification.destination_version_id
+         AND probe.organization_id=certification.organization_id
+         AND probe.environment=certification.environment
+         AND probe.connection_reference=certification.connection_reference
+         AND probe.adapter_version=certification.adapter_version
+        JOIN booking.affiliate_source_capability_production_preflights preflight
+          ON preflight.property_id=certification.property_id
+         AND preflight.destination_version_id=certification.destination_version_id
+         AND preflight.organization_id=certification.organization_id
+         AND preflight.capability=certification.capability
+         AND preflight.adapter_version=certification.adapter_version
+        WHERE certification.property_id=$1 AND certification.destination_version_id=$2
+          AND certification.organization_id=$3
+          AND certification.completed_at >= clock_timestamp() - make_interval(secs => $4)
+          AND preflight.completed_at >= clock_timestamp() - make_interval(secs => $4)
+          AND NOT EXISTS (
+            SELECT 1 FROM booking.affiliate_validation_probe_revocations revoked
+            WHERE revoked.probe_id=probe.id
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM booking.affiliate_source_capability_preflight_revocations revoked
+            WHERE revoked.preflight_id=preflight.id
+          )
+        ORDER BY certification.capability,"certificationEnvironment",
+          "certificationConnectionReference","productionConnectionReference","adapterVersion"`,
+        [
+          scope.propertyId.toLowerCase(),
+          scope.destinationVersionId.toLowerCase(),
+          scope.organizationId.toLowerCase(),
+          AFFILIATE_REFERRAL_READINESS_MAX_AGE_SECONDS,
+        ],
+      )
+    ).rows as (AffiliateDestinationTrackingPurposeConfiguration & {
+      capability: AffiliateSourceCapability;
+      certificationEnvironment: "local" | "sandbox";
+    })[];
+    if (
+      rows.length !== affiliateSourceCapabilities.length ||
+      affiliateSourceCapabilities.some(
+        (capability) => rows.filter((row) => row.capability === capability).length !== 1,
+      ) ||
+      rows.some((row) => row.certificationEnvironment !== referral.certificationEnvironment)
+    )
+      return undefined;
+    return {
+      certificationEnvironment: referral.certificationEnvironment,
+      purposes: {
+        referral_round_trip: {
+          certificationConnectionReference: referral.certificationConnectionReference,
+          productionConnectionReference: referral.productionConnectionReference,
+          adapterVersion: referral.adapterVersion,
+        },
+        ...Object.fromEntries(
+          rows.map((row) => [
+            row.capability,
+            {
+              certificationConnectionReference: row.certificationConnectionReference,
+              productionConnectionReference: row.productionConnectionReference,
+              adapterVersion: row.adapterVersion,
+            },
+          ]),
+        ),
+      } as AffiliateDestinationTrackingReadinessInput["purposes"],
+    };
+  };
 
 const combinedReferencePattern = (purpose: AffiliateTrackingPurpose) =>
   new RegExp(
