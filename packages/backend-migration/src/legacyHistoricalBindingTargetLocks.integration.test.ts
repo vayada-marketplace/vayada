@@ -165,9 +165,9 @@ describe.skipIf(!url)("historical prepare target locks on disposable PostgreSQL"
     await insertConnection(other);
   });
   it.each(["hotel_catalog.properties", "pms.channel_binding_claims", "pms.channel_connections"])(
-    "rejects RLS-enabled %s even for bypass role",
+    "rejects FORCE RLS on %s even for bypass role",
     async (table) => {
-      await client.query(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
+      await client.query(`ALTER TABLE ${table} FORCE ROW LEVEL SECURITY`);
       await expect(lock(client, expected)).rejects.toThrow();
     },
   );
