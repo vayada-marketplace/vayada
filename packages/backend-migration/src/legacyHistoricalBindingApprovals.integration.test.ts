@@ -3,6 +3,7 @@ import { join } from "node:path";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { canonicalizeJson } from "./channexAdoptionManifestCrypto.js";
+import { SINGLE_HUMAN_DUAL_AUTHORITY_DECISION } from "./channexAdoptionConsumer.js";
 import {
   LEGACY_OWNERSHIP_ROW_TABLES,
   type LegacyOwnershipFingerprint,
@@ -108,7 +109,11 @@ const policy = () => ({
       { principal: `human:${n}`, authorities: ["migration_owner", "security_owner"] as const },
     ]),
   ),
-  singleHumanDualAuthority: { actorUserId: id(1), decisionId: "synthetic-decision" },
+  singleHumanDualAuthority: {
+    actorUserId: id(1),
+    principal: "human:1",
+    decisionId: SINGLE_HUMAN_DUAL_AUTHORITY_DECISION,
+  },
 });
 describe.skipIf(!url)("signed historical registry and retained row locks", () => {
   let client: pg.Client;
