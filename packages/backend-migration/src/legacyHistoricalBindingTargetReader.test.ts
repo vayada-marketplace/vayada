@@ -19,20 +19,22 @@ describe("historical binding target boundary", () => {
     ).rejects.toThrow();
     expect(query).not.toHaveBeenCalled();
   });
-  it.each(["visibility", "query", "rollback"])(
+  it.each(["visibility", "query", "rollback", "query-and-rollback"])(
     "fails closed and cleans up on %s failure",
     async (mode) => {
       const release = vi.fn();
       const query = vi.fn(async (sql: string) => {
-        if (sql === "ROLLBACK" && mode === "rollback") throw new Error("cleanup failed");
-        if (sql.includes("pg_class") && mode === "query") throw new Error("read failed");
+        if (sql === "ROLLBACK" && mode.includes("rollback")) throw new Error("cleanup failed");
+        if (sql.includes("pg_class") && mode.includes("query")) throw new Error("read failed");
         return { rows: [{ complete: false }] };
       });
       const pool = { connect: vi.fn().mockResolvedValue({ query, release }) };
-      await expect(read(pool as never, input)).rejects.toThrow();
+      await expect(read(pool as never, input)).rejects.toThrow(
+        mode.includes("query") ? "read failed" : "incomplete",
+      );
       expect(query).toHaveBeenNthCalledWith(1, "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
       expect(query).toHaveBeenLastCalledWith("ROLLBACK");
-      expect(release).toHaveBeenCalledWith(mode === "rollback");
+      expect(release).toHaveBeenCalledWith(mode.includes("rollback"));
     },
   );
   it("rejects invalid IDs before obtaining a connection", async () => {

@@ -88,18 +88,19 @@ property so requests and retry state do not carry across property selections.
 
 ## Tracking diagnostics
 
-Authorized destination reads now include `trackingReadiness: { status, missing }`
+Authorized exact-version reads now include `trackingReadiness: { status, missing }`
 from the shared Booking assessment; offer draft reads carry the same destination
-diagnostics. The current adapter supplies no trusted evidence, so all four purposes
-remain pending. No row, URL or PMS subscription can produce verified tracking.
+diagnostics. Production derives configuration only from one current, unambiguous pair
+of Booking-owned certification and preflight proofs for every purpose. A destination
+row, URL or PMS subscription alone cannot produce verified tracking.
 The hotel setup form displays the server-reported missing purposes in expandable
 details, or reports unavailable details when an older API omits the field.
 No checkbox, verification write endpoint or provider-specific shortcut exists.
+History lists remain the existing bounded one-query pending view; they do not re-evaluate
+proofs for obsolete destination versions.
 
-The next dependency is a trusted owner-domain evidence adapter, scoped to exact
-destination/property and live connection. It must resolve an existing restricted
-evidence reference, validation time and current connection health for each purpose.
-The adapter owns freshness and revocation; documented support alone cannot pass.
+The Booking adapter scopes evidence to the exact destination/property/organization and
+rechecks freshness and revocation; documented support alone cannot pass.
 Vayada Booking and external booking/PMS integrations must use the same evidence
 contract. Existing Channex inventory/operational tests are not affiliate referral
 round-trip or completed-stay proof. Policy gates in
