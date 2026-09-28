@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AdoptionQueryClient } from "./channexAdoptionTargetRows.js";
+import { SINGLE_HUMAN_DUAL_AUTHORITY_DECISION } from "./channexAdoptionConsumer.js";
 import type { verifyLegacyOwnerApprovals } from "./legacyOwnerApprovalRegistry.js";
 import { verifyLegacyHistoricalBindingEnvelope } from "./legacyHistoricalBindingEnvelope.js";
 
@@ -103,7 +104,9 @@ export async function lockAndVerifyLegacyHistoricalBindingApprovals(
     }
     if (
       principals[0] === principals[1] &&
-      (!dual?.decisionId.trim() || result.rows.some((row) => row.actorId !== dual.actorUserId))
+      (dual?.decisionId !== SINGLE_HUMAN_DUAL_AUTHORITY_DECISION ||
+        result.rows.some((row) => row.actorId !== dual.actorUserId) ||
+        principals.some((principal) => principal !== dual.principal))
     )
       throw new Error();
     verifyLegacyHistoricalBindingEnvelope({ ...captured, now: clock() });
