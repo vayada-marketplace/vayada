@@ -172,7 +172,7 @@ describe.skipIf(!url)("signed historical registry and retained row locks", () =>
       environment: "local",
     });
     expect(result.failed).toBeNull();
-    expect(result.applied).toContain("0215");
+    expect(result.applied).toContain("0433");
     await client.query(
       "INSERT INTO identity.users(id,email) VALUES($1,'binding-one@example.test'),($2,'binding-two@example.test')",
       [id(1), id(2)],

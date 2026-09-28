@@ -246,7 +246,7 @@ original success after revocation is a receipt, not renewed eligibility.
 
 ## Required tests and implementation slices
 
-### Retained transition storage (0214)
+### Retained transition storage (0432)
 
 `platform.legacy_historical_binding_transitions` stores append-only `prepare`
 and `compensate` events under `legacy-historical-binding-transition.v1`. Each
@@ -284,8 +284,8 @@ requests, true source-activity assertion and current target before/after hashes.
 Pinned keys/environment/clock remain trusted. Signature matching alone requires
 registry authorities, revocation and locked eligibility; it authorizes no write.
 
-Migration 0215 admits the transition contract without replacing owner/setup
-contracts; coordinated integration must apply owner admission 0213 first.
+Migration 0433 admits the transition contract without replacing owner/setup
+contracts; coordinated integration must apply owner admission 0211 first.
 The registry verifier requires a caller-owned READ COMMITTED transaction with
 bounded timeouts, locks the exact two approval rows in ID order FOR UPDATE and
 then reads current revocations in a separate statement. Revocation inserts'
