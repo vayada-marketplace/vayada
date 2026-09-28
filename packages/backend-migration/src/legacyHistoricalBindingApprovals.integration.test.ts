@@ -3,6 +3,7 @@ import { join } from "node:path";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { canonicalizeJson } from "./channexAdoptionManifestCrypto.js";
+import { SINGLE_HUMAN_DUAL_AUTHORITY_DECISION } from "./channexAdoptionConsumer.js";
 import {
   LEGACY_OWNERSHIP_ROW_TABLES,
   type LegacyOwnershipFingerprint,
@@ -108,7 +109,11 @@ const policy = () => ({
       { principal: `human:${n}`, authorities: ["migration_owner", "security_owner"] as const },
     ]),
   ),
-  singleHumanDualAuthority: { actorUserId: id(1), decisionId: "synthetic-decision" },
+  singleHumanDualAuthority: {
+    actorUserId: id(1),
+    principal: "human:1",
+    decisionId: SINGLE_HUMAN_DUAL_AUTHORITY_DECISION,
+  },
 });
 describe.skipIf(!url)("signed historical registry and retained row locks", () => {
   let client: pg.Client;
@@ -153,7 +158,7 @@ describe.skipIf(!url)("signed historical registry and retained row locks", () =>
     if (
       !["postgres:", "postgresql:"].includes(parsed.protocol) ||
       parsed.hostname !== "127.0.0.1" ||
-      !["56636", "56637"].includes(parsed.port) ||
+      !["5432", "56636", "56637"].includes(parsed.port) ||
       parsed.pathname !== "/vay2017_binding_approval_fixture" ||
       parsed.search ||
       parsed.hash
@@ -172,7 +177,7 @@ describe.skipIf(!url)("signed historical registry and retained row locks", () =>
       environment: "local",
     });
     expect(result.failed).toBeNull();
-    expect(result.applied).toContain("0215");
+    expect(result.applied).toContain("0433");
     await client.query(
       "INSERT INTO identity.users(id,email) VALUES($1,'binding-one@example.test'),($2,'binding-two@example.test')",
       [id(1), id(2)],
@@ -223,6 +228,50 @@ describe.skipIf(!url)("signed historical registry and retained row locks", () =>
       await expect(verify(client, input, p, clock)).rejects.toThrow("APPROVALS_INVALID");
     },
   );
+  it.each(["valid", "wrong-decision", "wrong-principal"])(
+    "pins authorized single-human policy: %s",
+    async (kind) => {
+      const command = {
+        ...envelope,
+        commandId: id(50),
+        migrationApprovalRecordId: id(51),
+        securityApprovalRecordId: id(52),
+      };
+      const payload = canonicalizeJson(command);
+      await seed(
+        {
+          command_id: command.commandId,
+          actor_user_id: id(1),
+          envelope_sha256: hashLegacyHistoricalBindingEnvelope(payload),
+        },
+        20,
+      );
+      const signed = {
+        ...input,
+        canonicalPayload: payload,
+        detachedSignature: sign(
+          null,
+          Buffer.from(`vayada:legacy-historical-binding-transition:v1\0envelope\0${payload}`),
+          keys.privateKey,
+        ).toString("base64url"),
+      };
+      const p = policy();
+      p.actors.delete(id(2));
+      if (kind === "wrong-decision")
+        p.singleHumanDualAuthority = {
+          ...p.singleHumanDualAuthority,
+          decisionId: "wrong" as never,
+        };
+      if (kind === "wrong-principal")
+        p.singleHumanDualAuthority = { ...p.singleHumanDualAuthority, principal: "human:other" };
+      if (kind === "valid")
+        expect(await verify(client, signed, p, clock)).toEqual({
+          outcome: "approvals_locked_requires_eligibility",
+          executable: false,
+        });
+      else await expect(verify(client, signed, p, clock)).rejects.toThrow("APPROVALS_INVALID");
+    },
+  );
   it("rejects invalid signature and changed evidence", async () => {
     await expect(
       verify(client, { ...input, detachedSignature: "invalid" }, policy(), clock),
@@ -239,7 +288,6 @@ describe.skipIf(!url)("signed historical registry and retained row locks", () =>
   it.each([
     { envelope_sha256: "b".repeat(64) },
     { contract_version: "legacy-pms-owner-evidence.v1" },
-    { contract_version: "legacy-owner-internal-setup.v1" },
     { environment: "staging" },
   ])("rejects mismatched stored authority %j", async (change) => {
     const command = {

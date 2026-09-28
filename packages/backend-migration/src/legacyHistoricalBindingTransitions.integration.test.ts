@@ -58,7 +58,7 @@ describe.skipIf(!url)("historical binding transition storage", () => {
     if (
       !["postgres:", "postgresql:"].includes(parsed.protocol) ||
       parsed.hostname !== "127.0.0.1" ||
-      !["56636", "56637"].includes(parsed.port) ||
+      !["5432", "56636", "56637"].includes(parsed.port) ||
       parsed.pathname !== "/vay2017_transition_fixture" ||
       parsed.search ||
       parsed.hash
@@ -75,7 +75,7 @@ describe.skipIf(!url)("historical binding transition storage", () => {
       environment: "local",
     });
     expect(result.failed).toBeNull();
-    expect(result.applied).toContain("0214");
+    expect(result.applied).toContain("0432");
     await client.query(
       `INSERT INTO hotel_catalog.properties(id,public_id,display_name)
       VALUES($1,'transition-fixture','Synthetic')`,
