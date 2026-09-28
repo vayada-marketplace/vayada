@@ -159,7 +159,7 @@ export default function EarningsPage() {
           ) : result ? (
             <Performance result={result} loadingMore={loadingMore} onLoadMore={loadMore} />
           ) : null}
-          {authService.getUserType() !== "hotel" && <AffiliatePayouts />}
+          {authService.getUserType() === "creator" && <AffiliatePayouts />}
         </div>
       </div>
     </main>

@@ -43,6 +43,7 @@ export function AffiliatePayouts() {
     detailController.current?.abort();
     const controller = new AbortController();
     detailController.current = controller;
+    setDetail(null);
     setActionError(false);
     try {
       const response = await getAffiliatePayout(payoutId, currency, controller.signal);
@@ -128,9 +129,15 @@ export function AffiliatePayouts() {
             </p>
             <p>
               <strong>Readiness:</strong>{" "}
-              {payoutsReady ? "Ready" : "Setup required"}
+              {!page.payoutSettings.payoutsEnabled
+                ? "Payouts disabled"
+                : payoutsReady
+                  ? "Ready"
+                  : "Setup required"}
             </p>
-            {!payoutsReady && page.payoutSettings.payoutProvider === "stripe" && (
+            {page.payoutSettings.payoutsEnabled &&
+              !page.payoutSettings.providerAccount.payoutsEnabled &&
+              page.payoutSettings.payoutProvider === "stripe" && (
               <div className="mt-3 flex flex-wrap items-end gap-2">
                 <label className="text-xs font-semibold text-gray-600">
                   Country
