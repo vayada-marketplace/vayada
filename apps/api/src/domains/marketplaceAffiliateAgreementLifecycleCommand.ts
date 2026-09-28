@@ -1,7 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import type pg from "pg";
 import type { RequestContext } from "@vayada/backend-auth";
-import { requirePropertyAccess, requireResourceAccess } from "@vayada/backend-authorization";
+import {
+  requireActiveEntitlement,
+  requirePropertyAccess,
+  requireResourceAccess,
+} from "@vayada/backend-authorization";
 import { readMarketplaceAffiliateAgreementLifecycle } from "./marketplaceAffiliateAgreementLifecycle.js";
 
 type Action = "pause" | "resume" | "end";
@@ -98,6 +102,11 @@ export async function changeMarketplaceAffiliateAgreementLifecycle(
       resource: { ...resource, allowedRelationships: hotel ? ["owner", "operator"] : ["owner"] },
     });
     if (hotel) {
+      requireActiveEntitlement(context, {
+        product: "marketplace",
+        key: "marketplace-hotel-profile",
+        resource,
+      });
       await requirePropertyAccess(
         context,
         { findMembershipPropertyScope: async () => null },
