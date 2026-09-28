@@ -277,6 +277,46 @@ test("recovers payout history after a failed read without presenting eligible ea
   await verify();
 });
 
+test("loads older payout records beyond the first page", async ({ page }, testInfo) => {
+  const verify = checks(page, testInfo);
+  await routePerformance(page, () => performancePage({ partnerships: [partnership()] }));
+  await page.unroute(/\/api\/marketplace\/affiliate-payouts(?:[/?]|$)/);
+  await page.route(/\/api\/marketplace\/affiliate-payouts(?:\?|$)/, async (route) => {
+    if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+    const offset = Number(new URL(route.request().url()).searchParams.get("offset"));
+    const payouts =
+      offset === 25
+        ? [
+            payout({
+              payoutId: "15150000-0000-4000-8000-000000000099",
+              amount: "9.99",
+              netAmount: "9.99",
+            }),
+          ]
+        : Array.from({ length: 25 }, (_, index) =>
+            payout({
+              payoutId: `15150000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+            }),
+          );
+    await route.fulfill({
+      status: 200,
+      headers: corsHeaders(route),
+      json: payoutPage({ payouts, total: 26, offset }),
+    });
+  });
+
+  await page.goto("/earnings");
+  await expect(page.getByRole("button", { name: "Load more payouts" })).toBeVisible();
+  const nextPage = page.waitForRequest((request) =>
+    request.url().includes("affiliate-payouts?limit=25&offset=25"),
+  );
+  await page.getByRole("button", { name: "Load more payouts" }).click();
+  await nextPage;
+  await expect(page.getByText("EUR 9.99 · Paid", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Load more payouts" })).toHaveCount(0);
+  await verify();
+});
+
 function checks(page: Page, testInfo: TestInfo, checkHealth = true) {
   const healthy = checkHealth ? watchPageHealth(page, testInfo) : null;
   const targetOnly = watchNoLegacyCalls(page, testInfo, "marketplace-web-offer-discovery");
