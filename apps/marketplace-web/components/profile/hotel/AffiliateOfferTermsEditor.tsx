@@ -39,6 +39,9 @@ const blockedReason = (reason: string) =>
     settlement_currency_unsupported: "Choose a supported settlement currency in payout settings.",
     commercial_conditions_unresolved: "Complete the affiliate commercial conditions.",
     tracking_configuration_unavailable: "Configure affiliate tracking for this booking page.",
+    tracking_referral_round_trip_pending: "Verify that creator links match the resulting bookings.",
+    tracking_reservation_lifecycle_pending:
+      "Verify booking confirmations, changes and cancellations.",
     tracking_stay_completion_pending: "Finish the stay-completion tracking check.",
     tracking_accommodation_revenue_pending: "Finish the accommodation-revenue tracking check.",
     tracking_readiness_invalid: "Repair the affiliate tracking configuration.",
