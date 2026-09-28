@@ -419,6 +419,147 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS pricing command repository",
     ).toBe(true);
   });
 
+  it("turns Financials on once for a new hotel after currency and categories exist", async () => {
+    await admin.query(
+      `INSERT INTO identity.product_entitlements
+         (organization_id, product, entitlement_key, status,
+          resource_product, resource_type, resource_id, metadata)
+       VALUES ($1::uuid, 'pms', 'module:financials', 'suspended',
+         'pms', 'pms_property', $2, '{"newHotelFinancialsDefault":"pending"}'::jsonb)`,
+      [organizationId, propertyId],
+    );
+    expect(
+      (
+        await repository.upsertPropertyPricingCurrency(
+          currencyCommand("new-hotel-currency", 0, "EUR"),
+        )
+      ).ok,
+    ).toBe(true);
+    const state = () =>
+      admin.query<{ status: string; marker: string }>(
+        `SELECT status, metadata ->> 'newHotelFinancialsDefault' AS marker
+       FROM identity.product_entitlements
+       WHERE organization_id=$1::uuid AND entitlement_key='module:financials'
+         AND resource_id=$2`,
+        [organizationId, propertyId],
+      );
+    expect((await state()).rows).toEqual([{ status: "active", marker: "ready" }]);
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM finance.expense_categories WHERE property_id=$1::uuid AND archived_at IS NULL",
+          [propertyId],
+        )
+      ).rows[0].count,
+    ).toBe(7);
+    expect(
+      (
+        await admin.query(
+          "SELECT action FROM platform.product_audit_events WHERE property_id=$1::uuid AND action='financials_module_activated'",
+          [propertyId],
+        )
+      ).rows,
+    ).toHaveLength(1);
+
+    await admin.query(
+      `UPDATE identity.product_entitlements SET status='suspended'
+       WHERE organization_id=$1::uuid AND entitlement_key='module:financials' AND resource_id=$2`,
+      [organizationId, propertyId],
+    );
+    expect(
+      (await repository.upsertPropertyPricingCurrency(currencyCommand("later-currency", 1, "USD")))
+        .ok,
+    ).toBe(true);
+    expect((await state()).rows).toEqual([{ status: "suspended", marker: "ready" }]);
+  });
+
+  it("does not turn Financials on for a hotel linked to legacy PMS data", async () => {
+    await admin.query(
+      `INSERT INTO identity.product_entitlements
+         (organization_id, product, entitlement_key, status,
+          resource_product, resource_type, resource_id, metadata)
+       VALUES ($1::uuid, 'pms', 'module:financials', 'suspended',
+         'pms', 'pms_property', $2, '{"newHotelFinancialsDefault":"pending"}'::jsonb)`,
+      [organizationId, propertyId],
+    );
+    await admin.query(
+      `INSERT INTO hotel_catalog.property_source_links
+         (property_id, source_system, source_table, source_id, relationship)
+       VALUES ($1::uuid, 'pms', 'legacy_hotels', $1::text, 'operational_input')`,
+      [propertyId],
+    );
+    expect(
+      (await repository.upsertPropertyPricingCurrency(currencyCommand("legacy-currency", 0, "EUR")))
+        .ok,
+    ).toBe(true);
+    expect(
+      (
+        await admin.query(
+          `SELECT status, metadata ->> 'newHotelFinancialsDefault' AS marker
+       FROM identity.product_entitlements
+       WHERE organization_id=$1::uuid AND entitlement_key='module:financials'
+         AND resource_id=$2`,
+          [organizationId, propertyId],
+        )
+      ).rows,
+    ).toEqual([{ status: "suspended", marker: "pending" }]);
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM finance.expense_categories WHERE property_id=$1::uuid",
+          [propertyId],
+        )
+      ).rows[0].count,
+    ).toBe(0);
+  });
+
+  it("rolls back first currency setup if a starter category was archived", async () => {
+    await admin.query(
+      `INSERT INTO identity.product_entitlements
+         (organization_id, product, entitlement_key, status,
+          resource_product, resource_type, resource_id, metadata)
+       VALUES ($1::uuid, 'pms', 'module:financials', 'suspended',
+         'pms', 'pms_property', $2, '{"newHotelFinancialsDefault":"pending"}'::jsonb)`,
+      [organizationId, propertyId],
+    );
+    await admin.query(
+      `INSERT INTO finance.expense_categories (property_id, system_key, name, color, sort_order, archived_at)
+       VALUES ($1::uuid, 'staff', 'Staff', '#6366F1', 10, now())`,
+      [propertyId],
+    );
+    await expect(
+      repository.upsertPropertyPricingCurrency(currencyCommand("archived-category", 0, "EUR")),
+    ).rejects.toThrow("New hotel Financials starter categories are incomplete");
+    expect(
+      (await admin.query("SELECT 1 FROM pms.property_pricing_settings WHERE property_id=$1::uuid", [propertyId])).rows,
+    ).toHaveLength(0);
+  });
+
+  it("does not enable Financials when PMS billing became suspended", async () => {
+    await admin.query(
+      `INSERT INTO identity.product_entitlements
+         (organization_id, product, entitlement_key, status,
+          resource_product, resource_type, resource_id, metadata)
+       VALUES ($1::uuid, 'pms', 'module:financials', 'suspended',
+         'pms', 'pms_property', $2, '{"newHotelFinancialsDefault":"pending"}'::jsonb)`,
+      [organizationId, propertyId],
+    );
+    await admin.query(
+      `INSERT INTO finance.billing_entitlements
+         (organization_id, product, entitlement_key, billing_status)
+       VALUES ($1::uuid, 'pms', 'property-management', 'suspended')`,
+      [organizationId],
+    );
+    expect((await repository.upsertPropertyPricingCurrency(currencyCommand("suspended-billing", 0, "EUR"))).ok).toBe(true);
+    expect((await admin.query(
+      `SELECT status, metadata ->> 'newHotelFinancialsDefault' AS marker
+       FROM identity.product_entitlements
+       WHERE organization_id=$1::uuid AND entitlement_key='module:financials'
+         AND resource_id=$2`,
+      [organizationId, propertyId],
+    )).rows).toEqual([{ status: "suspended", marker: "pending" }]);
+  });
+
   it("rechecks authorization before replay and excludes front-desk scope", async () => {
     const command = currencyCommand("scope-replay", 0, "EUR");
     await expect(repository.upsertPropertyPricingCurrency(command)).resolves.toMatchObject({
@@ -824,6 +965,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS pricing command repository",
         "DELETE FROM pms.rate_plans WHERE property_id = $1::uuid",
         "DELETE FROM pms.room_types WHERE property_id = $1::uuid",
         "DELETE FROM pms.property_pricing_settings WHERE property_id = $1::uuid",
+        "DELETE FROM hotel_catalog.property_source_links WHERE property_id = $1::uuid",
+        "DELETE FROM finance.expense_categories WHERE property_id = $1::uuid",
         "DELETE FROM platform.outbox_events WHERE property_id = $1::uuid",
         "DELETE FROM platform.domain_events WHERE property_id = $1::uuid",
         "DELETE FROM platform.product_audit_events WHERE property_id = $1::uuid",
@@ -831,6 +974,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS pricing command repository",
       ]) {
         await admin.query(statement, [propertyId]);
       }
+      await admin.query("DELETE FROM finance.billing_entitlements WHERE organization_id = $1::uuid", [organizationId]);
       await admin.query(
         "DELETE FROM identity.product_entitlements WHERE organization_id = $1::uuid",
         [organizationId],

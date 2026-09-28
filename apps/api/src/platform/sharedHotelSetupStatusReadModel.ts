@@ -694,6 +694,19 @@ async function writePropertyProfile(
       const propertyId = result.rows[0]?.propertyId;
       if (!propertyId)
         throw new Error("Created shared property profile did not return a property id");
+      await client.query(
+        `INSERT INTO identity.product_entitlements (
+           organization_id, product, entitlement_key, status,
+           resource_product, resource_type, resource_id, metadata
+         )
+         SELECT $1::uuid, 'pms', 'module:financials', 'suspended',
+                'pms', 'pms_property', $2, '{"newHotelFinancialsDefault":"pending"}'::jsonb
+         FROM identity.organization_resource_links link
+         WHERE link.organization_id = $1::uuid
+           AND link.product = 'pms' AND link.resource_type = 'pms_property'
+           AND link.resource_id = $2 AND link.relationship = 'owner' AND link.status = 'active'`,
+        [input.organizationId, propertyId],
+      );
       if (input.provisioningReference) {
         await linkProvisioningReference(client, {
           propertyId,

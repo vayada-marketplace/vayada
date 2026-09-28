@@ -414,9 +414,12 @@ The operational sequence and evidence record are in the
    OTA commissions only where an effective rate snapshot is provable.
 5. Reconcile totals, counts, source exceptions, immutable folio revisions and
    generated expense idempotency in rehearsals.
-6. Ship new routes and UI while `module:financials` remains inactive by default.
-7. Activate per property only after permission, migration, API, export and
-   browser gates pass.
+6. Ship new routes and UI while `module:financials` remains inactive during
+   the initial release. For future new PMS hotels, activate automatically only
+   after currency and starter categories are ready; the Owner can turn it off
+   in Feature Hub.
+7. Activate existing properties individually only after permission, migration,
+   API, export and browser gates pass.
 
 Rollback deactivates the module and reverts application traffic. It does not
 delete new ledger rows or repeat successful exports blindly. Export job keys
