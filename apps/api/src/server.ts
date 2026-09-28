@@ -22,6 +22,9 @@ import { createPgPreparedImportRepository } from "./domains/preparedHotelImportR
 import { createPgPmsAffiliateCompletionRepository } from "./domains/pmsAffiliateCompletionRepository.js";
 import { createPgBookingAffiliateDestinationRepository } from "./domains/bookingAffiliateDestinationRepository.js";
 import { readAffiliateDestinationTrackingConfiguration } from "./domains/bookingAffiliateDestinationTrackingReadiness.js";
+import { readFinanceAffiliateCommercialConditions } from "./domains/financeAffiliateCommercialConditions.js";
+import { publishMarketplaceAffiliateTerms } from "./domains/marketplaceAffiliatePublication.js";
+import { createAffiliatePublicationPrerequisites } from "./domains/marketplaceAffiliatePublicationPrerequisites.js";
 import { assertAffiliateCaptureRoleHasVisitReadCapabilities } from "./domains/affiliateCaptureRoleBoundary.js";
 import { createMarketplaceAffiliateVisit } from "./domains/marketplaceAffiliateVisit.js";
 import { createMarketplaceAffiliatePublicLinkQuota } from "./domains/marketplaceAffiliatePublicLinkQuota.js";
@@ -2002,6 +2005,17 @@ const app = buildApp({
     createPgMarketplaceAffiliateAssentRepository(targetDatabaseUrl),
   marketplaceAffiliateDraftRepository:
     createPgMarketplaceAffiliateDraftRepository(targetDatabaseUrl),
+  marketplaceAffiliatePublication: (() => {
+    const pool = new pg.Pool({ connectionString: targetDatabaseUrl, max: 3 });
+    const prerequisites = createAffiliatePublicationPrerequisites({
+      commercialConditions: readFinanceAffiliateCommercialConditions,
+      trackingConfiguration: readAffiliateDestinationTrackingConfiguration,
+    });
+    return {
+      publish: (input) => publishMarketplaceAffiliateTerms(pool, input, prerequisites),
+      close: () => pool.end(),
+    };
+  })(),
   marketplaceAffiliatePolicyRepository:
     createPgFinanceAffiliatePercentagePolicyRepository(targetDatabaseUrl),
   marketplaceAffiliateDestinationRepository: createPgBookingAffiliateDestinationRepository(
