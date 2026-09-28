@@ -297,12 +297,18 @@ function targetFinanceRepository(options: {
     async getCancellationPolicy() {
       throw new Error("property cancellation policy should not be called");
     },
-    async getAffiliatePayoutSettings(requestedAffiliateId) {
+    async getAffiliatePayoutSettings(requestedAffiliateId, requestedOrganizationId) {
       expect(requestedAffiliateId).toBe(affiliateId);
+      expect(requestedOrganizationId).toBe(organizationId);
       return payoutSettings;
     },
-    async listAffiliatePayouts(requestedAffiliateId: string, query: FinancePayoutListQuery) {
+    async listAffiliatePayouts(
+      requestedAffiliateId: string,
+      query: FinancePayoutListQuery,
+      requestedOrganizationId: string,
+    ) {
       expect(requestedAffiliateId).toBe(affiliateId);
+      expect(requestedOrganizationId).toBe(organizationId);
       return {
         payouts: [payout],
         total: 1,

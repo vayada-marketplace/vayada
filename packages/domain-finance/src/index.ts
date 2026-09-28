@@ -436,6 +436,25 @@ export type FinanceAffiliatePayoutListResponse = {
   sourceFreshness: FinanceJsonObject;
 };
 
+export type FinanceAffiliatePayoutAllocation = {
+  earningEntryId: string;
+  propertyId: string;
+  bookingReference: string;
+  agreementId: string;
+  recordedAt: FinanceUtcDateTime;
+  currency: FinanceCurrencyCode;
+  currencyMinorUnit: number;
+  commissionMinor: string;
+  adjustmentMinor: string;
+  appliedMinor: string;
+};
+
+export type FinanceAffiliatePayoutDetail = FinancePayout & {
+  maskedDestination: string | null;
+  maskedProviderReference: string | null;
+  includedEarnings: FinanceAffiliatePayoutAllocation[];
+};
+
 export type FinanceReconciliationItem = {
   subjectId: string;
   subjectType: FinanceReconciliationSubjectType;
@@ -1132,12 +1151,21 @@ export type FinancePropertyCommandRepository = {
 export type FinanceAffiliateRepository = {
   getAffiliatePayoutSettings(
     affiliateId: FinanceAffiliateId,
+    organizationId: string,
   ): Promise<FinanceAffiliatePayoutSettingsReadModel | null>;
 
   listAffiliatePayouts(
     affiliateId: FinanceAffiliateId,
     query: FinancePayoutListQuery,
+    organizationId: string,
   ): Promise<Omit<FinanceAffiliatePayoutListResponse, "contractVersion" | "affiliateId"> | null>;
+
+  getAffiliatePayoutDetail?(
+    affiliateId: FinanceAffiliateId,
+    organizationId: string,
+    payoutId: string,
+    currency: FinanceCurrencyCode,
+  ): Promise<FinanceAffiliatePayoutDetail | null>;
 };
 
 export type FinancePropertyReadRepository = FinancePropertySettingsReadRepository &

@@ -51,7 +51,7 @@ const AFFILIATE_PAYOUT_FACTS = `
     FROM finance.payouts payout
     JOIN identity.organizations organization
       ON organization.id = payout.organization_id
-     AND organization.kind = 'affiliate_partner'
+     AND organization.kind IN ('affiliate_partner', 'creator_workspace')
     LEFT JOIN finance.payout_settings settings
       ON settings.id = payout.payout_setting_id
      AND settings.organization_id = payout.organization_id

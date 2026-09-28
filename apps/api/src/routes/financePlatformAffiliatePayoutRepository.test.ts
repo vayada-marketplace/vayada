@@ -28,6 +28,9 @@ describe("Platform Finance affiliate payout reads", () => {
       expect.stringContaining('ORDER BY "affiliateId", currency'),
       [25, 0],
     );
+    expect(query.mock.calls[0]?.[0]).toContain(
+      "organization.kind IN ('affiliate_partner', 'creator_workspace')",
+    );
     expect(result).toEqual({
       summaries: [
         expect.objectContaining({
