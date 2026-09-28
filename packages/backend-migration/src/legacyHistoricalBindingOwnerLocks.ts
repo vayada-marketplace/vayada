@@ -52,7 +52,7 @@ export async function lockLegacyHistoricalBindingOwner(
     // Fixed code-owned identifiers only. NOWAIT fails rather than pausing live writers.
     await client.query(`LOCK TABLE ${tables.join(",")} IN SHARE MODE NOWAIT`);
     const access = await client.query<{ complete: boolean }>(
-      `SELECT count(*)=$2 AND bool_and(relkind='r' AND NOT relrowsecurity AND NOT relforcerowsecurity
+      `SELECT count(*)=$2 AND bool_and(relkind='r' AND NOT pg_catalog.row_security_active(c.oid)
         AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_inherits WHERE inhrelid=c.oid OR inhparent=c.oid)
         AND has_table_privilege(c.oid,'SELECT')) AS complete
        FROM pg_catalog.pg_class c WHERE c.oid=ANY($1::regclass[])`,
