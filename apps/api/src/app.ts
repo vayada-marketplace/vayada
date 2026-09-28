@@ -13,6 +13,7 @@ import {
   registerMarketplaceAffiliatePerformanceRoutes,
   type MarketplaceAffiliatePerformanceRoutesOptions,
 } from "./routes/marketplaceAffiliatePerformance.js";
+import { registerMarketplaceAffiliatePayoutRoutes } from "./routes/marketplaceAffiliatePayouts.js";
 import {
   registerChannexOfferPreviewRoutes,
   type ChannexOfferPreviewRoutesOptions,
@@ -615,6 +616,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   app.register(registerMarketplaceAffiliatePerformanceRoutes, {
     prefix: "/api/marketplace",
     ...options.marketplaceAffiliatePerformance,
+  });
+  app.register(registerMarketplaceAffiliatePayoutRoutes, {
+    prefix: "/api/marketplace",
+    repository: options.financeRepository,
   });
   if (options.marketplaceTripRepository) {
     app.register(registerMarketplaceTripRoutes, {
