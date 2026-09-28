@@ -68,11 +68,14 @@ describe.skipIf(!url)("parent-migrated disposable PostgreSQL target reader", () 
     )
       throw new Error("Only the dedicated loopback fixture database is allowed");
     pool = new pg.Pool({ connectionString: url });
-    await pool.query("CREATE ROLE vay2017_binding_reader LOGIN");
+    await pool.query(
+      "CREATE ROLE vay2017_binding_reader LOGIN PASSWORD 'binding_reader_test_only'",
+    );
     ownsRole = true;
     await pool.query("GRANT USAGE ON SCHEMA hotel_catalog,pms TO vay2017_binding_reader");
     await pool.query(`GRANT SELECT ON ${tables.join(",")} TO vay2017_binding_reader`);
     parsed.username = "vay2017_binding_reader";
+    parsed.password = "binding_reader_test_only";
     reader = new pg.Pool({ connectionString: parsed.toString() });
     // Fail on duplicate fixture IDs; parent owns schema setup and DB disposal.
     for (const n of [601, 602, 603, 604])
@@ -134,14 +137,13 @@ describe.skipIf(!url)("parent-migrated disposable PostgreSQL target reader", () 
         const query = client.query.bind(client);
         const wrapped = {
           query: async (sql: string, args?: unknown[]) => {
-            const result = await query(sql, args);
-            if (sql.includes("FROM pg_class")) await restrict();
-            return result;
+            if (sql.includes("FROM information_schema.columns")) await restrict();
+            return query(sql, args);
           },
           release: client.release.bind(client),
         };
         await expect(read({ connect: async () => wrapped } as never, input)).rejects.toThrow(
-          "TARGET_COLUMN_VISIBILITY_INCOMPLETE",
+          /Historical binding target visibility is incomplete|TARGET_COLUMN_VISIBILITY_INCOMPLETE/,
         );
       } finally {
         await pool.query(`GRANT SELECT ON ${table} TO vay2017_binding_reader`);

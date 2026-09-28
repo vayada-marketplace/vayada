@@ -27,7 +27,7 @@ export async function readLegacyHistoricalBindingTargetSnapshot(
     await client.query(`LOCK TABLE hotel_catalog.properties, pms.channel_binding_claims,
       pms.channel_connections IN ACCESS SHARE MODE`);
     const access = await client.query<{ complete: boolean }>(
-      `SELECT count(*) = 3 AND bool_and(NOT c.relrowsecurity
+      `SELECT count(*) = 3 AND bool_and(NOT pg_catalog.row_security_active(c.oid)
         AND has_table_privilege(c.oid, 'SELECT')) AS complete
        FROM pg_class c WHERE c.oid = ANY(ARRAY[
          'hotel_catalog.properties'::regclass, 'pms.channel_binding_claims'::regclass,
