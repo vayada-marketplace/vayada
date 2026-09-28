@@ -8,6 +8,7 @@ import {
 } from "./affiliatePublicationCommandTestFixture.js";
 import {
   AFFILIATE_DESTINATION_TRACKING_READINESS_POLICY_VERSION,
+  readAffiliateDestinationTrackingConfiguration,
   readAffiliateDestinationTrackingReadiness,
 } from "./bookingAffiliateDestinationTrackingReadiness.js";
 import { AFFILIATE_REFERRAL_READINESS_MAX_AGE_SECONDS } from "./bookingAffiliateReferralReadiness.js";
@@ -217,6 +218,54 @@ describe.skipIf(!databaseUrl)("aggregate affiliate destination tracking readines
       client.release();
     }
   }
+
+  async function readConfiguration() {
+    const client = await fixture.pool().connect();
+    try {
+      await client.query("BEGIN");
+      const result = await readAffiliateDestinationTrackingConfiguration(client, scope());
+      await client.query("ROLLBACK");
+      return result;
+    } finally {
+      client.release();
+    }
+  }
+
+  it("selects the exact current Booking configuration for all tracking purposes", async () => {
+    await insertAllEvidence();
+    await expect(readConfiguration()).resolves.toEqual({
+      certificationEnvironment: "sandbox",
+      purposes: Object.fromEntries(
+        AFFILIATE_TRACKING_PURPOSES.map((purpose) => [purpose, configuration(purpose)]),
+      ),
+    });
+  });
+
+  it("fails closed when one purpose has ambiguous production configuration", async () => {
+    await insertAllEvidence();
+    const capability = "stay_completion";
+    await fixture.pool().query(
+      `INSERT INTO booking.affiliate_source_capability_production_preflights
+      (id,property_id,destination_version_id,organization_id,connection_reference,adapter_version,
+       capability,assertion,evidence_fingerprint_hash,contract_version,evidence_references,
+       actor_id,request_id,completed_at)
+      VALUES($1,$2,$3,$4,'another-live',$5,$6,$7,$8,
+       'booking-affiliate-source-capability-production-preflight.v1','["production"]',$9,
+       'ambiguous','infinity')`,
+      [
+        id(90),
+        id(3),
+        id(30),
+        id(4),
+        configuration(capability).adapterVersion,
+        capability,
+        preflightAssertions[capability],
+        digest(id(90), "e"),
+        id(1),
+      ],
+    );
+    await expect(readConfiguration()).resolves.toBeUndefined();
+  });
 
   it("requires one current certification and preflight for every purpose", async () => {
     await insertAllEvidence();

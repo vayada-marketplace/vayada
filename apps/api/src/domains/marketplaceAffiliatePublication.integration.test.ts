@@ -15,6 +15,7 @@ import {
 } from "./marketplaceAffiliatePublication.js";
 import { createAffiliatePublicationPrerequisites } from "./marketplaceAffiliatePublicationPrerequisites.js";
 import type { AffiliateDestinationTrackingReadinessInput } from "./bookingAffiliateDestinationTrackingReadiness.js";
+import { readFinanceAffiliateCommercialConditions } from "./financeAffiliateCommercialConditions.js";
 
 // Synthetic owner-domain proof only; not a live adapter or real provider validation.
 const ready: AffiliatePublicationPrerequisites = async (_client, scope) => ({
@@ -83,12 +84,7 @@ describe.skipIf(!databaseUrl)("affiliate publication command", () => {
       ]),
     ) as AffiliateDestinationTrackingReadinessInput["purposes"];
     const resolve = createAffiliatePublicationPrerequisites({
-      commercialConditions: async () => ({
-        status: "ready",
-        conditionsText: "Complete creator-visible conditions",
-        attributionPolicyVersion: "last-eligible-click.v1",
-        evidenceReferences: ["commercial:conditions:1"],
-      }),
+      commercialConditions: readFinanceAffiliateCommercialConditions,
       trackingConfiguration: async () => ({
         certificationEnvironment: "sandbox",
         purposes,
@@ -123,7 +119,8 @@ describe.skipIf(!databaseUrl)("affiliate publication command", () => {
         .query("SELECT evidence_references FROM marketplace.affiliate_published_terms")
     ).rows[0];
     expect(stored.evidence_references).toEqual([
-      "commercial:conditions:1",
+      `finance:affiliate-percentage-policy:${terms.financePolicyVersionId}`,
+      `pms:pricing-currency:${id(3)}:1`,
       ...AFFILIATE_TRACKING_PURPOSES.map(
         (purpose, index) =>
           `booking:affiliate-destination-capability-readiness:${purpose}:` +
