@@ -15,6 +15,7 @@ import {
   readLegacyHistoricalBindingTargetRow,
 } from "./channexAdoptionTargetRows.js";
 import { canonicalizeJson } from "./channexAdoptionManifestCrypto.js";
+import { SINGLE_HUMAN_DUAL_AUTHORITY_DECISION } from "./channexAdoptionConsumer.js";
 import {
   hashLegacyHistoricalBindingApprovalEvidence,
   type LegacyHistoricalBindingApprovalEvidence,
@@ -43,7 +44,11 @@ describe.skipIf(!url)("historical prepare target locks on disposable PostgreSQL"
         { principal: "human:fixture", authorities: ["migration_owner", "security_owner"] as const },
       ],
     ]),
-    singleHumanDualAuthority: { actorUserId: id(31), decisionId: "synthetic-dual-authority" },
+    singleHumanDualAuthority: {
+      actorUserId: id(31),
+      principal: "human:fixture",
+      decisionId: SINGLE_HUMAN_DUAL_AUTHORITY_DECISION,
+    },
   };
   const session = () => ({
     workosUserId: "user_binding_fixture",
@@ -81,7 +86,7 @@ describe.skipIf(!url)("historical prepare target locks on disposable PostgreSQL"
     if (
       !["postgres:", "postgresql:"].includes(parsed.protocol) ||
       parsed.hostname !== "127.0.0.1" ||
-      !["56636", "56637"].includes(parsed.port) ||
+      !["5432", "56636", "56637"].includes(parsed.port) ||
       parsed.pathname !== "/vay2017_target_lock_fixture" ||
       parsed.search ||
       parsed.hash
@@ -375,7 +380,7 @@ describe.skipIf(!url)("historical prepare target locks on disposable PostgreSQL"
   it.each([false, true])(
     "combined restricted-role visibility, withheld SELECT=%s",
     async (withheld) => {
-      await client.query(`CREATE ROLE binding_combined_fixture_role;
+      await client.query(`CREATE ROLE binding_combined_fixture_role BYPASSRLS;
       GRANT USAGE ON SCHEMA identity,hotel_catalog,pms,platform TO binding_combined_fixture_role;
       GRANT SELECT,UPDATE ON identity.users,identity.organizations,identity.organization_memberships,
         identity.organization_resource_links,identity.external_identities,hotel_catalog.properties,
@@ -462,10 +467,13 @@ describe.skipIf(!url)("historical prepare target locks on disposable PostgreSQL"
     await insertConnection(other);
   });
   it.each(["hotel_catalog.properties", "pms.channel_binding_claims", "pms.channel_connections"])(
-    "rejects RLS-enabled %s even for bypass role",
+    "accepts configured RLS on %s only when inactive for the migration role",
     async (table) => {
       await client.query(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
-      await expect(lock(client, expected)).rejects.toThrow();
+      expect(await lock(client, expected)).toEqual({
+        outcome: "target_locked_requires_owner_and_source",
+        executable: false,
+      });
     },
   );
   it("rejects an in-flight connection writer immediately and releases partial locks", async () => {

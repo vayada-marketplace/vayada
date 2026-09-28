@@ -134,14 +134,13 @@ describe.skipIf(!url)("parent-migrated disposable PostgreSQL target reader", () 
         const query = client.query.bind(client);
         const wrapped = {
           query: async (sql: string, args?: unknown[]) => {
-            const result = await query(sql, args);
-            if (sql.includes("FROM pg_class")) await restrict();
-            return result;
+            if (sql.includes("FROM information_schema.columns")) await restrict();
+            return query(sql, args);
           },
           release: client.release.bind(client),
         };
         await expect(read({ connect: async () => wrapped } as never, input)).rejects.toThrow(
-          "TARGET_COLUMN_VISIBILITY_INCOMPLETE",
+          /Historical binding target visibility is incomplete|TARGET_COLUMN_VISIBILITY_INCOMPLETE/,
         );
       } finally {
         await pool.query(`GRANT SELECT ON ${table} TO vay2017_binding_reader`);

@@ -88,15 +88,13 @@ export function verifyLegacyHistoricalBindingEnvelope(input: {
     envelope.migrationApprovalRecordId === envelope.securityApprovalRecordId
   )
     return fail("invalid_authority_records");
-  if (
-    !(
-      (envelope.purpose === "prepare" && envelope.originalPrepareCommandId === null) ||
-      (envelope.purpose === "compensate" &&
-        typeof envelope.originalPrepareCommandId === "string" &&
-        UUID.test(envelope.originalPrepareCommandId) &&
-        envelope.originalPrepareCommandId !== envelope.commandId)
-    )
-  )
+  if (!(
+    (envelope.purpose === "prepare" && envelope.originalPrepareCommandId === null) ||
+    (envelope.purpose === "compensate" &&
+      typeof envelope.originalPrepareCommandId === "string" &&
+      UUID.test(envelope.originalPrepareCommandId) &&
+      envelope.originalPrepareCommandId !== envelope.commandId)
+  ))
     return fail("invalid_purpose");
   const timestamp = (value: string) => {
     const date = new Date(value);
