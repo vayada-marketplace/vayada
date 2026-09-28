@@ -1,8 +1,9 @@
 import { createElement } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, expect, it, vi } from "vitest";
+import { ApiErrorResponse } from "@/services/api/client";
 import { AffiliateOfferTermsEditor } from "./AffiliateOfferTermsEditor";
-const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }));
+const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), post: vi.fn() }));
 vi.mock("@/services/api/targetClient", () => ({ targetApiClient: api }));
 let renderer: ReactTestRenderer;
 const terms = {
@@ -213,4 +214,55 @@ it("uses a fresh retry key when the destination changes after a failed save", as
   expect(changed?.[2].headers["Idempotency-Key"]).not.toBe(
     original?.[2].headers["Idempotency-Key"],
   );
+});
+
+it("publishes only the exact loaded draft and retains the accepted version", async () => {
+  await mount();
+  api.post.mockResolvedValue({
+    ok: true,
+    termsVersionId: "accepted-version",
+    programId: "program",
+    replayed: false,
+  });
+  const publish = button("Publish affiliate terms");
+  expect(publish.props.disabled).toBe(false);
+  await act(async () => publish.props.onClick());
+  expect(api.post).toHaveBeenCalledWith(
+    "/api/marketplace/properties/property/offers/offer/affiliate-publications",
+    { draftId: "draft", expectedRevision: 3 },
+    { headers: { "Idempotency-Key": expect.any(String) } },
+  );
+  expect(JSON.stringify(renderer.toJSON())).toContain("accepted-version");
+  expect(button("Affiliate terms published").props.disabled).toBe(true);
+
+  await edit("input", "30");
+  expect(api.post).toHaveBeenCalledTimes(1);
+});
+
+it("holds the publication key for an ambiguous retry and explains blocked prerequisites", async () => {
+  await mount();
+  api.post.mockRejectedValueOnce(new Error("network")).mockRejectedValueOnce(
+    new ApiErrorResponse(409, {
+      code: "publication_blocked",
+      reasons: ["settlement_currency_unavailable", "tracking_readiness_invalid"],
+    } as never),
+  );
+  await act(async () => button("Publish affiliate terms").props.onClick());
+  await act(async () => button("Publish affiliate terms").props.onClick());
+  expect(api.post.mock.calls[0]?.[2]).toEqual(api.post.mock.calls[1]?.[2]);
+  expect(renderer.root.findByProps({ role: "alert" }).children.join("")).toContain(
+    "Choose a settlement currency",
+  );
+  expect(renderer.root.findByProps({ role: "alert" }).children.join("")).toContain(
+    "Repair the affiliate tracking configuration",
+  );
+});
+
+it("requires saving changed selections before publication", async () => {
+  await mount();
+  await edit("select", "new");
+  expect(button("Publish affiliate terms").props.disabled).toBe(true);
+  expect(JSON.stringify(renderer.toJSON())).toContain("Save these changes before publishing");
+  await act(async () => button("Publish affiliate terms").props.onClick());
+  expect(api.post).not.toHaveBeenCalled();
 });

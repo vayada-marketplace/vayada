@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ApiErrorResponse } from "@/services/api/client";
 import { targetApiClient } from "@/services/api/targetClient";
 
 type Policy = { id: string; rateBasisPoints: number; approved: boolean };
@@ -29,6 +30,48 @@ type DraftRead = {
         };
   };
 };
+type Publication = { ok: true; termsVersionId: string; programId: string; replayed: boolean };
+
+const blockedReason = (reason: string) =>
+  ({
+    commission_policy_unavailable: "Save and approve a commission rate.",
+    settlement_currency_unavailable: "Choose a settlement currency in payout settings.",
+    settlement_currency_unsupported: "Choose a supported settlement currency in payout settings.",
+    commercial_conditions_unresolved: "Complete the affiliate commercial conditions.",
+    tracking_configuration_unavailable: "Configure affiliate tracking for this booking page.",
+    tracking_stay_completion_pending: "Finish the stay-completion tracking check.",
+    tracking_accommodation_revenue_pending: "Finish the accommodation-revenue tracking check.",
+    tracking_readiness_invalid: "Repair the affiliate tracking configuration.",
+  })[reason] ?? "Complete the missing publication prerequisite.";
+
+function publicationError(error: unknown): string {
+  if (!(error instanceof ApiErrorResponse)) return "Publication could not be confirmed. Retry.";
+  const reasons = (error.data as { reasons?: unknown }).reasons;
+  if (error.data.code === "publication_blocked" && Array.isArray(reasons)) {
+    const messages = Array.from(
+      new Set(reasons.filter((reason): reason is string => typeof reason === "string")),
+    )
+      .map(blockedReason)
+      .join(" ");
+    return messages || "Complete the missing publication prerequisites.";
+  }
+  return (
+    {
+      scope_unavailable: "You no longer have access to publish this property and offer.",
+      offer_not_verified: "The offer must be verified before affiliate terms can be published.",
+      revision_conflict: "A newer draft exists. Reload before publishing.",
+      idempotency_conflict: "This publication retry no longer matches. Reload before trying again.",
+      draft_already_published:
+        "This exact draft is already published. Save a new draft to update it.",
+      policy_unavailable: "The saved commission is unavailable. Select an approved rate and save.",
+      destination_unavailable:
+        "The saved booking page is unavailable. Select another page and save.",
+      attribution_window_exceeds_limit:
+        "The attribution window exceeds the approved limit. Shorten it and save.",
+      invalid_request: "This draft cannot be published. Reload it before trying again.",
+    }[error.data.code ?? ""] ?? "Publication could not be confirmed. Retry."
+  );
+}
 
 /** Mount with a property/offer key so pending requests cannot cross resource selections. */
 export function AffiliateOfferTermsEditor({
@@ -39,6 +82,7 @@ export function AffiliateOfferTermsEditor({
   offerId: string;
 }) {
   const path = `/api/marketplace/properties/${encodeURIComponent(propertyId)}/offers/${encodeURIComponent(offerId)}/affiliate-draft`;
+  const publicationPath = `/api/marketplace/properties/${encodeURIComponent(propertyId)}/offers/${encodeURIComponent(offerId)}/affiliate-publications`;
   const [loaded, setLoaded] = useState<DraftRead | null>(null);
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [destinations, setDestinations] = useState<Destination[]>([]);
@@ -48,13 +92,17 @@ export function AffiliateOfferTermsEditor({
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [publication, setPublication] = useState<Publication | null>(null);
   const [reload, setReload] = useState(0);
   const attempt = useRef<{ payload: string; key: string } | null>(null);
+  const publicationAttempt = useRef<{ payload: string; key: string } | null>(null);
   useEffect(() => {
     let active = true;
     setBusy(true);
     setLoaded(null);
     setError("");
+    setPublication(null);
+    publicationAttempt.current = null;
     void Promise.all([
       targetApiClient.get<DraftRead>(path),
       targetApiClient.get<{ policies: Policy[] }>(
@@ -148,6 +196,36 @@ export function AffiliateOfferTermsEditor({
       setError(
         "Save could not be confirmed. Retry the same selection, or reload to check for changes before editing again.",
       );
+      setBusy(false);
+    }
+  }
+  const unchanged = Boolean(
+    loaded?.draft &&
+    destinationId === loaded.draft.terms.bookingDestinationId &&
+    policyId === loaded.draft.terms.financePolicyVersionId &&
+    days === String(loaded.draft.terms.attributionWindowDays),
+  );
+  async function publish() {
+    if (busy || !loaded?.draft || !unchanged || publication) return;
+    const payload = { draftId: loaded.draft.id, expectedRevision: loaded.revision };
+    const serialized = JSON.stringify(payload);
+    if (publicationAttempt.current?.payload !== serialized)
+      publicationAttempt.current = { payload: serialized, key: crypto.randomUUID() };
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const result = await targetApiClient.post<Publication>(publicationPath, payload, {
+        headers: { "Idempotency-Key": publicationAttempt.current.key },
+      });
+      publicationAttempt.current = null;
+      setPublication(result);
+      setMessage(
+        `Affiliate terms version ${result.termsVersionId} published. Existing agreements keep their accepted version.`,
+      );
+    } catch (error) {
+      setError(publicationError(error));
+    } finally {
       setBusy(false);
     }
   }
@@ -276,6 +354,17 @@ export function AffiliateOfferTermsEditor({
           >
             Save affiliate draft
           </button>
+          <button
+            type="button"
+            disabled={busy || !unchanged || Boolean(publication)}
+            onClick={() => void publish()}
+            className="ml-2 rounded-lg border border-primary-600 px-4 py-2 text-sm font-semibold text-primary-700 disabled:opacity-50"
+          >
+            {publication ? "Affiliate terms published" : "Publish affiliate terms"}
+          </button>
+          {!unchanged && loaded.draft && (
+            <p className="text-sm text-gray-600">Save these changes before publishing.</p>
+          )}
         </>
       )}
       <button
