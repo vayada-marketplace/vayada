@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { AuthenticatedNavigation } from "@/components/layout";
 import { useSidebar } from "@/components/layout/AuthenticatedNavigation";
+import { AffiliatePayouts } from "@/components/marketplace/AffiliatePayouts";
 import { resolveMarketplaceSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import {
   AFFILIATE_PERFORMANCE_PERIODS,
@@ -158,6 +159,7 @@ export default function EarningsPage() {
           ) : result ? (
             <Performance result={result} loadingMore={loadingMore} onLoadMore={loadMore} />
           ) : null}
+          {authService.getUserType() === "creator" && <AffiliatePayouts />}
         </div>
       </div>
     </main>

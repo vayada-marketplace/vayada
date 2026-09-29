@@ -45,6 +45,7 @@ export async function readLegacyHistoricalBindingSourceProof(
     throw new Error("Invalid historical connection source request");
   const client = await pool.connect();
   let discard = false;
+  let primaryError: unknown;
   try {
     // Dedicated reader pool: never reuse an earlier caller's snapshot or writes.
     await client.query("ROLLBACK");
@@ -113,12 +114,15 @@ export async function readLegacyHistoricalBindingSourceProof(
       sourceRunId: expected.sourceRunId,
       sourceConnections: Object.freeze([Object.freeze(row)]),
     });
+  } catch (error) {
+    primaryError = error;
+    throw error;
   } finally {
     try {
       await client.query("ROLLBACK");
     } catch (error) {
       discard = true;
-      throw error;
+      if (primaryError === undefined) throw error;
     } finally {
       client.release(discard);
     }

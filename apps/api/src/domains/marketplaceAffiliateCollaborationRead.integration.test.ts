@@ -6,6 +6,7 @@ import {
 } from "./affiliateAssentCommandTestFixture.js";
 import { databaseUrl, id } from "./affiliatePublicationTestFixture.js";
 import { recordAffiliateAssent } from "./marketplaceAffiliateAssentCommand.js";
+import type { AffiliateAgreementActivationReadiness } from "./marketplaceAffiliateAgreementActivation.js";
 import {
   changeCollaborationAffiliateLifecycle,
   recordCollaborationAffiliateAssent,
@@ -213,14 +214,32 @@ describe.skipIf(!databaseUrl)("Affiliate assent through existing collaboration",
   it("records each side against the collaboration's current pinned terms", async () => {
     const creator = assentInput(false).context;
     const hotel = assentInput().context;
+    const ready: AffiliateAgreementActivationReadiness = async (_client, activationScope) => ({
+      status: "ready",
+      scope: activationScope,
+      enrollmentOpen: true,
+      evidenceReferences: ["fresh-finance-and-booking-proof"],
+    });
     expect(
-      await recordCollaborationAffiliateAssent(fixture.pool(), creator, key, "creator-decision"),
+      await recordCollaborationAffiliateAssent(
+        fixture.pool(),
+        creator,
+        key,
+        "creator-decision",
+        ready,
+      ),
     ).toMatchObject({ ok: true, revision: 1, state: "pending", replayed: false });
     expect(
-      await recordCollaborationAffiliateAssent(fixture.pool(), creator, key, "creator-decision"),
+      await recordCollaborationAffiliateAssent(
+        fixture.pool(),
+        creator,
+        key,
+        "creator-decision",
+        ready,
+      ),
     ).toMatchObject({ ok: true, revision: 1, replayed: true });
     expect(
-      await recordCollaborationAffiliateAssent(fixture.pool(), hotel, key, "hotel-decision"),
+      await recordCollaborationAffiliateAssent(fixture.pool(), hotel, key, "hotel-decision", ready),
     ).toMatchObject({ ok: true, revision: 2, state: "matched" });
 
     const retained = await readCollaborationAffiliateAssent(fixture.pool(), context(), key);
@@ -230,7 +249,51 @@ describe.skipIf(!databaseUrl)("Affiliate assent through existing collaboration",
       propertyId: id(3),
       programId: id(50),
       creatorProfileId: id(82),
+      lifecycle: { status: "active", revision: 0, pausedBy: [] },
     });
+    expect(
+      await fixture
+        .pool()
+        .query("SELECT count(*)::int AS count FROM marketplace.affiliate_agreement_activations"),
+    ).toMatchObject({ rows: [{ count: 1 }] });
+  });
+  it("returns activation blockage and activates on an exact-key retry once ready", async () => {
+    const creator = assentInput(false).context;
+    const hotel = assentInput().context;
+    const blocked: AffiliateAgreementActivationReadiness = async () => ({
+      status: "blocked",
+      reasons: ["destination_unavailable"],
+    });
+    const ready: AffiliateAgreementActivationReadiness = async (_client, activationScope) => ({
+      status: "ready",
+      scope: activationScope,
+      enrollmentOpen: true,
+      evidenceReferences: ["fresh-proof"],
+    });
+    await recordCollaborationAffiliateAssent(
+      fixture.pool(),
+      creator,
+      key,
+      "creator-decision",
+      ready,
+    );
+    expect(
+      await recordCollaborationAffiliateAssent(
+        fixture.pool(),
+        hotel,
+        key,
+        "hotel-decision",
+        blocked,
+      ),
+    ).toEqual({ ok: false, code: "activation_blocked" });
+    expect(
+      await recordCollaborationAffiliateAssent(fixture.pool(), hotel, key, "hotel-decision", ready),
+    ).toMatchObject({ ok: true, state: "matched", replayed: true });
+    expect(
+      await fixture
+        .pool()
+        .query("SELECT count(*)::int AS count FROM marketplace.affiliate_agreement_activations"),
+    ).toMatchObject({ rows: [{ count: 1 }] });
   });
   it("does not create assent for an ambiguous or cross-tenant collaboration", async () => {
     const creator = assentInput(false).context;
