@@ -202,7 +202,6 @@ describe.skipIf(!url)("ownership reader on disposable local PostgreSQL", () => {
   it.each([
     "UPDATE identity.users SET status='suspended'",
     "UPDATE identity.organization_memberships SET user_id='00000000-0000-4000-8000-000000000098'",
-    "ALTER TABLE identity.users FORCE ROW LEVEL SECURITY",
     "CREATE TABLE identity.owner_test_child () INHERITS (identity.users)",
     "INSERT INTO identity.external_identities SELECT '00000000-0000-4000-8000-000000000098', user_id, provider, 'another_owner', raw_profile FROM identity.external_identities",
   ])("rejects ownership or relation drift: %s", async (sql) => {
@@ -214,6 +213,35 @@ describe.skipIf(!url)("ownership reader on disposable local PostgreSQL", () => {
       ).rejects.toThrow("HISTORICAL_OWNER_LOCK_OR_EVIDENCE_FAILED");
     } finally {
       await client.query("ROLLBACK");
+    }
+  });
+  it("rejects an RLS-hidden owner relation for a restricted role", async () => {
+    const role = "historical_owner_fixture_role";
+    const tables = [
+      ...new Set([...Object.values(LEGACY_OWNERSHIP_ROW_TABLES), "identity.external_identities"]),
+    ];
+    await client.query(`CREATE ROLE ${role};
+      GRANT USAGE ON SCHEMA identity,hotel_catalog TO ${role};
+      GRANT SELECT,UPDATE ON ${tables.join(",")} TO ${role}`);
+    await beginBounded();
+    await client.query(`SET LOCAL ROLE ${role}; LOCK TABLE identity.users IN SHARE MODE NOWAIT`);
+    await client.query("ROLLBACK");
+    await client.query(`
+      ALTER TABLE identity.users ENABLE ROW LEVEL SECURITY;
+      CREATE POLICY fixture_hidden ON identity.users TO ${role} USING (false)`);
+    await beginBounded();
+    try {
+      await client.query(`SET LOCAL ROLE ${role}`);
+      expect((await client.query("SELECT 1 FROM identity.users")).rowCount).toBe(0);
+      await expect(
+        lockLegacyHistoricalBindingOwner(client, ownerRequest(), verifiedSession()),
+      ).rejects.toThrow("HISTORICAL_OWNER_LOCK_OR_EVIDENCE_FAILED");
+    } finally {
+      await client.query("ROLLBACK");
+      await client.query(`DROP POLICY fixture_hidden ON identity.users;
+        ALTER TABLE identity.users DISABLE ROW LEVEL SECURITY;
+        DROP OWNED BY ${role};
+        DROP ROLE ${role}`);
     }
   });
   it.each(["expired", "wrong_owner", "wrong_org"])(
