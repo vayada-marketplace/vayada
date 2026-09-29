@@ -83,6 +83,7 @@ import { createPgHotelCatalogStep1Repository } from "./domains/hotelCatalogStep1
 import { createPgAffiliatePerformanceReadModel } from "./domains/affiliatePerformanceReadModel.js";
 import { createPgFinanceAffiliatePercentagePolicyRepository } from "./domains/financeAffiliatePercentagePolicyRepository.js";
 import { createPgMarketplaceAffiliateDraftRepository } from "./domains/marketplaceAffiliateDraftRepository.js";
+import { createPgAffiliateDiscrepancyRepository } from "./domains/affiliateDiscrepancyRepository.js";
 import { createPgMarketplaceHotelCollaborationPreferencesRepository } from "./domains/marketplaceHotelCollaborationPreferencesRepository.js";
 import { createPgMarketplaceCommunicationPreferencesRepository } from "./domains/marketplaceCommunicationPreferencesRepository.js";
 import { createMarketplaceCommunicationUnsubscribeTokenService } from "./domains/marketplaceCommunicationUnsubscribeToken.js";
@@ -2015,6 +2016,8 @@ const app = buildApp({
   ),
   marketplaceAffiliateDraftRepository:
     createPgMarketplaceAffiliateDraftRepository(targetDatabaseUrl),
+  marketplaceAffiliateDiscrepancyRepository:
+    createPgAffiliateDiscrepancyRepository(targetDatabaseUrl),
   marketplaceAffiliatePublication: (() => {
     const pool = new pg.Pool({ connectionString: targetDatabaseUrl, max: 3 });
     const prerequisites = createAffiliatePublicationPrerequisites({

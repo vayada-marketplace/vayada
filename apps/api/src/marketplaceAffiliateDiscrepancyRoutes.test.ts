@@ -141,6 +141,207 @@ describe("Marketplace affiliate discrepancy routes", () => {
       expect(rejected.body).not.toContain("sensitive database detail");
     }
   });
+
+  it("allows hotel or platform resolution authority and denies creators", async () => {
+    const hotel = context(
+      "hotel_group",
+      id(30),
+      ["marketplace.collaboration.review"],
+      [
+        {
+          product: "marketplace",
+          resourceType: "hotel_profile",
+          resourceId: id(5),
+          relationship: "owner",
+          status: "active",
+        },
+      ],
+    );
+    hotel.entitlements = [
+      { product: "marketplace", key: "marketplace-hotel-profile", status: "active" },
+    ];
+    const hotelApp = await setup(hotel);
+    const resolved = await hotelApp.app.inject({
+      method: "POST",
+      url: `/affiliate-discrepancies/${claim.claimId}/resolution`,
+      headers: { "idempotency-key": "resolution-1" },
+      payload: resolutionPayload(),
+    });
+    expect(resolved.statusCode).toBe(201);
+    expect(hotelApp.repository.resolve).toHaveBeenCalledWith(
+      expect.objectContaining({
+        claimId: claim.claimId,
+        propertyId: id(5),
+        actorOrganizationId: id(30),
+        requestId: "request-1516",
+        resolution: expect.objectContaining({ decision: "denied", earningEntryId: null }),
+      }),
+    );
+
+    const platform = context(
+      "platform",
+      id(40),
+      ["platform.finance.manage"],
+      [
+        {
+          product: "platform",
+          resourceType: "platform",
+          resourceId: "vayada",
+          relationship: "finance_manager",
+          status: "active",
+        },
+      ],
+    );
+    platform.membership.roleKey = "finance_manager";
+    platform.entitlements = [
+      {
+        product: "platform",
+        key: "finance-admin",
+        status: "active",
+        resource: { product: "platform", resourceType: "platform", resourceId: "vayada" },
+      },
+    ];
+    const platformApp = await setup(platform);
+    expect(
+      (
+        await platformApp.app.inject({
+          method: "POST",
+          url: `/affiliate-discrepancies/${claim.claimId}/resolution`,
+          headers: { "idempotency-key": "resolution-2" },
+          payload: resolutionPayload(),
+        })
+      ).statusCode,
+    ).toBe(201);
+    expect(platformApp.repository.resolve).toHaveBeenCalledWith(
+      expect.objectContaining({ propertyId: null, actorOrganizationId: id(40) }),
+    );
+
+    const creatorApp = await setup(creator());
+    expect(
+      (
+        await creatorApp.app.inject({
+          method: "POST",
+          url: `/affiliate-discrepancies/${claim.claimId}/resolution`,
+          headers: { "idempotency-key": "resolution-3" },
+          payload: resolutionPayload(),
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(creatorApp.repository.resolve).not.toHaveBeenCalled();
+  });
+
+  it("denies wrong hotel scope, missing authority and evidence-free confirmation", async () => {
+    const hotel = context(
+      "hotel_group",
+      id(30),
+      ["marketplace.collaboration.review"],
+      [
+        {
+          product: "marketplace",
+          resourceType: "hotel_profile",
+          resourceId: id(5),
+          relationship: "owner",
+          status: "active",
+        },
+      ],
+    );
+    hotel.entitlements = [
+      { product: "marketplace", key: "marketplace-hotel-profile", status: "active" },
+    ];
+    const wrongProperty = await setup(hotel);
+    expect(
+      (
+        await wrongProperty.app.inject({
+          method: "POST",
+          url: `/affiliate-discrepancies/${claim.claimId}/resolution`,
+          headers: { "idempotency-key": "resolution-wrong-property" },
+          payload: { ...resolutionPayload(), propertyId: id(6) },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(wrongProperty.repository.resolve).not.toHaveBeenCalled();
+
+    const missingEntitlement = structuredClone(hotel);
+    missingEntitlement.entitlements = [];
+    const noEntitlement = await setup(missingEntitlement);
+    expect(
+      (
+        await noEntitlement.app.inject({
+          method: "POST",
+          url: `/affiliate-discrepancies/${claim.claimId}/resolution`,
+          headers: { "idempotency-key": "resolution-no-entitlement" },
+          payload: resolutionPayload(),
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(noEntitlement.repository.resolve).not.toHaveBeenCalled();
+
+    const invalidEvidence = await setup(hotel);
+    expect(
+      (
+        await invalidEvidence.app.inject({
+          method: "POST",
+          url: `/affiliate-discrepancies/${claim.claimId}/resolution`,
+          headers: { "idempotency-key": "resolution-no-evidence" },
+          payload: {
+            propertyId: id(5),
+            decision: "confirmed_earning",
+            reason: "Commission granted",
+            evidenceReferences: [],
+            earningEntryId: id(70),
+          },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(invalidEvidence.repository.resolve).not.toHaveBeenCalled();
+
+    const platform = context(
+      "platform",
+      id(40),
+      [],
+      [
+        {
+          product: "platform",
+          resourceType: "platform",
+          resourceId: "vayada",
+          relationship: "finance_manager",
+          status: "active",
+        },
+      ],
+    );
+    platform.membership.roleKey = "finance_manager";
+    platform.entitlements = [
+      {
+        product: "platform",
+        key: "finance-admin",
+        status: "active",
+        resource: { product: "platform", resourceType: "platform", resourceId: "vayada" },
+      },
+    ];
+    const noPlatformPermission = await setup(platform);
+    expect(
+      (
+        await noPlatformPermission.app.inject({
+          method: "POST",
+          url: `/affiliate-discrepancies/${claim.claimId}/resolution`,
+          headers: { "idempotency-key": "resolution-no-platform-permission" },
+          payload: resolutionPayload(),
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(noPlatformPermission.repository.resolve).not.toHaveBeenCalled();
+
+    const anonymous = await setup(null);
+    expect(
+      (
+        await anonymous.app.inject({
+          method: "POST",
+          url: "/affiliate-discrepancies/not-a-uuid/resolution",
+          payload: {},
+        })
+      ).statusCode,
+    ).toBe(401);
+  });
 });
 
 function validPayload() {
@@ -152,6 +353,15 @@ function validPayload() {
     payoutId: null,
     message: "Missing commission",
     evidenceReferences: ["creator-note-1"],
+  };
+}
+
+function resolutionPayload() {
+  return {
+    propertyId: id(5),
+    decision: "denied",
+    reason: "Attribution evidence does not support the claim",
+    evidenceReferences: ["review-note-1516"],
   };
 }
 
@@ -169,6 +379,9 @@ async function setup(context: RequestContext | null) {
       .mockResolvedValue({ claim, replayed: false }),
     list: vi.fn<AffiliateDiscrepancyRepository["list"]>().mockResolvedValue([claim]),
     get: vi.fn<AffiliateDiscrepancyRepository["get"]>().mockResolvedValue(claim),
+    resolve: vi
+      .fn<AffiliateDiscrepancyRepository["resolve"]>()
+      .mockResolvedValue({ ok: true, claim: { ...claim, status: "denied" }, replayed: false }),
     close: vi.fn().mockResolvedValue(undefined),
   };
   await app.register(registerMarketplaceAffiliateDiscrepancyRoutes, { repository });
