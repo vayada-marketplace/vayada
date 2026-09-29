@@ -225,6 +225,7 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
           booking.fixed_charge_heads, booking.fixed_charge_revisions TO {roles};
         GRANT SELECT, UPDATE ON finance.payment_settings,
           finance.payment_provider_accounts, finance.online_card_execution_evidence TO {roles};
+        GRANT SELECT ON finance.online_card_readiness TO {roles};
         GRANT SELECT ON booking.pricing_v2_offer_terms TO {roles};
         GRANT SELECT ON booking.pricing_quotes,booking.pricing_authority_revisions,
           booking.pricing_authority_heads TO {roles};
@@ -311,6 +312,7 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
             + f" TO {PROVISIONER}"
         )
         sql(f"GRANT SELECT ON booking.pricing_v2_offer_terms TO {PROVISIONER}")
+        sql(f"GRANT SELECT ON finance.online_card_readiness TO {PROVISIONER}")
         # CREATEROLE receives ADMIN-only membership in a role it creates. It
         # can grant itself SET/INHERIT later, so the policy must deny this
         # provisioner despite its current lack of usable pricing privileges.
@@ -511,6 +513,23 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
                 )
                 == "1"
             )
+        assert "security_invoker=true" in sql(
+            "SELECT array_to_string(reloptions, ',') FROM pg_class WHERE oid='finance.online_card_readiness'::regclass"
+        )
+        for role, allowed_property in (
+            (OWNER_A, A), (PUBLIC_A, A), (READER_A, A),
+            (OWNER_B, B), (PUBLIC_B, B),
+        ):
+            for property_id in (A, B):
+                assert (
+                    sql(
+                        f"SELECT property_id FROM finance.online_card_readiness WHERE property_id='{property_id}'",
+                        role,
+                    )
+                    == (property_id if property_id == allowed_property else "")
+                )
+        assert sql("SELECT count(*) FROM finance.online_card_readiness", LEGACY) == "2"
+        assert sql("SELECT count(*) FROM finance.online_card_readiness", PROVISIONER) == "0"
         # Exercise the owner's actual joined membership/user/property lock, not
         # just independent table locks. The assigned-mode checks below use the
         # same relation set as the live authorization path.
@@ -608,6 +627,7 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
         sql("SELECT 1 FROM platform.pricing_runtime_property_scopes", LEGACY, denied=True)
         sql("BEGIN;" + quote(B, 11) + "ROLLBACK", LEGACY)
         sql(f"GRANT {OWNER_B} TO {OWNER_A},{LEGACY}")
+        assert sql("SELECT count(*) FROM finance.online_card_readiness", LEGACY) == "0"
         for table, row_id, column in (
             ("identity.organizations", ORG, "name"),
             ("identity.users", ACTOR, "email"),
@@ -798,6 +818,7 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
         )
         sql(quote(A, 8), PUBLIC_A, denied=True)
         assert sql(f"SELECT property_id FROM finance.payment_settings WHERE property_id='{A}'", PUBLIC_A) == ""
+        assert sql("SELECT count(*) FROM finance.online_card_readiness", PUBLIC_A) == "0"
         assert sql(f"SELECT property_id FROM booking.fixed_charge_heads WHERE property_id='{A}'", PUBLIC_A) == ""
         assert sql(f"SELECT property_id FROM booking.pricing_v2_offer_terms WHERE property_id='{A}'", PUBLIC_A) == ""
         print(
