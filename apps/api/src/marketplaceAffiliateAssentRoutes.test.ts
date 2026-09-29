@@ -28,6 +28,9 @@ async function setup(mutate: (c: RequestContext) => void = () => {}) {
     createLinkForCollaboration: vi
       .fn<AffiliateAssentRepository["createLinkForCollaboration"]>()
       .mockResolvedValue({ ok: false, code: "scope_unavailable" }),
+    diagnoseLinkForCollaboration: vi
+      .fn<AffiliateAssentRepository["diagnoseLinkForCollaboration"]>()
+      .mockResolvedValue({ ok: false, code: "scope_unavailable" }),
     close: vi.fn<AffiliateAssentRepository["close"]>().mockResolvedValue(undefined),
   };
   const app = Fastify();
@@ -316,6 +319,65 @@ describe("Affiliate assent HTTP read", () => {
     ).toBe(403);
     expect(denied.repository.createLinkForCollaboration).not.toHaveBeenCalled();
   });
+  it("runs a protected synthetic link diagnostic without claiming a purchase", async () => {
+    const { app, repository } = await setup((context) => {
+      context.membership.permissions.push("marketplace.collaboration.write");
+    });
+    repository.diagnoseLinkForCollaboration.mockResolvedValue({
+      ok: true,
+      contractVersion: "marketplace-affiliate-link-diagnostic.v1",
+      status: "ready",
+      association: "verified",
+      programStatus: "active",
+      destinationUrl: "https://alpine.next-booking.vayada.com/",
+      campaignLabel: "instagram.reel-1",
+      normalMetricsExcluded: true,
+      externalPurchaseVerified: false,
+    });
+    const url = "/collaborations/Existing:QA/affiliate-link/diagnostic";
+    const response = await app.inject({
+      method: "POST",
+      url,
+      headers,
+      payload: { campaignLabel: "instagram.reel-1" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: "ready",
+      normalMetricsExcluded: true,
+      externalPurchaseVerified: false,
+    });
+    expect(repository.diagnoseLinkForCollaboration).toHaveBeenCalledWith(
+      expect.any(Object),
+      "Existing:QA",
+      "instagram.reel-1",
+    );
+    for (const status of ["program_inactive", "destination_unavailable", "link_invalid"] as const) {
+      repository.diagnoseLinkForCollaboration.mockResolvedValueOnce({
+        ok: true,
+        contractVersion: "marketplace-affiliate-link-diagnostic.v1",
+        status,
+        association: "verified",
+        programStatus: status === "program_inactive" ? "paused" : "active",
+        destinationUrl: null,
+        campaignLabel: null,
+        normalMetricsExcluded: true,
+        externalPurchaseVerified: false,
+      });
+      expect(
+        (await app.inject({ method: "POST", url, headers, payload: { campaignLabel: null } })).json()
+          .status,
+      ).toBe(status);
+    }
+    for (const payload of [{}, { campaignLabel: 7 }, { campaignLabel: null, extra: true }])
+      expect((await app.inject({ method: "POST", url, headers, payload })).statusCode).toBe(422);
+    const denied = await setup();
+    expect(
+      (await denied.app.inject({ method: "POST", url, headers, payload: { campaignLabel: null } }))
+        .statusCode,
+    ).toBe(403);
+    expect(denied.repository.diagnoseLinkForCollaboration).not.toHaveBeenCalled();
+  });
   it("registers the production prefix and keeps upstream auth failures uncached", async () => {
     const repository = {
       read: vi.fn(),
@@ -323,6 +385,7 @@ describe("Affiliate assent HTTP read", () => {
       recordForCollaboration: vi.fn(),
       changeLifecycleForCollaboration: vi.fn(),
       createLinkForCollaboration: vi.fn(),
+      diagnoseLinkForCollaboration: vi.fn(),
       close: async () => {},
     };
     const app = buildApp({
