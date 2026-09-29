@@ -147,7 +147,7 @@ describe.skipIf(!databaseUrl)("affiliate reservation lifecycle publication", () 
               get(target, property) {
                 if (property === "release") return () => undefined;
                 if (property === "query")
-                  return (sql: string, values?: readonly unknown[]) => {
+                  return (sql: string, values?: unknown[]) => {
                     if (sql === "BEGIN") return target.query("SAVEPOINT booking_lifecycle");
                     if (sql === "COMMIT")
                       return target.query("RELEASE SAVEPOINT booking_lifecycle");
@@ -157,7 +157,7 @@ describe.skipIf(!databaseUrl)("affiliate reservation lifecycle publication", () 
                       throw new Error("fixture publication failure");
                     return target.query(sql, values);
                   };
-                const value = target[property as keyof pg.PoolClient];
+                const value = Reflect.get(target, property);
                 return typeof value === "function" ? value.bind(target) : value;
               },
             }),
