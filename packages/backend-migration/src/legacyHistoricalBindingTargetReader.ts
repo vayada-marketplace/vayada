@@ -28,7 +28,8 @@ async function assertRestrictedReaderIdentity(client: pg.PoolClient): Promise<vo
        AND rolvaliduntil>statement_timestamp()
        AND shobj_description(matched.oid,'pg_authid')=
          'vayada:vay2017-preflight:'||parts[2]||'-'||parts[3]||':'||parts[1]
-       AND NOT EXISTS(SELECT 1 FROM pg_auth_members WHERE member=matched.oid)
+       AND NOT EXISTS(SELECT 1 FROM pg_roles granted
+         WHERE granted.oid<>matched.oid AND pg_has_role(current_user,granted.oid,'MEMBER'))
      ) AS complete FROM matched`,
   );
   if (identity.rows[0]?.complete !== true)

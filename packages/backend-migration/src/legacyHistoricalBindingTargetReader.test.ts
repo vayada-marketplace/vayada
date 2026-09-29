@@ -189,6 +189,14 @@ describe.skipIf(!url)("parent-migrated disposable PostgreSQL target reader", () 
     ).toBe(3);
     expect((await read(reader, input)).claims).toHaveLength(2);
   });
+  it("does not require direct access to the hardened role-membership catalog", async () => {
+    await pool.query("REVOKE SELECT ON pg_catalog.pg_auth_members FROM PUBLIC");
+    try {
+      expect((await read(reader, input)).claims).toHaveLength(2);
+    } finally {
+      await pool.query("GRANT SELECT ON pg_catalog.pg_auth_members TO PUBLIC");
+    }
+  });
   it("rejects switched and scoped reader identities", async () => {
     const switched = await pool.connect();
     try {
