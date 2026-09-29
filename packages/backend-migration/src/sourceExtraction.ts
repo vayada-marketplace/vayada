@@ -136,6 +136,7 @@ export type SourceExtractionManifest = {
 
 export type SourceExtractionConfig = {
   manifest: SourceExtractionManifest;
+  attestationOwner?: string;
   sourceSchemaRevision: string;
   historicalInventoryText?: string;
   snapshotIdentifiers: Record<SourceDatabase, string>;
@@ -170,7 +171,7 @@ export class SourceExtractionError extends Error {
   }
 }
 
-async function readSourceProvenance(client: QueryClient) {
+async function readSourceProvenance(client: QueryClient, attestationOwner?: string) {
   const result = await client.query<{
     source_database: string;
     snapshot_identifier: string | null;
@@ -178,7 +179,7 @@ async function readSourceProvenance(client: QueryClient) {
   }>(SOURCE_PROVENANCE_SQL);
   const settings = result.rows[0];
   try {
-    const table = await readDatabaseAttestationTable(client);
+    const table = await readDatabaseAttestationTable(client, attestationOwner);
     const resolved = resolveDatabaseAttestation(
       {
         [SOURCE_SNAPSHOT_ATTESTATION_KEY]: settings?.snapshot_identifier ?? null,
@@ -297,6 +298,15 @@ function isImmutableSnapshot(identifier: string, environment: ExtractionEnvironm
 }
 
 export function validateSourceExtractionConfig(config: SourceExtractionConfig): void {
+  if (
+    config.attestationOwner !== undefined &&
+    !/^[a-z_][a-z0-9_]{0,62}$/.test(config.attestationOwner)
+  ) {
+    throw new SourceExtractionError(
+      "INVALID_ATTESTATION_OWNER",
+      "source attestation owner is invalid",
+    );
+  }
   if (
     config.sourceSchemaRevision !== VAY_1350_INVENTORY_REVISION ||
     config.manifest.sourceSchemaRevision !== config.sourceSchemaRevision
@@ -775,7 +785,7 @@ export async function runSourceExtraction(
             `${sourceDatabase} source snapshot time is invalid`,
           );
         }
-        const attested = await readSourceProvenance(source);
+        const attested = await readSourceProvenance(source, config.attestationOwner);
         if (
           !attested ||
           attested.source_database !== approved.expectedDatabaseName ||

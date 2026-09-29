@@ -17,7 +17,7 @@ WITH evidence_relation AS (
 ), trusted_owner AS (
   SELECT role.*
   FROM pg_catalog.pg_roles role
-  WHERE role.rolname = '${DATABASE_ATTESTATION_OWNER}'
+  WHERE role.rolname = $1
 )
 SELECT EXISTS (SELECT 1 FROM evidence_relation) AS present,
        COALESCE(bool_and(
@@ -226,9 +226,14 @@ export class DatabaseAttestationError extends Error {
 
 export async function readDatabaseAttestationTable(
   client: QueryClient,
+  owner = DATABASE_ATTESTATION_OWNER,
 ): Promise<ReadonlyMap<string, string> | null> {
+  if (!/^[a-z_][a-z0-9_]{0,62}$/.test(owner)) {
+    throw new DatabaseAttestationError("UNTRUSTED_TABLE");
+  }
   const state = await client.query<{ present: boolean; trusted: boolean }>(
     DATABASE_ATTESTATION_TABLE_STATE_SQL,
+    [owner],
   );
   if (!state.rows[0]?.present) return null;
   if (state.rows[0].trusted !== true) throw new DatabaseAttestationError("UNTRUSTED_TABLE");
