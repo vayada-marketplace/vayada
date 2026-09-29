@@ -162,9 +162,10 @@ behavior intact.
 ## Required release proof
 
 1. Review this command, role, tenant-scope and rollback contract before
-   applying grants. Provision distinct non-owner, non-inheriting logins with
-   no schema/database CREATE, BYPASSRLS, unreviewed definer execution, or
-   unrelated writes or settable role memberships. Map only its named secret to
+   applying grants. Provision distinct non-owner `NOINHERIT` logins. A login may
+   inherit only a reviewed, non-settable `NOLOGIN` scope role for its own command;
+   it must have no schema/database CREATE, BYPASSRLS, unreviewed definer execution,
+   unrelated writes, or settable role memberships. Map only its named secret to
    the isolated command executor; fail closed if it is absent or equals the
    general runtime URL. Prove `SET ROLE` cannot escalate it.
 2. On fresh and upgraded PostgreSQL 16 and 17 schemas, execute the real PMS
