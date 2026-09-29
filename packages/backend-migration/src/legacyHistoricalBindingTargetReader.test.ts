@@ -7,6 +7,7 @@ import {
 import { readLegacyHistoricalBindingTargetSnapshot as read } from "./legacyHistoricalBindingTargetReader.js";
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const input = { propertyId: id(601), externalPropertyId: id(699) };
+const readerRole = "vay2017_preflight_prepare_123456789_1";
 
 describe("historical binding target boundary", () => {
   it("leaves the clean-adoption table boundary unchanged", async () => {
@@ -70,13 +71,24 @@ describe.skipIf(!url)("parent-migrated disposable PostgreSQL target reader", () 
     )
       throw new Error("Only the dedicated loopback fixture database is allowed");
     pool = new pg.Pool({ connectionString: url });
+    await pool.query(`CREATE ROLE ${readerRole} LOGIN PASSWORD 'binding_reader_test_only'
+      NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+      CONNECTION LIMIT 2 VALID UNTIL '${new Date(Date.now() + 3_600_000).toISOString()}'`);
     await pool.query(
-      "CREATE ROLE vay2017_binding_reader LOGIN PASSWORD 'binding_reader_test_only'",
+      `COMMENT ON ROLE ${readerRole} IS 'vayada:vay2017-preflight:123456789-1:prepare'`,
     );
     ownsRole = true;
-    await pool.query("GRANT USAGE ON SCHEMA hotel_catalog,pms TO vay2017_binding_reader");
-    await pool.query(`GRANT SELECT ON ${tables.join(",")} TO vay2017_binding_reader`);
-    parsed.username = "vay2017_binding_reader";
+    await pool.query(`GRANT USAGE ON SCHEMA hotel_catalog,pms TO ${readerRole}`);
+    await pool.query(`GRANT SELECT ON ${tables.join(",")} TO ${readerRole}`);
+    await pool.query(`CREATE ROLE vayada_next_channex_management_worker NOLOGIN NOINHERIT
+      NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`);
+    await pool.query(
+      "GRANT USAGE ON SCHEMA hotel_catalog,pms TO vayada_next_channex_management_worker",
+    );
+    await pool.query(
+      `GRANT SELECT ON ${tables.join(",")} TO vayada_next_channex_management_worker`,
+    );
+    parsed.username = readerRole;
     parsed.password = "binding_reader_test_only";
     reader = new pg.Pool({ connectionString: parsed.toString() });
     // Fail on duplicate fixture IDs; parent owns schema setup and DB disposal.
@@ -111,29 +123,41 @@ describe.skipIf(!url)("parent-migrated disposable PostgreSQL target reader", () 
   });
   afterAll(async () => {
     await reader?.end();
-    if (ownsRole)
-      await pool.query("DROP OWNED BY vay2017_binding_reader; DROP ROLE vay2017_binding_reader");
+    if (ownsRole) {
+      await pool.query(`DROP OWNED BY vayada_next_channex_management_worker;
+        DROP ROLE vayada_next_channex_management_worker`);
+      await pool.query(`DROP OWNED BY ${readerRole}; DROP ROLE ${readerRole}`);
+    }
     await pool?.end();
   });
   it.each([0, 1, 2])(
-    "rejects column-only/RLS visibility and post-check ACL loss on table %s",
+    "rejects column-only/filtering RLS visibility and post-check ACL loss on table %s",
     async (index) => {
       const table = tables[index]!;
       const restrict = async () => {
-        await pool.query(`REVOKE SELECT ON ${table} FROM vay2017_binding_reader`);
-        await pool.query(
-          `GRANT SELECT (${projections[index]}) ON ${table} TO vay2017_binding_reader`,
-        );
+        await pool.query(`REVOKE SELECT ON ${table} FROM ${readerRole}`);
+        await pool.query(`GRANT SELECT (${projections[index]}) ON ${table} TO ${readerRole}`);
       };
       try {
         await restrict();
         await expect(read(reader, input)).rejects.toMatchObject({ code: "42501" });
-        await pool.query(`GRANT SELECT ON ${table} TO vay2017_binding_reader`);
+        await pool.query(`GRANT SELECT ON ${table} TO ${readerRole}`);
+        const rlsWasEnabled = (
+          await pool.query<{ enabled: boolean }>(
+            "SELECT relrowsecurity AS enabled FROM pg_class WHERE oid=$1::regclass",
+            [table],
+          )
+        ).rows[0]!.enabled;
         await pool.query(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
+        await pool.query(
+          `CREATE POLICY vay2017_binding_reader_deny ON ${table} AS RESTRICTIVE
+             TO ${readerRole} USING (false)`,
+        );
         try {
           await expect(read(reader, input)).rejects.toThrow("visibility is incomplete");
         } finally {
-          await pool.query(`ALTER TABLE ${table} DISABLE ROW LEVEL SECURITY`);
+          await pool.query(`DROP POLICY vay2017_binding_reader_deny ON ${table}`);
+          if (!rlsWasEnabled) await pool.query(`ALTER TABLE ${table} DISABLE ROW LEVEL SECURITY`);
         }
         const client = await reader.connect();
         const query = client.query.bind(client);
@@ -148,11 +172,72 @@ describe.skipIf(!url)("parent-migrated disposable PostgreSQL target reader", () 
           /Historical binding target visibility is incomplete|TARGET_COLUMN_VISIBILITY_INCOMPLETE/,
         );
       } finally {
-        await pool.query(`GRANT SELECT ON ${table} TO vay2017_binding_reader`);
+        await pool.query(`GRANT SELECT ON ${table} TO ${readerRole}`);
       }
       expect(reader.totalCount).toBe(reader.idleCount);
     },
   );
+  it("accepts only the exact target RLS contract", async () => {
+    expect(
+      (
+        await pool.query<{ enabled: number }>(
+          `SELECT count(*)::int AS enabled FROM pg_class WHERE relrowsecurity
+             AND oid=ANY($1::regclass[])`,
+          [tables],
+        )
+      ).rows[0]!.enabled,
+    ).toBe(3);
+    expect((await read(reader, input)).claims).toHaveLength(2);
+  });
+  it("rejects switched and scoped reader identities", async () => {
+    const switched = await pool.connect();
+    try {
+      await switched.query("SET ROLE vayada_next_channex_management_worker");
+      await expect(
+        read(
+          {
+            connect: async () => ({
+              query: switched.query.bind(switched),
+              release: vi.fn(),
+            }),
+          } as never,
+          input,
+        ),
+      ).rejects.toThrow("visibility is incomplete");
+    } finally {
+      await switched.query("RESET ROLE");
+      switched.release();
+    }
+    await pool.query(`GRANT vayada_next_hotel_setup_scope TO ${readerRole}`);
+    try {
+      await expect(read(reader, input)).rejects.toThrow("visibility is incomplete");
+    } finally {
+      await pool.query(`REVOKE vayada_next_hotel_setup_scope FROM ${readerRole}`);
+    }
+  });
+  it("rejects a reader membership added after target rows are read", async () => {
+    const client = await reader.connect();
+    const query = client.query.bind(client);
+    let granted = false;
+    const wrapped = {
+      query: async (sql: string, args?: unknown[]) => {
+        const result = await query(sql, args);
+        if (!granted && sql.includes('FROM "pms"."channel_connections"')) {
+          await pool.query(`GRANT vayada_next_hotel_setup_scope TO ${readerRole}`);
+          granted = true;
+        }
+        return result;
+      },
+      release: client.release.bind(client),
+    };
+    try {
+      await expect(read({ connect: async () => wrapped } as never, input)).rejects.toThrow(
+        "visibility is incomplete",
+      );
+    } finally {
+      if (granted) await pool.query(`REVOKE vayada_next_hotel_setup_scope FROM ${readerRole}`);
+    }
+  });
   it("enumerates property, live-external and metadata-only competitors without truncation", async () => {
     const result = await read(pool, input);
     expect(result.property).toMatchObject({ id: id(601), profileStatus: "private" });
