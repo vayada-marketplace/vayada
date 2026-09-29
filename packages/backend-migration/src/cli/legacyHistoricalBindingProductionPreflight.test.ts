@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import pg from "pg";
 
+import { ChannexAdoptionConsumptionError } from "../channexAdoptionConsumptionError.js";
 import {
   cleanupExpiredRoles,
   cleanupRole,
@@ -11,10 +13,25 @@ import {
 describe("production historical binding preflight role cleanup", () => {
   it("reports only safe stage or PostgreSQL error codes", () => {
     expect(safeErrorCode(new Error("image_source_mismatch"))).toBe("image_source_mismatch");
+    const postgresError = new pg.DatabaseError("contains production detail", 0, "error");
+    postgresError.code = "55P03";
+    expect(safeErrorCode(postgresError)).toBe("postgres_55p03");
     expect(
-      safeErrorCode(Object.assign(new Error("contains production detail"), { code: "42501" })),
-    ).toBe("postgres_42501");
+      safeErrorCode(new ChannexAdoptionConsumptionError("SOURCE_RUN_MISMATCH", "detail")),
+    ).toBe("source_run_mismatch");
+    expect(safeErrorCode(new Error("Historical connection preparation target pair mismatch"))).toBe(
+      "historical_connection_preparation_target_pair_mismatch",
+    );
     expect(safeErrorCode(new Error("contains production detail"))).toBe(
+      "historical_binding_preflight_failed",
+    );
+    expect(safeErrorCode(new Error("vayada_target_prod"))).toBe(
+      "historical_binding_preflight_failed",
+    );
+    expect(safeErrorCode(Object.assign(new Error("detail"), { code: "CUSTOMER_ACME" }))).toBe(
+      "historical_binding_preflight_failed",
+    );
+    expect(safeErrorCode(Object.assign(new Error("detail"), { code: "EPIPE" }))).toBe(
       "historical_binding_preflight_failed",
     );
   });
