@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type pg from "pg";
 import { readLegacyHistoricalBindingTargetRow } from "./channexAdoptionTargetRows.js";
 import type { LegacyHistoricalBindingObserved } from "./legacyHistoricalBindingPreflight.js";
@@ -10,6 +11,29 @@ export type LegacyHistoricalBindingTargetSnapshot = {
   readonly connections: readonly Readonly<Connection>[];
 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+// Applicable SELECT/ALL policy inventory from the current PG16/17 migrations.
+const TARGET_SELECT_POLICY_SHA256 =
+  "1dbc9ef41f583b1c9903d4c69ca59930bd0be465b1f25a4ae4acbc7076007916";
+
+async function assertRestrictedReaderIdentity(client: pg.PoolClient): Promise<void> {
+  const identity = await client.query<{ complete: boolean }>(
+    `WITH matched AS (
+       SELECT r.*,regexp_match(r.rolname,
+         '^vay2017_preflight_(prepare|execute)_([0-9]{1,20})_([0-9]{1,3})$') AS parts
+       FROM pg_roles r WHERE r.rolname=current_user
+     ) SELECT count(*)=1 AND bool_and(
+       current_user=session_user AND parts IS NOT NULL AND rolcanlogin
+       AND NOT rolsuper AND NOT rolcreaterole AND NOT rolcreatedb AND NOT rolinherit
+       AND NOT rolbypassrls AND NOT rolreplication AND rolconnlimit=2
+       AND rolvaliduntil>statement_timestamp()
+       AND shobj_description(matched.oid,'pg_authid')=
+         'vayada:vay2017-preflight:'||parts[2]||'-'||parts[3]||':'||parts[1]
+       AND NOT EXISTS(SELECT 1 FROM pg_auth_members WHERE member=matched.oid)
+     ) AS complete FROM matched`,
+  );
+  if (identity.rows[0]?.complete !== true)
+    throw new Error("Historical binding target visibility is incomplete");
+}
 
 /** Owns one target-only read-only snapshot. No source proof, eligibility or execution. */
 export async function readLegacyHistoricalBindingTargetSnapshot(
@@ -21,20 +45,50 @@ export async function readLegacyHistoricalBindingTargetSnapshot(
     throw new Error("Invalid historical binding target identifiers");
   const client = await pool.connect();
   let discard = false;
+  let transactionOpen = false;
   let primaryError: unknown;
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    transactionOpen = true;
     // Hold relation definitions stable before checking privileges/RLS or hashing.
     await client.query(`LOCK TABLE hotel_catalog.properties, pms.channel_binding_claims,
       pms.channel_connections IN ACCESS SHARE MODE`);
-    const access = await client.query<{ complete: boolean }>(
-      `SELECT count(*) = 3 AND bool_and(NOT pg_catalog.row_security_active(c.oid)
-        AND has_table_privilege(c.oid, 'SELECT')) AS complete
+    const access = await client.query<{ complete: boolean; activeRlsCount: number }>(
+      `SELECT count(*) = 3 AND bool_and(has_table_privilege(c.oid, 'SELECT')
+        AND c.relrowsecurity AND NOT c.relforcerowsecurity) AS complete,
+        count(*) FILTER (WHERE row_security_active(c.oid))::int AS "activeRlsCount"
        FROM pg_class c WHERE c.oid = ANY(ARRAY[
          'hotel_catalog.properties'::regclass, 'pms.channel_binding_claims'::regclass,
          'pms.channel_connections'::regclass])`,
     );
     if (access.rows.length !== 1 || access.rows[0]?.complete !== true)
+      throw new Error("Historical binding target visibility is incomplete");
+    if (access.rows[0].activeRlsCount !== 0 && access.rows[0].activeRlsCount !== 3)
+      throw new Error("Historical binding target visibility is incomplete");
+    if (access.rows[0].activeRlsCount === 3) await assertRestrictedReaderIdentity(client);
+    const policies =
+      access.rows[0].activeRlsCount === 0
+        ? null
+        : await client.query(
+            `SELECT p.polrelid::regclass::text AS relation,p.polname AS name,
+         p.polpermissive AS permissive,p.polcmd AS command,
+         ARRAY(SELECT CASE WHEN role_oid=0 THEN 'public' ELSE r.rolname END
+           FROM unnest(p.polroles) role_oid LEFT JOIN pg_roles r ON r.oid=role_oid
+           ORDER BY 1) AS roles,
+         pg_get_expr(p.polqual,p.polrelid) AS qual,
+         pg_get_expr(p.polwithcheck,p.polrelid) AS "withCheck"
+       FROM pg_policy p WHERE p.polrelid=ANY(ARRAY[
+         'hotel_catalog.properties'::regclass, 'pms.channel_binding_claims'::regclass,
+         'pms.channel_connections'::regclass]) AND p.polcmd IN ('*','r')
+         AND EXISTS(SELECT 1 FROM unnest(p.polroles) role_oid
+           WHERE role_oid=0 OR pg_has_role(current_user,role_oid,'MEMBER'))
+       ORDER BY p.polrelid::regclass::text,p.polname`,
+          );
+    if (
+      policies !== null &&
+      createHash("sha256").update(JSON.stringify(policies.rows)).digest("hex") !==
+        TARGET_SELECT_POLICY_SHA256
+    )
       throw new Error("Historical binding target visibility is incomplete");
     const properties = await client.query<{ id: string; profileStatus: string }>(
       `SELECT id::text, profile_status AS "profileStatus"
@@ -103,6 +157,12 @@ export async function readLegacyHistoricalBindingTargetSnapshot(
           )),
         }),
       );
+    // End the row snapshot so the role recheck sees concurrent catalog changes.
+    if (access.rows[0].activeRlsCount === 3) {
+      await client.query("COMMIT");
+      transactionOpen = false;
+      await assertRestrictedReaderIdentity(client);
+    }
     return Object.freeze({
       property,
       claims: Object.freeze(claimRows),
@@ -113,7 +173,7 @@ export async function readLegacyHistoricalBindingTargetSnapshot(
     throw error;
   } finally {
     try {
-      await client.query("ROLLBACK");
+      if (transactionOpen) await client.query("ROLLBACK");
     } catch (error) {
       discard = true;
       if (primaryError === undefined) throw error;
