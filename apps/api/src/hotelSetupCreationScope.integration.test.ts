@@ -16,6 +16,7 @@ describe.skipIf(!url)("new hotel creation login scope", () => {
     const passwords = [randomUUID(), randomUUID()];
     const organizations = [randomUUID(), randomUUID()];
     const properties = [randomUUID(), randomUUID()];
+    const prelinkedProperty = randomUUID();
     const logins: pg.Pool[] = [];
     try {
       for (let index = 0; index < 2; index++) {
@@ -57,6 +58,35 @@ describe.skipIf(!url)("new hotel creation login scope", () => {
         );
         expect(row.rows[0]?.id).toBe(properties[index]);
       }
+
+      await admin.query(
+        `INSERT INTO identity.organization_resource_links
+           (organization_id, product, resource_type, resource_id, relationship, status)
+         VALUES ($1, 'hotel_catalog', 'property', $2, 'owner', 'active')`,
+        [organizations[1], prelinkedProperty],
+      );
+      await expect(
+        logins[0]!.query(
+          `INSERT INTO hotel_catalog.properties
+             (id, public_id, display_name, creation_organization_id)
+           VALUES ($1, $2, 'Prelinked hotel', $3)`,
+          [prelinkedProperty, `prelinked-${suffix}`, organizations[0]],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+      expect(
+        (
+          await logins[0]!.query("SELECT id FROM hotel_catalog.properties WHERE id = $1", [
+            prelinkedProperty,
+          ])
+        ).rows,
+      ).toEqual([]);
+      expect(
+        (
+          await logins[1]!.query("SELECT id FROM hotel_catalog.properties WHERE id = $1", [
+            prelinkedProperty,
+          ])
+        ).rows,
+      ).toEqual([]);
 
       expect(
         (
@@ -105,7 +135,33 @@ describe.skipIf(!url)("new hotel creation login scope", () => {
           [randomUUID(), `suspended-${suffix}`, organizations[0]],
         ),
       ).rejects.toMatchObject({ code: "42501" });
-      await admin.query(`REVOKE vayada_next_hotel_setup_scope FROM ${roles[0]}`);
+      await admin.query("UPDATE identity.organizations SET status = 'active' WHERE id = $1", [
+        organizations[0],
+      ]);
+      await admin.query(
+        `INSERT INTO identity.organization_resource_links
+           (organization_id, product, resource_type, resource_id, relationship, status)
+         VALUES ($1, 'hotel_catalog', 'property', $2, 'owner', 'active')`,
+        [organizations[0], properties[0]],
+      );
+      expect(
+        (
+          await logins[0]!.query("SELECT id FROM hotel_catalog.properties WHERE id = $1", [
+            properties[0],
+          ])
+        ).rows,
+      ).toEqual([{ id: properties[0] }]);
+      await admin.query(
+        `UPDATE identity.organization_resource_links SET status = 'suspended'
+         WHERE organization_id = $1 AND resource_id = $2`,
+        [organizations[0], properties[0]],
+      );
+      await admin.query(
+        `INSERT INTO identity.organization_resource_links
+           (organization_id, product, resource_type, resource_id, relationship, status)
+         VALUES ($1, 'hotel_catalog', 'property', $2, 'owner', 'active')`,
+        [organizations[1], properties[0]],
+      );
       expect(
         (
           await logins[0]!.query("SELECT id FROM hotel_catalog.properties WHERE id = $1", [
@@ -113,22 +169,72 @@ describe.skipIf(!url)("new hotel creation login scope", () => {
           ])
         ).rows,
       ).toEqual([]);
+      expect(
+        (
+          await logins[1]!.query("SELECT id FROM hotel_catalog.properties WHERE id = $1", [
+            properties[0],
+          ])
+        ).rows,
+      ).toEqual([{ id: properties[0] }]);
+      await admin.query("DELETE FROM identity.organization_resource_links WHERE resource_id = $1", [
+        properties[0],
+      ]);
+      expect(
+        (
+          await admin.query(
+            "SELECT 1 FROM platform.hotel_setup_linked_properties WHERE property_id = $1",
+            [properties[0]],
+          )
+        ).rowCount,
+      ).toBe(1);
+      expect(
+        (
+          await logins[0]!.query("SELECT id FROM hotel_catalog.properties WHERE id = $1", [
+            properties[0],
+          ])
+        ).rows,
+      ).toEqual([]);
+      await admin.query(`REVOKE vayada_next_hotel_setup_scope FROM ${roles[1]}`);
+      expect(
+        (
+          await logins[1]!.query("SELECT id FROM hotel_catalog.properties WHERE id = $1", [
+            properties[1],
+          ])
+        ).rows,
+      ).toEqual([]);
+      await admin.query(`GRANT ${roles[1]} TO ${roles[0]} WITH INHERIT FALSE, SET TRUE`);
+      await logins[0]!.query(`SET ROLE ${roles[1]}`);
+      expect(
+        (
+          await logins[0]!.query("SELECT id FROM hotel_catalog.properties WHERE id = $1", [
+            properties[1],
+          ])
+        ).rows,
+      ).toEqual([]);
       await expect(
         logins[0]!.query(
           `INSERT INTO hotel_catalog.properties
              (id, public_id, display_name, creation_organization_id)
-           VALUES ($1, $2, 'Revoked login', $3)`,
-          [randomUUID(), `revoked-${suffix}`, organizations[0]],
+           VALUES ($1, $2, 'Switched role', $3)`,
+          [randomUUID(), `switched-${suffix}`, organizations[1]],
         ),
       ).rejects.toMatchObject({ code: "42501" });
+      await logins[0]!.query("RESET ROLE");
+      await admin.query(`REVOKE ${roles[1]} FROM ${roles[0]}`);
     } finally {
       await Promise.all(logins.map((login) => login.end()));
       await admin.query(
         "DELETE FROM platform.hotel_setup_creation_scopes WHERE database_login = ANY($1::name[])",
         [roles],
       );
+      await admin.query("DELETE FROM identity.organization_resource_links WHERE resource_id = $1", [
+        properties[0],
+      ]);
+      await admin.query("DELETE FROM identity.organization_resource_links WHERE resource_id = $1", [
+        prelinkedProperty,
+      ]);
       await admin.query("DELETE FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])", [
-        properties,
+        [...properties, prelinkedProperty],
       ]);
       await admin.query("DELETE FROM identity.organizations WHERE id = ANY($1::uuid[])", [
         organizations,
