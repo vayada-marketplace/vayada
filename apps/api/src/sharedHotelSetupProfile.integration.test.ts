@@ -126,6 +126,14 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
       create("platform-provision-concurrent-b"),
     ]);
     expect(retry.propertyId).toBe(first.propertyId);
+    expect(
+      (
+        await client.query<{ creation_organization_id: string }>(
+          "SELECT creation_organization_id FROM hotel_catalog.properties WHERE id = $1",
+          [first.propertyId],
+        )
+      ).rows[0]?.creation_organization_id,
+    ).toBe(organizationId);
     await expect(create("platform-provision-concurrent-c")).resolves.toMatchObject({
       propertyId: first.propertyId,
     });

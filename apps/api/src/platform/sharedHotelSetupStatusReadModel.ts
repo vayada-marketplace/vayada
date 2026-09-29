@@ -1460,13 +1460,15 @@ function createPropertyProfileSql(): string {
         id,
         public_id,
         display_name,
-        property_type
+        property_type,
+        creation_organization_id
       )
       SELECT
         generated_property.property_id,
         'prop_' || replace(generated_property.property_id::text, '-', ''),
         profile_input.display_name,
-        profile_input.property_type
+        profile_input.property_type,
+        $1::uuid
       FROM generated_property, profile_input
       RETURNING
         id AS property_id
