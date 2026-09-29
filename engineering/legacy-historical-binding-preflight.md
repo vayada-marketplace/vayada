@@ -127,3 +127,27 @@ transition authorities, revocation and combined locked revalidation remain
 required. No clean-adoption consumer, provider, writer or runtime route is wired.
 Composition tests mock reader modules and use the real evaluator; they do not
 add PostgreSQL or production evidence beyond the separate reader suites.
+
+## Protected diagnostic command
+
+`target:channex:historical-preflight` is the deployment-facing read-only entry
+point for the eight historical candidates. It requires separate source and
+target database URLs, enables PostgreSQL's default read-only mode on both pools,
+and delegates each pair to the existing evidence composer. It has no transition
+or provider capability.
+
+The command accepts exactly one canonical JSON file containing the approved
+eight unique pairs from one production source boundary. It verifies an Ed25519
+detached signature with the deployment-controlled Channex adoption key
+configuration and requires its allowlisted runner principal. The exact eight
+historical hotel/Channex pairs and their immutable source run are also pinned in
+the command, so a differently signed cohort or source boundary is rejected.
+Protected fixture keys and all detailed source/target validation remain enforced
+by the underlying readers.
+
+Output contains only pair identifiers, diagnostic outcome/reason and
+`executable:false`; raw observations and database errors are not printed. A
+fully matching report means only that all eight pairs reached the existing
+`supplied_binding_matches_requires_owner_eligibility` diagnostic result. It
+does not grant owner eligibility, approve a transition, activate a connection,
+or authorize any write.
