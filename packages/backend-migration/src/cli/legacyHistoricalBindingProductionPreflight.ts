@@ -55,8 +55,8 @@ const SAFE_STAGE_ERRORS = new Map([
     "historical_connection_preparation_visibility_incomplete",
   ],
   [
-    "Historical connection preparation source is not production",
-    "historical_connection_preparation_source_is_not_production",
+    "Historical connection preparation source is not preprod",
+    "historical_connection_preparation_source_is_not_preprod",
   ],
   [
     "Historical connection preparation PMS source mismatch",

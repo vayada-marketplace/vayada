@@ -22,6 +22,9 @@ describe("production historical binding preflight role cleanup", () => {
     expect(safeErrorCode(new Error("Historical connection preparation target pair mismatch"))).toBe(
       "historical_connection_preparation_target_pair_mismatch",
     );
+    expect(
+      safeErrorCode(new Error("Historical connection preparation source is not preprod")),
+    ).toBe("historical_connection_preparation_source_is_not_preprod");
     expect(safeErrorCode(new Error("contains production detail"))).toBe(
       "historical_binding_preflight_failed",
     );

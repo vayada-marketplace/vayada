@@ -9,7 +9,7 @@ import {
 
 const VERSION = "vay2017-historical-binding-preflight.v1";
 const DOMAIN = "vayada:vay2017-historical-binding-preflight:v1\0";
-export const APPROVED_SOURCE_RUN_ID = "vay1351-b68e50b476c7a997f8ac4703";
+export const APPROVED_SOURCE_RUN_ID = "vay1351-61ec013e79ed2a042caadef8";
 export const APPROVED_PAIRS = [
   ["29f39aae-4ea8-4730-948a-c36780347750", "237e8ee7-3a88-474e-97b6-80fc953026e2"],
   ["26e9e98f-1f64-483f-8cb5-a5fa7499ba5d", "253dc0ba-6518-4117-86e4-b3d0da05b13d"],
@@ -72,7 +72,7 @@ export function parseLegacyHistoricalBindingPreflightInput(
     const source = request?.sourceRequest;
     const binding = request?.bindingExpected;
     if (
-      source?.sourceEnvironment !== "production" ||
+      source?.sourceEnvironment !== "preprod" ||
       source.sourceRunId !== APPROVED_SOURCE_RUN_ID ||
       source.sourceRunId !== binding?.sourceRunId ||
       source.source?.externalPropertyId !== binding?.source?.externalPropertyId ||

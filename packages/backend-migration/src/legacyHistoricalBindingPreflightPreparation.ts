@@ -55,8 +55,8 @@ export async function prepareLegacyHistoricalBindingPreflightInput(
 
     const ledger = await readSourceLedger(client, APPROVED_SOURCE_RUN_ID);
     await readProductionPmsSnapshot(client, APPROVED_SOURCE_RUN_ID);
-    if (ledger.run.environment !== "production")
-      throw new Error("Historical connection preparation source is not production");
+    if (ledger.run.environment !== "preprod")
+      throw new Error("Historical connection preparation source is not preprod");
     const pmsSources = ledger.sources.filter((source) => source.source_database === "pms");
     if (pmsSources.length !== 1)
       throw new Error("Historical connection preparation PMS source mismatch");
@@ -106,7 +106,7 @@ export async function prepareLegacyHistoricalBindingPreflightInput(
       requests.push({
         sourceRequest: {
           sourceRunId: APPROVED_SOURCE_RUN_ID,
-          sourceEnvironment: "production" as const,
+          sourceEnvironment: "preprod" as const,
           sourceSchemaRevision: ledger.run.source_schema_revision,
           sourceEvidenceSha256,
           snapshotIdentifierSha256: pmsSources[0]!.snapshot_identifier_sha256,
