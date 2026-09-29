@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   read: vi.fn(),
   record: vi.fn(),
   lifecycle: vi.fn(),
+  link: vi.fn(),
 }));
 
 vi.mock("@vayada/marketplace-shared/api/collaborations", async (original) => ({
@@ -13,6 +14,7 @@ vi.mock("@vayada/marketplace-shared/api/collaborations", async (original) => ({
   getMarketplaceCollaborationAffiliateAssent: mocks.read,
   recordMarketplaceCollaborationAffiliateAssent: mocks.record,
   changeMarketplaceCollaborationAffiliateLifecycle: mocks.lifecycle,
+  createMarketplaceCollaborationAffiliateLink: mocks.link,
 }));
 
 import { ApiErrorResponse } from "@vayada/marketplace-shared/api/client";
@@ -44,6 +46,17 @@ describe("AffiliateAgreementPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.record.mockResolvedValue({ ok: true, revision: 1, state: "pending", replayed: false });
+    mocks.link.mockResolvedValue({
+      ok: true,
+      contractVersion: "marketplace-affiliate-link.v1",
+      linkId: "link-1",
+      agreementId: "agreement-1",
+      propertyId: "property-1",
+      publicToken: "va_abcdefghijklmnopqrstuv",
+      path: "/r/va_abcdefghijklmnopqrstuv",
+      createdAt: "2026-09-29T08:00:00.000Z",
+      replayed: false,
+    });
   });
 
   afterEach(() => {
@@ -253,6 +266,75 @@ describe("AffiliateAgreementPanel", () => {
     );
     expect(output()).toContain("Affiliate agreement paused");
     expect(output()).toContain("Resume affiliate agreement");
+  });
+
+  it("retrieves the creator stable link without sending agreement identifiers", async () => {
+    mocks.read.mockResolvedValue({
+      ...agreement,
+      lifecycle: { status: "active", revision: 0, pausedBy: [] },
+    });
+    const output = await render();
+
+    await act(async () => {
+      await view?.root.findByProps({ children: "Get affiliate link" }).props.onClick();
+    });
+
+    expect(mocks.link).toHaveBeenCalledWith("Existing:QA", expect.any(String));
+    expect(output()).toContain("https://api.localhost/r/va_abcdefghijklmnopqrstuv");
+    expect(view?.root.findByProps({ "aria-label": "Stable affiliate link" }).props.href).toBe(
+      undefined,
+    );
+  });
+
+  it("keeps creator link issuance out of the hotel controls", async () => {
+    mocks.read.mockResolvedValue({
+      ...agreement,
+      lifecycle: { status: "active", revision: 0, pausedBy: [] },
+    });
+    const hotelOutput = await render(true, "hotel");
+    expect(hotelOutput()).not.toContain("Get affiliate link");
+  });
+
+  it.each(["active", "paused", "ended"] as const)(
+    "offers a retry for a generic %s link failure",
+    async (status) => {
+      mocks.read.mockResolvedValue({
+        ...agreement,
+        lifecycle: { status, revision: 0, pausedBy: [] },
+      });
+      mocks.link.mockRejectedValueOnce(new Error("private readiness detail"));
+      const output = await render();
+      await act(async () => {
+        await view?.root.findByProps({ children: "Get affiliate link" }).props.onClick();
+      });
+      expect(output()).toContain("Could not retrieve the affiliate link. Try again.");
+      expect(output()).not.toContain("private readiness detail");
+    },
+  );
+
+  it("explains coded link readiness and lifecycle failures", async () => {
+    mocks.read.mockResolvedValue({
+      ...agreement,
+      lifecycle: { status: "active", revision: 0, pausedBy: [] },
+    });
+    mocks.link.mockRejectedValueOnce(new ApiErrorResponse(409, { code: "link_creation_blocked" }));
+    const blocked = await render();
+    await act(async () => {
+      await view?.root.findByProps({ children: "Get affiliate link" }).props.onClick();
+    });
+    expect(blocked()).toContain("Ask the hotel to check its booking destination");
+    await act(async () => view?.unmount());
+
+    mocks.read.mockResolvedValue({
+      ...agreement,
+      lifecycle: { status: "paused", revision: 1, pausedBy: ["creator"] },
+    });
+    mocks.link.mockRejectedValueOnce(new ApiErrorResponse(409, { code: "agreement_not_active" }));
+    const inactive = await render();
+    await act(async () => {
+      await view?.root.findByProps({ children: "Get affiliate link" }).props.onClick();
+    });
+    expect(inactive()).toContain("Resume the agreement, then try again.");
   });
 
   it("explains a declined partnership and offers no assent action", async () => {
