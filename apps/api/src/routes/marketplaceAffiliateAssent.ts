@@ -139,6 +139,43 @@ export async function registerMarketplaceAffiliateAssentRoutes(
     },
   );
   app.post<{ Params: { collaborationId: string }; Body: unknown }>(
+    "/collaborations/:collaborationId/affiliate-link/diagnostic",
+    async (request, reply) => {
+      const { collaborationId } = request.params;
+      const body = readDiagnosticBody(request.body);
+      if (!validAffiliateCollaborationKey(collaborationId) || !body)
+        return reply.code(422).send({ ok: false, code: "invalid_request" });
+      const context = enforceRoutePolicy(request, {
+        permission: "marketplace.collaboration.write",
+      });
+      try {
+        const result = await options.repository.diagnoseLinkForCollaboration(
+          context,
+          collaborationId,
+          body.campaignLabel,
+        );
+        if (result.ok) return result;
+        return reply
+          .code(
+            result.code === "invalid_request"
+              ? 422
+              : result.code === "scope_unavailable"
+                ? 404
+                : 409,
+          )
+          .send(result);
+      } catch (error) {
+        if (
+          isPostgresUnavailableError(error) ||
+          (typeof error === "object" && error !== null && "statusCode" in error)
+        )
+          throw error;
+        request.log.error({ err: error }, "Collaboration affiliate link diagnostic failed");
+        return reply.code(500).send({ ok: false, code: "diagnostic_unavailable" });
+      }
+    },
+  );
+  app.post<{ Params: { collaborationId: string }; Body: unknown }>(
     "/collaborations/:collaborationId/affiliate-lifecycle",
     async (request, reply) => {
       const { collaborationId } = request.params;
@@ -179,6 +216,19 @@ export async function registerMarketplaceAffiliateAssentRoutes(
       }
     },
   );
+}
+
+function readDiagnosticBody(body: unknown): { campaignLabel: string | null } | null {
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    Object.keys(body).length !== 1 ||
+    !("campaignLabel" in body)
+  )
+    return null;
+  return body.campaignLabel === null || typeof body.campaignLabel === "string"
+    ? { campaignLabel: body.campaignLabel }
+    : null;
 }
 
 function readLifecycleBody(body: unknown) {

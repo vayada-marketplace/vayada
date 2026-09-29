@@ -9,6 +9,7 @@ import { recordAffiliateAssent } from "./marketplaceAffiliateAssentCommand.js";
 import type { AffiliateAgreementActivationReadiness } from "./marketplaceAffiliateAgreementActivation.js";
 import {
   changeCollaborationAffiliateLifecycle,
+  diagnoseCollaborationAffiliateLink,
   recordCollaborationAffiliateAssent,
   readAffiliateAssent,
   readCollaborationAffiliateAssent,
@@ -156,6 +157,45 @@ describe.skipIf(!databaseUrl)("Affiliate assent through existing collaboration",
         idempotencyKey: "pause-retained",
       }),
     ).toMatchObject({ ok: true, revision: 1 });
+  });
+  it("previews the exact safe destination without recording a live or synthetic click", async () => {
+    const participationId = await activate();
+    await fixture.pool().query(`
+      CREATE SCHEMA IF NOT EXISTS booking;
+      ALTER TABLE hotel_catalog.properties ADD COLUMN lifecycle_status TEXT DEFAULT 'active';
+      CREATE TABLE hotel_catalog.property_slugs(property_id UUID,slug TEXT,purpose TEXT,status TEXT);
+      CREATE TABLE hotel_catalog.property_domains(property_id UUID,verification_status TEXT,
+        canonical_when_verified BOOLEAN);
+      CREATE TABLE booking.affiliate_destination_versions(id UUID PRIMARY KEY,property_id UUID,
+        created_by_organization_id UUID,booking_url TEXT);
+      CREATE TABLE marketplace.affiliate_links(id UUID PRIMARY KEY,agreement_id UUID,
+        activation_id UUID,participation_id UUID,program_id UUID,property_id UUID,public_token TEXT);
+      INSERT INTO hotel_catalog.property_slugs VALUES
+        ('${id(3)}','hotel-alpenrose','canonical','active');
+      INSERT INTO booking.affiliate_destination_versions VALUES
+        ('${id(30)}','${id(3)}','${id(4)}','https://hotel-alpenrose.next-booking.vayada.com/');
+      INSERT INTO marketplace.affiliate_links VALUES
+        ('${id(140)}','${id(130)}','${id(131)}','${participationId}','${id(50)}','${id(3)}',
+         'va_abcdefghijklmnopqrstuv');
+    `);
+    expect(
+      await diagnoseCollaborationAffiliateLink(
+        fixture.pool(),
+        context(false),
+        key,
+        "instagram.reel-1",
+      ),
+    ).toEqual({
+      ok: true,
+      contractVersion: "marketplace-affiliate-link-diagnostic.v1",
+      status: "ready",
+      association: "verified",
+      programStatus: "active",
+      destinationUrl: "https://hotel-alpenrose.next-booking.vayada.com/",
+      campaignLabel: "instagram.reel-1",
+      normalMetricsExcluded: true,
+      externalPurchaseVerified: false,
+    });
   });
   it("fails closed when retained lifecycle history is invalid", async () => {
     await activate();
