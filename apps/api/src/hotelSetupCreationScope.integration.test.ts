@@ -18,6 +18,7 @@ describe.skipIf(!url)("new hotel creation login scope", () => {
     const properties = [randomUUID(), randomUUID()];
     const prelinkedProperty = randomUUID();
     const linkedFixture = randomUUID();
+    const invalidOwnerLink = `invalid-${suffix}`;
     const logins: pg.Pool[] = [];
     try {
       for (let index = 0; index < 2; index++) {
@@ -25,8 +26,12 @@ describe.skipIf(!url)("new hotel creation login scope", () => {
         await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD '${passwords[index]}' NOINHERIT
           NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`);
         await admin.query(`GRANT USAGE ON SCHEMA hotel_catalog TO ${role}`);
+        await admin.query(`GRANT USAGE ON SCHEMA identity TO ${role}`);
         await admin.query(
           `GRANT SELECT, INSERT, UPDATE, DELETE ON hotel_catalog.properties TO ${role}`,
+        );
+        await admin.query(
+          `GRANT SELECT, INSERT, UPDATE, DELETE ON identity.organization_resource_links TO ${role}`,
         );
         await admin.query(
           `GRANT vayada_next_hotel_setup_scope TO ${role} WITH INHERIT TRUE, SET FALSE`,
@@ -56,7 +61,13 @@ describe.skipIf(!url)("new hotel creation login scope", () => {
         `INSERT INTO identity.organization_resource_links
            (organization_id, product, resource_type, resource_id, relationship, status)
          VALUES ($1, 'hotel_catalog', 'property', $2, 'owner', 'active')`,
-        [organizations[0], linkedFixture],
+        [organizations[1], linkedFixture.toUpperCase()],
+      );
+      await admin.query(
+        `INSERT INTO identity.organization_resource_links
+           (organization_id, product, resource_type, resource_id, relationship, status)
+         VALUES ($1, 'hotel_catalog', 'property', $2, 'owner', 'active')`,
+        [organizations[1], invalidOwnerLink],
       );
       expect(
         (
@@ -66,6 +77,32 @@ describe.skipIf(!url)("new hotel creation login scope", () => {
           )
         ).rowCount,
       ).toBe(1);
+      expect(
+        (
+          await logins[1]!.query(
+            `SELECT organization_id FROM identity.organization_resource_links
+             WHERE resource_id = $1`,
+            [linkedFixture.toUpperCase()],
+          )
+        ).rows,
+      ).toEqual([{ organization_id: organizations[1] }]);
+      expect(
+        (
+          await logins[0]!.query(
+            `SELECT organization_id FROM identity.organization_resource_links
+             WHERE resource_id = $1`,
+            [linkedFixture.toUpperCase()],
+          )
+        ).rows,
+      ).toEqual([]);
+      await expect(
+        logins[0]!.query(
+          `INSERT INTO identity.organization_resource_links
+             (organization_id, product, resource_type, resource_id, relationship, status)
+           VALUES ($1, 'hotel_catalog', 'property', $2, 'owner', 'active')`,
+          [organizations[0], linkedFixture],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
       await expect(
         logins[0]!.query("SET ROLE vayada_next_hotel_setup_scope"),
       ).rejects.toMatchObject({ code: "42501" });
@@ -84,7 +121,7 @@ describe.skipIf(!url)("new hotel creation login scope", () => {
         `INSERT INTO identity.organization_resource_links
            (organization_id, product, resource_type, resource_id, relationship, status)
          VALUES ($1, 'hotel_catalog', 'property', $2, 'owner', 'active')`,
-        [organizations[1], prelinkedProperty],
+        [organizations[1], prelinkedProperty.toUpperCase()],
       );
       await expect(
         logins[0]!.query(
@@ -116,6 +153,30 @@ describe.skipIf(!url)("new hotel creation login scope", () => {
           ])
         ).rows,
       ).toEqual([]);
+      expect(
+        (
+          await logins[0]!.query(
+            "SELECT id FROM identity.organization_resource_links WHERE resource_id = $1",
+            [properties[1]],
+          )
+        ).rows,
+      ).toEqual([]);
+      await expect(
+        logins[0]!.query(
+          `INSERT INTO identity.organization_resource_links
+             (organization_id, product, resource_type, resource_id, relationship, status)
+           VALUES ($1, 'hotel_catalog', 'property', $2, 'owner', 'active')`,
+          [organizations[0], properties[1]],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+      await expect(
+        logins[0]!.query(
+          `INSERT INTO identity.organization_resource_links
+             (organization_id, product, resource_type, resource_id, relationship, status)
+           VALUES ($1, 'pms', 'pms_property', $2, 'owner', 'active')`,
+          [organizations[0], properties[0]],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
       await expect(
         logins[0]!.query(
           `INSERT INTO hotel_catalog.properties
@@ -159,12 +220,31 @@ describe.skipIf(!url)("new hotel creation login scope", () => {
       await admin.query("UPDATE identity.organizations SET status = 'active' WHERE id = $1", [
         organizations[0],
       ]);
-      await admin.query(
+      const linked = await logins[0]!.query(
         `INSERT INTO identity.organization_resource_links
            (organization_id, product, resource_type, resource_id, relationship, status)
-         VALUES ($1, 'hotel_catalog', 'property', $2, 'owner', 'active')`,
+         VALUES ($1, 'hotel_catalog', 'property', $2, 'owner', 'active')
+         RETURNING product, resource_id`,
         [organizations[0], properties[0]],
       );
+      expect(linked.rows).toEqual([{ product: "hotel_catalog", resource_id: properties[0] }]);
+      expect(
+        (
+          await logins[0]!.query(
+            `UPDATE identity.organization_resource_links SET status = 'suspended'
+           WHERE organization_id = $1 AND resource_id = $2`,
+            [organizations[0], properties[0]],
+          )
+        ).rowCount,
+      ).toBe(0);
+      expect(
+        (
+          await logins[0]!.query(
+            "DELETE FROM identity.organization_resource_links WHERE organization_id = $1 AND resource_id = $2",
+            [organizations[0], properties[0]],
+          )
+        ).rowCount,
+      ).toBe(0);
       expect(
         (
           await logins[0]!.query("SELECT id FROM hotel_catalog.properties WHERE id = $1", [
@@ -215,6 +295,14 @@ describe.skipIf(!url)("new hotel creation login scope", () => {
           ])
         ).rows,
       ).toEqual([]);
+      await expect(
+        logins[0]!.query(
+          `INSERT INTO identity.organization_resource_links
+             (organization_id, product, resource_type, resource_id, relationship, status)
+           VALUES ($1, 'hotel_catalog', 'property', $2, 'owner', 'active')`,
+          [organizations[0], properties[0]],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
       await admin.query(`REVOKE vayada_next_hotel_setup_scope FROM ${roles[1]}`);
       expect(
         (
@@ -252,10 +340,13 @@ describe.skipIf(!url)("new hotel creation login scope", () => {
         properties[0],
       ]);
       await admin.query("DELETE FROM identity.organization_resource_links WHERE resource_id = $1", [
-        prelinkedProperty,
+        prelinkedProperty.toUpperCase(),
       ]);
       await admin.query("DELETE FROM identity.organization_resource_links WHERE resource_id = $1", [
-        linkedFixture,
+        linkedFixture.toUpperCase(),
+      ]);
+      await admin.query("DELETE FROM identity.organization_resource_links WHERE resource_id = $1", [
+        invalidOwnerLink,
       ]);
       await admin.query("DELETE FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])", [
         [...properties, prelinkedProperty, linkedFixture],
