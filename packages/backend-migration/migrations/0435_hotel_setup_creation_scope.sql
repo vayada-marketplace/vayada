@@ -1,6 +1,6 @@
 -- VAY-1092: bind a new property to the organization of its setup login.
--- Only the session-bound scope view gets a read grant; no runtime login or
--- base-table write privilege is created or granted by this migration.
+-- The non-login scope role is granted only the view needed by setup logins.
+-- No runtime login or base-table write privilege is created or granted here.
 ALTER TABLE hotel_catalog.properties
   ADD COLUMN creation_organization_id UUID REFERENCES identity.organizations(id);
 
@@ -14,6 +14,22 @@ CREATE TABLE platform.hotel_setup_creation_scopes (
 );
 REVOKE ALL ON platform.hotel_setup_creation_scopes FROM PUBLIC;
 
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'vayada_next_hotel_setup_scope') THEN
+    CREATE ROLE vayada_next_hotel_setup_scope NOLOGIN NOINHERIT
+      NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles
+    WHERE rolname = 'vayada_next_hotel_setup_scope'
+      AND NOT (rolcanlogin OR rolsuper OR rolcreaterole OR rolcreatedb
+        OR rolinherit OR rolbypassrls OR rolreplication)
+  ) THEN
+    RAISE EXCEPTION 'hotel setup scope role is unsafe';
+  END IF;
+END $$;
+
 CREATE VIEW hotel_catalog.hotel_setup_effective_creation_scopes
 WITH (security_barrier = true) AS
 SELECT scope.organization_id
@@ -24,58 +40,47 @@ WHERE scope.database_login = session_user
   AND organization.kind = 'hotel_group'
   AND organization.status = 'active';
 REVOKE ALL ON hotel_catalog.hotel_setup_effective_creation_scopes FROM PUBLIC;
-GRANT SELECT ON hotel_catalog.hotel_setup_effective_creation_scopes TO PUBLIC;
+GRANT USAGE ON SCHEMA hotel_catalog TO vayada_next_hotel_setup_scope;
+GRANT SELECT ON hotel_catalog.hotel_setup_effective_creation_scopes
+  TO vayada_next_hotel_setup_scope;
 
--- Properties already have RLS. Preserve non-setup roles, including Finance and
--- pricing policies, while restricting any setup-prefixed or member login.
-CREATE POLICY hotel_setup_creation_insert_scope ON hotel_catalog.properties
+-- Existing roles need no view privilege. A setup-prefixed login without the
+-- scope membership fails closed even if it has base-table permissions.
+CREATE POLICY hotel_setup_creation_insert_guard ON hotel_catalog.properties
   AS RESTRICTIVE FOR INSERT TO PUBLIC WITH CHECK (
     (session_user::text !~ '^vayada_next_hotel_setup_org_'
-      AND current_user::text !~ '^vayada_next_hotel_setup_org_'
-      AND NOT EXISTS (
-        SELECT 1 FROM pg_catalog.pg_roles setup_role
-        WHERE setup_role.rolname ~ '^vayada_next_hotel_setup_org_'
-          AND pg_catalog.pg_has_role(session_user, setup_role.oid, 'member')
-      ))
-    OR EXISTS (
-      SELECT 1 FROM hotel_catalog.hotel_setup_effective_creation_scopes scope
-      WHERE scope.organization_id = properties.creation_organization_id
-    )
+      AND current_user::text !~ '^vayada_next_hotel_setup_org_')
+    OR pg_catalog.pg_has_role(session_user, 'vayada_next_hotel_setup_scope', 'USAGE')
   );
-
-CREATE POLICY hotel_setup_creation_read_scope ON hotel_catalog.properties
+CREATE POLICY hotel_setup_creation_read_guard ON hotel_catalog.properties
   AS RESTRICTIVE FOR SELECT TO PUBLIC USING (
     (session_user::text !~ '^vayada_next_hotel_setup_org_'
-      AND current_user::text !~ '^vayada_next_hotel_setup_org_'
-      AND NOT EXISTS (
-        SELECT 1 FROM pg_catalog.pg_roles setup_role
-        WHERE setup_role.rolname ~ '^vayada_next_hotel_setup_org_'
-          AND pg_catalog.pg_has_role(session_user, setup_role.oid, 'member')
-      ))
-    OR EXISTS (
-      SELECT 1 FROM hotel_catalog.hotel_setup_effective_creation_scopes scope
-      WHERE scope.organization_id = properties.creation_organization_id
-    )
+      AND current_user::text !~ '^vayada_next_hotel_setup_org_')
+    OR pg_catalog.pg_has_role(session_user, 'vayada_next_hotel_setup_scope', 'USAGE')
+  );
+CREATE POLICY hotel_setup_creation_insert_scope ON hotel_catalog.properties
+  AS RESTRICTIVE FOR INSERT TO vayada_next_hotel_setup_scope WITH CHECK (
+    EXISTS (SELECT 1 FROM hotel_catalog.hotel_setup_effective_creation_scopes scope
+            WHERE scope.organization_id = properties.creation_organization_id)
+  );
+CREATE POLICY hotel_setup_creation_read_scope ON hotel_catalog.properties
+  AS RESTRICTIVE FOR SELECT TO vayada_next_hotel_setup_scope USING (
+    EXISTS (SELECT 1 FROM hotel_catalog.hotel_setup_effective_creation_scopes scope
+            WHERE scope.organization_id = properties.creation_organization_id)
   );
 
 CREATE POLICY hotel_setup_creation_update_denial ON hotel_catalog.properties
   AS RESTRICTIVE FOR UPDATE TO PUBLIC USING (true) WITH CHECK (
     session_user::text !~ '^vayada_next_hotel_setup_org_'
     AND current_user::text !~ '^vayada_next_hotel_setup_org_'
-    AND NOT EXISTS (
-      SELECT 1 FROM pg_catalog.pg_roles setup_role
-      WHERE setup_role.rolname ~ '^vayada_next_hotel_setup_org_'
-        AND pg_catalog.pg_has_role(session_user, setup_role.oid, 'member')
-    )
+    AND NOT pg_catalog.pg_has_role(session_user, 'vayada_next_hotel_setup_scope', 'MEMBER')
+    AND NOT pg_catalog.pg_has_role(current_user, 'vayada_next_hotel_setup_scope', 'MEMBER')
   );
 
 CREATE POLICY hotel_setup_creation_delete_denial ON hotel_catalog.properties
   AS RESTRICTIVE FOR DELETE TO PUBLIC USING (
     session_user::text !~ '^vayada_next_hotel_setup_org_'
     AND current_user::text !~ '^vayada_next_hotel_setup_org_'
-    AND NOT EXISTS (
-      SELECT 1 FROM pg_catalog.pg_roles setup_role
-      WHERE setup_role.rolname ~ '^vayada_next_hotel_setup_org_'
-        AND pg_catalog.pg_has_role(session_user, setup_role.oid, 'member')
-    )
+    AND NOT pg_catalog.pg_has_role(session_user, 'vayada_next_hotel_setup_scope', 'MEMBER')
+    AND NOT pg_catalog.pg_has_role(current_user, 'vayada_next_hotel_setup_scope', 'MEMBER')
   );

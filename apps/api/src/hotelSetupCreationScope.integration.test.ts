@@ -27,6 +27,9 @@ describe.skipIf(!url)("new hotel creation login scope", () => {
           `GRANT SELECT, INSERT, UPDATE, DELETE ON hotel_catalog.properties TO ${role}`,
         );
         await admin.query(
+          `GRANT vayada_next_hotel_setup_scope TO ${role} WITH INHERIT TRUE, SET FALSE`,
+        );
+        await admin.query(
           `INSERT INTO identity.organizations (id, kind, name, slug)
            VALUES ($1, 'hotel_group', 'Creation scope test', $2)`,
           [organizations[index], `setup-scope-${index}-${suffix}`],
@@ -41,6 +44,9 @@ describe.skipIf(!url)("new hotel creation login scope", () => {
         login.password = passwords[index]!;
         logins.push(new pg.Pool({ connectionString: login.toString(), max: 1 }));
       }
+      await expect(
+        logins[0]!.query("SET ROLE vayada_next_hotel_setup_scope"),
+      ).rejects.toMatchObject({ code: "42501" });
 
       for (let index = 0; index < 2; index++) {
         const row = await logins[index]!.query<{ id: string }>(
@@ -97,6 +103,22 @@ describe.skipIf(!url)("new hotel creation login scope", () => {
              (id, public_id, display_name, creation_organization_id)
            VALUES ($1, $2, 'Suspended organization', $3)`,
           [randomUUID(), `suspended-${suffix}`, organizations[0]],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+      await admin.query(`REVOKE vayada_next_hotel_setup_scope FROM ${roles[0]}`);
+      expect(
+        (
+          await logins[0]!.query("SELECT id FROM hotel_catalog.properties WHERE id = $1", [
+            properties[0],
+          ])
+        ).rows,
+      ).toEqual([]);
+      await expect(
+        logins[0]!.query(
+          `INSERT INTO hotel_catalog.properties
+             (id, public_id, display_name, creation_organization_id)
+           VALUES ($1, $2, 'Revoked login', $3)`,
+          [randomUUID(), `revoked-${suffix}`, organizations[0]],
         ),
       ).rejects.toMatchObject({ code: "42501" });
     } finally {
