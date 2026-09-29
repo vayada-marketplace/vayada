@@ -33,6 +33,15 @@ function required(env: NodeJS.ProcessEnv, name: string): string {
   return value;
 }
 
+export function safeErrorCode(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  if (/^[a-z0-9_]+$/.test(message)) return message;
+  const postgresCode = (error as { code?: unknown } | null)?.code;
+  return typeof postgresCode === "string" && /^[0-9A-Z]{5}$/.test(postgresCode)
+    ? `postgres_${postgresCode.toLowerCase()}`
+    : "historical_binding_preflight_failed";
+}
+
 export function roleName(executionId: string, phase: Phase): string {
   return `vay2017_preflight_${phase}_${executionId.replace("-", "_")}`;
 }
@@ -95,14 +104,31 @@ export async function cleanupRole(
   )
     throw new Error("reader_cleanup_unsafe");
   const dependency = await admin.query<{ membership: boolean; ownership: boolean }>(
-    `SELECT EXISTS(SELECT 1 FROM pg_auth_members WHERE member=$1 OR roleid=$1) AS membership,
+    `SELECT EXISTS(
+         SELECT 1 FROM pg_auth_members m
+          WHERE (m.member=$1 OR m.roleid=$1)
+            AND NOT (
+              m.roleid=$1
+              AND m.member=(SELECT oid FROM pg_roles WHERE rolname=current_user)
+              AND m.admin_option
+            )
+       ) AS membership,
        EXISTS(SELECT 1 FROM pg_shdepend WHERE refclassid='pg_authid'::regclass
          AND refobjid=$1 AND deptype='o') AS ownership`,
     [found.oid],
   );
   if (dependency.rows[0]?.membership || dependency.rows[0]?.ownership)
     throw new Error("reader_cleanup_unsafe");
-  await admin.query(`DROP OWNED BY ${admin.escapeIdentifier(role)}`);
+  for (const table of PRODUCTION_PREFLIGHT_TABLES)
+    await admin.query(`REVOKE SELECT ON ${table} FROM ${admin.escapeIdentifier(role)}`);
+  for (const schema of new Set(PRODUCTION_PREFLIGHT_TABLES.map((table) => table.split(".")[0])))
+    await admin.query(`REVOKE USAGE ON SCHEMA ${schema} FROM ${admin.escapeIdentifier(role)}`);
+  const currentDatabase = await admin.query<{ database: string }>(
+    "SELECT current_database() AS database",
+  );
+  await admin.query(
+    `REVOKE CONNECT ON DATABASE ${admin.escapeIdentifier(currentDatabase.rows[0]!.database)} FROM ${admin.escapeIdentifier(role)}`,
+  );
   await admin.query(`DROP ROLE ${admin.escapeIdentifier(role)}`);
 }
 
@@ -296,11 +322,10 @@ async function main(): Promise<void> {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
   main().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : "";
     console.error(
       JSON.stringify({
         status: "failed",
-        code: /^[a-z0-9_]+$/.test(message) ? message : "historical_binding_preflight_failed",
+        code: safeErrorCode(error),
       }),
     );
     process.exitCode = 1;
