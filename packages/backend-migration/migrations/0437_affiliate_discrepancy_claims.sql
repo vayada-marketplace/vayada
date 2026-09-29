@@ -37,7 +37,7 @@ CREATE TABLE marketplace.affiliate_discrepancy_claims (
   actor_user_id UUID NOT NULL REFERENCES identity.users(id),
   request_id TEXT NOT NULL CHECK (length(btrim(request_id)) BETWEEN 1 AND 200),
   created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp() CHECK (isfinite(created_at)),
-  UNIQUE NULLS NOT DISTINCT
+  CONSTRAINT uq_affiliate_discrepancy_claims_duplicate UNIQUE NULLS NOT DISTINCT
     (creator_organization_id, kind, agreement_id, booking_id, payout_id),
   FOREIGN KEY (agreement_id, creator_profile_id, creator_organization_id)
     REFERENCES marketplace.affiliate_agreements(id, creator_profile_id, creator_organization_id),
