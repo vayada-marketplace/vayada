@@ -14,6 +14,7 @@ import {
 
 const HOST = "vayada-database.c7eiqkoq4as4.eu-west-1.rds.amazonaws.com";
 const DATABASE = "vayada_target_prod";
+const POLICY_HELPER = "platform.channex_management_worker_scope(text,text,uuid)";
 export const PRODUCTION_PREFLIGHT_TABLES = [
   "platform.source_extraction_runs",
   "platform.source_extraction_sources",
@@ -181,6 +182,9 @@ export async function cleanupRole(
     throw new Error("reader_cleanup_unsafe");
   for (const table of PRODUCTION_PREFLIGHT_TABLES)
     await admin.query(`REVOKE SELECT ON ${table} FROM ${admin.escapeIdentifier(role)}`);
+  await admin.query(
+    `REVOKE EXECUTE ON FUNCTION ${POLICY_HELPER} FROM ${admin.escapeIdentifier(role)}`,
+  );
   for (const schema of new Set(PRODUCTION_PREFLIGHT_TABLES.map((table) => table.split(".")[0])))
     await admin.query(`REVOKE USAGE ON SCHEMA ${schema} FROM ${admin.escapeIdentifier(role)}`);
   const currentDatabase = await admin.query<{ database: string }>(
@@ -246,6 +250,14 @@ export async function withReader<T>(
         );
         await admin.query(`GRANT SELECT ON ${table} TO ${admin.escapeIdentifier(role)}`);
       }
+      const helper = await admin.query<{ safe: boolean }>(
+        `SELECT NOT prosecdef AND provolatile='s' AS safe FROM pg_proc WHERE oid=$1::regprocedure`,
+        [POLICY_HELPER],
+      );
+      if (helper.rows[0]?.safe !== true) throw new Error("reader_policy_helper_unsafe");
+      await admin.query(
+        `GRANT EXECUTE ON FUNCTION ${POLICY_HELPER} TO ${admin.escapeIdentifier(role)}`,
+      );
       await admin.query("COMMIT");
     } catch (error) {
       await admin.query("ROLLBACK").catch(() => undefined);
