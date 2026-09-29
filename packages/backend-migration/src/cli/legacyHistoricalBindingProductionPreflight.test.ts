@@ -5,9 +5,20 @@ import {
   cleanupRole,
   roleMarker,
   roleName,
+  safeErrorCode,
 } from "./legacyHistoricalBindingProductionPreflight.js";
 
 describe("production historical binding preflight role cleanup", () => {
+  it("reports only safe stage or PostgreSQL error codes", () => {
+    expect(safeErrorCode(new Error("image_source_mismatch"))).toBe("image_source_mismatch");
+    expect(
+      safeErrorCode(Object.assign(new Error("contains production detail"), { code: "42501" })),
+    ).toBe("postgres_42501");
+    expect(safeErrorCode(new Error("contains production detail"))).toBe(
+      "historical_binding_preflight_failed",
+    );
+  });
+
   it("removes only the exact marker-bound restricted role", async () => {
     const queries: string[] = [];
     const admin = {
@@ -33,6 +44,8 @@ describe("production historical binding preflight role cleanup", () => {
           };
         if (sql.includes("FROM pg_shdepend"))
           return { rowCount: 1, rows: [{ membership: false, ownership: false }] };
+        if (sql.includes("current_database()"))
+          return { rowCount: 1, rows: [{ database: "vay2017_production_preflight_test" }] };
         return { rowCount: 0, rows: [] };
       },
     };
@@ -40,7 +53,14 @@ describe("production historical binding preflight role cleanup", () => {
     await cleanupRole(admin as never, "12345-1", "prepare");
 
     expect(roleName("12345-1", "prepare")).toBe("vay2017_preflight_prepare_12345_1");
-    expect(queries.some((sql) => sql.startsWith("DROP OWNED BY"))).toBe(true);
+    expect(queries.filter((sql) => sql.startsWith("REVOKE SELECT ON"))).toHaveLength(10);
+    expect(queries.filter((sql) => sql.startsWith("REVOKE USAGE ON SCHEMA"))).toHaveLength(7);
+    expect(
+      queries.some((sql) =>
+        sql.startsWith('REVOKE CONNECT ON DATABASE "vay2017_production_preflight_test"'),
+      ),
+    ).toBe(true);
+    expect(queries.some((sql) => sql.startsWith("DROP OWNED BY"))).toBe(false);
     expect(queries.some((sql) => sql.startsWith("DROP ROLE"))).toBe(true);
   });
 
@@ -107,6 +127,8 @@ describe("production historical binding preflight role cleanup", () => {
           };
         if (sql.includes("FROM pg_shdepend"))
           return { rowCount: 1, rows: [{ membership: false, ownership: false }] };
+        if (sql.includes("current_database()"))
+          return { rowCount: 1, rows: [{ database: "vay2017_production_preflight_test" }] };
         return { rowCount: 0, rows: [] };
       },
     };
