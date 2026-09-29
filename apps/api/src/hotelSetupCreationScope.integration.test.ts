@@ -17,6 +17,7 @@ describe.skipIf(!url)("new hotel creation login scope", () => {
     const organizations = [randomUUID(), randomUUID()];
     const properties = [randomUUID(), randomUUID()];
     const prelinkedProperty = randomUUID();
+    const linkedFixture = randomUUID();
     const logins: pg.Pool[] = [];
     try {
       for (let index = 0; index < 2; index++) {
@@ -45,6 +46,26 @@ describe.skipIf(!url)("new hotel creation login scope", () => {
         login.password = passwords[index]!;
         logins.push(new pg.Pool({ connectionString: login.toString(), max: 1 }));
       }
+      await admin.query(
+        `INSERT INTO hotel_catalog.properties
+           (id, public_id, display_name, creation_organization_id)
+         VALUES ($1, $2, 'Existing linked hotel', $3)`,
+        [linkedFixture, `linked-${suffix}`, organizations[0]],
+      );
+      await admin.query(
+        `INSERT INTO identity.organization_resource_links
+           (organization_id, product, resource_type, resource_id, relationship, status)
+         VALUES ($1, 'hotel_catalog', 'property', $2, 'owner', 'active')`,
+        [organizations[0], linkedFixture],
+      );
+      expect(
+        (
+          await admin.query(
+            "SELECT 1 FROM platform.hotel_setup_linked_properties WHERE property_id = $1",
+            [linkedFixture],
+          )
+        ).rowCount,
+      ).toBe(1);
       await expect(
         logins[0]!.query("SET ROLE vayada_next_hotel_setup_scope"),
       ).rejects.toMatchObject({ code: "42501" });
@@ -233,8 +254,11 @@ describe.skipIf(!url)("new hotel creation login scope", () => {
       await admin.query("DELETE FROM identity.organization_resource_links WHERE resource_id = $1", [
         prelinkedProperty,
       ]);
+      await admin.query("DELETE FROM identity.organization_resource_links WHERE resource_id = $1", [
+        linkedFixture,
+      ]);
       await admin.query("DELETE FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])", [
-        [...properties, prelinkedProperty],
+        [...properties, prelinkedProperty, linkedFixture],
       ]);
       await admin.query("DELETE FROM identity.organizations WHERE id = ANY($1::uuid[])", [
         organizations,

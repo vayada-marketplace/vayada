@@ -81,22 +81,22 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $$
           SELECT 1 FROM identity.organization_resource_links link
           WHERE link.product = 'hotel_catalog'
             AND link.resource_type = 'property'
-            AND link.resource_id = property_id::text
+            AND link.resource_id = $1::text
             AND link.relationship = 'owner'
             AND link.status = 'active'
             AND link.organization_id = scope.organization_id
         )
         OR (
-          creation_organization_id = scope.organization_id
+          $2 = scope.organization_id
           AND NOT EXISTS (
             SELECT 1 FROM platform.hotel_setup_linked_properties linked
-            WHERE linked.property_id = property_id
+            WHERE linked.property_id = $1
           )
           AND NOT EXISTS (
             SELECT 1 FROM identity.organization_resource_links link
             WHERE link.product = 'hotel_catalog'
               AND link.resource_type = 'property'
-              AND link.resource_id = property_id::text
+              AND link.resource_id = $1::text
               AND link.relationship = 'owner'
           )
         )
@@ -110,7 +110,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $$
     SELECT 1 FROM identity.organization_resource_links link
     WHERE link.product = 'hotel_catalog'
       AND link.resource_type = 'property'
-      AND link.resource_id = property_id::text
+      AND link.resource_id = $1::text
       AND link.relationship = 'owner'
   );
 $$;
