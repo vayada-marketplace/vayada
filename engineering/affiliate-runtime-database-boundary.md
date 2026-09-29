@@ -142,7 +142,12 @@ provision a production role.
 SQL surface used by link eligibility, accepted terms, native destination
 safety and referral-readiness checks. It requires `SELECT` on exactly those
 relations and non-delegable `UPDATE` only where PostgreSQL row locks require
-it. Every immutable relation in that lock list must retain its enabled mutation
+it. It also requires non-delegable execution of the three `SECURITY INVOKER`
+policy helpers reached while locking `hotel_catalog.properties`:
+`platform.channex_management_worker_scope(text,text,uuid)` and
+`platform.finance_expense_worker_scope(text,text,uuid)`, and
+`platform.finance_export_worker_scope(text,text,uuid)`. Every immutable relation
+in that lock list must retain its enabled mutation
 trigger in `ENABLE ALWAYS` mode, including when a login starts in replication
 mode; the two mutable hotel-catalogue relations must retain the complete known
 row-level policy set. The check rejects any additional direct read or write

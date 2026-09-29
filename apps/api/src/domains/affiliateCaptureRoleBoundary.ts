@@ -167,6 +167,12 @@ const affiliateCaptureLockRelations = [
   "booking.affiliate_referral_production_preflights",
 ] as const;
 
+const affiliateCapturePolicyFunctions = [
+  "platform.channex_management_worker_scope(text,text,uuid)",
+  "platform.finance_expense_worker_scope(text,text,uuid)",
+  "platform.finance_export_worker_scope(text,text,uuid)",
+] as const;
+
 const immutableLockTriggers = [
   [
     "marketplace.affiliate_agreement_activations",
@@ -289,6 +295,14 @@ const hotelLockPolicies = [
     false,
     "true",
     "(CURRENT_USER <> 'vayada_next_affiliate_capture'::name)",
+  ],
+  [
+    "hotel_catalog.property_slugs",
+    "pricing_runtime_slug_lock_only",
+    "w",
+    false,
+    "true",
+    "(((SESSION_USER)::text !~ '^vayada_next_pricing_'::text) AND ((CURRENT_USER)::text !~ '^vayada_next_pricing_'::text) AND (NOT (EXISTS ( SELECT 1\n   FROM pg_roles pricing_role\n  WHERE ((pricing_role.rolname ~ '^vayada_next_pricing_'::text) AND pg_has_role(SESSION_USER, pricing_role.oid, 'member'::text))))))",
   ],
 ] as const;
 
@@ -417,6 +431,17 @@ export async function assertAffiliateCaptureRoleHasVisitReadCapabilities(
     [role, affiliateCaptureReadRelations],
   );
   if (required.rows.some((row) => !row.read)) fail("read_allowlist");
+
+  const policyFunctions = await client.query(
+    `SELECT routine,
+            pg_catalog.has_function_privilege($1,routine,'EXECUTE') AS execute,
+            pg_catalog.has_function_privilege($1,routine,'EXECUTE WITH GRANT OPTION') AS delegate
+     FROM pg_catalog.unnest($2::pg_catalog.text[]) routine`,
+    [role, affiliateCapturePolicyFunctions],
+  );
+  if (policyFunctions.rows.some((row) => !row.execute || row.delegate))
+    fail("policy_function_grants");
+
   const extraReads = await client.query(
     `SELECT 1 FROM pg_catalog.pg_class relation
      JOIN pg_catalog.pg_namespace namespace ON namespace.oid=relation.relnamespace
