@@ -25,6 +25,10 @@ export const PRODUCTION_PREFLIGHT_TABLES = [
   "pms.channel_binding_claims",
   "pms.channel_connections",
 ] as const;
+const PUBLIC_EMPTY_VIEWS = [
+  "booking.pricing_runtime_effective_authority_scopes",
+  "booking.pricing_runtime_effective_property_scopes",
+] as const;
 type Phase = "prepare" | "execute";
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
@@ -189,13 +193,13 @@ export async function withReader<T>(
         const grants = await probe.query<{ relation: string }>(
           `SELECT n.nspname||'.'||c.relname AS relation
              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-            WHERE c.relkind IN ('r','p','f')
+            WHERE c.relkind IN ('r','p','v','m','f')
               AND n.nspname NOT IN ('pg_catalog','information_schema')
               AND has_table_privilege(current_user,c.oid,'SELECT') ORDER BY 1`,
         );
         if (
           grants.rows.map(({ relation }) => relation).join("\0") !==
-          [...PRODUCTION_PREFLIGHT_TABLES].sort().join("\0")
+          [...PRODUCTION_PREFLIGHT_TABLES, ...PUBLIC_EMPTY_VIEWS].sort().join("\0")
         )
           throw new Error("reader_scope_invalid");
         const publicViews = await probe.query<{ empty: boolean }>(
