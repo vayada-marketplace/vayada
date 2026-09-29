@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import pg from "pg";
 
+import { publishAffiliateReservationLifecycle } from "../domains/bookingAffiliateReservationLifecycle.js";
 import type { StripeBookingPaymentProvider } from "../domains/stripeBookingPayments.js";
 import {
   captureDirectNightlyRevenueEvidence,
@@ -898,7 +899,7 @@ async function updateBookingLifecycleStatus(
       publicMessageForMutation(mutation),
       JSON.stringify(statusEventPayload(candidate, mutation, context)),
       mutation.action,
-      candidate.deadlineOrWindow,
+      mutation.action === "stale-unpaid-cancellation" ? null : candidate.deadlineOrWindow,
     ],
   );
 
@@ -950,6 +951,30 @@ async function updateBookingLifecycleStatus(
         fromStatus: row.fromStatus,
         toStatus: row.toStatus,
         reason: mutation.cancellationReason ?? null,
+      },
+    });
+  }
+  if (mutation.toStatus === "canceled") {
+    const lifecycleKey = buildBookingLifecycleSweepKey({
+      guestBookingId: candidate.guestBookingId,
+      action: mutation.action,
+      deadlineOrWindow: mutation.deadlineOrWindow,
+    });
+    await publishAffiliateReservationLifecycle(client, {
+      source: "booking",
+      eventKey: `booking.affiliate-reservation.canceled.${lifecycleKey}.v1`,
+      eventType: "booking.affiliate_reservation.canceled",
+      occurredAt: context.now.toISOString(),
+      propertyId: candidate.propertyId,
+      bookingId: candidate.guestBookingId,
+      actorType: "system",
+      correlationId: context.correlationId,
+      causationId: lifecycleKey,
+      idempotencyKeyHash: sha256Key(lifecycleKey),
+      evidence: {
+        sourceEventType: mutation.statusEventType,
+        lifecycleStatus: row.toStatus,
+        cancellationReason: mutation.cancellationReason ?? null,
       },
     });
   }
