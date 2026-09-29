@@ -9,17 +9,18 @@ import {
 
 const VERSION = "vay2017-historical-binding-preflight.v1";
 const DOMAIN = "vayada:vay2017-historical-binding-preflight:v1\0";
-const APPROVED_SOURCE_RUN_ID = "vay1351-b68e50b476c7a997f8ac4703";
-const APPROVED_PAIRS = new Set([
-  "29f39aae-4ea8-4730-948a-c36780347750|237e8ee7-3a88-474e-97b6-80fc953026e2",
-  "26e9e98f-1f64-483f-8cb5-a5fa7499ba5d|253dc0ba-6518-4117-86e4-b3d0da05b13d",
-  "8f5919ed-4fc5-4d64-a65c-07486ec3f651|50e2edff-0399-4171-8e3e-ac04ffd3df24",
-  "c8efd685-527c-43da-a2f4-07e1b820b31e|61937e72-4e7f-4028-82d2-00c33433b607",
-  "7d3f6dcc-37f0-4446-bad8-7335819c180a|aeab85ad-8193-4c3e-9a65-491d05391720",
-  "6aca326e-9fb7-4139-a43c-d495c397700a|cfcddb9b-9607-4f5e-8759-23111bb68ab7",
-  "6810de91-f389-47ab-8f92-68abb2d8b163|e13f3645-d50b-4788-bb04-9e68ece0d647",
-  "b8efb175-7a94-49d5-98f9-1a6c28f6ec17|fc18d06d-c752-4621-bc3f-65b17d682b18",
-]);
+export const APPROVED_SOURCE_RUN_ID = "vay1351-b68e50b476c7a997f8ac4703";
+export const APPROVED_PAIRS = [
+  ["29f39aae-4ea8-4730-948a-c36780347750", "237e8ee7-3a88-474e-97b6-80fc953026e2"],
+  ["26e9e98f-1f64-483f-8cb5-a5fa7499ba5d", "253dc0ba-6518-4117-86e4-b3d0da05b13d"],
+  ["8f5919ed-4fc5-4d64-a65c-07486ec3f651", "50e2edff-0399-4171-8e3e-ac04ffd3df24"],
+  ["c8efd685-527c-43da-a2f4-07e1b820b31e", "61937e72-4e7f-4028-82d2-00c33433b607"],
+  ["7d3f6dcc-37f0-4446-bad8-7335819c180a", "aeab85ad-8193-4c3e-9a65-491d05391720"],
+  ["6aca326e-9fb7-4139-a43c-d495c397700a", "cfcddb9b-9607-4f5e-8759-23111bb68ab7"],
+  ["6810de91-f389-47ab-8f92-68abb2d8b163", "e13f3645-d50b-4788-bb04-9e68ece0d647"],
+  ["b8efb175-7a94-49d5-98f9-1a6c28f6ec17", "fc18d06d-c752-4621-bc3f-65b17d682b18"],
+] as const;
+const APPROVED_PAIR_KEYS = new Set(APPROVED_PAIRS.map((pair) => pair.join("|")));
 
 export type LegacyHistoricalBindingPreflightInput = {
   version: typeof VERSION;
@@ -90,7 +91,10 @@ export function parseLegacyHistoricalBindingPreflightInput(
     );
   }
   if (keys.size !== requests.length) throw new Error("Duplicate preflight pair");
-  if (keys.size !== APPROVED_PAIRS.size || [...keys].some((key) => !APPROVED_PAIRS.has(key)))
+  if (
+    keys.size !== APPROVED_PAIR_KEYS.size ||
+    [...keys].some((key) => !APPROVED_PAIR_KEYS.has(key))
+  )
     throw new Error("Preflight cohort does not match the approved eight pairs");
   if (sourceBoundaries.size !== 1) throw new Error("Mixed preflight source boundaries");
 
