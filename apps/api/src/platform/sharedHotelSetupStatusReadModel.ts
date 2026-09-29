@@ -119,6 +119,7 @@ type SharedPropertyProfileRow = {
 
 type PropertyProfileWriteRow = {
   propertyId: string;
+  hasPmsLink?: boolean;
 };
 
 type PropertyCreateIdempotencyRow = {
@@ -694,7 +695,10 @@ async function writePropertyProfile(
       const propertyId = result.rows[0]?.propertyId;
       if (!propertyId)
         throw new Error("Created shared property profile did not return a property id");
-      await client.query(
+      const hasPmsLink = result.rows[0]?.hasPmsLink;
+      if (typeof hasPmsLink !== "boolean")
+        throw new Error("Created shared property profile did not return PMS eligibility");
+      const pendingFinancials = await client.query(
         `INSERT INTO identity.product_entitlements (
            organization_id, product, entitlement_key, status,
            resource_product, resource_type, resource_id, metadata
@@ -704,9 +708,13 @@ async function writePropertyProfile(
          FROM identity.organization_resource_links link
          WHERE link.organization_id = $1::uuid
            AND link.product = 'pms' AND link.resource_type = 'pms_property'
-           AND link.resource_id = $2 AND link.relationship = 'owner' AND link.status = 'active'`,
+           AND link.resource_id = $2 AND link.relationship = 'owner' AND link.status = 'active'
+         RETURNING id`,
         [input.organizationId, propertyId],
       );
+      if (pendingFinancials.rows.length !== Number(hasPmsLink)) {
+        throw new Error("New property Financials entitlement did not match PMS eligibility");
+      }
       if (input.provisioningReference) {
         await linkProvisioningReference(client, {
           propertyId,
@@ -1636,7 +1644,8 @@ function createPropertyProfileSql(): string {
       SELECT * FROM created_property
     )
     ${propertyProfileMutationCtes()}
-    SELECT written_property.property_id::text AS "propertyId"
+    SELECT written_property.property_id::text AS "propertyId",
+           EXISTS (SELECT 1 FROM linked_product_properties WHERE product = 'pms') AS "hasPmsLink"
     FROM written_property
   `;
 }
