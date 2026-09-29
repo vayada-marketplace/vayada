@@ -16,6 +16,7 @@ import {
 import { captureDirectNightlyRevenueEvidence } from "./stripeBookingSettlement.js";
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
 import { appendMissingAddonRevenueEvidence } from "./bookingAddonRevenueEvidence.js";
+import { publishAffiliateReservationLifecycle } from "./bookingAffiliateReservationLifecycle.js";
 
 export type HostActionRequest = {
   action: HostBookingAction;
@@ -344,6 +345,20 @@ export function createBookingHostActions(config: {
               state.booking.paymentStatus === "authorized" ? "failed" : state.booking.paymentStatus,
           };
           await bookingOwner.reversePromo(client, scope.propertyId, scope.bookingId, at);
+          await publishAffiliateReservationLifecycle(client, {
+            source: "booking",
+            eventKey: `booking.affiliate-reservation.${updated.lifecycleStatus}.${previewId}.v1`,
+            eventType: "booking.affiliate_reservation.canceled",
+            occurredAt: at.toISOString(),
+            propertyId: scope.propertyId,
+            bookingId: scope.bookingId,
+            actorType: "user",
+            actorUserId: scope.actorUserId,
+            correlationId: previewId,
+            causationId: previewId,
+            idempotencyKeyHash: createHash("sha256").update(idempotencyKey).digest("hex"),
+            evidence: { sourceEventType: `guest_booking.${updated.lifecycleStatus}` },
+          });
         }
         if (!state.dates) {
           await config.guards.cancelAssignments(client, {
