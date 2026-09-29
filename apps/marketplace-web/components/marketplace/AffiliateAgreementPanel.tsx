@@ -5,11 +5,12 @@ import { CheckCircleIcon, ClockIcon } from "@heroicons/react/24/outline";
 
 import {
   changeMarketplaceCollaborationAffiliateLifecycle,
+  createMarketplaceCollaborationAffiliateLink,
   getMarketplaceCollaborationAffiliateAssent,
   recordMarketplaceCollaborationAffiliateAssent,
   type MarketplaceAffiliateAssentRead,
 } from "@vayada/marketplace-shared/api/collaborations";
-import { ApiErrorResponse } from "@vayada/marketplace-shared/api/client";
+import { ApiErrorResponse, VAYADA_API_BASE_URL } from "@vayada/marketplace-shared/api/client";
 
 type AgreementState =
   | { kind: "loading"; collaborationId: string }
@@ -83,6 +84,7 @@ export function AffiliateAgreementPanel({
       )}
       {currentState.kind === "ready" && (
         <AgreementDetails
+          key={collaborationId}
           agreement={currentState.agreement}
           collaborationId={collaborationId}
           currentUserType={currentUserType}
@@ -162,8 +164,12 @@ function AgreementDetails({
 }) {
   const [action, setAction] = useState<"idle" | "saving" | "error">("idle");
   const [lifecycleAction, setLifecycleAction] = useState<"idle" | "saving" | "error">("idle");
+  const [linkAction, setLinkAction] = useState<"idle" | "saving" | "error">("idle");
+  const [affiliateLink, setAffiliateLink] = useState<string | null>(null);
+  const [linkError, setLinkError] = useState<string | null>(null);
   const idempotencyKey = useRef<{ scope: string; key: string } | null>(null);
   const lifecycleKey = useRef<{ scope: string; key: string } | null>(null);
+  const linkKey = useRef<{ scope: string; key: string } | null>(null);
   const matched = agreement.assentState === "matched";
   const closedBeforeActivation =
     !agreement.lifecycle && ["declined", "cancelled", "rejected"].includes(collaborationStatus);
@@ -216,12 +222,43 @@ function AgreementDetails({
       <Disclosure disclosure={agreement.terms.disclosure} />
 
       {agreement.lifecycle && (
-        <a
-          href={`/earnings?propertyId=${encodeURIComponent(agreement.propertyId)}`}
-          className="inline-block text-sm font-semibold text-primary-700 underline"
-        >
-          View results & earnings
-        </a>
+        <div className="space-y-3">
+          {currentUserType === "creator" && (
+            <div className="rounded-lg border border-gray-200 bg-white p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Your stable affiliate link
+              </p>
+              {affiliateLink ? (
+                <p
+                  aria-label="Stable affiliate link"
+                  className="mt-1 block break-all text-sm font-semibold text-primary-700 underline"
+                >
+                  {affiliateLink}
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  disabled={linkAction === "saving"}
+                  onClick={runLinkCommand}
+                  className="mt-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {linkAction === "saving" ? "Getting link…" : "Get affiliate link"}
+                </button>
+              )}
+              {linkAction === "error" && (
+                <p role="alert" className="mt-2 text-sm text-red-800">
+                  {linkError}
+                </p>
+              )}
+            </div>
+          )}
+          <a
+            href={`/earnings?propertyId=${encodeURIComponent(agreement.propertyId)}`}
+            className="inline-block text-sm font-semibold text-primary-700 underline"
+          >
+            View results & earnings
+          </a>
+        </div>
       )}
 
       {!currentSideComplete && !closedBeforeActivation && (
@@ -343,6 +380,24 @@ function AgreementDetails({
       setLifecycleAction("error");
     }
   }
+
+  async function runLinkCommand() {
+    if (linkKey.current?.scope !== collaborationId)
+      linkKey.current = { scope: collaborationId, key: crypto.randomUUID() };
+    setLinkAction("saving");
+    setLinkError(null);
+    try {
+      const result = await createMarketplaceCollaborationAffiliateLink(
+        collaborationId,
+        linkKey.current.key,
+      );
+      setAffiliateLink(new URL(result.path, VAYADA_API_BASE_URL).toString());
+      setLinkAction("idle");
+    } catch (error) {
+      setLinkError(affiliateLinkErrorMessage(error, agreement.lifecycle?.status));
+      setLinkAction("error");
+    }
+  }
 }
 
 function LifecycleButton({
@@ -372,6 +427,21 @@ function lifecycleTitle(status: "active" | "paused" | "ended") {
     : status === "paused"
       ? "Affiliate agreement paused"
       : "Affiliate agreement ended";
+}
+
+function affiliateLinkErrorMessage(
+  error: unknown,
+  status: "active" | "paused" | "ended" | undefined,
+) {
+  if (error instanceof ApiErrorResponse && error.data.code === "link_creation_blocked")
+    return "The link is not ready. Ask the hotel to check its booking destination, then try again.";
+  if (error instanceof ApiErrorResponse && error.data.code === "agreement_not_active") {
+    if (status === "ended")
+      return "This agreement ended before a link was available. Start a new approved agreement to earn from new referrals.";
+    if (status === "paused") return "Resume the agreement, then try again.";
+    return "The agreement status changed. Refresh the collaboration details, then try again.";
+  }
+  return "Could not retrieve the affiliate link. Try again.";
 }
 
 function lifecycleDescription(

@@ -47,6 +47,18 @@ export type MarketplaceAffiliateLifecycleCommandResponse = {
   replayed: boolean;
 };
 
+export type MarketplaceAffiliateLinkCommandResponse = {
+  ok: true;
+  contractVersion: "marketplace-affiliate-link.v1";
+  linkId: string;
+  agreementId: string;
+  propertyId: string;
+  publicToken: string;
+  path: string;
+  createdAt: string;
+  replayed: boolean;
+};
+
 export type MarketplaceCollaborationStatus =
   | "pending"
   | "negotiating"
@@ -384,6 +396,8 @@ export const marketplaceCollaborationEndpoints = {
     `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/affiliate-assent`,
   affiliateLifecycle: (collaborationId: string) =>
     `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/affiliate-lifecycle`,
+  affiliateLink: (collaborationId: string) =>
+    `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/affiliate-link`,
   conversations: (
     input: {
       side?: MarketplaceCollaborationSide;
@@ -466,6 +480,17 @@ export async function changeMarketplaceCollaborationAffiliateLifecycle(
   return vayadaApiClient.post<MarketplaceAffiliateLifecycleCommandResponse>(
     marketplaceCollaborationEndpoints.affiliateLifecycle(collaborationId),
     input,
+    toIdempotencyOptions(idempotencyKey),
+  );
+}
+
+export async function createMarketplaceCollaborationAffiliateLink(
+  collaborationId: string,
+  idempotencyKey: string,
+): Promise<MarketplaceAffiliateLinkCommandResponse> {
+  return vayadaApiClient.post<MarketplaceAffiliateLinkCommandResponse>(
+    marketplaceCollaborationEndpoints.affiliateLink(collaborationId),
+    undefined,
     toIdempotencyOptions(idempotencyKey),
   );
 }
