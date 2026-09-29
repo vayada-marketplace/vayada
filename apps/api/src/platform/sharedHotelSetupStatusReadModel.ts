@@ -1509,8 +1509,6 @@ function createPropertyProfileSql(): string {
         'owner',
         'active'
       FROM created_property
-      ON CONFLICT (organization_id, product, resource_type, resource_id, relationship)
-      DO UPDATE SET status = 'active', updated_at = now()
       RETURNING product, resource_id
     ),
     setup_product_keys(product, entitlement_key) AS (
@@ -1615,8 +1613,6 @@ function createPropertyProfileSql(): string {
         'active'
       FROM created_property
       JOIN enabled_products entitlement ON TRUE
-      ON CONFLICT (organization_id, product, resource_type, resource_id, relationship)
-      DO UPDATE SET status = 'active', updated_at = now()
       RETURNING product, resource_id
     ),
     initialized_marketplace_profile AS (
