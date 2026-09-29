@@ -244,7 +244,10 @@ describe.skipIf(!url)("affiliate capture candidate role (PostgreSQL)", () => {
       );
       await owner.query(
         `GRANT EXECUTE ON FUNCTION marketplace.capture_affiliate_click(TEXT,TEXT,TEXT),
-          booking.admit_affiliate_click(TEXT,UUID,UUID) TO ${AFFILIATE_CAPTURE_ROLE}`,
+          booking.admit_affiliate_click(TEXT,UUID,UUID),
+          platform.channex_management_worker_scope(TEXT,TEXT,UUID),
+          platform.finance_expense_worker_scope(TEXT,TEXT,UUID),
+          platform.finance_export_worker_scope(TEXT,TEXT,UUID) TO ${AFFILIATE_CAPTURE_ROLE}`,
       );
       await owner.query(`GRANT SELECT ON ${readable.join(",")} TO ${AFFILIATE_CAPTURE_ROLE}`);
       await owner.query(`GRANT UPDATE ON ${lockable.join(",")} TO ${AFFILIATE_CAPTURE_ROLE}`);
@@ -261,6 +264,38 @@ describe.skipIf(!url)("affiliate capture candidate role (PostgreSQL)", () => {
       await expect(
         assertAffiliateCaptureRoleHasVisitReadCapabilities(owner, AFFILIATE_CAPTURE_ROLE, true),
       ).resolves.toBeUndefined();
+
+      for (const routine of [
+        "platform.channex_management_worker_scope(TEXT,TEXT,UUID)",
+        "platform.finance_expense_worker_scope(TEXT,TEXT,UUID)",
+        "platform.finance_export_worker_scope(TEXT,TEXT,UUID)",
+      ]) {
+        await owner.query(`REVOKE EXECUTE ON FUNCTION ${routine}
+          FROM PUBLIC,${AFFILIATE_CAPTURE_ROLE}`);
+        await expect(
+          assertAffiliateCaptureRoleHasVisitReadCapabilities(owner, AFFILIATE_CAPTURE_ROLE, true),
+        ).rejects.toThrow("affiliate_capture_role_policy_function_grants");
+        await owner.query(`GRANT EXECUTE ON FUNCTION ${routine} TO ${AFFILIATE_CAPTURE_ROLE}`);
+        await expect(
+          assertAffiliateCaptureRoleHasVisitReadCapabilities(owner, AFFILIATE_CAPTURE_ROLE, true),
+        ).resolves.toBeUndefined();
+      }
+      await owner.query(
+        `GRANT EXECUTE ON FUNCTION platform.finance_export_worker_scope(TEXT,TEXT,UUID)
+         TO ${AFFILIATE_CAPTURE_ROLE} WITH GRANT OPTION`,
+      );
+      await expect(
+        assertAffiliateCaptureRoleHasVisitReadCapabilities(owner, AFFILIATE_CAPTURE_ROLE, true),
+      ).rejects.toThrow("affiliate_capture_role_policy_function_grants");
+      await owner.query(
+        `REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION
+         platform.finance_export_worker_scope(TEXT,TEXT,UUID) FROM ${AFFILIATE_CAPTURE_ROLE}`,
+      );
+      await owner.query(`SET LOCAL ROLE ${AFFILIATE_CAPTURE_ROLE}`);
+      await expect(
+        owner.query("SELECT id FROM hotel_catalog.properties FOR UPDATE"),
+      ).resolves.toBeDefined();
+      await owner.query("RESET ROLE");
 
       // ENABLE ALWAYS guards remain effective even if a fresh login starts in replica mode.
       await owner.query(
