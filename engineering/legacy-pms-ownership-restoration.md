@@ -313,6 +313,76 @@ activity, verify current ownership, read replay receipts or write claims/events.
 Its non-executable result must not replace fresh source/owner eligibility,
 approval-expiry rechecks, compensation verification or atomic receipt/audit writes.
 
+`lockLegacyHistoricalBindingOwner` then fences the seven canonical ownership and
+identity relations in sorted order with SHARE NOWAIT in that same bounded READ
+COMMITTED transaction. This rejects busy writers instead of waiting; retained
+locks briefly prevent all writes to these relations, including unrelated owners.
+Use only in the controlled migration transaction, never ordinary request traffic.
+It rejects nonordinary, inherited or policy-filtered relations, rereads exhaustive
+ownership relationships/full-row fingerprints and compares an already verified
+owner session to current database identity bindings. Failure releases only this
+helper's locks; the caller must still abort. No source proof, migration-derived
+restriction disposition, entitlement, property eligibility or approval is inferred.
+Pending/suspended statuses stay explicit in its non-executable result. These
+locks are not provider-session revocation checks or a completed transition.
+Statement/lock timeouts do not bound idle transaction time: the controlled
+executor must enforce prompt completion and an idle-transaction deadline.
+
+The target-lock integration suite now composes real signed approval records,
+binding fences and owner fences in one transaction on the branch's migrated
+PG16/17 schema. It checks unchanged rows before rollback, retained locks against
+revocation/ownership/connection writes, release on outer rollback, later expiry,
+and a synthetic non-superuser role with complete versus withheld visibility.
+The fixture role's grants are not a reviewed production permission policy.
+Source hashes and before/after aggregate hashes in this guard-only fixture are
+synthetic assertions, not verified source provenance or transition evidence.
+These tests add no writer, claim transition, audit receipt, compensation or access
+release. Current-main migration integration and actual executor-role verification
+remain separate gates.
+
+`storeHistoricalBindingTransition` is an internal storage primitive, not a
+signature verifier or executable command. The future caller must authenticate
+and authorize before even receipt lookup, prove source/disposition/ownership and
+full target evidence under locks, and bind its chosen update timestamp and exact
+claim hashes to the signed aggregate before/after evidence. This primitive checks
+full claim drift, immutable provenance, disconnected retained-pair connections,
+and bounded transaction/visibility conditions; it atomically updates the claim
+and inserts the constrained transition plus restricted audit. Exact input replay
+returns history, never renewed eligibility; compensation uses a new command and
+the original prepare lineage. Savepoint failure restores all three writes, while
+success remains uncommitted. No runtime route/CLI/package-index export is wired;
+commit recovery, approved timestamp construction and full eligibility composition
+remain mandatory before any real execution.
+Compensation must also authenticate the original successful transition; a ledger
+row's existence and valid lineage alone are not authority.
+
+### Signed prepare write intent
+
+`buildHistoricalBindingWriteIntent` is an internal, prepare-only translator, not
+the executable consumer. It requires freshly signed evidence with a `write`
+object binding the original claim creation timestamp, chosen update timestamp
+(canonical UTC with six fractional digits), and complete expected after-row hash.
+Old diagnostic envelopes without this object cannot produce a write intent; do
+not modify old signatures or approval records. Generate new evidence/approvals.
+
+Before/after target hashes use domain `vayada:legacy-historical-binding-transition:v1`
+and `target-state` separators over canonical JSON containing the complete sorted
+owner fingerprint set, current identity evidence, property, claim fingerprint
+and sorted connection fingerprints. Only the claim fingerprint changes. Source
+proof and the exact write timestamps are additionally bound by the full signed
+evidence digest. The translator derives all event fields; payload hash is SHA256
+of canonical envelope bytes, and executor hash uses the same domain with the
+`executor` separator and the trusted runner principal. These are not user inputs.
+
+The result remains `executable: false`: hashes describe supplied expectations,
+not independent database observations. Current authorities, source provenance,
+owner/disposition eligibility and target evidence must still be verified under
+retained locks before receipt lookup or storage. Storage must compare actual
+full before/after row hashes and creation timestamp; signature alone does not
+prove the supplied after hash describes the chosen timestamp. Compensation is
+explicitly rejected until its original-transition authentication is composed.
+No command, provider call, access exception or production execution is wired.
+
 - Design acceptance first; identity disposition/evidence next; append-only
   transition storage next; signed consumer/replay/rollback next; integration
   rehearsal last. Keep each PR approximately 400 meaningful lines or less.

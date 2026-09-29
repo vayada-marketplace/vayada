@@ -9,8 +9,18 @@ import {
   requireResourceAccess,
 } from "@vayada/backend-authorization";
 import { recordAffiliateAssent } from "./marketplaceAffiliateAssentCommand.js";
+import {
+  activateMarketplaceAffiliateAgreement,
+  unresolvedAffiliateAgreementActivationReadiness,
+  type AffiliateAgreementActivationReadiness,
+} from "./marketplaceAffiliateAgreementActivation.js";
 import { changeMarketplaceAffiliateAgreementLifecycle } from "./marketplaceAffiliateAgreementLifecycleCommand.js";
 import { readMarketplaceAffiliateAgreementLifecycle } from "./marketplaceAffiliateAgreementLifecycle.js";
+import {
+  createMarketplaceAffiliateLink,
+  unresolvedAffiliateLinkCreationReadiness,
+  type AffiliateLinkCreationReadiness,
+} from "./marketplaceAffiliateLinkCreation.js";
 
 export type AffiliateAssentRead = {
   participationId: string | null;
@@ -47,6 +57,11 @@ export type AffiliateAssentRepository = {
     collaborationId: string,
     input: AffiliateLifecycleCommandInput,
   ): Promise<AffiliateLifecycleCommandResult>;
+  createLinkForCollaboration(
+    context: RequestContext,
+    collaborationId: string,
+    idempotencyKey: string,
+  ): Promise<AffiliateLinkCommandResult>;
   close(): Promise<void>;
 };
 export type AffiliateAssentCommandResult =
@@ -66,19 +81,53 @@ export type AffiliateLifecycleCommandInput = {
 export type AffiliateLifecycleCommandResult = Awaited<
   ReturnType<typeof changeMarketplaceAffiliateAgreementLifecycle>
 >;
+export type AffiliateLinkCommandResult = Awaited<ReturnType<typeof createMarketplaceAffiliateLink>>;
 export function createPgMarketplaceAffiliateAssentRepository(
   connectionString: string,
+  activationReadiness: AffiliateAgreementActivationReadiness = unresolvedAffiliateAgreementActivationReadiness,
+  linkReadiness: AffiliateLinkCreationReadiness = unresolvedAffiliateLinkCreationReadiness,
 ): AffiliateAssentRepository {
   const pool = new pg.Pool({ connectionString, max: 3 });
   return {
     read: (context, id) => readAffiliateAssent(pool, context, id),
     readForCollaboration: (context, id) => readCollaborationAffiliateAssent(pool, context, id),
     recordForCollaboration: (context, id, key) =>
-      recordCollaborationAffiliateAssent(pool, context, id, key),
+      recordCollaborationAffiliateAssent(pool, context, id, key, activationReadiness),
     changeLifecycleForCollaboration: (context, id, input) =>
       changeCollaborationAffiliateLifecycle(pool, context, id, input),
+    createLinkForCollaboration: (context, id, key) =>
+      createCollaborationAffiliateLink(pool, context, id, key, linkReadiness),
     close: () => pool.end(),
   };
+}
+
+export async function createCollaborationAffiliateLink(
+  pool: pg.Pool,
+  context: RequestContext,
+  collaborationId: string,
+  idempotencyKey: string,
+  readiness: AffiliateLinkCreationReadiness = unresolvedAffiliateLinkCreationReadiness,
+): Promise<AffiliateLinkCommandResult> {
+  if (
+    !validAffiliateCollaborationKey(collaborationId) ||
+    !idempotencyKey.trim() ||
+    idempotencyKey.length > 200
+  )
+    return { ok: false, code: "invalid_request" };
+  if (context.selectedOrganization.kind !== "creator_workspace")
+    return { ok: false, code: "scope_unavailable" };
+  const target = await resolveCollaborationAffiliateAssentTarget(pool, context, collaborationId);
+  if (!target?.attempt_id) return { ok: false, code: "scope_unavailable" };
+  const activation = await pool.query<{ agreement_id: string }>(
+    `SELECT agreement_id FROM marketplace.affiliate_agreement_activations WHERE attempt_id=$1`,
+    [target.attempt_id],
+  );
+  if (!activation.rows[0]) return { ok: false, code: "scope_unavailable" };
+  return createMarketplaceAffiliateLink(
+    pool,
+    { context, agreementId: activation.rows[0].agreement_id, idempotencyKey },
+    readiness,
+  );
 }
 
 export async function readAffiliateAssent(
@@ -286,6 +335,7 @@ export async function recordCollaborationAffiliateAssent(
   context: RequestContext,
   collaborationId: string,
   idempotencyKey: string,
+  activationReadiness: AffiliateAgreementActivationReadiness = unresolvedAffiliateAgreementActivationReadiness,
 ): Promise<AffiliateAssentCommandResult> {
   const hotel = context.selectedOrganization.kind === "hotel_group";
   if (
@@ -333,7 +383,7 @@ export async function recordCollaborationAffiliateAssent(
     disclosureHash: target.disclosure_hash,
     collaborationId,
   });
-  return result.ok
+  const response: AffiliateAssentCommandResult = result.ok
     ? {
         ok: true,
         revision: result.revision,
@@ -341,6 +391,26 @@ export async function recordCollaborationAffiliateAssent(
         replayed: result.replayed,
       }
     : result;
+  if (response.ok && response.state === "matched") {
+    const matched = await resolveCollaborationAffiliateAssentTarget(pool, context, collaborationId);
+    if (!matched?.attempt_id) throw new Error("Matched affiliate assent is unavailable");
+    const activation = await activateMarketplaceAffiliateAgreement(
+      pool,
+      {
+        context,
+        propertyId: matched.property_id,
+        programId: matched.program_id,
+        creatorProfileId: matched.creator_profile_id,
+        attemptId: matched.attempt_id,
+        termsId: matched.terms_id,
+        expectedRevision: 0,
+        idempotencyKey,
+      },
+      activationReadiness,
+    );
+    if (!activation.ok) return { ok: false, code: activation.code };
+  }
+  return response;
 }
 
 export async function changeCollaborationAffiliateLifecycle(
