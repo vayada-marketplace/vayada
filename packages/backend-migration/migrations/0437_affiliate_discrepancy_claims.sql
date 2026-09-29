@@ -106,6 +106,7 @@ BEGIN
       ON item.earning_entry_id=earning.earning_entry_id AND item.payout_id=NEW.payout_id
     WHERE earning.creator_profile_id=NEW.creator_profile_id
       AND earning.beneficiary_organization_id=NEW.creator_organization_id
+      AND earning.affiliate_id=NEW.affiliate_id
       AND earning.property_id=NEW.property_id AND earning.booking_id=NEW.booking_id
       AND earning.agreement_id=NEW.agreement_id
   ) THEN RAISE EXCEPTION 'affiliate claim payout scope unavailable' USING ERRCODE='23514'; END IF;
