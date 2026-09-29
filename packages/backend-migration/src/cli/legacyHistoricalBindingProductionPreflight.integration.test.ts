@@ -42,10 +42,10 @@ describe.skipIf(!url)("production historical binding temporary reader", () => {
           await expect(source.query(`SELECT 1 FROM ${table} LIMIT 0`)).resolves.toBeDefined();
         await expect(
           source.query("SELECT * FROM booking.pricing_runtime_effective_property_scopes"),
-        ).resolves.toMatchObject({ rows: [] });
+        ).rejects.toMatchObject({ code: "42501" });
         await expect(
           source.query("SELECT * FROM booking.pricing_runtime_effective_authority_scopes"),
-        ).resolves.toMatchObject({ rows: [] });
+        ).rejects.toMatchObject({ code: "42501" });
         return "ok";
       },
       owner.pathname.slice(1),

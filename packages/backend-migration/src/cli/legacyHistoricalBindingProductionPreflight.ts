@@ -25,10 +25,6 @@ export const PRODUCTION_PREFLIGHT_TABLES = [
   "pms.channel_binding_claims",
   "pms.channel_connections",
 ] as const;
-const PUBLIC_EMPTY_VIEWS = [
-  "booking.pricing_runtime_effective_authority_scopes",
-  "booking.pricing_runtime_effective_property_scopes",
-] as const;
 type Phase = "prepare" | "execute";
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
@@ -195,20 +191,14 @@ export async function withReader<T>(
              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
             WHERE c.relkind IN ('r','p','v','m','f')
               AND n.nspname NOT IN ('pg_catalog','information_schema')
+              AND has_schema_privilege(current_user,n.oid,'USAGE')
               AND has_table_privilege(current_user,c.oid,'SELECT') ORDER BY 1`,
         );
         if (
           grants.rows.map(({ relation }) => relation).join("\0") !==
-          [...PRODUCTION_PREFLIGHT_TABLES, ...PUBLIC_EMPTY_VIEWS].sort().join("\0")
+          [...PRODUCTION_PREFLIGHT_TABLES].sort().join("\0")
         )
           throw new Error("reader_scope_invalid");
-        const publicViews = await probe.query<{ empty: boolean }>(
-          `SELECT NOT EXISTS(SELECT 1 FROM booking.pricing_runtime_effective_property_scopes)
-            AND NOT EXISTS(SELECT 1 FROM booking.pricing_runtime_effective_authority_scopes)
-            AS empty`,
-        );
-        if (publicViews.rows[0]?.empty !== true)
-          throw new Error("reader_public_view_scope_invalid");
         let denied = false;
         try {
           await probe.query("UPDATE hotel_catalog.properties SET id=id WHERE false");
