@@ -144,6 +144,24 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
           VALUES ('{A}','Etc/UTC'),('{B}','Etc/UTC');
         INSERT INTO pms.room_types(id,property_id,name)
           VALUES ('{ROOM_A}','{A}','Proof room A'),('{ROOM_B}','{B}','Proof room B');
+        INSERT INTO booking.pricing_v2_offer_terms
+          (property_id,room_type_id,offer_id,revision,terms,request_id,request_hash,actor_user_id)
+          VALUES
+          ('{A}','{ROOM_A}','proof','{R1}',jsonb_build_object('roomTypeId','{ROOM_A}',
+            'offerId','proof','revision','{R1}','cancellation',jsonb_build_object('kind','flexible'),
+            'payment',jsonb_build_object('kind','full')),'proof-terms-a',repeat('a',64),'{ACTOR}'),
+          ('{B}','{ROOM_B}','proof','{R2}',jsonb_build_object('roomTypeId','{ROOM_B}',
+            'offerId','proof','revision','{R2}','cancellation',jsonb_build_object('kind','flexible'),
+            'payment',jsonb_build_object('kind','full')),'proof-terms-b',repeat('a',64),'{ACTOR}');
+        INSERT INTO booking.pricing_v2_offer_term_heads
+          (property_id,room_type_id,offer_id,revision)
+          VALUES ('{A}','{ROOM_A}','proof','{R1}'),('{B}','{ROOM_B}','proof','{R2}');
+        INSERT INTO booking.fixed_charge_revisions
+          (property_id,revision,policy,organization_id,actor_user_id,request_id,request_hash)
+          VALUES ('{A}','{R1}','{{}}','{ORG}','{ACTOR}','proof-fixed-a',repeat('a',64)),
+                 ('{B}','{R2}','{{}}','{ORG}','{ACTOR}','proof-fixed-b',repeat('a',64));
+        INSERT INTO booking.fixed_charge_heads(property_id,revision)
+          VALUES ('{A}','{R1}'),('{B}','{R2}');
         INSERT INTO hotel_catalog.property_public_profile_read_model
           (property_id,public_id,display_name,canonical_slug,default_locale,supported_locales,profile_status)
           VALUES ('{A}','proof-a','Proof A','proof-a','en',ARRAY['en'],'complete'),
@@ -191,6 +209,9 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
           hotel_catalog.property_locations,
           distribution.public_hotel_bookability_profiles,
           pms.room_types TO {roles};
+        GRANT SELECT, UPDATE ON booking.pricing_v2_offer_term_heads,
+          booking.fixed_charge_heads, booking.fixed_charge_revisions TO {roles};
+        GRANT SELECT ON booking.pricing_v2_offer_terms TO {roles};
         GRANT SELECT ON booking.pricing_quotes,booking.pricing_authority_revisions,
           booking.pricing_authority_heads TO {roles};
         GRANT INSERT ON booking.pricing_quotes TO {PUBLIC_A},{PUBLIC_B};
@@ -257,12 +278,20 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
             ("distribution.public_hotel_bookability_profiles", "property_id", "profile_status"),
         )
         room_locks = (("pms.room_types", "property_id", "sort_order"),)
+        booking_locks = (
+            ("booking.pricing_v2_offer_term_heads", "revision"),
+            ("booking.fixed_charge_heads", "revision"),
+            ("booking.fixed_charge_revisions", "policy"),
+        )
         sql(
-            f"GRANT USAGE ON SCHEMA identity, hotel_catalog, distribution, pms TO {PROVISIONER};"
+            f"GRANT USAGE ON SCHEMA identity, hotel_catalog, distribution, pms, booking TO {PROVISIONER};"
             + "GRANT SELECT, UPDATE ON "
             + ", ".join(table for table, _, _ in identity_locks + discovery_locks + room_locks)
+            + ", "
+            + ", ".join(table for table, _ in booking_locks)
             + f" TO {PROVISIONER}"
         )
+        sql(f"GRANT SELECT ON booking.pricing_v2_offer_terms TO {PROVISIONER}")
         # CREATEROLE receives ADMIN-only membership in a role it creates. It
         # can grant itself SET/INHERIT later, so the policy must deny this
         # provisioner despite its current lack of usable pricing privileges.
@@ -277,6 +306,9 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
             )
             == "true:true:false:false"
         )
+        # The immutable revision trigger masks RLS's UPDATE gate. Disable it
+        # only in this disposable cluster, then restore it after the checks.
+        sql("ALTER TABLE booking.fixed_charge_revisions DISABLE TRIGGER fixed_charge_immutable")
         for table, predicate, column in identity_locks:
             sql(
                 f"UPDATE {table} SET {column}={column} WHERE {predicate}",
@@ -289,6 +321,16 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
                 PROVISIONER,
                 denied=True,
             )
+        for table, column in booking_locks:
+            assert sql(f"SELECT property_id FROM {table} WHERE property_id='{A}'", PROVISIONER) == ""
+            assert (
+                sql(
+                    f"UPDATE {table} SET {column}={column} WHERE property_id='{A}' RETURNING 1",
+                    PROVISIONER,
+                )
+                == ""
+            )
+        assert sql(f"SELECT property_id FROM booking.pricing_v2_offer_terms WHERE property_id='{A}'", PROVISIONER) == ""
         for table, predicate, column in identity_locks:
             for role in (OWNER_A, PUBLIC_A, READER_A):
                 assert (
@@ -309,6 +351,93 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
                 )
                 == "1"
             )
+        for table, column in booking_locks:
+            assert (
+                sql(
+                    f"""SELECT count(*) FROM pg_policies
+                    WHERE schemaname='booking' AND tablename='{table.split('.')[1]}'
+                      AND policyname IN ('pricing_runtime_booking_read_scope',
+                        'pricing_runtime_booking_update_scope',
+                        'pricing_runtime_booking_lock_only')
+                      AND permissive='RESTRICTIVE'"""
+                )
+                == "3"
+            )
+            for property_id in (A, B):
+                for role, allowed_property in (
+                    (OWNER_A, A), (PUBLIC_A, A), (READER_A, A),
+                    (OWNER_B, B), (PUBLIC_B, B),
+                ):
+                    expected = property_id if property_id == allowed_property else ""
+                    assert (
+                        sql(
+                            f"BEGIN; SELECT property_id FROM {table} WHERE property_id='{property_id}' FOR SHARE; ROLLBACK;",
+                            role,
+                        )
+                        == expected
+                    )
+                    assert (
+                        sql(
+                            f"BEGIN; SELECT property_id FROM {table} WHERE property_id='{property_id}' FOR UPDATE; ROLLBACK;",
+                            role,
+                        )
+                        == expected
+                    )
+                    if expected:
+                        sql(
+                            f"UPDATE {table} SET {column}={column} WHERE property_id='{property_id}'",
+                            role,
+                            denied=True,
+                        )
+                    else:
+                        assert (
+                            sql(
+                                f"UPDATE {table} SET {column}={column} WHERE property_id='{property_id}' RETURNING 1",
+                                role,
+                            )
+                            == ""
+                        )
+            assert (
+                sql(
+                    f"BEGIN; UPDATE {table} SET {column}={column} WHERE property_id='{A}' RETURNING 1; ROLLBACK;",
+                    LEGACY,
+                )
+                == "1"
+            )
+        for role, allowed_property in (
+            (OWNER_A, A), (PUBLIC_A, A), (READER_A, A),
+            (OWNER_B, B), (PUBLIC_B, B),
+        ):
+            for property_id, room_id, revision_id in ((A, ROOM_A, R1), (B, ROOM_B, R2)):
+                expected = property_id if property_id == allowed_property else ""
+                assert (
+                    sql(
+                        f"SELECT property_id FROM booking.pricing_v2_offer_terms WHERE property_id='{property_id}'",
+                        role,
+                    )
+                    == expected
+                )
+                assert (
+                    sql(
+                        f"""BEGIN; SELECT h.property_id FROM booking.pricing_v2_offer_term_heads h
+                        JOIN booking.pricing_v2_offer_terms t
+                          USING(property_id,room_type_id,offer_id,revision)
+                        WHERE h.property_id='{property_id}' AND h.room_type_id='{room_id}'
+                          AND h.offer_id='proof' AND h.revision='{revision_id}'
+                        FOR SHARE OF h; ROLLBACK;""",
+                        role,
+                    )
+                    == expected
+                )
+                assert (
+                    sql(
+                        f"""BEGIN; SELECT h.property_id FROM booking.fixed_charge_heads h
+                        JOIN booking.fixed_charge_revisions r USING(property_id,revision)
+                        WHERE h.property_id='{property_id}' FOR SHARE OF h,r; ROLLBACK;""",
+                        role,
+                    )
+                    == expected
+                )
         # Exercise the owner's actual joined membership/user/property lock, not
         # just independent table locks. The assigned-mode checks below use the
         # same relation set as the live authorization path.
@@ -428,6 +557,17 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
                 LEGACY,
                 denied=True,
             )
+        for table, column in booking_locks:
+            assert sql(f"SELECT property_id FROM {table} WHERE property_id='{A}'", LEGACY) == ""
+            assert (
+                sql(
+                    f"UPDATE {table} SET {column}={column} WHERE property_id='{A}' RETURNING 1",
+                    LEGACY,
+                )
+                == ""
+            )
+        assert sql(f"SELECT property_id FROM booking.pricing_v2_offer_terms WHERE property_id='{A}'", LEGACY) == ""
+        sql("ALTER TABLE booking.fixed_charge_revisions ENABLE TRIGGER fixed_charge_immutable")
         sql(
             revision(B, "00000000-0000-4000-8000-000000000015", "inherited-owner"),
             LEGACY,
@@ -583,11 +723,13 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
             f"DELETE FROM platform.pricing_runtime_property_scopes WHERE database_login='{PUBLIC_A}'"
         )
         sql(quote(A, 8), PUBLIC_A, denied=True)
+        assert sql(f"SELECT property_id FROM booking.fixed_charge_heads WHERE property_id='{A}'", PUBLIC_A) == ""
+        assert sql(f"SELECT property_id FROM booking.pricing_v2_offer_terms WHERE property_id='{A}'", PUBLIC_A) == ""
         print(
             f"PASS PostgreSQL {sql('SHOW server_version')}: {len(migrations)} migrations through {migrations[-1].name}"
         )
         print(
-            "PASS owner/public separation; identity, public-discovery, and room-type lock-only denials; admin-only provisioner denial; attestation-safe scope views; property/org/GUC/inherited-role/ACL/RLS-bypass denials; exact joined locks; rollback; scope revocation"
+            "PASS owner/public separation; identity, public-discovery, room-type, and Booking lock-only denials; Booking cross-property read/lock denial; admin-only provisioner denial; attestation-safe scope views; property/org/GUC/inherited-role/ACL/RLS-bypass denials; exact joined locks; rollback; scope revocation"
         )
         print(
             "LIMIT: DB primitive only; no request identity issuer, actor binding, full route/lock matrix, or live rollout proof"
