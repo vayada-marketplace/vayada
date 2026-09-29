@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { gunzipSync, gzipSync } from "node:zlib";
 import pg from "pg";
 
+import { ChannexAdoptionConsumptionError } from "../channexAdoptionConsumptionError.js";
 import { parseChannexAdoptionRunnerConfig } from "../channexAdoptionRunnerConfig.js";
 import { prepareLegacyHistoricalBindingPreflightInput } from "../legacyHistoricalBindingPreflightPreparation.js";
 import {
@@ -27,6 +28,60 @@ export const PRODUCTION_PREFLIGHT_TABLES = [
 ] as const;
 type Phase = "prepare" | "execute";
 
+const SAFE_ERROR_CODES = new Set([
+  "admin_endpoint_untrusted",
+  "channex_adoption_execution_principal_missing",
+  "execution_id_invalid",
+  "image_source_mismatch",
+  "mode_invalid",
+  "reader_cleanup_unsafe",
+  "reader_identity_invalid",
+  "reader_scope_invalid",
+  "reader_write_not_denied",
+  "source_sha_invalid",
+  "target_database_admin_url_missing",
+  "vay2017_preflight_execution_id_missing",
+  "vay2017_preflight_input_gzip_base64_missing",
+  "vay2017_preflight_public_key_base64_missing",
+  "vay2017_preflight_signature_missing",
+  "vay2017_preflight_signing_key_id_missing",
+  "vay2017_preflight_source_sha_missing",
+  "vayada_db_rds_ca_bundle_missing",
+]);
+const SAFE_STAGE_ERRORS = new Map([
+  ["Invalid preflight signing key id", "invalid_preflight_signing_key_id"],
+  [
+    "Historical connection preparation visibility incomplete",
+    "historical_connection_preparation_visibility_incomplete",
+  ],
+  [
+    "Historical connection preparation source is not production",
+    "historical_connection_preparation_source_is_not_production",
+  ],
+  [
+    "Historical connection preparation PMS source mismatch",
+    "historical_connection_preparation_pms_source_mismatch",
+  ],
+  [
+    "Historical connection preparation source pair mismatch",
+    "historical_connection_preparation_source_pair_mismatch",
+  ],
+  [
+    "Historical connection preparation target pair mismatch",
+    "historical_connection_preparation_target_pair_mismatch",
+  ],
+  [
+    "Invalid historical binding target identifiers",
+    "invalid_historical_binding_target_identifiers",
+  ],
+  [
+    "Historical binding target visibility is incomplete",
+    "historical_binding_target_visibility_is_incomplete",
+  ],
+  ["Historical binding property missing", "historical_binding_property_missing"],
+  ["Historical binding target metadata invalid", "historical_binding_target_metadata_invalid"],
+]);
+
 function required(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name];
   if (!value) throw new Error(`${name.toLowerCase()}_missing`);
@@ -35,11 +90,16 @@ function required(env: NodeJS.ProcessEnv, name: string): string {
 
 export function safeErrorCode(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
-  if (/^[a-z0-9_]+$/.test(message)) return message;
-  const postgresCode = (error as { code?: unknown } | null)?.code;
-  return typeof postgresCode === "string" && /^[0-9A-Z]{5}$/.test(postgresCode)
-    ? `postgres_${postgresCode.toLowerCase()}`
-    : "historical_binding_preflight_failed";
+  if (SAFE_ERROR_CODES.has(message)) return message;
+  if (
+    error instanceof pg.DatabaseError &&
+    typeof error.code === "string" &&
+    /^[0-9A-Z]{5}$/.test(error.code)
+  )
+    return `postgres_${error.code.toLowerCase()}`;
+  if (error instanceof ChannexAdoptionConsumptionError && /^[A-Z][A-Z0-9_]{2,63}$/.test(error.code))
+    return error.code.toLowerCase();
+  return SAFE_STAGE_ERRORS.get(message) ?? "historical_binding_preflight_failed";
 }
 
 export function roleName(executionId: string, phase: Phase): string {
