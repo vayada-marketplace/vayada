@@ -1,5 +1,6 @@
 -- VAY-1092: bind a new property to the organization of its setup login.
--- No runtime login or privilege is created or granted by this migration.
+-- Only the session-bound scope view gets a read grant; no runtime login or
+-- base-table write privilege is created or granted by this migration.
 ALTER TABLE hotel_catalog.properties
   ADD COLUMN creation_organization_id UUID REFERENCES identity.organizations(id);
 
