@@ -1488,6 +1488,14 @@ describe("Airbnb alteration runtime opt-in", () => {
       }).airbnbAlterations,
     ).toBeUndefined();
   });
+  it("accepts only a standalone wildcard for all hotels", () => {
+    expect(
+      loadConfig({ ...enabled, AIRBNB_ALTERATION_PROPERTY_IDS: "*" }).airbnbAlterations,
+    ).toEqual({ propertyIds: undefined });
+    expect(() =>
+      loadConfig({ ...enabled, AIRBNB_ALTERATION_PROPERTY_IDS: `*,${propertyId}` }),
+    ).toThrow("AIRBNB_ALTERATION_PROPERTY_IDS");
+  });
   it("normalizes and deduplicates an explicit property allowlist", () => {
     const id = "ABCDEFAB-ABCD-4000-8000-ABCDEFABCDEF";
     expect(
