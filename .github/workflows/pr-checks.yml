@@ -354,6 +354,8 @@ jobs:
           --no-file-parallelism
           src/marketplaceCollaborations.test.ts
           src/marketplaceAffiliateDestinationRoutes.test.ts
+          src/marketplaceAffiliateDiscrepancyRoutes.test.ts
+          src/domains/affiliateDiscrepancyRepository.integration.test.ts
           src/domains/bookingAffiliateDestinationSave.integration.test.ts
           src/domains/bookingAffiliateReferralTransportCertificationStorage.integration.test.ts
           src/domains/bookingAffiliateReferralTransportCertification.integration.test.ts

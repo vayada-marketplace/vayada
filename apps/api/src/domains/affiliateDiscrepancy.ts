@@ -5,6 +5,13 @@ export type AffiliateClaimCreatorScope = {
   creatorProfileId: string;
   affiliateId: string;
 };
+export type AffiliateClaimResolution = {
+  decision: AffiliateClaimDecision;
+  reason: string;
+  evidenceReferences: string[];
+  earningEntryId: string | null;
+  payoutId: string | null;
+};
 export type AffiliateClaim = {
   claimId: string;
   kind: AffiliateClaimKind;
@@ -35,5 +42,17 @@ export type AffiliateDiscrepancyRepository = {
   }): Promise<{ claim: AffiliateClaim; replayed: boolean }>;
   list(scope: AffiliateClaimCreatorScope): Promise<AffiliateClaim[]>;
   get(scope: AffiliateClaimCreatorScope, claimId: string): Promise<AffiliateClaim | null>;
+  resolve(input: {
+    claimId: string;
+    propertyId: string | null;
+    resolution: AffiliateClaimResolution;
+    idempotencyKey: string;
+    actorUserId: string;
+    actorOrganizationId: string;
+    requestId: string;
+  }): Promise<
+    | { ok: true; claim: AffiliateClaim; replayed: boolean }
+    | { ok: false; code: "not_found" | "idempotency_conflict" }
+  >;
   close(): Promise<void>;
 };
