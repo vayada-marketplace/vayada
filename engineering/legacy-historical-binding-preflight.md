@@ -142,6 +142,8 @@ detached signature with the deployment-controlled Channex adoption key
 configuration and requires its allowlisted runner principal. The exact eight
 historical hotel/Channex pairs and their immutable source run are also pinned in
 the command, so a differently signed cohort or source boundary is rejected.
+The production target consumes that source through the extractor's immutable
+`preprod` snapshot contract; it never treats a live mutable database as source evidence.
 Protected fixture keys and all detailed source/target validation remain enforced
 by the underlying readers.
 

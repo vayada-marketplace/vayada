@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { canonicalizeJson } from "./channexAdoptionManifestCrypto.js";
 import { readLegacyHistoricalBindingEvidenceSnapshot } from "./legacyHistoricalBindingEvidenceSnapshot.js";
 import {
+  APPROVED_SOURCE_RUN_ID,
   parseLegacyHistoricalBindingPreflightInput,
   runLegacyHistoricalBindingPreflight,
 } from "./legacyHistoricalBindingPreflightRunner.js";
@@ -36,11 +37,11 @@ function rawInput() {
       rowOrdinal: index + 1,
       rowChecksumSha256: "a".repeat(64),
     };
-    const sourceRunId = "vay1351-b68e50b476c7a997f8ac4703";
+    const sourceRunId = APPROVED_SOURCE_RUN_ID;
     return {
       sourceRequest: {
         sourceRunId,
-        sourceEnvironment: "production",
+        sourceEnvironment: "preprod",
         sourceSchemaRevision: "c".repeat(40),
         sourceEvidenceSha256: "d".repeat(64),
         snapshotIdentifierSha256: "e".repeat(64),
@@ -71,6 +72,7 @@ beforeEach(() => vi.resetAllMocks());
 
 describe("historical binding production preflight runner", () => {
   it("requires the pinned complete eight-pair production input", () => {
+    expect(APPROVED_SOURCE_RUN_ID).toBe("vay1351-61ec013e79ed2a042caadef8");
     const raw = rawInput();
     expect(
       parseLegacyHistoricalBindingPreflightInput(raw, signature(raw), verificationKeys).requests,
@@ -78,6 +80,17 @@ describe("historical binding production preflight runner", () => {
     expect(() =>
       parseLegacyHistoricalBindingPreflightInput(raw, "0".repeat(86), verificationKeys),
     ).toThrow("Invalid preflight signature");
+
+    const liveSource = JSON.parse(raw);
+    liveSource.requests[0].sourceRequest.sourceEnvironment = "production";
+    const liveSourceRaw = canonicalizeJson(liveSource);
+    expect(() =>
+      parseLegacyHistoricalBindingPreflightInput(
+        liveSourceRaw,
+        signature(liveSourceRaw),
+        verificationKeys,
+      ),
+    ).toThrow("Inconsistent preflight request");
 
     const duplicate = JSON.parse(raw);
     duplicate.requests[7] = duplicate.requests[0];

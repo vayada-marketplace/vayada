@@ -13,8 +13,8 @@ vi.mock("./productionPmsSnapshotReader.js");
 
 const ledger = {
   run: {
-    run_id: "vay1351-b68e50b476c7a997f8ac4703",
-    environment: "production",
+    run_id: "vay1351-61ec013e79ed2a042caadef8",
+    environment: "preprod",
     source_schema_revision: "a".repeat(40),
     cutover_freeze_proof_sha256: "b".repeat(64),
     status: "completed",
@@ -55,6 +55,29 @@ const ledger = {
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
 describe("historical binding preflight preparation", () => {
+  it("rejects source evidence outside the immutable preprod contract", async () => {
+    vi.mocked(readSourceLedger).mockResolvedValue({
+      ...ledger,
+      run: { ...ledger.run, environment: "production" },
+    } as never);
+    vi.mocked(readProductionPmsSnapshot).mockResolvedValue({} as never);
+    const release = vi.fn();
+    const query = vi.fn(async (sql: string) =>
+      sql.includes("count(*) = 7") ? { rows: [{ complete: true }] } : { rows: [] },
+    );
+
+    await expect(
+      prepareLegacyHistoricalBindingPreflightInput(
+        {
+          source: { connect: async () => ({ query, release }) } as never,
+          target: { connect: vi.fn() } as never,
+        },
+        "migration-production-2026-09",
+      ),
+    ).rejects.toThrow("Historical connection preparation source is not preprod");
+    expect(release).toHaveBeenCalledWith(false);
+  });
+
   it("builds the canonical pinned eight-pair input from read-only observations", async () => {
     const sortedLedger = structuredClone(ledger);
     sortedLedger.tables.reverse();
