@@ -13,7 +13,7 @@ BEGIN
 
   IF NOT EXISTS (
     WITH candidates AS (
-      SELECT affiliate_link.agreement_id, occurrence.clicked_at
+      SELECT affiliate_link.agreement_id, date_trunc('milliseconds', occurrence.clicked_at) AS clicked_at
       FROM booking.affiliate_original_booking_bindings binding
       JOIN booking.guest_bookings booking ON booking.id=binding.booking_id AND booking.property_id=binding.property_id
       JOIN booking.affiliate_click_admissions admission ON admission.context_id=binding.context_id
