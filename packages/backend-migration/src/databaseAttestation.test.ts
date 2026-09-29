@@ -15,13 +15,20 @@ function result(rows: unknown[]) {
 
 describe("database attestation evidence", () => {
   it("accepts an absent table and reads a trusted administrator-owned table", async () => {
+    let owner: unknown;
     const absent = {
-      query: async (sql: string) => {
+      query: async (sql: string, parameters?: unknown[]) => {
         expect(sql).toBe(DATABASE_ATTESTATION_TABLE_STATE_SQL);
+        owner = parameters?.[0];
         return result([{ present: false, trusted: false }]);
       },
     };
     await expect(readDatabaseAttestationTable(absent as never)).resolves.toBeNull();
+    expect(owner).toBe(DATABASE_ATTESTATION_OWNER);
+    await expect(
+      readDatabaseAttestationTable(absent as never, "vay2017_source_attestor_20260929"),
+    ).resolves.toBeNull();
+    expect(owner).toBe("vay2017_source_attestor_20260929");
 
     const trusted = {
       query: async (sql: string) =>
@@ -36,7 +43,7 @@ describe("database attestation evidence", () => {
     );
     expect(DATABASE_ATTESTATION_TABLE_STATE_SQL).toContain("session_user = current_user");
     expect(DATABASE_ATTESTATION_TABLE_STATE_SQL).toContain("has_table_privilege");
-    expect(DATABASE_ATTESTATION_TABLE_STATE_SQL).toContain(DATABASE_ATTESTATION_OWNER);
+    expect(DATABASE_ATTESTATION_TABLE_STATE_SQL).toContain("role.rolname = $1");
     expect(DATABASE_ATTESTATION_TABLE_STATE_SQL).toContain("membership.inherit_option");
     expect(DATABASE_ATTESTATION_TABLE_STATE_SQL).toContain("relrowsecurity");
     expect(DATABASE_ATTESTATION_TABLE_STATE_SQL).toContain("pg_catalog.pg_inherits");
@@ -54,6 +61,9 @@ describe("database attestation evidence", () => {
     await expect(readDatabaseAttestationTable(untrusted as never)).rejects.toEqual(
       new DatabaseAttestationError("UNTRUSTED_TABLE"),
     );
+    await expect(
+      readDatabaseAttestationTable(untrusted as never, "unsafe-owner;"),
+    ).rejects.toEqual(new DatabaseAttestationError("UNTRUSTED_TABLE"));
 
     let queryCount = 0;
     const duplicate = {

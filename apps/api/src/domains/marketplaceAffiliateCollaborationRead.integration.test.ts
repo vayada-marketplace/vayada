@@ -6,8 +6,10 @@ import {
 } from "./affiliateAssentCommandTestFixture.js";
 import { databaseUrl, id } from "./affiliatePublicationTestFixture.js";
 import { recordAffiliateAssent } from "./marketplaceAffiliateAssentCommand.js";
+import type { AffiliateAgreementActivationReadiness } from "./marketplaceAffiliateAgreementActivation.js";
 import {
   changeCollaborationAffiliateLifecycle,
+  diagnoseCollaborationAffiliateLink,
   recordCollaborationAffiliateAssent,
   readAffiliateAssent,
   readCollaborationAffiliateAssent,
@@ -156,6 +158,48 @@ describe.skipIf(!databaseUrl)("Affiliate assent through existing collaboration",
       }),
     ).toMatchObject({ ok: true, revision: 1 });
   });
+  it("previews the exact safe destination without recording a live or synthetic click", async () => {
+    const participationId = await activate();
+    expect(await diagnoseCollaborationAffiliateLink(fixture.pool(), context(true), key, null)).toEqual(
+      { ok: false, code: "scope_unavailable" },
+    );
+    await fixture.pool().query(`
+      CREATE SCHEMA IF NOT EXISTS booking;
+      ALTER TABLE hotel_catalog.properties ADD COLUMN lifecycle_status TEXT DEFAULT 'active';
+      CREATE TABLE hotel_catalog.property_slugs(property_id UUID,slug TEXT,purpose TEXT,status TEXT);
+      CREATE TABLE hotel_catalog.property_domains(property_id UUID,verification_status TEXT,
+        canonical_when_verified BOOLEAN);
+      CREATE TABLE booking.affiliate_destination_versions(id UUID PRIMARY KEY,property_id UUID,
+        created_by_organization_id UUID,booking_url TEXT);
+      CREATE TABLE marketplace.affiliate_links(id UUID PRIMARY KEY,agreement_id UUID,
+        activation_id UUID,participation_id UUID,program_id UUID,property_id UUID,public_token TEXT);
+      INSERT INTO hotel_catalog.property_slugs VALUES
+        ('${id(3)}','hotel-alpenrose','canonical','active');
+      INSERT INTO booking.affiliate_destination_versions VALUES
+        ('${id(30)}','${id(3)}','${id(4)}','https://hotel-alpenrose.next-booking.vayada.com/');
+      INSERT INTO marketplace.affiliate_links VALUES
+        ('${id(140)}','${id(130)}','${id(131)}','${participationId}','${id(50)}','${id(3)}',
+         'va_abcdefghijklmnopqrstuv');
+    `);
+    expect(
+      await diagnoseCollaborationAffiliateLink(
+        fixture.pool(),
+        context(false),
+        key,
+        "instagram.reel-1",
+      ),
+    ).toEqual({
+      ok: true,
+      contractVersion: "marketplace-affiliate-link-diagnostic.v1",
+      status: "ready",
+      association: "verified",
+      programStatus: "active",
+      destinationUrl: "https://hotel-alpenrose.next-booking.vayada.com/",
+      campaignLabel: "instagram.reel-1",
+      normalMetricsExcluded: true,
+      externalPurchaseVerified: false,
+    });
+  });
   it("fails closed when retained lifecycle history is invalid", async () => {
     await activate();
     await fixture.pool().query(
@@ -213,14 +257,32 @@ describe.skipIf(!databaseUrl)("Affiliate assent through existing collaboration",
   it("records each side against the collaboration's current pinned terms", async () => {
     const creator = assentInput(false).context;
     const hotel = assentInput().context;
+    const ready: AffiliateAgreementActivationReadiness = async (_client, activationScope) => ({
+      status: "ready",
+      scope: activationScope,
+      enrollmentOpen: true,
+      evidenceReferences: ["fresh-finance-and-booking-proof"],
+    });
     expect(
-      await recordCollaborationAffiliateAssent(fixture.pool(), creator, key, "creator-decision"),
+      await recordCollaborationAffiliateAssent(
+        fixture.pool(),
+        creator,
+        key,
+        "creator-decision",
+        ready,
+      ),
     ).toMatchObject({ ok: true, revision: 1, state: "pending", replayed: false });
     expect(
-      await recordCollaborationAffiliateAssent(fixture.pool(), creator, key, "creator-decision"),
+      await recordCollaborationAffiliateAssent(
+        fixture.pool(),
+        creator,
+        key,
+        "creator-decision",
+        ready,
+      ),
     ).toMatchObject({ ok: true, revision: 1, replayed: true });
     expect(
-      await recordCollaborationAffiliateAssent(fixture.pool(), hotel, key, "hotel-decision"),
+      await recordCollaborationAffiliateAssent(fixture.pool(), hotel, key, "hotel-decision", ready),
     ).toMatchObject({ ok: true, revision: 2, state: "matched" });
 
     const retained = await readCollaborationAffiliateAssent(fixture.pool(), context(), key);
@@ -230,7 +292,51 @@ describe.skipIf(!databaseUrl)("Affiliate assent through existing collaboration",
       propertyId: id(3),
       programId: id(50),
       creatorProfileId: id(82),
+      lifecycle: { status: "active", revision: 0, pausedBy: [] },
     });
+    expect(
+      await fixture
+        .pool()
+        .query("SELECT count(*)::int AS count FROM marketplace.affiliate_agreement_activations"),
+    ).toMatchObject({ rows: [{ count: 1 }] });
+  });
+  it("returns activation blockage and activates on an exact-key retry once ready", async () => {
+    const creator = assentInput(false).context;
+    const hotel = assentInput().context;
+    const blocked: AffiliateAgreementActivationReadiness = async () => ({
+      status: "blocked",
+      reasons: ["destination_unavailable"],
+    });
+    const ready: AffiliateAgreementActivationReadiness = async (_client, activationScope) => ({
+      status: "ready",
+      scope: activationScope,
+      enrollmentOpen: true,
+      evidenceReferences: ["fresh-proof"],
+    });
+    await recordCollaborationAffiliateAssent(
+      fixture.pool(),
+      creator,
+      key,
+      "creator-decision",
+      ready,
+    );
+    expect(
+      await recordCollaborationAffiliateAssent(
+        fixture.pool(),
+        hotel,
+        key,
+        "hotel-decision",
+        blocked,
+      ),
+    ).toEqual({ ok: false, code: "activation_blocked" });
+    expect(
+      await recordCollaborationAffiliateAssent(fixture.pool(), hotel, key, "hotel-decision", ready),
+    ).toMatchObject({ ok: true, state: "matched", replayed: true });
+    expect(
+      await fixture
+        .pool()
+        .query("SELECT count(*)::int AS count FROM marketplace.affiliate_agreement_activations"),
+    ).toMatchObject({ rows: [{ count: 1 }] });
   });
   it("does not create assent for an ambiguous or cross-tenant collaboration", async () => {
     const creator = assentInput(false).context;

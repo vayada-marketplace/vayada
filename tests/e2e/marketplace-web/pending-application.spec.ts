@@ -1,4 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
+import { watchNoLegacyCalls } from "../support/noLegacyCalls";
+import { watchPageHealth } from "../support/pageHealth";
+import { createAdaptiveHotelSetupStatusMock } from "../support/sharedHotelSetupMocks";
 import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
 
 test("creator edits a pending request, retries failures, and cancels it", async ({ page }) => {
@@ -185,6 +188,234 @@ test("creator edits a pending request, retries failures, and cancels it", async 
   await expect(page.getByRole("button", { name: "Edit Request" })).toHaveCount(0);
 });
 
+test("creator finds the stable affiliate link after collaboration completion", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  const assertNoLegacyCalls = watchNoLegacyCalls(page, testInfo, "marketplace-web-offer-discovery");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await primeCreatorSession(page);
+  await mockCreatorProfile(page);
+  await routeJson(page, /\/api\/identity\/consent\/cookies(?:\?|$)/, {
+    necessary: true,
+    functional: true,
+    analytics: false,
+    marketing: false,
+  });
+  const collaboration = completedAffiliateCollaboration();
+  await routeJson(page, /\/api\/marketplace\/offers(?:\?|$)/, {
+    items: [],
+    pagination: { total: 0, offset: 0, limit: 200 },
+  });
+  await routeJson(page, /\/api\/marketplace\/collaborations\/me(?:\?|$)/, {
+    items: [collaboration],
+  });
+  await routeJson(page, /\/api\/marketplace\/collaborations\/conversations(?:\?|$)/, {
+    items: [
+      {
+        contractVersion: "marketplace-collaboration-reads.v1",
+        collaborationId: "affiliate-e2e",
+        side: "creator",
+        partnerName: "Alpine House",
+        partnerAvatarUrl: null,
+        offerTitle: "Alpine creator partnership",
+        collaborationStatus: "completed",
+        lastMessageContent: "Partnership complete",
+        lastMessageAt: "2026-09-25T01:00:00.000Z",
+        unreadCount: 0,
+      },
+    ],
+    nextCursor: null,
+    hasMore: false,
+  });
+  await routeJson(page, /\/api\/marketplace\/collaborations\/affiliate-e2e(?:\?|$)/, collaboration);
+  await routeJson(page, /\/collaborations\/affiliate-e2e\/messages(?:\?|$)/, {
+    contractVersion: "marketplace-collaboration-reads.v1",
+    collaborationId: "affiliate-e2e",
+    authorizationMode: "creator_workspace_resource_link",
+    items: [],
+    nextCursor: null,
+    hasMore: false,
+  });
+  await routeJson(
+    page,
+    /\/collaborations\/affiliate-e2e\/affiliate-assent$/,
+    completedAffiliateAgreement("active"),
+  );
+  let linkRequests = 0;
+  await page.route(/\/collaborations\/affiliate-e2e\/affiliate-link$/, async (route) => {
+    if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+    linkRequests++;
+    expect(route.request().method()).toBe("POST");
+    expect(route.request().headers()["idempotency-key"]).toBeTruthy();
+    await route.fulfill({
+      status: 201,
+      headers: corsHeaders(route),
+      json: {
+        ok: true,
+        contractVersion: "marketplace-affiliate-link.v1",
+        linkId: "link-e2e",
+        agreementId: "agreement-e2e",
+        propertyId: "property-e2e",
+        publicToken: "va_abcdefghijklmnopqrstuv",
+        path: "/r/va_abcdefghijklmnopqrstuv",
+        createdAt: "2026-09-29T08:00:00.000Z",
+        replayed: false,
+      },
+    });
+  });
+  await page.route(
+    /\/collaborations\/affiliate-e2e\/affiliate-link\/diagnostic$/,
+    async (route) => {
+      if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+      expect(route.request().postDataJSON()).toEqual({ campaignLabel: "instagram.reel-1" });
+      await route.fulfill({
+        headers: corsHeaders(route),
+        json: {
+          ok: true,
+          contractVersion: "marketplace-affiliate-link-diagnostic.v1",
+          status: "ready",
+          association: "verified",
+          programStatus: "active",
+          destinationUrl: "https://alpine.next-booking.vayada.com/",
+          campaignLabel: "instagram.reel-1",
+          normalMetricsExcluded: true,
+          externalPurchaseVerified: false,
+        },
+      });
+    },
+  );
+
+  await page.goto("/chat");
+  await page.getByRole("button", { name: "Archived", exact: true }).click();
+  await page.getByText("Alpine creator partnership", { exact: true }).click();
+  await page.getByRole("button", { name: "Details", exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByText("Affiliate agreement active", { exact: true })).toBeVisible();
+  await expect(page.getByText("12.5% of accommodation revenue", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Get affiliate link" }).click();
+  await expect(page.getByLabel("Stable affiliate link")).toHaveText(
+    "https://api.localhost/r/va_abcdefghijklmnopqrstuv",
+  );
+  await page.getByLabel("Optional campaign label").fill("instagram.reel-1");
+  await page.getByRole("button", { name: "Use labeled variant" }).click();
+  await expect(page.getByLabel("Stable affiliate link")).toHaveText(
+    "https://api.localhost/r/va_abcdefghijklmnopqrstuv?campaign=instagram.reel-1",
+  );
+  await page.getByRole("button", { name: "Preview & test" }).click();
+  await expect(page.getByText("Link ready to share", { exact: true })).toBeVisible();
+  await expect(page.getByText("Creator and hotel association verified.")).toBeVisible();
+  await expect(page.getByText(/no booking or purchase was verified/)).toBeVisible();
+  expect(page.url()).toContain("/chat");
+  await expect(page.getByRole("link", { name: "View results & earnings" })).toHaveAttribute(
+    "href",
+    "/earnings?propertyId=property-e2e",
+  );
+  expect(linkRequests).toBe(1);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    ),
+  ).toBe(true);
+  await assertNoLegacyCalls();
+  await assertHealthy();
+});
+
+test("hotel manages the retained affiliate agreement after collaboration completion", async ({
+  page,
+}, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  const assertNoLegacyCalls = watchNoLegacyCalls(page, testInfo, "marketplace-web-offer-discovery");
+  await primeHotelSession(page);
+  const collaboration = {
+    ...completedAffiliateCollaboration(),
+    side: "hotel",
+    isInitiator: false,
+    authorizationMode: "hotel_org_resource_link",
+  };
+  await routeJson(page, /\/api\/identity\/consent\/cookies(?:\?|$)/, {
+    necessary: true,
+    functional: true,
+    analytics: false,
+    marketing: false,
+  });
+  await routeJson(
+    page,
+    /\/api\/hotel-setup\/status(?:\?|$)/,
+    createAdaptiveHotelSetupStatusMock({
+      entryProduct: "marketplace",
+      organizationId: "hotel-org",
+      organizationDisplayName: "Alpine Group",
+      propertyId: "property-e2e",
+      propertyDisplayName: "Alpine House",
+    }),
+  );
+  await routeJson(page, /\/api\/marketplace\/collaborations\/me(?:\?|$)/, {
+    items: [collaboration],
+  });
+  await routeJson(page, /\/api\/marketplace\/collaborations\/conversations(?:\?|$)/, {
+    items: [
+      {
+        contractVersion: "marketplace-collaboration-reads.v1",
+        collaborationId: "affiliate-e2e",
+        side: "hotel",
+        partnerName: "Lina Creator",
+        partnerAvatarUrl: null,
+        offerTitle: "Alpine creator partnership",
+        collaborationStatus: "completed",
+        lastMessageContent: "Partnership complete",
+        lastMessageAt: "2026-09-25T01:00:00.000Z",
+        unreadCount: 0,
+      },
+    ],
+    nextCursor: null,
+    hasMore: false,
+  });
+  await routeJson(page, /\/api\/marketplace\/collaborations\/affiliate-e2e(?:\?|$)/, collaboration);
+  await routeJson(page, /\/collaborations\/affiliate-e2e\/messages(?:\?|$)/, {
+    contractVersion: "marketplace-collaboration-reads.v1",
+    collaborationId: "affiliate-e2e",
+    authorizationMode: "hotel_org_resource_link",
+    items: [],
+    nextCursor: null,
+    hasMore: false,
+  });
+  let lifecycleStatus: "active" | "paused" = "active";
+  await page.route(/\/collaborations\/affiliate-e2e\/affiliate-assent$/, async (route) => {
+    if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+    await route.fulfill({
+      headers: corsHeaders(route),
+      json: completedAffiliateAgreement(lifecycleStatus),
+    });
+  });
+  await page.route(/\/collaborations\/affiliate-e2e\/affiliate-lifecycle$/, async (route) => {
+    if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+    expect(route.request().postDataJSON()).toMatchObject({ action: "pause", expectedRevision: 0 });
+    lifecycleStatus = "paused";
+    await route.fulfill({
+      headers: corsHeaders(route),
+      json: { ok: true, eventId: "event-e2e", revision: 1, replayed: false },
+    });
+  });
+
+  await page.goto("/chat");
+  await page.getByRole("button", { name: "Archived", exact: true }).click();
+  await page.getByText("Lina Creator", { exact: true }).click();
+  await page.getByRole("button", { name: "Details", exact: true }).click();
+  await expect(page.getByText("Affiliate agreement active", { exact: true })).toBeVisible();
+  await expect(page.getByText("12.5% of accommodation revenue", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Get affiliate link" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "View results & earnings" })).toHaveAttribute(
+    "href",
+    "/earnings?propertyId=property-e2e",
+  );
+  await page.getByRole("button", { name: "Pause affiliate agreement" }).click();
+  await expect(page.getByText("Affiliate agreement paused", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Resume affiliate agreement" })).toBeVisible();
+  await assertNoLegacyCalls();
+  await assertHealthy();
+});
+
 async function primeCreatorSession(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem("userType", "creator");
@@ -215,6 +446,31 @@ async function primeCreatorSession(page: Page) {
           phone: "+49 89 123456",
           status: "active",
         },
+      },
+    });
+  });
+}
+
+async function primeHotelSession(page: Page) {
+  await page.addInitScript(() => {
+    localStorage.setItem("userType", "hotel");
+    localStorage.setItem("isLoggedIn", "true");
+    localStorage.setItem("selectedSharedPropertyId", "property-e2e");
+    localStorage.setItem(
+      "vayada_cookie_consent",
+      JSON.stringify({ necessary: true, functional: true, analytics: false, marketing: false }),
+    );
+  });
+  await page.route(/\/auth\/session(?:\?|$)/, async (route) => {
+    if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+    await route.fulfill({
+      headers: corsHeaders(route),
+      json: {
+        accessToken: "hotel-authkit-token",
+        csrfToken: "hotel-csrf-token",
+        organizationId: "hotel-org",
+        organizationKind: "hotel_group",
+        user: { id: "hotel-user", email: "hotel@example.test", name: "Alpine House" },
       },
     });
   });
@@ -269,6 +525,90 @@ async function mockCreatorProfile(page: Page) {
     missingPlatforms: false,
     completionSteps: [],
   });
+}
+
+function completedAffiliateCollaboration() {
+  return {
+    contractVersion: "marketplace-collaboration-reads.v1",
+    authorizationMode: "creator_workspace_resource_link",
+    collaborationId: "affiliate-e2e",
+    offerId: "offer-e2e",
+    creatorId: "creator-profile-e2e",
+    hotelProfileId: "hotel-e2e",
+    side: "creator",
+    initiatorSide: "creator",
+    isInitiator: true,
+    status: "completed",
+    compensationType: "paid",
+    propertyTimezone: "Europe/Berlin",
+    offerTitle: "Alpine creator partnership",
+    hotelLocation: "Innsbruck",
+    applicationMessage: "Alpine guide",
+    selectedCompensationOptionId: "paid-e2e",
+    creator: {
+      side: "creator",
+      organizationId: "creator-org",
+      profileId: "creator-profile-e2e",
+      displayName: "Lina Creator",
+      avatarUrl: null,
+      location: "Berlin",
+      portfolioUrl: null,
+      creatorType: "travel",
+      platforms: [],
+    },
+    hotel: {
+      side: "hotel",
+      organizationId: "hotel-org",
+      profileId: "hotel-e2e",
+      displayName: "Alpine House",
+      avatarUrl: null,
+    },
+    terms: {
+      paidAmount: "900",
+      currency: "EUR",
+      freeStayMinNights: null,
+      freeStayMaxNights: null,
+      discountPercentage: null,
+      affiliateEnabled: true,
+      affiliateCommissionPercentage: "12.5",
+      travelDateFrom: "2026-09-01",
+      travelDateTo: "2026-09-03",
+      preferredDateFrom: null,
+      preferredDateTo: null,
+      preferredMonths: [],
+    },
+    deliverables: [],
+    createdAt: "2026-09-01T01:00:00.000Z",
+    updatedAt: "2026-09-25T01:00:00.000Z",
+    lastMessageAt: null,
+    cancelledBy: null,
+  };
+}
+
+function completedAffiliateAgreement(status: "active" | "paused") {
+  return {
+    participationId: "participation-e2e",
+    attemptId: "attempt-e2e",
+    programId: "program-e2e",
+    propertyId: "property-e2e",
+    offerId: "offer-e2e",
+    creatorProfileId: "creator-profile-e2e",
+    origin: "application",
+    revision: 2,
+    assentState: "matched",
+    terms: {
+      id: "terms-e2e",
+      disclosure: "12.5% of accommodation revenue · 14-day attribution window",
+      disclosureHash: "hash-e2e",
+    },
+    hotelApprovedAt: "2026-09-20T08:00:00.000Z",
+    creatorAcceptedAt: "2026-09-20T09:00:00.000Z",
+    lifecycle: {
+      status,
+      revision: status === "active" ? 0 : 1,
+      pausedBy: status === "paused" ? ["hotel"] : [],
+    },
+  };
 }
 
 async function routeJson(page: Page, pattern: RegExp, json: unknown) {

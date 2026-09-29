@@ -3066,6 +3066,9 @@ describe("shared hotel setup status route", () => {
         return { rows: [{ id: "99999999-9999-4999-8999-999999999901" }] };
       }
       if (text.includes("INSERT INTO hotel_catalog.properties")) {
+        return { rows: [{ propertyId }] };
+      }
+      if (text.includes("INSERT INTO identity.organization_resource_links")) {
         return { rows: [{ propertyId, hasPmsLink: true }] };
       }
       if (text.includes("INSERT INTO identity.product_entitlements")) {
@@ -3106,28 +3109,35 @@ describe("shared hotel setup status route", () => {
       }),
     ).resolves.toEqual(profileResponse(propertyId, minimalHotelInput(), 3));
 
-    const createCall = query.mock.calls.find(([text]) =>
+    const createIndex = query.mock.calls.findIndex(([text]) =>
       text.includes("INSERT INTO hotel_catalog.properties"),
     );
-    if (!createCall) throw new Error("Expected the transactional property create query");
-    const [createSql, createValues] = createCall;
+    const linkIndex = query.mock.calls.findIndex(([text]) =>
+      text.includes("INSERT INTO identity.organization_resource_links"),
+    );
+    expect(createIndex).toBeGreaterThanOrEqual(0);
+    expect(linkIndex).toBeGreaterThan(createIndex);
+    const [createSql, createValues] = query.mock.calls[createIndex]!;
+    const [linkSql, linkValues] = query.mock.calls[linkIndex]!;
     expect(createSql).toContain("INSERT INTO hotel_catalog.properties");
-    expect(createSql).toContain("INSERT INTO identity.organization_resource_links");
-    expect(createSql).toContain("WHEN 'booking' THEN 'booking_hotel'");
-    expect(createSql).toContain("WHEN 'pms' THEN 'pms_property'");
-    expect(createSql).toContain("WHEN 'marketplace' THEN 'hotel_profile'");
-    expect(createSql).toContain("INSERT INTO marketplace.marketplace_hotel_profiles");
-    expect(createSql).toContain("INSERT INTO booking.booking_settings (property_id)");
-    expect(createSql).toContain("contact_input.purpose");
-    expect(createSql).toContain("contact_input.is_public");
-    expect(createSql).toContain("SET purpose = EXCLUDED.purpose");
-    expect(createSql).toContain("is_public = EXCLUDED.is_public");
-    expect(createSql).toContain("deleted_external_guest_contacts");
-    expect(createSql).toContain("contact.source_system <> 'platform'");
-    expect(createSql).not.toContain("INSERT INTO hotel_catalog.property_profiles");
-    expect(createSql).not.toContain("INSERT INTO hotel_catalog.property_media");
-    expect(createSql).not.toContain("INSERT INTO identity.organizations");
-    expect(createSql).not.toContain("property_source_links");
+    expect(createSql).not.toContain("INSERT INTO identity.organization_resource_links");
+    expect(linkSql).toContain("WHEN 'booking' THEN 'booking_hotel'");
+    expect(linkSql).toContain("WHEN 'pms' THEN 'pms_property'");
+    expect(linkSql).toContain("WHEN 'marketplace' THEN 'hotel_profile'");
+    expect(linkSql).toContain("INSERT INTO marketplace.marketplace_hotel_profiles");
+    expect(linkSql).toContain("INSERT INTO booking.booking_settings (property_id)");
+    expect(linkSql).toContain("contact_input.purpose");
+    expect(linkSql).toContain("contact_input.is_public");
+    expect(linkSql).toContain("SET purpose = EXCLUDED.purpose");
+    expect(linkSql).toContain("is_public = EXCLUDED.is_public");
+    expect(linkSql).toContain("deleted_external_guest_contacts");
+    expect(linkSql).toContain("contact.source_system <> 'platform'");
+    expect(linkSql).not.toContain("INSERT INTO hotel_catalog.property_profiles");
+    expect(linkSql).not.toContain("INSERT INTO hotel_catalog.property_media");
+    expect(linkSql).not.toContain("INSERT INTO identity.organizations");
+    expect(linkSql).not.toContain("property_source_links");
+    expect(linkSql).not.toContain("DO UPDATE SET status = 'active'");
+    expect(linkValues).toEqual([organizationId, expect.any(Object), propertyId]);
     expect(createValues).toMatchObject([
       organizationId,
       expect.objectContaining({
@@ -3144,6 +3154,48 @@ describe("shared hotel setup status route", () => {
         ]),
       }),
     ]);
+  });
+
+  it("rolls back the base property when its dependent links fail", async () => {
+    const query = vi.fn(async (text: string) => {
+      if (text.includes("FROM platform.idempotency_keys")) return { rows: [] };
+      if (text.includes("INSERT INTO platform.idempotency_keys"))
+        return { rows: [{ id: "99999999-9999-4999-8999-999999999901" }] };
+      if (text.includes("INSERT INTO hotel_catalog.properties")) return { rows: [{ propertyId }] };
+      if (text.includes("INSERT INTO identity.organization_resource_links"))
+        throw new Error("owner link failed");
+      return { rows: [profileRow()] };
+    });
+    const release = vi.fn();
+    const repository = createPgSharedHotelSetupStatusRepository({
+      connectionString: "postgresql://target-db",
+      pool: {
+        query: async <T extends QueryResultRow = QueryResultRow>(text: string) => {
+          const result = await query(text);
+          return { rows: result.rows as T[] };
+        },
+        connect: async () => ({
+          query: async <T extends QueryResultRow = QueryResultRow>(text: string) => {
+            const result = await query(text);
+            return { rows: result.rows as T[] };
+          },
+          release,
+        }),
+        end: vi.fn(async () => undefined),
+      },
+    });
+
+    await expect(
+      repository.createPropertyProfile({
+        organizationId,
+        idempotencyKey: "create-profile-link-failure",
+        correlationId: "create-profile-link-failure",
+        profile: minimalHotelInput(),
+      }),
+    ).rejects.toThrow("owner link failed");
+    expect(query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
+    expect(query.mock.calls.some(([text]) => text === "COMMIT")).toBe(false);
+    expect(release).toHaveBeenCalledOnce();
   });
 
   it("does not close caller-owned database pools", async () => {

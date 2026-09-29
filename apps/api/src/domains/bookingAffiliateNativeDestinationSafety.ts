@@ -14,7 +14,7 @@ type Scope = { propertyId: string; organizationId: string; destinationVersionId:
 type Result = { status: "blocked" } | AffiliateDestinationSafetyEvidence;
 
 /** Resolves fresh safety evidence while the per-property safety lock is held. */
-async function readNativeAffiliateDestinationSafety(
+export async function readNativeAffiliateDestinationSafety(
   client: pg.PoolClient,
   scope: Scope,
 ): Promise<Result> {

@@ -81,6 +81,13 @@ revision, recomputed ledger hash and hashed PMS snapshot tag to independently
 authenticated expected evidence. It does not verify a signature itself; an
 untrusted caller choosing its own expected hashes gains no authority.
 
+Use a dedicated, independently authenticated pool with bounded acquisition. The
+reader rolls back any leaked transaction before opening its snapshot, fixes its
+catalog search path and sets nonzero lock/query timeouts. Policy-filtered reads
+reject rather than silently hiding evidence. All seven relations must be ordinary
+tables without RLS or inheritance; relation locks retain that representation.
+These controls do not turn historical records into live ownership evidence.
+
 It uses the real default PMS snapshot reader and its identity/inventory validator:
 four-source/table ledger completeness, source aggregates, tag/ordinal continuity
 and raw PostgreSQL JSON row/table checksums are recomputed. Source table is fixed
@@ -120,3 +127,29 @@ transition authorities, revocation and combined locked revalidation remain
 required. No clean-adoption consumer, provider, writer or runtime route is wired.
 Composition tests mock reader modules and use the real evaluator; they do not
 add PostgreSQL or production evidence beyond the separate reader suites.
+
+## Protected diagnostic command
+
+`target:channex:historical-preflight` is the deployment-facing read-only entry
+point for the eight historical candidates. It requires separate source and
+target database URLs, enables PostgreSQL's default read-only mode on both pools,
+and delegates each pair to the existing evidence composer. It has no transition
+or provider capability.
+
+The command accepts exactly one canonical JSON file containing the approved
+eight unique pairs from one production source boundary. It verifies an Ed25519
+detached signature with the deployment-controlled Channex adoption key
+configuration and requires its allowlisted runner principal. The exact eight
+historical hotel/Channex pairs and their immutable source run are also pinned in
+the command, so a differently signed cohort or source boundary is rejected.
+The production target consumes that source through the extractor's immutable
+`preprod` snapshot contract; it never treats a live mutable database as source evidence.
+Protected fixture keys and all detailed source/target validation remain enforced
+by the underlying readers.
+
+Output contains only pair identifiers, diagnostic outcome/reason and
+`executable:false`; raw observations and database errors are not printed. A
+fully matching report means only that all eight pairs reached the existing
+`supplied_binding_matches_requires_owner_eligibility` diagnostic result. It
+does not grant owner eligibility, approve a transition, activate a connection,
+or authorize any write.

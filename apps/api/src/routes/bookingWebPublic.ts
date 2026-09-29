@@ -47,6 +47,7 @@ import {
   projectBookingRoomSelection,
 } from "../domains/bookingRoomSelectionProjection.js";
 import { appendMissingAddonRevenueEvidence } from "../domains/bookingAddonRevenueEvidence.js";
+import { publishAffiliateReservationLifecycle } from "../domains/bookingAffiliateReservationLifecycle.js";
 import type { BankTransferBookingOperations } from "../domains/financeBankTransferBooking.js";
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
 import { releaseAbandonedBookingEdits } from "../jobs/pendingBookingEditCleanup.js";
@@ -3866,6 +3867,19 @@ async function withGuestLifecycleMutation(
     if (!updated) {
       throw createHttpError(409, "Booking status changed. Please refresh and try again.");
     }
+    await publishAffiliateReservationLifecycle(client, {
+      source: "booking",
+      eventKey: `booking.affiliate-reservation.${mutation.action}.${updated.guestBookingId}.${context.fingerprint}.v1`,
+      eventType: "booking.affiliate_reservation.canceled",
+      occurredAt: context.occurredAt.toISOString(),
+      propertyId: updated.propertyId,
+      bookingId: updated.guestBookingId,
+      actorType: "user",
+      correlationId: context.correlationId,
+      causationId: context.requestId,
+      idempotencyKeyHash: sha256Hex(context.idempotencyKey),
+      evidence: { sourceEventType: mutation.eventType, lifecycleStatus: updated.lifecycleStatus },
+    });
     await reverseTargetPromoRedemption(
       client,
       updated.propertyId,
@@ -4843,6 +4857,26 @@ async function applyAcceptedTargetDateChange(
   );
   const updated = result.rows[0];
   if (!updated) throw createHttpError(409, "Booking change request status changed.");
+  await publishAffiliateReservationLifecycle(pool, {
+    source: "booking",
+    eventKey: `booking.affiliate-reservation.amended.${input.changeRequest.id}.v1`,
+    eventType: "booking.affiliate_reservation.amended",
+    occurredAt: input.context.occurredAt.toISOString(),
+    propertyId: updated.propertyId,
+    bookingId: updated.guestBookingId,
+    actorType: "user",
+    actorUserId: input.context.actorUserId,
+    correlationId: input.context.correlationId,
+    causationId: input.changeRequest.id,
+    idempotencyKeyHash: sha256Hex(input.context.idempotencyKey),
+    evidence: {
+      changeRequestId: input.changeRequest.id,
+      oldCheckIn: input.preview.oldCheckIn,
+      oldCheckOut: input.preview.oldCheckOut,
+      checkIn: input.preview.requestedCheckIn,
+      checkOut: input.preview.requestedCheckOut,
+    },
+  });
   return updated;
 }
 

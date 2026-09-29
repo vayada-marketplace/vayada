@@ -9,6 +9,7 @@ import {
 import { recordAffiliateAssent } from "./marketplaceAffiliateAssentCommand.js";
 import { readMarketplaceAffiliateAgreementLifecycle } from "./marketplaceAffiliateAgreementLifecycle.js";
 import { changeMarketplaceAffiliateAgreementLifecycle } from "./marketplaceAffiliateAgreementLifecycleCommand.js";
+import type { RequestContext } from "@vayada/backend-auth";
 
 const migrations = new URL("../../../../packages/backend-migration/migrations/", import.meta.url);
 
@@ -186,6 +187,55 @@ describe.skipIf(!databaseUrl)("affiliate agreement lifecycle command", () => {
       ok: false,
       code: "scope_unavailable",
     });
+  });
+
+  it.each([
+    ["permission", (context: RequestContext) => (context.membership.permissions = [])],
+    ["entitlement", (context: RequestContext) => (context.entitlements = [])],
+    [
+      "assigned property",
+      (context: RequestContext) =>
+        (context.membership.propertyAccess!.assignedPropertyIds = [id(6)]),
+    ],
+    ["resource link", (context: RequestContext) => (context.linkedResources = [])],
+  ])("denies hotel lifecycle changes without current %s access", async (_name, revoke) => {
+    const denied = input();
+    revoke(denied.context);
+    await expect(changeMarketplaceAffiliateAgreementLifecycle(pool(), denied)).rejects.toThrow();
+    expect(await status()).toEqual({ status: "active", revision: 0, pausedBy: [] });
+  });
+
+  it.each(["actor", "membership", "selectedOrganization"] as const)(
+    "denies inactive %s before any lifecycle write",
+    async (scope) => {
+      const denied = input();
+      denied.context[scope].status = "suspended";
+      expect(await changeMarketplaceAffiliateAgreementLifecycle(pool(), denied)).toEqual({
+        ok: false,
+        code: "scope_unavailable",
+      });
+      expect(await status()).toEqual({ status: "active", revision: 0, pausedBy: [] });
+    },
+  );
+
+  it("denies a creator who is not the current profile owner", async () => {
+    const denied = input(false);
+    denied.context.actor.internalUserId = id(1);
+    expect(await changeMarketplaceAffiliateAgreementLifecycle(pool(), denied)).toEqual({
+      ok: false,
+      code: "scope_unavailable",
+    });
+    expect(await status()).toEqual({ status: "active", revision: 0, pausedBy: [] });
+  });
+
+  it.each([
+    ["permission", (context: RequestContext) => (context.membership.permissions = [])],
+    ["resource link", (context: RequestContext) => (context.linkedResources = [])],
+  ])("denies creator lifecycle changes without current %s access", async (_name, revoke) => {
+    const denied = input(false);
+    revoke(denied.context);
+    await expect(changeMarketplaceAffiliateAgreementLifecycle(pool(), denied)).rejects.toThrow();
+    expect(await status()).toEqual({ status: "active", revision: 0, pausedBy: [] });
   });
 
   it("serializes competing changes and rejects an invalid transition", async () => {

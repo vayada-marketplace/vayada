@@ -120,6 +120,7 @@ class FakeSource {
   attestedFreezeProof: string | null = null;
   attestationTable: Map<string, string> | null = null;
   attestationTableTrusted = true;
+  attestationOwner: unknown;
   failTableOnce: string | null = null;
   private failed = false;
   private currentTable = "";
@@ -133,7 +134,7 @@ class FakeSource {
     this.attestedSnapshotIdentifier = `fixture:${sourceDatabase}-snapshot`;
   }
 
-  async query(sql: string) {
+  async query(sql: string, parameters?: unknown[]) {
     this.queries.push(sql);
     if (sql === SOURCE_WRITABLE_PRIVILEGES_SQL) return result([{ is_writable: this.writable }]);
     if (sql === "SHOW transaction_read_only") {
@@ -151,6 +152,7 @@ class FakeSource {
       ]);
     }
     if (sql === DATABASE_ATTESTATION_TABLE_STATE_SQL) {
+      this.attestationOwner = parameters?.[0];
       return result([
         {
           present: this.attestationTable !== null,
@@ -499,13 +501,16 @@ describe("immutable source extraction", () => {
 
   it("accepts trusted RDS table evidence and rejects conflicting or writable evidence", async () => {
     const tableSources = makeSources();
+    const config = makeConfig();
+    config.attestationOwner = "vay2017_source_attestor_20260929";
     tableSources.auth.attestedSnapshotIdentifier = null;
     tableSources.auth.attestationTable = new Map([
       ["vayada.source_snapshot_identifier", "fixture:auth-snapshot"],
     ]);
     await expect(
-      runSourceExtraction(makeConfig(), new FakeTarget() as never, tableSources as never),
+      runSourceExtraction(config, new FakeTarget() as never, tableSources as never),
     ).resolves.toMatchObject({ status: "completed" });
+    expect(tableSources.auth.attestationOwner).toBe("vay2017_source_attestor_20260929");
 
     const conflictingSources = makeSources();
     conflictingSources.auth.attestationTable = new Map([
@@ -523,6 +528,14 @@ describe("immutable source extraction", () => {
     await expect(
       runSourceExtraction(makeConfig(), new FakeTarget() as never, untrustedSources as never),
     ).rejects.toMatchObject({ code: "UNTRUSTED_SOURCE_ATTESTATION" });
+  });
+
+  it("rejects an unsafe attestation owner before connecting", () => {
+    const config = makeConfig();
+    config.attestationOwner = "unsafe-owner;";
+    expect(() => validateSourceExtractionConfig(config)).toThrowError(
+      expect.objectContaining({ code: "INVALID_ATTESTATION_OWNER" }),
+    );
   });
 
   it("enforces a read-only transaction and redacts unexpected failures", async () => {

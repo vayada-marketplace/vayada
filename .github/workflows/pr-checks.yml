@@ -165,9 +165,11 @@ jobs:
         env:
           VAY2017_BINDING_READER_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_binding_reader_fixture
           VAY2017_BINDING_SOURCE_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_binding_source_fixture
+          VAY2017_EVIDENCE_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_evidence_fixture
           VAY2017_TARGET_LOCK_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_target_lock_fixture
           VAY2017_TRANSITION_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_transition_fixture
           VAY2017_BINDING_APPROVAL_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_binding_approval_fixture
+          VAY2017_PRODUCTION_PREFLIGHT_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_production_preflight_test
         run: |
           node --input-type=module -e '
             import pg from "pg";
@@ -178,17 +180,24 @@ jobs:
             for (const database of [
               "vay2017_binding_reader_fixture",
               "vay2017_binding_source_fixture",
+              "vay2017_evidence_fixture",
               "vay2017_target_lock_fixture",
               "vay2017_transition_fixture",
               "vay2017_binding_approval_fixture",
+              "vay2017_production_preflight_test",
             ]) await client.query(`CREATE DATABASE ${database}`);
             await client.end();
           '
           TARGET_DATABASE_URL="$VAY2017_BINDING_READER_TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
           TARGET_DATABASE_URL="$VAY2017_BINDING_SOURCE_TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
-          npm --workspace @vayada/backend-migration run test -- --no-file-parallelism \
+          TARGET_DATABASE_URL="$VAY2017_PRODUCTION_PREFLIGHT_TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          VAY2017_PRODUCTION_PREFLIGHT_TEST_DATABASE_URL="$VAY2017_PRODUCTION_PREFLIGHT_TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run test -- --no-file-parallelism \
+            src/cli/legacyHistoricalBindingProductionPreflight.integration.test.ts \
             src/legacyHistoricalBindingTargetReader.test.ts \
             src/legacyHistoricalBindingSourceProof.test.ts \
+            src/legacyHistoricalBindingEvidenceSnapshot.test.ts \
+            src/legacyHistoricalBindingEnvelope.test.ts \
+            src/legacyOwnershipEvidenceReader.integration.test.ts \
             src/legacyHistoricalBindingTargetLocks.integration.test.ts \
             src/legacyHistoricalBindingTransitions.integration.test.ts \
             src/legacyHistoricalBindingApprovals.integration.test.ts
@@ -428,6 +437,13 @@ jobs:
         run: >-
           npm --workspace vayada-api run test --
           src/sharedHotelSetupProfile.integration.test.ts -t 'evaluates payment readiness'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify hotel setup creation scope
+        run: |
+          npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupCreationScope.integration.test.ts
+          npm --workspace vayada-api run test -- --no-file-parallelism src/sharedHotelSetupProfile.integration.test.ts -t 'provisions one canonical property for concurrent stable-reference commands'
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 

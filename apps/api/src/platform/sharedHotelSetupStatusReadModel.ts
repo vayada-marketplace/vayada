@@ -688,13 +688,20 @@ async function writePropertyProfile(
         await client.query("COMMIT");
         return provisionedPropertyId;
       }
-      const result = await client.query<PropertyProfileWriteRow>(createPropertyProfileSql(), [
+      const created = await client.query<PropertyProfileWriteRow>(createBasePropertySql(), [
         input.organizationId,
         payload,
       ]);
-      const propertyId = result.rows[0]?.propertyId;
+      const propertyId = created.rows[0]?.propertyId;
       if (!propertyId)
         throw new Error("Created shared property profile did not return a property id");
+      const result = await client.query<PropertyProfileWriteRow>(createPropertyProfileSql(), [
+        input.organizationId,
+        payload,
+        propertyId,
+      ]);
+      if (result.rows[0]?.propertyId !== propertyId)
+        throw new Error("Created shared property profile links did not return the property id");
       const hasPmsLink = result.rows[0]?.hasPmsLink;
       if (typeof hasPmsLink !== "boolean")
         throw new Error("Created shared property profile did not return PMS eligibility");
@@ -1453,6 +1460,20 @@ function publicPropertyProfileSql(): string {
   `;
 }
 
+function createBasePropertySql(): string {
+  return `
+    WITH generated_property AS (SELECT gen_random_uuid() AS property_id)
+    INSERT INTO hotel_catalog.properties (
+      id, public_id, display_name, property_type, creation_organization_id
+    )
+    SELECT generated_property.property_id,
+           'prop_' || replace(generated_property.property_id::text, '-', ''),
+           $2::jsonb ->> 'display_name', $2::jsonb ->> 'property_type', $1::uuid
+    FROM generated_property
+    RETURNING id::text AS "propertyId"
+  `;
+}
+
 function createPropertyProfileSql(): string {
   return `
     WITH profile_input AS (
@@ -1473,24 +1494,8 @@ function createPropertyProfileSql(): string {
         contacts jsonb
       )
     ),
-    generated_property AS (
-      SELECT gen_random_uuid() AS property_id
-    ),
     created_property AS (
-      INSERT INTO hotel_catalog.properties (
-        id,
-        public_id,
-        display_name,
-        property_type
-      )
-      SELECT
-        generated_property.property_id,
-        'prop_' || replace(generated_property.property_id::text, '-', ''),
-        profile_input.display_name,
-        profile_input.property_type
-      FROM generated_property, profile_input
-      RETURNING
-        id AS property_id
+      SELECT $3::uuid AS property_id
     ),
     linked_property AS (
       INSERT INTO identity.organization_resource_links (

@@ -43,6 +43,8 @@
     "target:workos:audit": "tsx src/cli/workosLinkAudit.ts",
     "target:next-smoke:backfill": "tsx src/cli/nextSmokeBackfill.ts",
     "target:channex:adopt": "tsx src/cli/channexAdoption.ts",
+    "target:channex:historical-preflight:prepare": "tsx src/cli/legacyHistoricalBindingPreflightPrepare.ts",
+    "target:channex:historical-preflight": "tsx src/cli/legacyHistoricalBindingPreflight.ts",
     "target:booking-public-bookability:backfill": "tsx src/cli/bookingPublicBookabilityBackfill.ts",
     "target:booking-nightly-revenue:backfill": "tsx src/cli/bookingNightlyRevenueBackfill.ts",
     "target:fixtures:smoke": "tsx src/cli/smoke.ts",
@@ -70,6 +72,8 @@
     "target:workos:audit:dist": "node dist/cli/workosLinkAudit.js",
     "target:next-smoke:backfill:dist": "node dist/cli/nextSmokeBackfill.js",
     "target:channex:adopt:dist": "node dist/cli/channexAdoption.js",
+    "target:channex:historical-preflight:prepare:dist": "node dist/cli/legacyHistoricalBindingPreflightPrepare.js",
+    "target:channex:historical-preflight:dist": "node dist/cli/legacyHistoricalBindingPreflight.js",
     "target:booking-public-bookability:backfill:dist": "node dist/cli/bookingPublicBookabilityBackfill.js",
     "target:booking-nightly-revenue:backfill:dist": "node dist/cli/bookingNightlyRevenueBackfill.js"
   },

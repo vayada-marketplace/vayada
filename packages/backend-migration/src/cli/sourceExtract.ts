@@ -42,6 +42,9 @@ try {
   ) as Record<SourceDatabase, string>;
   const config = {
     manifest,
+    ...(process.env["SOURCE_ATTESTATION_OWNER"]
+      ? { attestationOwner: process.env["SOURCE_ATTESTATION_OWNER"] }
+      : {}),
     inventory,
     historicalInventoryText,
     sourceSchemaRevision: values.get("--source-schema-revision")!,
