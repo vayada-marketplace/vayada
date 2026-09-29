@@ -476,6 +476,13 @@ describe.skipIf(!url)("historical prepare target locks on disposable PostgreSQL"
       });
     },
   );
+  it.each(["hotel_catalog.properties", "pms.channel_binding_claims", "pms.channel_connections"])(
+    "rejects FORCE RLS on %s even for bypass role",
+    async (table) => {
+      await client.query(`ALTER TABLE ${table} FORCE ROW LEVEL SECURITY`);
+      await expect(lock(client, expected)).rejects.toThrow();
+    },
+  );
   it("rejects an in-flight connection writer immediately and releases partial locks", async () => {
     await begin(other);
     await insertConnection(other);

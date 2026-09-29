@@ -41,7 +41,7 @@ export const unresolvedAffiliatePublicationPrerequisites: AffiliatePublicationPr
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const operation = "marketplace.affiliate_terms.publish";
-type Input = {
+export type AffiliatePublicationInput = {
   context: RequestContext;
   propertyId: string;
   offerId: string;
@@ -49,16 +49,27 @@ type Input = {
   expectedRevision: number;
   idempotencyKey: string;
 };
-type Result =
+export type AffiliatePublicationErrorCode =
+  | "invalid_request"
+  | "scope_unavailable"
+  | "idempotency_conflict"
+  | "offer_not_verified"
+  | "revision_conflict"
+  | "attribution_window_exceeds_limit"
+  | "draft_already_published"
+  | "policy_unavailable"
+  | "destination_unavailable"
+  | "publication_blocked";
+export type AffiliatePublicationResult =
   | { ok: true; termsVersionId: string; programId: string; replayed: boolean }
-  | { ok: false; code: string; reasons?: string[] };
+  | { ok: false; code: AffiliatePublicationErrorCode; reasons?: string[] };
 
 /** Internal command only. No HTTP route, creator acceptance or link activation. */
 export async function publishMarketplaceAffiliateTerms(
   pool: pg.Pool,
-  input: Input,
+  input: AffiliatePublicationInput,
   resolvePrerequisites: AffiliatePublicationPrerequisites = unresolvedAffiliatePublicationPrerequisites,
-): Promise<Result> {
+): Promise<AffiliatePublicationResult> {
   const { context } = input;
   if (
     ![input.propertyId, input.offerId, input.draftId].every(
@@ -107,7 +118,10 @@ export async function publishMarketplaceAffiliateTerms(
     JSON.stringify([organizationId, actorId, propertyId, offerId, draftId, input.expectedRevision]),
   );
   const client = await pool.connect();
-  const fail = async (code: string, reasons?: string[]): Promise<Result> => {
+  const fail = async (
+    code: AffiliatePublicationErrorCode,
+    reasons?: string[],
+  ): Promise<AffiliatePublicationResult> => {
     await client.query("ROLLBACK");
     return reasons ? { ok: false, code, reasons } : { ok: false, code };
   };
