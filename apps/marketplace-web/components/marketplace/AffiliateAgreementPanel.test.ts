@@ -366,6 +366,33 @@ describe("AffiliateAgreementPanel", () => {
     );
     await act(async () => view?.root.findByProps({ children: "Preview & test" }).props.onClick());
     expect(output()).toContain("Could not test that label");
+
+    let resolveDiagnostic!: (value: Awaited<ReturnType<typeof mocks.diagnostic>>) => void;
+    mocks.diagnostic.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveDiagnostic = resolve;
+      }),
+    );
+    const staleRequest = view?.root.findByProps({ children: "Preview & test" }).props.onClick();
+    await act(async () => input?.props.onChange({ target: { value: "youtube.short-2" } }));
+    await act(async () =>
+      view?.root.findByProps({ children: "Use labeled variant" }).props.onClick(),
+    );
+    await act(async () =>
+      resolveDiagnostic({
+        ok: true,
+        contractVersion: "marketplace-affiliate-link-diagnostic.v1",
+        status: "ready",
+        association: "verified",
+        programStatus: "active",
+        destinationUrl: "https://alpine.next-booking.vayada.com/",
+        campaignLabel: "instagram.reel-1",
+        normalMetricsExcluded: true,
+        externalPurchaseVerified: false,
+      }),
+    );
+    await staleRequest;
+    expect(output()).not.toContain("Link ready to share");
   });
 
   it("keeps creator link issuance out of the hotel controls", async () => {

@@ -181,6 +181,7 @@ function AgreementDetails({
   const idempotencyKey = useRef<{ scope: string; key: string } | null>(null);
   const lifecycleKey = useRef<{ scope: string; key: string } | null>(null);
   const linkKey = useRef<{ scope: string; key: string } | null>(null);
+  const diagnosticRequest = useRef(0);
   const matched = agreement.assentState === "matched";
   const closedBeforeActivation =
     !agreement.lifecycle && ["declined", "cancelled", "rejected"].includes(collaborationStatus);
@@ -484,6 +485,7 @@ function AgreementDetails({
     });
     setSelectedCampaignLabel(share.campaignLabel);
     setShareNotice(share.campaignLabel ? "Labeled variant selected." : "Default link selected.");
+    diagnosticRequest.current += 1;
     setDiagnostic(null);
   }
 
@@ -513,14 +515,19 @@ function AgreementDetails({
   }
 
   async function runLinkDiagnostic() {
+    const request = ++diagnosticRequest.current;
     setDiagnostic("loading");
     try {
-      setDiagnostic(
-        await diagnoseMarketplaceCollaborationAffiliateLink(collaborationId, selectedCampaignLabel),
+      const result = await diagnoseMarketplaceCollaborationAffiliateLink(
+        collaborationId,
+        selectedCampaignLabel,
       );
+      if (request === diagnosticRequest.current) setDiagnostic(result);
     } catch (error) {
-      setDiagnostic("error");
-      setShareNotice(affiliateDiagnosticErrorMessage(error));
+      if (request === diagnosticRequest.current) {
+        setDiagnostic("error");
+        setShareNotice(affiliateDiagnosticErrorMessage(error));
+      }
     }
   }
 }
