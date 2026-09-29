@@ -84,6 +84,76 @@ login, caller-supplied ID, or session setting cannot pass the direct-SQL
 cross-organization denial test. Review this provisioning lifecycle and the
 service's separate original-session verification before any grant request.
 
+The base `hotel_catalog.properties` row currently has no organization column
+and is inserted before its owner link. An organization login therefore cannot
+be scoped on that first INSERT by the existing schema. Add a nullable
+creation-organization reference for new setup-created properties; the setup
+role's INSERT policy must compare it with a database-owned `session_user`
+assignment. Give that role no UPDATE privilege on the reference and reject
+changes to it through every setup command. This reference scopes the first
+property INSERT only. Later property commands must use the current active
+owner link and a current database-owned property-login assignment, so an
+ownership transfer does not depend on the original organization. Legacy rows
+may stay null, but the setup role must not create null rows or use another
+organization's value.
+Prove this with direct SQL from two organization logins before granting any
+production privilege. If a column conflicts with catalog ownership, replace
+it with an equally testable database-owned property reservation; a
+caller-provided property ID alone is insufficient.
+
+The current property-create SQL places the property INSERT and dependent
+owner-link/product writes in sibling data-modifying CTEs. Their shared
+PostgreSQL statement snapshot may hide the new property from a dependent RLS
+policy. Split the base INSERT and dependent writes into successive statements
+on the **same transaction and connection**, or prove an equivalent mechanism
+with the real restricted-role command on PostgreSQL 16 and 17. The generated
+property ID cannot conflict with an existing owner link, so remove the
+owner-link `ON CONFLICT DO UPDATE` arms rather than granting the creation role
+UPDATE that could reactivate a suspended link.
+
+The command service must support both Owner-created hotels and platform-admin
+provisioning. It verifies the actual admin actor and target organization for
+the latter; it must not impersonate the target Owner. Provision the organization
+login before its first property command and the property login before the first
+currency command. If either provisioner fails, reject the affected command
+without a partial Financials activation, surface a resumable setup state, and
+reuse the same idempotency key on retry. On transfer, change the database-owned
+active assignment in the ownership-transfer transaction. Every write policy
+must check that assignment, including for an already connected session using
+the old login; credential rotation alone does not terminate pooled sessions.
+Serialize transfer and in-flight setup writes by locking the same assignment
+or owner row in both paths; an unlocked policy lookup may see the old value in
+a concurrent statement snapshot. Prove stale-session denial concurrently
+with a new-owner command.
+
+Property-scope RLS alone does not protect the pending-to-ready transition.
+The property login could otherwise directly update its own Financials
+entitlement to `active` or forge `newHotelFinancialsDefault=ready` without
+saving currency or creating categories. Put that transition behind a
+separate command capability unavailable to the ordinary property login; an
+SQL function granted to that login is directly callable and cannot trust a
+caller-supplied actor ID or session setting. The capability must verify the current currency,
+seven starter categories, pending marker, owner, and billing state in the same
+transaction, and only update the selected property's Financials row. Prove
+direct UPDATE cannot forge ready, and that the isolated service verifies the
+original actor before accessing the separate command credential. A direct
+call using that credential must still fail for another property or invalid
+transition. If this cannot preserve one transaction, keep auto-activation
+blocked.
+
+The Feature Hub command must reload and resolve current Owner permission with
+the canonical team-role and override rules, property link, and base PMS
+entitlement inside its write transaction. Activation must also recheck
+billing/global suspension and the activation allowlist or completed new-hotel
+marker there. Deactivation remains available during a suspension. Lock the
+membership, role definition or grant, ownership link, and entitlement rows
+whose revocation must serialize with the update. The current route-level check
+is insufficient, and a second hand-written permission rule is not acceptable.
+Currency commands also lock Identity rows with `FOR SHARE`, which needs UPDATE
+privilege in PostgreSQL. Add setup-role-specific lock-only policies and prove
+direct UPDATE denial on each locked relation; pricing-role policies do not
+apply to the setup role.
+
 Avoid making a pricing-prefixed setup role: migration `0422` intentionally
 denies those roles direct Identity entitlement UPDATE. Do not weaken that
 pricing guard. Keep existing Finance worker policies and product authorization
@@ -107,7 +177,9 @@ behavior intact.
    for PMS creation and none for non-PMS creation, currency blocker/revision
    behavior, no partial writes on failure, replay, and no extra grants on the
    general API login. Test provisioning absence, rotation, owner transfer,
-   stale-login denial, and recovery after a failed provisioner run.
+   already-connected stale-login denial, admin-created PMS hotels without Owner impersonation,
+   and recovery after a failed provisioner run. Test revocation between
+   Feature Hub route admission and its locked command write.
 3. Add an exact-role platform preflight for allowed and denied relation,
    column, function, and RLS access. Review the rendered primary and rollback
    task definitions and the immutable app image before deployment. Keep new
