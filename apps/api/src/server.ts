@@ -13,6 +13,7 @@ import { readChannexOfferPreview } from "./domains/channexOfferPreviewReader.js"
 import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
 import { createPgMarketplaceAffiliateAssentRepository } from "./domains/marketplaceAffiliateAssentRepository.js";
 import { createAffiliateAgreementActivationReadiness } from "./domains/marketplaceAffiliateAgreementActivationReadiness.js";
+import { readMarketplaceAffiliateLinkCreationReadiness } from "./domains/marketplaceAffiliateLinkCreationReadiness.js";
 import { externalBookingChanges } from "./integrations/externalBookingChanges.js";
 import { createAirbnbAlterationRuntime } from "./airbnbAlterationRuntime.js";
 import { createAirbnbImportRuntime } from "./airbnbImportRuntime.js";
@@ -2010,6 +2011,7 @@ const app = buildApp({
         trackingConfiguration: readAffiliateDestinationTrackingConfiguration,
       }),
     ),
+    readMarketplaceAffiliateLinkCreationReadiness,
   ),
   marketplaceAffiliateDraftRepository:
     createPgMarketplaceAffiliateDraftRepository(targetDatabaseUrl),

@@ -14,6 +14,7 @@ import {
   createMarketplaceAffiliateLink,
   type AffiliateLinkCreationReadiness,
 } from "./marketplaceAffiliateLinkCreation.js";
+import { readMarketplaceAffiliateLinkCreationReadiness } from "./marketplaceAffiliateLinkCreationReadiness.js";
 import { readMarketplaceAffiliateLinkEligibility } from "./marketplaceAffiliateLinkEligibility.js";
 import { readMarketplaceAffiliateVisitScope } from "./marketplaceAffiliateVisitScope.js";
 import { createMarketplaceAffiliateVisit } from "./marketplaceAffiliateVisit.js";
@@ -169,6 +170,44 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     expect(
       (await pool().query("SELECT count(*) FROM marketplace.affiliate_links")).rows[0].count,
     ).toBe("1");
+  });
+
+  it("uses current native destination safety for the production link command", async () => {
+    await pool().query(`
+      ALTER TABLE hotel_catalog.properties ADD COLUMN lifecycle_status TEXT DEFAULT 'active';
+      CREATE TABLE hotel_catalog.property_slugs(property_id UUID,slug TEXT,purpose TEXT,status TEXT);
+      CREATE TABLE hotel_catalog.property_domains(property_id UUID,verification_status TEXT,
+        canonical_when_verified BOOLEAN);
+      CREATE TABLE booking.affiliate_destination_versions(id UUID PRIMARY KEY,property_id UUID,
+        created_by_organization_id UUID,booking_url TEXT);
+      INSERT INTO hotel_catalog.property_slugs VALUES
+        ('${id(3)}','hotel-alpenrose','canonical','active');
+      INSERT INTO booking.affiliate_destination_versions VALUES
+        ('${id(30)}','${id(3)}','${id(4)}','https://external.example/');
+    `);
+    expect(
+      await createMarketplaceAffiliateLink(
+        pool(),
+        input(),
+        readMarketplaceAffiliateLinkCreationReadiness,
+      ),
+    ).toEqual({
+      ok: false,
+      code: "link_creation_blocked",
+      reasons: ["destination_unavailable"],
+    });
+    await pool().query(
+      `UPDATE booking.affiliate_destination_versions
+       SET booking_url='https://hotel-alpenrose.next-booking.vayada.com/' WHERE id=$1`,
+      [id(30)],
+    );
+    expect(
+      await createMarketplaceAffiliateLink(
+        pool(),
+        input(),
+        readMarketplaceAffiliateLinkCreationReadiness,
+      ),
+    ).toMatchObject({ ok: true, agreementId, propertyId: id(3) });
   });
 
   it("shares a fixed per-link click quota without storing visitor data", async () => {

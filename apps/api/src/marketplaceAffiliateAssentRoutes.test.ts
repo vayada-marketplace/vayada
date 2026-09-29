@@ -25,6 +25,9 @@ async function setup(mutate: (c: RequestContext) => void = () => {}) {
     changeLifecycleForCollaboration: vi
       .fn<AffiliateAssentRepository["changeLifecycleForCollaboration"]>()
       .mockResolvedValue({ ok: false, code: "scope_unavailable" }),
+    createLinkForCollaboration: vi
+      .fn<AffiliateAssentRepository["createLinkForCollaboration"]>()
+      .mockResolvedValue({ ok: false, code: "scope_unavailable" }),
     close: vi.fn<AffiliateAssentRepository["close"]>().mockResolvedValue(undefined),
   };
   const app = Fastify();
@@ -258,12 +261,68 @@ describe("Affiliate assent HTTP read", () => {
       expect((await app.inject({ method: "POST", url, ...invalid })).statusCode).toBe(422);
     expect(repository.changeLifecycleForCollaboration).toHaveBeenCalledTimes(1);
   });
+  it("creates one stable creator link for the protected collaboration", async () => {
+    const { app, repository } = await setup((context) => {
+      context.membership.permissions.push("marketplace.collaboration.write");
+    });
+    const result = {
+      ok: true as const,
+      contractVersion: "marketplace-affiliate-link.v1" as const,
+      linkId: attemptId,
+      agreementId: attemptId,
+      propertyId: attemptId,
+      publicToken: `va_${"a".repeat(22)}`,
+      path: `/r/va_${"a".repeat(22)}`,
+      createdAt: "2026-09-29T00:00:00.000Z",
+      replayed: false,
+    };
+    repository.createLinkForCollaboration.mockResolvedValue(result);
+    const url = "/collaborations/Existing:QA/affiliate-link";
+    const response = await app.inject({
+      method: "POST",
+      url,
+      headers: { ...headers, "idempotency-key": "link-1" },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(repository.createLinkForCollaboration).toHaveBeenCalledWith(
+      expect.any(Object),
+      "Existing:QA",
+      "link-1",
+    );
+    repository.createLinkForCollaboration.mockResolvedValue({
+      ...result,
+      replayed: true,
+    });
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url,
+          headers: { ...headers, "idempotency-key": "link-1" },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect((await app.inject({ method: "POST", url, headers })).statusCode).toBe(422);
+    const denied = await setup();
+    expect(
+      (
+        await denied.app.inject({
+          method: "POST",
+          url,
+          headers: { ...headers, "idempotency-key": "link-1" },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(denied.repository.createLinkForCollaboration).not.toHaveBeenCalled();
+  });
   it("registers the production prefix and keeps upstream auth failures uncached", async () => {
     const repository = {
       read: vi.fn(),
       readForCollaboration: vi.fn(),
       recordForCollaboration: vi.fn(),
       changeLifecycleForCollaboration: vi.fn(),
+      createLinkForCollaboration: vi.fn(),
       close: async () => {},
     };
     const app = buildApp({
