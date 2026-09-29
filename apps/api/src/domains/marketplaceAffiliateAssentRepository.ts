@@ -132,6 +132,8 @@ export async function diagnoseCollaborationAffiliateLink(
 ): Promise<AffiliateLinkDiagnosticResult> {
   if (!validAffiliateCollaborationKey(collaborationId))
     return { ok: false, code: "invalid_request" };
+  if (context.selectedOrganization.kind !== "creator_workspace")
+    return { ok: false, code: "scope_unavailable" };
   const assent = await readCollaborationAffiliateAssent(pool, context, collaborationId);
   if (!assent) return { ok: false, code: "scope_unavailable" };
   if (!assent.attemptId || !assent.lifecycle) return { ok: false, code: "link_unavailable" };

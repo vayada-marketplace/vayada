@@ -264,6 +264,27 @@ test("creator finds the stable affiliate link after collaboration completion", a
       },
     });
   });
+  await page.route(
+    /\/collaborations\/affiliate-e2e\/affiliate-link\/diagnostic$/,
+    async (route) => {
+      if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+      expect(route.request().postDataJSON()).toEqual({ campaignLabel: "instagram.reel-1" });
+      await route.fulfill({
+        headers: corsHeaders(route),
+        json: {
+          ok: true,
+          contractVersion: "marketplace-affiliate-link-diagnostic.v1",
+          status: "ready",
+          association: "verified",
+          programStatus: "active",
+          destinationUrl: "https://alpine.next-booking.vayada.com/",
+          campaignLabel: "instagram.reel-1",
+          normalMetricsExcluded: true,
+          externalPurchaseVerified: false,
+        },
+      });
+    },
+  );
 
   await page.goto("/chat");
   await page.getByRole("button", { name: "Archived", exact: true }).click();
@@ -276,6 +297,16 @@ test("creator finds the stable affiliate link after collaboration completion", a
   await expect(page.getByLabel("Stable affiliate link")).toHaveText(
     "https://api.localhost/r/va_abcdefghijklmnopqrstuv",
   );
+  await page.getByLabel("Optional campaign label").fill("instagram.reel-1");
+  await page.getByRole("button", { name: "Use labeled variant" }).click();
+  await expect(page.getByLabel("Stable affiliate link")).toHaveText(
+    "https://api.localhost/r/va_abcdefghijklmnopqrstuv?campaign=instagram.reel-1",
+  );
+  await page.getByRole("button", { name: "Preview & test" }).click();
+  await expect(page.getByText("Link ready to share", { exact: true })).toBeVisible();
+  await expect(page.getByText("Creator and hotel association verified.")).toBeVisible();
+  await expect(page.getByText(/no booking or purchase was verified/)).toBeVisible();
+  expect(page.url()).toContain("/chat");
   await expect(page.getByRole("link", { name: "View results & earnings" })).toHaveAttribute(
     "href",
     "/earnings?propertyId=property-e2e",

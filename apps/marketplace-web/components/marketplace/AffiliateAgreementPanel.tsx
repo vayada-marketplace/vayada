@@ -2,13 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import { CheckCircleIcon, ClockIcon } from "@heroicons/react/24/outline";
+import { buildMarketplaceAffiliateSharePath } from "@vayada/domain-marketplace";
 
 import {
   changeMarketplaceCollaborationAffiliateLifecycle,
   createMarketplaceCollaborationAffiliateLink,
+  diagnoseMarketplaceCollaborationAffiliateLink,
   getMarketplaceCollaborationAffiliateAssent,
   recordMarketplaceCollaborationAffiliateAssent,
   type MarketplaceAffiliateAssentRead,
+  type MarketplaceAffiliateLinkDiagnosticResponse,
 } from "@vayada/marketplace-shared/api/collaborations";
 import { ApiErrorResponse, VAYADA_API_BASE_URL } from "@vayada/marketplace-shared/api/client";
 
@@ -165,11 +168,20 @@ function AgreementDetails({
   const [action, setAction] = useState<"idle" | "saving" | "error">("idle");
   const [lifecycleAction, setLifecycleAction] = useState<"idle" | "saving" | "error">("idle");
   const [linkAction, setLinkAction] = useState<"idle" | "saving" | "error">("idle");
-  const [affiliateLink, setAffiliateLink] = useState<string | null>(null);
+  const [affiliateLink, setAffiliateLink] = useState<{ publicToken: string; url: string } | null>(
+    null,
+  );
   const [linkError, setLinkError] = useState<string | null>(null);
+  const [campaignLabel, setCampaignLabel] = useState("");
+  const [selectedCampaignLabel, setSelectedCampaignLabel] = useState<string | null>(null);
+  const [shareNotice, setShareNotice] = useState<string | null>(null);
+  const [diagnostic, setDiagnostic] = useState<
+    MarketplaceAffiliateLinkDiagnosticResponse | "loading" | "error" | null
+  >(null);
   const idempotencyKey = useRef<{ scope: string; key: string } | null>(null);
   const lifecycleKey = useRef<{ scope: string; key: string } | null>(null);
   const linkKey = useRef<{ scope: string; key: string } | null>(null);
+  const diagnosticRequest = useRef(0);
   const matched = agreement.assentState === "matched";
   const closedBeforeActivation =
     !agreement.lifecycle && ["declined", "cancelled", "rejected"].includes(collaborationStatus);
@@ -229,12 +241,65 @@ function AgreementDetails({
                 Your stable affiliate link
               </p>
               {affiliateLink ? (
-                <p
-                  aria-label="Stable affiliate link"
-                  className="mt-1 block break-all text-sm font-semibold text-primary-700 underline"
-                >
-                  {affiliateLink}
-                </p>
+                <div className="mt-2 space-y-3">
+                  <p
+                    aria-label="Stable affiliate link"
+                    className="block break-all text-sm font-semibold text-primary-700"
+                  >
+                    {affiliateLink.url}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={copyLink} className={secondaryButtonClass}>
+                      Copy link
+                    </button>
+                    <button type="button" onClick={shareLink} className={secondaryButtonClass}>
+                      Share link
+                    </button>
+                    <button
+                      type="button"
+                      disabled={diagnostic === "loading"}
+                      onClick={runLinkDiagnostic}
+                      className={secondaryButtonClass}
+                    >
+                      {diagnostic === "loading" ? "Checking…" : "Preview & test"}
+                    </button>
+                  </div>
+                  {shareNotice && (
+                    <p
+                      role={shareNotice.startsWith("Could not") ? "alert" : "status"}
+                      className="text-sm text-gray-700"
+                    >
+                      {shareNotice}
+                    </p>
+                  )}
+                  <div>
+                    <label
+                      htmlFor={`affiliate-campaign-${collaborationId}`}
+                      className="text-sm font-medium text-gray-800"
+                    >
+                      Optional campaign label
+                    </label>
+                    <div className="mt-1 flex flex-col gap-2 sm:flex-row">
+                      <input
+                        id={`affiliate-campaign-${collaborationId}`}
+                        value={campaignLabel}
+                        onChange={(event) => setCampaignLabel(event.target.value)}
+                        placeholder="instagram.reel-1"
+                        className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={applyCampaignLabel}
+                        className={secondaryButtonClass}
+                      >
+                        Use labeled variant
+                      </button>
+                    </div>
+                  </div>
+                  {diagnostic && diagnostic !== "loading" && diagnostic !== "error" && (
+                    <AffiliateLinkDiagnostic result={diagnostic} />
+                  )}
+                </div>
               ) : (
                 <button
                   type="button"
@@ -391,13 +456,121 @@ function AgreementDetails({
         collaborationId,
         linkKey.current.key,
       );
-      setAffiliateLink(new URL(result.path, VAYADA_API_BASE_URL).toString());
+      setAffiliateLink({
+        publicToken: result.publicToken,
+        url: new URL(result.path, VAYADA_API_BASE_URL).toString(),
+      });
       setLinkAction("idle");
     } catch (error) {
       setLinkError(affiliateLinkErrorMessage(error, agreement.lifecycle?.status));
       setLinkAction("error");
     }
   }
+
+  function applyCampaignLabel() {
+    if (!affiliateLink) return;
+    const share = buildMarketplaceAffiliateSharePath(
+      affiliateLink.publicToken,
+      campaignLabel.trim() || undefined,
+    );
+    if (!share.ok) {
+      setShareNotice(
+        "Could not use that label. Use 1–64 letters, numbers, dots, dashes or underscores.",
+      );
+      return;
+    }
+    setAffiliateLink({
+      publicToken: affiliateLink.publicToken,
+      url: new URL(share.path, VAYADA_API_BASE_URL).toString(),
+    });
+    setSelectedCampaignLabel(share.campaignLabel);
+    setShareNotice(share.campaignLabel ? "Labeled variant selected." : "Default link selected.");
+    diagnosticRequest.current += 1;
+    setDiagnostic(null);
+  }
+
+  async function copyLink() {
+    if (!affiliateLink) return;
+    try {
+      await navigator.clipboard.writeText(affiliateLink.url);
+      setShareNotice("Link copied.");
+    } catch {
+      setShareNotice("Could not copy the link. Select the URL and copy it manually.");
+    }
+  }
+
+  async function shareLink() {
+    if (!affiliateLink) return;
+    if (!navigator.share) {
+      setShareNotice("Could not share from this browser. Copy the link instead.");
+      return;
+    }
+    try {
+      await navigator.share({ title: "Book this hotel", url: affiliateLink.url });
+      setShareNotice("Share sheet opened.");
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError"))
+        setShareNotice("Could not share the link. Copy it instead.");
+    }
+  }
+
+  async function runLinkDiagnostic() {
+    const request = ++diagnosticRequest.current;
+    setDiagnostic("loading");
+    try {
+      const result = await diagnoseMarketplaceCollaborationAffiliateLink(
+        collaborationId,
+        selectedCampaignLabel,
+      );
+      if (request === diagnosticRequest.current) setDiagnostic(result);
+    } catch (error) {
+      if (request === diagnosticRequest.current) {
+        setDiagnostic("error");
+        setShareNotice(affiliateDiagnosticErrorMessage(error));
+      }
+    }
+  }
+}
+
+const secondaryButtonClass =
+  "rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60";
+
+function AffiliateLinkDiagnostic({
+  result,
+}: {
+  result: MarketplaceAffiliateLinkDiagnosticResponse;
+}) {
+  const title =
+    result.status === "ready"
+      ? "Link ready to share"
+      : result.status === "program_inactive"
+        ? `Affiliate program ${result.programStatus}`
+        : result.status === "link_invalid"
+          ? "Affiliate link invalid"
+          : "Booking destination unavailable";
+  return (
+    <div
+      role="status"
+      className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700"
+    >
+      <p className="font-semibold text-gray-900">{title}</p>
+      <p>Creator and hotel association verified.</p>
+      {result.status === "program_inactive" && (
+        <p>Resume the paused agreement, or start a new agreement if it ended.</p>
+      )}
+      {result.status === "link_invalid" && (
+        <p>Retrieve the affiliate link again. Contact support if it remains invalid.</p>
+      )}
+      {result.status === "destination_unavailable" && (
+        <p>Ask the hotel to fix its booking destination, then test the link again.</p>
+      )}
+      {result.destinationUrl && <p className="break-all">Destination: {result.destinationUrl}</p>}
+      <p>
+        Read-only diagnostic: no visit was recorded or added to normal metrics. This checks link
+        health only; no booking or purchase was verified.
+      </p>
+    </div>
+  );
 }
 
 function LifecycleButton({
@@ -442,6 +615,14 @@ function affiliateLinkErrorMessage(
     return "The agreement status changed. Refresh the collaboration details, then try again.";
   }
   return "Could not retrieve the affiliate link. Try again.";
+}
+
+function affiliateDiagnosticErrorMessage(error: unknown) {
+  if (error instanceof ApiErrorResponse && error.data.code === "invalid_request")
+    return "Could not test that label. Use 1–64 letters, numbers, dots, dashes or underscores.";
+  if (error instanceof ApiErrorResponse && error.data.code === "link_unavailable")
+    return "The affiliate link is no longer available. Retrieve it again, then retry.";
+  return "Could not verify the link configuration. Ask the hotel to check its booking destination, then retry.";
 }
 
 function lifecycleDescription(

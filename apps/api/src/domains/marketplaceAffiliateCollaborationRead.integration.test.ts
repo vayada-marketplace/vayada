@@ -160,6 +160,9 @@ describe.skipIf(!databaseUrl)("Affiliate assent through existing collaboration",
   });
   it("previews the exact safe destination without recording a live or synthetic click", async () => {
     const participationId = await activate();
+    expect(await diagnoseCollaborationAffiliateLink(fixture.pool(), context(true), key, null)).toEqual(
+      { ok: false, code: "scope_unavailable" },
+    );
     await fixture.pool().query(`
       CREATE SCHEMA IF NOT EXISTS booking;
       ALTER TABLE hotel_catalog.properties ADD COLUMN lifecycle_status TEXT DEFAULT 'active';
