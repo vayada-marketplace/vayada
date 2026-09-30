@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { describe, expect, it } from "vitest";
 
+import { withHotelSetupCommandScope } from "./hotelSetupCommandScope.js";
+
 const url = process.env["TEST_DATABASE_URL"];
 
 describe.skipIf(!url)("hotel setup property Financials scope", () => {
@@ -13,6 +15,7 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
     const admin = new pg.Client({ connectionString: url });
     const inspector = new pg.Client({ connectionString: url });
     const suffix = randomUUID().replaceAll("-", "");
+    const ownedRelation = `hotel_setup_scope_owned_${suffix}`;
     const roles = [0, 1, 2, 3, 4].map(
       (index) => `vayada_next_hotel_setup_property_${index}_${suffix}`,
     );
@@ -21,6 +24,17 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
     const organizationId = organizations[0]!;
     const properties = [randomUUID(), randomUUID()];
     const logins: pg.Client[] = [];
+    const scopePool = (login: pg.Client) => ({
+      async connect() {
+        return {
+          async query<T>(sql: string, values?: readonly unknown[]) {
+            const result = await login.query(sql, values ? [...values] : []);
+            return { rows: result.rows as T[] };
+          },
+          release() {},
+        };
+      },
+    });
     let transferOpen = false;
     let inspectorConnected = false;
     await admin.connect();
@@ -117,7 +131,86 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           [properties[propertyIndex], operation],
         );
         expect(result.rows[0]?.allowed).toBe(allowed);
+        const preflight = withHotelSetupCommandScope(
+          scopePool(logins[loginIndex]!),
+          {
+            propertyId: properties[propertyIndex]!,
+            organizationId,
+            operation,
+          },
+          async () => undefined,
+        );
+        if (allowed) await expect(preflight).resolves.toBeUndefined();
+        else await expect(preflight).rejects.toThrow("scope preflight failed");
       }
+      const lockInspector = new pg.Client({ connectionString: url });
+      await lockInspector.connect();
+      let releaseWrite!: () => void;
+      let scopeChecked!: () => void;
+      const writeCanFinish = new Promise<void>((resolve) => {
+        releaseWrite = resolve;
+      });
+      const preflightFinished = new Promise<void>((resolve) => {
+        scopeChecked = resolve;
+      });
+      const scopedWrite = withHotelSetupCommandScope(
+        scopePool(logins[3]!),
+        {
+          propertyId: properties[0]!,
+          organizationId,
+          operation: "currency_ready",
+        },
+        async (client) => {
+          scopeChecked();
+          await writeCanFinish;
+          await client.query("SELECT 1");
+        },
+      );
+      await preflightFinished;
+      await admin.query("BEGIN");
+      try {
+        const adminPid = (await admin.query<{ pid: number }>("SELECT pg_backend_pid() AS pid"))
+          .rows[0]!.pid;
+        const revoke = admin.query(
+          "UPDATE platform.hotel_setup_property_scopes SET active=FALSE WHERE database_login=$1",
+          [roles[3]],
+        );
+        void revoke.catch(() => {});
+        let waiting = false;
+        for (let attempt = 0; attempt < 100; attempt++) {
+          const activity = await lockInspector.query<{ wait_event_type: string | null }>(
+            "SELECT wait_event_type FROM pg_stat_activity WHERE pid=$1",
+            [adminPid],
+          );
+          if (activity.rows[0]?.wait_event_type === "Lock") {
+            waiting = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(waiting).toBe(true);
+        releaseWrite();
+        await scopedWrite;
+        await revoke;
+      } finally {
+        releaseWrite();
+        await admin.query("ROLLBACK");
+        await lockInspector.end();
+      }
+      await admin.query(`CREATE TABLE public.${ownedRelation} (id integer)`);
+      await admin.query(`ALTER TABLE public.${ownedRelation} OWNER TO ${roles[3]}`);
+      await expect(
+        withHotelSetupCommandScope(
+          scopePool(logins[3]!),
+          {
+            propertyId: properties[0]!,
+            organizationId,
+            operation: "currency_ready",
+          },
+          async () => undefined,
+        ),
+      ).rejects.toThrow("scope preflight failed");
+      await admin.query(`DROP TABLE public.${ownedRelation}`);
       expect(
         (
           await logins[4]!.query("SELECT id FROM hotel_catalog.properties WHERE id=$1", [
@@ -343,6 +436,17 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
       await admin.query("COMMIT");
       transferOpen = false;
       await expect(oldWrite).rejects.toMatchObject({ code: "42501" });
+      await expect(
+        withHotelSetupCommandScope(
+          scopePool(logins[3]!),
+          {
+            propertyId: properties[0]!,
+            organizationId,
+            operation: "currency_ready",
+          },
+          async () => undefined,
+        ),
+      ).rejects.toThrow("scope preflight failed");
       expect(
         (
           await logins[3]!.query<{ allowed: boolean }>(
@@ -388,6 +492,7 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
       if (transferOpen) await admin.query("ROLLBACK");
       if (inspectorConnected) await inspector.end();
       await Promise.all(logins.map((login) => login.end()));
+      await admin.query(`DROP TABLE IF EXISTS public.${ownedRelation}`);
       await admin.query(
         "DELETE FROM identity.product_entitlements WHERE organization_id=ANY($1::uuid[])",
         [organizations],
