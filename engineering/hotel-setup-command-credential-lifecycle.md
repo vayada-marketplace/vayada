@@ -116,6 +116,13 @@ row. Do not rely on the route's earlier authorization snapshot. The isolated
 service supplies the verified actor identity; no SQL function trusts an actor
 ID or session setting supplied by its caller.
 
+Reuse backend-authorization's canonical role-permission resolution for those
+locked rows, including saved team-role defaults and membership overrides. Its
+pure result does not authorize a command by itself: the transaction must also
+check product access, property assignment, owner links and entitlements. Invalid
+configuration returns no permissions; the ordinary request resolver retains its
+existing rejection audit. Currency credentials do not gain Identity audit writes.
+
 Both currency and Feature Hub commands require Identity row locks. Provide
 and test lock-only policies and exact privileges for those `FOR SHARE` reads
 without permitting direct `UPDATE` of the locked rows. PostgreSQL `FOR SHARE`
