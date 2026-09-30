@@ -1,5 +1,9 @@
 import { UnauthorizedError } from "@vayada/backend-auth";
-import { AuthorizationError } from "@vayada/backend-authorization";
+import {
+  AuthorizationError,
+  requirePropertyAccess,
+  type PropertyAccessRepository,
+} from "@vayada/backend-authorization";
 import {
   parseFlexibleRatePlanCommandResult,
   parseFlexibleRatePlanSnapshot,
@@ -36,14 +40,23 @@ export type PmsPricingRoutesOptions = {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-/** Target pricing adapter. Currency changes stay fail-closed until the shared dependency guard lands. */
-export async function registerPmsPricingRoutes(
+/** Shared currency adapter for the ordinary API and isolated setup service. */
+export function registerPmsPricingCurrencyCommand(
   app: FastifyInstance,
-  options: PmsPricingRoutesOptions,
-): Promise<void> {
+  commandPort: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">,
+  options: {
+    requireOwnerSession?: boolean;
+    propertyAccessRepository?: PropertyAccessRepository;
+  } = {},
+): void {
   const authorized = new WeakMap<FastifyRequest, AuthorizedScope>();
   const authorize = async (request: FastifyRequest, reply: FastifyReply) => {
-    const scope = authorizeRequest(request, reply);
+    const scope = await authorizeRequest(
+      request,
+      reply,
+      options.requireOwnerSession,
+      options.propertyAccessRepository,
+    );
     if (scope) authorized.set(request, scope);
   };
 
@@ -68,7 +81,7 @@ export async function registerPmsPricingRoutes(
       if (!command) return invalidRequest(reply, "The pricing currency body is invalid.");
 
       const result = parsePropertyPricingCurrencyCommandResult(
-        await options.commandPort.upsertPropertyPricingCurrency(command),
+        await commandPort.upsertPropertyPricingCurrency(command),
       );
       if (
         !result ||
@@ -81,6 +94,20 @@ export async function registerPmsPricingRoutes(
         : sendCurrencyError(reply, result.error);
     },
   );
+}
+
+/** Target pricing adapter. Currency changes stay fail-closed until the shared dependency guard lands. */
+export async function registerPmsPricingRoutes(
+  app: FastifyInstance,
+  options: PmsPricingRoutesOptions,
+): Promise<void> {
+  const authorized = new WeakMap<FastifyRequest, AuthorizedScope>();
+  const authorize = async (request: FastifyRequest, reply: FastifyReply) => {
+    const scope = await authorizeRequest(request, reply);
+    if (scope) authorized.set(request, scope);
+  };
+
+  registerPmsPricingCurrencyCommand(app, options.commandPort);
 
   app.put<{ Params: RoomTypeParams; Body: unknown }>(
     "/properties/:propertyId/room-types/:roomTypeId/flexible-rate-plan",
@@ -210,7 +237,12 @@ export async function registerPmsPricingRoutes(
   );
 }
 
-function authorizeRequest(request: FastifyRequest, reply: FastifyReply): AuthorizedScope | null {
+async function authorizeRequest(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  requireOwnerSession = false,
+  propertyAccessRepository?: PropertyAccessRepository,
+): Promise<AuthorizedScope | null> {
   const permission = request.method === "GET" ? "pms.operations.read" : "pms.operations.manage";
   try {
     const baseContext = enforceRoutePolicy(request, { permission });
@@ -218,6 +250,8 @@ function authorizeRequest(request: FastifyRequest, reply: FastifyReply): Authori
       reply.status(403).send({ code: "invalid_organization_scope" });
       return null;
     }
+    if (requireOwnerSession && !baseContext.actor.providerIdentity.sessionId)
+      throw new AuthorizationError();
     const rawPropertyId = (request.params as Partial<PropertyParams>).propertyId;
     if (typeof rawPropertyId !== "string" || !UUID_PATTERN.test(rawPropertyId)) {
       invalidRequest(reply, "The property ID is invalid.");
@@ -232,8 +266,18 @@ function authorizeRequest(request: FastifyRequest, reply: FastifyReply): Authori
     const context = enforceRoutePolicy(request, {
       permission,
       entitlement: { product: "pms", key: "property-management", resource },
-      resource: { ...resource, allowedRelationships: ["owner", "operator"] },
+      resource: {
+        ...resource,
+        allowedRelationships: requireOwnerSession ? ["owner"] : ["owner", "operator"],
+      },
     });
+    if (propertyAccessRepository) {
+      await requirePropertyAccess(context, propertyAccessRepository, {
+        propertyId,
+        targetResource: { product: "pms", resourceType: "pms_property" },
+        allowedRelationships: ["owner"],
+      });
+    }
     return { context, propertyId };
   } catch (error) {
     if (error instanceof UnauthorizedError) {
