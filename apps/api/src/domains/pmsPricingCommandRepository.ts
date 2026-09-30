@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { beginHotelSetupCommandScope } from "../hotelSetupCommandScope.js";
+import { seedPendingHotelFinancialsCategories } from "./financeStarterCategories.js";
 import { enqueueChannexMealChange } from "./pmsChannexMealChange.js";
 
 import {
@@ -196,6 +197,14 @@ export function createPgPmsPricingCommandRepository(
       if (!result) throw new Error("PMS pricing command produced an invalid contract result");
       if (result.ok !== Boolean(worked.change)) {
         throw new Error("PMS pricing command change notification invariant failed");
+      }
+      if (
+        config.hotelSetupCurrencyOperation === "currency_ready" &&
+        spec.operation === CURRENCY_OPERATION &&
+        result.ok &&
+        result.response.outcome === "created"
+      ) {
+        await seedPendingHotelFinancialsCategories(client, command);
       }
 
       const domainEventId = worked.change
