@@ -88,6 +88,10 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           "identity.role_permission_grants",
           "pms.property_pricing_settings",
           "finance.expense_categories",
+          "platform.idempotency_keys",
+          "platform.domain_events",
+          "platform.outbox_events",
+          "platform.product_audit_events",
         ]) {
           await admin.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${relation} TO ${role}`);
         }
@@ -237,6 +241,163 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
             [organizationId, properties[1], users[0]],
           )
         ).rowCount,
+      ).toBe(1);
+      // Run the currency repository with a native login, including real evidence SQL.
+      const command = parseUpsertPropertyPricingCurrencyCommand({
+        organizationId,
+        propertyId: properties[1],
+        currency: "EUR",
+        expectedPricingCurrencyRevision: 0,
+        idempotencyKey: `native-evidence-${suffix}`,
+        audit: {
+          actor: { kind: "user", userId: users[0] },
+          requestId: suffix,
+          correlationId: null,
+          requestedAt: new Date().toISOString(),
+        },
+      });
+      if (!command) throw new Error("invalid native currency fixture");
+      const repository = createPgPmsPricingCommandRepository({
+        connectionString: url,
+        pool: scopePool(logins[1]!),
+        hotelSetupCurrencyOperation: "currency",
+        currencyChangeGuard: {
+          async runWithCurrencyChangeGuard() {
+            throw new Error("initial currency does not need the change guard");
+          },
+        },
+      });
+      const created = await repository.upsertPropertyPricingCurrency(command);
+      expect(created).toMatchObject({ ok: true, response: { outcome: "created" } });
+      expect(await repository.upsertPropertyPricingCurrency(command)).toEqual(created);
+      for (const [relation, count] of [
+        ["platform.idempotency_keys", 1],
+        ["platform.domain_events", 1],
+        ["platform.outbox_events", 2],
+        ["platform.product_audit_events", 1],
+      ] as const) {
+        expect(
+          (
+            await logins[1]!.query(`SELECT id FROM ${relation} WHERE property_id=$1`, [
+              properties[1],
+            ])
+          ).rowCount,
+        ).toBe(count);
+        for (const index of [0, 2, 3, 4])
+          expect((await logins[index]!.query(`SELECT id FROM ${relation}`)).rows).toEqual([]);
+        expect((await logins[1]!.query(`DELETE FROM ${relation}`)).rowCount).toBe(0);
+        if (relation !== "platform.idempotency_keys")
+          expect((await logins[1]!.query(`UPDATE ${relation} SET id=id`)).rowCount).toBe(0);
+      }
+      await expect(
+        logins[1]!.query("UPDATE platform.idempotency_keys SET property_id=$1", [properties[0]]),
+      ).rejects.toMatchObject({ code: "42501" });
+      await expect(
+        logins[1]!.query("UPDATE platform.idempotency_keys SET operation='pms.other'"),
+      ).rejects.toMatchObject({ code: "42501" });
+      // Reuse valid rows; change one boundary field and require RLS denial.
+      const clones = [
+        [
+          "platform.idempotency_keys",
+          "operation_scope,operation,key_hash,request_fingerprint_hash,status,tenant_scope,property_id,expires_at",
+          "operation_scope,'pms.other',key_hash,request_fingerprint_hash,'in_progress',tenant_scope,property_id,expires_at",
+        ],
+        [
+          "platform.domain_events",
+          "source_system,event_key,event_type,occurred_at,tenant_scope,property_id,resource_product,resource_type,resource_id,actor_type,actor_user_id,payload",
+          "source_system,event_key||'.invalid','pms.other',occurred_at,tenant_scope,property_id,resource_product,resource_type,resource_id,actor_type,actor_user_id,payload",
+        ],
+        [
+          "platform.outbox_events",
+          "domain_event_id,outbox_key,destination,event_type,tenant_scope,property_id,resource_product,resource_type,resource_id,payload,idempotency_key_hash",
+          "domain_event_id,outbox_key||'.invalid','provider.write',event_type,tenant_scope,property_id,resource_product,resource_type,resource_id,payload,idempotency_key_hash",
+        ],
+        [
+          "platform.product_audit_events",
+          "audit_key,product,action,occurred_at,tenant_scope,property_id,actor_type,actor_user_id,target_resource_product,target_resource_type,target_resource_id,idempotency_key_id,redacted_payload,audit_metadata",
+          "audit_key||'.invalid',product,'pms.other',occurred_at,tenant_scope,property_id,actor_type,actor_user_id,target_resource_product,target_resource_type,target_resource_id,idempotency_key_id,redacted_payload,audit_metadata",
+        ],
+      ] as const;
+      for (const [relation, columns, values] of clones)
+        await expect(
+          logins[1]!.query(
+            `INSERT INTO ${relation} (${columns}) SELECT ${values} FROM ${relation} LIMIT 1`,
+          ),
+        ).rejects.toMatchObject({ code: "42501" });
+      const event = (
+        await admin.query("SELECT id FROM platform.domain_events WHERE property_id=$1", [
+          properties[1],
+        ])
+      ).rows[0];
+      await expect(
+        logins[1]!.query(
+          `INSERT INTO platform.domain_events
+          (source_system,event_key,event_type,occurred_at,tenant_scope,property_id,
+           resource_product,resource_type,resource_id,actor_type,actor_user_id,payload)
+         SELECT source_system,event_key||'.actor',event_type,occurred_at,tenant_scope,property_id,
+           resource_product,resource_type,resource_id,'user',$1::uuid,payload
+         FROM platform.domain_events WHERE id=$2`,
+          [users[1], event.id],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+      await expect(
+        logins[1]!.query(
+          `INSERT INTO platform.outbox_events
+          (domain_event_id,outbox_key,destination,event_type,tenant_scope,property_id,resource_product,resource_type,resource_id,payload,idempotency_key_hash)
+         SELECT id,$1,'booking.pricing-source',event_type,'property',$2::uuid,'pms','property_pricing',$2::uuid::text,payload,idempotency_key_hash
+         FROM platform.domain_events WHERE id=$3`,
+          [`cross-${suffix}`, properties[0], event.id],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+      // An ordinary ACL-backed caller retains access to other event types.
+      await logins[5]!.query(
+        `INSERT INTO platform.domain_events (source_system,event_key,event_type,occurred_at,
+          tenant_scope,property_id,resource_product,resource_type,resource_id)
+         VALUES ('pms',$1,'pms.other',now(),'property',$2::uuid,'pms','property_pricing',$2::uuid::text)`,
+        [`ordinary-${suffix}`, properties[1]],
+      );
+      expect((await logins[1]!.query("SELECT id FROM platform.domain_events")).rowCount).toBe(1);
+      await admin.query("DELETE FROM pms.property_pricing_settings WHERE property_id=$1", [
+        properties[1],
+      ]);
+      await admin.query(`REVOKE INSERT ON platform.product_audit_events FROM ${roles[1]}`);
+      await expect(
+        repository.upsertPropertyPricingCurrency({
+          ...command,
+          idempotencyKey: `native-rollback-${suffix}`,
+        }),
+      ).rejects.toMatchObject({ code: "42501" });
+      expect(
+        (
+          await admin.query(
+            "SELECT property_id FROM pms.property_pricing_settings WHERE property_id=$1",
+            [properties[1]],
+          )
+        ).rows,
+      ).toEqual([]);
+      for (const [relation, count] of [
+        ["idempotency_keys", 1],
+        ["domain_events", 2],
+        ["outbox_events", 2],
+        ["product_audit_events", 1],
+      ] as const)
+        expect(
+          (
+            await admin.query(`SELECT id FROM platform.${relation} WHERE property_id=$1`, [
+              properties[1],
+            ])
+          ).rowCount,
+        ).toBe(count);
+      await admin.query(`GRANT INSERT ON platform.product_audit_events TO ${roles[1]}`);
+      const keySql = `INSERT INTO platform.idempotency_keys
+        (operation_scope,operation,key_hash,request_fingerprint_hash,tenant_scope,property_id,expires_at)
+        VALUES ('pms','pms.pricing_currency.upsert',$1,$1,'property',$2,now()+interval '1 hour')`;
+      for (const index of [1, 2, 4])
+        await expect(
+          logins[index]!.query(keySql, [`deny-${index}-${suffix}`, properties[0]]),
+        ).rejects.toMatchObject({ code: "42501" });
+      expect(
+        (await logins[3]!.query(keySql, [`readiness-${suffix}`, properties[0]])).rowCount,
       ).toBe(1);
       await admin.query(
         "DELETE FROM identity.product_entitlements WHERE entitlement_key='property-management' AND organization_id=ANY($1::uuid[])",
@@ -778,6 +939,26 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
       if (inspectorConnected) await inspector.end();
       await Promise.all(logins.map((login) => login.end()));
       await admin.query(`DROP TABLE IF EXISTS public.${ownedRelation}`);
+      // Only dedicated synthetic test databases reach this cleanup.
+      await admin.query("BEGIN");
+      for (const relation of ["product_audit_events", "domain_events"])
+        await admin.query(
+          `ALTER TABLE platform.${relation} DISABLE TRIGGER trg_platform_${relation}_append_only`,
+        );
+      for (const relation of [
+        "product_audit_events",
+        "outbox_events",
+        "domain_events",
+        "idempotency_keys",
+      ])
+        await admin.query(`DELETE FROM platform.${relation} WHERE property_id=ANY($1::uuid[])`, [
+          properties,
+        ]);
+      for (const relation of ["product_audit_events", "domain_events"])
+        await admin.query(
+          `ALTER TABLE platform.${relation} ENABLE TRIGGER trg_platform_${relation}_append_only`,
+        );
+      await admin.query("COMMIT");
       await admin.query(
         "DELETE FROM identity.product_entitlements WHERE organization_id=ANY($1::uuid[])",
         [organizations],
