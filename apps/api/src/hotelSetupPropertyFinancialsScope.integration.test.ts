@@ -13,8 +13,10 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
     const admin = new pg.Client({ connectionString: url });
     const inspector = new pg.Client({ connectionString: url });
     const suffix = randomUUID().replaceAll("-", "");
-    const roles = [0, 1, 2].map((index) => `vayada_next_hotel_setup_property_${index}_${suffix}`);
-    const passwords = [randomUUID(), randomUUID(), randomUUID()];
+    const roles = [0, 1, 2, 3, 4].map(
+      (index) => `vayada_next_hotel_setup_property_${index}_${suffix}`,
+    );
+    const passwords = [0, 1, 2, 3, 4].map(() => randomUUID());
     const organizations = [randomUUID(), randomUUID()];
     const organizationId = organizations[0]!;
     const properties = [randomUUID(), randomUUID()];
@@ -34,7 +36,7 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           `property-receiver-${suffix}`,
         ],
       );
-      for (let index = 0; index < 3; index++) {
+      for (let index = 0; index < 5; index++) {
         const role = roles[index]!;
         await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD '${passwords[index]}' NOINHERIT
           NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`);
@@ -85,6 +87,14 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
             [organizationId, properties[index]],
           );
         }
+        if (index >= 3) {
+          await admin.query(
+            `INSERT INTO platform.hotel_setup_property_scopes
+             (database_login, property_id, organization_id, operation_class)
+             VALUES ($1, $2, $3, $4)`,
+            [role, properties[0], organizationId, index === 3 ? "currency_ready" : "feature_hub"],
+          );
+        }
         const loginUrl = new URL(url);
         loginUrl.username = role;
         loginUrl.password = passwords[index]!;
@@ -92,6 +102,49 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         await login.connect();
         logins.push(login);
       }
+      for (const [loginIndex, propertyIndex, operation, allowed] of [
+        [0, 0, "currency", true],
+        [0, 0, "currency_ready", false],
+        [3, 0, "currency_ready", true],
+        [3, 0, "feature_hub", false],
+        [3, 1, "currency_ready", false],
+        [4, 0, "feature_hub", true],
+        [4, 0, "currency", false],
+      ] as const) {
+        const result = await logins[loginIndex]!.query<{ allowed: boolean }>(
+          `SELECT platform.hotel_setup_property_operation_allowed($1::uuid, $2::text)
+             AS allowed`,
+          [properties[propertyIndex], operation],
+        );
+        expect(result.rows[0]?.allowed).toBe(allowed);
+      }
+      expect(
+        (
+          await logins[4]!.query("SELECT id FROM hotel_catalog.properties WHERE id=$1", [
+            properties[0],
+          ])
+        ).rowCount,
+      ).toBe(1);
+      await expect(
+        logins[4]!.query(
+          "INSERT INTO pms.property_pricing_settings (property_id, currency) VALUES ($1, 'USD')",
+          [properties[0]],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+      await expect(
+        logins[4]!.query(
+          "INSERT INTO finance.expense_categories (property_id, name, color) VALUES ($1, 'Other', '#6366F1')",
+          [properties[0]],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+      expect(
+        (
+          await logins[3]!.query(
+            "INSERT INTO finance.expense_categories (property_id, name, color) VALUES ($1, 'Other', '#6366F1')",
+            [properties[0]],
+          )
+        ).rowCount,
+      ).toBe(1);
       await admin.query(
         `INSERT INTO identity.organization_resource_links
            (organization_id, product, resource_type, resource_id, relationship, status)
@@ -240,6 +293,14 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         [roles[0]],
       );
       await admin.query(
+        "UPDATE platform.hotel_setup_property_scopes SET active=FALSE WHERE database_login=$1",
+        [roles[3]],
+      );
+      await admin.query(
+        "UPDATE platform.hotel_setup_property_scopes SET active=FALSE WHERE database_login=$1",
+        [roles[4]],
+      );
+      await admin.query(
         `UPDATE identity.organization_resource_links SET organization_id=$1
          WHERE organization_id=$2 AND resource_id=$3`,
         [organizations[1], organizationId, properties[0]!.toUpperCase()],
@@ -282,6 +343,22 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
       await admin.query("COMMIT");
       transferOpen = false;
       await expect(oldWrite).rejects.toMatchObject({ code: "42501" });
+      expect(
+        (
+          await logins[3]!.query<{ allowed: boolean }>(
+            "SELECT platform.hotel_setup_property_operation_allowed($1, 'currency_ready') AS allowed",
+            [properties[0]],
+          )
+        ).rows[0]?.allowed,
+      ).toBe(false);
+      expect(
+        (
+          await logins[4]!.query<{ allowed: boolean }>(
+            "SELECT platform.hotel_setup_property_operation_allowed($1, 'feature_hub') AS allowed",
+            [properties[0]],
+          )
+        ).rows[0]?.allowed,
+      ).toBe(false);
       expect(
         (
           await logins[0]!.query(
