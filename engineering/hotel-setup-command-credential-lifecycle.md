@@ -122,6 +122,10 @@ pure result does not authorize a command by itself: the transaction must also
 check product access, property assignment, owner links and entitlements. Invalid
 configuration returns no permissions; the ordinary request resolver retains its
 existing rejection audit. Currency credentials do not gain Identity audit writes.
+The native currency preparation and write transactions now apply a live membership
+veto with locked role defaults, grants and target-property assignments. The existing
+pricing Owner/base-entitlement checks remain required. This does not complete the
+broader entitlement/activation contract or its exact production grants.
 
 Both currency and Feature Hub commands require Identity row locks. Provide
 and test lock-only policies and exact privileges for those `FOR SHARE` reads

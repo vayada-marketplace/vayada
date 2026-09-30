@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { beginHotelSetupCommandScope } from "../hotelSetupCommandScope.js";
+import { lockHotelSetupCurrencyMembership } from "../hotelSetupCurrencyMembership.js";
 import { seedPendingHotelFinancialsCategories } from "./financeStarterCategories.js";
 import { enqueueChannexMealChange } from "./pmsChannexMealChange.js";
 
@@ -161,7 +162,14 @@ export function createPgPmsPricingCommandRepository(
     try {
       await beginCurrencyTransaction(client, command);
       await lockPropertyPricingScope(client, command.propertyId);
-      if (!(await lockAuthorizedScope(client, command, acceptedAt))) {
+      if (
+        !(await lockAuthorizedScope(
+          client,
+          command,
+          acceptedAt,
+          !!config.hotelSetupCurrencyOperation,
+        ))
+      ) {
         await rollbackQuietly(client);
         return spec.scopeFailure();
       }
@@ -269,7 +277,7 @@ export function createPgPmsPricingCommandRepository(
     try {
       await beginCurrencyTransaction(client, command);
       await lockPropertyPricingScope(client, command.propertyId);
-      if (!(await lockAuthorizedScope(client, command, at))) {
+      if (!(await lockAuthorizedScope(client, command, at, !!config.hotelSetupCurrencyOperation))) {
         await rollbackQuietly(client);
         return { kind: "result", result: CURRENCY_SPEC.scopeFailure() };
       }
@@ -505,8 +513,10 @@ async function lockAuthorizedScope(
   client: PmsPricingCommandClient,
   command: AnyCommand,
   at: Date,
+  nativeSetup: boolean,
 ): Promise<boolean> {
   if (command.audit.actor.kind !== "user") return false;
+  if (nativeSetup && !(await lockHotelSetupCurrencyMembership(client, command))) return false;
   const scope = await client.query(
     `SELECT property.id
      FROM hotel_catalog.properties property

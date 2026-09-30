@@ -132,6 +132,24 @@ describe("PMS pricing command repository", () => {
             }
             if (sql.includes("FROM hotel_catalog.properties property"))
               return { rows: [{ id: propertyId }], rowCount: 1 } as never;
+            if (sql.includes("FROM identity.organization_memberships"))
+              return {
+                rows: [
+                  {
+                    id: propertyId,
+                    roleKey: "hotel_owner",
+                    mode: "all",
+                    accessOrigin: "agency",
+                    permissionOverrides: null,
+                    pms: true,
+                    booking: true,
+                    roleDefinitionId: null,
+                  },
+                ],
+                rowCount: 1,
+              } as never;
+            if (sql.includes("FROM identity.role_permission_grants"))
+              return { rows: [{ permission: "pms.operations.manage" }], rowCount: 1 } as never;
             if (sql.includes("FROM identity.product_entitlements"))
               return {
                 rows: [{ status: "active", startsAt: null, expiresAt: null }],

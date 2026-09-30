@@ -6,7 +6,11 @@ import { describe, expect, it } from "vitest";
 
 import { createPgPmsPricingCommandRepository } from "./domains/pmsPricingCommandRepository.js";
 import { seedPendingHotelFinancialsCategories } from "./domains/financeStarterCategories.js";
-import { withHotelSetupCommandScope } from "./hotelSetupCommandScope.js";
+import {
+  beginHotelSetupCommandScope,
+  withHotelSetupCommandScope,
+} from "./hotelSetupCommandScope.js";
+import { lockHotelSetupCurrencyMembership } from "./hotelSetupCurrencyMembership.js";
 
 const url = process.env["TEST_DATABASE_URL"];
 
@@ -41,6 +45,7 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
     const organizationId = organizations[0]!;
     const users = [randomUUID(), randomUUID()];
     const roleKeys = [`lock_owner_${suffix}`, `lock_other_${suffix}`];
+    const roleDefinition = randomUUID();
     const properties = [randomUUID(), randomUUID()];
     const logins: pg.Client[] = [];
     const scopePool = (login: pg.Client) => ({
@@ -86,6 +91,8 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           "identity.users",
           "identity.organization_memberships",
           "identity.role_permission_grants",
+          "identity.organization_roles",
+          "identity.membership_property_assignments",
           "pms.property_pricing_settings",
           "finance.expense_categories",
           "platform.idempotency_keys",
@@ -151,7 +158,7 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           `lock-${index}-${suffix}@example.test`,
         ]);
         await admin.query(
-          "INSERT INTO identity.organization_memberships (organization_id,user_id,role_key,access_origin) VALUES ($1,$2,$3,'agency')",
+          "INSERT INTO identity.organization_memberships (organization_id,user_id,role_key,access_origin,property_access_mode) VALUES ($1,$2,$3,'agency','all')",
           [organizations[index], users[index], roleKeys[index]],
         );
         await admin.query(
@@ -271,6 +278,198 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
       const created = await repository.upsertPropertyPricingCurrency(command);
       expect(created).toMatchObject({ ok: true, response: { outcome: "created" } });
       expect(await repository.upsertPropertyPricingCurrency(command)).toEqual(created);
+      // A replay still rechecks live membership access before returning old evidence.
+      for (const patch of [
+        "pms_access_enabled=false",
+        "property_access_mode='assigned'",
+        'permission_overrides=\'{"grant":[42],"deny":[]}\'::jsonb',
+      ]) {
+        await admin.query(
+          `UPDATE identity.organization_memberships SET ${patch} WHERE user_id=$1`,
+          [users[0]],
+        );
+        expect(await repository.upsertPropertyPricingCurrency(command)).toEqual({
+          ok: false,
+          error: { code: "setup_scope_unavailable" },
+        });
+        await admin.query(
+          `UPDATE identity.organization_memberships SET
+          pms_access_enabled=true, property_access_mode='all', permission_overrides=NULL WHERE user_id=$1`,
+          [users[0]],
+        );
+      }
+      const member = (
+        await admin.query("SELECT id FROM identity.organization_memberships WHERE user_id=$1", [
+          users[0],
+        ])
+      ).rows[0].id;
+      await admin.query(
+        "INSERT INTO identity.membership_property_assignments (membership_id,property_id) VALUES ($1,$2)",
+        [member, properties[1]],
+      );
+      await admin.query(
+        "UPDATE identity.organization_memberships SET property_access_mode='assigned' WHERE id=$1",
+        [member],
+      );
+      expect(await repository.upsertPropertyPricingCurrency(command)).toEqual(created);
+      for (const index of [0, 2])
+        expect(
+          (
+            await logins[index]!.query(
+              "SELECT property_id FROM identity.membership_property_assignments WHERE membership_id=$1",
+              [member],
+            )
+          ).rows,
+        ).toEqual([]);
+      expect(
+        (
+          await logins[1]!.query(
+            "SELECT property_id FROM identity.membership_property_assignments WHERE membership_id=$1 FOR SHARE",
+            [member],
+          )
+        ).rowCount,
+      ).toBe(1);
+      await expect(
+        logins[1]!.query(
+          "UPDATE identity.membership_property_assignments SET property_id=property_id WHERE membership_id=$1",
+          [member],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+      expect(
+        (
+          await logins[1]!.query(
+            "DELETE FROM identity.membership_property_assignments WHERE membership_id=$1",
+            [member],
+          )
+        ).rowCount,
+      ).toBe(0);
+      await expect(
+        logins[0]!.query(
+          "INSERT INTO identity.membership_property_assignments (membership_id,property_id) VALUES ($1,$2)",
+          [member, properties[0]],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+
+      await admin.query(
+        `INSERT INTO identity.organization_roles
+        (id,organization_id,name,security_class,base_role_key,default_permissions)
+        VALUES ($1,$2,'Scoped role test','staff','hotel_custom','["pms.calendar.read"]')`,
+        [roleDefinition, organizationId],
+      );
+      expect(
+        (
+          await logins[1]!.query(
+            "SELECT id FROM identity.organization_roles WHERE id=$1 FOR SHARE",
+            [roleDefinition],
+          )
+        ).rowCount,
+      ).toBe(1);
+      expect(
+        (
+          await logins[2]!.query("SELECT id FROM identity.organization_roles WHERE id=$1", [
+            roleDefinition,
+          ])
+        ).rowCount,
+      ).toBe(0);
+      await expect(
+        logins[1]!.query("UPDATE identity.organization_roles SET name=name WHERE id=$1", [
+          roleDefinition,
+        ]),
+      ).rejects.toMatchObject({ code: "42501" });
+      expect(
+        (
+          await logins[1]!.query("DELETE FROM identity.organization_roles WHERE id=$1", [
+            roleDefinition,
+          ])
+        ).rowCount,
+      ).toBe(0);
+      await expect(
+        logins[1]!.query(
+          `INSERT INTO identity.organization_roles
+        (organization_id,name,security_class,base_role_key,default_permissions)
+        VALUES ($1,'Forbidden role','staff','hotel_custom','[]')`,
+          [organizationId],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+      await admin.query(
+        "UPDATE identity.organization_memberships SET role_definition_id=$1 WHERE id=$2",
+        [roleDefinition, member],
+      );
+      expect(await repository.upsertPropertyPricingCurrency(command)).toEqual({
+        ok: false,
+        error: { code: "setup_scope_unavailable" },
+      });
+      await admin.query(
+        "UPDATE identity.organization_memberships SET role_key='hotel_custom' WHERE id=$1",
+        [member],
+      );
+      expect(await repository.upsertPropertyPricingCurrency(command)).toEqual({
+        ok: false,
+        error: { code: "setup_scope_unavailable" },
+      });
+      await admin.query(
+        "UPDATE identity.organization_memberships SET role_key=$1,role_definition_id=NULL,property_access_mode='all' WHERE id=$2",
+        [roleKeys[0], member],
+      );
+      await admin.query("DELETE FROM identity.organization_roles WHERE id=$1", [roleDefinition]);
+      await admin.query(
+        "DELETE FROM identity.membership_property_assignments WHERE membership_id=$1",
+        [member],
+      );
+      expect(await repository.upsertPropertyPricingCurrency(command)).toEqual(created);
+      await inspector.connect();
+      inspectorConnected = true;
+      const membershipPid = (await logins[1]!.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      // A revocation that started first must be visible after the lock wait.
+      await admin.query("BEGIN");
+      transferOpen = true;
+      await admin.query(
+        "UPDATE identity.organization_memberships SET pms_access_enabled=false WHERE id=$1",
+        [member],
+      );
+      const revokedReplay = repository.upsertPropertyPricingCurrency(command);
+      void revokedReplay.catch(() => {});
+      await expectBlocked(inspector, membershipPid);
+      await admin.query("COMMIT");
+      transferOpen = false;
+      expect(await revokedReplay).toEqual({
+        ok: false,
+        error: { code: "setup_scope_unavailable" },
+      });
+      await admin.query(
+        "UPDATE identity.organization_memberships SET pms_access_enabled=true WHERE id=$1",
+        [member],
+      );
+      // If the setup check wins, the access writer waits until its transaction ends.
+      const membershipClient = await scopePool(logins[1]!).connect();
+      let revokeAfterSetup: Promise<unknown> | undefined;
+      try {
+        await beginHotelSetupCommandScope(membershipClient, {
+          organizationId,
+          propertyId: properties[1]!,
+          operation: "currency",
+        });
+        expect(await lockHotelSetupCurrencyMembership(membershipClient, command)).toBe(true);
+        const adminPid = (await admin.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+        revokeAfterSetup = admin.query(
+          "UPDATE identity.organization_memberships SET pms_access_enabled=false WHERE id=$1",
+          [member],
+        );
+        void revokeAfterSetup.catch(() => {});
+        await expectBlocked(inspector, adminPid);
+        await membershipClient.query("COMMIT");
+      } finally {
+        await membershipClient.query("ROLLBACK");
+      }
+      await revokeAfterSetup;
+      expect(await repository.upsertPropertyPricingCurrency(command)).toEqual({
+        ok: false,
+        error: { code: "setup_scope_unavailable" },
+      });
+      await admin.query(
+        "UPDATE identity.organization_memberships SET pms_access_enabled=true WHERE id=$1",
+        [member],
+      );
       for (const [relation, count] of [
         ["platform.idempotency_keys", 1],
         ["platform.domain_events", 1],
@@ -952,8 +1151,10 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
            (database_login, property_id, organization_id) VALUES ($1, $2, $3)`,
         [roles[2], properties[0], organizations[1]],
       );
-      await inspector.connect();
-      inspectorConnected = true;
+      if (!inspectorConnected) {
+        await inspector.connect();
+        inspectorConnected = true;
+      }
       const oldLoginPid = (
         await logins[0]!.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")
       ).rows[0]!.pid;
@@ -1072,6 +1273,7 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         "DELETE FROM identity.organization_memberships WHERE organization_id=ANY($1::uuid[])",
         [organizations],
       );
+      await admin.query("DELETE FROM identity.organization_roles WHERE id=$1", [roleDefinition]);
       await admin.query("DELETE FROM identity.users WHERE id=ANY($1::uuid[])", [users]);
       await admin.query(
         "DELETE FROM identity.role_permission_grants WHERE role_key=ANY($1::text[])",
@@ -1086,5 +1288,5 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
       }
       await admin.end();
     }
-  });
+  }, 15_000);
 });
