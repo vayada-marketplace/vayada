@@ -1,0 +1,78 @@
+import { timingSafeEqual } from "node:crypto";
+
+import {
+  AuthorizationResolutionError,
+  backendAuthPlugin,
+  type BackendAuthPluginOptions,
+} from "@vayada/backend-auth";
+import {
+  createAuthorizationResolver,
+  type EntitlementRepository,
+  type PropertyAccessRepository,
+  type RolePermissionRepository,
+} from "@vayada/backend-authorization";
+import type { PmsPricingCommandPort } from "@vayada/domain-pms";
+import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
+
+import { registerPmsPricingCurrencyCommand } from "./routes/pmsPricing.js";
+
+type HotelSetupCommandServiceOptions = {
+  logger?: FastifyServerOptions["logger"];
+  internalToken: string;
+  auth: Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
+    rolePermissionRepository: RolePermissionRepository;
+    entitlementRepository: EntitlementRepository;
+    propertyAccessRepository: PropertyAccessRepository;
+  };
+  currencyCommands: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">;
+};
+
+/** Private currency endpoint. Credential selection belongs to its command adapter. */
+export function buildHotelSetupCommandService(
+  options: HotelSetupCommandServiceOptions,
+): FastifyInstance {
+  if (Buffer.byteLength(options.internalToken) < 32)
+    throw new Error("Hotel setup internal token must contain at least 32 bytes");
+  const app = Fastify({ logger: options.logger ?? false, disableRequestLogging: true });
+  app.addHook("onRequest", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const actual = request.headers["x-vayada-internal-token"];
+    const wanted = Buffer.from(options.internalToken);
+    const received = typeof actual === "string" ? Buffer.from(actual) : Buffer.alloc(0);
+    if (received.length !== wanted.length || !timingSafeEqual(received, wanted))
+      return reply.code(401).send({ code: "internal_unauthenticated" });
+    if (
+      Object.keys(request.headers).some(
+        (header) =>
+          header === "x-hotel-id" ||
+          (header.startsWith("x-vayada-") && header !== "x-vayada-internal-token"),
+      )
+    )
+      return reply.code(400).send({ code: "forwarded_context_rejected" });
+    if (Object.keys(request.query as object).length !== 0)
+      return reply.code(400).send({ code: "invalid_request" });
+  });
+
+  const { rolePermissionRepository, entitlementRepository, propertyAccessRepository, ...auth } =
+    options.auth;
+  app.register(backendAuthPlugin, {
+    ...auth,
+    authorizationResolver: createAuthorizationResolver(
+      rolePermissionRepository,
+      entitlementRepository,
+      propertyAccessRepository,
+    ),
+  });
+  app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof AuthorizationResolutionError)
+      return reply.code(403).send({ code: "forbidden" });
+    if ((error as { statusCode?: number }).statusCode === 400)
+      return reply.code(400).send({ code: "invalid_request" });
+    return reply.code(503).send({ code: "hotel_setup_unavailable" });
+  });
+  registerPmsPricingCurrencyCommand(app, options.currencyCommands, {
+    requireOwnerSession: true,
+    propertyAccessRepository,
+  });
+  return app;
+}
