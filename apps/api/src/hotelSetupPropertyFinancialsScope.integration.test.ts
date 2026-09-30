@@ -257,16 +257,17 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         },
       });
       if (!command) throw new Error("invalid native currency fixture");
-      const repository = createPgPmsPricingCommandRepository({
+      const repositoryConfig = {
         connectionString: url,
         pool: scopePool(logins[1]!),
-        hotelSetupCurrencyOperation: "currency",
+        hotelSetupCurrencyOperation: "currency" as const,
         currencyChangeGuard: {
           async runWithCurrencyChangeGuard() {
             throw new Error("initial currency does not need the change guard");
           },
         },
-      });
+      };
+      const repository = createPgPmsPricingCommandRepository(repositoryConfig);
       const created = await repository.upsertPropertyPricingCurrency(command);
       expect(created).toMatchObject({ ok: true, response: { outcome: "created" } });
       expect(await repository.upsertPropertyPricingCurrency(command)).toEqual(created);
@@ -399,6 +400,91 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
       expect(
         (await logins[3]!.query(keySql, [`readiness-${suffix}`, properties[0]])).rowCount,
       ).toBe(1);
+      // The first-save class includes categories on this same native transaction.
+      await admin.query(
+        "UPDATE platform.hotel_setup_property_scopes SET operation_class='currency_ready' WHERE database_login=$1",
+        [roles[1]],
+      );
+      const readiness = createPgPmsPricingCommandRepository({
+        ...repositoryConfig,
+        hotelSetupCurrencyOperation: "currency_ready",
+      });
+      const firstSave = { ...command, idempotencyKey: `native-first-save-${suffix}` };
+      await admin.query(
+        "INSERT INTO finance.expense_categories (property_id,system_key,name,color,archived_at) VALUES ($1,'staff','Archived payroll','#112233',now())",
+        [properties[1]],
+      );
+      await expect(readiness.upsertPropertyPricingCurrency(firstSave)).rejects.toThrow(
+        "categories incomplete",
+      );
+      expect(
+        (
+          await admin.query(
+            "SELECT property_id FROM pms.property_pricing_settings WHERE property_id=$1",
+            [properties[1]],
+          )
+        ).rows,
+      ).toEqual([]);
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS count FROM finance.expense_categories WHERE property_id=$1",
+            [properties[1]],
+          )
+        ).rows,
+      ).toEqual([{ count: 1 }]);
+      await admin.query("DELETE FROM finance.expense_categories WHERE property_id=$1", [
+        properties[1],
+      ]);
+      await admin.query(`REVOKE INSERT ON platform.product_audit_events FROM ${roles[1]}`);
+      await expect(readiness.upsertPropertyPricingCurrency(firstSave)).rejects.toMatchObject({
+        code: "42501",
+      });
+      expect(
+        (
+          await admin.query(
+            "SELECT property_id FROM pms.property_pricing_settings WHERE property_id=$1",
+            [properties[1]],
+          )
+        ).rows,
+      ).toEqual([]);
+      expect(
+        (
+          await admin.query("SELECT id FROM finance.expense_categories WHERE property_id=$1", [
+            properties[1],
+          ])
+        ).rows,
+      ).toEqual([]);
+      await admin.query(`GRANT INSERT ON platform.product_audit_events TO ${roles[1]}`);
+      const firstSaved = await readiness.upsertPropertyPricingCurrency(firstSave);
+      expect(firstSaved).toMatchObject({ ok: true, response: { outcome: "created" } });
+      expect(await readiness.upsertPropertyPricingCurrency(firstSave)).toEqual(firstSaved);
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS count FROM finance.expense_categories WHERE property_id=$1 AND archived_at IS NULL",
+            [properties[1]],
+          )
+        ).rows,
+      ).toEqual([{ count: 7 }]);
+      expect(
+        (
+          await admin.query(
+            "SELECT status,metadata->>'newHotelFinancialsDefault' AS marker FROM identity.product_entitlements WHERE resource_id=$1",
+            [properties[1]],
+          )
+        ).rows,
+      ).toEqual([{ status: "suspended", marker: "pending" }]);
+      await admin.query(
+        "UPDATE platform.hotel_setup_property_scopes SET operation_class='currency' WHERE database_login=$1",
+        [roles[1]],
+      );
+      await admin.query("DELETE FROM finance.expense_categories WHERE property_id=$1", [
+        properties[1],
+      ]);
+      await admin.query("DELETE FROM pms.property_pricing_settings WHERE property_id=$1", [
+        properties[1],
+      ]);
       await admin.query(
         "DELETE FROM identity.product_entitlements WHERE entitlement_key='property-management' AND organization_id=ANY($1::uuid[])",
         [organizations],
