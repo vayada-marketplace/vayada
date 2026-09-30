@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { beginHotelSetupCommandScope } from "../hotelSetupCommandScope.js";
 import { enqueueChannexMealChange } from "./pmsChannexMealChange.js";
 
 import {
@@ -41,6 +42,8 @@ export type PmsPricingCommandPool = {
 export type PmsPricingCommandRepositoryConfig = {
   connectionString: string;
   currencyChangeGuard: PmsPricingCurrencyChangeGuardPort;
+  /** Trusted private-service configuration; never read from the request DTO. */
+  hotelSetupCurrencyOperation?: "currency" | "currency_ready";
   channexMealSyncEnabled?: boolean;
   channexMealSyncPropertyId?: string;
   max?: number;
@@ -128,6 +131,21 @@ export function createPgPmsPricingCommandRepository(
   const makeId = config.randomId ?? randomUUID;
   let closed = false;
 
+  async function beginCurrencyTransaction(
+    client: PmsPricingCommandClient,
+    command: AnyCommand,
+  ): Promise<void> {
+    if (config.hotelSetupCurrencyOperation) {
+      await beginHotelSetupCommandScope(client, {
+        propertyId: command.propertyId,
+        organizationId: command.organizationId,
+        operation: config.hotelSetupCurrencyOperation,
+      });
+    } else {
+      await client.query("BEGIN");
+    }
+  }
+
   async function runCommand<C extends AnyCommand, R extends AnyResult>(
     command: C,
     spec: CommandSpec<C, R>,
@@ -140,7 +158,7 @@ export function createPgPmsPricingCommandRepository(
     const client = await pool.connect();
 
     try {
-      await client.query("BEGIN");
+      await beginCurrencyTransaction(client, command);
       await lockPropertyPricingScope(client, command.propertyId);
       if (!(await lockAuthorizedScope(client, command, acceptedAt))) {
         await rollbackQuietly(client);
@@ -193,7 +211,8 @@ export function createPgPmsPricingCommandRepository(
         : null;
       if (
         config.channexMealSyncEnabled &&
-        (!config.channexMealSyncPropertyId || config.channexMealSyncPropertyId === command.propertyId) &&
+        (!config.channexMealSyncPropertyId ||
+          config.channexMealSyncPropertyId === command.propertyId) &&
         domainEventId &&
         worked.change?.resourceType === "flexible_rate_plan" &&
         command.audit.actor.kind === "user"
@@ -239,7 +258,7 @@ export function createPgPmsPricingCommandRepository(
     const fingerprint = sha256(CURRENCY_SPEC.serializeFingerprint(command));
     const client = await pool.connect();
     try {
-      await client.query("BEGIN");
+      await beginCurrencyTransaction(client, command);
       await lockPropertyPricingScope(client, command.propertyId);
       if (!(await lockAuthorizedScope(client, command, at))) {
         await rollbackQuietly(client);

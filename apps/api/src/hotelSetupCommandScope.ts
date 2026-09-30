@@ -1,9 +1,11 @@
+import type { QueryResultRow } from "pg";
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type HotelSetupOperation = "currency" | "currency_ready" | "feature_hub";
 
 type ScopeQuery = {
-  query<T>(sql: string, values?: readonly unknown[]): Promise<{ rows: T[] }>;
+  query<T extends QueryResultRow>(sql: string, values?: readonly unknown[]): Promise<{ rows: T[] }>;
 };
 
 type ScopeClient = ScopeQuery & { release(): void };
@@ -69,6 +71,16 @@ async function assertHotelSetupCommandScope(
     throw new Error("Hotel setup command scope preflight failed");
 }
 
+/** Begins the transaction for repositories that own their commit/rollback lifecycle.
+ * Callers must use this same client through completion and release it in finally. */
+export async function beginHotelSetupCommandScope(
+  client: ScopeQuery,
+  scope: Parameters<typeof assertHotelSetupCommandScope>[1],
+): Promise<void> {
+  await client.query("BEGIN");
+  await assertHotelSetupCommandScope(client, scope);
+}
+
 /** The assignment and owner locks stay held through the command's commit.
  * The platform's exact ACL and secret preflight is a separate release gate. */
 export async function withHotelSetupCommandScope<T>(
@@ -78,8 +90,7 @@ export async function withHotelSetupCommandScope<T>(
 ): Promise<T> {
   const client = await pool.connect();
   try {
-    await client.query("BEGIN");
-    await assertHotelSetupCommandScope(client, scope);
+    await beginHotelSetupCommandScope(client, scope);
     const result = await work(client);
     await client.query("COMMIT");
     return result;
