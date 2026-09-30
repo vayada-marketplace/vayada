@@ -123,6 +123,13 @@ requires UPDATE privilege and UPDATE-policy visibility. If any separate
 capability cannot preserve its transaction or denial proof, keep automatic
 activation and Feature Hub writes blocked.
 
+Currency evidence is limited to `pms.pricing_currency.upsert` idempotency and
+audit rows, property-pricing source events, and their two pricing-source outbox
+destinations. Native logins cannot change event/audit/outbox rows, delete retry
+records, or attach another hotel's evidence. Preserve existing shared-table
+policies and ACL-backed callers; exact grants and the remaining currency read
+inventory still need the full handler/platform preflight.
+
 Before any release: test the real handlers and native logins on fresh and
 upgraded PostgreSQL 16 and 17, including two organizations, cross-property
 denials, replay, failed provisioning, rotation, transfer with an already
