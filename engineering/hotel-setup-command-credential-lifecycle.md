@@ -56,6 +56,11 @@ capability. The assignment schema must allow one active login per property and
 operation class, including a separate Feature Hub class, without allowing any
 login to cross properties. The readiness login's own direct SQL still cannot
 complete an invalid transition.
+The first-currency transaction also keeps the existing idempotency reservation,
+pricing source event/outbox, currency audit, and Financials activation audit.
+A standalone database function that can activate from an existing currency row
+or skip those records is not a valid replacement. The database boundary must
+check the same supported currency vocabulary as the PMS command.
 Do not make the first currency command a two-connection workflow.
 
 Provisioning is idempotent for the same immutable organization or property
@@ -91,6 +96,10 @@ transition needs a distinct capability, unavailable to that login, which
 checks current currency, all seven unarchived system categories, pending marker,
 current Owner link, base PMS entitlement, billing status, and global suspension
 in the write transaction. It updates only that property's Financials row.
+Revocation of an existing entitlement or billing row and insertion of a new
+suspension must serialize with this check. Use a shared lock protocol that both
+the command and those mutation paths obey, and test both commit orders; a
+serializable snapshot taken before a conflicting lock is not enough.
 The private service must reverify the original actor before invoking it. A
 separate property-bound Feature Hub capability must update only that property's
 Financials entitlement and append its audit in one transaction; neither
