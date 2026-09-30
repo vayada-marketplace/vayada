@@ -19,12 +19,16 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
     const inspector = new pg.Client({ connectionString: url });
     const suffix = randomUUID().replaceAll("-", "");
     const ownedRelation = `hotel_setup_scope_owned_${suffix}`;
-    const roles = [0, 1, 2, 3, 4].map(
-      (index) => `vayada_next_hotel_setup_property_${index}_${suffix}`,
+    const roles = [0, 1, 2, 3, 4, 5].map((index) =>
+      index === 5
+        ? `vayada_test_lock_reader_${suffix}`
+        : `vayada_next_hotel_setup_property_${index}_${suffix}`,
     );
-    const passwords = [0, 1, 2, 3, 4].map(() => randomUUID());
+    const passwords = roles.map(() => randomUUID());
     const organizations = [randomUUID(), randomUUID()];
     const organizationId = organizations[0]!;
+    const users = [randomUUID(), randomUUID()];
+    const roleKeys = [`lock_owner_${suffix}`, `lock_other_${suffix}`];
     const properties = [randomUUID(), randomUUID()];
     const logins: pg.Client[] = [];
     const scopePool = (login: pg.Client) => ({
@@ -54,7 +58,7 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           `property-receiver-${suffix}`,
         ],
       );
-      for (let index = 0; index < 5; index++) {
+      for (let index = 0; index < 6; index++) {
         const role = roles[index]!;
         await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD '${passwords[index]}' NOINHERIT
           NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`);
@@ -66,15 +70,20 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           "hotel_catalog.properties",
           "identity.organization_resource_links",
           "identity.product_entitlements",
+          "identity.organizations",
+          "identity.users",
+          "identity.organization_memberships",
+          "identity.role_permission_grants",
           "pms.property_pricing_settings",
           "finance.expense_categories",
         ]) {
           await admin.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${relation} TO ${role}`);
         }
         await admin.query(`GRANT SELECT ON pms.room_types, pms.rate_plans TO ${role}`);
-        await admin.query(
-          `GRANT vayada_next_hotel_setup_property_scope TO ${role} WITH INHERIT TRUE, SET FALSE`,
-        );
+        if (index !== 5)
+          await admin.query(
+            `GRANT vayada_next_hotel_setup_property_scope TO ${role} WITH INHERIT TRUE, SET FALSE`,
+          );
         if (index < 2) {
           const ownerResourceId =
             index === 0 ? properties[index]!.toUpperCase() : properties[index]!;
@@ -105,7 +114,7 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
             [organizationId, properties[index]],
           );
         }
-        if (index >= 3) {
+        if (index >= 3 && index < 5) {
           await admin.query(
             `INSERT INTO platform.hotel_setup_property_scopes
              (database_login, property_id, organization_id, operation_class)
@@ -120,6 +129,107 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         await login.connect();
         logins.push(login);
       }
+      for (let index = 0; index < 2; index++) {
+        await admin.query("INSERT INTO identity.users (id,email) VALUES ($1,$2)", [
+          users[index],
+          `lock-${index}-${suffix}@example.test`,
+        ]);
+        await admin.query(
+          "INSERT INTO identity.organization_memberships (organization_id,user_id,role_key,access_origin) VALUES ($1,$2,$3,'agency')",
+          [organizations[index], users[index], roleKeys[index]],
+        );
+        await admin.query(
+          `INSERT INTO identity.role_permission_grants (organization_kind,role_key,permission_key)
+           VALUES ('hotel_group',$1,'pms.operations.manage')`,
+          [roleKeys[index]],
+        );
+        await admin.query(
+          `INSERT INTO identity.product_entitlements (organization_id,product,entitlement_key,status)
+           VALUES ($1,'pms','property-management','active')`,
+          [organizations[index]],
+        );
+      }
+      // Broad local grants distinguish lock-only RLS from absent UPDATE privilege.
+      for (const [relation, column, own, other] of [
+        ["identity.organizations", "id", organizationId, organizations[1]],
+        ["identity.users", "id", users[0], users[1]],
+        ["identity.organization_memberships", "user_id", users[0], users[1]],
+        ["identity.role_permission_grants", "role_key", roleKeys[0], roleKeys[1]],
+        ["hotel_catalog.properties", "id", properties[0], properties[1]],
+        [
+          "identity.organization_resource_links",
+          "resource_id",
+          properties[0]!.toUpperCase(),
+          properties[1],
+        ],
+        ["identity.product_entitlements", "organization_id", organizationId, organizations[1]],
+      ] as const) {
+        for (const lock of ["SHARE", "KEY SHARE", "UPDATE"])
+          expect(
+            (
+              await logins[3]!.query(
+                `SELECT ${column} FROM ${relation} WHERE ${column}=$1 FOR ${lock}`,
+                [own],
+              )
+            ).rowCount,
+          ).toBeGreaterThan(0);
+        expect(
+          (
+            await logins[3]!.query(
+              `SELECT ${column} FROM ${relation} WHERE ${column}=$1 FOR SHARE`,
+              [other],
+            )
+          ).rows,
+        ).toEqual([]);
+        await expect(
+          logins[3]!.query(`UPDATE ${relation} SET ${column}=${column} WHERE ${column}=$1`, [own]),
+        ).rejects.toMatchObject({ code: "42501" });
+        expect(
+          (await logins[3]!.query(`DELETE FROM ${relation} WHERE ${column}=$1`, [own])).rowCount,
+        ).toBe(0);
+      }
+      await expect(
+        logins[3]!.query("INSERT INTO identity.users (email) VALUES ($1)", [
+          `forbidden-${suffix}@example.test`,
+        ]),
+      ).rejects.toMatchObject({ code: "42501" });
+      expect(
+        (
+          await logins[2]!.query("SELECT id FROM identity.organizations WHERE id=$1", [
+            organizationId,
+          ])
+        ).rows,
+      ).toEqual([]);
+      expect(
+        (
+          await logins[5]!.query(
+            "UPDATE identity.users SET name='ordinary access retained' WHERE id=$1 RETURNING id",
+            [users[0]],
+          )
+        ).rowCount,
+      ).toBe(1);
+      // The actual currency authorization join can now take all required locks.
+      expect(
+        (
+          await logins[1]!.query(
+            `SELECT property.id FROM hotel_catalog.properties property
+         JOIN identity.organizations organization ON organization.id=$1
+         JOIN identity.organization_resource_links resource ON resource.organization_id=organization.id
+           AND resource.product='pms' AND resource.resource_id=property.id::text
+         JOIN identity.users actor ON actor.id=$3
+         JOIN identity.organization_memberships membership ON membership.organization_id=organization.id AND membership.user_id=actor.id
+         JOIN identity.role_permission_grants permission_grant ON permission_grant.role_key=membership.role_key
+           AND permission_grant.organization_kind='hotel_group' AND permission_grant.permission_key='pms.operations.manage'
+         WHERE property.id=$2
+         FOR SHARE OF property,organization,resource,actor,membership FOR KEY SHARE OF permission_grant`,
+            [organizationId, properties[1], users[0]],
+          )
+        ).rowCount,
+      ).toBe(1);
+      await admin.query(
+        "DELETE FROM identity.product_entitlements WHERE entitlement_key='property-management' AND organization_id=ANY($1::uuid[])",
+        [organizations],
+      );
       for (const [loginIndex, propertyIndex, operation, allowed] of [
         [0, 0, "currency", true],
         [0, 0, "currency_ready", false],
@@ -443,16 +553,14 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           ])
         ).rowCount,
       ).toBe(0);
-      expect(
-        (
-          await logins[0]!.query(
-            `UPDATE identity.product_entitlements SET status='active',
+      await expect(
+        logins[0]!.query(
+          `UPDATE identity.product_entitlements SET status='active',
          metadata='{"newHotelFinancialsDefault":"ready"}'
          WHERE resource_id=$1`,
-            [properties[0]],
-          )
-        ).rowCount,
-      ).toBe(0);
+          [properties[0]],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
       await expect(
         logins[0]!.query(
           `INSERT INTO identity.product_entitlements
@@ -461,14 +569,12 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           [organizationId],
         ),
       ).rejects.toMatchObject({ code: "42501" });
-      expect(
-        (
-          await logins[0]!.query(
-            "UPDATE identity.organization_resource_links SET status='suspended' WHERE resource_id=$1",
-            [properties[0]],
-          )
-        ).rowCount,
-      ).toBe(0);
+      await expect(
+        logins[0]!.query(
+          "UPDATE identity.organization_resource_links SET status='suspended' WHERE lower(resource_id)=$1",
+          [properties[0]],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
 
       await admin.query(`REVOKE vayada_next_hotel_setup_property_scope FROM ${roles[1]}`);
       expect(
@@ -625,6 +731,15 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
       await admin.query("DELETE FROM hotel_catalog.properties WHERE id=ANY($1::uuid[])", [
         properties,
       ]);
+      await admin.query(
+        "DELETE FROM identity.organization_memberships WHERE organization_id=ANY($1::uuid[])",
+        [organizations],
+      );
+      await admin.query("DELETE FROM identity.users WHERE id=ANY($1::uuid[])", [users]);
+      await admin.query(
+        "DELETE FROM identity.role_permission_grants WHERE role_key=ANY($1::text[])",
+        [roleKeys],
+      );
       await admin.query("DELETE FROM identity.organizations WHERE id=ANY($1::uuid[])", [
         organizations,
       ]);
