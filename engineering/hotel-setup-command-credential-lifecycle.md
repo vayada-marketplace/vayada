@@ -100,6 +100,12 @@ Revocation of an existing entitlement or billing row and insertion of a new
 suspension must serialize with this check. Use a shared lock protocol that both
 the command and those mutation paths obey, and test both commit orders; a
 serializable snapshot taken before a conflicting lock is not enough.
+The native setup scope takes the organization's `FOR UPDATE` lock before
+entitlement checks, serializing FK-backed entitlement inserts. Locked reads of
+existing entitlements must also serialize their revocations. The scope requires
+`READ COMMITTED` so checks after a wait see committed changes; older-snapshot
+isolation fails closed. Hold that
+lock through the complete command and test both commit orders before release.
 The private service must reverify the original actor before invoking it. A
 separate property-bound Feature Hub capability must update only that property's
 Financials entitlement and append its audit in one transaction; neither

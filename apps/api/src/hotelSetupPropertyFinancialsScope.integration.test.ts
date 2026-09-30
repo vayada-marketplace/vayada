@@ -10,6 +10,18 @@ import { withHotelSetupCommandScope } from "./hotelSetupCommandScope.js";
 
 const url = process.env["TEST_DATABASE_URL"];
 
+async function expectBlocked(observer: pg.Client, pid: number): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const result = await observer.query(
+      "SELECT wait_event_type FROM pg_stat_activity WHERE pid=$1",
+      [pid],
+    );
+    if (result.rows[0]?.wait_event_type === "Lock") return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("Expected transaction to wait on a lock");
+}
+
 describe.skipIf(!url)("hotel setup property Financials scope", () => {
   it("isolates two hotels in one organization and revokes an already connected login", async () => {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
@@ -395,19 +407,7 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           [roles[3]],
         );
         void revoke.catch(() => {});
-        let waiting = false;
-        for (let attempt = 0; attempt < 100; attempt++) {
-          const activity = await lockInspector.query<{ wait_event_type: string | null }>(
-            "SELECT wait_event_type FROM pg_stat_activity WHERE pid=$1",
-            [adminPid],
-          );
-          if (activity.rows[0]?.wait_event_type === "Lock") {
-            waiting = true;
-            break;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        }
-        expect(waiting).toBe(true);
+        await expectBlocked(lockInspector, adminPid);
         releaseWrite();
         await scopedWrite;
         await revoke;
@@ -430,6 +430,88 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         ),
       ).rejects.toThrow("scope preflight failed");
       await admin.query(`DROP TABLE public.${ownedRelation}`);
+      const suspensionObserver = new pg.Client({ connectionString: url });
+      await suspensionObserver.connect();
+      const setupLogin = logins[3]!;
+      const scope = {
+        propertyId: properties[0]!,
+        organizationId,
+        operation: "currency_ready" as const,
+      };
+      const suspensionSql = `INSERT INTO identity.product_entitlements
+        (organization_id,product,entitlement_key,status) VALUES ($1,'pms','pms-core','suspended')`;
+      try {
+        // Setup first: the insert's organization FK lock waits for setup commit.
+        await setupLogin.query("BEGIN");
+        await setupLogin.query("SELECT platform.hotel_setup_property_allowed($1,$2)", [
+          properties[0],
+          organizationId,
+        ]);
+        await admin.query("BEGIN");
+        const adminPid = (await admin.query("SELECT pg_backend_pid() AS pid")).rows[0]
+          .pid as number;
+        const insert = admin.query(suspensionSql, [organizationId]);
+        void insert.catch(() => {});
+        await expectBlocked(suspensionObserver, adminPid);
+        expect(
+          (
+            await setupLogin.query(
+              "SELECT status FROM identity.product_entitlements WHERE entitlement_key='pms-core'",
+            )
+          ).rows,
+        ).toEqual([]);
+        await setupLogin.query("COMMIT");
+        await insert;
+        await admin.query("COMMIT");
+        await admin.query(
+          "DELETE FROM identity.product_entitlements WHERE organization_id=$1 AND entitlement_key='pms-core'",
+          [organizationId],
+        );
+
+        // Suspension first: setup waits, then observes the committed row.
+        await admin.query("BEGIN");
+        await admin.query(suspensionSql, [organizationId]);
+        const setupPid = (await setupLogin.query("SELECT pg_backend_pid() AS pid")).rows[0]
+          .pid as number;
+        const setup = withHotelSetupCommandScope(scopePool(setupLogin), scope, async (client) => {
+          return (
+            await client.query(
+              "SELECT status FROM identity.product_entitlements WHERE entitlement_key='pms-core'",
+            )
+          ).rows;
+        });
+        void setup.catch(() => {});
+        await expectBlocked(suspensionObserver, setupPid);
+        await admin.query("COMMIT");
+        expect(await setup).toEqual([{ status: "suspended" }]);
+        await admin.query(
+          "DELETE FROM identity.product_entitlements WHERE organization_id=$1 AND entitlement_key='pms-core'",
+          [organizationId],
+        );
+
+        for (const isolation of ["REPEATABLE READ", "SERIALIZABLE"]) {
+          await setupLogin.query(`BEGIN ISOLATION LEVEL ${isolation}`);
+          expect(
+            (
+              await setupLogin.query(
+                "SELECT platform.hotel_setup_property_allowed($1,$2) AS allowed",
+                [properties[0], organizationId],
+              )
+            ).rows,
+          ).toEqual([{ allowed: false }]);
+          await expect(
+            setupLogin.query(
+              "INSERT INTO pms.property_pricing_settings (property_id,currency) VALUES ($1,'EUR')",
+              [properties[0]],
+            ),
+          ).rejects.toMatchObject({ code: "42501" });
+          await setupLogin.query("ROLLBACK");
+        }
+      } finally {
+        await setupLogin.query("ROLLBACK");
+        await admin.query("ROLLBACK");
+        await suspensionObserver.end();
+      }
       expect(
         (
           await logins[4]!.query("SELECT id FROM hotel_catalog.properties WHERE id=$1", [
@@ -635,19 +717,7 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         [properties[0]],
       );
       void oldWrite.catch(() => {});
-      let waitingOnTransferLock = false;
-      for (let attempt = 0; attempt < 100; attempt++) {
-        const activity = await inspector.query<{ wait_event_type: string | null }>(
-          "SELECT wait_event_type FROM pg_stat_activity WHERE pid=$1",
-          [oldLoginPid],
-        );
-        if (activity.rows[0]?.wait_event_type === "Lock") {
-          waitingOnTransferLock = true;
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      expect(waitingOnTransferLock).toBe(true);
+      await expectBlocked(inspector, oldLoginPid);
       await admin.query("COMMIT");
       transferOpen = false;
       await expect(oldWrite).rejects.toMatchObject({ code: "42501" });
