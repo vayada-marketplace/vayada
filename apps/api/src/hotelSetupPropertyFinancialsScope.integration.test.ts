@@ -5,6 +5,7 @@ import pg from "pg";
 import { describe, expect, it } from "vitest";
 
 import { createPgPmsPricingCommandRepository } from "./domains/pmsPricingCommandRepository.js";
+import { seedPendingHotelFinancialsCategories } from "./domains/financeStarterCategories.js";
 import { withHotelSetupCommandScope } from "./hotelSetupCommandScope.js";
 
 const url = process.env["TEST_DATABASE_URL"];
@@ -175,6 +176,82 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           );
         }
       }
+      // Native category/currency SQL proof; full-handler ACL provisioning is a separate gate.
+      const categoryScope = {
+        propertyId: properties[0]!,
+        organizationId,
+        operation: "currency_ready" as const,
+      };
+      await admin.query(
+        `INSERT INTO finance.expense_categories (property_id, system_key, name, color)
+         VALUES ($1, 'staff', 'Our payroll', '#112233')`,
+        [properties[0]],
+      );
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await withHotelSetupCommandScope(scopePool(logins[3]!), categoryScope, async (client) => {
+          await seedPendingHotelFinancialsCategories(client, categoryScope);
+        });
+      }
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS count FROM finance.expense_categories WHERE property_id=$1",
+            [properties[0]],
+          )
+        ).rows,
+      ).toEqual([{ count: 7 }]);
+      expect(
+        (
+          await admin.query(
+            "SELECT name, color FROM finance.expense_categories WHERE property_id=$1 AND system_key='staff'",
+            [properties[0]],
+          )
+        ).rows,
+      ).toEqual([{ name: "Our payroll", color: "#112233" }]);
+      expect(
+        (
+          await admin.query("SELECT id FROM finance.expense_categories WHERE property_id=$1", [
+            properties[1],
+          ])
+        ).rows,
+      ).toEqual([]);
+      await admin.query("DELETE FROM finance.expense_categories WHERE property_id=$1", [
+        properties[0],
+      ]);
+      await admin.query(
+        `INSERT INTO finance.expense_categories (property_id, system_key, name, color, archived_at)
+         VALUES ($1, 'staff', 'Archived payroll', '#112233', now())`,
+        [properties[0]],
+      );
+      await expect(
+        withHotelSetupCommandScope(scopePool(logins[3]!), categoryScope, async (client) => {
+          await client.query(
+            "INSERT INTO pms.property_pricing_settings (property_id, currency) VALUES ($1, 'EUR')",
+            [properties[0]],
+          );
+          await seedPendingHotelFinancialsCategories(client, categoryScope);
+        }),
+      ).rejects.toThrow("categories incomplete");
+      expect(
+        (
+          await admin.query(
+            "SELECT system_key, archived_at IS NOT NULL AS archived FROM finance.expense_categories WHERE property_id=$1",
+            [properties[0]],
+          )
+        ).rows,
+      ).toEqual([{ system_key: "staff", archived: true }]);
+      expect(
+        (
+          await admin.query(
+            "SELECT property_id FROM pms.property_pricing_settings WHERE property_id=$1",
+            [properties[0]],
+          )
+        ).rows,
+      ).toEqual([]);
+      await admin.query("DELETE FROM finance.expense_categories WHERE property_id=$1", [
+        properties[0],
+      ]);
+
       const lockInspector = new pg.Client({ connectionString: url });
       await lockInspector.connect();
       let releaseWrite!: () => void;
