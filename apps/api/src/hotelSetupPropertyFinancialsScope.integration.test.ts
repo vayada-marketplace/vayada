@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 
+import { parseUpsertPropertyPricingCurrencyCommand } from "@vayada/domain-pms";
 import pg from "pg";
 import { describe, expect, it } from "vitest";
 
+import { createPgPmsPricingCommandRepository } from "./domains/pmsPricingCommandRepository.js";
 import { withHotelSetupCommandScope } from "./hotelSetupCommandScope.js";
 
 const url = process.env["TEST_DATABASE_URL"];
@@ -25,11 +27,12 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
     const properties = [randomUUID(), randomUUID()];
     const logins: pg.Client[] = [];
     const scopePool = (login: pg.Client) => ({
+      async end() {},
       async connect() {
         return {
           async query<T>(sql: string, values?: readonly unknown[]) {
             const result = await login.query(sql, values ? [...values] : []);
-            return { rows: result.rows as T[] };
+            return { rows: result.rows as T[], rowCount: result.rowCount };
           },
           release() {},
         };
@@ -142,6 +145,35 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         );
         if (allowed) await expect(preflight).resolves.toBeUndefined();
         else await expect(preflight).rejects.toThrow("scope preflight failed");
+        if (!allowed && operation !== "feature_hub") {
+          const command = parseUpsertPropertyPricingCurrencyCommand({
+            organizationId,
+            propertyId: properties[propertyIndex],
+            currency: "EUR",
+            expectedPricingCurrencyRevision: 0,
+            idempotencyKey: `native-denial-${suffix}-${loginIndex}-${operation}`,
+            audit: {
+              actor: { kind: "user", userId: randomUUID() },
+              requestId: suffix,
+              correlationId: null,
+              requestedAt: new Date().toISOString(),
+            },
+          });
+          if (!command) throw new Error("invalid currency command fixture");
+          const repository = createPgPmsPricingCommandRepository({
+            connectionString: url,
+            pool: scopePool(logins[loginIndex]!),
+            hotelSetupCurrencyOperation: operation,
+            currencyChangeGuard: {
+              async runWithCurrencyChangeGuard() {
+                throw new Error("guard must not run");
+              },
+            },
+          });
+          await expect(repository.upsertPropertyPricingCurrency(command)).rejects.toThrow(
+            "Hotel setup command scope preflight failed",
+          );
+        }
       }
       const lockInspector = new pg.Client({ connectionString: url });
       await lockInspector.connect();
