@@ -23,6 +23,24 @@ The required table policies and direct-SQL denial matrix are in
 
 ## Provisioning
 
+The private executable is `npm --workspace vayada-api run start:hotel-setup-command`
+(default port 8011). It requires its own `HOTEL_SETUP_COMMAND_*` configuration;
+it cannot use `TARGET_DATABASE_URL` or the ordinary API's WorkOS configuration.
+Its reader/assignment credential must name `vayada_next_hotel_setup_reader`, use
+TLS `verify-full`, and target the same host/database as the password-free command
+endpoint. Startup rejects role membership, ownership, inheritance and elevated
+role attributes. This role-posture check is **not** an exact ACL preflight.
+Before release, platform must review/prove its exact canonical authorization,
+entitlement and assignment reads. Canonical authorization also appends rejected
+permission-override audit events; preserve that narrow rejection-audit contract
+without granting entitlement, registry or Financials writes. Missing audit access
+must fail closed. No reader role or grant is provisioned by this launcher.
+Secrets Manager access is `GetSecretValue` only within the reviewed setup prefix;
+the command adapters receive no secret-write methods. Exact live ACL/RLS/IAM,
+private ingress, primary/rollback tasks and credential provisioning remain release
+gates. Feature Hub writes use only the native purpose-specific command adapter;
+the reader repository's general entitlement writer is never wired into this service.
+
 1. A separate provisioner accepts only a command authenticated by the private
    service and independently checks the current database-owned organization
    or property assignment. It does not accept a caller-supplied login name or

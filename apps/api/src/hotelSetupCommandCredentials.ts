@@ -8,14 +8,15 @@ export type HotelSetupCredentialOptions = {
   secretPrefix: string;
 };
 
-/** Private service only. Purpose comes from the adapter, never the HTTP caller. */
-export function createHotelSetupCredentialResolver(
-  options: HotelSetupCredentialOptions,
-  operation: "currency_ready" | "feature_hub",
-) {
-  if (operation !== "currency_ready" && operation !== "feature_hub")
-    throw new Error("Invalid hotel setup credential purpose");
-  const endpoint = new URL(options.databaseEndpoint);
+export function parseHotelSetupCredentialConfiguration(
+  options: Pick<HotelSetupCredentialOptions, "databaseEndpoint" | "secretPrefix">,
+): URL {
+  let endpoint: URL;
+  try {
+    endpoint = new URL(options.databaseEndpoint);
+  } catch {
+    throw new Error("Invalid hotel setup credential configuration");
+  }
   if (
     !["postgres:", "postgresql:"].includes(endpoint.protocol) ||
     !endpoint.hostname ||
@@ -24,9 +25,21 @@ export function createHotelSetupCredentialResolver(
     endpoint.password ||
     endpoint.search ||
     endpoint.hash ||
-    !/^[A-Za-z0-9/_+=.@-]{1,256}\/$/.test(options.secretPrefix)
+    !/^[A-Za-z0-9/_+=.@-]{1,256}\/$/.test(options.secretPrefix) ||
+    options.secretPrefix.split("/").some((segment) => segment === "." || segment === "..")
   )
     throw new Error("Invalid hotel setup credential configuration");
+  return endpoint;
+}
+
+/** Private service only. Purpose comes from the adapter, never the HTTP caller. */
+export function createHotelSetupCredentialResolver(
+  options: HotelSetupCredentialOptions,
+  operation: "currency_ready" | "feature_hub",
+) {
+  if (operation !== "currency_ready" && operation !== "feature_hub")
+    throw new Error("Invalid hotel setup credential purpose");
+  const endpoint = parseHotelSetupCredentialConfiguration(options);
   const secretPrefix = options.secretPrefix;
 
   return async (propertyId: string, organizationId: string): Promise<string> => {
