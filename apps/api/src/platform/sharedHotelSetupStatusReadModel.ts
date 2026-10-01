@@ -1623,7 +1623,7 @@ function createPropertyProfileSql(): string {
     written_property AS (
       SELECT * FROM created_property
     )
-    ${propertyProfileMutationCtes()}
+    ${propertyProfileMutationCtes("create")}
     SELECT written_property.property_id::text AS "propertyId"
     FROM written_property
   `;
@@ -1677,13 +1677,14 @@ function updatePropertyProfileSql(): string {
     written_property AS (
       SELECT * FROM updated_property
     )
-    ${propertyProfileMutationCtes()}
+    ${propertyProfileMutationCtes("update")}
     SELECT written_property.property_id::text AS "propertyId"
     FROM written_property
   `;
 }
 
-function propertyProfileMutationCtes(): string {
+function propertyProfileMutationCtes(mode: "create" | "update"): string {
+  // A new UUID has no existing location or contacts to replace. Creation needs INSERT only.
   return `,
     upserted_location AS (
       INSERT INTO hotel_catalog.property_locations (
@@ -1716,7 +1717,9 @@ function propertyProfileMutationCtes(): string {
         'verified',
         now()
       FROM written_property, profile_input
-      ON CONFLICT (property_id) DO UPDATE
+      ${
+        mode === "update"
+          ? `ON CONFLICT (property_id) DO UPDATE
       SET country_code = EXCLUDED.country_code,
           city = EXCLUDED.city,
           street_address = EXCLUDED.street_address,
@@ -1728,7 +1731,9 @@ function propertyProfileMutationCtes(): string {
           geo_public = EXCLUDED.geo_public,
           map_display_mode = EXCLUDED.map_display_mode,
           source_confidence = EXCLUDED.source_confidence,
-          updated_at = now()
+          updated_at = now()`
+          : ""
+      }
       RETURNING property_id
     ),
     contact_input AS (
@@ -1742,7 +1747,9 @@ function propertyProfileMutationCtes(): string {
       JOIN LATERAL jsonb_to_recordset(COALESCE(profile_input.contacts, '[]'::jsonb))
         AS contact(channel_type text, value text, purpose text, is_public boolean) ON TRUE
     ),
-    deleted_contacts AS (
+    ${
+      mode === "update"
+        ? `deleted_contacts AS (
       DELETE FROM hotel_catalog.property_contact_channels contact
       USING written_property
       WHERE contact.property_id = written_property.property_id
@@ -1765,6 +1772,9 @@ function propertyProfileMutationCtes(): string {
         AND contact.channel_type IN ('phone', 'whatsapp', 'email')
       RETURNING contact.property_id
     ),
+    `
+        : ""
+    }
     upserted_contacts AS (
       INSERT INTO hotel_catalog.property_contact_channels (
         property_id,
@@ -1784,7 +1794,9 @@ function propertyProfileMutationCtes(): string {
         'platform',
         now()
       FROM contact_input
-      CROSS JOIN (
+      ${
+        mode === "update"
+          ? `CROSS JOIN (
         SELECT count(*) AS deleted_count
         FROM deleted_external_guest_contacts
       ) external_guest_contact_cleanup
@@ -1792,7 +1804,9 @@ function propertyProfileMutationCtes(): string {
       SET purpose = EXCLUDED.purpose,
           is_public = EXCLUDED.is_public,
           source_system = EXCLUDED.source_system,
-          updated_at = now()
+          updated_at = now()`
+          : ""
+      }
       RETURNING property_id
     )
   `;
