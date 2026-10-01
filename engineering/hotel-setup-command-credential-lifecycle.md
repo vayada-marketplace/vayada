@@ -30,6 +30,17 @@ Its reader/assignment credential must name `vayada_next_hotel_setup_reader`, use
 TLS `verify-full`, and target the same host/database as the password-free command
 endpoint. Startup rejects role membership, ownership, inheritance and elevated
 role attributes. This role-posture check is **not** an exact ACL preflight.
+The launcher also checks effective column privileges (including PUBLIC/inherited
+grants), matching only the columns used by canonical session/authorization,
+registry and Feature Hub readers. The only permitted write is column-limited
+rejected-permission-override audit INSERT, with audit-key/product SELECT for the
+canonical conflict clause. Entitlement, registry, currency and business writes
+are forbidden. CREATE, destructive table privileges (including PG17 MAINTAIN),
+sequence access and application SECURITY DEFINER execution are rejected.
+This effective ACL check does not prove the audit row boundary: release still
+requires reviewed restrictive RLS for the reader's audit action/shape, denial of
+other actions/private payloads/business side effects, and real canonical
+read/rejected-override tests. Audit grants alone are not permission to release.
 Before release, platform must review/prove its exact canonical authorization,
 entitlement and assignment reads. Canonical authorization also appends rejected
 permission-override audit events; preserve that narrow rejection-audit contract

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
     },
     load: vi.fn(),
     preflight: vi.fn(),
+    privileges: vi.fn(),
     runtimeClose: vi.fn(),
     pool: vi.fn(),
     get: vi.fn(),
@@ -57,6 +58,9 @@ vi.mock("./hotelSetupCommandServiceConfig.js", () => ({
   loadHotelSetupCommandServiceConfig: mocks.load,
   assertHotelSetupServiceReader: mocks.preflight,
 }));
+vi.mock("./hotelSetupReaderPrivileges.js", () => ({
+  assertHotelSetupReaderPrivileges: mocks.privileges,
+}));
 vi.mock("./platform/postgresRuntime.js", () => ({
   installPostgresPoolRuntime: () => ({ close: mocks.runtimeClose }),
 }));
@@ -89,6 +93,7 @@ describe("private hotel setup executable", () => {
     vi.clearAllMocks();
     mocks.load.mockReturnValue(mocks.config);
     mocks.preflight.mockResolvedValue(undefined);
+    mocks.privileges.mockResolvedValue(undefined);
     mocks.app.listen.mockResolvedValue(undefined);
     mocks.app.close.mockResolvedValue(undefined);
     mocks.runtimeClose.mockResolvedValue(undefined);
@@ -145,5 +150,15 @@ describe("private hotel setup executable", () => {
     );
     expect(mocks.app.close).toHaveBeenCalledOnce();
     expect(mocks.runtimeClose).toHaveBeenCalled();
+  });
+
+  it("rejects broad reader privileges before building or listening", async () => {
+    mocks.privileges.mockRejectedValueOnce(new Error("reader ACL mismatch"));
+    await expect(import("./hotelSetupCommandServer.js")).rejects.toThrow(
+      "Hotel setup command service startup failed",
+    );
+    expect(mocks.runtimeClose).toHaveBeenCalledOnce();
+    expect(mocks.build).not.toHaveBeenCalled();
+    expect(mocks.app.listen).not.toHaveBeenCalled();
   });
 });

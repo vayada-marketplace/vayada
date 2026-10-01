@@ -13,6 +13,7 @@ import {
 } from "./hotelSetupCommandServiceConfig.js";
 import { createHotelSetupCurrencyCommands } from "./hotelSetupCurrencyCommands.js";
 import { createHotelSetupFeatureHubCommands } from "./hotelSetupFeatureHubCommands.js";
+import { assertHotelSetupReaderPrivileges } from "./hotelSetupReaderPrivileges.js";
 import { installPostgresPoolRuntime } from "./platform/postgresRuntime.js";
 import { createSecretsManagerProviderCredentialVault } from "./platform/providerCredentialVault.js";
 import { registerShutdownSignals } from "./platform/shutdown.js";
@@ -23,6 +24,7 @@ const runtime = installPostgresPoolRuntime(pg);
 try {
   const reader = new pg.Pool({ connectionString: config.readerDatabaseUrl });
   await assertHotelSetupServiceReader(reader);
+  await assertHotelSetupReaderPrivileges(reader);
   const repositoryConfig = { connectionString: config.readerDatabaseUrl };
   const vault = createSecretsManagerProviderCredentialVault();
   const credentials = {
