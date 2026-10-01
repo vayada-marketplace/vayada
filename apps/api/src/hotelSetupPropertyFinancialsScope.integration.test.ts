@@ -907,7 +907,135 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         ).rows,
       ).toEqual([]);
       await admin.query(`GRANT INSERT ON platform.product_audit_events TO ${roles[1]}`);
-      const firstSaved = await readiness.upsertPropertyPricingCurrency(firstSave);
+      const beforeCompletion = (statements: readonly string[], omit?: "audit" | "outbox") =>
+        createPgPmsPricingCommandRepository({
+          ...repositoryConfig,
+          hotelSetupCurrencyOperation: "currency_ready",
+          pool: {
+            async end() {},
+            async connect() {
+              const client = await scopePool(logins[1]!).connect();
+              return {
+                ...client,
+                async query<T>(sql: string, values?: readonly unknown[]) {
+                  if (
+                    (omit === "audit" &&
+                      sql.includes("INSERT INTO platform.product_audit_events")) ||
+                    (omit === "outbox" &&
+                      sql.includes("INSERT INTO platform.outbox_events") &&
+                      values?.[2] === "finance.pricing-source")
+                  )
+                    return { rows: [] as T[], rowCount: 1 };
+                  if (sql === "COMMIT")
+                    for (const statement of statements)
+                      await logins[1]!.query(
+                        statement,
+                        statement.includes("$1") ? [properties[1]] : [],
+                      );
+                  return client.query<T>(sql, values);
+                },
+              };
+            },
+          },
+        });
+      for (const [statements, message] of [
+        [
+          [
+            "SET CONSTRAINTS ALL IMMEDIATE",
+            "UPDATE pms.property_pricing_settings SET currency='USD',pricing_currency_revision=2 WHERE property_id=$1",
+          ],
+          "completion evidence is sealed",
+        ],
+        [
+          [
+            "SET CONSTRAINTS ALL IMMEDIATE",
+            "UPDATE platform.idempotency_keys SET status='failed' WHERE property_id=$1",
+          ],
+          "completion evidence is sealed",
+        ],
+        [
+          [
+            "UPDATE pms.property_pricing_settings SET currency='USD',pricing_currency_revision=2 WHERE property_id=$1",
+          ],
+          "first currency invalid",
+        ],
+        [
+          ["UPDATE platform.idempotency_keys SET status='failed' WHERE property_id=$1"],
+          "query returned no rows",
+        ],
+      ] as const) {
+        await expect(
+          beforeCompletion(statements).upsertPropertyPricingCurrency(firstSave),
+        ).rejects.toThrow(message);
+        for (const relation of ["pms.property_pricing_settings", "finance.expense_categories"])
+          expect(
+            (
+              await admin.query(`SELECT property_id FROM ${relation} WHERE property_id=$1`, [
+                properties[1],
+              ])
+            ).rows,
+          ).toEqual([]);
+        expect(
+          (
+            await admin.query(
+              "SELECT status,metadata->>'newHotelFinancialsDefault' AS marker FROM identity.product_entitlements WHERE resource_id=$1",
+              [properties[1]],
+            )
+          ).rows,
+        ).toEqual([{ status: "suspended", marker: "pending" }]);
+      }
+      for (const omit of ["audit", "outbox"] as const)
+        await expect(
+          beforeCompletion([], omit).upsertPropertyPricingCurrency(firstSave),
+        ).rejects.toMatchObject({ code: "P0002" });
+      await expect(
+        logins[1]!.query("SELECT platform.complete_hotel_setup_first_currency()"),
+      ).rejects.toMatchObject({ code: "42501" });
+      await admin.query(
+        "INSERT INTO identity.product_entitlements (organization_id,product,entitlement_key,status) VALUES ($1,'pms','module:financials','suspended')",
+        [organizationId],
+      );
+      await expect(readiness.upsertPropertyPricingCurrency(firstSave)).rejects.toThrow(
+        "prerequisites incomplete",
+      );
+      await admin.query(
+        "DELETE FROM identity.product_entitlements WHERE organization_id=$1 AND entitlement_key='module:financials' AND resource_id IS NULL",
+        [organizationId],
+      );
+      await admin.query(
+        "UPDATE identity.product_entitlements SET expires_at=now()-interval '1 hour' WHERE resource_id=$1",
+        [properties[1]],
+      );
+      await expect(readiness.upsertPropertyPricingCurrency(firstSave)).rejects.toThrow(
+        "prerequisites incomplete",
+      );
+      await admin.query(
+        "UPDATE identity.product_entitlements SET expires_at=NULL WHERE resource_id=$1",
+        [properties[1]],
+      );
+      for (const currency of ["BTC", "EUR"])
+        await expect(
+          withHotelSetupCommandScope(
+            scopePool(logins[1]!),
+            {
+              propertyId: properties[1]!,
+              organizationId,
+              operation: "currency_ready",
+            },
+            async (client) => {
+              await client.query(
+                "INSERT INTO pms.property_pricing_settings (property_id,currency) VALUES ($1,$2)",
+                [properties[1], currency],
+              );
+            },
+          ),
+        ).rejects.toThrow(
+          currency === "BTC" ? "first currency invalid" : "prerequisites incomplete",
+        );
+      const firstSaved = await beforeCompletion([
+        'UPDATE platform.idempotency_keys SET idempotency_metadata=idempotency_metadata||\'{"hotelSetupTransaction":"forged"}\'::jsonb WHERE property_id=$1',
+        "SET CONSTRAINTS ALL IMMEDIATE",
+      ]).upsertPropertyPricingCurrency(firstSave);
       expect(firstSaved).toMatchObject({ ok: true, response: { outcome: "created" } });
       expect(await readiness.upsertPropertyPricingCurrency(firstSave)).toEqual(firstSaved);
       expect(
@@ -925,7 +1053,57 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
             [properties[1]],
           )
         ).rows,
-      ).toEqual([{ status: "suspended", marker: "pending" }]);
+      ).toEqual([{ status: "active", marker: "ready" }]);
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS count FROM platform.product_audit_events WHERE property_id=$1 AND action='pms.financials.default_activated'",
+            [properties[1]],
+          )
+        ).rows,
+      ).toEqual([{ count: 1 }]);
+      expect(
+        (
+          await admin.query(
+            `SELECT count(*)::int AS count FROM platform.product_audit_events activation
+        JOIN platform.product_audit_events source ON source.id::text=activation.audit_metadata->>'sourceAuditId'
+        JOIN platform.idempotency_keys k ON k.id=activation.idempotency_key_id
+        JOIN platform.domain_events e ON e.id=activation.domain_event_id
+        JOIN platform.outbox_events o ON o.domain_event_id=e.id
+        JOIN identity.product_entitlements entitlement ON entitlement.resource_id=activation.property_id::text
+        WHERE activation.property_id=$1 AND activation.action='pms.financials.default_activated'
+          AND activation.actor_user_id=source.actor_user_id AND source.idempotency_key_id=k.id
+          AND activation.correlation_id=source.correlation_id
+          AND entitlement.metadata->>'newHotelFinancialsActivationTransaction'=k.idempotency_metadata->>'hotelSetupTransaction'
+          AND source.audit_metadata->>'hotelSetupTransaction'=k.idempotency_metadata->>'hotelSetupTransaction'
+          AND e.event_metadata->>'hotelSetupTransaction'=k.idempotency_metadata->>'hotelSetupTransaction'
+          AND o.outbox_metadata->>'hotelSetupTransaction'=k.idempotency_metadata->>'hotelSetupTransaction'`,
+            [properties[1]],
+          )
+        ).rows,
+      ).toEqual([{ count: 2 }]);
+      // Owner off is preserved by replay and subsequent currency updates.
+      await admin.query(
+        "UPDATE identity.product_entitlements SET status='suspended' WHERE resource_id=$1",
+        [properties[1]],
+      );
+      expect(await readiness.upsertPropertyPricingCurrency(firstSave)).toEqual(firstSaved);
+      await logins[1]!.query(
+        "UPDATE pms.property_pricing_settings SET currency='USD',pricing_currency_revision=2 WHERE property_id=$1",
+        [properties[1]],
+      );
+      expect(
+        (
+          await admin.query(
+            "SELECT status FROM identity.product_entitlements WHERE resource_id=$1",
+            [properties[1]],
+          )
+        ).rows,
+      ).toEqual([{ status: "suspended" }]);
+      await admin.query(
+        "UPDATE identity.product_entitlements SET metadata=metadata-'newHotelFinancialsActivationTransaction'||'{\"newHotelFinancialsDefault\":\"pending\"}'::jsonb WHERE resource_id=$1",
+        [properties[1]],
+      );
       await admin.query(
         "UPDATE platform.hotel_setup_property_scopes SET operation_class='currency' WHERE database_login=$1",
         [roles[1]],
