@@ -143,4 +143,29 @@ export async function assertHotelSetupReaderPrivileges(client: Pick<pg.Pool, "qu
   );
   if (forbidden.rows.length !== 1 || forbidden.rows[0]?.unsafe !== false)
     throw new Error("Hotel setup reader unsafe capabilities");
+
+  // PG16/17 render the reviewed full policy set and audit triggers identically.
+  // Pin trigger bodies too: INSERT triggers execute even without function EXECUTE grants.
+  const audit = await client.query<{ safe: boolean }>(`SELECT (
+    c.relrowsecurity AND (SELECT pg_catalog.md5(pg_catalog.string_agg(
+        p.polname || p.polpermissive::text || p.polcmd::text
+        || COALESCE((SELECT pg_catalog.string_agg(
+          CASE WHEN role=0 THEN 'PUBLIC' ELSE role::regrole::text END,',' ORDER BY role::regrole::text)
+          FROM pg_catalog.unnest(p.polroles) roles(role)),'')
+        || COALESCE(pg_catalog.pg_get_expr(p.polqual,p.polrelid),'')
+        || COALESCE(pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid),''),'' ORDER BY p.polname))
+        ='044432dd1129d5e301fa3552d5666a38'
+      FROM pg_catalog.pg_policy p WHERE p.polrelid=c.oid)
+    AND pg_catalog.md5(pg_catalog.pg_get_functiondef(
+      'platform.hotel_setup_reader_audit_allowed(platform.product_audit_events)'::regprocedure))
+      ='888e163929843b9c7b56919c193c13c5'
+    AND pg_catalog.has_function_privilege(current_user,
+      'platform.hotel_setup_reader_audit_allowed(platform.product_audit_events)','EXECUTE')
+    AND (SELECT pg_catalog.md5(pg_catalog.string_agg(pg_catalog.pg_get_triggerdef(t.oid)
+      || pg_catalog.pg_get_functiondef(t.tgfoid) || t.tgenabled::text,'' ORDER BY t.tgname))
+      FROM pg_catalog.pg_trigger t WHERE t.tgrelid=c.oid AND NOT t.tgisinternal)
+      ='1ae1e3d61b153413f5b4f12f994318ea'
+  ) AS safe FROM pg_catalog.pg_class c WHERE c.oid='platform.product_audit_events'::regclass`);
+  if (audit.rows.length !== 1 || audit.rows[0]?.safe !== true)
+    throw new Error("Hotel setup reader audit boundary mismatch");
 }
