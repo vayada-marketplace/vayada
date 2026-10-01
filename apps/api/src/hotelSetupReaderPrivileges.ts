@@ -89,15 +89,31 @@ export const HOTEL_SETUP_READER_AUDIT_COLUMNS = [
 const schemas = `n.nspname NOT IN ('pg_catalog','information_schema')
   AND n.nspname NOT LIKE 'pg_toast%' AND n.nspname NOT LIKE 'pg_temp_%'`;
 
-/** Read-only catalog check. Audit row-shape/RLS, IAM and native command ACLs are separate gates. */
-export async function assertHotelSetupReaderPrivileges(client: Pick<pg.Pool, "query">) {
+export type HotelSetupColumnPrivileges = Record<
+  string,
+  Partial<Record<"SELECT" | "INSERT" | "UPDATE", readonly string[]>>
+>;
+
+/** Effective catalog ACLs, including inherited/PUBLIC privileges; no SQL writes. */
+export async function assertHotelSetupColumnPrivileges(
+  client: Pick<pg.Pool, "query">,
+  inventory: HotelSetupColumnPrivileges,
+  allowedDefiners: readonly string[] = [],
+) {
   const version = await client.query<{ version: number }>(
     "SELECT pg_catalog.current_setting('server_version_num')::integer AS version",
   );
   const maintain = (version.rows[0]?.version ?? 0) >= 170000 ? ",MAINTAIN" : "";
-  const columns = await client.query<{ relation: string; column: string; privilege: string }>(`
+  const columns = await client.query<{
+    relation: string;
+    column: string;
+    privilege: string;
+    grantable: boolean;
+  }>(`
     SELECT n.nspname || '.' || c.relname AS relation, a.attname AS "column",
-      privileges.privilege FROM pg_catalog.pg_class c
+      privileges.privilege,
+      pg_catalog.has_column_privilege(current_user,c.oid,a.attnum,
+        privileges.privilege || ' WITH GRANT OPTION') AS grantable FROM pg_catalog.pg_class c
     JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
     JOIN pg_catalog.pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped
     CROSS JOIN (VALUES ('SELECT'),('INSERT'),('UPDATE'),('REFERENCES')) privileges(privilege)
@@ -105,28 +121,32 @@ export async function assertHotelSetupReaderPrivileges(client: Pick<pg.Pool, "qu
       AND pg_catalog.has_schema_privilege(current_user,n.oid,'USAGE')
       AND pg_catalog.has_column_privilege(current_user,c.oid,a.attnum,privileges.privilege)`);
   const expected = new Set(
-    Object.entries(HOTEL_SETUP_READER_READ_COLUMNS).flatMap(([relation, names]) =>
-      names.map((column) => `${relation}:${column}:SELECT`),
+    Object.entries(inventory).flatMap(([relation, privileges]) =>
+      Object.entries(privileges).flatMap(([privilege, names]) =>
+        names.map((column) => `${relation}:${column}:${privilege}`),
+      ),
     ),
   );
-  for (const column of HOTEL_SETUP_READER_AUDIT_COLUMNS)
-    expected.add(`platform.product_audit_events:${column}:INSERT`);
   const actual = new Set(
     columns.rows.map((row) => `${row.relation}:${row.column}:${row.privilege}`),
   );
-  if (expected.size !== actual.size || [...expected].some((key) => !actual.has(key)))
-    throw new Error("Hotel setup reader column privileges mismatch");
+  if (
+    columns.rows.some((row) => row.grantable) ||
+    expected.size !== actual.size ||
+    [...expected].some((key) => !actual.has(key))
+  )
+    throw new Error("Hotel setup credential column privileges mismatch");
 
   const forbidden = await client.query<{ unsafe: boolean }>(
     `SELECT (
     EXISTS (SELECT 1 FROM pg_catalog.pg_namespace n WHERE ${schemas}
-      AND pg_catalog.has_schema_privilege(current_user,n.oid,'CREATE'))
+      AND pg_catalog.has_schema_privilege(current_user,n.oid,'CREATE,USAGE WITH GRANT OPTION'))
     OR pg_catalog.has_database_privilege(current_user,pg_catalog.current_database(),'CREATE')
     OR EXISTS (SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
       WHERE ${schemas} AND c.relkind IN ('r','p','v','m','f')
       AND pg_catalog.has_schema_privilege(current_user,n.oid,'USAGE')
       AND (pg_catalog.has_table_privilege(current_user,c.oid,'DELETE,TRUNCATE,TRIGGER${maintain}')
-        OR (n.nspname || '.' || c.relname <> 'platform.product_audit_events'
+        OR (NOT (n.nspname || '.' || c.relname = ANY($2::text[]))
           AND pg_catalog.has_table_privilege(current_user,c.oid,'INSERT'))
         OR (NOT (n.nspname || '.' || c.relname = ANY($1::text[]))
           AND pg_catalog.has_table_privilege(current_user,c.oid,'SELECT'))))
@@ -135,15 +155,36 @@ export async function assertHotelSetupReaderPrivileges(client: Pick<pg.Pool, "qu
       AND pg_catalog.has_schema_privilege(current_user,n.oid,'USAGE')
       AND pg_catalog.has_sequence_privilege(current_user,c.oid,'USAGE,SELECT,UPDATE'))
     OR EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
-      WHERE ${schemas} AND p.prosecdef
+      WHERE ${schemas}
       AND pg_catalog.has_schema_privilege(current_user,n.oid,'USAGE')
-      AND pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE'))
+      AND (pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE WITH GRANT OPTION')
+        OR (p.prosecdef AND pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE')
+          AND NOT (p.oid=ANY($3::regprocedure[])))))
   ) AS unsafe`,
-    [Object.keys(HOTEL_SETUP_READER_READ_COLUMNS)],
+    [
+      Object.keys(inventory).filter((name) => inventory[name]!.SELECT),
+      Object.keys(inventory).filter((name) => inventory[name]!.INSERT),
+      allowedDefiners,
+    ],
   );
   if (forbidden.rows.length !== 1 || forbidden.rows[0]?.unsafe !== false)
-    throw new Error("Hotel setup reader unsafe capabilities");
+    throw new Error("Hotel setup credential unsafe capabilities");
+}
 
+/** Read-only catalog check. Audit row-shape/RLS, IAM and native command ACLs are separate gates. */
+export async function assertHotelSetupReaderPrivileges(client: Pick<pg.Pool, "query">) {
+  const inventory: HotelSetupColumnPrivileges = Object.fromEntries(
+    Object.entries(HOTEL_SETUP_READER_READ_COLUMNS).map(([relation, SELECT]) => [
+      relation,
+      { SELECT },
+    ]),
+  );
+  inventory["platform.product_audit_events"]!.INSERT = HOTEL_SETUP_READER_AUDIT_COLUMNS;
+  await assertHotelSetupColumnPrivileges(client, inventory);
+  await assertHotelSetupAuditBoundary(client);
+}
+
+export async function assertHotelSetupAuditBoundary(client: Pick<pg.Pool, "query">) {
   // PG16/17 render the reviewed full policy set and audit triggers identically.
   // Pin trigger bodies too: INSERT triggers execute even without function EXECUTE grants.
   const audit = await client.query<{ safe: boolean }>(`SELECT (
