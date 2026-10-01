@@ -4,6 +4,7 @@ import {
   type PermissionKey,
   type ProductEntitlement,
 } from "@vayada/backend-auth";
+import { AuthorizationError } from "@vayada/backend-authorization";
 import { PMS_PRICING_CONTRACT_VERSION } from "@vayada/domain-pms";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -25,6 +26,9 @@ afterEach(async () => {
 function fixture(
   options: {
     session?: boolean;
+    setupComplete?: boolean;
+    globalFinancialsSuspended?: boolean;
+    financialsActive?: boolean;
     assignment?: "current" | "other";
     malformedOverride?: boolean;
     membership?: "active" | "inactive";
@@ -91,6 +95,16 @@ function fixture(
             resource: { product: "pms", resourceType: "pms_property", resourceId: propertyId },
           },
         ];
+  if (options.globalFinancialsSuspended)
+    entitlements.push({ product: "pms", key: "module:financials", status: "suspended" });
+  const feature = vi.fn(async (_context, _propertyId, isActive: boolean) => ({
+    moduleId: "financials",
+    isActive,
+    activatedAt: null,
+    deactivatedAt: null,
+    updatedAt: "2026-10-01T00:00:00.000Z",
+  }));
+  const setupComplete = vi.fn().mockResolvedValue(options.setupComplete ?? true);
   const save = vi.fn().mockResolvedValue({
     ok: true,
     response: {
@@ -136,10 +150,27 @@ function fixture(
       },
     },
     currencyCommands: { upsertPropertyPricingCurrency: save },
+    featureHub: {
+      reads: {
+        list: vi.fn().mockResolvedValue([
+          {
+            moduleId: "financials",
+            isActive: options.financialsActive ?? false,
+            activatedAt: null,
+            deactivatedAt: null,
+            updatedAt: "2026-10-01T00:00:00.000Z",
+          },
+        ]),
+      },
+      commands: { updateFinancials: feature },
+      setupComplete,
+    },
   });
   apps.push(app);
   return {
     app,
+    feature,
+    setupComplete,
     save,
     verifier,
     headers: {
@@ -262,4 +293,188 @@ describe("private hotel setup currency service", () => {
       ).statusCode,
     ).toBe(404);
   });
+});
+
+describe("private hotel setup Feature Hub", () => {
+  const featurePath = `/properties/${propertyId}/module-activations/financials`;
+  const permissions: PermissionKey[] = [
+    "pms.operations.read",
+    "pms.finance.read",
+    "pms.finance.manage",
+  ];
+  it("keeps completed setup visible after off and forwards the original verified actor for on/off", async () => {
+    const f = fixture({ permissions });
+    const read = await f.app.inject({
+      method: "GET",
+      url: `/properties/${propertyId}/module-activations`,
+      headers: f.headers,
+    });
+    expect(read.statusCode).toBe(200);
+    expect(read.json()).toMatchObject({
+      canManage: true,
+      supportedModules: ["financials"],
+      activeModules: [],
+    });
+    for (const isActive of [true, false, false]) {
+      const response = await f.app.inject({
+        method: "PATCH",
+        url: featurePath,
+        headers: f.headers,
+        payload: { isActive, actorUserId: otherPropertyId, organizationId: otherPropertyId },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ isActive });
+      expect(f.feature.mock.lastCall).toEqual([
+        expect.objectContaining({
+          actor: expect.objectContaining({ internalUserId: userId }),
+          selectedOrganization: expect.objectContaining({ organizationId }),
+        }),
+        propertyId,
+        isActive,
+      ]);
+    }
+    expect(f.save).not.toHaveBeenCalled();
+  });
+  it.each([
+    { session: false },
+    { assignment: "other" as const },
+    { malformedOverride: true },
+    { membership: "inactive" as const },
+    { permissions: [] },
+    { link: "missing" as const },
+    { link: "operator" as const },
+    { link: "other_property" as const },
+  ])("denies untrusted/current unauthorized access %j", async (options) => {
+    const f = fixture({ permissions, ...options });
+    const response = await f.app.inject({
+      method: "PATCH",
+      url: featurePath,
+      headers: f.headers,
+      payload: { isActive: false },
+    });
+    expect(response.statusCode).toBe(options.membership === "inactive" ? 401 : 403);
+    expect(f.feature).not.toHaveBeenCalled();
+  });
+  it.each(["missing", "suspended"] as const)(
+    "allows off but denies on when base access is %s",
+    async (entitlement) => {
+      const f = fixture({ permissions, entitlement });
+      expect(
+        (
+          await f.app.inject({
+            method: "GET",
+            url: `/properties/${propertyId}/module-activations`,
+            headers: f.headers,
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(
+        (
+          await f.app.inject({
+            method: "PATCH",
+            url: featurePath,
+            headers: f.headers,
+            payload: { isActive: false },
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(
+        (
+          await f.app.inject({
+            method: "PATCH",
+            url: featurePath,
+            headers: f.headers,
+            payload: { isActive: true },
+          })
+        ).statusCode,
+      ).toBe(403);
+      expect(f.feature).toHaveBeenCalledOnce();
+    },
+  );
+  it("does not use setup readiness to bypass a global suspension", async () => {
+    const f = fixture({ permissions, globalFinancialsSuspended: true, financialsActive: true });
+    const response = await f.app.inject({
+      method: "GET",
+      url: `/properties/${propertyId}/module-activations`,
+      headers: f.headers,
+    });
+    expect(response.json()).toMatchObject({
+      canManage: true,
+      activeModules: [],
+      activations: [{ moduleId: "financials", isActive: true }],
+    });
+    expect(
+      (
+        await f.app.inject({
+          method: "PATCH",
+          url: featurePath,
+          headers: f.headers,
+          payload: { isActive: false },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await f.app.inject({
+          method: "PATCH",
+          url: featurePath,
+          headers: f.headers,
+          payload: { isActive: true },
+        })
+      ).statusCode,
+    ).toBe(409);
+    expect(f.feature).toHaveBeenCalledOnce();
+  });
+  it("does not automatically enroll an existing hotel without completed new-hotel setup", async () => {
+    const f = fixture({ permissions, setupComplete: false });
+    expect(
+      (
+        await f.app.inject({
+          method: "PATCH",
+          url: featurePath,
+          headers: f.headers,
+          payload: { isActive: true },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(f.feature).not.toHaveBeenCalled();
+  });
+  it("rejects missing internal auth and invalid sessions before selecting native credentials", async () => {
+    const f = fixture({ permissions });
+    for (const headers of [
+      { authorization: "Bearer valid" },
+      { ...f.headers, authorization: "Bearer invalid" },
+    ]) {
+      expect(
+        (
+          await f.app.inject({
+            method: "PATCH",
+            url: featurePath,
+            headers,
+            payload: { isActive: true },
+          })
+        ).statusCode,
+      ).toBe(401);
+    }
+    expect(f.feature).not.toHaveBeenCalled();
+  });
+});
+
+it("sanitizes private Feature Hub storage errors and preserves current authorization denial", async () => {
+  const f = fixture({ permissions: ["pms.finance.manage"] });
+  const url = `/properties/${propertyId}/module-activations/financials`;
+  f.feature.mockRejectedValueOnce(new AuthorizationError());
+  expect(
+    (await f.app.inject({ method: "PATCH", url, headers: f.headers, payload: { isActive: false } }))
+      .statusCode,
+  ).toBe(403);
+  f.feature.mockRejectedValueOnce(new Error("database credential detail"));
+  const response = await f.app.inject({
+    method: "PATCH",
+    url,
+    headers: f.headers,
+    payload: { isActive: false },
+  });
+  expect(response.statusCode).toBe(503);
+  expect(response.json()).toEqual({ code: "hotel_setup_unavailable" });
 });
