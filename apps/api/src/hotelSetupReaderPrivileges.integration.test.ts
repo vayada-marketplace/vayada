@@ -35,6 +35,7 @@ describe.runIf(connectionString)("private reader effective ACL on migrated Postg
       await client.query("RESET SESSION AUTHORIZATION");
 
       const changes = [
+        `GRANT SELECT (id) ON identity.users TO ${reader} WITH GRANT OPTION`,
         `GRANT UPDATE (status) ON identity.product_entitlements TO ${reader}`,
         `GRANT INSERT ON platform.product_audit_events TO ${reader}`,
         `GRANT SELECT (private_payload) ON platform.product_audit_events TO ${reader}`,
@@ -56,9 +57,7 @@ describe.runIf(connectionString)("private reader effective ACL on migrated Postg
         await client.query("SAVEPOINT drift");
         await client.query(sql);
         await client.query(`SET SESSION AUTHORIZATION ${reader}`);
-        await expect(assertHotelSetupReaderPrivileges(client), sql).rejects.toThrow(
-          /Hotel setup reader/,
-        );
+        await expect(assertHotelSetupReaderPrivileges(client), sql).rejects.toThrow(/Hotel setup/);
         await client.query("RESET SESSION AUTHORIZATION");
         await client.query("ROLLBACK TO SAVEPOINT drift");
       }

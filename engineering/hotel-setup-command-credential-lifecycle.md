@@ -307,3 +307,21 @@ grant or secret and writes no hotel/audit data. Native command ACLs, real audit
 row denial tests, function ownership, lifecycle/transfer, IAM and authenticated
 private-service readiness remain separate gates. Do not add a digest to the
 platform image inventory until the composed image and rollback are reviewed.
+
+## Native Feature Hub column contract
+
+`HOTEL_SETUP_FEATURE_HUB_PRIVILEGES` is the fixed column inventory for the native
+`feature_hub` purpose. The real off/on handler is tested with these grants on
+PostgreSQL 16 and 17. UPDATE of one key column permits authorization row locks;
+reviewed RLS denies even no-op updates. Only the narrow Financials audit INSERT
+can request the trigger's protected entitlement transition. No pricing/category,
+private audit payload, setup registry, or direct entitlement status write is granted.
+
+`assertHotelSetupFeatureHubPrivileges` runs inside a successfully begun native
+Feature Hub scope and checks effective column access, inherited/PUBLIC grants,
+unsafe capabilities, reviewed function bodies/posture, full policy sets and audit
+triggers. It is a catalog check, not actor authorization or a provisioner. This
+slice exports the contract and proves the handler; it does not wire a new release
+CLI or run a check on every switch. Verified connection/endpoint/database isolation,
+exact owner identities/posture, credential lifecycle and live deployment remain
+separate release gates.

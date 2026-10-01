@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
+import {
+  assertHotelSetupFeatureHubPrivileges,
+  HOTEL_SETUP_FEATURE_HUB_PRIVILEGES,
+} from "./hotelSetupFeatureHubPrivileges.js";
 import { createPgHotelSetupFeatureHubRepository } from "./hotelSetupFeatureHubRepository.js";
 
 import { parseUpsertPropertyPricingCurrencyCommand } from "@vayada/domain-pms";
@@ -49,6 +53,23 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
     const roleKeys = [`lock_owner_${suffix}`, `lock_other_${suffix}`];
     const roleDefinition = randomUUID();
     const properties = [randomUUID(), randomUUID()];
+    const fixtureRelations = [
+      "hotel_catalog.properties",
+      "identity.organization_resource_links",
+      "identity.product_entitlements",
+      "identity.organizations",
+      "identity.users",
+      "identity.organization_memberships",
+      "identity.role_permission_grants",
+      "identity.organization_roles",
+      "identity.membership_property_assignments",
+      "pms.property_pricing_settings",
+      "finance.expense_categories",
+      "platform.idempotency_keys",
+      "platform.domain_events",
+      "platform.outbox_events",
+      "platform.product_audit_events",
+    ];
     const logins: pg.Client[] = [];
     const scopePool = (login: pg.Client) => ({
       async end() {},
@@ -85,23 +106,7 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           `GRANT USAGE ON SCHEMA platform, identity, hotel_catalog, pms, finance TO ${role}`,
         );
         // Deliberately broad ACLs prove RLS, rather than missing grants, deny cross-hotel writes.
-        for (const relation of [
-          "hotel_catalog.properties",
-          "identity.organization_resource_links",
-          "identity.product_entitlements",
-          "identity.organizations",
-          "identity.users",
-          "identity.organization_memberships",
-          "identity.role_permission_grants",
-          "identity.organization_roles",
-          "identity.membership_property_assignments",
-          "pms.property_pricing_settings",
-          "finance.expense_categories",
-          "platform.idempotency_keys",
-          "platform.domain_events",
-          "platform.outbox_events",
-          "platform.product_audit_events",
-        ]) {
+        for (const relation of fixtureRelations) {
           await admin.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${relation} TO ${role}`);
         }
         await admin.query(`GRANT SELECT ON pms.room_types, pms.rate_plans TO ${role}`);
@@ -1093,6 +1098,90 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         "UPDATE platform.hotel_setup_property_scopes SET operation_class='feature_hub' WHERE database_login=$1",
         [roles[1]],
       );
+      // The real switch must work with only its reviewed column grants.
+      const nativeRole = roles[1]!;
+      await admin.query(
+        `REVOKE ALL ON ${fixtureRelations.join(",")},pms.room_types,pms.rate_plans FROM ${nativeRole}`,
+      );
+      await admin.query(`REVOKE USAGE ON SCHEMA hotel_catalog,pms,finance FROM ${nativeRole}`);
+      const nativeGrants = Object.entries(HOTEL_SETUP_FEATURE_HUB_PRIVILEGES).flatMap(
+        ([relation, privileges]) =>
+          Object.entries(privileges).map(([privilege, columns]) => ({
+            relation,
+            privilege,
+            columns: columns.join(","),
+          })),
+      );
+      for (const grant of nativeGrants)
+        await admin.query(
+          `GRANT ${grant.privilege} (${grant.columns}) ON ${grant.relation} TO ${nativeRole}`,
+        );
+      const checkNative = () =>
+        withHotelSetupCommandScope(
+          scopePool(logins[1]!),
+          { organizationId, propertyId: properties[1]!, operation: "feature_hub" },
+          () => assertHotelSetupFeatureHubPrivileges(logins[1]!),
+        );
+      await checkNative();
+      const linkFunction = (
+        await admin.query(
+          "SELECT pg_catalog.pg_get_functiondef('platform.hotel_setup_property_link_matches(uuid,text)'::regprocedure) AS definition",
+        )
+      ).rows[0].definition as string;
+      for (const [drift, restore] of [
+        [
+          "REVOKE EXECUTE ON FUNCTION platform.hotel_setup_property_financials_read_allowed(uuid,text,text,text,text,text) FROM vayada_next_hotel_setup_property_scope",
+          "GRANT EXECUTE ON FUNCTION platform.hotel_setup_property_financials_read_allowed(uuid,text,text,text,text,text) TO vayada_next_hotel_setup_property_scope",
+        ],
+        [
+          `GRANT SELECT (id) ON identity.users TO ${nativeRole} WITH GRANT OPTION`,
+          `REVOKE GRANT OPTION FOR SELECT (id) ON identity.users FROM ${nativeRole}`,
+        ],
+        [
+          `GRANT EXECUTE ON FUNCTION platform.hotel_setup_property_allowed(uuid,uuid) TO ${nativeRole} WITH GRANT OPTION`,
+          `REVOKE EXECUTE ON FUNCTION platform.hotel_setup_property_allowed(uuid,uuid) FROM ${nativeRole}`,
+        ],
+        [
+          linkFunction.replace("RETURN property_id = resource_id::uuid;", "RETURN TRUE;"),
+          linkFunction,
+        ],
+        [
+          "ALTER POLICY hotel_setup_property_identity_update_scope ON identity.users WITH CHECK (true)",
+          "ALTER POLICY hotel_setup_property_identity_update_scope ON identity.users WITH CHECK (false)",
+        ],
+        [
+          "GRANT SELECT (email) ON identity.users TO PUBLIC",
+          "REVOKE SELECT (email) ON identity.users FROM PUBLIC",
+        ],
+        [
+          `GRANT SELECT (email) ON identity.users TO ${nativeRole}`,
+          `REVOKE SELECT (email) ON identity.users FROM ${nativeRole}`,
+        ],
+        [
+          `GRANT UPDATE (status) ON identity.product_entitlements TO ${nativeRole}`,
+          `REVOKE UPDATE (status) ON identity.product_entitlements FROM ${nativeRole}`,
+        ],
+        [
+          "ALTER TABLE identity.users DISABLE ROW LEVEL SECURITY",
+          "ALTER TABLE identity.users ENABLE ROW LEVEL SECURITY",
+        ],
+        [
+          "ALTER FUNCTION platform.hotel_setup_property_assigned_organization() SET search_path=public",
+          "ALTER FUNCTION platform.hotel_setup_property_assigned_organization() SET search_path=pg_catalog",
+        ],
+        [
+          `GRANT SET ON PARAMETER session_replication_role TO ${nativeRole}`,
+          `REVOKE SET ON PARAMETER session_replication_role FROM ${nativeRole}`,
+        ],
+      ]) {
+        await admin.query(drift!);
+        try {
+          await expect(checkNative()).rejects.toThrow(/Hotel setup/);
+        } finally {
+          await admin.query(restore!);
+        }
+      }
+      await checkNative();
       const featureHub = createPgHotelSetupFeatureHubRepository({
         connectionString: url,
         pool: scopePool(logins[1]!),
@@ -1141,7 +1230,9 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         "INSERT INTO identity.role_permission_grants (organization_kind,role_key,permission_key) VALUES ('hotel_group',$1,'pms.finance.manage')",
         [roleKeys[0]],
       );
-      await admin.query(`REVOKE INSERT ON platform.product_audit_events FROM ${roles[1]}`);
+      await admin.query(
+        `REVOKE INSERT (${HOTEL_SETUP_FEATURE_HUB_PRIVILEGES["platform.product_audit_events"]!.INSERT!.join(",")}) ON platform.product_audit_events FROM ${roles[1]}`,
+      );
       await expect(toggle(false)).rejects.toMatchObject({ code: "42501" });
       expect(
         (
@@ -1151,7 +1242,9 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           )
         ).rows,
       ).toEqual([{ status: "active" }]);
-      await admin.query(`GRANT INSERT ON platform.product_audit_events TO ${roles[1]}`);
+      await admin.query(
+        `GRANT INSERT (${HOTEL_SETUP_FEATURE_HUB_PRIVILEGES["platform.product_audit_events"]!.INSERT!.join(",")}) ON platform.product_audit_events TO ${roles[1]}`,
+      );
       await expect(
         logins[1]!.query(
           "UPDATE identity.product_entitlements SET status='active' WHERE resource_id=$1",
@@ -1159,20 +1252,29 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         ),
       ).rejects.toMatchObject({ code: "42501" });
       await expect(
+        logins[1]!.query("UPDATE identity.product_entitlements SET id=id WHERE resource_id=$1", [
+          properties[1],
+        ]),
+      ).rejects.toMatchObject({ code: "42501" });
+      await expect(
         logins[1]!.query("SELECT platform.apply_hotel_setup_feature_hub_command()"),
       ).rejects.toMatchObject({ code: "42501" });
       await toggle(false);
       // Skipped audit insertion must not execute the command's side effect.
+      const previousAudit = (
+        await admin.query(
+          "SELECT audit_key FROM platform.product_audit_events WHERE property_id=$1 AND action='financials_module_deactivated' ORDER BY occurred_at DESC LIMIT 1",
+          [properties[1]],
+        )
+      ).rows[0].audit_key;
       const skipped = await logins[1]!.query(
         `INSERT INTO platform.product_audit_events
         (audit_key,product,action,occurred_at,tenant_scope,property_id,actor_type,actor_user_id,
           target_resource_product,target_resource_type,target_resource_id,redacted_payload,retention_class,privacy_scope)
-        SELECT audit_key,product,'financials_module_activated',clock_timestamp(),tenant_scope,property_id,actor_type,actor_user_id,
-          target_resource_product,target_resource_type,target_resource_id,
-          jsonb_build_object('moduleId','financials','isActive',true),retention_class,privacy_scope
-        FROM platform.product_audit_events WHERE property_id=$1 AND action='financials_module_deactivated'
-        ORDER BY occurred_at DESC LIMIT 1 ON CONFLICT (product,audit_key) DO NOTHING`,
-        [properties[1]],
+        VALUES ($1,'pms','financials_module_activated',clock_timestamp(),'property',$2::uuid,'user',$3,
+          'pms','pms_property',$2::uuid::text,jsonb_build_object('moduleId','financials','isActive',true),
+          'financial','internal') ON CONFLICT (product,audit_key) DO NOTHING`,
+        [previousAudit, properties[1], users[0]],
       );
       expect(skipped.rowCount).toBe(0);
       expect(
@@ -1224,6 +1326,15 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
       );
       await toggle(true);
       await toggle(false);
+      for (const grant of nativeGrants)
+        await admin.query(
+          `REVOKE ${grant.privilege} (${grant.columns}) ON ${grant.relation} FROM ${nativeRole}`,
+        );
+      await admin.query(`GRANT USAGE ON SCHEMA hotel_catalog,pms,finance TO ${nativeRole}`);
+      await admin.query(
+        `GRANT SELECT,INSERT,UPDATE,DELETE ON ${fixtureRelations.join(",")} TO ${nativeRole}`,
+      );
+      await admin.query(`GRANT SELECT ON pms.room_types,pms.rate_plans TO ${nativeRole}`);
       await admin.query(
         "UPDATE platform.hotel_setup_property_scopes SET operation_class='currency_ready' WHERE database_login=$1",
         [roles[1]],
