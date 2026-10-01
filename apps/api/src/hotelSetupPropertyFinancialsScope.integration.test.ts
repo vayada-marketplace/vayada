@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import type { RequestContext } from "@vayada/backend-auth";
+import { createPgHotelSetupFeatureHubRepository } from "./hotelSetupFeatureHubRepository.js";
 
 import { parseUpsertPropertyPricingCurrencyCommand } from "@vayada/domain-pms";
 import pg from "pg";
@@ -1082,6 +1084,150 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           )
         ).rows,
       ).toEqual([{ count: 2 }]);
+      // The audited Feature Hub capability preserves setup data and cannot undo billing.
+      await admin.query(
+        "INSERT INTO identity.role_permission_grants (organization_kind,role_key,permission_key) VALUES ('hotel_group',$1,'pms.finance.manage')",
+        [roleKeys[0]],
+      );
+      await admin.query(
+        "UPDATE platform.hotel_setup_property_scopes SET operation_class='feature_hub' WHERE database_login=$1",
+        [roles[1]],
+      );
+      const featureHub = createPgHotelSetupFeatureHubRepository({
+        connectionString: url,
+        pool: scopePool(logins[1]!),
+      });
+      const featureContext = {
+        actor: { internalUserId: users[0] },
+        selectedOrganization: { organizationId },
+        audit: { requestId: `feature-${suffix}`, receivedAt: new Date().toISOString() },
+      } as RequestContext;
+      const toggle = (enabled: boolean) =>
+        featureHub.updateFinancials(featureContext, properties[1]!, enabled);
+      const dataBefore = (
+        await admin.query(
+          "SELECT to_jsonb(p) AS currency,(SELECT jsonb_agg(to_jsonb(c) ORDER BY id) FROM finance.expense_categories c WHERE property_id=$1) AS categories FROM pms.property_pricing_settings p WHERE property_id=$1",
+          [properties[1]],
+        )
+      ).rows;
+      const auditCount = async () =>
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM platform.product_audit_events WHERE property_id=$1 AND action IN ('financials_module_activated','financials_module_deactivated')",
+            [properties[1]],
+          )
+        ).rows[0].n;
+      expect(await toggle(false)).toMatchObject({ isActive: false });
+      expect(await toggle(false)).toMatchObject({ isActive: false });
+      expect(await toggle(true)).toMatchObject({ isActive: true });
+      expect(await auditCount()).toBe(3);
+      expect(
+        (
+          await admin.query(
+            "SELECT to_jsonb(p) AS currency,(SELECT jsonb_agg(to_jsonb(c) ORDER BY id) FROM finance.expense_categories c WHERE property_id=$1) AS categories FROM pms.property_pricing_settings p WHERE property_id=$1",
+            [properties[1]],
+          )
+        ).rows,
+      ).toEqual(dataBefore);
+      await expect(
+        featureHub.updateFinancials(featureContext, properties[0]!, false),
+      ).rejects.toThrow();
+      await admin.query(
+        "DELETE FROM identity.role_permission_grants WHERE role_key=$1 AND permission_key='pms.finance.manage'",
+        [roleKeys[0]],
+      );
+      await expect(toggle(false)).rejects.toThrow();
+      await admin.query(
+        "INSERT INTO identity.role_permission_grants (organization_kind,role_key,permission_key) VALUES ('hotel_group',$1,'pms.finance.manage')",
+        [roleKeys[0]],
+      );
+      await admin.query(`REVOKE INSERT ON platform.product_audit_events FROM ${roles[1]}`);
+      await expect(toggle(false)).rejects.toMatchObject({ code: "42501" });
+      expect(
+        (
+          await admin.query(
+            "SELECT status FROM identity.product_entitlements WHERE resource_id=$1",
+            [properties[1]],
+          )
+        ).rows,
+      ).toEqual([{ status: "active" }]);
+      await admin.query(`GRANT INSERT ON platform.product_audit_events TO ${roles[1]}`);
+      await expect(
+        logins[1]!.query(
+          "UPDATE identity.product_entitlements SET status='active' WHERE resource_id=$1",
+          [properties[1]],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+      await expect(
+        logins[1]!.query("SELECT platform.apply_hotel_setup_feature_hub_command()"),
+      ).rejects.toMatchObject({ code: "42501" });
+      await toggle(false);
+      // Skipped audit insertion must not execute the command's side effect.
+      const skipped = await logins[1]!.query(
+        `INSERT INTO platform.product_audit_events
+        (audit_key,product,action,occurred_at,tenant_scope,property_id,actor_type,actor_user_id,
+          target_resource_product,target_resource_type,target_resource_id,redacted_payload,retention_class,privacy_scope)
+        SELECT audit_key,product,'financials_module_activated',clock_timestamp(),tenant_scope,property_id,actor_type,actor_user_id,
+          target_resource_product,target_resource_type,target_resource_id,
+          jsonb_build_object('moduleId','financials','isActive',true),retention_class,privacy_scope
+        FROM platform.product_audit_events WHERE property_id=$1 AND action='financials_module_deactivated'
+        ORDER BY occurred_at DESC LIMIT 1 ON CONFLICT (product,audit_key) DO NOTHING`,
+        [properties[1]],
+      );
+      expect(skipped.rowCount).toBe(0);
+      expect(
+        (
+          await admin.query(
+            "SELECT status FROM identity.product_entitlements WHERE resource_id=$1",
+            [properties[1]],
+          )
+        ).rows,
+      ).toEqual([{ status: "suspended" }]);
+      // A subsequent trusted writer invalidates the Owner-off receipt even on a no-op.
+      await admin.query(
+        "UPDATE identity.product_entitlements SET updated_at=updated_at WHERE resource_id=$1",
+        [properties[1]],
+      );
+      await toggle(false);
+      await expect(toggle(true)).rejects.toThrow("activation unavailable");
+      await admin.query(
+        "UPDATE identity.product_entitlements SET status='active' WHERE resource_id=$1",
+        [properties[1]],
+      );
+      await admin.query(
+        "INSERT INTO identity.product_entitlements (organization_id,product,entitlement_key,status,metadata) VALUES ($1,'pms','module:financials','suspended','{\"newHotelFinancialsOwnerDisabled\":true}') RETURNING metadata AS clean",
+        [organizationId],
+      );
+      expect(
+        (
+          await admin.query(
+            "SELECT metadata ? 'newHotelFinancialsOwnerDisabled' AS copied FROM identity.product_entitlements WHERE organization_id=$1 AND resource_id IS NULL AND entitlement_key='module:financials'",
+            [organizationId],
+          )
+        ).rows,
+      ).toEqual([{ copied: false }]);
+      await toggle(false);
+      await expect(toggle(true)).rejects.toThrow("activation unavailable");
+      await admin.query(
+        "DELETE FROM identity.product_entitlements WHERE organization_id=$1 AND entitlement_key='module:financials' AND resource_id IS NULL",
+        [organizationId],
+      );
+      await admin.query(
+        "UPDATE identity.product_entitlements SET status='suspended' WHERE organization_id=$1 AND entitlement_key='property-management'",
+        [organizationId],
+      );
+      await toggle(false);
+      await expect(toggle(true)).rejects.toThrow();
+      await admin.query(
+        "UPDATE identity.product_entitlements SET status='active' WHERE organization_id=$1 AND entitlement_key='property-management'",
+        [organizationId],
+      );
+      await toggle(true);
+      await toggle(false);
+      await admin.query(
+        "UPDATE platform.hotel_setup_property_scopes SET operation_class='currency_ready' WHERE database_login=$1",
+        [roles[1]],
+      );
       // Owner off is preserved by replay and subsequent currency updates.
       await admin.query(
         "UPDATE identity.product_entitlements SET status='suspended' WHERE resource_id=$1",

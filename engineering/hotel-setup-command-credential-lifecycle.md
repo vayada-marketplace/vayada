@@ -195,6 +195,29 @@ records, or attach another hotel's evidence. Preserve existing shared-table
 policies and ACL-backed callers; exact grants and the remaining currency read
 inventory still need the full handler/platform preflight.
 
+### Owner Feature Hub command
+
+The private service verifies the original Owner session. Its native `feature_hub`
+transaction repeats canonical current membership/role/override and property-access
+checks for `pms.finance.manage`. It appends only the existing Financials on/off audit
+shape. A trigger-only definer derives the actor from that audit and the organization
+from the native assignment; it accepts no standalone actor or organization argument.
+It locks the current own Financials row and all applicable base/module entitlements,
+then atomically changes that row and stamps the linked audit. Direct entitlement
+UPDATE, other modules/properties, pricing/category writes and currency evidence
+remain denied to this login.
+
+Native activation requires the completed new-hotel marker, configured supported
+currency, current base access, valid entitlement dates and no applicable suspension.
+Existing-hotel activation stays on its separate reviewed rollout path. Deactivation
+does not require active billing/base access, and never clears dates or deletes data.
+Only a transition from active to Owner-disabled records an Owner-off marker.
+Every other entitlement writer invalidates that marker; repeated off cannot turn a
+billing suspension into Owner-off. Activation of a suspended row requires that
+uninvalidated marker. Currency completion and replays cannot undo Owner-off.
+Feature Hub must keep a completed new hotel visible after off so its Owner can
+switch it back on. Route eligibility reads never replace the locked write checks.
+
 Before any release: test the real handlers and native logins on fresh and
 upgraded PostgreSQL 16 and 17, including two organizations, cross-property
 denials, replay, failed provisioning, rotation, transfer with an already
