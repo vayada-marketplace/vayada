@@ -2,10 +2,12 @@ import { timingSafeEqual } from "node:crypto";
 
 import {
   AuthorizationResolutionError,
+  UnauthorizedError,
   backendAuthPlugin,
   type BackendAuthPluginOptions,
 } from "@vayada/backend-auth";
 import {
+  AuthorizationError,
   createAuthorizationResolver,
   type EntitlementRepository,
   type PropertyAccessRepository,
@@ -14,6 +16,10 @@ import {
 import type { PmsPricingCommandPort } from "@vayada/domain-pms";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 
+import {
+  registerPmsModuleActivationRoutes,
+  type PmsModuleActivationRepository,
+} from "./routes/pmsModuleActivations.js";
 import { registerPmsPricingCurrencyCommand } from "./routes/pmsPricing.js";
 
 type HotelSetupCommandServiceOptions = {
@@ -25,9 +31,14 @@ type HotelSetupCommandServiceOptions = {
     propertyAccessRepository: PropertyAccessRepository;
   };
   currencyCommands: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">;
+  featureHub?: {
+    reads: Pick<PmsModuleActivationRepository, "list" | "close">;
+    commands: Pick<PmsModuleActivationRepository, "updateFinancials">;
+    setupComplete: NonNullable<PmsModuleActivationRepository["isFinancialsSetupComplete"]>;
+  };
 };
 
-/** Private currency endpoint. Credential selection belongs to its command adapter. */
+/** Private setup endpoints. Credential selection belongs to its command adapter. */
 export function buildHotelSetupCommandService(
   options: HotelSetupCommandServiceOptions,
 ): FastifyInstance {
@@ -64,7 +75,9 @@ export function buildHotelSetupCommandService(
     ),
   });
   app.setErrorHandler((error, _request, reply) => {
-    if (error instanceof AuthorizationResolutionError)
+    if (error instanceof UnauthorizedError)
+      return reply.code(401).send({ code: "unauthenticated" });
+    if (error instanceof AuthorizationResolutionError || error instanceof AuthorizationError)
       return reply.code(403).send({ code: "forbidden" });
     if ((error as { statusCode?: number }).statusCode === 400)
       return reply.code(400).send({ code: "invalid_request" });
@@ -74,5 +87,16 @@ export function buildHotelSetupCommandService(
     requireOwnerSession: true,
     propertyAccessRepository,
   });
+  if (options.featureHub)
+    app.register(registerPmsModuleActivationRoutes, {
+      repository: {
+        list: options.featureHub.reads.list,
+        close: options.featureHub.reads.close,
+        updateFinancials: options.featureHub.commands.updateFinancials,
+      },
+      requireOwnerSession: true,
+      financialsSetupComplete: options.featureHub.setupComplete,
+      propertyAccessRepository,
+    });
   return app;
 }
