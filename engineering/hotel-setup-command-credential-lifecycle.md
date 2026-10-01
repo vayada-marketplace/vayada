@@ -336,3 +336,19 @@ including through an unfiltered query. Native writes remain denied despite broad
 fixture grants; existing ACL-backed callers keep their prior policy behavior.
 This stages the read boundary; exact currency column grants and catalog preflight
 follow separately. No live role, secret or grant is created.
+
+## Native currency column contracts
+
+The fixed currency inventory permits pricing currency writes and their retry,
+event, outbox and audit evidence only. The separate `currency_ready` inventory
+adds seven starter-category inserts. Ordinary currency credentials cannot write
+categories. Identity key UPDATE grants supply authorization locks without edits.
+Dependency reads include the active flags required by existing pricing triggers.
+
+`assertHotelSetupCurrencyPrivileges` reuses the native helper/ACL/audit checks,
+pins each purpose’s full policy and trigger/function catalog, and rejects trigger
+or owner drift. Both purposes run the real currency handler with these column
+grants on PostgreSQL 16/17; first-save completion, replay and later currency update
+are covered. This stages contracts and catalog proof, not a new release CLI,
+per-request check or provisioner. Verified credentials, TLS/database isolation,
+exact live owners, lifecycle/transfer, private readiness and deployment remain gates.

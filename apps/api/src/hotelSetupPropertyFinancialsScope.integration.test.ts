@@ -4,6 +4,11 @@ import {
   assertHotelSetupFeatureHubPrivileges,
   HOTEL_SETUP_FEATURE_HUB_PRIVILEGES,
 } from "./hotelSetupFeatureHubPrivileges.js";
+import {
+  assertHotelSetupCurrencyPrivileges,
+  HOTEL_SETUP_CURRENCY_PRIVILEGES,
+  HOTEL_SETUP_CURRENCY_READY_PRIVILEGES,
+} from "./hotelSetupCurrencyPrivileges.js";
 import { createPgHotelSetupFeatureHubRepository } from "./hotelSetupFeatureHubRepository.js";
 
 import { parseUpsertPropertyPricingCurrencyCommand } from "@vayada/domain-pms";
@@ -357,10 +362,56 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           },
         },
       };
+      async function currencyCredentials(
+        narrow: boolean,
+        operation: "currency" | "currency_ready" = "currency",
+      ) {
+        const currencyGrants = Object.entries(
+          operation === "currency_ready"
+            ? HOTEL_SETUP_CURRENCY_READY_PRIVILEGES
+            : HOTEL_SETUP_CURRENCY_PRIVILEGES,
+        ).flatMap(([relation, privileges]) =>
+          Object.entries(privileges).map(([privilege, columns]) => ({
+            relation,
+            privilege,
+            columns: columns.join(","),
+          })),
+        );
+        const role = roles[1]!;
+        if (narrow) {
+          await admin.query(`REVOKE ALL ON ${fixtureRelations.join(",")} FROM ${role}`);
+          await admin.query(`REVOKE USAGE ON SCHEMA hotel_catalog FROM ${role}`);
+        }
+        for (const grant of currencyGrants)
+          await admin.query(
+            `${narrow ? "GRANT" : "REVOKE"} ${grant.privilege} (${grant.columns}) ON ${grant.relation} ${narrow ? "TO" : "FROM"} ${role}`,
+          );
+        if (!narrow) {
+          await admin.query(`GRANT USAGE ON SCHEMA hotel_catalog TO ${role}`);
+          await admin.query(
+            `GRANT SELECT,INSERT,UPDATE,DELETE ON ${fixtureRelations.join(",")} TO ${role}`,
+          );
+        }
+      }
+      const checkCurrency = (operation: "currency" | "currency_ready") =>
+        withHotelSetupCommandScope(
+          scopePool(logins[1]!),
+          { organizationId, propertyId: properties[1]!, operation },
+          () => assertHotelSetupCurrencyPrivileges(logins[1]!, operation),
+        );
+      await currencyCredentials(true);
+      await checkCurrency("currency");
+      await expect(
+        logins[1]!.query(
+          "INSERT INTO finance.expense_categories (property_id,name,color) VALUES ($1,'Forbidden','#FFFFFF')",
+          [properties[1]],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
       const repository = createPgPmsPricingCommandRepository(repositoryConfig);
       const created = await repository.upsertPropertyPricingCurrency(command);
       expect(created).toMatchObject({ ok: true, response: { outcome: "created" } });
       expect(await repository.upsertPropertyPricingCurrency(command)).toEqual(created);
+      await currencyCredentials(false);
       // Base PMS aliases share the same active/suspended semantics in the native command.
       for (const key of ["property-management", "pms-core", "account_access"]) {
         await admin.query(
@@ -1115,6 +1166,34 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         ).rejects.toThrow(
           currency === "BTC" ? "first currency invalid" : "prerequisites incomplete",
         );
+      await currencyCredentials(true, "currency_ready");
+      await checkCurrency("currency_ready");
+      for (const [drift, restore] of [
+        [
+          `GRANT SELECT (private_payload) ON platform.product_audit_events TO ${roles[1]}`,
+          `REVOKE SELECT (private_payload) ON platform.product_audit_events FROM ${roles[1]}`,
+        ],
+        [
+          `GRANT UPDATE (payload) ON platform.domain_events TO ${roles[1]}`,
+          `REVOKE UPDATE (payload) ON platform.domain_events FROM ${roles[1]}`,
+        ],
+        [
+          `REVOKE SELECT (currency) ON pms.property_pricing_settings FROM ${roles[1]}`,
+          `GRANT SELECT (currency) ON pms.property_pricing_settings TO ${roles[1]}`,
+        ],
+        [
+          "ALTER TABLE pms.property_pricing_settings DISABLE TRIGGER hotel_setup_first_currency_completion",
+          "ALTER TABLE pms.property_pricing_settings ENABLE ALWAYS TRIGGER hotel_setup_first_currency_completion",
+        ],
+      ]) {
+        await admin.query(drift!);
+        try {
+          await expect(checkCurrency("currency_ready")).rejects.toThrow(/mismatch/);
+        } finally {
+          await admin.query(restore!);
+        }
+        await checkCurrency("currency_ready");
+      }
       const firstSaved = await beforeCompletion([
         'UPDATE platform.idempotency_keys SET idempotency_metadata=idempotency_metadata||\'{"hotelSetupTransaction":"forged"}\'::jsonb WHERE property_id=$1',
         "SET CONSTRAINTS ALL IMMEDIATE",
@@ -1165,6 +1244,7 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           )
         ).rows,
       ).toEqual([{ count: 2 }]);
+      await currencyCredentials(false, "currency_ready");
       // The audited Feature Hub capability preserves setup data and cannot undo billing.
       await admin.query(
         "INSERT INTO identity.role_permission_grants (organization_kind,role_key,permission_key) VALUES ('hotel_group',$1,'pms.finance.manage')",
@@ -1421,10 +1501,34 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         [properties[1]],
       );
       expect(await readiness.upsertPropertyPricingCurrency(firstSave)).toEqual(firstSaved);
-      await logins[1]!.query(
-        "UPDATE pms.property_pricing_settings SET currency='USD',pricing_currency_revision=2 WHERE property_id=$1",
-        [properties[1]],
-      );
+      await currencyCredentials(true, "currency_ready");
+      await checkCurrency("currency_ready");
+      const updater = createPgPmsPricingCommandRepository({
+        ...repositoryConfig,
+        hotelSetupCurrencyOperation: "currency_ready",
+        // This fixture has no dependencies; the real shared dependency guard has separate proofs.
+        currencyChangeGuard: {
+          async runWithCurrencyChangeGuard(_input, guarded) {
+            return guarded([]);
+          },
+        },
+      });
+      const updateCommand = parseUpsertPropertyPricingCurrencyCommand({
+        ...firstSave,
+        currency: "USD",
+        expectedPricingCurrencyRevision: 1,
+        idempotencyKey: `native-narrow-update-${suffix}`,
+      });
+      if (!updateCommand) throw new Error("invalid native update fixture");
+      const updated = await updater.upsertPropertyPricingCurrency(updateCommand);
+      expect(updated).toMatchObject({
+        ok: true,
+        response: {
+          outcome: "updated",
+          pricingCurrency: { currency: "USD", pricingCurrencyRevision: 2 },
+        },
+      });
+      await currencyCredentials(false, "currency_ready");
       expect(
         (
           await admin.query(

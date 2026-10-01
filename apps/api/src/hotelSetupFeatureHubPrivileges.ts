@@ -91,7 +91,20 @@ const definers = [
 
 /** Call inside a successfully begun native feature_hub scope. Not actor authorization. */
 export async function assertHotelSetupFeatureHubPrivileges(client: Pick<pg.Pool, "query">) {
-  await assertHotelSetupColumnPrivileges(client, HOTEL_SETUP_FEATURE_HUB_PRIVILEGES, definers);
+  await assertHotelSetupNativePrivileges(
+    client,
+    HOTEL_SETUP_FEATURE_HUB_PRIVILEGES,
+    "3fceeef36d33dbc6ec8b5ee9a7495229",
+  );
+}
+
+/** Shared native column, helper and policy attestation. Scope and actor checks remain separate. */
+export async function assertHotelSetupNativePrivileges(
+  client: Pick<pg.Pool, "query">,
+  inventory: HotelSetupColumnPrivileges,
+  policyDigest: string,
+) {
+  await assertHotelSetupColumnPrivileges(client, inventory, definers);
   await assertHotelSetupAuditBoundary(client);
   const result = await client.query<{ safe: boolean }>(
     `SELECT (
@@ -114,7 +127,7 @@ export async function assertHotelSetupFeatureHubPrivileges(client: Pick<pg.Pool,
       || COALESCE(pg_catalog.pg_get_expr(p.polqual,p.polrelid),'')
       || COALESCE(pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid),''),'' ORDER BY c.oid::regclass::text,p.polname))
       FROM pg_catalog.pg_class c JOIN pg_catalog.pg_policy p ON p.polrelid=c.oid
-      WHERE c.oid=ANY($3::regclass[]))='3fceeef36d33dbc6ec8b5ee9a7495229'
+      WHERE c.oid=ANY($3::regclass[]))=$4
     AND NOT pg_catalog.has_parameter_privilege(current_user,'session_replication_role','SET')
     AND pg_catalog.current_setting('session_replication_role')='origin'
   ) AS safe`,
@@ -127,9 +140,10 @@ export async function assertHotelSetupFeatureHubPrivileges(client: Pick<pg.Pool,
         "platform.hotel_setup_property_financials_read_allowed(uuid,text,text,text,text,text)",
         "platform.hotel_setup_property_link_matches(uuid,text)",
       ],
-      Object.keys(HOTEL_SETUP_FEATURE_HUB_PRIVILEGES),
+      Object.keys(inventory),
+      policyDigest,
     ],
   );
   if (result.rows.length !== 1 || result.rows[0]?.safe !== true)
-    throw new Error("Hotel setup Feature Hub function posture mismatch");
+    throw new Error("Hotel setup native function posture mismatch");
 }
