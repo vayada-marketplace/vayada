@@ -3122,10 +3122,8 @@ describe("shared hotel setup status route", () => {
     expect(linkSql).toContain("INSERT INTO booking.booking_settings (property_id)");
     expect(linkSql).toContain("contact_input.purpose");
     expect(linkSql).toContain("contact_input.is_public");
-    expect(linkSql).toContain("SET purpose = EXCLUDED.purpose");
-    expect(linkSql).toContain("is_public = EXCLUDED.is_public");
-    expect(linkSql).toContain("deleted_external_guest_contacts");
-    expect(linkSql).toContain("contact.source_system <> 'platform'");
+    expect(linkSql).not.toContain("DO UPDATE");
+    expect(linkSql).not.toContain("DELETE FROM");
     expect(linkSql).not.toContain("INSERT INTO hotel_catalog.property_profiles");
     expect(linkSql).not.toContain("INSERT INTO hotel_catalog.property_media");
     expect(linkSql).not.toContain("INSERT INTO identity.organizations");

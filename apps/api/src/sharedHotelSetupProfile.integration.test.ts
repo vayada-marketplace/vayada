@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -101,6 +103,111 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
        VALUES ($1::uuid, ARRAY['creator_marketplace']::text[])`,
       [organizationId],
     );
+  });
+
+  it("creates and replays with INSERT-only location and contact privileges", async () => {
+    // ACL regression only; this fixture is not the production tenant-scope contract.
+    const role = `profile_insert_test_${randomUUID().replaceAll("-", "")}`;
+    const password = randomUUID();
+    const login = new URL(TEST_DATABASE_URL!);
+    login.username = role;
+    login.password = password;
+    const restricted = createPgSharedHotelSetupStatusRepository({
+      connectionString: login.toString(),
+    });
+    try {
+      await client.query(`CREATE ROLE ${role} LOGIN PASSWORD '${password}' NOINHERIT
+        NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`);
+      const database = decodeURIComponent(login.pathname.slice(1)).replaceAll('"', '""');
+      await client.query(`GRANT CONNECT ON DATABASE "${database}" TO ${role}`);
+      await client.query(`GRANT USAGE ON SCHEMA
+        hotel_catalog, identity, finance, booking, marketplace, platform TO ${role}`);
+      await client.query(`GRANT SELECT ON
+        identity.organizations, identity.organization_resource_links,
+        identity.product_entitlements, finance.billing_entitlements,
+        hotel_catalog.properties, hotel_catalog.property_locations,
+        hotel_catalog.property_contact_channels,
+        hotel_catalog.organization_setup_track_intents,
+        booking.booking_settings, marketplace.marketplace_hotel_profiles,
+        platform.idempotency_keys TO ${role}`);
+      await client.query(`GRANT INSERT ON
+        hotel_catalog.properties, hotel_catalog.property_locations,
+        hotel_catalog.property_contact_channels,
+        identity.organization_resource_links, booking.booking_settings,
+        marketplace.marketplace_hotel_profiles,
+        platform.idempotency_keys, platform.product_audit_events TO ${role}`);
+      await client.query(`GRANT UPDATE ON platform.idempotency_keys TO ${role}`);
+      // Existing location triggers record a separate canonical owner revision.
+      await client.query(`GRANT SELECT, INSERT, UPDATE ON
+        hotel_catalog.property_owner_revisions TO ${role}`);
+      const command = {
+        organizationId,
+        idempotencyKey: "insert-only-profile-create",
+        correlationId: "insert-only-profile-create",
+        profile,
+        audit: {
+          actorUserId,
+          requestId: "insert-only-profile-create",
+          receivedAt: "2026-10-01T21:40:00.000Z",
+        },
+      };
+      const before = await client.query(
+        "SELECT count(*) FROM hotel_catalog.properties WHERE creation_organization_id=$1::uuid",
+        [organizationId],
+      );
+      await expect(
+        restricted.createPropertyProfile({
+          ...command,
+          profile: { ...profile, contacts: [...profile.contacts, profile.contacts[0]!] },
+        }),
+      ).rejects.toMatchObject({ code: "23505" });
+      expect(
+        (
+          await client.query(
+            "SELECT count(*) FROM hotel_catalog.properties WHERE creation_organization_id=$1::uuid",
+            [organizationId],
+          )
+        ).rows,
+      ).toEqual(before.rows);
+      expect(
+        (
+          await client.query("SELECT 1 FROM platform.idempotency_keys WHERE correlation_id=$1", [
+            command.correlationId,
+          ])
+        ).rowCount,
+      ).toBe(0);
+      const created = await restricted.createPropertyProfile(command);
+      expect(created.profile.contacts).toEqual(expect.arrayContaining(profile.contacts));
+      await expect(restricted.createPropertyProfile(command)).resolves.toMatchObject({
+        propertyId: created.propertyId,
+        profileRevision: 1,
+      });
+      expect(
+        (
+          await client.query(
+            `SELECT 1 FROM platform.product_audit_events
+         WHERE organization_id=$1::uuid AND target_resource_id=$2
+           AND action='hotel_setup.property.create'`,
+            [organizationId, created.propertyId],
+          )
+        ).rowCount,
+      ).toBe(1);
+      await expect(
+        restricted.updatePropertyProfile({
+          organizationId,
+          propertyId: created.propertyId,
+          expectedProfileRevision: 1,
+          profile: { ...profile, contacts: [] },
+        }),
+      ).rejects.toMatchObject({ code: "42501" });
+      await expect(
+        repository.getPropertyProfile({ organizationId, propertyId: created.propertyId }),
+      ).resolves.toMatchObject({ profileRevision: 1, profile: { contacts: profile.contacts } });
+    } finally {
+      await restricted.close?.();
+      await client.query(`DROP OWNED BY ${role}`);
+      await client.query(`DROP ROLE ${role}`);
+    }
   });
 
   it("provisions one canonical property for concurrent stable-reference commands", async () => {
