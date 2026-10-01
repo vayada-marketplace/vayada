@@ -71,7 +71,7 @@ export function FeatureHubPage({
   const [savingModuleId, setSavingModuleId] = useState<string | null>(null);
   const {
     activeModuleIds,
-    activeModuleSet,
+    configuredModuleSet,
     supportedModuleIds,
     canManage,
     loading,
@@ -305,7 +305,7 @@ export function FeatureHubPage({
                         t={t}
                         key={module.id}
                         module={module}
-                        isActive={activeModuleSet.has(module.id)}
+                        isActive={configuredModuleSet.has(module.id)}
                         disabled={loading || !canManage || savingModuleId !== null}
                         saving={savingModuleId === module.id}
                         onOpen={() => setSelectedModule(module)}
@@ -334,7 +334,7 @@ export function FeatureHubPage({
         <DetailModal
           t={t}
           module={selectedModule}
-          isActive={activeModuleSet.has(selectedModule.id)}
+          isActive={configuredModuleSet.has(selectedModule.id)}
           disabled={loading || !canManage || savingModuleId !== null}
           saving={savingModuleId === selectedModule.id}
           error={updateError ? t(updateError) || updateError : ""}
