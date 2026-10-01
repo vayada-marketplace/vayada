@@ -126,6 +126,14 @@ The native currency preparation and write transactions now apply a live membersh
 veto with locked role defaults, grants and target-property assignments. The existing
 pricing Owner/base-entitlement checks remain required. This does not complete the
 broader entitlement/activation contract or its exact production grants.
+Native currency saves must reuse canonical PMS entitlement alias/suspension
+resolution over locked current rows, evaluated with the database clock after
+lock waits. Request timestamps cannot decide whether billing access is current.
+This check does not activate the Financials module or authorize a Feature Hub toggle.
+Before runtime release, entitlement writers must also serialize updates that retarget
+an existing unrelated entitlement into a base-PMS suspension for this property.
+The current organization lock serializes inserts; property-scoped row locks cannot
+lock rows hidden by RLS. The shared mutation protocol remains a release gate.
 
 Both currency and Feature Hub commands require Identity row locks. Provide
 and test lock-only policies and exact privileges for those `FOR SHARE` reads

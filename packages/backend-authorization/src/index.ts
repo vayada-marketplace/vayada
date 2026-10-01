@@ -611,7 +611,7 @@ export function canAccessResource(
 }
 
 export function hasActiveEntitlement(
-  context: RequestContext,
+  context: Pick<RequestContext, "entitlements">,
   requirement: EntitlementRequirement,
 ): boolean {
   const requiredKey = canonicalEntitlementKey(requirement.product, requirement.key);

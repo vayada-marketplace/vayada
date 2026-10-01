@@ -516,7 +516,7 @@ async function lockAuthorizedScope(
   nativeSetup: boolean,
 ): Promise<boolean> {
   if (command.audit.actor.kind !== "user") return false;
-  if (nativeSetup && !(await lockHotelSetupCurrencyMembership(client, command))) return false;
+  if (nativeSetup) return lockHotelSetupCurrencyMembership(client, command);
   const scope = await client.query(
     `SELECT property.id
      FROM hotel_catalog.properties property

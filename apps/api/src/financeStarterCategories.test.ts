@@ -60,7 +60,21 @@ describe("first-currency starter categories", () => {
           if (sql.includes("newHotelFinancialsDefault"))
             return { rows: [{ id: propertyId }], rowCount: 1 };
           if (sql.includes("FROM identity.product_entitlements"))
-            return { rows: [{ status: "active", startsAt: null, expiresAt: null }], rowCount: 1 };
+            return {
+              rows: [
+                {
+                  key: "property-management",
+                  resourceId: null,
+                  status: "active",
+                  startsAt: null,
+                  expiresAt: null,
+                },
+              ],
+              rowCount: 1,
+            };
+          if (sql.includes("FROM identity.users"))
+            return { rows: [{ id: propertyId }], rowCount: 1 };
+          if (sql.includes("clock_timestamp")) return { rows: [{ at: new Date(at) }], rowCount: 1 };
           if (sql.includes("INSERT INTO platform.idempotency_keys"))
             return { rows: [{ id: propertyId, attempt: 1 }], rowCount: 1 };
           if (sql.includes("INSERT INTO pms.property_pricing_settings"))

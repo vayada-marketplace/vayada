@@ -278,6 +278,93 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
       const created = await repository.upsertPropertyPricingCurrency(command);
       expect(created).toMatchObject({ ok: true, response: { outcome: "created" } });
       expect(await repository.upsertPropertyPricingCurrency(command)).toEqual(created);
+      // Base PMS aliases share the same active/suspended semantics in the native command.
+      for (const key of ["property-management", "pms-core", "account_access"]) {
+        await admin.query(
+          `UPDATE identity.product_entitlements SET entitlement_key=$1
+          WHERE organization_id=$2 AND entitlement_key='property-management'`,
+          [key, organizationId],
+        );
+        expect(await repository.upsertPropertyPricingCurrency(command)).toEqual(created);
+        for (const patch of [
+          "status='suspended'",
+          "status='expired'",
+          "starts_at=clock_timestamp()+interval '1 hour'",
+          "expires_at=clock_timestamp()-interval '1 hour'",
+        ]) {
+          await admin.query(
+            `UPDATE identity.product_entitlements SET ${patch}
+            WHERE organization_id=$1 AND entitlement_key=$2`,
+            [organizationId, key],
+          );
+          expect(await repository.upsertPropertyPricingCurrency(command)).toEqual({
+            ok: false,
+            error: { code: "setup_scope_unavailable" },
+          });
+          await admin.query(
+            `UPDATE identity.product_entitlements SET status='active',starts_at=NULL,expires_at=NULL
+            WHERE organization_id=$1 AND entitlement_key=$2`,
+            [organizationId, key],
+          );
+        }
+        await admin.query(
+          `UPDATE identity.product_entitlements SET resource_product='pms',resource_type='pms_property',resource_id=$1
+          WHERE organization_id=$2 AND entitlement_key=$3`,
+          [properties[1]!.toUpperCase(), organizationId, key],
+        );
+        expect(await repository.upsertPropertyPricingCurrency(command)).toEqual(created);
+        await admin.query(
+          `UPDATE identity.product_entitlements SET resource_product=NULL,resource_type=NULL,resource_id=NULL,entitlement_key='property-management'
+          WHERE organization_id=$1 AND entitlement_key=$2`,
+          [organizationId, key],
+        );
+      }
+      for (const resourceId of [null, properties[1]!.toUpperCase(), properties[0]]) {
+        const veto = (
+          await admin.query(
+            `INSERT INTO identity.product_entitlements
+          (organization_id,product,entitlement_key,status,resource_product,resource_type,resource_id)
+          VALUES ($1,'pms','account_access','suspended',CASE WHEN $2::text IS NULL THEN NULL ELSE 'pms' END,
+            CASE WHEN $2::text IS NULL THEN NULL ELSE 'pms_property' END,$2) RETURNING id`,
+            [organizationId, resourceId],
+          )
+        ).rows[0].id;
+        const result = await repository.upsertPropertyPricingCurrency(command);
+        expect(result).toEqual(
+          resourceId === properties[0]
+            ? created
+            : { ok: false, error: { code: "setup_scope_unavailable" } },
+        );
+        await admin.query(
+          "UPDATE identity.product_entitlements SET expires_at=clock_timestamp()-interval '1 hour' WHERE id=$1",
+          [veto],
+        );
+        expect(await repository.upsertPropertyPricingCurrency(command)).toEqual(created);
+        await admin.query("DELETE FROM identity.product_entitlements WHERE id=$1", [veto]);
+      }
+      await admin.query("UPDATE identity.users SET status='suspended' WHERE id=$1", [users[0]]);
+      expect(await repository.upsertPropertyPricingCurrency(command)).toEqual({
+        ok: false,
+        error: { code: "setup_scope_unavailable" },
+      });
+      await admin.query("UPDATE identity.users SET status='active' WHERE id=$1", [users[0]]);
+      // The uppercase canonical owner-link fixture must also pass native current authorization.
+      await withHotelSetupCommandScope(
+        scopePool(logins[0]!),
+        {
+          organizationId,
+          propertyId: properties[0]!,
+          operation: "currency",
+        },
+        async (client) => {
+          expect(
+            await lockHotelSetupCurrencyMembership(client, {
+              ...command,
+              propertyId: properties[0]!,
+            }),
+          ).toBe(true);
+        },
+      );
       // A replay still rechecks live membership access before returning old evidence.
       for (const patch of [
         "pms_access_enabled=false",
@@ -420,6 +507,28 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
       await inspector.connect();
       inspectorConnected = true;
       const membershipPid = (await logins[1]!.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      // An entitlement that expires during a lock wait must deny an old accepted timestamp.
+      await admin.query("BEGIN");
+      transferOpen = true;
+      await admin.query(
+        `UPDATE identity.product_entitlements SET expires_at=clock_timestamp()+interval '100 milliseconds'
+        WHERE organization_id=$1 AND entitlement_key='property-management'`,
+        [organizationId],
+      );
+      const expiredReplay = repository.upsertPropertyPricingCurrency(command);
+      void expiredReplay.catch(() => {});
+      await expectBlocked(inspector, membershipPid);
+      await admin.query("SELECT pg_sleep(0.2)");
+      await admin.query("COMMIT");
+      transferOpen = false;
+      expect(await expiredReplay).toEqual({
+        ok: false,
+        error: { code: "setup_scope_unavailable" },
+      });
+      await admin.query(
+        "UPDATE identity.product_entitlements SET expires_at=NULL WHERE organization_id=$1 AND entitlement_key='property-management'",
+        [organizationId],
+      );
       // A revocation that started first must be visible after the lock wait.
       await admin.query("BEGIN");
       transferOpen = true;
