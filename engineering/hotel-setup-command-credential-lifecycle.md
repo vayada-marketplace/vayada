@@ -197,6 +197,20 @@ inventory still need the full handler/platform preflight.
 
 ### Owner Feature Hub command
 
+The API's opt-in `HOTEL_SETUP_COMMAND_ORIGIN` and matching internal token route
+currency PUT, module-list GET and Financials PATCH to the private service.
+Other pricing commands and retired affiliate writes retain their existing behavior.
+With no configuration, existing API behavior remains. Partial configuration fails
+startup; an enabled service failure never retries through the local repository.
+Only the original bearer, internal token, JSON body and currency idempotency key
+are forwarded, with fixed operation paths, no redirects and a bounded timeout.
+Caller identity/context headers and query overrides cannot reach the private service.
+This transport is an explicit route-policy exception: the private adapters enforce
+the canonical policies and original session themselves, including Owner off during
+billing suspension. The transport never treats a forwarded API context as authority.
+TLS is required except for local loopback tests. Production network isolation,
+independent task IAM/DB access and exact live ACL preflights remain release gates.
+
 The private service verifies the original Owner session. Its native `feature_hub`
 transaction repeats canonical current membership/role/override and property-access
 checks for `pms.finance.manage`. It appends only the existing Financials on/off audit

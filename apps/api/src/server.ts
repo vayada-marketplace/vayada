@@ -66,6 +66,7 @@ import pg from "pg";
 import { createHmac } from "node:crypto";
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
+import { loadHotelSetupCommandForwarder } from "./hotelSetupCommandForwarder.js";
 import { type ApiConfig, loadConfig, stripeSubscriptionRuntimeEnabled } from "./config.js";
 import { createPgBookingDesignCatalogEvidenceRepository } from "./domains/bookingDesignCatalogEvidenceRepository.js";
 import { createPgBookingDesignRepository } from "./domains/bookingDesignRepository.js";
@@ -336,6 +337,7 @@ import {
 
 const postgresRuntime = installPostgresPoolRuntime(pg);
 const config = loadConfig();
+const hotelSetupCommandForwarder = loadHotelSetupCommandForwarder();
 
 function buildAuthOptions(auth: ApiConfig["auth"]): ApiAuthOptions | undefined {
   if (!auth) {
@@ -1835,6 +1837,7 @@ const app = buildApp({
     ? { commandPort: pmsPhysicalRoomOperationalLabels }
     : undefined,
   pmsModuleActivationRepository,
+  hotelSetupCommandForwarder,
   financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,
