@@ -37,10 +37,24 @@ rejected-permission-override audit INSERT, with audit-key/product SELECT for the
 canonical conflict clause. Entitlement, registry, currency and business writes
 are forbidden. CREATE, destructive table privileges (including PG17 MAINTAIN),
 sequence access and application SECURITY DEFINER execution are rejected.
-This effective ACL check does not prove the audit row boundary: release still
-requires reviewed restrictive RLS for the reader's audit action/shape, denial of
-other actions/private payloads/business side effects, and real canonical
-read/rejected-override tests. Audit grants alone are not permission to release.
+The companion audit preflight pins the full reviewed policy set, invoker
+predicate and audit trigger bodies on PG16/17. Audit grants alone are not
+permission to release: exact live RLS, credentials and IAM still need proof.
+The reader's restrictive audit policy must permit only the canonical
+`identity.staff.permission_override.rejected` INSERT: organization scope, the
+actor's own current active membership in that organization, fixed security and
+confidential labels, no private or linked business evidence, and the exact
+redacted issue-code/request metadata shape. It grants no login or privilege.
+Only matching rejection-audit keys are readable for the canonical repository's
+`ON CONFLICT DO NOTHING`; audit UPDATE/DELETE stays denied. Existing callers keep their
+policies. Startup must reject missing/changed RLS and INSERT-trigger definitions;
+the local real-repository test must prove successful rejection audit, conflict
+replay, cross-membership/organization and other-action denials, with no
+Financials or pricing side effect.
+The original actor comes from the private service's verified WorkOS context.
+This shared reader's database policy checks membership/organization consistency;
+it does not cryptographically bind an audit to a WorkOS token. Its audit INSERT
+cannot authorize or invoke a business command.
 Before release, platform must review/prove its exact canonical authorization,
 entitlement and assignment reads. Canonical authorization also appends rejected
 permission-override audit events; preserve that narrow rejection-audit contract
