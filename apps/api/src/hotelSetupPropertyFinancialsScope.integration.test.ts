@@ -1,3 +1,5 @@
+import { spawnSync } from "node:child_process";
+import { checkHotelSetupPropertyCredential } from "./cli/hotelSetupPropertyPreflight.js";
 import { randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import {
@@ -49,7 +51,7 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
     const roles = [0, 1, 2, 3, 4, 5].map((index) =>
       index === 5
         ? `vayada_test_lock_reader_${suffix}`
-        : `vayada_next_hotel_setup_property_${index}_${suffix}`,
+        : `vayada_next_hotel_setup_property_${index}_${suffix.slice(0, 24)}`,
     );
     const passwords = roles.map(() => randomUUID());
     const organizations = [randomUUID(), randomUUID()];
@@ -92,6 +94,116 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         };
       },
     });
+    async function credentialPreflight(operation: "currency" | "currency_ready" | "feature_hub") {
+      const databaseUrl = new URL(url!);
+      if (databaseUrl.hostname !== "127.0.0.1" || !databaseUrl.pathname.startsWith("/vay1092_"))
+        throw new Error("Native preflight needs an isolated local migrated database");
+      const databases = (
+        await admin.query<{ name: string; privileges: string[] }>(`
+        SELECT d.datname AS name, COALESCE(array_agg(a.privilege_type) FILTER (WHERE a.grantee=0),ARRAY[]::text[]) AS privileges
+        FROM pg_catalog.pg_database d LEFT JOIN LATERAL pg_catalog.aclexplode(COALESCE(d.datacl,pg_catalog.acldefault('d',d.datdba))) a ON true
+        WHERE d.datallowconn GROUP BY d.datname`)
+      ).rows;
+      const quote = (name: string) => '"' + name.replaceAll('"', '""') + '"';
+      const counts = () =>
+        admin.query(
+          "SELECT (SELECT count(*) FROM platform.product_audit_events)::text AS audits, (SELECT count(*) FROM pms.property_pricing_settings)::text AS pricing, (SELECT count(*) FROM finance.expense_categories)::text AS categories",
+        );
+      const before = (await counts()).rows;
+      const scope = { organizationId, propertyId: properties[1]!, operation };
+      try {
+        for (const database of databases)
+          await admin.query(`REVOKE ALL ON DATABASE ${quote(database.name)} FROM PUBLIC`);
+        await admin.query(
+          `GRANT CONNECT ON DATABASE ${quote(new URL(url!).pathname.slice(1))} TO ${roles[1]}`,
+        );
+        await admin.query(
+          `GRANT CONNECT ON DATABASE ${quote(databaseUrl.pathname.slice(1))} TO ${roles[1]} WITH GRANT OPTION`,
+        );
+        await expect(checkHotelSetupPropertyCredential(logins[1]!, scope)).rejects.toThrow(
+          "database isolation",
+        );
+        await admin.query(
+          `REVOKE GRANT OPTION FOR CONNECT ON DATABASE ${quote(databaseUrl.pathname.slice(1))} FROM ${roles[1]}`,
+        );
+        await checkHotelSetupPropertyCredential(logins[1]!, scope);
+        await expect(
+          checkHotelSetupPropertyCredential(logins[1]!, { ...scope, propertyId: properties[0]! }),
+        ).rejects.toThrow();
+        await expect(
+          checkHotelSetupPropertyCredential(logins[1]!, {
+            ...scope,
+            organizationId: organizations[1]!,
+          }),
+        ).rejects.toThrow();
+        if (process.env.NODE_EXTRA_CA_CERTS) {
+          const credential = new URL(url!);
+          credential.username = roles[1]!;
+          credential.password = passwords[1]!;
+          credential.search = "?sslmode=verify-full";
+          const endpoint = new URL(url!);
+          endpoint.username = endpoint.password = endpoint.search = "";
+          const run = (overrides: NodeJS.ProcessEnv = {}) =>
+            spawnSync(
+              process.execPath,
+              [
+                "--import",
+                "tsx",
+                new URL("./cli/hotelSetupPropertyPreflight.ts", import.meta.url).pathname,
+              ],
+              {
+                encoding: "utf8",
+                timeout: 30_000,
+                env: {
+                  ...process.env,
+                  HOTEL_SETUP_COMMAND_DATABASE_URL: credential.toString(),
+                  HOTEL_SETUP_COMMAND_DATABASE_ENDPOINT: endpoint.toString(),
+                  HOTEL_SETUP_COMMAND_DATABASE_LOGIN: roles[1],
+                  HOTEL_SETUP_COMMAND_PROPERTY_ID: properties[1],
+                  HOTEL_SETUP_COMMAND_ORGANIZATION_ID: organizationId,
+                  HOTEL_SETUP_COMMAND_OPERATION: operation,
+                  PGHOST: "untrusted.invalid",
+                  PGPORT: "1",
+                  PGOPTIONS: "-c role=postgres",
+                  ...overrides,
+                },
+              },
+            );
+          expect(run()).toMatchObject({
+            status: 0,
+            stderr: "",
+            stdout: '{"status":"PASS","scope":"hotel_setup_property"}\n',
+          });
+          expect(run({ NODE_EXTRA_CA_CERTS: "" })).toMatchObject({
+            status: 1,
+            stdout: "",
+            stderr: '{"status":"FAIL","code":"hotel_setup_property_preflight_failed"}\n',
+          });
+          const bad = new URL(credential);
+          bad.password = "wrong-password".repeat(4);
+          expect(run({ HOTEL_SETUP_COMMAND_DATABASE_URL: bad.toString() })).toMatchObject({
+            status: 1,
+            stdout: "",
+            stderr: '{"status":"FAIL","code":"hotel_setup_property_preflight_failed"}\n',
+          });
+        }
+        await admin.query(
+          `GRANT TEMPORARY ON DATABASE ${quote(new URL(url!).pathname.slice(1))} TO PUBLIC`,
+        );
+        await expect(checkHotelSetupPropertyCredential(logins[1]!, scope)).rejects.toThrow(
+          "database isolation",
+        );
+        expect((await counts()).rows).toEqual(before);
+      } finally {
+        for (const database of databases) {
+          await admin.query(`REVOKE ALL ON DATABASE ${quote(database.name)} FROM PUBLIC`);
+          if (database.privileges.length)
+            await admin.query(
+              `GRANT ${database.privileges.join(",")} ON DATABASE ${quote(database.name)} TO PUBLIC`,
+            );
+        }
+      }
+    }
     let transferOpen = false;
     let inspectorConnected = false;
     await admin.connect();
@@ -401,6 +513,7 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         );
       await currencyCredentials(true);
       await checkCurrency("currency");
+      await credentialPreflight("currency");
       await expect(
         logins[1]!.query(
           "INSERT INTO finance.expense_categories (property_id,name,color) VALUES ($1,'Forbidden','#FFFFFF')",
@@ -1168,6 +1281,7 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         );
       await currencyCredentials(true, "currency_ready");
       await checkCurrency("currency_ready");
+      await credentialPreflight("currency_ready");
       for (const [drift, restore] of [
         [
           `GRANT SELECT (private_payload) ON platform.product_audit_events TO ${roles[1]}`,
@@ -1279,6 +1393,7 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           () => assertHotelSetupFeatureHubPrivileges(logins[1]!),
         );
       await checkNative();
+      await credentialPreflight("feature_hub");
       const linkFunction = (
         await admin.query(
           "SELECT pg_catalog.pg_get_functiondef('platform.hotel_setup_property_link_matches(uuid,text)'::regprocedure) AS definition",
@@ -1362,10 +1477,12 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
             [properties[1]],
           )
         ).rows[0].n;
+      await logins[1]!.query("SET plan_cache_mode=force_generic_plan");
       expect(await toggle(false)).toMatchObject({ isActive: false });
       expect(await toggle(false)).toMatchObject({ isActive: false });
       expect(await toggle(true)).toMatchObject({ isActive: true });
       expect(await auditCount()).toBe(3);
+      await logins[1]!.query("RESET plan_cache_mode");
       expect(
         (
           await admin.query(
@@ -2164,5 +2281,5 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
       }
       await admin.end();
     }
-  }, 15_000);
+  }, 60_000);
 });

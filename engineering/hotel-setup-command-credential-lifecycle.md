@@ -352,3 +352,26 @@ grants on PostgreSQL 16/17; first-save completion, replay and later currency upd
 are covered. This stages contracts and catalog proof, not a new release CLI,
 per-request check or provisioner. Verified credentials, TLS/database isolation,
 exact live owners, lifecycle/transfer, private readiness and deployment remain gates.
+
+## Native property credential release check
+
+After migration 0452, run `node apps/api/dist/cli/hotelSetupPropertyPreflight.js`
+inside the reviewed image. Inject `HOTEL_SETUP_COMMAND_DATABASE_URL` as a secret;
+set the password-free `HOTEL_SETUP_COMMAND_DATABASE_ENDPOINT`, exact
+`HOTEL_SETUP_COMMAND_DATABASE_LOGIN`, `HOTEL_SETUP_COMMAND_PROPERTY_ID`,
+`HOTEL_SETUP_COMMAND_ORGANIZATION_ID`, and `HOTEL_SETUP_COMMAND_OPERATION`
+(`currency`, `currency_ready`, or `feature_hub`). Supply the reviewed CA through
+`NODE_EXTRA_CA_CERTS`. No admin credential or internal token is needed.
+
+The CLI reuses verified reader TLS and database isolation checks, then validates
+that purpose's column, policy and trigger catalogs in a rolled-back read-only
+transaction. A second READ COMMITTED transaction calls the existing assignment
+and current Owner check, takes its authorization locks, and always rolls back.
+It invokes no business command and saves no currency, category, entitlement or
+audit. Wrong assignment, purpose, credentials, TLS or inherited access fails with
+a fixed sanitized record. Migration 0452 separates UPDATE-only trigger reads
+from INSERT plans; Feature Hub still receives no entitlement metadata read grant.
+
+PASS is a credential/catalog snapshot. Exact live owner identities, lifecycle,
+IAM, authenticated private-service readiness, composed image/rollback review and
+release approval remain gates. This command neither provisions nor deploys.

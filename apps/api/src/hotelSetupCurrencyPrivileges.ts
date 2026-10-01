@@ -200,8 +200,8 @@ export async function assertHotelSetupCurrencyPrivileges(
     [
       Object.keys(inventory),
       operation === "currency_ready"
-        ? "cfe8c4dd731e4389b8edde41318f5bbc"
-        : "256f3f1f99e7608c5373761845620927",
+        ? "cc0e1a70bfa0ef71d5834884f3faf541"
+        : "bbbf7ac1eddd1ed6e6ce67556ff82d30",
     ],
   );
   if (result.rows.length !== 1 || result.rows[0]?.safe !== true)
