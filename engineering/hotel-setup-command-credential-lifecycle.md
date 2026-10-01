@@ -325,3 +325,14 @@ slice exports the contract and proves the handler; it does not wire a new releas
 CLI or run a check on every switch. Verified connection/endpoint/database isolation,
 exact owner identities/posture, credential lifecycle and live deployment remain
 separate release gates.
+
+## Currency dependency reads
+
+Migration 0451 restricts native property logins' room types, rate plans, rate
+rules and recurring pricing sources to the assigned hotel and the `currency`
+or `currency_ready` purpose. These reads check existing pricing before the
+currency command writes. Feature Hub, unassigned and revoked logins see no rows,
+including through an unfiltered query. Native writes remain denied despite broad
+fixture grants; existing ACL-backed callers keep their prior policy behavior.
+This stages the read boundary; exact currency column grants and catalog preflight
+follow separately. No live role, secret or grant is created.

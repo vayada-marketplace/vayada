@@ -64,6 +64,10 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
       "identity.organization_roles",
       "identity.membership_property_assignments",
       "pms.property_pricing_settings",
+      "pms.room_types",
+      "pms.rate_plans",
+      "pms.rate_rules",
+      "pms.recurring_pricing_sources",
       "finance.expense_categories",
       "platform.idempotency_keys",
       "platform.domain_events",
@@ -109,7 +113,6 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         for (const relation of fixtureRelations) {
           await admin.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${relation} TO ${role}`);
         }
-        await admin.query(`GRANT SELECT ON pms.room_types, pms.rate_plans TO ${role}`);
         if (index !== 5)
           await admin.query(
             `GRANT vayada_next_hotel_setup_property_scope TO ${role} WITH INHERIT TRUE, SET FALSE`,
@@ -179,6 +182,79 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           [organizations[index]],
         );
       }
+      // Broad grants prove dependency RLS: even unfiltered SQL cannot read another hotel.
+      const dependencies = [
+        "pms.room_types",
+        "pms.rate_plans",
+        "pms.rate_rules",
+        "pms.recurring_pricing_sources",
+      ];
+      for (const property of properties) {
+        await admin.query(
+          "INSERT INTO pms.property_pricing_settings (property_id,currency) VALUES ($1,'EUR')",
+          [property],
+        );
+        const room = (
+          await admin.query(
+            "INSERT INTO pms.room_types (property_id,name,base_rate_amount,currency) VALUES ($1,'Dependency fixture',100,'EUR') RETURNING id",
+            [property],
+          )
+        ).rows[0].id;
+        await admin.query(
+          "INSERT INTO pms.rate_plans (property_id,room_type_id,code,name,currency) VALUES ($1,$2,'dependency','Dependency fixture','EUR')",
+          [property, room],
+        );
+        await admin.query(
+          "INSERT INTO pms.rate_rules (property_id,room_type_id,rule_type,starts_on,ends_on) VALUES ($1,$2,'season',CURRENT_DATE,CURRENT_DATE)",
+          [property, room],
+        );
+        await admin.query(
+          "INSERT INTO pms.recurring_pricing_sources (id,property_id,source_kind,source_revision,configured_state,validation_state,validation_revision,validated_at,invalid_reasons,currency,source_pricing_currency_revision) VALUES (gen_random_uuid(),$1,'additional_guest',1,'active','valid',1,now(),'[]','EUR',1)",
+          [property],
+        );
+      }
+      for (const relation of dependencies) {
+        for (const [loginIndex, visible] of [
+          [0, properties[0]],
+          [1, properties[1]],
+          [3, properties[0]],
+        ] as const)
+          expect(
+            (await logins[loginIndex]!.query(`SELECT property_id FROM ${relation}`)).rows,
+          ).toEqual([{ property_id: visible }]);
+        for (const loginIndex of [2, 4])
+          expect(
+            (await logins[loginIndex]!.query(`SELECT property_id FROM ${relation}`)).rows,
+          ).toEqual([]);
+        expect((await logins[5]!.query(`SELECT property_id FROM ${relation}`)).rowCount).toBe(2);
+        // rate_rules updates enqueue Channex jobs; this dependency proof grants no queue writes.
+        if (relation !== "pms.rate_rules")
+          expect(
+            (await logins[5]!.query(`UPDATE ${relation} SET property_id=property_id`)).rowCount,
+          ).toBe(2);
+        await expect(
+          logins[1]!.query(`UPDATE ${relation} SET property_id=property_id`),
+        ).rejects.toMatchObject({ code: "42501" });
+        expect((await logins[1]!.query(`DELETE FROM ${relation}`)).rowCount).toBe(0);
+      }
+      await admin.query(
+        "UPDATE platform.hotel_setup_property_scopes SET active=false WHERE database_login=$1",
+        [roles[1]],
+      );
+      for (const relation of dependencies)
+        expect((await logins[1]!.query(`SELECT property_id FROM ${relation}`)).rows).toEqual([]);
+      await admin.query(
+        "UPDATE platform.hotel_setup_property_scopes SET active=true WHERE database_login=$1",
+        [roles[1]],
+      );
+      for (const relation of [...dependencies].reverse())
+        await admin.query(`DELETE FROM ${relation} WHERE property_id=ANY($1::uuid[])`, [
+          properties,
+        ]);
+      await admin.query(
+        "DELETE FROM pms.property_pricing_settings WHERE property_id=ANY($1::uuid[])",
+        [properties],
+      );
       // Broad local grants distinguish lock-only RLS from absent UPDATE privilege.
       for (const [relation, column, own, other] of [
         ["identity.organizations", "id", organizationId, organizations[1]],
@@ -1941,6 +2017,15 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         "DELETE FROM finance.expense_categories WHERE property_id=ANY($1::uuid[])",
         [properties],
       );
+      for (const relation of [
+        "pms.recurring_pricing_sources",
+        "pms.rate_rules",
+        "pms.rate_plans",
+        "pms.room_types",
+      ])
+        await admin.query(`DELETE FROM ${relation} WHERE property_id=ANY($1::uuid[])`, [
+          properties,
+        ]);
       await admin.query(
         "DELETE FROM pms.property_pricing_settings WHERE property_id=ANY($1::uuid[])",
         [properties],
