@@ -1,17 +1,18 @@
 import type { PermissionKey } from "@vayada/backend-auth";
 import {
+  hasActiveEntitlement,
   resolveEffectivePropertyAccess,
   resolveMembershipRolePermissions,
   type MembershipPropertyScope,
   type PropertyAccessContext,
 } from "@vayada/backend-authorization";
 import type { UpsertPropertyPricingCurrencyCommand } from "@vayada/domain-pms";
-import type { PmsPricingCommandClient } from "./domains/pmsPricingCommandRepository.js";
+import type { beginHotelSetupCommandScope } from "./hotelSetupCommandScope.js";
 
-/** Additional live membership veto for a transaction already bound by beginHotelSetupCommandScope.
- * Owner, actor, organization and entitlement locks remain in the currency repository. */
+/** Current membership, actor and base entitlement checks for the native currency scope.
+ * beginHotelSetupCommandScope already locks the organization and canonical Owner links. */
 export async function lockHotelSetupCurrencyMembership(
-  client: PmsPricingCommandClient,
+  client: Parameters<typeof beginHotelSetupCommandScope>[0],
   command: Pick<UpsertPropertyPricingCurrencyCommand, "organizationId" | "propertyId" | "audit">,
 ): Promise<boolean> {
   if (command.audit.actor.kind !== "user") return false;
@@ -97,5 +98,57 @@ export async function lockHotelSetupCurrencyMembership(
     grants.rows.map((row) => row.permission),
     scope,
   );
-  return resolved.ok && resolved.permissions.includes("pms.operations.manage");
+  if (!resolved.ok || !resolved.permissions.includes("pms.operations.manage")) return false;
+  const actor = await client.query(
+    "SELECT id FROM identity.users WHERE id=$1::uuid AND status='active' FOR SHARE",
+    [command.audit.actor.userId],
+  );
+  if (actor.rows.length !== 1) return false;
+  const entitlements = await client.query<{
+    key: string;
+    status: "active" | "suspended" | "expired";
+    resourceId: string | null;
+    startsAt: Date | null;
+    expiresAt: Date | null;
+  }>(
+    `SELECT entitlement_key AS key, status,
+      CASE WHEN resource_product IS NULL THEN NULL ELSE resource_id::uuid::text END AS "resourceId",
+      starts_at AS "startsAt", expires_at AS "expiresAt"
+     FROM identity.product_entitlements
+     WHERE organization_id=$1::uuid AND product='pms'
+       AND entitlement_key IN ('property-management','pms-core','account_access')
+       AND (resource_product IS NULL OR (resource_product='pms' AND resource_type='pms_property'
+         AND lower(resource_id)=$2::uuid::text))
+     FOR SHARE`,
+    [command.organizationId, command.propertyId],
+  );
+  // Read after all lock waits; now() and the request clock can predate revocation/expiry.
+  const clock = await client.query<{ at: Date }>("SELECT pg_catalog.clock_timestamp() AS at");
+  const at = clock.rows[0]?.at;
+  if (!(at instanceof Date) || !Number.isFinite(at.getTime())) return false;
+  return hasActiveEntitlement(
+    {
+      entitlements: entitlements.rows
+        .filter((row) => row.startsAt === null || row.startsAt <= at)
+        .map((row) => ({
+          product: "pms" as const,
+          key: row.key,
+          status: row.expiresAt !== null && row.expiresAt <= at ? "expired" : row.status,
+          ...(row.resourceId === null
+            ? {}
+            : {
+                resource: {
+                  product: "pms" as const,
+                  resourceType: "pms_property" as const,
+                  resourceId: row.resourceId,
+                },
+              }),
+        })),
+    },
+    {
+      product: "pms",
+      key: "property-management",
+      resource: { product: "pms", resourceType: "pms_property", resourceId: command.propertyId },
+    },
+  );
 }

@@ -152,9 +152,21 @@ describe("PMS pricing command repository", () => {
               return { rows: [{ permission: "pms.operations.manage" }], rowCount: 1 } as never;
             if (sql.includes("FROM identity.product_entitlements"))
               return {
-                rows: [{ status: "active", startsAt: null, expiresAt: null }],
+                rows: [
+                  {
+                    key: "property-management",
+                    resourceId: null,
+                    status: "active",
+                    startsAt: null,
+                    expiresAt: null,
+                  },
+                ],
                 rowCount: 1,
               } as never;
+            if (sql.includes("FROM identity.users"))
+              return { rows: [{ id: actorUserId }], rowCount: 1 } as never;
+            if (sql.includes("clock_timestamp"))
+              return { rows: [{ at: new Date(acceptedAt) }], rowCount: 1 } as never;
             return { rows: [], rowCount: 0 };
           },
           release,
