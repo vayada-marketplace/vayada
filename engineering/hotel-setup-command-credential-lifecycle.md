@@ -284,3 +284,26 @@ denied ACLs, RLS, functions, schema/database CREATE, and role membership.
 Review primary and rollback task definitions, immutable image, and the
 synthetic-hotel smoke. New hotels remain off until all gates pass; existing
 hotels use their separate rollout path.
+
+## Read-only reader release check
+
+Run `node apps/api/dist/cli/hotelSetupReaderPreflight.js` inside the exact reviewed
+private image, with only `HOTEL_SETUP_COMMAND_READER_DATABASE_URL`, the matching
+password-free `HOTEL_SETUP_COMMAND_DATABASE_ENDPOINT`, and the reviewed RDS CA
+through `NODE_EXTRA_CA_CERTS`. The command needs no internal token, WorkOS secret,
+admin connection or Secrets Manager write access. Supply the credential through
+secret injection, never command arguments or logs.
+
+It authenticates as the fixed native reader over verified TLS, reuses the
+launcher's role/column/audit checks, and rejects effective access to other
+connectable databases, database CREATE/TEMP, or replication-trigger bypass.
+Catalog checks share one read-only repeatable-read transaction which is always
+rolled back. Output is a fixed PASS/FAIL record; failure details and credentials
+are not logged. Ambient PG connection options cannot replace its explicit
+endpoint, TLS or read-only settings.
+
+This proves reader credentials and catalog posture only. It provisions no role,
+grant or secret and writes no hotel/audit data. Native command ACLs, real audit
+row denial tests, function ownership, lifecycle/transfer, IAM and authenticated
+private-service readiness remain separate gates. Do not add a digest to the
+platform image inventory until the composed image and rollback are reviewed.

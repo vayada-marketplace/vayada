@@ -18,25 +18,9 @@ export function loadHotelSetupCommandServiceConfig(env: NodeJS.ProcessEnv = proc
     throw new Error("HOTEL_SETUP_COMMAND_INTERNAL_TOKEN must contain at least 32 bytes");
   const databaseEndpoint = required(env, "HOTEL_SETUP_COMMAND_DATABASE_ENDPOINT");
   const secretPrefix = required(env, "HOTEL_SETUP_COMMAND_SECRET_PREFIX");
-  const endpoint = parseHotelSetupCredentialConfiguration({ databaseEndpoint, secretPrefix });
+  parseHotelSetupCredentialConfiguration({ databaseEndpoint, secretPrefix });
   const readerDatabaseUrl = required(env, "HOTEL_SETUP_COMMAND_READER_DATABASE_URL");
-  try {
-    const reader = new URL(readerDatabaseUrl);
-    if (
-      !["postgres:", "postgresql:"].includes(reader.protocol) ||
-      decodeURIComponent(reader.username) !== READER_LOGIN ||
-      Buffer.byteLength(decodeURIComponent(reader.password)) < 32 ||
-      reader.hostname !== endpoint.hostname ||
-      (reader.port || "5432") !== (endpoint.port || "5432") ||
-      reader.pathname !== endpoint.pathname ||
-      reader.hash ||
-      reader.searchParams.get("sslmode") !== "verify-full" ||
-      [...reader.searchParams.keys()].length !== 1
-    )
-      throw new Error();
-  } catch {
-    throw new Error("Invalid hotel setup reader database configuration");
-  }
+  parseHotelSetupReaderDatabaseUrl(readerDatabaseUrl, databaseEndpoint);
   const workosJwksUrl = required(env, "HOTEL_SETUP_COMMAND_WORKOS_JWKS_URL");
   const workosIssuer = required(env, "HOTEL_SETUP_COMMAND_WORKOS_ISSUER");
   for (const value of [workosJwksUrl, workosIssuer]) {
@@ -57,6 +41,32 @@ export function loadHotelSetupCommandServiceConfig(env: NodeJS.ProcessEnv = proc
     workosIssuer,
     workosAudience: required(env, "HOTEL_SETUP_COMMAND_WORKOS_AUDIENCE"),
   };
+}
+
+/** Shared by the private launcher and its read-only credential preflight. */
+export function parseHotelSetupReaderDatabaseUrl(raw: string, databaseEndpoint: string): URL {
+  const endpoint = parseHotelSetupCredentialConfiguration({
+    databaseEndpoint,
+    secretPrefix: "hotel-setup-command/prod/property/",
+  });
+  try {
+    const reader = new URL(raw);
+    if (
+      !["postgres:", "postgresql:"].includes(reader.protocol) ||
+      decodeURIComponent(reader.username) !== READER_LOGIN ||
+      Buffer.byteLength(decodeURIComponent(reader.password)) < 32 ||
+      reader.hostname !== endpoint.hostname ||
+      (reader.port || "5432") !== (endpoint.port || "5432") ||
+      reader.pathname !== endpoint.pathname ||
+      reader.hash ||
+      reader.searchParams.get("sslmode") !== "verify-full" ||
+      [...reader.searchParams.keys()].length !== 1
+    )
+      throw new Error();
+    return reader;
+  } catch {
+    throw new Error("Invalid hotel setup reader database configuration");
+  }
 }
 
 /** Role posture only. Exact read/audit ACL and IAM proofs remain release gates. */
