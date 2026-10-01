@@ -9,11 +9,12 @@ import {
 import type { UpsertPropertyPricingCurrencyCommand } from "@vayada/domain-pms";
 import type { beginHotelSetupCommandScope } from "./hotelSetupCommandScope.js";
 
-/** Current membership, actor and base entitlement checks for the native currency scope.
+/** Current membership, actor and base entitlement checks for the native command scope.
  * beginHotelSetupCommandScope already locks the organization and canonical Owner links. */
 export async function lockHotelSetupCurrencyMembership(
   client: Parameters<typeof beginHotelSetupCommandScope>[0],
   command: Pick<UpsertPropertyPricingCurrencyCommand, "organizationId" | "propertyId" | "audit">,
+  options = { permission: "pms.operations.manage" as PermissionKey, requireBaseAccess: true },
 ): Promise<boolean> {
   if (command.audit.actor.kind !== "user") return false;
   const members = await client.query<{
@@ -98,12 +99,13 @@ export async function lockHotelSetupCurrencyMembership(
     grants.rows.map((row) => row.permission),
     scope,
   );
-  if (!resolved.ok || !resolved.permissions.includes("pms.operations.manage")) return false;
+  if (!resolved.ok || !resolved.permissions.includes(options.permission)) return false;
   const actor = await client.query(
     "SELECT id FROM identity.users WHERE id=$1::uuid AND status='active' FOR SHARE",
     [command.audit.actor.userId],
   );
   if (actor.rows.length !== 1) return false;
+  if (!options.requireBaseAccess) return true;
   const entitlements = await client.query<{
     key: string;
     status: "active" | "suspended" | "expired";
