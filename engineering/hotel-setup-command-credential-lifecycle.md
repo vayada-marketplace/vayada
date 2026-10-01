@@ -150,6 +150,44 @@ requires UPDATE privilege and UPDATE-policy visibility. If any separate
 capability cannot preserve its transaction or denial proof, keep automatic
 activation and Feature Hub writes blocked.
 
+### First-currency readiness completion
+
+Use a deferred constraint trigger on the actual INSERT of
+`pms.property_pricing_settings`, only for the distinct native `currency_ready`
+assignment. Ordinary currency logins cannot activate Financials. No caller can
+invoke a standalone activation function or directly update the pending row.
+The trigger runs inside the existing command transaction after its final
+idempotency write; failure rolls back currency, categories and all evidence.
+An UPDATE or replay cannot turn Financials back on after the Owner switches it off.
+
+At completion, lock and prove the current exact assignment, active organization,
+both Owner links, one suspended/pending Financials row, current base PMS access,
+absence of applicable billing/global suspensions and seven unarchived system
+categories. Use the database clock after waits. Require the inserted currency
+and revision to remain unchanged, and the same supported V1 currency vocabulary
+as the native command. Require a completed successful first-currency idempotency
+record, its currency audit and pricing event, and both matching pricing outbox
+destinations from this transaction. Existing evidence cannot be reused.
+Native evidence triggers overwrite a reserved metadata stamp with PostgreSQL's
+full transaction ID on INSERT and idempotency UPDATE; caller timestamps, supplied
+stamps and wrapping 32-bit tuple IDs are not completion proof. Activation records
+the same database transaction ID in the protected entitlement metadata. Immediate
+guards reject subsequent currency or idempotency updates in that transaction,
+including after `SET CONSTRAINTS ALL IMMEDIATE`. Append-only evidence and category
+mutation denials protect the remaining prerequisites. Later currency commands
+and cached replay do not reactivate an Owner-disabled module.
+
+The original actor is verified by the isolated service and canonical current
+membership checks in the native currency repository, before writing. Completion
+derives its actor and correlation from that command's matching audit/event evidence;
+it accepts no actor parameter or caller session setting. The database purpose
+credential remains available only to that service. The completion trigger updates
+only the locked pending Financials row to active/ready and appends one linked
+Financials activation audit, with no entitlement mutation policy or additional
+UPDATE grant for either currency login. Its fixed-search-path definer function is trigger-only and not executable
+by runtime roles. Live trigger/function ownership and exact ACL preflight remain
+release gates.
+
 Currency evidence is limited to `pms.pricing_currency.upsert` idempotency and
 audit rows, property-pricing source events, and their two pricing-source outbox
 destinations. Native logins cannot change event/audit/outbox rows, delete retry
