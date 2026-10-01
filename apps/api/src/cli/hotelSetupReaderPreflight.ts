@@ -12,8 +12,19 @@ export async function checkHotelSetupReader(client: pg.Client) {
   try {
     await assertHotelSetupServiceReader(client);
     await assertHotelSetupReaderPrivileges(client);
-    const result = await client.query<{ safe: boolean }>(`SELECT (
+    await assertHotelSetupDatabaseIsolation(client);
+  } finally {
+    // Never commit, create a role, grant, write an audit or invoke a hotel command.
+    await client.query("ROLLBACK");
+  }
+}
+
+/** Shared by native credential checks. Does not inspect or write hotel data. */
+export async function assertHotelSetupDatabaseIsolation(client: pg.Client) {
+  const result = await client.query<{ safe: boolean }>(`SELECT (
       pg_catalog.has_database_privilege(current_user,pg_catalog.current_database(),'CONNECT')
+      AND NOT pg_catalog.has_database_privilege(current_user,pg_catalog.current_database(),
+        'CONNECT WITH GRANT OPTION')
       AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_database d WHERE
         (d.datname=pg_catalog.current_database()
           AND pg_catalog.has_database_privilege(current_user,d.oid,'CREATE,TEMPORARY'))
@@ -22,22 +33,32 @@ export async function checkHotelSetupReader(client: pg.Client) {
       AND NOT pg_catalog.has_parameter_privilege(current_user,'session_replication_role','SET')
       AND pg_catalog.current_setting('session_replication_role')='origin'
     ) AS safe`);
-    if (result.rows.length !== 1 || result.rows[0]?.safe !== true)
-      throw new Error("Hotel setup reader database isolation failed");
-  } finally {
-    // Never commit, create a role, grant, write an audit or invoke a hotel command.
-    await client.query("ROLLBACK");
-  }
+  if (result.rows.length !== 1 || result.rows[0]?.safe !== true)
+    throw new Error("Hotel setup credential database isolation failed");
 }
 
 export async function runHotelSetupReaderPreflight(env: NodeJS.ProcessEnv = process.env) {
+  return runHotelSetupCredentialPreflight(
+    "hotel_setup_reader",
+    () =>
+      parseHotelSetupReaderDatabaseUrl(
+        env.HOTEL_SETUP_COMMAND_READER_DATABASE_URL ?? "",
+        env.HOTEL_SETUP_COMMAND_DATABASE_ENDPOINT ?? "",
+      ),
+    checkHotelSetupReader,
+  );
+}
+
+/** Explicit TLS transport and sanitized diagnostics shared by the two release checks. */
+export async function runHotelSetupCredentialPreflight(
+  scope: "hotel_setup_reader" | "hotel_setup_property",
+  parseUrl: () => URL,
+  check: (client: pg.Client) => Promise<void>,
+) {
   let client: pg.Client | undefined;
   let connectionFailed = false;
   try {
-    const url = parseHotelSetupReaderDatabaseUrl(
-      env.HOTEL_SETUP_COMMAND_READER_DATABASE_URL ?? "",
-      env.HOTEL_SETUP_COMMAND_DATABASE_ENDPOINT ?? "",
-    );
+    const url = parseUrl();
     // Explicit fields prevent ambient PGHOST/PGPORT/PGOPTIONS and URL SSL options
     // from replacing this connection's endpoint, trust or read-only settings.
     client = new pg.Client({
@@ -59,14 +80,14 @@ export async function runHotelSetupReaderPreflight(env: NodeJS.ProcessEnv = proc
     });
     await client.connect();
     if (connectionFailed) throw new Error("Reader connection unavailable");
-    await checkHotelSetupReader(client);
+    await check(client);
     if (connectionFailed) throw new Error("Reader connection unavailable");
-    process.stdout.write(JSON.stringify({ status: "PASS", scope: "hotel_setup_reader" }) + "\n");
+    process.stdout.write(JSON.stringify({ status: "PASS", scope }) + "\n");
     return 0;
   } catch {
     // pg errors can contain credentials, SQL text, hostnames or linked data.
     process.stderr.write(
-      JSON.stringify({ status: "FAIL", code: "hotel_setup_reader_preflight_failed" }) + "\n",
+      JSON.stringify({ status: "FAIL", code: `${scope}_preflight_failed` }) + "\n",
     );
     return 1;
   } finally {

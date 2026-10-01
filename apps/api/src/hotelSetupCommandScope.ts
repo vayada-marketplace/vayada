@@ -11,7 +11,7 @@ type ScopeQuery = {
 type ScopeClient = ScopeQuery & { release(): void };
 type ScopePool = { connect(): Promise<ScopeClient> };
 
-async function assertHotelSetupCommandScope(
+export async function assertHotelSetupCommandScope(
   client: ScopeQuery,
   scope: {
     propertyId: string;

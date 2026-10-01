@@ -130,6 +130,13 @@ describe.runIf(adminUrl)("native reader credential on isolated PostgreSQL", () =
         stdout: '{"status":"PASS","scope":"hotel_setup_reader"}\n',
       });
       await admin.query(
+        `GRANT CONNECT ON DATABASE ${quote(endpoint.pathname.slice(1))} TO ${role} WITH GRANT OPTION`,
+      );
+      expect(run(env)).toMatchObject({ status: 1, stdout: "" });
+      await admin.query(
+        `REVOKE GRANT OPTION FOR CONNECT ON DATABASE ${quote(endpoint.pathname.slice(1))} FROM ${role}`,
+      );
+      await admin.query(
         "GRANT SELECT (private_payload) ON platform.product_audit_events TO PUBLIC",
       );
       expect(run(env)).toMatchObject({ status: 1, stdout: "" });

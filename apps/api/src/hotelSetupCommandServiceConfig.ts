@@ -45,6 +45,15 @@ export function loadHotelSetupCommandServiceConfig(env: NodeJS.ProcessEnv = proc
 
 /** Shared by the private launcher and its read-only credential preflight. */
 export function parseHotelSetupReaderDatabaseUrl(raw: string, databaseEndpoint: string): URL {
+  return parseHotelSetupDatabaseUrl(raw, databaseEndpoint, READER_LOGIN);
+}
+
+/** Shared endpoint/TLS/password validation; callers supply a reviewed expected native login. */
+export function parseHotelSetupDatabaseUrl(
+  raw: string,
+  databaseEndpoint: string,
+  login: string,
+): URL {
   const endpoint = parseHotelSetupCredentialConfiguration({
     databaseEndpoint,
     secretPrefix: "hotel-setup-command/prod/property/",
@@ -53,7 +62,7 @@ export function parseHotelSetupReaderDatabaseUrl(raw: string, databaseEndpoint: 
     const reader = new URL(raw);
     if (
       !["postgres:", "postgresql:"].includes(reader.protocol) ||
-      decodeURIComponent(reader.username) !== READER_LOGIN ||
+      decodeURIComponent(reader.username) !== login ||
       Buffer.byteLength(decodeURIComponent(reader.password)) < 32 ||
       reader.hostname !== endpoint.hostname ||
       (reader.port || "5432") !== (endpoint.port || "5432") ||
