@@ -336,6 +336,7 @@ export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolv
 };
 
 type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
+  hotelSetupCommandForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
   auth?: ApiAuthOptions;
   authSession?: AuthSessionRouteOptions;
   browserAllowedOrigins?: string[];
@@ -1016,6 +1017,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPmsPricingRoutes, {
       prefix: "/api/pms",
       ...options.pmsPricing,
+      currencyForward: options.hotelSetupCommandForwarder,
       inventoryPublicOfferProjector: options.pmsInventoryPublicOfferProjector,
     });
   }
@@ -1076,6 +1078,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPmsModuleActivationRoutes, {
       prefix: "/api/pms",
       repository: options.pmsModuleActivationRepository,
+      forward: options.hotelSetupCommandForwarder,
       allowedOrigins: options.pmsOperationsAllowedOrigins,
       financialsActivationPropertyIds: options.financialsActivationPropertyIds,
       propertyAccessRepository: options.auth?.propertyAccessRepository,

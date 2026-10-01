@@ -4,11 +4,15 @@ import {
   type PermissionKey,
   type ProductEntitlement,
 } from "@vayada/backend-auth";
+import { request as httpRequest } from "node:http";
 import { AuthorizationError } from "@vayada/backend-authorization";
 import { PMS_PRICING_CONTRACT_VERSION } from "@vayada/domain-pms";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildHotelSetupCommandService } from "./hotelSetupCommandService.js";
+import { buildApp } from "./app.js";
+import { loadHotelSetupCommandForwarder } from "./hotelSetupCommandForwarder.js";
+import { registerPmsPricingCurrencyCommand } from "./routes/pmsPricing.js";
 
 const propertyId = "11111111-1111-4111-8111-111111111111";
 const otherPropertyId = "22222222-2222-4222-8222-222222222222";
@@ -21,6 +25,135 @@ const path = `/properties/${propertyId}/pricing-source/currency`;
 
 afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
+});
+
+it("forwards the original session through real private handlers without a local write fallback", async () => {
+  const f = fixture({
+    permissions: [
+      "pms.operations.read",
+      "pms.operations.manage",
+      "pms.finance.read",
+      "pms.finance.manage",
+    ],
+  });
+  const transport = vi.fn<typeof fetch>(async (input, init) => {
+    expect(init?.redirect).toBe("error");
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+    const forwarded = await f.app.inject({
+      method: init!.method as "GET" | "PUT" | "PATCH",
+      url: new URL(String(input)).pathname,
+      headers: init!.headers as Record<string, string>,
+      ...(typeof init?.body === "string" ? { payload: init.body } : {}),
+    });
+    return new Response(forwarded.body, { status: forwarded.statusCode });
+  });
+  const forward = loadHotelSetupCommandForwarder(
+    {
+      HOTEL_SETUP_COMMAND_ORIGIN: "https://setup.internal",
+      HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: internalToken,
+    },
+    transport,
+  )!;
+  const fallback = vi.fn();
+  const gateway = buildApp({
+    logger: false,
+    hotelSetupCommandForwarder: forward,
+    pmsModuleActivationRepository: { list: fallback, updateFinancials: fallback },
+  });
+  gateway.register(
+    async (app) =>
+      registerPmsPricingCurrencyCommand(
+        app,
+        { upsertPropertyPricingCurrency: fallback },
+        { forward },
+      ),
+    { prefix: "/api/pms" },
+  );
+  apps.push(gateway);
+  const headers = {
+    authorization: "Bearer valid",
+    "idempotency-key": "currency-first-save",
+    "x-hotel-id": otherPropertyId,
+    "x-vayada-actor": "spoofed",
+    "x-vayada-internal-token": "caller-token",
+  };
+  const currency = await gateway.inject({
+    method: "PUT",
+    url: `/api/pms${path}`,
+    headers,
+    payload,
+  });
+  expect(currency.statusCode).toBe(201);
+  expect(f.save.mock.calls[0]![0]).toMatchObject({
+    propertyId,
+    organizationId,
+    idempotencyKey: "currency-first-save",
+  });
+  const featurePath = `/api/pms/properties/${propertyId}/module-activations`;
+  expect((await gateway.inject({ url: featurePath, headers })).statusCode).toBe(200);
+  expect(
+    (
+      await gateway.inject({
+        method: "PATCH",
+        url: `${featurePath}/financials`,
+        headers,
+        payload: { isActive: false, actorId: "spoofed" },
+      })
+    ).statusCode,
+  ).toBe(200);
+  expect(f.feature.mock.calls[0]![0].actor.internalUserId).toBe(userId);
+  expect(f.verifier).toHaveBeenCalledWith("valid");
+  expect(fallback).not.toHaveBeenCalled();
+  f.feature.mockRejectedValueOnce(new Error("credential details"));
+  const unavailable = await gateway.inject({
+    method: "PATCH",
+    url: `${featurePath}/financials`,
+    headers,
+    payload: { isActive: false },
+  });
+  expect(unavailable.statusCode).toBe(503);
+  expect(unavailable.json()).toEqual({ code: "hotel_setup_unavailable" });
+  transport.mockRejectedValueOnce(new Error("network credentials"));
+  expect(
+    (await gateway.inject({ method: "PUT", url: `/api/pms${path}`, headers, payload })).statusCode,
+  ).toBe(503);
+  expect(fallback).not.toHaveBeenCalled();
+  const calls = transport.mock.calls.length;
+  const address = await gateway.listen({ host: "127.0.0.1", port: 0 });
+  const duplicateStatus = await new Promise<number | undefined>((resolve, reject) => {
+    const request = httpRequest(
+      new URL(`/api/pms${path}`, address),
+      {
+        method: "PUT",
+        headers: [
+          "Authorization",
+          "Bearer valid",
+          "Idempotency-Key",
+          "first",
+          "Idempotency-Key",
+          "second",
+          "Content-Type",
+          "application/json",
+        ],
+      },
+      (response) => {
+        response.resume();
+        response.on("end", () => resolve(response.statusCode));
+      },
+    );
+    request.on("error", reject);
+    request.end(JSON.stringify(payload));
+  });
+  expect(duplicateStatus).toBe(400);
+  expect((await gateway.inject({ url: featurePath })).statusCode).toBe(401);
+  expect(
+    (await gateway.inject({ url: `${featurePath}?organizationId=spoofed`, headers })).statusCode,
+  ).toBe(400);
+  expect(transport).toHaveBeenCalledTimes(calls);
+  expect(
+    (await gateway.inject({ url: featurePath, headers: { authorization: "Bearer invalid" } }))
+      .statusCode,
+  ).toBe(401);
 });
 
 function fixture(

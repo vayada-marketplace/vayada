@@ -32,6 +32,7 @@ type AuthorizedScope = {
 };
 
 export type PmsPricingRoutesOptions = {
+  currencyForward?: import("../hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
   commandPort: PmsPricingCommandPort;
   readPort: PmsPricingReadPort;
   currencyCapabilitiesReadPort: PmsPricingCurrencyCapabilitiesReadPort;
@@ -45,12 +46,14 @@ export function registerPmsPricingCurrencyCommand(
   app: FastifyInstance,
   commandPort: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">,
   options: {
+    forward?: import("../hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
     requireOwnerSession?: boolean;
     propertyAccessRepository?: PropertyAccessRepository;
   } = {},
 ): void {
   const authorized = new WeakMap<FastifyRequest, AuthorizedScope>();
   const authorize = async (request: FastifyRequest, reply: FastifyReply) => {
+    if (options.forward) return;
     const scope = await authorizeRequest(
       request,
       reply,
@@ -64,6 +67,8 @@ export function registerPmsPricingCurrencyCommand(
     "/properties/:propertyId/pricing-source/currency",
     { onRequest: authorize },
     async (request, reply) => {
+      if (options.forward)
+        return options.forward(request, reply, request.params.propertyId, "currency");
       const scope = requireAuthorizedScope(authorized, request);
       const idempotencyKey = readIdempotencyKey(request);
       if (!idempotencyKey) return invalidRequest(reply, "A single Idempotency-Key is required.");
@@ -107,7 +112,7 @@ export async function registerPmsPricingRoutes(
     if (scope) authorized.set(request, scope);
   };
 
-  registerPmsPricingCurrencyCommand(app, options.commandPort);
+  registerPmsPricingCurrencyCommand(app, options.commandPort, { forward: options.currencyForward });
 
   app.put<{ Params: RoomTypeParams; Body: unknown }>(
     "/properties/:propertyId/room-types/:roomTypeId/flexible-rate-plan",
@@ -318,7 +323,7 @@ function readRoomTypeId(params: RoomTypeParams, reply: FastifyReply): string | n
   return params.roomTypeId.toLowerCase();
 }
 
-function readIdempotencyKey(request: FastifyRequest): string | null {
+export function readIdempotencyKey(request: FastifyRequest): string | null {
   const occurrences = request.raw.rawHeaders.filter(
     (value, index) => index % 2 === 0 && value.toLowerCase() === "idempotency-key",
   ).length;

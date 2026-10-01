@@ -10,6 +10,7 @@ import {
 } from "@vayada/backend-authorization";
 
 import { enforceRoutePolicy } from "./policy.js";
+import type { HotelSetupCommandForwarder } from "../hotelSetupCommandForwarder.js";
 
 const MODULE_ENTITLEMENT_PREFIX = "module:";
 const MODULE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -44,6 +45,7 @@ export type PmsModuleActivationRepository = {
 };
 
 export type PmsModuleActivationRoutesOptions = {
+  forward?: HotelSetupCommandForwarder;
   repository: PmsModuleActivationRepository;
   requireOwnerSession?: boolean;
   financialsSetupComplete?: (context: RequestContext, propertyId: string) => Promise<boolean>;
@@ -104,6 +106,7 @@ export async function registerPmsModuleActivationRoutes(
       }
 
       const { propertyId } = request.params;
+      if (options.forward) return options.forward(request, reply, propertyId, "modules");
       const context = enforceModuleActivationReadPolicy(
         request,
         propertyId,
@@ -177,6 +180,8 @@ export async function registerPmsModuleActivationRoutes(
           message: "Legacy affiliate module changes are no longer available.",
         });
       }
+
+      if (options.forward) return options.forward(request, reply, propertyId, "financials");
 
       const context = await enforceFinancialsManagePolicy(
         request,
