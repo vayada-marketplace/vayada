@@ -1,3 +1,7 @@
+import { AuthorizationError } from "@vayada/backend-authorization";
+import type { RequestContext } from "@vayada/backend-auth";
+import { createHotelSetupFeatureHubCommands } from "./hotelSetupFeatureHubCommands.js";
+import { createPgHotelSetupFeatureHubRepository } from "./hotelSetupFeatureHubRepository.js";
 import { parseUpsertPropertyPricingCurrencyCommand } from "@vayada/domain-pms";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -6,6 +10,10 @@ import { createHotelSetupCurrencyCommands } from "./hotelSetupCurrencyCommands.j
 
 vi.mock("./domains/pmsPricingCommandRepository.js", () => ({
   createPgPmsPricingCommandRepository: vi.fn(),
+}));
+
+vi.mock("./hotelSetupFeatureHubRepository.js", () => ({
+  createPgHotelSetupFeatureHubRepository: vi.fn(),
 }));
 
 const propertyId = "11111111-1111-4111-8111-111111111111";
@@ -56,8 +64,8 @@ describe("private hotel setup credential selection", () => {
       ok: false,
       error: { code: "setup_scope_unavailable" },
     });
-    expect(f.query.mock.calls[0]?.[1]).toEqual([propertyId, organizationId]);
-    expect(f.query.mock.calls[0]?.[0]).toContain("scope.operation_class='currency_ready'");
+    expect(f.query.mock.calls[0]?.[1]).toEqual([propertyId, organizationId, "currency_ready"]);
+    expect(f.query.mock.calls[0]?.[0]).toContain("scope.operation_class=$3");
     expect(f.query.mock.calls[0]?.[0]).toContain("organization.status='active'");
     expect(f.query.mock.calls[0]?.[0]).toContain("link.relationship='owner'");
     expect(f.get).toHaveBeenCalledWith("vayada/hotel-setup/" + login);
@@ -147,4 +155,67 @@ describe("private hotel setup credential selection", () => {
       expect(f.query).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("private Feature Hub credential selection", () => {
+  const context = {
+    actor: { internalUserId: organizationId },
+    selectedOrganization: { organizationId },
+  } as RequestContext;
+  function featureFixture() {
+    const f = fixture();
+    f.query.mockResolvedValue({ rows: [{ ...scope, operation: "feature_hub" }] });
+    const update = vi.fn().mockResolvedValue({ moduleId: "financials", isActive: false });
+    vi.mocked(createPgHotelSetupFeatureHubRepository).mockReturnValue({
+      updateFinancials: update,
+      close: f.close,
+    });
+    return { ...f, update, feature: createHotelSetupFeatureHubCommands(f.options) };
+  }
+  it("selects only feature_hub, forwards verified context and closes each native pool", async () => {
+    const f = featureFixture();
+    expect(await f.feature.updateFinancials(context, propertyId, false)).toMatchObject({
+      isActive: false,
+    });
+    expect(f.query.mock.calls[0]?.[1]).toEqual([propertyId, organizationId, "feature_hub"]);
+    expect(f.update).toHaveBeenCalledWith(context, propertyId, false);
+    const connection = new URL(
+      vi.mocked(createPgHotelSetupFeatureHubRepository).mock.calls[0]![0].connectionString,
+    );
+    expect(connection.username).toBe(login);
+    expect(decodeURIComponent(connection.password)).toBe(password);
+    expect(connection.searchParams.get("sslmode")).toBe("verify-full");
+    expect(f.close).toHaveBeenCalledOnce();
+    expect(createPgPmsPricingCommandRepository).not.toHaveBeenCalled();
+  });
+  it.each(["currency_ready", "currency", "unknown"])(
+    "rejects another credential purpose %s",
+    async (operation) => {
+      const f = featureFixture();
+      f.query.mockResolvedValue({ rows: [{ ...scope, operation }] });
+      await expect(f.feature.updateFinancials(context, propertyId, true)).rejects.toThrow(
+        "Feature Hub command unavailable",
+      );
+      expect(f.get).not.toHaveBeenCalled();
+      expect(f.update).not.toHaveBeenCalled();
+    },
+  );
+  it("rechecks assignment and secrets and preserves forbidden responses without leaking failure details", async () => {
+    const f = featureFixture();
+    f.update.mockRejectedValueOnce(new AuthorizationError());
+    await expect(f.feature.updateFinancials(context, propertyId, true)).rejects.toBeInstanceOf(
+      AuthorizationError,
+    );
+    expect(f.close).toHaveBeenCalledOnce();
+    f.query.mockResolvedValue({ rows: [] });
+    await expect(f.feature.updateFinancials(context, propertyId, true)).rejects.toThrow(
+      /^Hotel setup Feature Hub command unavailable$/,
+    );
+    expect(f.get).toHaveBeenCalledOnce();
+    f.query.mockResolvedValue({ rows: [{ ...scope, operation: "feature_hub" }] });
+    f.get.mockRejectedValue(new Error("sensitive credential detail"));
+    await expect(f.feature.updateFinancials(context, propertyId, false)).rejects.toThrow(
+      /^Hotel setup Feature Hub command unavailable$/,
+    );
+  });
 });
