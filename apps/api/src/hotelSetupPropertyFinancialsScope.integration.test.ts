@@ -529,6 +529,149 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         "UPDATE identity.product_entitlements SET expires_at=NULL WHERE organization_id=$1 AND entitlement_key='property-management'",
         [organizationId],
       );
+      // Routing a hidden row into scope must serialize too, even with unchanged organization_id.
+      const writer = logins[5]!; // Ordinary ACL-backed login, not a setup role or superuser.
+      const writerPid = (await writer.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      const nativeClient = await scopePool(logins[1]!).connect();
+      const retargetSql = `UPDATE identity.product_entitlements SET
+        organization_id=$1,product='pms',entitlement_key=$2,
+        resource_product=CASE WHEN $3::text IS NULL THEN NULL ELSE 'pms' END,
+        resource_type=CASE WHEN $3::text IS NULL THEN NULL ELSE 'pms_property' END,
+        resource_id=$3 WHERE id=$4`;
+      for (const [sourceOrganization, sourceProduct, sourceKey, sourceProperty, targetKey] of [
+        [organizationId, "pms", "unrelated", null, "pms-core"],
+        [organizationId, "marketplace", "account_access", null, "account_access"],
+        [organizationId, "pms", "property-management", properties[0], "property-management"],
+        [organizations[1], "pms", "account_access", null, "account_access"],
+      ] as const) {
+        const entitlementId = randomUUID();
+        const targetProperty = sourceProperty === null ? null : properties[1]!.toUpperCase();
+        await admin.query(
+          `INSERT INTO identity.product_entitlements
+          (id,organization_id,product,entitlement_key,status,resource_product,resource_type,resource_id)
+          VALUES ($1,$2,$3,$4,'suspended',CASE WHEN $5::text IS NULL THEN NULL ELSE 'pms' END,
+            CASE WHEN $5::text IS NULL THEN NULL ELSE 'pms_property' END,$5)`,
+          [entitlementId, sourceOrganization, sourceProduct, sourceKey, sourceProperty],
+        );
+        let setupHoldsLock = true;
+        try {
+          // Setup wins: the hidden candidate cannot appear until setup has committed.
+          await beginHotelSetupCommandScope(nativeClient, {
+            organizationId,
+            propertyId: properties[1]!,
+            operation: "currency",
+          });
+          expect(await lockHotelSetupCurrencyMembership(nativeClient, command)).toBe(true);
+          const retarget = writer.query(retargetSql, [
+            organizationId,
+            targetKey,
+            targetProperty,
+            entitlementId,
+          ]);
+          void retarget.catch(() => {});
+          await expectBlocked(inspector, writerPid);
+          expect(await lockHotelSetupCurrencyMembership(nativeClient, command)).toBe(true);
+          await nativeClient.query("COMMIT");
+          setupHoldsLock = false;
+          await retarget;
+          expect(await repository.upsertPropertyPricingCurrency(command)).toEqual({
+            ok: false,
+            error: { code: "setup_scope_unavailable" },
+          });
+          await admin.query(
+            `UPDATE identity.product_entitlements SET organization_id=$1,product=$2,
+            entitlement_key=$3,resource_product=CASE WHEN $4::text IS NULL THEN NULL ELSE 'pms' END,
+            resource_type=CASE WHEN $4::text IS NULL THEN NULL ELSE 'pms_property' END,
+            resource_id=$4 WHERE id=$5`,
+            [sourceOrganization, sourceProduct, sourceKey, sourceProperty, entitlementId],
+          );
+          // Retarget wins: setup waits for its commit, then rejects the stale replay.
+          await writer.query("BEGIN");
+          await writer.query(retargetSql, [
+            organizationId,
+            targetKey,
+            targetProperty,
+            entitlementId,
+          ]);
+          const deniedReplay = repository.upsertPropertyPricingCurrency(command);
+          void deniedReplay.catch(() => {});
+          await expectBlocked(inspector, membershipPid);
+          await writer.query("COMMIT");
+          expect(await deniedReplay).toEqual({
+            ok: false,
+            error: { code: "setup_scope_unavailable" },
+          });
+        } finally {
+          // Release the blocker before queueing rollback on its waiting peer.
+          if (setupHoldsLock) {
+            await nativeClient.query("ROLLBACK");
+            await writer.query("ROLLBACK");
+          } else {
+            await writer.query("ROLLBACK");
+            await nativeClient.query("ROLLBACK");
+          }
+          await admin.query("DELETE FROM identity.product_entitlements WHERE id=$1", [
+            entitlementId,
+          ]);
+        }
+      }
+      // Reversed row/organization lock order must abort a transaction, not permit stale access.
+      const baseEntitlement = (
+        await admin.query(
+          "SELECT id FROM identity.product_entitlements WHERE organization_id=$1 AND product='pms' AND entitlement_key='property-management' AND resource_product IS NULL",
+          [organizationId],
+        )
+      ).rows[0].id;
+      try {
+        await beginHotelSetupCommandScope(nativeClient, {
+          organizationId,
+          propertyId: properties[1]!,
+          operation: "currency",
+        });
+        const update = writer
+          .query(
+            "UPDATE identity.product_entitlements SET entitlement_key='pms-core',status='suspended' WHERE id=$1",
+            [baseEntitlement],
+          )
+          .then(
+            () => null,
+            (error: unknown) => error,
+          );
+        await expectBlocked(inspector, writerPid);
+        const checked = await lockHotelSetupCurrencyMembership(nativeClient, command).then(
+          (allowed) => ({ allowed, error: null }),
+          (error: unknown) => ({ allowed: false, error }),
+        );
+        await nativeClient.query(checked.error ? "ROLLBACK" : "COMMIT");
+        const updateError = await update;
+        expect(checked.error ?? updateError).toMatchObject({ code: "40P01" });
+        if (!checked.error) expect(checked.allowed).toBe(true);
+      } finally {
+        await nativeClient.query("ROLLBACK");
+        await writer.query("ROLLBACK");
+        await admin.query(
+          "UPDATE identity.product_entitlements SET entitlement_key='property-management',status='active' WHERE id=$1",
+          [baseEntitlement],
+        );
+      }
+      nativeClient.release();
+      expect(
+        (
+          await admin.query(
+            `SELECT tgenabled FROM pg_catalog.pg_trigger
+          WHERE tgrelid='identity.product_entitlements'::regclass
+            AND tgname='entitlement_routing_organization_lock'`,
+          )
+        ).rows,
+      ).toEqual([{ tgenabled: "A" }]);
+      for (const login of [logins[1]!, writer])
+        expect(
+          (
+            await login.query(
+              "SELECT has_function_privilege(current_user,'platform.lock_entitlement_routing_organization()','EXECUTE') AS allowed",
+            )
+          ).rows,
+        ).toEqual([{ allowed: false }]);
       // A revocation that started first must be visible after the lock wait.
       await admin.query("BEGIN");
       transferOpen = true;

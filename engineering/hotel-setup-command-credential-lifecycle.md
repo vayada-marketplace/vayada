@@ -130,10 +130,18 @@ Native currency saves must reuse canonical PMS entitlement alias/suspension
 resolution over locked current rows, evaluated with the database clock after
 lock waits. Request timestamps cannot decide whether billing access is current.
 This check does not activate the Financials module or authorize a Feature Hub toggle.
-Before runtime release, entitlement writers must also serialize updates that retarget
-an existing unrelated entitlement into a base-PMS suspension for this property.
-The current organization lock serializes inserts; property-scoped row locks cannot
-lock rows hidden by RLS. The shared mutation protocol remains a release gate.
+Entitlement routing updates must take the destination organization's `FOR KEY SHARE`
+lock, including changes of organization, product, key or resource scope. A database
+trigger enforces this for every writer; it returns the unchanged candidate row and
+grants no entitlement mutation or function-call capability. The trigger remains
+enabled for replication sessions. Unchanged routing uses existing entitlement row
+locks; inserts use the organization FK lock. This covers unrelated rows hidden by
+property RLS without exposing them to setup credentials.
+Writers should lock the destination organization before updating routing. If a
+writer already holds a row needed by setup, the opposite lock order can deadlock;
+PostgreSQL must abort one whole transaction, never allow stale authorization to
+commit. Retry the whole command with fresh authorization, not only its last SQL.
+Verify both commit orders and the enforced trigger before runtime release.
 
 Both currency and Feature Hub commands require Identity row locks. Provide
 and test lock-only policies and exact privileges for those `FOR SHARE` reads
