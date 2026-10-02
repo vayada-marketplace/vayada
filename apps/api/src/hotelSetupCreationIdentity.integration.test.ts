@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { describe, expect, it } from "vitest";
+import { lockHotelSetupCreationPermissions } from "./hotelSetupMembership.js";
 import { assertHotelSetupCreationScope } from "./hotelSetupCommandScope.js";
 
 const url = process.env["TEST_DATABASE_URL"];
@@ -45,7 +46,7 @@ describe.skipIf(!url)("native creation identity locks", () => {
         );
         await admin.query(
           `INSERT INTO identity.organization_memberships
-          (id, organization_id, user_id, role_key, access_origin, property_access_mode) VALUES ($1, $2, $3, $4, 'agency', 'all')`,
+          (id, organization_id, user_id, role_key, access_origin, property_access_mode, pms_access_enabled, booking_access_enabled) VALUES ($1, $2, $3, $4, 'agency', 'all', false, false)`,
           [
             memberships[index],
             organizations[index],
@@ -71,6 +72,27 @@ describe.skipIf(!url)("native creation identity locks", () => {
       native = new pg.Pool({ connectionString: connection.toString(), max: 1 });
       await native.query("BEGIN");
       await assertHotelSetupCreationScope(native, organizations[0]!);
+      expect(
+        await lockHotelSetupCreationPermissions(native, {
+          organizationId: organizations[0]!,
+          actorUserId: users[0]!,
+        }),
+      ).toContain("hotel_catalog.setup.manage");
+      expect(
+        await lockHotelSetupCreationPermissions(native, {
+          organizationId: organizations[0]!,
+          actorUserId: users[1]!,
+        }),
+      ).toBeNull();
+      const currentPermissions = await lockHotelSetupCreationPermissions(native, {
+        organizationId: organizations[0]!,
+        actorUserId: users[0]!,
+      });
+      expect(
+        currentPermissions?.some(
+          (permission) => permission.startsWith("pms.") || permission.startsWith("booking."),
+        ),
+      ).toBe(false);
       for (const [relation, ids] of [
         ["organizations", organizations],
         ["users", users],
@@ -127,6 +149,34 @@ describe.skipIf(!url)("native creation identity locks", () => {
       await expect(
         native.query(`INSERT INTO identity.users (email) VALUES ('new@example.test')`),
       ).rejects.toMatchObject({ code: "42501" });
+      const permissions = () =>
+        lockHotelSetupCreationPermissions(native!, {
+          organizationId: organizations[0]!,
+          actorUserId: users[0]!,
+        });
+      await admin.query(
+        `UPDATE identity.organization_memberships SET status='inactive' WHERE id=$1`,
+        [memberships[0]],
+      );
+      expect(await permissions()).toBeNull();
+      await admin.query(
+        `UPDATE identity.organization_memberships SET status='active', role_definition_id=$2 WHERE id=$1`,
+        [memberships[0], definitions[0]],
+      );
+      expect(await permissions()).toBeNull();
+      await admin.query(
+        `UPDATE identity.organization_memberships SET role_definition_id=NULL,
+        role_key='front_desk', property_access_mode='assigned' WHERE id=$1`,
+        [memberships[0]],
+      );
+      expect(await permissions()).toBeNull();
+      await admin.query(
+        `UPDATE identity.organization_memberships SET role_key='hotel_owner',
+        property_access_mode='all' WHERE id=$1`,
+        [memberships[0]],
+      );
+      await admin.query(`UPDATE identity.users SET status='suspended' WHERE id=$1`, [users[0]]);
+      expect(await permissions()).toBeNull();
       await admin.query(`UPDATE identity.organizations SET status='suspended' WHERE id=$1`, [
         organizations[0],
       ]);
