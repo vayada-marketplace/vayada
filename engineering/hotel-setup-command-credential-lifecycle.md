@@ -375,3 +375,24 @@ from INSERT plans; Feature Hub still receives no entitlement metadata read grant
 PASS is a credential/catalog snapshot. Exact live owner identities, lifecycle,
 IAM, authenticated private-service readiness, composed image/rollback review and
 release approval remain gates. This command neither provisions nor deploys.
+
+## Property creation transport
+
+The API's separate `HOTEL_SETUP_CREATION_COMMAND_ORIGIN` and
+`HOTEL_SETUP_CREATION_COMMAND_INTERNAL_TOKEN` configure forwarding only for POST
+`/api/hotel-setup/properties` to private POST `/properties`, preserving the
+original bearer, JSON profile and unique idempotency key. Caller context headers
+and query overrides are not forwarded. This is the same explicit route-policy
+exception as currency transport: the private handler independently verifies the
+original session and runs the shared `hotel_catalog.setup.manage`, hotel-group,
+publication-permission and profile-validation checks. Service or transport failure
+never falls back to local property writes. Other profile reads and edits keep
+their ordinary repository.
+
+Creation registration is optional in the private service builder. This slice
+adds the shared handler and forwarding only, not a production command adapter.
+The executable must not enable creation until the native organization credential,
+full write/trigger scope, lifecycle and exact runtime preflights are reviewed.
+The default runtime URL and migration URL cannot be used for private creation.
+This configuration leaves currency and Feature Hub routing unchanged; enabling
+creation does not activate or deploy the Financials rollout.
