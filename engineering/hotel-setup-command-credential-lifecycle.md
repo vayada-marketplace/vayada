@@ -375,3 +375,24 @@ from INSERT plans; Feature Hub still receives no entitlement metadata read grant
 PASS is a credential/catalog snapshot. Exact live owner identities, lifecycle,
 IAM, authenticated private-service readiness, composed image/rollback review and
 release approval remain gates. This command neither provisions nor deploys.
+
+## Compiled-image credential rehearsal
+
+The existing local credential fixtures can run the same reader and three native
+purposes against `apps/api/dist/cli/*Preflight.js` in a candidate image built with
+`apps/api/Dockerfile` (Node 24, `linux/amd64`). Set `HOTEL_SETUP_PREFLIGHT_IMAGE`,
+`HOTEL_SETUP_PREFLIGHT_NETWORK`, `HOTEL_SETUP_PREFLIGHT_DATABASE_HOST`, and the
+local public CA in `NODE_EXTRA_CA_CERTS`. The test runner only injects preflight
+configuration, never AWS/admin/internal-token credentials. Passwords stay in the
+child environment. It maps the local endpoint to the owned PostgreSQL container;
+bad credentials and missing CA still reach the real compiled executable.
+
+Run `hotelSetupPropertyFinancialsScope.integration.test.ts` and
+`cli/hotelSetupReaderPreflight.test.ts` serially per owned cluster, with
+`TEST_DATABASE_URL` and `HOTEL_SETUP_READER_PREFLIGHT_TEST_DATABASE_URL` pointing
+to a loopback `/vay1092_` migrated fixture. These tests temporarily change PUBLIC
+database ACLs, restore them and remove their synthetic roles. Use only a dedicated
+local cluster. CI uses its own `vay1092_setup_credential_fixture` database for
+native scope tests and the shared fixture for source CLI rejection tests. This
+local rehearsal does not populate the
+platform's reviewed image inventory or verify live credentials.

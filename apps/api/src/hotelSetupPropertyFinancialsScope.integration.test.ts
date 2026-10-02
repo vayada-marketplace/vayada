@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { runHotelSetupPreflight } from "./cli/hotelSetupPreflight.testHelper.js";
 import { checkHotelSetupPropertyCredential } from "./cli/hotelSetupPropertyPreflight.js";
 import { randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
@@ -144,48 +144,55 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           const endpoint = new URL(url!);
           endpoint.username = endpoint.password = endpoint.search = "";
           const run = (overrides: NodeJS.ProcessEnv = {}) =>
-            spawnSync(
-              process.execPath,
-              [
-                "--import",
-                "tsx",
-                new URL("./cli/hotelSetupPropertyPreflight.ts", import.meta.url).pathname,
-              ],
-              {
-                encoding: "utf8",
-                timeout: 30_000,
-                env: {
-                  ...process.env,
-                  HOTEL_SETUP_COMMAND_DATABASE_URL: credential.toString(),
-                  HOTEL_SETUP_COMMAND_DATABASE_ENDPOINT: endpoint.toString(),
-                  HOTEL_SETUP_COMMAND_DATABASE_LOGIN: roles[1],
-                  HOTEL_SETUP_COMMAND_PROPERTY_ID: properties[1],
-                  HOTEL_SETUP_COMMAND_ORGANIZATION_ID: organizationId,
-                  HOTEL_SETUP_COMMAND_OPERATION: operation,
-                  PGHOST: "untrusted.invalid",
-                  PGPORT: "1",
-                  PGOPTIONS: "-c role=postgres",
-                  ...overrides,
-                },
-              },
-            );
+            runHotelSetupPreflight("hotelSetupPropertyPreflight", {
+              HOTEL_SETUP_COMMAND_DATABASE_URL: credential.toString(),
+              HOTEL_SETUP_COMMAND_DATABASE_ENDPOINT: endpoint.toString(),
+              HOTEL_SETUP_COMMAND_DATABASE_LOGIN: roles[1],
+              HOTEL_SETUP_COMMAND_PROPERTY_ID: properties[1],
+              HOTEL_SETUP_COMMAND_ORGANIZATION_ID: organizationId,
+              HOTEL_SETUP_COMMAND_OPERATION: operation,
+              PGHOST: "untrusted.invalid",
+              PGPORT: "1",
+              PGOPTIONS: "-c role=postgres",
+              ...overrides,
+            });
           expect(run()).toMatchObject({
             status: 0,
             stderr: "",
             stdout: '{"status":"PASS","scope":"hotel_setup_property"}\n',
           });
-          expect(run({ NODE_EXTRA_CA_CERTS: "" })).toMatchObject({
-            status: 1,
-            stdout: "",
-            stderr: '{"status":"FAIL","code":"hotel_setup_property_preflight_failed"}\n',
-          });
           const bad = new URL(credential);
           bad.password = "wrong-password".repeat(4);
-          expect(run({ HOTEL_SETUP_COMMAND_DATABASE_URL: bad.toString() })).toMatchObject({
+          const failure = {
             status: 1,
             stdout: "",
             stderr: '{"status":"FAIL","code":"hotel_setup_property_preflight_failed"}\n',
-          });
+          };
+          for (const overrides of [
+            { NODE_EXTRA_CA_CERTS: "" },
+            { HOTEL_SETUP_COMMAND_DATABASE_URL: bad.toString() },
+            { HOTEL_SETUP_COMMAND_PROPERTY_ID: properties[0] },
+            { HOTEL_SETUP_COMMAND_ORGANIZATION_ID: organizations[1] },
+            {
+              HOTEL_SETUP_COMMAND_OPERATION:
+                operation === "currency" ? "currency_ready" : "currency",
+            },
+          ])
+            expect(run(overrides)).toMatchObject(failure);
+          await admin.query(
+            `GRANT CONNECT ON DATABASE ${quote(databaseUrl.pathname.slice(1))} TO ${roles[1]} WITH GRANT OPTION`,
+          );
+          expect(run()).toMatchObject(failure);
+          await admin.query(
+            `REVOKE GRANT OPTION FOR CONNECT ON DATABASE ${quote(databaseUrl.pathname.slice(1))} FROM ${roles[1]}`,
+          );
+          await admin.query(
+            `GRANT SELECT (private_payload) ON platform.product_audit_events TO ${roles[1]}`,
+          );
+          expect(run()).toMatchObject(failure);
+          await admin.query(
+            `REVOKE SELECT (private_payload) ON platform.product_audit_events FROM ${roles[1]}`,
+          );
         }
         await admin.query(
           `GRANT TEMPORARY ON DATABASE ${quote(new URL(url!).pathname.slice(1))} TO PUBLIC`,
@@ -2281,5 +2288,5 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
       }
       await admin.end();
     }
-  }, 60_000);
+  }, 120_000);
 });

@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { runHotelSetupPreflight } from "./hotelSetupPreflight.testHelper.js";
 import { randomBytes } from "node:crypto";
 import pg from "pg";
 import { describe, expect, it } from "vitest";
@@ -9,11 +10,7 @@ import {
 
 const executable = new URL("./hotelSetupReaderPreflight.ts", import.meta.url);
 function run(overrides: NodeJS.ProcessEnv) {
-  return spawnSync(process.execPath, ["--import", "tsx", executable.pathname], {
-    encoding: "utf8",
-    env: { ...process.env, ...overrides },
-    timeout: 30_000,
-  });
+  return runHotelSetupPreflight("hotelSetupReaderPreflight", overrides);
 }
 
 it("sanitizes asynchronous pg socket errors as well as rejected queries", () => {
@@ -63,7 +60,7 @@ it("preflight fails closed without a credential and sanitizes malformed secrets"
     });
     expect(result.stderr).not.toContain("synthetic-secret");
   }
-});
+}, 30_000);
 
 const adminUrl = process.env.HOTEL_SETUP_READER_PREFLIGHT_TEST_DATABASE_URL;
 describe.runIf(adminUrl)("native reader credential on isolated PostgreSQL", () => {

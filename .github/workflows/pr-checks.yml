@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - "fm/vay-1092-*"
       - flamurmaliqi2811/vay-2044-expense-worker-runtime
       - fm/vay-2041-worker-permissions
       - fm/vay-2041-worker-source-permissions
@@ -444,7 +445,17 @@ jobs:
 
       - name: Verify native hotel setup creation and currency scope
         run: |
-          npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupCreationScope.integration.test.ts src/hotelSetupPropertyFinancialsScope.integration.test.ts
+          node --input-type=module -e '
+            import pg from "pg";
+            const client = new pg.Client({ connectionString: process.env.TEST_DATABASE_URL });
+            await client.connect();
+            await client.query("CREATE DATABASE vay1092_setup_credential_fixture");
+            await client.end();
+          '
+          credential_fixture=postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay1092_setup_credential_fixture
+          TARGET_DATABASE_URL="$credential_fixture" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          TEST_DATABASE_URL="$credential_fixture" npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupCreationScope.integration.test.ts src/hotelSetupPropertyFinancialsScope.integration.test.ts
+          npm --workspace vayada-api run test -- src/cli/hotelSetupPropertyPreflight.test.ts src/cli/hotelSetupReaderPreflight.test.ts
           npm --workspace vayada-api run test -- --no-file-parallelism src/sharedHotelSetupProfile.integration.test.ts -t 'provisions one canonical property for concurrent stable-reference commands'
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
