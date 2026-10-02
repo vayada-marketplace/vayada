@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { AuthorizationError } from "@vayada/backend-authorization";
 
 import type {
   PropertyProfileContact,
@@ -9,6 +10,10 @@ import type {
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import { lockHotelSetupOrganization } from "../domains/hotelSetupTrackCommandRepository.js";
+import { assertHotelSetupCreationScope } from "../hotelSetupCommandScope.js";
+import { assertHotelSetupCreationPrivileges } from "../hotelSetupCreationPrivileges.js";
+import { lockHotelSetupCreationPermissions } from "../hotelSetupMembership.js";
+import { hasPublishedPropertySurface } from "../routes/sharedHotelSetupStatus.js";
 import type {
   AdaptivePropertySetupFacts,
   AdaptiveSetupTaskFact,
@@ -172,6 +177,7 @@ export function createPgSharedHotelSetupStatusRepository(config: {
   connectionString: string;
   max?: number;
   pool?: SharedHotelSetupStatusPool;
+  hotelSetupNativeCreation?: boolean;
 }): SharedHotelSetupStatusRepository {
   if (!config.connectionString.trim()) {
     throw new Error("Shared hotel setup status repository connectionString must not be empty");
@@ -218,10 +224,14 @@ export function createPgSharedHotelSetupStatusRepository(config: {
       return loadPropertyProfile(pool, organizationId, propertyId);
     },
     async createPropertyProfile(input) {
-      const propertyId = await writePropertyProfile(pool, {
-        ...input,
-        mode: "create",
-      });
+      const propertyId = await writePropertyProfile(
+        pool,
+        {
+          ...input,
+          mode: "create",
+        },
+        config.hotelSetupNativeCreation === true,
+      );
       if (!propertyId) {
         throw new Error("Created shared property profile did not return a property id");
       }
@@ -616,6 +626,7 @@ async function writePropertyProfile(
         expectedProfileRevision: number;
         profile: SharedPropertyProfileInput;
       },
+  nativeCreation = false,
 ): Promise<string | null> {
   const payload = propertyProfileWritePayload(input.profile);
   if (input.mode === "create") {
@@ -635,11 +646,35 @@ async function writePropertyProfile(
     );
     try {
       await client.query("BEGIN");
+      if (
+        nativeCreation &&
+        (!input.audit ||
+          input.targetAccountUserId !== undefined ||
+          input.provisioningReference !== undefined ||
+          input.audit.reason !== undefined)
+      )
+        throw new AuthorizationError();
+      if (nativeCreation) await assertHotelSetupCreationPrivileges(client);
+      // Match the track command's advisory-lock order before taking organization row locks.
       await lockHotelSetupOrganization(
         client,
         input.organizationId,
         input.targetAccountUserId ?? null,
       );
+      if (nativeCreation) {
+        await assertHotelSetupCreationScope(client, input.organizationId);
+        const permissions = await lockHotelSetupCreationPermissions(client, {
+          organizationId: input.organizationId,
+          actorUserId: input.audit!.actorUserId,
+        });
+        if (
+          !permissions ||
+          (hasPublishedPropertySurface(input.profile) &&
+            !permissions.includes("marketplace.profile.manage") &&
+            !permissions.includes("booking.settings.manage"))
+        )
+          throw new AuthorizationError();
+      }
       if (input.provisioningReference) {
         await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
           input.provisioningReference,

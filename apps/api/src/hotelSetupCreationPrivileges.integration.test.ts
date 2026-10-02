@@ -27,6 +27,7 @@ describe.skipIf(!url)("native creation privilege contract", () => {
     const repository = createPgSharedHotelSetupStatusRepository({
       connectionString: login.toString(),
       pool: native,
+      hotelSetupNativeCreation: true,
     });
     let createdRole = false;
     let restoreTemp = false;
@@ -152,6 +153,20 @@ describe.skipIf(!url)("native creation privilege contract", () => {
           )
         ).rowCount,
       ).toBe(1);
+      await admin.query(
+        `UPDATE identity.organization_memberships SET status='inactive'
+        WHERE organization_id=$1 AND user_id=$2`,
+        [organizationId, actorUserId],
+      );
+      await expect(repository.createPropertyProfile(command)).rejects.toThrow("not authorized");
+      await admin.query(
+        `UPDATE identity.organization_memberships SET status='active'
+        WHERE organization_id=$1 AND user_id=$2`,
+        [organizationId, actorUserId],
+      );
+      await expect(
+        repository.createPropertyProfile({ ...command, targetAccountUserId: actorUserId }),
+      ).rejects.toThrow("not authorized");
       expect(
         (
           await admin.query(
@@ -168,10 +183,42 @@ describe.skipIf(!url)("native creation privilege contract", () => {
           )
         ).rowCount,
       ).toBe(1);
+      const publicationGrants = await admin.query(`DELETE FROM identity.role_permission_grants
+        WHERE organization_kind='hotel_group' AND role_key='hotel_owner'
+          AND permission_key IN ('marketplace.profile.manage','booking.settings.manage') RETURNING *`);
+      try {
+        await expect(
+          repository.createPropertyProfile({
+            ...command,
+            idempotencyKey: "publication-denied",
+            profile: {
+              ...command.profile,
+              location: { ...command.profile.location, localityPublic: true },
+            },
+          }),
+        ).rejects.toThrow("not authorized");
+      } finally {
+        for (const grant of publicationGrants.rows) {
+          await admin.query(
+            `INSERT INTO identity.role_permission_grants
+            (id,organization_kind,role_key,permission_key,created_at) VALUES ($1,$2,$3,$4,$5)`,
+            [
+              grant.id,
+              grant.organization_kind,
+              grant.role_key,
+              grant.permission_key,
+              grant.created_at,
+            ],
+          );
+        }
+      }
       await admin.query(
         `GRANT SELECT (private_payload) ON platform.product_audit_events TO ${role}`,
       );
       await expect(assertHotelSetupCreationPrivileges(native)).rejects.toThrow(
+        "column privileges mismatch",
+      );
+      await expect(repository.createPropertyProfile(command)).rejects.toThrow(
         "column privileges mismatch",
       );
       await admin.query(
@@ -179,6 +226,9 @@ describe.skipIf(!url)("native creation privilege contract", () => {
       );
       await admin.query(`GRANT TEMP ON DATABASE "${database}" TO ${role}`);
       await expect(assertHotelSetupCreationPrivileges(native)).rejects.toThrow(
+        "privilege posture mismatch",
+      );
+      await expect(repository.createPropertyProfile(command)).rejects.toThrow(
         "privilege posture mismatch",
       );
     } finally {
