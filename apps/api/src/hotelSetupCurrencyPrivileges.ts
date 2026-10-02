@@ -181,8 +181,8 @@ export async function assertHotelSetupCurrencyPrivileges(
     client,
     inventory,
     operation === "currency_ready"
-      ? "eed79e20681b7f2a84921e5826402051"
-      : "caeb8242e09a8af001570421e558e76f",
+      ? "e2f2bb7a7227a0ed3c38e87dfb226223"
+      : "32426a8fdd3f0df6660e3ed236a95123",
   );
   const result = await client.query<{ safe: boolean }>(
     `SELECT (
