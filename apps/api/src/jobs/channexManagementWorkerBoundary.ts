@@ -95,7 +95,7 @@ export async function assertChannexManagementWorkerBoundary(
   ).rows;
   if (
     createHash("sha256").update(JSON.stringify(catalog)).digest("hex") !==
-    "b6f00af1bf82bf087c49a594e56d2f765d5c9748ddd8239bc49eb490d24b193a"
+    "f58889931010f26f5b7faae51967f14197d1436399fa8d8ed307d2d02d200246"
   )
     fail("catalog_drift");
   const version = Number(

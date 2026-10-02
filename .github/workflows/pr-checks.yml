@@ -444,9 +444,8 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
-      - name: Verify native hotel setup creation and currency scope
+      - name: Verify concurrent native property creation
         run: |
-          npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupCreationScope.integration.test.ts src/hotelSetupPropertyFinancialsScope.integration.test.ts
           npm --workspace vayada-api run test -- --no-file-parallelism src/sharedHotelSetupProfile.integration.test.ts -t 'provisions one canonical property for concurrent stable-reference commands'
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
@@ -490,7 +489,7 @@ jobs:
           npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupCreationPrivileges.integration.test.ts src/hotelSetupCreationScope.integration.test.ts src/hotelSetupCreationContacts.integration.test.ts src/hotelSetupCreationIdentity.integration.test.ts src/hotelSetupCreationProducts.integration.test.ts src/hotelSetupPropertyFinancialsScope.integration.test.ts
         env:
           ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
-          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vay1092_vay965_creation_test
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay1092_vay965_creation_test
 
       - name: Verify private creation authentication and credential handling
         run: >-
