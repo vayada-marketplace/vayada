@@ -23,6 +23,7 @@ import {
 import { registerPmsPricingCurrencyCommand } from "./routes/pmsPricing.js";
 import {
   registerSharedHotelSetupPropertyCreation,
+  registerSharedHotelSetupLaunchSettings,
   type SharedHotelSetupStatusRepository,
 } from "./routes/sharedHotelSetupStatus.js";
 
@@ -36,6 +37,9 @@ type HotelSetupCommandServiceOptions = {
   };
   currencyCommands?: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">;
   propertyCreation?: Pick<SharedHotelSetupStatusRepository, "createPropertyProfile">;
+  launchSettings?: {
+    updateLaunchSettings: Parameters<typeof registerSharedHotelSetupLaunchSettings>[1];
+  };
   featureHub?: {
     reads: Pick<PmsModuleActivationRepository, "list" | "close">;
     commands: Pick<PmsModuleActivationRepository, "updateFinancials">;
@@ -96,6 +100,11 @@ export function buildHotelSetupCommandService(
   if (options.propertyCreation)
     registerSharedHotelSetupPropertyCreation(app, options.propertyCreation, {
       requireOwnerSession: true,
+    });
+  if (options.launchSettings)
+    registerSharedHotelSetupLaunchSettings(app, options.launchSettings.updateLaunchSettings, {
+      requireOwnerSession: true,
+      propertyAccessRepository,
     });
   if (options.featureHub)
     app.register(registerPmsModuleActivationRoutes, {

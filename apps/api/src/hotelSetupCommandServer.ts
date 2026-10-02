@@ -1,3 +1,4 @@
+import { createHotelSetupLaunchSettingsCommands } from "./hotelSetupLaunchSettingsCommands.js";
 import { createPgIdentityRepository, createWorkOSVerifier } from "@vayada/backend-auth";
 import {
   createPgEntitlementRepository,
@@ -43,6 +44,7 @@ try {
             pool: reader,
           });
           return {
+            launchSettings: createHotelSetupLaunchSettingsCommands(credentials),
             currencyCommands: createHotelSetupCurrencyCommands({
               ...credentials,
               currencyChangeGuard: PMS_PRICING_CURRENCY_CHANGE_FAIL_CLOSED_GUARD,

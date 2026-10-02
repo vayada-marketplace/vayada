@@ -791,6 +791,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       propertyAccessRepository: options.auth?.propertyAccessRepository,
       launchSettingsRepository: options.propertyLaunchSettingsRepository,
       propertyCreationForwarder: options.hotelSetupCreationForwarder,
+      launchSettingsForwarder: options.hotelSetupCommandForwarder,
     });
   }
   if (options.propertySetupRouteStateReadPort) {
