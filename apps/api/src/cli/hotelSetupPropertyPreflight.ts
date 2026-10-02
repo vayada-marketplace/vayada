@@ -21,6 +21,8 @@ export async function checkHotelSetupPropertyCredential(
     operation: HotelSetupOperation;
   },
 ) {
+  if (scope.operation === "launch_settings")
+    throw new Error("Launch settings credential contract is not staged");
   await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
   try {
     await assertHotelSetupDatabaseIsolation(client);

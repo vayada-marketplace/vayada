@@ -2,7 +2,7 @@ import type { QueryResultRow } from "pg";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export type HotelSetupOperation = "currency" | "currency_ready" | "feature_hub";
+export type HotelSetupOperation = "currency" | "currency_ready" | "feature_hub" | "launch_settings";
 
 type ScopeQuery = {
   query<T extends QueryResultRow>(sql: string, values?: readonly unknown[]): Promise<{ rows: T[] }>;
