@@ -40,6 +40,31 @@ that is provisioner control, not a parent role inherited by the reader. Ambiguou
 transport/commit outcomes require inspection of the still-disabled role; never
 adopt or activate it on retry. The service never receives the admin credential.
 
+### Verified reader secret candidate
+
+A separate provisioner may call `stageVerifiedHotelSetupReaderSecret` only after
+reader password setup and LOGIN activation have their own reviewed proof. It
+reuses the real TLS/native reader preflight and requires the exact live reader
+container to have no versions, including deprecated versions from
+`ListSecretVersionIds(IncludeDeprecated=true)` with no unexamined next page.
+The helper creates a separate random
+`hotel-setup-command/prod/reader-candidate/<uuid>` container, stores the raw URL,
+and reads back its exact immutable version before returning non-secret references.
+The OAuth vault JSON-encodes values and updates the live secret; it cannot implement
+this raw ECS-injected URL contract.
+
+[AWS automatically labels the first version AWSCURRENT](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_PutSecretValue.html),
+even when custom stages are supplied. Therefore this candidate must be separate
+from `hotel-setup-command/prod/reader-database-url`. Private execution/task IAM
+permits only the exact live injected secrets and native purpose prefixes; it must
+have no access to the candidate prefix. Candidate creation is not publication.
+The helper never writes or relabels the live reader container, changes a database
+login or service mapping, or deletes/retries an uncertain candidate. Inspection is
+required after an uncertain write. The provisioner supplies its own admin Secrets
+Manager client; no writer is wired into the command service. Copying the verified
+value into the live container, credential lifecycle, exact live IAM, private
+readiness and release approval remain separate gates.
+
 The private executable is `npm --workspace vayada-api run start:hotel-setup-command`
 (default port 8011). It requires its own `HOTEL_SETUP_COMMAND_*` configuration;
 it cannot use `TARGET_DATABASE_URL` or the ordinary API's WorkOS configuration.
