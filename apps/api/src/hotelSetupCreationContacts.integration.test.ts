@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { describe, expect, it } from "vitest";
 
+import { assertHotelSetupCreationScope } from "./hotelSetupCommandScope.js";
+
 const url = process.env["TEST_DATABASE_URL"];
 
 describe.skipIf(!url)("native creation contact scope", () => {
@@ -85,6 +87,10 @@ describe.skipIf(!url)("native creation contact scope", () => {
           [id, value],
         );
       await native.query("BEGIN");
+      await assertHotelSetupCreationScope(native, organizationId);
+      await expect(assertHotelSetupCreationScope(native, foreignOrganizationId)).rejects.toThrow(
+        "Hotel setup creation scope preflight failed",
+      );
       await native.query(
         `INSERT INTO hotel_catalog.properties
         (id, public_id, display_name, creation_organization_id)
@@ -181,6 +187,9 @@ describe.skipIf(!url)("native creation contact scope", () => {
       await admin.query(
         `DELETE FROM platform.hotel_setup_creation_scopes WHERE database_login = $1`,
         [nativeRole],
+      );
+      await expect(assertHotelSetupCreationScope(native, organizationId)).rejects.toThrow(
+        "Hotel setup creation scope preflight failed",
       );
       expect(
         (
