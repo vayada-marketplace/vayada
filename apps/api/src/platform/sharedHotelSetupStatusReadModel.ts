@@ -694,6 +694,9 @@ async function writePropertyProfile(
       const propertyId = created.rows[0]?.propertyId;
       if (!propertyId)
         throw new Error("Created shared property profile did not return a property id");
+      // Native policies need parent links visible in a later statement's snapshot.
+      // All stages stay on this client and roll back together.
+      await client.query(createPropertyCatalogOwnerSql(), [input.organizationId, propertyId]);
       const result = await client.query<PropertyProfileWriteRow>(createPropertyProfileSql(), [
         input.organizationId,
         payload,
@@ -701,6 +704,7 @@ async function writePropertyProfile(
       ]);
       if (result.rows[0]?.propertyId !== propertyId)
         throw new Error("Created shared property profile links did not return the property id");
+      await client.query(createPropertyProductDefaultsSql(), [input.organizationId, propertyId]);
       if (input.provisioningReference) {
         await linkProvisioningReference(client, {
           propertyId,
@@ -1453,6 +1457,43 @@ function createBasePropertySql(): string {
   `;
 }
 
+function createPropertyCatalogOwnerSql(): string {
+  return `INSERT INTO identity.organization_resource_links
+    (organization_id, product, resource_type, resource_id, relationship, status)
+    VALUES ($1::uuid, 'hotel_catalog', 'property', $2::uuid::text, 'owner', 'active')`;
+}
+
+function createPropertyProductDefaultsSql(): string {
+  return `WITH linked_product_properties AS (
+    SELECT product, resource_id FROM identity.organization_resource_links
+    WHERE organization_id=$1::uuid AND resource_id=$2::uuid::text
+      AND relationship='owner' AND status='active'
+      AND (product, resource_type) IN (('booking', 'booking_hotel'), ('marketplace', 'hotel_profile'))
+  ),
+    initialized_marketplace_profile AS (
+      INSERT INTO marketplace.marketplace_hotel_profiles (
+        property_id,
+        organization_id,
+        source_system,
+        source_hotel_profile_id
+      )
+      SELECT resource_id::uuid, $1::uuid, 'marketplace', resource_id
+      FROM linked_product_properties
+      WHERE product = 'marketplace'
+      ON CONFLICT (property_id) DO NOTHING
+      RETURNING property_id
+    ),
+    initialized_booking_settings AS (
+      INSERT INTO booking.booking_settings (property_id)
+      SELECT resource_id::uuid
+      FROM linked_product_properties
+      WHERE product = 'booking'
+      ON CONFLICT (property_id) DO NOTHING
+      RETURNING property_id
+    )
+  SELECT 1`;
+}
+
 function createPropertyProfileSql(): string {
   return `
     WITH profile_input AS (
@@ -1475,25 +1516,6 @@ function createPropertyProfileSql(): string {
     ),
     created_property AS (
       SELECT $3::uuid AS property_id
-    ),
-    linked_property AS (
-      INSERT INTO identity.organization_resource_links (
-        organization_id,
-        product,
-        resource_type,
-        resource_id,
-        relationship,
-        status
-      )
-      SELECT
-        $1::uuid,
-        'hotel_catalog',
-        'property',
-        created_property.property_id::text,
-        'owner',
-        'active'
-      FROM created_property
-      RETURNING product, resource_id
     ),
     setup_product_keys(product, entitlement_key) AS (
       VALUES
@@ -1598,27 +1620,6 @@ function createPropertyProfileSql(): string {
       FROM created_property
       JOIN enabled_products entitlement ON TRUE
       RETURNING product, resource_id
-    ),
-    initialized_marketplace_profile AS (
-      INSERT INTO marketplace.marketplace_hotel_profiles (
-        property_id,
-        organization_id,
-        source_system,
-        source_hotel_profile_id
-      )
-      SELECT resource_id::uuid, $1::uuid, 'marketplace', resource_id
-      FROM linked_product_properties
-      WHERE product = 'marketplace'
-      ON CONFLICT (property_id) DO NOTHING
-      RETURNING property_id
-    ),
-    initialized_booking_settings AS (
-      INSERT INTO booking.booking_settings (property_id)
-      SELECT resource_id::uuid
-      FROM linked_product_properties
-      WHERE product = 'booking'
-      ON CONFLICT (property_id) DO NOTHING
-      RETURNING property_id
     ),
     written_property AS (
       SELECT * FROM created_property
