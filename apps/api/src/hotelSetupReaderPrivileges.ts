@@ -221,7 +221,7 @@ export async function assertHotelSetupAuditBoundary(client: HotelSetupPrivilegeQ
     AND (SELECT pg_catalog.md5(pg_catalog.string_agg(pg_catalog.pg_get_triggerdef(t.oid)
       || pg_catalog.pg_get_functiondef(t.tgfoid) || t.tgenabled::text,'' ORDER BY t.tgname))
       FROM pg_catalog.pg_trigger t WHERE t.tgrelid=c.oid AND NOT t.tgisinternal)
-      ='06f7e342246dda536d319f80f3333ff5'
+      ='c039e04dcdd85a42db5a8f8379a37244'
   ) AS safe FROM pg_catalog.pg_class c WHERE c.oid='platform.product_audit_events'::regclass`);
   if (audit.rows.length !== 1 || audit.rows[0]?.safe !== true)
     throw new Error("Hotel setup reader audit boundary mismatch");
