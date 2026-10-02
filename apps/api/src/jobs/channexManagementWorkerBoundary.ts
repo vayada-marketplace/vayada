@@ -5,7 +5,7 @@ import {
   channexManagementWorkerPrivileges,
 } from "./channexManagementWorkerPrivileges.js";
 
-// Canonical catalogs through migration 0437, checked on PG16 and PG17.
+// Worker policy catalog through 0437; shared trigger catalog through 0460, checked on PG16/17.
 const POLICY_DIGEST = "fc60ee7cf0ac6346843a77b8c62b9997eda39af3aa420cd06b732d775e0bd863";
 export const channexManagementWorkerFunctions = [
   "platform.channex_management_worker_scope(text,text,uuid)",
@@ -95,7 +95,7 @@ export async function assertChannexManagementWorkerBoundary(
   ).rows;
   if (
     createHash("sha256").update(JSON.stringify(catalog)).digest("hex") !==
-    "8bd875fcc332ae003015463846800a1add54779d5f53701cfadd22be0f62a99f"
+    "f58889931010f26f5b7faae51967f14197d1436399fa8d8ed307d2d02d200246"
   )
     fail("catalog_drift");
   const version = Number(
