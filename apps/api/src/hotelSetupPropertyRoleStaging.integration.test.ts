@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import pg from "pg";
 import { describe, expect, it, vi } from "vitest";
 import { stageHotelSetupPropertyRole } from "./hotelSetupPropertyRoleStaging.js";
+import { activateVerifiedHotelSetupPropertyRole } from "./hotelSetupPropertyRoleActivation.js";
 import type { HotelSetupOperation } from "./hotelSetupCommandScope.js";
 import { checkHotelSetupPropertyCredential } from "./cli/hotelSetupPropertyPreflight.js";
 import { HOTEL_SETUP_LAUNCH_SETTINGS_PRIVILEGES } from "./hotelSetupLaunchSettingsPrivileges.js";
@@ -158,12 +159,38 @@ describe.runIf(connectionString)("manual disabled property-role staging", () => 
         } finally {
           await disabled.end();
         }
-        // Fixture-only activation/assignment to prove the staged effective grants natively.
-        await admin.query(`ALTER ROLE ${role} LOGIN`);
-        await admin.query(
-          "INSERT INTO platform.hotel_setup_property_scopes(database_login,property_id,organization_id,operation_class) VALUES($1,$2,$3,$4)",
-          [staged.login, propertyId, organizationId, operation],
-        );
+        await admin.query(`ALTER ROLE ${role} PASSWORD NULL`);
+        if (operation === "launch_settings") {
+          await admin.query(
+            "UPDATE identity.organization_memberships SET status='suspended' WHERE user_id=$1",
+            [actorUserId],
+          );
+          await expect(
+            activateVerifiedHotelSetupPropertyRole({
+              ...input,
+              staged,
+              nativeDatabaseUrl: nativeUrl.toString(),
+            }),
+          ).rejects.toThrow("verification failed");
+          await admin.query(
+            "UPDATE identity.organization_memberships SET status='active' WHERE user_id=$1",
+            [actorUserId],
+          );
+          await expect(
+            activateVerifiedHotelSetupPropertyRole({
+              ...input,
+              staged: { ...staged, propertyId: other },
+              nativeDatabaseUrl: nativeUrl.toString(),
+            }),
+          ).rejects.toThrow("verification failed");
+        }
+        await expect(
+          activateVerifiedHotelSetupPropertyRole({
+            ...input,
+            staged,
+            nativeDatabaseUrl: nativeUrl.toString(),
+          }),
+        ).resolves.toEqual(staged);
         const native = new pg.Client({ connectionString: nativeUrl.toString() });
         await native.connect();
         try {
@@ -286,6 +313,45 @@ describe.runIf(connectionString)("manual disabled property-role staging", () => 
         queries.mockRestore();
       }
       expect(await count()).toEqual(original);
+      expect(await counts()).toEqual(before);
+
+      const staged = await stageHotelSetupPropertyRole(input);
+      roles.push(staged.login);
+      const nativeUrl = new URL(url);
+      nativeUrl.username = staged.login;
+      nativeUrl.password = randomBytes(36).toString("base64url");
+      const activation = { ...input, staged, nativeDatabaseUrl: nativeUrl.toString() };
+      await expect(
+        activateVerifiedHotelSetupPropertyRole({
+          ...activation,
+          staged: { ...staged, roleOid: 1 },
+        }),
+      ).rejects.toThrow("verification failed");
+      await admin.query(
+        `GRANT SELECT(private_payload) ON platform.product_audit_events TO ${admin.escapeIdentifier(staged.login)}`,
+      );
+      await expect(activateVerifiedHotelSetupPropertyRole(activation)).rejects.toThrow(
+        "verification failed",
+      );
+      expect(
+        (
+          await admin.query(
+            "SELECT rolcanlogin,rolpassword FROM pg_catalog.pg_authid WHERE oid=$1",
+            [staged.roleOid],
+          )
+        ).rows,
+      ).toEqual([{ rolcanlogin: false, rolpassword: null }]);
+      expect(
+        (
+          await admin.query(
+            "SELECT active FROM platform.hotel_setup_property_scopes WHERE database_login=$1",
+            [staged.login],
+          )
+        ).rows,
+      ).toEqual([{ active: false }]);
+      await expect(activateVerifiedHotelSetupPropertyRole(activation)).rejects.toThrow(
+        "verification failed",
+      );
       expect(await counts()).toEqual(before);
     } finally {
       await admin.query("ROLLBACK");
