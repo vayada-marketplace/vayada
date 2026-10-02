@@ -23,6 +23,23 @@ The required table policies and direct-SQL denial matrix are in
 
 ## Provisioning
 
+### Disabled reader role staging
+
+`stageHotelSetupReaderRole` is the first reader-only provisioning step. A separate
+provisioner supplies explicit administrative connection configuration; the helper
+opens and closes its own connection and transaction. It creates the fixed reader
+with `NOLOGIN`, no password or parent-role memberships, current-database CONNECT and only the
+canonical reader/audit column grants. Existing roles are rejected without adoption
+or repair; a failed grant (including PostgreSQL insufficient-grant warnings) rolls
+back role creation and every grant. It changes no
+assignment, secret, hotel or PUBLIC privileges. This is not complete credential
+provisioning: inherited/PUBLIC access, ownership and exact catalog checks, verified
+TLS native authentication, password/secret publication and activation remain
+separate release gates. PostgreSQL may grant the role's creator administration rights;
+that is provisioner control, not a parent role inherited by the reader. Ambiguous
+transport/commit outcomes require inspection of the still-disabled role; never
+adopt or activate it on retry. The service never receives the admin credential.
+
 The private executable is `npm --workspace vayada-api run start:hotel-setup-command`
 (default port 8011). It requires its own `HOTEL_SETUP_COMMAND_*` configuration;
 it cannot use `TARGET_DATABASE_URL` or the ordinary API's WorkOS configuration.
