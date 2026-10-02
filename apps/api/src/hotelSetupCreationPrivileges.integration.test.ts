@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { describe, expect, it } from "vitest";
@@ -30,14 +31,18 @@ describe.skipIf(!url)("native creation privilege contract", () => {
       hotelSetupNativeCreation: true,
     });
     let createdRole = false;
-    let restoreTemp = false;
+    const databaseAcls = (
+      await admin.query<{ name: string; privileges: string[] }>(`
+      SELECT d.datname AS name, COALESCE(array_agg(a.privilege_type)
+        FILTER (WHERE a.grantee=0),ARRAY[]::text[]) AS privileges
+      FROM pg_catalog.pg_database d LEFT JOIN LATERAL pg_catalog.aclexplode(
+        COALESCE(d.datacl,pg_catalog.acldefault('d',d.datdba))) a ON true
+      WHERE d.datallowconn GROUP BY d.datname`)
+    ).rows;
+    const quote = (name: string) => '"' + name.replaceAll('"', '""') + '"';
     try {
-      restoreTemp = (
-        await admin.query(
-          `SELECT has_database_privilege('public',current_database(),'TEMP') AS allowed`,
-        )
-      ).rows[0]!.allowed;
-      await admin.query(`REVOKE TEMP ON DATABASE "${database}" FROM PUBLIC`);
+      for (const acl of databaseAcls)
+        await admin.query(`REVOKE ALL ON DATABASE ${quote(acl.name)} FROM PUBLIC`);
       await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD '${password}' NOINHERIT NOSUPERUSER
         NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`);
       createdRole = true;
@@ -85,6 +90,52 @@ describe.skipIf(!url)("native creation privilege contract", () => {
           ($1,'marketplace','marketplace-hotel-profile')`,
         [organizationId],
       );
+      const credentialUrl = new URL(login);
+      credentialUrl.searchParams.set("sslmode", "verify-full");
+      const endpoint = new URL(login);
+      endpoint.username = endpoint.password = endpoint.search = "";
+      const runPreflight = (overrides: NodeJS.ProcessEnv = {}) =>
+        spawnSync(
+          process.execPath,
+          [
+            "--import",
+            "tsx",
+            new URL("./cli/hotelSetupCreationPreflight.ts", import.meta.url).pathname,
+          ],
+          {
+            encoding: "utf8",
+            timeout: 30_000,
+            env: {
+              ...process.env,
+              HOTEL_SETUP_COMMAND_DATABASE_URL: credentialUrl.toString(),
+              HOTEL_SETUP_COMMAND_DATABASE_ENDPOINT: endpoint.toString(),
+              HOTEL_SETUP_COMMAND_DATABASE_LOGIN: role,
+              HOTEL_SETUP_COMMAND_ORGANIZATION_ID: organizationId,
+              HOTEL_SETUP_COMMAND_ACTOR_USER_ID: actorUserId,
+              PGHOST: "untrusted.invalid",
+              PGPORT: "1",
+              PGOPTIONS: "-c role=postgres",
+              ...overrides,
+            },
+          },
+        );
+      const before = (
+        await admin.query("SELECT count(*)::text AS count FROM platform.product_audit_events")
+      ).rows;
+      expect(runPreflight()).toMatchObject({
+        status: 0,
+        stderr: "",
+        stdout: '{"status":"PASS","scope":"hotel_setup_creation"}\n',
+      });
+      expect(runPreflight({ HOTEL_SETUP_COMMAND_ACTOR_USER_ID: randomUUID() })).toMatchObject({
+        status: 1,
+        stdout: "",
+      });
+      expect(runPreflight({ NODE_EXTRA_CA_CERTS: "" })).toMatchObject({ status: 1, stdout: "" });
+      expect(
+        (await admin.query("SELECT count(*)::text AS count FROM platform.product_audit_events"))
+          .rows,
+      ).toEqual(before);
       const client = await native.connect();
       try {
         await client.query("BEGIN");
@@ -275,7 +326,11 @@ describe.skipIf(!url)("native creation privilege contract", () => {
         await admin.query(`DROP OWNED BY ${role}`);
         await admin.query(`DROP ROLE ${role}`);
       }
-      if (restoreTemp) await admin.query(`GRANT TEMP ON DATABASE "${database}" TO PUBLIC`);
+      for (const acl of databaseAcls)
+        if (acl.privileges.length)
+          await admin.query(
+            `GRANT ${acl.privileges.join(",")} ON DATABASE ${quote(acl.name)} TO PUBLIC`,
+          );
       await admin.end();
     }
   });

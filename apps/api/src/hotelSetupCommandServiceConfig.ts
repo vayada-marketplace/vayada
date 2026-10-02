@@ -3,6 +3,12 @@ import type pg from "pg";
 import { parseHotelSetupCredentialConfiguration } from "./hotelSetupCommandCredentials.js";
 
 export type HotelSetupCommandMode = "property_commands" | "property_creation";
+export function parseHotelSetupCommandMode(env: NodeJS.ProcessEnv): HotelSetupCommandMode {
+  const mode = env.HOTEL_SETUP_COMMAND_MODE ?? "property_commands";
+  if (mode !== "property_commands" && mode !== "property_creation")
+    throw new Error("Invalid hotel setup command mode");
+  return mode;
+}
 function readerLogin(mode: HotelSetupCommandMode): string {
   return mode === "property_creation"
     ? "vayada_next_hotel_setup_creation_reader"
@@ -17,9 +23,7 @@ function required(env: NodeJS.ProcessEnv, key: string): string {
 
 /** Private executable only; never falls back to the ordinary API environment. */
 export function loadHotelSetupCommandServiceConfig(env: NodeJS.ProcessEnv = process.env) {
-  const mode = env.HOTEL_SETUP_COMMAND_MODE ?? "property_commands";
-  if (mode !== "property_commands" && mode !== "property_creation")
-    throw new Error("Invalid hotel setup command mode");
+  const mode = parseHotelSetupCommandMode(env);
   const server = loadServerConfig(env, { host: "0.0.0.0", port: 8011 });
   const internalToken = required(env, "HOTEL_SETUP_COMMAND_INTERNAL_TOKEN");
   if (Buffer.byteLength(internalToken) < 32)
