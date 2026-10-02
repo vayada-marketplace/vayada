@@ -36,8 +36,15 @@ export async function stageHotelSetupReaderRole(config: pg.ClientConfig) {
     );
     if (connectionFailed) throw new Error("Hotel setup reader staging connection unavailable");
     if (incompleteGrant) throw new Error("Hotel setup reader staging grants incomplete");
+    const roleOid = (
+      await admin.query<{ oid: number }>("SELECT oid FROM pg_catalog.pg_roles WHERE rolname=$1", [
+        role,
+      ])
+    ).rows[0]!.oid;
+    if (connectionFailed) throw new Error("Hotel setup reader staging connection unavailable");
     await admin.query("COMMIT");
     if (connectionFailed) throw new Error("Hotel setup reader staging commit outcome uncertain");
+    return { roleOid };
   } catch (error) {
     await admin.query("ROLLBACK").catch(() => undefined);
     throw error;

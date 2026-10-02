@@ -462,7 +462,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify private hotel setup reader privileges
-        run: npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupReaderPrivileges.integration.test.ts src/hotelSetupReaderAudit.integration.test.ts src/hotelSetupReaderSecretCandidate.test.ts
+        run: npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupReaderPrivileges.integration.test.ts src/hotelSetupReaderAudit.integration.test.ts src/hotelSetupReaderSecretCandidate.test.ts src/hotelSetupReaderLoginVerification.test.ts
         env:
           HOTEL_SETUP_READER_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
