@@ -81,24 +81,62 @@ export function createHotelSetupCredentialResolver(
     )
       throw new Error("Missing hotel setup assignment");
 
-    const secret = await options.vault.get<unknown>(secretPrefix + scope.databaseLogin);
-    if (
-      typeof secret !== "object" ||
-      secret === null ||
-      Array.isArray(secret) ||
-      Object.keys(secret).length !== 2 ||
-      !("username" in secret) ||
-      !("password" in secret) ||
-      secret.username !== scope.databaseLogin ||
-      typeof secret.password !== "string" ||
-      Buffer.byteLength(secret.password) < 32
-    )
-      throw new Error("Invalid hotel setup credential");
-
-    const connection = new URL(endpoint);
-    connection.username = scope.databaseLogin;
-    connection.password = encodeURIComponent(secret.password);
-    connection.searchParams.set("sslmode", "verify-full");
-    return connection.toString();
+    return readNativeSetupCredential(options.vault, endpoint, secretPrefix, scope.databaseLogin);
   };
+}
+
+/** Private creation only; the database assignment selects an organization-bound native login. */
+export function createHotelSetupCreationCredentialResolver(options: HotelSetupCredentialOptions) {
+  const endpoint = parseHotelSetupCredentialConfiguration(options);
+  const prefix = options.secretPrefix;
+  return async (organizationId: string): Promise<string> => {
+    const result = await options.assignments.query<{
+      databaseLogin: string;
+      organizationId: string;
+    }>(
+      `SELECT scope.database_login::text AS "databaseLogin",
+        scope.organization_id::text AS "organizationId"
+       FROM platform.hotel_setup_creation_scopes scope
+       JOIN identity.organizations organization ON organization.id=scope.organization_id
+       WHERE scope.organization_id=$1::uuid
+         AND organization.kind='hotel_group' AND organization.status='active'`,
+      [organizationId],
+    );
+    const scope = result.rows.length === 1 ? result.rows[0] : undefined;
+    if (
+      !scope ||
+      scope.organizationId !== organizationId ||
+      !/^vayada_next_hotel_setup_org_[a-z0-9_]+$/.test(scope.databaseLogin) ||
+      Buffer.byteLength(scope.databaseLogin) > 63
+    )
+      throw new Error("Missing hotel setup creation assignment");
+    return readNativeSetupCredential(options.vault, endpoint, prefix, scope.databaseLogin);
+  };
+}
+
+async function readNativeSetupCredential(
+  vault: HotelSetupCredentialOptions["vault"],
+  endpoint: URL,
+  secretPrefix: string,
+  databaseLogin: string,
+): Promise<string> {
+  const secret = await vault.get<unknown>(secretPrefix + databaseLogin);
+  if (
+    typeof secret !== "object" ||
+    secret === null ||
+    Array.isArray(secret) ||
+    Object.keys(secret).length !== 2 ||
+    !("username" in secret) ||
+    !("password" in secret) ||
+    secret.username !== databaseLogin ||
+    typeof secret.password !== "string" ||
+    Buffer.byteLength(secret.password) < 32
+  )
+    throw new Error("Invalid hotel setup credential");
+
+  const connection = new URL(endpoint);
+  connection.username = databaseLogin;
+  connection.password = encodeURIComponent(secret.password);
+  connection.searchParams.set("sslmode", "verify-full");
+  return connection.toString();
 }
