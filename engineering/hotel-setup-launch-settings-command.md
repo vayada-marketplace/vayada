@@ -75,3 +75,15 @@ pricing-currency command retains its existing idempotency and completion rules.
    release. Neither immutable creation candidate currently proves this command.
 5. Confirm authenticated live Save and status for both reported accounts before
    reporting recovery. Keep VAY-965 In Progress until accepted live completion.
+
+
+## Release admission hold
+
+The public API can set `HOTEL_SETUP_COMMAND_ADMISSION=blocked` before initial
+property credential bootstrap or rollback. The existing shared forwarder then
+rejects all property commands with uncached 503 without transport or ordinary
+writes. Creation has its separate `HOTEL_SETUP_CREATION_COMMAND_ADMISSION`.
+`enabled` requires a valid private origin/token pair; unknown states fail startup.
+Unset retains the existing pre-cutover behavior. Keep origin/token configuration
+when blocking an already-enabled caller. Only the reviewed release removes the
+hold after private-service and credential proof; setting it does not prove recovery.

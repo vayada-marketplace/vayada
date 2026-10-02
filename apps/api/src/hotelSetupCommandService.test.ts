@@ -858,3 +858,40 @@ it("rejects extra launch claims and keeps creation-only service free of launch c
     ).statusCode,
   ).toBe(404);
 });
+
+it("blocks public property creation before any ordinary writer", async () => {
+  const write = vi.fn(() => {
+    throw new Error("ordinary writer reached");
+  });
+  const transport = vi.fn<typeof fetch>();
+  const gateway = buildApp({
+    logger: false,
+    hotelSetupCreationForwarder: loadHotelSetupCommandForwarder(
+      { HOTEL_SETUP_COMMAND_ADMISSION: "blocked" },
+      transport,
+    ),
+    sharedHotelSetupStatusRepository: {
+      getHotelSetupStatus: vi.fn(),
+      getPropertyProfile: vi.fn(),
+      createPropertyProfile: write,
+      updatePropertyProfile: vi.fn(),
+      getPublicPropertyProfile: vi.fn(),
+      updatePublicPropertyProfile: vi.fn(),
+    },
+    hotelSetupTrackCommandRepository: {
+      updateTracks: vi.fn(),
+      getTrackStatus: vi.fn(),
+      close: vi.fn(),
+    },
+  });
+  apps.push(gateway);
+  const response = await gateway.inject({
+    method: "POST",
+    url: "/api/hotel-setup/properties",
+    headers: { authorization: "Bearer valid", "idempotency-key": "creation-held" },
+    payload: hotelProfile,
+  });
+  expect(response.statusCode).toBe(503);
+  expect(write).not.toHaveBeenCalled();
+  expect(transport).not.toHaveBeenCalled();
+});
