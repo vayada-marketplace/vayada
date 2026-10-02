@@ -35,9 +35,9 @@ export function parseHotelSetupCredentialConfiguration(
 /** Private service only. Purpose comes from the adapter, never the HTTP caller. */
 export function createHotelSetupCredentialResolver(
   options: HotelSetupCredentialOptions,
-  operation: "currency_ready" | "feature_hub",
+  operation: "currency_ready" | "feature_hub" | "launch_settings",
 ) {
-  if (operation !== "currency_ready" && operation !== "feature_hub")
+  if (!["currency_ready", "feature_hub", "launch_settings"].includes(operation))
     throw new Error("Invalid hotel setup credential purpose");
   const endpoint = parseHotelSetupCredentialConfiguration(options);
   const secretPrefix = options.secretPrefix;

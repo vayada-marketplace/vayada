@@ -1,3 +1,4 @@
+import { assertHotelSetupLaunchSettingsPrivileges } from "../hotelSetupLaunchSettingsPrivileges.js";
 import { pathToFileURL } from "node:url";
 import type pg from "pg";
 import {
@@ -21,12 +22,12 @@ export async function checkHotelSetupPropertyCredential(
     operation: HotelSetupOperation;
   },
 ) {
-  if (scope.operation === "launch_settings")
-    throw new Error("Launch settings credential contract is not staged");
   await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
   try {
     await assertHotelSetupDatabaseIsolation(client);
-    if (scope.operation === "feature_hub") await assertHotelSetupFeatureHubPrivileges(client);
+    if (scope.operation === "launch_settings")
+      await assertHotelSetupLaunchSettingsPrivileges(client);
+    else if (scope.operation === "feature_hub") await assertHotelSetupFeatureHubPrivileges(client);
     else await assertHotelSetupCurrencyPrivileges(client, scope.operation);
   } finally {
     await client.query("ROLLBACK");
@@ -50,7 +51,7 @@ export async function runHotelSetupPropertyPreflight(env: NodeJS.ProcessEnv = pr
       if (
         !/^vayada_next_hotel_setup_property_[a-z0-9_]+$/.test(login) ||
         Buffer.byteLength(login) > 63 ||
-        !["currency", "currency_ready", "feature_hub"].includes(operation ?? "")
+        !["currency", "currency_ready", "feature_hub", "launch_settings"].includes(operation ?? "")
       )
         throw new Error("Invalid native credential configuration");
       return parseHotelSetupDatabaseUrl(
