@@ -40,6 +40,22 @@ that is provisioner control, not a parent role inherited by the reader. Ambiguou
 transport/commit outcomes require inspection of the still-disabled role; never
 adopt or activate it on retry. The service never receives the admin credential.
 
+### First reader login verification
+
+A separate provisioner retains the role OID returned by successful staging; it
+must not look up a new OID by name on retry. It may activate only that exact role
+OID, with NOLOGIN, no password, safe attributes, no parent memberships or object
+ownership. This is first setup only, not rotation or adoption. Hold the reader
+activation advisory lock through commit and the actual native TLS preflight;
+the reviewed release window must exclude other administrative role changes.
+Set the supplied random password and LOGIN in one transaction, then use the
+real native reader preflight after commit. No secret is published by activation.
+On failure, disable and clear only the same OID with the exact password verifier
+this attempt installed. A changed role/verifier or unavailable connection
+requires inspection; never repair or disable another attempt's credential.
+Only success allows the separate secret-candidate helper to run. Secret
+publication, rotation, current live IAM and service release remain separate gates.
+
 ### Verified reader secret candidate
 
 A separate provisioner may call `stageVerifiedHotelSetupReaderSecret` only after

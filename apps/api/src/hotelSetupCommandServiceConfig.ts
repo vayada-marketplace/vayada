@@ -61,6 +61,7 @@ export function parseHotelSetupDatabaseUrl(
   try {
     const reader = new URL(raw);
     if (
+      !login ||
       !["postgres:", "postgresql:"].includes(reader.protocol) ||
       decodeURIComponent(reader.username) !== login ||
       Buffer.byteLength(decodeURIComponent(reader.password)) < 32 ||
