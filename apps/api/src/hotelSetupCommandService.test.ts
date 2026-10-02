@@ -159,6 +159,7 @@ it("forwards the original session through real private handlers without a local 
 function fixture(
   options: {
     session?: boolean;
+    creationOnly?: boolean;
     setupComplete?: boolean;
     globalFinancialsSuspended?: boolean;
     financialsActive?: boolean;
@@ -283,23 +284,25 @@ function fixture(
         }),
       },
     },
-    currencyCommands: { upsertPropertyPricingCurrency: save },
+    currencyCommands: options.creationOnly ? undefined : { upsertPropertyPricingCurrency: save },
     propertyCreation: { createPropertyProfile: create },
-    featureHub: {
-      reads: {
-        list: vi.fn().mockResolvedValue([
-          {
-            moduleId: "financials",
-            isActive: options.financialsActive ?? false,
-            activatedAt: null,
-            deactivatedAt: null,
-            updatedAt: "2026-10-01T00:00:00.000Z",
+    featureHub: options.creationOnly
+      ? undefined
+      : {
+          reads: {
+            list: vi.fn().mockResolvedValue([
+              {
+                moduleId: "financials",
+                isActive: options.financialsActive ?? false,
+                activatedAt: null,
+                deactivatedAt: null,
+                updatedAt: "2026-10-01T00:00:00.000Z",
+              },
+            ]),
           },
-        ]),
-      },
-      commands: { updateFinancials: feature },
-      setupComplete,
-    },
+          commands: { updateFinancials: feature },
+          setupComplete,
+        },
   });
   apps.push(app);
   return {
@@ -766,4 +769,16 @@ it("rejects missing internal auth, spoofed context, invalid fields and missing r
     expect([400, 401, 422]).toContain(response.statusCode);
   }
   expect(f.create).not.toHaveBeenCalled();
+});
+
+it("exposes only the property-creation route in creation-only mode", async () => {
+  const f = fixture({ creationOnly: true, permissions: ["hotel_catalog.setup.manage"] });
+  await f.app.ready();
+  expect(f.app.hasRoute({ method: "POST", url: "/properties" })).toBe(true);
+  expect(
+    f.app.hasRoute({ method: "PUT", url: "/properties/:propertyId/pricing-source/currency" }),
+  ).toBe(false);
+  expect(f.app.hasRoute({ method: "GET", url: "/properties/:propertyId/module-activations" })).toBe(
+    false,
+  );
 });

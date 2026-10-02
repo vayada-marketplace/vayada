@@ -1,4 +1,5 @@
 import type pg from "pg";
+import type { HotelSetupCommandMode } from "./hotelSetupCommandServiceConfig.js";
 
 // Canonical backend-auth/authorization, registry selection and Feature Hub reads only.
 export const HOTEL_SETUP_READER_READ_COLUMNS: Record<string, readonly string[]> = {
@@ -68,6 +69,11 @@ export const HOTEL_SETUP_READER_READ_COLUMNS: Record<string, readonly string[]> 
   ],
   "platform.product_audit_events": ["product", "audit_key"],
 };
+export const HOTEL_SETUP_CREATION_READER_READ_COLUMNS = Object.fromEntries(
+  Object.entries(HOTEL_SETUP_READER_READ_COLUMNS)
+    .filter(([relation]) => relation !== "platform.hotel_setup_property_scopes")
+    .concat([["platform.hotel_setup_creation_scopes", ["database_login", "organization_id"]]]),
+);
 export const HOTEL_SETUP_READER_AUDIT_COLUMNS = [
   "audit_key",
   "product",
@@ -178,12 +184,16 @@ export async function assertHotelSetupColumnPrivileges(
 }
 
 /** Read-only catalog check. Audit row-shape/RLS, IAM and native command ACLs are separate gates. */
-export async function assertHotelSetupReaderPrivileges(client: Pick<pg.Pool, "query">) {
+export async function assertHotelSetupReaderPrivileges(
+  client: Pick<pg.Pool, "query">,
+  mode: HotelSetupCommandMode = "property_commands",
+) {
   const inventory: HotelSetupColumnPrivileges = Object.fromEntries(
-    Object.entries(HOTEL_SETUP_READER_READ_COLUMNS).map(([relation, SELECT]) => [
-      relation,
-      { SELECT },
-    ]),
+    Object.entries(
+      mode === "property_creation"
+        ? HOTEL_SETUP_CREATION_READER_READ_COLUMNS
+        : HOTEL_SETUP_READER_READ_COLUMNS,
+    ).map(([relation, SELECT]) => [relation, { SELECT }]),
   );
   inventory["platform.product_audit_events"]!.INSERT = HOTEL_SETUP_READER_AUDIT_COLUMNS;
   await assertHotelSetupColumnPrivileges(client, inventory);
@@ -201,11 +211,11 @@ export async function assertHotelSetupAuditBoundary(client: HotelSetupPrivilegeQ
           FROM pg_catalog.unnest(p.polroles) roles(role)),'')
         || COALESCE(pg_catalog.pg_get_expr(p.polqual,p.polrelid),'')
         || COALESCE(pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid),''),'' ORDER BY p.polname))
-        ='90d09af3e267d8aeb8817c700fd0724e'
+        ='b9c0fcab601eaf5605a35557ec984274'
       FROM pg_catalog.pg_policy p WHERE p.polrelid=c.oid)
     AND pg_catalog.md5(pg_catalog.pg_get_functiondef(
       'platform.hotel_setup_reader_audit_allowed(platform.product_audit_events)'::regprocedure))
-      ='888e163929843b9c7b56919c193c13c5'
+      ='990c9f2f388ba30c768c5b7076c11700'
     AND pg_catalog.has_function_privilege(current_user,
       'platform.hotel_setup_reader_audit_allowed(platform.product_audit_events)','EXECUTE')
     AND (SELECT pg_catalog.md5(pg_catalog.string_agg(pg_catalog.pg_get_triggerdef(t.oid)

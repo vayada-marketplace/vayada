@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => {
     get: vi.fn(),
     broadWrite: vi.fn(),
     currency: vi.fn(),
+    creation: vi.fn(),
     toggle: vi.fn(),
     list: vi.fn(),
     ready: vi.fn(),
@@ -70,6 +71,9 @@ vi.mock("./platform/providerCredentialVault.js", () => ({
     put: vi.fn(),
     delete: vi.fn(),
   }),
+}));
+vi.mock("./hotelSetupCreationCommands.js", () => ({
+  createHotelSetupCreationCommands: mocks.creation,
 }));
 vi.mock("./hotelSetupCurrencyCommands.js", () => ({
   createHotelSetupCurrencyCommands: mocks.currency,
@@ -123,6 +127,20 @@ describe("private hotel setup executable", () => {
     expect(mocks.app.listen).toHaveBeenCalledWith({ host: "127.0.0.1", port: 8011 });
     await mocks.app.addHook.mock.calls[0]![1]();
     expect(mocks.runtimeClose).toHaveBeenCalledOnce();
+  });
+
+  it("registers only creation commands in the isolated creation mode", async () => {
+    mocks.load.mockReturnValueOnce({ ...mocks.config, mode: "property_creation" });
+    mocks.creation.mockReturnValue({ createPropertyProfile: vi.fn() });
+    await import("./hotelSetupCommandServer.js");
+    expect(mocks.preflight).toHaveBeenCalledWith(expect.anything(), "property_creation");
+    expect(mocks.privileges).toHaveBeenCalledWith(expect.anything(), "property_creation");
+    const options = mocks.build.mock.calls[0]![0];
+    expect(options.propertyCreation).toBe(mocks.creation.mock.results[0]!.value);
+    expect(options.currencyCommands).toBeUndefined();
+    expect(options.featureHub).toBeUndefined();
+    expect(mocks.currency).not.toHaveBeenCalled();
+    expect(mocks.toggle).not.toHaveBeenCalled();
   });
 
   it("rejects invalid configuration before constructing pools", async () => {

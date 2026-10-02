@@ -11,11 +11,13 @@ import {
   assertHotelSetupReaderPrivileges,
   HOTEL_SETUP_READER_AUDIT_COLUMNS,
   HOTEL_SETUP_READER_READ_COLUMNS,
+  HOTEL_SETUP_CREATION_READER_READ_COLUMNS,
 } from "./hotelSetupReaderPrivileges.js";
 
+const modes = ["property_commands", "property_creation"] as const;
 const connectionString = process.env.HOTEL_SETUP_READER_TEST_DATABASE_URL;
 describe.runIf(connectionString)("private reader rejection-audit boundary", () => {
-  it("preserves canonical rejection/replay and denies audit and policy drift", async () => {
+  it.each(modes)("rejection audit: %s", async (mode) => {
     if (
       !connectionString ||
       !["localhost", "127.0.0.1", "[::1]"].includes(new URL(connectionString).hostname)
@@ -23,7 +25,10 @@ describe.runIf(connectionString)("private reader rejection-audit boundary", () =
       throw new Error("Hotel setup reader fixture requires a disposable local database");
     const client = new pg.Client({ connectionString });
     await client.connect();
-    const reader = "vayada_next_hotel_setup_reader";
+    const reader =
+      mode === "property_creation"
+        ? "vayada_next_hotel_setup_creation_reader"
+        : "vayada_next_hotel_setup_reader";
     const organizations = [randomUUID(), randomUUID()];
     const users = [randomUUID(), randomUUID()];
     const memberships = [randomUUID(), randomUUID()];
@@ -63,7 +68,11 @@ describe.runIf(connectionString)("private reader rejection-audit boundary", () =
       await client.query("BEGIN");
       await client.query(`CREATE ROLE ${reader} LOGIN NOINHERIT`);
       await client.query(`GRANT USAGE ON SCHEMA identity,platform TO ${reader}`);
-      for (const [relation, columns] of Object.entries(HOTEL_SETUP_READER_READ_COLUMNS))
+      for (const [relation, columns] of Object.entries(
+        mode === "property_creation"
+          ? HOTEL_SETUP_CREATION_READER_READ_COLUMNS
+          : HOTEL_SETUP_READER_READ_COLUMNS,
+      ))
         await client.query(`GRANT SELECT (${columns.join(",")}) ON ${relation} TO ${reader}`);
       await client.query(
         `GRANT INSERT (${HOTEL_SETUP_READER_AUDIT_COLUMNS.join(",")}) ON platform.product_audit_events TO ${reader}`,
@@ -93,7 +102,7 @@ describe.runIf(connectionString)("private reader rejection-audit boundary", () =
         ).rows;
       const before = await businessSnapshot();
       await client.query(`SET SESSION AUTHORIZATION ${reader}`);
-      await assertHotelSetupReaderPrivileges(client);
+      await assertHotelSetupReaderPrivileges(client, mode);
       const resolve = createAuthorizationResolver(roles, undefined, propertyAccess);
       await expect(resolve(context)).rejects.toBeInstanceOf(AuthorizationResolutionError);
       await expect(resolve(context)).rejects.toBeInstanceOf(AuthorizationResolutionError);
@@ -213,7 +222,7 @@ describe.runIf(connectionString)("private reader rejection-audit boundary", () =
         await client.query("SAVEPOINT drift");
         await client.query(sql);
         await client.query(`SET SESSION AUTHORIZATION ${reader}`);
-        await expect(assertHotelSetupReaderPrivileges(client)).rejects.toThrow(
+        await expect(assertHotelSetupReaderPrivileges(client, mode)).rejects.toThrow(
           "audit boundary mismatch",
         );
         await client.query("RESET SESSION AUTHORIZATION");
