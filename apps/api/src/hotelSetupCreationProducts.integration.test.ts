@@ -13,6 +13,7 @@ describe.skipIf(!url)("native creation product scopes", () => {
     const organizations = [randomUUID(), randomUUID()];
     const properties = [randomUUID(), randomUUID()];
     const billing = [randomUUID(), randomUUID()];
+    const newProperties: string[] = [];
     let native: pg.Pool | undefined;
     let created = false;
     try {
@@ -28,7 +29,7 @@ describe.skipIf(!url)("native creation product scopes", () => {
         `GRANT vayada_next_hotel_setup_scope TO ${role} WITH INHERIT TRUE, SET FALSE`,
       );
       await admin.query(
-        `GRANT SELECT ON hotel_catalog.properties, identity.organization_resource_links TO ${role}`,
+        `GRANT SELECT, INSERT ON hotel_catalog.properties, identity.organization_resource_links TO ${role}`,
       );
       // Excessive fixture grants exercise restrictive policies even after an accidental grant.
       await admin.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON hotel_catalog.organization_setup_track_intents,
@@ -132,6 +133,115 @@ describe.skipIf(!url)("native creation product scopes", () => {
         ),
       ).rejects.toMatchObject({ code: "42501" });
       await admin.query(
+        `INSERT INTO identity.product_entitlements
+        (organization_id, product, entitlement_key) VALUES
+        ($1,'booking','booking-engine'), ($1,'pms','property-management'),
+        ($1,'marketplace','marketplace-hotel-profile')`,
+        [organizations[0]],
+      );
+      const createLinkedProperty = async (product: string, resourceType: string) => {
+        const id = randomUUID();
+        newProperties.push(id);
+        await native!.query("BEGIN");
+        try {
+          await native!.query(
+            `INSERT INTO hotel_catalog.properties
+            (id, public_id, display_name, creation_organization_id)
+            VALUES ($1, $1::uuid::text, 'New products fixture', $2)`,
+            [id, organizations[0]],
+          );
+          await native!.query(
+            `INSERT INTO identity.organization_resource_links
+            (organization_id, product, resource_type, resource_id, relationship, status)
+            VALUES ($1, 'hotel_catalog', 'property', $2, 'owner', 'active')`,
+            [organizations[0], id],
+          );
+          await native!.query(
+            `INSERT INTO identity.organization_resource_links
+            (organization_id, product, resource_type, resource_id, relationship, status)
+            VALUES ($1, $2, $3, $4, 'owner', 'active')`,
+            [organizations[0], product, resourceType, id],
+          );
+          if (product === "booking") {
+            await native!.query(`INSERT INTO booking.booking_settings (property_id) VALUES ($1)`, [
+              id,
+            ]);
+          } else if (product === "marketplace") {
+            await native!.query(
+              `INSERT INTO marketplace.marketplace_hotel_profiles
+              (property_id, organization_id, source_hotel_profile_id)
+              VALUES ($1, $2, $1::uuid::text)`,
+              [id, organizations[0]],
+            );
+          }
+          await native!.query("COMMIT");
+          return id;
+        } catch (error) {
+          await native!.query("ROLLBACK");
+          throw error;
+        }
+      };
+      for (const [product, resourceType] of [
+        ["booking", "booking_hotel"],
+        ["pms", "pms_property"],
+        ["marketplace", "hotel_profile"],
+      ]) {
+        const id = await createLinkedProperty(product!, resourceType!);
+        expect(
+          (
+            await native.query(
+              `SELECT product FROM identity.organization_resource_links
+          WHERE resource_id=$1 ORDER BY product`,
+              [id],
+            )
+          ).rows.map((row) => row.product),
+        ).toEqual(["hotel_catalog", product].sort());
+        // Committed properties cannot acquire additional product links in a later transaction.
+        await expect(
+          native.query(
+            `INSERT INTO identity.organization_resource_links
+          (organization_id, product, resource_type, resource_id, relationship, status)
+          VALUES ($1, $2, $3, $4, 'owner', 'active')`,
+            [organizations[0], product, resourceType, id],
+          ),
+        ).rejects.toMatchObject({ code: "42501" });
+      }
+      await admin.query(
+        `INSERT INTO identity.product_entitlements
+        (organization_id, product, entitlement_key, status) VALUES ($1,'pms','account_access','suspended')`,
+        [organizations[0]],
+      );
+      await expect(createLinkedProperty("booking", "booking_hotel")).rejects.toMatchObject({
+        code: "42501",
+      });
+      expect(
+        (
+          await admin.query(`SELECT id FROM hotel_catalog.properties WHERE id=$1`, [
+            newProperties.at(-1),
+          ])
+        ).rows,
+      ).toEqual([]);
+      await admin.query(
+        `DELETE FROM identity.product_entitlements
+        WHERE organization_id=$1 AND entitlement_key='account_access'`,
+        [organizations[0]],
+      );
+      await admin.query(
+        `UPDATE finance.billing_entitlements SET billing_status='past_due' WHERE id=$1`,
+        [billing[0]],
+      );
+      await expect(createLinkedProperty("pms", "pms_property")).rejects.toMatchObject({
+        code: "42501",
+      });
+      await admin.query(
+        `UPDATE hotel_catalog.organization_setup_track_intents
+        SET selected_tracks=ARRAY['hotel_operations'] WHERE organization_id=$1`,
+        [organizations[0]],
+      );
+      await expect(createLinkedProperty("marketplace", "hotel_profile")).rejects.toMatchObject({
+        code: "42501",
+      });
+      await admin.query(
         `DELETE FROM platform.hotel_setup_creation_scopes WHERE database_login=$1`,
         [role],
       );
@@ -156,8 +266,12 @@ describe.skipIf(!url)("native creation product scopes", () => {
         [organizations],
       );
       await admin.query(`DELETE FROM hotel_catalog.properties WHERE id=ANY($1::uuid[])`, [
-        properties,
+        [...properties, ...newProperties],
       ]);
+      await admin.query(
+        `DELETE FROM identity.product_entitlements WHERE organization_id=ANY($1::uuid[])`,
+        [organizations],
+      );
       await admin.query(`DELETE FROM identity.organizations WHERE id=ANY($1::uuid[])`, [
         organizations,
       ]);
