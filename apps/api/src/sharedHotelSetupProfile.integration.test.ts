@@ -145,6 +145,9 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
           );
           await client.query(`GRANT UPDATE ON identity.organizations TO ${role}`);
           await client.query(
+            `GRANT SELECT ON identity.organization_memberships, identity.users TO ${role}`,
+          );
+          await client.query(
             `INSERT INTO platform.hotel_setup_creation_scopes
           (database_login, organization_id) VALUES ($1, $2)`,
             [role, organizationId],
@@ -231,6 +234,109 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
             )
           ).rowCount,
         ).toBe(1);
+        if (mode === "native") {
+          // Fixture overgrants audit reads: native RLS must still hide all evidence.
+          await client.query(
+            `GRANT SELECT, UPDATE, DELETE ON platform.product_audit_events TO ${role}`,
+          );
+          const native = new pg.Client({ connectionString: login.toString() });
+          await native.connect();
+          try {
+            expect(
+              (await native.query(`SELECT id FROM platform.product_audit_events`)).rows,
+            ).toEqual([]);
+            for (const mismatch of [false, true]) {
+              await native.query("BEGIN");
+              try {
+                const propertyIds = [randomUUID(), randomUUID()];
+                for (const id of propertyIds) {
+                  await native.query(
+                    `INSERT INTO hotel_catalog.properties
+                    (id, public_id, display_name, creation_organization_id)
+                    VALUES ($1, $1::uuid::text, 'Evidence test', $2)`,
+                    [id, organizationId],
+                  );
+                  await native.query(
+                    `INSERT INTO identity.organization_resource_links
+                    (organization_id, product, resource_type, resource_id, relationship)
+                    VALUES ($1, 'hotel_catalog', 'property', $2, 'owner')`,
+                    [organizationId, id],
+                  );
+                }
+                const reserved = await native.query(
+                  `INSERT INTO platform.idempotency_keys
+                  (operation_scope, operation, key_hash, request_fingerprint_hash, tenant_scope,
+                    organization_id, correlation_id, expires_at)
+                  VALUES ('hotel_catalog', 'hotel_setup.property.create', repeat('e',64), repeat('f',64),
+                    'organization', $1, 'evidence-test', now()+interval '24 hours') RETURNING id`,
+                  [organizationId],
+                );
+                const key = reserved.rows[0]!.id;
+                if (mismatch) {
+                  await native.query(
+                    `INSERT INTO platform.product_audit_events
+                    (audit_key, product, action, occurred_at, tenant_scope, organization_id, actor_type,
+                      actor_user_id, target_resource_product, target_resource_type, target_resource_id,
+                      idempotency_key_id, correlation_id, redacted_payload, private_payload, audit_metadata,
+                      privacy_scope)
+                    VALUES ('hotel-setup-property-create:' || $1::uuid::text, 'hotel_catalog',
+                      'hotel_setup.property.create', now(), 'organization', $2, 'user', $3,
+                      'hotel_catalog', 'property', $4, $1, 'evidence-test', '{"outcome":"created"}',
+                      '{"targetAccountUserId":null,"provisioningReference":null,"reason":null}',
+                      jsonb_build_object('organizationId',$2::uuid::text), 'confidential')`,
+                    [key, organizationId, actorUserId, propertyIds[0]],
+                  );
+                }
+                await expect(
+                  native.query(
+                    `UPDATE platform.idempotency_keys SET status='completed',
+                  response_status_code=201, response_resource_product='hotel_catalog',
+                  response_resource_type='property', response_resource_id=$2,
+                  completed_at=now(), last_seen_at=now() WHERE id=$1`,
+                    [key, propertyIds[1]],
+                  ),
+                ).rejects.toMatchObject({ code: "42501" });
+              } finally {
+                await native.query("ROLLBACK");
+              }
+            }
+
+            await expect(
+              native.query(
+                `UPDATE platform.idempotency_keys SET last_seen_at=last_seen_at
+              WHERE correlation_id=$1`,
+                [command.correlationId],
+              ),
+            ).rejects.toMatchObject({ code: "42501" });
+            expect((await native.query(`DELETE FROM platform.product_audit_events`)).rowCount).toBe(
+              0,
+            );
+            await client.query(
+              `INSERT INTO platform.idempotency_keys
+              (organization_id, tenant_scope, operation_scope, operation, key_hash, request_fingerprint_hash,
+                expires_at) VALUES ($1, 'organization', 'hotel_catalog', 'another.operation',
+                repeat('a',64), repeat('b',64), now()+interval '24 hours')`,
+              [organizationId],
+            );
+            expect(
+              (
+                await native.query(`SELECT id FROM platform.idempotency_keys
+              WHERE operation='another.operation'`)
+              ).rows,
+            ).toEqual([]);
+            await expect(
+              native.query(
+                `INSERT INTO platform.idempotency_keys
+              (organization_id, tenant_scope, operation_scope, operation, key_hash, request_fingerprint_hash,
+                expires_at) VALUES ($1, 'organization', 'hotel_catalog', 'another.operation',
+                repeat('c',64), repeat('d',64), now()+interval '24 hours')`,
+                [organizationId],
+              ),
+            ).rejects.toMatchObject({ code: "42501" });
+          } finally {
+            await native.end();
+          }
+        }
         await expect(
           restricted.updatePropertyProfile({
             organizationId,
