@@ -745,7 +745,7 @@ function ensurePublicPropertyPublicationPermission(
   return false;
 }
 
-function hasPublishedPropertySurface(profile: SharedPropertyProfileInput): boolean {
+export function hasPublishedPropertySurface(profile: SharedPropertyProfileInput): boolean {
   const surface = propertyPublicationSurface(profile);
   return surface.locality !== null || surface.geo !== null || surface.contacts.length > 0;
 }

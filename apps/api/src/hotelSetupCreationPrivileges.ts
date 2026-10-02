@@ -1,9 +1,9 @@
-import type pg from "pg";
 import { HOTEL_SETUP_FEATURE_HUB_PRIVILEGES } from "./hotelSetupFeatureHubPrivileges.js";
 import {
   assertHotelSetupAuditBoundary,
   assertHotelSetupColumnPrivileges,
   type HotelSetupColumnPrivileges,
+  type HotelSetupPrivilegeQueryable,
 } from "./hotelSetupReaderPrivileges.js";
 
 /** Creation only. Identity key UPDATE permits locks; native RLS denies actual changes. */
@@ -205,7 +205,7 @@ const definers = [
 const helpers = [...definers, "platform.hotel_setup_property_link_matches(uuid,text)"];
 
 /** On the same begun native client, before replay, actor checks, or any writes. */
-export async function assertHotelSetupCreationPrivileges(client: Pick<pg.Pool, "query">) {
+export async function assertHotelSetupCreationPrivileges(client: HotelSetupPrivilegeQueryable) {
   await assertHotelSetupColumnPrivileges(client, HOTEL_SETUP_CREATION_PRIVILEGES, definers);
   await assertHotelSetupAuditBoundary(client);
   const result = await client.query<{ safe: boolean }>(

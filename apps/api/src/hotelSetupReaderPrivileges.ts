@@ -93,10 +93,16 @@ export type HotelSetupColumnPrivileges = Record<
   string,
   Partial<Record<"SELECT" | "INSERT" | "UPDATE", readonly string[]>>
 >;
+export type HotelSetupPrivilegeQueryable = {
+  query<Row extends pg.QueryResultRow = pg.QueryResultRow>(
+    sql: string,
+    values?: readonly unknown[],
+  ): Promise<{ rows: Row[] }>;
+};
 
 /** Effective catalog ACLs, including inherited/PUBLIC privileges; no SQL writes. */
 export async function assertHotelSetupColumnPrivileges(
-  client: Pick<pg.Pool, "query">,
+  client: HotelSetupPrivilegeQueryable,
   inventory: HotelSetupColumnPrivileges,
   allowedDefiners: readonly string[] = [],
 ) {
@@ -184,7 +190,7 @@ export async function assertHotelSetupReaderPrivileges(client: Pick<pg.Pool, "qu
   await assertHotelSetupAuditBoundary(client);
 }
 
-export async function assertHotelSetupAuditBoundary(client: Pick<pg.Pool, "query">) {
+export async function assertHotelSetupAuditBoundary(client: HotelSetupPrivilegeQueryable) {
   // PG16/17 render the reviewed full policy set and audit triggers identically.
   // Pin trigger bodies too: INSERT triggers execute even without function EXECUTE grants.
   const audit = await client.query<{ safe: boolean }>(`SELECT (
