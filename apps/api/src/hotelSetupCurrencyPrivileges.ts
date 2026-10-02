@@ -181,8 +181,8 @@ export async function assertHotelSetupCurrencyPrivileges(
     client,
     inventory,
     operation === "currency_ready"
-      ? "eed79e20681b7f2a84921e5826402051"
-      : "caeb8242e09a8af001570421e558e76f",
+      ? "0ea4f43514886d10b42aa83e08a3c1e2"
+      : "56bf681c05fe0a533a6bd01b6f2db9d1",
   );
   const result = await client.query<{ safe: boolean }>(
     `SELECT (
@@ -200,8 +200,8 @@ export async function assertHotelSetupCurrencyPrivileges(
     [
       Object.keys(inventory),
       operation === "currency_ready"
-        ? "36d99d12aa98d155e04abafbc7977023"
-        : "74b881b29937e64673cdc467c26cbcdd",
+        ? "eaed32a23475f27edff0e0b901809e14"
+        : "b8990e86bc1c23ad6612da07d564e913",
     ],
   );
   if (result.rows.length !== 1 || result.rows[0]?.safe !== true)

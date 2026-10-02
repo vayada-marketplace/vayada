@@ -434,7 +434,7 @@ exact live owners, lifecycle/transfer, private readiness and deployment remain g
 
 ## Native property credential release check
 
-After the reviewed migrations through 0453, run `node apps/api/dist/cli/hotelSetupPropertyPreflight.js`
+After the reviewed migrations through 0461, run `node apps/api/dist/cli/hotelSetupPropertyPreflight.js`
 inside the reviewed image. Inject `HOTEL_SETUP_COMMAND_DATABASE_URL` as a secret;
 set the password-free `HOTEL_SETUP_COMMAND_DATABASE_ENDPOINT`, exact
 `HOTEL_SETUP_COMMAND_DATABASE_LOGIN`, `HOTEL_SETUP_COMMAND_PROPERTY_ID`,
@@ -471,7 +471,58 @@ Run `hotelSetupPropertyFinancialsScope.integration.test.ts` and
 `TEST_DATABASE_URL` and `HOTEL_SETUP_READER_PREFLIGHT_TEST_DATABASE_URL` pointing
 to a loopback `/vay1092_` migrated fixture. These tests temporarily change PUBLIC
 database ACLs, restore them and remove their synthetic roles. Use only a dedicated
-local cluster. CI uses its own `vay1092_setup_credential_test` database for
-native scope tests and the shared fixture for source CLI rejection tests. This
+local cluster. CI uses its own trusted TLS `vay1092_vay965_creation_test` database for
+native scope tests and keeps native reader staging/login/candidate checks serial in that isolated fixture. This
 local rehearsal does not populate the
 platform's reviewed image inventory or verify live credentials.
+
+## Property creation transport
+
+The API's separate `HOTEL_SETUP_CREATION_COMMAND_ORIGIN` and
+`HOTEL_SETUP_CREATION_COMMAND_INTERNAL_TOKEN` configure forwarding only for POST
+`/api/hotel-setup/properties` to private POST `/properties`, preserving the
+original bearer, JSON profile and unique idempotency key. Caller context headers
+and query overrides are not forwarded. This is the same explicit route-policy
+exception as currency transport: the private handler independently verifies the
+original session and runs the shared `hotel_catalog.setup.manage`, hotel-group,
+publication-permission and profile-validation checks. Service or transport failure
+never falls back to local property writes. Other profile reads and edits keep
+their ordinary repository.
+
+Creation registration is optional in the private service builder. This slice
+adds the shared handler and forwarding only, not a production command adapter.
+The executable must not enable creation until the native organization credential,
+full write/trigger scope, lifecycle and exact runtime preflights are reviewed.
+The default runtime URL and migration URL cannot be used for private creation.
+This configuration leaves currency and Feature Hub routing unchanged; enabling
+creation does not activate or deploy the Financials rollout.
+
+## Isolated creation executable
+
+`HOTEL_SETUP_COMMAND_MODE=property_creation` registers only POST `/properties`.
+The fixed reader login is `vayada_next_hotel_setup_creation_reader`; its exact
+canonical authentication inventory replaces the property credential registry
+with `platform.hotel_setup_creation_scopes(database_login, organization_id)`.
+The existing default `property_commands` mode retains its own reader contract.
+Migration 0460 applies the same rejection-only audit shape and mutation denial
+to both readers. Neither mode creates logins or grants.
+
+Each creation command resolves the current organization assignment and vault
+password, opens a fresh native connection, and checks exact privileges, helper
+catalogs, assignment and current owner permissions inside the write transaction
+before retry replay or writes. Missing credentials fail closed. Creation mode
+constructs no currency or Feature Hub command adapter. Separate Secrets Manager
+prefix/IAM, reader and native credential provisioning, verified release preflights
+and normal CI deployment remain required before live activation.
+
+## Creation credential release check
+
+Run `node apps/api/dist/cli/hotelSetupCreationPreflight.js` in the reviewed image
+with the secret `HOTEL_SETUP_COMMAND_DATABASE_URL`, password-free endpoint,
+exact `HOTEL_SETUP_COMMAND_DATABASE_LOGIN`, `HOTEL_SETUP_COMMAND_ORGANIZATION_ID`
+and `HOTEL_SETUP_COMMAND_ACTOR_USER_ID`. The native organization login independently
+proves verified TLS, isolation from every other database, exact ACL/helper/trigger
+catalogs, its assignment and current owner's setup permission. The transaction
+always rolls back; it creates no hotel, retry evidence or audit. Credential failures
+produce only a fixed sanitized failure record. Check the separate reader with the
+existing reader CLI and `HOTEL_SETUP_COMMAND_MODE=property_creation`.

@@ -66,6 +66,30 @@ describe("private hotel setup configuration", () => {
     expect(() => loadHotelSetupCommandServiceConfig({ ...env, ...override })).toThrow();
   });
 
+  it("pins creation mode to its separate reader login", () => {
+    const creation = {
+      ...env,
+      HOTEL_SETUP_COMMAND_MODE: "property_creation",
+      HOTEL_SETUP_COMMAND_READER_DATABASE_URL: env.HOTEL_SETUP_COMMAND_READER_DATABASE_URL.replace(
+        "vayada_next_hotel_setup_reader",
+        "vayada_next_hotel_setup_creation_reader",
+      ),
+    };
+    expect(loadHotelSetupCommandServiceConfig(creation).mode).toBe("property_creation");
+    expect(() =>
+      loadHotelSetupCommandServiceConfig({ ...env, HOTEL_SETUP_COMMAND_MODE: "property_creation" }),
+    ).toThrow();
+    expect(() =>
+      loadHotelSetupCommandServiceConfig({
+        ...creation,
+        HOTEL_SETUP_COMMAND_MODE: "property_commands",
+      }),
+    ).toThrow();
+    expect(() =>
+      loadHotelSetupCommandServiceConfig({ ...env, HOTEL_SETUP_COMMAND_MODE: "unknown" }),
+    ).toThrow();
+  });
+
   it("does not expose malformed endpoint input in startup diagnostics", () => {
     let failure: unknown;
     try {

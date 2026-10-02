@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   HOTEL_SETUP_READER_AUDIT_COLUMNS,
   HOTEL_SETUP_READER_READ_COLUMNS,
+  HOTEL_SETUP_CREATION_READER_READ_COLUMNS,
 } from "../hotelSetupReaderPrivileges.js";
 
 const executable = new URL("./hotelSetupReaderPreflight.ts", import.meta.url);
@@ -64,7 +65,7 @@ it("preflight fails closed without a credential and sanitizes malformed secrets"
 
 const adminUrl = process.env.HOTEL_SETUP_READER_PREFLIGHT_TEST_DATABASE_URL;
 describe.runIf(adminUrl)("native reader credential on isolated PostgreSQL", () => {
-  it("passes exact TLS reader, rejects PUBLIC drift/wrong login, and writes nothing", async () => {
+  const check = async (mode: "property_commands" | "property_creation") => {
     const url = new URL(adminUrl!);
     if (
       url.hostname !== "127.0.0.1" ||
@@ -74,7 +75,10 @@ describe.runIf(adminUrl)("native reader credential on isolated PostgreSQL", () =
       throw new Error("Reader preflight needs an isolated local migrated database and test CA");
     const admin = new pg.Client({ connectionString: adminUrl });
     await admin.connect();
-    const role = "vayada_next_hotel_setup_reader";
+    const role =
+      mode === "property_creation"
+        ? "vayada_next_hotel_setup_creation_reader"
+        : "vayada_next_hotel_setup_reader";
     const password = randomBytes(36).toString("base64url");
     const databases = (
       await admin.query<{ name: string; privileges: string[] }>(`
@@ -100,7 +104,11 @@ describe.runIf(adminUrl)("native reader credential on isolated PostgreSQL", () =
         await admin.query(`REVOKE ALL ON DATABASE ${quote(database.name)} FROM PUBLIC`);
       await admin.query(`GRANT CONNECT ON DATABASE ${quote(url.pathname.slice(1))} TO ${role}`);
       await admin.query(`GRANT USAGE ON SCHEMA identity,platform TO ${role}`);
-      for (const [relation, columns] of Object.entries(HOTEL_SETUP_READER_READ_COLUMNS))
+      for (const [relation, columns] of Object.entries(
+        mode === "property_creation"
+          ? HOTEL_SETUP_CREATION_READER_READ_COLUMNS
+          : HOTEL_SETUP_READER_READ_COLUMNS,
+      ))
         await admin.query(`GRANT SELECT (${columns.join(",")}) ON ${relation} TO ${role}`);
       await admin.query(`GRANT INSERT (${HOTEL_SETUP_READER_AUDIT_COLUMNS.join(",")})
         ON platform.product_audit_events TO ${role}`);
@@ -115,6 +123,7 @@ describe.runIf(adminUrl)("native reader credential on isolated PostgreSQL", () =
       const endpoint = new URL(url);
       endpoint.username = endpoint.password = endpoint.search = "";
       const env = {
+        HOTEL_SETUP_COMMAND_MODE: mode,
         HOTEL_SETUP_COMMAND_READER_DATABASE_URL: url.toString(),
         HOTEL_SETUP_COMMAND_DATABASE_ENDPOINT: endpoint.toString(),
         PGHOST: "untrusted.invalid",
@@ -188,5 +197,7 @@ describe.runIf(adminUrl)("native reader credential on isolated PostgreSQL", () =
       }
       await admin.end();
     }
-  }, 60_000);
+  };
+  const modes = ["property_commands", "property_creation"] as const;
+  it.each(modes)("checks isolated reader: %s", check, 60_000);
 });

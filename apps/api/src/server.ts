@@ -338,6 +338,10 @@ import {
 const postgresRuntime = installPostgresPoolRuntime(pg);
 const config = loadConfig();
 const hotelSetupCommandForwarder = loadHotelSetupCommandForwarder();
+const hotelSetupCreationForwarder = loadHotelSetupCommandForwarder({
+  HOTEL_SETUP_COMMAND_ORIGIN: process.env["HOTEL_SETUP_CREATION_COMMAND_ORIGIN"],
+  HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: process.env["HOTEL_SETUP_CREATION_COMMAND_INTERNAL_TOKEN"],
+});
 
 function buildAuthOptions(auth: ApiConfig["auth"]): ApiAuthOptions | undefined {
   if (!auth) {
@@ -1838,6 +1842,7 @@ const app = buildApp({
     : undefined,
   pmsModuleActivationRepository,
   hotelSetupCommandForwarder,
+  hotelSetupCreationForwarder,
   financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,

@@ -1,4 +1,5 @@
 import type pg from "pg";
+import type { HotelSetupCommandMode } from "./hotelSetupCommandServiceConfig.js";
 
 // Canonical backend-auth/authorization, registry selection and Feature Hub reads only.
 export const HOTEL_SETUP_READER_READ_COLUMNS: Record<string, readonly string[]> = {
@@ -68,6 +69,11 @@ export const HOTEL_SETUP_READER_READ_COLUMNS: Record<string, readonly string[]> 
   ],
   "platform.product_audit_events": ["product", "audit_key"],
 };
+export const HOTEL_SETUP_CREATION_READER_READ_COLUMNS = Object.fromEntries(
+  Object.entries(HOTEL_SETUP_READER_READ_COLUMNS)
+    .filter(([relation]) => relation !== "platform.hotel_setup_property_scopes")
+    .concat([["platform.hotel_setup_creation_scopes", ["database_login", "organization_id"]]]),
+);
 export const HOTEL_SETUP_READER_AUDIT_COLUMNS = [
   "audit_key",
   "product",
@@ -93,10 +99,16 @@ export type HotelSetupColumnPrivileges = Record<
   string,
   Partial<Record<"SELECT" | "INSERT" | "UPDATE", readonly string[]>>
 >;
+export type HotelSetupPrivilegeQueryable = {
+  query<Row extends pg.QueryResultRow = pg.QueryResultRow>(
+    sql: string,
+    values?: readonly unknown[],
+  ): Promise<{ rows: Row[] }>;
+};
 
 /** Effective catalog ACLs, including inherited/PUBLIC privileges; no SQL writes. */
 export async function assertHotelSetupColumnPrivileges(
-  client: Pick<pg.Pool, "query">,
+  client: HotelSetupPrivilegeQueryable,
   inventory: HotelSetupColumnPrivileges,
   allowedDefiners: readonly string[] = [],
 ) {
@@ -172,19 +184,23 @@ export async function assertHotelSetupColumnPrivileges(
 }
 
 /** Read-only catalog check. Audit row-shape/RLS, IAM and native command ACLs are separate gates. */
-export async function assertHotelSetupReaderPrivileges(client: Pick<pg.Pool, "query">) {
+export async function assertHotelSetupReaderPrivileges(
+  client: Pick<pg.Pool, "query">,
+  mode: HotelSetupCommandMode = "property_commands",
+) {
   const inventory: HotelSetupColumnPrivileges = Object.fromEntries(
-    Object.entries(HOTEL_SETUP_READER_READ_COLUMNS).map(([relation, SELECT]) => [
-      relation,
-      { SELECT },
-    ]),
+    Object.entries(
+      mode === "property_creation"
+        ? HOTEL_SETUP_CREATION_READER_READ_COLUMNS
+        : HOTEL_SETUP_READER_READ_COLUMNS,
+    ).map(([relation, SELECT]) => [relation, { SELECT }]),
   );
   inventory["platform.product_audit_events"]!.INSERT = HOTEL_SETUP_READER_AUDIT_COLUMNS;
   await assertHotelSetupColumnPrivileges(client, inventory);
   await assertHotelSetupAuditBoundary(client);
 }
 
-export async function assertHotelSetupAuditBoundary(client: Pick<pg.Pool, "query">) {
+export async function assertHotelSetupAuditBoundary(client: HotelSetupPrivilegeQueryable) {
   // PG16/17 render the reviewed full policy set and audit triggers identically.
   // Pin trigger bodies too: INSERT triggers execute even without function EXECUTE grants.
   const audit = await client.query<{ safe: boolean }>(`SELECT (
@@ -195,17 +211,17 @@ export async function assertHotelSetupAuditBoundary(client: Pick<pg.Pool, "query
           FROM pg_catalog.unnest(p.polroles) roles(role)),'')
         || COALESCE(pg_catalog.pg_get_expr(p.polqual,p.polrelid),'')
         || COALESCE(pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid),''),'' ORDER BY p.polname))
-        ='044432dd1129d5e301fa3552d5666a38'
+        ='b9c0fcab601eaf5605a35557ec984274'
       FROM pg_catalog.pg_policy p WHERE p.polrelid=c.oid)
     AND pg_catalog.md5(pg_catalog.pg_get_functiondef(
       'platform.hotel_setup_reader_audit_allowed(platform.product_audit_events)'::regprocedure))
-      ='888e163929843b9c7b56919c193c13c5'
+      ='990c9f2f388ba30c768c5b7076c11700'
     AND pg_catalog.has_function_privilege(current_user,
       'platform.hotel_setup_reader_audit_allowed(platform.product_audit_events)','EXECUTE')
     AND (SELECT pg_catalog.md5(pg_catalog.string_agg(pg_catalog.pg_get_triggerdef(t.oid)
       || pg_catalog.pg_get_functiondef(t.tgfoid) || t.tgenabled::text,'' ORDER BY t.tgname))
       FROM pg_catalog.pg_trigger t WHERE t.tgrelid=c.oid AND NOT t.tgisinternal)
-      ='434d91e56ecb070a03126e97247fb388'
+      ='c039e04dcdd85a42db5a8f8379a37244'
   ) AS safe FROM pg_catalog.pg_class c WHERE c.oid='platform.product_audit_events'::regclass`);
   if (audit.rows.length !== 1 || audit.rows[0]?.safe !== true)
     throw new Error("Hotel setup reader audit boundary mismatch");

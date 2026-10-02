@@ -2,7 +2,18 @@ import { loadServerConfig } from "@vayada/backend-config";
 import type pg from "pg";
 import { parseHotelSetupCredentialConfiguration } from "./hotelSetupCommandCredentials.js";
 
-const READER_LOGIN = "vayada_next_hotel_setup_reader";
+export type HotelSetupCommandMode = "property_commands" | "property_creation";
+export function parseHotelSetupCommandMode(env: NodeJS.ProcessEnv): HotelSetupCommandMode {
+  const mode = env.HOTEL_SETUP_COMMAND_MODE ?? "property_commands";
+  if (mode !== "property_commands" && mode !== "property_creation")
+    throw new Error("Invalid hotel setup command mode");
+  return mode;
+}
+function readerLogin(mode: HotelSetupCommandMode): string {
+  return mode === "property_creation"
+    ? "vayada_next_hotel_setup_creation_reader"
+    : "vayada_next_hotel_setup_reader";
+}
 
 function required(env: NodeJS.ProcessEnv, key: string): string {
   const value = env[key];
@@ -12,6 +23,7 @@ function required(env: NodeJS.ProcessEnv, key: string): string {
 
 /** Private executable only; never falls back to the ordinary API environment. */
 export function loadHotelSetupCommandServiceConfig(env: NodeJS.ProcessEnv = process.env) {
+  const mode = parseHotelSetupCommandMode(env);
   const server = loadServerConfig(env, { host: "0.0.0.0", port: 8011 });
   const internalToken = required(env, "HOTEL_SETUP_COMMAND_INTERNAL_TOKEN");
   if (Buffer.byteLength(internalToken) < 32)
@@ -20,7 +32,7 @@ export function loadHotelSetupCommandServiceConfig(env: NodeJS.ProcessEnv = proc
   const secretPrefix = required(env, "HOTEL_SETUP_COMMAND_SECRET_PREFIX");
   parseHotelSetupCredentialConfiguration({ databaseEndpoint, secretPrefix });
   const readerDatabaseUrl = required(env, "HOTEL_SETUP_COMMAND_READER_DATABASE_URL");
-  parseHotelSetupReaderDatabaseUrl(readerDatabaseUrl, databaseEndpoint);
+  parseHotelSetupReaderDatabaseUrl(readerDatabaseUrl, databaseEndpoint, mode);
   const workosJwksUrl = required(env, "HOTEL_SETUP_COMMAND_WORKOS_JWKS_URL");
   const workosIssuer = required(env, "HOTEL_SETUP_COMMAND_WORKOS_ISSUER");
   for (const value of [workosJwksUrl, workosIssuer]) {
@@ -33,6 +45,7 @@ export function loadHotelSetupCommandServiceConfig(env: NodeJS.ProcessEnv = proc
   }
   return {
     ...server,
+    mode,
     internalToken,
     databaseEndpoint,
     secretPrefix,
@@ -44,8 +57,12 @@ export function loadHotelSetupCommandServiceConfig(env: NodeJS.ProcessEnv = proc
 }
 
 /** Shared by the private launcher and its read-only credential preflight. */
-export function parseHotelSetupReaderDatabaseUrl(raw: string, databaseEndpoint: string): URL {
-  return parseHotelSetupDatabaseUrl(raw, databaseEndpoint, READER_LOGIN);
+export function parseHotelSetupReaderDatabaseUrl(
+  raw: string,
+  databaseEndpoint: string,
+  mode: HotelSetupCommandMode = "property_commands",
+): URL {
+  return parseHotelSetupDatabaseUrl(raw, databaseEndpoint, readerLogin(mode));
 }
 
 /** Shared endpoint/TLS/password validation; callers supply a reviewed expected native login. */
@@ -80,9 +97,13 @@ export function parseHotelSetupDatabaseUrl(
 }
 
 /** Role posture only. Exact read/audit ACL and IAM proofs remain release gates. */
-export async function assertHotelSetupServiceReader(pool: Pick<pg.Pool, "query">) {
-  const result = await pool.query<{ safe: boolean }>(`SELECT (
-    session_user = current_user AND role.rolname = '${READER_LOGIN}'
+export async function assertHotelSetupServiceReader(
+  pool: Pick<pg.Pool, "query">,
+  mode: HotelSetupCommandMode = "property_commands",
+) {
+  const result = await pool.query<{ safe: boolean }>(
+    `SELECT (
+    session_user = current_user AND role.rolname = $1
     AND role.rolcanlogin AND NOT role.rolsuper AND NOT role.rolbypassrls
     AND NOT role.rolcreaterole AND NOT role.rolcreatedb AND NOT role.rolreplication
     AND NOT role.rolinherit
@@ -92,7 +113,9 @@ export async function assertHotelSetupServiceReader(pool: Pick<pg.Pool, "query">
         AND refobjid = role.oid AND deptype = 'o'
         AND (dbid = 0 OR dbid = (SELECT oid FROM pg_catalog.pg_database
           WHERE datname = pg_catalog.current_database())))
-  ) AS safe FROM pg_catalog.pg_roles role WHERE role.rolname = session_user`);
+  ) AS safe FROM pg_catalog.pg_roles role WHERE role.rolname = session_user`,
+    [readerLogin(mode)],
+  );
   if (result.rows.length !== 1 || result.rows[0]?.safe !== true)
     throw new Error("Hotel setup reader role preflight failed");
 }

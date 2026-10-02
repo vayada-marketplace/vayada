@@ -21,6 +21,10 @@ import {
   type PmsModuleActivationRepository,
 } from "./routes/pmsModuleActivations.js";
 import { registerPmsPricingCurrencyCommand } from "./routes/pmsPricing.js";
+import {
+  registerSharedHotelSetupPropertyCreation,
+  type SharedHotelSetupStatusRepository,
+} from "./routes/sharedHotelSetupStatus.js";
 
 type HotelSetupCommandServiceOptions = {
   logger?: FastifyServerOptions["logger"];
@@ -30,7 +34,8 @@ type HotelSetupCommandServiceOptions = {
     entitlementRepository: EntitlementRepository;
     propertyAccessRepository: PropertyAccessRepository;
   };
-  currencyCommands: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">;
+  currencyCommands?: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">;
+  propertyCreation?: Pick<SharedHotelSetupStatusRepository, "createPropertyProfile">;
   featureHub?: {
     reads: Pick<PmsModuleActivationRepository, "list" | "close">;
     commands: Pick<PmsModuleActivationRepository, "updateFinancials">;
@@ -83,10 +88,15 @@ export function buildHotelSetupCommandService(
       return reply.code(400).send({ code: "invalid_request" });
     return reply.code(503).send({ code: "hotel_setup_unavailable" });
   });
-  registerPmsPricingCurrencyCommand(app, options.currencyCommands, {
-    requireOwnerSession: true,
-    propertyAccessRepository,
-  });
+  if (options.currencyCommands)
+    registerPmsPricingCurrencyCommand(app, options.currencyCommands, {
+      requireOwnerSession: true,
+      propertyAccessRepository,
+    });
+  if (options.propertyCreation)
+    registerSharedHotelSetupPropertyCreation(app, options.propertyCreation, {
+      requireOwnerSession: true,
+    });
   if (options.featureHub)
     app.register(registerPmsModuleActivationRoutes, {
       repository: {

@@ -1,3 +1,4 @@
+import type { HotelSetupCommandForwarder } from "../hotelSetupCommandForwarder.js";
 import { createHash } from "node:crypto";
 
 import { UnauthorizedError, type PermissionKey } from "@vayada/backend-auth";
@@ -137,6 +138,7 @@ export type SharedHotelSetupStatusRepository = {
 type SharedHotelSetupStatusRoutesOptions = {
   repository: SharedHotelSetupStatusRepository;
   trackCommandRepository: HotelSetupTrackCommandRepository;
+  propertyCreationForwarder?: HotelSetupCommandForwarder;
   propertyAccessRepository?: PropertyAccessRepository;
   launchSettingsRepository?: SharedPropertyLaunchSettingsRepository;
   now?: () => Date;
@@ -308,61 +310,8 @@ export async function registerSharedHotelSetupStatusRoutes(
     return profile;
   });
 
-  app.post("/properties", async (request, reply) => {
-    const access = resolveSharedSetupAccess(request, reply, null, "hotel_catalog.setup.manage");
-    if (!access) return reply;
-
-    const profileInput = parseCreatePropertyProfile(
-      request.body as SharedPropertyProfileBody,
-      reply,
-    );
-    if (profileInput === false) return reply;
-
-    if (
-      hasPublishedPropertySurface(profileInput) &&
-      !ensurePublicPropertyPublicationPermission(access.context, reply)
-    ) {
-      return reply;
-    }
-    const idempotencyKey = parseIdempotencyKey(request, reply);
-    if (!idempotencyKey) return reply;
-
-    try {
-      const profile = await repository.createPropertyProfile({
-        organizationId: access.organizationId,
-        idempotencyKey,
-        correlationId: access.context.audit.correlationId ?? access.context.audit.requestId,
-        profile: profileInput,
-        audit: {
-          actorUserId: access.context.actor.internalUserId,
-          requestId: access.context.audit.requestId,
-          receivedAt: access.context.audit.receivedAt,
-        },
-      });
-
-      return reply.status(201).send(profile);
-    } catch (error) {
-      const code =
-        isObjectRecord(error) && typeof error["code"] === "string" ? error["code"] : null;
-      const propertyId =
-        isObjectRecord(error) && typeof error["propertyId"] === "string"
-          ? error["propertyId"]
-          : null;
-      if (code === "idempotency_key_conflict") {
-        return reply.status(409).send({
-          code,
-          detail: "These hotel details changed during the save. Review them and try again.",
-          ...(propertyId ? { propertyId } : {}),
-        });
-      }
-      if (code === "command_in_progress") {
-        return reply.status(409).send({
-          code,
-          detail: "Your hotel setup is still being saved. Please try again in a moment.",
-        });
-      }
-      throw error;
-    }
+  registerSharedHotelSetupPropertyCreation(app, repository, {
+    forward: options.propertyCreationForwarder,
   });
 
   app.put("/properties/:propertyId/profile", async (request, reply) => {
@@ -796,7 +745,7 @@ function ensurePublicPropertyPublicationPermission(
   return false;
 }
 
-function hasPublishedPropertySurface(profile: SharedPropertyProfileInput): boolean {
+export function hasPublishedPropertySurface(profile: SharedPropertyProfileInput): boolean {
   const surface = propertyPublicationSurface(profile);
   return surface.locality !== null || surface.geo !== null || surface.contacts.length > 0;
 }
@@ -890,6 +839,73 @@ function toSharedSetupTrackAccessError(error: unknown): SharedHotelSetupTrackAcc
     category: "authorization",
     message: "Missing required hotel product management permission.",
   };
+}
+
+/** Shared validation and policy for the public API and independently authenticated setup service. */
+export function registerSharedHotelSetupPropertyCreation(
+  app: FastifyInstance,
+  repository: Pick<SharedHotelSetupStatusRepository, "createPropertyProfile">,
+  options: { requireOwnerSession?: boolean; forward?: HotelSetupCommandForwarder } = {},
+): void {
+  app.post("/properties", async (request, reply) => {
+    if (options.forward) return options.forward(request, reply, null, "property_creation");
+    const access = resolveSharedSetupAccess(request, reply, null, "hotel_catalog.setup.manage");
+    if (!access) return reply;
+    if (options.requireOwnerSession && !access.context.actor.providerIdentity.sessionId)
+      return reply.status(403).send({ code: "owner_session_required" });
+
+    const profileInput = parseCreatePropertyProfile(
+      request.body as SharedPropertyProfileBody,
+      reply,
+    );
+    if (profileInput === false) return reply;
+
+    if (
+      hasPublishedPropertySurface(profileInput) &&
+      !ensurePublicPropertyPublicationPermission(access.context, reply)
+    ) {
+      return reply;
+    }
+    const idempotencyKey = parseIdempotencyKey(request, reply);
+    if (!idempotencyKey) return reply;
+
+    try {
+      const profile = await repository.createPropertyProfile({
+        organizationId: access.organizationId,
+        idempotencyKey,
+        correlationId: access.context.audit.correlationId ?? access.context.audit.requestId,
+        profile: profileInput,
+        audit: {
+          actorUserId: access.context.actor.internalUserId,
+          requestId: access.context.audit.requestId,
+          receivedAt: access.context.audit.receivedAt,
+        },
+      });
+
+      return reply.status(201).send(profile);
+    } catch (error) {
+      const code =
+        isObjectRecord(error) && typeof error["code"] === "string" ? error["code"] : null;
+      const propertyId =
+        isObjectRecord(error) && typeof error["propertyId"] === "string"
+          ? error["propertyId"]
+          : null;
+      if (code === "idempotency_key_conflict") {
+        return reply.status(409).send({
+          code,
+          detail: "These hotel details changed during the save. Review them and try again.",
+          ...(propertyId ? { propertyId } : {}),
+        });
+      }
+      if (code === "command_in_progress") {
+        return reply.status(409).send({
+          code,
+          detail: "Your hotel setup is still being saved. Please try again in a moment.",
+        });
+      }
+      throw error;
+    }
+  });
 }
 
 function resolveSharedSetupAccess(

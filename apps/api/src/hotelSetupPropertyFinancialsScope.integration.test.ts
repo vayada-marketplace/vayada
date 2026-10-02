@@ -350,11 +350,23 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
           expect(
             (await logins[loginIndex]!.query(`SELECT property_id FROM ${relation}`)).rows,
           ).toEqual([]);
-        expect((await logins[5]!.query(`SELECT property_id FROM ${relation}`)).rowCount).toBe(2);
+        expect(
+          (
+            await logins[5]!.query(
+              `SELECT property_id FROM ${relation} WHERE property_id=ANY($1::uuid[])`,
+              [properties],
+            )
+          ).rowCount,
+        ).toBe(2);
         // rate_rules updates enqueue Channex jobs; this dependency proof grants no queue writes.
         if (relation !== "pms.rate_rules")
           expect(
-            (await logins[5]!.query(`UPDATE ${relation} SET property_id=property_id`)).rowCount,
+            (
+              await logins[5]!.query(
+                `UPDATE ${relation} SET property_id=property_id WHERE property_id=ANY($1::uuid[])`,
+                [properties],
+              )
+            ).rowCount,
           ).toBe(2);
         await expect(
           logins[1]!.query(`UPDATE ${relation} SET property_id=property_id`),

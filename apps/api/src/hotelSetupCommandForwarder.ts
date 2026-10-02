@@ -1,11 +1,11 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { readIdempotencyKey } from "./routes/pmsPricing.js";
 
-type Operation = "currency" | "modules" | "financials";
+type Operation = "currency" | "modules" | "financials" | "property_creation";
 export type HotelSetupCommandForwarder = (
   request: FastifyRequest,
   reply: FastifyReply,
-  propertyId: string,
+  propertyId: string | null,
   operation: Operation,
 ) => Promise<unknown>;
 
@@ -41,7 +41,12 @@ export function loadHotelSetupCommandForwarder(
   return async (request, reply, propertyId, operation) => {
     reply.header("Cache-Control", "no-store");
     if (
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(propertyId) ||
+      (operation === "property_creation"
+        ? propertyId !== null
+        : typeof propertyId !== "string" ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+            propertyId,
+          )) ||
       Object.keys(request.query as object).length !== 0
     )
       return reply.code(400).send({ code: "invalid_request" });
@@ -54,21 +59,31 @@ export function loadHotelSetupCommandForwarder(
         : operation === "modules"
           ? "module-activations"
           : "module-activations/financials";
-    const method = operation === "currency" ? "PUT" : operation === "modules" ? "GET" : "PATCH";
+    const method =
+      operation === "property_creation"
+        ? "POST"
+        : operation === "currency"
+          ? "PUT"
+          : operation === "modules"
+            ? "GET"
+            : "PATCH";
     if (request.method !== method) return reply.code(400).send({ code: "invalid_request" });
     const headers: Record<string, string> = {
       authorization,
       "x-vayada-internal-token": internalToken,
       "content-type": "application/json",
     };
-    if (operation === "currency") {
+    if (operation === "currency" || operation === "property_creation") {
       const idempotencyKey = readIdempotencyKey(request);
       if (!idempotencyKey) return reply.code(400).send({ code: "invalid_request" });
       headers["idempotency-key"] = idempotencyKey;
     }
     try {
       const response = await transport(
-        new URL(`/properties/${propertyId}/${suffix}`, destination),
+        new URL(
+          operation === "property_creation" ? "/properties" : `/properties/${propertyId}/${suffix}`,
+          destination,
+        ),
         {
           method,
           headers,

@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { PROPERTY_MEDIA_PUBLIC_VARIANTS } from "@vayada/domain-hotels";
+import { PROPERTY_MEDIA_PUBLIC_VARIANT_MAX_DIMENSIONS } from "./platform/propertyMediaVariantContract.js";
+
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -102,6 +106,268 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
       [organizationId],
     );
   });
+
+  it.each(["ordinary", "native"] as const)(
+    "creates and replays with INSERT-only location/contact privileges (%s)",
+    async (mode) => {
+      // ACL regression only; this fixture is not the production tenant-scope contract.
+      const role = `${mode === "native" ? "vayada_next_hotel_setup_org_" : "profile_insert_test_"}${randomUUID().replaceAll("-", "")}`;
+      const password = randomUUID();
+      const login = new URL(TEST_DATABASE_URL!);
+      login.username = role;
+      login.password = password;
+      const restricted = createPgSharedHotelSetupStatusRepository({
+        connectionString: login.toString(),
+      });
+      try {
+        await client.query(`CREATE ROLE ${role} LOGIN PASSWORD '${password}' NOINHERIT
+        NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`);
+        const database = decodeURIComponent(login.pathname.slice(1)).replaceAll('"', '""');
+        await client.query(`GRANT CONNECT ON DATABASE "${database}" TO ${role}`);
+        await client.query(`GRANT USAGE ON SCHEMA
+        hotel_catalog, identity, finance, booking, marketplace, platform TO ${role}`);
+        await client.query(`GRANT SELECT ON
+        identity.organizations, identity.organization_resource_links,
+        identity.product_entitlements, finance.billing_entitlements,
+        hotel_catalog.properties, hotel_catalog.property_locations,
+        hotel_catalog.property_contact_channels,
+        hotel_catalog.organization_setup_track_intents,
+        booking.booking_settings, marketplace.marketplace_hotel_profiles,
+        platform.idempotency_keys TO ${role}`);
+        await client.query(`GRANT INSERT ON
+        hotel_catalog.properties, hotel_catalog.property_locations,
+        hotel_catalog.property_contact_channels,
+        identity.organization_resource_links, booking.booking_settings,
+        marketplace.marketplace_hotel_profiles,
+        platform.idempotency_keys, platform.product_audit_events TO ${role}`);
+        await client.query(`GRANT UPDATE ON platform.idempotency_keys TO ${role}`);
+        if (mode === "native") {
+          await client.query(
+            `GRANT vayada_next_hotel_setup_scope TO ${role} WITH INHERIT TRUE, SET FALSE`,
+          );
+          await client.query(`GRANT UPDATE ON identity.organizations TO ${role}`);
+          await client.query(
+            `GRANT SELECT ON identity.organization_memberships, identity.users TO ${role}`,
+          );
+          await client.query(
+            `INSERT INTO platform.hotel_setup_creation_scopes
+          (database_login, organization_id) VALUES ($1, $2)`,
+            [role, organizationId],
+          );
+          await client.query(
+            `INSERT INTO identity.product_entitlements
+          (organization_id, product, entitlement_key) VALUES
+          ($1, 'marketplace', 'marketplace-hotel-profile')`,
+            [organizationId],
+          );
+        }
+        // Existing location triggers record a separate canonical owner revision.
+        await client.query(`GRANT SELECT, INSERT, UPDATE ON
+        hotel_catalog.property_owner_revisions TO ${role}`);
+        const command = {
+          organizationId,
+          idempotencyKey: `insert-only-profile-create-${mode}`,
+          correlationId: `insert-only-profile-create-${mode}`,
+          profile,
+          audit: {
+            actorUserId,
+            requestId: `insert-only-profile-create-${mode}`,
+            receivedAt: "2026-10-01T21:40:00.000Z",
+          },
+        };
+        const before = await client.query(
+          "SELECT count(*) FROM hotel_catalog.properties WHERE creation_organization_id=$1::uuid",
+          [organizationId],
+        );
+        await expect(
+          restricted.createPropertyProfile({
+            ...command,
+            profile: { ...profile, contacts: [...profile.contacts, profile.contacts[0]!] },
+          }),
+        ).rejects.toMatchObject({ code: "23505" });
+        expect(
+          (
+            await client.query(
+              "SELECT count(*) FROM hotel_catalog.properties WHERE creation_organization_id=$1::uuid",
+              [organizationId],
+            )
+          ).rows,
+        ).toEqual(before.rows);
+        expect(
+          (
+            await client.query("SELECT 1 FROM platform.idempotency_keys WHERE correlation_id=$1", [
+              command.correlationId,
+            ])
+          ).rowCount,
+        ).toBe(0);
+        const created = await restricted.createPropertyProfile(command);
+        expect(created.profile.contacts).toEqual(expect.arrayContaining(profile.contacts));
+        if (mode === "native") {
+          expect(
+            (
+              await client.query(
+                `SELECT product FROM identity.organization_resource_links
+          WHERE organization_id=$1 AND resource_id=$2 ORDER BY product`,
+                [organizationId, created.propertyId],
+              )
+            ).rows.map((row) => row.product),
+          ).toEqual(["hotel_catalog", "marketplace"]);
+          expect(
+            (
+              await client.query(
+                `SELECT property_id FROM marketplace.marketplace_hotel_profiles
+          WHERE property_id=$1`,
+                [created.propertyId],
+              )
+            ).rows,
+          ).toEqual([{ property_id: created.propertyId }]);
+        }
+        await expect(restricted.createPropertyProfile(command)).resolves.toMatchObject({
+          propertyId: created.propertyId,
+          profileRevision: 1,
+        });
+        expect(
+          (
+            await client.query(
+              `SELECT 1 FROM platform.product_audit_events
+         WHERE organization_id=$1::uuid AND target_resource_id=$2
+           AND action='hotel_setup.property.create'`,
+              [organizationId, created.propertyId],
+            )
+          ).rowCount,
+        ).toBe(1);
+        if (mode === "native") {
+          // Fixture overgrants audit reads: native RLS must still hide all evidence.
+          await client.query(
+            `GRANT SELECT, UPDATE, DELETE ON platform.product_audit_events TO ${role}`,
+          );
+          const native = new pg.Client({ connectionString: login.toString() });
+          await native.connect();
+          try {
+            expect(
+              (await native.query(`SELECT id FROM platform.product_audit_events`)).rows,
+            ).toEqual([]);
+            for (const mismatch of [false, true]) {
+              await native.query("BEGIN");
+              try {
+                const propertyIds = [randomUUID(), randomUUID()];
+                for (const id of propertyIds) {
+                  await native.query(
+                    `INSERT INTO hotel_catalog.properties
+                    (id, public_id, display_name, creation_organization_id)
+                    VALUES ($1, $1::uuid::text, 'Evidence test', $2)`,
+                    [id, organizationId],
+                  );
+                  await native.query(
+                    `INSERT INTO identity.organization_resource_links
+                    (organization_id, product, resource_type, resource_id, relationship)
+                    VALUES ($1, 'hotel_catalog', 'property', $2, 'owner')`,
+                    [organizationId, id],
+                  );
+                }
+                const reserved = await native.query(
+                  `INSERT INTO platform.idempotency_keys
+                  (operation_scope, operation, key_hash, request_fingerprint_hash, tenant_scope,
+                    organization_id, correlation_id, expires_at)
+                  VALUES ('hotel_catalog', 'hotel_setup.property.create', repeat('e',64), repeat('f',64),
+                    'organization', $1, 'evidence-test', now()+interval '24 hours') RETURNING id`,
+                  [organizationId],
+                );
+                const key = reserved.rows[0]!.id;
+                if (mismatch) {
+                  await native.query(
+                    `INSERT INTO platform.product_audit_events
+                    (audit_key, product, action, occurred_at, tenant_scope, organization_id, actor_type,
+                      actor_user_id, target_resource_product, target_resource_type, target_resource_id,
+                      idempotency_key_id, correlation_id, redacted_payload, private_payload, audit_metadata,
+                      privacy_scope)
+                    VALUES ('hotel-setup-property-create:' || $1::uuid::text, 'hotel_catalog',
+                      'hotel_setup.property.create', now(), 'organization', $2, 'user', $3,
+                      'hotel_catalog', 'property', $4, $1, 'evidence-test', '{"outcome":"created"}',
+                      '{"targetAccountUserId":null,"provisioningReference":null,"reason":null}',
+                      jsonb_build_object('organizationId',$2::uuid::text), 'confidential')`,
+                    [key, organizationId, actorUserId, propertyIds[0]],
+                  );
+                }
+                await expect(
+                  native.query(
+                    `UPDATE platform.idempotency_keys SET status='completed',
+                  response_status_code=201, response_resource_product='hotel_catalog',
+                  response_resource_type='property', response_resource_id=$2,
+                  completed_at=now(), last_seen_at=now() WHERE id=$1`,
+                    [key, propertyIds[1]],
+                  ),
+                ).rejects.toMatchObject({ code: "42501" });
+              } finally {
+                await native.query("ROLLBACK");
+              }
+            }
+
+            await expect(
+              native.query(
+                `UPDATE platform.idempotency_keys SET last_seen_at=last_seen_at
+              WHERE correlation_id=$1`,
+                [command.correlationId],
+              ),
+            ).rejects.toMatchObject({ code: "42501" });
+            expect((await native.query(`DELETE FROM platform.product_audit_events`)).rowCount).toBe(
+              0,
+            );
+            await client.query(
+              `INSERT INTO platform.idempotency_keys
+              (organization_id, tenant_scope, operation_scope, operation, key_hash, request_fingerprint_hash,
+                expires_at) VALUES ($1, 'organization', 'hotel_catalog', 'another.operation',
+                repeat('a',64), repeat('b',64), now()+interval '24 hours')`,
+              [organizationId],
+            );
+            expect(
+              (
+                await native.query(`SELECT id FROM platform.idempotency_keys
+              WHERE operation='another.operation'`)
+              ).rows,
+            ).toEqual([]);
+            await expect(
+              native.query(
+                `INSERT INTO platform.idempotency_keys
+              (organization_id, tenant_scope, operation_scope, operation, key_hash, request_fingerprint_hash,
+                expires_at) VALUES ($1, 'organization', 'hotel_catalog', 'another.operation',
+                repeat('c',64), repeat('d',64), now()+interval '24 hours')`,
+                [organizationId],
+              ),
+            ).rejects.toMatchObject({ code: "42501" });
+          } finally {
+            await native.end();
+          }
+        }
+        await expect(
+          restricted.updatePropertyProfile({
+            organizationId,
+            propertyId: created.propertyId,
+            expectedProfileRevision: 1,
+            profile: { ...profile, contacts: [] },
+          }),
+        ).rejects.toMatchObject({ code: "42501" });
+        await expect(
+          repository.getPropertyProfile({ organizationId, propertyId: created.propertyId }),
+        ).resolves.toMatchObject({ profileRevision: 1, profile: { contacts: profile.contacts } });
+      } finally {
+        await restricted.close?.();
+        if (mode === "native") {
+          await client.query(
+            `DELETE FROM platform.hotel_setup_creation_scopes WHERE database_login=$1`,
+            [role],
+          );
+          await client.query(
+            `DELETE FROM identity.product_entitlements
+          WHERE organization_id=$1 AND product='marketplace' AND entitlement_key='marketplace-hotel-profile'`,
+            [organizationId],
+          );
+        }
+        await client.query(`DROP OWNED BY ${role}`);
+        await client.query(`DROP ROLE ${role}`);
+      }
+    },
+  );
 
   it("provisions one canonical property for concurrent stable-reference commands", async () => {
     const provisioningReference = "platform-admin-provisioning-integration";
@@ -459,10 +725,10 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
       } as never,
       request: {
         purpose: "property.gallery_image",
-        visibility: "public",
+        visibility: "private",
         resource: {
-          product: "marketplace",
-          resourceType: "hotel_profile",
+          product: "hotel_catalog",
+          resourceType: "property",
           resourceId: created.propertyId,
         },
         files: [
@@ -476,7 +742,8 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
       },
       policy: {
         purpose: "property.gallery_image",
-        autoApprovePublicOnFinalize: true,
+        autoApprovePublicOnFinalize: false,
+        privateOnly: true,
       } as never,
       target: {
         resourceProduct: "hotel_catalog",
@@ -525,19 +792,17 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
         },
       ],
       variantSets: [
-        [
-          {
-            variantName: "original_safe",
-            visibility: "public",
-            storageKey: "properties/profile-revision-test/gallery.webp",
-            contentType: "image/webp",
-            widthPx: 1200,
-            heightPx: 800,
-            sizeBytes: 1800,
-            checksumSha256: "b".repeat(64),
-            publicCdnUrl: "https://cdn.example.test/properties/profile-revision-test/gallery.webp",
-          },
-        ],
+        PROPERTY_MEDIA_PUBLIC_VARIANTS.map((variantName) => ({
+          variantName,
+          visibility: "private" as const,
+          storageKey: `private/media/${uploadedMediaObjectId}/${variantName}/sha256-${"b".repeat(64)}.webp`,
+          contentType: "image/webp",
+          widthPx: PROPERTY_MEDIA_PUBLIC_VARIANT_MAX_DIMENSIONS[variantName].widthPx,
+          heightPx: PROPERTY_MEDIA_PUBLIC_VARIANT_MAX_DIMENSIONS[variantName].heightPx,
+          sizeBytes: 1800,
+          checksumSha256: "b".repeat(64),
+          publicCdnUrl: null,
+        })),
       ],
       bucketName: "vayada-test-media",
       now: "2026-07-26T20:01:00.000Z",
@@ -559,29 +824,23 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
         propertyId: created.propertyId,
       }),
     ).resolves.toMatchObject({
-      profileRevision: 6,
+      profileRevision: 5,
       publicProfile: {
-        media: [
-          {
-            mediaObjectId: uploadedMediaObjectId,
-            mediaType: "gallery_image",
-            url: "https://cdn.example.test/properties/profile-revision-test/gallery.webp",
-          },
-        ],
+        media: [],
       },
     });
     await expect(readProfileCompleteness(created.propertyId)).resolves.toEqual({
-      profileStatus: "complete",
-      completenessReasons: [],
+      profileStatus: "incomplete",
+      completenessReasons: ["media"],
     });
     await expect(
       repository.updatePublicPropertyProfile({
         organizationId,
         propertyId: created.propertyId,
-        expectedProfileRevision: 5,
+        expectedProfileRevision: 4,
         patch: { shortDescription: "Stale after media upload" },
       }),
-    ).resolves.toEqual({ status: "conflict", currentRevision: 6 });
+    ).resolves.toEqual({ status: "conflict", currentRevision: 5 });
 
     await client.query(
       `INSERT INTO booking.booking_settings (property_id)
@@ -844,11 +1103,11 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
     });
 
     await client.query(
-      `INSERT INTO pms.room_types (id, property_id, name, currency, active)
+      `INSERT INTO pms.room_types (id, property_id, name, base_rate_amount, currency, active)
        VALUES
-         ($2::uuid, $1::uuid, 'Room only', 'EUR', TRUE),
-         ($3::uuid, $1::uuid, 'Rate only', 'EUR', TRUE),
-         ($4::uuid, $1::uuid, 'Inventory only', 'EUR', TRUE)`,
+         ($2::uuid, $1::uuid, 'Room only', 100, 'EUR', TRUE),
+         ($3::uuid, $1::uuid, 'Rate only', 100, 'EUR', TRUE),
+         ($4::uuid, $1::uuid, 'Inventory only', 100, 'EUR', TRUE)`,
       [created.propertyId, roomTypeWithRoomId, roomTypeWithRateId, roomTypeWithInventoryId],
     );
     await client.query(
@@ -933,7 +1192,7 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
       readiness: "complete",
       reasonCodes: [],
     });
-  });
+  }, 30_000);
 
   it.each([
     { methods: ["pay_at_property"], enabled: true, complete: true },

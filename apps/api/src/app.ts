@@ -337,6 +337,7 @@ export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolv
 
 type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   hotelSetupCommandForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
+  hotelSetupCreationForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
   auth?: ApiAuthOptions;
   authSession?: AuthSessionRouteOptions;
   browserAllowedOrigins?: string[];
@@ -789,6 +790,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       trackCommandRepository: options.hotelSetupTrackCommandRepository,
       propertyAccessRepository: options.auth?.propertyAccessRepository,
       launchSettingsRepository: options.propertyLaunchSettingsRepository,
+      propertyCreationForwarder: options.hotelSetupCreationForwarder,
     });
   }
   if (options.propertySetupRouteStateReadPort) {

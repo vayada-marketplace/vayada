@@ -1,14 +1,11 @@
--- VAY-1092: restrict setup completion stamping to actual setup sessions.
+-- VAY-965: superusers are implicit members of every role, not native setup logins.
+-- Preserve ordinary command metadata while retaining guards for setup role names.
 CREATE OR REPLACE FUNCTION platform.guard_hotel_setup_completion_evidence()
 RETURNS TRIGGER LANGUAGE plpgsql SET search_path = pg_catalog AS $$
 BEGIN
-  -- pg_has_role treats a superuser as a member of every role. Administrative
-  -- writes are not setup commands; preserve their exact audit/replay metadata.
-  IF (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname=session_user)
-  THEN RETURN NEW; END IF;
-
-  IF NOT pg_catalog.pg_has_role(session_user, 'vayada_next_hotel_setup_property_scope', 'MEMBER')
-    AND session_user::text !~ '^vayada_next_hotel_setup_property_'
+  IF session_user::text !~ '^vayada_next_hotel_setup_property_'
+    AND (NOT pg_catalog.pg_has_role(session_user, 'vayada_next_hotel_setup_property_scope', 'MEMBER')
+      OR EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = session_user AND rolsuper))
   THEN RETURN NEW; END IF;
 
   IF TG_OP = 'UPDATE' THEN

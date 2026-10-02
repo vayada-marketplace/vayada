@@ -378,6 +378,7 @@ describe("shared hotel setup status route", () => {
   it.each([
     ["missing", null],
     ["unknown mode", agencyScope({ mode: "unknown" })],
+    ["missing product access", agencyScope({ productAccess: undefined })],
     [
       "malformed assignments",
       agencyScope({
@@ -3106,11 +3107,21 @@ describe("shared hotel setup status route", () => {
     const createIndex = query.mock.calls.findIndex(([text]) =>
       text.includes("INSERT INTO hotel_catalog.properties"),
     );
-    const linkIndex = query.mock.calls.findIndex(([text]) =>
-      text.includes("INSERT INTO identity.organization_resource_links"),
+    const catalogIndex = query.mock.calls.findIndex(([text]) =>
+      text.includes("VALUES ($1::uuid, 'hotel_catalog'"),
+    );
+    const linkIndex = query.mock.calls.findIndex(
+      ([text]) =>
+        text.includes("INSERT INTO identity.organization_resource_links") &&
+        text.includes("enabled_products"),
+    );
+    const defaultsIndex = query.mock.calls.findIndex(([text]) =>
+      text.includes("INSERT INTO marketplace.marketplace_hotel_profiles"),
     );
     expect(createIndex).toBeGreaterThanOrEqual(0);
-    expect(linkIndex).toBeGreaterThan(createIndex);
+    expect(catalogIndex).toBeGreaterThan(createIndex);
+    expect(linkIndex).toBeGreaterThan(catalogIndex);
+    expect(defaultsIndex).toBeGreaterThan(linkIndex);
     const [createSql, createValues] = query.mock.calls[createIndex]!;
     const [linkSql, linkValues] = query.mock.calls[linkIndex]!;
     expect(createSql).toContain("INSERT INTO hotel_catalog.properties");
@@ -3118,14 +3129,17 @@ describe("shared hotel setup status route", () => {
     expect(linkSql).toContain("WHEN 'booking' THEN 'booking_hotel'");
     expect(linkSql).toContain("WHEN 'pms' THEN 'pms_property'");
     expect(linkSql).toContain("WHEN 'marketplace' THEN 'hotel_profile'");
-    expect(linkSql).toContain("INSERT INTO marketplace.marketplace_hotel_profiles");
-    expect(linkSql).toContain("INSERT INTO booking.booking_settings (property_id)");
+    expect(linkSql).not.toContain("INSERT INTO marketplace.marketplace_hotel_profiles");
+    expect(linkSql).not.toContain("INSERT INTO booking.booking_settings");
+    const [defaultsSql, defaultsValues] = query.mock.calls[defaultsIndex]!;
+    expect(defaultsSql).toContain("FROM identity.organization_resource_links");
+    expect(defaultsSql).toContain("INSERT INTO marketplace.marketplace_hotel_profiles");
+    expect(defaultsSql).toContain("INSERT INTO booking.booking_settings (property_id)");
+    expect(defaultsValues).toEqual([organizationId, propertyId]);
     expect(linkSql).toContain("contact_input.purpose");
     expect(linkSql).toContain("contact_input.is_public");
-    expect(linkSql).toContain("SET purpose = EXCLUDED.purpose");
-    expect(linkSql).toContain("is_public = EXCLUDED.is_public");
-    expect(linkSql).toContain("deleted_external_guest_contacts");
-    expect(linkSql).toContain("contact.source_system <> 'platform'");
+    expect(linkSql).not.toContain("DO UPDATE");
+    expect(linkSql).not.toContain("DELETE FROM");
     expect(linkSql).not.toContain("INSERT INTO hotel_catalog.property_profiles");
     expect(linkSql).not.toContain("INSERT INTO hotel_catalog.property_media");
     expect(linkSql).not.toContain("INSERT INTO identity.organizations");
@@ -3150,14 +3164,16 @@ describe("shared hotel setup status route", () => {
     ]);
   });
 
-  it("rolls back the base property when its dependent links fail", async () => {
+  it.each([
+    "INSERT INTO identity.organization_resource_links",
+    "INSERT INTO booking.booking_settings",
+  ])("rolls back all property stages when %s fails", async (failedStage) => {
     const query = vi.fn(async (text: string) => {
       if (text.includes("FROM platform.idempotency_keys")) return { rows: [] };
       if (text.includes("INSERT INTO platform.idempotency_keys"))
         return { rows: [{ id: "99999999-9999-4999-8999-999999999901" }] };
       if (text.includes("INSERT INTO hotel_catalog.properties")) return { rows: [{ propertyId }] };
-      if (text.includes("INSERT INTO identity.organization_resource_links"))
-        throw new Error("owner link failed");
+      if (text.includes(failedStage)) throw new Error("dependent creation stage failed");
       return { rows: [profileRow()] };
     });
     const release = vi.fn();
@@ -3182,11 +3198,11 @@ describe("shared hotel setup status route", () => {
     await expect(
       repository.createPropertyProfile({
         organizationId,
-        idempotencyKey: "create-profile-link-failure",
-        correlationId: "create-profile-link-failure",
+        idempotencyKey: "create-profile-stage-failure",
+        correlationId: "create-profile-stage-failure",
         profile: minimalHotelInput(),
       }),
-    ).rejects.toThrow("owner link failed");
+    ).rejects.toThrow("dependent creation stage failed");
     expect(query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
     expect(query.mock.calls.some(([text]) => text === "COMMIT")).toBe(false);
     expect(release).toHaveBeenCalledOnce();
@@ -3378,6 +3394,7 @@ function agencyScope(overrides: Partial<MembershipPropertyScope> = {}): Membersh
     roleKey: "hotel_owner",
     accessOrigin: "agency",
     assignedPropertyIds: [],
+    productAccess: { pms: true, booking: true },
     ...overrides,
   };
 }
