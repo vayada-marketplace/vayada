@@ -449,10 +449,10 @@ jobs:
             import pg from "pg";
             const client = new pg.Client({ connectionString: process.env.TEST_DATABASE_URL });
             await client.connect();
-            await client.query("CREATE DATABASE vay1092_setup_credential_fixture");
+            await client.query("CREATE DATABASE vay1092_setup_credential_test");
             await client.end();
           '
-          credential_fixture=postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay1092_setup_credential_fixture
+          credential_fixture=postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay1092_setup_credential_test
           TARGET_DATABASE_URL="$credential_fixture" npm --workspace @vayada/backend-migration run target:migrate -- --env local
           TEST_DATABASE_URL="$credential_fixture" npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupCreationScope.integration.test.ts src/hotelSetupPropertyFinancialsScope.integration.test.ts
           npm --workspace vayada-api run test -- src/cli/hotelSetupPropertyPreflight.test.ts src/cli/hotelSetupReaderPreflight.test.ts
