@@ -694,6 +694,9 @@ async function writePropertyProfile(
       const propertyId = created.rows[0]?.propertyId;
       if (!propertyId)
         throw new Error("Created shared property profile did not return a property id");
+      // Native policies need parent links visible in a later statement's snapshot.
+      // All stages stay on this client and roll back together.
+      await client.query(createPropertyCatalogOwnerSql(), [input.organizationId, propertyId]);
       const result = await client.query<PropertyProfileWriteRow>(createPropertyProfileSql(), [
         input.organizationId,
         payload,
@@ -701,6 +704,7 @@ async function writePropertyProfile(
       ]);
       if (result.rows[0]?.propertyId !== propertyId)
         throw new Error("Created shared property profile links did not return the property id");
+      await client.query(createPropertyProductDefaultsSql(), [input.organizationId, propertyId]);
       if (input.provisioningReference) {
         await linkProvisioningReference(client, {
           propertyId,
@@ -1453,6 +1457,43 @@ function createBasePropertySql(): string {
   `;
 }
 
+function createPropertyCatalogOwnerSql(): string {
+  return `INSERT INTO identity.organization_resource_links
+    (organization_id, product, resource_type, resource_id, relationship, status)
+    VALUES ($1::uuid, 'hotel_catalog', 'property', $2::uuid::text, 'owner', 'active')`;
+}
+
+function createPropertyProductDefaultsSql(): string {
+  return `WITH linked_product_properties AS (
+    SELECT product, resource_id FROM identity.organization_resource_links
+    WHERE organization_id=$1::uuid AND resource_id=$2::uuid::text
+      AND relationship='owner' AND status='active'
+      AND (product, resource_type) IN (('booking', 'booking_hotel'), ('marketplace', 'hotel_profile'))
+  ),
+    initialized_marketplace_profile AS (
+      INSERT INTO marketplace.marketplace_hotel_profiles (
+        property_id,
+        organization_id,
+        source_system,
+        source_hotel_profile_id
+      )
+      SELECT resource_id::uuid, $1::uuid, 'marketplace', resource_id
+      FROM linked_product_properties
+      WHERE product = 'marketplace'
+      ON CONFLICT (property_id) DO NOTHING
+      RETURNING property_id
+    ),
+    initialized_booking_settings AS (
+      INSERT INTO booking.booking_settings (property_id)
+      SELECT resource_id::uuid
+      FROM linked_product_properties
+      WHERE product = 'booking'
+      ON CONFLICT (property_id) DO NOTHING
+      RETURNING property_id
+    )
+  SELECT 1`;
+}
+
 function createPropertyProfileSql(): string {
   return `
     WITH profile_input AS (
@@ -1475,25 +1516,6 @@ function createPropertyProfileSql(): string {
     ),
     created_property AS (
       SELECT $3::uuid AS property_id
-    ),
-    linked_property AS (
-      INSERT INTO identity.organization_resource_links (
-        organization_id,
-        product,
-        resource_type,
-        resource_id,
-        relationship,
-        status
-      )
-      SELECT
-        $1::uuid,
-        'hotel_catalog',
-        'property',
-        created_property.property_id::text,
-        'owner',
-        'active'
-      FROM created_property
-      RETURNING product, resource_id
     ),
     setup_product_keys(product, entitlement_key) AS (
       VALUES
@@ -1599,31 +1621,10 @@ function createPropertyProfileSql(): string {
       JOIN enabled_products entitlement ON TRUE
       RETURNING product, resource_id
     ),
-    initialized_marketplace_profile AS (
-      INSERT INTO marketplace.marketplace_hotel_profiles (
-        property_id,
-        organization_id,
-        source_system,
-        source_hotel_profile_id
-      )
-      SELECT resource_id::uuid, $1::uuid, 'marketplace', resource_id
-      FROM linked_product_properties
-      WHERE product = 'marketplace'
-      ON CONFLICT (property_id) DO NOTHING
-      RETURNING property_id
-    ),
-    initialized_booking_settings AS (
-      INSERT INTO booking.booking_settings (property_id)
-      SELECT resource_id::uuid
-      FROM linked_product_properties
-      WHERE product = 'booking'
-      ON CONFLICT (property_id) DO NOTHING
-      RETURNING property_id
-    ),
     written_property AS (
       SELECT * FROM created_property
     )
-    ${propertyProfileMutationCtes()}
+    ${propertyProfileMutationCtes("create")}
     SELECT written_property.property_id::text AS "propertyId"
     FROM written_property
   `;
@@ -1677,13 +1678,14 @@ function updatePropertyProfileSql(): string {
     written_property AS (
       SELECT * FROM updated_property
     )
-    ${propertyProfileMutationCtes()}
+    ${propertyProfileMutationCtes("update")}
     SELECT written_property.property_id::text AS "propertyId"
     FROM written_property
   `;
 }
 
-function propertyProfileMutationCtes(): string {
+function propertyProfileMutationCtes(mode: "create" | "update"): string {
+  // A new UUID has no existing location or contacts to replace. Creation needs INSERT only.
   return `,
     upserted_location AS (
       INSERT INTO hotel_catalog.property_locations (
@@ -1716,7 +1718,9 @@ function propertyProfileMutationCtes(): string {
         'verified',
         now()
       FROM written_property, profile_input
-      ON CONFLICT (property_id) DO UPDATE
+      ${
+        mode === "update"
+          ? `ON CONFLICT (property_id) DO UPDATE
       SET country_code = EXCLUDED.country_code,
           city = EXCLUDED.city,
           street_address = EXCLUDED.street_address,
@@ -1728,7 +1732,9 @@ function propertyProfileMutationCtes(): string {
           geo_public = EXCLUDED.geo_public,
           map_display_mode = EXCLUDED.map_display_mode,
           source_confidence = EXCLUDED.source_confidence,
-          updated_at = now()
+          updated_at = now()`
+          : ""
+      }
       RETURNING property_id
     ),
     contact_input AS (
@@ -1742,7 +1748,9 @@ function propertyProfileMutationCtes(): string {
       JOIN LATERAL jsonb_to_recordset(COALESCE(profile_input.contacts, '[]'::jsonb))
         AS contact(channel_type text, value text, purpose text, is_public boolean) ON TRUE
     ),
-    deleted_contacts AS (
+    ${
+      mode === "update"
+        ? `deleted_contacts AS (
       DELETE FROM hotel_catalog.property_contact_channels contact
       USING written_property
       WHERE contact.property_id = written_property.property_id
@@ -1765,6 +1773,9 @@ function propertyProfileMutationCtes(): string {
         AND contact.channel_type IN ('phone', 'whatsapp', 'email')
       RETURNING contact.property_id
     ),
+    `
+        : ""
+    }
     upserted_contacts AS (
       INSERT INTO hotel_catalog.property_contact_channels (
         property_id,
@@ -1784,7 +1795,9 @@ function propertyProfileMutationCtes(): string {
         'platform',
         now()
       FROM contact_input
-      CROSS JOIN (
+      ${
+        mode === "update"
+          ? `CROSS JOIN (
         SELECT count(*) AS deleted_count
         FROM deleted_external_guest_contacts
       ) external_guest_contact_cleanup
@@ -1792,7 +1805,9 @@ function propertyProfileMutationCtes(): string {
       SET purpose = EXCLUDED.purpose,
           is_public = EXCLUDED.is_public,
           source_system = EXCLUDED.source_system,
-          updated_at = now()
+          updated_at = now()`
+          : ""
+      }
       RETURNING property_id
     )
   `;
