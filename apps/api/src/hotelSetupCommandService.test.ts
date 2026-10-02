@@ -255,6 +255,7 @@ function fixture(
       acceptedAt: "2026-09-30T12:00:00.000Z",
     },
   });
+  const launch = vi.fn(async (_context, _id, settings) => settings);
   const create = vi.fn().mockResolvedValue({ propertyId, profileRevision: 1 });
   const app = buildHotelSetupCommandService({
     internalToken,
@@ -284,6 +285,7 @@ function fixture(
         }),
       },
     },
+    launchSettings: options.creationOnly ? undefined : { updateLaunchSettings: launch },
     currencyCommands: options.creationOnly ? undefined : { upsertPropertyPricingCurrency: save },
     propertyCreation: { createPropertyProfile: create },
     featureHub: options.creationOnly
@@ -307,6 +309,7 @@ function fixture(
   apps.push(app);
   return {
     app,
+    launch,
     create,
     feature,
     setupComplete,
@@ -781,4 +784,77 @@ it("exposes only the property-creation route in creation-only mode", async () =>
   expect(f.app.hasRoute({ method: "GET", url: "/properties/:propertyId/module-activations" })).toBe(
     false,
   );
+});
+
+const launchPayload = {
+  defaultCurrency: "LKR",
+  supportedCurrencies: [],
+  defaultLanguage: "en",
+  supportedLanguages: [],
+  instagram: "",
+  facebook: "",
+  tiktok: "",
+  youtube: "",
+};
+const launchPath = `/properties/${propertyId}/launch-settings`;
+it("saves launch values under the independently verified original session", async () => {
+  const f = fixture({ permissions: ["hotel_catalog.setup.manage"] });
+  const response = await f.app.inject({
+    method: "PUT",
+    url: launchPath,
+    headers: f.headers,
+    payload: launchPayload,
+  });
+  expect(response.statusCode).toBe(200);
+  expect(response.json()).toEqual(launchPayload);
+  expect(f.launch.mock.calls[0]![0]).toMatchObject({
+    actor: { internalUserId: userId, providerIdentity: { sessionId: "session_workos" } },
+    selectedOrganization: { organizationId },
+  });
+  expect(f.launch.mock.calls[0]!.slice(1)).toEqual([propertyId, launchPayload]);
+});
+it.each([
+  { session: false },
+  { assignment: "other" as const },
+  { malformedOverride: true },
+  { membership: "inactive" as const },
+  { permissions: [] },
+  { link: "missing" as const },
+  { link: "operator" as const },
+  { link: "other_property" as const },
+])("denies unauthorized launch saves before credential selection: %j", async (options) => {
+  const f = fixture({ permissions: ["hotel_catalog.setup.manage"], ...options });
+  const response = await f.app.inject({
+    method: "PUT",
+    url: launchPath,
+    headers: f.headers,
+    payload: launchPayload,
+  });
+  expect([401, 403]).toContain(response.statusCode);
+  expect(f.launch).not.toHaveBeenCalled();
+});
+it("rejects extra launch claims and keeps creation-only service free of launch commands", async () => {
+  const f = fixture({ permissions: ["hotel_catalog.setup.manage"] });
+  expect(
+    (
+      await f.app.inject({
+        method: "PUT",
+        url: launchPath,
+        headers: f.headers,
+        payload: { ...launchPayload, organizationId },
+      })
+    ).statusCode,
+  ).toBe(422);
+  expect(f.launch).not.toHaveBeenCalled();
+  const creation = fixture({ creationOnly: true, permissions: ["hotel_catalog.setup.manage"] });
+  expect(
+    (
+      await creation.app.inject({
+        method: "PUT",
+        url: launchPath,
+        headers: creation.headers,
+        payload: launchPayload,
+      })
+    ).statusCode,
+  ).toBe(404);
 });

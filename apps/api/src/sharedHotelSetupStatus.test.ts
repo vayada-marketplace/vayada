@@ -2314,6 +2314,53 @@ describe("shared hotel setup status route", () => {
     expect(updatePropertySettingsByHotelId).toHaveBeenCalledTimes(1);
   });
 
+  it("forwards a validated save and retries the same property without a local write fallback", async () => {
+    const write = vi.fn();
+    const forward = vi
+      .fn<import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder>()
+      .mockImplementationOnce(async (_request, reply) =>
+        reply.code(503).send({ code: "hotel_setup_unavailable" }),
+      )
+      .mockImplementationOnce(async (_request, reply) => reply.send({ defaultCurrency: "LKR" }));
+    app = buildSharedSetupApp({
+      permissions: ["hotel_catalog.setup.manage"],
+      linkedResources: [propertyLink(propertyId)],
+      repository: repositoryWith([]),
+      launchForwarder: forward,
+      launchSettingsRepository: {
+        findPropertySettingsByHotelId: vi.fn(),
+        updatePropertySettingsByHotelId: write,
+      },
+    });
+    const payload = {
+      defaultCurrency: "LKR",
+      supportedCurrencies: [],
+      defaultLanguage: "en",
+      supportedLanguages: [],
+      instagram: "",
+      facebook: "",
+      tiktok: "",
+      youtube: "",
+    };
+    const request = {
+      method: "PUT" as const,
+      url: `/api/hotel-setup/properties/${propertyId}/launch-settings`,
+      headers: { authorization: "Bearer valid-token" },
+      payload,
+    };
+    expect((await injectJson(app, request)).statusCode).toBe(503);
+    expect((await injectJson(app, request)).statusCode).toBe(200);
+    expect(forward).toHaveBeenCalledTimes(2);
+    for (const call of forward.mock.calls)
+      expect(call.slice(2)).toEqual([propertyId, "launch_settings"]);
+    expect(write).not.toHaveBeenCalled();
+    expect(
+      (await injectJson(app, { ...request, payload: { ...payload, databaseUrl: "forbidden" } }))
+        .statusCode,
+    ).toBe(422);
+    expect(forward).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects launch settings access outside the selected hotel group", async () => {
     const launchSettingsRepository: SharedPropertyLaunchSettingsRepository = {
       async findPropertySettingsByHotelId() {
@@ -3229,6 +3276,7 @@ describe("shared hotel setup status route", () => {
 function buildSharedSetupApp(options: {
   repository: SharedHotelSetupStatusRepository;
   launchSettingsRepository?: SharedPropertyLaunchSettingsRepository;
+  launchForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
   trackCommandRepository?: HotelSetupTrackCommandRepository;
   propertyAccessRepository?: PropertyAccessRepository;
   permissions?: PermissionKey[];
@@ -3242,6 +3290,7 @@ function buildSharedSetupApp(options: {
     logger: false,
     sharedHotelSetupStatusRepository: options.repository,
     propertyLaunchSettingsRepository: options.launchSettingsRepository,
+    hotelSetupCommandForwarder: options.launchForwarder,
     hotelSetupTrackCommandRepository:
       options.trackCommandRepository ?? unusedTrackCommandRepository(),
     auth: {

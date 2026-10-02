@@ -139,6 +139,7 @@ type SharedHotelSetupStatusRoutesOptions = {
   repository: SharedHotelSetupStatusRepository;
   trackCommandRepository: HotelSetupTrackCommandRepository;
   propertyCreationForwarder?: HotelSetupCommandForwarder;
+  launchSettingsForwarder?: HotelSetupCommandForwarder;
   propertyAccessRepository?: PropertyAccessRepository;
   launchSettingsRepository?: SharedPropertyLaunchSettingsRepository;
   now?: () => Date;
@@ -407,51 +408,18 @@ export async function registerSharedHotelSetupStatusRoutes(
       return toSharedPropertyLaunchSettings(settings);
     });
 
-    app.put("/properties/:propertyId/launch-settings", async (request, reply) => {
-      const params = request.params as SharedPropertyProfileParams;
-      const propertyId = parsePropertyId(params.propertyId, reply);
-      if (propertyId === false || propertyId === null) return reply;
-
-      const access = resolveSharedSetupAccess(
-        request,
-        reply,
-        propertyId,
-        "hotel_catalog.setup.manage",
-      );
-      if (!access) return reply;
-
-      const settings = parsePropertyLaunchSettings(request.body, reply);
-      if (settings === false) return reply;
-
-      let stored: BookingPropertySettingsReadModel | null;
-      try {
-        stored = await launchSettingsRepository.updatePropertySettingsByHotelId(
+    registerSharedHotelSetupLaunchSettings(
+      app,
+      async (context, propertyId, settings) => {
+        const stored = await launchSettingsRepository.updatePropertySettingsByHotelId(
           propertyId,
           settings,
-          access.organizationId,
+          context.selectedOrganization.organizationId,
         );
-      } catch (error) {
-        if (error instanceof BookingContactPublicationConflictError) {
-          return reply.status(409).send({
-            code: "private_contact_conflict",
-            detail: error.message,
-          });
-        }
-        request.log.error({ err: error, propertyId }, "Property launch settings write failed");
-        return reply.status(500).send({
-          code: "launch_settings_unavailable",
-          detail: "Property launch settings could not be saved.",
-        });
-      }
-      if (!stored) {
-        return reply.status(404).send({
-          code: "property_launch_settings_not_found",
-          detail: "Property launch settings were not found for the selected property.",
-        });
-      }
-
-      return toSharedPropertyLaunchSettings(stored);
-    });
+        return stored ? toSharedPropertyLaunchSettings(stored) : null;
+      },
+      { forward: options.launchSettingsForwarder },
+    );
   }
 
   app.get("/properties/:propertyId/public-profile", async (request, reply) => {
@@ -587,7 +555,7 @@ function toSharedPropertyLaunchSettings(
 function parsePropertyLaunchSettings(
   body: unknown,
   reply: FastifyReply,
-): UpdateBookingPropertySettingsBody | false {
+): SharedPropertyLaunchSettings | false {
   const fields: Record<string, string[]> = {};
   if (!isObjectRecord(body)) {
     addFieldError(fields, "body", "body must be an object.");
@@ -839,6 +807,88 @@ function toSharedSetupTrackAccessError(error: unknown): SharedHotelSetupTrackAcc
     category: "authorization",
     message: "Missing required hotel product management permission.",
   };
+}
+
+/** Shared input contract; private handler independently verifies the original session. */
+export function registerSharedHotelSetupLaunchSettings(
+  app: FastifyInstance,
+  update: (
+    context: ReturnType<typeof enforceRoutePolicy>,
+    propertyId: string,
+    settings: SharedPropertyLaunchSettings,
+  ) => Promise<SharedPropertyLaunchSettings | null>,
+  options: {
+    requireOwnerSession?: boolean;
+    forward?: HotelSetupCommandForwarder;
+    propertyAccessRepository?: PropertyAccessRepository;
+  } = {},
+): void {
+  app.put("/properties/:propertyId/launch-settings", async (request, reply) => {
+    const params = request.params as SharedPropertyProfileParams;
+    const propertyId = parsePropertyId(params.propertyId, reply);
+    if (propertyId === false || propertyId === null) return reply;
+
+    const access = resolveSharedSetupAccess(
+      request,
+      reply,
+      propertyId,
+      "hotel_catalog.setup.manage",
+    );
+    if (!access) return reply;
+    if (
+      options.requireOwnerSession &&
+      (!access.context.actor.providerIdentity.sessionId ||
+        !access.context.linkedResources.some(
+          (link) =>
+            link.product === "hotel_catalog" &&
+            link.resourceType === "property" &&
+            link.resourceId === propertyId &&
+            link.relationship === "owner" &&
+            link.status === "active",
+        ))
+    )
+      return reply.status(403).send({ code: "owner_session_required" });
+
+    if (options.requireOwnerSession) {
+      if (!options.propertyAccessRepository) throw new Error("Property access unavailable");
+      const effective = await resolveEffectivePropertyAccess(
+        access.context,
+        options.propertyAccessRepository,
+      );
+      if (!effective?.propertyIds.includes(propertyId)) throw new AuthorizationError();
+    }
+
+    const settings = parsePropertyLaunchSettings(request.body, reply);
+    if (settings === false) return reply;
+
+    if (options.forward) return options.forward(request, reply, propertyId, "launch_settings");
+
+    let stored: SharedPropertyLaunchSettings | null;
+    try {
+      stored = await update(access.context, propertyId, settings);
+    } catch (error) {
+      if (error instanceof AuthorizationError) throw error;
+      if (error instanceof BookingContactPublicationConflictError) {
+        return reply.status(409).send({
+          code: "private_contact_conflict",
+          detail: error.message,
+        });
+      }
+      request.log.error({ err: error, propertyId }, "Property launch settings write failed");
+      return reply.status(options.requireOwnerSession ? 503 : 500).send({
+        code: "launch_settings_unavailable",
+        detail: "Property launch settings could not be saved.",
+      });
+    }
+    if (!stored) {
+      return reply.status(404).send({
+        code: "property_launch_settings_not_found",
+        detail: "Property launch settings were not found for the selected property.",
+      });
+    }
+
+    return stored;
+  });
 }
 
 /** Shared validation and policy for the public API and independently authenticated setup service. */
