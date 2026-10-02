@@ -63,10 +63,13 @@ export async function withHotelSetupCommandScope<T>(
   pool: ScopePool,
   scope: Parameters<typeof assertHotelSetupCommandScope>[1],
   work: (client: ScopeClient) => Promise<T>,
+  attest?: (client: ScopeClient) => Promise<void>,
 ): Promise<T> {
   const client = await pool.connect();
   try {
-    await beginHotelSetupCommandScope(client, scope);
+    await client.query("BEGIN");
+    await attest?.(client);
+    await assertHotelSetupCommandScope(client, scope);
     const result = await work(client);
     await client.query("COMMIT");
     return result;

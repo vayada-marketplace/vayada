@@ -3,6 +3,7 @@ import {
   assertHotelSetupAuditBoundary,
   assertHotelSetupColumnPrivileges,
   type HotelSetupColumnPrivileges,
+  type HotelSetupPrivilegeQueryable,
 } from "./hotelSetupReaderPrivileges.js";
 
 /** Native Feature Hub only. UPDATE of one key supplies row locks; RLS denies actual updates. */
@@ -100,11 +101,12 @@ export async function assertHotelSetupFeatureHubPrivileges(client: Pick<pg.Pool,
 
 /** Shared native column, helper and policy attestation. Scope and actor checks remain separate. */
 export async function assertHotelSetupNativePrivileges(
-  client: Pick<pg.Pool, "query">,
+  client: HotelSetupPrivilegeQueryable,
   inventory: HotelSetupColumnPrivileges,
   policyDigest: string,
+  allowedDeletes: readonly string[] = [],
 ) {
-  await assertHotelSetupColumnPrivileges(client, inventory, definers);
+  await assertHotelSetupColumnPrivileges(client, inventory, definers, allowedDeletes);
   await assertHotelSetupAuditBoundary(client);
   const result = await client.query<{ safe: boolean }>(
     `SELECT (

@@ -111,6 +111,7 @@ export async function assertHotelSetupColumnPrivileges(
   client: HotelSetupPrivilegeQueryable,
   inventory: HotelSetupColumnPrivileges,
   allowedDefiners: readonly string[] = [],
+  allowedDeletes: readonly string[] = [],
 ) {
   const version = await client.query<{ version: number }>(
     "SELECT pg_catalog.current_setting('server_version_num')::integer AS version",
@@ -157,7 +158,10 @@ export async function assertHotelSetupColumnPrivileges(
     OR EXISTS (SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
       WHERE ${schemas} AND c.relkind IN ('r','p','v','m','f')
       AND pg_catalog.has_schema_privilege(current_user,n.oid,'USAGE')
-      AND (pg_catalog.has_table_privilege(current_user,c.oid,'DELETE,TRUNCATE,TRIGGER${maintain}')
+      AND (pg_catalog.has_table_privilege(current_user,c.oid,'TRUNCATE,TRIGGER${maintain}')
+        OR (pg_catalog.has_table_privilege(current_user,c.oid,'DELETE')
+          AND NOT (n.nspname || '.' || c.relname = ANY($4::text[])))
+        OR pg_catalog.has_table_privilege(current_user,c.oid,'DELETE WITH GRANT OPTION')
         OR (NOT (n.nspname || '.' || c.relname = ANY($2::text[]))
           AND pg_catalog.has_table_privilege(current_user,c.oid,'INSERT'))
         OR (NOT (n.nspname || '.' || c.relname = ANY($1::text[]))
@@ -172,11 +176,14 @@ export async function assertHotelSetupColumnPrivileges(
       AND (pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE WITH GRANT OPTION')
         OR (p.prosecdef AND pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE')
           AND NOT (p.oid=ANY($3::regprocedure[])))))
+    OR (SELECT count(*) FROM pg_catalog.unnest($4::text[]) relation
+      WHERE pg_catalog.has_table_privilege(current_user,relation,'DELETE'))<>pg_catalog.cardinality($4::text[])
   ) AS unsafe`,
     [
       Object.keys(inventory).filter((name) => inventory[name]!.SELECT),
       Object.keys(inventory).filter((name) => inventory[name]!.INSERT),
       allowedDefiners,
+      allowedDeletes,
     ],
   );
   if (forbidden.rows.length !== 1 || forbidden.rows[0]?.unsafe !== false)

@@ -3,6 +3,7 @@ import type { RequestContext } from "@vayada/backend-auth";
 import { AuthorizationError, resolveEffectivePropertyAccess } from "@vayada/backend-authorization";
 import { withHotelSetupCommandScope } from "./hotelSetupCommandScope.js";
 import { lockHotelSetupMembership } from "./hotelSetupMembership.js";
+import { assertHotelSetupLaunchSettingsPrivileges } from "./hotelSetupLaunchSettingsPrivileges.js";
 import { BookingContactPublicationConflictError } from "./routes/bookingSettings.js";
 import type { SharedPropertyLaunchSettings } from "./routes/sharedHotelSetupStatus.js";
 
@@ -16,20 +17,32 @@ export async function writeHotelSetupLaunchSettings(
 ): Promise<SharedPropertyLaunchSettings> {
   if (!context.actor.providerIdentity.sessionId) throw new AuthorizationError();
   const organizationId = context.selectedOrganization.organizationId;
-  return withHotelSetupCommandScope(pool, { propertyId, organizationId, operation: "launch_settings" },
+  return withHotelSetupCommandScope(
+    pool,
+    { propertyId, organizationId, operation: "launch_settings" },
     async (client) => {
       const membership = await lockHotelSetupMembership(client, {
-        organizationId, actorUserId: context.actor.internalUserId, propertyId,
+        organizationId,
+        actorUserId: context.actor.internalUserId,
+        propertyId,
       });
-      const access = membership && await resolveEffectivePropertyAccess(membership.context, {
-        async findMembershipPropertyScope() { return membership.scope; },
-      });
-      if (!membership?.permissions.includes("hotel_catalog.setup.manage") ||
-          !access?.propertyIds.includes(propertyId)) throw new AuthorizationError();
+      const access =
+        membership &&
+        (await resolveEffectivePropertyAccess(membership.context, {
+          async findMembershipPropertyScope() {
+            return membership.scope;
+          },
+        }));
+      if (
+        !membership?.permissions.includes("hotel_catalog.setup.manage") ||
+        !access?.propertyIds.includes(propertyId)
+      )
+        throw new AuthorizationError();
 
       // Serialize every settings/contact save for this property, including empty social values.
       const property = await client.query(
-        "SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid FOR UPDATE", [propertyId],
+        "SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid FOR UPDATE",
+        [propertyId],
       );
       if (property.rows.length !== 1) throw new Error("Property launch settings unavailable");
       const locked = await client.query(
@@ -38,28 +51,38 @@ export async function writeHotelSetupLaunchSettings(
       );
       if (locked.rows.length !== 1) throw new Error("Property launch settings unavailable");
       const channels = ["instagram", "facebook", "tiktok", "youtube"] as const;
-      const contacts = JSON.stringify(channels.map((channel_type) => ({
-        channel_type, value: settings[channel_type],
-      })));
+      const contacts = JSON.stringify(
+        channels.map((channel_type) => ({
+          channel_type,
+          value: settings[channel_type],
+        })),
+      );
       const conflicts = await client.query(
         `SELECT contact.id FROM hotel_catalog.property_contact_channels contact
          JOIN jsonb_to_recordset($2::jsonb) input(channel_type text,value text)
            ON contact.channel_type=input.channel_type AND contact.value=input.value
          WHERE contact.property_id=$1::uuid AND contact.source_system<>'booking'
-           AND NOT contact.is_public FOR UPDATE OF contact`, [propertyId, contacts],
+           AND NOT contact.is_public FOR UPDATE OF contact`,
+        [propertyId, contacts],
       );
       if (conflicts.rows.length) throw new BookingContactPublicationConflictError();
       await client.query(
         `UPDATE booking.booking_settings SET default_currency=$2, supported_currencies=$3::text[],
           default_language=$4, supported_languages=$5::text[], updated_at=clock_timestamp()
          WHERE property_id=$1::uuid`,
-        [propertyId, settings.defaultCurrency, settings.supportedCurrencies,
-          settings.defaultLanguage, settings.supportedLanguages],
+        [
+          propertyId,
+          settings.defaultCurrency,
+          settings.supportedCurrencies,
+          settings.defaultLanguage,
+          settings.supportedLanguages,
+        ],
       );
       await client.query(
         `DELETE FROM hotel_catalog.property_contact_channels
          WHERE property_id=$1::uuid AND source_system='booking'
-           AND channel_type=ANY($2::text[])`, [propertyId, channels],
+           AND channel_type=ANY($2::text[])`,
+        [propertyId, channels],
       );
       await client.query(
         `INSERT INTO hotel_catalog.property_contact_channels
@@ -69,7 +92,8 @@ export async function writeHotelSetupLaunchSettings(
          WHERE input.value<>''
          ON CONFLICT (property_id,channel_type,value) DO UPDATE
            SET is_public=TRUE,updated_at=clock_timestamp()
-           WHERE property_contact_channels.source_system='booking'`, [propertyId, contacts],
+           WHERE property_contact_channels.source_system='booking'`,
+        [propertyId, contacts],
       );
       // Only public contacts depend on these fields in the catalog projection. Offer cards
       // contain neither social contacts nor booking localization, so need no rebuild.
@@ -80,7 +104,8 @@ export async function writeHotelSetupLaunchSettings(
            FROM hotel_catalog.property_contact_channels contact
            WHERE contact.property_id=$1::uuid AND contact.is_public),'[]'::jsonb),
            projected_at=clock_timestamp()
-         WHERE profile.property_id=$1::uuid`, [propertyId],
+         WHERE profile.property_id=$1::uuid`,
+        [propertyId],
       );
       await client.query(
         `INSERT INTO platform.product_audit_events
@@ -91,8 +116,13 @@ export async function writeHotelSetupLaunchSettings(
            'property',NULL,$3::uuid,'user',$4::uuid,'hotel_catalog','property',$3::uuid::text,
            $5,'{"operation":"launch_settings"}'::jsonb,
            jsonb_build_object('actorOrganizationId',$2::uuid::text),'standard','internal')`,
-        [randomUUID(), organizationId, propertyId, context.actor.internalUserId,
-          context.audit.correlationId ?? context.audit.requestId],
+        [
+          randomUUID(),
+          organizationId,
+          propertyId,
+          context.actor.internalUserId,
+          context.audit.correlationId ?? context.audit.requestId,
+        ],
       );
       // Read authoritative values while the transaction and native owner locks remain held.
       const saved = await client.query<SharedPropertyLaunchSettings>(
@@ -100,13 +130,20 @@ export async function writeHotelSetupLaunchSettings(
           settings.supported_currencies AS "supportedCurrencies",
           settings.default_language AS "defaultLanguage",
           settings.supported_languages AS "supportedLanguages",
-          ${channels.map((channel) => `COALESCE((SELECT value
+          ${channels
+            .map(
+              (channel) => `COALESCE((SELECT value
             FROM hotel_catalog.property_contact_channels WHERE property_id=$1::uuid
               AND channel_type='${channel}' AND is_public
-            ORDER BY (source_system='booking') DESC,value DESC LIMIT 1),'') AS "${channel}"`).join(",")}
-         FROM booking.booking_settings settings WHERE settings.property_id=$1::uuid`, [propertyId],
+            ORDER BY (source_system='booking') DESC,value DESC LIMIT 1),'') AS "${channel}"`,
+            )
+            .join(",")}
+         FROM booking.booking_settings settings WHERE settings.property_id=$1::uuid`,
+        [propertyId],
       );
       if (saved.rows.length !== 1) throw new Error("Property launch settings unavailable");
       return saved.rows[0]!;
-    });
+    },
+    assertHotelSetupLaunchSettingsPrivileges,
+  );
 }
