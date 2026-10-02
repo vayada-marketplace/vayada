@@ -94,7 +94,7 @@ export async function assertHotelSetupFeatureHubPrivileges(client: Pick<pg.Pool,
   await assertHotelSetupNativePrivileges(
     client,
     HOTEL_SETUP_FEATURE_HUB_PRIVILEGES,
-    "deebe4c8416fd98b9854abcab63915fe",
+    "16827da3dbb58d1daf6c2d1231323ad9",
   );
 }
 
@@ -117,7 +117,7 @@ export async function assertHotelSetupNativePrivileges(
       AND p.proname <> 'hotel_setup_property_link_matches'
       AND pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE'))=6
     AND (SELECT pg_catalog.md5(pg_catalog.string_agg(pg_catalog.pg_get_functiondef(p.oid),'' ORDER BY p.proname))
-      FROM pg_catalog.pg_proc p WHERE p.oid=ANY($2::regprocedure[]))='c8a96056a5e26d02b628c8d5973e6a44'
+      FROM pg_catalog.pg_proc p WHERE p.oid=ANY($2::regprocedure[]))='b59c9714d0f54b35a6858ab799f81878'
     AND (SELECT pg_catalog.md5(pg_catalog.string_agg(
       c.oid::regclass::text || c.relrowsecurity::text || c.relforcerowsecurity::text || p.polname
       || p.polpermissive::text || p.polcmd::text
