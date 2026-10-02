@@ -1,7 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { readIdempotencyKey } from "./routes/pmsPricing.js";
 
-type Operation = "currency" | "modules" | "financials" | "property_creation";
+type Operation = "currency" | "modules" | "financials" | "property_creation" | "launch_settings";
 export type HotelSetupCommandForwarder = (
   request: FastifyRequest,
   reply: FastifyReply,
@@ -54,7 +54,9 @@ export function loadHotelSetupCommandForwarder(
     if (typeof authorization !== "string" || !/^Bearer \S+$/i.test(authorization))
       return reply.code(401).send({ code: "unauthenticated" });
     const suffix =
-      operation === "currency"
+      operation === "launch_settings"
+        ? "launch-settings"
+        : operation === "currency"
         ? "pricing-source/currency"
         : operation === "modules"
           ? "module-activations"
@@ -62,7 +64,7 @@ export function loadHotelSetupCommandForwarder(
     const method =
       operation === "property_creation"
         ? "POST"
-        : operation === "currency"
+        : operation === "currency" || operation === "launch_settings"
           ? "PUT"
           : operation === "modules"
             ? "GET"
