@@ -378,6 +378,7 @@ describe("shared hotel setup status route", () => {
   it.each([
     ["missing", null],
     ["unknown mode", agencyScope({ mode: "unknown" })],
+    ["missing product access", agencyScope({ productAccess: undefined })],
     [
       "malformed assignments",
       agencyScope({
@@ -3393,6 +3394,7 @@ function agencyScope(overrides: Partial<MembershipPropertyScope> = {}): Membersh
     roleKey: "hotel_owner",
     accessOrigin: "agency",
     assignedPropertyIds: [],
+    productAccess: { pms: true, booking: true },
     ...overrides,
   };
 }
