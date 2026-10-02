@@ -115,14 +115,32 @@ Financials readiness transition succeed.
 
 ## Rotation and transfer
 
-Rotation creates a new random login and secret and verifies its attributes and
-denials. In one transaction, deactivate the old assignment, activate the new
-one, run the replacement's positive exact-scope preflight, and commit only on
-success. The 0441 scope helper rejects an inactive login, so a positive test
-before this transaction cannot work. Run the post-switch preflight again from
-the real service connection before serving a command.
-Only after old connections drain may the old login be disabled and retired.
-Secret replacement alone cannot revoke a pooled session.
+Rotation must keep setup commands blocked for the affected assignment until the
+replacement has passed its native check:
+
+1. Block new commands and drain in-flight commands. Create a new random login
+   and secret; verify its attributes, exact privileges and denials while its
+   assignment is inactive.
+2. Lock and recheck the current assignment and Owner link. In one transaction,
+   deactivate the old assignment, activate the new one and commit the switch.
+3. While commands remain blocked, run the positive exact-scope preflight from
+   the replacement's actual native service connection. A different connection
+   cannot see an uncommitted assignment; an admin connection cannot substitute
+   for native `session_user = current_user` proof. Unblock only after success.
+4. On failure, keep commands blocked. A compensating transaction may restore
+   the prior assignment only after locking and verifying that the replacement
+   is still the expected active assignment and current ownership is unchanged.
+   If either has changed, require recovery against the current owner instead.
+   After a valid restore, require the old login's native preflight to pass
+   before unblocking. Do not treat a secret rollback as assignment recovery.
+5. Only after the replacement is active, its native preflight succeeds and old
+   connections drain, disable and retire the old login. A successful recovery
+   must retain the restored old login; retire the failed replacement only under
+   separately reviewed cleanup. Secret replacement alone cannot revoke a pooled
+   session.
+
+The separate provisioner must enforce and test this command block, switch and
+recovery procedure; this contract does not implement it.
 
 Ownership transfer changes the current owner link and active property-login
 assignment in one transaction. Both transfer and setup commands lock the same
@@ -130,6 +148,9 @@ assignment and owner rows. An already connected old login must fail its next
 command, including a command racing with transfer. A new owner receives a new
 login and secret; the old organization's creation login never gains the
 transferred property's command scope.
+Keep affected setup commands blocked through the transfer and the new owner's
+post-commit native preflight. A failed check must not restore the former owner's
+access after ownership has changed.
 
 ## Activation and release gate
 
@@ -355,7 +376,7 @@ exact live owners, lifecycle/transfer, private readiness and deployment remain g
 
 ## Native property credential release check
 
-After migration 0452, run `node apps/api/dist/cli/hotelSetupPropertyPreflight.js`
+After the reviewed migrations through 0453, run `node apps/api/dist/cli/hotelSetupPropertyPreflight.js`
 inside the reviewed image. Inject `HOTEL_SETUP_COMMAND_DATABASE_URL` as a secret;
 set the password-free `HOTEL_SETUP_COMMAND_DATABASE_ENDPOINT`, exact
 `HOTEL_SETUP_COMMAND_DATABASE_LOGIN`, `HOTEL_SETUP_COMMAND_PROPERTY_ID`,
@@ -392,7 +413,7 @@ Run `hotelSetupPropertyFinancialsScope.integration.test.ts` and
 `TEST_DATABASE_URL` and `HOTEL_SETUP_READER_PREFLIGHT_TEST_DATABASE_URL` pointing
 to a loopback `/vay1092_` migrated fixture. These tests temporarily change PUBLIC
 database ACLs, restore them and remove their synthetic roles. Use only a dedicated
-local cluster. CI uses its own `vay1092_setup_credential_fixture` database for
+local cluster. CI uses its own `vay1092_setup_credential_test` database for
 native scope tests and the shared fixture for source CLI rejection tests. This
 local rehearsal does not populate the
 platform's reviewed image inventory or verify live credentials.
