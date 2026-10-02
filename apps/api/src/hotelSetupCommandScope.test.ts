@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { withHotelSetupCommandScope } from "./hotelSetupCommandScope.js";
+import {
+  assertHotelSetupCreationScope,
+  withHotelSetupCommandScope,
+} from "./hotelSetupCommandScope.js";
 
 const propertyId = "11111111-1111-4111-8111-111111111111";
 const organizationId = "22222222-2222-4222-8222-222222222222";
@@ -89,5 +92,37 @@ describe("hotel setup command transaction scope", () => {
     ).rejects.toThrow("write failed");
     expect(setup.calls.at(-1)?.sql).toBe("ROLLBACK");
     expect(setup.isReleased()).toBe(true);
+  });
+});
+
+describe("hotel setup creation native scope", () => {
+  const creation = {
+    sessionUser: "vayada_next_hotel_setup_org_1",
+    currentUser: "vayada_next_hotel_setup_org_1",
+  };
+  it("uses the organization assignment and exact native parent role", async () => {
+    const setup = setupPool(creation);
+    await assertHotelSetupCreationScope(setup.client, organizationId);
+    expect(setup.calls[0]?.values).toEqual([organizationId]);
+    expect(setup.calls[0]?.sql).toContain("platform.hotel_setup_creation_assigned_organization()");
+    expect(setup.calls[0]?.sql).toContain("parent.rolname = 'vayada_next_hotel_setup_scope'");
+  });
+  it.each([
+    { currentUser: "migration_owner" },
+    { sessionUser: "ordinary_api", currentUser: "ordinary_api" },
+    { organizationAllowed: false },
+    { safeRole: false },
+  ])("rejects an unsafe or mismatched creation session: %j", async (change) => {
+    const setup = setupPool({ ...creation, ...change });
+    await expect(assertHotelSetupCreationScope(setup.client, organizationId)).rejects.toThrow(
+      "Hotel setup creation scope preflight failed",
+    );
+  });
+  it("rejects malformed organization identifiers before querying", async () => {
+    const setup = setupPool(creation);
+    await expect(assertHotelSetupCreationScope(setup.client, "not-a-uuid")).rejects.toThrow(
+      "Hotel setup creation scope preflight failed",
+    );
+    expect(setup.calls).toEqual([]);
   });
 });
