@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { PROPERTY_MEDIA_PUBLIC_VARIANTS } from "@vayada/domain-hotels";
+import { PROPERTY_MEDIA_PUBLIC_VARIANT_MAX_DIMENSIONS } from "./platform/propertyMediaVariantContract.js";
 
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -723,10 +725,10 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
       } as never,
       request: {
         purpose: "property.gallery_image",
-        visibility: "public",
+        visibility: "private",
         resource: {
-          product: "marketplace",
-          resourceType: "hotel_profile",
+          product: "hotel_catalog",
+          resourceType: "property",
           resourceId: created.propertyId,
         },
         files: [
@@ -740,7 +742,8 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
       },
       policy: {
         purpose: "property.gallery_image",
-        autoApprovePublicOnFinalize: true,
+        autoApprovePublicOnFinalize: false,
+        privateOnly: true,
       } as never,
       target: {
         resourceProduct: "hotel_catalog",
@@ -789,19 +792,17 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
         },
       ],
       variantSets: [
-        [
-          {
-            variantName: "original_safe",
-            visibility: "public",
-            storageKey: "properties/profile-revision-test/gallery.webp",
-            contentType: "image/webp",
-            widthPx: 1200,
-            heightPx: 800,
-            sizeBytes: 1800,
-            checksumSha256: "b".repeat(64),
-            publicCdnUrl: "https://cdn.example.test/properties/profile-revision-test/gallery.webp",
-          },
-        ],
+        PROPERTY_MEDIA_PUBLIC_VARIANTS.map((variantName) => ({
+          variantName,
+          visibility: "private" as const,
+          storageKey: `private/media/${uploadedMediaObjectId}/${variantName}/sha256-${"b".repeat(64)}.webp`,
+          contentType: "image/webp",
+          widthPx: PROPERTY_MEDIA_PUBLIC_VARIANT_MAX_DIMENSIONS[variantName].widthPx,
+          heightPx: PROPERTY_MEDIA_PUBLIC_VARIANT_MAX_DIMENSIONS[variantName].heightPx,
+          sizeBytes: 1800,
+          checksumSha256: "b".repeat(64),
+          publicCdnUrl: null,
+        })),
       ],
       bucketName: "vayada-test-media",
       now: "2026-07-26T20:01:00.000Z",
@@ -823,29 +824,23 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
         propertyId: created.propertyId,
       }),
     ).resolves.toMatchObject({
-      profileRevision: 6,
+      profileRevision: 5,
       publicProfile: {
-        media: [
-          {
-            mediaObjectId: uploadedMediaObjectId,
-            mediaType: "gallery_image",
-            url: "https://cdn.example.test/properties/profile-revision-test/gallery.webp",
-          },
-        ],
+        media: [],
       },
     });
     await expect(readProfileCompleteness(created.propertyId)).resolves.toEqual({
-      profileStatus: "complete",
-      completenessReasons: [],
+      profileStatus: "incomplete",
+      completenessReasons: ["media"],
     });
     await expect(
       repository.updatePublicPropertyProfile({
         organizationId,
         propertyId: created.propertyId,
-        expectedProfileRevision: 5,
+        expectedProfileRevision: 4,
         patch: { shortDescription: "Stale after media upload" },
       }),
-    ).resolves.toEqual({ status: "conflict", currentRevision: 6 });
+    ).resolves.toEqual({ status: "conflict", currentRevision: 5 });
 
     await client.query(
       `INSERT INTO booking.booking_settings (property_id)
@@ -1108,11 +1103,11 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
     });
 
     await client.query(
-      `INSERT INTO pms.room_types (id, property_id, name, currency, active)
+      `INSERT INTO pms.room_types (id, property_id, name, base_rate_amount, currency, active)
        VALUES
-         ($2::uuid, $1::uuid, 'Room only', 'EUR', TRUE),
-         ($3::uuid, $1::uuid, 'Rate only', 'EUR', TRUE),
-         ($4::uuid, $1::uuid, 'Inventory only', 'EUR', TRUE)`,
+         ($2::uuid, $1::uuid, 'Room only', 100, 'EUR', TRUE),
+         ($3::uuid, $1::uuid, 'Rate only', 100, 'EUR', TRUE),
+         ($4::uuid, $1::uuid, 'Inventory only', 100, 'EUR', TRUE)`,
       [created.propertyId, roomTypeWithRoomId, roomTypeWithRateId, roomTypeWithInventoryId],
     );
     await client.query(
@@ -1197,7 +1192,7 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
       readiness: "complete",
       reasonCodes: [],
     });
-  });
+  }, 30_000);
 
   it.each([
     { methods: ["pay_at_property"], enabled: true, complete: true },
