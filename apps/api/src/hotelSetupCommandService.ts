@@ -34,7 +34,7 @@ type HotelSetupCommandServiceOptions = {
     entitlementRepository: EntitlementRepository;
     propertyAccessRepository: PropertyAccessRepository;
   };
-  currencyCommands: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">;
+  currencyCommands?: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">;
   propertyCreation?: Pick<SharedHotelSetupStatusRepository, "createPropertyProfile">;
   featureHub?: {
     reads: Pick<PmsModuleActivationRepository, "list" | "close">;
@@ -88,10 +88,11 @@ export function buildHotelSetupCommandService(
       return reply.code(400).send({ code: "invalid_request" });
     return reply.code(503).send({ code: "hotel_setup_unavailable" });
   });
-  registerPmsPricingCurrencyCommand(app, options.currencyCommands, {
-    requireOwnerSession: true,
-    propertyAccessRepository,
-  });
+  if (options.currencyCommands)
+    registerPmsPricingCurrencyCommand(app, options.currencyCommands, {
+      requireOwnerSession: true,
+      propertyAccessRepository,
+    });
   if (options.propertyCreation)
     registerSharedHotelSetupPropertyCreation(app, options.propertyCreation, {
       requireOwnerSession: true,

@@ -11,6 +11,7 @@ import {
   assertHotelSetupServiceReader,
   loadHotelSetupCommandServiceConfig,
 } from "./hotelSetupCommandServiceConfig.js";
+import { createHotelSetupCreationCommands } from "./hotelSetupCreationCommands.js";
 import { createHotelSetupCurrencyCommands } from "./hotelSetupCurrencyCommands.js";
 import { createHotelSetupFeatureHubCommands } from "./hotelSetupFeatureHubCommands.js";
 import { assertHotelSetupReaderPrivileges } from "./hotelSetupReaderPrivileges.js";
@@ -23,8 +24,8 @@ const config = loadHotelSetupCommandServiceConfig();
 const runtime = installPostgresPoolRuntime(pg);
 try {
   const reader = new pg.Pool({ connectionString: config.readerDatabaseUrl });
-  await assertHotelSetupServiceReader(reader);
-  await assertHotelSetupReaderPrivileges(reader);
+  await assertHotelSetupServiceReader(reader, config.mode);
+  await assertHotelSetupReaderPrivileges(reader, config.mode);
   const repositoryConfig = { connectionString: config.readerDatabaseUrl };
   const vault = createSecretsManagerProviderCredentialVault();
   const credentials = {
@@ -33,7 +34,26 @@ try {
     databaseEndpoint: config.databaseEndpoint,
     secretPrefix: config.secretPrefix,
   };
-  const reads = createPgPmsModuleActivationRepository({ ...repositoryConfig, pool: reader });
+  const commandOptions =
+    config.mode === "property_creation"
+      ? { propertyCreation: createHotelSetupCreationCommands(credentials) }
+      : (() => {
+          const reads = createPgPmsModuleActivationRepository({
+            ...repositoryConfig,
+            pool: reader,
+          });
+          return {
+            currencyCommands: createHotelSetupCurrencyCommands({
+              ...credentials,
+              currencyChangeGuard: PMS_PRICING_CURRENCY_CHANGE_FAIL_CLOSED_GUARD,
+            }),
+            featureHub: {
+              reads: { list: reads.list },
+              commands: createHotelSetupFeatureHubCommands(credentials),
+              setupComplete: reads.isFinancialsSetupComplete!,
+            },
+          };
+        })();
   const app = buildHotelSetupCommandService({
     internalToken: config.internalToken,
     auth: {
@@ -47,15 +67,7 @@ try {
       entitlementRepository: createPgEntitlementRepository(repositoryConfig),
       propertyAccessRepository: createPgPropertyAccessRepository(repositoryConfig),
     },
-    currencyCommands: createHotelSetupCurrencyCommands({
-      ...credentials,
-      currencyChangeGuard: PMS_PRICING_CURRENCY_CHANGE_FAIL_CLOSED_GUARD,
-    }),
-    featureHub: {
-      reads: { list: reads.list },
-      commands: createHotelSetupFeatureHubCommands(credentials),
-      setupComplete: reads.isFinancialsSetupComplete!,
-    },
+    ...commandOptions,
   });
   app.addHook("onClose", () => runtime.close());
   registerShutdownSignals(app);

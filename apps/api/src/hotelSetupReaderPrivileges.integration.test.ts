@@ -5,12 +5,14 @@ import {
   assertHotelSetupReaderPrivileges,
   HOTEL_SETUP_READER_AUDIT_COLUMNS,
   HOTEL_SETUP_READER_READ_COLUMNS,
+  HOTEL_SETUP_CREATION_READER_READ_COLUMNS,
 } from "./hotelSetupReaderPrivileges.js";
 
+const modes = ["property_commands", "property_creation"] as const;
 const connectionString = process.env.HOTEL_SETUP_READER_TEST_DATABASE_URL;
 
 describe.runIf(connectionString)("private reader effective ACL on migrated PostgreSQL", () => {
-  it("accepts only exact canonical columns and rejects privilege drift", async () => {
+  it.each(modes)("exact reader ACL: %s", async (mode) => {
     // Explicit disposable local database only; every role, grant and object rolls back.
     if (
       !connectionString ||
@@ -19,19 +21,26 @@ describe.runIf(connectionString)("private reader effective ACL on migrated Postg
       throw new Error("Hotel setup reader fixture requires a disposable local database");
     const client = new pg.Client({ connectionString });
     await client.connect();
-    const reader = "vayada_next_hotel_setup_reader";
+    const reader =
+      mode === "property_creation"
+        ? "vayada_next_hotel_setup_creation_reader"
+        : "vayada_next_hotel_setup_reader";
     try {
       await client.query("BEGIN");
       await client.query(`CREATE ROLE ${reader} LOGIN NOINHERIT`);
       await client.query(`GRANT USAGE ON SCHEMA identity,platform TO ${reader}`);
-      for (const [relation, columns] of Object.entries(HOTEL_SETUP_READER_READ_COLUMNS))
+      for (const [relation, columns] of Object.entries(
+        mode === "property_creation"
+          ? HOTEL_SETUP_CREATION_READER_READ_COLUMNS
+          : HOTEL_SETUP_READER_READ_COLUMNS,
+      ))
         await client.query(`GRANT SELECT (${columns.join(",")}) ON ${relation} TO ${reader}`);
       await client.query(
         `GRANT INSERT (${HOTEL_SETUP_READER_AUDIT_COLUMNS.join(",")}) ON platform.product_audit_events TO ${reader}`,
       );
       await client.query(`SET SESSION AUTHORIZATION ${reader}`);
-      await assertHotelSetupServiceReader(client);
-      await expect(assertHotelSetupReaderPrivileges(client)).resolves.toBeUndefined();
+      await assertHotelSetupServiceReader(client, mode);
+      await expect(assertHotelSetupReaderPrivileges(client, mode)).resolves.toBeUndefined();
       await client.query("RESET SESSION AUTHORIZATION");
 
       const changes = [
@@ -57,7 +66,9 @@ describe.runIf(connectionString)("private reader effective ACL on migrated Postg
         await client.query("SAVEPOINT drift");
         await client.query(sql);
         await client.query(`SET SESSION AUTHORIZATION ${reader}`);
-        await expect(assertHotelSetupReaderPrivileges(client), sql).rejects.toThrow(/Hotel setup/);
+        await expect(assertHotelSetupReaderPrivileges(client, mode), sql).rejects.toThrow(
+          /Hotel setup/,
+        );
         await client.query("RESET SESSION AUTHORIZATION");
         await client.query("ROLLBACK TO SAVEPOINT drift");
       }

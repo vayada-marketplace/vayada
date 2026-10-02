@@ -94,7 +94,7 @@ export async function assertHotelSetupFeatureHubPrivileges(client: Pick<pg.Pool,
   await assertHotelSetupNativePrivileges(
     client,
     HOTEL_SETUP_FEATURE_HUB_PRIVILEGES,
-    "57383c0c58bd752ece31f136624a42cc",
+    "deebe4c8416fd98b9854abcab63915fe",
   );
 }
 

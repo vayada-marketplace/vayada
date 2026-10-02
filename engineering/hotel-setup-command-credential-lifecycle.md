@@ -396,3 +396,21 @@ full write/trigger scope, lifecycle and exact runtime preflights are reviewed.
 The default runtime URL and migration URL cannot be used for private creation.
 This configuration leaves currency and Feature Hub routing unchanged; enabling
 creation does not activate or deploy the Financials rollout.
+
+## Isolated creation executable
+
+`HOTEL_SETUP_COMMAND_MODE=property_creation` registers only POST `/properties`.
+The fixed reader login is `vayada_next_hotel_setup_creation_reader`; its exact
+canonical authentication inventory replaces the property credential registry
+with `platform.hotel_setup_creation_scopes(database_login, organization_id)`.
+The existing default `property_commands` mode retains its own reader contract.
+Migration 0460 applies the same rejection-only audit shape and mutation denial
+to both readers. Neither mode creates logins or grants.
+
+Each creation command resolves the current organization assignment and vault
+password, opens a fresh native connection, and checks exact privileges, helper
+catalogs, assignment and current owner permissions inside the write transaction
+before retry replay or writes. Missing credentials fail closed. Creation mode
+constructs no currency or Feature Hub command adapter. Separate Secrets Manager
+prefix/IAM, reader and native credential provisioning, verified release preflights
+and normal CI deployment remain required before live activation.
