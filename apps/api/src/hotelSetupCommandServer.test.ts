@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => {
   const listen = vi.fn();
   return {
     config: {
+      mode: "property_commands",
       host: "127.0.0.1",
       port: 8011,
       readerDatabaseUrl: "private-reader-url",
@@ -25,6 +26,7 @@ const mocks = vi.hoisted(() => {
     currency: vi.fn(),
     creation: vi.fn(),
     toggle: vi.fn(),
+    launch: vi.fn(),
     list: vi.fn(),
     ready: vi.fn(),
     identity: vi.fn(),
@@ -78,6 +80,9 @@ vi.mock("./hotelSetupCreationCommands.js", () => ({
 vi.mock("./hotelSetupCurrencyCommands.js", () => ({
   createHotelSetupCurrencyCommands: mocks.currency,
 }));
+vi.mock("./hotelSetupLaunchSettingsCommands.js", () => ({
+  createHotelSetupLaunchSettingsCommands: mocks.launch,
+}));
 vi.mock("./hotelSetupFeatureHubCommands.js", () => ({
   createHotelSetupFeatureHubCommands: mocks.toggle,
 }));
@@ -104,6 +109,7 @@ describe("private hotel setup executable", () => {
     mocks.build.mockReturnValue(mocks.app);
     mocks.currency.mockReturnValue({ upsertPropertyPricingCurrency: vi.fn() });
     mocks.toggle.mockReturnValue({ updateFinancials: vi.fn() });
+    mocks.launch.mockReturnValue({ updateLaunchSettings: vi.fn() });
   });
 
   it("wires native commands and reader-only Feature Hub ports after preflight", async () => {
@@ -119,6 +125,11 @@ describe("private hotel setup executable", () => {
       commands: mocks.toggle.mock.results[0]!.value,
     });
     expect(options.currencyCommands).toBe(mocks.currency.mock.results[0]!.value);
+    expect(options.launchSettings).toBe(mocks.launch.mock.results[0]!.value);
+    expect(mocks.launch.mock.calls[0]![0].vault).toEqual({ get: mocks.get });
+    expect(mocks.preflight.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.launch.mock.invocationCallOrder[0]!,
+    );
     expect(mocks.currency.mock.calls[0]![0].vault).toEqual({ get: mocks.get });
     expect(mocks.toggle.mock.calls[0]![0].vault).toEqual({ get: mocks.get });
     for (const repository of [mocks.identity, mocks.role, mocks.entitlements, mocks.access])
@@ -139,6 +150,8 @@ describe("private hotel setup executable", () => {
     expect(options.propertyCreation).toBe(mocks.creation.mock.results[0]!.value);
     expect(options.currencyCommands).toBeUndefined();
     expect(options.featureHub).toBeUndefined();
+    expect(options.launchSettings).toBeUndefined();
+    expect(mocks.launch).not.toHaveBeenCalled();
     expect(mocks.currency).not.toHaveBeenCalled();
     expect(mocks.toggle).not.toHaveBeenCalled();
   });

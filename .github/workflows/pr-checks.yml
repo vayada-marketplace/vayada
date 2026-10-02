@@ -525,7 +525,7 @@ jobs:
         env:
           ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
-      - name: Verify private creation authentication and credential handling
+      - name: Verify private setup authentication and credential handling
         run: >-
           npm --workspace vayada-api run test --
           src/sharedHotelSetupStatus.test.ts
@@ -536,6 +536,11 @@ jobs:
           src/hotelSetupCommandServiceConfig.test.ts
           src/hotelSetupCommandService.test.ts
           src/hotelSetupCommandServer.test.ts
+          src/hotelSetupLaunchSettingsCommands.test.ts
+          src/hotelSetupLaunchSettingsCredentials.test.ts
+          src/hotelSetupLaunchSettingsRepository.test.ts
+          src/cli/hotelSetupLaunchSettingsPreflight.test.ts
+          src/cli/hotelSetupPropertyPreflight.test.ts
           src/cli/hotelSetupCreationPreflight.test.ts
 
       - name: Verify private hotel setup reader privileges
