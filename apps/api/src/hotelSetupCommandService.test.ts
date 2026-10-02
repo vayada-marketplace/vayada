@@ -254,6 +254,7 @@ function fixture(
       acceptedAt: "2026-09-30T12:00:00.000Z",
     },
   });
+  const create = vi.fn().mockResolvedValue({ propertyId, profileRevision: 1 });
   const app = buildHotelSetupCommandService({
     internalToken,
     logger: false,
@@ -283,6 +284,7 @@ function fixture(
       },
     },
     currencyCommands: { upsertPropertyPricingCurrency: save },
+    propertyCreation: { createPropertyProfile: create },
     featureHub: {
       reads: {
         list: vi.fn().mockResolvedValue([
@@ -302,6 +304,7 @@ function fixture(
   apps.push(app);
   return {
     app,
+    create,
     feature,
     setupComplete,
     save,
@@ -610,4 +613,157 @@ it("sanitizes private Feature Hub storage errors and preserves current authoriza
   });
   expect(response.statusCode).toBe(503);
   expect(response.json()).toEqual({ code: "hotel_setup_unavailable" });
+});
+
+const hotelProfile = {
+  displayName: "Private setup hotel",
+  propertyType: "hotel",
+  location: {
+    streetAddress: "Test street 1",
+    postalCode: "10115",
+    city: "Berlin",
+    countryCode: "DE",
+    timezone: "Europe/Berlin",
+    latitude: null,
+    longitude: null,
+    localityPublic: false,
+    geoPublic: false,
+    mapDisplayMode: "hidden",
+  },
+  contacts: [
+    { channelType: "email", value: "hotel@example.test", purpose: "guest", isPublic: false },
+    { channelType: "phone", value: "+49 30 1234567", purpose: "guest", isPublic: false },
+  ],
+};
+
+it("forwards creation to the private handler without local fallback or caller context", async () => {
+  const f = fixture({ permissions: ["hotel_catalog.setup.manage"], link: "missing" });
+  const transport = vi.fn<typeof fetch>(async (input, init) => {
+    expect(new URL(String(input)).pathname).toBe("/properties");
+    expect(init?.method).toBe("POST");
+    expect(init?.headers).toEqual({
+      authorization: "Bearer valid",
+      "content-type": "application/json",
+      "x-vayada-internal-token": internalToken,
+      "idempotency-key": "create-hotel-retry",
+    });
+    const response = await f.app.inject({
+      method: "POST",
+      url: "/properties",
+      headers: init!.headers as Record<string, string>,
+      payload: init!.body as string,
+    });
+    return new Response(response.body, { status: response.statusCode });
+  });
+  const forward = loadHotelSetupCommandForwarder(
+    {
+      HOTEL_SETUP_COMMAND_ORIGIN: "https://setup.internal",
+      HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: internalToken,
+    },
+    transport,
+  )!;
+  const fallback = vi.fn();
+  const gateway = buildApp({
+    logger: false,
+    hotelSetupCreationForwarder: forward,
+    sharedHotelSetupStatusRepository: {
+      getHotelSetupStatus: vi.fn(),
+      getPropertyProfile: vi.fn(),
+      createPropertyProfile: fallback,
+      updatePropertyProfile: vi.fn(),
+      getPublicPropertyProfile: vi.fn(),
+      updatePublicPropertyProfile: vi.fn(),
+    },
+    hotelSetupTrackCommandRepository: {
+      updateTracks: vi.fn(),
+      getTrackStatus: vi.fn(),
+      close: vi.fn(),
+    },
+  });
+  apps.push(gateway);
+  const request = {
+    method: "POST" as const,
+    url: "/api/hotel-setup/properties",
+    payload: hotelProfile,
+    headers: {
+      authorization: "Bearer valid",
+      "idempotency-key": "create-hotel-retry",
+      "x-hotel-id": otherPropertyId,
+      "x-vayada-organization-id": otherPropertyId,
+    },
+  };
+  expect((await gateway.inject(request)).statusCode).toBe(201);
+  expect(f.create).toHaveBeenCalledWith(
+    expect.objectContaining({
+      organizationId,
+      idempotencyKey: "create-hotel-retry",
+      audit: expect.objectContaining({ actorUserId: userId }),
+    }),
+  );
+  transport.mockRejectedValueOnce(new Error("private transport details"));
+  const unavailable = await gateway.inject(request);
+  expect(unavailable.statusCode).toBe(503);
+  expect(unavailable.json()).toEqual({ code: "hotel_setup_unavailable" });
+  expect(fallback).not.toHaveBeenCalled();
+});
+
+it("creates under the independently verified organization and actor", async () => {
+  const f = fixture({ permissions: ["hotel_catalog.setup.manage"], link: "missing" });
+  const response = await f.app.inject({
+    method: "POST",
+    url: "/properties",
+    headers: f.headers,
+    payload: hotelProfile,
+  });
+  expect(response.statusCode).toBe(201);
+  expect(f.create).toHaveBeenCalledWith(
+    expect.objectContaining({
+      organizationId,
+      idempotencyKey: "currency-first-save",
+      audit: expect.objectContaining({ actorUserId: userId }),
+      profile: expect.objectContaining({ contacts: hotelProfile.contacts }),
+    }),
+  );
+  f.create.mockRejectedValueOnce(new Error("private credential detail"));
+  const unavailable = await f.app.inject({
+    method: "POST",
+    url: "/properties",
+    headers: f.headers,
+    payload: hotelProfile,
+  });
+  expect(unavailable.statusCode).toBe(503);
+  expect(unavailable.json()).toEqual({ code: "hotel_setup_unavailable" });
+});
+
+it.each([
+  { session: false },
+  { permissions: [] },
+  { malformedOverride: true },
+  { membership: "inactive" as const },
+])("denies creation before credential selection for %j", async (options) => {
+  const f = fixture({ permissions: ["hotel_catalog.setup.manage"], ...options });
+  const response = await f.app.inject({
+    method: "POST",
+    url: "/properties",
+    headers: f.headers,
+    payload: hotelProfile,
+  });
+  expect(response.statusCode).toBe(options.membership === "inactive" ? 401 : 403);
+  expect(f.create).not.toHaveBeenCalled();
+});
+
+it("rejects missing internal auth, spoofed context, invalid fields and missing retry key", async () => {
+  const f = fixture({ permissions: ["hotel_catalog.setup.manage"] });
+  for (const [headers, payload] of [
+    [{ authorization: "Bearer valid" }, hotelProfile],
+    [{ ...f.headers, authorization: "Bearer invalid" }, hotelProfile],
+    [{ ...f.headers, "x-vayada-organization-id": otherPropertyId }, hotelProfile],
+    [{ ...f.headers, "idempotency-key": "" }, hotelProfile],
+    [f.headers, { ...hotelProfile, displayName: "" }],
+    [f.headers, { ...hotelProfile, organizationId: otherPropertyId, actorUserId: otherPropertyId }],
+  ] as const) {
+    const response = await f.app.inject({ method: "POST", url: "/properties", headers, payload });
+    expect([400, 401, 422]).toContain(response.statusCode);
+  }
+  expect(f.create).not.toHaveBeenCalled();
 });
