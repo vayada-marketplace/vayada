@@ -414,3 +414,15 @@ before retry replay or writes. Missing credentials fail closed. Creation mode
 constructs no currency or Feature Hub command adapter. Separate Secrets Manager
 prefix/IAM, reader and native credential provisioning, verified release preflights
 and normal CI deployment remain required before live activation.
+
+## Creation credential release check
+
+Run `node apps/api/dist/cli/hotelSetupCreationPreflight.js` in the reviewed image
+with the secret `HOTEL_SETUP_COMMAND_DATABASE_URL`, password-free endpoint,
+exact `HOTEL_SETUP_COMMAND_DATABASE_LOGIN`, `HOTEL_SETUP_COMMAND_ORGANIZATION_ID`
+and `HOTEL_SETUP_COMMAND_ACTOR_USER_ID`. The native organization login independently
+proves verified TLS, isolation from every other database, exact ACL/helper/trigger
+catalogs, its assignment and current owner's setup permission. The transaction
+always rolls back; it creates no hotel, retry evidence or audit. Credential failures
+produce only a fixed sanitized failure record. Check the separate reader with the
+existing reader CLI and `HOTEL_SETUP_COMMAND_MODE=property_creation`.

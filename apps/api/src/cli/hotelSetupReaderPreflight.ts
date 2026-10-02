@@ -3,15 +3,20 @@ import pg from "pg";
 import {
   assertHotelSetupServiceReader,
   parseHotelSetupReaderDatabaseUrl,
+  parseHotelSetupCommandMode,
+  type HotelSetupCommandMode,
 } from "../hotelSetupCommandServiceConfig.js";
 import { assertHotelSetupReaderPrivileges } from "../hotelSetupReaderPrivileges.js";
 
 /** Release-only check; the real native reader connection must own this transaction. */
-export async function checkHotelSetupReader(client: pg.Client) {
+export async function checkHotelSetupReader(
+  client: pg.Client,
+  mode: HotelSetupCommandMode = "property_commands",
+) {
   await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
   try {
-    await assertHotelSetupServiceReader(client);
-    await assertHotelSetupReaderPrivileges(client);
+    await assertHotelSetupServiceReader(client, mode);
+    await assertHotelSetupReaderPrivileges(client, mode);
     await assertHotelSetupDatabaseIsolation(client);
   } finally {
     // Never commit, create a role, grant, write an audit or invoke a hotel command.
@@ -44,14 +49,15 @@ export async function runHotelSetupReaderPreflight(env: NodeJS.ProcessEnv = proc
       parseHotelSetupReaderDatabaseUrl(
         env.HOTEL_SETUP_COMMAND_READER_DATABASE_URL ?? "",
         env.HOTEL_SETUP_COMMAND_DATABASE_ENDPOINT ?? "",
+        parseHotelSetupCommandMode(env),
       ),
-    checkHotelSetupReader,
+    (client) => checkHotelSetupReader(client, parseHotelSetupCommandMode(env)),
   );
 }
 
 /** Explicit TLS transport and sanitized diagnostics shared by the two release checks. */
 export async function runHotelSetupCredentialPreflight(
-  scope: "hotel_setup_reader" | "hotel_setup_property",
+  scope: "hotel_setup_reader" | "hotel_setup_property" | "hotel_setup_creation",
   parseUrl: () => URL,
   check: (client: pg.Client) => Promise<void>,
 ) {
