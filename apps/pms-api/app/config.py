@@ -142,6 +142,7 @@ class Settings(BaseSettings):
     PMS_LEGACY_CHANNEX_WEBHOOK_MODE: str = ""
     PMS_WEBHOOK_TARGET_BASE_URL: str = ""
     PMS_STRIPE_WEBHOOK_TARGET_URL: str = ""
+    PMS_STRIPE_CONNECT_WEBHOOK_TARGET_URL: str = ""
     PMS_XENDIT_WEBHOOK_TARGET_URL: str = ""
     PMS_CHANNEX_WEBHOOK_TARGET_URL: str = ""
 
@@ -188,15 +189,16 @@ class Settings(BaseSettings):
             raise ValueError(f"Invalid PMS legacy webhook mode {mode!r}; expected one of {valid}")
         return mode
 
-    def provider_webhook_target_url(self, provider: str) -> str:
-        provider_key = provider.upper()
+    def provider_webhook_target_url(self, provider: str, *, stripe_connect: bool = False) -> str:
+        endpoint = "stripe/connect" if provider == "stripe" and stripe_connect else provider.lower()
+        provider_key = endpoint.upper().replace("/", "_")
         specific_url = getattr(self, f"PMS_{provider_key}_WEBHOOK_TARGET_URL", "") or ""
         if specific_url.strip():
             return specific_url.strip()
         base_url = self.PMS_WEBHOOK_TARGET_BASE_URL.strip().rstrip("/")
         if not base_url:
             return ""
-        return f"{base_url}/webhooks/{provider.lower()}"
+        return f"{base_url}/webhooks/{endpoint}"
 
     def provider_webhook_cutover_status(self) -> dict[str, dict[str, str | bool]]:
         status = {}

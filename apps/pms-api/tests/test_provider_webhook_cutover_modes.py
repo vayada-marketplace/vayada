@@ -1,12 +1,17 @@
+import hashlib
+import hmac
 import json
+import time
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from app.config import settings
 from app.main import health
 from app.routers import webhooks
 from fastapi import HTTPException
 from starlette.requests import Request
+from stripe import SignatureVerificationError
 
 
 def _request(path: str, payload: bytes, headers: dict[str, str]) -> Request:
@@ -368,3 +373,140 @@ async def test_health_exposes_provider_webhook_cutover_modes(monkeypatch):
     assert modes["xendit"]["mode"] == "proxy_to_target"
     assert modes["channex"]["mode"] == "mutating"
     assert modes["xendit"]["proxyTargetConfigured"] is True
+
+
+def _stripe_signature(payload: bytes, secret: str) -> str:
+    timestamp = str(int(time.time()))
+    signature = hmac.new(
+        secret.encode(), timestamp.encode() + b"." + payload, hashlib.sha256
+    ).hexdigest()
+    return f"t={timestamp},v1={signature}"
+
+
+@pytest.mark.parametrize("connect", [False, True])
+@pytest.mark.parametrize("explicit_target", [False, True])
+async def test_stripe_proxy_preserves_endpoint_and_signed_bytes(
+    monkeypatch, connect, explicit_target
+):
+    _set_mode(monkeypatch, "stripe", "proxy_to_target")
+    monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", "whsec_platform_synthetic")
+    monkeypatch.setattr(settings, "STRIPE_CONNECT_WEBHOOK_SECRET", "whsec_connect_synthetic")
+    monkeypatch.setattr(settings, "PMS_WEBHOOK_TARGET_BASE_URL", "https://target.example.com/")
+    monkeypatch.setattr(settings, "PMS_STRIPE_CONNECT_WEBHOOK_TARGET_URL", "")
+    # Keep a conflicting platform override even when Connect uses the base URL.
+    monkeypatch.setattr(
+        settings, "PMS_STRIPE_WEBHOOK_TARGET_URL", "https://platform.example.com/hook"
+    )
+    endpoint = "stripe/connect" if connect else "stripe"
+    secret = settings.STRIPE_CONNECT_WEBHOOK_SECRET if connect else settings.STRIPE_WEBHOOK_SECRET
+    other_secret = (
+        settings.STRIPE_WEBHOOK_SECRET if connect else settings.STRIPE_CONNECT_WEBHOOK_SECRET
+    )
+    expected_url = (
+        "https://target.example.com/webhooks/stripe/connect"
+        if connect
+        else settings.PMS_STRIPE_WEBHOOK_TARGET_URL
+    )
+    if explicit_target:
+        expected_url = f"https://explicit.example.com/webhooks/{endpoint}"
+        monkeypatch.setattr(
+            settings,
+            "PMS_STRIPE_CONNECT_WEBHOOK_TARGET_URL" if connect else "PMS_STRIPE_WEBHOOK_TARGET_URL",
+            expected_url,
+        )
+    payload = b'{ "id": "evt_synthetic", "type": "payment_intent.succeeded", "data": {"object": {"id": "pi_synthetic"}} }'
+    signature = _stripe_signature(payload, secret)
+    request = _request(
+        f"/webhooks/{endpoint}",
+        payload,
+        {
+            "stripe-signature": signature,
+            "host": "legacy.example.com",
+            "content-type": "application/json",
+        },
+    )
+    forwarded = []
+
+    def target(incoming):
+        forwarded.append(incoming)
+        assert str(incoming.url) == expected_url
+        assert incoming.headers["host"] != "legacy.example.com"
+        assert incoming.content == payload
+        assert incoming.headers["stripe-signature"] == signature
+        assert (
+            webhooks.stripe_service.construct_webhook_event(
+                incoming.content,
+                incoming.headers["stripe-signature"],
+                secret,
+            )["id"]
+            == "evt_synthetic"
+        )
+        with pytest.raises(SignatureVerificationError):
+            webhooks.stripe_service.construct_webhook_event(
+                incoming.content, signature, other_secret
+            )
+        return httpx.Response(200)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(target))
+    with (
+        patch.object(webhooks.httpx, "AsyncClient", return_value=client),
+        patch.object(
+            webhooks, "_materialize_or_get_booking_for_pi", new_callable=AsyncMock
+        ) as mutate,
+    ):
+        handler = webhooks.stripe_connect_webhook if connect else webhooks.stripe_webhook
+        response = await handler(request)
+
+    assert len(forwarded) == 1
+    assert response["provider"] == "stripe"
+    assert response["mode"] == "proxy_to_target"
+    mutate.assert_not_awaited()
+
+
+async def test_connect_proxy_does_not_fall_back_to_platform_target(monkeypatch):
+    _set_mode(monkeypatch, "stripe", "proxy_to_target")
+    monkeypatch.setattr(settings, "STRIPE_CONNECT_WEBHOOK_SECRET", "whsec_connect_synthetic")
+    monkeypatch.setattr(
+        settings, "PMS_STRIPE_WEBHOOK_TARGET_URL", "https://platform.example.com/hook"
+    )
+    monkeypatch.setattr(settings, "PMS_WEBHOOK_TARGET_BASE_URL", "")
+    monkeypatch.setattr(settings, "PMS_STRIPE_CONNECT_WEBHOOK_TARGET_URL", "")
+    payload = b'{"type":"test.synthetic","data":{"object":{}}}'
+    request = _request(
+        "/webhooks/stripe/connect",
+        payload,
+        {
+            "stripe-signature": _stripe_signature(payload, settings.STRIPE_CONNECT_WEBHOOK_SECRET),
+        },
+    )
+    with patch.object(webhooks.httpx, "AsyncClient") as client:
+        with pytest.raises(HTTPException) as error:
+            await webhooks.stripe_connect_webhook(request)
+    assert error.value.status_code == 503
+    client.assert_not_called()
+
+
+@pytest.mark.parametrize("connect", [False, True])
+async def test_stripe_proxy_rejects_other_endpoint_signature_before_forwarding(
+    monkeypatch, connect
+):
+    _set_mode(monkeypatch, "stripe", "proxy_to_target")
+    monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", "whsec_platform_synthetic")
+    monkeypatch.setattr(settings, "STRIPE_CONNECT_WEBHOOK_SECRET", "whsec_connect_synthetic")
+    payload = b'{"type":"test.synthetic","data":{"object":{}}}'
+    other_secret = (
+        settings.STRIPE_WEBHOOK_SECRET if connect else settings.STRIPE_CONNECT_WEBHOOK_SECRET
+    )
+    request = _request(
+        "/webhooks/stripe/connect" if connect else "/webhooks/stripe",
+        payload,
+        {
+            "stripe-signature": _stripe_signature(payload, other_secret),
+        },
+    )
+    with patch.object(webhooks.httpx, "AsyncClient") as client:
+        with pytest.raises(HTTPException) as error:
+            handler = webhooks.stripe_connect_webhook if connect else webhooks.stripe_webhook
+            await handler(request)
+    assert error.value.status_code == 400
+    client.assert_not_called()
