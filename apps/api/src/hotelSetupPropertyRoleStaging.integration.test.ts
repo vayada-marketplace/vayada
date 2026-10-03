@@ -1,12 +1,22 @@
+import { STSClient } from "@aws-sdk/client-sts";
+import {
+  CreateSecretCommand,
+  DescribeSecretCommand,
+  SecretsManagerClient,
+} from "@aws-sdk/client-secrets-manager";
 import { randomBytes, randomUUID } from "node:crypto";
 import pg from "pg";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { stageHotelSetupPropertyRole } from "./hotelSetupPropertyRoleStaging.js";
 import { activateVerifiedHotelSetupPropertyRole } from "./hotelSetupPropertyRoleActivation.js";
 import type { HotelSetupOperation } from "./hotelSetupCommandScope.js";
 import { checkHotelSetupPropertyCredential } from "./cli/hotelSetupPropertyPreflight.js";
 import { HOTEL_SETUP_LAUNCH_SETTINGS_PRIVILEGES } from "./hotelSetupLaunchSettingsPrivileges.js";
 
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 const connectionString = process.env.HOTEL_SETUP_PROPERTY_STAGE_TEST_DATABASE_URL;
 describe.runIf(connectionString)("manual disabled property-role staging", () => {
   it("pins each purpose, rejects stale authority/assignments and rolls back failed grants", async () => {
@@ -184,13 +194,45 @@ describe.runIf(connectionString)("manual disabled property-role staging", () => 
             }),
           ).rejects.toThrow("verification failed");
         }
+        let stored: { ARN?: string; Name?: string; VersionId?: string; SecretString?: string } = {};
+        vi.stubEnv("AWS_ACCESS_KEY_ID", "synthetic-key");
+        vi.stubEnv("AWS_SECRET_ACCESS_KEY", "synthetic-secret");
+        vi.stubEnv("AWS_PROFILE", undefined);
+        vi.spyOn(STSClient.prototype, "send").mockResolvedValue({
+          Account: "269416271598",
+        } as never);
+        vi.spyOn(SecretsManagerClient.prototype, "send").mockImplementation((async (
+          command: unknown,
+        ) => {
+          if (command instanceof DescribeSecretCommand) {
+            const error = new Error();
+            error.name = "ResourceNotFoundException";
+            throw error;
+          }
+          if (command instanceof CreateSecretCommand)
+            stored = {
+              ARN: `arn:aws:secretsmanager:eu-west-1:269416271598:secret:${command.input.Name}-123abc`,
+              Name: command.input.Name,
+              VersionId: command.input.ClientRequestToken,
+              SecretString: command.input.SecretString,
+            };
+          return stored;
+        }) as never);
         await expect(
           activateVerifiedHotelSetupPropertyRole({
             ...input,
             staged,
             nativeDatabaseUrl: nativeUrl.toString(),
+            proveSecondary: checkHotelSetupPropertyCredential,
+            publish: true,
           }),
-        ).resolves.toEqual(staged);
+        ).resolves.toEqual({
+          ...staged,
+          publication: { secretArn: expect.any(String), versionId: expect.any(String) },
+        });
+
+        vi.restoreAllMocks();
+        vi.unstubAllEnvs();
         const native = new pg.Client({ connectionString: nativeUrl.toString() });
         await native.connect();
         try {

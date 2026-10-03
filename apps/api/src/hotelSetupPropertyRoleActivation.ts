@@ -1,7 +1,8 @@
+import { publishHotelSetupPropertySecret } from "./hotelSetupPropertySecretPublication.js";
 import { createHash } from "node:crypto";
 import pg from "pg";
 import { parseHotelSetupDatabaseUrl } from "./hotelSetupCommandServiceConfig.js";
-import { runHotelSetupPropertyPreflight } from "./cli/hotelSetupPropertyPreflight.js";
+import { checkHotelSetupPropertyCredential } from "./cli/hotelSetupPropertyPreflight.js";
 import {
   lockHotelSetupPropertyBootstrapAuthority,
   type stageHotelSetupPropertyRole,
@@ -13,14 +14,22 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
   nativeDatabaseUrl: string;
   databaseEndpoint: string;
   staged: Awaited<ReturnType<typeof stageHotelSetupPropertyRole>>;
+  /** Trusted operational image imports only; never supplied by an HTTP caller. */
+  proveSecondary?: (client: pg.Client, scope: Readonly<typeof input.staged>) => Promise<void>;
+  publish?: boolean;
 }) {
   let admin: pg.Client | undefined;
+  let nativeClient: pg.Client | undefined;
   let failed = false;
+  let nativeFailed = false;
+  let publicationAttempted = false;
   let commitAttempted = false;
   let verifier = "";
   const { nativeDatabaseUrl, adminDatabaseUrl, databaseEndpoint } = input;
   const { login, roleOid, propertyId, organizationId, actorUserId, operation } = input.staged ?? {};
-  const scope = { propertyId, organizationId, actorUserId, operation };
+  const scope = Object.freeze({ propertyId, organizationId, actorUserId, operation });
+  const stagedScope = Object.freeze({ login, roleOid, ...scope });
+  const { proveSecondary, publish } = input;
   try {
     const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const prefix = `vayada_next_hotel_setup_property_${createHash("sha256")
@@ -36,25 +45,28 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
       !/^[a-f0-9]{12}$/.test(login.slice(prefix.length))
     )
       throw new Error();
+    if (publish && !proveSecondary) throw new Error();
     const native = parseHotelSetupDatabaseUrl(nativeDatabaseUrl, databaseEndpoint, login);
     const url = parseHotelSetupDatabaseUrl(
       adminDatabaseUrl,
       databaseEndpoint,
       decodeURIComponent(new URL(adminDatabaseUrl).username),
     );
-    admin = new pg.Client({
-      host: url.hostname,
-      port: Number(url.port || 5432),
-      database: decodeURIComponent(url.pathname.slice(1)),
-      user: decodeURIComponent(url.username),
-      password: decodeURIComponent(url.password),
-      ssl: { rejectUnauthorized: true },
-      options: "-c search_path=pg_catalog",
-      connectionTimeoutMillis: 10_000,
-      query_timeout: 15_000,
-      statement_timeout: 15_000,
-      lock_timeout: 5_000,
-    });
+    const connection = (url: URL) =>
+      new pg.Client({
+        host: url.hostname,
+        port: Number(url.port || 5432),
+        database: decodeURIComponent(url.pathname.slice(1)),
+        user: decodeURIComponent(url.username),
+        password: decodeURIComponent(url.password),
+        ssl: { rejectUnauthorized: true },
+        options: "-c search_path=pg_catalog",
+        connectionTimeoutMillis: 10_000,
+        query_timeout: 15_000,
+        statement_timeout: 15_000,
+        lock_timeout: 5_000,
+      });
+    admin = connection(url);
     admin.on("error", () => {
       failed = true;
     });
@@ -102,21 +114,35 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
     if (failed || !verifier) throw new Error();
     commitAttempted = true;
     await admin.query("COMMIT");
-    if (
-      failed ||
-      (await runHotelSetupPropertyPreflight({
-        HOTEL_SETUP_COMMAND_DATABASE_URL: nativeDatabaseUrl,
-        HOTEL_SETUP_COMMAND_DATABASE_ENDPOINT: databaseEndpoint,
-        HOTEL_SETUP_COMMAND_DATABASE_LOGIN: login,
-        HOTEL_SETUP_COMMAND_PROPERTY_ID: propertyId,
-        HOTEL_SETUP_COMMAND_ORGANIZATION_ID: organizationId,
-        HOTEL_SETUP_COMMAND_OPERATION: operation,
-      })) !== 0 ||
-      failed
-    )
-      throw new Error();
-    return { login, roleOid, ...scope };
+    if (failed) throw new Error();
+    nativeClient = connection(native);
+    nativeClient.on("error", () => {
+      nativeFailed = true;
+    });
+    await nativeClient.connect();
+    await checkHotelSetupPropertyCredential(nativeClient, scope);
+    if (failed || nativeFailed) throw new Error();
+    await proveSecondary?.(nativeClient, stagedScope);
+    if (failed || nativeFailed) throw new Error();
+    await nativeClient.end();
+    nativeClient = undefined;
+    if (failed || nativeFailed) throw new Error();
+    let publication;
+    if (publish) {
+      publicationAttempted = true;
+      publication = await publishHotelSetupPropertySecret({
+        admin,
+        expectedVerifier: verifier,
+        nativeDatabaseUrl,
+        databaseEndpoint,
+        staged: stagedScope,
+      });
+      if (failed) throw new Error();
+    }
+    return { ...stagedScope, ...(publication ? { publication } : {}) };
   } catch {
+    await nativeClient?.end().catch(() => undefined);
+    nativeClient = undefined;
     await admin?.query("ROLLBACK").catch(() => undefined);
     if (commitAttempted) {
       try {
@@ -163,6 +189,8 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
         throw new Error("Hotel setup property activation requires recovery inspection");
       }
     }
+    if (publicationAttempted)
+      throw new Error("Hotel setup property publication requires recovery inspection");
     throw new Error("Hotel setup property activation verification failed");
   } finally {
     await admin?.end().catch(() => undefined);
