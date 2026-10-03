@@ -21,6 +21,7 @@ import {
   type CreatePropertyProfileRequest,
   type ProductEntryDecision,
   type PropertyProfile,
+  type PropertyInitialLaunchSettings,
   type PropertyProfileContact,
   type PropertyProfileLocation,
   type PropertyProfilePatch,
@@ -55,16 +56,7 @@ export type SharedPropertyTypeCatalog = {
 export type SharedPropertyProfileInput = CreatePropertyProfileRequest;
 export type SharedPropertyProfile = PropertyProfileResponse;
 export type SharedPublicPropertyProfile = PublicPropertyProfileResponse;
-export type SharedPropertyLaunchSettings = {
-  defaultCurrency: string;
-  supportedCurrencies: string[];
-  defaultLanguage: string;
-  supportedLanguages: string[];
-  instagram: string;
-  facebook: string;
-  tiktok: string;
-  youtube: string;
-};
+export type SharedPropertyLaunchSettings = PropertyInitialLaunchSettings;
 
 export type SharedPropertyLaunchSettingsRepository = {
   findPropertySettingsByHotelId(
@@ -715,7 +707,16 @@ function ensurePublicPropertyPublicationPermission(
 
 export function hasPublishedPropertySurface(profile: SharedPropertyProfileInput): boolean {
   const surface = propertyPublicationSurface(profile);
-  return surface.locality !== null || surface.geo !== null || surface.contacts.length > 0;
+  const settings = profile.initialLaunchSettings;
+  return (
+    surface.locality !== null ||
+    surface.geo !== null ||
+    surface.contacts.length > 0 ||
+    Boolean(
+      settings &&
+      (["instagram", "facebook", "tiktok", "youtube"] as const).some((key) => settings[key] !== ""),
+    )
+  );
 }
 
 function publishedPropertySurfaceChanged(
@@ -1263,7 +1264,7 @@ function parseCreatePropertyProfile(
   const input = objectValue(body);
   validateKnownKeys(
     input,
-    ["displayName", "propertyType", "location", "contacts"],
+    ["displayName", "propertyType", "location", "contacts", "initialLaunchSettings"],
     "request",
     errors,
   );
@@ -1286,7 +1287,14 @@ function parseCreatePropertyProfile(
     errors,
   );
   const profile = parseCanonicalPropertyProfile(input, errors);
-  if (profile && Object.keys(errors).length === 0) return profile;
+  if (profile && Object.keys(errors).length === 0) {
+    if (!Object.hasOwn(input, "initialLaunchSettings")) return profile;
+    const initialLaunchSettings = parsePropertyLaunchSettings(
+      input["initialLaunchSettings"],
+      reply,
+    );
+    return initialLaunchSettings === false ? false : { ...profile, initialLaunchSettings };
+  }
   return sendInvalidProfile(reply, errors);
 }
 

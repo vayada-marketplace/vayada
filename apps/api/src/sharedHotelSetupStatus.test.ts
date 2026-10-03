@@ -1511,6 +1511,81 @@ describe("shared hotel setup status route", () => {
     );
   });
 
+  it.each([false, true])(
+    "normalizes initial settings and requires publication permission for socials: %s",
+    async (socials) => {
+      const createPropertyProfile = vi.fn(async () =>
+        profileResponse(propertyId, minimalHotelInput()),
+      );
+      app = buildSharedSetupApp({
+        linkedResources: [],
+        permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+        repository: {
+          ...unusedStatusMethods(),
+          ...unusedPropertyProfileMethods(),
+          createPropertyProfile,
+        },
+      });
+      const initialLaunchSettings = {
+        defaultCurrency: " lkr ",
+        supportedCurrencies: ["LKR", " usd "],
+        defaultLanguage: " si ",
+        supportedLanguages: ["si", "en"],
+        instagram: socials ? " https://instagram.com/hotel " : "",
+        facebook: "",
+        tiktok: "",
+        youtube: "",
+      };
+      const response = await injectJson<{ code: string }>(app, {
+        method: "POST",
+        url: "/api/hotel-setup/properties",
+        headers: { authorization: "Bearer valid-token", "idempotency-key": "initial-settings" },
+        payload: { ...minimalHotelInput(), initialLaunchSettings },
+      });
+      expect(response.statusCode).toBe(socials ? 403 : 201);
+      if (socials) expect(createPropertyProfile).not.toHaveBeenCalled();
+      else
+        expect(createPropertyProfile).toHaveBeenCalledWith(
+          expect.objectContaining({
+            profile: {
+              ...minimalHotelInput(),
+              initialLaunchSettings: {
+                ...initialLaunchSettings,
+                defaultCurrency: "LKR",
+                supportedCurrencies: ["USD"],
+                defaultLanguage: "si",
+                supportedLanguages: ["en"],
+              },
+            },
+          }),
+        );
+    },
+  );
+
+  it.each([null, {}, { defaultCurrency: "LKR", pricingCurrency: "USD" }])(
+    "rejects malformed initial settings before creation: %j",
+    async (initialLaunchSettings) => {
+      const createPropertyProfile = vi.fn();
+      app = buildSharedSetupApp({
+        linkedResources: [],
+        permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+        repository: {
+          ...unusedStatusMethods(),
+          ...unusedPropertyProfileMethods(),
+          createPropertyProfile,
+        },
+      });
+      const response = await injectJson<{ code: string }>(app, {
+        method: "POST",
+        url: "/api/hotel-setup/properties",
+        headers: { authorization: "Bearer valid-token", "idempotency-key": "bad-initial-settings" },
+        payload: { ...minimalHotelInput(), initialLaunchSettings },
+      });
+      expect(response.statusCode).toBe(422);
+      expect(createPropertyProfile).not.toHaveBeenCalled();
+    },
+  );
+
   it("rejects unauthenticated property creation before validating its body", async () => {
     const createPropertyProfile = vi.fn();
     app = buildSharedSetupApp({
