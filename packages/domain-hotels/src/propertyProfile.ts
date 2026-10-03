@@ -48,7 +48,20 @@ export type PropertyProfile = {
   contacts: PropertyProfileContact[];
 };
 
-export type CreatePropertyProfileRequest = PropertyProfile;
+export type PropertyInitialLaunchSettings = {
+  defaultCurrency: string;
+  supportedCurrencies: string[];
+  defaultLanguage: string;
+  supportedLanguages: string[];
+  instagram: string;
+  facebook: string;
+  tiktok: string;
+  youtube: string;
+};
+
+export type CreatePropertyProfileRequest = PropertyProfile & {
+  initialLaunchSettings?: PropertyInitialLaunchSettings;
+};
 
 export type PropertyProfilePatch = {
   displayName?: string;
@@ -71,7 +84,59 @@ export type PropertyProfileResponse = {
 export function parseCreatePropertyProfileRequest(
   value: unknown,
 ): CreatePropertyProfileRequest | null {
-  return isPropertyProfile(value) ? value : null;
+  if (!isRecord(value)) return null;
+  const { initialLaunchSettings, ...profile } = value;
+  if (!isPropertyProfile(profile)) return null;
+  if (
+    Object.hasOwn(value, "initialLaunchSettings") &&
+    !isInitialLaunchSettings(initialLaunchSettings)
+  )
+    return null;
+  return value as CreatePropertyProfileRequest;
+}
+
+function isInitialLaunchSettings(value: unknown): value is PropertyInitialLaunchSettings {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, [
+      "defaultCurrency",
+      "supportedCurrencies",
+      "defaultLanguage",
+      "supportedLanguages",
+      "instagram",
+      "facebook",
+      "tiktok",
+      "youtube",
+    ])
+  )
+    return false;
+  const currency = (code: unknown) => typeof code === "string" && /^[A-Z]{3}$/i.test(code.trim());
+  const language = (code: unknown) =>
+    typeof code === "string" && /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/.test(code.trim());
+  const social = (url: unknown) => {
+    if (typeof url !== "string") return false;
+    if (!url.trim()) return true;
+    try {
+      const parsed = new URL(url.trim());
+      return (
+        ["http:", "https:"].includes(parsed.protocol) &&
+        Boolean(parsed.hostname) &&
+        !parsed.username &&
+        !parsed.password
+      );
+    } catch {
+      return false;
+    }
+  };
+  return (
+    currency(value.defaultCurrency) &&
+    language(value.defaultLanguage) &&
+    Array.isArray(value.supportedCurrencies) &&
+    value.supportedCurrencies.every(currency) &&
+    Array.isArray(value.supportedLanguages) &&
+    value.supportedLanguages.every(language) &&
+    ["instagram", "facebook", "tiktok", "youtube"].every((key) => social(value[key]))
+  );
 }
 
 export function parsePropertyProfileResponse(value: unknown): PropertyProfileResponse | null {
