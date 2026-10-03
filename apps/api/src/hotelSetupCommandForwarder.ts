@@ -14,9 +14,18 @@ export function loadHotelSetupCommandForwarder(
   env: NodeJS.ProcessEnv = process.env,
   transport: typeof fetch = fetch,
 ): HotelSetupCommandForwarder | undefined {
+  const admission = env["HOTEL_SETUP_COMMAND_ADMISSION"];
+  if (admission !== undefined && admission !== "blocked" && admission !== "enabled")
+    throw new Error("Invalid hotel setup admission configuration");
+  if (admission === "blocked")
+    return async (_request, reply) =>
+      reply.header("Cache-Control", "no-store").code(503).send({ code: "hotel_setup_unavailable" });
   const origin = env["HOTEL_SETUP_COMMAND_ORIGIN"]?.trim();
   const internalToken = env["HOTEL_SETUP_COMMAND_INTERNAL_TOKEN"];
-  if (!origin && !internalToken) return undefined;
+  if (!origin && !internalToken) {
+    if (admission === "enabled") throw new Error("Private hotel setup forwarding is required");
+    return undefined;
+  }
   let destination: URL;
   try {
     destination = new URL(origin!);
@@ -57,10 +66,10 @@ export function loadHotelSetupCommandForwarder(
       operation === "launch_settings"
         ? "launch-settings"
         : operation === "currency"
-        ? "pricing-source/currency"
-        : operation === "modules"
-          ? "module-activations"
-          : "module-activations/financials";
+          ? "pricing-source/currency"
+          : operation === "modules"
+            ? "module-activations"
+            : "module-activations/financials";
     const method =
       operation === "property_creation"
         ? "POST"

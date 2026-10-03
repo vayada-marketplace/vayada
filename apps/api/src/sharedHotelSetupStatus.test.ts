@@ -1,3 +1,4 @@
+import { loadHotelSetupCommandForwarder } from "./hotelSetupCommandForwarder.js";
 import { readFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 
@@ -2312,6 +2313,48 @@ describe("shared hotel setup status route", () => {
     });
     expect(invalidResponse.statusCode).toBe(422);
     expect(updatePropertySettingsByHotelId).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks public launch Save with an existing private pair before any ordinary writer", async () => {
+    const write = vi.fn(() => {
+      throw new Error("ordinary writer reached");
+    });
+    const transport = vi.fn<typeof fetch>();
+    app = buildSharedSetupApp({
+      permissions: ["hotel_catalog.setup.manage"],
+      linkedResources: [propertyLink(propertyId)],
+      repository: repositoryWith([]),
+      launchForwarder: loadHotelSetupCommandForwarder(
+        {
+          HOTEL_SETUP_COMMAND_ADMISSION: "blocked",
+          HOTEL_SETUP_COMMAND_ORIGIN: "https://setup.internal",
+          HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: "internal-token-with-at-least-32-bytes",
+        },
+        transport,
+      ),
+      launchSettingsRepository: {
+        findPropertySettingsByHotelId: vi.fn(),
+        updatePropertySettingsByHotelId: write,
+      },
+    });
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: `/api/hotel-setup/properties/${propertyId}/launch-settings`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: {
+        defaultCurrency: "LKR",
+        supportedCurrencies: [],
+        defaultLanguage: "en",
+        supportedLanguages: [],
+        instagram: "",
+        facebook: "",
+        tiktok: "",
+        youtube: "",
+      },
+    });
+    expect(response.statusCode).toBe(503);
+    expect(write).not.toHaveBeenCalled();
+    expect(transport).not.toHaveBeenCalled();
   });
 
   it("forwards a validated save and retries the same property without a local write fallback", async () => {
