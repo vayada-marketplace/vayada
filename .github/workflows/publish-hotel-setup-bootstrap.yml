@@ -55,7 +55,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: apps/api/Dockerfile.hotel-setup-bootstrap
+          file: engineering/hotel-setup-bootstrap/Dockerfile
           platforms: linux/amd64
           push: true
           build-args: |
