@@ -1,0 +1,12 @@
+{
+  "vay965-launch-save-20261003": {
+    "primary": {
+      "digest": "sha256:b673453b253fac2e94822c24158f6d599696d0fb71a2bc68c7f4a3be0f98f38a",
+      "source": "d51cb02975995ffd8388958e295e23ae63474fd7"
+    },
+    "rollback": {
+      "digest": "sha256:9c6ad66294c188ff16b141922cc3cc57d0fc7dd7dfd45eda59e4c4492bb51f79",
+      "source": "b83da0787e098d59490b48b392967cb6d67b97b7"
+    }
+  }
+}

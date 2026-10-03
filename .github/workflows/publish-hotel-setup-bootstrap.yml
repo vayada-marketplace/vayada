@@ -1,0 +1,68 @@
+name: Publish hotel setup bootstrap image
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_pair:
+        description: Reviewed primary/rollback pair key in the checked-in inventory
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: hotel-setup-bootstrap-publisher
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Select reviewed image pair
+        env:
+          REVIEWED_PAIR: ${{ inputs.reviewed_pair }}
+        run: |
+          python3 scripts/select-hotel-setup-bootstrap-images.py
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::269416271598:role/vayada-github-actions-deploy
+          aws-region: eu-west-1
+      - uses: aws-actions/amazon-ecr-login@v2
+      - name: Verify both immutable source revisions and fixed CLI roots
+        run: |
+          set -euo pipefail
+          for mode in primary rollback; do
+            image="$(jq -r ".${mode}.image" engineering/hotel-setup-bootstrap-image-manifest.json)"
+            source="$(jq -r ".${mode}.source" engineering/hotel-setup-bootstrap-image-manifest.json)"
+            docker pull "$image"
+            test "$(docker inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$source"
+            if test "$mode" = primary; then
+              cli=/app/apps/api/dist/cli/hotelSetupPropertyBootstrap.js
+            else
+              cli=/app/apps/api/dist/cli/hotelSetupPropertyPreflight.js
+            fi
+            docker run --rm --platform linux/amd64 --network none --entrypoint node "$image" -e 'require("node:fs").accessSync(process.argv[1])' "$cli"
+          done
+      - uses: docker/setup-buildx-action@v4
+      - name: Publish immutable operational image only
+        id: image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: engineering/hotel-setup-bootstrap/Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            PRIMARY_IMAGE=${{ env.BOOTSTRAP_PRIMARY_IMAGE }}
+            ROLLBACK_IMAGE=${{ env.BOOTSTRAP_ROLLBACK_IMAGE }}
+          tags: 269416271598.dkr.ecr.eu-west-1.amazonaws.com/vayada-next-api:hotel-setup-bootstrap-${{ github.sha }}-${{ env.BOOTSTRAP_PAIR_HASH }}
+      - name: Record image digest
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: printf 'Operational image digest `%s`\n' "$IMAGE_DIGEST" >> "$GITHUB_STEP_SUMMARY"
