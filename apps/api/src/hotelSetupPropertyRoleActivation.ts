@@ -23,6 +23,7 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
   let failed = false;
   let nativeFailed = false;
   let publicationAttempted = false;
+  let publicationSucceeded = false;
   let commitAttempted = false;
   let verifier = "";
   const { nativeDatabaseUrl, adminDatabaseUrl, databaseEndpoint } = input;
@@ -137,13 +138,22 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
         databaseEndpoint,
         staged: stagedScope,
       });
+      publicationSucceeded = true;
       if (failed) throw new Error();
     }
     return { ...stagedScope, ...(publication ? { publication } : {}) };
-  } catch {
+  } catch (error) {
     await nativeClient?.end().catch(() => undefined);
     nativeClient = undefined;
     await admin?.query("ROLLBACK").catch(() => undefined);
+    // Readiness COMMIT can succeed despite a lost acknowledgement. Do not disable
+    // a possibly admitted identity; inspect this exact attempt before cleanup.
+    if (
+      publicationSucceeded ||
+      (error as { code?: unknown } | null)?.code ===
+        "hotel_setup_property_readiness_inspection_required"
+    )
+      throw new Error("Hotel setup property readiness requires recovery inspection");
     if (commitAttempted) {
       try {
         await admin!.query("BEGIN");
@@ -156,7 +166,9 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
           organization_id: string;
           operation_class: string;
         }>(
-          "SELECT property_id,organization_id,operation_class FROM platform.hotel_setup_property_scopes WHERE database_login=$1 FOR UPDATE",
+          `SELECT property_id,organization_id,operation_class FROM platform.hotel_setup_property_scopes
+           WHERE database_login=$1 AND credential_role_oid IS NULL
+             AND credential_secret_version IS NULL AND credential_ready_at IS NULL FOR UPDATE`,
           [login],
         );
         const role = identity.rows[0];

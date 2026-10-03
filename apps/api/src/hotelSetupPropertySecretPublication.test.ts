@@ -9,6 +9,7 @@ import {
   SecretsManagerClient,
 } from "@aws-sdk/client-secrets-manager";
 import { publishHotelSetupPropertySecret } from "./hotelSetupPropertySecretPublication.js";
+import { lockHotelSetupPropertyBootstrapAuthority } from "./hotelSetupPropertyRoleStaging.js";
 vi.mock("./hotelSetupPropertyRoleStaging.js", () => ({
   lockHotelSetupPropertyBootstrapAuthority: vi.fn(),
 }));
@@ -28,6 +29,9 @@ it.each([
   "verifier",
   "lateDrift",
   "wrongAccount",
+  "ready",
+  "revoked",
+  "readinessCommit",
 ])("pins property credential publication on %s", async (mode) => {
   vi.stubEnv("AWS_ACCESS_KEY_ID", "synthetic-key");
   vi.stubEnv("AWS_SECRET_ACCESS_KEY", "synthetic-secret");
@@ -51,7 +55,17 @@ it.each([
     actorUserId: "10000000-0000-4000-8000-000000000003",
   };
   let identityReads = 0;
+  vi.mocked(lockHotelSetupPropertyBootstrapAuthority).mockImplementation(async () => {
+    if (mode === "revoked" && identityReads === 1) throw new Error("revoked intent");
+  });
   const query = vi.fn(async (sql: string, params?: unknown[]) => {
+    if (sql === "COMMIT" && mode === "readinessCommit") throw new Error("lost acknowledgement");
+    if (sql.startsWith("UPDATE platform.hotel_setup_property_scopes")) {
+      expect(params).toEqual([login, 42, versionId, propertyId, staged.organizationId, operation]);
+      expect(identityReads).toBe(2);
+      expect(send).toHaveBeenCalledTimes(3);
+      return { rows: [{ database_login: login }] };
+    }
     if (sql.startsWith("SELECT oid")) {
       expect(params).toEqual([42, login, "private-verifier"]);
       identityReads++;
@@ -67,6 +81,9 @@ it.each([
           organization_id: staged.organizationId,
           operation_class: operation,
           active: true,
+          credential_role_oid: mode === "ready" ? 42 : null,
+          credential_secret_version: mode === "ready" ? "x".repeat(32) : null,
+          credential_ready_at: mode === "ready" ? new Date() : null,
         },
       ],
     };
@@ -116,8 +133,13 @@ it.each([
     expect(query.mock.calls.at(-1)?.[0]).toBe("COMMIT");
   } else {
     await expect(result).rejects.toThrow("publication requires recovery inspection");
+    if (mode === "readinessCommit")
+      await expect(result).rejects.toMatchObject({
+        code: "hotel_setup_property_readiness_inspection_required",
+      });
     expect(query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
   }
-  if (["retarget", "verifier", "wrongAccount"].includes(mode)) expect(send).not.toHaveBeenCalled();
+  if (["retarget", "verifier", "wrongAccount", "ready"].includes(mode))
+    expect(send).not.toHaveBeenCalled();
   if (["existing", "unknown"].includes(mode)) expect(send).toHaveBeenCalledOnce();
 });

@@ -23,6 +23,7 @@ export async function publishHotelSetupPropertySecret(input: {
   const { admin, expectedVerifier, nativeDatabaseUrl, databaseEndpoint } = input;
   let secrets: SecretsManagerClient | undefined;
   let sts: STSClient | undefined;
+  let readinessCommitAttempted = false;
   const { login, roleOid, propertyId, organizationId, actorUserId, operation } = input.staged;
   const scope = Object.freeze({ propertyId, organizationId, actorUserId, operation });
   const name = `hotel-setup-command/prod/property/${login}`;
@@ -57,8 +58,13 @@ export async function publishHotelSetupPropertySecret(input: {
       organization_id: string;
       operation_class: string;
       active: boolean;
+      credential_role_oid: number | null;
+      credential_secret_version: string | null;
+      credential_ready_at: Date | null;
     }>(
-      `SELECT property_id,organization_id,operation_class,active FROM platform.hotel_setup_property_scopes
+      `SELECT property_id,organization_id,operation_class,active,
+        credential_role_oid,credential_secret_version,credential_ready_at
+       FROM platform.hotel_setup_property_scopes
        WHERE database_login=$1 OR (property_id=$2::uuid AND operation_class=$3) FOR UPDATE`,
       [login, propertyId, operation],
     );
@@ -68,7 +74,10 @@ export async function publishHotelSetupPropertySecret(input: {
       assigned?.property_id !== propertyId.toLowerCase() ||
       assigned.organization_id !== organizationId.toLowerCase() ||
       assigned.operation_class !== operation ||
-      !assigned.active
+      !assigned.active ||
+      assigned.credential_role_oid !== null ||
+      assigned.credential_secret_version !== null ||
+      assigned.credential_ready_at !== null
     )
       throw new Error();
     await identity();
@@ -147,13 +156,33 @@ export async function publishHotelSetupPropertySecret(input: {
       stored.SecretBinary
     )
       throw new Error();
+    await lockHotelSetupPropertyBootstrapAuthority(admin, scope);
     await identity();
+    const ready = await admin.query<{ database_login: string }>(
+      `UPDATE platform.hotel_setup_property_scopes
+       SET credential_role_oid=$2::oid,credential_secret_version=$3,
+         credential_ready_at=pg_catalog.clock_timestamp()
+       WHERE database_login=$1 AND property_id=$4::uuid AND organization_id=$5::uuid
+         AND operation_class=$6 AND active AND credential_role_oid IS NULL
+         AND credential_secret_version IS NULL AND credential_ready_at IS NULL
+       RETURNING database_login`,
+      [login, roleOid, versionId, propertyId, organizationId, operation],
+    );
+    if (ready.rows.length !== 1 || ready.rows[0]?.database_login !== login) throw new Error();
+    readinessCommitAttempted = true;
     await admin.query("COMMIT");
     return { secretArn: version.ARN, versionId };
   } catch {
     await admin.query("ROLLBACK").catch(() => undefined);
     // A remote write can succeed despite a lost response. Never delete or retry it here.
-    throw new Error("Hotel setup property publication requires recovery inspection");
+    throw Object.assign(
+      new Error("Hotel setup property publication requires recovery inspection"),
+      {
+        code: readinessCommitAttempted
+          ? "hotel_setup_property_readiness_inspection_required"
+          : undefined,
+      },
+    );
   } finally {
     secrets?.destroy();
     sts?.destroy();
