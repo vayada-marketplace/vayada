@@ -387,6 +387,11 @@ export default function SharedFirstRunPropertySetupWizard({
   const profileHeading = useRef<HTMLHeadingElement>(null);
   const trackCommandKey = useRef<string | null>(null);
   const createPropertyCommandKey = useRef<string | null>(null);
+  const pendingCreateFingerprint = useRef<string | null>(null);
+  const ambiguousCreateAttempt = useRef(false);
+  const launchSettingsEnabled =
+    Boolean(propertyLaunchSettingsApi) &&
+    Boolean(status?.organization.selectedTracks.includes("hotel_operations"));
   const usePreparedProperty =
     !forceCreateProperty && status?.propertySelection.availableProperties.length === 0;
   const logoUploadKey = useRef<string | null>(null);
@@ -463,7 +468,7 @@ export default function SharedFirstRunPropertySetupWizard({
       propertyId
         ? api.getPublicPropertyProfile(propertyId)
         : Promise.resolve<PublicPropertyProfileResponse | null>(null),
-      propertyId && propertyLaunchSettingsApi
+      propertyId && launchSettingsEnabled && propertyLaunchSettingsApi
         ? propertyLaunchSettingsApi.get(propertyId)
         : Promise.resolve<PropertyLaunchSettings | null>(null),
     ])
@@ -521,6 +526,7 @@ export default function SharedFirstRunPropertySetupWizard({
     initialProfileSuggestions,
     usePreparedProperty,
     propertyLaunchSettingsApi,
+    launchSettingsEnabled,
     view.profileMode,
     view.screen,
     view.selectedPropertyId,
@@ -553,7 +559,7 @@ export default function SharedFirstRunPropertySetupWizard({
     setError("");
     setFieldErrors({});
     const nextFieldErrors = validateProfileDraft(draft);
-    if (propertyLaunchSettingsApi && !skipLaunchSettings) {
+    if (launchSettingsEnabled && !skipLaunchSettings) {
       Object.assign(nextFieldErrors, validatePropertyLaunchSettings(launchSettings));
     }
     if (Object.keys(nextFieldErrors).length > 0) {
@@ -564,6 +570,21 @@ export default function SharedFirstRunPropertySetupWizard({
     profileSaveInFlight.current = true;
     setSaving(true);
     try {
+      const profile = createProfileFromDraft(draft);
+      if (launchSettingsEnabled && !skipLaunchSettings) {
+        profile.initialLaunchSettings = normalizedPropertyLaunchSettings(launchSettings);
+      }
+      const createFingerprint = JSON.stringify(profile);
+      if (
+        view.profileMode === "create" &&
+        pendingCreateFingerprint.current &&
+        pendingCreateFingerprint.current !== createFingerprint
+      ) {
+        setError(
+          "This hotel was already submitted. Reload setup to review its saved details before making changes.",
+        );
+        return;
+      }
       if (view.profileMode === "update" && !loadedProfile) {
         setError("The existing property profile could not be loaded.");
         return;
@@ -577,7 +598,7 @@ export default function SharedFirstRunPropertySetupWizard({
       } else if (loadedProfile) {
         saved = loadedProfile;
       } else {
-        const profile = createProfileFromDraft(draft);
+        pendingCreateFingerprint.current = createFingerprint;
         const idempotencyKey = (createPropertyCommandKey.current = idempotencyKeyForRetry(
           createPropertyCommandKey.current ??
             (usePreparedProperty ? (propertyCreateIdempotencyKey ?? null) : null),
@@ -585,10 +606,17 @@ export default function SharedFirstRunPropertySetupWizard({
         try {
           saved = await api.createPropertyProfile(profile, idempotencyKey);
         } catch (createError) {
+          if ([403, 422].includes(setupErrorStatus(createError) ?? 0)) {
+            if (!ambiguousCreateAttempt.current) pendingCreateFingerprint.current = null;
+          } else {
+            ambiguousCreateAttempt.current = true;
+          }
           const code = setupErrorCode(createError);
           if (code !== "idempotency_key_conflict" && code !== "command_in_progress") {
             throw createError;
           }
+
+          if (profile.initialLaunchSettings) throw createError;
 
           if (
             usePreparedProperty &&
@@ -618,7 +646,12 @@ export default function SharedFirstRunPropertySetupWizard({
         assignmentKey: logoAssignmentKey,
       });
       setLoadedProfile(saved);
-      if (propertyLaunchSettingsApi && !skipLaunchSettings) {
+      if (
+        view.profileMode === "update" &&
+        launchSettingsEnabled &&
+        propertyLaunchSettingsApi &&
+        !skipLaunchSettings
+      ) {
         await propertyLaunchSettingsApi.update(
           saved.propertyId,
           normalizedPropertyLaunchSettings(launchSettings),
@@ -631,6 +664,8 @@ export default function SharedFirstRunPropertySetupWizard({
         await onPropertySelected?.(saved.propertyId);
       }
       createPropertyCommandKey.current = null;
+      pendingCreateFingerprint.current = null;
+      ambiguousCreateAttempt.current = false;
       logoUploadKey.current = null;
       logoAssignmentKey.current = null;
     } catch (err) {
@@ -804,6 +839,8 @@ export default function SharedFirstRunPropertySetupWizard({
           onSelect={handleSelectProperty}
           onAdd={() => {
             createPropertyCommandKey.current = null;
+            pendingCreateFingerprint.current = null;
+            ambiguousCreateAttempt.current = false;
             setDraft(newPropertyDraft());
             setLaunchSettings(propertyLaunchSettingsDefaults(""));
             setLaunchSettingsTouched(false);
@@ -830,7 +867,7 @@ export default function SharedFirstRunPropertySetupWizard({
           loading={!propertyTypeOptions}
           saving={saving}
           fieldErrors={fieldErrors}
-          launchSettings={propertyLaunchSettingsApi ? launchSettings : null}
+          launchSettings={launchSettingsEnabled ? launchSettings : null}
           skipLaunchSettings={skipLaunchSettings}
           launchSettingsTouched={launchSettingsTouched}
           propertyTypeOptions={propertyTypeOptions ?? []}
@@ -838,6 +875,7 @@ export default function SharedFirstRunPropertySetupWizard({
           onChange={(nextDraft) => {
             if (
               view.profileMode === "create" &&
+              !pendingCreateFingerprint.current &&
               (!usePreparedProperty || !propertyCreateIdempotencyKey)
             )
               createPropertyCommandKey.current = null;
