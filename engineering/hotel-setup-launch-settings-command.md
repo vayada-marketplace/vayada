@@ -76,7 +76,6 @@ pricing-currency command retains its existing idempotency and completion rules.
 5. Confirm authenticated live Save and status for both reported accounts before
    reporting recovery. Keep VAY-965 In Progress until accepted live completion.
 
-
 ## Release admission hold
 
 The public API can set `HOTEL_SETUP_COMMAND_ADMISSION=blocked` before initial
@@ -87,3 +86,22 @@ writes. Creation has its separate `HOTEL_SETUP_CREATION_COMMAND_ADMISSION`.
 Unset retains the existing pre-cutover behavior. Keep origin/token configuration
 when blocking an already-enabled caller. Only the reviewed release removes the
 hold after private-service and credential proof; setting it does not prove recovery.
+
+## Manual native property bootstrap (VAY-1092)
+
+The protected operational image invokes `/app/apps/api/dist/cli/hotelSetupPropertyBootstrap.js`.
+Its separately reviewed rollback app and dependencies are fixed at `/proof/rollback`; arbitrary module roots are rejected.
+The protected release driver must prove exclusive ownership, public admission blocked, and the private property service desired/running/pending all zero through proof and publication.
+
+Inputs are `HOTEL_SETUP_PROPERTY_ADMIN_DATABASE_URL`, `HOTEL_SETUP_COMMAND_DATABASE_ENDPOINT`,
+`HOTEL_SETUP_COMMAND_PROPERTY_ID`, `HOTEL_SETUP_COMMAND_ORGANIZATION_ID`,
+`HOTEL_SETUP_COMMAND_ACTOR_USER_ID`, and `HOTEL_SETUP_COMMAND_OPERATION` (one of the four reviewed purposes).
+The driver privately validates and normalizes the production owner URL to the target database with sole `sslmode=verify-full` before invocation.
+Prepare the pinned CA via `NODE_EXTRA_CA_CERTS` before starting Node; there is no insecure fallback.
+
+The CLI creates a disabled role, generates a private password, activates only the exact staged identity,
+proves primary and rollback native credentials, then publishes one immutable property-purpose secret version.
+Publication uses official regional SDK endpoints and one captured AWS credential identity; account verification precedes writes.
+Only nonsecret identity/scope and `publication.secretArn/versionId` appear in the single success receipt.
+Failure emits a sanitized inspection-required code. Never blindly retry, overwrite, or adopt a partial role/assignment/secret.
+The synthetic fixed-root script `scripts/test-hotel-setup-property-bootstrap.mjs` is restricted to an owned loopback test database; its AWS preload is test-only and must never be included in the operational image.

@@ -512,10 +512,11 @@ jobs:
             const env = {...process.env};
             for (const name of ["STAGE", "LOGIN", "CANDIDATE", "PREFLIGHT"])
               env[`HOTEL_SETUP_READER_${name}_TEST_DATABASE_URL`] = url.toString();
+            env.HOTEL_SETUP_PROPERTY_STAGE_TEST_DATABASE_URL = url.toString();
             const result = spawnSync("npm", ["--workspace", "vayada-api", "run", "test", "--", "--no-file-parallelism",
               "src/hotelSetupReaderRoleStaging.integration.test.ts", "src/hotelSetupReaderLoginVerification.integration.test.ts",
               "src/hotelSetupReaderSecretCandidate.integration.test.ts", "src/cli/hotelSetupPropertyPreflight.test.ts",
-              "src/cli/hotelSetupReaderPreflight.test.ts"], {env, stdio: "inherit"});
+              "src/cli/hotelSetupReaderPreflight.test.ts", "src/hotelSetupPropertyRoleStaging.integration.test.ts"], {env, stdio: "inherit"});
             process.exitCode = result.status ?? 1;
           } finally {
             await admin.query(`DROP ROLE ${role}`);
@@ -536,6 +537,10 @@ jobs:
           src/hotelSetupCommandServiceConfig.test.ts
           src/hotelSetupCommandService.test.ts
           src/hotelSetupCommandServer.test.ts
+          src/hotelSetupPropertyRoleStaging.test.ts
+          src/hotelSetupPropertyRoleActivation.test.ts
+          src/hotelSetupPropertySecretPublication.test.ts
+          src/cli/hotelSetupPropertyBootstrap.test.ts
           src/hotelSetupLaunchSettingsCommands.test.ts
           src/hotelSetupLaunchSettingsCredentials.test.ts
           src/hotelSetupLaunchSettingsRepository.test.ts
