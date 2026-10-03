@@ -85,7 +85,10 @@ function pmsEntitlement(status: ProductEntitlement["status"] = "active"): Produc
   };
 }
 
-function createActivationRepository(includeFinancials = true): PmsModuleActivationRepository {
+function createActivationRepository(
+  includeFinancials = true,
+  newHotelDefault = false,
+): PmsModuleActivationRepository {
   const now = "2026-06-29T08:00:00.000Z";
   const activations = new Map<string, PmsModuleActivation>([
     [
@@ -121,6 +124,9 @@ function createActivationRepository(includeFinancials = true): PmsModuleActivati
   ]);
   if (!includeFinancials) activations.delete("financials");
   return {
+    async isNewHotelFinancialsDefault() {
+      return newHotelDefault;
+    },
     async list() {
       return Array.from(activations.values());
     },
@@ -322,6 +328,37 @@ describe("PMS module activation routes", () => {
     });
     expect(disabled.statusCode).toBe(200);
     expect(disabled.json()).toMatchObject({ moduleId: "financials", isActive: false });
+  });
+
+  it("keeps the Feature Hub switch available after a new hotel turns Financials off", async () => {
+    app = buildAuthenticatedApp({
+      repository: createActivationRepository(true, true),
+      linkedRelationship: "owner",
+      permissions: ["pms.operations.read", "pms.finance.read", "pms.finance.manage"],
+    });
+    const headers = { authorization: "Bearer valid-token" };
+    const url = `/api/pms/properties/${propertyId}/module-activations`;
+    const disabled = await app.inject({
+      method: "PATCH",
+      url: `${url}/financials`,
+      headers,
+      payload: { isActive: false },
+    });
+    expect(disabled.statusCode).toBe(200);
+    const list = await injectJson<PmsModuleActivationsResponse>(app, {
+      method: "GET",
+      url,
+      headers,
+    });
+    expect(list.body).toMatchObject({ supportedModules: ["financials"], canManage: true });
+    expect(list.body.activeModules).not.toContain("financials");
+    const enabled = await app.inject({
+      method: "PATCH",
+      url: `${url}/financials`,
+      headers,
+      payload: { isActive: true },
+    });
+    expect(enabled.statusCode).toBe(200);
   });
 
   it("keeps rollback available after the property leaves the activation allowlist", async () => {

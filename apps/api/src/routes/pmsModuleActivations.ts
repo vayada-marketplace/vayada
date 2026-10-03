@@ -34,6 +34,7 @@ export type PmsModuleActivationsResponse = {
 
 export type PmsModuleActivationRepository = {
   list(context: RequestContext, propertyId: string): Promise<PmsModuleActivation[]>;
+  isNewHotelFinancialsDefault(context: RequestContext, propertyId: string): Promise<boolean>;
   updateFinancials(
     context: RequestContext,
     propertyId: string,
@@ -120,9 +121,11 @@ export async function registerPmsModuleActivationRoutes(
         },
       };
       const financialsActive = hasActiveEntitlement(context, financialsEntitlement);
+      const newHotelDefault = await repository.isNewHotelFinancialsDefault(context, propertyId);
       const financialsVisible =
         canReadFinancials(context, propertyId) &&
         (financialsActivationPropertyIds.has(propertyId) ||
+          newHotelDefault ||
           financialsActive ||
           activations.some(
             (activation) => activation.moduleId === "financials" && activation.isActive,
@@ -177,7 +180,10 @@ export async function registerPmsModuleActivationRoutes(
           message: "The organization has suspended Financials.",
         });
       }
-      if (!financialsActivationPropertyIds.has(propertyId)) {
+      if (
+        !financialsActivationPropertyIds.has(propertyId) &&
+        !(await repository.isNewHotelFinancialsDefault(context, propertyId))
+      ) {
         const current = (await repository.list(context, propertyId)).find(
           (activation) => activation.moduleId === "financials",
         );
@@ -402,6 +408,18 @@ export function createPgPmsModuleActivationRepository(config: {
     });
 
   return {
+    async isNewHotelFinancialsDefault(context, propertyId) {
+      const result = await pool.query(
+        `SELECT 1 FROM identity.product_entitlements
+         WHERE organization_id = $1::uuid AND product = 'pms'
+           AND entitlement_key = 'module:financials'
+           AND resource_product = 'pms' AND resource_type = 'pms_property'
+           AND resource_id = $2::uuid::text
+           AND metadata ->> 'newHotelFinancialsDefault' = 'ready'`,
+        [context.selectedOrganization.organizationId, propertyId],
+      );
+      return (result.rowCount ?? result.rows.length) > 0;
+    },
     async list(context, propertyId) {
       const result = await pool.query<PmsModuleActivationRow>(
         `SELECT

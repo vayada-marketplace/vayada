@@ -3068,6 +3068,12 @@ describe("shared hotel setup status route", () => {
       if (text.includes("INSERT INTO hotel_catalog.properties")) {
         return { rows: [{ propertyId }] };
       }
+      if (text.includes("INSERT INTO identity.organization_resource_links")) {
+        return { rows: [{ propertyId, hasPmsLink: true }] };
+      }
+      if (text.includes("INSERT INTO identity.product_entitlements")) {
+        return { rows: [{ id: "99999999-9999-4999-8999-999999999902" }] };
+      }
       return { rows: [profileRow()] };
     });
     const repository = createPgSharedHotelSetupStatusRepository({

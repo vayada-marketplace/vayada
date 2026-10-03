@@ -685,6 +685,16 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
       expect(
         await count("booking.booking_settings", "property_id", blockedProperty.propertyId),
       ).toBe(0);
+      expect(
+        (
+          await client.query(
+            `SELECT 1 FROM identity.product_entitlements
+         WHERE organization_id=$1::uuid AND entitlement_key='module:financials'
+           AND resource_id=$2`,
+            [suspendedBilling.organizationId, blockedProperty.propertyId],
+          )
+        ).rows,
+      ).toHaveLength(0);
       await expect(
         blockedPropertyRepository.createPropertyProfile({
           organizationId: suspendedBilling.organizationId,
@@ -992,6 +1002,17 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel setup track command repository", () =
       expect(
         await count("booking.booking_settings", "property_id", createdProperty.propertyId),
       ).toBe(1);
+      expect(
+        (
+          await client.query(
+            `SELECT status, metadata ->> 'newHotelFinancialsDefault' AS marker
+         FROM identity.product_entitlements
+         WHERE organization_id=$1::uuid AND entitlement_key='module:financials'
+           AND resource_id=$2`,
+            [propertyRace.organizationId, createdProperty.propertyId],
+          )
+        ).rows,
+      ).toEqual([{ status: "suspended", marker: "pending" }]);
     } finally {
       if (blockerOpen) await client.query("ROLLBACK");
       await Promise.allSettled([trackPromise, propertyPromise].filter(Boolean));

@@ -2,9 +2,23 @@
 
 This is the VAY-1138 release gate for the five no-provider MVP tabs: Dashboard,
 Revenue, Expenses, Profit & Loss, and Folios. The source contract is
-[`pms-financials-contracts.md`](pms-financials-contracts.md). Financials stays
-inactive for new properties. An official invoice, provider connection, PDF, or
+[`pms-financials-contracts.md`](pms-financials-contracts.md). An official invoice, provider connection, PDF, or
 invoice email is not part of this activation.
+
+For a newly created PMS hotel, Financials turns on automatically after its
+currency is first saved and all seven starter expense categories exist. Until
+then its property entitlement is suspended. The Owner can turn Financials off
+or back on in Feature Hub; later currency edits never override that choice.
+PMS billing must still be eligible. A global suspension or linked historical
+data keeps the module off for manual review.
+Existing hotels are not activated by this setup path and still follow the
+property-specific rehearsal and approval below. Do not bulk-enable them.
+
+Before releasing the new-hotel path, run the standard API runtime database
+preflight and verify the restricted runtime role can read billing, booking,
+property links, entitlements, and categories; insert categories and audit
+events; and update the property entitlement. Hold the release if any exact
+privilege is missing. Do not add a broad grant.
 
 ## Record the candidate
 
@@ -22,11 +36,12 @@ The Feature Hub control now exists for approved properties. Verify its current
 serving revision, owner authorization, entitlement write, audit event, and
 rollback behavior for each activation candidate.
 
-The control introduced in PR #2541 is property-scoped and fails closed: the API
-setting `PMS_FINANCIALS_ACTIVATION_PROPERTY_IDS` defaults to an empty list. After the
-control is reviewed and serving, add only the explicitly approved property ID
-to that setting and verify the running API picked it up. The allowlist permits
-activation; it does not replace the readiness audit or production approval.
+The control introduced in PR #2541 is property-scoped. The API setting
+`PMS_FINANCIALS_ACTIVATION_PROPERTY_IDS` defaults to an empty list for existing
+hotels. Add only an explicitly approved existing property ID and verify the
+running API picked it up. A newly created hotel with a completed setup marker
+can use the Feature Hub switch without this allowlist. The allowlist does not
+replace the readiness audit or production approval for existing hotels.
 Only an active property owner with `pms.finance.manage`, a PMS base entitlement,
 and effective property access can change the module. A global Financials
 suspension blocks activation. Removing a property from the allowlist must not
@@ -40,9 +55,10 @@ for both entitlement and audit tables before adding any live property ID.
 1. Confirm the exact running API and PMS image digests and map them to source
    commits. A successful image build or merge alone does not prove deployment.
 2. Confirm the target migration chain applied and the property has a currency
-   and PMS pricing settings. Keep `module:financials` inactive through a new
-   property's rehearsal. For an already approved active test property, use
-   `--expect-active`; do not toggle it merely to satisfy the inactive audit.
+   and PMS pricing settings. For an existing hotel, keep `module:financials`
+   inactive through rehearsal. For a newly created hotel whose setup completed,
+   or an already approved active test property, use `--expect-active`; do not
+   toggle it merely to satisfy the inactive audit.
 3. Confirm `pms.finance.read` and `pms.finance.manage` grants and the selected
    property's `owner` or `finance_manager` link. Review the effect of granting
    `pms.finance.read` to `finance_manager` on older Finance routes before its
@@ -52,11 +68,12 @@ for both entitlement and audit tables before adding any live property ID.
    status, and downloads. Missing permission, property link, base entitlement,
    or active module entitlement must each deny Owner and Manager access. Repeat
    the allowed Owner/Manager cases only after activation.
-5. Confirm the Feature Hub card and state are visible only for the approved
+5. Confirm the Feature Hub card and state are visible only for the authorized
    owner/property, that activation persists an effective property-scoped
    entitlement and audit event, and that deactivation hides navigation and
-   denies direct Financials access. Verify that a property outside the allowlist
-   cannot activate, while rollback remains possible after allowlist removal.
+   denies direct Financials access. An existing property outside the allowlist
+   cannot activate; a completed new-hotel setup can. Rollback remains possible
+   after allowlist removal.
 
 ## 2. Rehearse data and reconcile
 

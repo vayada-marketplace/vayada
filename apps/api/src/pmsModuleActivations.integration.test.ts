@@ -226,4 +226,35 @@ describe.skipIf(!databaseUrl)("Feature Hub data preservation", () => {
       await client.query("ROLLBACK TO SAVEPOINT before_global_grant_rollback");
     }
   });
+
+  it("recognizes only a completed new-hotel setup for the Feature Hub switch", async () => {
+    await client.query("SAVEPOINT before_new_hotel_default");
+    try {
+      await client.query(
+        `DELETE FROM identity.product_entitlements
+         WHERE organization_id=$1::uuid AND entitlement_key='module:financials'
+           AND resource_id=$2`,
+        [organizationId, propertyId],
+      );
+      await client.query(
+        `INSERT INTO identity.product_entitlements
+           (organization_id, product, entitlement_key, status,
+            resource_product, resource_type, resource_id, metadata)
+         VALUES ($1::uuid, 'pms', 'module:financials', 'suspended',
+           'pms', 'pms_property', $2, '{"newHotelFinancialsDefault":"pending"}'::jsonb)`,
+        [organizationId, propertyId],
+      );
+      expect(await repository.isNewHotelFinancialsDefault(context, propertyId)).toBe(false);
+      await client.query(
+        `UPDATE identity.product_entitlements
+         SET metadata='{"newHotelFinancialsDefault":"ready"}'::jsonb
+         WHERE organization_id=$1::uuid AND entitlement_key='module:financials'
+           AND resource_id=$2`,
+        [organizationId, propertyId],
+      );
+      expect(await repository.isNewHotelFinancialsDefault(context, propertyId)).toBe(true);
+    } finally {
+      await client.query("ROLLBACK TO SAVEPOINT before_new_hotel_default");
+    }
+  });
 });
