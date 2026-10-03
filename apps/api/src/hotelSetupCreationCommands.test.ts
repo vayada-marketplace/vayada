@@ -3,6 +3,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { createHotelSetupCreationCommands } from "./hotelSetupCreationCommands.js";
 import { createPgSharedHotelSetupStatusRepository } from "./platform/sharedHotelSetupStatusReadModel.js";
 import type { SharedHotelSetupStatusRepository } from "./routes/sharedHotelSetupStatus.js";
+import { BookingContactPublicationConflictError } from "./routes/bookingSettings.js";
 
 vi.mock("./platform/sharedHotelSetupStatusReadModel.js", () => ({
   createPgSharedHotelSetupStatusRepository: vi.fn(),
@@ -75,4 +76,14 @@ it("preserves authorization denial and sanitizes unexpected failures", async () 
     "Hotel setup property creation unavailable",
   );
   expect(f.close).toHaveBeenCalledTimes(2);
+});
+
+it("preserves only the standard private-contact conflict message", async () => {
+  const f = fixture();
+  const conflict = new BookingContactPublicationConflictError();
+  conflict.message = "secret database detail";
+  f.save.mockRejectedValue(conflict);
+  await expect(f.commands.createPropertyProfile(f.input)).rejects.toThrow(
+    "That contact is stored as private hotel information.",
+  );
 });

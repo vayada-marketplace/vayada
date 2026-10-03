@@ -130,7 +130,16 @@ export const HOTEL_SETUP_CREATION_PRIVILEGES: HotelSetupColumnPrivileges = {
   "booking.pricing_runtime_effective_authority_scopes": {
     SELECT: ["operation_class", "property_id", "revision"],
   },
-  "booking.booking_settings": { SELECT: ["property_id"], INSERT: ["property_id"] },
+  "booking.booking_settings": {
+    SELECT: ["property_id"],
+    INSERT: [
+      "property_id",
+      "default_currency",
+      "supported_currencies",
+      "default_language",
+      "supported_languages",
+    ],
+  },
   "marketplace.marketplace_hotel_profiles": {
     SELECT: ["property_id"],
     INSERT: ["property_id", "organization_id", "source_system", "source_hotel_profile_id"],

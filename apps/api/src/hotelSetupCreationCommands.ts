@@ -5,6 +5,7 @@ import {
 } from "./hotelSetupCommandCredentials.js";
 import { createPgSharedHotelSetupStatusRepository } from "./platform/sharedHotelSetupStatusReadModel.js";
 import type { SharedHotelSetupStatusRepository } from "./routes/sharedHotelSetupStatus.js";
+import { BookingContactPublicationConflictError } from "./routes/bookingSettings.js";
 
 /** Private executor: select current organization credentials for every request. */
 export function createHotelSetupCreationCommands(
@@ -28,6 +29,8 @@ export function createHotelSetupCreationCommands(
         }
       } catch (error) {
         if (error instanceof AuthorizationError) throw error;
+        if (error instanceof BookingContactPublicationConflictError)
+          throw new BookingContactPublicationConflictError();
         const code = (error as { code?: unknown } | null)?.code;
         if (code === "idempotency_key_conflict" || code === "command_in_progress")
           throw Object.assign(new Error(code), { code });

@@ -120,9 +120,12 @@ describe.skipIf(!url)("native creation product scopes", () => {
         ),
       ).rejects.toMatchObject({ code: "42501" });
       await expect(
-        native.query(`INSERT INTO booking.booking_settings (property_id) VALUES ($1)`, [
-          properties[1],
-        ]),
+        native.query(
+          `INSERT INTO booking.booking_settings
+          (property_id,default_currency,supported_currencies,default_language,supported_languages)
+          VALUES ($1,'LKR',ARRAY['USD'],'si',ARRAY['en'])`,
+          [properties[1]],
+        ),
       ).rejects.toMatchObject({ code: "42501" });
       await expect(
         native.query(

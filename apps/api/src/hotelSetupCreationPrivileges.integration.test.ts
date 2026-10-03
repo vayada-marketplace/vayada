@@ -263,6 +263,192 @@ describe.skipIf(!url)("native creation privilege contract", () => {
           );
         }
       }
+      const initialLaunchSettings = {
+        defaultCurrency: "LKR",
+        supportedCurrencies: ["USD"],
+        defaultLanguage: "si",
+        supportedLanguages: ["en"],
+        instagram: "https://instagram.com/native_hotel",
+        facebook: "",
+        tiktok: "https://tiktok.com/@native_hotel",
+        youtube: "https://youtube.com/@native_hotel",
+      };
+      const atomic = {
+        ...command,
+        idempotencyKey: "atomic-initial",
+        profile: {
+          ...command.profile,
+          initialLaunchSettings,
+        },
+      };
+      const saved = await repository.createPropertyProfile(atomic);
+      expect(saved.profile).not.toHaveProperty("initialLaunchSettings");
+      expect(saved.profile.contacts).toEqual(command.profile.contacts);
+      await expect(repository.createPropertyProfile(atomic)).resolves.toEqual(saved);
+      expect(
+        (
+          await admin.query(
+            `SELECT default_currency::text AS "defaultCurrency",
+        supported_currencies AS "supportedCurrencies", default_language AS "defaultLanguage",
+        supported_languages AS "supportedLanguages" FROM booking.booking_settings WHERE property_id=$1`,
+            [saved.propertyId],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          defaultCurrency: "LKR",
+          supportedCurrencies: ["USD"],
+          defaultLanguage: "si",
+          supportedLanguages: ["en"],
+        },
+      ]);
+      expect(
+        (
+          await admin.query(
+            `SELECT channel_type,value,is_public,source_system
+        FROM hotel_catalog.property_contact_channels WHERE property_id=$1 AND source_system='booking'
+        ORDER BY channel_type`,
+            [saved.propertyId],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          channel_type: "instagram",
+          value: initialLaunchSettings.instagram,
+          is_public: true,
+          source_system: "booking",
+        },
+        {
+          channel_type: "tiktok",
+          value: initialLaunchSettings.tiktok,
+          is_public: true,
+          source_system: "booking",
+        },
+        {
+          channel_type: "youtube",
+          value: initialLaunchSettings.youtube,
+          is_public: true,
+          source_system: "booking",
+        },
+      ]);
+      for (const profile of [
+        command.profile,
+        {
+          ...atomic.profile,
+          initialLaunchSettings: { ...initialLaunchSettings, defaultCurrency: "USD" },
+        },
+        { ...atomic.profile, initialLaunchSettings: { ...initialLaunchSettings, instagram: "" } },
+      ]) {
+        await expect(
+          repository.createPropertyProfile({ ...atomic, profile }),
+        ).rejects.toMatchObject({
+          code: "idempotency_key_conflict",
+          propertyId: saved.propertyId,
+        });
+      }
+      const countProperties = async () =>
+        (
+          await admin.query(
+            "SELECT count(*)::int AS count FROM hotel_catalog.properties WHERE creation_organization_id=$1",
+            [organizationId],
+          )
+        ).rows[0].count;
+      const beforeAtomicDenials = await countProperties();
+      await admin.query(
+        `UPDATE hotel_catalog.organization_setup_track_intents
+        SET selected_tracks=ARRAY['creator_marketplace'] WHERE organization_id=$1`,
+        [organizationId],
+      );
+      await expect(
+        repository.createPropertyProfile({ ...atomic, idempotencyKey: "creator-only-denied" }),
+      ).rejects.toThrow("not authorized");
+      await admin.query(
+        `UPDATE hotel_catalog.organization_setup_track_intents
+        SET selected_tracks=ARRAY['hotel_operations','creator_marketplace'] WHERE organization_id=$1`,
+        [organizationId],
+      );
+      await admin.query(
+        `UPDATE identity.product_entitlements SET status='suspended'
+        WHERE organization_id=$1 AND product='booking'`,
+        [organizationId],
+      );
+      await expect(
+        repository.createPropertyProfile({ ...atomic, idempotencyKey: "inactive-booking-denied" }),
+      ).rejects.toThrow("not authorized");
+      await admin.query(
+        `UPDATE identity.product_entitlements SET status='active'
+        WHERE organization_id=$1 AND product='booking'`,
+        [organizationId],
+      );
+      await expect(
+        repository.createPropertyProfile({
+          ...atomic,
+          idempotencyKey: "private-social-denied",
+          profile: {
+            ...atomic.profile,
+            contacts: [
+              ...command.profile.contacts,
+              {
+                channelType: "instagram",
+                value: initialLaunchSettings.instagram,
+                purpose: "operations",
+                isPublic: false,
+              },
+            ],
+          },
+        }),
+      ).rejects.toThrow("private hotel information");
+      expect(await countProperties()).toBe(beforeAtomicDenials);
+      expect(
+        (
+          await admin.query(
+            `SELECT id FROM platform.idempotency_keys WHERE organization_id=$1
+        AND status<>'completed'`,
+            [organizationId],
+          )
+        ).rows,
+      ).toEqual([]);
+      for (const propertyId of [saved.propertyId, randomUUID()]) {
+        await expect(
+          native.query(
+            `INSERT INTO booking.booking_settings
+          (property_id,default_currency,supported_currencies,default_language,supported_languages)
+          VALUES ($1,'LKR',ARRAY['USD'],'si',ARRAY['en'])`,
+            [propertyId],
+          ),
+        ).rejects.toMatchObject({ code: "42501" });
+      }
+      await expect(
+        native.query(
+          `UPDATE booking.booking_settings SET default_currency='USD'
+        WHERE property_id=$1`,
+          [saved.propertyId],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+      const socialGrants = await admin.query(`DELETE FROM identity.role_permission_grants
+        WHERE organization_kind='hotel_group' AND role_key='hotel_owner'
+          AND permission_key IN ('marketplace.profile.manage','booking.settings.manage') RETURNING *`);
+      try {
+        await expect(
+          repository.createPropertyProfile({
+            ...atomic,
+            idempotencyKey: "initial-publication-denied",
+          }),
+        ).rejects.toThrow("not authorized");
+      } finally {
+        for (const grant of socialGrants.rows)
+          await admin.query(
+            `INSERT INTO identity.role_permission_grants
+          (id,organization_kind,role_key,permission_key,created_at) VALUES ($1,$2,$3,$4,$5)`,
+            [
+              grant.id,
+              grant.organization_kind,
+              grant.role_key,
+              grant.permission_key,
+              grant.created_at,
+            ],
+          );
+      }
       await admin.query(
         `GRANT SELECT (private_payload) ON platform.product_audit_events TO ${role}`,
       );

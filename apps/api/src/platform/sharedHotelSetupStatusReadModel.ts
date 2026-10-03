@@ -3,6 +3,7 @@ import { AuthorizationError } from "@vayada/backend-authorization";
 
 import type {
   PropertyProfileContact,
+  PropertyInitialLaunchSettings,
   PropertyProfileMapDisplayMode,
   PublicPropertyProfileMedia,
   PublicPropertyProfilePatch,
@@ -14,6 +15,7 @@ import { assertHotelSetupCreationScope } from "../hotelSetupCommandScope.js";
 import { assertHotelSetupCreationPrivileges } from "../hotelSetupCreationPrivileges.js";
 import { lockHotelSetupCreationPermissions } from "../hotelSetupMembership.js";
 import { hasPublishedPropertySurface } from "../routes/sharedHotelSetupStatus.js";
+import { BookingContactPublicationConflictError } from "../routes/bookingSettings.js";
 import type {
   AdaptivePropertySetupFacts,
   AdaptiveSetupTaskFact,
@@ -642,6 +644,9 @@ async function writePropertyProfile(
         provisioningReference: input.provisioningReference ?? null,
         reason: input.audit?.reason ?? null,
         profile: payload,
+        ...(input.profile.initialLaunchSettings
+          ? { initialLaunchSettings: input.profile.initialLaunchSettings }
+          : {}),
       }),
     );
     try {
@@ -673,6 +678,16 @@ async function writePropertyProfile(
             !permissions.includes("marketplace.profile.manage") &&
             !permissions.includes("booking.settings.manage"))
         )
+          throw new AuthorizationError();
+      }
+      const initialSettings = input.profile.initialLaunchSettings;
+      if (initialSettings) {
+        const intent = await client.query<{ selectedTracks: string[] }>(
+          `SELECT selected_tracks AS "selectedTracks"
+           FROM hotel_catalog.organization_setup_track_intents WHERE organization_id=$1::uuid`,
+          [input.organizationId],
+        );
+        if (!intent.rows[0]?.selectedTracks.includes("hotel_operations"))
           throw new AuthorizationError();
       }
       if (input.provisioningReference) {
@@ -739,7 +754,14 @@ async function writePropertyProfile(
       ]);
       if (result.rows[0]?.propertyId !== propertyId)
         throw new Error("Created shared property profile links did not return the property id");
-      await client.query(createPropertyProductDefaultsSql(), [input.organizationId, propertyId]);
+      const initialized = await client.query<{ bookingInitialized: boolean }>(
+        createPropertyProductDefaultsSql(Boolean(initialSettings)),
+        [input.organizationId, propertyId, ...(initialSettings ? [initialSettings] : [])],
+      );
+      if (initialSettings) {
+        if (!initialized.rows[0]?.bookingInitialized) throw new AuthorizationError();
+        await createInitialSocialContacts(client, propertyId, initialSettings);
+      }
       if (input.provisioningReference) {
         await linkProvisioningReference(client, {
           propertyId,
@@ -1498,7 +1520,36 @@ function createPropertyCatalogOwnerSql(): string {
     VALUES ($1::uuid, 'hotel_catalog', 'property', $2::uuid::text, 'owner', 'active')`;
 }
 
-function createPropertyProductDefaultsSql(): string {
+async function createInitialSocialContacts(
+  client: SharedHotelSetupQueryClient,
+  propertyId: string,
+  settings: PropertyInitialLaunchSettings,
+) {
+  const contacts = (["instagram", "facebook", "tiktok", "youtube"] as const)
+    .filter((channel_type) => settings[channel_type] !== "")
+    .map((channel_type) => ({ channel_type, value: settings[channel_type] }));
+  if (!contacts.length) return;
+  const conflicts = await client.query(
+    `SELECT contact.id FROM hotel_catalog.property_contact_channels contact
+     JOIN jsonb_to_recordset($2::jsonb) input(channel_type text,value text)
+       ON contact.channel_type=input.channel_type AND contact.value=input.value
+     WHERE contact.property_id=$1::uuid AND NOT contact.is_public`,
+    [propertyId, JSON.stringify(contacts)],
+  );
+  if (conflicts.rows.length) throw new BookingContactPublicationConflictError();
+  await client.query(
+    `INSERT INTO hotel_catalog.property_contact_channels
+      (property_id,channel_type,value,is_public,source_system)
+     SELECT $1::uuid,input.channel_type,input.value,TRUE,'booking'
+     FROM jsonb_to_recordset($2::jsonb) input(channel_type text,value text)
+     WHERE NOT EXISTS (SELECT 1 FROM hotel_catalog.property_contact_channels contact
+       WHERE contact.property_id=$1::uuid AND contact.channel_type=input.channel_type
+         AND contact.value=input.value AND contact.is_public)`,
+    [propertyId, JSON.stringify(contacts)],
+  );
+}
+
+function createPropertyProductDefaultsSql(initialSettings = false): string {
   return `WITH linked_product_properties AS (
     SELECT product, resource_id FROM identity.organization_resource_links
     WHERE organization_id=$1::uuid AND resource_id=$2::uuid::text
@@ -1519,14 +1570,21 @@ function createPropertyProductDefaultsSql(): string {
       RETURNING property_id
     ),
     initialized_booking_settings AS (
-      INSERT INTO booking.booking_settings (property_id)
-      SELECT resource_id::uuid
+      INSERT INTO booking.booking_settings (property_id${initialSettings ? ", default_currency, supported_currencies, default_language, supported_languages" : ""})
+      SELECT resource_id::uuid${
+        initialSettings
+          ? `, $3::jsonb->>'defaultCurrency',
+        ARRAY(SELECT jsonb_array_elements_text($3::jsonb->'supportedCurrencies')),
+        $3::jsonb->>'defaultLanguage',
+        ARRAY(SELECT jsonb_array_elements_text($3::jsonb->'supportedLanguages'))`
+          : ""
+      }
       FROM linked_product_properties
       WHERE product = 'booking'
       ON CONFLICT (property_id) DO NOTHING
       RETURNING property_id
     )
-  SELECT 1`;
+  ${initialSettings ? 'SELECT EXISTS (SELECT 1 FROM initialized_booking_settings) AS "bookingInitialized"' : "SELECT 1"}`;
 }
 
 function createPropertyProfileSql(): string {

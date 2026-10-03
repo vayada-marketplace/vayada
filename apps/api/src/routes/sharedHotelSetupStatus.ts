@@ -935,6 +935,9 @@ export function registerSharedHotelSetupPropertyCreation(
 
       return reply.status(201).send(profile);
     } catch (error) {
+      if (error instanceof BookingContactPublicationConflictError) {
+        return reply.status(409).send({ code: "private_contact_conflict", detail: error.message });
+      }
       const code =
         isObjectRecord(error) && typeof error["code"] === "string" ? error["code"] : null;
       const propertyId =
