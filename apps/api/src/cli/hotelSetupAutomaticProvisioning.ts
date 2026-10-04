@@ -40,7 +40,10 @@ export function parseHotelSetupAutomaticConfiguration(env: NodeJS.ProcessEnv): {
 }
 
 /** Operational secret injection only; ordinary serving tasks never receive this URL. */
-export function parseHotelSetupHelperOwnerConfiguration(env: NodeJS.ProcessEnv) {
+export function parseHotelSetupHelperOwnerConfiguration(
+  env: NodeJS.ProcessEnv,
+  trustedCaPath: "/runtime/rds-ca.pem" | "/tmp/hotel-setup-rds.pem" = "/runtime/rds-ca.pem",
+) {
   const url = new URL(env.HOTEL_SETUP_HELPER_OWNER_DATABASE_URL ?? "");
   if (
     url.protocol !== "postgresql:" ||
@@ -50,7 +53,7 @@ export function parseHotelSetupHelperOwnerConfiguration(env: NodeJS.ProcessEnv) 
     url.username !== "vayada_target_prod_user" ||
     url.hash ||
     url.search !== "?sslmode=require" ||
-    env.NODE_EXTRA_CA_CERTS !== "/runtime/rds-ca.pem" ||
+    env.NODE_EXTRA_CA_CERTS !== trustedCaPath ||
     (env.NODE_TLS_REJECT_UNAUTHORIZED !== undefined && env.NODE_TLS_REJECT_UNAUTHORIZED !== "1")
   )
     throw new Error();

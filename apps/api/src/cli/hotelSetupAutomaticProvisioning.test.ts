@@ -94,3 +94,24 @@ it("requires a separately injected fixed helper-owner credential with verified T
       }),
     ).toThrow();
 });
+
+it("keeps automatic and fixed manual-child CA contracts separate", () => {
+  const manual = {
+    ...env,
+    NODE_EXTRA_CA_CERTS: "/tmp/hotel-setup-rds.pem",
+    HOTEL_SETUP_HELPER_OWNER_DATABASE_URL: env.HOTEL_SETUP_AUTOMATIC_ADMIN_DATABASE_URL.replace(
+      "vayada_admin",
+      "vayada_target_prod_user",
+    ).replace("/postgres?", "/vayada_target_prod?"),
+  };
+  expect(() => parseHotelSetupHelperOwnerConfiguration(manual)).toThrow();
+  expect(() =>
+    parseHotelSetupHelperOwnerConfiguration(manual, "/tmp/hotel-setup-rds.pem"),
+  ).not.toThrow();
+  expect(() =>
+    parseHotelSetupHelperOwnerConfiguration(
+      { ...manual, NODE_EXTRA_CA_CERTS: "/arbitrary.pem" },
+      "/tmp/hotel-setup-rds.pem",
+    ),
+  ).toThrow();
+});

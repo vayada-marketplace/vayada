@@ -33,7 +33,10 @@ export async function runHotelSetupPropertyBootstrap(env: NodeJS.ProcessEnv = pr
     if (typeof secondary.checkHotelSetupPropertyCredential !== "function") throw new Error();
     const adminDatabaseUrl = env.HOTEL_SETUP_PROPERTY_ADMIN_DATABASE_URL ?? "";
     const databaseEndpoint = env.HOTEL_SETUP_COMMAND_DATABASE_ENDPOINT ?? "";
-    const ownerDatabaseUrl = parseHotelSetupHelperOwnerConfiguration(env);
+    const ownerDatabaseUrl = parseHotelSetupHelperOwnerConfiguration(
+      env,
+      "/tmp/hotel-setup-rds.pem",
+    );
     holder = hotelSetupOrganizationConnection(adminDatabaseUrl, databaseEndpoint);
     holder.on("error", () => undefined);
     await holder.connect();
