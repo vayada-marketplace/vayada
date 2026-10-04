@@ -57,6 +57,23 @@ describe("property create conflict recovery", () => {
       "Something went wrong on our end. Please try again.",
     );
     expect(
+      setupErrorMessage(
+        Object.assign(new Error("API Error: 503"), {
+          status: 503,
+          data: { code: "hotel_setup_unavailable" },
+        }),
+      ),
+    ).toBe("Hotel setup is temporarily unavailable. Please try again in a few minutes.");
+    expect(
+      setupErrorMessage({
+        status: 503,
+        data: { code: "other_unavailable", message: "private diagnostic" },
+      }),
+    ).toBe("Something went wrong on our end. Please try again.");
+    expect(setupErrorMessage({ status: 500, data: { code: "hotel_setup_unavailable" } })).toBe(
+      "Something went wrong on our end. Please try again.",
+    );
+    expect(
       setupErrorMessage({
         status: 500,
         data: { message: "database unavailable" },

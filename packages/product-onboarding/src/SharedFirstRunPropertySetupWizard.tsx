@@ -3591,11 +3591,14 @@ function propertyTypeOptionsFromCatalog(options: unknown): SharedPropertyTypeOpt
 
 export function setupErrorMessage(error: unknown): string {
   const status = setupErrorStatus(error);
+  const code = setupErrorCode(error);
+  if (status === 503 && code === "hotel_setup_unavailable") {
+    return "Hotel setup is temporarily unavailable. Please try again in a few minutes.";
+  }
   if (status !== null && status >= 500) {
     return "Something went wrong on our end. Please try again.";
   }
 
-  const code = setupErrorCode(error);
   if (code === "command_in_progress") {
     return "We're still finishing your setup. Please try again in a moment.";
   }
