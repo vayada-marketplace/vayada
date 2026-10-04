@@ -3,6 +3,7 @@
 import asyncio
 import json
 from contextlib import ExitStack, contextmanager
+from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -37,6 +38,8 @@ async def _create_card_draft(
     expected_affiliate_commission_amount: float = 0,
     affiliate_commission_pct: float | None = None,
 ):
+    check_in = date.today() + timedelta(days=30)
+    check_out = check_in + timedelta(days=3)
     user = await create_test_user()
     hotel = await create_test_hotel(str(user["id"]))
     room = await create_test_room_type(str(hotel["id"]))
@@ -98,8 +101,8 @@ async def _create_card_draft(
                 "guestLastName": "Guest",
                 "guestEmail": "instant@example.com",
                 "guestPhone": "+1234567890",
-                "checkIn": "2026-10-10",
-                "checkOut": "2026-10-13",
+                "checkIn": check_in.isoformat(),
+                "checkOut": check_out.isoformat(),
                 "adults": 2,
                 "paymentMethod": "card",
                 "rateType": "flexible",
