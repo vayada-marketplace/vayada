@@ -32,6 +32,8 @@ it.each([
   "ready",
   "revoked",
   "readinessCommit",
+  "lateRetarget",
+  "lateReady",
 ])("pins property credential publication on %s", async (mode) => {
   vi.stubEnv("AWS_ACCESS_KEY_ID", "synthetic-key");
   vi.stubEnv("AWS_SECRET_ACCESS_KEY", "synthetic-secret");
@@ -39,6 +41,7 @@ it.each([
   vi.stubEnv("AWS_REGION", "us-east-1");
   vi.stubEnv("AWS_ENDPOINT_URL", "https://wrong.example");
   vi.spyOn(STSClient.prototype, "send").mockImplementation(async function (this: STSClient) {
+    expect(transaction).toBe(false);
     expect(await this.config.region()).toBe("eu-west-1");
     expect((await this.config.endpoint!()).hostname).toBe("sts.eu-west-1.amazonaws.com");
     return { Account: mode === "wrongAccount" ? "000000000000" : "269416271598" };
@@ -55,11 +58,18 @@ it.each([
     actorUserId: "10000000-0000-4000-8000-000000000003",
   };
   let identityReads = 0;
+  let assignmentReads = 0,
+    commits = 0,
+    transaction = false;
   vi.mocked(lockHotelSetupPropertyBootstrapAuthority).mockImplementation(async () => {
     if (mode === "revoked" && identityReads === 1) throw new Error("revoked intent");
   });
   const query = vi.fn(async (sql: string, params?: unknown[]) => {
-    if (sql === "COMMIT" && mode === "readinessCommit") throw new Error("lost acknowledgement");
+    if (sql === "BEGIN") transaction = true;
+    if (sql === "COMMIT") {
+      transaction = false;
+      if (++commits === 2 && mode === "readinessCommit") throw new Error("lost acknowledgement");
+    }
     if (sql.startsWith("UPDATE platform.hotel_setup_property_scopes")) {
       expect(params).toEqual([login, 42, versionId, propertyId, staged.organizationId, operation]);
       expect(identityReads).toBe(2);
@@ -74,16 +84,21 @@ it.each([
           mode === "verifier" || (mode === "lateDrift" && identityReads === 2) ? [] : [{ oid: 42 }],
       };
     }
+    if (sql.includes("FROM platform.hotel_setup_property_scopes")) assignmentReads++;
+    const ready = mode === "ready" || (mode === "lateReady" && assignmentReads === 2);
     return {
       rows: [
         {
-          property_id: mode === "retarget" ? staged.organizationId : propertyId,
+          property_id:
+            mode === "retarget" || (mode === "lateRetarget" && assignmentReads === 2)
+              ? staged.organizationId
+              : propertyId,
           organization_id: staged.organizationId,
           operation_class: operation,
           active: true,
-          credential_role_oid: mode === "ready" ? 42 : null,
-          credential_secret_version: mode === "ready" ? "x".repeat(32) : null,
-          credential_ready_at: mode === "ready" ? new Date() : null,
+          credential_role_oid: ready ? 42 : null,
+          credential_secret_version: ready ? "x".repeat(32) : null,
+          credential_ready_at: ready ? new Date() : null,
         },
       ],
     };
@@ -93,6 +108,7 @@ it.each([
   const name = `hotel-setup-command/prod/property/${login}`;
   const arn = `arn:aws:secretsmanager:eu-west-1:269416271598:secret:${name}-123abc`;
   const send = vi.fn(async function (this: SecretsManagerClient, command: unknown) {
+    expect(transaction).toBe(false);
     expect(await this.config.region()).toBe("eu-west-1");
     expect((await this.config.endpoint!()).hostname).toBe("secretsmanager.eu-west-1.amazonaws.com");
     if (command instanceof DescribeSecretCommand) {

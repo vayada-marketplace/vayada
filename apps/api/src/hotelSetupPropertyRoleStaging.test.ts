@@ -87,6 +87,9 @@ it.each([
   "pmsBilling",
   "billingEnded",
   "clock",
+  "futureBill",
+  "unrelatedBilling",
+  "unrelatedEntitlement",
 ])("rechecks online eligibility under current locks on %s", async (mode) => {
   vi.mocked(lockHotelSetupMembership).mockResolvedValue({
     scope: {
@@ -116,23 +119,39 @@ it.each([
             key: product === "pms" ? "property-management" : "booking-engine",
             status: "active",
             resourceId: null,
+            resourceProduct: null,
+            resourceType: null,
             startsAt: null,
             expiresAt: null,
           };
           return mode === product + "Suspended"
             ? [active, { ...active, key: "account_access", status: "suspended" }]
-            : [active];
+            : mode === "unrelatedEntitlement"
+              ? [
+                  active,
+                  {
+                    ...active,
+                    key: "account_access",
+                    status: "suspended",
+                    resourceProduct: product,
+                    resourceType: product === "pms" ? "pms_property" : "booking_hotel",
+                    resourceId: input.scope.organizationId,
+                  },
+                ]
+              : [active];
         }),
       };
     if (sql.includes("FROM finance.billing_entitlements"))
       return {
         rows:
-          mode.endsWith("Billing") || mode === "billingEnded"
+          mode.endsWith("Billing") || mode === "billingEnded" || mode === "futureBill"
             ? [
                 {
                   product: mode === "bookingBilling" ? "booking" : "pms",
-                  status: mode === "billingEnded" ? "active" : "past_due",
-                  startsAt: null,
+                  key: mode === "bookingBilling" ? "booking-engine" : "property-management",
+                  propertyId: mode === "unrelatedBilling" ? input.scope.organizationId : null,
+                  status: ["billingEnded", "futureBill"].includes(mode) ? "active" : "past_due",
+                  startsAt: mode === "futureBill" ? new Date(Date.now() + 60000) : null,
                   expiresAt: mode === "billingEnded" ? new Date(0) : null,
                 },
               ]
@@ -152,7 +171,8 @@ it.each([
     ...input.scope,
     automatic: true,
   });
-  if (mode === "success") await expect(result).resolves.toBeUndefined();
+  if (["success", "unrelatedBilling", "unrelatedEntitlement"].includes(mode))
+    await expect(result).resolves.toBeUndefined();
   else await expect(result).rejects.toThrow();
   expect(query.mock.calls[0]![0]).toContain("FROM identity.organizations");
   expect(query.mock.calls[0]![0]).toContain("FOR UPDATE");

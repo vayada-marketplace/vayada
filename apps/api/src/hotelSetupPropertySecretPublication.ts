@@ -52,36 +52,42 @@ export async function publishHotelSetupPropertySecret(input: {
       );
       if (role.rows.length !== 1) throw new Error();
     };
-    await admin.query("BEGIN");
-    await lockHotelSetupPropertyBootstrapAuthority(admin, scope);
-    const assignments = await admin.query<{
-      property_id: string;
-      organization_id: string;
-      operation_class: string;
-      active: boolean;
-      credential_role_oid: number | null;
-      credential_secret_version: string | null;
-      credential_ready_at: Date | null;
-    }>(
-      `SELECT property_id,organization_id,operation_class,active,
+    const pending = async () => {
+      await lockHotelSetupPropertyBootstrapAuthority(admin, scope);
+      const assignments = await admin.query<{
+        property_id: string;
+        organization_id: string;
+        operation_class: string;
+        active: boolean;
+        credential_role_oid: number | null;
+        credential_secret_version: string | null;
+        credential_ready_at: Date | null;
+      }>(
+        `SELECT property_id,organization_id,operation_class,active,
         credential_role_oid,credential_secret_version,credential_ready_at
        FROM platform.hotel_setup_property_scopes
        WHERE database_login=$1 OR (property_id=$2::uuid AND operation_class=$3) FOR UPDATE`,
-      [login, propertyId, operation],
-    );
-    const assigned = assignments.rows[0];
-    if (
-      assignments.rows.length !== 1 ||
-      assigned?.property_id !== propertyId.toLowerCase() ||
-      assigned.organization_id !== organizationId.toLowerCase() ||
-      assigned.operation_class !== operation ||
-      !assigned.active ||
-      assigned.credential_role_oid !== null ||
-      assigned.credential_secret_version !== null ||
-      assigned.credential_ready_at !== null
-    )
-      throw new Error();
-    await identity();
+        [login, propertyId, operation],
+      );
+      const assigned = assignments.rows[0];
+      if (
+        assignments.rows.length !== 1 ||
+        assigned?.property_id !== propertyId.toLowerCase() ||
+        assigned.organization_id !== organizationId.toLowerCase() ||
+        assigned.operation_class !== operation ||
+        !assigned.active ||
+        assigned.credential_role_oid !== null ||
+        assigned.credential_secret_version !== null ||
+        assigned.credential_ready_at !== null
+      )
+        throw new Error();
+      await identity();
+    };
+    await admin.query("BEGIN");
+    await pending();
+    // Do not retain organization/property locks through external SDK latency.
+    // This assignment remains pending; readiness is committed only below.
+    await admin.query("COMMIT");
     // Resolve once, then pin the same credentials and official endpoints for identity and writes.
     const resolver = new STSClient({
       region: "eu-west-1",
@@ -157,8 +163,8 @@ export async function publishHotelSetupPropertySecret(input: {
       stored.SecretBinary
     )
       throw new Error();
-    await lockHotelSetupPropertyBootstrapAuthority(admin, scope);
-    await identity();
+    await admin.query("BEGIN");
+    await pending();
     const ready = await admin.query<{ database_login: string }>(
       `UPDATE platform.hotel_setup_property_scopes
        SET credential_role_oid=$2::oid,credential_secret_version=$3,

@@ -235,34 +235,33 @@ async function lockHotelSetupAutomaticPropertyEligibility(
   )
     throw new Error("Hotel setup automatic products unavailable");
   const entitlements = await admin.query<{
-    product: "pms" | "booking";
+    product: string;
     key: string;
     status: "active" | "suspended" | "expired";
+    resourceProduct: string | null;
+    resourceType: string | null;
     resourceId: string | null;
     startsAt: Date | null;
     expiresAt: Date | null;
   }>(
-    `SELECT product,entitlement_key AS key,status,
-       CASE WHEN resource_product IS NULL THEN NULL ELSE resource_id::uuid::text END AS "resourceId",
+    `SELECT product,entitlement_key AS key,status,resource_product AS "resourceProduct",
+       resource_type AS "resourceType",resource_id AS "resourceId",
        starts_at AS "startsAt",expires_at AS "expiresAt"
-     FROM identity.product_entitlements WHERE organization_id=$1::uuid AND product IN ('pms','booking')
-       AND entitlement_key IN ('property-management','pms-core','account_access','booking-engine')
-       AND (resource_product IS NULL OR (resource_product=product AND lower(resource_id)=$2::uuid::text
-         AND resource_type=CASE product WHEN 'pms' THEN 'pms_property' ELSE 'booking_hotel' END)) FOR SHARE`,
-    [scope.organizationId, scope.propertyId],
+     FROM identity.product_entitlements WHERE organization_id=$1::uuid FOR SHARE`,
+    [scope.organizationId],
   );
   const billing = await admin.query<{
-    product: "pms" | "booking";
+    product: string;
+    key: string;
+    propertyId: string | null;
     status: string;
     startsAt: Date | null;
     expiresAt: Date | null;
   }>(
-    `SELECT product,billing_status AS status,starts_at AS "startsAt",expires_at AS "expiresAt"
-     FROM finance.billing_entitlements WHERE organization_id=$1::uuid
-       AND (property_id IS NULL OR property_id=$2::uuid)
-       AND ((product='pms' AND entitlement_key IN ('property-management','pms-core','account_access'))
-         OR (product='booking' AND entitlement_key IN ('booking-engine','account_access'))) FOR SHARE`,
-    [scope.organizationId, scope.propertyId],
+    `SELECT product,entitlement_key AS key,property_id::text AS "propertyId",
+       billing_status AS status,starts_at AS "startsAt",expires_at AS "expiresAt"
+     FROM finance.billing_entitlements WHERE organization_id=$1::uuid FOR SHARE`,
+    [scope.organizationId],
   );
   const clock = await admin.query<{ at: Date }>("SELECT pg_catalog.clock_timestamp() AS at");
   const at = clock.rows[0]?.at;
@@ -271,24 +270,42 @@ async function lockHotelSetupAutomaticPropertyEligibility(
     const resourceType = product === "pms" ? "pms_property" : "booking_hotel";
     const context = {
       entitlements: entitlements.rows
-        .filter((row) => row.startsAt === null || row.startsAt <= at)
+        .filter(
+          (row) =>
+            ["pms", "booking"].includes(row.product) &&
+            (row.resourceProduct === null ||
+              (row.resourceProduct === row.product &&
+                row.resourceType === (row.product === "pms" ? "pms_property" : "booking_hotel") &&
+                row.resourceId?.toLowerCase() === scope.propertyId.toLowerCase())) &&
+            (row.startsAt === null || row.startsAt <= at),
+        )
         .map((row) => ({
-          product: row.product,
+          product: row.product as "pms" | "booking",
           key: row.key,
           status: row.expiresAt !== null && row.expiresAt <= at ? ("expired" as const) : row.status,
-          ...(row.resourceId === null
+          ...(row.resourceProduct === null
             ? {}
             : {
                 resource: {
-                  product: row.product,
+                  product: row.product as "pms" | "booking",
                   resourceType:
                     row.product === "pms" ? ("pms_property" as const) : ("booking_hotel" as const),
-                  resourceId: row.resourceId,
+                  resourceId: scope.propertyId,
                 },
               }),
         })),
     };
-    const bills = billing.rows.filter((row) => row.product === product);
+    // Lock the complete organization inventories before filtering. An excluded
+    // existing row must not be retargeted to a global denial during this proof.
+    const bills = billing.rows.filter(
+      (row) =>
+        row.product === product &&
+        (row.propertyId === null || row.propertyId === scope.propertyId.toLowerCase()) &&
+        (product === "pms"
+          ? ["property-management", "pms-core", "account_access"]
+          : ["booking-engine", "account_access"]
+        ).includes(row.key),
+    );
     const current = bills.filter(
       (row) =>
         (row.startsAt === null || row.startsAt <= at) &&
