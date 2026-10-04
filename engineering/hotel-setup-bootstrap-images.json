@@ -8,5 +8,15 @@
       "digest": "sha256:9c6ad66294c188ff16b141922cc3cc57d0fc7dd7dfd45eda59e4c4492bb51f79",
       "source": "b83da0787e098d59490b48b392967cb6d67b97b7"
     }
+  },
+  "vay965-automatic-ready-20261004": {
+    "primary": {
+      "digest": "sha256:f80c4779f5f54f03525e0a95358018c2307af2ef65556a78a3e34d899f6ca28a",
+      "source": "21b492dd9beb60fb774e1c7ec6206158e3f436a0"
+    },
+    "rollback": {
+      "digest": "sha256:259f22ca5f9d90cfa87239adfff6a396bd3877598372c20a377dc055dfd3df6b",
+      "source": "187eeea3a5d6864283b854815334fe34c7ec752b"
+    }
   }
 }
