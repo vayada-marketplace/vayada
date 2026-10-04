@@ -1,4 +1,9 @@
 import { randomBytes } from "node:crypto";
+import {
+  assertHotelSetupBootstrapLock,
+  HotelSetupHelperGrantInspection,
+  type grantFreshHotelSetupHelpers,
+} from "./hotelSetupHelperOwnerGrants.js";
 import type { checkHotelSetupCreationCredential } from "./cli/hotelSetupCreationPreflight.js";
 import type { checkHotelSetupPropertyCredential } from "./cli/hotelSetupPropertyPreflight.js";
 import {
@@ -25,6 +30,12 @@ export async function reconcileHotelSetupAutomaticScopes(input: {
   mode: HotelSetupAutomaticMode;
   adminDatabaseUrl: string;
   databaseEndpoint: string;
+  helperOwnerDatabaseUrl?: string;
+  onHelperPhase?: (
+    receipt:
+      | Parameters<NonNullable<Parameters<typeof grantFreshHotelSetupHelpers>[0]["onPhase"]>>[0]
+      | undefined,
+  ) => void;
   proveOrganization?: typeof checkHotelSetupCreationCredential;
   proveProperty?: typeof checkHotelSetupPropertyCredential;
 }) {
@@ -51,6 +62,12 @@ export async function reconcileHotelSetupAutomaticScopes(input: {
   const deadline = Date.now() + 120_000;
   try {
     await admin.connect();
+    if (input.helperOwnerDatabaseUrl) {
+      const lock = await admin.query<{ held: boolean }>(
+        "SELECT pg_catalog.pg_try_advisory_lock_shared(8734516) AS held",
+      );
+      if (lock.rows[0]?.held !== true) throw new Error();
+    }
     const claim = await admin.query<{ claimed: boolean }>(
       "SELECT pg_catalog.pg_try_advisory_lock(pg_catalog.hashtextextended($1,0)) AS claimed",
       [`hotel_setup_reconciliation_pass:${mode}`],
@@ -108,11 +125,26 @@ export async function reconcileHotelSetupAutomaticScopes(input: {
               if (existing === "fresh") {
                 status = "inspection_required";
                 // Keep this candidate actor for the entire attempt, including both native proofs.
-                const config = { adminDatabaseUrl, databaseEndpoint };
+                input.onHelperPhase?.(undefined);
+                const config = {
+                  adminDatabaseUrl,
+                  databaseEndpoint,
+                  ...(input.helperOwnerDatabaseUrl ? { bootstrapHolder: admin } : {}),
+                  ...(input.helperOwnerDatabaseUrl
+                    ? {
+                        helperOwner: {
+                          databaseUrl: input.helperOwnerDatabaseUrl,
+                          holder: admin,
+                          onPhase: input.onHelperPhase,
+                        },
+                      }
+                    : {}),
+                };
                 const staged = purpose
                   ? await stageHotelSetupPropertyRole({ ...config, scope: propertyScope })
                   : await stageHotelSetupOrganizationRole({ ...config, scope });
                 assertConnected();
+                if (input.helperOwnerDatabaseUrl) await assertHotelSetupBootstrapLock(admin);
                 const native = new URL(adminDatabaseUrl);
                 native.username = staged.login;
                 native.password = randomBytes(36).toString("base64url");
@@ -136,8 +168,9 @@ export async function reconcileHotelSetupAutomaticScopes(input: {
               }
             }
           }
-        } catch {
+        } catch (error) {
           assertConnected();
+          if (error instanceof HotelSetupHelperGrantInspection) throw error;
         } finally {
           await admin.query(
             "SELECT pg_catalog.pg_advisory_unlock(pg_catalog.hashtextextended($1,0))",

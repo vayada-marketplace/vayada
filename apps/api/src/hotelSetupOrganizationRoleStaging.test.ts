@@ -1,4 +1,5 @@
 import pg from "pg";
+import * as helperOwner from "./hotelSetupHelperOwnerGrants.js";
 import { afterEach, expect, it, vi } from "vitest";
 import { lockHotelSetupCreationPermissions } from "./hotelSetupMembership.js";
 import {
@@ -88,7 +89,7 @@ it.each([
       : "Hotel setup organization staging failed",
   );
   const sql = f.query.mock.calls.map(([value]) => value);
-  expect(sql.at(-1)).toBe("ROLLBACK");
+  expect(sql.at(-1)).toBe(mode === "commit" ? "COMMIT" : "ROLLBACK");
   expect(sql.some((value) => /DROP ROLE|ALTER ROLE|DELETE FROM/.test(value))).toBe(false);
   if (["assignment", "staged", "actor", "organization"].includes(mode))
     expect(sql.some((value) => value.startsWith("CREATE ROLE"))).toBe(false);
@@ -106,4 +107,51 @@ it("rejects malformed scopes and mismatched endpoints before constructing a clie
       "Hotel setup organization staging failed",
     );
   expect(constructor).not.toHaveBeenCalled();
+});
+
+it("grants via the owner only after confirmed disabled staging, never after an uncertain commit", async () => {
+  const holder = {} as pg.Client;
+  vi.spyOn(helperOwner, "assertHotelSetupBootstrapLock").mockResolvedValue(undefined);
+  for (const mode of ["success", "commit"]) {
+    const f = fixture(mode);
+    const grant = vi
+      .spyOn(helperOwner, "grantFreshHotelSetupHelpers")
+      .mockImplementation(async (value) => {
+        expect(f.query.mock.calls.at(-1)?.[0]).toBe("COMMIT");
+        expect(value).toMatchObject({ holder, roleOid: 123, kind: "organization" });
+      });
+    const attempt = stageHotelSetupOrganizationRole({
+      ...input,
+      helperOwner: { holder, databaseUrl: "synthetic owner" },
+    });
+    if (mode === "success") {
+      await attempt;
+      expect(grant).toHaveBeenCalledOnce();
+    } else {
+      await expect(attempt).rejects.toThrow("requires recovery inspection");
+      expect(grant).not.toHaveBeenCalled();
+    }
+    expect(f.query.mock.calls.some(([sql]) => sql.startsWith("GRANT EXECUTE"))).toBe(false);
+    grant.mockRestore();
+  }
+});
+
+it("preserves exact helper-grant recovery coordinates after durable staging", async () => {
+  const f = fixture();
+  vi.spyOn(helperOwner, "assertHotelSetupBootstrapLock").mockResolvedValue(undefined);
+  const failure = new helperOwner.HotelSetupHelperGrantInspection({
+    phase: "grant_attempted",
+    login: "synthetic",
+    roleOid: 123,
+    catalog: "unavailable",
+    commitAttempted: true,
+  });
+  vi.spyOn(helperOwner, "grantFreshHotelSetupHelpers").mockRejectedValue(failure);
+  await expect(
+    stageHotelSetupOrganizationRole({
+      ...input,
+      helperOwner: { holder: {} as pg.Client, databaseUrl: "synthetic owner" },
+    }),
+  ).rejects.toBe(failure);
+  expect(f.query.mock.calls.at(-1)?.[0]).toBe("COMMIT");
 });

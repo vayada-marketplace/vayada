@@ -1,6 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
 import pg from "pg";
 import {
+  assertHotelSetupBootstrapLock,
+  grantFreshHotelSetupHelpers,
+  HotelSetupHelperGrantInspection,
+} from "./hotelSetupHelperOwnerGrants.js";
+import {
   hasActiveEntitlement,
   resolveEffectivePropertyAccess,
 } from "@vayada/backend-authorization";
@@ -39,6 +44,11 @@ export async function stageHotelSetupPropertyRole(input: {
   adminDatabaseUrl: string;
   databaseEndpoint: string;
   scope: HotelSetupPropertyBootstrapScope;
+  helperOwner?: {
+    databaseUrl: string;
+    holder: pg.Client;
+    onPhase?: Parameters<typeof grantFreshHotelSetupHelpers>[0]["onPhase"];
+  };
 }) {
   let admin: pg.Client | undefined;
   let failed = false;
@@ -87,6 +97,7 @@ export async function stageHotelSetupPropertyRole(input: {
     admin.on("notice", (notice) => {
       if (notice.code === "01007") incompleteGrant = true;
     });
+    if (input.helperOwner) await assertHotelSetupBootstrapLock(input.helperOwner.holder);
     await admin.connect();
     await admin.query("BEGIN");
     await lockHotelSetupPropertyBootstrapAuthority(admin, scope);
@@ -131,8 +142,9 @@ export async function stageHotelSetupPropertyRole(input: {
       );
       if (helper.rows.length !== helpers.length || helper.rows.some(({ safe }) => safe !== true))
         throw new Error();
-      for (const signature of helpers)
-        await admin.query(`GRANT EXECUTE ON FUNCTION ${signature} TO ${role}`);
+      if (!input.helperOwner)
+        for (const signature of helpers)
+          await admin.query(`GRANT EXECUTE ON FUNCTION ${signature} TO ${role}`);
     }
     const result = await admin.query<{ oid: number }>(
       "SELECT oid FROM pg_catalog.pg_roles WHERE rolname=$1",
@@ -142,9 +154,21 @@ export async function stageHotelSetupPropertyRole(input: {
     commitAttempted = true;
     await admin.query("COMMIT");
     if (failed) throw new Error();
+    if (input.helperOwner)
+      await grantFreshHotelSetupHelpers({
+        ownerDatabaseUrl: input.helperOwner.databaseUrl,
+        databaseEndpoint: input.databaseEndpoint,
+        holder: input.helperOwner.holder,
+        onPhase: input.helperOwner.onPhase,
+        login,
+        roleOid: result.rows[0]!.oid,
+        kind: "property",
+        signatures: helpers,
+      });
     return { login, roleOid: result.rows[0]!.oid, ...scope };
-  } catch {
-    await admin?.query("ROLLBACK").catch(() => undefined);
+  } catch (error) {
+    if (!commitAttempted) await admin?.query("ROLLBACK").catch(() => undefined);
+    if (error instanceof HotelSetupHelperGrantInspection) throw error;
     // Lost commit may have left a disabled role. Never retry/adopt it blindly.
     throw new Error(
       commitAttempted

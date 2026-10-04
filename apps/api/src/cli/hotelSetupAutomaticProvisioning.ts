@@ -1,4 +1,8 @@
 import { pathToFileURL } from "node:url";
+import {
+  HotelSetupHelperGrantInspection,
+  type grantFreshHotelSetupHelpers,
+} from "../hotelSetupHelperOwnerGrants.js";
 import { parseHotelSetupDatabaseUrl } from "../hotelSetupCommandServiceConfig.js";
 import { reconcileHotelSetupAutomaticScopes } from "../hotelSetupAutomaticReconciliation.js";
 import type { checkHotelSetupCreationCredential } from "./hotelSetupCreationPreflight.js";
@@ -35,11 +39,37 @@ export function parseHotelSetupAutomaticConfiguration(env: NodeJS.ProcessEnv): {
   return { mode, adminDatabaseUrl: url.toString(), databaseEndpoint };
 }
 
+/** Operational secret injection only; ordinary serving tasks never receive this URL. */
+export function parseHotelSetupHelperOwnerConfiguration(env: NodeJS.ProcessEnv) {
+  const url = new URL(env.HOTEL_SETUP_HELPER_OWNER_DATABASE_URL ?? "");
+  if (
+    url.protocol !== "postgresql:" ||
+    url.hostname !== host ||
+    url.port !== "5432" ||
+    url.pathname !== "/vayada_target_prod" ||
+    url.username !== "vayada_target_prod_user" ||
+    url.hash ||
+    url.search !== "?sslmode=require" ||
+    env.NODE_EXTRA_CA_CERTS !== "/runtime/rds-ca.pem" ||
+    (env.NODE_TLS_REJECT_UNAUTHORIZED !== undefined && env.NODE_TLS_REJECT_UNAUTHORIZED !== "1")
+  )
+    throw new Error();
+  url.pathname = "/vayada_target_prod";
+  url.search = "?sslmode=verify-full";
+  parseHotelSetupDatabaseUrl(url.toString(), databaseEndpoint, "vayada_target_prod_user");
+  return url.toString();
+}
+let helperPhase:
+  | Parameters<NonNullable<Parameters<typeof grantFreshHotelSetupHelpers>[0]["onPhase"]>>[0]
+  | undefined;
+
 export async function runHotelSetupAutomaticProvisioning(env: NodeJS.ProcessEnv = process.env) {
+  helperPhase = undefined;
   try {
     if (import.meta.url !== "file:///app/apps/api/dist/cli/hotelSetupAutomaticProvisioning.js")
       throw new Error();
     const config = parseHotelSetupAutomaticConfiguration(env);
+    const helperOwnerDatabaseUrl = parseHotelSetupHelperOwnerConfiguration(env);
     const creation: {
       checkHotelSetupCreationCredential?: typeof checkHotelSetupCreationCredential;
     } =
@@ -58,12 +88,24 @@ export async function runHotelSetupAutomaticProvisioning(env: NodeJS.ProcessEnv 
         : {};
     const receipt = await reconcileHotelSetupAutomaticScopes({
       ...config,
+      helperOwnerDatabaseUrl,
+      onHelperPhase: (receipt) => {
+        helperPhase = receipt;
+      },
       proveOrganization: creation.checkHotelSetupCreationCredential,
       proveProperty: property.checkHotelSetupPropertyCredential,
     });
     console.log(JSON.stringify(receipt));
     return 0;
-  } catch {
+  } catch (error) {
+    if (error instanceof HotelSetupHelperGrantInspection)
+      console.error(
+        JSON.stringify({
+          status: "FAIL",
+          code: "hotel_setup_helper_grant_inspection",
+          ...error.receipt,
+        }),
+      );
     console.error(
       JSON.stringify({ status: "FAIL", code: "hotel_setup_automatic_inspection_required" }),
     );
@@ -75,7 +117,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // A hung proof/publication must not outlive the bounded operational pass. Durable
   // assignment/prefix detection makes any interrupted attempt inspection-only.
   const timer = setTimeout(() => {
-    console.error(JSON.stringify({ status: "FAIL", code: "hotel_setup_automatic_deadline" }));
+    console.error(
+      JSON.stringify({
+        status: "FAIL",
+        code: "hotel_setup_automatic_deadline",
+        ...(helperPhase ? { helper: helperPhase } : {}),
+      }),
+    );
     process.exit(1);
   }, 170_000);
   try {

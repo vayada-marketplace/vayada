@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import {
   parseHotelSetupAutomaticConfiguration,
+  parseHotelSetupHelperOwnerConfiguration,
   runHotelSetupAutomaticProvisioning,
 } from "./hotelSetupAutomaticProvisioning.js";
 import * as reconciliation from "../hotelSetupAutomaticReconciliation.js";
@@ -60,4 +61,36 @@ it("denies source/alternate roots before discovery or any administrative access 
       code: "hotel_setup_automatic_inspection_required",
     }),
   );
+});
+
+it("requires a separately injected fixed helper-owner credential with verified TLS", () => {
+  const owner = {
+    ...env,
+    HOTEL_SETUP_HELPER_OWNER_DATABASE_URL: env.HOTEL_SETUP_AUTOMATIC_ADMIN_DATABASE_URL.replace(
+      "vayada_admin",
+      "vayada_target_prod_user",
+    ).replace("/postgres?", "/vayada_target_prod?"),
+  };
+  const url = new URL(parseHotelSetupHelperOwnerConfiguration(owner));
+  expect(url.username).toBe("vayada_target_prod_user");
+  expect(url.pathname).toBe("/vayada_target_prod");
+  expect(url.search).toBe("?sslmode=verify-full");
+  expect(() => parseHotelSetupHelperOwnerConfiguration(env)).toThrow();
+  for (const [from, to] of [
+    ["vayada_target_prod_user", "vayada_admin"],
+    ["rds.amazonaws.com", "alternate.invalid"],
+    ["/vayada_target_prod?", "/other?"],
+    [":5432/", ":5433/"],
+    ["sslmode=require", "sslmode=require&options=unsafe"],
+    ["x".repeat(36), "short"],
+  ])
+    expect(() =>
+      parseHotelSetupHelperOwnerConfiguration({
+        ...owner,
+        HOTEL_SETUP_HELPER_OWNER_DATABASE_URL: owner.HOTEL_SETUP_HELPER_OWNER_DATABASE_URL.replace(
+          from!,
+          to!,
+        ),
+      }),
+    ).toThrow();
 });

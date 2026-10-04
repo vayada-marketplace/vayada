@@ -1,6 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
 import pg from "pg";
 import {
+  assertHotelSetupBootstrapLock,
+  grantFreshHotelSetupHelpers,
+  HotelSetupHelperGrantInspection,
+} from "./hotelSetupHelperOwnerGrants.js";
+import {
   HOTEL_SETUP_CREATION_PRIVILEGES,
   HOTEL_SETUP_CREATION_RLS_HELPERS,
 } from "./hotelSetupCreationPrivileges.js";
@@ -61,6 +66,11 @@ export async function stageHotelSetupOrganizationRole(input: {
   adminDatabaseUrl: string;
   databaseEndpoint: string;
   scope: HotelSetupOrganizationBootstrapScope;
+  helperOwner?: {
+    databaseUrl: string;
+    holder: pg.Client;
+    onPhase?: Parameters<typeof grantFreshHotelSetupHelpers>[0]["onPhase"];
+  };
 }) {
   let admin: pg.Client | undefined;
   let failed = false;
@@ -80,6 +90,7 @@ export async function stageHotelSetupOrganizationRole(input: {
     admin.on("notice", (notice) => {
       if (notice.code === "01007") incompleteGrant = true;
     });
+    if (input.helperOwner) await assertHotelSetupBootstrapLock(input.helperOwner.holder);
     await admin.connect();
     await admin.query("BEGIN");
     await admin.query(
@@ -122,8 +133,9 @@ export async function stageHotelSetupOrganizationRole(input: {
     );
     if (helper.rows.length !== 2 || helper.rows.some(({ safe }) => safe !== true))
       throw new Error();
-    for (const signature of HOTEL_SETUP_CREATION_RLS_HELPERS)
-      await admin.query(`GRANT EXECUTE ON FUNCTION ${signature} TO ${role}`);
+    if (!input.helperOwner)
+      for (const signature of HOTEL_SETUP_CREATION_RLS_HELPERS)
+        await admin.query(`GRANT EXECUTE ON FUNCTION ${signature} TO ${role}`);
     const identity = await admin.query<{ oid: number }>(
       "SELECT oid FROM pg_catalog.pg_roles WHERE rolname=$1",
       [login],
@@ -132,9 +144,21 @@ export async function stageHotelSetupOrganizationRole(input: {
     commitAttempted = true;
     await admin.query("COMMIT");
     if (failed) throw new Error();
+    if (input.helperOwner)
+      await grantFreshHotelSetupHelpers({
+        ownerDatabaseUrl: input.helperOwner.databaseUrl,
+        databaseEndpoint: input.databaseEndpoint,
+        holder: input.helperOwner.holder,
+        onPhase: input.helperOwner.onPhase,
+        login,
+        roleOid: identity.rows[0]!.oid,
+        kind: "organization",
+        signatures: HOTEL_SETUP_CREATION_RLS_HELPERS,
+      });
     return { login, roleOid: identity.rows[0]!.oid, ...scope };
-  } catch {
-    await admin?.query("ROLLBACK").catch(() => undefined);
+  } catch (error) {
+    if (!commitAttempted) await admin?.query("ROLLBACK").catch(() => undefined);
+    if (error instanceof HotelSetupHelperGrantInspection) throw error;
     throw new Error(
       commitAttempted
         ? "Hotel setup organization staging requires recovery inspection"

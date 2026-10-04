@@ -59,7 +59,7 @@ it.each(["grantWarning", "transport", "commit", "helperMissing", "helperDefiner"
       mode === "commit" ? "staging requires recovery inspection" : "staging failed",
     );
     expect(sql.includes("COMMIT")).toBe(mode === "commit");
-    expect(sql.at(-1)).toBe("ROLLBACK");
+    expect(sql.at(-1)).toBe(mode === "commit" ? "COMMIT" : "ROLLBACK");
     expect(end).toHaveBeenCalledOnce();
   },
 );
