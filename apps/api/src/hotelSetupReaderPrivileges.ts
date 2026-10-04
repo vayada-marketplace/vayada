@@ -66,13 +66,27 @@ export const HOTEL_SETUP_READER_READ_COLUMNS: Record<string, readonly string[]> 
     "organization_id",
     "operation_class",
     "active",
+    "credential_role_oid",
+    "credential_secret_version",
+    "credential_ready_at",
   ],
   "platform.product_audit_events": ["product", "audit_key"],
 };
 export const HOTEL_SETUP_CREATION_READER_READ_COLUMNS = Object.fromEntries(
   Object.entries(HOTEL_SETUP_READER_READ_COLUMNS)
     .filter(([relation]) => relation !== "platform.hotel_setup_property_scopes")
-    .concat([["platform.hotel_setup_creation_scopes", ["database_login", "organization_id"]]]),
+    .concat([
+      [
+        "platform.hotel_setup_creation_scopes",
+        [
+          "database_login",
+          "organization_id",
+          "credential_role_oid",
+          "credential_secret_version",
+          "credential_ready_at",
+        ],
+      ],
+    ]),
 );
 export const HOTEL_SETUP_READER_AUDIT_COLUMNS = [
   "audit_key",
@@ -195,6 +209,7 @@ export async function assertHotelSetupReaderPrivileges(
   client: Pick<pg.Pool, "query">,
   mode: HotelSetupCommandMode = "property_commands",
 ) {
+  await assertHotelSetupCredentialReadinessSchema(client);
   const inventory: HotelSetupColumnPrivileges = Object.fromEntries(
     Object.entries(
       mode === "property_creation"
@@ -205,6 +220,35 @@ export async function assertHotelSetupReaderPrivileges(
   inventory["platform.product_audit_events"]!.INSERT = HOTEL_SETUP_READER_AUDIT_COLUMNS;
   await assertHotelSetupColumnPrivileges(client, inventory);
   await assertHotelSetupAuditBoundary(client);
+}
+
+/** Startup must deny old, partial or weakened readiness migrations before admission. */
+export async function assertHotelSetupCredentialReadinessSchema(
+  client: HotelSetupPrivilegeQueryable,
+) {
+  const expression =
+    "(((credential_role_oid IS NULL) AND (credential_secret_version IS NULL) AND (credential_ready_at IS NULL)) OR ((credential_role_oid IS NOT NULL) AND (credential_secret_version IS NOT NULL) AND (credential_secret_version ~ '^[A-Za-z0-9-]{32,64}$'::text) AND (credential_ready_at IS NOT NULL)))";
+  const result = await client.query<{ safe: boolean }>(
+    `SELECT bool_and(
+    (SELECT count(*)=3 FROM pg_catalog.pg_attribute a
+      JOIN (VALUES ('credential_role_oid','oid'::regtype),
+        ('credential_secret_version','text'::regtype),
+        ('credential_ready_at','timestamptz'::regtype)) expected(name,type)
+        ON a.attname=expected.name AND a.atttypid=expected.type
+      WHERE a.attrelid=scope.relation::regclass AND a.attnum>0 AND NOT a.attisdropped
+        AND NOT a.attnotnull AND a.attidentity='' AND a.attgenerated='' AND NOT a.atthasdef)
+    AND (SELECT count(*)=1 FROM pg_catalog.pg_constraint c
+      WHERE c.conrelid=scope.relation::regclass AND c.conname=scope.constraint_name
+        AND c.contype='c' AND c.convalidated
+        AND pg_catalog.pg_get_expr(c.conbin,c.conrelid)=$1)
+    ) AS safe FROM (VALUES
+      ('platform.hotel_setup_creation_scopes','hotel_setup_creation_credential_ready'),
+      ('platform.hotel_setup_property_scopes','hotel_setup_property_credential_ready')
+    ) scope(relation,constraint_name)`,
+    [expression],
+  );
+  if (result.rows.length !== 1 || result.rows[0]?.safe !== true)
+    throw new Error("Hotel setup credential readiness schema mismatch");
 }
 
 export async function assertHotelSetupAuditBoundary(client: HotelSetupPrivilegeQueryable) {

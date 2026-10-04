@@ -1,9 +1,9 @@
 import type pg from "pg";
-import type { ProviderCredentialVault } from "./platform/providerCredentialVault.js";
+import type { HotelSetupNativeSecretReader } from "./hotelSetupNativeSecretReader.js";
 
 export type HotelSetupCredentialOptions = {
   assignments: Pick<pg.Pool, "query">;
-  vault: Pick<ProviderCredentialVault, "get">;
+  readNativeSecret: HotelSetupNativeSecretReader;
   databaseEndpoint: string;
   secretPrefix: string;
 };
@@ -48,15 +48,25 @@ export function createHotelSetupCredentialResolver(
       propertyId: string;
       organizationId: string;
       operation: string;
+      credentialRoleOid: number;
+      actualRoleOid: number;
+      credentialSecretVersion: string;
+      credentialReadyAt: Date;
     }>(
       `SELECT scope.database_login::text AS "databaseLogin",
             scope.property_id::text AS "propertyId",
             scope.organization_id::text AS "organizationId",
-            scope.operation_class AS operation
+            scope.operation_class AS operation,
+            scope.credential_role_oid AS "credentialRoleOid", role.oid AS "actualRoleOid",
+            scope.credential_secret_version AS "credentialSecretVersion",
+            scope.credential_ready_at AS "credentialReadyAt"
            FROM platform.hotel_setup_property_scopes scope
+           JOIN pg_catalog.pg_roles role ON role.rolname=scope.database_login
            JOIN identity.organizations organization ON organization.id=scope.organization_id
            WHERE scope.active AND scope.property_id=$1::uuid
              AND scope.organization_id=$2::uuid AND scope.operation_class=$3
+             AND scope.credential_role_oid=role.oid AND role.rolcanlogin
+             AND scope.credential_secret_version IS NOT NULL AND scope.credential_ready_at IS NOT NULL
              AND organization.kind='hotel_group' AND organization.status='active'
              AND EXISTS (SELECT 1 FROM identity.organization_resource_links link
                WHERE link.organization_id=scope.organization_id
@@ -76,12 +86,13 @@ export function createHotelSetupCredentialResolver(
       scope.propertyId !== propertyId ||
       scope.organizationId !== organizationId ||
       scope.operation !== operation ||
+      !isReadyCredential(scope) ||
       !/^vayada_next_hotel_setup_property_[a-z0-9_]+$/.test(scope.databaseLogin) ||
       Buffer.byteLength(scope.databaseLogin) > 63
     )
       throw new Error("Missing hotel setup assignment");
 
-    return readNativeSetupCredential(options.vault, endpoint, secretPrefix, scope.databaseLogin);
+    return readNativeSetupCredential(options.readNativeSecret, endpoint, secretPrefix, scope);
   };
 }
 
@@ -93,12 +104,22 @@ export function createHotelSetupCreationCredentialResolver(options: HotelSetupCr
     const result = await options.assignments.query<{
       databaseLogin: string;
       organizationId: string;
+      credentialRoleOid: number;
+      actualRoleOid: number;
+      credentialSecretVersion: string;
+      credentialReadyAt: Date;
     }>(
       `SELECT scope.database_login::text AS "databaseLogin",
-        scope.organization_id::text AS "organizationId"
+        scope.organization_id::text AS "organizationId",
+        scope.credential_role_oid AS "credentialRoleOid", role.oid AS "actualRoleOid",
+        scope.credential_secret_version AS "credentialSecretVersion",
+        scope.credential_ready_at AS "credentialReadyAt"
        FROM platform.hotel_setup_creation_scopes scope
+       JOIN pg_catalog.pg_roles role ON role.rolname=scope.database_login
        JOIN identity.organizations organization ON organization.id=scope.organization_id
        WHERE scope.organization_id=$1::uuid
+         AND scope.credential_role_oid=role.oid AND role.rolcanlogin
+         AND scope.credential_secret_version IS NOT NULL AND scope.credential_ready_at IS NOT NULL
          AND organization.kind='hotel_group' AND organization.status='active'`,
       [organizationId],
     );
@@ -106,21 +127,44 @@ export function createHotelSetupCreationCredentialResolver(options: HotelSetupCr
     if (
       !scope ||
       scope.organizationId !== organizationId ||
+      !isReadyCredential(scope) ||
       !/^vayada_next_hotel_setup_org_[a-z0-9_]+$/.test(scope.databaseLogin) ||
       Buffer.byteLength(scope.databaseLogin) > 63
     )
       throw new Error("Missing hotel setup creation assignment");
-    return readNativeSetupCredential(options.vault, endpoint, prefix, scope.databaseLogin);
+    return readNativeSetupCredential(options.readNativeSecret, endpoint, prefix, scope);
   };
 }
 
+type ReadyCredential = {
+  databaseLogin: string;
+  credentialRoleOid: number;
+  actualRoleOid: number;
+  credentialSecretVersion: string;
+  credentialReadyAt: Date;
+};
+function isReadyCredential(scope: ReadyCredential): boolean {
+  return (
+    Number.isInteger(scope.credentialRoleOid) &&
+    scope.credentialRoleOid > 0 &&
+    scope.credentialRoleOid === scope.actualRoleOid &&
+    /^[A-Za-z0-9-]{32,64}$/.test(scope.credentialSecretVersion) &&
+    scope.credentialReadyAt instanceof Date &&
+    Number.isFinite(scope.credentialReadyAt.getTime())
+  );
+}
+
 async function readNativeSetupCredential(
-  vault: HotelSetupCredentialOptions["vault"],
+  readNativeSecret: HotelSetupCredentialOptions["readNativeSecret"],
   endpoint: URL,
   secretPrefix: string,
-  databaseLogin: string,
+  scope: ReadyCredential,
 ): Promise<string> {
-  const secret = await vault.get<unknown>(secretPrefix + databaseLogin);
+  const databaseLogin = scope.databaseLogin;
+  const secret = await readNativeSecret(
+    secretPrefix + databaseLogin,
+    scope.credentialSecretVersion,
+  );
   if (
     typeof secret !== "object" ||
     secret === null ||

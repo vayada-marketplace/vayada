@@ -32,7 +32,18 @@ const settings = {
 };
 function fixture() {
   const query = vi.fn().mockResolvedValue({
-    rows: [{ propertyId, organizationId, databaseLogin: login, operation: "launch_settings" }],
+    rows: [
+      {
+        propertyId,
+        organizationId,
+        databaseLogin: login,
+        operation: "launch_settings",
+        credentialRoleOid: 12345,
+        actualRoleOid: 12345,
+        credentialSecretVersion: "11111111-1111-4111-8111-111111111111",
+        credentialReadyAt: new Date("2026-10-04T00:00:00Z"),
+      },
+    ],
   });
   const get = vi.fn().mockResolvedValue({ username: login, password: "p".repeat(48) });
   const close = vi.fn().mockResolvedValue(undefined);
@@ -46,7 +57,7 @@ function fixture() {
     close,
     commands: createHotelSetupLaunchSettingsCommands({
       assignments: { query },
-      vault: { get },
+      readNativeSecret: get,
       databaseEndpoint: "postgresql://db.example.test/target",
       secretPrefix: "hotel-setup-command/prod/property/",
     }),

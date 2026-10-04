@@ -17,7 +17,7 @@ import { createHotelSetupCurrencyCommands } from "./hotelSetupCurrencyCommands.j
 import { createHotelSetupFeatureHubCommands } from "./hotelSetupFeatureHubCommands.js";
 import { assertHotelSetupReaderPrivileges } from "./hotelSetupReaderPrivileges.js";
 import { installPostgresPoolRuntime } from "./platform/postgresRuntime.js";
-import { createSecretsManagerProviderCredentialVault } from "./platform/providerCredentialVault.js";
+import { createHotelSetupNativeSecretReader } from "./hotelSetupNativeSecretReader.js";
 import { registerShutdownSignals } from "./platform/shutdown.js";
 import { createPgPmsModuleActivationRepository } from "./routes/pmsModuleActivations.js";
 
@@ -28,10 +28,9 @@ try {
   await assertHotelSetupServiceReader(reader, config.mode);
   await assertHotelSetupReaderPrivileges(reader, config.mode);
   const repositoryConfig = { connectionString: config.readerDatabaseUrl };
-  const vault = createSecretsManagerProviderCredentialVault();
   const credentials = {
     assignments: reader,
-    vault: { get: vault.get },
+    readNativeSecret: createHotelSetupNativeSecretReader(),
     databaseEndpoint: config.databaseEndpoint,
     secretPrefix: config.secretPrefix,
   };

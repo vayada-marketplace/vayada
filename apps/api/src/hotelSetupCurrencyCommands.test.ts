@@ -20,7 +20,16 @@ const propertyId = "11111111-1111-4111-8111-111111111111";
 const organizationId = "22222222-2222-4222-8222-222222222222";
 const login = "vayada_next_hotel_setup_property_ready_test";
 const password = "password-with-32-or-more-characters%40@?#:/\\ +";
-const scope = { databaseLogin: login, propertyId, organizationId, operation: "currency_ready" };
+const scope = {
+  databaseLogin: login,
+  propertyId,
+  organizationId,
+  operation: "currency_ready",
+  credentialRoleOid: 12345,
+  actualRoleOid: 12345,
+  credentialSecretVersion: "11111111-1111-4111-8111-111111111111",
+  credentialReadyAt: new Date("2026-10-04T00:00:00Z"),
+};
 const command = parseUpsertPropertyPricingCurrencyCommand({
   propertyId,
   organizationId,
@@ -49,9 +58,9 @@ function fixture() {
   });
   const options = {
     assignments: { query },
-    vault: { get },
+    readNativeSecret: get,
     databaseEndpoint: "postgresql://db.example.test/target",
-    secretPrefix: "vayada/hotel-setup/",
+    secretPrefix: "hotel-setup-command/prod/property/",
     currencyChangeGuard: { runWithCurrencyChangeGuard: vi.fn() },
   };
   return { query, get, save, close, options, commands: createHotelSetupCurrencyCommands(options) };
@@ -68,7 +77,10 @@ describe("private hotel setup credential selection", () => {
     expect(f.query.mock.calls[0]?.[0]).toContain("scope.operation_class=$3");
     expect(f.query.mock.calls[0]?.[0]).toContain("organization.status='active'");
     expect(f.query.mock.calls[0]?.[0]).toContain("link.relationship='owner'");
-    expect(f.get).toHaveBeenCalledWith("vayada/hotel-setup/" + login);
+    expect(f.get).toHaveBeenCalledWith(
+      "hotel-setup-command/prod/property/" + login,
+      "11111111-1111-4111-8111-111111111111",
+    );
     const config = vi.mocked(createPgPmsPricingCommandRepository).mock.calls[0]![0];
     const connection = new URL(config.connectionString);
     expect(connection.hostname).toBe("db.example.test");
