@@ -53,7 +53,27 @@ catalog inspection or grants. The backfill lock lasts through native proofs,
 secret/version verification and readiness commit; uncertain-commit inspection
 reacquires it on a fresh connection. Read-only inspection releases its lock before
 Secrets Manager metadata reads; apply independently rechecks the frozen identities
-and versions under its own lock. Role OID, flags, membership and verifier
-checks remain exact catalog reads. They do not row-lock `pg_authid`, which would
-require catalog UPDATE privileges unavailable to the production administrator.
-No catalog write privileges are added.
+and versions under its own lock.
+
+Approved offline recovery reads role OIDs, flags, memberships, settings and
+ownership through `pg_roles` and the existing accessible catalogs. Production
+inspection confirmed that its administrator has neither SELECT nor UPDATE on
+`pg_authid`; recovery must not add those permissions or use its masked password
+field as evidence. Before granting, a fresh connection must authenticate the
+pinned credential as the exact session/effective login and OID. After the grant,
+fresh primary and rollback connections prove the exact own-organization scope.
+Repeat both fresh proofs and immutable-current secret readback immediately before
+reacquiring current authority and exact assignment/xmin locks for readiness commit.
+Network proofs run outside SQL transactions; the exclusive provisioning session
+fence remains held throughout.
+
+An ambiguous commit requires a fresh administrative connection and the same fence,
+exact committed readiness/xmin observation, fresh primary/rollback authentication
+and secret readback, then another exact authority/readiness observation. Missing
+or failed evidence remains recovery-required. This proves approved credential
+usability and authority at the observed checkpoints, not uninterrupted stored
+password-verifier continuity. Uncoordinated administrator changes between the
+last check and commit remain outside the provisioning lock protocol. The procedure
+never rotates passwords, expands catalog privileges, or changes hotel facts or
+product activation. Fixtures must run without catalog SELECT or UPDATE and cover
+password, role-OID, authority/version drift and lost commit acknowledgement.

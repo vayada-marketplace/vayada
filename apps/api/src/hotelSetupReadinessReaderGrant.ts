@@ -32,7 +32,7 @@ export async function grantHotelSetupReadinessReaderColumns(input: {
   const inspect = async (client: pg.Client, requireGrants: boolean) => {
     for (const [index, reader] of readers.entries()) {
       const identity = await client.query(
-        `SELECT r.oid FROM pg_catalog.pg_authid r WHERE oid=$1::oid AND rolname=$2
+        `SELECT r.oid FROM pg_catalog.pg_roles r WHERE oid=$1::oid AND rolname=$2
          AND rolcanlogin AND rolvaliduntil IS NULL AND NOT rolinherit AND NOT rolsuper
          AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls
          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE member=r.oid)
