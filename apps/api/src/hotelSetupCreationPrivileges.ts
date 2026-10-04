@@ -48,6 +48,16 @@ export const HOTEL_SETUP_CREATION_PRIVILEGES: HotelSetupColumnPrivileges = {
       "starts_at",
       "expires_at",
     ],
+    INSERT: [
+      "organization_id",
+      "product",
+      "entitlement_key",
+      "status",
+      "resource_product",
+      "resource_type",
+      "resource_id",
+      "metadata",
+    ],
   },
   "finance.billing_entitlements": {
     SELECT: [

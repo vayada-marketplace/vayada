@@ -1554,8 +1554,20 @@ function createPropertyProductDefaultsSql(initialSettings = false): string {
     SELECT product, resource_id FROM identity.organization_resource_links
     WHERE organization_id=$1::uuid AND resource_id=$2::uuid::text
       AND relationship='owner' AND status='active'
-      AND (product, resource_type) IN (('booking', 'booking_hotel'), ('marketplace', 'hotel_profile'))
+      AND (product, resource_type) IN (('booking', 'booking_hotel'), ('marketplace', 'hotel_profile'), ('pms', 'pms_property'))
   ),
+    initialized_pending_financials AS (
+      INSERT INTO identity.product_entitlements (
+        organization_id, product, entitlement_key, status,
+        resource_product, resource_type, resource_id, metadata
+      )
+      SELECT $1::uuid, 'pms', 'module:financials', 'suspended',
+        'pms', 'pms_property', resource_id,
+        '{"newHotelFinancialsDefault":"pending"}'::jsonb
+      FROM linked_product_properties WHERE product = 'pms'
+      ON CONFLICT DO NOTHING
+      RETURNING resource_id
+    ),
     initialized_marketplace_profile AS (
       INSERT INTO marketplace.marketplace_hotel_profiles (
         property_id,
