@@ -5,27 +5,53 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { parse } from "yaml";
 
-const workflow = parse(
-  readFileSync(new URL("../.github/workflows/deploy-next-api.yml", import.meta.url), "utf8"),
-);
-const steps = workflow.jobs["build-and-push"].steps;
-const guard = steps.find((step) => step.id === "source");
-const image = steps.find((step) => step.id === "image");
-const checkout = steps.find((step) => step.name === "Checkout code");
-assert.equal(guard.env.PRIVATE_ONLY, "${{ inputs.publish_private_creation_only }}");
-assert.equal(guard.env.SOURCE_SHA, "${{ inputs.private_creation_source_sha }}");
-assert(steps.indexOf(guard) < steps.findIndex((step) => step.name === "Configure AWS credentials"));
-assert.equal(checkout.with.ref, "${{ steps.source.outputs.sha }}");
-assert.equal(checkout.with["persist-credentials"], false);
-assert.equal(
-  steps.find((step) => step.name === "Dispatch deploy to platform").if,
-  "${{ !inputs.publish_private_creation_only }}",
-);
-assert(image.with.tags.includes("'hotel-setup-creation' || 'next'"));
-assert(image.with.tags.includes("!inputs.publish_private_creation_only && format("));
-assert.equal(image.with.tags.trim().split("\n").length, 2);
-assert(image.with["build-args"].includes("APPLICATION_RELEASE=${{ steps.source.outputs.sha }}"));
-assert.equal(workflow.on.workflow_dispatch.inputs.publish_private_creation_only.default, false);
+const guards = [
+  ["api", "publish_private_creation_only", "private_creation_source_sha", "hotel-setup-creation"],
+  [
+    "marketplace-web",
+    "publish_private_setup_only",
+    "private_setup_source_sha",
+    "hotel-setup-frontend",
+  ],
+].map(([name, flag, source, tag]) => {
+  const workflow = parse(
+    readFileSync(new URL(`../.github/workflows/deploy-next-${name}.yml`, import.meta.url), "utf8"),
+  );
+  const steps = workflow.jobs["build-and-push"].steps;
+  const guard = steps.find((step) => step.id === "source");
+  const image = steps.find((step) => step.id === "image");
+  const checkout = steps.find((step) => step.name === "Checkout code");
+  const dispatch = steps.find((step) => step.name === "Dispatch deploy to platform");
+  assert.equal(guard.env.PRIVATE_ONLY, "${{ inputs." + flag + " }}");
+  assert.equal(guard.env.SOURCE_SHA, "${{ inputs." + source + " }}");
+  assert(steps.indexOf(guard) < steps.indexOf(checkout));
+  assert(
+    steps.indexOf(guard) < steps.findIndex((step) => step.name === "Configure AWS credentials"),
+  );
+  assert.equal(checkout.with.ref, "${{ steps.source.outputs.sha }}");
+  assert.equal(checkout.with["persist-credentials"], false);
+  assert.equal(dispatch.if, "${{ !inputs." + flag + " }}");
+  assert.equal(dispatch.with["event-type"], "app-image-published");
+  assert.equal(JSON.parse(dispatch.with["client-payload"]).image_sha, "next-${{ github.sha }}");
+  assert.equal(
+    workflow.jobs["build-and-push"].if,
+    "${{ github.event_name == 'workflow_dispatch' || vars.COORDINATED_RELEASES_ENABLED != 'true' }}",
+  );
+  assert(image.with.tags.includes(`'${tag}' || 'next'`));
+  assert(image.with.tags.includes(`!inputs.${flag} && format(`));
+  assert.equal(image.with.tags.trim().split("\n").length, 2);
+  assert.equal(workflow.on.workflow_dispatch.inputs[flag].default, false);
+  if (name === "api")
+    assert(
+      image.with["build-args"].includes("APPLICATION_RELEASE=${{ steps.source.outputs.sha }}"),
+    );
+  else
+    assert.equal(
+      image.with.labels.trim(),
+      "org.opencontainers.image.revision=${{ steps.source.outputs.sha }}",
+    );
+  return guard;
+});
 
 const publisher = parse(
   readFileSync(
@@ -68,18 +94,23 @@ try {
     [{ SOURCE_SHA: "B".repeat(40) }, false],
     [{ SOURCE_SHA: "", GITHUB_SHA: "invalid" }, false],
   ];
-  for (const [index, [changes, allowed]] of cases.entries()) {
-    const env = { ...defaults, ...changes };
-    const output = join(directory, `source-${index}`);
-    const result = spawnSync("bash", ["-c", guard.run], {
-      cwd: directory,
-      encoding: "utf8",
-      env: { ...process.env, ...env, GITHUB_OUTPUT: output },
-    });
-    assert.equal(result.status === 0, allowed, `Source admission case ${index}`);
-    if (allowed)
-      assert.equal(readFileSync(output, "utf8"), `sha=${env.SOURCE_SHA || env.GITHUB_SHA}\n`);
-  }
+  for (const [publisherIndex, guard] of guards.entries())
+    for (const [index, [changes, allowed]] of cases.entries()) {
+      const env = { ...defaults, ...changes };
+      const output = join(directory, `source-${publisherIndex}-${index}`);
+      const result = spawnSync("bash", ["-c", guard.run], {
+        cwd: directory,
+        encoding: "utf8",
+        env: { ...process.env, ...env, GITHUB_OUTPUT: output },
+      });
+      assert.equal(
+        result.status === 0,
+        allowed,
+        `Publisher ${publisherIndex} source admission case ${index}`,
+      );
+      if (allowed)
+        assert.equal(readFileSync(output, "utf8"), `sha=${env.SOURCE_SHA || env.GITHUB_SHA}\n`);
+    }
   assert.throws(() => readFileSync(join(directory, "unsafe")));
 
   mkdirSync(join(directory, "engineering"));
@@ -155,4 +186,4 @@ fi
 } finally {
   rmSync(directory, { recursive: true });
 }
-console.log("Private image publication: 16 source-boundary and 6 bundled-root cases passed");
+console.log("Private image publication: 32 source-boundary and 6 bundled-root cases passed");
