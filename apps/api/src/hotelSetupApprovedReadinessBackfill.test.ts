@@ -1,6 +1,10 @@
 import { EventEmitter } from "node:events";
 import { STSClient } from "@aws-sdk/client-sts";
-import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
+import {
+  DescribeSecretCommand,
+  GetSecretValueCommand,
+  SecretsManagerClient,
+} from "@aws-sdk/client-secrets-manager";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   APPROVED_HOTEL_SETUP_BACKFILLS,
@@ -39,7 +43,13 @@ it.each([
   "authority",
   "retarget",
   "assignmentDrift",
-  "verifier",
+  "passwordDrift",
+  "nativeCurrentUser",
+  "nativeConnect",
+  "nativeEffectiveOid",
+  "inspectionPassword",
+  "currentVersion",
+  "inspectionVersion",
   "wrongAccount",
   "secretVersion",
   "secretArn",
@@ -64,7 +74,9 @@ it.each([
       if (mode === "proof") throw new Error("private-proof-diagnostic");
     }),
   };
-  let identityReads = 0,
+  let metadataReads = 0,
+    nativeAuthentications = 0,
+    identityReads = 0,
     assignmentReads = 0,
     authorityReads = 0;
   const pending = {
@@ -88,7 +100,19 @@ it.each([
   class Client extends EventEmitter {
     transaction = false;
     write: typeof state | undefined;
-    connect = vi.fn(async () => undefined);
+    constructor(readonly native = false) {
+      super();
+    }
+    connect = vi.fn(async () => {
+      if (this.native && mode === "nativeConnect")
+        throw new Error("private-authentication-diagnostic");
+      if (
+        this.native &&
+        ++nativeAuthentications > (mode === "inspectionPassword" ? 5 : 3) &&
+        ["passwordDrift", "inspectionPassword"].includes(mode)
+      )
+        throw new Error("private-authentication-diagnostic");
+    });
     end = vi.fn(async () => undefined);
     escapeIdentifier = (identifier: string) => `"${identifier}"`;
     async query(sql: string, params?: unknown[]) {
@@ -106,28 +130,35 @@ it.each([
           state = this.write;
           this.write = undefined;
           this.transaction = false;
-          if (["commitLost", "inspectionRetarget"].includes(mode))
+          if (
+            [
+              "commitLost",
+              "inspectionRetarget",
+              "inspectionPassword",
+              "inspectionVersion",
+            ].includes(mode)
+          )
             throw new Error("private-commit-diagnostic");
         }
         this.transaction = false;
       }
       if (sql.startsWith("GRANT") && mode === "grantNotice") this.emit("notice", { code: "01007" });
       if (sql.includes("SELECT session_user"))
-        return { rows: [{ oid: mode === "nativeOid" ? 43 : 42 }] };
-      if (sql.includes("SELECT r.rolpassword")) {
-        identityReads++;
-        expect(params).toEqual([
-          42,
-          binding.login,
-          identityReads === 1 ? null : "private-verifier",
-        ]);
-        expect(sql).not.toContain("FOR SHARE OF r");
         return {
-          rows:
-            mode === "wrongOid" || (mode === "verifier" && identityReads > 1)
-              ? []
-              : [{ verifier: "private-verifier" }],
+          rows: [
+            {
+              session_login: binding.login,
+              effective_login: mode === "nativeCurrentUser" ? "other" : binding.login,
+              role_oid: mode === "nativeOid" ? 43 : 42,
+              effective_oid: mode === "nativeEffectiveOid" ? 43 : 42,
+            },
+          ],
         };
+      if (sql.includes("SELECT r.oid FROM pg_catalog.pg_roles")) {
+        identityReads++;
+        expect(params).toEqual([42, binding.login]);
+        expect(sql).not.toContain("FROM pg_catalog.pg_authid");
+        return { rows: mode === "wrongOid" ? [] : [{ oid: 42 }] };
       }
       if (sql.includes("SELECT database_login")) {
         assignmentReads++;
@@ -160,8 +191,8 @@ it.each([
     }
   }
   const clients: Client[] = [];
-  vi.mocked(hotelSetupOrganizationConnection).mockImplementation(() => {
-    const client = new Client();
+  vi.mocked(hotelSetupOrganizationConnection).mockImplementation((url) => {
+    const client = new Client(new URL(url).username === binding.login);
     clients.push(client);
     return client as never;
   });
@@ -187,6 +218,20 @@ it.each([
     expect(clients[0]!.transaction).toBe(false);
     expect(await this.config.region()).toBe("eu-west-1");
     expect((await this.config.endpoint!()).hostname).toBe("secretsmanager.eu-west-1.amazonaws.com");
+    if (command instanceof DescribeSecretCommand) {
+      metadataReads++;
+      expect(command.input).toEqual({ SecretId: name });
+      return {
+        Name: name,
+        ARN: `arn:aws:secretsmanager:eu-west-1:269416271598:secret:${name}-123abc`,
+        VersionIdsToStages: {
+          [(mode === "currentVersion" && metadataReads > 1) ||
+          (mode === "inspectionVersion" && metadataReads > 2)
+            ? "2".repeat(32)
+            : receipt.secretVersion]: ["AWSCURRENT"],
+        },
+      };
+    }
     expect(command).toBeInstanceOf(GetSecretValueCommand);
     expect((command as GetSecretValueCommand).input).toEqual({
       SecretId: name,
@@ -223,16 +268,42 @@ it.each([
       "Approved hotel setup readiness backfill requires recovery inspection",
     );
   expect(state.ready_at !== null).toBe(
-    ["success", "animal", "replay", "commitLost", "inspectionRetarget"].includes(mode),
+    [
+      "success",
+      "animal",
+      "replay",
+      "commitLost",
+      "inspectionRetarget",
+      "inspectionPassword",
+      "inspectionVersion",
+    ].includes(mode),
   );
   expect(queries.filter((sql) => sql.startsWith("GRANT"))).toHaveLength(
-    mode === "replay" || ["retarget", "wrongOid", "partialReady", "lockBusy"].includes(mode)
+    mode === "replay" ||
+      [
+        "retarget",
+        "wrongOid",
+        "partialReady",
+        "lockBusy",
+        "nativeOid",
+        "nativeCurrentUser",
+        "nativeConnect",
+        "nativeEffectiveOid",
+      ].includes(mode)
       ? 0
       : 1,
   );
   expect(queries.some((sql) => /CREATE ROLE|ALTER ROLE|DROP|DELETE|REVOKE/.test(sql))).toBe(false);
   expect(queries.some((sql) => sql.startsWith("UPDATE platform"))).toBe(
-    ["success", "animal", "commitLost", "commitRejected", "inspectionRetarget"].includes(mode),
+    [
+      "success",
+      "animal",
+      "commitLost",
+      "commitRejected",
+      "inspectionRetarget",
+      "inspectionPassword",
+      "inspectionVersion",
+    ].includes(mode),
   );
   if (
     [

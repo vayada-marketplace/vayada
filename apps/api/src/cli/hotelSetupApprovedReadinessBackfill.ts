@@ -164,8 +164,8 @@ export async function inspectApprovedReadiness(config: {
       )
         throw new Error();
       const roles = await admin.query<{ oid: number }>(
-        `SELECT r.oid FROM pg_catalog.pg_authid r WHERE r.rolname=$1 AND r.rolcanlogin
-         AND r.rolpassword IS NOT NULL AND r.rolvaliduntil IS NULL
+        `SELECT r.oid FROM pg_catalog.pg_roles r WHERE r.rolname=$1 AND r.rolcanlogin
+         AND r.rolvaliduntil IS NULL
          AND NOT r.rolsuper AND NOT r.rolinherit AND NOT r.rolcreaterole AND NOT r.rolcreatedb
          AND NOT r.rolreplication AND NOT r.rolbypassrls
          AND (SELECT count(*) FROM pg_catalog.pg_auth_members WHERE member=r.oid)=1
@@ -184,7 +184,7 @@ export async function inspectApprovedReadiness(config: {
     const oids: number[] = [];
     for (const login of readerLogins) {
       const roles = await admin.query<{ oid: number }>(
-        `SELECT r.oid FROM pg_catalog.pg_authid r WHERE r.rolname=$1 AND r.rolcanlogin
+        `SELECT r.oid FROM pg_catalog.pg_roles r WHERE r.rolname=$1 AND r.rolcanlogin
          AND r.rolvaliduntil IS NULL AND NOT r.rolsuper AND NOT r.rolinherit
          AND NOT r.rolcreaterole AND NOT r.rolcreatedb AND NOT r.rolreplication AND NOT r.rolbypassrls
          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE member=r.oid)
