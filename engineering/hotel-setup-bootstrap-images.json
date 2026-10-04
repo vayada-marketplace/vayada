@@ -38,5 +38,15 @@
       "digest": "sha256:259f22ca5f9d90cfa87239adfff6a396bd3877598372c20a377dc055dfd3df6b",
       "source": "187eeea3a5d6864283b854815334fe34c7ec752b"
     }
+  },
+  "vay965-offline-catalog-lock-20261004": {
+    "primary": {
+      "digest": "sha256:8fdd394ce806f2ba928b3aa330d02422064742d4016801c113e860b838284d11",
+      "source": "be8c6d4052f2c37cee8d06de46de958fd6087f58"
+    },
+    "rollback": {
+      "digest": "sha256:259f22ca5f9d90cfa87239adfff6a396bd3877598372c20a377dc055dfd3df6b",
+      "source": "187eeea3a5d6864283b854815334fe34c7ec752b"
+    }
   }
 }
