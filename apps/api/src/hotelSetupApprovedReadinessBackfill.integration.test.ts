@@ -304,6 +304,13 @@ describe.runIf(databaseUrl && rollbackRoot)(
                 await expect(
                   backfillApprovedHotelSetupOrganizationReadiness(input),
                 ).rejects.toThrow("requires recovery inspection");
+                const rejectedInsertGrants = (
+                  await admin.query(
+                    "SELECT column_name FROM information_schema.column_privileges WHERE grantee=$1 AND table_schema='identity' AND table_name='product_entitlements' AND privilege_type='INSERT'",
+                    [binding.login],
+                  )
+                ).rows;
+                expect(rejectedInsertGrants).toEqual([]);
               } finally {
                 await admin.query("SELECT pg_catalog.pg_advisory_unlock_shared(8734516)");
               }
