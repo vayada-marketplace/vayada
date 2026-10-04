@@ -1,3 +1,4 @@
+import { lockHotelSetupOfflineBootstrap } from "./hotelSetupHelperOwnerGrants.js";
 import type pg from "pg";
 import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 import { SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
@@ -78,8 +79,7 @@ async function lockApprovedIdentity(
            AND m.inherit_option AND NOT m.set_option AND NOT m.admin_option)
        AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_db_role_setting WHERE setrole=r.oid)
        AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_shdepend
-         WHERE refclassid='pg_catalog.pg_authid'::regclass AND refobjid=r.oid AND deptype='o')
-     FOR SHARE OF r`,
+         WHERE refclassid='pg_catalog.pg_authid'::regclass AND refobjid=r.oid AND deptype='o')`,
     [receipt.expectedRoleOid, receipt.login, expectedVerifier ?? null],
   );
   if (identities.rows.length !== 1 || !identities.rows[0]?.verifier) throw new Error();
@@ -152,6 +152,7 @@ export async function backfillApprovedHotelSetupOrganizationReadiness(input: {
       if (notice.code === "01007") incompleteGrant = true;
     });
     await admin.connect();
+    await lockHotelSetupOfflineBootstrap(admin);
     await admin.query("SELECT pg_catalog.pg_advisory_lock(pg_catalog.hashtextextended($1,0))", [
       `hotel_setup_organization:${receipt.organizationId}`,
     ]);
@@ -277,6 +278,7 @@ export async function backfillApprovedHotelSetupOrganizationReadiness(input: {
           inspectionFailed = true;
         });
         await inspection.connect();
+        await lockHotelSetupOfflineBootstrap(inspection);
         await inspection.query("BEGIN");
         const inspected = await lockApprovedIdentity(inspection, receipt, verifier);
         if (

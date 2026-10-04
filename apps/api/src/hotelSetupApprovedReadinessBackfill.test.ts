@@ -28,6 +28,7 @@ afterEach(() => {
 
 it.each([
   "success",
+  "lockBusy",
   "animal",
   "replay",
   "wrongOid",
@@ -92,6 +93,8 @@ it.each([
     escapeIdentifier = (identifier: string) => `"${identifier}"`;
     async query(sql: string, params?: unknown[]) {
       queries.push(sql);
+      if (sql.includes("pg_try_advisory_lock(8734516)"))
+        return { rows: [{ held: mode !== "lockBusy" }] };
       if (sql.startsWith("BEGIN")) this.transaction = true;
       if (sql === "ROLLBACK") {
         this.transaction = false;
@@ -118,7 +121,7 @@ it.each([
           binding.login,
           identityReads === 1 ? null : "private-verifier",
         ]);
-        expect(sql).toContain("FOR SHARE OF r");
+        expect(sql).not.toContain("FOR SHARE OF r");
         return {
           rows:
             mode === "wrongOid" || (mode === "verifier" && identityReads > 1)
@@ -223,7 +226,9 @@ it.each([
     ["success", "animal", "replay", "commitLost", "inspectionRetarget"].includes(mode),
   );
   expect(queries.filter((sql) => sql.startsWith("GRANT"))).toHaveLength(
-    mode === "replay" || ["retarget", "wrongOid", "partialReady"].includes(mode) ? 0 : 1,
+    mode === "replay" || ["retarget", "wrongOid", "partialReady", "lockBusy"].includes(mode)
+      ? 0
+      : 1,
   );
   expect(queries.some((sql) => /CREATE ROLE|ALTER ROLE|DROP|DELETE|REVOKE/.test(sql))).toBe(false);
   expect(queries.some((sql) => sql.startsWith("UPDATE platform"))).toBe(

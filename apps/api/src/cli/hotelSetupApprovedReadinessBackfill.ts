@@ -1,3 +1,4 @@
+import { lockHotelSetupOfflineBootstrap } from "../hotelSetupHelperOwnerGrants.js";
 import { pathToFileURL } from "node:url";
 import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 import { SecretsManagerClient, DescribeSecretCommand } from "@aws-sdk/client-secrets-manager";
@@ -147,6 +148,7 @@ export async function inspectApprovedReadiness(config: {
   let readers: ApprovedReadinessInspection["readers"];
   try {
     await admin.connect();
+    await lockHotelSetupOfflineBootstrap(admin);
     await admin.query("BEGIN");
     for (const binding of APPROVED_HOTEL_SETUP_BACKFILLS) {
       await lockHotelSetupOrganizationBootstrapAuthority(admin, binding);
@@ -172,8 +174,7 @@ export async function inspectApprovedReadiness(config: {
              AND m.inherit_option AND NOT m.set_option AND NOT m.admin_option)
          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_db_role_setting WHERE setrole=r.oid)
          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_shdepend
-           WHERE refclassid='pg_catalog.pg_authid'::regclass AND refobjid=r.oid AND deptype='o')
-         FOR SHARE OF r`,
+           WHERE refclassid='pg_catalog.pg_authid'::regclass AND refobjid=r.oid AND deptype='o')`,
         [binding.login],
       );
       if (roles.rows.length !== 1 || !isHotelSetupInspectedOid(roles.rows[0]?.oid))
@@ -189,8 +190,7 @@ export async function inspectApprovedReadiness(config: {
          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE member=r.oid)
          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_db_role_setting WHERE setrole=r.oid)
          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_shdepend
-           WHERE refclassid='pg_catalog.pg_authid'::regclass AND refobjid=r.oid AND deptype='o')
-         FOR SHARE OF r`,
+           WHERE refclassid='pg_catalog.pg_authid'::regclass AND refobjid=r.oid AND deptype='o')`,
         [login],
       );
       if (roles.rows.length !== 1 || !isHotelSetupInspectedOid(roles.rows[0]?.oid))

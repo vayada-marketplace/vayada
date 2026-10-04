@@ -58,6 +58,15 @@ export async function assertHotelSetupBootstrapLock(holder: pg.Client) {
   if (result.rows[0]?.held !== true) throw new Error("Hotel setup bootstrap lock unavailable");
 }
 
+/** Offline inspection/backfill excludes live bootstrap sessions without catalog write privileges. */
+export async function lockHotelSetupOfflineBootstrap(client: pg.Client) {
+  const result = await client.query<{ held: boolean }>(
+    "SELECT pg_catalog.pg_try_advisory_lock(8734516) AS held",
+  );
+  if (result.rows[0]?.held !== true)
+    throw new Error("Hotel setup offline bootstrap lock unavailable");
+}
+
 /** Only fresh disabled operational roles, never an existing login or arbitrary function. */
 export async function grantFreshHotelSetupHelpers(input: {
   ownerDatabaseUrl: string;
