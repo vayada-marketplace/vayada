@@ -1,3 +1,4 @@
+import { assertHotelSetupBootstrapLock } from "./hotelSetupHelperOwnerGrants.js";
 import type pg from "pg";
 import { checkHotelSetupCreationCredential } from "./cli/hotelSetupCreationPreflight.js";
 import { parseHotelSetupDatabaseUrl } from "./hotelSetupCommandServiceConfig.js";
@@ -13,6 +14,7 @@ import { publishHotelSetupOrganizationSecret } from "./hotelSetupOrganizationSec
  * The fixed operational CLI supplies its bundled compatible rollback preflight. */
 export async function activateVerifiedHotelSetupOrganizationRole(input: {
   adminDatabaseUrl: string;
+  bootstrapHolder?: pg.Client;
   nativeDatabaseUrl: string;
   databaseEndpoint: string;
   staged: Awaited<ReturnType<typeof stageHotelSetupOrganizationRole>>;
@@ -48,6 +50,14 @@ export async function activateVerifiedHotelSetupOrganizationRole(input: {
       failed = true;
     });
     await admin.connect();
+    if (input.bootstrapHolder) {
+      // Try rather than queue behind a migrator waiting on the coordinator.
+      const lock = await admin.query<{ held: boolean }>(
+        "SELECT pg_catalog.pg_try_advisory_lock_shared(8734516) AS held",
+      );
+      if (lock.rows[0]?.held !== true) throw new Error();
+      await assertHotelSetupBootstrapLock(input.bootstrapHolder);
+    }
     await admin.query("SELECT pg_catalog.pg_advisory_lock(pg_catalog.hashtextextended($1,0))", [
       `hotel_setup_organization:${organizationId.toLowerCase()}`,
     ]);

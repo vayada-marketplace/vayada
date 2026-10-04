@@ -1,4 +1,5 @@
 import pg from "pg";
+import * as helperOwner from "./hotelSetupHelperOwnerGrants.js";
 import { afterEach, expect, it, vi } from "vitest";
 import { checkHotelSetupCreationCredential } from "./cli/hotelSetupCreationPreflight.js";
 import { activateVerifiedHotelSetupOrganizationRole } from "./hotelSetupOrganizationRoleActivation.js";
@@ -35,6 +36,8 @@ const input = {
 function fixture(mode: string) {
   let commits = 0;
   const adminQuery = vi.fn(async (sql: string) => {
+    if (sql.includes("pg_try_advisory_lock_shared(8734516)"))
+      return { rows: [{ held: mode !== "bootstrapBusy" }] };
     if (sql.startsWith("SELECT oid")) return { rows: mode === "unsafe" ? [] : [{ oid: 42 }] };
     if (sql.startsWith("SELECT rolpassword")) return { rows: [{ verifier: "private-verifier" }] };
     if (sql.startsWith("SELECT rolcanlogin"))
@@ -198,3 +201,31 @@ it("requires an exact staged identity and compatible secondary proof before conn
     ).rejects.toThrow("activation verification failed");
   expect(constructor).not.toHaveBeenCalled();
 });
+
+it.each(["success", "bootstrapBusy", "holderLost"])(
+  "owns an activation lock independently of the coordinator: %s",
+  async (mode) => {
+    const f = fixture(mode);
+    const assertHolder = vi
+      .spyOn(helperOwner, "assertHotelSetupBootstrapLock")
+      .mockImplementation(async () => {
+        if (mode === "holderLost") throw Error("lost holder");
+      });
+    const secondary = vi.fn(async () => undefined);
+    const attempt = activateVerifiedHotelSetupOrganizationRole({
+      ...input,
+      proveSecondary: secondary,
+      bootstrapHolder: {} as pg.Client,
+    });
+    if (mode === "success") {
+      await attempt;
+      expect(secondary).toHaveBeenCalledOnce();
+      expect(assertHolder).toHaveBeenCalledOnce();
+    } else {
+      await expect(attempt).rejects.toThrow();
+      expect(secondary).not.toHaveBeenCalled();
+      expect(publishHotelSetupOrganizationSecret).not.toHaveBeenCalled();
+    }
+    expect(f.adminQuery.mock.calls[0]?.[0]).toContain("pg_try_advisory_lock_shared(8734516)");
+  },
+);

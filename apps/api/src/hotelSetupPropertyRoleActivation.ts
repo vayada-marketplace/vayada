@@ -1,3 +1,4 @@
+import { assertHotelSetupBootstrapLock } from "./hotelSetupHelperOwnerGrants.js";
 import { publishHotelSetupPropertySecret } from "./hotelSetupPropertySecretPublication.js";
 import { createHash } from "node:crypto";
 import pg from "pg";
@@ -11,6 +12,7 @@ import {
 /** Isolated provisioner only; serving admission waits for proof and readiness COMMIT. */
 export async function activateVerifiedHotelSetupPropertyRole(input: {
   adminDatabaseUrl: string;
+  bootstrapHolder?: pg.Client;
   nativeDatabaseUrl: string;
   databaseEndpoint: string;
   staged: Awaited<ReturnType<typeof stageHotelSetupPropertyRole>>;
@@ -79,6 +81,14 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
       failed = true;
     });
     await admin.connect();
+    if (input.bootstrapHolder) {
+      // Try rather than queue behind a migrator waiting on the coordinator.
+      const lock = await admin.query<{ held: boolean }>(
+        "SELECT pg_catalog.pg_try_advisory_lock_shared(8734516) AS held",
+      );
+      if (lock.rows[0]?.held !== true) throw new Error();
+      await assertHotelSetupBootstrapLock(input.bootstrapHolder);
+    }
     await admin.query("SELECT pg_catalog.pg_advisory_lock(pg_catalog.hashtextextended($1,0))", [
       `hotel_setup_property_activation:${login}`,
     ]);
