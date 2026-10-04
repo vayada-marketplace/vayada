@@ -556,6 +556,8 @@ jobs:
           src/hotelSetupPropertyRoleActivation.test.ts
           src/hotelSetupPropertySecretPublication.test.ts
           src/cli/hotelSetupPropertyBootstrap.test.ts
+          src/hotelSetupAutomaticReconciliation.test.ts
+          src/cli/hotelSetupAutomaticProvisioning.test.ts
           src/hotelSetupLaunchSettingsCommands.test.ts
           src/hotelSetupLaunchSettingsCredentials.test.ts
           src/hotelSetupLaunchSettingsRepository.test.ts
