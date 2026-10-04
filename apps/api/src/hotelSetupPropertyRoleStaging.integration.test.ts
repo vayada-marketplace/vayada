@@ -13,6 +13,7 @@ import {
 } from "./hotelSetupPropertyRoleStaging.js";
 import { activateVerifiedHotelSetupPropertyRole } from "./hotelSetupPropertyRoleActivation.js";
 import type { HotelSetupOperation } from "./hotelSetupCommandScope.js";
+import { assertHotelSetupCommandScope } from "./hotelSetupCommandScope.js";
 import { checkHotelSetupPropertyCredential } from "./cli/hotelSetupPropertyPreflight.js";
 import { HOTEL_SETUP_LAUNCH_SETTINGS_PRIVILEGES } from "./hotelSetupLaunchSettingsPrivileges.js";
 
@@ -536,4 +537,248 @@ describe.runIf(connectionString)("manual disabled property-role staging", () => 
       await admin.end();
     }
   }, 90_000);
+
+  it("allows a ready hotel's native scope while another hotel's publication waits on SDK", async () => {
+    const url = new URL(connectionString!);
+    if (url.hostname !== "127.0.0.1" || !url.pathname.startsWith("/vay1092_")) throw new Error();
+    const endpoint = new URL(url);
+    endpoint.username = endpoint.password = endpoint.search = "";
+    const admin = new pg.Client({ connectionString });
+    await admin.connect();
+    const databases = (
+      await admin.query<{ name: string; privileges: string[] }>(`
+      SELECT d.datname AS name, COALESCE(array_agg(a.privilege_type) FILTER (WHERE a.grantee=0),ARRAY[]::text[]) AS privileges
+      FROM pg_catalog.pg_database d LEFT JOIN LATERAL pg_catalog.aclexplode(COALESCE(d.datacl,pg_catalog.acldefault('d',d.datdba))) a ON true
+      WHERE d.datallowconn GROUP BY d.datname`)
+    ).rows;
+    const organizationId = randomUUID(),
+      actorUserId = randomUUID();
+    const properties = [randomUUID(), randomUUID()];
+    const roleKey = `delay_${randomBytes(12).toString("hex")}`;
+    const roles: string[] = [];
+    let releaseSdk!: () => void, enterSdk!: () => void;
+    const sdkWait = new Promise<void>((resolve) => {
+      releaseSdk = resolve;
+    });
+    const sdkEntered = new Promise<void>((resolve) => {
+      enterSdk = resolve;
+    });
+    let delay = false,
+      publishing: Promise<unknown> | undefined,
+      readyClient: pg.Client | undefined,
+      retarget: pg.Client | undefined;
+    try {
+      for (const database of databases)
+        await admin.query(
+          `REVOKE ALL ON DATABASE ${admin.escapeIdentifier(database.name)} FROM PUBLIC`,
+        );
+      await admin.query(
+        "INSERT INTO identity.organizations(id,kind,name,slug) VALUES($1,'hotel_group','SDK lock fixture',$2)",
+        [organizationId, roleKey],
+      );
+      await admin.query("INSERT INTO identity.users(id,email) VALUES($1,$2)", [
+        actorUserId,
+        `${roleKey}@example.test`,
+      ]);
+      await admin.query(
+        `INSERT INTO identity.organization_memberships(organization_id,user_id,role_key,access_origin,property_access_mode,pms_access_enabled,booking_access_enabled)
+        VALUES($1,$2,$3,'agency','all',TRUE,TRUE)`,
+        [organizationId, actorUserId, roleKey],
+      );
+      await admin.query(
+        "INSERT INTO identity.role_permission_grants(organization_kind,role_key,permission_key) VALUES('hotel_group',$1,'hotel_catalog.setup.manage')",
+        [roleKey],
+      );
+      await admin.query(
+        "INSERT INTO hotel_catalog.organization_setup_track_intents(organization_id,selected_tracks) VALUES($1,ARRAY['hotel_operations'])",
+        [organizationId],
+      );
+      await admin.query(
+        `INSERT INTO identity.product_entitlements(organization_id,product,entitlement_key,status)
+        VALUES($1,'pms','property-management','active'),($1,'booking','booking-engine','active')`,
+        [organizationId],
+      );
+      for (const propertyId of properties) {
+        await admin.query(
+          "INSERT INTO hotel_catalog.properties(id,public_id,display_name,creation_organization_id) VALUES($1,$1::uuid::text,'SDK lock fixture',$2)",
+          [propertyId, organizationId],
+        );
+        await admin.query(
+          `INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship,status)
+          VALUES($1,'hotel_catalog','property',$2,'owner','active'),($1,'pms','pms_property',$2,'owner','active'),($1,'booking','booking_hotel',$2,'owner','active')`,
+          [organizationId, propertyId],
+        );
+      }
+      vi.stubEnv("AWS_ACCESS_KEY_ID", "synthetic-key");
+      vi.stubEnv("AWS_SECRET_ACCESS_KEY", "synthetic-secret");
+      vi.stubEnv("AWS_PROFILE", undefined);
+      vi.spyOn(STSClient.prototype, "send").mockImplementation((async () => {
+        if (delay) {
+          enterSdk();
+          await sdkWait;
+        }
+        return { Account: "269416271598" };
+      }) as never);
+      const secrets = new Map<string, Record<string, string>>();
+      vi.spyOn(SecretsManagerClient.prototype, "send").mockImplementation((async (
+        command: unknown,
+      ) => {
+        if (command instanceof DescribeSecretCommand) {
+          const error = new Error();
+          error.name = "ResourceNotFoundException";
+          throw error;
+        }
+        if (command instanceof CreateSecretCommand) {
+          const Name = command.input.Name!;
+          const secret = {
+            Name,
+            ARN: `arn:aws:secretsmanager:eu-west-1:269416271598:secret:${Name}-123abc`,
+            VersionId: command.input.ClientRequestToken!,
+            SecretString: command.input.SecretString!,
+          };
+          secrets.set(secret.ARN, secret);
+          return secret;
+        }
+        return secrets.get((command as { input: { SecretId: string } }).input.SecretId);
+      }) as never);
+      const stage = async (propertyId: string) => {
+        const staged = await stageHotelSetupPropertyRole({
+          adminDatabaseUrl: connectionString!,
+          databaseEndpoint: endpoint.toString(),
+          scope: {
+            propertyId,
+            organizationId,
+            actorUserId,
+            operation: "launch_settings",
+            automatic: true,
+          },
+        });
+        roles.push(staged.login);
+        const native = new URL(url);
+        native.username = staged.login;
+        native.password = randomBytes(36).toString("base64url");
+        return {
+          staged,
+          nativeDatabaseUrl: native.toString(),
+          adminDatabaseUrl: connectionString!,
+          databaseEndpoint: endpoint.toString(),
+          proveSecondary: checkHotelSetupPropertyCredential,
+          publish: true,
+        };
+      };
+      const ready = await stage(properties[0]!);
+      await activateVerifiedHotelSetupPropertyRole(ready);
+      readyClient = new pg.Client({ connectionString: ready.nativeDatabaseUrl });
+      await readyClient.connect();
+      const pending = await stage(properties[1]!);
+      delay = true;
+      publishing = activateVerifiedHotelSetupPropertyRole(pending);
+      await sdkEntered;
+      await readyClient.query("SET lock_timeout='750ms'");
+      await readyClient.query("BEGIN");
+      await expect(
+        assertHotelSetupCommandScope(readyClient, ready.staged),
+      ).resolves.toBeUndefined();
+      await readyClient.query("ROLLBACK");
+      expect(
+        (
+          await admin.query(
+            "SELECT credential_ready_at FROM platform.hotel_setup_property_scopes WHERE database_login=$1",
+            [pending.staged.login],
+          )
+        ).rows,
+      ).toEqual([{ credential_ready_at: null }]);
+      const billingId = randomUUID(),
+        entitlementId = randomUUID();
+      await admin.query(
+        `INSERT INTO finance.billing_entitlements(id,organization_id,product,entitlement_key,billing_status)
+        VALUES($1,$2,'pms','module:excluded','past_due')`,
+        [billingId, organizationId],
+      );
+      await admin.query(
+        `INSERT INTO identity.product_entitlements(id,organization_id,product,entitlement_key,status)
+        VALUES($1,$2,'pms','module:excluded','suspended')`,
+        [entitlementId, organizationId],
+      );
+      retarget = new pg.Client({ connectionString });
+      await retarget.connect();
+      await retarget.query("SET lock_timeout='750ms'");
+      await admin.query("BEGIN");
+      try {
+        await lockHotelSetupPropertyBootstrapAuthority(admin, pending.staged);
+        await expect(
+          retarget.query(
+            "UPDATE finance.billing_entitlements SET entitlement_key='property-management' WHERE id=$1",
+            [billingId],
+          ),
+        ).rejects.toMatchObject({ code: "55P03" });
+        await expect(
+          retarget.query(
+            "UPDATE identity.product_entitlements SET entitlement_key='account_access' WHERE id=$1",
+            [entitlementId],
+          ),
+        ).rejects.toMatchObject({ code: "55P03" });
+      } finally {
+        await admin.query("ROLLBACK");
+      }
+      await retarget.query(
+        "UPDATE finance.billing_entitlements SET entitlement_key='property-management' WHERE id=$1",
+        [billingId],
+      );
+      await retarget.query(
+        "UPDATE identity.product_entitlements SET entitlement_key='account_access' WHERE id=$1",
+        [entitlementId],
+      );
+      await retarget.end();
+      retarget = undefined;
+      releaseSdk();
+      await expect(publishing).rejects.toThrow("publication requires recovery inspection");
+      expect(
+        (
+          await admin.query(
+            "SELECT credential_ready_at,active FROM platform.hotel_setup_property_scopes WHERE database_login=$1",
+            [pending.staged.login],
+          )
+        ).rows,
+      ).toEqual([{ credential_ready_at: null, active: false }]);
+    } finally {
+      releaseSdk();
+      await publishing?.catch(() => undefined);
+      await readyClient?.end();
+      await retarget?.end();
+      for (const login of roles) {
+        await admin.query(
+          "DELETE FROM platform.hotel_setup_property_scopes WHERE database_login=$1",
+          [login],
+        );
+        await admin.query(`DROP OWNED BY ${admin.escapeIdentifier(login)}`);
+        await admin.query(`DROP ROLE ${admin.escapeIdentifier(login)}`);
+      }
+      await admin.query("DELETE FROM hotel_catalog.properties WHERE id=ANY($1::uuid[])", [
+        properties,
+      ]);
+      await admin.query(
+        "DELETE FROM identity.organization_resource_links WHERE organization_id=$1",
+        [organizationId],
+      );
+      await admin.query("DELETE FROM identity.product_entitlements WHERE organization_id=$1", [
+        organizationId,
+      ]);
+      await admin.query("DELETE FROM finance.billing_entitlements WHERE organization_id=$1", [
+        organizationId,
+      ]);
+      await admin.query("DELETE FROM identity.organization_memberships WHERE organization_id=$1", [
+        organizationId,
+      ]);
+      await admin.query("DELETE FROM identity.role_permission_grants WHERE role_key=$1", [roleKey]);
+      await admin.query("DELETE FROM identity.organizations WHERE id=$1", [organizationId]);
+      await admin.query("DELETE FROM identity.users WHERE id=$1", [actorUserId]);
+      for (const database of databases)
+        if (database.privileges.length)
+          await admin.query(
+            `GRANT ${database.privileges.join(",")} ON DATABASE ${admin.escapeIdentifier(database.name)} TO PUBLIC`,
+          );
+      await admin.end();
+    }
+  }, 30000);
 });
