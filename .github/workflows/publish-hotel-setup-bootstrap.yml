@@ -7,6 +7,10 @@ on:
         description: Reviewed primary/rollback pair key in the checked-in inventory
         required: true
         type: string
+      verify_automatic:
+        description: Also require the fixed automatic provisioning and dual native proof roots
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -35,6 +39,8 @@ jobs:
           aws-region: eu-west-1
       - uses: aws-actions/amazon-ecr-login@v2
       - name: Verify both immutable source revisions and fixed CLI roots
+        env:
+          VERIFY_AUTOMATIC: ${{ inputs.verify_automatic }}
         run: |
           set -euo pipefail
           for mode in primary rollback; do
@@ -48,6 +54,14 @@ jobs:
               cli=/app/apps/api/dist/cli/hotelSetupPropertyPreflight.js
             fi
             docker run --rm --platform linux/amd64 --network none --entrypoint node "$image" -e 'require("node:fs").accessSync(process.argv[1])' "$cli"
+            if test "$VERIFY_AUTOMATIC" = true; then
+              if test "$mode" = primary; then
+                cli=/app/apps/api/dist/cli/hotelSetupAutomaticProvisioning.js
+              else
+                cli=/app/apps/api/dist/cli/hotelSetupCreationPreflight.js
+              fi
+              docker run --rm --platform linux/amd64 --network none --entrypoint node "$image" -e 'require("node:fs").accessSync(process.argv[1])' "$cli"
+            fi
           done
       - uses: docker/setup-buildx-action@v4
       - name: Publish immutable operational image only

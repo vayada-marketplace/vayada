@@ -40,6 +40,9 @@ jobs:
       - name: Coordinated release contracts
         run: npm run test:coordinated-release
 
+      - name: Private hotel setup image publication boundaries
+        run: node scripts/check-hotel-setup-image-publication.mjs
+
       - name: Finance domain contracts
         run: npm --workspace @vayada/domain-finance run test
 
