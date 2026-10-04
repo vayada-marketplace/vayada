@@ -2,6 +2,7 @@ import pg from "pg";
 import {
   HOTEL_SETUP_READER_AUDIT_COLUMNS,
   HOTEL_SETUP_READER_READ_COLUMNS,
+  HOTEL_SETUP_READER_RLS_HELPERS,
 } from "./hotelSetupReaderPrivileges.js";
 
 /** Separate provisioner only; never wire admin credentials into the command service. */
@@ -31,6 +32,8 @@ export async function stageHotelSetupReaderRole(config: pg.ClientConfig) {
     await admin.query(`GRANT USAGE ON SCHEMA identity,platform TO ${role}`);
     for (const [relation, columns] of Object.entries(HOTEL_SETUP_READER_READ_COLUMNS))
       await admin.query(`GRANT SELECT (${columns.join(",")}) ON ${relation} TO ${role}`);
+    for (const helper of HOTEL_SETUP_READER_RLS_HELPERS)
+      await admin.query(`GRANT EXECUTE ON FUNCTION ${helper} TO ${role}`);
     await admin.query(
       `GRANT INSERT (${HOTEL_SETUP_READER_AUDIT_COLUMNS.join(",")}) ON platform.product_audit_events TO ${role}`,
     );

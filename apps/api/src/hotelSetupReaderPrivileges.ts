@@ -1,6 +1,23 @@
 import type pg from "pg";
 import type { HotelSetupCommandMode } from "./hotelSetupCommandServiceConfig.js";
 
+// PUBLIC RLS policies reference these invoker helpers even for non-worker readers.
+export const HOTEL_SETUP_READER_RLS_HELPERS = [
+  "platform.channex_management_worker_source(text,text,uuid)",
+  "platform.channex_management_worker_scope(text,text,uuid)",
+] as const;
+
+export async function assertHotelSetupReaderRlsHelpers(client: Pick<pg.Pool, "query">) {
+  const result = await client.query<{ allowed: boolean }>(
+    `SELECT pg_catalog.bool_and(NOT p.prosecdef
+      AND pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE')) AS allowed
+     FROM pg_catalog.pg_proc p WHERE p.oid=ANY($1::regprocedure[])`,
+    [HOTEL_SETUP_READER_RLS_HELPERS],
+  );
+  if (result.rows.length !== 1 || result.rows[0]?.allowed !== true)
+    throw new Error("Hotel setup reader RLS helper privileges unavailable");
+}
+
 // Canonical backend-auth/authorization, registry selection and Feature Hub reads only.
 export const HOTEL_SETUP_READER_READ_COLUMNS: Record<string, readonly string[]> = {
   "identity.external_identities": ["provider", "provider_user_id", "user_id"],
@@ -210,6 +227,7 @@ export async function assertHotelSetupReaderPrivileges(
   mode: HotelSetupCommandMode = "property_commands",
 ) {
   await assertHotelSetupCredentialReadinessSchema(client);
+  await assertHotelSetupReaderRlsHelpers(client);
   const inventory: HotelSetupColumnPrivileges = Object.fromEntries(
     Object.entries(
       mode === "property_creation"

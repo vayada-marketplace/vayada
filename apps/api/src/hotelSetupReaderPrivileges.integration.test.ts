@@ -12,6 +12,7 @@ import {
   HOTEL_SETUP_READER_AUDIT_COLUMNS,
   HOTEL_SETUP_READER_READ_COLUMNS,
   HOTEL_SETUP_CREATION_READER_READ_COLUMNS,
+  HOTEL_SETUP_READER_RLS_HELPERS,
 } from "./hotelSetupReaderPrivileges.js";
 
 const modes = ["property_commands", "property_creation"] as const;
@@ -57,6 +58,8 @@ describe.runIf(connectionString)("private reader effective ACL on migrated Postg
       await client.query(
         `GRANT INSERT (${HOTEL_SETUP_READER_AUDIT_COLUMNS.join(",")}) ON platform.product_audit_events TO ${reader}`,
       );
+      for (const helper of HOTEL_SETUP_READER_RLS_HELPERS)
+        await client.query(`GRANT EXECUTE ON FUNCTION ${helper} TO ${reader}`);
       await client.query(`SET SESSION AUTHORIZATION ${reader}`);
       await assertHotelSetupServiceReader(client, mode);
       await expect(assertHotelSetupReaderPrivileges(client, mode)).resolves.toBeUndefined();

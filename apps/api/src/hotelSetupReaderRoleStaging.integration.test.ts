@@ -7,6 +7,7 @@ import {
   assertHotelSetupReaderPrivileges,
   HOTEL_SETUP_READER_READ_COLUMNS,
   HOTEL_SETUP_READER_AUDIT_COLUMNS,
+  HOTEL_SETUP_READER_RLS_HELPERS,
 } from "./hotelSetupReaderPrivileges.js";
 import { stageHotelSetupReaderRole } from "./hotelSetupReaderRoleStaging.js";
 
@@ -130,6 +131,10 @@ describe.runIf(connectionString)("disabled reader staging on isolated PostgreSQL
       for (const [relation, columns] of Object.entries(HOTEL_SETUP_READER_READ_COLUMNS))
         await admin.query(
           `GRANT SELECT (${columns.join(",")}) ON ${relation} TO ${provisioner} WITH GRANT OPTION`,
+        );
+      for (const helper of HOTEL_SETUP_READER_RLS_HELPERS)
+        await admin.query(
+          `GRANT EXECUTE ON FUNCTION ${helper} TO ${provisioner} WITH GRANT OPTION`,
         );
       const provisionerUrl = new URL(url);
       provisionerUrl.username = provisioner;
