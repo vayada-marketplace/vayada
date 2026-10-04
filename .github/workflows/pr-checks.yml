@@ -557,6 +557,20 @@ jobs:
                 "src/hotelSetupAutomaticCreatorFlow.integration.test.ts"], {env: flowEnv, stdio: "inherit"});
               process.exitCode = flow.status ?? 1;
             }
+            if (process.exitCode === 0) {
+              const connections = await admin.query("SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname='vay1092_vay965_creation_test'");
+              if (connections.rows[0]?.count !== 0) throw new Error("Native template connections must close before cloning");
+              await admin.query("CREATE DATABASE vay1092_approved_backfill_test TEMPLATE vay1092_vay965_creation_test");
+              const backfillUrl = new URL(url);
+              backfillUrl.pathname = "/vay1092_approved_backfill_test";
+              const backfillEnv = {...env,
+                HOTEL_SETUP_APPROVED_BACKFILL_TEST_DATABASE_URL: backfillUrl.toString(),
+                HOTEL_SETUP_APPROVED_BACKFILL_ROLLBACK_ROOT: `${process.env.GITHUB_WORKSPACE}/.hotel-setup-compatible-rollback`};
+              const backfill = spawnSync("npm", ["--workspace", "vayada-api", "run", "test", "--", "--no-file-parallelism",
+                "src/hotelSetupApprovedReadinessBackfill.integration.test.ts",
+                "src/hotelSetupReadinessReaderGrant.integration.test.ts"], {env: backfillEnv, stdio: "inherit"});
+              process.exitCode = backfill.status ?? 1;
+            }
           } finally {
             await admin.query(`DROP ROLE ${role}`);
             await admin.end();
@@ -586,6 +600,9 @@ jobs:
           src/cli/hotelSetupPropertyBootstrap.test.ts
           src/hotelSetupAutomaticReconciliation.test.ts
           src/cli/hotelSetupAutomaticProvisioning.test.ts
+          src/hotelSetupApprovedReadinessBackfill.test.ts
+          src/hotelSetupReadinessReaderGrant.test.ts
+          src/cli/hotelSetupApprovedReadinessBackfill.test.ts
           src/hotelSetupLaunchSettingsCommands.test.ts
           src/hotelSetupLaunchSettingsCredentials.test.ts
           src/hotelSetupLaunchSettingsRepository.test.ts
