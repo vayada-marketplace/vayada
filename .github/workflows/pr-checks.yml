@@ -533,6 +533,7 @@ jobs:
           src/hotelSetupCommandScope.test.ts
           src/hotelSetupCreationCommands.test.ts
           src/hotelSetupCreationCredentials.test.ts
+          src/hotelSetupNativeSecretReader.test.ts
           src/hotelSetupCommandServiceConfig.test.ts
           src/hotelSetupCommandService.test.ts
           src/hotelSetupCommandServer.test.ts

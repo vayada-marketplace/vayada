@@ -3,8 +3,17 @@ import { createHotelSetupCredentialResolver } from "./hotelSetupCommandCredentia
 const propertyId = "11111111-1111-4111-8111-111111111111";
 const organizationId = "22222222-2222-4222-8222-222222222222";
 const databaseLogin = "vayada_next_hotel_setup_property_launch_test";
-const assignment = { databaseLogin, propertyId, organizationId, operation: "launch_settings" };
-function fixture(rows = [assignment]) {
+const assignment = {
+  databaseLogin,
+  propertyId,
+  organizationId,
+  operation: "launch_settings",
+  credentialRoleOid: 12345,
+  actualRoleOid: 12345,
+  credentialSecretVersion: "11111111-1111-4111-8111-111111111111",
+  credentialReadyAt: new Date("2026-10-04T00:00:00Z"),
+};
+function fixture(rows: unknown[] = [assignment]) {
   const query = vi.fn().mockResolvedValue({ rows });
   const get = vi.fn().mockResolvedValue({ username: databaseLogin, password: "p".repeat(48) });
   return {
@@ -13,7 +22,7 @@ function fixture(rows = [assignment]) {
     resolve: createHotelSetupCredentialResolver(
       {
         assignments: { query },
-        vault: { get },
+        readNativeSecret: get,
         databaseEndpoint: "postgresql://db.example.test/target",
         secretPrefix: "hotel-setup-command/prod/property/",
       },
@@ -27,7 +36,10 @@ it("selects only assigned launch credentials on each request", async () => {
   expect(url.username).toBe(databaseLogin);
   expect(url.searchParams.get("sslmode")).toBe("verify-full");
   expect(f.query.mock.calls[0]?.[1]).toEqual([propertyId, organizationId, "launch_settings"]);
-  expect(f.get).toHaveBeenCalledWith("hotel-setup-command/prod/property/" + databaseLogin);
+  expect(f.get).toHaveBeenCalledWith(
+    "hotel-setup-command/prod/property/" + databaseLogin,
+    "11111111-1111-4111-8111-111111111111",
+  );
   f.query.mockResolvedValue({ rows: [] });
   await expect(f.resolve(propertyId, organizationId)).rejects.toThrow(
     "Missing hotel setup assignment",
@@ -42,6 +54,10 @@ it.each([
   [{ ...assignment, operation: "currency_ready" }],
   [{ ...assignment, operation: "feature_hub" }],
   [{ ...assignment, databaseLogin: "vayada_next_api_runtime" }],
+  [{ ...assignment, credentialRoleOid: null }],
+  [{ ...assignment, actualRoleOid: 12346 }],
+  [{ ...assignment, credentialSecretVersion: "latest" }],
+  [{ ...assignment, credentialReadyAt: null }],
 ])(
   "rejects absent, ambiguous or cross-purpose assignments before fetching secrets: %j",
   async (...rows) => {

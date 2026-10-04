@@ -13,7 +13,18 @@ const organizationId = "11111111-1111-4111-8111-111111111111";
 const login = "vayada_next_hotel_setup_org_test";
 
 function fixture() {
-  const query = vi.fn().mockResolvedValue({ rows: [{ organizationId, databaseLogin: login }] });
+  const query = vi.fn().mockResolvedValue({
+    rows: [
+      {
+        organizationId,
+        databaseLogin: login,
+        credentialRoleOid: 12345,
+        actualRoleOid: 12345,
+        credentialSecretVersion: "11111111-1111-4111-8111-111111111111",
+        credentialReadyAt: new Date("2026-10-04T00:00:00Z"),
+      },
+    ],
+  });
   const get = vi.fn().mockResolvedValue({ username: login, password: "x".repeat(32) });
   const save = vi.fn().mockResolvedValue({ propertyId: organizationId });
   const close = vi.fn().mockResolvedValue(undefined);
@@ -23,7 +34,7 @@ function fixture() {
   } as unknown as SharedHotelSetupStatusRepository);
   const commands = createHotelSetupCreationCommands({
     assignments: { query },
-    vault: { get },
+    readNativeSecret: get,
     databaseEndpoint: "postgresql://database.internal/target",
     secretPrefix: "hotel-setup-command/prod/organization/",
   });

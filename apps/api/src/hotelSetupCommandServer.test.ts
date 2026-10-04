@@ -67,12 +67,8 @@ vi.mock("./hotelSetupReaderPrivileges.js", () => ({
 vi.mock("./platform/postgresRuntime.js", () => ({
   installPostgresPoolRuntime: () => ({ close: mocks.runtimeClose }),
 }));
-vi.mock("./platform/providerCredentialVault.js", () => ({
-  createSecretsManagerProviderCredentialVault: () => ({
-    get: mocks.get,
-    put: vi.fn(),
-    delete: vi.fn(),
-  }),
+vi.mock("./hotelSetupNativeSecretReader.js", () => ({
+  createHotelSetupNativeSecretReader: () => mocks.get,
 }));
 vi.mock("./hotelSetupCreationCommands.js", () => ({
   createHotelSetupCreationCommands: mocks.creation,
@@ -126,12 +122,12 @@ describe("private hotel setup executable", () => {
     });
     expect(options.currencyCommands).toBe(mocks.currency.mock.results[0]!.value);
     expect(options.launchSettings).toBe(mocks.launch.mock.results[0]!.value);
-    expect(mocks.launch.mock.calls[0]![0].vault).toEqual({ get: mocks.get });
+    expect(mocks.launch.mock.calls[0]![0].readNativeSecret).toBe(mocks.get);
     expect(mocks.preflight.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.launch.mock.invocationCallOrder[0]!,
     );
-    expect(mocks.currency.mock.calls[0]![0].vault).toEqual({ get: mocks.get });
-    expect(mocks.toggle.mock.calls[0]![0].vault).toEqual({ get: mocks.get });
+    expect(mocks.currency.mock.calls[0]![0].readNativeSecret).toBe(mocks.get);
+    expect(mocks.toggle.mock.calls[0]![0].readNativeSecret).toBe(mocks.get);
     for (const repository of [mocks.identity, mocks.role, mocks.entitlements, mocks.access])
       expect(repository).toHaveBeenCalledWith({ connectionString: "private-reader-url" });
     expect(mocks.broadWrite).not.toHaveBeenCalled();
