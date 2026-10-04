@@ -554,7 +554,8 @@ jobs:
                 HOTEL_SETUP_AUTOMATIC_ROLLBACK_PREFLIGHT_ROOT: `${process.env.GITHUB_WORKSPACE}/.hotel-setup-compatible-rollback`};
               const flow = spawnSync("npm", ["--workspace", "vayada-api", "run", "test", "--", "--no-file-parallelism",
                 "src/hotelSetupAutomaticOwnerFlow.integration.test.ts",
-                "src/hotelSetupAutomaticCreatorFlow.integration.test.ts"], {env: flowEnv, stdio: "inherit"});
+                "src/hotelSetupAutomaticCreatorFlow.integration.test.ts",
+                "src/hotelSetupAutomaticReaderRls.integration.test.ts"], {env: flowEnv, stdio: "inherit"});
               process.exitCode = flow.status ?? 1;
             }
             if (process.exitCode === 0) {
