@@ -45,3 +45,15 @@ parameter. The public service retains its present secrets and privileges. No
 GRANT OPTION, role-owner membership or helper function body change is introduced.
 Online setup stays disabled until this path has native PostgreSQL 16/17 proof,
 immutable primary/rollback package proof and a reviewed deployment.
+
+The protected offline readiness inspection, reader grants and approved legacy
+backfill take the exclusive session lock on `8734516` on their administrative
+connection. A live shared provisioning lock causes immediate refusal before
+catalog inspection or grants. The backfill lock lasts through native proofs,
+secret/version verification and readiness commit; uncertain-commit inspection
+reacquires it on a fresh connection. Read-only inspection releases its lock before
+Secrets Manager metadata reads; apply independently rechecks the frozen identities
+and versions under its own lock. Role OID, flags, membership and verifier
+checks remain exact catalog reads. They do not row-lock `pg_authid`, which would
+require catalog UPDATE privileges unavailable to the production administrator.
+No catalog write privileges are added.

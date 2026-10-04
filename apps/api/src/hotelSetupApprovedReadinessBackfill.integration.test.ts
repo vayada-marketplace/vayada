@@ -59,6 +59,7 @@ describe.runIf(databaseUrl && rollbackRoot)(
       FROM pg_database d LEFT JOIN LATERAL aclexplode(COALESCE(d.datacl,acldefault('d',d.datdba))) a ON true
       WHERE d.datallowconn GROUP BY d.datname`)
       ).rows;
+      const operationalUrl = new URL(url);
       const owned = new Map<string, number>();
       const createdOrganizations = new Set<string>();
       const before = (
@@ -77,6 +78,16 @@ describe.runIf(databaseUrl && rollbackRoot)(
         expect(
           (await admin.query("SELECT oid FROM pg_roles WHERE rolname=$1", [login])).rows,
         ).toEqual([{ oid }]);
+        if (APPROVED_HOTEL_SETUP_BACKFILLS.some((binding) => binding.login === login)) {
+          await admin.query(`SET ROLE ${admin.escapeIdentifier(operationalUrl.username)}`);
+          try {
+            await admin.query(
+              `REVOKE INSERT(${HOTEL_SETUP_CREATION_PRIVILEGES["identity.product_entitlements"]!.INSERT!.join(",")}) ON identity.product_entitlements FROM ${admin.escapeIdentifier(login)}`,
+            );
+          } finally {
+            await admin.query("RESET ROLE");
+          }
+        }
         await admin.query(`DROP OWNED BY ${admin.escapeIdentifier(login)}`);
         await admin.query(`DROP ROLE ${admin.escapeIdentifier(login)}`);
         owned.delete(login);
@@ -92,6 +103,42 @@ describe.runIf(databaseUrl && rollbackRoot)(
         return oid;
       };
       try {
+        const operatorLogin = `vay965_approved_operator_${randomUUID().replaceAll("-", "")}`;
+        const operatorPassword = randomBytes(32).toString("base64url");
+        await admin.query(`CREATE ROLE ${admin.escapeIdentifier(operatorLogin)} LOGIN NOINHERIT
+          NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS
+          PASSWORD ${admin.escapeLiteral(operatorPassword)}`);
+        const operatorOid = (
+          await admin.query("SELECT oid FROM pg_roles WHERE rolname=$1", [operatorLogin])
+        ).rows[0].oid;
+        owned.set(operatorLogin, operatorOid);
+        await admin.query(
+          `GRANT CONNECT ON DATABASE ${admin.escapeIdentifier(url.pathname.slice(1))} TO ${admin.escapeIdentifier(operatorLogin)}`,
+        );
+        await admin.query(
+          `GRANT USAGE ON SCHEMA identity,platform,hotel_catalog,pms TO ${admin.escapeIdentifier(operatorLogin)}`,
+        );
+        // Disposable fixture authority: catalog SELECT, deliberately never catalog UPDATE.
+        await admin.query(
+          `GRANT SELECT ON pg_catalog.pg_authid TO ${admin.escapeIdentifier(operatorLogin)}`,
+        );
+        await admin.query(
+          `GRANT ALL ON ALL TABLES IN SCHEMA identity,platform,hotel_catalog,pms TO ${admin.escapeIdentifier(operatorLogin)} WITH GRANT OPTION`,
+        );
+        operationalUrl.username = operatorLogin;
+        operationalUrl.password = operatorPassword;
+        const operator = new pg.Client({ connectionString: operationalUrl.href });
+        await operator.connect();
+        try {
+          expect(
+            (
+              await operator.query(`SELECT rolsuper,pg_catalog.has_table_privilege(current_user,'pg_catalog.pg_authid','UPDATE') AS catalog_update
+            FROM pg_roles WHERE rolname=current_user`)
+            ).rows,
+          ).toEqual([{ rolsuper: false, catalog_update: false }]);
+        } finally {
+          await operator.end();
+        }
         expect(
           (
             await admin.query(
@@ -238,7 +285,7 @@ describe.runIf(databaseUrl && rollbackRoot)(
                 return result;
               } as never);
             const input = {
-              adminDatabaseUrl: url.toString(),
+              adminDatabaseUrl: operationalUrl.toString(),
               nativeDatabaseUrl: native.toString(),
               databaseEndpoint: endpoint.toString(),
               inspectionReceipt: inspected,
@@ -251,6 +298,23 @@ describe.runIf(databaseUrl && rollbackRoot)(
               }),
             ).rejects.toThrow("requires recovery inspection");
             expect(send).not.toHaveBeenCalled();
+            if (mode === "success") {
+              await admin.query("SELECT pg_catalog.pg_advisory_lock_shared(8734516)");
+              try {
+                await expect(
+                  backfillApprovedHotelSetupOrganizationReadiness(input),
+                ).rejects.toThrow("requires recovery inspection");
+                const rejectedInsertGrants = (
+                  await admin.query(
+                    "SELECT column_name FROM information_schema.column_privileges WHERE grantee=$1 AND table_schema='identity' AND table_name='product_entitlements' AND privilege_type='INSERT'",
+                    [binding.login],
+                  )
+                ).rows;
+                expect(rejectedInsertGrants).toEqual([]);
+              } finally {
+                await admin.query("SELECT pg_catalog.pg_advisory_unlock_shared(8734516)");
+              }
+            }
             const run = backfillApprovedHotelSetupOrganizationReadiness(input);
             if (["success", "commitLost"].includes(mode))
               await expect(run).resolves.toMatchObject({
@@ -357,6 +421,7 @@ describe.runIf(databaseUrl && rollbackRoot)(
             binding.organizationId,
           ]);
         }
+        for (const login of [...owned.keys()]) await removeOwnedRole(login);
         for (const db of databases) {
           await admin.query(
             `REVOKE ALL ON DATABASE ${admin.escapeIdentifier(db.name)} FROM PUBLIC`,

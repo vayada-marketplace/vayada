@@ -1,3 +1,4 @@
+import { lockHotelSetupOfflineBootstrap } from "./hotelSetupHelperOwnerGrants.js";
 import type pg from "pg";
 import { hotelSetupOrganizationConnection } from "./hotelSetupOrganizationRoleStaging.js";
 import { isHotelSetupInspectedOid } from "./hotelSetupApprovedReadinessBackfill.js";
@@ -37,8 +38,7 @@ export async function grantHotelSetupReadinessReaderColumns(input: {
          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE member=r.oid)
          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_db_role_setting WHERE setrole=r.oid)
          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_shdepend
-           WHERE refclassid='pg_catalog.pg_authid'::regclass AND refobjid=r.oid AND deptype='o')
-         FOR SHARE OF r`,
+           WHERE refclassid='pg_catalog.pg_authid'::regclass AND refobjid=r.oid AND deptype='o')`,
         [oids[index], reader.login],
       );
       if (identity.rows.length !== 1) throw new Error();
@@ -67,6 +67,7 @@ export async function grantHotelSetupReadinessReaderColumns(input: {
       if (notice.code === "01007") incomplete = true;
     });
     await admin.connect();
+    await lockHotelSetupOfflineBootstrap(admin);
     await admin.query("BEGIN");
     await inspect(admin, false);
     for (const reader of readers)
@@ -92,6 +93,7 @@ export async function grantHotelSetupReadinessReaderColumns(input: {
           inspectionFailed = true;
         });
         await client.connect();
+        await lockHotelSetupOfflineBootstrap(client);
         await client.query("BEGIN");
         await inspect(client, true);
         if (inspectionFailed) throw new Error();
