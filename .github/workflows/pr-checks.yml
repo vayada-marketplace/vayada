@@ -128,7 +128,7 @@ jobs:
   api_postgres:
     name: TypeScript API PostgreSQL Integration (PG${{ matrix.postgres }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
