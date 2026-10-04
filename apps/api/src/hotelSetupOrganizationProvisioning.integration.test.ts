@@ -9,7 +9,10 @@ import {
 } from "@aws-sdk/client-secrets-manager";
 import { describe, expect, it, vi } from "vitest";
 import { checkHotelSetupCreationCredential } from "./cli/hotelSetupCreationPreflight.js";
-import { stageHotelSetupOrganizationRole } from "./hotelSetupOrganizationRoleStaging.js";
+import {
+  stageHotelSetupOrganizationRole,
+  type HotelSetupOrganizationBootstrapScope,
+} from "./hotelSetupOrganizationRoleStaging.js";
 import { activateVerifiedHotelSetupOrganizationRole } from "./hotelSetupOrganizationRoleActivation.js";
 
 const databaseUrl = process.env.HOTEL_SETUP_ORGANIZATION_BOOTSTRAP_TEST_DATABASE_URL;
@@ -38,7 +41,10 @@ describe.runIf(databaseUrl)(
             COALESCE(d.datacl,pg_catalog.acldefault('d',d.datdba))) a ON true
           WHERE d.datallowconn GROUP BY d.datname`)
         ).rows;
-        const scope = { organizationId: randomUUID(), actorUserId: randomUUID() };
+        const scope: HotelSetupOrganizationBootstrapScope = {
+          organizationId: randomUUID(),
+          actorUserId: randomUUID(),
+        };
         let staged: Awaited<ReturnType<typeof stageHotelSetupOrganizationRole>> | undefined;
         let versionId = "",
           secretString = "",
@@ -118,8 +124,8 @@ describe.runIf(databaseUrl)(
             [scope.actorUserId],
           );
           await admin.query(
-            `INSERT INTO identity.organization_memberships(organization_id,user_id,role_key,property_access_mode,pms_access_enabled,booking_access_enabled)
-        VALUES($1,$2,'hotel_owner','all',false,false)`,
+            `INSERT INTO identity.organization_memberships(organization_id,user_id,role_key,access_origin,property_access_mode,pms_access_enabled,booking_access_enabled)
+        VALUES($1,$2,'hotel_owner','agency','all',false,false)`,
             [scope.organizationId, scope.actorUserId],
           );
           staged = await stageHotelSetupOrganizationRole({
