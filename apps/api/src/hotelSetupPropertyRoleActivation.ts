@@ -8,7 +8,7 @@ import {
   type stageHotelSetupPropertyRole,
 } from "./hotelSetupPropertyRoleStaging.js";
 
-/** Manual exclusive provisioner only; credential remains unpublished through native proof. */
+/** Isolated provisioner only; serving admission waits for proof and readiness COMMIT. */
 export async function activateVerifiedHotelSetupPropertyRole(input: {
   adminDatabaseUrl: string;
   nativeDatabaseUrl: string;
@@ -27,8 +27,15 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
   let commitAttempted = false;
   let verifier = "";
   const { nativeDatabaseUrl, adminDatabaseUrl, databaseEndpoint } = input;
-  const { login, roleOid, propertyId, organizationId, actorUserId, operation } = input.staged ?? {};
-  const scope = Object.freeze({ propertyId, organizationId, actorUserId, operation });
+  const { login, roleOid, propertyId, organizationId, actorUserId, operation, automatic } =
+    input.staged ?? {};
+  const scope = Object.freeze({
+    propertyId,
+    organizationId,
+    actorUserId,
+    operation,
+    ...(automatic ? { automatic } : {}),
+  });
   const stagedScope = Object.freeze({ login, roleOid, ...scope });
   const { proveSecondary, publish } = input;
   try {

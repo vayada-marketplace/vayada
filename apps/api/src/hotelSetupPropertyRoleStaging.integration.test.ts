@@ -7,7 +7,10 @@ import {
 import { randomBytes, randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { stageHotelSetupPropertyRole } from "./hotelSetupPropertyRoleStaging.js";
+import {
+  lockHotelSetupPropertyBootstrapAuthority,
+  stageHotelSetupPropertyRole,
+} from "./hotelSetupPropertyRoleStaging.js";
 import { activateVerifiedHotelSetupPropertyRole } from "./hotelSetupPropertyRoleActivation.js";
 import type { HotelSetupOperation } from "./hotelSetupCommandScope.js";
 import { checkHotelSetupPropertyCredential } from "./cli/hotelSetupPropertyPreflight.js";
@@ -223,13 +226,45 @@ describe.runIf(connectionString)("manual disabled property-role staging", () => 
             ...input,
             staged,
             nativeDatabaseUrl: nativeUrl.toString(),
-            proveSecondary: checkHotelSetupPropertyCredential,
+            proveSecondary: async (client, provedScope) => {
+              expect(
+                (
+                  await admin.query(
+                    `SELECT credential_role_oid,credential_secret_version,credential_ready_at
+                FROM platform.hotel_setup_property_scopes WHERE database_login=$1`,
+                    [staged.login],
+                  )
+                ).rows,
+              ).toEqual([
+                {
+                  credential_role_oid: null,
+                  credential_secret_version: null,
+                  credential_ready_at: null,
+                },
+              ]);
+              await checkHotelSetupPropertyCredential(client, provedScope);
+            },
             publish: true,
           }),
         ).resolves.toEqual({
           ...staged,
           publication: { secretArn: expect.any(String), versionId: expect.any(String) },
         });
+        expect(
+          (
+            await admin.query(
+              `SELECT credential_role_oid,credential_secret_version,credential_ready_at
+          FROM platform.hotel_setup_property_scopes WHERE database_login=$1`,
+              [staged.login],
+            )
+          ).rows,
+        ).toEqual([
+          {
+            credential_role_oid: staged.roleOid,
+            credential_secret_version: stored.VersionId,
+            credential_ready_at: expect.any(Date),
+          },
+        ]);
 
         vi.restoreAllMocks();
         vi.unstubAllEnvs();
@@ -355,6 +390,94 @@ describe.runIf(connectionString)("manual disabled property-role staging", () => 
         queries.mockRestore();
       }
       expect(await count()).toEqual(original);
+      expect(await counts()).toEqual(before);
+
+      // Online eligibility is checked again at each phase, without a business write.
+      await admin.query(
+        "UPDATE identity.organization_memberships SET pms_access_enabled=TRUE,booking_access_enabled=TRUE WHERE user_id=$1",
+        [actorUserId],
+      );
+      await admin.query(
+        "INSERT INTO hotel_catalog.organization_setup_track_intents(organization_id,selected_tracks) VALUES($1,ARRAY['hotel_operations'])",
+        [organizationId],
+      );
+      await admin.query(
+        `INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship,status)
+        VALUES($1,'booking','booking_hotel',$2,'owner','active')`,
+        [organizationId, propertyId],
+      );
+      await admin.query(
+        "INSERT INTO identity.product_entitlements(organization_id,product,entitlement_key,status) VALUES($1,'booking','booking-engine','active')",
+        [organizationId],
+      );
+      const automatic = await stageHotelSetupPropertyRole({
+        ...input,
+        scope: { ...scope, automatic: true },
+      });
+      roles.push(automatic.login);
+      const automaticUrl = new URL(url);
+      automaticUrl.username = automatic.login;
+      automaticUrl.password = randomBytes(36).toString("base64url");
+      await expect(
+        activateVerifiedHotelSetupPropertyRole({
+          ...input,
+          staged: automatic,
+          nativeDatabaseUrl: automaticUrl.toString(),
+          proveSecondary: checkHotelSetupPropertyCredential,
+        }),
+      ).resolves.toEqual(automatic);
+      expect(
+        (
+          await admin.query(
+            "SELECT credential_ready_at FROM platform.hotel_setup_property_scopes WHERE database_login=$1",
+            [automatic.login],
+          )
+        ).rows,
+      ).toEqual([{ credential_ready_at: null }]);
+      await admin.query(
+        "DELETE FROM platform.hotel_setup_property_scopes WHERE database_login=$1",
+        [automatic.login],
+      );
+      await admin.query(`DROP OWNED BY ${admin.escapeIdentifier(automatic.login)}`);
+      await admin.query(`DROP ROLE ${admin.escapeIdentifier(automatic.login)}`);
+      roles.pop();
+      for (const change of [
+        null,
+        "UPDATE hotel_catalog.organization_setup_track_intents SET selected_tracks=ARRAY['creator_marketplace'] WHERE organization_id=$1",
+        "UPDATE identity.organization_memberships SET booking_access_enabled=FALSE WHERE organization_id=$1",
+        "UPDATE identity.organization_resource_links SET status='suspended' WHERE organization_id=$1 AND product='booking'",
+        "INSERT INTO identity.product_entitlements(organization_id,product,entitlement_key,status) VALUES($1,'pms','account_access','suspended')",
+        "INSERT INTO finance.billing_entitlements(organization_id,product,entitlement_key,billing_status) VALUES($1,'booking','booking-engine','past_due')",
+      ]) {
+        await admin.query("BEGIN");
+        try {
+          if (change) await admin.query(change, [organizationId]);
+          const proof = lockHotelSetupPropertyBootstrapAuthority(admin, {
+            ...scope,
+            automatic: true,
+          });
+          if (change) await expect(proof).rejects.toThrow();
+          else await expect(proof).resolves.toBeUndefined();
+        } finally {
+          await admin.query("ROLLBACK");
+        }
+      }
+      await admin.query(
+        "DELETE FROM hotel_catalog.organization_setup_track_intents WHERE organization_id=$1",
+        [organizationId],
+      );
+      await admin.query(
+        "DELETE FROM identity.organization_resource_links WHERE organization_id=$1 AND product='booking'",
+        [organizationId],
+      );
+      await admin.query(
+        "DELETE FROM identity.product_entitlements WHERE organization_id=$1 AND product='booking'",
+        [organizationId],
+      );
+      await admin.query(
+        "UPDATE identity.organization_memberships SET pms_access_enabled=FALSE WHERE user_id=$1",
+        [actorUserId],
+      );
       expect(await counts()).toEqual(before);
 
       const staged = await stageHotelSetupPropertyRole(input);

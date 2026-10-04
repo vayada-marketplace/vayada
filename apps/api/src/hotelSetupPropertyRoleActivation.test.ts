@@ -33,6 +33,7 @@ it.each([
   const operation = "launch_settings" as const;
   const login = `vayada_next_hotel_setup_property_${createHash("sha256").update(`${propertyId}:${operation}`).digest("hex").slice(0, 16)}_123456789abc`;
   const staged = {
+    ...(mode === "mutate" ? { automatic: true as const } : {}),
     login,
     roleOid: 42,
     propertyId,
@@ -95,6 +96,7 @@ it.each([
     if (mode === "mutate") {
       input.nativeDatabaseUrl = input.nativeDatabaseUrl.replace("b".repeat(36), "c".repeat(36));
       input.staged.propertyId = "10000000-0000-4000-8000-000000000004";
+      input.staged.automatic = undefined;
     }
     if (mode === "secondary") throw new Error("private-diagnostic");
   });

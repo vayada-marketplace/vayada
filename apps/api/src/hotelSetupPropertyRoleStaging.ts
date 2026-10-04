@@ -1,6 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import pg from "pg";
-import { resolveEffectivePropertyAccess } from "@vayada/backend-authorization";
+import {
+  hasActiveEntitlement,
+  resolveEffectivePropertyAccess,
+} from "@vayada/backend-authorization";
 import { parseHotelSetupDatabaseUrl } from "./hotelSetupCommandServiceConfig.js";
 import type { HotelSetupOperation } from "./hotelSetupCommandScope.js";
 import { lockHotelSetupMembership } from "./hotelSetupMembership.js";
@@ -17,6 +20,8 @@ export type HotelSetupPropertyBootstrapScope = {
   organizationId: string;
   actorUserId: string;
   operation: HotelSetupOperation;
+  /** Trusted reconciler only: adds eligibility checks; never bypasses manual release gates. */
+  automatic?: true;
 };
 const inventories = {
   launch_settings: HOTEL_SETUP_LAUNCH_SETTINGS_PRIVILEGES,
@@ -25,7 +30,7 @@ const inventories = {
   feature_hub: HOTEL_SETUP_FEATURE_HUB_PRIVILEGES,
 };
 
-/** Separate manual provisioner only, with service/caller admission blocked.
+/** Isolated provisioner only; manual callers retain their blocked service gate.
  * No password, assignment, secret or business command is created by staging. */
 export async function stageHotelSetupPropertyRole(input: {
   adminDatabaseUrl: string;
@@ -38,13 +43,21 @@ export async function stageHotelSetupPropertyRole(input: {
   let commitAttempted = false;
   try {
     const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const { propertyId, organizationId, actorUserId, operation } = input.scope;
-    const scope = { propertyId, organizationId, actorUserId, operation };
+    const { propertyId, organizationId, actorUserId, operation, automatic } = input.scope;
+    const scope = {
+      propertyId,
+      organizationId,
+      actorUserId,
+      operation,
+      ...(automatic ? { automatic } : {}),
+    };
     if (
       !uuid.test(scope.propertyId) ||
       !uuid.test(scope.organizationId) ||
       !uuid.test(scope.actorUserId) ||
-      !Object.hasOwn(inventories, scope.operation)
+      !Object.hasOwn(inventories, scope.operation) ||
+      (automatic !== undefined && automatic !== true) ||
+      (automatic && operation === "currency")
     )
       throw new Error();
     const url = parseHotelSetupDatabaseUrl(
@@ -134,6 +147,15 @@ export async function lockHotelSetupPropertyBootstrapAuthority(
   admin: pg.Client,
   scope: HotelSetupPropertyBootstrapScope,
 ) {
+  if (scope.automatic) {
+    const organization = await admin.query(
+      `SELECT id FROM identity.organizations WHERE id=$1::uuid
+       AND kind='hotel_group' AND status='active' FOR UPDATE`,
+      [scope.organizationId],
+    );
+    if (organization.rows.length !== 1)
+      throw new Error("Hotel setup property authority unavailable");
+  }
   const owner = await admin.query(
     `SELECT property.id FROM hotel_catalog.properties property
      JOIN identity.organizations organization ON organization.id=$2::uuid
@@ -148,6 +170,7 @@ export async function lockHotelSetupPropertyBootstrapAuthority(
     [scope.propertyId, scope.organizationId],
   );
   if (owner.rows.length !== 1) throw new Error("Hotel setup property authority unavailable");
+  if (scope.automatic) await lockHotelSetupAutomaticPropertyEligibility(admin, scope);
   if (scope.operation === "launch_settings") {
     const membership = await lockHotelSetupMembership(admin, scope);
     const access =
@@ -182,4 +205,104 @@ export async function lockHotelSetupPropertyBootstrapAuthority(
     ))
   )
     throw new Error("Hotel setup property actor unavailable");
+}
+
+/** Existing manual authority stays intact; online setup additionally requires the
+ * selected commercial bundle and both current products, without enabling either. */
+async function lockHotelSetupAutomaticPropertyEligibility(
+  admin: pg.Client,
+  scope: HotelSetupPropertyBootstrapScope,
+) {
+  if (scope.operation === "currency") throw new Error("Unused automatic property purpose");
+  const intent = await admin.query<{ selected_tracks: string[] }>(
+    `SELECT selected_tracks FROM hotel_catalog.organization_setup_track_intents
+     WHERE organization_id=$1::uuid FOR SHARE`,
+    [scope.organizationId],
+  );
+  const bookingOwner = await admin.query(
+    `SELECT resource_id FROM identity.organization_resource_links
+     WHERE organization_id=$1::uuid AND product='booking' AND resource_type='booking_hotel'
+       AND lower(resource_id)=$2::uuid::text AND relationship='owner' AND status='active' FOR SHARE`,
+    [scope.organizationId, scope.propertyId],
+  );
+  const membership = await lockHotelSetupMembership(admin, scope);
+  if (
+    intent.rows.length !== 1 ||
+    !intent.rows[0]?.selected_tracks.includes("hotel_operations") ||
+    bookingOwner.rows.length !== 1 ||
+    !membership?.scope.productAccess?.pms ||
+    !membership.scope.productAccess.booking
+  )
+    throw new Error("Hotel setup automatic products unavailable");
+  const entitlements = await admin.query<{
+    product: "pms" | "booking";
+    key: string;
+    status: "active" | "suspended" | "expired";
+    resourceId: string | null;
+    startsAt: Date | null;
+    expiresAt: Date | null;
+  }>(
+    `SELECT product,entitlement_key AS key,status,
+       CASE WHEN resource_product IS NULL THEN NULL ELSE resource_id::uuid::text END AS "resourceId",
+       starts_at AS "startsAt",expires_at AS "expiresAt"
+     FROM identity.product_entitlements WHERE organization_id=$1::uuid AND product IN ('pms','booking')
+       AND entitlement_key IN ('property-management','pms-core','account_access','booking-engine')
+       AND (resource_product IS NULL OR (resource_product=product AND lower(resource_id)=$2::uuid::text
+         AND resource_type=CASE product WHEN 'pms' THEN 'pms_property' ELSE 'booking_hotel' END)) FOR SHARE`,
+    [scope.organizationId, scope.propertyId],
+  );
+  const billing = await admin.query<{
+    product: "pms" | "booking";
+    status: string;
+    startsAt: Date | null;
+    expiresAt: Date | null;
+  }>(
+    `SELECT product,billing_status AS status,starts_at AS "startsAt",expires_at AS "expiresAt"
+     FROM finance.billing_entitlements WHERE organization_id=$1::uuid
+       AND (property_id IS NULL OR property_id=$2::uuid)
+       AND ((product='pms' AND entitlement_key IN ('property-management','pms-core','account_access'))
+         OR (product='booking' AND entitlement_key IN ('booking-engine','account_access'))) FOR SHARE`,
+    [scope.organizationId, scope.propertyId],
+  );
+  const clock = await admin.query<{ at: Date }>("SELECT pg_catalog.clock_timestamp() AS at");
+  const at = clock.rows[0]?.at;
+  if (!(at instanceof Date) || !Number.isFinite(at.getTime())) throw new Error();
+  for (const product of ["pms", "booking"] as const) {
+    const resourceType = product === "pms" ? "pms_property" : "booking_hotel";
+    const context = {
+      entitlements: entitlements.rows
+        .filter((row) => row.startsAt === null || row.startsAt <= at)
+        .map((row) => ({
+          product: row.product,
+          key: row.key,
+          status: row.expiresAt !== null && row.expiresAt <= at ? ("expired" as const) : row.status,
+          ...(row.resourceId === null
+            ? {}
+            : {
+                resource: {
+                  product: row.product,
+                  resourceType:
+                    row.product === "pms" ? ("pms_property" as const) : ("booking_hotel" as const),
+                  resourceId: row.resourceId,
+                },
+              }),
+        })),
+    };
+    const bills = billing.rows.filter((row) => row.product === product);
+    const current = bills.filter(
+      (row) =>
+        (row.startsAt === null || row.startsAt <= at) &&
+        (row.expiresAt === null || row.expiresAt > at),
+    );
+    if (
+      !hasActiveEntitlement(context, {
+        product,
+        key: product === "pms" ? "property-management" : "booking-engine",
+        resource: { product, resourceType, resourceId: scope.propertyId },
+      }) ||
+      current.some((row) => ["past_due", "suspended"].includes(row.status)) ||
+      (bills.length && !current.some((row) => ["trialing", "active"].includes(row.status)))
+    )
+      throw new Error("Hotel setup automatic products unavailable");
+  }
 }

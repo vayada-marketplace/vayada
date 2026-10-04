@@ -24,8 +24,9 @@ export async function publishHotelSetupPropertySecret(input: {
   let secrets: SecretsManagerClient | undefined;
   let sts: STSClient | undefined;
   let readinessCommitAttempted = false;
-  const { login, roleOid, propertyId, organizationId, actorUserId, operation } = input.staged;
-  const scope = Object.freeze({ propertyId, organizationId, actorUserId, operation });
+  const { login, roleOid, propertyId, organizationId, actorUserId, operation, automatic } =
+    input.staged;
+  const scope = Object.freeze({ propertyId, organizationId, actorUserId, operation, automatic });
   const name = `hotel-setup-command/prod/property/${login}`;
   try {
     if (

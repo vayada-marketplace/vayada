@@ -1,9 +1,14 @@
 import { EventEmitter } from "node:events";
 import pg from "pg";
 import { afterEach, expect, it, vi } from "vitest";
-import { stageHotelSetupPropertyRole } from "./hotelSetupPropertyRoleStaging.js";
+import {
+  lockHotelSetupPropertyBootstrapAuthority,
+  stageHotelSetupPropertyRole,
+} from "./hotelSetupPropertyRoleStaging.js";
+import { lockHotelSetupMembership } from "./hotelSetupMembership.js";
 import { lockHotelSetupCurrencyMembership } from "./hotelSetupCurrencyMembership.js";
 vi.mock("./hotelSetupCurrencyMembership.js", () => ({ lockHotelSetupCurrencyMembership: vi.fn() }));
+vi.mock("./hotelSetupMembership.js", () => ({ lockHotelSetupMembership: vi.fn() }));
 
 const input = {
   adminDatabaseUrl: `postgresql://admin:${"a".repeat(36)}@db.internal/test?sslmode=verify-full`,
@@ -61,9 +66,94 @@ it("rejects invalid purpose, identity and transport before constructing a client
       adminDatabaseUrl: input.adminDatabaseUrl.replace("sslmode=verify-full", "sslmode=disable"),
     },
     { ...input, adminDatabaseUrl: input.adminDatabaseUrl.replace("admin:", ":") },
+    { ...input, scope: { ...input.scope, automatic: false } },
+    { ...input, scope: { ...input.scope, automatic: true, operation: "currency" } },
   ])
     await expect(stageHotelSetupPropertyRole(invalid as typeof input)).rejects.toThrow(
       "staging failed",
     );
   expect(constructor).not.toHaveBeenCalled();
+});
+
+it.each([
+  "success",
+  "intent",
+  "bookingLink",
+  "bookingOff",
+  "pmsOff",
+  "bookingSuspended",
+  "pmsSuspended",
+  "bookingBilling",
+  "pmsBilling",
+  "billingEnded",
+  "clock",
+])("rechecks online eligibility under current locks on %s", async (mode) => {
+  vi.mocked(lockHotelSetupMembership).mockResolvedValue({
+    scope: {
+      productAccess: {
+        pms: mode !== "pmsOff",
+        booking: mode !== "bookingOff",
+      },
+    },
+  } as Awaited<ReturnType<typeof lockHotelSetupMembership>>);
+  vi.mocked(lockHotelSetupCurrencyMembership).mockResolvedValue(true);
+  const query = vi.fn(async (sql: string) => {
+    expect(sql === "SELECT pg_catalog.clock_timestamp() AS at" || sql.includes("FOR ")).toBe(true);
+    if (sql.includes("organization_setup_track_intents"))
+      return {
+        rows: [
+          {
+            selected_tracks: mode === "intent" ? ["creator_marketplace"] : ["hotel_operations"],
+          },
+        ],
+      };
+    if (sql.startsWith("SELECT resource_id")) return { rows: mode === "bookingLink" ? [] : [{}] };
+    if (sql.includes("FROM identity.product_entitlements"))
+      return {
+        rows: ["pms", "booking"].flatMap((product) => {
+          const active = {
+            product,
+            key: product === "pms" ? "property-management" : "booking-engine",
+            status: "active",
+            resourceId: null,
+            startsAt: null,
+            expiresAt: null,
+          };
+          return mode === product + "Suspended"
+            ? [active, { ...active, key: "account_access", status: "suspended" }]
+            : [active];
+        }),
+      };
+    if (sql.includes("FROM finance.billing_entitlements"))
+      return {
+        rows:
+          mode.endsWith("Billing") || mode === "billingEnded"
+            ? [
+                {
+                  product: mode === "bookingBilling" ? "booking" : "pms",
+                  status: mode === "billingEnded" ? "active" : "past_due",
+                  startsAt: null,
+                  expiresAt: mode === "billingEnded" ? new Date(0) : null,
+                },
+              ]
+            : [],
+      };
+    if (sql === "SELECT pg_catalog.clock_timestamp() AS at")
+      return {
+        rows: [
+          {
+            at: mode === "clock" ? "bad-clock" : new Date(),
+          },
+        ],
+      };
+    return { rows: [{}] };
+  });
+  const result = lockHotelSetupPropertyBootstrapAuthority({ query } as unknown as pg.Client, {
+    ...input.scope,
+    automatic: true,
+  });
+  if (mode === "success") await expect(result).resolves.toBeUndefined();
+  else await expect(result).rejects.toThrow();
+  expect(query.mock.calls[0]![0]).toContain("FROM identity.organizations");
+  expect(query.mock.calls[0]![0]).toContain("FOR UPDATE");
 });
