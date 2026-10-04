@@ -1,6 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import pg from "pg";
-import { HOTEL_SETUP_CREATION_PRIVILEGES } from "./hotelSetupCreationPrivileges.js";
+import {
+  HOTEL_SETUP_CREATION_PRIVILEGES,
+  HOTEL_SETUP_CREATION_RLS_HELPERS,
+} from "./hotelSetupCreationPrivileges.js";
 import { parseHotelSetupDatabaseUrl } from "./hotelSetupCommandServiceConfig.js";
 import { lockHotelSetupCreationPermissions } from "./hotelSetupMembership.js";
 
@@ -113,6 +116,14 @@ export async function stageHotelSetupOrganizationRole(input: {
     for (const [table, privileges] of Object.entries(HOTEL_SETUP_CREATION_PRIVILEGES))
       for (const [privilege, columns] of Object.entries(privileges))
         await admin.query(`GRANT ${privilege}(${columns.join(",")}) ON ${table} TO ${role}`);
+    const helper = await admin.query<{ safe: boolean }>(
+      `SELECT NOT prosecdef AS safe FROM pg_catalog.pg_proc WHERE oid=ANY($1::regprocedure[])`,
+      [HOTEL_SETUP_CREATION_RLS_HELPERS],
+    );
+    if (helper.rows.length !== 2 || helper.rows.some(({ safe }) => safe !== true))
+      throw new Error();
+    for (const signature of HOTEL_SETUP_CREATION_RLS_HELPERS)
+      await admin.query(`GRANT EXECUTE ON FUNCTION ${signature} TO ${role}`);
     const identity = await admin.query<{ oid: number }>(
       "SELECT oid FROM pg_catalog.pg_roles WHERE rolname=$1",
       [login],

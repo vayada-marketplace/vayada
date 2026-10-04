@@ -222,6 +222,10 @@ const definers = [
   "platform.hotel_setup_creation_audit_key_allowed(uuid,uuid,text)",
 ];
 const helpers = [...definers, "platform.hotel_setup_property_link_matches(uuid,text)"];
+export const HOTEL_SETUP_CREATION_RLS_HELPERS = [
+  "platform.channex_management_worker_source(text,text,uuid)",
+  "platform.channex_management_worker_scope(text,text,uuid)",
+] as const;
 
 /** On the same begun native client, before replay, actor checks, or any writes. */
 export async function assertHotelSetupCreationPrivileges(client: HotelSetupPrivilegeQueryable) {
@@ -232,6 +236,10 @@ export async function assertHotelSetupCreationPrivileges(client: HotelSetupPrivi
     NOT pg_catalog.has_database_privilege(current_user, pg_catalog.current_database(), 'TEMP')
     AND NOT pg_catalog.has_database_privilege(current_user, pg_catalog.current_database(), 'CONNECT WITH GRANT OPTION')
     AND pg_catalog.has_database_privilege(current_user, pg_catalog.current_database(), 'CONNECT')
+    AND (SELECT count(*) FROM pg_catalog.pg_proc p WHERE p.oid=ANY($4::regprocedure[])
+      AND NOT p.prosecdef AND pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE')
+      AND p.proowner=(SELECT relowner FROM pg_catalog.pg_class WHERE oid='platform.hotel_setup_creation_scopes'::regclass)
+      AND p.proconfig=ARRAY['search_path=pg_catalog']::text[])=2
     AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_proc p WHERE p.oid=ANY($1::regprocedure[])
       AND (NOT pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE')
         OR p.proowner<>(SELECT relowner FROM pg_catalog.pg_class WHERE oid='platform.hotel_setup_creation_scopes'::regclass)
@@ -268,7 +276,12 @@ export async function assertHotelSetupCreationPrivileges(client: HotelSetupPrivi
     AND NOT pg_catalog.has_parameter_privilege(current_user,'session_replication_role','SET')
     AND pg_catalog.current_setting('session_replication_role')='origin'
   ) AS safe`,
-    [helpers, definers, Object.keys(HOTEL_SETUP_CREATION_PRIVILEGES)],
+    [
+      helpers,
+      definers,
+      Object.keys(HOTEL_SETUP_CREATION_PRIVILEGES),
+      HOTEL_SETUP_CREATION_RLS_HELPERS,
+    ],
   );
   if (result.rows.length !== 1 || result.rows[0]?.safe !== true)
     throw new Error("Hotel setup creation privilege posture mismatch");
