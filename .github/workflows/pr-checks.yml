@@ -518,6 +518,14 @@ jobs:
               "src/hotelSetupReaderSecretCandidate.integration.test.ts", "src/cli/hotelSetupPropertyPreflight.test.ts",
               "src/cli/hotelSetupReaderPreflight.test.ts"], {env, stdio: "inherit"});
             process.exitCode = result.status ?? 1;
+            if (result.status === 0) {
+              await admin.query("CREATE DATABASE vay1092_readiness_organization_test TEMPLATE vay1092_vay965_creation_test");
+              url.pathname = "/vay1092_readiness_organization_test";
+              env.HOTEL_SETUP_ORGANIZATION_BOOTSTRAP_TEST_DATABASE_URL = url.toString();
+              const organization = spawnSync("npm", ["--workspace", "vayada-api", "run", "test", "--", "--no-file-parallelism",
+                "src/hotelSetupOrganizationProvisioning.integration.test.ts"], {env, stdio: "inherit"});
+              process.exitCode = organization.status ?? 1;
+            }
           } finally {
             await admin.query(`DROP ROLE ${role}`);
             await admin.end();
@@ -535,6 +543,9 @@ jobs:
           src/hotelSetupCreationCommands.test.ts
           src/hotelSetupCreationCredentials.test.ts
           src/hotelSetupNativeSecretReader.test.ts
+          src/hotelSetupOrganizationRoleStaging.test.ts
+          src/hotelSetupOrganizationSecretPublication.test.ts
+          src/hotelSetupOrganizationRoleActivation.test.ts
           src/hotelSetupCommandServiceConfig.test.ts
           src/hotelSetupCommandService.test.ts
           src/hotelSetupCommandServer.test.ts
