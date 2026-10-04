@@ -37,7 +37,7 @@ const guards = [
     workflow.jobs["build-and-push"].if,
     "${{ github.event_name == 'workflow_dispatch' || vars.COORDINATED_RELEASES_ENABLED != 'true' }}",
   );
-  assert(image.with.tags.includes(`'${tag}' || 'next'`));
+  assert(image.with.tags.includes("'" + tag + "' || 'next' }}-${{ steps.source.outputs.sha }}"));
   assert(image.with.tags.includes(`!inputs.${flag} && format(`));
   assert.equal(image.with.tags.trim().split("\n").length, 2);
   assert.equal(workflow.on.workflow_dispatch.inputs[flag].default, false);
