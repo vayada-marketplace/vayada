@@ -492,6 +492,20 @@ jobs:
           ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay1092_vay965_creation_test
 
+      - name: Checkout reviewed compatible setup rollback source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 187eeea3a5d6864283b854815334fe34c7ec752b
+          path: .hotel-setup-compatible-rollback
+          persist-credentials: false
+
+      - name: Build separately compiled compatible setup rollback
+        working-directory: .hotel-setup-compatible-rollback
+        run: |
+          test "$(git rev-parse HEAD)" = 187eeea3a5d6864283b854815334fe34c7ec752b
+          npm ci
+          npm run build:api
+
       - name: Verify native reader staging, login and secret candidates
         run: |
           node --input-type=module <<'NODE'
@@ -528,6 +542,20 @@ jobs:
               const organization = spawnSync("npm", ["--workspace", "vayada-api", "run", "test", "--", "--no-file-parallelism",
                 "src/hotelSetupOrganizationProvisioning.integration.test.ts"], {env, stdio: "inherit"});
               process.exitCode = organization.status ?? 1;
+            }
+            if (process.exitCode === 0) {
+              const connections = await admin.query("SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname='vay1092_vay965_creation_test'");
+              if (connections.rows[0]?.count !== 0) throw new Error("Native template connections must close before cloning");
+              await admin.query("CREATE DATABASE vay1092_automatic_owner_flow_test TEMPLATE vay1092_vay965_creation_test");
+              const flowUrl = new URL(url);
+              flowUrl.pathname = "/vay1092_automatic_owner_flow_test";
+              const flowEnv = {...env,
+                HOTEL_SETUP_AUTOMATIC_OWNER_FLOW_TEST_DATABASE_URL: flowUrl.toString(),
+                HOTEL_SETUP_AUTOMATIC_ROLLBACK_PREFLIGHT_ROOT: `${process.env.GITHUB_WORKSPACE}/.hotel-setup-compatible-rollback`};
+              const flow = spawnSync("npm", ["--workspace", "vayada-api", "run", "test", "--", "--no-file-parallelism",
+                "src/hotelSetupAutomaticOwnerFlow.integration.test.ts",
+                "src/hotelSetupAutomaticCreatorFlow.integration.test.ts"], {env: flowEnv, stdio: "inherit"});
+              process.exitCode = flow.status ?? 1;
             }
           } finally {
             await admin.query(`DROP ROLE ${role}`);
