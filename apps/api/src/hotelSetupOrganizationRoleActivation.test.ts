@@ -64,7 +64,8 @@ function fixture(mode: string) {
                   database_login: login,
                   organization_id: mode === "retarget" ? actorUserId : organizationId,
                   credential_role_oid: mode === "readyCommit" ? 42 : null,
-                  credential_secret_version: mode === "readyCommit" ? "immutable-version" : null,
+                  credential_secret_version:
+                    mode === "readyCommit" ? "33333333-3333-4333-8333-333333333333" : null,
                   credential_ready_at: mode === "readyCommit" ? new Date() : null,
                 },
               ],
@@ -101,7 +102,10 @@ function fixture(mode: string) {
   vi.mocked(publishHotelSetupOrganizationSecret).mockImplementation(async () => {
     if (["publication", "readyCommit", "changedOid", "changedVerifier", "retarget"].includes(mode))
       throw new Error("uncertain publication");
-    return { secretArn: "sanitized-reference", versionId: "immutable-version" };
+    return {
+      secretArn: "sanitized-reference",
+      versionId: "33333333-3333-4333-8333-333333333333",
+    };
   });
   return { adminQuery, adminEnd, nativeEnd, secondary };
 }
@@ -130,7 +134,7 @@ it.each([
   if (mode === "success") {
     await expect(result).resolves.toMatchObject({
       ...input.staged,
-      publication: { versionId: "immutable-version" },
+      publication: { versionId: "33333333-3333-4333-8333-333333333333" },
     });
     expect(checkHotelSetupCreationCredential).toHaveBeenCalledWith(expect.anything(), {
       organizationId,
