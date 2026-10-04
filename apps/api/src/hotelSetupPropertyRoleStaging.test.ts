@@ -22,39 +22,47 @@ const input = {
 };
 afterEach(() => vi.restoreAllMocks());
 
-it.each(["grantWarning", "transport", "commit"])("fails closed on %s", async (mode) => {
-  const sql: string[] = [];
-  const end = vi.fn().mockResolvedValue(undefined);
-  class Client extends EventEmitter {
-    async connect() {}
-    escapeIdentifier(name: string) {
-      return `"${name}"`;
+it.each(["grantWarning", "transport", "commit", "helperMissing", "helperDefiner"])(
+  "fails closed on %s",
+  async (mode) => {
+    const sql: string[] = [];
+    const end = vi.fn().mockResolvedValue(undefined);
+    class Client extends EventEmitter {
+      async connect() {}
+      escapeIdentifier(name: string) {
+        return `"${name}"`;
+      }
+      end = end;
+      async query(text: string) {
+        sql.push(text);
+        if (text.startsWith("GRANT INSERT") && mode === "grantWarning")
+          this.emit("notice", { code: "01007" });
+        if (text.startsWith("GRANT INSERT") && mode === "transport")
+          this.emit("error", new Error("private-diagnostic"));
+        if (text === "COMMIT" && mode === "commit")
+          this.emit("error", new Error("private-diagnostic"));
+        if (text.includes("left(rolname") || text.includes("SELECT database_login"))
+          return { rows: [] };
+        if (text.includes("SELECT NOT prosecdef AS safe"))
+          return {
+            rows:
+              mode === "helperMissing" ? [] : [{ safe: mode !== "helperDefiner" }, { safe: true }],
+          };
+        return { rows: [{ oid: 42 }] };
+      }
     }
-    end = end;
-    async query(text: string) {
-      sql.push(text);
-      if (text.startsWith("GRANT INSERT") && mode === "grantWarning")
-        this.emit("notice", { code: "01007" });
-      if (text.startsWith("GRANT INSERT") && mode === "transport")
-        this.emit("error", new Error("private-diagnostic"));
-      if (text === "COMMIT" && mode === "commit")
-        this.emit("error", new Error("private-diagnostic"));
-      if (text.includes("left(rolname") || text.includes("SELECT database_login"))
-        return { rows: [] };
-      return { rows: [{ oid: 42 }] };
-    }
-  }
-  vi.spyOn(pg, "Client").mockImplementation(function () {
-    return new Client();
-  } as unknown as typeof pg.Client);
-  vi.mocked(lockHotelSetupCurrencyMembership).mockResolvedValue(true);
-  await expect(stageHotelSetupPropertyRole(input)).rejects.toThrow(
-    mode === "commit" ? "staging requires recovery inspection" : "staging failed",
-  );
-  expect(sql.includes("COMMIT")).toBe(mode === "commit");
-  expect(sql.at(-1)).toBe("ROLLBACK");
-  expect(end).toHaveBeenCalledOnce();
-});
+    vi.spyOn(pg, "Client").mockImplementation(function () {
+      return new Client();
+    } as unknown as typeof pg.Client);
+    vi.mocked(lockHotelSetupCurrencyMembership).mockResolvedValue(true);
+    await expect(stageHotelSetupPropertyRole(input)).rejects.toThrow(
+      mode === "commit" ? "staging requires recovery inspection" : "staging failed",
+    );
+    expect(sql.includes("COMMIT")).toBe(mode === "commit");
+    expect(sql.at(-1)).toBe("ROLLBACK");
+    expect(end).toHaveBeenCalledOnce();
+  },
+);
 
 it("rejects invalid purpose, identity and transport before constructing a client", async () => {
   const constructor = vi.spyOn(pg, "Client");
@@ -74,6 +82,76 @@ it("rejects invalid purpose, identity and transport before constructing a client
     );
   expect(constructor).not.toHaveBeenCalled();
 });
+
+it.each([
+  ["launch_settings", ["scope"]],
+  ["currency_ready", ["source", "scope"]],
+  ["feature_hub", ["source", "scope"]],
+  ["currency", []],
+] as const)(
+  "grants only the proven invoker helpers for fresh %s roles",
+  async (operation, helpers) => {
+    const sql: string[] = [];
+    class Client extends EventEmitter {
+      async connect() {}
+      async end() {}
+      escapeIdentifier(name: string) {
+        return `"${name}"`;
+      }
+      async query(text: string) {
+        sql.push(text);
+        if (text.includes("left(rolname") || text.includes("SELECT database_login"))
+          return { rows: [] };
+        if (text.includes("SELECT NOT prosecdef AS safe"))
+          return { rows: helpers.map(() => ({ safe: true })) };
+        return { rows: [{ oid: 42 }] };
+      }
+    }
+    vi.spyOn(pg, "Client").mockImplementation(function () {
+      return new Client();
+    } as unknown as typeof pg.Client);
+    vi.mocked(lockHotelSetupCurrencyMembership).mockResolvedValue(true);
+    vi.mocked(lockHotelSetupMembership).mockResolvedValue({
+      context: {
+        actor: { internalUserId: input.scope.actorUserId, status: "active" },
+        selectedOrganization: {
+          organizationId: input.scope.organizationId,
+          kind: "hotel_group",
+          status: "active",
+        },
+        membership: { membershipId: input.scope.actorUserId, roleKey: "owner", status: "active" },
+        linkedResources: [
+          {
+            product: "hotel_catalog",
+            resourceType: "property",
+            resourceId: input.scope.propertyId,
+            relationship: "owner",
+            status: "active",
+          },
+        ],
+      },
+      permissions: ["hotel_catalog.setup.manage"],
+      scope: {
+        mode: "all",
+        roleKey: "owner",
+        accessOrigin: "agency",
+        assignedPropertyIds: [],
+        productAccess: { pms: true, booking: true },
+      },
+    } as Awaited<ReturnType<typeof lockHotelSetupMembership>>);
+    const role = await stageHotelSetupPropertyRole({
+      ...input,
+      scope: { ...input.scope, operation },
+    });
+    expect(sql.filter((text) => text.startsWith("GRANT EXECUTE"))).toEqual(
+      helpers.map(
+        (helper) =>
+          `GRANT EXECUTE ON FUNCTION platform.channex_management_worker_${helper}(text,text,uuid) TO "${role.login}"`,
+      ),
+    );
+    expect(sql.at(-1)).toBe("COMMIT");
+  },
+);
 
 it.each([
   "success",

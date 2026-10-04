@@ -4,6 +4,7 @@ import type {
 } from "./hotelSetupReaderPrivileges.js";
 import {
   assertHotelSetupNativePrivileges,
+  assertHotelSetupPropertyRlsHelpers,
   HOTEL_SETUP_FEATURE_HUB_PRIVILEGES,
 } from "./hotelSetupFeatureHubPrivileges.js";
 
@@ -85,6 +86,7 @@ export async function assertHotelSetupLaunchSettingsPrivileges(
     "1806e2aa27adf206bf1bd347ed6165c1",
     ["hotel_catalog.property_contact_channels"],
   );
+  await assertHotelSetupPropertyRlsHelpers(client, "launch_settings");
   const triggers = await client.query<{ safe: boolean }>(
     `SELECT (
     SELECT pg_catalog.md5(pg_catalog.string_agg(c.oid::regclass::text

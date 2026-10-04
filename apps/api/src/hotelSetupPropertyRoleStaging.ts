@@ -9,7 +9,10 @@ import type { HotelSetupOperation } from "./hotelSetupCommandScope.js";
 import { lockHotelSetupMembership } from "./hotelSetupMembership.js";
 import { lockHotelSetupCurrencyMembership } from "./hotelSetupCurrencyMembership.js";
 import { HOTEL_SETUP_LAUNCH_SETTINGS_PRIVILEGES } from "./hotelSetupLaunchSettingsPrivileges.js";
-import { HOTEL_SETUP_FEATURE_HUB_PRIVILEGES } from "./hotelSetupFeatureHubPrivileges.js";
+import {
+  HOTEL_SETUP_FEATURE_HUB_PRIVILEGES,
+  HOTEL_SETUP_PROPERTY_RLS_HELPERS,
+} from "./hotelSetupFeatureHubPrivileges.js";
 import {
   HOTEL_SETUP_CURRENCY_PRIVILEGES,
   HOTEL_SETUP_CURRENCY_READY_PRIVILEGES,
@@ -120,6 +123,17 @@ export async function stageHotelSetupPropertyRole(input: {
         await admin.query(`GRANT ${privilege}(${columns.join(",")}) ON ${table} TO ${role}`);
     if (scope.operation === "launch_settings")
       await admin.query(`GRANT DELETE ON hotel_catalog.property_contact_channels TO ${role}`);
+    const helpers = HOTEL_SETUP_PROPERTY_RLS_HELPERS[scope.operation];
+    if (helpers.length) {
+      const helper = await admin.query<{ safe: boolean }>(
+        "SELECT NOT prosecdef AS safe FROM pg_catalog.pg_proc WHERE oid=ANY($1::regprocedure[])",
+        [helpers],
+      );
+      if (helper.rows.length !== helpers.length || helper.rows.some(({ safe }) => safe !== true))
+        throw new Error();
+      for (const signature of helpers)
+        await admin.query(`GRANT EXECUTE ON FUNCTION ${signature} TO ${role}`);
+    }
     const result = await admin.query<{ oid: number }>(
       "SELECT oid FROM pg_catalog.pg_roles WHERE rolname=$1",
       [login],

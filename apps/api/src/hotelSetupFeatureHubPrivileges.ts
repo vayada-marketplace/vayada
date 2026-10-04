@@ -1,4 +1,5 @@
 import type pg from "pg";
+import type { HotelSetupOperation } from "./hotelSetupCommandScope.js";
 import {
   assertHotelSetupAuditBoundary,
   assertHotelSetupColumnPrivileges,
@@ -89,6 +90,33 @@ const definers = [
   "platform.hotel_setup_property_operation_allowed(uuid,text)",
   "platform.hotel_setup_property_assigned_organization()",
 ];
+const source = "platform.channex_management_worker_source(text,text,uuid)";
+const scope = "platform.channex_management_worker_scope(text,text,uuid)";
+export const HOTEL_SETUP_PROPERTY_RLS_HELPERS: Record<HotelSetupOperation, readonly string[]> = {
+  launch_settings: [scope],
+  currency_ready: [source, scope],
+  feature_hub: [source, scope],
+  currency: [],
+};
+
+/** Actual native commands need these invoker RLS helpers even for non-worker logins. */
+export async function assertHotelSetupPropertyRlsHelpers(
+  client: HotelSetupPrivilegeQueryable,
+  operation: HotelSetupOperation,
+) {
+  const helpers = HOTEL_SETUP_PROPERTY_RLS_HELPERS[operation];
+  if (!helpers.length) return;
+  const result = await client.query<{ safe: boolean }>(
+    `SELECT count(*) FILTER (WHERE NOT p.prosecdef AND pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE')
+      AND NOT pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE WITH GRANT OPTION')
+      AND p.proowner=(SELECT relowner FROM pg_catalog.pg_class WHERE oid='platform.hotel_setup_property_scopes'::regclass)
+      AND p.proconfig=ARRAY['search_path=pg_catalog']::text[])=$2 AS safe
+     FROM pg_catalog.pg_proc p WHERE p.oid=ANY($1::regprocedure[])`,
+    [helpers, helpers.length],
+  );
+  if (result.rows.length !== 1 || result.rows[0]?.safe !== true)
+    throw new Error("Hotel setup property RLS helper privileges unavailable");
+}
 
 /** Call inside a successfully begun native feature_hub scope. Not actor authorization. */
 export async function assertHotelSetupFeatureHubPrivileges(client: Pick<pg.Pool, "query">) {
@@ -97,6 +125,7 @@ export async function assertHotelSetupFeatureHubPrivileges(client: Pick<pg.Pool,
     HOTEL_SETUP_FEATURE_HUB_PRIVILEGES,
     "16827da3dbb58d1daf6c2d1231323ad9",
   );
+  await assertHotelSetupPropertyRlsHelpers(client, "feature_hub");
 }
 
 /** Shared native column, helper and policy attestation. Scope and actor checks remain separate. */

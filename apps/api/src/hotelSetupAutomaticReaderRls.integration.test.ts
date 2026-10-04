@@ -1,10 +1,16 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import type { RequestContext } from "@vayada/backend-auth";
+import { parseUpsertPropertyPricingCurrencyCommand } from "@vayada/domain-pms";
 import pg from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAutomaticOwnerFlowFixture } from "./hotelSetupAutomaticOwnerFlow.fixture.js";
 import { createHotelSetupCreationCommands } from "./hotelSetupCreationCommands.js";
 import { checkHotelSetupCreationCredential } from "./cli/hotelSetupCreationPreflight.js";
 import { checkHotelSetupPropertyCredential } from "./cli/hotelSetupPropertyPreflight.js";
+import { createHotelSetupLaunchSettingsCommands } from "./hotelSetupLaunchSettingsCommands.js";
+import { createHotelSetupCurrencyCommands } from "./hotelSetupCurrencyCommands.js";
+import { createHotelSetupFeatureHubCommands } from "./hotelSetupFeatureHubCommands.js";
+import { HOTEL_SETUP_PROPERTY_RLS_HELPERS } from "./hotelSetupFeatureHubPrivileges.js";
 import {
   createHotelSetupCreationCredentialResolver,
   createHotelSetupCredentialResolver,
@@ -27,7 +33,7 @@ afterEach(() => {
 describe.runIf(databaseUrl && rollbackRoot)(
   "automatic setup with hardened worker helper ACLs",
   () => {
-    it("uses real serving readers and preserves native scope proof under PUBLIC EXECUTE denial", async () => {
+    it("uses real readers and native commands under PUBLIC EXECUTE denial without bypassing restrictions", async () => {
       const fixture = await createAutomaticOwnerFlowFixture(databaseUrl!, rollbackRoot!);
       const { admin, organizationId, actorUserId } = fixture;
       const logins = ["vayada_next_hotel_setup_creation_reader", "vayada_next_hotel_setup_reader"];
@@ -63,6 +69,12 @@ describe.runIf(databaseUrl && rollbackRoot)(
           "platform.channex_management_worker_source(text,text,uuid)",
           "platform.channex_management_worker_scope(text,text,uuid)",
         ]);
+        expect(HOTEL_SETUP_PROPERTY_RLS_HELPERS).toEqual({
+          launch_settings: [HOTEL_SETUP_READER_RLS_HELPERS[1]],
+          currency_ready: HOTEL_SETUP_READER_RLS_HELPERS,
+          feature_hub: HOTEL_SETUP_READER_RLS_HELPERS,
+          currency: [],
+        });
         helperBaseline.push(
           ...(
             await admin.query<{ name: string; public: boolean }>(
@@ -254,6 +266,47 @@ describe.runIf(databaseUrl && rollbackRoot)(
           const native = new pg.Client({ connectionString: nativeUrl });
           connections.push(native);
           await native.connect();
+          const grant = (
+            await admin.query(
+              `SELECT p.oid::regprocedure::text AS helper FROM pg_proc p
+            JOIN LATERAL aclexplode(p.proacl) a ON true WHERE p.oid=ANY($1::regprocedure[])
+            AND a.grantee=(SELECT oid FROM pg_roles WHERE rolname=$2) AND a.privilege_type='EXECUTE' AND NOT a.is_grantable`,
+              [HOTEL_SETUP_READER_RLS_HELPERS, new URL(nativeUrl).username],
+            )
+          ).rows;
+          expect(grant.map(({ helper }) => helper).sort()).toEqual(
+            [...HOTEL_SETUP_PROPERTY_RLS_HELPERS[purpose]].sort(),
+          );
+          for (const helper of HOTEL_SETUP_PROPERTY_RLS_HELPERS[purpose]) {
+            await admin.query(
+              `REVOKE EXECUTE ON FUNCTION ${helper} FROM ${admin.escapeIdentifier(new URL(nativeUrl).username)}`,
+            );
+            await expect(
+              checkHotelSetupPropertyCredential(native, {
+                propertyId: first.propertyId,
+                organizationId,
+                operation: purpose,
+              }),
+            ).rejects.toThrow("property RLS helper privileges unavailable");
+            await admin.query(
+              `GRANT EXECUTE ON FUNCTION ${helper} TO ${admin.escapeIdentifier(new URL(nativeUrl).username)}`,
+            );
+          }
+          if (purpose === "launch_settings") {
+            const helper = HOTEL_SETUP_READER_RLS_HELPERS[1];
+            await admin.query(`ALTER FUNCTION ${helper} SET search_path=public`);
+            try {
+              await expect(
+                checkHotelSetupPropertyCredential(native, {
+                  propertyId: first.propertyId,
+                  organizationId,
+                  operation: purpose,
+                }),
+              ).rejects.toThrow("property RLS helper privileges unavailable");
+            } finally {
+              await admin.query(`ALTER FUNCTION ${helper} SET search_path=pg_catalog`);
+            }
+          }
           await expect(
             checkHotelSetupPropertyCredential(native, {
               propertyId: randomUUID(),
@@ -273,6 +326,136 @@ describe.runIf(databaseUrl && rollbackRoot)(
             )
           ).rows,
         ).toEqual([{ pricing: 0, categories: 0, financials: "suspended" }]);
+        const context = {
+          actor: {
+            internalUserId: actorUserId,
+            providerIdentity: { sessionId: "synthetic-session" },
+          },
+          selectedOrganization: { organizationId },
+          audit: { requestId: "hardened-command", receivedAt: new Date().toISOString() },
+        } as RequestContext;
+        const financials = () =>
+          admin.query(
+            `SELECT status,metadata->>'newHotelFinancialsDefault' AS marker,
+           metadata->'newHotelFinancialsOwnerDisabled' AS "ownerOff"
+           FROM identity.product_entitlements WHERE organization_id=$1 AND resource_id=$2
+           AND product='pms' AND entitlement_key='module:financials'`,
+            [organizationId, first.propertyId],
+          );
+        const currency = createHotelSetupCurrencyCommands({
+          ...propertyOptions,
+          currencyChangeGuard: {
+            async runWithCurrencyChangeGuard() {
+              throw new Error("First currency must not use a change guard");
+            },
+          },
+        });
+        const command = parseUpsertPropertyPricingCurrencyCommand({
+          organizationId,
+          propertyId: first.propertyId,
+          currency: "LKR",
+          expectedPricingCurrencyRevision: 0,
+          idempotencyKey: "hardened-first-currency",
+          audit: {
+            actor: { kind: "user", userId: actorUserId },
+            requestId: "hardened-first-currency",
+            correlationId: null,
+            requestedAt: new Date().toISOString(),
+          },
+        })!;
+        let operation = "launch_settings";
+        try {
+          expect(
+            await createHotelSetupLaunchSettingsCommands(propertyOptions).updateLaunchSettings(
+              context,
+              first.propertyId,
+              input.profile.initialLaunchSettings,
+            ),
+          ).toEqual(input.profile.initialLaunchSettings);
+          operation = "currency_ready_global_denial";
+          const globalId = randomUUID();
+          await admin.query(
+            "INSERT INTO identity.product_entitlements(id,organization_id,product,entitlement_key,status) VALUES($1,$2,'pms','module:financials','suspended')",
+            [globalId, organizationId],
+          );
+          await expect(currency.upsertPropertyPricingCurrency(command)).rejects.toThrow(
+            "currency command unavailable",
+          );
+          expect(
+            (
+              await admin.query(
+                "SELECT property_id FROM pms.property_pricing_settings WHERE property_id=$1",
+                [first.propertyId],
+              )
+            ).rows,
+          ).toEqual([]);
+          expect((await financials()).rows).toEqual([
+            { status: "suspended", marker: "pending", ownerOff: null },
+          ]);
+          expect(
+            (
+              await admin.query("SELECT id FROM finance.expense_categories WHERE property_id=$1", [
+                first.propertyId,
+              ])
+            ).rows,
+          ).toEqual([]);
+          await admin.query("DELETE FROM identity.product_entitlements WHERE id=$1", [globalId]);
+          operation = "currency_ready";
+          const saved = await currency.upsertPropertyPricingCurrency(command);
+          expect(saved).toMatchObject({
+            ok: true,
+            response: {
+              outcome: "created",
+              pricingCurrency: {
+                propertyId: first.propertyId,
+                currency: "LKR",
+                pricingCurrencyRevision: 1,
+              },
+            },
+          });
+          expect((await financials()).rows).toMatchObject([{ status: "active", marker: "ready" }]);
+          const feature = createHotelSetupFeatureHubCommands(propertyOptions);
+          operation = "feature_hub_disable";
+          expect(await feature.updateFinancials(context, first.propertyId, false)).toMatchObject({
+            isActive: false,
+          });
+          expect((await financials()).rows).toMatchObject([
+            { status: "suspended", ownerOff: true },
+          ]);
+          operation = "feature_hub_enable";
+          expect(await feature.updateFinancials(context, first.propertyId, true)).toMatchObject({
+            isActive: true,
+          });
+          await feature.updateFinancials(context, first.propertyId, false);
+          await fixture.pass("property");
+          await fixture.pass("property");
+          expect(await currency.upsertPropertyPricingCurrency(command)).toEqual(saved);
+          expect((await financials()).rows).toMatchObject([
+            { status: "suspended", ownerOff: true },
+          ]);
+          expect(
+            (
+              await admin.query(
+                "SELECT count(*)::int AS count FROM finance.expense_categories WHERE property_id=$1",
+                [first.propertyId],
+              )
+            ).rows,
+          ).toEqual([{ count: 7 }]);
+          await admin.query(
+            "UPDATE identity.organization_memberships SET status='inactive' WHERE id=$1",
+            [fixture.membershipId],
+          );
+          expect(await currency.upsertPropertyPricingCurrency(command)).toMatchObject({
+            ok: false,
+            error: { code: "setup_scope_unavailable" },
+          });
+        } catch (error) {
+          if (nativeDenials().length)
+            throw new Error(
+              `Native ${operation} command denied: ${JSON.stringify(nativeDenials())}`,
+            );
+          throw error;
+        }
         expect(nativeDenials()).toEqual([]);
       } finally {
         query.mockRestore();

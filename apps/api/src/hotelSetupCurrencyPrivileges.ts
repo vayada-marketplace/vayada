@@ -1,6 +1,7 @@
 import type pg from "pg";
 import {
   assertHotelSetupNativePrivileges,
+  assertHotelSetupPropertyRlsHelpers,
   HOTEL_SETUP_FEATURE_HUB_PRIVILEGES,
 } from "./hotelSetupFeatureHubPrivileges.js";
 import type { HotelSetupColumnPrivileges } from "./hotelSetupReaderPrivileges.js";
@@ -184,6 +185,7 @@ export async function assertHotelSetupCurrencyPrivileges(
       ? "c6d6cffecd7f49154148eed01f67186b"
       : "db8e9b28d4ae8c2a359a4e86a1406e6d",
   );
+  if (operation === "currency_ready") await assertHotelSetupPropertyRlsHelpers(client, operation);
   const result = await client.query<{ safe: boolean }>(
     `SELECT (
     (SELECT pg_catalog.md5(pg_catalog.string_agg(c.oid::regclass::text
