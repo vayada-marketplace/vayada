@@ -48,5 +48,15 @@
       "digest": "sha256:259f22ca5f9d90cfa87239adfff6a396bd3877598372c20a377dc055dfd3df6b",
       "source": "187eeea3a5d6864283b854815334fe34c7ec752b"
     }
+  },
+  "vay965-native-no-catalog-20261005": {
+    "primary": {
+      "digest": "sha256:35d75f64188bb20bd512a9d1640e34a48484d460b7789cd4de7813efe8a96d47",
+      "source": "eddb53c841575b4136935fb3e1130ecc80cb56fa"
+    },
+    "rollback": {
+      "digest": "sha256:259f22ca5f9d90cfa87239adfff6a396bd3877598372c20a377dc055dfd3df6b",
+      "source": "187eeea3a5d6864283b854815334fe34c7ec752b"
+    }
   }
 }
