@@ -28,7 +28,7 @@ it.each([
   "publication",
   "mutate",
   "readinessCommit",
-])("guards activation and cleanup on %s", async (mode) => {
+])("guards activation and pending recovery on %s", async (mode) => {
   const propertyId = "10000000-0000-4000-8000-000000000001";
   const operation = "launch_settings" as const;
   const login = `vayada_next_hotel_setup_property_${createHash("sha256").update(`${propertyId}:${operation}`).digest("hex").slice(0, 16)}_123456789abc`;
@@ -52,24 +52,9 @@ it.each([
       sql.push(text);
       if (text === "COMMIT" && mode === "commit")
         this.emit("error", new Error("private-diagnostic"));
-      if (text.startsWith("SELECT rolcanlogin"))
+      if (text.startsWith("SELECT session_user"))
         return {
-          rows: [
-            {
-              rolcanlogin: true,
-              rolpassword: mode === "identityDrift" ? "other-private-verifier" : "private-verifier",
-            },
-          ],
-        };
-      if (text.startsWith("SELECT property_id"))
-        return {
-          rows: [
-            {
-              property_id: propertyId,
-              organization_id: staged.organizationId,
-              operation_class: operation,
-            },
-          ],
+          rows: [{ session_login: login, effective_login: login, role_oid: 42, effective_oid: 42 }],
         };
       return { rows: [{ oid: 42, verifier: "private-verifier" }] };
     }
@@ -78,7 +63,7 @@ it.each([
     return new Client();
   } as unknown as typeof pg.Client);
   vi.mocked(checkHotelSetupPropertyCredential).mockImplementation(async () => {
-    expect(sql.at(-1)).toBe("COMMIT");
+    expect(sql.at(-1)).toContain("session_user::regrole::oid");
     expect(sql.some((q) => q.startsWith("INSERT INTO platform.hotel_setup_property_scopes"))).toBe(
       true,
     );
@@ -122,16 +107,18 @@ it.each([
     await expect(activateVerifiedHotelSetupPropertyRole(input)).resolves.toEqual(staged);
   else
     await expect(activateVerifiedHotelSetupPropertyRole(input)).rejects.toThrow(
-      ["proof", "secondary"].includes(mode)
-        ? "verification failed"
-        : "requires recovery inspection",
+      "requires recovery inspection",
     );
-  expect(sql.some((q) => q.startsWith("ALTER ROLE"))).toBe(
-    ["proof", "commit", "secondary", "publication"].includes(mode),
-  );
-  expect(sql.some((q) => q.includes("pg_terminate_backend"))).toBe(
-    ["proof", "commit", "secondary", "publication"].includes(mode),
-  );
+  expect(
+    sql.some(
+      (q) =>
+        q.startsWith("ALTER ROLE") ||
+        q.startsWith("UPDATE platform.hotel_setup_property_scopes") ||
+        q.includes("pg_terminate_backend") ||
+        q.includes("FROM pg_catalog.pg_authid"),
+    ),
+  ).toBe(false);
+
   if (mode === "secondary") expect(publishHotelSetupPropertySecret).not.toHaveBeenCalled();
   if (mode === "commit") expect(checkHotelSetupPropertyCredential).not.toHaveBeenCalled();
 });
