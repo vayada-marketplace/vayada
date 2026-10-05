@@ -19,22 +19,29 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-it.each([
-  "success",
-  "existing",
-  "unknown",
-  "version",
-  "readback",
-  "retarget",
-  "verifier",
-  "lateDrift",
-  "wrongAccount",
-  "ready",
-  "revoked",
-  "readinessCommit",
-  "lateRetarget",
-  "lateReady",
-])("pins property credential publication on %s", async (mode) => {
+it.each(
+  [
+    "success",
+    "existing",
+    "unknown",
+    "version",
+    "readback",
+    "retarget",
+    "verifier",
+    "lateDrift",
+    "wrongAccount",
+    "ready",
+    "revoked",
+    "readinessCommit",
+    "lateRetarget",
+    "lateReady",
+    "actorDrift",
+  ].flatMap((mode) =>
+    (["launch_settings", "property_logo"] as const)
+      .filter((operation) => mode !== "actorDrift" || operation === "property_logo")
+      .map((operation) => [operation, mode] as const),
+  ),
+)("pins %s credential publication on %s", async (operation, mode) => {
   vi.stubEnv("AWS_ACCESS_KEY_ID", "synthetic-key");
   vi.stubEnv("AWS_SECRET_ACCESS_KEY", "synthetic-secret");
   vi.stubEnv("AWS_PROFILE", undefined);
@@ -47,8 +54,7 @@ it.each([
     return { Account: mode === "wrongAccount" ? "000000000000" : "269416271598" };
   } as never);
   const propertyId = "10000000-0000-4000-8000-000000000001";
-  const operation = "launch_settings" as const;
-  const login = `vayada_next_hotel_setup_property_${createHash("sha256").update(`${propertyId}:${operation}`).digest("hex").slice(0, 16)}_123456789abc`;
+  const login = `vayada_next_hotel_setup_${operation === "property_logo" ? "logo" : "property"}_${createHash("sha256").update(`${propertyId}:${operation}`).digest("hex").slice(0, 16)}_123456789abc`;
   const staged = {
     login,
     roleOid: 42,
@@ -71,13 +77,28 @@ it.each([
       if (++commits === 2 && mode === "readinessCommit") throw new Error("lost acknowledgement");
     }
     if (sql.startsWith("UPDATE platform.hotel_setup_property_scopes")) {
-      expect(params).toEqual([login, 42, versionId, propertyId, staged.organizationId, operation]);
+      expect(params).toEqual([
+        login,
+        42,
+        versionId,
+        propertyId,
+        staged.organizationId,
+        operation,
+        operation === "property_logo" ? staged.actorUserId : null,
+      ]);
       expect(identityReads).toBe(2);
       expect(send).toHaveBeenCalledTimes(3);
       return { rows: [{ database_login: login }] };
     }
     if (sql.startsWith("SELECT oid")) {
-      expect(params).toEqual([42, login, "private-verifier"]);
+      expect(params).toEqual([
+        42,
+        login,
+        "private-verifier",
+        operation === "property_logo"
+          ? "vayada_next_hotel_setup_logo_scope"
+          : "vayada_next_hotel_setup_property_scope",
+      ]);
       identityReads++;
       return {
         rows:
@@ -95,6 +116,7 @@ it.each([
               : propertyId,
           organization_id: staged.organizationId,
           operation_class: operation,
+          actor_user_id: mode === "actorDrift" ? propertyId : staged.actorUserId,
           active: true,
           credential_role_oid: ready ? 42 : null,
           credential_secret_version: ready ? "x".repeat(32) : null,
@@ -155,7 +177,7 @@ it.each([
       });
     expect(query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
   }
-  if (["retarget", "verifier", "wrongAccount", "ready"].includes(mode))
+  if (["retarget", "verifier", "wrongAccount", "ready", "actorDrift"].includes(mode))
     expect(send).not.toHaveBeenCalled();
   if (["existing", "unknown"].includes(mode)) expect(send).toHaveBeenCalledOnce();
 });

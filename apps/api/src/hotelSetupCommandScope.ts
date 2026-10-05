@@ -3,6 +3,7 @@ import type { QueryResultRow } from "pg";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type HotelSetupOperation = "currency" | "currency_ready" | "feature_hub" | "launch_settings";
+export type HotelSetupPropertyPurpose = HotelSetupOperation | "property_logo";
 
 type ScopeQuery = {
   query<T extends QueryResultRow>(sql: string, values?: readonly unknown[]): Promise<{ rows: T[] }>;
@@ -152,6 +153,22 @@ export async function assertHotelSetupLogoScope(
   client: ScopeQuery,
   scope: { propertyId: string; organizationId: string; actorUserId: string },
 ): Promise<void> {
+  await assertHotelSetupLogoAuthority(client, scope, "hotel_setup_logo_row_allowed");
+}
+
+/** Protected credential proof only; this predicate never admits media writes. */
+export async function assertHotelSetupLogoBootstrapScope(
+  client: ScopeQuery,
+  scope: { propertyId: string; organizationId: string; actorUserId: string },
+): Promise<void> {
+  await assertHotelSetupLogoAuthority(client, scope, "hotel_setup_logo_bootstrap_proof_allowed");
+}
+
+async function assertHotelSetupLogoAuthority(
+  client: ScopeQuery,
+  scope: { propertyId: string; organizationId: string; actorUserId: string },
+  predicate: "hotel_setup_logo_row_allowed" | "hotel_setup_logo_bootstrap_proof_allowed",
+): Promise<void> {
   if (![scope.propertyId, scope.organizationId, scope.actorUserId].every((id) => UUID.test(id)))
     throw new Error("Hotel setup logo scope preflight failed");
   const result = await client.query<{
@@ -160,7 +177,7 @@ export async function assertHotelSetupLogoScope(
     allowed: boolean;
   }>(
     `SELECT session_user::text AS "sessionUser", current_user::text AS "currentUser",
-      platform.hotel_setup_logo_row_allowed($1::uuid,$2::uuid,$3::uuid) AS allowed`,
+      platform.${predicate}($1::uuid,$2::uuid,$3::uuid) AS allowed`,
     [scope.propertyId, scope.organizationId, scope.actorUserId],
   );
   const row = result.rows.length === 1 ? result.rows[0] : undefined;

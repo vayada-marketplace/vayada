@@ -19,21 +19,27 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it.each([
-  "success",
-  "proof",
-  "identityDrift",
-  "commit",
-  "secondary",
-  "publication",
-  "mutate",
-  "readinessCommit",
-])("guards activation and cleanup on %s", async (mode) => {
+it.each(
+  [
+    "success",
+    "proof",
+    "identityDrift",
+    "commit",
+    "secondary",
+    "publication",
+    "mutate",
+    "readinessCommit",
+    "actorDrift",
+  ].flatMap((mode) =>
+    (["launch_settings", "property_logo"] as const)
+      .filter((operation) => mode !== "actorDrift" || operation === "property_logo")
+      .map((operation) => [operation, mode] as const),
+  ),
+)("guards %s activation and cleanup on %s", async (operation, mode) => {
   const propertyId = "10000000-0000-4000-8000-000000000001";
-  const operation = "launch_settings" as const;
-  const login = `vayada_next_hotel_setup_property_${createHash("sha256").update(`${propertyId}:${operation}`).digest("hex").slice(0, 16)}_123456789abc`;
+  const login = `vayada_next_hotel_setup_${operation === "property_logo" ? "logo" : "property"}_${createHash("sha256").update(`${propertyId}:${operation}`).digest("hex").slice(0, 16)}_123456789abc`;
   const staged = {
-    ...(mode === "mutate" ? { automatic: true as const } : {}),
+    ...(mode === "mutate" && operation !== "property_logo" ? { automatic: true as const } : {}),
     login,
     roleOid: 42,
     propertyId,
@@ -68,6 +74,7 @@ it.each([
               property_id: propertyId,
               organization_id: staged.organizationId,
               operation_class: operation,
+              actor_user_id: mode === "actorDrift" ? propertyId : staged.actorUserId,
             },
           ],
         };
@@ -77,12 +84,15 @@ it.each([
   vi.spyOn(pg, "Client").mockImplementation(function () {
     return new Client();
   } as unknown as typeof pg.Client);
-  vi.mocked(checkHotelSetupPropertyCredential).mockImplementation(async () => {
+  vi.mocked(checkHotelSetupPropertyCredential).mockImplementation(async (_client, proof) => {
+    expect(Object.isFrozen(proof)).toBe(true);
+    expect(proof.bootstrapPending).toBe(operation === "property_logo" ? true : undefined);
     expect(sql.at(-1)).toBe("COMMIT");
     expect(sql.some((q) => q.startsWith("INSERT INTO platform.hotel_setup_property_scopes"))).toBe(
       true,
     );
-    if (["proof", "identityDrift"].includes(mode)) throw new Error("private-diagnostic");
+    if (["proof", "identityDrift", "actorDrift"].includes(mode))
+      throw new Error("private-diagnostic");
   });
   const input = {
     staged,

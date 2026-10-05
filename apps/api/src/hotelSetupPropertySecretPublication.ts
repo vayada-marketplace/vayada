@@ -30,7 +30,12 @@ export async function publishHotelSetupPropertySecret(input: {
   const name = `hotel-setup-command/prod/property/${login}`;
   try {
     if (
-      !/^vayada_next_hotel_setup_property_[a-f0-9]{16}_[a-f0-9]{12}$/.test(login) ||
+      !(
+        operation === "property_logo"
+          ? /^vayada_next_hotel_setup_logo_[a-f0-9]{16}_[a-f0-9]{12}$/
+          : /^vayada_next_hotel_setup_property_[a-f0-9]{16}_[a-f0-9]{12}$/
+      ).test(login) ||
+      (operation === "property_logo" && automatic !== undefined) ||
       !expectedVerifier
     )
       throw new Error();
@@ -43,12 +48,19 @@ export async function publishHotelSetupPropertySecret(input: {
          AND NOT rolreplication AND NOT rolbypassrls
          AND (SELECT count(*) FROM pg_catalog.pg_auth_members WHERE member=r.oid)=1
          AND EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members m JOIN pg_catalog.pg_roles p ON p.oid=m.roleid
-           WHERE m.member=r.oid AND p.rolname='vayada_next_hotel_setup_property_scope'
+           WHERE m.member=r.oid AND p.rolname=$4
            AND m.inherit_option AND NOT m.set_option AND NOT m.admin_option)
          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_db_role_setting WHERE setrole=r.oid)
          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_shdepend WHERE
            refclassid='pg_catalog.pg_authid'::regclass AND refobjid=r.oid AND deptype='o')`,
-        [roleOid, login, expectedVerifier],
+        [
+          roleOid,
+          login,
+          expectedVerifier,
+          operation === "property_logo"
+            ? "vayada_next_hotel_setup_logo_scope"
+            : "vayada_next_hotel_setup_property_scope",
+        ],
       );
       if (role.rows.length !== 1) throw new Error();
     };
@@ -58,12 +70,13 @@ export async function publishHotelSetupPropertySecret(input: {
         property_id: string;
         organization_id: string;
         operation_class: string;
+        actor_user_id: string | null;
         active: boolean;
         credential_role_oid: number | null;
         credential_secret_version: string | null;
         credential_ready_at: Date | null;
       }>(
-        `SELECT property_id,organization_id,operation_class,active,
+        `SELECT property_id,organization_id,operation_class,actor_user_id,active,
         credential_role_oid,credential_secret_version,credential_ready_at
        FROM platform.hotel_setup_property_scopes
        WHERE database_login=$1 OR (property_id=$2::uuid AND operation_class=$3) FOR UPDATE`,
@@ -75,6 +88,7 @@ export async function publishHotelSetupPropertySecret(input: {
         assigned?.property_id !== propertyId.toLowerCase() ||
         assigned.organization_id !== organizationId.toLowerCase() ||
         assigned.operation_class !== operation ||
+        (operation === "property_logo" && assigned.actor_user_id !== actorUserId.toLowerCase()) ||
         !assigned.active ||
         assigned.credential_role_oid !== null ||
         assigned.credential_secret_version !== null ||
@@ -172,8 +186,17 @@ export async function publishHotelSetupPropertySecret(input: {
        WHERE database_login=$1 AND property_id=$4::uuid AND organization_id=$5::uuid
          AND operation_class=$6 AND active AND credential_role_oid IS NULL
          AND credential_secret_version IS NULL AND credential_ready_at IS NULL
+         AND actor_user_id IS NOT DISTINCT FROM $7::uuid
        RETURNING database_login`,
-      [login, roleOid, versionId, propertyId, organizationId, operation],
+      [
+        login,
+        roleOid,
+        versionId,
+        propertyId,
+        organizationId,
+        operation,
+        operation === "property_logo" ? actorUserId : null,
+      ],
     );
     if (ready.rows.length !== 1 || ready.rows[0]?.database_login !== login) throw new Error();
     readinessCommitAttempted = true;
