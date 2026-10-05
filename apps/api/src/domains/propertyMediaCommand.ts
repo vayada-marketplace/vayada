@@ -70,6 +70,7 @@ export function createPropertyMediaCommandExecutor(config: {
     let fingerprint = "";
     try {
       await client.query("BEGIN");
+      await pool.authorizeTransaction?.(client);
       const property = platformAdminInput
         ? await lockPlatformAdminProperty(client, platformAdminInput.propertyId)
         : await lockProperty(client, command!);
