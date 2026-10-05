@@ -11,9 +11,9 @@ export type LegacyHistoricalBindingTargetSnapshot = {
   readonly connections: readonly Readonly<Connection>[];
 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-// Applicable SELECT/ALL policy inventory through 0441, including the property guard.
+// Applicable SELECT/ALL policy inventory through 0468, including the native logo guard.
 const TARGET_SELECT_POLICY_SHA256 =
-  "8c72eb7c086850fa330907b4a2bb2566e76fb9b877321b9ee35c3d92afc8366e";
+  "864738a880ec3dbc172d8e9be0b98eeeeec2db5c21aa7e6a29597f983339d89b";
 
 async function assertRestrictedReaderIdentity(client: pg.PoolClient): Promise<void> {
   const identity = await client.query<{ complete: boolean }>(
