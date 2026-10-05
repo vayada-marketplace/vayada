@@ -40,7 +40,22 @@ describe.skipIf(!url)("native creation privilege contract", () => {
       WHERE d.datallowconn GROUP BY d.datname`)
     ).rows;
     const quote = (name: string) => '"' + name.replaceAll('"', '""') + '"';
+    const tenantHelpers = [
+      "platform.tenant_scope_key(text,uuid,uuid)",
+      "platform.valid_tenant_scope(text,uuid,uuid)",
+    ];
+    const publicHelpers = (
+      await admin.query<{ signature: string }>(
+        `SELECT p.oid::regprocedure::text AS signature
+      FROM pg_proc p CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) a
+      WHERE p.oid=ANY($1::regprocedure[]) AND a.grantee=0 AND a.privilege_type='EXECUTE'`,
+        [tenantHelpers],
+      )
+    ).rows;
     try {
+      // Match the production function ACL, rather than relying on default PUBLIC EXECUTE.
+      for (const signature of tenantHelpers)
+        await admin.query(`REVOKE EXECUTE ON FUNCTION ${signature} FROM PUBLIC`);
       for (const acl of databaseAcls)
         await admin.query(`REVOKE ALL ON DATABASE ${quote(acl.name)} FROM PUBLIC`);
       await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD '${password}' NOINHERIT NOSUPERUSER
@@ -138,6 +153,16 @@ describe.skipIf(!url)("native creation privilege contract", () => {
       ).toEqual(before);
       const client = await native.connect();
       try {
+        await admin.query(`REVOKE EXECUTE ON FUNCTION platform.tenant_scope_key(text,uuid,uuid)
+          FROM vayada_next_hotel_setup_scope`);
+        try {
+          await expect(assertHotelSetupCreationPrivileges(client)).rejects.toThrow(
+            "privilege posture mismatch",
+          );
+        } finally {
+          await admin.query(`GRANT EXECUTE ON FUNCTION platform.tenant_scope_key(text,uuid,uuid)
+            TO vayada_next_hotel_setup_scope`);
+        }
         await client.query("BEGIN");
         await assertHotelSetupCreationScope(client, organizationId);
         await assertHotelSetupCreationPrivileges(client);
@@ -517,6 +542,8 @@ describe.skipIf(!url)("native creation privilege contract", () => {
           await admin.query(
             `GRANT ${acl.privileges.join(",")} ON DATABASE ${quote(acl.name)} TO PUBLIC`,
           );
+      for (const { signature } of publicHelpers)
+        await admin.query(`GRANT EXECUTE ON FUNCTION ${signature} TO PUBLIC`);
       await admin.end();
     }
   });

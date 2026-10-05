@@ -233,7 +233,9 @@ export async function assertHotelSetupCreationPrivileges(client: HotelSetupPrivi
   await assertHotelSetupAuditBoundary(client);
   const result = await client.query<{ safe: boolean }>(
     `SELECT (
-    NOT pg_catalog.has_database_privilege(current_user, pg_catalog.current_database(), 'TEMP')
+    pg_catalog.has_function_privilege(current_user,'platform.tenant_scope_key(text,uuid,uuid)','EXECUTE')
+    AND pg_catalog.has_function_privilege(current_user,'platform.valid_tenant_scope(text,uuid,uuid)','EXECUTE')
+    AND NOT pg_catalog.has_database_privilege(current_user, pg_catalog.current_database(), 'TEMP')
     AND NOT pg_catalog.has_database_privilege(current_user, pg_catalog.current_database(), 'CONNECT WITH GRANT OPTION')
     AND pg_catalog.has_database_privilege(current_user, pg_catalog.current_database(), 'CONNECT')
     AND (SELECT count(*) FROM pg_catalog.pg_proc p WHERE p.oid=ANY($4::regprocedure[])
