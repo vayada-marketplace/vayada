@@ -20,7 +20,14 @@ BEGIN
     OR (SELECT count(*) FROM pg_catalog.pg_auth_members WHERE member=login_oid)<>1
     OR NOT EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members
       WHERE member=login_oid AND roleid=parent_oid AND inherit_option AND NOT set_option AND NOT admin_option)
-    OR EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE roleid=login_oid)
+    OR (SELECT count(*) FROM pg_catalog.pg_auth_members WHERE roleid=login_oid)>1
+    OR EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members edge
+      JOIN pg_catalog.pg_roles administrator ON administrator.oid=edge.member
+      JOIN pg_catalog.pg_roles grantor ON grantor.oid=edge.grantor
+      WHERE edge.roleid=login_oid AND NOT
+        (administrator.rolname='vayada_admin' AND administrator.rolcanlogin AND administrator.rolcreaterole
+          AND NOT administrator.rolsuper
+          AND edge.admin_option AND NOT edge.inherit_option AND NOT edge.set_option AND grantor.rolsuper))
     OR EXISTS (SELECT 1 FROM pg_catalog.pg_db_role_setting setting WHERE setting.setrole IN (login_oid,parent_oid))
     OR EXISTS (SELECT 1 FROM pg_catalog.pg_shdepend dependency
       WHERE dependency.refclassid='pg_catalog.pg_authid'::regclass AND dependency.refobjid=login_oid
@@ -147,9 +154,15 @@ CREATE FUNCTION platform.hotel_setup_logo_login_guard() RETURNS BOOLEAN
 LANGUAGE sql STABLE SET search_path=pg_catalog AS $$
  SELECT (session_user::text !~ '^vayada_next_hotel_setup_logo_'
    AND current_user::text !~ '^vayada_next_hotel_setup_logo_'
-   AND (EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname=session_user AND rolsuper)
+   AND (EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname=session_user AND (rolsuper
+       OR (rolname='vayada_admin' AND rolcanlogin AND rolcreaterole
+         AND NOT pg_has_role(session_user,'vayada_next_hotel_setup_logo_scope','USAGE')
+         AND NOT pg_has_role(session_user,'vayada_next_hotel_setup_logo_scope','SET'))))
      OR NOT pg_has_role(session_user,'vayada_next_hotel_setup_logo_scope','MEMBER'))
-   AND (EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname=current_user AND rolsuper)
+   AND (EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname=current_user AND (rolsuper
+       OR (rolname='vayada_admin' AND rolcanlogin AND rolcreaterole
+         AND NOT pg_has_role(current_user,'vayada_next_hotel_setup_logo_scope','USAGE')
+         AND NOT pg_has_role(current_user,'vayada_next_hotel_setup_logo_scope','SET'))))
      OR NOT pg_has_role(current_user,'vayada_next_hotel_setup_logo_scope','MEMBER')))
    OR (current_user=session_user AND pg_has_role(session_user,'vayada_next_hotel_setup_logo_scope','USAGE'));
 $$;
@@ -170,7 +183,10 @@ DECLARE binding JSONB; reasons TEXT[]; expected_status TEXT;
 BEGIN
  IF session_user::text !~ '^vayada_next_hotel_setup_logo_'
  AND (NOT pg_has_role(session_user,'vayada_next_hotel_setup_logo_scope','MEMBER')
- OR EXISTS(SELECT 1 FROM pg_roles WHERE rolname=session_user AND rolsuper)) THEN RETURN NEW; END IF;
+ OR EXISTS(SELECT 1 FROM pg_roles WHERE rolname=session_user AND (rolsuper
+   OR (rolname='vayada_admin' AND rolcanlogin AND rolcreaterole
+     AND NOT pg_has_role(session_user,'vayada_next_hotel_setup_logo_scope','USAGE')
+     AND NOT pg_has_role(session_user,'vayada_next_hotel_setup_logo_scope','SET'))))) THEN RETURN NEW; END IF;
  binding:=platform.hotel_setup_logo_context();
  IF OLD.id::text IS DISTINCT FROM binding->>'property' OR NEW.profile_revision<>OLD.profile_revision+1 THEN
  RAISE EXCEPTION 'logo profile revision scope mismatch' USING ERRCODE='42501'; END IF;
@@ -378,9 +394,15 @@ END $$;
 DO $$
 DECLARE item RECORD; non_logo TEXT := $guard$
  session_user::text !~ '^vayada_next_hotel_setup_logo_' AND current_user::text !~ '^vayada_next_hotel_setup_logo_'
- AND (EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname=session_user AND rolsuper)
+ AND (EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname=session_user AND (rolsuper
+       OR (rolname='vayada_admin' AND rolcanlogin AND rolcreaterole
+         AND NOT pg_has_role(session_user,'vayada_next_hotel_setup_logo_scope','USAGE')
+         AND NOT pg_has_role(session_user,'vayada_next_hotel_setup_logo_scope','SET'))))
      OR NOT pg_has_role(session_user,'vayada_next_hotel_setup_logo_scope','MEMBER'))
- AND (EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname=current_user AND rolsuper)
+ AND (EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname=current_user AND (rolsuper
+       OR (rolname='vayada_admin' AND rolcanlogin AND rolcreaterole
+         AND NOT pg_has_role(current_user,'vayada_next_hotel_setup_logo_scope','USAGE')
+         AND NOT pg_has_role(current_user,'vayada_next_hotel_setup_logo_scope','SET'))))
      OR NOT pg_has_role(current_user,'vayada_next_hotel_setup_logo_scope','MEMBER'))
 $guard$;
 BEGIN

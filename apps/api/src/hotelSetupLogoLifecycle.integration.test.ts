@@ -11,9 +11,11 @@ import {
 import { stageHotelSetupPropertyRole } from "./hotelSetupPropertyRoleStaging.js";
 import { activateVerifiedHotelSetupPropertyRole } from "./hotelSetupPropertyRoleActivation.js";
 import { checkHotelSetupPropertyCredential } from "./cli/hotelSetupPropertyPreflight.js";
+import { HOTEL_SETUP_LOGO_PRIVILEGES } from "./hotelSetupLogoPrivileges.js";
 import { createHotelSetupLogoCredentialResolver } from "./hotelSetupCommandCredentials.js";
 
 const databaseUrl = process.env["TEST_DATABASE_URL"];
+const creatorDatabaseUrl = process.env["VAY965_LOGO_CREATOR_DATABASE_URL"];
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
@@ -31,6 +33,23 @@ describe.skipIf(!databaseUrl)("protected logo credential lifecycle", () => {
     endpoint.username = endpoint.password = endpoint.search = "";
     const admin = new pg.Client({ connectionString: databaseUrl });
     await admin.connect();
+    const creatorUrl = creatorDatabaseUrl ?? databaseUrl!;
+    if (creatorDatabaseUrl) {
+      const creator = new URL(creatorDatabaseUrl);
+      if (
+        creator.hostname !== url.hostname ||
+        creator.port !== url.port ||
+        creator.pathname !== url.pathname ||
+        creator.username !== "vayada_admin"
+      )
+        throw new Error("Owned local protected creator required");
+      const posture = (
+        await admin.query(
+          "SELECT rolsuper,rolcreaterole FROM pg_catalog.pg_roles WHERE rolname='vayada_admin'",
+        )
+      ).rows[0];
+      expect(posture).toEqual({ rolsuper: false, rolcreaterole: true });
+    }
     const organizationId = randomUUID(),
       actorUserId = randomUUID(),
       propertyId = randomUUID();
@@ -68,11 +87,34 @@ describe.skipIf(!databaseUrl)("protected logo credential lifecycle", () => {
         [organizationId, propertyId],
       );
       const staged = await stageHotelSetupPropertyRole({
-        adminDatabaseUrl: databaseUrl!,
+        adminDatabaseUrl: creatorUrl,
         databaseEndpoint: endpoint.toString(),
         scope,
       });
       login = staged.login;
+      if (creatorDatabaseUrl) {
+        expect(
+          (
+            await admin.query(
+              `SELECT member.rolname,edge.admin_option,edge.inherit_option,edge.set_option,
+             grantor.rolsuper AS grantor_superuser
+           FROM pg_catalog.pg_auth_members edge
+           JOIN pg_catalog.pg_roles member ON member.oid=edge.member
+           JOIN pg_catalog.pg_roles grantor ON grantor.oid=edge.grantor
+           WHERE edge.roleid=$1::oid`,
+              [staged.roleOid],
+            )
+          ).rows,
+        ).toEqual([
+          {
+            rolname: "vayada_admin",
+            admin_option: true,
+            inherit_option: false,
+            set_option: false,
+            grantor_superuser: true,
+          },
+        ]);
+      }
       const nativeUrl = new URL(url);
       nativeUrl.username = login;
       nativeUrl.password = randomUUID() + randomUUID();
@@ -160,7 +202,7 @@ describe.skipIf(!databaseUrl)("protected logo credential lifecycle", () => {
       );
       const activated = await activateVerifiedHotelSetupPropertyRole({
         staged,
-        adminDatabaseUrl: databaseUrl!,
+        adminDatabaseUrl: creatorUrl,
         databaseEndpoint: endpoint.toString(),
         nativeDatabaseUrl: nativeUrl.toString(),
         proveSecondary,
@@ -192,8 +234,55 @@ describe.skipIf(!databaseUrl)("protected logo credential lifecycle", () => {
       await expect(resolve(propertyId, organizationId, actorUserId)).rejects.toThrow(
         "Missing hotel setup logo assignment",
       );
+      if (creatorDatabaseUrl) {
+        const creator = new pg.Client({ connectionString: creatorDatabaseUrl });
+        await creator.connect();
+        try {
+          await creator.query(
+            `ALTER ROLE ${creator.escapeIdentifier(login)} NOLOGIN PASSWORD NULL`,
+          );
+          expect(
+            (
+              await admin.query(
+                "SELECT rolcanlogin,rolpassword IS NULL AS password_removed FROM pg_catalog.pg_authid WHERE oid=$1::oid",
+                [staged.roleOid],
+              )
+            ).rows,
+          ).toEqual([{ rolcanlogin: false, password_removed: true }]);
+        } finally {
+          await creator.end();
+        }
+      }
     } finally {
       await native?.end();
+      if (login && creatorDatabaseUrl) {
+        const creator = new pg.Client({ connectionString: creatorDatabaseUrl });
+        await creator.connect();
+        try {
+          await creator.query(
+            `REVOKE DELETE ON hotel_catalog.property_media FROM ${creator.escapeIdentifier(login)}`,
+          );
+          await creator.query(
+            `REVOKE USAGE ON SCHEMA identity,hotel_catalog,platform FROM ${creator.escapeIdentifier(login)}`,
+          );
+          await creator.query(
+            `REVOKE CONNECT ON DATABASE ${creator.escapeIdentifier(decodeURIComponent(url.pathname.slice(1)))} FROM ${creator.escapeIdentifier(login)}`,
+          );
+          // Revoke column ACLs using their original grantor before dropping the fixture role.
+          for (const [relation, grants] of Object.entries(HOTEL_SETUP_LOGO_PRIVILEGES))
+            for (const [privilege, columns] of Object.entries(grants))
+              await creator.query(
+                `REVOKE ${privilege}(${columns.join(",")}) ON ${relation} FROM ${creator.escapeIdentifier(login)} CASCADE`,
+              );
+        } finally {
+          await creator.end();
+        }
+      }
+      for (const database of databaseAcls)
+        await admin.query("UPDATE pg_database SET datacl=$1::aclitem[] WHERE datname=$2", [
+          database.acl,
+          database.name,
+        ]);
       if (login) {
         await admin.query(
           "DELETE FROM platform.hotel_setup_property_scopes WHERE database_login=$1",

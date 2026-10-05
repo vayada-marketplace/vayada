@@ -15,6 +15,8 @@ describe.skipIf(!url)("native property logo lifecycle", () => {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
       throw new Error("test database required");
     const admin = new pg.Pool({ connectionString: url, max: 1 });
+    const creatorUrl = process.env["VAY965_LOGO_CREATOR_DATABASE_URL"];
+    const creator = creatorUrl ? new pg.Pool({ connectionString: creatorUrl, max: 1 }) : admin;
     const suffix = randomUUID().replaceAll("-", "");
     const role = `vayada_next_hotel_setup_logo_${suffix}`;
     const organizationId = randomUUID(),
@@ -44,10 +46,19 @@ describe.skipIf(!url)("native property logo lifecycle", () => {
         "INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship,status) VALUES($1,'hotel_catalog','property',$2,'owner','active')",
         [organizationId, propertyId],
       );
-      await admin.query(
+      if (creatorUrl) {
+        expect(
+          (
+            await creator.query(
+              "SELECT current_user='vayada_admin' AND rolcanlogin AND rolcreaterole AND NOT (rolsuper OR rolcreatedb OR rolreplication OR rolbypassrls) AS safe FROM pg_catalog.pg_roles WHERE rolname=current_user",
+            )
+          ).rows[0]?.safe,
+        ).toBe(true);
+      }
+      await creator.query(
         `CREATE ROLE ${role} LOGIN PASSWORD '${password}' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`,
       );
-      await admin.query(
+      await creator.query(
         `GRANT vayada_next_hotel_setup_logo_scope TO ${role} WITH INHERIT TRUE, SET FALSE`,
       );
       await admin.query(
@@ -58,6 +69,36 @@ describe.skipIf(!url)("native property logo lifecycle", () => {
       connection.username = role;
       connection.password = password;
       native = new pg.Pool({ connectionString: connection.toString(), max: 6 });
+      if (creatorUrl) {
+        expect(
+          (
+            await admin.query(
+              "SELECT edge.admin_option AND NOT edge.inherit_option AND NOT edge.set_option AND grantor.rolsuper AS safe FROM pg_catalog.pg_auth_members edge JOIN pg_catalog.pg_roles administrator ON administrator.oid=edge.member JOIN pg_catalog.pg_roles grantor ON grantor.oid=edge.grantor WHERE edge.roleid=$1::regrole AND administrator.rolname='vayada_admin'",
+              [role],
+            )
+          ).rows[0]?.safe,
+        ).toBe(true);
+        for (const options of [
+          "ADMIN TRUE, INHERIT TRUE, SET FALSE",
+          "ADMIN TRUE, INHERIT FALSE, SET TRUE",
+          "ADMIN FALSE, INHERIT FALSE, SET FALSE",
+        ]) {
+          await admin.query(`GRANT ${role} TO vayada_admin WITH ${options}`);
+          expect(
+            (
+              await native.query(
+                "SELECT platform.hotel_setup_logo_bootstrap_proof_allowed($1,$2,$3) AS allowed",
+                [propertyId, organizationId, actorUserId],
+              )
+            ).rows[0]?.allowed,
+          ).toBe(false);
+          await expect(assertHotelSetupLogoPrivileges(native)).rejects.toThrow();
+          await admin.query(
+            `GRANT ${role} TO vayada_admin WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`,
+          );
+        }
+        await assertHotelSetupLogoPrivileges(native);
+      }
       expect(
         (
           await native.query(
@@ -530,7 +571,8 @@ describe.skipIf(!url)("native property logo lifecycle", () => {
       await admin.query("DELETE FROM identity.organizations WHERE id=$1", [organizationId]);
       await admin.query("SET session_replication_role=origin");
       await admin.query(`DROP OWNED BY ${role}`);
-      await admin.query(`DROP ROLE ${role}`);
+      await creator.query(`DROP ROLE ${role}`);
+      if (creator !== admin) await creator.end();
       await admin.end();
     }
   });
