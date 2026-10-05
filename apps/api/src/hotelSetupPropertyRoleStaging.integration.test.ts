@@ -11,6 +11,7 @@ import {
   lockHotelSetupPropertyBootstrapAuthority,
   stageHotelSetupPropertyRole,
 } from "./hotelSetupPropertyRoleStaging.js";
+import { createHotelSetupCredentialResolver } from "./hotelSetupCommandCredentials.js";
 import { activateVerifiedHotelSetupPropertyRole } from "./hotelSetupPropertyRoleActivation.js";
 import type { HotelSetupOperation } from "./hotelSetupCommandScope.js";
 import { assertHotelSetupCommandScope } from "./hotelSetupCommandScope.js";
@@ -113,7 +114,7 @@ describe.runIf(connectionString)("manual disabled property-role staging", () => 
         [organizationId],
       );
       await admin.query(
-        `CREATE ROLE ${admin.escapeIdentifier(publisher)} NOLOGIN NOINHERIT NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION BYPASSRLS`,
+        `CREATE ROLE ${admin.escapeIdentifier(publisher)} NOLOGIN NOINHERIT NOSUPERUSER CREATEROLE NOCREATEDB NOREPLICATION BYPASSRLS`,
       );
       roles.push(publisher);
       await admin.query(
@@ -243,19 +244,21 @@ describe.runIf(connectionString)("manual disabled property-role staging", () => 
           this: pg.Client,
           ...args: unknown[]
         ) => Promise<pg.QueryResult>;
+        await admin.query(
+          `GRANT ${admin.escapeIdentifier(staged.login)} TO ${admin.escapeIdentifier(publisher)} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`,
+        );
         const activated = new WeakSet<pg.Client>();
         vi.spyOn(pg.Client.prototype, "query").mockImplementation(async function (
           this: pg.Client,
           ...args: unknown[]
         ) {
           const sql = args[0];
-          const result = await originalQuery.apply(this, args);
           if (
             typeof sql === "string" &&
-            sql.startsWith("INSERT INTO platform.hotel_setup_property_scopes")
-          )
+            sql.startsWith("SELECT pg_catalog.pg_advisory_lock(") &&
+            !activated.has(this)
+          ) {
             activated.add(this);
-          if (sql === "COMMIT" && activated.delete(this)) {
             await originalQuery.call(this, `SET ROLE ${admin.escapeIdentifier(publisher)}`);
             expect(
               (
@@ -266,6 +269,7 @@ describe.runIf(connectionString)("manual disabled property-role staging", () => 
               ).rows,
             ).toEqual([{ rolsuper: false, catalog_select: false, catalog_update: false }]);
           }
+          const result = await originalQuery.apply(this, args);
           return result;
         } as never);
         await expect(
@@ -543,7 +547,7 @@ describe.runIf(connectionString)("manual disabled property-role staging", () => 
         `GRANT SELECT(private_payload) ON platform.product_audit_events TO ${admin.escapeIdentifier(staged.login)}`,
       );
       await expect(activateVerifiedHotelSetupPropertyRole(activation)).rejects.toThrow(
-        "verification failed",
+        "requires recovery inspection",
       );
       expect(
         (
@@ -552,15 +556,35 @@ describe.runIf(connectionString)("manual disabled property-role staging", () => 
             [staged.roleOid],
           )
         ).rows,
-      ).toEqual([{ rolcanlogin: false, rolpassword: null }]);
+      ).toEqual([{ rolcanlogin: true, rolpassword: expect.any(String) }]);
+      const readSecret = vi.fn(async () => ({}));
+      await expect(
+        createHotelSetupCredentialResolver(
+          {
+            assignments: admin as unknown as pg.Pool,
+            readNativeSecret: readSecret,
+            databaseEndpoint: endpoint.toString(),
+            secretPrefix: "hotel-setup-command/prod/property/",
+          },
+          "launch_settings",
+        )(propertyId, organizationId),
+      ).rejects.toThrow("Missing hotel setup assignment");
+      expect(readSecret).not.toHaveBeenCalled();
       expect(
         (
           await admin.query(
-            "SELECT active FROM platform.hotel_setup_property_scopes WHERE database_login=$1",
+            "SELECT active,credential_ready_at,credential_role_oid,credential_secret_version FROM platform.hotel_setup_property_scopes WHERE database_login=$1",
             [staged.login],
           )
         ).rows,
-      ).toEqual([{ active: false }]);
+      ).toEqual([
+        {
+          active: true,
+          credential_ready_at: null,
+          credential_role_oid: null,
+          credential_secret_version: null,
+        },
+      ]);
       await expect(activateVerifiedHotelSetupPropertyRole(activation)).rejects.toThrow(
         "verification failed",
       );
@@ -795,7 +819,20 @@ describe.runIf(connectionString)("manual disabled property-role staging", () => 
             [pending.staged.login],
           )
         ).rows,
-      ).toEqual([{ credential_ready_at: null, active: false }]);
+      ).toEqual([{ credential_ready_at: null, active: true }]);
+      const readSecret = vi.fn(async () => ({}));
+      await expect(
+        createHotelSetupCredentialResolver(
+          {
+            assignments: admin as unknown as pg.Pool,
+            readNativeSecret: readSecret,
+            databaseEndpoint: endpoint.toString(),
+            secretPrefix: "hotel-setup-command/prod/property/",
+          },
+          "launch_settings",
+        )(pending.staged.propertyId, organizationId),
+      ).rejects.toThrow("Missing hotel setup assignment");
+      expect(readSecret).not.toHaveBeenCalled();
     } finally {
       releaseSdk();
       await publishing?.catch(() => undefined);
