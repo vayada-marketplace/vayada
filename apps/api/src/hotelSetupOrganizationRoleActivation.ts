@@ -124,7 +124,7 @@ export async function activateVerifiedHotelSetupOrganizationRole(input: {
     const publication = await publishHotelSetupOrganizationSecret({
       admin,
       staged,
-      expectedVerifier: verifier,
+      proveSecondary: input.proveSecondary,
       nativeDatabaseUrl: input.nativeDatabaseUrl,
       databaseEndpoint: input.databaseEndpoint,
     });

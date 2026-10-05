@@ -77,3 +77,39 @@ last check and commit remain outside the provisioning lock protocol. The procedu
 never rotates passwords, expands catalog privileges, or changes hotel facts or
 product activation. Fixtures must run without catalog SELECT or UPDATE and cover
 password, role-OID, authority/version drift and lost commit acknowledgement.
+
+## Fresh automatic credentials without password-catalog access
+
+The production `vayada_admin` cannot SELECT `pg_authid`. The online fixture's
+superuser creator therefore does not establish production compatibility for
+organization/property activation or secret publication. Keep fresh provisioning
+disabled until the replacement and its real authority gate pass.
+
+For newly staged candidates, bind activation to the exact frozen role OID,
+canonical accessible `pg_roles` metadata, current Owner authority and pending
+assignment. Commit generated-password LOGIN activation and that assignment
+atomically. This path never resets an existing published credential.
+
+Before create-only secret publication and again after exact pinned payload
+readback, authenticate separate fresh primary and rollback connections. Each
+must match both session/effective login and OID and pass its actual scoped native
+proof. Require the sole immutable AWSCURRENT version, then recheck current
+catalog identity, authority and pending assignment before readiness COMMIT.
+Keep external proofs and SDK calls outside SQL row-lock transactions; retain the
+coordinator and assignment fences throughout.
+
+After a failed or uncertain committed activation/publication, preserve the
+candidate for recovery inspection. Do not clear its password, delete its
+assignment, retry a remote write, adopt it or provision a replacement. Pending
+LOGIN is not disabled or revoked: it remains unavailable through the actual
+serving credential providers because readiness is NULL. Prove that denial before
+publication, after publication, and after each fault. No serving-success receipt
+may be emitted for an uncertain outcome.
+
+Owned PostgreSQL 16/17 fixtures must exercise the compiled modules with a
+nonsuperuser creator lacking password-catalog SELECT/UPDATE and possessing only
+the separately verified creation, ALTER, parent ADMIN and required grant
+capabilities. Helper-owner authority remains separate. Production authority and
+Owner Save/reload are independent gates; synthetic fixture success proves
+neither. Observed fresh-authentication checkpoints do not promise uninterrupted
+verifier continuity against uncoordinated administrative changes.
