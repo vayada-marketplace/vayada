@@ -35,9 +35,8 @@ export async function proveFreshHotelSetupNativeCredential(
     )
       throw new Error();
     await prove?.(client);
-    if (failed) throw new Error();
   } finally {
     await client.end();
-    if (failed) throw new Error();
   }
+  if (failed) throw new Error();
 }

@@ -19,6 +19,8 @@ it.each([
   "connect",
   "query",
   "proof",
+  "proofErrorEvent",
+  "endErrorEvent",
   "error",
   "end",
 ])("authenticates an exact fresh native identity on %s", async (mode) => {
@@ -37,6 +39,7 @@ it.each([
     effective_oid: mode === "effectiveOid" ? 43 : 42,
   };
   const end = vi.fn(async () => {
+    if (mode === "endErrorEvent") onError?.();
     if (mode === "end") throw new Error();
   });
   const client = {
@@ -60,17 +63,24 @@ it.each([
   vi.mocked(hotelSetupOrganizationConnection).mockReturnValue(client as unknown as pg.Client);
   const prove = vi.fn(async (received: pg.Client) => {
     expect(received).toBe(client);
+    if (mode === "proofErrorEvent") {
+      onError?.();
+      throw new Error("native proof rejected");
+    }
     if (mode === "proof") throw new Error();
   });
   const result = proveFreshHotelSetupNativeCredential(input, prove);
   if (mode === "success") await expect(result).resolves.toBeUndefined();
+  else if (mode === "proofErrorEvent")
+    await expect(result).rejects.toThrow("native proof rejected");
   else await expect(result).rejects.toThrow();
   expect(hotelSetupOrganizationConnection).toHaveBeenCalledWith(
     input.nativeDatabaseUrl,
     input.databaseEndpoint,
   );
   expect(end).toHaveBeenCalledOnce();
-  if (["success", "proof", "end"].includes(mode)) expect(prove).toHaveBeenCalledOnce();
+  if (["success", "proof", "proofErrorEvent", "endErrorEvent", "end"].includes(mode))
+    expect(prove).toHaveBeenCalledOnce();
   else expect(prove).not.toHaveBeenCalled();
 });
 
