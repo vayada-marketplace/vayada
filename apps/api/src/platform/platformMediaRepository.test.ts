@@ -12,6 +12,46 @@ import {
 import { createPgPlatformMediaRepository } from "./platformMediaRepository.js";
 
 describe("PostgreSQL platform media repository", () => {
+  it.each([
+    "actorUserId",
+    "ownerOrganizationId",
+    "propertyId",
+    "resourceProduct",
+    "resourceType",
+    "resourceId",
+    "purpose",
+    "visibility",
+    "approvalStatus",
+    "storageKey",
+  ] as const)("rejects a completed logo snapshot with forged %s before replay", async (field) => {
+    const database = createFakeDatabase();
+    const repository = repositoryFor(database.pool);
+    const session = await createSession(repository, "property.logo");
+    await repository.completeUploadSession(completionInput(session));
+    Object.assign(database.session!.completedMediaObjects![0]!, { [field]: "foreign" });
+    await expect(
+      repository.findUploadSessionForActor({
+        sessionId: session.sessionId,
+        actorUserId: session.actorUserId,
+        ownerOrganizationId: session.ownerOrganizationId,
+      }),
+    ).rejects.toThrow("Completed property media is not reusable");
+  });
+
+  it("replays the private completion snapshot and ignores a forged alias", async () => {
+    const database = createFakeDatabase();
+    const repository = repositoryFor(database.pool);
+    const session = await createSession(repository, "property.logo");
+    const completed = await repository.completeUploadSession(completionInput(session));
+    database.session!.completedMediaObject = {
+      ...completed.mediaObjects[0]!,
+      actorUserId: "foreign",
+    };
+    const restored = await repository.findUploadSession(session.sessionId);
+    expect(restored?.completedMediaObject).toEqual(completed.mediaObjects[0]);
+    expect(restored?.completedMediaObject?.visibility).toBe("private");
+  });
+
   it.each(["create", "renew", "complete", "audit"] as const)(
     "authorizes %s writes inside the transaction and rejects revoked authority before mutation",
     async (operation) => {

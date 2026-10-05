@@ -187,7 +187,7 @@ export function createPgPlatformMediaRepository(
           ],
         );
         if (inserted.rows.length === 0) {
-          const existing = await readSession(client, session.sessionId);
+          const existing = await readSession(client, session.sessionId, mediaPathPrefix);
           if (!existing) {
             throw new Error("Platform media upload session idempotency conflict");
           }
@@ -205,10 +205,10 @@ export function createPgPlatformMediaRepository(
       return session;
     },
     async findUploadSession(sessionId) {
-      return readSession(pool, sessionId);
+      return readSession(pool, sessionId, mediaPathPrefix);
     },
     async findUploadSessionForActor(input) {
-      return readSession(pool, input.sessionId, false, {
+      return readSession(pool, input.sessionId, mediaPathPrefix, false, {
         actorUserId: input.actorUserId,
         ownerOrganizationId: input.ownerOrganizationId,
       });
@@ -251,7 +251,7 @@ export function createPgPlatformMediaRepository(
         );
         if (result.rows[0]?.session) return result.rows[0].session;
 
-        const current = await readSession(client, input.session.sessionId);
+        const current = await readSession(client, input.session.sessionId, mediaPathPrefix);
         if (!current) throw new Error("Platform media upload session was not found");
         return current;
       };
@@ -704,7 +704,7 @@ async function completeUploadSession(
     await client.query("BEGIN");
     transactionStarted = true;
     await authorizeWriteTransaction?.(client);
-    const session = await readSession(client, input.session.sessionId, true);
+    const session = await readSession(client, input.session.sessionId, mediaPathPrefix, true);
     if (!session) throw new Error("Platform media upload session was not found");
     if (session.status === "completed") {
       assertCompletedPropertyMediaIsCanonical(session, mediaPathPrefix);
@@ -807,7 +807,7 @@ async function completeUploadSession(
   }
 
   try {
-    const reconciled = await readSession(pool, input.session.sessionId);
+    const reconciled = await readSession(pool, input.session.sessionId, mediaPathPrefix);
     if (reconciled?.status === "completed") {
       assertCompletedPropertyMediaIsCanonical(reconciled, mediaPathPrefix);
       return {
@@ -965,6 +965,12 @@ function assertCompletedPropertyMediaIsCanonical(
       (mediaObject) =>
         !expectedMediaIds.delete(mediaObject.mediaId) ||
         mediaObject.purpose !== session.purpose ||
+        mediaObject.actorUserId !== session.actorUserId ||
+        mediaObject.ownerOrganizationId !== session.ownerOrganizationId ||
+        mediaObject.propertyId !== session.target.propertyId ||
+        mediaObject.resourceProduct !== session.target.resourceProduct ||
+        mediaObject.resourceType !== session.target.resourceType ||
+        mediaObject.resourceId !== session.target.resourceId ||
         !(isAutoApprovedPublicSession(session)
           ? isCanonicalPublicRoomMediaObject(mediaObject)
           : isCanonicalPrivatePropertyMediaObject({ mediaObject, mediaPathPrefix })),
@@ -1074,6 +1080,7 @@ async function insertVariant(
 async function readSession(
   queryable: Queryable,
   sessionId: string,
+  mediaPathPrefix: string,
   forUpdate = false,
   scope?: { actorUserId: string; ownerOrganizationId: string },
 ): Promise<PlatformMediaSessionRecord | null> {
@@ -1101,7 +1108,12 @@ async function readSession(
     isCanonicalPropertyMediaRequest(row.session) &&
     (row.session.completedMediaObjects?.length || row.session.completedMediaObject)
   ) {
-    return row.session;
+    assertCompletedPropertyMediaIsCanonical(row.session, mediaPathPrefix);
+    return {
+      ...row.session,
+      completedMediaObject:
+        row.session.completedMediaObjects?.[0] ?? row.session.completedMediaObject,
+    };
   }
 
   const mediaObjectIds = completedMediaObjectIds(row);
