@@ -7,12 +7,20 @@ import {
 } from "@aws-sdk/client-secrets-manager";
 import type pg from "pg";
 import { afterEach, expect, it, vi } from "vitest";
+import { proveFreshHotelSetupNativeCredential } from "./hotelSetupFreshNativeCredential.js";
+import { checkHotelSetupCreationCredential } from "./cli/hotelSetupCreationPreflight.js";
 import { publishHotelSetupOrganizationSecret } from "./hotelSetupOrganizationSecretPublication.js";
 import {
   hotelSetupOrganizationRolePrefix,
   lockHotelSetupOrganizationBootstrapAuthority,
 } from "./hotelSetupOrganizationRoleStaging.js";
 
+vi.mock("./hotelSetupFreshNativeCredential.js", () => ({
+  proveFreshHotelSetupNativeCredential: vi.fn(),
+}));
+vi.mock("./cli/hotelSetupCreationPreflight.js", () => ({
+  checkHotelSetupCreationCredential: vi.fn(),
+}));
 vi.mock("./hotelSetupOrganizationRoleStaging.js", async (load) => ({
   ...(await load<typeof import("./hotelSetupOrganizationRoleStaging.js")>()),
   lockHotelSetupOrganizationBootstrapAuthority: vi.fn(),
@@ -30,12 +38,16 @@ it.each([
   "version",
   "readback",
   "retarget",
-  "verifier",
+  "identity",
   "lateDrift",
   "lateActor",
   "alreadyReady",
   "wrongAccount",
   "readyCommit",
+  "native",
+  "lateNative",
+  "metadataVersion",
+  "metadataIdentity",
 ])("admits only pinned organization publication on %s", async (mode) => {
   vi.stubEnv("AWS_ACCESS_KEY_ID", "synthetic-key");
   vi.stubEnv("AWS_SECRET_ACCESS_KEY", "synthetic-secret");
@@ -58,13 +70,29 @@ it.each([
   let identityReads = 0;
   let commits = 0;
   let readyWritten = false;
+  let transaction = false;
+  let nativeProofs = 0;
+  const secondary = vi.fn(async () => undefined);
+  vi.mocked(checkHotelSetupCreationCredential).mockResolvedValue(undefined);
+  vi.mocked(proveFreshHotelSetupNativeCredential).mockImplementation(async (credential, prove) => {
+    expect(transaction).toBe(false);
+    expect(credential.login).toBe(login);
+    expect(credential.roleOid).toBe(42);
+    nativeProofs++;
+    if (mode === "native" || (mode === "lateNative" && nativeProofs === 3)) throw new Error();
+    await prove?.({ checkpoint: nativeProofs } as unknown as pg.Client);
+  });
   const query = vi.fn(async (sql: string, params?: unknown[]) => {
+    if (sql === "BEGIN") transaction = true;
+    if (sql === "COMMIT" || sql === "ROLLBACK") transaction = false;
     if (sql.startsWith("SELECT oid")) {
-      expect(params).toEqual([42, login, "private-verifier"]);
+      expect(sql).toContain("FROM pg_catalog.pg_roles");
+      expect(sql).not.toContain("rolpassword");
+      expect(params).toEqual([42, login]);
       identityReads++;
       return {
         rows:
-          mode === "verifier" || (mode === "lateDrift" && identityReads === 2) ? [] : [{ oid: 42 }],
+          mode === "identity" || (mode === "lateDrift" && identityReads === 2) ? [] : [{ oid: 42 }],
       };
     }
     if (sql.startsWith("SELECT database_login"))
@@ -95,10 +123,19 @@ it.each([
   const name = `hotel-setup-command/prod/organization/${login}`;
   const arn = `arn:aws:secretsmanager:eu-west-1:269416271598:secret:${name}-123abc`;
   const send = vi.fn(async function (this: SecretsManagerClient, command: unknown) {
+    expect(transaction).toBe(false);
     expect(await this.config.region()).toBe("eu-west-1");
     expect((await this.config.endpoint!()).hostname).toBe("secretsmanager.eu-west-1.amazonaws.com");
     if (command instanceof DescribeSecretCommand) {
       expect(command.input.SecretId).toBe(name);
+      if (versionId)
+        return {
+          ARN: mode === "metadataIdentity" ? "other" : arn,
+          Name: name,
+          VersionIdsToStages: {
+            [mode === "metadataVersion" ? "other" : versionId]: ["AWSCURRENT"],
+          },
+        };
       if (mode === "existing") return { ARN: arn };
       const error = new Error("private-diagnostic");
       error.name = mode === "unknown" ? "AccessDeniedException" : "ResourceNotFoundException";
@@ -126,7 +163,7 @@ it.each([
   const result = publishHotelSetupOrganizationSecret({
     admin: { query, on: vi.fn(), removeListener: vi.fn() } as unknown as pg.Client,
     staged,
-    expectedVerifier: "private-verifier",
+    proveSecondary: secondary,
     databaseEndpoint: "postgresql://db.internal/test",
     nativeDatabaseUrl: `postgresql://${login}:${"b".repeat(36)}@db.internal/test?sslmode=verify-full`,
   });
@@ -137,12 +174,15 @@ it.each([
     );
     expect(query.mock.calls.at(-2)?.[1]).toEqual([login, 42, versionId, organizationId]);
     expect(query.mock.calls.at(-1)?.[0]).toBe("COMMIT");
+    expect(proveFreshHotelSetupNativeCredential).toHaveBeenCalledTimes(4);
+    expect(checkHotelSetupCreationCredential).toHaveBeenCalledTimes(2);
+    expect(secondary).toHaveBeenCalledTimes(2);
   } else {
     await expect(result).rejects.toThrow("publication requires recovery inspection");
     expect(query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
   }
   expect(readyWritten).toBe(["success", "readyCommit"].includes(mode));
-  if (["retarget", "verifier", "alreadyReady", "wrongAccount"].includes(mode))
+  if (["retarget", "identity", "alreadyReady", "wrongAccount", "native"].includes(mode))
     expect(send).not.toHaveBeenCalled();
   if (["existing", "unknown"].includes(mode)) expect(send).toHaveBeenCalledOnce();
 });

@@ -7,6 +7,8 @@ import {
   SecretsManagerClient,
 } from "@aws-sdk/client-secrets-manager";
 import type pg from "pg";
+import { proveFreshHotelSetupNativeCredential } from "./hotelSetupFreshNativeCredential.js";
+import { checkHotelSetupCreationCredential } from "./cli/hotelSetupCreationPreflight.js";
 import { parseHotelSetupDatabaseUrl } from "./hotelSetupCommandServiceConfig.js";
 import {
   hotelSetupOrganizationRolePrefix,
@@ -19,11 +21,11 @@ import {
 export async function publishHotelSetupOrganizationSecret(input: {
   admin: pg.Client;
   staged: Awaited<ReturnType<typeof stageHotelSetupOrganizationRole>>;
-  expectedVerifier: string;
+  proveSecondary: typeof checkHotelSetupCreationCredential;
   nativeDatabaseUrl: string;
   databaseEndpoint: string;
 }) {
-  const { admin, staged, expectedVerifier } = input;
+  const { admin, staged } = input;
   const { login, roleOid, organizationId, actorUserId } = staged;
   const scope = Object.freeze({ organizationId, actorUserId });
   const name = `hotel-setup-command/prod/organization/${login}`;
@@ -40,7 +42,7 @@ export async function publishHotelSetupOrganizationSecret(input: {
       !login.startsWith(hotelSetupOrganizationRolePrefix(organizationId)) ||
       !Number.isInteger(roleOid) ||
       roleOid <= 0 ||
-      !expectedVerifier
+      typeof input.proveSecondary !== "function"
     )
       throw new Error();
     const url = parseHotelSetupDatabaseUrl(input.nativeDatabaseUrl, input.databaseEndpoint, login);
@@ -68,8 +70,8 @@ export async function publishHotelSetupOrganizationSecret(input: {
       )
         throw new Error();
       const identity = await admin.query(
-        `SELECT oid FROM pg_catalog.pg_authid r
-        WHERE oid=$1::oid AND rolname=$2 AND rolpassword=$3 AND rolcanlogin AND rolvaliduntil IS NULL
+        `SELECT oid FROM pg_catalog.pg_roles r
+        WHERE oid=$1::oid AND rolname=$2 AND rolcanlogin AND rolvaliduntil IS NULL
           AND NOT rolsuper AND NOT rolinherit AND NOT rolcreaterole AND NOT rolcreatedb
           AND NOT rolreplication AND NOT rolbypassrls
           AND (SELECT count(*) FROM pg_catalog.pg_auth_members WHERE member=r.oid)=1
@@ -79,13 +81,28 @@ export async function publishHotelSetupOrganizationSecret(input: {
           AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_db_role_setting WHERE setrole=r.oid)
           AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_shdepend
             WHERE refclassid='pg_catalog.pg_authid'::regclass AND refobjid=r.oid AND deptype='o')`,
-        [roleOid, login, expectedVerifier],
+        [roleOid, login],
       );
       if (failed || identity.rows.length !== 1) throw new Error();
+    };
+    const proveFresh = async () => {
+      const credential = {
+        nativeDatabaseUrl: input.nativeDatabaseUrl,
+        databaseEndpoint: input.databaseEndpoint,
+        login,
+        roleOid,
+      };
+      await proveFreshHotelSetupNativeCredential(credential, (client) =>
+        checkHotelSetupCreationCredential(client, scope),
+      );
+      await proveFreshHotelSetupNativeCredential(credential, (client) =>
+        input.proveSecondary(client, scope),
+      );
     };
     await admin.query("BEGIN");
     await assertPending();
     await admin.query("COMMIT");
+    await proveFresh();
     const resolver = new STSClient({
       region: "eu-west-1",
       endpoint: "https://sts.eu-west-1.amazonaws.com",
@@ -155,6 +172,23 @@ export async function publishHotelSetupOrganizationSecret(input: {
       stored.VersionId !== versionId ||
       stored.SecretString !== secretString ||
       stored.SecretBinary
+    )
+      throw new Error();
+    await proveFresh();
+    const metadata = await secrets.send(new DescribeSecretCommand({ SecretId: name }), {
+      abortSignal: AbortSignal.timeout(15_000),
+    });
+    const current = Object.entries(metadata.VersionIdsToStages ?? {}).filter(([, stages]) =>
+      stages.includes("AWSCURRENT"),
+    );
+    if (
+      failed ||
+      metadata.ARN !== version.ARN ||
+      metadata.Name !== name ||
+      metadata.DeletedDate !== undefined ||
+      current.length !== 1 ||
+      current[0]?.[0] !== versionId ||
+      current[0][1].length !== 1
     )
       throw new Error();
     // A secret or proof receipt never admits commands: recheck fresh locked authority.
