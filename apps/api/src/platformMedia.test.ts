@@ -22,6 +22,7 @@ import {
   type PlatformMediaObjectRecord,
   type PlatformMediaPurpose,
   type PlatformMediaRepository,
+  type PlatformMediaRoutesOptions,
   type PlatformMediaSessionRecord,
   type PlatformMediaTargetResolver,
   type PlatformMediaUploadFinalizer,
@@ -176,6 +177,248 @@ type ErrorResponse = {
 };
 
 describe("platform media upload routes", () => {
+  it("uses authenticated request persistence for create and finalize without ambient writes", async () => {
+    const repository = createInMemoryPlatformMediaRepository();
+    const ambient = createInMemoryPlatformMediaRepository();
+    const ambientWrite = vi.spyOn(ambient, "createUploadSession");
+    const close = vi.fn(async () => {});
+    const resolveRequestPersistence = vi.fn(async () => ({
+      repository,
+      targetResolver: propertyMediaTargetResolver,
+      close,
+    }));
+    const app = buildMediaApp({ repository: ambient, resolveRequestPersistence });
+    const payload = {
+      ...propertyGalleryCase.request.body,
+      purpose: "property.logo",
+      idempotencyKey: "scoped-logo",
+    };
+    try {
+      const create = await injectJson(app, {
+        method: "POST",
+        url: "/api/media/upload-sessions",
+        headers: { authorization: "Bearer valid-token" },
+        payload,
+      });
+      expect(create.statusCode).toBe(201);
+      const created = create.body as MediaCreateResponse;
+      expect(resolveRequestPersistence.mock.calls[0]).toMatchObject([
+        {
+          operation: "create",
+          context: {
+            actor: { internalUserId: "user_media" },
+            selectedOrganization: { organizationId: "org_media" },
+          },
+          request: { purpose: "property.logo" },
+        },
+      ]);
+      const finalizeInput = {
+        method: "POST" as const,
+        url: `/api/media/upload-sessions/${created.uploadSession.sessionId}/finalize`,
+        headers: { authorization: "Bearer valid-token" },
+        payload: {
+          files: [
+            {
+              uploadTargetId: created.uploadTargets[0]!.uploadTargetId,
+              contentType: "image/jpeg",
+              sizeBytes: 2048,
+              widthPx: 1200,
+              heightPx: 800,
+            },
+          ],
+        },
+      };
+      expect((await injectJson(app, finalizeInput)).statusCode).toBe(200);
+      expect((await injectJson(app, finalizeInput)).statusCode).toBe(200);
+      expect(close).toHaveBeenCalledTimes(3);
+      expect(ambientWrite).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("keeps concurrent upload persistence isolated", async () => {
+    const calls: string[] = [];
+    const closes: string[] = [];
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const app = buildMediaApp({
+      resolveRequestPersistence: async (input) => {
+        if (input.operation !== "create") throw new Error("unexpected finalize");
+        const key = input.request.idempotencyKey!;
+        const repository = createInMemoryPlatformMediaRepository();
+        const create = repository.createUploadSession.bind(repository);
+        repository.createUploadSession = async (write) => {
+          expect(write.request.idempotencyKey).toBe(key);
+          return create(write);
+        };
+        calls.push(key);
+        if (calls.length === 2) release();
+        await ready;
+        return {
+          repository,
+          targetResolver: propertyMediaTargetResolver,
+          close: async () => {
+            closes.push(key);
+          },
+        };
+      },
+    });
+    try {
+      const responses = await Promise.all(
+        ["logo-a", "logo-b"].map((idempotencyKey) =>
+          injectJson(app, {
+            method: "POST",
+            url: "/api/media/upload-sessions",
+            headers: { authorization: "Bearer valid-token" },
+            payload: {
+              ...propertyGalleryCase.request.body,
+              purpose: "property.logo",
+              idempotencyKey,
+            },
+          }),
+        ),
+      );
+      expect(responses.map(({ statusCode }) => statusCode)).toEqual([201, 201]);
+      expect(closes.sort()).toEqual(["logo-a", "logo-b"]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("does not acquire persistence for anonymous requests or fall back after acquisition fails", async () => {
+    const repository = createInMemoryPlatformMediaRepository();
+    const write = vi.spyOn(repository, "createUploadSession");
+    const resolveRequestPersistence = vi.fn(async () => {
+      throw new Error("native scope unavailable");
+    });
+    const app = buildMediaApp({ repository, resolveRequestPersistence });
+    const payload = { ...propertyGalleryCase.request.body, purpose: "property.logo" };
+    try {
+      expect(
+        (await injectJson(app, { method: "POST", url: "/api/media/upload-sessions", payload }))
+          .statusCode,
+      ).toBe(401);
+      expect(resolveRequestPersistence).not.toHaveBeenCalled();
+      expect(
+        (
+          await injectJson(app, {
+            method: "POST",
+            url: "/api/media/upload-sessions",
+            headers: { authorization: "Bearer valid-token" },
+            payload,
+          })
+        ).statusCode,
+      ).toBe(500);
+      expect(resolveRequestPersistence).toHaveBeenCalledTimes(1);
+      expect(write).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it.each([undefined, {}, { repository: createInMemoryPlatformMediaRepository() }])(
+    "rejects malformed scoped persistence without ambient writes: %j",
+    async (invalid) => {
+      const repository = createInMemoryPlatformMediaRepository();
+      const write = vi.spyOn(repository, "createUploadSession");
+      const app = buildMediaApp({
+        repository,
+        resolveRequestPersistence: async () => invalid as never,
+      });
+      try {
+        expect(
+          (
+            await injectJson(app, {
+              method: "POST",
+              url: "/api/media/upload-sessions",
+              headers: { authorization: "Bearer valid-token" },
+              payload: { ...propertyGalleryCase.request.body, purpose: "property.logo" },
+            })
+          ).statusCode,
+        ).toBe(500);
+        expect(write).not.toHaveBeenCalled();
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
+  it("keeps persistence open until expired-session replay renewal finishes", async () => {
+    const repository = createInMemoryPlatformMediaRepository();
+    let closed = false;
+    let clock = new Date("2026-06-12T12:00:00.000Z");
+    const renew = repository.renewSignedUploadSession.bind(repository);
+    const renewed = vi
+      .spyOn(repository, "renewSignedUploadSession")
+      .mockImplementation(async (input) => {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(closed).toBe(false);
+        return renew(input);
+      });
+    const app = buildMediaApp({
+      now: () => clock,
+      resolveRequestPersistence: async () => ({
+        repository,
+        targetResolver: propertyMediaTargetResolver,
+        close: async () => {
+          closed = true;
+        },
+      }),
+    });
+    const input = {
+      method: "POST" as const,
+      url: "/api/media/upload-sessions",
+      headers: { authorization: "Bearer valid-token" },
+      payload: {
+        ...propertyGalleryCase.request.body,
+        purpose: "property.logo",
+        idempotencyKey: "renew-logo",
+      },
+    };
+    try {
+      expect((await injectJson(app, input)).statusCode).toBe(201);
+      expect(closed).toBe(true);
+      closed = false;
+      clock = new Date("2026-06-12T12:20:00.000Z");
+      expect((await injectJson(app, input)).statusCode).toBe(200);
+      expect(renewed).toHaveBeenCalledTimes(1);
+      expect(closed).toBe(true);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("closes request persistence when a write fails", async () => {
+    const repository = createInMemoryPlatformMediaRepository();
+    vi.spyOn(repository, "createUploadSession").mockRejectedValue(new Error("write rejected"));
+    const close = vi.fn(async () => {});
+    const app = buildMediaApp({
+      resolveRequestPersistence: async () => ({
+        repository,
+        targetResolver: propertyMediaTargetResolver,
+        close,
+      }),
+    });
+    try {
+      expect(
+        (
+          await injectJson(app, {
+            method: "POST",
+            url: "/api/media/upload-sessions",
+            headers: { authorization: "Bearer valid-token" },
+            payload: { ...propertyGalleryCase.request.body, purpose: "property.logo" },
+          })
+        ).statusCode,
+      ).toBe(500);
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("labels each fixture with the contract selected by its request shape", () => {
     for (const contractCase of uploadContractCases.cases) {
       const body = contractCase.request.body;
@@ -2761,6 +3004,7 @@ describe("platform media upload routes", () => {
 function buildMediaApp(
   options: {
     repository?: PlatformMediaRepository;
+    resolveRequestPersistence?: PlatformMediaRoutesOptions["resolveRequestPersistence"];
     permissions?: PermissionKey[];
     entitlements?: ProductEntitlement[];
     resources?: Array<{
@@ -2786,6 +3030,7 @@ function buildMediaApp(
     logger: false,
     platformMedia: {
       repository: options.repository ?? createInMemoryPlatformMediaRepository(),
+      resolveRequestPersistence: options.resolveRequestPersistence,
       signer: createDeterministicPlatformMediaUploadSigner(),
       targetResolver: options.targetResolver ?? propertyMediaTargetResolver,
       finalizer: options.finalizer ?? createDeterministicPlatformMediaFinalizer(),
