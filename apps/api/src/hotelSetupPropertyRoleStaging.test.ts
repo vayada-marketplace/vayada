@@ -22,6 +22,108 @@ const input = {
 };
 afterEach(() => vi.restoreAllMocks());
 
+it.each(["allowed", "operator", "override", "customRole", "missingOwner", "foreignProperty"])(
+  "stages a separate logo capability only for its canonical Owner: %s",
+  async (mode) => {
+    const sql: string[] = [];
+    class Client extends EventEmitter {
+      async connect() {}
+      async end() {}
+      escapeIdentifier(name: string) {
+        return `"${name}"`;
+      }
+      async query(text: string, values?: unknown[]) {
+        sql.push(text);
+        if (text.includes("left(rolname") || text.includes("SELECT database_login"))
+          return { rows: [] };
+        if (text.includes("SELECT pg_catalog.has_function_privilege"))
+          return { rows: (values?.[0] as string[]).map(() => ({ safe: true })) };
+        if (text.startsWith("SELECT property.id")) {
+          expect(text).not.toContain("pms.product");
+          expect(text).toContain("FOR UPDATE OF organization");
+          return { rows: mode === "missingOwner" ? [] : [{ id: input.scope.propertyId }] };
+        }
+        return { rows: [{ oid: 42 }] };
+      }
+    }
+    vi.spyOn(pg, "Client").mockImplementation(function () {
+      return new Client();
+    } as unknown as typeof pg.Client);
+    vi.mocked(lockHotelSetupCurrencyMembership).mockClear();
+    vi.mocked(lockHotelSetupMembership).mockResolvedValue({
+      context: {
+        actor: { internalUserId: input.scope.actorUserId, status: "active" },
+        selectedOrganization: {
+          organizationId: input.scope.organizationId,
+          kind: "hotel_group",
+          status: "active",
+        },
+        membership: {
+          membershipId: input.scope.actorUserId,
+          roleKey: mode === "operator" ? "hotel_staff" : "hotel_owner",
+          status: "active",
+        },
+        linkedResources: [
+          {
+            product: "hotel_catalog",
+            resourceType: "property",
+            resourceId:
+              mode === "foreignProperty" ? input.scope.organizationId : input.scope.propertyId,
+            relationship: "owner",
+            status: "active",
+          },
+        ],
+      },
+      permissions: ["hotel_catalog.setup.manage"],
+      scope: {
+        mode: "all",
+        roleKey: mode === "operator" ? "hotel_staff" : "hotel_owner",
+        accessOrigin: "agency",
+        assignedPropertyIds: [],
+        productAccess: { pms: false, booking: false },
+        permissionOverrides:
+          mode === "override" ? { grant: ["hotel_catalog.setup.manage"], deny: [] } : null,
+        roleDefinitionId: mode === "customRole" ? input.scope.actorUserId : null,
+        roleDefinition:
+          mode === "customRole"
+            ? {
+                securityClass: "custom",
+                baseRoleKey: "hotel_owner",
+                presetKey: null,
+                defaultPermissions: [],
+              }
+            : null,
+      },
+    } as Awaited<ReturnType<typeof lockHotelSetupMembership>>);
+    const result = stageHotelSetupPropertyRole({
+      ...input,
+      scope: { ...input.scope, operation: "property_logo" },
+    });
+    if (mode === "allowed") {
+      const staged = await result;
+      expect(staged.login).toMatch(/^vayada_next_hotel_setup_logo_[a-f0-9]{16}_[a-f0-9]{12}$/);
+      expect(
+        sql.some(
+          (statement) => statement.startsWith("CREATE ROLE") && statement.includes("NOLOGIN"),
+        ),
+      ).toBe(true);
+      expect(
+        sql.some((statement) => statement.startsWith("GRANT vayada_next_hotel_setup_logo_scope")),
+      ).toBe(true);
+      expect(
+        sql.some((statement) =>
+          statement.startsWith("GRANT DELETE ON hotel_catalog.property_media"),
+        ),
+      ).toBe(true);
+      expect(sql.some((statement) => statement.startsWith("GRANT EXECUTE"))).toBe(false);
+    } else {
+      await expect(result).rejects.toThrow("staging failed");
+      expect(sql.some((statement) => statement.startsWith("CREATE ROLE"))).toBe(false);
+    }
+    expect(lockHotelSetupCurrencyMembership).not.toHaveBeenCalled();
+  },
+);
+
 it.each(["grantWarning", "transport", "commit", "helperMissing", "helperDefiner"])(
   "fails closed on %s",
   async (mode) => {
