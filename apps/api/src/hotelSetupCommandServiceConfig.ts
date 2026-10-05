@@ -1,3 +1,4 @@
+import { loadPlatformMediaServingConfig } from "./platform/mediaServing.js";
 import { loadServerConfig } from "@vayada/backend-config";
 import type pg from "pg";
 import { parseHotelSetupCredentialConfiguration } from "./hotelSetupCommandCredentials.js";
@@ -43,8 +44,18 @@ export function loadHotelSetupCommandServiceConfig(env: NodeJS.ProcessEnv = proc
       throw new Error("Hotel setup WorkOS URLs must use HTTPS without credentials");
     }
   }
+  const logoAdmission = env.HOTEL_SETUP_LOGO_COMMAND_ADMISSION ?? "blocked";
+  if (
+    !["blocked", "enabled"].includes(logoAdmission) ||
+    (mode === "property_creation" && logoAdmission === "enabled")
+  )
+    throw new Error("Invalid hotel setup logo admission");
+  const logoServing = logoAdmission === "enabled" ? loadPlatformMediaServingConfig(env) : undefined;
+  if (logoAdmission === "enabled" && !logoServing)
+    throw new Error("Hotel setup logo storage required");
   return {
     ...server,
+    logoServing,
     mode,
     internalToken,
     databaseEndpoint,

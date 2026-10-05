@@ -344,6 +344,12 @@ const hotelSetupCreationForwarder = loadHotelSetupCommandForwarder({
   HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: process.env["HOTEL_SETUP_CREATION_COMMAND_INTERNAL_TOKEN"],
 });
 
+const hotelSetupLogoForwarder = loadHotelSetupCommandForwarder({
+  HOTEL_SETUP_COMMAND_ADMISSION: process.env["HOTEL_SETUP_LOGO_COMMAND_ADMISSION"] ?? "blocked",
+  HOTEL_SETUP_COMMAND_ORIGIN: process.env["HOTEL_SETUP_LOGO_COMMAND_ORIGIN"],
+  HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: process.env["HOTEL_SETUP_LOGO_COMMAND_INTERNAL_TOKEN"],
+});
+
 function buildAuthOptions(auth: ApiConfig["auth"]): ApiAuthOptions | undefined {
   if (!auth) {
     return undefined;
@@ -2177,7 +2183,10 @@ const app = buildApp({
       : undefined,
   bookingWebAffiliateHotelResolver,
   bookingWebAffiliateRepository,
-  platformMedia: platformMediaRuntime?.routes,
+  platformMedia: platformMediaRuntime
+    ? { ...platformMediaRuntime.routes, forwardLogo: hotelSetupLogoForwarder }
+    : undefined,
+  hotelSetupLogoForwarder,
 });
 app.addHook("onClose", async () => {
   await affiliateCaptureRuntime?.pool.end();

@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => {
     creation: vi.fn(),
     toggle: vi.fn(),
     launch: vi.fn(),
+    logo: vi.fn(),
     list: vi.fn(),
     ready: vi.fn(),
     identity: vi.fn(),
@@ -70,6 +71,7 @@ vi.mock("./platform/postgresRuntime.js", () => ({
 vi.mock("./hotelSetupNativeSecretReader.js", () => ({
   createHotelSetupNativeSecretReader: () => mocks.get,
 }));
+vi.mock("./hotelSetupLogoRuntime.js", () => ({ createHotelSetupLogoRuntime: mocks.logo }));
 vi.mock("./hotelSetupCreationCommands.js", () => ({
   createHotelSetupCreationCommands: mocks.creation,
 }));
@@ -106,6 +108,20 @@ describe("private hotel setup executable", () => {
     mocks.currency.mockReturnValue({ upsertPropertyPricingCurrency: vi.fn() });
     mocks.toggle.mockReturnValue({ updateFinancials: vi.fn() });
     mocks.launch.mockReturnValue({ updateLaunchSettings: vi.fn() });
+    mocks.logo.mockReturnValue({ uploads: {}, assignments: {} });
+  });
+
+  it("admits logo only with independently configured storage", async () => {
+    const config = { ...mocks.config, logoServing: { bucketName: "owned-logo-bucket" } };
+    mocks.load.mockReturnValue(config);
+    await import("./hotelSetupCommandServer.js");
+    expect(mocks.logo).toHaveBeenCalledWith(
+      expect.objectContaining({ assignments: expect.anything(), readNativeSecret: mocks.get }),
+      config.logoServing,
+    );
+    expect(mocks.build).toHaveBeenCalledWith(
+      expect.objectContaining({ logoMedia: { uploads: {}, assignments: {} } }),
+    );
   });
 
   it("wires native commands and reader-only Feature Hub ports after preflight", async () => {

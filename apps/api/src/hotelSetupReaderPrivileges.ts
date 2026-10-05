@@ -82,16 +82,32 @@ export const HOTEL_SETUP_READER_READ_COLUMNS: Record<string, readonly string[]> 
     "property_id",
     "organization_id",
     "operation_class",
+    "actor_user_id",
     "active",
     "credential_role_oid",
     "credential_secret_version",
     "credential_ready_at",
   ],
+  "platform.media_upload_sessions": [
+    "id",
+    "actor_user_id",
+    "owner_organization_id",
+    "requested_purpose",
+    "property_id",
+    "resource_product",
+    "resource_type",
+    "resource_id",
+  ],
   "platform.product_audit_events": ["product", "audit_key"],
 };
 export const HOTEL_SETUP_CREATION_READER_READ_COLUMNS = Object.fromEntries(
   Object.entries(HOTEL_SETUP_READER_READ_COLUMNS)
-    .filter(([relation]) => relation !== "platform.hotel_setup_property_scopes")
+    .filter(
+      ([relation]) =>
+        !["platform.hotel_setup_property_scopes", "platform.media_upload_sessions"].includes(
+          relation,
+        ),
+    )
     .concat([
       [
         "platform.hotel_setup_creation_scopes",
