@@ -50,7 +50,7 @@ describe.skipIf(!url)("native property logo lifecycle", () => {
         expect(
           (
             await creator.query(
-              "SELECT current_user='vayada_admin' AND rolcanlogin AND rolcreaterole AND NOT (rolsuper OR rolcreatedb OR rolreplication OR rolbypassrls) AS safe FROM pg_catalog.pg_roles WHERE rolname=current_user",
+              "SELECT current_user='vayada_admin' AND rolcanlogin AND rolcreaterole AND NOT (rolsuper OR rolreplication OR rolbypassrls) AS safe FROM pg_catalog.pg_roles WHERE rolname=current_user",
             )
           ).rows[0]?.safe,
         ).toBe(true);

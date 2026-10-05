@@ -7,10 +7,14 @@ export function runHotelSetupPreflight(
 ) {
   const env = { ...process.env, ...overrides };
   const image = process.env.HOTEL_SETUP_PREFLIGHT_IMAGE;
+  const compiled = import.meta.url.endsWith(".js");
   if (!image)
     return spawnSync(
       process.execPath,
-      ["--import", "tsx", new URL(`./${script}.ts`, import.meta.url).pathname],
+      [
+        ...(compiled ? [] : ["--import", "tsx"]),
+        new URL(`./${script}.${compiled ? "js" : "ts"}`, import.meta.url).pathname,
+      ],
       { encoding: "utf8", timeout: 30_000, env },
     );
   const host = process.env.HOTEL_SETUP_PREFLIGHT_DATABASE_HOST;

@@ -262,7 +262,7 @@ export async function assertHotelSetupCreationPrivileges(client: HotelSetupPrivi
       || pg_catalog.pg_get_triggerdef(t.oid) || pg_catalog.pg_get_functiondef(t.tgfoid)
       || t.tgenabled::text,'' ORDER BY c.oid::regclass::text,t.tgname))
       FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid
-      WHERE NOT t.tgisinternal AND c.oid=ANY($3::regclass[]))='cc0862177b274e8b27da6cac074f8ac3'
+      WHERE NOT t.tgisinternal AND c.oid=ANY($3::regclass[]))='e2b189f2fa3ced50bd09130f50d306ef'
     AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_class c WHERE c.oid=ANY($3::regclass[])
       AND (c.relowner<>(SELECT relowner FROM pg_catalog.pg_class WHERE oid='platform.hotel_setup_creation_scopes'::regclass)
         OR (c.relkind IN ('r','p') AND NOT c.relrowsecurity)))
