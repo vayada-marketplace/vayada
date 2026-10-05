@@ -149,7 +149,7 @@ export async function markIdempotencyPending(
     `UPDATE platform.idempotency_keys
      SET last_seen_at = $4::timestamptz,
          locked_until = $4::timestamptz + make_interval(secs => $5::double precision),
-         idempotency_metadata = jsonb_build_object(
+         idempotency_metadata = idempotency_metadata || jsonb_build_object(
            'publication', jsonb_build_object(
              'jobId', $2::text,
              'acceptedProfileRevision', $3::integer,
@@ -1981,10 +1981,10 @@ export async function reserveIdempotency(
   const result = await client.query<{ id: string }>(
     `INSERT INTO platform.idempotency_keys (
        operation_scope, operation, key_hash, request_fingerprint_hash,
-       tenant_scope, property_id, correlation_id, expires_at
+       tenant_scope, property_id, correlation_id, expires_at, idempotency_metadata
      ) VALUES (
        'hotel_catalog', $1, $2, $3, 'property', $4::uuid, $5,
-       'infinity'::timestamptz
+       'infinity'::timestamptz, jsonb_build_object('commandActorUserId',$6::text,'commandOrganizationId',$7::text)
      )
      ON CONFLICT DO NOTHING
      RETURNING id::text AS id`,
@@ -1994,6 +1994,8 @@ export async function reserveIdempotency(
       fingerprint,
       command.propertyId,
       command.audit.correlationId ?? command.audit.requestId,
+      command.actorUserId,
+      command.organizationId,
     ],
   );
   return result.rows[0]?.id ?? null;
@@ -2012,7 +2014,7 @@ export async function completeIdempotency(
          response_body_hash = $3, completed_at = $4::timestamptz,
          last_seen_at = $4::timestamptz,
          locked_until = NULL,
-         idempotency_metadata = jsonb_build_object('result', $5::jsonb)
+         idempotency_metadata = (idempotency_metadata - 'publication') || jsonb_build_object('result', $5::jsonb)
      WHERE id = $1::uuid AND status = 'in_progress'`,
     [
       id,
