@@ -7,20 +7,25 @@ import {
   GetSecretValueCommand,
   SecretsManagerClient,
 } from "@aws-sdk/client-secrets-manager";
+import { proveFreshHotelSetupNativeCredential } from "./hotelSetupFreshNativeCredential.js";
+import { checkHotelSetupPropertyCredential } from "./cli/hotelSetupPropertyPreflight.js";
 import { parseHotelSetupDatabaseUrl } from "./hotelSetupCommandServiceConfig.js";
 import { lockHotelSetupPropertyBootstrapAuthority } from "./hotelSetupPropertyRoleStaging.js";
 import type { stageHotelSetupPropertyRole } from "./hotelSetupPropertyRoleStaging.js";
 
 /** Trusted activation callback only, after both compiled native proofs in the same process.
- * Caller owns the connected admin client and exact verifier cleanup boundary. */
+ * Fresh native authentication and current immutable publication precede readiness. */
 export async function publishHotelSetupPropertySecret(input: {
   admin: pg.Client;
   staged: Awaited<ReturnType<typeof stageHotelSetupPropertyRole>>;
-  expectedVerifier: string;
+  proveSecondary: (
+    client: pg.Client,
+    scope: Readonly<Awaited<ReturnType<typeof stageHotelSetupPropertyRole>>>,
+  ) => Promise<void>;
   nativeDatabaseUrl: string;
   databaseEndpoint: string;
 }) {
-  const { admin, expectedVerifier, nativeDatabaseUrl, databaseEndpoint } = input;
+  const { admin, nativeDatabaseUrl, databaseEndpoint } = input;
   let secrets: SecretsManagerClient | undefined;
   let sts: STSClient | undefined;
   let readinessCommitAttempted = false;
@@ -28,17 +33,24 @@ export async function publishHotelSetupPropertySecret(input: {
     input.staged;
   const scope = Object.freeze({ propertyId, organizationId, actorUserId, operation, automatic });
   const name = `hotel-setup-command/prod/property/${login}`;
+  let failed = false;
+  const onError = () => {
+    failed = true;
+  };
+  admin.on("error", onError);
   try {
     if (
       !/^vayada_next_hotel_setup_property_[a-f0-9]{16}_[a-f0-9]{12}$/.test(login) ||
-      !expectedVerifier
+      !Number.isInteger(roleOid) ||
+      roleOid <= 0 ||
+      typeof input.proveSecondary !== "function"
     )
       throw new Error();
     const url = parseHotelSetupDatabaseUrl(nativeDatabaseUrl, databaseEndpoint, login);
     const identity = async () => {
       const role = await admin.query(
-        `SELECT oid FROM pg_catalog.pg_authid r WHERE oid=$1::oid AND rolname=$2
-         AND rolpassword=$3 AND rolcanlogin AND rolvaliduntil IS NULL
+        `SELECT oid FROM pg_catalog.pg_roles r WHERE oid=$1::oid AND rolname=$2
+         AND rolcanlogin AND rolvaliduntil IS NULL
          AND NOT rolsuper AND NOT rolinherit AND NOT rolcreaterole AND NOT rolcreatedb
          AND NOT rolreplication AND NOT rolbypassrls
          AND (SELECT count(*) FROM pg_catalog.pg_auth_members WHERE member=r.oid)=1
@@ -48,9 +60,9 @@ export async function publishHotelSetupPropertySecret(input: {
          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_db_role_setting WHERE setrole=r.oid)
          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_shdepend WHERE
            refclassid='pg_catalog.pg_authid'::regclass AND refobjid=r.oid AND deptype='o')`,
-        [roleOid, login, expectedVerifier],
+        [roleOid, login],
       );
-      if (role.rows.length !== 1) throw new Error();
+      if (failed || role.rows.length !== 1) throw new Error();
     };
     const pending = async () => {
       await lockHotelSetupPropertyBootstrapAuthority(admin, scope);
@@ -83,11 +95,21 @@ export async function publishHotelSetupPropertySecret(input: {
         throw new Error();
       await identity();
     };
+    const proveFresh = async () => {
+      const credential = { nativeDatabaseUrl, databaseEndpoint, login, roleOid };
+      await proveFreshHotelSetupNativeCredential(credential, (client) =>
+        checkHotelSetupPropertyCredential(client, scope),
+      );
+      await proveFreshHotelSetupNativeCredential(credential, (client) =>
+        input.proveSecondary(client, Object.freeze({ login, roleOid, ...scope })),
+      );
+    };
     await admin.query("BEGIN");
     await pending();
     // Do not retain organization/property locks through external SDK latency.
     // This assignment remains pending; readiness is committed only below.
     await admin.query("COMMIT");
+    await proveFresh();
     // Resolve once, then pin the same credentials and official endpoints for identity and writes.
     const resolver = new STSClient({
       region: "eu-west-1",
@@ -126,6 +148,7 @@ export async function publishHotelSetupPropertySecret(input: {
       if (!(error instanceof Error) || error.name !== "ResourceNotFoundException")
         throw new Error();
     }
+    if (failed) throw new Error();
     const versionId = randomUUID();
     const secretString = JSON.stringify({
       username: login,
@@ -163,6 +186,23 @@ export async function publishHotelSetupPropertySecret(input: {
       stored.SecretBinary
     )
       throw new Error();
+    await proveFresh();
+    const metadata = await secrets.send(new DescribeSecretCommand({ SecretId: name }), {
+      abortSignal: AbortSignal.timeout(15_000),
+    });
+    const current = Object.entries(metadata.VersionIdsToStages ?? {}).filter(([, stages]) =>
+      stages.includes("AWSCURRENT"),
+    );
+    if (
+      failed ||
+      metadata.ARN !== version.ARN ||
+      metadata.Name !== name ||
+      metadata.DeletedDate !== undefined ||
+      current.length !== 1 ||
+      current[0]?.[0] !== versionId ||
+      current[0][1].length !== 1
+    )
+      throw new Error();
     await admin.query("BEGIN");
     await pending();
     const ready = await admin.query<{ database_login: string }>(
@@ -175,9 +215,11 @@ export async function publishHotelSetupPropertySecret(input: {
        RETURNING database_login`,
       [login, roleOid, versionId, propertyId, organizationId, operation],
     );
-    if (ready.rows.length !== 1 || ready.rows[0]?.database_login !== login) throw new Error();
+    if (failed || ready.rows.length !== 1 || ready.rows[0]?.database_login !== login)
+      throw new Error();
     readinessCommitAttempted = true;
     await admin.query("COMMIT");
+    if (failed) throw new Error();
     return { secretArn: version.ARN, versionId };
   } catch {
     await admin.query("ROLLBACK").catch(() => undefined);
@@ -191,6 +233,7 @@ export async function publishHotelSetupPropertySecret(input: {
       },
     );
   } finally {
+    admin.removeListener("error", onError);
     secrets?.destroy();
     sts?.destroy();
   }

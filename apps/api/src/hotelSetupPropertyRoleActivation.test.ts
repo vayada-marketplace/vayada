@@ -101,7 +101,7 @@ it.each([
     if (mode === "secondary") throw new Error("private-diagnostic");
   });
   vi.mocked(publishHotelSetupPropertySecret).mockImplementation(async (publication) => {
-    expect(publication.expectedVerifier).toBe("private-verifier");
+    expect(publication.proveSecondary).toBe(proveSecondary);
     expect(publication.nativeDatabaseUrl).toBe(originalNativeUrl);
     expect(publication.staged).toEqual(originalStaged);
     expect(proveSecondary).toHaveBeenCalledOnce();
