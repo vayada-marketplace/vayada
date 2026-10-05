@@ -11,6 +11,7 @@ import {
   propertyMediaCommandResultStatus,
   type PropertyMediaCommandRepository,
 } from "../domains/propertyMediaCommandRepository.js";
+import type { HotelSetupCommandForwarder } from "../hotelSetupCommandForwarder.js";
 import { enforceRoutePolicy } from "./policy.js";
 
 type PropertyMediaParams = { propertyId?: string };
@@ -21,7 +22,11 @@ type AuthorizedRequest = {
 
 export async function registerPropertyMediaRoutes(
   app: FastifyInstance,
-  options: { repository: PropertyMediaCommandRepository },
+  options: {
+    repository: PropertyMediaCommandRepository;
+    forwardLogo?: HotelSetupCommandForwarder;
+    logoOnly?: boolean;
+  },
 ): Promise<void> {
   const authorized = new WeakMap<FastifyRequest, AuthorizedRequest>();
   const onRequest = async (request: FastifyRequest, reply: FastifyReply) => {
@@ -35,6 +40,8 @@ export async function registerPropertyMediaRoutes(
     if (!body) return invalidRequest(reply, "A valid logo assignment is required.");
     const idempotencyKey = parseIdempotencyKey(request, reply);
     if (!idempotencyKey) return reply;
+    if (options.forwardLogo)
+      return options.forwardLogo(request, reply, access.propertyId, "logo_assignment");
     return sendResult(
       reply,
       await options.repository.assignLogo({
@@ -48,6 +55,7 @@ export async function registerPropertyMediaRoutes(
     );
   });
 
+  if (options.logoOnly) return;
   app.put("/properties/:propertyId/media/presentation", { onRequest }, async (request, reply) => {
     const access = requireAuthorizedRequest(authorized, request);
     const body = parseReplacePropertyPresentationMediaRequest(request.body);
