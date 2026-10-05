@@ -146,3 +146,29 @@ function nativeRolePosture(
           )
       )`;
 }
+
+/** Called after BEGIN on the media repository's client; authority locks live until commit. */
+export async function assertHotelSetupLogoScope(
+  client: ScopeQuery,
+  scope: { propertyId: string; organizationId: string; actorUserId: string },
+): Promise<void> {
+  if (![scope.propertyId, scope.organizationId, scope.actorUserId].every((id) => UUID.test(id)))
+    throw new Error("Hotel setup logo scope preflight failed");
+  const result = await client.query<{
+    sessionUser: string;
+    currentUser: string;
+    allowed: boolean;
+  }>(
+    `SELECT session_user::text AS "sessionUser", current_user::text AS "currentUser",
+      platform.hotel_setup_logo_row_allowed($1::uuid,$2::uuid,$3::uuid) AS allowed`,
+    [scope.propertyId, scope.organizationId, scope.actorUserId],
+  );
+  const row = result.rows.length === 1 ? result.rows[0] : undefined;
+  if (
+    !row ||
+    row.sessionUser !== row.currentUser ||
+    !/^vayada_next_hotel_setup_logo_[a-z0-9_]+$/.test(row.sessionUser) ||
+    row.allowed !== true
+  )
+    throw new Error("Hotel setup logo scope preflight failed");
+}
