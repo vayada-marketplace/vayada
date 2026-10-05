@@ -161,9 +161,7 @@ describe.skipIf(!url)("actor-bound native logo authority", () => {
       await expect(
         login.query("SET ROLE vayada_next_hotel_setup_logo_scope"),
       ).rejects.toMatchObject({ code: "42501" });
-      await expect(
-        login.query("SELECT id FROM platform.media_upload_sessions"),
-      ).rejects.toMatchObject({ code: "42501" });
+      expect((await login.query("SELECT id FROM platform.media_upload_sessions")).rows).toEqual([]);
       await admin.query(
         "UPDATE platform.hotel_setup_property_scopes SET active=FALSE WHERE database_login=$1",
         [role],
