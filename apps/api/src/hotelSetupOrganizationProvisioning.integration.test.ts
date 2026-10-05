@@ -13,13 +13,25 @@ import {
   stageHotelSetupOrganizationRole,
   type HotelSetupOrganizationBootstrapScope,
 } from "./hotelSetupOrganizationRoleStaging.js";
+import { createHotelSetupCreationCredentialResolver } from "./hotelSetupCommandCredentials.js";
 import { activateVerifiedHotelSetupOrganizationRole } from "./hotelSetupOrganizationRoleActivation.js";
 
 const databaseUrl = process.env.HOTEL_SETUP_ORGANIZATION_BOOTSTRAP_TEST_DATABASE_URL;
 describe.runIf(databaseUrl)(
   "automatic organization first publication on owned verified-TLS PostgreSQL",
   () => {
-    it.each(["success", "proof", "publication", "readback", "readyCommit", "restrictedPublisher"])(
+    it.each([
+      "success",
+      "proof",
+      "publication",
+      "readback",
+      "readyCommit",
+      "restrictedPublisher",
+      "restrictedActivation",
+      "activationCommit",
+      "revokedOwner",
+      "passwordDrift",
+    ])(
       "keeps %s exact and isolated",
       async (mode) => {
         const url = new URL(databaseUrl!);
@@ -61,6 +73,7 @@ describe.runIf(databaseUrl)(
         vi.spyOn(STSClient.prototype, "send").mockResolvedValue({
           Account: "269416271598",
         } as never);
+        let denyPending = async () => {};
         const send = vi.fn(async (command: unknown) => {
           if (command instanceof DescribeSecretCommand) {
             if (versionId)
@@ -70,6 +83,7 @@ describe.runIf(databaseUrl)(
             throw error;
           }
           if (command instanceof CreateSecretCommand) {
+            await denyPending();
             name = command.input.Name!;
             versionId = command.input.ClientRequestToken!;
             secretString = command.input.SecretString!;
@@ -78,10 +92,20 @@ describe.runIf(databaseUrl)(
             return { Name: name, VersionId: versionId, ARN: arn };
           }
           expect(command).toBeInstanceOf(GetSecretValueCommand);
+          await denyPending();
           expect((command as GetSecretValueCommand).input).toEqual({
             SecretId: arn,
             VersionId: versionId,
           });
+          if (mode === "revokedOwner")
+            await admin.query(
+              "UPDATE identity.organization_memberships SET status='inactive' WHERE organization_id=$1 AND user_id=$2",
+              [scope.organizationId, scope.actorUserId],
+            );
+          if (mode === "passwordDrift")
+            await admin.query(
+              `ALTER ROLE ${admin.escapeIdentifier(staged!.login)} PASSWORD ${admin.escapeLiteral(randomBytes(36).toString("base64url"))}`,
+            );
           return {
             Name: name,
             VersionId: versionId,
@@ -97,14 +121,40 @@ describe.runIf(databaseUrl)(
         ) => Promise<pg.QueryResult>;
         let readyUpdate = false;
         const activatedClients = new WeakSet<pg.Client>();
+        const restrictedClients = new WeakSet<pg.Client>();
         const operator = `vay965_publication_operator_${scope.organizationId.replaceAll("-", "")}`;
         let operatorCreated = false;
-        if (["readyCommit", "restrictedPublisher"].includes(mode))
+        if (
+          [
+            "readyCommit",
+            "restrictedPublisher",
+            "restrictedActivation",
+            "activationCommit",
+          ].includes(mode)
+        )
           vi.spyOn(pg.Client.prototype, "query").mockImplementation(async function (
             this: pg.Client,
             ...args: unknown[]
           ) {
             const sql = args[0];
+            if (
+              mode === "restrictedActivation" &&
+              operatorCreated &&
+              typeof sql === "string" &&
+              sql.startsWith("SELECT pg_catalog.pg_advisory_lock(") &&
+              !restrictedClients.has(this)
+            ) {
+              restrictedClients.add(this);
+              await nativeQuery.call(this, `SET ROLE ${admin.escapeIdentifier(operator)}`);
+              expect(
+                (
+                  await nativeQuery.call(
+                    this,
+                    "SELECT rolsuper,pg_catalog.has_table_privilege(current_user,'pg_catalog.pg_authid','SELECT') AS catalog_select,pg_catalog.has_table_privilege(current_user,'pg_catalog.pg_authid','UPDATE') AS catalog_update FROM pg_roles WHERE rolname=current_user",
+                  )
+                ).rows,
+              ).toEqual([{ rolsuper: false, catalog_select: false, catalog_update: false }]);
+            }
             const result = await (
               originalQuery as unknown as (...values: unknown[]) => Promise<unknown>
             ).apply(this, args);
@@ -114,11 +164,13 @@ describe.runIf(databaseUrl)(
             )
               readyUpdate = true;
             if (
-              mode === "restrictedPublisher" &&
+              ["restrictedPublisher", "activationCommit"].includes(mode) &&
               typeof sql === "string" &&
               sql.startsWith("INSERT INTO platform.hotel_setup_creation_scopes")
             )
               activatedClients.add(this);
+            if (mode === "activationCommit" && sql === "COMMIT" && activatedClients.delete(this))
+              throw new Error("lost activation acknowledgement");
             if (
               mode === "restrictedPublisher" &&
               sql === "COMMIT" &&
@@ -190,12 +242,13 @@ describe.runIf(databaseUrl)(
                 )
               ).rows,
             ).toEqual([{ credential_ready_at: null }]);
+            await denyPending();
             await checkHotelSetupCreationCredential(client, nativeScope);
             if (mode === "proof") throw new Error("failed rollback proof");
           });
-          if (mode === "restrictedPublisher") {
+          if (["restrictedPublisher", "restrictedActivation"].includes(mode)) {
             await admin.query(
-              `CREATE ROLE ${admin.escapeIdentifier(operator)} NOLOGIN NOINHERIT NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION BYPASSRLS`,
+              `CREATE ROLE ${admin.escapeIdentifier(operator)} NOLOGIN NOINHERIT NOSUPERUSER ${mode === "restrictedActivation" ? "CREATEROLE" : "NOCREATEROLE"} NOCREATEDB NOREPLICATION BYPASSRLS`,
             );
             operatorCreated = true;
             await admin.query(
@@ -205,6 +258,23 @@ describe.runIf(databaseUrl)(
               `GRANT ALL ON ALL TABLES IN SCHEMA identity,platform,hotel_catalog TO ${admin.escapeIdentifier(operator)}`,
             );
           }
+          if (mode === "restrictedActivation")
+            await admin.query(
+              `GRANT ${admin.escapeIdentifier(staged.login)} TO ${admin.escapeIdentifier(operator)} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`,
+            );
+          const readNativeSecret = vi.fn(async () => JSON.parse(secretString));
+          const resolveCredential = createHotelSetupCreationCredentialResolver({
+            assignments: admin as unknown as pg.Pool,
+            readNativeSecret,
+            databaseEndpoint: endpoint.toString(),
+            secretPrefix: "hotel-setup-command/prod/organization/",
+          });
+          denyPending = async () => {
+            await expect(resolveCredential(scope.organizationId)).rejects.toThrow(
+              "Missing hotel setup creation assignment",
+            );
+            expect(readNativeSecret).not.toHaveBeenCalled();
+          };
           const run = activateVerifiedHotelSetupOrganizationRole({
             adminDatabaseUrl: url.toString(),
             nativeDatabaseUrl: native.toString(),
@@ -212,18 +282,20 @@ describe.runIf(databaseUrl)(
             staged,
             proveSecondary: secondary,
           });
-          if (["success", "restrictedPublisher"].includes(mode))
+          if (["success", "restrictedPublisher", "restrictedActivation"].includes(mode))
             await expect(run).resolves.toMatchObject({
               ...staged,
               publication: { secretArn: expect.any(String), versionId: expect.any(String) },
             });
           else await expect(run).rejects.toThrow("requires recovery inspection");
           expect(secondary).toHaveBeenCalledTimes(
-            ["success", "readyCommit", "restrictedPublisher"].includes(mode)
+            ["success", "readyCommit", "restrictedPublisher", "restrictedActivation"].includes(mode)
               ? 3
-              : mode === "proof"
-                ? 1
-                : 2,
+              : mode === "activationCommit"
+                ? 0
+                : mode === "proof"
+                  ? 1
+                  : 2,
           );
           const state = (
             await admin.query(
@@ -231,7 +303,9 @@ describe.runIf(databaseUrl)(
               [staged.login],
             )
           ).rows;
-          if (["success", "readyCommit", "restrictedPublisher"].includes(mode)) {
+          if (
+            ["success", "readyCommit", "restrictedPublisher", "restrictedActivation"].includes(mode)
+          ) {
             expect(state).toEqual([
               {
                 credential_role_oid: staged.roleOid,
@@ -265,7 +339,17 @@ describe.runIf(databaseUrl)(
               await client.end();
             }
           } else {
-            expect(state).toEqual([]);
+            expect(state).toEqual([
+              {
+                credential_role_oid: null,
+                credential_secret_version: null,
+                credential_ready_at: null,
+              },
+            ]);
+            await expect(resolveCredential(scope.organizationId)).rejects.toThrow(
+              "Missing hotel setup creation assignment",
+            );
+            expect(readNativeSecret).not.toHaveBeenCalled();
             expect(
               (
                 await admin.query(
@@ -273,7 +357,7 @@ describe.runIf(databaseUrl)(
                   [staged.roleOid],
                 )
               ).rows,
-            ).toEqual([{ rolcanlogin: false, rolpassword: null }]);
+            ).toEqual([{ rolcanlogin: true, rolpassword: expect.any(String) }]);
           }
           expect(
             (

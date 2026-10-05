@@ -39,40 +39,6 @@ function fixture(mode: string) {
     if (sql.includes("pg_try_advisory_lock_shared(8734516)"))
       return { rows: [{ held: mode !== "bootstrapBusy" }] };
     if (sql.startsWith("SELECT oid")) return { rows: mode === "unsafe" ? [] : [{ oid: 42 }] };
-    if (sql.startsWith("SELECT rolpassword")) return { rows: [{ verifier: "private-verifier" }] };
-    if (sql.startsWith("SELECT rolcanlogin"))
-      return {
-        rows:
-          mode === "changedOid"
-            ? []
-            : [
-                {
-                  rolcanlogin: mode !== "rolledBack",
-                  rolpassword:
-                    mode === "rolledBack"
-                      ? null
-                      : mode === "changedVerifier"
-                        ? "other"
-                        : "private-verifier",
-                },
-              ],
-      };
-    if (sql.startsWith("SELECT database_login"))
-      return {
-        rows:
-          mode === "rolledBack"
-            ? []
-            : [
-                {
-                  database_login: login,
-                  organization_id: mode === "retarget" ? actorUserId : organizationId,
-                  credential_role_oid: mode === "readyCommit" ? 42 : null,
-                  credential_secret_version:
-                    mode === "readyCommit" ? "33333333-3333-4333-8333-333333333333" : null,
-                  credential_ready_at: mode === "readyCommit" ? new Date() : null,
-                },
-              ],
-      };
     if (sql === "COMMIT" && ++commits === 1 && ["commit", "rolledBack"].includes(mode))
       throw new Error("lost commit response");
     return { rows: [] };
@@ -128,7 +94,7 @@ it.each([
   "retarget",
   "commit",
   "rolledBack",
-])("keeps organization admission and cleanup exact on %s", async (mode) => {
+])("keeps organization admission and pending recovery exact on %s", async (mode) => {
   const f = fixture(mode);
   const result = activateVerifiedHotelSetupOrganizationRole({
     ...input,
@@ -158,16 +124,15 @@ it.each([
         : "Hotel setup organization activation requires recovery inspection",
     );
   const sql = f.adminQuery.mock.calls.map(([value]) => value);
-  const cleanup = sql.some((value) => value.startsWith("ALTER ROLE"));
-  expect(cleanup).toBe(
-    ["connect", "nativeOid", "proof", "rollback", "publication", "commit"].includes(mode),
-  );
-  if (["readyCommit", "changedOid", "changedVerifier", "retarget"].includes(mode))
-    expect(
-      sql.some(
-        (value) => value.startsWith("DELETE FROM") || value.includes("pg_terminate_backend"),
-      ),
-    ).toBe(false);
+  expect(sql.some((value) => value.includes("FROM pg_catalog.pg_authid"))).toBe(false);
+  expect(
+    sql.some(
+      (value) =>
+        value.startsWith("ALTER ROLE") ||
+        value.startsWith("DELETE FROM") ||
+        value.includes("pg_terminate_backend"),
+    ),
+  ).toBe(false);
   if (
     [
       "actor",
