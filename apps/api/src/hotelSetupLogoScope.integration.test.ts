@@ -67,6 +67,74 @@ describe.skipIf(!url)("actor-bound native logo authority", () => {
           )
         ).rows[0]!.allowed;
       expect(await allowed()).toBe(true);
+      const sessionId = randomUUID();
+      const sessionMetadata = {
+        sessionId,
+        purpose: "property.logo",
+        actorUserId: actorId,
+        ownerOrganizationId: organizationId,
+        requestedVisibility: "private",
+        effectiveVisibility: "private",
+        stagingPrefix: `staging/${sessionId}`,
+        resource: { product: "hotel_catalog", resourceType: "property", resourceId: propertyId },
+        target: {
+          resourceProduct: "hotel_catalog",
+          resourceType: "property",
+          resourceId: propertyId,
+          propertyId,
+        },
+      };
+      const bound = async (metadata: unknown) =>
+        (
+          await login!.query<{ allowed: boolean }>(
+            "SELECT platform.hotel_setup_logo_session_binding($1,$2,$3,$4,$5::jsonb) AS allowed",
+            [sessionId, propertyId, organizationId, actorId, JSON.stringify(metadata)],
+          )
+        ).rows[0]!.allowed;
+      expect(await bound(sessionMetadata)).toBe(true);
+      for (const metadata of [
+        null,
+        {},
+        [],
+        { ...sessionMetadata, sessionId: randomUUID() },
+        { ...sessionMetadata, purpose: "property.gallery_image" },
+        { ...sessionMetadata, actorUserId: randomUUID() },
+        { ...sessionMetadata, ownerOrganizationId: randomUUID() },
+        { ...sessionMetadata, requestedVisibility: "public" },
+        { ...sessionMetadata, effectiveVisibility: "public" },
+        { ...sessionMetadata, platformAdmin: false },
+        { ...sessionMetadata, stagingPrefix: "staging/foreign" },
+        { ...sessionMetadata, resource: null },
+        { ...sessionMetadata, resource: [] },
+        { ...sessionMetadata, target: "property" },
+        { ...sessionMetadata, target: [] },
+        { ...sessionMetadata, resource: { ...sessionMetadata.resource, propertyId: null } },
+        { ...sessionMetadata, resource: { ...sessionMetadata.resource, propertyId: randomUUID() } },
+        {
+          ...sessionMetadata,
+          resource: { ...sessionMetadata.resource, targetResourceId: randomUUID() },
+        },
+        { ...sessionMetadata, target: { ...sessionMetadata.target, propertyId: randomUUID() } },
+      ])
+        expect(await bound(metadata)).toBe(false);
+      for (let index = 0; index < 4; index++) {
+        const values: unknown[] = [
+          sessionId,
+          propertyId,
+          organizationId,
+          actorId,
+          JSON.stringify(sessionMetadata),
+        ];
+        values[index] = null;
+        expect(
+          (
+            await login.query<{ allowed: boolean }>(
+              "SELECT platform.hotel_setup_logo_session_binding($1,$2,$3,$4,$5::jsonb) AS allowed",
+              values,
+            )
+          ).rows[0]!.allowed,
+        ).toBe(false);
+      }
       const endpoint = new URL(url);
       endpoint.username = "";
       endpoint.password = "";
