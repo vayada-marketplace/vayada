@@ -41,6 +41,7 @@ type PgPlatformMediaRepositoryConfig = {
   mediaPathPrefix?: string;
   max?: number;
   pool?: PlatformMediaPool;
+  authorizeWriteTransaction?(client: Queryable): Promise<void>;
 };
 
 type SessionRow = {
@@ -150,6 +151,7 @@ export function createPgPlatformMediaRepository(
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
+        await config.authorizeWriteTransaction?.(client);
         await assertRoomMediaUploadWithinPlan(client, session);
         const inserted = await client.query<{ id: string }>(
           `INSERT INTO platform.media_upload_sessions
@@ -220,8 +222,9 @@ export function createPgPlatformMediaRepository(
           expiresAt: input.expiresAt,
         })),
       };
-      const result = await pool.query<SessionRow>(
-        `UPDATE platform.media_upload_sessions
+      const renew = async (client: Queryable) => {
+        const result = await client.query<SessionRow>(
+          `UPDATE platform.media_upload_sessions
          SET expires_at = $4::timestamptz,
              completion_metadata = jsonb_set(
                completion_metadata,
@@ -238,19 +241,23 @@ export function createPgPlatformMediaRepository(
            completed_media_object_id::text AS "completedMediaObjectId",
            completion_metadata -> 'mediaObjectIds' AS "mediaObjectIds"
          /* platform_media_upload_session_renewal */`,
-        [
-          input.session.sessionId,
-          input.session.expiresAt,
-          JSON.stringify(persistedSession(renewed)),
-          input.expiresAt,
-          input.now,
-        ],
-      );
-      if (result.rows[0]?.session) return result.rows[0].session;
+          [
+            input.session.sessionId,
+            input.session.expiresAt,
+            JSON.stringify(persistedSession(renewed)),
+            input.expiresAt,
+            input.now,
+          ],
+        );
+        if (result.rows[0]?.session) return result.rows[0].session;
 
-      const current = await readSession(pool, input.session.sessionId);
-      if (!current) throw new Error("Platform media upload session was not found");
-      return current;
+        const current = await readSession(client, input.session.sessionId);
+        if (!current) throw new Error("Platform media upload session was not found");
+        return current;
+      };
+      return config.authorizeWriteTransaction
+        ? withAuthorizedMediaWrite(pool, config.authorizeWriteTransaction, renew)
+        : renew(pool);
     },
     async findMediaObject(mediaId) {
       return readMediaObject(pool, mediaId);
@@ -259,7 +266,7 @@ export function createPgPlatformMediaRepository(
       return resolveTarget(pool, input);
     },
     async completeUploadSession(input) {
-      return completeUploadSession(pool, input, mediaPathPrefix);
+      return completeUploadSession(pool, input, mediaPathPrefix, config.authorizeWriteTransaction);
     },
     async createImportJob() {
       throw new Error(
@@ -267,12 +274,38 @@ export function createPgPlatformMediaRepository(
       );
     },
     async recordAudit(event) {
-      await recordAudit(pool, event);
+      if (config.authorizeWriteTransaction) {
+        await withAuthorizedMediaWrite(pool, config.authorizeWriteTransaction, (client) =>
+          recordAudit(client, event),
+        );
+      } else {
+        await recordAudit(pool, event);
+      }
     },
     async close() {
       if (ownsPool) await pool.end();
     },
   };
+}
+
+async function withAuthorizedMediaWrite<T>(
+  pool: PlatformMediaPool,
+  authorize: NonNullable<PgPlatformMediaRepositoryConfig["authorizeWriteTransaction"]>,
+  work: (client: Queryable) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await authorize(client);
+    const result = await work(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function assertRoomMediaUploadWithinPlan(
@@ -661,6 +694,7 @@ async function completeUploadSession(
   pool: PlatformMediaPool,
   input: Parameters<PlatformMediaRepository["completeUploadSession"]>[0],
   mediaPathPrefix: string,
+  authorizeWriteTransaction?: PgPlatformMediaRepositoryConfig["authorizeWriteTransaction"],
 ): ReturnType<PlatformMediaRepository["completeUploadSession"]> {
   const client = await pool.connect();
   let transactionStarted = false;
@@ -669,6 +703,7 @@ async function completeUploadSession(
   try {
     await client.query("BEGIN");
     transactionStarted = true;
+    await authorizeWriteTransaction?.(client);
     const session = await readSession(client, input.session.sessionId, true);
     if (!session) throw new Error("Platform media upload session was not found");
     if (session.status === "completed") {
