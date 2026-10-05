@@ -420,7 +420,7 @@ export async function assertHotelSetupLogoPrivileges(client: HotelSetupPrivilege
       AND p.proowner=(SELECT relowner FROM pg_class WHERE oid='platform.hotel_setup_property_scopes'::regclass)
       AND (p.proname NOT LIKE 'hotel_setup_logo_%' OR p.proconfig=ARRAY['search_path=pg_catalog']::text[]))=$3
     AND (SELECT md5(string_agg(pg_get_functiondef(p.oid),'' ORDER BY p.oid::regprocedure::text))
-      FROM pg_proc p WHERE p.oid=ANY($1::regprocedure[] || ARRAY['platform.hotel_setup_logo_authority(uuid,uuid,uuid,boolean)'::regprocedure]))='c5b3f88abded344ad1946434b19c8434'
+      FROM pg_proc p WHERE p.oid=ANY($1::regprocedure[] || ARRAY['platform.hotel_setup_logo_authority(uuid,uuid,uuid,boolean)'::regprocedure]))='2fb622fd71c5a7e0894a189fcc56ecd4'
     AND (SELECT md5(string_agg(c.oid::regclass::text||c.relrowsecurity::text||c.relforcerowsecurity::text||p.polname
       ||p.polpermissive::text||p.polcmd::text
       ||COALESCE((SELECT string_agg(CASE WHEN role=0 THEN 'PUBLIC' ELSE role::regrole::text END,',' ORDER BY role::regrole::text)
