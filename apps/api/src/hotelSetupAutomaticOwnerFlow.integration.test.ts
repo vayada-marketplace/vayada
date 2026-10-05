@@ -177,7 +177,7 @@ describe.runIf(databaseUrl && rollbackRoot)("synthetic Owner automatic native se
         "provisioned",
         "provisioned",
       ]);
-      expect(proveProperty).toHaveBeenCalledTimes(3);
+      expect(proveProperty).toHaveBeenCalledTimes(9);
       expect(records.size).toBe(4);
       expect((await financials(propertyId)).rows).toEqual([
         { status: "suspended", marker: "pending", ownerOff: null },

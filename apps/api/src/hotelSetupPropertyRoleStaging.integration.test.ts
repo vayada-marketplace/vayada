@@ -55,6 +55,7 @@ describe.runIf(connectionString)("manual disabled property-role staging", () => 
       scope,
     };
     const provisioner = `vay1092_stage_${randomBytes(12).toString("hex")}`;
+    const publisher = `vay1092_publisher_${randomBytes(12).toString("hex")}`;
     const count = async () =>
       (
         await admin.query(
@@ -110,6 +111,16 @@ describe.runIf(connectionString)("manual disabled property-role staging", () => 
       await admin.query(
         "INSERT INTO identity.product_entitlements(organization_id,product,entitlement_key,status) VALUES($1,'pms','property-management','active')",
         [organizationId],
+      );
+      await admin.query(
+        `CREATE ROLE ${admin.escapeIdentifier(publisher)} NOLOGIN NOINHERIT NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION BYPASSRLS`,
+      );
+      roles.push(publisher);
+      await admin.query(
+        `GRANT USAGE ON SCHEMA identity,platform,hotel_catalog,booking,pms,finance TO ${admin.escapeIdentifier(publisher)}`,
+      );
+      await admin.query(
+        `GRANT ALL ON ALL TABLES IN SCHEMA identity,platform,hotel_catalog,booking,pms,finance TO ${admin.escapeIdentifier(publisher)}`,
       );
       const before = await counts();
       for (const operation of [
@@ -209,6 +220,12 @@ describe.runIf(connectionString)("manual disabled property-role staging", () => 
           command: unknown,
         ) => {
           if (command instanceof DescribeSecretCommand) {
+            if (stored.VersionId)
+              return {
+                ARN: stored.ARN,
+                Name: stored.Name,
+                VersionIdsToStages: { [stored.VersionId]: ["AWSCURRENT"] },
+              };
             const error = new Error();
             error.name = "ResourceNotFoundException";
             throw error;
@@ -222,6 +239,35 @@ describe.runIf(connectionString)("manual disabled property-role staging", () => 
             };
           return stored;
         }) as never);
+        const originalQuery = pg.Client.prototype.query as unknown as (
+          this: pg.Client,
+          ...args: unknown[]
+        ) => Promise<pg.QueryResult>;
+        const activated = new WeakSet<pg.Client>();
+        vi.spyOn(pg.Client.prototype, "query").mockImplementation(async function (
+          this: pg.Client,
+          ...args: unknown[]
+        ) {
+          const sql = args[0];
+          const result = await originalQuery.apply(this, args);
+          if (
+            typeof sql === "string" &&
+            sql.startsWith("INSERT INTO platform.hotel_setup_property_scopes")
+          )
+            activated.add(this);
+          if (sql === "COMMIT" && activated.delete(this)) {
+            await originalQuery.call(this, `SET ROLE ${admin.escapeIdentifier(publisher)}`);
+            expect(
+              (
+                await originalQuery.call(
+                  this,
+                  "SELECT rolsuper,pg_catalog.has_table_privilege(current_user,'pg_catalog.pg_authid','SELECT') AS catalog_select,pg_catalog.has_table_privilege(current_user,'pg_catalog.pg_authid','UPDATE') AS catalog_update FROM pg_roles WHERE rolname=current_user",
+                )
+              ).rows,
+            ).toEqual([{ rolsuper: false, catalog_select: false, catalog_update: false }]);
+          }
+          return result;
+        } as never);
         await expect(
           activateVerifiedHotelSetupPropertyRole({
             ...input,
@@ -624,6 +670,15 @@ describe.runIf(connectionString)("manual disabled property-role staging", () => 
         command: unknown,
       ) => {
         if (command instanceof DescribeSecretCommand) {
+          const published = [...secrets.values()].find(
+            (secret) => secret.Name === command.input.SecretId,
+          );
+          if (published)
+            return {
+              ARN: published.ARN,
+              Name: published.Name,
+              VersionIdsToStages: { [published.VersionId!]: ["AWSCURRENT"] },
+            };
           const error = new Error();
           error.name = "ResourceNotFoundException";
           throw error;

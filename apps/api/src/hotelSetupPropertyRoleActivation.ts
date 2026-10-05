@@ -150,7 +150,7 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
       publicationAttempted = true;
       publication = await publishHotelSetupPropertySecret({
         admin,
-        expectedVerifier: verifier,
+        proveSecondary: proveSecondary!,
         nativeDatabaseUrl,
         databaseEndpoint,
         staged: stagedScope,
