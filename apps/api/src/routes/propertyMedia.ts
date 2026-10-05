@@ -1,5 +1,9 @@
 import { UnauthorizedError } from "@vayada/backend-auth";
-import { AuthorizationError } from "@vayada/backend-authorization";
+import {
+  AuthorizationError,
+  resolveEffectivePropertyAccess,
+  type PropertyAccessRepository,
+} from "@vayada/backend-authorization";
 import {
   PROPERTY_MEDIA_AUTHORIZATION,
   parseAssignPropertyLogoRequest,
@@ -26,12 +30,23 @@ export async function registerPropertyMediaRoutes(
     repository: PropertyMediaCommandRepository;
     forwardLogo?: HotelSetupCommandForwarder;
     logoOnly?: boolean;
+    propertyAccessRepository?: PropertyAccessRepository;
   },
 ): Promise<void> {
   const authorized = new WeakMap<FastifyRequest, AuthorizedRequest>();
   const onRequest = async (request: FastifyRequest, reply: FastifyReply) => {
-    const access = authorizePropertyMediaRequest(request, reply);
-    if (access) authorized.set(request, access);
+    const access = authorizePropertyMediaRequest(request, reply, options.logoOnly);
+    if (!access) return;
+    if (options.logoOnly) {
+      if (!access.context.actor.providerIdentity.sessionId || !options.propertyAccessRepository)
+        throw new AuthorizationError();
+      const effective = await resolveEffectivePropertyAccess(
+        access.context,
+        options.propertyAccessRepository,
+      );
+      if (!effective?.propertyIds.includes(access.propertyId)) throw new AuthorizationError();
+    }
+    authorized.set(request, access);
   };
 
   app.put("/properties/:propertyId/media/logo", { onRequest }, async (request, reply) => {
@@ -79,6 +94,7 @@ export async function registerPropertyMediaRoutes(
 function authorizePropertyMediaRequest(
   request: FastifyRequest,
   reply: FastifyReply,
+  ownerOnly = false,
 ): AuthorizedRequest | null {
   try {
     const baseContext = enforceRoutePolicy(request, {
@@ -108,7 +124,9 @@ function authorizePropertyMediaRequest(
         product: PROPERTY_MEDIA_AUTHORIZATION.product,
         resourceType: PROPERTY_MEDIA_AUTHORIZATION.resourceType,
         resourceId: propertyId,
-        allowedRelationships: PROPERTY_MEDIA_AUTHORIZATION.allowedRelationships,
+        allowedRelationships: ownerOnly
+          ? ["owner"]
+          : PROPERTY_MEDIA_AUTHORIZATION.allowedRelationships,
       },
     });
     return { propertyId, context };
