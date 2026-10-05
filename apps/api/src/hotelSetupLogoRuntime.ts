@@ -12,7 +12,11 @@ import {
 import { createPgPlatformMediaRepository } from "./platform/platformMediaRepository.js";
 import { createS3PlatformMediaAdapter } from "./platform/platformMediaS3.js";
 import type { PlatformMediaServingConfig } from "./platform/mediaServing.js";
-import type { PlatformMediaRoutesOptions } from "./routes/platformMedia.js";
+import type {
+  PlatformMediaVariantRecord,
+  PlatformMediaSessionRecord,
+  PlatformMediaRoutesOptions,
+} from "./routes/platformMedia.js";
 
 /** Native credentials and pools are selected per verified request, never cached or shared. */
 export function createHotelSetupLogoRuntime(
@@ -117,7 +121,76 @@ export function createHotelSetupLogoRuntime(
           mediaPathPrefix: serving.publicPathPrefix,
           authorizeWriteTransaction: native.authorize,
         });
-        return { repository, targetResolver: repository, close: () => native.pool.end() };
+        async function recordArtifact(
+          session: PlatformMediaSessionRecord,
+          mediaId: string,
+          variant: PlatformMediaVariantRecord,
+        ) {
+          const artifact = JSON.stringify({ mediaId, ...variant });
+          const client = await native.pool.connect();
+          let commitAttempted = false;
+          try {
+            await client.query("BEGIN");
+            await native.authorize(client);
+            const persisted = await client.query(
+              `UPDATE platform.media_upload_sessions
+               SET private_artifact_manifest=private_artifact_manifest || jsonb_build_array($2::jsonb)
+               WHERE id=$1::uuid AND session_status='signed' AND requested_purpose='property.logo'
+                 AND NOT private_artifact_manifest @> jsonb_build_array($2::jsonb)
+               RETURNING id`,
+              [session.sessionId, artifact],
+            );
+            if (persisted.rowCount !== 1) {
+              const existing = await client.query(
+                `SELECT id FROM platform.media_upload_sessions
+                WHERE id=$1::uuid AND session_status='signed' AND private_artifact_manifest @> jsonb_build_array($2::jsonb)`,
+                [session.sessionId, artifact],
+              );
+              if (existing.rows.length !== 1)
+                throw new Error("Private logo artifact receipt missing");
+            }
+            commitAttempted = true;
+            await client.query("COMMIT");
+          } catch (error) {
+            if (!commitAttempted) {
+              await client.query("ROLLBACK");
+              throw error;
+            }
+            // No private PUT until an unknown COMMIT is reconciled against the exact persisted receipt.
+            await client.query("ROLLBACK").catch(() => undefined);
+            await client.query("BEGIN");
+            try {
+              await native.authorize(client);
+              const existing = await client.query(
+                `SELECT id FROM platform.media_upload_sessions
+                WHERE id=$1::uuid AND session_status='signed' AND private_artifact_manifest @> jsonb_build_array($2::jsonb)`,
+                [session.sessionId, artifact],
+              );
+              if (existing.rows.length !== 1)
+                throw new Error("Private logo artifact commit requires inspection");
+              await client.query("COMMIT");
+            } catch (inspectionError) {
+              await client.query("ROLLBACK").catch(() => undefined);
+              throw inspectionError;
+            }
+          } finally {
+            client.release();
+          }
+        }
+        return {
+          repository,
+          targetResolver: repository,
+          finalizer: {
+            ...adapter,
+            generateVariants: (input) =>
+              adapter.generateVariants({
+                ...input,
+                beforeWriteVariant: (variant) =>
+                  recordArtifact(input.session, input.file.sessionFile.mediaId, variant),
+              }),
+          },
+          close: () => native.pool.end(),
+        };
       } catch (error) {
         await native.pool.end();
         throw error;

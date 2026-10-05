@@ -461,6 +461,7 @@ export type PlatformMediaUploadFinalizer = {
     file: PlatformMediaFinalizedFileRecord;
     fileIndex: number;
     policy: PlatformMediaPurposePolicy;
+    beforeWriteVariant?(variant: PlatformMediaVariantRecord): Promise<void>;
   }): Promise<PlatformMediaVariantRecord[]>;
   cleanupUploadedFile?(input: {
     session: PlatformMediaSessionRecord;
@@ -469,6 +470,7 @@ export type PlatformMediaUploadFinalizer = {
 };
 
 export type PlatformMediaRequestPersistence = {
+  finalizer?: PlatformMediaUploadFinalizer;
   repository: PlatformMediaRepository;
   targetResolver: PlatformMediaTargetResolver;
   close(): Promise<void>;
@@ -1184,6 +1186,7 @@ export async function registerPlatformMediaRoutes(
       });
       const repository = persistence?.repository ?? options.repository;
       const targetResolver = persistence?.targetResolver ?? options.targetResolver;
+      const finalizer = persistence?.finalizer ?? options.finalizer;
       try {
         const platformOrganizationSelected =
           authenticatedContext.selectedOrganization.kind === "platform";
@@ -1264,7 +1267,7 @@ export async function registerPlatformMediaRoutes(
         }
         if (session.status === "completed") {
           await cleanupUploadedFiles({
-            finalizer: options.finalizer,
+            finalizer,
             session,
             files: finalizedFilesFromCompletedSession(session),
             timeoutMs: cleanupTimeoutMs,
@@ -1310,7 +1313,7 @@ export async function registerPlatformMediaRoutes(
           request: request.body,
           session: finalizationSession,
           policy,
-          finalizer: options.finalizer,
+          finalizer,
         });
         if (!finalizedFiles.ok) {
           const replay = await findCompletedFinalizeReplay({
@@ -1325,7 +1328,7 @@ export async function registerPlatformMediaRoutes(
         try {
           for (const [index, file] of finalizedFiles.files.entries()) {
             variantSets.push(
-              await options.finalizer.generateVariants({
+              await finalizer.generateVariants({
                 session: finalizationSession,
                 file,
                 fileIndex: index,
@@ -1381,7 +1384,7 @@ export async function registerPlatformMediaRoutes(
         const mediaObjects = completed.mediaObjects;
         const primaryMediaObject = mediaObjects[0]!;
         await cleanupUploadedFiles({
-          finalizer: options.finalizer,
+          finalizer,
           session: completedSession,
           files: finalizedFiles.files,
           timeoutMs: cleanupTimeoutMs,

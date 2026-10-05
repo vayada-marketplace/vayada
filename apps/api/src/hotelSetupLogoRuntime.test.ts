@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   close: vi.fn(),
   pool: vi.fn(),
   routing: vi.fn(),
+  generate: vi.fn(),
 }));
 vi.mock("pg", () => ({
   default: {
@@ -30,7 +31,9 @@ vi.mock("./hotelSetupCommandCredentials.js", () => ({
 }));
 vi.mock("./hotelSetupLogoPrivileges.js", () => ({ assertHotelSetupLogoPrivileges: mocks.attest }));
 vi.mock("./hotelSetupCommandScope.js", () => ({ assertHotelSetupLogoScope: mocks.scope }));
-vi.mock("./platform/platformMediaS3.js", () => ({ createS3PlatformMediaAdapter: () => ({}) }));
+vi.mock("./platform/platformMediaS3.js", () => ({
+  createS3PlatformMediaAdapter: () => ({ generateVariants: mocks.generate }),
+}));
 vi.mock("./platform/platformMediaRepository.js", () => ({
   createPgPlatformMediaRepository: mocks.repo,
 }));
@@ -73,6 +76,59 @@ beforeEach(() => {
   mocks.assign.mockResolvedValue({ ok: true });
 });
 describe("request-bound native logo runtime", () => {
+  it.each(["acknowledged", "unknown_reconciled", "unknown_unconfirmed"])(
+    "records private artifact before storage after %s COMMIT",
+    async (outcome) => {
+      const r = runtime();
+      const ports = await r.uploads.resolveRequestPersistence!({
+        operation: "create",
+        context,
+        request: {
+          purpose: "property.logo",
+          resource: { product: "hotel_catalog", resourceType: "property", resourceId: propertyId },
+          files: [],
+        },
+      });
+      const artifact = {
+        variantName: "original_safe",
+        visibility: "private",
+        storageKey: "private/media/exact",
+        contentType: "image/webp",
+        sizeBytes: 10,
+        publicCdnUrl: null,
+      };
+      mocks.generate.mockImplementation(async (input) => {
+        await input.beforeWriteVariant(artifact);
+        return [artifact];
+      });
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.startsWith("UPDATE")) return { rows: [{ id: propertyId }], rowCount: 1 };
+        if (sql.startsWith("SELECT id"))
+          return {
+            rows: outcome === "unknown_unconfirmed" ? [] : [{ id: propertyId }],
+            rowCount: 1,
+          };
+        if (sql === "COMMIT" && outcome !== "acknowledged") {
+          if (mocks.query.mock.calls.filter(([q]) => q === "COMMIT").length === 2)
+            throw new Error("lost commit acknowledgement");
+        }
+        return { rows: [] };
+      });
+      const generation = ports.finalizer!.generateVariants({
+        session: { sessionId: propertyId } as any,
+        file: { sessionFile: { mediaId: propertyId } } as any,
+        fileIndex: 0,
+        policy: {} as any,
+      });
+      if (outcome === "unknown_unconfirmed")
+        await expect(generation).rejects.toThrow("requires inspection");
+      else await expect(generation).resolves.toEqual([artifact]);
+      expect(
+        mocks.query.mock.calls.some(([sql]) => sql.includes("private_artifact_manifest")),
+      ).toBe(true);
+      await ports.close();
+    },
+  );
   it("binds current actor before acquisition and rechecks on the repository's transaction client", async () => {
     const r = runtime();
     const ports = await r.uploads.resolveRequestPersistence!({
