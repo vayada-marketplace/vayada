@@ -123,7 +123,7 @@ export async function assertHotelSetupFeatureHubPrivileges(client: Pick<pg.Pool,
   await assertHotelSetupNativePrivileges(
     client,
     HOTEL_SETUP_FEATURE_HUB_PRIVILEGES,
-    "16827da3dbb58d1daf6c2d1231323ad9",
+    "e55f55fa2d9d374518e1bcb0ad2aea33",
   );
   await assertHotelSetupPropertyRlsHelpers(client, "feature_hub");
 }
