@@ -1068,6 +1068,8 @@ describe.skipIf(!url)("hotel setup property Financials scope", () => {
         ),
       ).rejects.toMatchObject({ code: "42501" });
       // An ordinary ACL-backed caller retains access to other event types.
+      await admin.query(`GRANT EXECUTE ON FUNCTION platform.tenant_scope_key(text,uuid,uuid),
+        platform.valid_tenant_scope(text,uuid,uuid) TO ${roles[5]}`);
       await logins[5]!.query(
         `INSERT INTO platform.domain_events (source_system,event_key,event_type,occurred_at,
           tenant_scope,property_id,resource_product,resource_type,resource_id)
