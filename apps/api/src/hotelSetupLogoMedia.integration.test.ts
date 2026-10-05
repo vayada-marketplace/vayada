@@ -230,6 +230,48 @@ describe.skipIf(!url)("native property logo lifecycle", () => {
         ),
       );
       expect(completed.mediaObjects[0]?.visibility).toBe("private");
+      // A privileged migration session may operate an unrelated restricted worker.
+      const ordinary = `vay965_worker_${suffix}`,
+        alias = `vay965_logo_alias_${suffix}`;
+      await admin.query(`CREATE ROLE ${ordinary} NOLOGIN NOSUPERUSER`);
+      await admin.query(`CREATE ROLE ${alias} NOLOGIN NOSUPERUSER`);
+      try {
+        await admin.query(`GRANT USAGE ON SCHEMA platform TO ${ordinary},${alias}`);
+        await admin.query(`GRANT SELECT ON platform.media_objects TO ${ordinary},${alias}`);
+        await admin.query(
+          `GRANT vayada_next_hotel_setup_logo_scope TO ${alias} WITH INHERIT TRUE, SET FALSE`,
+        );
+        await admin.query(`SET ROLE ${ordinary}`);
+        expect(
+          (await admin.query("SELECT platform.hotel_setup_logo_login_guard() AS allowed")).rows[0]
+            ?.allowed,
+        ).toBe(true);
+        expect(
+          (
+            await admin.query("SELECT id FROM platform.media_objects WHERE id=$1", [
+              completed.mediaObjects[0]!.mediaId,
+            ])
+          ).rows,
+        ).toHaveLength(1);
+        await admin.query("RESET ROLE");
+        await admin.query(`SET ROLE ${alias}`);
+        expect(
+          (await admin.query("SELECT platform.hotel_setup_logo_login_guard() AS allowed")).rows[0]
+            ?.allowed,
+        ).toBe(false);
+        expect(
+          (
+            await admin.query("SELECT id FROM platform.media_objects WHERE id=$1", [
+              completed.mediaObjects[0]!.mediaId,
+            ])
+          ).rows,
+        ).toHaveLength(0);
+      } finally {
+        await admin.query("RESET ROLE");
+        await admin.query(`DROP OWNED BY ${ordinary},${alias}`);
+        await admin.query(`DROP ROLE ${ordinary},${alias}`);
+      }
+
       const copyToPublic = vi.fn(async () => undefined),
         deletePublic = vi.fn(async () => undefined);
       const commands = createPgS3PropertyMediaCommandRepository({
