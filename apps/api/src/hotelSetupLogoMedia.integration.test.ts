@@ -124,6 +124,19 @@ describe.skipIf(!url)("native property logo lifecycle", () => {
           )
         ).rows[0]?.allowed,
       ).toBe(false);
+      const catalogClient = await native.connect();
+      try {
+        await catalogClient.query("BEGIN");
+        await catalogClient.query(
+          "CREATE TEMP TABLE pg_proc AS SELECT * FROM pg_catalog.pg_proc WITH NO DATA",
+        );
+        await catalogClient.query("SET LOCAL search_path=pg_temp,pg_catalog");
+        await assertHotelSetupLogoPrivileges(catalogClient);
+        await catalogClient.query("ROLLBACK");
+      } finally {
+        await catalogClient.query("ROLLBACK").catch(() => undefined);
+        catalogClient.release();
+      }
       const authorize = async (client: HotelSetupPrivilegeQueryable) => {
         await assertHotelSetupLogoPrivileges(client);
         await assertHotelSetupLogoScope(client, { propertyId, organizationId, actorUserId });

@@ -414,37 +414,37 @@ export async function assertHotelSetupLogoPrivileges(client: HotelSetupPrivilege
   ]);
   const result = await client.query<{ safe: boolean }>(
     `SELECT (
-    (SELECT count(*) FROM pg_proc p WHERE p.oid=ANY($1::regprocedure[])
-      AND has_function_privilege(current_user,p.oid,'EXECUTE')
-      AND NOT has_function_privilege(current_user,p.oid,'EXECUTE WITH GRANT OPTION')
-      AND p.proowner=(SELECT relowner FROM pg_class WHERE oid='platform.hotel_setup_property_scopes'::regclass)
+    (SELECT pg_catalog.count(*) FROM pg_catalog.pg_proc p WHERE p.oid=ANY($1::pg_catalog.regprocedure[])
+      AND pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE')
+      AND NOT pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE WITH GRANT OPTION')
+      AND p.proowner=(SELECT relowner FROM pg_catalog.pg_class WHERE oid='platform.hotel_setup_property_scopes'::pg_catalog.regclass)
       AND (p.proname NOT LIKE 'hotel_setup_logo_%' OR p.proconfig=ARRAY['search_path=pg_catalog']::text[]))=$3
-    AND (SELECT md5(string_agg(pg_get_functiondef(p.oid),'' ORDER BY p.oid::regprocedure::text))
-      FROM pg_proc p WHERE p.oid=ANY($1::regprocedure[] || ARRAY['platform.hotel_setup_logo_authority(uuid,uuid,uuid,boolean)'::regprocedure]))='2fb622fd71c5a7e0894a189fcc56ecd4'
-    AND (SELECT md5(string_agg(c.oid::regclass::text||c.relrowsecurity::text||c.relforcerowsecurity::text||p.polname
+    AND (SELECT pg_catalog.md5(pg_catalog.string_agg(pg_catalog.pg_get_functiondef(p.oid),'' ORDER BY p.oid::pg_catalog.regprocedure::text))
+      FROM pg_catalog.pg_proc p WHERE p.oid=ANY($1::pg_catalog.regprocedure[] || ARRAY['platform.hotel_setup_logo_authority(uuid,uuid,uuid,boolean)'::pg_catalog.regprocedure]))='2fb622fd71c5a7e0894a189fcc56ecd4'
+    AND (SELECT pg_catalog.md5(pg_catalog.string_agg(c.oid::pg_catalog.regclass::text||c.relrowsecurity::text||c.relforcerowsecurity::text||p.polname
       ||p.polpermissive::text||p.polcmd::text
-      ||COALESCE((SELECT string_agg(CASE WHEN role=0 THEN 'PUBLIC' ELSE role::regrole::text END,',' ORDER BY role::regrole::text)
-        FROM unnest(p.polroles) roles(role)),'')
-      ||COALESCE(pg_get_expr(p.polqual,p.polrelid),'')||COALESCE(pg_get_expr(p.polwithcheck,p.polrelid),''),' ' ORDER BY c.oid::regclass::text,p.polname))
-      FROM pg_class c JOIN pg_policy p ON p.polrelid=c.oid WHERE c.oid=ANY($2::regclass[]))='7b295d5a3753af419bbc2c44fc231cb9'
-    AND (SELECT md5(string_agg(c.oid::regclass::text||pg_get_triggerdef(t.oid)||pg_get_functiondef(t.tgfoid)||t.tgenabled::text,'' ORDER BY c.oid::regclass::text,t.tgname))
-      FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE NOT t.tgisinternal AND c.oid=ANY($2::regclass[]))='68b11515042c1756a1b45f82abd21f22'
-    AND NOT EXISTS(SELECT 1 FROM pg_class c WHERE c.oid=ANY($2::regclass[]) AND c.relowner<>(SELECT relowner FROM pg_class WHERE oid='platform.hotel_setup_property_scopes'::regclass))
-    AND NOT has_function_privilege(current_user,'platform.hotel_setup_logo_authority(uuid,uuid,uuid,boolean)','EXECUTE')
+      ||COALESCE((SELECT pg_catalog.string_agg(CASE WHEN role=0 THEN 'PUBLIC' ELSE role::pg_catalog.regrole::text END,',' ORDER BY role::pg_catalog.regrole::text)
+        FROM pg_catalog.unnest(p.polroles) roles(role)),'')
+      ||COALESCE(pg_catalog.pg_get_expr(p.polqual,p.polrelid),'')||COALESCE(pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid),''),' ' ORDER BY c.oid::pg_catalog.regclass::text,p.polname))
+      FROM pg_catalog.pg_class c JOIN pg_catalog.pg_policy p ON p.polrelid=c.oid WHERE c.oid=ANY($2::pg_catalog.regclass[]))='7b295d5a3753af419bbc2c44fc231cb9'
+    AND (SELECT pg_catalog.md5(pg_catalog.string_agg(c.oid::pg_catalog.regclass::text||pg_catalog.pg_get_triggerdef(t.oid)||pg_catalog.pg_get_functiondef(t.tgfoid)||t.tgenabled::text,'' ORDER BY c.oid::pg_catalog.regclass::text,t.tgname))
+      FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid WHERE NOT t.tgisinternal AND c.oid=ANY($2::pg_catalog.regclass[]))='68b11515042c1756a1b45f82abd21f22'
+    AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class c WHERE c.oid=ANY($2::pg_catalog.regclass[]) AND c.relowner<>(SELECT relowner FROM pg_catalog.pg_class WHERE oid='platform.hotel_setup_property_scopes'::pg_catalog.regclass))
+    AND NOT pg_catalog.has_function_privilege(current_user,'platform.hotel_setup_logo_authority(uuid,uuid,uuid,boolean)','EXECUTE')
     AND (SELECT p.prosecdef AND p.proconfig=ARRAY['search_path=pg_catalog']::text[]
-      AND p.proowner=(SELECT relowner FROM pg_class WHERE oid='platform.hotel_setup_property_scopes'::regclass)
-      FROM pg_proc p WHERE p.oid='platform.hotel_setup_logo_authority(uuid,uuid,uuid,boolean)'::regprocedure)
-    AND NOT EXISTS(SELECT 1 FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid
-      WHERE NOT t.tgisinternal AND t.tgrelid=ANY($2::regclass[]) AND p.proowner<>(SELECT relowner FROM pg_class WHERE oid='platform.hotel_setup_property_scopes'::regclass))
-    AND NOT EXISTS(SELECT 1 FROM pg_auth_members WHERE member=(SELECT oid FROM pg_roles WHERE rolname='vayada_next_hotel_setup_logo_scope'))
-    AND NOT EXISTS(SELECT 1 FROM pg_proc p,LATERAL aclexplode(p.proacl) a
-      WHERE p.pronamespace='pg_catalog'::regnamespace AND a.grantee IN
-        ((SELECT oid FROM pg_roles WHERE rolname=session_user),(SELECT oid FROM pg_roles WHERE rolname='vayada_next_hotel_setup_logo_scope')))
-    AND NOT EXISTS(SELECT 1 FROM pg_proc p WHERE p.pronamespace='pg_catalog'::regnamespace
+      AND p.proowner=(SELECT relowner FROM pg_catalog.pg_class WHERE oid='platform.hotel_setup_property_scopes'::pg_catalog.regclass)
+      FROM pg_catalog.pg_proc p WHERE p.oid='platform.hotel_setup_logo_authority(uuid,uuid,uuid,boolean)'::pg_catalog.regprocedure)
+    AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_proc p ON p.oid=t.tgfoid
+      WHERE NOT t.tgisinternal AND t.tgrelid=ANY($2::pg_catalog.regclass[]) AND p.proowner<>(SELECT relowner FROM pg_catalog.pg_class WHERE oid='platform.hotel_setup_property_scopes'::pg_catalog.regclass))
+    AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_auth_members WHERE member=(SELECT oid FROM pg_catalog.pg_roles WHERE rolname='vayada_next_hotel_setup_logo_scope'))
+    AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc p,LATERAL pg_catalog.aclexplode(p.proacl) a
+      WHERE p.pronamespace='pg_catalog'::pg_catalog.regnamespace AND a.grantee IN
+        ((SELECT oid FROM pg_catalog.pg_roles WHERE rolname=session_user),(SELECT oid FROM pg_catalog.pg_roles WHERE rolname='vayada_next_hotel_setup_logo_scope')))
+    AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc p WHERE p.pronamespace='pg_catalog'::pg_catalog.regnamespace
       AND p.proname IN ('pg_read_file','pg_read_binary_file','pg_ls_dir','lo_import','lo_export')
-      AND has_function_privilege(current_user,p.oid,'EXECUTE'))
+      AND pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE'))
     AND current_user=session_user
-    AND current_setting('session_replication_role')='origin' AND NOT has_parameter_privilege(current_user,'session_replication_role','SET')
+    AND pg_catalog.current_setting('session_replication_role')='origin' AND NOT pg_catalog.has_parameter_privilege(current_user,'session_replication_role','SET')
   ) AS safe`,
     [
       HOTEL_SETUP_LOGO_RLS_HELPERS,
