@@ -58,5 +58,15 @@
       "digest": "sha256:259f22ca5f9d90cfa87239adfff6a396bd3877598372c20a377dc055dfd3df6b",
       "source": "187eeea3a5d6864283b854815334fe34c7ec752b"
     }
+  },
+  "vay965-logo-manual-20261005": {
+    "primary": {
+      "digest": "sha256:18fa7587a09fa58916e734ea9c3b2d38c274783bc98d793308cc2f122d688965",
+      "source": "3efb2195a823f40b7cd5a716db5bf08ac3fe90ad"
+    },
+    "rollback": {
+      "digest": "sha256:18fa7587a09fa58916e734ea9c3b2d38c274783bc98d793308cc2f122d688965",
+      "source": "3efb2195a823f40b7cd5a716db5bf08ac3fe90ad"
+    }
   }
 }

@@ -15,7 +15,7 @@ preserved. Accepting again after withdrawal starts fresh measurement on the next
 full page load; an old beacon cannot replay activity from the withdrawn period.
 Other origins and account consent are independent.
 
-The reviewed 2026-09-06 beacon uses XHR and navigator.sendBeacon. Guards cover its
+The reviewed 2026-10-05 beacon uses XHR and navigator.sendBeacon. Guards cover its
 Cloudflare and same-origin `/cdn-cgi/rum` destinations only. SRI pins the reviewed
 bytes. A vendor update fails closed instead of introducing an unguarded transport.
 To update, download the official script, review all network transports, update
