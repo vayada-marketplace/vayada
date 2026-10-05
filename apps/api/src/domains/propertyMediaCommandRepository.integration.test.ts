@@ -544,7 +544,12 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL property media publication saga"
     const copiesReleased = new Promise<void>((resolve) => {
       releaseCopies = resolve;
     });
+    let signalCopyStarted!: () => void;
+    const copyStarted = new Promise<void>((resolve) => {
+      signalCopyStarted = resolve;
+    });
     copyToPublic.mockImplementation(async ({ publicStorageKey }) => {
+      signalCopyStarted();
       await copiesReleased;
       publicObjects.add(publicStorageKey);
     });
@@ -554,6 +559,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL property media publication saga"
 
     const staleWorker = repository.replacePresentation(command);
     await waitForPublicationStatus("running");
+    await copyStarted;
     await admin.query(
       `UPDATE platform.idempotency_keys
        SET idempotency_metadata = '{}'::jsonb
