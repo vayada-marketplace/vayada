@@ -167,7 +167,7 @@ describe.runIf(databaseUrl && rollbackRoot)(
           organization.receipts.map((r) => r.status),
           JSON.stringify(nativeDenials()),
         ).toEqual(["provisioned"]);
-        expect(fixture.proveOrganization).toHaveBeenCalledOnce();
+        expect(fixture.proveOrganization).toHaveBeenCalledTimes(3);
         const options = {
           ...fixture.options,
           assignments: connections[0]!,
