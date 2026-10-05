@@ -147,8 +147,10 @@ CREATE FUNCTION platform.hotel_setup_logo_login_guard() RETURNS BOOLEAN
 LANGUAGE sql STABLE SET search_path=pg_catalog AS $$
  SELECT (session_user::text !~ '^vayada_next_hotel_setup_logo_'
    AND current_user::text !~ '^vayada_next_hotel_setup_logo_'
-   AND NOT pg_has_role(session_user,'vayada_next_hotel_setup_logo_scope','MEMBER')
-   AND NOT pg_has_role(current_user,'vayada_next_hotel_setup_logo_scope','MEMBER'))
+   AND (EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname=session_user AND rolsuper)
+     OR NOT pg_has_role(session_user,'vayada_next_hotel_setup_logo_scope','MEMBER'))
+   AND (EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname=current_user AND rolsuper)
+     OR NOT pg_has_role(current_user,'vayada_next_hotel_setup_logo_scope','MEMBER')))
    OR (current_user=session_user AND pg_has_role(session_user,'vayada_next_hotel_setup_logo_scope','USAGE'));
 $$;
 CREATE FUNCTION platform.hotel_setup_logo_context() RETURNS JSONB
@@ -376,8 +378,10 @@ END $$;
 DO $$
 DECLARE item RECORD; non_logo TEXT := $guard$
  session_user::text !~ '^vayada_next_hotel_setup_logo_' AND current_user::text !~ '^vayada_next_hotel_setup_logo_'
- AND NOT pg_has_role(session_user,'vayada_next_hotel_setup_logo_scope','MEMBER')
- AND NOT pg_has_role(current_user,'vayada_next_hotel_setup_logo_scope','MEMBER')
+ AND (EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname=session_user AND rolsuper)
+     OR NOT pg_has_role(session_user,'vayada_next_hotel_setup_logo_scope','MEMBER'))
+ AND (EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname=current_user AND rolsuper)
+     OR NOT pg_has_role(current_user,'vayada_next_hotel_setup_logo_scope','MEMBER'))
 $guard$;
 BEGIN
  FOR item IN SELECT * FROM (VALUES
