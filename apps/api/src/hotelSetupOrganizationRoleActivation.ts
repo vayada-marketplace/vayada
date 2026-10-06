@@ -25,7 +25,6 @@ export async function activateVerifiedHotelSetupOrganizationRole(input: {
   let failed = false;
   let nativeFailed = false;
   let commitAttempted = false;
-  let verifier = "";
   const { login, roleOid, organizationId, actorUserId } = input.staged ?? {};
   const scope = Object.freeze({ organizationId, actorUserId });
   const staged = Object.freeze({ login, roleOid, ...scope });
@@ -64,8 +63,8 @@ export async function activateVerifiedHotelSetupOrganizationRole(input: {
     await admin.query("BEGIN");
     await lockHotelSetupOrganizationBootstrapAuthority(admin, scope);
     const identity = await admin.query(
-      `SELECT oid FROM pg_catalog.pg_authid r WHERE
-      oid=$1::oid AND rolname=$2 AND NOT rolcanlogin AND rolpassword IS NULL
+      `SELECT oid FROM pg_catalog.pg_roles r WHERE
+      oid=$1::oid AND rolname=$2 AND NOT rolcanlogin
       AND rolvaliduntil IS NULL AND NOT rolsuper AND NOT rolinherit AND NOT rolcreaterole
       AND NOT rolcreatedb AND NOT rolreplication AND NOT rolbypassrls
       AND (SELECT count(*) FROM pg_catalog.pg_auth_members WHERE member=r.oid)=1
@@ -93,12 +92,6 @@ export async function activateVerifiedHotelSetupOrganizationRole(input: {
       (database_login,organization_id) VALUES($1,$2::uuid)`,
       [login, organizationId],
     );
-    const password = await admin.query<{ verifier: string }>(
-      "SELECT rolpassword AS verifier FROM pg_catalog.pg_authid WHERE oid=$1::oid AND rolname=$2",
-      [roleOid, login],
-    );
-    verifier = password.rows[0]?.verifier ?? "";
-    if (failed || !verifier) throw new Error();
     commitAttempted = true;
     await admin.query("COMMIT");
     if (failed) throw new Error();
@@ -124,7 +117,7 @@ export async function activateVerifiedHotelSetupOrganizationRole(input: {
     const publication = await publishHotelSetupOrganizationSecret({
       admin,
       staged,
-      expectedVerifier: verifier,
+      proveSecondary: input.proveSecondary,
       nativeDatabaseUrl: input.nativeDatabaseUrl,
       databaseEndpoint: input.databaseEndpoint,
     });
@@ -134,66 +127,8 @@ export async function activateVerifiedHotelSetupOrganizationRole(input: {
     await nativeClient?.end().catch(() => undefined);
     nativeClient = undefined;
     await admin?.query("ROLLBACK").catch(() => undefined);
-    if (commitAttempted) {
-      try {
-        await admin!.query("BEGIN");
-        await admin!.query("SELECT id FROM identity.organizations WHERE id=$1::uuid FOR UPDATE", [
-          organizationId,
-        ]);
-        const identity = await admin!.query<{ rolcanlogin: boolean; rolpassword: string | null }>(
-          "SELECT rolcanlogin,rolpassword FROM pg_catalog.pg_authid WHERE oid=$1::oid AND rolname=$2",
-          [roleOid, login],
-        );
-        const assignments = await admin!.query<{
-          database_login: string;
-          organization_id: string;
-          credential_role_oid: number | null;
-          credential_secret_version: string | null;
-          credential_ready_at: Date | null;
-        }>(
-          `SELECT database_login,organization_id,credential_role_oid,credential_secret_version,credential_ready_at
-          FROM platform.hotel_setup_creation_scopes WHERE database_login=$1 OR organization_id=$2::uuid FOR UPDATE`,
-          [login, organizationId],
-        );
-        const role = identity.rows[0];
-        if (!role || identity.rows.length !== 1) throw new Error();
-        if (
-          !(
-            role.rolcanlogin === false &&
-            role.rolpassword === null &&
-            assignments.rows.length === 0
-          )
-        ) {
-          const assignment = assignments.rows[0];
-          // Any readiness may be a committed admission after a lost acknowledgement.
-          // Preserve it for inspection; never disable a ready or changed identity blindly.
-          if (
-            role.rolpassword !== verifier ||
-            assignments.rows.length !== 1 ||
-            assignment?.database_login !== login ||
-            assignment.organization_id !== organizationId.toLowerCase() ||
-            assignment.credential_role_oid !== null ||
-            assignment.credential_secret_version !== null ||
-            assignment.credential_ready_at !== null
-          )
-            throw new Error();
-          await admin!.query(`ALTER ROLE ${admin!.escapeIdentifier(login)} NOLOGIN PASSWORD NULL`);
-          await admin!.query(
-            "DELETE FROM platform.hotel_setup_creation_scopes WHERE database_login=$1 AND organization_id=$2::uuid",
-            [login, organizationId],
-          );
-          await admin!.query(
-            "SELECT pg_catalog.pg_terminate_backend(pid) FROM pg_catalog.pg_stat_activity WHERE usename=$1 AND pid<>pg_catalog.pg_backend_pid()",
-            [login],
-          );
-        }
-        await admin!.query("COMMIT");
-        if (failed) throw new Error();
-      } catch {
-        await admin?.query("ROLLBACK").catch(() => undefined);
-        throw new Error("Hotel setup organization activation requires recovery inspection");
-      }
-    }
+    // A committed or uncertain candidate stays pending for recovery inspection.
+    // Native proof or remote publication failure never authorizes a password reset or adoption.
     throw new Error(
       commitAttempted
         ? "Hotel setup organization activation requires recovery inspection"

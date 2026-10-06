@@ -45,3 +45,71 @@ parameter. The public service retains its present secrets and privileges. No
 GRANT OPTION, role-owner membership or helper function body change is introduced.
 Online setup stays disabled until this path has native PostgreSQL 16/17 proof,
 immutable primary/rollback package proof and a reviewed deployment.
+
+The protected offline readiness inspection, reader grants and approved legacy
+backfill take the exclusive session lock on `8734516` on their administrative
+connection. A live shared provisioning lock causes immediate refusal before
+catalog inspection or grants. The backfill lock lasts through native proofs,
+secret/version verification and readiness commit; uncertain-commit inspection
+reacquires it on a fresh connection. Read-only inspection releases its lock before
+Secrets Manager metadata reads; apply independently rechecks the frozen identities
+and versions under its own lock.
+
+Approved offline recovery reads role OIDs, flags, memberships, settings and
+ownership through `pg_roles` and the existing accessible catalogs. Production
+inspection confirmed that its administrator has neither SELECT nor UPDATE on
+`pg_authid`; recovery must not add those permissions or use its masked password
+field as evidence. Before granting, a fresh connection must authenticate the
+pinned credential as the exact session/effective login and OID. After the grant,
+fresh primary and rollback connections prove the exact own-organization scope.
+Repeat both fresh proofs and immutable-current secret readback immediately before
+reacquiring current authority and exact assignment/xmin locks for readiness commit.
+Network proofs run outside SQL transactions; the exclusive provisioning session
+fence remains held throughout.
+
+An ambiguous commit requires a fresh administrative connection and the same fence,
+exact committed readiness/xmin observation, fresh primary/rollback authentication
+and secret readback, then another exact authority/readiness observation. Missing
+or failed evidence remains recovery-required. This proves approved credential
+usability and authority at the observed checkpoints, not uninterrupted stored
+password-verifier continuity. Uncoordinated administrator changes between the
+last check and commit remain outside the provisioning lock protocol. The procedure
+never rotates passwords, expands catalog privileges, or changes hotel facts or
+product activation. Fixtures must run without catalog SELECT or UPDATE and cover
+password, role-OID, authority/version drift and lost commit acknowledgement.
+
+## Fresh automatic credentials without password-catalog access
+
+The production `vayada_admin` cannot SELECT `pg_authid`. The online fixture's
+superuser creator therefore does not establish production compatibility for
+organization/property activation or secret publication. Keep fresh provisioning
+disabled until the replacement and its real authority gate pass.
+
+For newly staged candidates, bind activation to the exact frozen role OID,
+canonical accessible `pg_roles` metadata, current Owner authority and pending
+assignment. Commit generated-password LOGIN activation and that assignment
+atomically. This path never resets an existing published credential.
+
+Before create-only secret publication and again after exact pinned payload
+readback, authenticate separate fresh primary and rollback connections. Each
+must match both session/effective login and OID and pass its actual scoped native
+proof. Require the sole immutable AWSCURRENT version, then recheck current
+catalog identity, authority and pending assignment before readiness COMMIT.
+Keep external proofs and SDK calls outside SQL row-lock transactions; retain the
+coordinator and assignment fences throughout.
+
+After a failed or uncertain committed activation/publication, preserve the
+candidate for recovery inspection. Do not clear its password, delete its
+assignment, retry a remote write, adopt it or provision a replacement. Pending
+LOGIN is not disabled or revoked: it remains unavailable through the actual
+serving credential providers because readiness is NULL. Prove that denial before
+publication, after publication, and after each fault. No serving-success receipt
+may be emitted for an uncertain outcome.
+
+Owned PostgreSQL 16/17 fixtures must exercise the compiled modules with a
+nonsuperuser creator lacking password-catalog SELECT/UPDATE and possessing only
+the separately verified creation, ALTER, parent ADMIN and required grant
+capabilities. Helper-owner authority remains separate. Production authority and
+Owner Save/reload are independent gates; synthetic fixture success proves
+neither. Observed fresh-authentication checkpoints do not promise uninterrupted
+verifier continuity against uncoordinated administrative changes.

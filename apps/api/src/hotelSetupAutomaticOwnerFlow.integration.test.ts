@@ -90,7 +90,7 @@ describe.runIf(databaseUrl && rollbackRoot)("synthetic Owner automatic native se
       await expect(creation.createPropertyProfile(input)).rejects.toThrow("creation unavailable");
       expect(aws).not.toHaveBeenCalled();
       expect((await pass("organization")).receipts.map((r) => r.status)).toEqual(["provisioned"]);
-      expect(proveOrganization).toHaveBeenCalledOnce();
+      expect(proveOrganization).toHaveBeenCalledTimes(3);
       expect(records.size).toBe(1);
       // Lose the post-COMMIT profile read, then replay the same creation key. No existing-property PUT occurs.
       const originalQuery = pg.Pool.prototype.query;
@@ -177,7 +177,7 @@ describe.runIf(databaseUrl && rollbackRoot)("synthetic Owner automatic native se
         "provisioned",
         "provisioned",
       ]);
-      expect(proveProperty).toHaveBeenCalledTimes(3);
+      expect(proveProperty).toHaveBeenCalledTimes(9);
       expect(records.size).toBe(4);
       expect((await financials(propertyId)).rows).toEqual([
         { status: "suspended", marker: "pending", ownerOff: null },

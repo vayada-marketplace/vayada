@@ -5,7 +5,11 @@ import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 import pg from "pg";
 import { STSClient } from "@aws-sdk/client-sts";
-import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
+import {
+  DescribeSecretCommand,
+  GetSecretValueCommand,
+  SecretsManagerClient,
+} from "@aws-sdk/client-secrets-manager";
 import { describe, expect, it, vi } from "vitest";
 import {
   APPROVED_HOTEL_SETUP_BACKFILLS,
@@ -59,6 +63,7 @@ describe.runIf(databaseUrl && rollbackRoot)(
       FROM pg_database d LEFT JOIN LATERAL aclexplode(COALESCE(d.datacl,acldefault('d',d.datdba))) a ON true
       WHERE d.datallowconn GROUP BY d.datname`)
       ).rows;
+      const operationalUrl = new URL(url);
       const owned = new Map<string, number>();
       const createdOrganizations = new Set<string>();
       const before = (
@@ -77,6 +82,16 @@ describe.runIf(databaseUrl && rollbackRoot)(
         expect(
           (await admin.query("SELECT oid FROM pg_roles WHERE rolname=$1", [login])).rows,
         ).toEqual([{ oid }]);
+        if (APPROVED_HOTEL_SETUP_BACKFILLS.some((binding) => binding.login === login)) {
+          await admin.query(`SET ROLE ${admin.escapeIdentifier(operationalUrl.username)}`);
+          try {
+            await admin.query(
+              `REVOKE INSERT(${HOTEL_SETUP_CREATION_PRIVILEGES["identity.product_entitlements"]!.INSERT!.join(",")}) ON identity.product_entitlements FROM ${admin.escapeIdentifier(login)}`,
+            );
+          } finally {
+            await admin.query("RESET ROLE");
+          }
+        }
         await admin.query(`DROP OWNED BY ${admin.escapeIdentifier(login)}`);
         await admin.query(`DROP ROLE ${admin.escapeIdentifier(login)}`);
         owned.delete(login);
@@ -92,6 +107,39 @@ describe.runIf(databaseUrl && rollbackRoot)(
         return oid;
       };
       try {
+        const operatorLogin = `vay965_approved_operator_${randomUUID().replaceAll("-", "")}`;
+        const operatorPassword = randomBytes(32).toString("base64url");
+        await admin.query(`CREATE ROLE ${admin.escapeIdentifier(operatorLogin)} LOGIN NOINHERIT
+          NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS
+          PASSWORD ${admin.escapeLiteral(operatorPassword)}`);
+        const operatorOid = (
+          await admin.query("SELECT oid FROM pg_roles WHERE rolname=$1", [operatorLogin])
+        ).rows[0].oid;
+        owned.set(operatorLogin, operatorOid);
+        await admin.query(
+          `GRANT CONNECT ON DATABASE ${admin.escapeIdentifier(url.pathname.slice(1))} TO ${admin.escapeIdentifier(operatorLogin)}`,
+        );
+        await admin.query(
+          `GRANT USAGE ON SCHEMA identity,platform,hotel_catalog,pms TO ${admin.escapeIdentifier(operatorLogin)}`,
+        );
+        // Disposable fixture authority: catalog SELECT, deliberately never catalog UPDATE.
+        await admin.query(
+          `GRANT ALL ON ALL TABLES IN SCHEMA identity,platform,hotel_catalog,pms TO ${admin.escapeIdentifier(operatorLogin)} WITH GRANT OPTION`,
+        );
+        operationalUrl.username = operatorLogin;
+        operationalUrl.password = operatorPassword;
+        const operator = new pg.Client({ connectionString: operationalUrl.href });
+        await operator.connect();
+        try {
+          expect(
+            (
+              await operator.query(`SELECT rolsuper,pg_catalog.has_table_privilege(current_user,'pg_catalog.pg_authid','SELECT') AS catalog_select,pg_catalog.has_table_privilege(current_user,'pg_catalog.pg_authid','UPDATE') AS catalog_update
+            FROM pg_roles WHERE rolname=current_user`)
+            ).rows,
+          ).toEqual([{ rolsuper: false, catalog_select: false, catalog_update: false }]);
+        } finally {
+          await operator.end();
+        }
         expect(
           (
             await admin.query(
@@ -124,7 +172,18 @@ describe.runIf(databaseUrl && rollbackRoot)(
             [binding.organizationId, binding.actorUserId],
           );
           for (const mode of index === 0
-            ? ["proof", "readback", "authority", "verifier", "assignment", "commitLost", "success"]
+            ? [
+                "proof",
+                "readback",
+                "authority",
+                "verifier",
+                "assignment",
+                "version",
+                "commitPassword",
+                "commitVersion",
+                "commitLost",
+                "success",
+              ]
             : ["success"]) {
             const password = randomBytes(36).toString("base64url"),
               secretVersion = randomUUID();
@@ -160,9 +219,24 @@ describe.runIf(databaseUrl && rollbackRoot)(
             vi.spyOn(STSClient.prototype, "send").mockResolvedValue({
               Account: "269416271598",
             } as never);
+            let metadataReads = 0,
+              commitFaultThisAttempt = false;
             const send = vi
               .spyOn(SecretsManagerClient.prototype, "send")
               .mockImplementation(async (command: unknown) => {
+                if (command instanceof DescribeSecretCommand) {
+                  metadataReads++;
+                  return {
+                    Name: name,
+                    ARN: `arn:aws:secretsmanager:eu-west-1:269416271598:secret:${name}-123abc`,
+                    VersionIdsToStages: {
+                      [(mode === "version" && metadataReads > 1) ||
+                      (mode === "commitVersion" && commitFaultThisAttempt)
+                        ? randomUUID()
+                        : secretVersion]: ["AWSCURRENT"],
+                    },
+                  };
+                }
                 expect(command).toBeInstanceOf(GetSecretValueCommand);
                 expect((command as GetSecretValueCommand).input).toEqual({
                   SecretId: name,
@@ -197,7 +271,11 @@ describe.runIf(databaseUrl && rollbackRoot)(
                       [binding.login],
                     )
                   ).rows,
-                ).toEqual([{ credential_ready_at: null }]);
+                ).toEqual([
+                  {
+                    credential_ready_at: commitFaultThisAttempt ? expect.any(Date) : null,
+                  },
+                ]);
                 await secondary.checkHotelSetupCreationCredential(client, scope);
                 if (mode === "proof") throw new Error("Synthetic rollback proof failure");
                 if (mode === "authority")
@@ -217,7 +295,7 @@ describe.runIf(databaseUrl && rollbackRoot)(
               },
             );
             let readyUpdate = false;
-            if (mode === "commitLost")
+            if (["commitLost", "commitPassword", "commitVersion"].includes(mode))
               vi.spyOn(pg.Client.prototype, "query").mockImplementation(async function (
                 this: pg.Client,
                 ...args: unknown[]
@@ -232,13 +310,17 @@ describe.runIf(databaseUrl && rollbackRoot)(
                   readyUpdate = true;
                 if (args[0] === "COMMIT" && readyUpdate) {
                   readyUpdate = false;
-                  committedAckFault = true;
+                  committedAckFault = commitFaultThisAttempt = true;
+                  if (mode === "commitPassword")
+                    await admin.query(
+                      `ALTER ROLE ${role} PASSWORD ${admin.escapeLiteral(randomBytes(36).toString("base64url"))}`,
+                    );
                   throw new Error("Synthetic lost COMMIT acknowledgement");
                 }
                 return result;
               } as never);
             const input = {
-              adminDatabaseUrl: url.toString(),
+              adminDatabaseUrl: operationalUrl.toString(),
               nativeDatabaseUrl: native.toString(),
               databaseEndpoint: endpoint.toString(),
               inspectionReceipt: inspected,
@@ -251,15 +333,38 @@ describe.runIf(databaseUrl && rollbackRoot)(
               }),
             ).rejects.toThrow("requires recovery inspection");
             expect(send).not.toHaveBeenCalled();
+            if (mode === "success") {
+              await admin.query("SELECT pg_catalog.pg_advisory_lock_shared(8734516)");
+              try {
+                await expect(
+                  backfillApprovedHotelSetupOrganizationReadiness(input),
+                ).rejects.toThrow("requires recovery inspection");
+                const rejectedInsertGrants = (
+                  await admin.query(
+                    "SELECT column_name FROM information_schema.column_privileges WHERE grantee=$1 AND table_schema='identity' AND table_name='product_entitlements' AND privilege_type='INSERT'",
+                    [binding.login],
+                  )
+                ).rows;
+                expect(rejectedInsertGrants).toEqual([]);
+              } finally {
+                await admin.query("SELECT pg_catalog.pg_advisory_unlock_shared(8734516)");
+              }
+            }
             const run = backfillApprovedHotelSetupOrganizationReadiness(input);
             if (["success", "commitLost"].includes(mode))
-              await expect(run).resolves.toMatchObject({
+              await expect(run, mode).resolves.toMatchObject({
                 status: mode === "success" ? "ready" : "ready_commit_inspected",
                 roleOid: oid,
                 secretVersion,
               });
             else await expect(run).rejects.toThrow("requires recovery inspection");
-            expect(proveSecondary).toHaveBeenCalledOnce();
+            expect(proveSecondary).toHaveBeenCalledTimes(
+              ["commitLost", "commitVersion"].includes(mode)
+                ? 3
+                : ["success", "assignment", "version", "commitPassword"].includes(mode)
+                  ? 2
+                  : 1,
+            );
             const state = (
               await admin.query(
                 "SELECT credential_role_oid,credential_secret_version,credential_ready_at FROM platform.hotel_setup_creation_scopes WHERE database_login=$1",
@@ -267,7 +372,7 @@ describe.runIf(databaseUrl && rollbackRoot)(
               )
             ).rows[0];
             expect(state).toEqual(
-              ["success", "commitLost"].includes(mode)
+              ["success", "commitLost", "commitPassword", "commitVersion"].includes(mode)
                 ? {
                     credential_role_oid: oid,
                     credential_secret_version: secretVersion,
@@ -287,7 +392,8 @@ describe.runIf(databaseUrl && rollbackRoot)(
             ).rows[0];
             expect(principal.oid).toBe(oid);
             expect(principal.rolcanlogin).toBe(true);
-            if (mode !== "verifier") expect(principal.rolpassword).toBe(verifier);
+            if (!["verifier", "commitPassword"].includes(mode))
+              expect(principal.rolpassword).toBe(verifier);
             const insertedColumns = (
               await admin.query(
                 "SELECT column_name FROM information_schema.column_privileges WHERE grantee=$1 AND table_schema='identity' AND table_name='product_entitlements' AND privilege_type='INSERT' ORDER BY column_name",
@@ -357,6 +463,7 @@ describe.runIf(databaseUrl && rollbackRoot)(
             binding.organizationId,
           ]);
         }
+        for (const login of [...owned.keys()]) await removeOwnedRole(login);
         for (const db of databases) {
           await admin.query(
             `REVOKE ALL ON DATABASE ${admin.escapeIdentifier(db.name)} FROM PUBLIC`,

@@ -69,8 +69,13 @@ export async function createAutomaticOwnerFlowFixture(databaseUrl: string, rollb
   vi.spyOn(STSClient.prototype, "send").mockResolvedValue({ Account: "269416271598" } as never);
   const send = async (command: unknown) => {
     if (command instanceof DescribeSecretCommand) {
-      if (records.has(command.input.SecretId!))
-        throw new Error("Existing secret must never be overwritten");
+      const record = records.get(command.input.SecretId!);
+      if (record)
+        return {
+          Name: record.Name,
+          ARN: record.ARN,
+          VersionIdsToStages: { [record.VersionId]: ["AWSCURRENT"] },
+        };
       throw Object.assign(new Error(), { name: "ResourceNotFoundException" });
     }
     if (command instanceof CreateSecretCommand) {

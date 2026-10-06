@@ -1,3 +1,4 @@
+import { lockHotelSetupOfflineBootstrap } from "../hotelSetupHelperOwnerGrants.js";
 import { pathToFileURL } from "node:url";
 import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 import { SecretsManagerClient, DescribeSecretCommand } from "@aws-sdk/client-secrets-manager";
@@ -147,6 +148,7 @@ export async function inspectApprovedReadiness(config: {
   let readers: ApprovedReadinessInspection["readers"];
   try {
     await admin.connect();
+    await lockHotelSetupOfflineBootstrap(admin);
     await admin.query("BEGIN");
     for (const binding of APPROVED_HOTEL_SETUP_BACKFILLS) {
       await lockHotelSetupOrganizationBootstrapAuthority(admin, binding);
@@ -162,8 +164,8 @@ export async function inspectApprovedReadiness(config: {
       )
         throw new Error();
       const roles = await admin.query<{ oid: number }>(
-        `SELECT r.oid FROM pg_catalog.pg_authid r WHERE r.rolname=$1 AND r.rolcanlogin
-         AND r.rolpassword IS NOT NULL AND r.rolvaliduntil IS NULL
+        `SELECT r.oid FROM pg_catalog.pg_roles r WHERE r.rolname=$1 AND r.rolcanlogin
+         AND r.rolvaliduntil IS NULL
          AND NOT r.rolsuper AND NOT r.rolinherit AND NOT r.rolcreaterole AND NOT r.rolcreatedb
          AND NOT r.rolreplication AND NOT r.rolbypassrls
          AND (SELECT count(*) FROM pg_catalog.pg_auth_members WHERE member=r.oid)=1
@@ -172,8 +174,7 @@ export async function inspectApprovedReadiness(config: {
              AND m.inherit_option AND NOT m.set_option AND NOT m.admin_option)
          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_db_role_setting WHERE setrole=r.oid)
          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_shdepend
-           WHERE refclassid='pg_catalog.pg_authid'::regclass AND refobjid=r.oid AND deptype='o')
-         FOR SHARE OF r`,
+           WHERE refclassid='pg_catalog.pg_authid'::regclass AND refobjid=r.oid AND deptype='o')`,
         [binding.login],
       );
       if (roles.rows.length !== 1 || !isHotelSetupInspectedOid(roles.rows[0]?.oid))
@@ -183,14 +184,13 @@ export async function inspectApprovedReadiness(config: {
     const oids: number[] = [];
     for (const login of readerLogins) {
       const roles = await admin.query<{ oid: number }>(
-        `SELECT r.oid FROM pg_catalog.pg_authid r WHERE r.rolname=$1 AND r.rolcanlogin
+        `SELECT r.oid FROM pg_catalog.pg_roles r WHERE r.rolname=$1 AND r.rolcanlogin
          AND r.rolvaliduntil IS NULL AND NOT r.rolsuper AND NOT r.rolinherit
          AND NOT r.rolcreaterole AND NOT r.rolcreatedb AND NOT r.rolreplication AND NOT r.rolbypassrls
          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE member=r.oid)
          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_db_role_setting WHERE setrole=r.oid)
          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_shdepend
-           WHERE refclassid='pg_catalog.pg_authid'::regclass AND refobjid=r.oid AND deptype='o')
-         FOR SHARE OF r`,
+           WHERE refclassid='pg_catalog.pg_authid'::regclass AND refobjid=r.oid AND deptype='o')`,
         [login],
       );
       if (roles.rows.length !== 1 || !isHotelSetupInspectedOid(roles.rows[0]?.oid))

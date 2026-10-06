@@ -77,6 +77,7 @@ beforeEach(() => {
   mocks.end.mockResolvedValue(undefined);
   mocks.account.mockResolvedValue({ Account: "269416271598" });
   mocks.query.mockImplementation(async (sql: string, params?: string[]) => {
+    if (sql.includes("pg_try_advisory_lock(8734516)")) return { rows: [{ held: true }] };
     if (sql.includes("hotel_setup_creation_scopes")) {
       const binding = APPROVED_HOTEL_SETUP_BACKFILLS.find((item) => item.login === params?.[0])!;
       return { rows: [{ database_login: binding.login, organization_id: binding.organizationId }] };
@@ -243,4 +244,15 @@ it("denies alternate executable roots before admin/AWS access and emits a saniti
     JSON.stringify({ status: "FAIL", code: "hotel_setup_approved_readiness_inspection_required" }),
   );
   stderr.mockRestore();
+});
+
+it("fails before authority/catalog inspection when live provisioning holds the lock", async () => {
+  mocks.query.mockResolvedValue({ rows: [{ held: false }] });
+  await expect(
+    inspectApprovedReadiness(parseApprovedReadinessConfiguration(env)),
+  ).rejects.toThrow();
+  expect(mocks.authority).not.toHaveBeenCalled();
+  expect(mocks.query.mock.calls.every(([sql]) => !sql.includes("pg_authid"))).toBe(true);
+  expect(mocks.metadata).not.toHaveBeenCalled();
+  expect(mocks.end).toHaveBeenCalled();
 });

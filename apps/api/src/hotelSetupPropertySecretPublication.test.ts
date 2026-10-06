@@ -1,16 +1,23 @@
 import { STSClient } from "@aws-sdk/client-sts";
 import { createHash } from "node:crypto";
 import { expect, it, vi, afterEach } from "vitest";
-import pg from "pg";
-import { EventEmitter } from "node:events";
+import type pg from "pg";
 import {
   CreateSecretCommand,
   DescribeSecretCommand,
   GetSecretValueCommand,
   SecretsManagerClient,
 } from "@aws-sdk/client-secrets-manager";
+import { proveFreshHotelSetupNativeCredential } from "./hotelSetupFreshNativeCredential.js";
+import { checkHotelSetupPropertyCredential } from "./cli/hotelSetupPropertyPreflight.js";
 import { publishHotelSetupPropertySecret } from "./hotelSetupPropertySecretPublication.js";
 import { lockHotelSetupPropertyBootstrapAuthority } from "./hotelSetupPropertyRoleStaging.js";
+vi.mock("./hotelSetupFreshNativeCredential.js", () => ({
+  proveFreshHotelSetupNativeCredential: vi.fn(),
+}));
+vi.mock("./cli/hotelSetupPropertyPreflight.js", () => ({
+  checkHotelSetupPropertyCredential: vi.fn(),
+}));
 vi.mock("./hotelSetupPropertyRoleStaging.js", () => ({
   lockHotelSetupPropertyBootstrapAuthority: vi.fn(),
 }));
@@ -28,7 +35,7 @@ it.each(
     "version",
     "readback",
     "retarget",
-    "verifier",
+    "identity",
     "lateDrift",
     "wrongAccount",
     "ready",
@@ -36,26 +43,21 @@ it.each(
     "readinessCommit",
     "lateRetarget",
     "lateReady",
+    "native",
+    "lateNative",
+    "metadataVersion",
+    "metadataIdentity",
     "actorDrift",
     "xidDrift",
-    "passwordDrift",
-    "sessionLogin",
-    "effectiveLogin",
-    "sessionOid",
-    "effectiveOid",
   ].flatMap((mode) =>
     (["launch_settings", "property_logo"] as const)
       .filter(
+        (operation) => !["actorDrift", "xidDrift"].includes(mode) || operation === "property_logo",
+      )
+      // Logo keeps its reviewed RDS publication without the AWSCURRENT metadata step.
+      .filter(
         (operation) =>
-          ![
-            "actorDrift",
-            "xidDrift",
-            "passwordDrift",
-            "sessionLogin",
-            "effectiveLogin",
-            "sessionOid",
-            "effectiveOid",
-          ].includes(mode) || operation === "property_logo",
+          !["metadataVersion", "metadataIdentity"].includes(mode) || operation !== "property_logo",
       )
       .map((operation) => [operation, mode] as const),
   ),
@@ -72,7 +74,8 @@ it.each(
     return { Account: mode === "wrongAccount" ? "000000000000" : "269416271598" };
   } as never);
   const propertyId = "10000000-0000-4000-8000-000000000001";
-  const login = `vayada_next_hotel_setup_${operation === "property_logo" ? "logo" : "property"}_${createHash("sha256").update(`${propertyId}:${operation}`).digest("hex").slice(0, 16)}_123456789abc`;
+  const logo = operation === "property_logo";
+  const login = `vayada_next_hotel_setup_${logo ? "logo" : "property"}_${createHash("sha256").update(`${propertyId}:${operation}`).digest("hex").slice(0, 16)}_123456789abc`;
   const staged = {
     login,
     roleOid: 42,
@@ -82,40 +85,24 @@ it.each(
     actorUserId: "10000000-0000-4000-8000-000000000003",
   };
   let identityReads = 0;
-  let connections = 0,
-    closed = 0;
-  class NativeClient extends EventEmitter {
-    async connect() {
-      connections++;
-      if (mode === "passwordDrift" && connections === 2) throw new Error("authentication failed");
-    }
-    async end() {
-      closed++;
-    }
-    async query() {
-      return {
-        rows: [
-          {
-            session_login: mode === "sessionLogin" ? "other" : login,
-            effective_login: mode === "effectiveLogin" ? "other" : login,
-            role_oid: mode === "sessionOid" ? 43 : 42,
-            effective_oid: mode === "effectiveOid" ? 43 : 42,
-          },
-        ],
-      };
-    }
-  }
-  vi.spyOn(pg, "Client").mockImplementation(function (config: pg.ClientConfig) {
-    expect(config).toMatchObject({
-      user: login,
-      password: "b".repeat(36),
-      ssl: { rejectUnauthorized: true },
-    });
-    return new NativeClient();
-  } as unknown as typeof pg.Client);
   let assignmentReads = 0,
     commits = 0,
     transaction = false;
+  let nativeProofs = 0;
+  const secondary = vi.fn(async () => undefined);
+  vi.mocked(checkHotelSetupPropertyCredential).mockResolvedValue(undefined);
+  vi.mocked(proveFreshHotelSetupNativeCredential).mockImplementation(async (credential, prove) => {
+    // Logo reauthenticates under the authority/assignment locks, like the reviewed RDS path.
+    expect(transaction).toBe(logo);
+    expect(credential.login).toBe(login);
+    expect(credential.roleOid).toBe(42);
+    nativeProofs++;
+    // Logo authenticates within each pending check; other purposes prove twice per checkpoint.
+    if (mode === "native" || (mode === "lateNative" && nativeProofs === (logo ? 2 : 3)))
+      throw new Error();
+    expect(prove === undefined).toBe(logo);
+    await prove?.({ checkpoint: nativeProofs } as unknown as pg.Client);
+  });
   vi.mocked(lockHotelSetupPropertyBootstrapAuthority).mockImplementation(async () => {
     if (mode === "revoked" && identityReads === 1) throw new Error("revoked intent");
   });
@@ -133,27 +120,25 @@ it.each(
         propertyId,
         staged.organizationId,
         operation,
-        operation === "property_logo" ? staged.actorUserId : null,
-        operation === "property_logo" ? "123" : null,
+        logo ? staged.actorUserId : null,
+        logo ? "123" : null,
       ]);
       expect(identityReads).toBe(2);
-      expect(send).toHaveBeenCalledTimes(3);
+      expect(send).toHaveBeenCalledTimes(logo ? 3 : 4);
       return { rows: [{ database_login: login }] };
     }
     if (sql.startsWith("SELECT oid")) {
+      expect(sql).toContain("FROM pg_catalog.pg_roles");
+      expect(sql).not.toContain("rolpassword");
       expect(params).toEqual([
         42,
         login,
-        operation === "property_logo" ? null : "private-verifier",
-        operation === "property_logo"
-          ? "vayada_next_hotel_setup_logo_scope"
-          : "vayada_next_hotel_setup_property_scope",
+        logo ? "vayada_next_hotel_setup_logo_scope" : "vayada_next_hotel_setup_property_scope",
       ]);
-      expect(sql.includes("FROM pg_catalog.pg_roles")).toBe(operation === "property_logo");
       identityReads++;
       return {
         rows:
-          mode === "verifier" || (mode === "lateDrift" && identityReads === 2) ? [] : [{ oid: 42 }],
+          mode === "identity" || (mode === "lateDrift" && identityReads === 2) ? [] : [{ oid: 42 }],
       };
     }
     if (sql.includes("FROM platform.hotel_setup_property_scopes")) assignmentReads++;
@@ -167,7 +152,7 @@ it.each(
               : propertyId,
           organization_id: staged.organizationId,
           operation_class: operation,
-          actor_user_id: mode === "actorDrift" ? propertyId : staged.actorUserId,
+          actor_user_id: logo ? (mode === "actorDrift" ? propertyId : staged.actorUserId) : null,
           active: true,
           credential_role_oid: ready ? 42 : null,
           credential_secret_version: ready ? "x".repeat(32) : null,
@@ -187,6 +172,14 @@ it.each(
     expect((await this.config.endpoint!()).hostname).toBe("secretsmanager.eu-west-1.amazonaws.com");
     if (command instanceof DescribeSecretCommand) {
       expect(command.input.SecretId).toBe(name);
+      if (versionId)
+        return {
+          ARN: mode === "metadataIdentity" ? "other" : arn,
+          Name: name,
+          VersionIdsToStages: {
+            [mode === "metadataVersion" ? "other" : versionId]: ["AWSCURRENT"],
+          },
+        };
       if (mode === "existing") return { ARN: arn };
       const error = new Error("private-diagnostic");
       error.name = mode === "unknown" ? "AccessDeniedException" : "ResourceNotFoundException";
@@ -212,18 +205,18 @@ it.each(
   });
   vi.spyOn(SecretsManagerClient.prototype, "send").mockImplementation(send as never);
   const result = publishHotelSetupPropertySecret({
-    admin: { query } as unknown as pg.Client,
+    admin: { query, on: vi.fn(), removeListener: vi.fn() } as unknown as pg.Client,
     staged,
-    ...(operation === "property_logo"
-      ? { expectedAssignmentXid: "123" }
-      : { expectedVerifier: "private-verifier" }),
+    ...(logo ? { expectedAssignmentXid: "123" } : { proveSecondary: secondary }),
     databaseEndpoint: "postgresql://db.internal/test",
     nativeDatabaseUrl: `postgresql://${login}:${"b".repeat(36)}@db.internal/test?sslmode=verify-full`,
   });
   if (mode === "success") {
     await expect(result).resolves.toEqual({ secretArn: arn, versionId: expect.any(String) });
     expect(query.mock.calls.at(-1)?.[0]).toBe("COMMIT");
-    expect(connections).toBe(operation === "property_logo" ? 2 : 0);
+    expect(proveFreshHotelSetupNativeCredential).toHaveBeenCalledTimes(logo ? 2 : 4);
+    expect(checkHotelSetupPropertyCredential).toHaveBeenCalledTimes(logo ? 0 : 2);
+    expect(secondary).toHaveBeenCalledTimes(logo ? 0 : 2);
   } else {
     await expect(result).rejects.toThrow("publication requires recovery inspection");
     if (mode === "readinessCommit")
@@ -232,12 +225,9 @@ it.each(
       });
     expect(query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
   }
-  if (["retarget", "verifier", "wrongAccount", "ready", "actorDrift"].includes(mode))
+  if (["retarget", "identity", "wrongAccount", "ready", "native", "actorDrift"].includes(mode))
     expect(send).not.toHaveBeenCalled();
-  if (["existing", "unknown"].includes(mode)) expect(send).toHaveBeenCalledOnce();
-  expect(closed).toBe(connections);
-  if (["sessionLogin", "effectiveLogin", "sessionOid", "effectiveOid"].includes(mode))
-    expect(send).not.toHaveBeenCalled();
-  if (["xidDrift", "passwordDrift"].includes(mode))
+  if (["xidDrift", "lateNative"].includes(mode))
     expect(query.mock.calls.some(([sql]) => sql.startsWith("UPDATE"))).toBe(false);
+  if (["existing", "unknown"].includes(mode)) expect(send).toHaveBeenCalledOnce();
 });

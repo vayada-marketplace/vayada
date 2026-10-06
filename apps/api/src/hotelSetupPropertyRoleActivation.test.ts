@@ -1,7 +1,4 @@
-import {
-  authenticateHotelSetupPropertyLogin,
-  publishHotelSetupPropertySecret,
-} from "./hotelSetupPropertySecretPublication.js";
+import { publishHotelSetupPropertySecret } from "./hotelSetupPropertySecretPublication.js";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import pg from "pg";
@@ -16,7 +13,6 @@ vi.mock("./cli/hotelSetupPropertyPreflight.js", () => ({
 }));
 vi.mock("./hotelSetupPropertySecretPublication.js", () => ({
   publishHotelSetupPropertySecret: vi.fn(),
-  authenticateHotelSetupPropertyLogin: vi.fn(),
 }));
 afterEach(() => {
   vi.clearAllMocks();
@@ -33,25 +29,24 @@ it.each(
     "publication",
     "mutate",
     "readinessCommit",
-    "actorDrift",
   ].flatMap((mode) =>
     (["launch_settings", "property_logo"] as const)
-      .filter((operation) => mode !== "actorDrift" || operation === "property_logo")
       .filter((operation) => mode !== "commit" || operation !== "property_logo")
       .map((operation) => [operation, mode] as const),
   ),
-)("guards %s activation and cleanup on %s", async (operation, mode) => {
+)("guards %s activation and pending recovery on %s", async (operation, mode) => {
   const propertyId = "10000000-0000-4000-8000-000000000001";
-  const login = `vayada_next_hotel_setup_${operation === "property_logo" ? "logo" : "property"}_${createHash("sha256").update(`${propertyId}:${operation}`).digest("hex").slice(0, 16)}_123456789abc`;
+  const logo = operation === "property_logo";
+  const login = `vayada_next_hotel_setup_${logo ? "logo" : "property"}_${createHash("sha256").update(`${propertyId}:${operation}`).digest("hex").slice(0, 16)}_123456789abc`;
   const staged = {
-    ...(mode === "mutate" && operation !== "property_logo" ? { automatic: true as const } : {}),
+    ...(mode === "mutate" && !logo ? { automatic: true as const } : {}),
     login,
     roleOid: 42,
     propertyId,
     operation,
     organizationId: "10000000-0000-4000-8000-000000000002",
     actorUserId: "10000000-0000-4000-8000-000000000003",
-    ...(operation === "property_logo" ? { assignmentXid: "123" } : {}),
+    ...(logo ? { assignmentXid: "123" } : {}),
   };
   const sql: string[] = [];
   class Client extends EventEmitter {
@@ -64,25 +59,9 @@ it.each(
       sql.push(text);
       if (text === "COMMIT" && mode === "commit")
         this.emit("error", new Error("private-diagnostic"));
-      if (text.startsWith("SELECT rolcanlogin"))
+      if (text.startsWith("SELECT session_user"))
         return {
-          rows: [
-            {
-              rolcanlogin: true,
-              rolpassword: mode === "identityDrift" ? "other-private-verifier" : "private-verifier",
-            },
-          ],
-        };
-      if (text.startsWith("SELECT property_id"))
-        return {
-          rows: [
-            {
-              property_id: propertyId,
-              organization_id: staged.organizationId,
-              operation_class: operation,
-              actor_user_id: mode === "actorDrift" ? propertyId : staged.actorUserId,
-            },
-          ],
+          rows: [{ session_login: login, effective_login: login, role_oid: 42, effective_oid: 42 }],
         };
       return { rows: [{ oid: 42, verifier: "private-verifier" }] };
     }
@@ -90,20 +69,15 @@ it.each(
   vi.spyOn(pg, "Client").mockImplementation(function () {
     return new Client();
   } as unknown as typeof pg.Client);
-  vi.mocked(authenticateHotelSetupPropertyLogin).mockImplementation(async (_credential, prove) => {
-    await prove?.(new Client() as unknown as pg.Client);
-  });
   vi.mocked(checkHotelSetupPropertyCredential).mockImplementation(async (_client, proof) => {
     expect(Object.isFrozen(proof)).toBe(true);
-    expect(proof.bootstrapPending).toBe(operation === "property_logo" ? true : undefined);
-    if (operation !== "property_logo") {
-      expect(sql.at(-1)).toBe("COMMIT");
-      expect(
-        sql.some((q) => q.startsWith("INSERT INTO platform.hotel_setup_property_scopes")),
-      ).toBe(true);
-    }
-    if (["proof", "identityDrift", "actorDrift"].includes(mode))
-      throw new Error("private-diagnostic");
+    expect(proof.bootstrapPending).toBe(logo ? true : undefined);
+    expect(sql.at(-1)).toContain("session_user::regrole::oid");
+    // Logo committed its LOGIN and pending assignment atomically during staging.
+    expect(sql.some((q) => q.startsWith("INSERT INTO platform.hotel_setup_property_scopes"))).toBe(
+      !logo,
+    );
+    if (["proof", "identityDrift"].includes(mode)) throw new Error("private-diagnostic");
   });
   const input = {
     staged,
@@ -122,12 +96,8 @@ it.each(
     if (mode === "secondary") throw new Error("private-diagnostic");
   });
   vi.mocked(publishHotelSetupPropertySecret).mockImplementation(async (publication) => {
-    expect(publication.expectedVerifier).toBe(
-      operation === "property_logo" ? undefined : "private-verifier",
-    );
-    expect(publication.expectedAssignmentXid).toBe(
-      operation === "property_logo" ? "123" : undefined,
-    );
+    expect(publication.proveSecondary).toBe(logo ? undefined : proveSecondary);
+    expect(publication.expectedAssignmentXid).toBe(logo ? "123" : undefined);
     expect(publication.nativeDatabaseUrl).toBe(originalNativeUrl);
     expect(publication.staged).toEqual(originalStaged);
     expect(proveSecondary).toHaveBeenCalledOnce();
@@ -148,20 +118,20 @@ it.each(
     await expect(activateVerifiedHotelSetupPropertyRole(input)).resolves.toEqual(staged);
   else
     await expect(activateVerifiedHotelSetupPropertyRole(input)).rejects.toThrow(
-      operation !== "property_logo" && ["proof", "secondary"].includes(mode)
-        ? "verification failed"
-        : "requires recovery inspection",
+      "requires recovery inspection",
     );
-  expect(sql.some((q) => q.startsWith("ALTER ROLE"))).toBe(
-    operation !== "property_logo" && ["proof", "commit", "secondary", "publication"].includes(mode),
-  );
-  expect(sql.some((q) => q.includes("pg_terminate_backend"))).toBe(
-    operation !== "property_logo" && ["proof", "commit", "secondary", "publication"].includes(mode),
-  );
-  if (operation === "property_logo") {
-    expect(sql.some((q) => /FROM pg_catalog.pg_authid/.test(q))).toBe(false);
-    expect(sql.some((q) => /ALTER ROLE|INSERT INTO|UPDATE platform/.test(q))).toBe(false);
-  }
+  expect(
+    sql.some(
+      (q) =>
+        q.startsWith("ALTER ROLE") ||
+        q.startsWith("UPDATE platform.hotel_setup_property_scopes") ||
+        q.includes("pg_terminate_backend") ||
+        q.includes("FROM pg_catalog.pg_authid"),
+    ),
+  ).toBe(false);
+
+  // Logo recovery never alters, inserts or readies anything, even inside a DO block.
+  if (logo) expect(sql.some((q) => /ALTER ROLE|INSERT INTO|UPDATE platform/.test(q))).toBe(false);
   if (mode === "secondary") expect(publishHotelSetupPropertySecret).not.toHaveBeenCalled();
   if (mode === "commit") expect(checkHotelSetupPropertyCredential).not.toHaveBeenCalled();
 });

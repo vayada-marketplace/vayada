@@ -23,8 +23,9 @@ it.each(["success", "wrongOid", "unsafeGrant", "notice", "commitLost", "inspecti
       inspection = ++connections > 1;
       async query(sql: string, params?: unknown[]) {
         queries.push(sql);
+        if (sql.includes("pg_try_advisory_lock(8734516)")) return { rows: [{ held: true }] };
         if (sql.includes("SELECT r.oid")) {
-          expect(sql).toContain("FOR SHARE OF r");
+          expect(sql).not.toContain("FOR SHARE OF r");
           expect(params).toEqual(
             params?.[0] === 41
               ? [41, "vayada_next_hotel_setup_creation_reader"]
@@ -109,4 +110,25 @@ it.each([
     }),
   ).rejects.toThrow("requires recovery inspection");
   expect(hotelSetupOrganizationConnection).not.toHaveBeenCalled();
+});
+
+it("refuses reader grants while live provisioning holds the lock", async () => {
+  const query = vi.fn(async (_sql: string) => ({ rows: [{ held: false }] }));
+  const end = vi.fn(async () => undefined);
+  vi.mocked(hotelSetupOrganizationConnection).mockReturnValue({
+    query,
+    end,
+    connect: async () => undefined,
+    on: vi.fn(),
+  } as never);
+  await expect(
+    grantHotelSetupReadinessReaderColumns({
+      adminDatabaseUrl: "operational",
+      databaseEndpoint: "fixed",
+      expectedCreationReaderOid: 41,
+      expectedPropertyReaderOid: 42,
+    }),
+  ).rejects.toThrow("requires recovery inspection");
+  expect(query.mock.calls.every(([sql]) => !/pg_authid|GRANT/.test(sql))).toBe(true);
+  expect(end).toHaveBeenCalledOnce();
 });

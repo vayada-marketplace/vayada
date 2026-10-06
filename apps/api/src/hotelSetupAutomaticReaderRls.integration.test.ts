@@ -167,7 +167,7 @@ describe.runIf(databaseUrl && rollbackRoot)(
           organization.receipts.map((r) => r.status),
           JSON.stringify(nativeDenials()),
         ).toEqual(["provisioned"]);
-        expect(fixture.proveOrganization).toHaveBeenCalledOnce();
+        expect(fixture.proveOrganization).toHaveBeenCalledTimes(3);
         const options = {
           ...fixture.options,
           assignments: connections[0]!,
@@ -255,7 +255,7 @@ describe.runIf(databaseUrl && rollbackRoot)(
           property.receipts.map((r) => r.status),
           JSON.stringify(nativeDenials()),
         ).toEqual(["provisioned", "provisioned", "provisioned"]);
-        expect(fixture.proveProperty).toHaveBeenCalledTimes(3);
+        expect(fixture.proveProperty).toHaveBeenCalledTimes(9);
         const propertyOptions = { ...fixture.options, assignments: connections[1]! };
         for (const purpose of ["launch_settings", "currency_ready", "feature_hub"] as const) {
           const nativeUrl = await createHotelSetupCredentialResolver(propertyOptions, purpose)(

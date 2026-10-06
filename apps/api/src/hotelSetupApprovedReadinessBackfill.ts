@@ -1,6 +1,7 @@
+import { lockHotelSetupOfflineBootstrap } from "./hotelSetupHelperOwnerGrants.js";
 import type pg from "pg";
 import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
-import { SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
+import { DescribeSecretCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import { checkHotelSetupCreationCredential } from "./cli/hotelSetupCreationPreflight.js";
 import { parseHotelSetupDatabaseUrl } from "./hotelSetupCommandServiceConfig.js";
 import { createHotelSetupNativeSecretReader } from "./hotelSetupNativeSecretReader.js";
@@ -49,7 +50,6 @@ export function isHotelSetupInspectedOid(value: unknown): value is number {
 async function lockApprovedIdentity(
   admin: pg.Client,
   receipt: Readonly<ApprovedHotelSetupInspectionReceipt>,
-  expectedVerifier?: string,
 ) {
   await lockHotelSetupOrganizationBootstrapAuthority(admin, receipt);
   const assignments = await admin.query<Assignment>(
@@ -66,10 +66,10 @@ async function lockApprovedIdentity(
     assignment.organization_id !== receipt.organizationId
   )
     throw new Error();
-  const identities = await admin.query<{ verifier: string }>(
-    `SELECT r.rolpassword AS verifier FROM pg_catalog.pg_authid r
-     WHERE r.oid=$1::oid AND r.rolname=$2 AND r.rolcanlogin AND r.rolpassword IS NOT NULL
-       AND ($3::text IS NULL OR r.rolpassword=$3) AND r.rolvaliduntil IS NULL
+  const identities = await admin.query<{ oid: number }>(
+    `SELECT r.oid FROM pg_catalog.pg_roles r
+     WHERE r.oid=$1::oid AND r.rolname=$2 AND r.rolcanlogin
+       AND r.rolvaliduntil IS NULL
        AND NOT r.rolsuper AND NOT r.rolinherit AND NOT r.rolcreaterole AND NOT r.rolcreatedb
        AND NOT r.rolreplication AND NOT r.rolbypassrls
        AND (SELECT count(*) FROM pg_catalog.pg_auth_members WHERE member=r.oid)=1
@@ -78,12 +78,49 @@ async function lockApprovedIdentity(
            AND m.inherit_option AND NOT m.set_option AND NOT m.admin_option)
        AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_db_role_setting WHERE setrole=r.oid)
        AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_shdepend
-         WHERE refclassid='pg_catalog.pg_authid'::regclass AND refobjid=r.oid AND deptype='o')
-     FOR SHARE OF r`,
-    [receipt.expectedRoleOid, receipt.login, expectedVerifier ?? null],
+         WHERE refclassid='pg_catalog.pg_authid'::regclass AND refobjid=r.oid AND deptype='o')`,
+    [receipt.expectedRoleOid, receipt.login],
   );
-  if (identities.rows.length !== 1 || !identities.rows[0]?.verifier) throw new Error();
-  return { assignment, verifier: identities.rows[0].verifier };
+  if (identities.rows.length !== 1 || identities.rows[0]?.oid !== receipt.expectedRoleOid)
+    throw new Error();
+  return { assignment };
+}
+
+/** Every checkpoint authenticates a new connection; existing sessions cannot detect rotation. */
+async function authenticateApprovedCredential(
+  input: { nativeDatabaseUrl: string; databaseEndpoint: string },
+  receipt: Readonly<ApprovedHotelSetupInspectionReceipt>,
+  prove?: typeof checkHotelSetupCreationCredential,
+) {
+  const native = hotelSetupOrganizationConnection(input.nativeDatabaseUrl, input.databaseEndpoint);
+  let failed = false;
+  native.on("error", () => {
+    failed = true;
+  });
+  try {
+    await native.connect();
+    const authenticated = await native.query<{
+      session_login: string;
+      effective_login: string;
+      role_oid: number;
+      effective_oid: number;
+    }>(
+      "SELECT session_user::text AS session_login,current_user::text AS effective_login,session_user::regrole::oid AS role_oid,current_user::regrole::oid AS effective_oid",
+    );
+    const identity = authenticated.rows[0];
+    if (
+      authenticated.rows.length !== 1 ||
+      identity?.session_login !== receipt.login ||
+      identity.effective_login !== receipt.login ||
+      identity.role_oid !== receipt.expectedRoleOid ||
+      identity.effective_oid !== receipt.expectedRoleOid
+    )
+      throw new Error();
+    if (prove) await prove(native, receipt);
+    if (failed) throw new Error();
+  } finally {
+    await native.end();
+  }
 }
 
 function isPending(assignment: Assignment) {
@@ -113,17 +150,52 @@ export async function backfillApprovedHotelSetupOrganizationReadiness(input: {
   const receipt = Object.freeze({ ...input.inspectionReceipt });
   const { adminDatabaseUrl, nativeDatabaseUrl, databaseEndpoint, proveSecondary } = input;
   let admin: pg.Client | undefined;
-  let native: pg.Client | undefined;
   let secrets: SecretsManagerClient | undefined;
   let sts: STSClient | undefined;
   let failed = false,
-    nativeFailed = false,
     incompleteGrant = false;
   let readyCommitAttempted = false,
     readyXid = "",
-    verifier = "";
+    nativePassword = "";
   const onError = () => {
     failed = true;
+  };
+  const proveFresh = async () => {
+    for (const prove of [checkHotelSetupCreationCredential, proveSecondary])
+      await authenticateApprovedCredential(input, receipt, prove);
+  };
+  const assertCurrentCredential = async () => {
+    if (!secrets || !nativePassword) throw new Error();
+    const stored = await createHotelSetupNativeSecretReader(secrets)(
+      `hotel-setup-command/prod/organization/${receipt.login}`,
+      receipt.secretVersion,
+    );
+    if (
+      !stored ||
+      typeof stored !== "object" ||
+      Array.isArray(stored) ||
+      Object.keys(stored).sort().join(",") !== "password,username" ||
+      (stored as { username?: unknown }).username !== receipt.login ||
+      (stored as { password?: unknown }).password !== nativePassword
+    )
+      throw new Error();
+    const name = `hotel-setup-command/prod/organization/${receipt.login}`;
+    const metadata = await secrets.send(new DescribeSecretCommand({ SecretId: name }), {
+      abortSignal: AbortSignal.timeout(15_000),
+    });
+    const prefix = `arn:aws:secretsmanager:eu-west-1:269416271598:secret:${name}-`;
+    const versions = Object.entries(metadata.VersionIdsToStages ?? {});
+    if (
+      metadata.Name !== name ||
+      !metadata.ARN?.startsWith(prefix) ||
+      !/^[A-Za-z0-9]{6}$/.test(metadata.ARN.slice(prefix.length)) ||
+      metadata.DeletedDate ||
+      versions.length !== 1 ||
+      versions[0]![0] !== receipt.secretVersion ||
+      versions[0]![1].length !== 1 ||
+      versions[0]![1][0] !== "AWSCURRENT"
+    )
+      throw new Error();
   };
   const result = (status: "ready" | "already_ready" | "ready_commit_inspected") => ({
     status,
@@ -146,20 +218,22 @@ export async function backfillApprovedHotelSetupOrganizationReadiness(input: {
     )
       throw new Error();
     const url = parseHotelSetupDatabaseUrl(nativeDatabaseUrl, databaseEndpoint, receipt.login);
+    nativePassword = decodeURIComponent(url.password);
     admin = hotelSetupOrganizationConnection(adminDatabaseUrl, databaseEndpoint);
     admin.on("error", onError);
     admin.on("notice", (notice) => {
       if (notice.code === "01007") incompleteGrant = true;
     });
     await admin.connect();
+    await lockHotelSetupOfflineBootstrap(admin);
     await admin.query("SELECT pg_catalog.pg_advisory_lock(pg_catalog.hashtextextended($1,0))", [
       `hotel_setup_organization:${receipt.organizationId}`,
     ]);
     await admin.query("BEGIN");
     const initial = await lockApprovedIdentity(admin, receipt);
-    verifier = initial.verifier;
     const replay = isExactReady(initial.assignment, receipt);
     if (!replay && !isPending(initial.assignment)) throw new Error();
+    await authenticateApprovedCredential(input, receipt);
     if (!replay)
       await admin.query(
         `GRANT INSERT(organization_id,product,entitlement_key,status,resource_product,resource_type,resource_id,metadata)
@@ -169,22 +243,8 @@ export async function backfillApprovedHotelSetupOrganizationReadiness(input: {
     await admin.query("COMMIT");
     if (failed) throw new Error();
 
-    native = hotelSetupOrganizationConnection(nativeDatabaseUrl, databaseEndpoint);
-    native.on("error", () => {
-      nativeFailed = true;
-    });
-    await native.connect();
-    const authenticated = await native.query<{ oid: number }>(
-      "SELECT session_user::regrole::oid AS oid",
-    );
-    if (authenticated.rows.length !== 1 || authenticated.rows[0]?.oid !== receipt.expectedRoleOid)
-      throw new Error();
-    await checkHotelSetupCreationCredential(native, receipt);
-    if (failed || nativeFailed) throw new Error();
-    await proveSecondary(native, receipt);
-    if (failed || nativeFailed) throw new Error();
-    await native.end();
-    native = undefined;
+    await proveFresh();
+    if (failed) throw new Error();
 
     const resolver = new STSClient({
       region: "eu-west-1",
@@ -213,24 +273,13 @@ export async function backfillApprovedHotelSetupOrganizationReadiness(input: {
       endpoint: "https://secretsmanager.eu-west-1.amazonaws.com",
       maxAttempts: 1,
     });
-    const stored = await createHotelSetupNativeSecretReader(secrets)(
-      `hotel-setup-command/prod/organization/${receipt.login}`,
-      receipt.secretVersion,
-    );
-    if (
-      !stored ||
-      typeof stored !== "object" ||
-      Array.isArray(stored) ||
-      Object.keys(stored).sort().join(",") !== "password,username" ||
-      (stored as { username?: unknown }).username !== receipt.login ||
-      (stored as { password?: unknown }).password !== decodeURIComponent(url.password) ||
-      failed ||
-      nativeFailed
-    )
-      throw new Error();
+    await assertCurrentCredential();
+    await proveFresh();
+    await assertCurrentCredential();
+    if (failed) throw new Error();
 
     await admin.query("BEGIN");
-    const current = await lockApprovedIdentity(admin, receipt, verifier);
+    const current = await lockApprovedIdentity(admin, receipt);
     if (
       current.assignment.assignment_xid !== initial.assignment.assignment_xid ||
       current.assignment.ready_at !== initial.assignment.ready_at ||
@@ -263,12 +312,10 @@ export async function backfillApprovedHotelSetupOrganizationReadiness(input: {
     if (failed) throw new Error();
     return result("ready");
   } catch {
-    await native?.end().catch(() => undefined);
-    native = undefined;
     await admin?.query("ROLLBACK").catch(() => undefined);
     await admin?.end().catch(() => undefined);
     admin = undefined;
-    if (readyCommitAttempted && readyXid && verifier) {
+    if (readyCommitAttempted && readyXid) {
       let inspection: pg.Client | undefined;
       let inspectionFailed = false;
       try {
@@ -277,11 +324,23 @@ export async function backfillApprovedHotelSetupOrganizationReadiness(input: {
           inspectionFailed = true;
         });
         await inspection.connect();
+        await lockHotelSetupOfflineBootstrap(inspection);
         await inspection.query("BEGIN");
-        const inspected = await lockApprovedIdentity(inspection, receipt, verifier);
+        const inspected = await lockApprovedIdentity(inspection, receipt);
         if (
           !isExactReady(inspected.assignment, receipt) ||
           inspected.assignment.assignment_xid !== readyXid ||
+          inspectionFailed
+        )
+          throw new Error();
+        await inspection.query("ROLLBACK");
+        await proveFresh();
+        await assertCurrentCredential();
+        await inspection.query("BEGIN");
+        const current = await lockApprovedIdentity(inspection, receipt);
+        if (
+          !isExactReady(current.assignment, receipt) ||
+          current.assignment.assignment_xid !== readyXid ||
           inspectionFailed
         )
           throw new Error();
@@ -296,7 +355,6 @@ export async function backfillApprovedHotelSetupOrganizationReadiness(input: {
     }
     throw new Error("Approved hotel setup readiness backfill requires recovery inspection");
   } finally {
-    await native?.end().catch(() => undefined);
     await admin?.end().catch(() => undefined);
     secrets?.destroy();
     sts?.destroy();
