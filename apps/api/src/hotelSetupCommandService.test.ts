@@ -969,6 +969,7 @@ it.each([
   [{ status: "conflict", currentRevision: 5 }, 409, "profile_revision_conflict"],
   [{ status: "idempotency_conflict" }, 409, "idempotency_key_conflict"],
   [{ status: "private_contact_conflict" }, 409, "private_contact_conflict"],
+  [{ status: "not_provisioned" }, 409, "profile_edit_not_provisioned"],
   [new Error("native"), 503, "profile_update_unavailable"],
   [new AuthorizationError(), 403, "forbidden"],
 ])("surfaces every failed profile save: %j", async (outcome, status, code) => {

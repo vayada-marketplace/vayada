@@ -28,7 +28,7 @@ export async function assertHotelSetupProfilePrivileges(client: HotelSetupPrivil
         AND p.proconfig=ARRAY['search_path=pg_catalog']::text[]
         AND p.proowner=(SELECT relowner FROM pg_catalog.pg_class WHERE oid='platform.hotel_setup_property_scopes'::pg_catalog.regclass))=$3+$4
     AND (SELECT pg_catalog.md5(pg_catalog.string_agg(pg_catalog.pg_get_functiondef(p.oid),'' ORDER BY p.oid::pg_catalog.regprocedure::text))
-      FROM pg_catalog.pg_proc p WHERE p.oid=ANY($1::pg_catalog.regprocedure[] || $2::pg_catalog.regprocedure[]))='0ac3d81783c8334e994ff4fecb5e6130'
+      FROM pg_catalog.pg_proc p WHERE p.oid=ANY($1::pg_catalog.regprocedure[] || $2::pg_catalog.regprocedure[]))='c0f1afcf2056a95ee934fd4186d1ec45'
     AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_class c
       WHERE c.relnamespace NOT IN ('pg_catalog'::pg_catalog.regnamespace,'information_schema'::pg_catalog.regnamespace)
         AND pg_catalog.has_schema_privilege(current_user,c.relnamespace,'USAGE')

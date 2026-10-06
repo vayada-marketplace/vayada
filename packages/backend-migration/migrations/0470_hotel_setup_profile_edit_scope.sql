@@ -154,12 +154,14 @@ RETURNS JSONB LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog AS
 $$;
 REVOKE ALL ON FUNCTION platform.hotel_setup_property_profile_row(UUID) FROM PUBLIC;
 
+-- Authority denials use the dedicated SQLSTATE HSP03, so a missing grant or policy
+-- (42501) surfaces as unavailable instead of an Owner-facing denial.
 CREATE FUNCTION platform.hotel_setup_property_profile_snapshot(
   requested_property_id UUID, requested_organization_id UUID, requested_actor_user_id UUID
 ) RETURNS JSONB LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 BEGIN
   IF NOT platform.hotel_setup_profile_authority(requested_property_id,requested_organization_id,requested_actor_user_id,FALSE)
-  THEN RAISE EXCEPTION 'hotel setup profile forbidden' USING ERRCODE='42501'; END IF;
+  THEN RAISE EXCEPTION 'hotel setup profile forbidden' USING ERRCODE='HSP03'; END IF;
   RETURN platform.hotel_setup_property_profile_row(requested_property_id);
 END $$;
 

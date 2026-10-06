@@ -96,6 +96,9 @@ export function createHotelSetupCredentialResolver(
   };
 }
 
+/** No ready assignment for this purpose, property, organization and actor (not retryable). */
+export class HotelSetupAssignmentMissingError extends Error {}
+
 /** Private logo only: purpose and actor are server-owned, never chosen by an HTTP override. */
 export function createHotelSetupLogoCredentialResolver(options: HotelSetupCredentialOptions) {
   return createHotelSetupActorCredentialResolver(options, "property_logo");
@@ -116,7 +119,7 @@ export function createHotelSetupActorCredentialResolver(
   ): Promise<string> => {
     const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
     if (![propertyId, organizationId, actorUserId].every((id) => uuid.test(id)))
-      throw new Error(`Missing hotel setup ${kind} assignment`);
+      throw new HotelSetupAssignmentMissingError(`Missing hotel setup ${kind} assignment`);
     const result = await options.assignments.query<
       ReadyCredential & {
         propertyId: string;
@@ -169,7 +172,7 @@ export function createHotelSetupActorCredentialResolver(
       !new RegExp(`^vayada_next_hotel_setup_${kind}_[a-z0-9_]+$`).test(scope.databaseLogin) ||
       Buffer.byteLength(scope.databaseLogin) > 63
     )
-      throw new Error(`Missing hotel setup ${kind} assignment`);
+      throw new HotelSetupAssignmentMissingError(`Missing hotel setup ${kind} assignment`);
     return readNativeSetupCredential(
       options.readNativeSecret,
       endpoint,

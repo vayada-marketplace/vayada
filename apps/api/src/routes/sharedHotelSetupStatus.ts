@@ -906,6 +906,7 @@ export type HotelSetupPropertyProfileResult =
   | { status: "conflict"; currentRevision: number }
   | { status: "idempotency_conflict" }
   | { status: "private_contact_conflict" }
+  | { status: "not_provisioned" }
   | { status: "invalid"; fields: Record<string, string[]> };
 
 /** Private property-command service only. Checks the original Owner session, Owner link and
@@ -980,6 +981,12 @@ export function registerHotelSetupPropertyProfileUpdate(
       return reply.status(409).send({
         code: "idempotency_key_conflict",
         detail: "These hotel details changed during the save. Review them and try again.",
+      });
+    if (result.status === "not_provisioned")
+      return reply.status(409).send({
+        code: "profile_edit_not_provisioned",
+        detail:
+          "Editing hotel details isn't enabled for your account on this hotel yet. Please contact Vayada support.",
       });
     if (result.status === "private_contact_conflict")
       return reply.status(409).send({
