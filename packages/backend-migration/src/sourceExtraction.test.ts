@@ -652,7 +652,8 @@ describe("immutable source extraction", () => {
     expect(SOURCE_EXTRACTION_LOCK_ID).toBe(ADVISORY_LOCK_ID);
     expect(SOURCE_WRITABLE_PRIVILEGES_SQL).toContain("has_sequence_privilege");
     expect(SOURCE_WRITABLE_PRIVILEGES_SQL).toContain("has_any_column_privilege");
-    expect(SOURCE_WRITABLE_PRIVILEGES_SQL).toContain("pg_auth_members");
+    expect(SOURCE_WRITABLE_PRIVILEGES_SQL).toContain("pg_has_role(current_user");
+    expect(SOURCE_WRITABLE_PRIVILEGES_SQL).not.toContain("pg_auth_members");
     expect(SOURCE_WRITABLE_PRIVILEGES_SQL).toContain("routine.prosecdef");
   });
 });
