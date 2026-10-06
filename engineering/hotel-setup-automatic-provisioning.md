@@ -160,3 +160,122 @@ first currency, preserving Owner-off/billing/global restrictions. Production
 rollout needs its separate reviewed release receipts. The two real Owners' later
 Save/reload results remain acceptance work; local fixtures do not establish their
 accounts as recovered.
+
+## Restricted operator authority (RDS)
+
+Superuser fixtures cannot show what the production operator may do. Read-only
+protected inspections (platform runs 37436890909 and 37216169103) establish
+the production shape that the online passes must work under:
+
+- PostgreSQL 17.9. `vayada_admin` is `NOSUPERUSER CREATEROLE`, a member of
+  `rds_superuser`, `NOBYPASSRLS`, and has no `pg_authid` SELECT or UPDATE.
+- Roles it creates get no creator membership edge. Their parent-scope edge is
+  recorded by the RDS bootstrap superuser. Vanilla PostgreSQL 16+ instead gives
+  a non-superuser creator an ADMIN-only edge.
+- Tables and the setup RLS helpers are owned by `vayada_target_prod_user`. The
+  Channex RLS helpers are not PUBLIC-executable, yet the operator reads identity
+  rows through those policies.
+
+The helper-owner grant previously required the vanilla creator edge. Under the
+RDS shape it would have stopped every automatic staging before activation. It
+now accepts no incoming edge or exactly that single ADMIN-only creator edge.
+
+`hotelSetupAutomaticRdsOperator.fixture.ts` mirrors this posture on owned
+PostgreSQL 16/17. Only three whole statements borrow a fixture superuser role
+to reproduce the RDS edge shape: fresh role creation, its parent grant and
+LOGIN-password activation. The restricted operator performs every other read,
+row lock, ACL grant, RLS-checked query and assignment write. Helper EXECUTE
+grants go through the non-superuser owner connection. Native proofs
+authenticate as the new role.
+
+The required CI job runs the whole reconciler with primary and
+serving-rollback (`3efb2195a`) proofs. Faults hit one hotel while an unrelated
+hotel is in the same pass. Coverage:
+
+- organization and property first setup, replay and serving admission;
+- lost-before-COMMIT staging (the only retried case);
+- lost staging, helper-grant, activation and readiness COMMIT acknowledgements;
+- rollback proof failure;
+- failed, lost and mismatched secret publication;
+- Owner revocation before readiness, then reinstatement without adoption;
+- cross-property credential denial and revoked-Owner command denial.
+
+A helper-grant inspection aborts its pass by design. The next pass skips the
+inspected scope and continues with other hotels. No case adopts or cleans up an
+earlier identity, reads `pg_authid`, or creates a second role.
+
+The fixture grants the operator broad grantable ACLs. This is an emulation, not
+proof of RDS internals. Before enabling the schedule, a protected read-only
+production inspection must confirm all of the following for `vayada_admin`:
+
+- **Discovery and authority:**
+  - SELECT on `identity.organizations`, `organization_memberships`,
+    `membership_property_assignments`, `users`, `organization_roles`,
+    `role_permission_grants`, `product_entitlements` and
+    `organization_resource_links`, on `hotel_catalog.properties` and
+    `organization_setup_track_intents`, and on `finance.billing_entitlements`;
+  - UPDATE on at least one column of each row it locks;
+  - EXECUTE on every function their RLS policies initialize, including both
+    Channex helpers.
+- **Assignment state:** INSERT/SELECT/UPDATE on
+  `platform.hotel_setup_creation_scopes` and `hotel_setup_property_scopes`,
+  and SELECT/UPDATE on `hotel_setup_reconciliation_cursors`.
+- **Native grants:**
+  - grantable column privileges for the creation, `launch_settings`,
+    `currency_ready` and `feature_hub` inventories, plus grantable DELETE on
+    `hotel_catalog.property_contact_channels`;
+  - grantable CONNECT and schema USAGE.
+- **Roles:** the ability to grant the setup scope roles and to alter roles it
+  created.
+- **Helper owner:** `vayada_target_prod_user` owns both Channex helpers.
+
+### Review follow-ups and remaining gate items
+
+These items were raised by the coordinator's independent review of #2901–#2904 and must be closed before the schedule is enabled.
+
+**1. Fixed in code.**
+
+- A fresh role must carry no incoming membership.
+- Each pass first asserts that the operator is not a MEMBER of any of the three native scope roles. Otherwise setup RLS would hide discovery and authority rows and the pass would report no work.
+- The CLI exits non-zero while any scope is `inspection_required`.
+- Non-logo publication re-authenticates the exact login and OID under the readiness locks.
+
+**2. Database-level readiness (deferred, blocking).** The native scope helpers check only an active assignment, unlike logo:
+
+- the property scope helpers (0444, 0462) do not check `credential_ready_at`;
+- the creation scope view (0436) does not check that `credential_role_oid` equals the session role.
+
+An attempt that stops after its LOGIN and pending assignment committed therefore stays usable by anyone holding its secret. This covers a lost publication, a mismatched readback, and a revoked-then-reinstated Owner. Commands still recheck current Owner authority.
+
+Closing this needs:
+
+- a new migration with a logo-style readiness predicate, with an explicit pending allowance for proof connections;
+- updated primary and rollback preflight pins;
+- a coordinated serving-image release, because current serving preflights pin those definitions.
+
+Until it ships, keep the schedule OFF. Alternatively, accept a documented exception where serving task roles can read only the exact admitted secret versions, if IAM can express that.
+
+**3. Held-scope runbook.** For a scope that is LOGIN with a published secret but not ready, use a protected manual quarantine:
+
+1. inspect the exact OID and assignment `xmin`;
+2. set `NOLOGIN`, deactivate the assignment and terminate its sessions in one transaction;
+3. retain the secret for evidence;
+4. clear the hold only after review.
+
+Automatic passes never do this.
+
+**4. First enablement.**
+
+- Dispatch one observed manual pass per mode, limited to one candidate (a platform runner input).
+- Have the schedule disable itself, or alert and stop, on the first non-zero exit.
+
+**5. Operator authority inspection.** In addition to the privilege list above, the protected read-only inspection must confirm:
+
+- the operator is not a MEMBER, by any path, of the three native scope roles;
+- how the operator obtains the authority to grant the scope roles: the `rds_superuser` semantics or an explicit ADMIN grant, and in the latter case that this keeps it a non-member;
+- the `rds.restrict_password_commands` setting and the operator's `rds_password` membership, so that `ALTER ROLE … PASSWORD` is permitted;
+- that a role it creates records no creator edge (the inspected 17.9 behaviour).
+
+Re-inspect after every RDS engine upgrade, because creator-edge and role-management semantics are engine-version specific.
+
+**6. Fixture limits.** The fixture borrows a superuser only for the three role-management statements. It grants the operator broad grantable ACLs and an empty `rds_superuser`. It does not test `rds_password` or real scope-grant authority; items 5 and 2 cover those.
