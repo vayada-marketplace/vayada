@@ -119,12 +119,10 @@ export async function grantFreshHotelSetupHelpers(input: {
       statement_timeout: 15_000,
       lock_timeout: 5_000,
     });
-  const creator = (
-    await input.holder.query<{ oid: number }>(
-      "SELECT r.oid FROM pg_catalog.pg_roles r WHERE r.rolname=current_user AND current_user=session_user",
-    )
-  ).rows[0];
-  if (!creator) throw new Error();
+  const creator = await input.holder.query(
+    "SELECT 1 FROM pg_catalog.pg_roles r WHERE r.rolname=current_user AND current_user=session_user",
+  );
+  if (creator.rows.length !== 1) throw new Error();
   const owner = connection();
   let failed = false,
     phase: Phase = "owner_preflight",
@@ -196,21 +194,10 @@ export async function grantFreshHotelSetupHelpers(input: {
     ).rows;
     const parents = membership.filter((row) => row.member === input.roleOid);
     const incoming = membership.filter((row) => row.roleid === input.roleOid);
-    // Vanilla PostgreSQL 16+ gives a nonsuperuser creator one ADMIN-only edge; RDS
-    // (inspected PG17.9) and superuser creators record none. Nothing else may
-    // inherit or SET ROLE into the disabled identity before activation.
-    if (
-      incoming.length > 1 ||
-      incoming.some(
-        (row) =>
-          row.member !== creator.oid ||
-          row.admin_option !== true ||
-          row.inherit_option !== false ||
-          row.set_option !== false ||
-          row.grantor_superuser !== true,
-      )
-    )
-      throw new Error();
+    // RDS (inspected PG17.9) and superuser creators record no membership into a fresh role.
+    // A vanilla PostgreSQL 16+ ADMIN creator edge would make the operator an implicit member
+    // of the native scope, which RLS then treats as a native identity: refuse every edge.
+    if (incoming.length) throw new Error();
     const scopeRole =
       input.kind === "organization"
         ? "vayada_next_hotel_setup_scope"

@@ -75,11 +75,13 @@ it.each([
   const secondary = vi.fn(async () => undefined);
   vi.mocked(checkHotelSetupCreationCredential).mockResolvedValue(undefined);
   vi.mocked(proveFreshHotelSetupNativeCredential).mockImplementation(async (credential, prove) => {
-    expect(transaction).toBe(false);
+    // Identity-only reauthentication runs under the locks; native proofs run outside them.
+    expect(transaction).toBe(prove === undefined);
     expect(credential.login).toBe(login);
     expect(credential.roleOid).toBe(42);
     nativeProofs++;
-    if (mode === "native" || (mode === "lateNative" && nativeProofs === 3)) throw new Error();
+    // lateNative fails the final locked reauthentication just before the readiness UPDATE.
+    if (mode === "native" || (mode === "lateNative" && nativeProofs === 6)) throw new Error();
     await prove?.({ checkpoint: nativeProofs } as unknown as pg.Client);
   });
   const query = vi.fn(async (sql: string, params?: unknown[]) => {
@@ -174,7 +176,7 @@ it.each([
     );
     expect(query.mock.calls.at(-2)?.[1]).toEqual([login, 42, versionId, organizationId]);
     expect(query.mock.calls.at(-1)?.[0]).toBe("COMMIT");
-    expect(proveFreshHotelSetupNativeCredential).toHaveBeenCalledTimes(4);
+    expect(proveFreshHotelSetupNativeCredential).toHaveBeenCalledTimes(6);
     expect(checkHotelSetupCreationCredential).toHaveBeenCalledTimes(2);
     expect(secondary).toHaveBeenCalledTimes(2);
   } else {
