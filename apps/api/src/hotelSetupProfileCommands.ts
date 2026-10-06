@@ -4,6 +4,7 @@ import { AuthorizationError } from "@vayada/backend-authorization";
 import pg from "pg";
 import {
   createHotelSetupActorCredentialResolver,
+  HotelSetupAssignmentMissingError,
   type HotelSetupCredentialOptions,
 } from "./hotelSetupCommandCredentials.js";
 import { assertHotelSetupProfilePrivileges } from "./hotelSetupProfilePrivileges.js";
@@ -27,7 +28,7 @@ export function createHotelSetupProfileCommands(options: HotelSetupCredentialOpt
       context: RequestContext,
       propertyId: string,
       command: HotelSetupPropertyProfileCommand,
-    ) {
+    ): Promise<HotelSetupPropertyProfileResult> {
       const scope = {
         propertyId,
         organizationId: context.selectedOrganization.organizationId,
@@ -45,6 +46,8 @@ export function createHotelSetupProfileCommands(options: HotelSetupCredentialOpt
         return await writeHotelSetupPropertyProfile(pool, scope, correlation, command);
       } catch (error) {
         if (error instanceof AuthorizationError) throw error;
+        // Credentials are provisioned per property and Owner; retrying cannot help.
+        if (error instanceof HotelSetupAssignmentMissingError) return { status: "not_provisioned" };
         throw new Error("Hotel setup profile command unavailable");
       } finally {
         await pool?.end().catch(() => undefined);
@@ -95,8 +98,8 @@ export async function writeHotelSetupPropertyProfile(
       : result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
-    // Fixed definer functions raise 42501 for every authority, scope or assignment denial.
-    if ((error as { code?: unknown } | null)?.code === "42501") throw new AuthorizationError();
+    // Only the definer authority check raises HSP03; a grant/RLS gap (42501) is unavailability.
+    if ((error as { code?: unknown } | null)?.code === "HSP03") throw new AuthorizationError();
     throw error;
   } finally {
     client.release();

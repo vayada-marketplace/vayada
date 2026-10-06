@@ -219,7 +219,9 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
     await admin?.query("ROLLBACK").catch(() => undefined);
     // No catalog verifier is available on RDS. Never mutate an uncertain committed actor identity.
     if (isHotelSetupActorPurpose(operation))
-      throw new Error("Hotel setup logo bootstrap requires recovery inspection");
+      throw new Error(
+        `Hotel setup ${hotelSetupPurposeKind(operation)} bootstrap requires recovery inspection`,
+      );
     // Readiness COMMIT can succeed despite a lost acknowledgement. Do not disable
     // a possibly admitted identity; inspect this exact attempt before cleanup.
     if (

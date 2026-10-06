@@ -11,6 +11,7 @@ import pg from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { checkHotelSetupPropertyCredential } from "./cli/hotelSetupPropertyPreflight.js";
 import { createHotelSetupActorCredentialResolver } from "./hotelSetupCommandCredentials.js";
+import { createHotelSetupNativeSecretReader } from "./hotelSetupNativeSecretReader.js";
 import { writeHotelSetupPropertyProfile } from "./hotelSetupProfileCommands.js";
 import { activateVerifiedHotelSetupPropertyRole } from "./hotelSetupPropertyRoleActivation.js";
 import { stageHotelSetupPropertyRole } from "./hotelSetupPropertyRoleStaging.js";
@@ -134,9 +135,8 @@ describe.skipIf(!databaseUrl)("protected profile credential lifecycle", () => {
         expect(command).toBeInstanceOf(GetSecretValueCommand);
         return { ARN: arn, Name: name, VersionId: versionId, SecretString: secretString };
       }) as never);
-      const readNativeSecret = vi.fn(
-        async () => JSON.parse(secretString) as { username: string; password: string },
-      );
+      // The production reader (its name/version/ARN checks) runs; only the SDK transport is faked.
+      const readNativeSecret = createHotelSetupNativeSecretReader();
       const resolve = createHotelSetupActorCredentialResolver(
         {
           assignments: admin,
@@ -169,7 +169,7 @@ describe.skipIf(!databaseUrl)("protected profile credential lifecycle", () => {
                   organizationId,
                   actorUserId,
                 ]),
-              ).rejects.toMatchObject({ code: "42501" });
+              ).rejects.toMatchObject({ code: "HSP03" });
             } finally {
               await client.query("ROLLBACK");
             }

@@ -1,8 +1,14 @@
 import { createHash } from "node:crypto";
 import { AuthorizationError } from "@vayada/backend-authorization";
 import { describe, expect, it, vi } from "vitest";
-import { createHotelSetupActorCredentialResolver } from "./hotelSetupCommandCredentials.js";
-import { writeHotelSetupPropertyProfile } from "./hotelSetupProfileCommands.js";
+import {
+  createHotelSetupActorCredentialResolver,
+  HotelSetupAssignmentMissingError,
+} from "./hotelSetupCommandCredentials.js";
+import {
+  createHotelSetupProfileCommands,
+  writeHotelSetupPropertyProfile,
+} from "./hotelSetupProfileCommands.js";
 import type { HotelSetupPropertyProfileCommand } from "./routes/sharedHotelSetupStatus.js";
 
 const propertyId = "11111111-1111-4111-8111-111111111111";
@@ -112,17 +118,19 @@ describe("native profile writer adapter", () => {
     ).toMatchObject({ status: "replayed", profile: { profileRevision: 3 } });
   });
 
-  it("rolls back and denies native authority failures; other errors propagate", async () => {
-    const denied = harness(Object.assign(new Error("forbidden"), { code: "42501" }));
+  it("rolls back and denies only native authority failures; grant gaps and others propagate", async () => {
+    const denied = harness(Object.assign(new Error("forbidden"), { code: "HSP03" }));
     await expect(
       writeHotelSetupPropertyProfile(denied.pool as never, scope, "r", command()),
     ).rejects.toBeInstanceOf(AuthorizationError);
     expect(statements(denied.query).at(-1)).toBe("ROLLBACK");
-    const broken = harness(Object.assign(new Error("check"), { code: "23514" }));
-    await expect(
-      writeHotelSetupPropertyProfile(broken.pool as never, scope, "r", command()),
-    ).rejects.toThrow("check");
-    expect(statements(broken.query).at(-1)).toBe("ROLLBACK");
+    for (const code of ["42501", "23514"]) {
+      const broken = harness(Object.assign(new Error(`sql ${code}`), { code }));
+      const failure = writeHotelSetupPropertyProfile(broken.pool as never, scope, "r", command());
+      await expect(failure).rejects.toThrow(`sql ${code}`);
+      await expect(failure).rejects.not.toBeInstanceOf(AuthorizationError);
+      expect(statements(broken.query).at(-1)).toBe("ROLLBACK");
+    }
   });
 });
 
@@ -172,9 +180,48 @@ describe("profile credential selection", () => {
     [],
   ])("rejects logo, property or ambiguous assignments: %j", async (...rows) => {
     const r = resolver(rows);
-    await expect(r.resolve(propertyId, organizationId, actorUserId)).rejects.toThrow(
-      "Missing hotel setup profile assignment",
-    );
+    const missing = r.resolve(propertyId, organizationId, actorUserId);
+    await expect(missing).rejects.toThrow("Missing hotel setup profile assignment");
+    await expect(missing).rejects.toBeInstanceOf(HotelSetupAssignmentMissingError);
     expect(r.readNativeSecret).not.toHaveBeenCalled();
+  });
+});
+
+describe("profile command availability", () => {
+  const context = {
+    actor: { internalUserId: actorUserId },
+    selectedOrganization: { organizationId },
+    audit: { requestId: "request-1", correlationId: null },
+  } as never;
+  const commands = (rows: unknown[], readNativeSecret = vi.fn()) =>
+    createHotelSetupProfileCommands({
+      assignments: { query: vi.fn().mockResolvedValue({ rows }) },
+      readNativeSecret,
+      databaseEndpoint: "postgresql://db.example.test/target",
+      secretPrefix: "hotel-setup-command/prod/property/",
+    });
+  it("reports an unprovisioned property or Owner as not retryable", async () => {
+    expect(await commands([]).updatePropertyProfile(context, propertyId, command())).toEqual({
+      status: "not_provisioned",
+    });
+  });
+  it("keeps other credential failures generic and unavailable", async () => {
+    const ready = {
+      databaseLogin: "vayada_next_hotel_setup_profile_test",
+      propertyId,
+      organizationId,
+      actorUserId,
+      credentialRoleOid: 7,
+      actualRoleOid: 7,
+      credentialSecretVersion: "11111111-1111-4111-8111-111111111111",
+      credentialReadyAt: new Date("2026-10-06T00:00:00Z"),
+    };
+    await expect(
+      commands([ready], vi.fn().mockRejectedValue(new Error("sdk detail"))).updatePropertyProfile(
+        context,
+        propertyId,
+        command(),
+      ),
+    ).rejects.toThrow(/^Hotel setup profile command unavailable$/);
   });
 });

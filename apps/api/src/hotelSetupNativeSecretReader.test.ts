@@ -22,6 +22,31 @@ it("pins the database-selected native name and immutable version, with no latest
   expect(f.send.mock.calls[0]![0].input).toEqual({ SecretId: name, VersionId: versionId });
   expect(f.send).toHaveBeenCalledOnce();
 });
+it.each(["logo", "profile"])(
+  "reads the actor-bound %s purpose's pinned native version",
+  async (purpose) => {
+    const actorName = name.replace("_property_test", `_${purpose}_test`);
+    const f = fixture({
+      ...result,
+      Name: actorName,
+      ARN: `arn:aws:secretsmanager:eu-west-1:269416271598:secret:${actorName}-ABC123`,
+    });
+    await expect(f.read(actorName, versionId)).resolves.toEqual({
+      username: "fixture",
+      password: "fixture",
+    });
+    expect(f.send.mock.calls[0]![0].input).toEqual({ SecretId: actorName, VersionId: versionId });
+  },
+);
+it.each([
+  "hotel-setup-command/prod/property/vayada_next_hotel_setup_profiles_test",
+  "hotel-setup-command/prod/organization/vayada_next_hotel_setup_profile_test",
+  "hotel-setup-command/prod/property/vayada_next_hotel_setup_org_test",
+])("denies lookalike or cross-prefix native names before SDK access: %s", async (reference) => {
+  const f = fixture();
+  await expect(f.read(reference, versionId)).rejects.toThrow("unavailable");
+  expect(f.send).not.toHaveBeenCalled();
+});
 it.each([
   { ...result, Name: name + "_other" },
   { ...result, VersionId: "22222222-2222-4222-8222-222222222222" },

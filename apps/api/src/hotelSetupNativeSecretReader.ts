@@ -13,7 +13,7 @@ export function createHotelSetupNativeSecretReader(
   return async (name, versionId) => {
     try {
       if (
-        !/^hotel-setup-command\/prod\/(organization\/vayada_next_hotel_setup_org_|property\/vayada_next_hotel_setup_(property_|logo_))[a-z0-9_]+$/.test(
+        !/^hotel-setup-command\/prod\/(organization\/vayada_next_hotel_setup_org_|property\/vayada_next_hotel_setup_(property_|logo_|profile_))[a-z0-9_]+$/.test(
           name,
         ) ||
         !/^[A-Za-z0-9-]{32,64}$/.test(versionId)
