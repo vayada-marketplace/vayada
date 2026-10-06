@@ -130,6 +130,8 @@ it.each(
     ),
   ).toBe(false);
 
+  // Logo recovery never alters, inserts or readies anything, even inside a DO block.
+  if (logo) expect(sql.some((q) => /ALTER ROLE|INSERT INTO|UPDATE platform/.test(q))).toBe(false);
   if (mode === "secondary") expect(publishHotelSetupPropertySecret).not.toHaveBeenCalled();
   if (mode === "commit") expect(checkHotelSetupPropertyCredential).not.toHaveBeenCalled();
 });

@@ -54,6 +54,11 @@ it.each(
       .filter(
         (operation) => !["actorDrift", "xidDrift"].includes(mode) || operation === "property_logo",
       )
+      // Logo keeps its reviewed RDS publication without the AWSCURRENT metadata step.
+      .filter(
+        (operation) =>
+          !["metadataVersion", "metadataIdentity"].includes(mode) || operation !== "property_logo",
+      )
       .map((operation) => [operation, mode] as const),
   ),
 )("pins %s credential publication on %s", async (operation, mode) => {
@@ -119,7 +124,7 @@ it.each(
         logo ? "123" : null,
       ]);
       expect(identityReads).toBe(2);
-      expect(send).toHaveBeenCalledTimes(4);
+      expect(send).toHaveBeenCalledTimes(logo ? 3 : 4);
       return { rows: [{ database_login: login }] };
     }
     if (sql.startsWith("SELECT oid")) {
@@ -222,7 +227,7 @@ it.each(
   }
   if (["retarget", "identity", "wrongAccount", "ready", "native", "actorDrift"].includes(mode))
     expect(send).not.toHaveBeenCalled();
-  if (mode === "xidDrift")
+  if (["xidDrift", "lateNative"].includes(mode))
     expect(query.mock.calls.some(([sql]) => sql.startsWith("UPDATE"))).toBe(false);
   if (["existing", "unknown"].includes(mode)) expect(send).toHaveBeenCalledOnce();
 });

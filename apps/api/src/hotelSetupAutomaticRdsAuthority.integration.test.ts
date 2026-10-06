@@ -16,7 +16,10 @@ import type { SharedPropertyProfileInput } from "./routes/sharedHotelSetupStatus
 
 const databaseUrl = process.env.HOTEL_SETUP_AUTOMATIC_RDS_TEST_DATABASE_URL;
 const rollbackRoot = process.env.HOTEL_SETUP_AUTOMATIC_ROLLBACK_PREFLIGHT_ROOT;
-vi.setConfig({ testTimeout: 120_000 });
+// The required CI job sets this so a renamed variable fails instead of skipping.
+const required = process.env.HOTEL_SETUP_AUTOMATIC_RDS_REQUIRED === "1";
+// Property cases run several bounded passes, each with its own 120 s reconciler deadline.
+vi.setConfig({ testTimeout: 600_000 });
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
@@ -233,11 +236,12 @@ async function withRestrictedOperator(
     flow: Awaited<ReturnType<typeof createAutomaticOwnerFlowFixture>>,
   ) => Promise<void>,
 ) {
-  const rds = await createRdsOperatorFixture(databaseUrl!);
+  if (!databaseUrl || !rollbackRoot) throw new Error("Restricted operator proof inputs missing");
+  const rds = await createRdsOperatorFixture(databaseUrl);
   let flow: Awaited<ReturnType<typeof createAutomaticOwnerFlowFixture>> | undefined;
   const errors: unknown[] = [];
   try {
-    flow = await createAutomaticOwnerFlowFixture(databaseUrl!, rollbackRoot!, rds);
+    flow = await createAutomaticOwnerFlowFixture(databaseUrl, rollbackRoot, rds);
     await test(rds, flow);
   } catch (error) {
     errors.push(error);
@@ -249,7 +253,7 @@ async function withRestrictedOperator(
   if (errors.length) throw errors[0];
 }
 
-describe.runIf(databaseUrl && rollbackRoot)(
+describe.runIf(required || (databaseUrl && rollbackRoot))(
   "automatic setup under the inspected RDS operator authority",
   () => {
     it("provisions, replays and admits only proved credentials without catalog or RLS bypass", async () => {
