@@ -160,3 +160,53 @@ first currency, preserving Owner-off/billing/global restrictions. Production
 rollout needs its separate reviewed release receipts. The two real Owners' later
 Save/reload results remain acceptance work; local fixtures do not establish their
 accounts as recovered.
+
+## Restricted operator authority (RDS)
+
+Superuser fixtures cannot show what the production operator may do. Read-only
+protected inspections (platform runs 37436890909 and 37216169103) establish
+the production shape that the online passes must work under:
+
+- PostgreSQL 17.9. `vayada_admin` is `NOSUPERUSER CREATEROLE`, a member of
+  `rds_superuser`, `NOBYPASSRLS`, and has no `pg_authid` SELECT or UPDATE.
+- Roles it creates get no creator membership edge. Their parent-scope edge is
+  recorded by the RDS bootstrap superuser. Vanilla PostgreSQL 16+ instead gives
+  a non-superuser creator an ADMIN-only edge.
+- Tables and the setup RLS helpers are owned by `vayada_target_prod_user`. The
+  Channex RLS helpers are not PUBLIC-executable, yet the operator reads identity
+  rows through those policies.
+
+The helper-owner grant previously required the vanilla creator edge. Under the
+RDS shape it would have stopped every automatic staging before activation. It
+now accepts no incoming edge or exactly that single ADMIN-only creator edge.
+
+`hotelSetupAutomaticRdsOperator.fixture.ts` mirrors this posture on owned
+PostgreSQL 16/17. Only exact role-management statements (fresh role creation,
+its parent grant and LOGIN password activation) borrow a fixture superuser role
+to reproduce the RDS edge shape. Every read, row lock, ACL grant, RLS check,
+readiness write and native proof runs as the restricted operator. Helper EXECUTE
+grants go through the non-superuser owner connection. The required CI job runs
+the whole reconciler with primary and serving-rollback (`3efb2195a`) proofs:
+
+- organization and property first setup, replay and serving admission;
+- lost-before-COMMIT staging (the only retried case);
+- lost staging, activation and readiness COMMIT acknowledgements;
+- rollback proof failure;
+- failed, lost and mismatched secret publication;
+- Owner revocation before readiness;
+- cross-property credential denial;
+- an unrelated hotel provisioned and serving in the same passes.
+
+No case adopts or cleans up an earlier identity, reads `pg_authid`, or creates
+a second role.
+
+This is an emulation, not proof of RDS internals. Before enabling the schedule,
+a protected read-only production inspection must confirm all of the following
+for the operator:
+
+- grantable column privileges for the creation, `launch_settings`,
+  `currency_ready` and `feature_hub` inventories, and grantable CONNECT/USAGE;
+- INSERT/SELECT/UPDATE on both assignment tables and SELECT/UPDATE on the cursor;
+- EXECUTE on every RLS helper its authority reads initialize;
+- the ability to grant the setup scope roles and to alter roles it created;
+- the helper owner's ownership of the two Channex helpers.
