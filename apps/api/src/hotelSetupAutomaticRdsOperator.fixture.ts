@@ -30,7 +30,11 @@ const roleManagement = new RegExp(
 /** Owned disposable database only. Mirrors the inspected production operator posture:
  * NOSUPERUSER CREATEROLE, rds_superuser-style membership, grantable relation ACLs,
  * no BYPASSRLS, no pg_authid access and no helper-function grant option. */
-export async function createRdsOperatorFixture(superUrl: string) {
+export async function createRdsOperatorFixture(
+  superUrl: string,
+  /** Reproduce vanilla PostgreSQL 16+: the operator itself creates roles and keeps the edge. */
+  options: { vanillaCreator?: boolean } = {},
+) {
   const url = new URL(superUrl);
   if (
     url.hostname !== "127.0.0.1" ||
@@ -170,7 +174,12 @@ export async function createRdsOperatorFixture(superUrl: string) {
     operations.statements.push(sql);
     if (/\b(?:FROM|JOIN)\s+(?:pg_catalog\.)?pg_authid\b/i.test(sql)) operations.catalog++;
     const execute = async () => {
-      if (!roleManagement.test(sql.replace(/\s+/g, " ").trim())) return run();
+      const statement = sql.replace(/\s+/g, " ").trim();
+      if (
+        !roleManagement.test(statement) ||
+        (options.vanillaCreator && statement.startsWith("CREATE ROLE "))
+      )
+        return run();
       operations.borrowed++;
       const call = original as unknown as (sql: string) => Promise<unknown>;
       await call.call(this, `SET ROLE ${manager}`);

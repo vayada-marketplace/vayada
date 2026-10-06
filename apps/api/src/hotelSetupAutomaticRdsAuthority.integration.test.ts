@@ -1,6 +1,7 @@
 import type { RequestContext } from "@vayada/backend-auth";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHotelSetupCredentialResolver } from "./hotelSetupCommandCredentials.js";
+import { hotelSetupOrganizationRolePrefix } from "./hotelSetupOrganizationRoleStaging.js";
 import { createHotelSetupLaunchSettingsCommands } from "./hotelSetupLaunchSettingsCommands.js";
 import { createAutomaticOwnerFlowFixture } from "./hotelSetupAutomaticOwnerFlow.fixture.js";
 import { createRdsOperatorFixture } from "./hotelSetupAutomaticRdsOperator.fixture.js";
@@ -66,13 +67,14 @@ function owner(organizationId: string, actorUserId: string) {
 
 /** Tear down both fixtures without masking the test's own failure. */
 async function withRestrictedOperator(
+  options: { vanillaCreator?: boolean },
   test: (
     rds: Awaited<ReturnType<typeof createRdsOperatorFixture>>,
     flow: Awaited<ReturnType<typeof createAutomaticOwnerFlowFixture>>,
   ) => Promise<void>,
 ) {
   if (!databaseUrl || !rollbackRoot) throw new Error("Restricted operator proof inputs missing");
-  const rds = await createRdsOperatorFixture(databaseUrl);
+  const rds = await createRdsOperatorFixture(databaseUrl, options);
   let flow: Awaited<ReturnType<typeof createAutomaticOwnerFlowFixture>> | undefined;
   const errors: unknown[] = [];
   try {
@@ -91,7 +93,7 @@ describe.runIf(required || (databaseUrl && rollbackRoot))(
   "automatic setup under the inspected RDS operator authority",
   () => {
     it("provisions, replays and admits only proved credentials without catalog or RLS bypass", async () => {
-      await withRestrictedOperator(async (rds, flow) => {
+      await withRestrictedOperator({}, async (rds, flow) => {
         const { organizationId, actorUserId, options, creation, records, pass } = flow;
         expect((await pass("organization")).receipts.map((r) => r.status)).toEqual(["provisioned"]);
         const { propertyId } = await creation.createPropertyProfile(
@@ -102,7 +104,7 @@ describe.runIf(required || (databaseUrl && rollbackRoot))(
             propertyId,
             organizationId,
           ),
-        ).rejects.toThrow();
+        ).rejects.toThrow("Missing hotel setup assignment");
         expect((await pass("property")).receipts.map((r) => r.status)).toEqual([
           "provisioned",
           "provisioned",
@@ -143,6 +145,27 @@ describe.runIf(required || (databaseUrl && rollbackRoot))(
         );
         expect(rds.operations.catalog).toBe(0);
         expect(rds.operations.borrowed).toBe(12);
+      });
+    });
+
+    it("stops loudly when the operator keeps a vanilla creator edge into a native scope", async () => {
+      await withRestrictedOperator({ vanillaCreator: true }, async (rds, flow) => {
+        const { organizationId, records, pass } = flow;
+        // The helper owner refuses the edged role before any grant, login or assignment.
+        await expect(pass("organization")).rejects.toMatchObject({
+          receipt: { phase: "owner_preflight", commitAttempted: false, catalog: "unavailable" },
+        });
+        // The edge makes the operator a scope member, so every later pass fails before discovery.
+        await expect(pass("organization")).rejects.toThrow("must not be a native scope member");
+        const staged = await rds.su.query(
+          `SELECT r.rolcanlogin,
+            (SELECT count(*)::int FROM pg_auth_members m WHERE m.roleid=r.oid) AS incoming,
+            (SELECT count(*)::int FROM platform.hotel_setup_creation_scopes WHERE organization_id=$2) AS assignments
+           FROM pg_roles r WHERE starts_with(r.rolname,$1)`,
+          [hotelSetupOrganizationRolePrefix(organizationId), organizationId],
+        );
+        expect(staged.rows).toEqual([{ rolcanlogin: false, incoming: 1, assignments: 0 }]);
+        expect(records.size).toBe(0);
       });
     });
   },
