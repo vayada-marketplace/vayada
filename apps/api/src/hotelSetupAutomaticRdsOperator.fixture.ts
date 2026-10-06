@@ -173,12 +173,16 @@ export async function createRdsOperatorFixture(superUrl: string) {
   ) {
     const run = () =>
       (original as unknown as (...values: unknown[]) => Promise<pg.QueryResult>).apply(this, args);
-    if (this.user !== "vayada_admin" || typeof args[0] !== "string") return run();
+    const operator = this.user === "vayada_admin";
+    // Fault hooks also see the helper owner's grant connection; only the operator borrows.
+    if (typeof args[0] !== "string" || (!operator && this.user !== "vayada_target_prod_user"))
+      return run();
     const sql = args[0];
-    operations.statements.push(sql);
-    if (/\b(?:FROM|JOIN)\s+(?:pg_catalog\.)?pg_authid\b/i.test(sql)) operations.catalog++;
+    if (operator) operations.statements.push(sql);
+    if (operator && /\b(?:FROM|JOIN)\s+(?:pg_catalog\.)?pg_authid\b/i.test(sql))
+      operations.catalog++;
     const execute = async () => {
-      if (!roleManagement.test(sql.replace(/\s+/g, " ").trim())) return run();
+      if (!operator || !roleManagement.test(sql.replace(/\s+/g, " ").trim())) return run();
       operations.borrowed++;
       const call = original as unknown as (sql: string) => Promise<unknown>;
       await call.call(this, `SET ROLE ${manager}`);
