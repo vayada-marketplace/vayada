@@ -100,6 +100,8 @@ export function safeErrorCode(error: unknown): string {
     return `postgres_${error.code.toLowerCase()}`;
   if (error instanceof ChannexAdoptionConsumptionError && /^[A-Z][A-Z0-9_]{2,63}$/.test(error.code))
     return error.code.toLowerCase();
+  const missing = /^Historical binding properties missing: ([1-8](?:,[1-8])*)$/.exec(message);
+  if (missing) return `historical_binding_properties_missing_${missing[1]!.replaceAll(",", "_")}`;
   return SAFE_STAGE_ERRORS.get(message) ?? "historical_binding_preflight_failed";
 }
 

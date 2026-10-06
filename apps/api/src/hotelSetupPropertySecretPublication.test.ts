@@ -1,7 +1,8 @@
 import { STSClient } from "@aws-sdk/client-sts";
 import { createHash } from "node:crypto";
 import { expect, it, vi, afterEach } from "vitest";
-import type pg from "pg";
+import pg from "pg";
+import { EventEmitter } from "node:events";
 import {
   CreateSecretCommand,
   DescribeSecretCommand,
@@ -36,9 +37,26 @@ it.each(
     "lateRetarget",
     "lateReady",
     "actorDrift",
+    "xidDrift",
+    "passwordDrift",
+    "sessionLogin",
+    "effectiveLogin",
+    "sessionOid",
+    "effectiveOid",
   ].flatMap((mode) =>
     (["launch_settings", "property_logo"] as const)
-      .filter((operation) => mode !== "actorDrift" || operation === "property_logo")
+      .filter(
+        (operation) =>
+          ![
+            "actorDrift",
+            "xidDrift",
+            "passwordDrift",
+            "sessionLogin",
+            "effectiveLogin",
+            "sessionOid",
+            "effectiveOid",
+          ].includes(mode) || operation === "property_logo",
+      )
       .map((operation) => [operation, mode] as const),
   ),
 )("pins %s credential publication on %s", async (operation, mode) => {
@@ -64,6 +82,37 @@ it.each(
     actorUserId: "10000000-0000-4000-8000-000000000003",
   };
   let identityReads = 0;
+  let connections = 0,
+    closed = 0;
+  class NativeClient extends EventEmitter {
+    async connect() {
+      connections++;
+      if (mode === "passwordDrift" && connections === 2) throw new Error("authentication failed");
+    }
+    async end() {
+      closed++;
+    }
+    async query() {
+      return {
+        rows: [
+          {
+            session_login: mode === "sessionLogin" ? "other" : login,
+            effective_login: mode === "effectiveLogin" ? "other" : login,
+            role_oid: mode === "sessionOid" ? 43 : 42,
+            effective_oid: mode === "effectiveOid" ? 43 : 42,
+          },
+        ],
+      };
+    }
+  }
+  vi.spyOn(pg, "Client").mockImplementation(function (config: pg.ClientConfig) {
+    expect(config).toMatchObject({
+      user: login,
+      password: "b".repeat(36),
+      ssl: { rejectUnauthorized: true },
+    });
+    return new NativeClient();
+  } as unknown as typeof pg.Client);
   let assignmentReads = 0,
     commits = 0,
     transaction = false;
@@ -85,6 +134,7 @@ it.each(
         staged.organizationId,
         operation,
         operation === "property_logo" ? staged.actorUserId : null,
+        operation === "property_logo" ? "123" : null,
       ]);
       expect(identityReads).toBe(2);
       expect(send).toHaveBeenCalledTimes(3);
@@ -94,11 +144,12 @@ it.each(
       expect(params).toEqual([
         42,
         login,
-        "private-verifier",
+        operation === "property_logo" ? null : "private-verifier",
         operation === "property_logo"
           ? "vayada_next_hotel_setup_logo_scope"
           : "vayada_next_hotel_setup_property_scope",
       ]);
+      expect(sql.includes("FROM pg_catalog.pg_roles")).toBe(operation === "property_logo");
       identityReads++;
       return {
         rows:
@@ -121,6 +172,7 @@ it.each(
           credential_role_oid: ready ? 42 : null,
           credential_secret_version: ready ? "x".repeat(32) : null,
           credential_ready_at: ready ? new Date() : null,
+          assignment_xid: mode === "xidDrift" && assignmentReads === 2 ? "124" : "123",
         },
       ],
     };
@@ -162,13 +214,16 @@ it.each(
   const result = publishHotelSetupPropertySecret({
     admin: { query } as unknown as pg.Client,
     staged,
-    expectedVerifier: "private-verifier",
+    ...(operation === "property_logo"
+      ? { expectedAssignmentXid: "123" }
+      : { expectedVerifier: "private-verifier" }),
     databaseEndpoint: "postgresql://db.internal/test",
     nativeDatabaseUrl: `postgresql://${login}:${"b".repeat(36)}@db.internal/test?sslmode=verify-full`,
   });
   if (mode === "success") {
     await expect(result).resolves.toEqual({ secretArn: arn, versionId: expect.any(String) });
     expect(query.mock.calls.at(-1)?.[0]).toBe("COMMIT");
+    expect(connections).toBe(operation === "property_logo" ? 2 : 0);
   } else {
     await expect(result).rejects.toThrow("publication requires recovery inspection");
     if (mode === "readinessCommit")
@@ -180,4 +235,9 @@ it.each(
   if (["retarget", "verifier", "wrongAccount", "ready", "actorDrift"].includes(mode))
     expect(send).not.toHaveBeenCalled();
   if (["existing", "unknown"].includes(mode)) expect(send).toHaveBeenCalledOnce();
+  expect(closed).toBe(connections);
+  if (["sessionLogin", "effectiveLogin", "sessionOid", "effectiveOid"].includes(mode))
+    expect(send).not.toHaveBeenCalled();
+  if (["xidDrift", "passwordDrift"].includes(mode))
+    expect(query.mock.calls.some(([sql]) => sql.startsWith("UPDATE"))).toBe(false);
 });

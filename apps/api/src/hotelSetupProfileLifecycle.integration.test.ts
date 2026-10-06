@@ -16,6 +16,8 @@ import { activateVerifiedHotelSetupPropertyRole } from "./hotelSetupPropertyRole
 import { stageHotelSetupPropertyRole } from "./hotelSetupPropertyRoleStaging.js";
 
 const databaseUrl = process.env["HOTEL_SETUP_PROPERTY_STAGE_TEST_DATABASE_URL"];
+// Optional RDS-like creator: CREATEROLE without superuser or password-catalog access.
+const creatorUrl = process.env["VAY965_LOGO_CREATOR_DATABASE_URL"] ?? databaseUrl;
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
@@ -82,10 +84,13 @@ describe.skipIf(!databaseUrl)("protected profile credential lifecycle", () => {
         [propertyId],
       );
 
+      // RDS-compatible actor purposes create the LOGIN and pending assignment while staging.
+      const password = randomUUID() + randomUUID();
       const staged = await stageHotelSetupPropertyRole({
-        adminDatabaseUrl: databaseUrl!,
+        adminDatabaseUrl: creatorUrl!,
         databaseEndpoint: endpoint.toString(),
         scope,
+        logoPassword: password,
       });
       login = staged.login;
       expect(login).toMatch(/^vayada_next_hotel_setup_profile_[a-f0-9]{16}_[a-f0-9]{12}$/);
@@ -105,7 +110,7 @@ describe.skipIf(!databaseUrl)("protected profile credential lifecycle", () => {
 
       const nativeUrl = new URL(url);
       nativeUrl.username = login;
-      nativeUrl.password = randomUUID() + randomUUID();
+      nativeUrl.password = password;
       vi.stubEnv("AWS_ACCESS_KEY_ID", "synthetic-key");
       vi.stubEnv("AWS_SECRET_ACCESS_KEY", "synthetic-secret");
       vi.stubEnv("AWS_PROFILE", undefined);
@@ -175,7 +180,7 @@ describe.skipIf(!databaseUrl)("protected profile credential lifecycle", () => {
         },
       );
       const receipt = await activateVerifiedHotelSetupPropertyRole({
-        adminDatabaseUrl: databaseUrl!,
+        adminDatabaseUrl: creatorUrl!,
         databaseEndpoint: endpoint.toString(),
         nativeDatabaseUrl: nativeUrl.toString(),
         staged,
@@ -261,7 +266,15 @@ describe.skipIf(!databaseUrl)("protected profile credential lifecycle", () => {
           "DELETE FROM platform.hotel_setup_property_scopes WHERE database_login=$1",
           [login],
         );
-        // Remove the staged CONNECT grant through dependency tracking before restoring ACLs.
+        // Remove the staged CONNECT grant through dependency tracking before restoring ACLs;
+        // an RDS-like creator granted it, so revoke as that original grantor.
+        await admin.query(
+          `SET ROLE ${admin.escapeIdentifier(decodeURIComponent(new URL(creatorUrl!).username))}`,
+        );
+        await admin.query(
+          `REVOKE ALL ON DATABASE ${admin.escapeIdentifier(url.pathname.slice(1))} FROM ${admin.escapeIdentifier(login)}`,
+        );
+        await admin.query("RESET ROLE");
         await admin.query(`DROP OWNED BY ${admin.escapeIdentifier(login)}`);
         await admin.query(`DROP ROLE ${admin.escapeIdentifier(login)}`);
       }

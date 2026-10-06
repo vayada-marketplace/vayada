@@ -149,4 +149,53 @@ describe("historical binding preflight preparation", () => {
     expect(release).toHaveBeenCalledWith(false);
     expect(raw).toBe(JSON.stringify(input));
   });
+
+  it("reports missing approved properties when the other pairs validate", async () => {
+    vi.mocked(readLegacyHistoricalBindingTargetSnapshot).mockClear();
+    vi.mocked(readSourceLedger).mockResolvedValue(structuredClone(ledger) as never);
+    vi.mocked(readProductionPmsSnapshot).mockResolvedValue({} as never);
+    vi.mocked(readLegacyHistoricalBindingTargetSnapshot).mockImplementation(
+      async (_pool, { propertyId }) => {
+        const index = APPROVED_PAIRS.findIndex(([id]) => id === propertyId);
+        if ([0, 2, 7].includes(index)) throw new Error("Historical binding property missing");
+        return {
+          property: { id: propertyId, profileStatus: "private", rowStateSha256: "1".repeat(64) },
+          claims: [{ id: uuid(10), rowStateSha256: "2".repeat(64) }],
+          connections: [{ id: uuid(11), rowStateSha256: "3".repeat(64) }],
+        } as never;
+      },
+    );
+    const release = vi.fn();
+    const query = vi.fn(async (sql: string, parameters?: string[]) => {
+      if (sql.includes("count(*) = 7")) return { rows: [{ complete: true }] };
+      if (sql.includes("FROM migration_source_pms.snapshot_rows")) {
+        const [, hotelId, externalPropertyId] = parameters!;
+        return {
+          rows: [
+            {
+              id: uuid(1),
+              hotelId,
+              externalPropertyId,
+              rowOrdinal: 1,
+              rowChecksumSha256: "4".repeat(64),
+              active: true,
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    });
+
+    await expect(
+      prepareLegacyHistoricalBindingPreflightInput(
+        {
+          source: { connect: async () => ({ query, release }) } as never,
+          target: { connect: vi.fn() } as never,
+        },
+        "migration-production-2026-09",
+      ),
+    ).rejects.toThrow("Historical binding properties missing: 1,3,8");
+    expect(readLegacyHistoricalBindingTargetSnapshot).toHaveBeenCalledTimes(8);
+    expect(release).toHaveBeenCalledWith(false);
+  });
 });
