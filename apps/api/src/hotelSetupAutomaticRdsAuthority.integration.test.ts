@@ -8,6 +8,7 @@ import {
   createHotelSetupCreationCredentialResolver,
   createHotelSetupCredentialResolver,
 } from "./hotelSetupCommandCredentials.js";
+import { HotelSetupHelperGrantInspection } from "./hotelSetupHelperOwnerGrants.js";
 import { hotelSetupOrganizationRolePrefix } from "./hotelSetupOrganizationRoleStaging.js";
 import { createHotelSetupLaunchSettingsCommands } from "./hotelSetupLaunchSettingsCommands.js";
 import { createAutomaticOwnerFlowFixture } from "./hotelSetupAutomaticOwnerFlow.fixture.js";
@@ -16,7 +17,10 @@ import type { SharedPropertyProfileInput } from "./routes/sharedHotelSetupStatus
 
 const databaseUrl = process.env.HOTEL_SETUP_AUTOMATIC_RDS_TEST_DATABASE_URL;
 const rollbackRoot = process.env.HOTEL_SETUP_AUTOMATIC_ROLLBACK_PREFLIGHT_ROOT;
-vi.setConfig({ testTimeout: 120_000 });
+// The required CI job sets this so a renamed variable fails instead of skipping.
+const required = process.env.HOTEL_SETUP_AUTOMATIC_RDS_REQUIRED === "1";
+// Property cases run several bounded passes, each with its own 120 s reconciler deadline.
+vi.setConfig({ testTimeout: 600_000 });
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
@@ -72,6 +76,7 @@ function owner(organizationId: string, actorUserId: string) {
 const faults = [
   "stagingRollback",
   "stagingCommitLost",
+  "helperCommitLost",
   "activationCommitLost",
   "rollbackProof",
   "publication",
@@ -89,56 +94,54 @@ type Outcome = {
   secrets: number;
   ready: boolean;
 };
-const pending = (secrets: number): Outcome => ({
-  first: ["inspection_required"],
-  replay: ["inspection_required"],
-  settled: ["inspection_required"],
-  secrets,
-  ready: false,
-});
-// Property passes prepare launch_settings first; A's other two purposes are independent.
-const property = (outcome: Outcome, later = "provisioned"): Outcome => ({
-  ...outcome,
-  first: [...outcome.first, later, later],
-  replay: outcome.replay.length ? [...outcome.replay, "existing_ready", "existing_ready"] : [],
-  settled: outcome.settled.length ? [...outcome.settled, "existing_ready", "existing_ready"] : [],
-  secrets: outcome.secrets + (later === "provisioned" ? 2 : 0),
-});
-const outcomes: Record<Fault, Record<"organization" | "property", Outcome>> = Object.fromEntries(
+const [held, made, ready, waiting, aborted] = [
+  "inspection_required",
+  "provisioned",
+  "existing_ready",
+  "pending_authority",
+  "helper_grant_inspection",
+];
+const outcome = (
+  first: string[],
+  replay: string[],
+  settled: string[],
+  secrets: number,
+  admitted = false,
+): Outcome => ({ first, replay, settled, secrets, ready: admitted });
+// Only nothing-durable staging retries. A helper-grant inspection aborts its pass; a lost
+// readiness acknowledgement is admitted after it committed. Property passes prepare
+// launch_settings first; A's other two purposes are independent.
+const outcomes = Object.fromEntries(
   faults.map((fault) => {
-    // Nothing durable before a lost-before-COMMIT staging failure, so only it may retry.
-    const organization: Outcome =
+    const secrets = ["publicationLost", "readback", "revokedBeforeReady"].includes(fault) ? 1 : 0;
+    const organization =
       fault === "stagingRollback"
-        ? {
-            first: ["inspection_required"],
-            replay: ["provisioned"],
-            settled: ["existing_ready"],
-            secrets: 1,
-            ready: true,
-          }
-        : fault === "revokedBeforeReady"
-          ? { first: ["inspection_required"], replay: [], settled: [], secrets: 1, ready: false }
-          : fault === "readinessCommitLost"
-            ? {
-                first: ["inspection_required"],
-                replay: ["existing_ready"],
-                settled: ["existing_ready"],
-                secrets: 1,
-                ready: true,
-              }
-            : pending(["publicationLost", "readback"].includes(fault) ? 1 : 0);
-    return [
-      fault,
-      {
-        organization,
-        property: property(
-          organization,
-          fault === "revokedBeforeReady" ? "pending_authority" : "provisioned",
-        ),
-      },
-    ];
+        ? outcome([held], [made], [ready], 1, true)
+        : fault === "helperCommitLost"
+          ? outcome([aborted], [held], [held], 0)
+          : fault === "revokedBeforeReady"
+            ? outcome([held], [], [held], 1)
+            : fault === "readinessCommitLost"
+              ? outcome([held], [ready], [ready], 1, true)
+              : outcome([held], [held], [held], secrets);
+    const property =
+      fault === "stagingRollback"
+        ? outcome([held, made, made], [made, ready, ready], [ready, ready, ready], 3, true)
+        : fault === "helperCommitLost"
+          ? outcome([aborted], [held, made, made], [held, ready, ready], 2)
+          : fault === "revokedBeforeReady"
+            ? outcome([held, waiting, waiting], [], [held, made, made], 3)
+            : fault === "readinessCommitLost"
+              ? outcome([held, made, made], [ready, ready, ready], [ready, ready, ready], 3, true)
+              : outcome(
+                  [held, made, made],
+                  [held, ready, ready],
+                  [held, ready, ready],
+                  secrets + 2,
+                );
+    return [fault, { organization, property }];
   }),
-) as never;
+) as Record<Fault, Record<"organization" | "property", Outcome>>;
 
 function propertyRolePrefix(propertyId: string, purpose: string) {
   const hash = createHash("sha256").update(`${propertyId}:${purpose}`).digest("hex");
@@ -158,17 +161,19 @@ function installFault(
   const once = (matches: boolean) => (!fired && matches ? (fired = true) : false);
   const transactions = new WeakMap<pg.Client, string[]>();
   const kind = (statements: string[]) =>
-    statements.some((sql) => sql.startsWith("CREATE ROLE"))
-      ? "staging"
-      : statements.some((sql) => sql.includes("'ALTER ROLE %I LOGIN PASSWORD %L'"))
-        ? "activation"
-        : statements.some((sql) =>
-              /^UPDATE platform\.hotel_setup_\w+_scopes\s+SET credential_role_oid/.test(sql),
-            )
-          ? "readiness"
-          : undefined;
+    statements.some((sql) => sql.startsWith("GRANT EXECUTE ON FUNCTION"))
+      ? "helper"
+      : statements.some((sql) => sql.startsWith("CREATE ROLE"))
+        ? "staging"
+        : statements.some((sql) => sql.includes("'ALTER ROLE %I LOGIN PASSWORD %L'"))
+          ? "activation"
+          : statements.some((sql) =>
+                /^UPDATE platform\.hotel_setup_\w+_scopes\s+SET credential_role_oid/.test(sql),
+              )
+            ? "readiness"
+            : undefined;
   rds.setHook(async (client, sql, params, run) => {
-    if (sql === "BEGIN") transactions.set(client, []);
+    if (/^BEGIN\b/.test(sql)) transactions.set(client, []);
     const statements = transactions.get(client);
     const targeted = statements?.some((entry) => entry.includes(target()));
     statements?.push(`${sql} ${JSON.stringify(params ?? [])}`);
@@ -180,6 +185,7 @@ function installFault(
     if (
       once(
         (fault === "stagingCommitLost" && committed === "staging") ||
+          (fault === "helperCommitLost" && committed === "helper") ||
           (fault === "activationCommitLost" && committed === "activation") ||
           (fault === "readinessCommitLost" && committed === "readiness"),
       )
@@ -233,11 +239,12 @@ async function withRestrictedOperator(
     flow: Awaited<ReturnType<typeof createAutomaticOwnerFlowFixture>>,
   ) => Promise<void>,
 ) {
-  const rds = await createRdsOperatorFixture(databaseUrl!);
+  if (!databaseUrl || !rollbackRoot) throw new Error("Restricted operator proof inputs missing");
+  const rds = await createRdsOperatorFixture(databaseUrl);
   let flow: Awaited<ReturnType<typeof createAutomaticOwnerFlowFixture>> | undefined;
   const errors: unknown[] = [];
   try {
-    flow = await createAutomaticOwnerFlowFixture(databaseUrl!, rollbackRoot!, rds);
+    flow = await createAutomaticOwnerFlowFixture(databaseUrl, rollbackRoot, rds);
     await test(rds, flow);
   } catch (error) {
     errors.push(error);
@@ -249,7 +256,7 @@ async function withRestrictedOperator(
   if (errors.length) throw errors[0];
 }
 
-describe.runIf(databaseUrl && rollbackRoot)(
+describe.runIf(required || (databaseUrl && rollbackRoot))(
   "automatic setup under the inspected RDS operator authority",
   () => {
     it("provisions, replays and admits only proved credentials without catalog or RLS bypass", async () => {
@@ -318,14 +325,18 @@ describe.runIf(databaseUrl && rollbackRoot)(
       await withRestrictedOperator(async (rds, flow) => {
         const { organizationId, actorUserId, options, creation, records, pass } = flow;
         const unrelated = await flow.addOrganization();
-        const replay = async (scope: "organization" | "property") => {
-          const result = await pass(scope);
-          return result.receipts.length ? result : pass(scope); // Wrap an exhausted cursor once.
-        };
-        const status = async (scope: "organization" | "property") =>
-          (await replay(scope)).receipts
+        // Restart discovery each time so every pass holds both hotels' candidates (LIMIT 2).
+        const fromStart = (scope: "organization" | "property") =>
+          rds.su.query(
+            "UPDATE platform.hotel_setup_reconciliation_cursors SET scope_id=NULL,organization_id=NULL,actor_user_id=NULL WHERE mode=$1",
+            [scope],
+          );
+        const status = async (scope: "organization" | "property") => {
+          await fromStart(scope);
+          return (await pass(scope)).receipts
             .filter((receipt) => receipt.organizationId === organizationId)
             .map((receipt) => receipt.status);
+        };
         let propertyId = "";
         let unrelatedPropertyId = "";
         const target = () =>
@@ -344,12 +355,34 @@ describe.runIf(databaseUrl && rollbackRoot)(
           ).propertyId;
         }
         const secretsBefore = records.size;
+        await fromStart(mode);
         installFault(rds, flow, fault, target, organizationId, actorUserId);
-        const first = await status(mode);
+        const first = await pass(mode).then(
+          ({ receipts }) => receipts,
+          (error: unknown) => {
+            if (!(error instanceof HotelSetupHelperGrantInspection)) throw error;
+            return [{ organizationId, status: "helper_grant_inspection" }];
+          },
+        );
         rds.setHook(undefined);
         const expected = outcomes[fault][mode];
-        expect(first).toEqual(expected.first);
+        const of = (receipts: typeof first, id: string) =>
+          receipts.filter((receipt) => receipt.organizationId === id).map(({ status }) => status);
+        expect(of(first, organizationId)).toEqual(expected.first);
+        // Unless the pass aborted, unrelated hotel B provisioned in that same faulted pass.
+        if (fault !== "helperCommitLost")
+          expect(of(first, unrelated.organizationId)).toEqual(
+            mode === "organization"
+              ? ["provisioned"]
+              : ["provisioned", "provisioned", "provisioned"],
+          );
         expect(await status(mode)).toEqual(expected.replay);
+        // A reinstated Owner gets its other scopes, never the published but unready attempt.
+        if (fault === "revokedBeforeReady")
+          await rds.su.query(
+            "UPDATE identity.organization_memberships SET status='active' WHERE organization_id=$1 AND user_id=$2",
+            [organizationId, actorUserId],
+          );
         expect(await status(mode)).toEqual(expected.settled);
         // One durable identity at most; never a second attempt or destructive recovery.
         const roles = await rds.su.query<{ rolname: string; rolcanlogin: boolean }>(
@@ -357,7 +390,9 @@ describe.runIf(databaseUrl && rollbackRoot)(
           [target()],
         );
         expect(roles.rows).toHaveLength(1);
-        expect(roles.rows[0]?.rolcanlogin).toBe(fault !== "stagingCommitLost");
+        expect(roles.rows[0]?.rolcanlogin).toBe(
+          !["stagingCommitLost", "helperCommitLost"].includes(fault),
+        );
         expect(
           rds.operations.statements.filter((sql) =>
             /DROP ROLE|NOLOGIN PASSWORD NULL|SET active=FALSE|pg_terminate_backend|DELETE FROM platform/i.test(

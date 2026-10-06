@@ -794,6 +794,16 @@ jobs:
             docker exec "$PG_CONTAINER" psql -U vayada_test -d vayada_api_test -c "ALTER SYSTEM SET $setting"
           done
           docker exec "$PG_CONTAINER" psql -U vayada_test -d vayada_api_test -c 'SELECT pg_reload_conf()'
+          tls_ready=false
+          for attempt in $(seq 1 20); do
+            if docker exec --env PGPASSWORD=vayada_test --env PGSSLMODE=verify-full \
+              --env PGSSLROOTCERT=/tmp/rds-tls/server.crt "$PG_CONTAINER" \
+              psql -h 127.0.0.1 -U vayada_test -d vayada_api_test -c 'SELECT 1' >/dev/null 2>&1; then
+              tls_ready=true; break
+            fi
+            sleep 1
+          done
+          test "$tls_ready" = true
           rm "$tls_dir/server.key"
           echo "NODE_EXTRA_CA_CERTS=$tls_dir/server.crt" >> "$GITHUB_ENV"
 
@@ -825,7 +835,7 @@ jobs:
           psql_admin "ALTER ROLE vayada_target_prod_user NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD NULL"
           HOTEL_SETUP_AUTOMATIC_RDS_TEST_DATABASE_URL="postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay1092_automatic_rds_test?sslmode=verify-full" \
           HOTEL_SETUP_AUTOMATIC_ROLLBACK_PREFLIGHT_ROOT="$GITHUB_WORKSPACE/.hotel-setup-serving-rollback" \
-          AWS_EC2_METADATA_DISABLED=true \
+          HOTEL_SETUP_AUTOMATIC_RDS_REQUIRED=1 AWS_EC2_METADATA_DISABLED=true \
             npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupAutomaticRdsAuthority.integration.test.ts
           test "$(PGPASSWORD=vayada_test psql -X -A -t -h localhost -U vayada_test -d vayada_api_test -c "SELECT count(*) FROM pg_roles WHERE rolname ~ '^(vayada_admin|rds_superuser|vay965_fixture_rds_role_manager|vayada_next_hotel_setup_(org|property|logo)_[a-f0-9]{16}_[a-f0-9]{12})$'")" = 0
 
