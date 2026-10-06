@@ -1274,9 +1274,7 @@ function ProfileForm({
   const focusAddressFieldsWhenShown = useRef(false);
   const stepHeading = useRef<HTMLHeadingElement>(null);
   const timezoneWasAutoDetected = useRef(false);
-  const [whatsappFollowsPhone, setWhatsappFollowsPhone] = useState(
-    () => !draft.whatsapp || draft.whatsapp === draft.phone,
-  );
+  const [whatsappFollowsPhone, setWhatsappFollowsPhone] = useState<boolean | null>(null);
 
   useEffect(() => {
     const errorStep = profileStepFields.findIndex((fields) =>
@@ -1326,14 +1324,15 @@ function ProfileForm({
 
   useEffect(() => {
     if (
+      mode === "create" &&
       step === contactStep &&
-      whatsappFollowsPhone &&
+      (whatsappFollowsPhone ?? (!draft.whatsapp || draft.whatsapp === draft.phone)) &&
       draft.phone &&
       draft.whatsapp !== draft.phone
     ) {
       onChange({ ...draft, whatsapp: draft.phone });
     }
-  }, [contactStep, draft, onChange, step, whatsappFollowsPhone]);
+  }, [contactStep, draft, mode, onChange, step, whatsappFollowsPhone]);
 
   if (loading) {
     return (
@@ -1563,7 +1562,9 @@ function ProfileForm({
               How can guests reach you?
             </h3>
             <p className="mt-2 text-sm text-gray-500">
-              This information is shown when guests click &apos;Contact&apos; on your booking page.
+              {mode === "update"
+                ? "Only contact details you change here are published on your booking page. Unchanged contacts keep their current visibility."
+                : "This information is shown when guests click 'Contact' on your booking page."}
             </p>
           </div>
           <div className="space-y-4">
@@ -1574,13 +1575,17 @@ function ProfileForm({
               placeholder="+94 77 123 4567"
               required
               error={fieldErrors.phone?.[0]}
-              onChange={(value) =>
+              onChange={(value) => {
+                const follow =
+                  whatsappFollowsPhone ??
+                  (draft.whatsapp ? draft.whatsapp === draft.phone : mode === "create");
+                setWhatsappFollowsPhone(follow);
                 onChange({
                   ...draft,
                   phone: value,
-                  whatsapp: whatsappFollowsPhone ? value : draft.whatsapp,
-                })
-              }
+                  whatsapp: follow ? value : draft.whatsapp,
+                });
+              }}
             />
             <PhoneField
               label="WhatsApp number"
@@ -1980,7 +1985,9 @@ function ProfileForm({
                       Show city and country publicly
                     </span>
                     <span className="mt-1 block text-xs leading-5 text-gray-600">
-                      Street address, postal code, and map coordinates stay private.
+                      {mode === "update"
+                        ? "Existing location visibility is preserved. If you edit the location, street address, postal code, and map coordinates stay private."
+                        : "Street address, postal code, and map coordinates stay private."}
                     </span>
                   </span>
                 </label>
@@ -3340,7 +3347,7 @@ function SelectField({
   );
 }
 
-function draftFromProfile(
+export function draftFromProfile(
   response: PropertyProfileResponse,
   publicResponse: PublicPropertyProfileResponse | null,
   pendingLogo: PendingPropertyLogoAssignment | null,
@@ -3358,7 +3365,7 @@ function draftFromProfile(
   return {
     displayName: profile.displayName,
     propertyType: profile.propertyType,
-    countryCode: profile.location.countryCode,
+    countryCode: profileCountry,
     city: profile.location.city,
     streetAddress: profile.location.streetAddress,
     postalCode: profile.location.postalCode,
@@ -3400,32 +3407,26 @@ export function profileUpdateFromDraft(
   existing: PropertyProfileResponse,
 ): UpdatePropertyProfileRequest | null {
   const profile = existing.profile;
+  const baseline = draftFromProfile(existing, null, null);
+  const original = createProfileFromDraft(baseline);
+  const edited = createProfileFromDraft(draft);
   const patch: PropertyProfilePatch = {};
-  const displayName = draft.displayName.trim();
-  const propertyType = draft.propertyType;
-  if (displayName !== profile.displayName) patch.displayName = displayName;
-  if (propertyType !== profile.propertyType) patch.propertyType = propertyType;
+  if (edited.displayName !== original.displayName) patch.displayName = edited.displayName;
+  if (edited.propertyType !== original.propertyType) patch.propertyType = edited.propertyType;
 
-  const location = {
-    countryCode: draft.countryCode.trim().toUpperCase(),
-    city: draft.city.trim(),
-    streetAddress: draft.streetAddress.trim(),
-    postalCode: draft.postalCode.trim(),
-    timezone: draft.timezone.trim(),
-    latitude: draft.latitude,
-    longitude: draft.longitude,
-    localityPublic: draft.localityPublic,
-    geoPublic: false,
-    mapDisplayMode: "hidden" as const,
-  };
   const locationPatch = Object.fromEntries(
-    Object.entries(location).filter(
-      ([key, value]) => value !== profile.location[key as keyof typeof location],
+    Object.entries(edited.location).filter(
+      ([key, value]) => value !== original.location[key as keyof typeof original.location],
     ),
   ) as NonNullable<PropertyProfilePatch["location"]>;
-  if (Object.keys(locationPatch).length > 0) patch.location = locationPatch;
+  if (Object.keys(locationPatch).length > 0) {
+    // Consent for an existing location does not publish newly entered location details.
+    if (profile.location.geoPublic) locationPatch.geoPublic = false;
+    if (profile.location.mapDisplayMode !== "hidden") locationPatch.mapDisplayMode = "hidden";
+    patch.location = locationPatch;
+  }
 
-  const contacts = contactsFromDraft(draft, profile.contacts);
+  const contacts = contactsFromDraft(draft, profile.contacts, baseline);
   if (!sameContacts(contacts, profile.contacts)) patch.contacts = contacts;
   if (Object.keys(patch).length === 0) return null;
 
@@ -3478,17 +3479,19 @@ function normalizedPropertyLaunchSettings(
 function contactsFromDraft(
   draft: ProfileDraft,
   existing: PropertyProfileContact[] = [],
+  baseline?: ProfileDraft,
 ): PropertyProfileContact[] {
   return (
     [
-      ["phone", draft.phone],
-      ["whatsapp", draft.whatsapp],
-      ["email", draft.contactEmail],
+      ["phone", draft.phone, baseline?.phone],
+      ["whatsapp", draft.whatsapp, baseline?.whatsapp],
+      ["email", draft.contactEmail, baseline?.contactEmail],
     ] as const
-  ).reduce<PropertyProfileContact[]>(
-    (contacts, [channelType, value]) => replaceContact(contacts, channelType, value),
-    existing,
-  );
+  ).reduce<PropertyProfileContact[]>((contacts, [channelType, value, original]) => {
+    const displayed = channelType === "email" ? value.trim() : normalizedPhoneNumber(value.trim());
+    if (original !== undefined && displayed === original.trim()) return contacts;
+    return replaceContact(contacts, channelType, value);
+  }, existing);
 }
 
 function replaceContact(
