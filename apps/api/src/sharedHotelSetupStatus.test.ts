@@ -2390,6 +2390,48 @@ describe("shared hotel setup status route", () => {
     expect(updatePropertySettingsByHotelId).toHaveBeenCalledTimes(1);
   });
 
+  it("forwards profile edits after access checks without the ordinary reader or writer", async () => {
+    const ordinary = repositoryWith([]);
+    const getPropertyProfile = vi.spyOn(ordinary, "getPropertyProfile");
+    const updatePropertyProfile = vi.spyOn(ordinary, "updatePropertyProfile");
+    const forward = vi
+      .fn<import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder>()
+      .mockImplementation(async (_request, reply) =>
+        reply.code(503).send({ code: "hotel_setup_unavailable" }),
+      );
+    const request = {
+      method: "PUT" as const,
+      url: `/api/hotel-setup/properties/${propertyId}/profile`,
+      headers: { authorization: "Bearer valid-token", "idempotency-key": "save-1" },
+      payload: { expectedProfileRevision: 1, patch: { displayName: "Edited" } },
+    };
+    app = buildSharedSetupApp({
+      permissions: ["hotel_catalog.setup.manage"],
+      linkedResources: [propertyLink(propertyId)],
+      repository: ordinary,
+      profileForwarder: forward,
+    });
+    expect((await injectJson(app, request)).statusCode).toBe(503);
+    expect(forward).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      propertyId,
+      "property_profile",
+    );
+    expect(getPropertyProfile).not.toHaveBeenCalled();
+    expect(updatePropertyProfile).not.toHaveBeenCalled();
+    await app.close();
+    forward.mockClear();
+    app = buildSharedSetupApp({
+      permissions: ["hotel_catalog.setup.read"],
+      linkedResources: [propertyLink(propertyId)],
+      repository: ordinary,
+      profileForwarder: forward,
+    });
+    expect((await injectJson(app, request)).statusCode).toBe(403);
+    expect(forward).not.toHaveBeenCalled();
+  });
+
   it("blocks public launch Save with an existing private pair before any ordinary writer", async () => {
     const write = vi.fn(() => {
       throw new Error("ordinary writer reached");
@@ -3395,6 +3437,7 @@ function buildSharedSetupApp(options: {
   repository: SharedHotelSetupStatusRepository;
   launchSettingsRepository?: SharedPropertyLaunchSettingsRepository;
   launchForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
+  profileForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
   trackCommandRepository?: HotelSetupTrackCommandRepository;
   propertyAccessRepository?: PropertyAccessRepository;
   permissions?: PermissionKey[];
@@ -3409,6 +3452,7 @@ function buildSharedSetupApp(options: {
     sharedHotelSetupStatusRepository: options.repository,
     propertyLaunchSettingsRepository: options.launchSettingsRepository,
     hotelSetupCommandForwarder: options.launchForwarder,
+    hotelSetupProfileForwarder: options.profileForwarder,
     hotelSetupTrackCommandRepository:
       options.trackCommandRepository ?? unusedTrackCommandRepository(),
     auth: {

@@ -132,6 +132,8 @@ type SharedHotelSetupStatusRoutesOptions = {
   trackCommandRepository: HotelSetupTrackCommandRepository;
   propertyCreationForwarder?: HotelSetupCommandForwarder;
   launchSettingsForwarder?: HotelSetupCommandForwarder;
+  /** Unset keeps the ordinary pre-cutover writer; set, there is no local-write fallback. */
+  profileForwarder?: HotelSetupCommandForwarder;
   propertyAccessRepository?: PropertyAccessRepository;
   launchSettingsRepository?: SharedPropertyLaunchSettingsRepository;
   now?: () => Date;
@@ -319,6 +321,8 @@ export async function registerSharedHotelSetupStatusRoutes(
       "hotel_catalog.setup.manage",
     );
     if (!access) return reply;
+    if (options.profileForwarder)
+      return options.profileForwarder(request, reply, propertyId, "property_profile");
 
     const existingProfile = await repository.getPropertyProfile({
       organizationId: access.organizationId,

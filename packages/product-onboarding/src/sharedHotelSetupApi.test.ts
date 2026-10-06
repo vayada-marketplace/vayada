@@ -70,6 +70,14 @@ describe("createSharedHotelSetupApi", () => {
       expectedProfileRevision: 1,
       patch: { displayName: "Hotel Alpenrose" },
     });
+    // Profile edits always carry a retry key; callers retrying one save pass theirs.
+    expect(putCalls[2]?.options?.headers).toEqual({ "Idempotency-Key": expect.any(String) });
+    await api.updatePropertyProfile(
+      "property-1",
+      { expectedProfileRevision: 2, patch: { displayName: "Retried" } },
+      retryKey,
+    );
+    expect(putCalls.at(-1)?.options?.headers).toEqual({ "Idempotency-Key": retryKey });
     expect(putCalls[3]?.data).toEqual({
       expectedProfileRevision: 1,
       patch: { shortDescription: "A city hotel." },
