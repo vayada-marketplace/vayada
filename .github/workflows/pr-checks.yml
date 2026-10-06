@@ -640,6 +640,7 @@ jobs:
           src/hotelSetupPropertySecretPublication.test.ts
           src/cli/hotelSetupPropertyBootstrap.test.ts
           src/hotelSetupAutomaticReconciliation.test.ts
+          src/hotelSetupHelperOwnerGrants.test.ts
           src/cli/hotelSetupAutomaticProvisioning.test.ts
           src/hotelSetupApprovedReadinessBackfill.test.ts
           src/hotelSetupReadinessReaderGrant.test.ts

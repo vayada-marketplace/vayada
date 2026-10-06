@@ -78,14 +78,13 @@ export async function publishHotelSetupPropertySecret(input: {
         ],
       );
       if (failed || role.rows.length !== 1) throw new Error();
-      // Logo proofs ran during activation; reauthenticate under the locks instead.
-      if (logo)
-        await proveFreshHotelSetupNativeCredential({
-          nativeDatabaseUrl,
-          databaseEndpoint,
-          login,
-          roleOid,
-        });
+      // Reauthenticate the exact login and OID while the authority and assignment locks are held.
+      await proveFreshHotelSetupNativeCredential({
+        nativeDatabaseUrl,
+        databaseEndpoint,
+        login,
+        roleOid,
+      });
     };
     const pending = async () => {
       await lockHotelSetupPropertyBootstrapAuthority(admin, scope);

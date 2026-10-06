@@ -30,6 +30,7 @@ function fixture(candidates = [candidate(1)]) {
   const prefixes = new Set<string>();
   const claimed = new Map<string, boolean>();
   const queries: Array<{ sql: string; values: unknown[] }> = [];
+  let operatorMember = false;
   const admin = {
     on: vi.fn(),
     connect: vi.fn(),
@@ -38,6 +39,7 @@ function fixture(candidates = [candidate(1)]) {
     }),
     query: vi.fn(async (sql: string, values: unknown[] = []) => {
       queries.push({ sql, values });
+      if (sql.includes("pg_has_role")) return { rows: [{ member: operatorMember }] };
       if (sql.includes("pg_try_advisory_lock"))
         return { rows: [{ claimed: claimed.get(String(values[0])) ?? true }] };
       if (sql.startsWith("SELECT scope_id"))
@@ -132,6 +134,9 @@ function fixture(candidates = [candidate(1)]) {
     prefixes,
     claimed,
     config,
+    setOperatorMember(member: boolean) {
+      operatorMember = member;
+    },
     orgAuthority,
     propertyAuthority,
     stageOrg,
@@ -315,4 +320,15 @@ it("stops starting new attempts at the deadline and requires the selected rollba
     reconcileHotelSetupAutomaticScopes({ ...f.config, mode: "property", proveProperty: undefined }),
   ).rejects.toThrow();
   expect(f.stageProperty).not.toHaveBeenCalled();
+});
+
+it("fails loudly before discovery when the operator is a member of any native scope", async () => {
+  const f = fixture([candidate(1)]);
+  f.setOperatorMember(true);
+  await expect(
+    reconcileHotelSetupAutomaticScopes({ ...f.config, mode: "organization" }),
+  ).rejects.toThrow("must not be a native scope member");
+  expect(f.queries.some(({ sql }) => sql.includes("SELECT DISTINCT"))).toBe(false);
+  expect(f.stageOrg).not.toHaveBeenCalled();
+  expect(f.disconnected).toBe(true);
 });

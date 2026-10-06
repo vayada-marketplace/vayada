@@ -234,13 +234,14 @@ function installFault(
 
 /** Tear down both fixtures without masking the test's own failure. */
 async function withRestrictedOperator(
+  options: { vanillaCreator?: boolean },
   test: (
     rds: Awaited<ReturnType<typeof createRdsOperatorFixture>>,
     flow: Awaited<ReturnType<typeof createAutomaticOwnerFlowFixture>>,
   ) => Promise<void>,
 ) {
   if (!databaseUrl || !rollbackRoot) throw new Error("Restricted operator proof inputs missing");
-  const rds = await createRdsOperatorFixture(databaseUrl);
+  const rds = await createRdsOperatorFixture(databaseUrl, options);
   let flow: Awaited<ReturnType<typeof createAutomaticOwnerFlowFixture>> | undefined;
   const errors: unknown[] = [];
   try {
@@ -260,7 +261,7 @@ describe.runIf(required || (databaseUrl && rollbackRoot))(
   "automatic setup under the inspected RDS operator authority",
   () => {
     it("provisions, replays and admits only proved credentials without catalog or RLS bypass", async () => {
-      await withRestrictedOperator(async (rds, flow) => {
+      await withRestrictedOperator({}, async (rds, flow) => {
         const { organizationId, actorUserId, options, creation, records, pass } = flow;
         expect((await pass("organization")).receipts.map((r) => r.status)).toEqual(["provisioned"]);
         const { propertyId } = await creation.createPropertyProfile(
@@ -271,7 +272,7 @@ describe.runIf(required || (databaseUrl && rollbackRoot))(
             propertyId,
             organizationId,
           ),
-        ).rejects.toThrow();
+        ).rejects.toThrow("Missing hotel setup assignment");
         expect((await pass("property")).receipts.map((r) => r.status)).toEqual([
           "provisioned",
           "provisioned",
@@ -322,7 +323,7 @@ describe.runIf(required || (databaseUrl && rollbackRoot))(
         (["organization", "property"] as const).map((mode) => [mode, fault] as const),
       ),
     )("keeps a %s %s attempt unavailable without duplicates or cleanup", async (mode, fault) => {
-      await withRestrictedOperator(async (rds, flow) => {
+      await withRestrictedOperator({}, async (rds, flow) => {
         const { organizationId, actorUserId, options, creation, records, pass } = flow;
         const unrelated = await flow.addOrganization();
         // Restart discovery each time so every pass holds both hotels' candidates (LIMIT 2).
@@ -434,7 +435,26 @@ describe.runIf(required || (databaseUrl && rollbackRoot))(
                 organizationId,
               );
         if (expected.ready) await expect(admitted).resolves.toMatch(/^postgres/);
-        else await expect(admitted).rejects.toThrow();
+        else {
+          await expect(admitted).rejects.toThrow(
+            mode === "organization"
+              ? "Missing hotel setup creation assignment"
+              : "Missing hotel setup assignment",
+          );
+          // An unadmitted attempt never carries readiness, whatever its durable stage.
+          const readiness = await rds.su.query(
+            `SELECT credential_role_oid,credential_secret_version,credential_ready_at
+             FROM platform.hotel_setup_${mode === "organization" ? "creation" : "property"}_scopes
+             WHERE starts_with(database_login::text,$1)`,
+            [target()],
+          );
+          for (const row of readiness.rows)
+            expect(row).toEqual({
+              credential_role_oid: null,
+              credential_secret_version: null,
+              credential_ready_at: null,
+            });
+        }
         // Unrelated hotel B is unaffected.
         if (mode === "organization")
           await expect(
@@ -461,7 +481,7 @@ describe.runIf(required || (databaseUrl && rollbackRoot))(
               unrelatedPropertyId,
               organizationId,
             ),
-          ).rejects.toThrow();
+          ).rejects.toThrow("Missing hotel setup assignment");
           const native = new pg.Client({ connectionString: nativeUrl });
           await native.connect();
           try {
@@ -471,7 +491,7 @@ describe.runIf(required || (databaseUrl && rollbackRoot))(
                 organizationId,
                 operation: "launch_settings",
               }),
-            ).rejects.toThrow();
+            ).rejects.toThrow("Hotel setup command scope preflight failed");
           } finally {
             await native.end();
           }
@@ -488,9 +508,30 @@ describe.runIf(required || (databaseUrl && rollbackRoot))(
               unrelatedPropertyId,
               settings,
             ),
-          ).rejects.toThrow();
+          ).rejects.toThrow("The authenticated user is not authorized for this resource.");
         }
         expect(rds.operations.catalog).toBe(0);
+      });
+    });
+
+    it("stops loudly when the operator keeps a vanilla creator edge into a native scope", async () => {
+      await withRestrictedOperator({ vanillaCreator: true }, async (rds, flow) => {
+        const { organizationId, records, pass } = flow;
+        // The helper owner refuses the edged role before any grant, login or assignment.
+        await expect(pass("organization")).rejects.toMatchObject({
+          receipt: { phase: "owner_preflight", commitAttempted: false, catalog: "unavailable" },
+        });
+        // The edge makes the operator a scope member, so every later pass fails before discovery.
+        await expect(pass("organization")).rejects.toThrow("must not be a native scope member");
+        const staged = await rds.su.query(
+          `SELECT r.rolcanlogin,
+            (SELECT count(*)::int FROM pg_auth_members m WHERE m.roleid=r.oid) AS incoming,
+            (SELECT count(*)::int FROM platform.hotel_setup_creation_scopes WHERE organization_id=$2) AS assignments
+           FROM pg_roles r WHERE starts_with(r.rolname,$1)`,
+          [hotelSetupOrganizationRolePrefix(organizationId), organizationId],
+        );
+        expect(staged.rows).toEqual([{ rolcanlogin: false, incoming: 1, assignments: 0 }]);
+        expect(records.size).toBe(0);
       });
     });
   },
