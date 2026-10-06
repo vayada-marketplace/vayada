@@ -241,7 +241,9 @@ export async function lockHotelSetupPropertyBootstrapAuthority(
   scope: HotelSetupPropertyBootstrapScope,
 ) {
   if (isHotelSetupActorPurpose(scope.operation) && scope.automatic)
-    throw new Error("Automatic logo provisioning is not admitted");
+    throw new Error(
+      `Automatic ${hotelSetupPurposeKind(scope.operation)} provisioning is not admitted`,
+    );
   if (scope.automatic) {
     const organization = await admin.query(
       `SELECT id FROM identity.organizations WHERE id=$1::uuid
