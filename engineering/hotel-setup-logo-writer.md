@@ -126,6 +126,30 @@ sessions/jobs and their evidence. Older images cannot silently fall back to
 ordinary persistence. Document which mode the reviewed immutable rollback uses
 before any production admission; unrelated setup commands remain serving.
 
+## RDS bootstrap recovery contract
+
+The protected manual logo bootstrap creates the fresh role, exact grants, LOGIN
+password and actor-bound pending assignment in one transaction. It rejects every
+existing role prefix or property-purpose assignment; it never adopts a staged
+role. Non-logo staging and activation retain their existing contract.
+
+RDS does not expose `pg_authid` to the provisioner. Logo proof and each secret
+publication checkpoint instead authenticate a fresh verified-TLS connection and
+check both session/effective login names and OIDs, current `pg_roles` posture,
+Owner authority, exact pending binding and the original assignment `xmin`.
+Both compiled preflights must pass before publication. Re-salting the same
+password remains the same credential; this path makes no claim of literal
+password-verifier identity. No catalog grants or custom authentication protocol
+are introduced.
+
+Before the first COMMIT, failure rolls back the entire fresh identity. After a
+commit is attempted, uncertain activation, proof, secret publication or readiness
+requires inspection: never reset a password, disable/drop a role, delete a
+secret, adopt or retry automatically. Pending logo RLS denies business commands
+until the exact secret version and role OID are committed as ready. Keep public
+admission blocked, private executors stopped and automatic provisioning OFF
+through the protected bootstrap window.
+
 ## Required checks
 
 - Actual PostgreSQL 16/17 native fixtures: complete create/upload/finalize/assign/

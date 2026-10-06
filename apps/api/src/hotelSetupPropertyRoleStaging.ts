@@ -45,11 +45,13 @@ const inventories = {
 };
 
 /** Isolated provisioner only; manual callers retain their blocked service gate.
- * No password, assignment, secret or business command is created by staging. */
+ * Logo creates its password/pending assignment atomically; other purposes only stage. */
 export async function stageHotelSetupPropertyRole(input: {
   adminDatabaseUrl: string;
   databaseEndpoint: string;
   scope: HotelSetupPropertyBootstrapScope;
+  /** Private manual-logo input; never returned in a receipt. */
+  logoPassword?: string;
   helperOwner?: {
     databaseUrl: string;
     holder: pg.Client;
@@ -63,6 +65,7 @@ export async function stageHotelSetupPropertyRole(input: {
   try {
     const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const { propertyId, organizationId, actorUserId, operation, automatic } = input.scope;
+    const { logoPassword } = input;
     const scope = {
       propertyId,
       organizationId,
@@ -76,7 +79,10 @@ export async function stageHotelSetupPropertyRole(input: {
       !uuid.test(scope.actorUserId) ||
       !Object.hasOwn(inventories, scope.operation) ||
       (automatic !== undefined && automatic !== true) ||
-      (automatic && ["currency", "property_logo"].includes(operation))
+      (automatic && ["currency", "property_logo"].includes(operation)) ||
+      (operation === "property_logo"
+        ? typeof logoPassword !== "string" || Buffer.byteLength(logoPassword) < 32
+        : logoPassword !== undefined)
     )
       throw new Error();
     const url = parseHotelSetupDatabaseUrl(
@@ -166,6 +172,27 @@ export async function stageHotelSetupPropertyRole(input: {
       [login],
     );
     if (failed || incompleteGrant || result.rows.length !== 1) throw new Error();
+    let assignmentXid: string | undefined;
+    if (scope.operation === "property_logo") {
+      await admin.query(
+        `SELECT pg_catalog.set_config('vay1092.property_login',$1,true),
+        pg_catalog.set_config('vay1092.property_password',$2,true)`,
+        [login, logoPassword],
+      );
+      await admin.query(`DO $$ BEGIN EXECUTE pg_catalog.format('ALTER ROLE %I LOGIN PASSWORD %L',
+        pg_catalog.current_setting('vay1092.property_login'),
+        pg_catalog.current_setting('vay1092.property_password')); END $$`);
+      const assignment = await admin.query<{ assignment_xid: string }>(
+        `INSERT INTO platform.hotel_setup_property_scopes
+        (database_login,property_id,organization_id,operation_class,active,actor_user_id)
+        VALUES($1,$2::uuid,$3::uuid,'property_logo',TRUE,$4::uuid)
+        RETURNING xmin::text AS assignment_xid`,
+        [login, scope.propertyId, scope.organizationId, scope.actorUserId],
+      );
+      assignmentXid = assignment.rows[0]?.assignment_xid;
+      if (failed || assignment.rows.length !== 1 || !/^[1-9][0-9]*$/.test(assignmentXid ?? ""))
+        throw new Error();
+    }
     commitAttempted = true;
     await admin.query("COMMIT");
     if (failed) throw new Error();
@@ -180,11 +207,16 @@ export async function stageHotelSetupPropertyRole(input: {
         kind: "property",
         signatures: helpers,
       });
-    return { login, roleOid: result.rows[0]!.oid, ...scope };
+    return {
+      login,
+      roleOid: result.rows[0]!.oid,
+      ...scope,
+      ...(assignmentXid ? { assignmentXid } : {}),
+    };
   } catch (error) {
     if (!commitAttempted) await admin?.query("ROLLBACK").catch(() => undefined);
     if (error instanceof HotelSetupHelperGrantInspection) throw error;
-    // Lost commit may have left a disabled role. Never retry/adopt it blindly.
+    // Lost commit may have left a staged role or pending logo identity. Never retry/adopt it.
     throw new Error(
       commitAttempted
         ? "Hotel setup property staging requires recovery inspection"
