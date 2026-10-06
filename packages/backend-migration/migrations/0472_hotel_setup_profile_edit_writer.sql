@@ -10,7 +10,7 @@ CREATE FUNCTION platform.hotel_setup_update_property_profile(
 DECLARE replay RECORD; current_revision BIGINT; before JSONB; after JSONB; key_id UUID; changed TEXT[];
 BEGIN
   IF NOT platform.hotel_setup_profile_authority(requested_property_id,requested_organization_id,requested_actor_user_id,FALSE)
-  THEN RAISE EXCEPTION 'hotel setup profile forbidden' USING ERRCODE='42501'; END IF;
+  THEN RAISE EXCEPTION 'hotel setup profile forbidden' USING ERRCODE='HSP03'; END IF;
   IF requested_key_hash !~ '^[0-9a-f]{64}$' OR requested_fingerprint !~ '^[0-9a-f]{64}$'
     OR expected_revision IS NULL OR expected_revision < 1
     OR jsonb_typeof(requested_profile) IS DISTINCT FROM 'object' OR jsonb_typeof(requested_profile->'contacts') IS DISTINCT FROM 'array'
