@@ -43,6 +43,7 @@ it.each(["allowed", "operator", "override", "customRole", "missingOwner", "forei
           expect(text).toContain("FOR UPDATE OF organization");
           return { rows: mode === "missingOwner" ? [] : [{ id: input.scope.propertyId }] };
         }
+        if (text.includes("RETURNING xmin::text")) return { rows: [{ assignment_xid: "123" }] };
         return { rows: [{ oid: 42 }] };
       }
     }
@@ -98,9 +99,22 @@ it.each(["allowed", "operator", "override", "customRole", "missingOwner", "forei
     const result = stageHotelSetupPropertyRole({
       ...input,
       scope: { ...input.scope, operation: "property_logo" },
+      logoPassword: "b".repeat(36),
     });
     if (mode === "allowed") {
       const staged = await result;
+      expect(staged.assignmentXid).toBe("123");
+      expect(JSON.stringify(staged)).not.toContain("b".repeat(36));
+      expect(sql.filter((statement) => statement === "COMMIT")).toHaveLength(1);
+      expect(sql.at(-1)).toBe("COMMIT");
+      expect(sql.some((statement) => statement.includes("ALTER ROLE %I LOGIN PASSWORD %L"))).toBe(
+        true,
+      );
+      expect(
+        sql.some((statement) =>
+          statement.startsWith("INSERT INTO platform.hotel_setup_property_scopes"),
+        ),
+      ).toBe(true);
       expect(staged.login).toMatch(/^vayada_next_hotel_setup_logo_[a-f0-9]{16}_[a-f0-9]{12}$/);
       expect(
         sql.some(
@@ -178,6 +192,14 @@ it("rejects invalid purpose, identity and transport before constructing a client
     { ...input, adminDatabaseUrl: input.adminDatabaseUrl.replace("admin:", ":") },
     { ...input, scope: { ...input.scope, automatic: false } },
     { ...input, scope: { ...input.scope, automatic: true, operation: "currency" } },
+    { ...input, scope: { ...input.scope, operation: "property_logo" } },
+    { ...input, logoPassword: "b".repeat(36) },
+    { ...input, logoPassword: "short", scope: { ...input.scope, operation: "property_logo" } },
+    {
+      ...input,
+      logoPassword: "b".repeat(36),
+      scope: { ...input.scope, automatic: true, operation: "property_logo" },
+    },
   ])
     await expect(stageHotelSetupPropertyRole(invalid as typeof input)).rejects.toThrow(
       "staging failed",
