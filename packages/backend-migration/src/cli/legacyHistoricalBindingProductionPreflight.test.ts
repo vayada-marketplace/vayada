@@ -31,6 +31,12 @@ describe("production historical binding preflight role cleanup", () => {
     expect(safeErrorCode(new Error("vayada_target_prod"))).toBe(
       "historical_binding_preflight_failed",
     );
+    expect(safeErrorCode(new Error("Historical binding properties missing: 1,3,8"))).toBe(
+      "historical_binding_properties_missing_1_3_8",
+    );
+    expect(
+      safeErrorCode(new Error("Historical binding properties missing: customer@example.com")),
+    ).toBe("historical_binding_preflight_failed");
     expect(safeErrorCode(Object.assign(new Error("detail"), { code: "CUSTOMER_ACME" }))).toBe(
       "historical_binding_preflight_failed",
     );
