@@ -39,7 +39,7 @@ function fixture(candidates = [candidate(1)]) {
     }),
     query: vi.fn(async (sql: string, values: unknown[] = []) => {
       queries.push({ sql, values });
-      if (sql.includes("pg_has_role")) return { rows: [{ member: operatorMember }] };
+      if (sql.includes("pg_has_role")) return { rows: [{ safe: !operatorMember }] };
       if (sql.includes("pg_try_advisory_lock"))
         return { rows: [{ claimed: claimed.get(String(values[0])) ?? true }] };
       if (sql.startsWith("SELECT scope_id"))
