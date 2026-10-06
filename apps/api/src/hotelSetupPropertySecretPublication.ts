@@ -123,7 +123,6 @@ export async function publishHotelSetupPropertySecret(input: {
       await identity();
     };
     const proveFresh = async () => {
-      if (logo) return;
       const credential = { nativeDatabaseUrl, databaseEndpoint, login, roleOid };
       await proveFreshHotelSetupNativeCredential(credential, (client) =>
         checkHotelSetupPropertyCredential(client, scope),
@@ -137,7 +136,8 @@ export async function publishHotelSetupPropertySecret(input: {
     // Do not retain organization/property locks through external SDK latency.
     // This assignment remains pending; readiness is committed only below.
     await admin.query("COMMIT");
-    await proveFresh();
+    // Logo keeps its reviewed RDS sequence: proofs during activation, then locked reauthentication.
+    if (!logo) await proveFresh();
     // Resolve once, then pin the same credentials and official endpoints for identity and writes.
     const resolver = new STSClient({
       region: "eu-west-1",
@@ -214,23 +214,25 @@ export async function publishHotelSetupPropertySecret(input: {
       stored.SecretBinary
     )
       throw new Error();
-    await proveFresh();
-    const metadata = await secrets.send(new DescribeSecretCommand({ SecretId: name }), {
-      abortSignal: AbortSignal.timeout(15_000),
-    });
-    const current = Object.entries(metadata.VersionIdsToStages ?? {}).filter(([, stages]) =>
-      stages.includes("AWSCURRENT"),
-    );
-    if (
-      failed ||
-      metadata.ARN !== version.ARN ||
-      metadata.Name !== name ||
-      metadata.DeletedDate !== undefined ||
-      current.length !== 1 ||
-      current[0]?.[0] !== versionId ||
-      current[0][1].length !== 1
-    )
-      throw new Error();
+    if (!logo) {
+      await proveFresh();
+      const metadata = await secrets.send(new DescribeSecretCommand({ SecretId: name }), {
+        abortSignal: AbortSignal.timeout(15_000),
+      });
+      const current = Object.entries(metadata.VersionIdsToStages ?? {}).filter(([, stages]) =>
+        stages.includes("AWSCURRENT"),
+      );
+      if (
+        failed ||
+        metadata.ARN !== version.ARN ||
+        metadata.Name !== name ||
+        metadata.DeletedDate !== undefined ||
+        current.length !== 1 ||
+        current[0]?.[0] !== versionId ||
+        current[0][1].length !== 1
+      )
+        throw new Error();
+    }
     await admin.query("BEGIN");
     await pending();
     const ready = await admin.query<{ database_login: string }>(
