@@ -17,6 +17,13 @@ const scopes = [
 const roleManagement =
   /^(?:CREATE ROLE "vayada_next_hotel_setup_(?:org|property|logo)_[a-f0-9]{16}_[a-f0-9]{12}" NOLOGIN NOINHERIT |GRANT vayada_next_hotel_setup_(?:scope|property_scope|logo_scope) TO "vayada_next_hotel_setup_(?:org|property|logo)_[a-f0-9]{16}_[a-f0-9]{12}"\s+WITH INHERIT TRUE, SET FALSE$|DO \$\$ BEGIN EXECUTE pg_catalog\.format\('ALTER ROLE %I LOGIN PASSWORD %L',)/;
 
+export type RdsOperatorHook = (
+  client: pg.Client,
+  sql: string,
+  params: unknown,
+  run: () => Promise<pg.QueryResult>,
+) => Promise<pg.QueryResult>;
+
 /** Owned disposable database only. Mirrors the inspected production operator posture:
  * NOSUPERUSER CREATEROLE, rds_superuser-style membership, grantable relation ACLs,
  * no BYPASSRLS, no pg_authid access and no helper-function grant option. */
@@ -142,6 +149,7 @@ export async function createRdsOperatorFixture(superUrl: string) {
     return result.toString();
   };
   const operations = { catalog: 0, borrowed: 0, statements: [] as string[] };
+  let hook: RdsOperatorHook | undefined;
   const original = pg.Client.prototype.query;
   const shim = vi.spyOn(pg.Client.prototype, "query").mockImplementation(async function (
     this: pg.Client,
@@ -164,7 +172,7 @@ export async function createRdsOperatorFixture(superUrl: string) {
       await (original as unknown as (sql: string) => Promise<unknown>).call(this, "RESET ROLE");
       return result;
     };
-    return execute();
+    return hook ? hook(this, sql, args[1], execute) : execute();
   } as never);
   return {
     su,
@@ -172,6 +180,9 @@ export async function createRdsOperatorFixture(superUrl: string) {
     helperOwnerDatabaseUrl: credentialUrl("vayada_target_prod_user", ownerPassword),
     databaseEndpoint: endpoint.toString(),
     operations,
+    setHook(next?: RdsOperatorHook) {
+      hook = next;
+    },
     /** Production shape after every pass: no creator edges and superuser-recorded parents. */
     async nativeMembership() {
       return (
