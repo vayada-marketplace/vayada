@@ -165,29 +165,8 @@ export async function createAutomaticOwnerFlowFixture(
       }
     }
   };
-  try {
-    for (const database of databases)
-      await admin.query(
-        `REVOKE ALL ON DATABASE ${admin.escapeIdentifier(database.name)} FROM PUBLIC`,
-      );
-    const cursor = await admin.query(
-      "SELECT to_regclass('platform.hotel_setup_reconciliation_cursors') AS name",
-    );
-    if (!cursor.rows[0]?.name)
-      await admin.query(
-        await readFile(
-          new URL(
-            "../../../packages/backend-migration/migrations/0464_hotel_setup_reconciliation_cursor.sql",
-            import.meta.url,
-          ),
-          "utf8",
-        ),
-      );
-    await admin.query(
-      "UPDATE platform.hotel_setup_reconciliation_cursors SET scope_id=NULL,organization_id=NULL,actor_user_id=NULL",
-    );
-    // This new disposable database has no real accounts. Disable prior fixture candidates only.
-    await admin.query("UPDATE identity.organization_memberships SET status='inactive'");
+  /** Synthetic TEST ONLY Owner group with Hotel Operations; never a real account. */
+  async function seed(organizationId: string, actorUserId: string, membershipId: string) {
     await admin.query(
       "INSERT INTO identity.organizations(id,kind,name,slug) VALUES($1,'hotel_group','Synthetic Owner group',$1::uuid::text)",
       [organizationId],
@@ -211,6 +190,31 @@ export async function createAutomaticOwnerFlowFixture(
         ($1,'pms','property-management'),($1,'booking','booking-engine'),($1,'marketplace','marketplace-hotel-profile')`,
       [organizationId],
     );
+  }
+  try {
+    for (const database of databases)
+      await admin.query(
+        `REVOKE ALL ON DATABASE ${admin.escapeIdentifier(database.name)} FROM PUBLIC`,
+      );
+    const cursor = await admin.query(
+      "SELECT to_regclass('platform.hotel_setup_reconciliation_cursors') AS name",
+    );
+    if (!cursor.rows[0]?.name)
+      await admin.query(
+        await readFile(
+          new URL(
+            "../../../packages/backend-migration/migrations/0464_hotel_setup_reconciliation_cursor.sql",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+      );
+    await admin.query(
+      "UPDATE platform.hotel_setup_reconciliation_cursors SET scope_id=NULL,organization_id=NULL,actor_user_id=NULL",
+    );
+    // This new disposable database has no real accounts. Disable prior fixture candidates only.
+    await admin.query("UPDATE identity.organization_memberships SET status='inactive'");
+    await seed(organizationId, actorUserId, membershipId);
   } catch (error) {
     await close();
     throw error;
@@ -228,6 +232,11 @@ export async function createAutomaticOwnerFlowFixture(
     proveProperty,
     records,
     pass,
+    async addOrganization() {
+      const added = { organizationId: randomUUID(), actorUserId: randomUUID() };
+      await seed(added.organizationId, added.actorUserId, randomUUID());
+      return added;
+    },
     close,
   };
 }

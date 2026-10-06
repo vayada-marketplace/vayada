@@ -27,6 +27,13 @@ const roleManagement = new RegExp(
     .join("|"),
 );
 
+export type RdsOperatorHook = (
+  client: pg.Client,
+  sql: string,
+  params: unknown,
+  run: () => Promise<pg.QueryResult>,
+) => Promise<pg.QueryResult>;
+
 /** Owned disposable database only. Mirrors the inspected production operator posture:
  * NOSUPERUSER CREATEROLE, rds_superuser-style membership, grantable relation ACLs,
  * no BYPASSRLS, no pg_authid access and no helper-function grant option. */
@@ -162,6 +169,7 @@ export async function createRdsOperatorFixture(
     return result.toString();
   };
   const operations = { catalog: 0, borrowed: 0, statements: [] as string[] };
+  let hook: RdsOperatorHook | undefined;
   const original = pg.Client.prototype.query;
   const shim = vi.spyOn(pg.Client.prototype, "query").mockImplementation(async function (
     this: pg.Client,
@@ -169,13 +177,18 @@ export async function createRdsOperatorFixture(
   ) {
     const run = () =>
       (original as unknown as (...values: unknown[]) => Promise<pg.QueryResult>).apply(this, args);
-    if (this.user !== "vayada_admin" || typeof args[0] !== "string") return run();
+    const operator = this.user === "vayada_admin";
+    // Fault hooks also see the helper owner's grant connection; only the operator borrows.
+    if (typeof args[0] !== "string" || (!operator && this.user !== "vayada_target_prod_user"))
+      return run();
     const sql = args[0];
-    operations.statements.push(sql);
-    if (/\b(?:FROM|JOIN)\s+(?:pg_catalog\.)?pg_authid\b/i.test(sql)) operations.catalog++;
+    if (operator) operations.statements.push(sql);
+    if (operator && /\b(?:FROM|JOIN)\s+(?:pg_catalog\.)?pg_authid\b/i.test(sql))
+      operations.catalog++;
     const execute = async () => {
       const statement = sql.replace(/\s+/g, " ").trim();
       if (
+        !operator ||
         !roleManagement.test(statement) ||
         (options.vanillaCreator && statement.startsWith("CREATE ROLE "))
       )
@@ -190,7 +203,7 @@ export async function createRdsOperatorFixture(
         await call.call(this, "RESET ROLE").catch(() => undefined);
       }
     };
-    return execute();
+    return hook ? hook(this, sql, args[1], execute) : execute();
   } as never);
   return {
     su,
@@ -198,6 +211,9 @@ export async function createRdsOperatorFixture(
     helperOwnerDatabaseUrl: credentialUrl("vayada_target_prod_user", ownerPassword),
     databaseEndpoint: endpoint.toString(),
     operations,
+    setHook(next?: RdsOperatorHook) {
+      hook = next;
+    },
     /** Production shape after every pass: no creator edges and superuser-recorded parents. */
     async nativeMembership() {
       return (
