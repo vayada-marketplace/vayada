@@ -19,12 +19,19 @@ import type { checkHotelSetupCreationCredential } from "./cli/hotelSetupCreation
 import type { checkHotelSetupPropertyCredential } from "./cli/hotelSetupPropertyPreflight.js";
 import { hotelSetupOrganizationRolePrefix } from "./hotelSetupOrganizationRoleStaging.js";
 
-/** Owned TLS database only; AWS is fully stubbed, while both native DB proofs execute. */
-export async function createAutomaticOwnerFlowFixture(databaseUrl: string, rollbackRoot: string) {
+/** Owned TLS database only; AWS is fully stubbed, while both native DB proofs execute.
+ * An optional restricted operator replaces the superuser for every reconciliation pass. */
+export async function createAutomaticOwnerFlowFixture(
+  databaseUrl: string,
+  rollbackRoot: string,
+  operator?: { adminDatabaseUrl: string; helperOwnerDatabaseUrl: string },
+) {
   const url = new URL(databaseUrl);
   if (
     url.hostname !== "127.0.0.1" ||
-    !url.pathname.startsWith("/vay1092_automatic_owner_flow_test") ||
+    !url.pathname.startsWith(
+      operator ? "/vay1092_automatic_rds_" : "/vay1092_automatic_owner_flow_test",
+    ) ||
     url.search !== "?sslmode=verify-full" ||
     !isAbsolute(rollbackRoot)
   )
@@ -115,7 +122,8 @@ export async function createAutomaticOwnerFlowFixture(databaseUrl: string, rollb
   const pass = (mode: "organization" | "property") =>
     reconcileHotelSetupAutomaticScopes({
       mode,
-      adminDatabaseUrl: url.toString(),
+      adminDatabaseUrl: operator?.adminDatabaseUrl ?? url.toString(),
+      ...(operator ? { helperOwnerDatabaseUrl: operator.helperOwnerDatabaseUrl } : {}),
       databaseEndpoint: endpoint.toString(),
       proveOrganization,
       proveProperty,

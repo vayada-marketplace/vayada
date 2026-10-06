@@ -120,8 +120,8 @@ export async function grantFreshHotelSetupHelpers(input: {
       lock_timeout: 5_000,
     });
   const creator = (
-    await input.holder.query<{ oid: number; superuser: boolean }>(
-      "SELECT r.oid,r.rolsuper AS superuser FROM pg_catalog.pg_roles r WHERE r.rolname=current_user AND current_user=session_user",
+    await input.holder.query<{ oid: number }>(
+      "SELECT r.oid FROM pg_catalog.pg_roles r WHERE r.rolname=current_user AND current_user=session_user",
     )
   ).rows[0];
   if (!creator) throw new Error();
@@ -196,10 +196,11 @@ export async function grantFreshHotelSetupHelpers(input: {
     ).rows;
     const parents = membership.filter((row) => row.member === input.roleOid);
     const incoming = membership.filter((row) => row.roleid === input.roleOid);
-    // PostgreSQL gives a nonsuperuser role creator one ADMIN-only edge. Nothing
-    // else may inherit or SET ROLE into the disabled identity before activation.
+    // Vanilla PostgreSQL 16+ gives a nonsuperuser creator one ADMIN-only edge; RDS
+    // (inspected PG17.9) and superuser creators record none. Nothing else may
+    // inherit or SET ROLE into the disabled identity before activation.
     if (
-      incoming.length !== (creator.superuser ? 0 : 1) ||
+      incoming.length > 1 ||
       incoming.some(
         (row) =>
           row.member !== creator.oid ||
