@@ -115,8 +115,8 @@ describe.skipIf(!url)("native property profile edit", () => {
         [login, property, org, owner],
       );
       const native = connect(login);
-      const call = async (sql: string, values: unknown[]) => {
-        const client = await native.connect();
+      const call = async (sql: string, values: unknown[], pool = native) => {
+        const client = await pool.connect();
         try {
           await client.query("BEGIN");
           const result = await client.query<{ value: Record<string, unknown> }>(sql, values);
@@ -137,10 +137,12 @@ describe.skipIf(!url)("native property profile edit", () => {
         body: object,
         key: string,
         fingerprint = key,
+        pool = native,
       ) =>
         call(
           "SELECT platform.hotel_setup_update_property_profile($1,$2,$3,$4,$5,$6,$7,'request-1') AS value",
           [...scope, revision, JSON.stringify(body), hash(key), hash(fingerprint)],
+          pool,
         );
       const bound = [property, org, owner];
 
@@ -153,7 +155,7 @@ describe.skipIf(!url)("native property profile edit", () => {
           )
         ).rows[0],
       ).toEqual({ proof: true, ready: false });
-      await expect(snapshot(bound)).rejects.toMatchObject({ code: "42501" });
+      await expect(snapshot(bound)).rejects.toMatchObject({ code: "HSP03" });
       await admin.query(
         `UPDATE platform.hotel_setup_property_scopes SET credential_role_oid=(SELECT oid FROM pg_roles WHERE rolname=$1),
          credential_secret_version=$2,credential_ready_at=now() WHERE database_login=$1`,
@@ -204,9 +206,9 @@ describe.skipIf(!url)("native property profile edit", () => {
         [property, foreignOrg, owner],
         [property, org, foreignOwner],
       ]) {
-        await expect(snapshot(scope)).rejects.toMatchObject({ code: "42501" });
+        await expect(snapshot(scope)).rejects.toMatchObject({ code: "HSP03" });
         await expect(update(scope, 1, profile("Forged", []), "forged")).rejects.toMatchObject({
-          code: "42501",
+          code: "HSP03",
         });
       }
 
@@ -419,13 +421,33 @@ describe.skipIf(!url)("native property profile edit", () => {
       ] as const) {
         await admin.query(revoke, [id]);
         await expect(update(bound, revision, edited, "key-1")).rejects.toMatchObject({
-          code: "42501",
+          code: "HSP03",
         });
-        await expect(snapshot(bound)).rejects.toMatchObject({ code: "42501" });
+        await expect(snapshot(bound)).rejects.toMatchObject({ code: "HSP03" });
         await admin.query(restore, [id]);
       }
       expect(await snapshot(bound)).toMatchObject({ profileRevision: revision + 2 });
       expect((await audits()).rows).toHaveLength(2);
+
+      // Two connections race. The organization lock serializes them: one revision
+      // writes and the other conflicts; one key writes once and the other replays.
+      const racer = connect(login);
+      const race = await Promise.all([
+        update(bound, revision + 2, profile("Race A", contacts), "race-a", "race-a", native),
+        update(bound, revision + 2, profile("Race B", contacts), "race-b", "race-b", racer),
+      ]);
+      expect(race.map((result) => result!["status"]).sort()).toEqual(["conflict", "updated"]);
+      const same = profile("Race C", contacts);
+      const replay = await Promise.all([
+        update(bound, revision + 3, same, "race-c", "race-c", native),
+        update(bound, revision + 3, same, "race-c", "race-c", racer),
+      ]);
+      expect(replay.map((result) => result!["status"]).sort()).toEqual(["replayed", "updated"]);
+      expect(await snapshot(bound)).toMatchObject({
+        profileRevision: revision + 4,
+        displayName: "Race C",
+      });
+      expect((await audits()).rows).toHaveLength(4);
     } finally {
       await Promise.all(pools.map((pool) => pool.end()));
       for (const role of roles) {

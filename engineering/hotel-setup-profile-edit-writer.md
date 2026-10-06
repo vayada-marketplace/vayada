@@ -55,6 +55,27 @@ Each call re-locks the organization, assignment, membership, role definition,
 grants, actor and Owner link and requires the original Owner shape (`hotel_owner`,
 no overrides, account-admin preset) with `hotel_catalog.setup.manage` and
 `marketplace.profile.manage`. Revocation denies first attempts and replays.
+Authority denials raise the dedicated SQLSTATE `HSP03` (relayed as 403); any other
+error, including a missing grant or policy (42501), is relayed as 503.
+
+### Who can edit once admission is enabled
+
+Admission is one switch, but credentials are per property and per Owner actor, and
+are provisioned by the protected manual bootstrap. With the caller enabled:
+
+- Only the bound original Owner can save profile edits, from every caller (setup
+  wizard, Marketplace and PMS editors, nearby editor). Managers and other non-Owner
+  members who could use the ordinary writer get `403 owner_session_required`. This
+  is a product decision to confirm before enabling.
+- A property or Owner without a ready `property_profile` assignment (new hotels,
+  co-Owners, an ownership transfer) gets a non-retryable
+  `409 profile_edit_not_provisioned`, with copy that asks the Owner to contact
+  support. Clients must not retry it.
+- Automatic provisioning deliberately refuses actor-bound purposes. Provisioning
+  for new properties and Owner changes is a **follow-up**: either extend the
+  reviewed automatic reconciler to `property_profile` for the property's current
+  Owner, or rebind the purpose to the property. Until then, enable admission only
+  after every property that needs editing has been bootstrapped.
 
 ## Atomicity, idempotency and audit
 
@@ -78,12 +99,25 @@ Any failure rolls back the profile, location, contacts, projections, key and aud
 
 ## Release order
 
-1. Apply the migration (no login or grant is created).
-2. Deploy private property-service primary and a compatible rollback that both
+1. Pre-stage the NOLOGIN parent `vayada_next_hotel_setup_profile_scope` exactly like
+   the logo parent (platform `hotel-setup-migration-scope.yml`, add `scope=profile_0470`
+   pinned to the 0470 bytes): the production migration owner cannot create roles, so
+   `vayada_admin` (NOSUPERUSER CREATEROLE) creates it. That yields its creator edge
+   (ADMIN=true, INHERIT=false, SET=false, superuser grantor), which credential staging
+   needs to grant the parent. 0470 then skips `CREATE ROLE` and only checks the posture.
+   Without this step, startup fails with the same `CREATE ROLE` permission error 0466
+   hit.
+2. Apply 0470–0472 through normal public API startup (no login or grant is created).
+3. Deploy private property-service primary and a compatible rollback that both
    contain this purpose (the bootstrap's secondary proof requires it).
-3. Protected bootstrap of the `property_profile` credential per original property
-   with its exact Owner actor; publish the immutable secret version.
-4. Deploy the public API, then set `HOTEL_SETUP_PROFILE_COMMAND_ADMISSION=enabled`
+4. Protected bootstrap of the `property_profile` credential per original property
+   with its exact Owner actor (RDS-compatible actor flow); publish the immutable
+   secret version. Grant the profile secret prefix to the property task's secret
+   read and to the bootstrap role first.
+5. Deploy the web apps that send `Idempotency-Key` on profile edits (Marketplace,
+   PMS and the onboarding surfaces) **before** enabling admission. Older bundles
+   get `400 invalid_request` from the forwarder.
+6. Deploy the public API, then set `HOTEL_SETUP_PROFILE_COMMAND_ADMISSION=enabled`
    with the property-service origin/token. Rolling the private service back to an
    image without this route requires `blocked` first.
-5. Original Owner edit → Save → reload for both properties.
+7. Original Owner edit → Save → reload for both properties.
