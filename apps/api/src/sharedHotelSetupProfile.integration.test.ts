@@ -128,6 +128,16 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
     expect(retry.propertyId).toBe(first.propertyId);
     expect(
       (
+        await client.query<{ count: number }>(
+          `SELECT count(*)::int AS count FROM identity.product_entitlements
+           WHERE organization_id=$1::uuid AND resource_id=$2
+             AND entitlement_key='module:financials'`,
+          [organizationId, first.propertyId],
+        )
+      ).rows[0]?.count,
+    ).toBe(0);
+    expect(
+      (
         await client.query<{ creation_organization_id: string }>(
           "SELECT creation_organization_id FROM hotel_catalog.properties WHERE id = $1",
           [first.propertyId],

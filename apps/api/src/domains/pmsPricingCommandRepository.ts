@@ -193,7 +193,8 @@ export function createPgPmsPricingCommandRepository(
         : null;
       if (
         config.channexMealSyncEnabled &&
-        (!config.channexMealSyncPropertyId || config.channexMealSyncPropertyId === command.propertyId) &&
+        (!config.channexMealSyncPropertyId ||
+          config.channexMealSyncPropertyId === command.propertyId) &&
         domainEventId &&
         worked.change?.resourceType === "flexible_rate_plan" &&
         command.audit.actor.kind === "user"
@@ -367,6 +368,7 @@ async function upsertCurrency(
        RETURNING ${CURRENCY_RETURNING}`,
       [command.propertyId, command.currency, at.toISOString()],
     );
+    await activateNewHotelFinancials(client, command, at);
     const pricingCurrency = pmsPricingCurrencySnapshotFromRow(inserted.rows[0]!);
     const response = {
       contractVersion: PMS_PRICING_CONTRACT_VERSION,
@@ -446,6 +448,139 @@ async function upsertCurrency(
       resourceId: command.propertyId,
     }),
   };
+}
+
+async function activateNewHotelFinancials(
+  client: PmsPricingCommandClient,
+  command: UpsertPropertyPricingCurrencyCommand,
+  at: Date,
+): Promise<void> {
+  const pending = await client.query<{ id: string }>(
+    `SELECT financials.id
+     FROM identity.product_entitlements financials
+     JOIN identity.organization_resource_links link
+       ON link.organization_id = financials.organization_id
+      AND link.product = 'pms' AND link.resource_type = 'pms_property'
+      AND link.resource_id = financials.resource_id
+      AND link.relationship = 'owner' AND link.status = 'active'
+     WHERE financials.organization_id = $1::uuid
+       AND financials.product = 'pms' AND financials.entitlement_key = 'module:financials'
+       AND financials.resource_product = 'pms' AND financials.resource_type = 'pms_property'
+       AND financials.resource_id = $2::uuid::text
+       AND financials.status = 'suspended'
+       AND financials.metadata ->> 'newHotelFinancialsDefault' = 'pending'
+       AND EXISTS (
+         SELECT 1 FROM identity.product_entitlements base
+         WHERE base.organization_id = $1::uuid AND base.product = 'pms'
+           AND base.entitlement_key = 'property-management' AND base.status = 'active'
+           AND (base.resource_product IS NULL OR
+             (base.resource_product = 'pms' AND base.resource_type = 'pms_property'
+              AND base.resource_id = $2::uuid::text))
+           AND (base.starts_at IS NULL OR base.starts_at <= $3::timestamptz)
+           AND (base.expires_at IS NULL OR base.expires_at > $3::timestamptz)
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM finance.billing_entitlements billing
+         WHERE billing.organization_id = $1::uuid AND billing.product = 'pms'
+           AND billing.entitlement_key = 'property-management'
+           AND (billing.starts_at IS NULL OR billing.starts_at <= now())
+           AND (billing.expires_at IS NULL OR billing.expires_at > now())
+           AND billing.billing_status IN ('past_due', 'suspended')
+       )
+       AND (
+         NOT EXISTS (
+           SELECT 1 FROM finance.billing_entitlements billing
+           WHERE billing.organization_id = $1::uuid AND billing.product = 'pms'
+             AND billing.entitlement_key = 'property-management'
+         )
+         OR EXISTS (
+           SELECT 1 FROM finance.billing_entitlements billing
+           WHERE billing.organization_id = $1::uuid AND billing.product = 'pms'
+             AND billing.entitlement_key = 'property-management'
+             AND (billing.starts_at IS NULL OR billing.starts_at <= now())
+             AND (billing.expires_at IS NULL OR billing.expires_at > now())
+             AND billing.billing_status IN ('trialing', 'active')
+         )
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM identity.product_entitlements suspension
+         WHERE suspension.organization_id = $1::uuid AND suspension.product = 'pms'
+           AND suspension.entitlement_key IN ('property-management', 'module:financials')
+           AND suspension.status = 'suspended'
+           AND (suspension.resource_product IS NULL OR
+             (suspension.resource_product = 'pms' AND suspension.resource_type = 'pms_property'
+              AND suspension.resource_id = $2::uuid::text))
+           AND (suspension.starts_at IS NULL OR suspension.starts_at <= $3::timestamptz)
+           AND (suspension.expires_at IS NULL OR suspension.expires_at > $3::timestamptz)
+           AND suspension.id <> financials.id
+       )
+       AND NOT EXISTS (SELECT 1 FROM booking.guest_bookings WHERE property_id = $2::uuid)
+       AND NOT EXISTS (
+         SELECT 1 FROM hotel_catalog.property_source_links
+         WHERE property_id = $2::uuid AND source_system <> 'platform'
+       )
+     FOR UPDATE OF financials`,
+    [command.organizationId, command.propertyId, at.toISOString()],
+  );
+  const entitlementId = pending.rows[0]?.id;
+  if (!entitlementId) return;
+
+  await client.query(
+    `INSERT INTO finance.expense_categories (property_id, system_key, name, color, sort_order)
+     SELECT $1::uuid, seed.system_key, seed.name, seed.color, seed.sort_order
+     FROM (VALUES
+       ('staff', 'Staff', '#6366F1', 10),
+       ('ota_commission', 'OTA commission', '#F59E0B', 20),
+       ('utilities', 'Utilities', '#06B6D4', 30),
+       ('maintenance', 'Maintenance', '#EF4444', 40),
+       ('supplies', 'Supplies', '#8B5CF6', 50),
+       ('marketing', 'Marketing', '#EC4899', 60),
+       ('platform_fees', 'Platform fees', '#64748B', 70)
+     ) AS seed(system_key, name, color, sort_order)
+     ON CONFLICT (property_id, system_key) WHERE system_key IS NOT NULL DO NOTHING`,
+    [command.propertyId],
+  );
+  const categories = await client.query<{ count: number }>(
+    `SELECT count(*)::int AS count FROM finance.expense_categories
+     WHERE property_id = $1::uuid AND archived_at IS NULL
+       AND system_key = ANY(ARRAY[
+         'staff','ota_commission','utilities','maintenance','supplies','marketing','platform_fees'
+       ])`,
+    [command.propertyId],
+  );
+  if (categories.rows[0]?.count !== 7) {
+    throw new Error("New hotel Financials starter categories are incomplete");
+  }
+
+  await client.query(
+    `UPDATE identity.product_entitlements
+     SET status = 'active', starts_at = $2::timestamptz,
+         metadata = jsonb_set(metadata, '{newHotelFinancialsDefault}', '"ready"'::jsonb),
+         updated_at = $2::timestamptz
+     WHERE id = $1::uuid`,
+    [entitlementId, at.toISOString()],
+  );
+  await client.query(
+    `INSERT INTO platform.product_audit_events (
+       audit_key, product, action, occurred_at, tenant_scope, property_id,
+       actor_type, target_resource_product, target_resource_type, target_resource_id,
+       redacted_payload, audit_metadata, retention_class, privacy_scope
+     ) VALUES (
+       $1, 'pms', 'financials_module_activated', $2::timestamptz, 'property', $3::uuid,
+       'system', 'pms', 'pms_property', $3,
+       '{"moduleId":"financials","isActive":true,"source":"new_hotel_default"}'::jsonb,
+       jsonb_build_object('organizationId', $4::uuid, 'entitlementId', $5::uuid,
+         'initiatingActorUserId', $6::uuid), 'financial', 'internal'
+     )`,
+    [
+      randomUUID(),
+      at.toISOString(),
+      command.propertyId,
+      command.organizationId,
+      entitlementId,
+      command.audit.actor.kind === "user" ? command.audit.actor.userId : null,
+    ],
+  );
 }
 
 function pricingChange(
