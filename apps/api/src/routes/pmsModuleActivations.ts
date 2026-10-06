@@ -10,6 +10,7 @@ import {
 } from "@vayada/backend-authorization";
 
 import { enforceRoutePolicy } from "./policy.js";
+import type { HotelSetupCommandForwarder } from "../hotelSetupCommandForwarder.js";
 
 const MODULE_ENTITLEMENT_PREFIX = "module:";
 const MODULE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -39,11 +40,15 @@ export type PmsModuleActivationRepository = {
     propertyId: string,
     isActive: boolean,
   ): Promise<PmsModuleActivation>;
+  isFinancialsSetupComplete?(context: RequestContext, propertyId: string): Promise<boolean>;
   close?(): Promise<void>;
 };
 
 export type PmsModuleActivationRoutesOptions = {
+  forward?: HotelSetupCommandForwarder;
   repository: PmsModuleActivationRepository;
+  requireOwnerSession?: boolean;
+  financialsSetupComplete?: (context: RequestContext, propertyId: string) => Promise<boolean>;
   allowedOrigins?: string[];
   financialsActivationPropertyIds?: readonly string[];
   propertyAccessRepository?: PropertyAccessRepository;
@@ -66,6 +71,8 @@ export async function registerPmsModuleActivationRoutes(
   app: FastifyInstance,
   options: PmsModuleActivationRoutesOptions,
 ): Promise<void> {
+  if (options.financialsSetupComplete && !options.requireOwnerSession)
+    throw new Error("Native Financials setup eligibility requires original-session verification");
   const { repository } = options;
   const financialsActivationPropertyIds = new Set(options.financialsActivationPropertyIds ?? []);
 
@@ -99,7 +106,14 @@ export async function registerPmsModuleActivationRoutes(
       }
 
       const { propertyId } = request.params;
-      const context = enforceModuleActivationReadPolicy(request, propertyId);
+      if (options.forward) return options.forward(request, reply, propertyId, "modules");
+      const context = enforceModuleActivationReadPolicy(
+        request,
+        propertyId,
+        !options.requireOwnerSession,
+      );
+      if (options.requireOwnerSession && !context.actor.providerIdentity.sessionId)
+        throw new AuthorizationError();
       if (!options.propertyAccessRepository) throw new AuthorizationError();
       await requirePropertyAccess(context, options.propertyAccessRepository, {
         propertyId,
@@ -123,6 +137,7 @@ export async function registerPmsModuleActivationRoutes(
       const financialsVisible =
         canReadFinancials(context, propertyId) &&
         (financialsActivationPropertyIds.has(propertyId) ||
+          (await options.financialsSetupComplete?.(context, propertyId)) === true ||
           financialsActive ||
           activations.some(
             (activation) => activation.moduleId === "financials" && activation.isActive,
@@ -133,7 +148,7 @@ export async function registerPmsModuleActivationRoutes(
           moduleActivationsResponse(
             propertyId,
             financialsVisible &&
-              !hasGlobalFinancialsSuspension(context) &&
+              (options.requireOwnerSession || !hasGlobalFinancialsSuspension(context)) &&
               canManageFinancials(context, propertyId),
             activations,
             financialsVisible,
@@ -166,18 +181,26 @@ export async function registerPmsModuleActivationRoutes(
         });
       }
 
+      if (options.forward) return options.forward(request, reply, propertyId, "financials");
+
       const context = await enforceFinancialsManagePolicy(
         request,
         propertyId,
         options.propertyAccessRepository,
+        parsed.isActive || !options.requireOwnerSession,
       );
+      if (options.requireOwnerSession && !context.actor.providerIdentity.sessionId)
+        throw new AuthorizationError();
       if (parsed.isActive && hasGlobalFinancialsSuspension(context)) {
         return reply.header("Cache-Control", "no-store").code(409).send({
           code: "financials_globally_suspended",
           message: "The organization has suspended Financials.",
         });
       }
-      if (!financialsActivationPropertyIds.has(propertyId)) {
+      if (
+        !financialsActivationPropertyIds.has(propertyId) &&
+        (await options.financialsSetupComplete?.(context, propertyId)) !== true
+      ) {
         const current = (await repository.list(context, propertyId)).find(
           (activation) => activation.moduleId === "financials",
         );
@@ -202,18 +225,23 @@ export async function registerPmsModuleActivationRoutes(
 function enforceModuleActivationReadPolicy(
   request: FastifyRequest,
   propertyId: string,
+  requireBaseAccess = true,
 ): RequestContext {
   return enforceRoutePolicy(request, {
     permission: "pms.operations.read",
-    entitlement: {
-      product: "pms",
-      key: "property-management",
-      resource: {
-        product: "pms",
-        resourceType: "pms_property",
-        resourceId: propertyId,
-      },
-    },
+    ...(requireBaseAccess
+      ? {
+          entitlement: {
+            product: "pms",
+            key: "property-management",
+            resource: {
+              product: "pms",
+              resourceType: "pms_property",
+              resourceId: propertyId,
+            },
+          },
+        }
+      : {}),
     resource: {
       product: "pms",
       resourceType: "pms_property",
@@ -251,6 +279,7 @@ async function enforceFinancialsManagePolicy(
   request: FastifyRequest,
   propertyId: string,
   propertyAccessRepository?: PropertyAccessRepository,
+  requireBaseAccess = true,
 ): Promise<RequestContext> {
   const resource = {
     product: "pms" as const,
@@ -259,7 +288,9 @@ async function enforceFinancialsManagePolicy(
   };
   const context = enforceRoutePolicy(request, {
     permission: "pms.finance.manage",
-    entitlement: { product: "pms", key: "property-management", resource },
+    ...(requireBaseAccess
+      ? { entitlement: { product: "pms" as const, key: "property-management", resource } }
+      : {}),
     resource: { ...resource, allowedRelationships: ["owner"] },
   });
   if (context.selectedOrganization.kind !== "hotel_group" || !propertyAccessRepository) {
@@ -402,6 +433,19 @@ export function createPgPmsModuleActivationRepository(config: {
     });
 
   return {
+    async isFinancialsSetupComplete(context, propertyId) {
+      const result = await pool.query<{ ready: boolean }>(
+        `SELECT EXISTS (
+        SELECT 1 FROM identity.product_entitlements WHERE organization_id=$1::uuid
+          AND product='pms' AND entitlement_key='module:financials'
+          AND resource_product='pms' AND resource_type='pms_property' AND lower(resource_id)=$2::uuid::text
+          AND metadata->>'newHotelFinancialsDefault'='ready'
+          AND metadata ? 'newHotelFinancialsActivationTransaction'
+      ) AS ready`,
+        [context.selectedOrganization.organizationId, propertyId],
+      );
+      return result.rows[0]?.ready === true;
+    },
     async list(context, propertyId) {
       const result = await pool.query<PmsModuleActivationRow>(
         `SELECT

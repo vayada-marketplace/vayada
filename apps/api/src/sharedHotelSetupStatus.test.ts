@@ -1,3 +1,4 @@
+import { loadHotelSetupCommandForwarder } from "./hotelSetupCommandForwarder.js";
 import { readFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 
@@ -378,6 +379,7 @@ describe("shared hotel setup status route", () => {
   it.each([
     ["missing", null],
     ["unknown mode", agencyScope({ mode: "unknown" })],
+    ["missing product access", agencyScope({ productAccess: undefined })],
     [
       "malformed assignments",
       agencyScope({
@@ -1509,6 +1511,81 @@ describe("shared hotel setup status route", () => {
     );
   });
 
+  it.each([false, true])(
+    "normalizes initial settings and requires publication permission for socials: %s",
+    async (socials) => {
+      const createPropertyProfile = vi.fn(async () =>
+        profileResponse(propertyId, minimalHotelInput()),
+      );
+      app = buildSharedSetupApp({
+        linkedResources: [],
+        permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+        repository: {
+          ...unusedStatusMethods(),
+          ...unusedPropertyProfileMethods(),
+          createPropertyProfile,
+        },
+      });
+      const initialLaunchSettings = {
+        defaultCurrency: " lkr ",
+        supportedCurrencies: ["LKR", " usd "],
+        defaultLanguage: " si ",
+        supportedLanguages: ["si", "en"],
+        instagram: socials ? " https://instagram.com/hotel " : "",
+        facebook: "",
+        tiktok: "",
+        youtube: "",
+      };
+      const response = await injectJson<{ code: string }>(app, {
+        method: "POST",
+        url: "/api/hotel-setup/properties",
+        headers: { authorization: "Bearer valid-token", "idempotency-key": "initial-settings" },
+        payload: { ...minimalHotelInput(), initialLaunchSettings },
+      });
+      expect(response.statusCode).toBe(socials ? 403 : 201);
+      if (socials) expect(createPropertyProfile).not.toHaveBeenCalled();
+      else
+        expect(createPropertyProfile).toHaveBeenCalledWith(
+          expect.objectContaining({
+            profile: {
+              ...minimalHotelInput(),
+              initialLaunchSettings: {
+                ...initialLaunchSettings,
+                defaultCurrency: "LKR",
+                supportedCurrencies: ["USD"],
+                defaultLanguage: "si",
+                supportedLanguages: ["en"],
+              },
+            },
+          }),
+        );
+    },
+  );
+
+  it.each([null, {}, { defaultCurrency: "LKR", pricingCurrency: "USD" }])(
+    "rejects malformed initial settings before creation: %j",
+    async (initialLaunchSettings) => {
+      const createPropertyProfile = vi.fn();
+      app = buildSharedSetupApp({
+        linkedResources: [],
+        permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+        repository: {
+          ...unusedStatusMethods(),
+          ...unusedPropertyProfileMethods(),
+          createPropertyProfile,
+        },
+      });
+      const response = await injectJson<{ code: string }>(app, {
+        method: "POST",
+        url: "/api/hotel-setup/properties",
+        headers: { authorization: "Bearer valid-token", "idempotency-key": "bad-initial-settings" },
+        payload: { ...minimalHotelInput(), initialLaunchSettings },
+      });
+      expect(response.statusCode).toBe(422);
+      expect(createPropertyProfile).not.toHaveBeenCalled();
+    },
+  );
+
   it("rejects unauthenticated property creation before validating its body", async () => {
     const createPropertyProfile = vi.fn();
     app = buildSharedSetupApp({
@@ -2313,6 +2390,95 @@ describe("shared hotel setup status route", () => {
     expect(updatePropertySettingsByHotelId).toHaveBeenCalledTimes(1);
   });
 
+  it("blocks public launch Save with an existing private pair before any ordinary writer", async () => {
+    const write = vi.fn(() => {
+      throw new Error("ordinary writer reached");
+    });
+    const transport = vi.fn<typeof fetch>();
+    app = buildSharedSetupApp({
+      permissions: ["hotel_catalog.setup.manage"],
+      linkedResources: [propertyLink(propertyId)],
+      repository: repositoryWith([]),
+      launchForwarder: loadHotelSetupCommandForwarder(
+        {
+          HOTEL_SETUP_COMMAND_ADMISSION: "blocked",
+          HOTEL_SETUP_COMMAND_ORIGIN: "https://setup.internal",
+          HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: "internal-token-with-at-least-32-bytes",
+        },
+        transport,
+      ),
+      launchSettingsRepository: {
+        findPropertySettingsByHotelId: vi.fn(),
+        updatePropertySettingsByHotelId: write,
+      },
+    });
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: `/api/hotel-setup/properties/${propertyId}/launch-settings`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: {
+        defaultCurrency: "LKR",
+        supportedCurrencies: [],
+        defaultLanguage: "en",
+        supportedLanguages: [],
+        instagram: "",
+        facebook: "",
+        tiktok: "",
+        youtube: "",
+      },
+    });
+    expect(response.statusCode).toBe(503);
+    expect(write).not.toHaveBeenCalled();
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it("forwards a validated save and retries the same property without a local write fallback", async () => {
+    const write = vi.fn();
+    const forward = vi
+      .fn<import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder>()
+      .mockImplementationOnce(async (_request, reply) =>
+        reply.code(503).send({ code: "hotel_setup_unavailable" }),
+      )
+      .mockImplementationOnce(async (_request, reply) => reply.send({ defaultCurrency: "LKR" }));
+    app = buildSharedSetupApp({
+      permissions: ["hotel_catalog.setup.manage"],
+      linkedResources: [propertyLink(propertyId)],
+      repository: repositoryWith([]),
+      launchForwarder: forward,
+      launchSettingsRepository: {
+        findPropertySettingsByHotelId: vi.fn(),
+        updatePropertySettingsByHotelId: write,
+      },
+    });
+    const payload = {
+      defaultCurrency: "LKR",
+      supportedCurrencies: [],
+      defaultLanguage: "en",
+      supportedLanguages: [],
+      instagram: "",
+      facebook: "",
+      tiktok: "",
+      youtube: "",
+    };
+    const request = {
+      method: "PUT" as const,
+      url: `/api/hotel-setup/properties/${propertyId}/launch-settings`,
+      headers: { authorization: "Bearer valid-token" },
+      payload,
+    };
+    expect((await injectJson(app, request)).statusCode).toBe(503);
+    expect((await injectJson(app, request)).statusCode).toBe(200);
+    expect(forward).toHaveBeenCalledTimes(2);
+    for (const call of forward.mock.calls)
+      expect(call.slice(2)).toEqual([propertyId, "launch_settings"]);
+    expect(write).not.toHaveBeenCalled();
+    expect(
+      (await injectJson(app, { ...request, payload: { ...payload, databaseUrl: "forbidden" } }))
+        .statusCode,
+    ).toBe(422);
+    expect(forward).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects launch settings access outside the selected hotel group", async () => {
     const launchSettingsRepository: SharedPropertyLaunchSettingsRepository = {
       async findPropertySettingsByHotelId() {
@@ -3106,11 +3272,21 @@ describe("shared hotel setup status route", () => {
     const createIndex = query.mock.calls.findIndex(([text]) =>
       text.includes("INSERT INTO hotel_catalog.properties"),
     );
-    const linkIndex = query.mock.calls.findIndex(([text]) =>
-      text.includes("INSERT INTO identity.organization_resource_links"),
+    const catalogIndex = query.mock.calls.findIndex(([text]) =>
+      text.includes("VALUES ($1::uuid, 'hotel_catalog'"),
+    );
+    const linkIndex = query.mock.calls.findIndex(
+      ([text]) =>
+        text.includes("INSERT INTO identity.organization_resource_links") &&
+        text.includes("enabled_products"),
+    );
+    const defaultsIndex = query.mock.calls.findIndex(([text]) =>
+      text.includes("INSERT INTO marketplace.marketplace_hotel_profiles"),
     );
     expect(createIndex).toBeGreaterThanOrEqual(0);
-    expect(linkIndex).toBeGreaterThan(createIndex);
+    expect(catalogIndex).toBeGreaterThan(createIndex);
+    expect(linkIndex).toBeGreaterThan(catalogIndex);
+    expect(defaultsIndex).toBeGreaterThan(linkIndex);
     const [createSql, createValues] = query.mock.calls[createIndex]!;
     const [linkSql, linkValues] = query.mock.calls[linkIndex]!;
     expect(createSql).toContain("INSERT INTO hotel_catalog.properties");
@@ -3118,14 +3294,17 @@ describe("shared hotel setup status route", () => {
     expect(linkSql).toContain("WHEN 'booking' THEN 'booking_hotel'");
     expect(linkSql).toContain("WHEN 'pms' THEN 'pms_property'");
     expect(linkSql).toContain("WHEN 'marketplace' THEN 'hotel_profile'");
-    expect(linkSql).toContain("INSERT INTO marketplace.marketplace_hotel_profiles");
-    expect(linkSql).toContain("INSERT INTO booking.booking_settings (property_id)");
+    expect(linkSql).not.toContain("INSERT INTO marketplace.marketplace_hotel_profiles");
+    expect(linkSql).not.toContain("INSERT INTO booking.booking_settings");
+    const [defaultsSql, defaultsValues] = query.mock.calls[defaultsIndex]!;
+    expect(defaultsSql).toContain("FROM identity.organization_resource_links");
+    expect(defaultsSql).toContain("INSERT INTO marketplace.marketplace_hotel_profiles");
+    expect(defaultsSql).toContain("INSERT INTO booking.booking_settings (property_id)");
+    expect(defaultsValues).toEqual([organizationId, propertyId]);
     expect(linkSql).toContain("contact_input.purpose");
     expect(linkSql).toContain("contact_input.is_public");
-    expect(linkSql).toContain("SET purpose = EXCLUDED.purpose");
-    expect(linkSql).toContain("is_public = EXCLUDED.is_public");
-    expect(linkSql).toContain("deleted_external_guest_contacts");
-    expect(linkSql).toContain("contact.source_system <> 'platform'");
+    expect(linkSql).not.toContain("DO UPDATE");
+    expect(linkSql).not.toContain("DELETE FROM");
     expect(linkSql).not.toContain("INSERT INTO hotel_catalog.property_profiles");
     expect(linkSql).not.toContain("INSERT INTO hotel_catalog.property_media");
     expect(linkSql).not.toContain("INSERT INTO identity.organizations");
@@ -3150,14 +3329,16 @@ describe("shared hotel setup status route", () => {
     ]);
   });
 
-  it("rolls back the base property when its dependent links fail", async () => {
+  it.each([
+    "INSERT INTO identity.organization_resource_links",
+    "INSERT INTO booking.booking_settings",
+  ])("rolls back all property stages when %s fails", async (failedStage) => {
     const query = vi.fn(async (text: string) => {
       if (text.includes("FROM platform.idempotency_keys")) return { rows: [] };
       if (text.includes("INSERT INTO platform.idempotency_keys"))
         return { rows: [{ id: "99999999-9999-4999-8999-999999999901" }] };
       if (text.includes("INSERT INTO hotel_catalog.properties")) return { rows: [{ propertyId }] };
-      if (text.includes("INSERT INTO identity.organization_resource_links"))
-        throw new Error("owner link failed");
+      if (text.includes(failedStage)) throw new Error("dependent creation stage failed");
       return { rows: [profileRow()] };
     });
     const release = vi.fn();
@@ -3182,11 +3363,11 @@ describe("shared hotel setup status route", () => {
     await expect(
       repository.createPropertyProfile({
         organizationId,
-        idempotencyKey: "create-profile-link-failure",
-        correlationId: "create-profile-link-failure",
+        idempotencyKey: "create-profile-stage-failure",
+        correlationId: "create-profile-stage-failure",
         profile: minimalHotelInput(),
       }),
-    ).rejects.toThrow("owner link failed");
+    ).rejects.toThrow("dependent creation stage failed");
     expect(query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
     expect(query.mock.calls.some(([text]) => text === "COMMIT")).toBe(false);
     expect(release).toHaveBeenCalledOnce();
@@ -3213,6 +3394,7 @@ describe("shared hotel setup status route", () => {
 function buildSharedSetupApp(options: {
   repository: SharedHotelSetupStatusRepository;
   launchSettingsRepository?: SharedPropertyLaunchSettingsRepository;
+  launchForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
   trackCommandRepository?: HotelSetupTrackCommandRepository;
   propertyAccessRepository?: PropertyAccessRepository;
   permissions?: PermissionKey[];
@@ -3226,6 +3408,7 @@ function buildSharedSetupApp(options: {
     logger: false,
     sharedHotelSetupStatusRepository: options.repository,
     propertyLaunchSettingsRepository: options.launchSettingsRepository,
+    hotelSetupCommandForwarder: options.launchForwarder,
     hotelSetupTrackCommandRepository:
       options.trackCommandRepository ?? unusedTrackCommandRepository(),
     auth: {
@@ -3378,6 +3561,7 @@ function agencyScope(overrides: Partial<MembershipPropertyScope> = {}): Membersh
     roleKey: "hotel_owner",
     accessOrigin: "agency",
     assignedPropertyIds: [],
+    productAccess: { pms: true, booking: true },
     ...overrides,
   };
 }

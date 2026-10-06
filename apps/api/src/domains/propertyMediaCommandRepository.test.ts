@@ -25,6 +25,83 @@ const serving: PlatformMediaServingConfig = {
 };
 
 describe("property media command repository", () => {
+  it("reauthorizes each assignment and publication transaction without altering the shared pool", async () => {
+    const harness = fakeDatabase({ media: [mediaRow("private")] });
+    const authorizeTransaction = vi.fn(async () => {
+      expect(harness.commands.at(-1)).toBe("BEGIN");
+    });
+    const publisher = fakePublisher();
+    const repository = createRepository(harness, publisher, { authorizeTransaction });
+    const result = await repository.assignLogo({
+      ...baseCommand("scoped-logo"),
+      expectedProfileRevision: 1,
+      assignment: { mediaObjectId: mediaId, role: "logo", altText: null, sortOrder: 0 },
+    });
+    expect(result.ok).toBe(true);
+    expect(publisher.copyToPublic).toHaveBeenCalledTimes(4);
+    expect(authorizeTransaction.mock.calls.length).toBe(
+      harness.commands.filter((command) => command === "BEGIN").length,
+    );
+    expect(authorizeTransaction.mock.calls.length).toBeGreaterThanOrEqual(4);
+    expect(harness.pool).not.toHaveProperty("authorizeTransaction");
+  });
+
+  it.each([1, 2, 3])(
+    "stops logo assignment/publication when transaction authority is revoked at check %i",
+    async (denyAt) => {
+      const harness = fakeDatabase({ media: [mediaRow("private")] });
+      const publisher = fakePublisher();
+      let checks = 0;
+      const repository = createRepository(harness, publisher, {
+        authorizeTransaction: async () => {
+          expect(harness.commands.at(-1)).toBe("BEGIN");
+          if (++checks >= denyAt) throw new Error("owner revoked");
+        },
+      });
+      await expect(
+        repository.assignLogo({
+          ...baseCommand("revoked-logo"),
+          expectedProfileRevision: 1,
+          assignment: { mediaObjectId: mediaId, role: "logo", altText: null, sortOrder: 0 },
+        }),
+      ).rejects.toThrow("owner revoked");
+      expect(publisher.copyToPublic).not.toHaveBeenCalled();
+      expect(harness.registryMutationCount()).toBe(0);
+      expect(harness.state.assignments).toEqual([]);
+      expect(harness.commands.at(-1)).toBe("ROLLBACK");
+    },
+  );
+
+  it("keeps a copied logo unassigned when Owner authority is revoked before registry commit", async () => {
+    const old = assignment(galleryMediaId, "logo", null, 0);
+    const harness = fakeDatabase({ media: [mediaRow("private")], assignments: [old] });
+    let revoked = false;
+    const publisher: PropertyMediaVariantPublisher = {
+      copyToPublic: vi.fn(async () => {
+        revoked = true;
+      }),
+      deletePublic: vi.fn(async () => undefined),
+    };
+    const repository = createRepository(harness, publisher, {
+      authorizeTransaction: async () => {
+        if (revoked) throw new Error("owner revoked");
+      },
+    });
+    await expect(
+      repository.assignLogo({
+        ...baseCommand("revoked-after-copy"),
+        expectedProfileRevision: 1,
+        assignment: { mediaObjectId: mediaId, role: "logo", altText: null, sortOrder: 0 },
+      }),
+    ).rejects.toThrow("owner revoked");
+    expect(publisher.copyToPublic).toHaveBeenCalled();
+    expect(harness.registryMutationCount()).toBe(0);
+    expect(harness.state.assignments).toEqual([old]);
+    expect(harness.state.pendingAssignments).toHaveLength(1);
+    expect(harness.state.jobs).toHaveLength(1);
+    expect(harness.state.media[0]).toMatchObject({ visibility: "private", publicApproved: false });
+  });
+
   it("reads a canonical hero only when the active property scope is unique", async () => {
     const row = {
       propertyId,
@@ -469,12 +546,18 @@ describe("property media command repository", () => {
 function createRepository(
   harness: ReturnType<typeof fakeDatabase>,
   publisher: PropertyMediaVariantPublisher,
-  options: { now?: () => Date } = {},
+  options: {
+    now?: () => Date;
+    authorizeTransaction?: Parameters<
+      typeof createPgS3PropertyMediaCommandRepository
+    >[0]["authorizeTransaction"];
+  } = {},
 ) {
   return createPgS3PropertyMediaCommandRepository({
     connectionString: "postgresql://target-db",
     serving,
     pool: harness.pool,
+    authorizeTransaction: options.authorizeTransaction,
     publisher,
     now: options.now ?? (() => new Date("2026-08-01T12:00:00.000Z")),
     randomId: () => "55555555-5555-4555-8555-555555555555",

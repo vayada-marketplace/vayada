@@ -336,6 +336,9 @@ export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolv
 };
 
 type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
+  hotelSetupCommandForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
+  hotelSetupLogoForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
+  hotelSetupCreationForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
   auth?: ApiAuthOptions;
   authSession?: AuthSessionRouteOptions;
   browserAllowedOrigins?: string[];
@@ -788,6 +791,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       trackCommandRepository: options.hotelSetupTrackCommandRepository,
       propertyAccessRepository: options.auth?.propertyAccessRepository,
       launchSettingsRepository: options.propertyLaunchSettingsRepository,
+      propertyCreationForwarder: options.hotelSetupCreationForwarder,
+      launchSettingsForwarder: options.hotelSetupCommandForwarder,
     });
   }
   if (options.propertySetupRouteStateReadPort) {
@@ -806,6 +811,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPropertyMediaRoutes, {
       prefix: "/api/hotel-setup",
       repository: options.propertyMediaCommandRepository,
+      forwardLogo: options.hotelSetupLogoForwarder,
     });
     app.register(registerPlatformPropertyMediaRoutes, {
       prefix: "/api/platform/admin",
@@ -1016,6 +1022,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPmsPricingRoutes, {
       prefix: "/api/pms",
       ...options.pmsPricing,
+      currencyForward: options.hotelSetupCommandForwarder,
       inventoryPublicOfferProjector: options.pmsInventoryPublicOfferProjector,
     });
   }
@@ -1076,6 +1083,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPmsModuleActivationRoutes, {
       prefix: "/api/pms",
       repository: options.pmsModuleActivationRepository,
+      forward: options.hotelSetupCommandForwarder,
       allowedOrigins: options.pmsOperationsAllowedOrigins,
       financialsActivationPropertyIds: options.financialsActivationPropertyIds,
       propertyAccessRepository: options.auth?.propertyAccessRepository,

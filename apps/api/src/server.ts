@@ -66,6 +66,7 @@ import pg from "pg";
 import { createHmac } from "node:crypto";
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
+import { loadHotelSetupCommandForwarder } from "./hotelSetupCommandForwarder.js";
 import { type ApiConfig, loadConfig, stripeSubscriptionRuntimeEnabled } from "./config.js";
 import { createPgBookingDesignCatalogEvidenceRepository } from "./domains/bookingDesignCatalogEvidenceRepository.js";
 import { createPgBookingDesignRepository } from "./domains/bookingDesignRepository.js";
@@ -336,6 +337,18 @@ import {
 
 const postgresRuntime = installPostgresPoolRuntime(pg);
 const config = loadConfig();
+const hotelSetupCommandForwarder = loadHotelSetupCommandForwarder();
+const hotelSetupCreationForwarder = loadHotelSetupCommandForwarder({
+  HOTEL_SETUP_COMMAND_ADMISSION: process.env["HOTEL_SETUP_CREATION_COMMAND_ADMISSION"],
+  HOTEL_SETUP_COMMAND_ORIGIN: process.env["HOTEL_SETUP_CREATION_COMMAND_ORIGIN"],
+  HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: process.env["HOTEL_SETUP_CREATION_COMMAND_INTERNAL_TOKEN"],
+});
+
+const hotelSetupLogoForwarder = loadHotelSetupCommandForwarder({
+  HOTEL_SETUP_COMMAND_ADMISSION: process.env["HOTEL_SETUP_LOGO_COMMAND_ADMISSION"] ?? "blocked",
+  HOTEL_SETUP_COMMAND_ORIGIN: process.env["HOTEL_SETUP_LOGO_COMMAND_ORIGIN"],
+  HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: process.env["HOTEL_SETUP_LOGO_COMMAND_INTERNAL_TOKEN"],
+});
 
 function buildAuthOptions(auth: ApiConfig["auth"]): ApiAuthOptions | undefined {
   if (!auth) {
@@ -1835,6 +1848,8 @@ const app = buildApp({
     ? { commandPort: pmsPhysicalRoomOperationalLabels }
     : undefined,
   pmsModuleActivationRepository,
+  hotelSetupCommandForwarder,
+  hotelSetupCreationForwarder,
   financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,
@@ -2168,7 +2183,10 @@ const app = buildApp({
       : undefined,
   bookingWebAffiliateHotelResolver,
   bookingWebAffiliateRepository,
-  platformMedia: platformMediaRuntime?.routes,
+  platformMedia: platformMediaRuntime
+    ? { ...platformMediaRuntime.routes, forwardLogo: hotelSetupLogoForwarder }
+    : undefined,
+  hotelSetupLogoForwarder,
 });
 app.addHook("onClose", async () => {
   await affiliateCaptureRuntime?.pool.end();

@@ -66,18 +66,20 @@ def stripe_patches():
 # ── Booking Request (Public) ─────────────────────────────────────
 
 
+@pytest.fixture
+def payment_booking_clock(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.booking_service.property_today", lambda timezone: date(2026, 8, 31)
+    )
+    monkeypatch.setattr(
+        "app.services.booking_service.is_same_day_booking_closed",
+        lambda *args, **kwargs: False,
+    )
+
+
+@pytest.mark.usefixtures("payment_booking_clock")
 class TestCreateBookingRequest:
     """Tests for POST /api/hotels/{slug}/bookings (new payment flow)."""
-
-    @pytest.fixture(autouse=True)
-    def isolate_payment_scenarios_from_wall_clock(self, monkeypatch):
-        monkeypatch.setattr(
-            "app.services.booking_service.property_today", lambda timezone: date(2026, 8, 31)
-        )
-        monkeypatch.setattr(
-            "app.services.booking_service.is_same_day_booking_closed",
-            lambda *args, **kwargs: False,
-        )
 
     async def test_create_booking_card_payment(self, client, hotel_with_rooms):
         """Card booking creates a payment intent and returns client_secret."""
@@ -803,10 +805,21 @@ class TestConfirmAuthorization:
 # ── Card-payment soft-hold draft (VAY-388) ──────────────────────
 
 
+@pytest.mark.usefixtures("payment_booking_clock")
 class TestCardPaymentDraft:
     """The card-payment flow defers the booking row + inventory commit
     until Stripe authorizes the card. The intermediate state is a
     booking_drafts row that holds inventory for ~15 min."""
+
+    @pytest.fixture(autouse=True)
+    def isolate_draft_inventory_from_wall_clock(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.services.booking_service.property_today", lambda timezone: date(2026, 8, 31)
+        )
+        monkeypatch.setattr(
+            "app.services.booking_service.is_same_day_booking_closed",
+            lambda *args, **kwargs: False,
+        )
 
     async def _create_card_draft(self, client, hotel, room, pi_id="pi_draft_test"):
         await create_test_payment_settings(
@@ -1852,7 +1865,7 @@ class TestPaymentSettingsAdmin:
 
     async def test_update_payment_settings(self, client, cleanup_database):
         user = await create_test_user()
-        hotel = await create_test_hotel(str(user["id"]))
+        await create_test_hotel(str(user["id"]))
 
         resp = await client.patch(
             "/admin/payment-settings",
@@ -2015,7 +2028,7 @@ class TestCancellationPolicyAdmin:
 
     async def test_update_cancellation_policy(self, client, cleanup_database):
         user = await create_test_user()
-        hotel = await create_test_hotel(str(user["id"]))
+        await create_test_hotel(str(user["id"]))
 
         resp = await client.patch(
             "/admin/cancellation-policy",
@@ -2046,7 +2059,7 @@ class TestPayoutsAdmin:
 
     async def test_list_payouts_empty(self, client, cleanup_database):
         user = await create_test_user()
-        hotel = await create_test_hotel(str(user["id"]))
+        await create_test_hotel(str(user["id"]))
 
         resp = await client.get(
             "/admin/payouts",

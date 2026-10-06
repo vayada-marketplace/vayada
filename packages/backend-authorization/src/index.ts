@@ -383,6 +383,62 @@ export function createPgPropertyAccessRepository(
   };
 }
 
+/** Resolve current role defaults/overrides only; product and resource checks remain required. */
+export function resolveMembershipRolePermissions(
+  context: Pick<PropertyAccessContext, "selectedOrganization" | "membership">,
+  rolePermissions: readonly PermissionKey[],
+  membershipScope?: MembershipPropertyScope,
+): { ok: true; permissions: PermissionKey[] } | { ok: false; issueCodes: readonly string[] } {
+  let permissions = [...rolePermissions];
+  const permissionOverrides = membershipScope?.permissionOverrides;
+  if (membershipScope?.roleDefinitionId != null) {
+    const definition = membershipScope.roleDefinition;
+    const resolved =
+      definition &&
+      definition.id === membershipScope.roleDefinitionId &&
+      definition.organizationId === context.selectedOrganization.organizationId &&
+      definition.baseRoleKey === context.membership.roleKey
+        ? resolveTeamRolePermissions(definition, permissionOverrides, rolePermissions)
+        : null;
+    if (!resolved) {
+      return { ok: false, issueCodes: ["invalid_role_definition"] };
+    }
+    // Property navigation is a non-editable baseline, outside section controls.
+    permissions = [
+      ...new Set([
+        ...resolved,
+        // New external-owner presets need property navigation without changing legacy grants.
+        ...(definition?.securityClass === "external_owner"
+          ? ["hotel_catalog.property_manifest.read" as const]
+          : []),
+        ...rolePermissions.filter((key) => key === "hotel_catalog.property_manifest.read"),
+      ]),
+    ];
+  } else if (permissionOverrides !== null && permissionOverrides !== undefined) {
+    const overrides = parseStaffPermissionOverrides(permissionOverrides);
+    const issueCodes = overrides
+      ? validateStaffPermissionOverrides({
+          roleKey: context.membership.roleKey,
+          rolePermissions,
+          permissionOverrides: overrides,
+        })
+      : ["malformed_permission_override"];
+    if (!overrides || issueCodes.length) {
+      return { ok: false, issueCodes };
+    }
+    const effectivePermissions = new Set<PermissionKey>(rolePermissions);
+    for (const permission of overrides.grant) {
+      effectivePermissions.add(permission as PermissionKey);
+    }
+    for (const permission of overrides.deny) {
+      effectivePermissions.delete(permission as PermissionKey);
+    }
+    permissions = [...effectivePermissions];
+  }
+
+  return { ok: true, permissions };
+}
+
 export function createAuthorizationResolver(
   rolePermissionRepository: RolePermissionRepository,
   entitlementRepository: EntitlementRepository | undefined,
@@ -409,55 +465,15 @@ export function createAuthorizationResolver(
       context.selectedOrganization.kind,
       context.membership.roleKey,
     );
-    let permissions = rolePermissions;
-    const permissionOverrides = membershipScope?.permissionOverrides;
-    if (membershipScope?.roleDefinitionId != null) {
-      const definition = membershipScope.roleDefinition;
-      const resolved =
-        definition &&
-        definition.id === membershipScope.roleDefinitionId &&
-        definition.organizationId === context.selectedOrganization.organizationId &&
-        definition.baseRoleKey === context.membership.roleKey
-          ? resolveTeamRolePermissions(definition, permissionOverrides, rolePermissions)
-          : null;
-      if (!resolved) {
-        return rejectInvalidPermissionConfiguration(propertyAccessRepository, context, [
-          "invalid_role_definition",
-        ]);
-      }
-      // Property navigation is a non-editable baseline, outside section controls.
-      permissions = [
-        ...new Set([
-          ...resolved,
-          // New external-owner presets need property navigation without changing legacy grants.
-          ...(definition?.securityClass === "external_owner"
-            ? ["hotel_catalog.property_manifest.read" as const]
-            : []),
-          ...rolePermissions.filter((key) => key === "hotel_catalog.property_manifest.read"),
-        ]),
-      ];
-    } else if (permissionOverrides !== null && permissionOverrides !== undefined) {
-      const overrides = parseStaffPermissionOverrides(permissionOverrides);
-      const issueCodes = overrides
-        ? validateStaffPermissionOverrides({
-            roleKey: context.membership.roleKey,
-            rolePermissions,
-            permissionOverrides: overrides,
-          })
-        : ["malformed_permission_override"];
-      if (!overrides || issueCodes.length) {
-        return rejectInvalidPermissionConfiguration(propertyAccessRepository, context, issueCodes);
-      }
-      const effectivePermissions = new Set<PermissionKey>(rolePermissions);
-      for (const permission of overrides.grant) {
-        effectivePermissions.add(permission as PermissionKey);
-      }
-      for (const permission of overrides.deny) {
-        effectivePermissions.delete(permission as PermissionKey);
-      }
-      permissions = [...effectivePermissions];
+    const resolved = resolveMembershipRolePermissions(context, rolePermissions, membershipScope);
+    if (!resolved.ok) {
+      return rejectInvalidPermissionConfiguration(
+        propertyAccessRepository,
+        context,
+        resolved.issueCodes,
+      );
     }
-
+    let permissions = resolved.permissions;
     let entitlements = await entitlementRepository?.findEntitlementsForContext(context);
     if (context.selectedOrganization.kind === "hotel_group") {
       const products = membershipScope?.productAccess;
@@ -595,7 +611,7 @@ export function canAccessResource(
 }
 
 export function hasActiveEntitlement(
-  context: RequestContext,
+  context: Pick<RequestContext, "entitlements">,
   requirement: EntitlementRequirement,
 ): boolean {
   const requiredKey = canonicalEntitlementKey(requirement.product, requirement.key);

@@ -74,6 +74,41 @@ describe("canonical property profile wire contract", () => {
     ).toBeNull();
   });
 
+  it("accepts initial localization/social settings only on create requests", () => {
+    const initialLaunchSettings = {
+      defaultCurrency: "LKR",
+      supportedCurrencies: ["USD"],
+      defaultLanguage: "en",
+      supportedLanguages: ["si"],
+      instagram: "https://instagram.com/example",
+      facebook: "",
+      tiktok: "",
+      youtube: "",
+    };
+    const profile = { ...response.profile, initialLaunchSettings };
+    expect(parseCreatePropertyProfileRequest(profile)).toEqual(profile);
+    expect(parsePropertyProfileResponse({ ...response, profile })).toBeNull();
+    for (const invalid of [
+      null,
+      { ...initialLaunchSettings, pricingCurrency: "USD" },
+      { ...initialLaunchSettings, organizationId: "other" },
+      { ...initialLaunchSettings, supportedCurrencies: [null] },
+      { ...initialLaunchSettings, instagram: "javascript:alert(1)" },
+      { ...initialLaunchSettings, youtube: "https://user:password@example.com" },
+      { ...initialLaunchSettings, defaultLanguage: "" },
+    ]) {
+      expect(
+        parseCreatePropertyProfileRequest({ ...profile, initialLaunchSettings: invalid }),
+      ).toBeNull();
+    }
+    expect(
+      parseUpdatePropertyProfileRequest({
+        expectedProfileRevision: 3,
+        patch: { initialLaunchSettings },
+      }),
+    ).toBeNull();
+  });
+
   it("parses the nested response including revision and contact metadata", () => {
     expect(parsePropertyProfileResponse(response)).toEqual(response);
     expect(

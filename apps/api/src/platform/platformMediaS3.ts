@@ -542,6 +542,7 @@ export function createS3PlatformMediaAdapter(
             input.session.effectiveVisibility,
             input.file.inspection.contentType,
           );
+          await input.beforeWriteVariant?.(record);
           await s3.send(
             new PutObjectCommand({
               Bucket: bucketName,

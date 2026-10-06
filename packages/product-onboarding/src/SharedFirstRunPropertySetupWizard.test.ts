@@ -1,10 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { describe, expect, it, vi } from "vitest";
+import type { SharedHotelSetupApi } from "./sharedHotelSetupApi";
 
-import {
+import Wizard, {
   blockInlineSetupUnload,
   canLeaveInlineSetupTask,
   canConfirmLocation,
   createProfileFromDraft,
+  draftFromProfile,
   hasMapCoordinates,
   idempotencyKeyForRetry,
   INLINE_SETUP_STALE_SAVE_MESSAGE,
@@ -54,6 +58,23 @@ describe("property create conflict recovery", () => {
       }),
     ).toBe("Publish this contact first.");
     expect(setupErrorMessage(Object.assign(new Error("API Error: 500"), { status: 500 }))).toBe(
+      "Something went wrong on our end. Please try again.",
+    );
+    expect(
+      setupErrorMessage(
+        Object.assign(new Error("API Error: 503"), {
+          status: 503,
+          data: { code: "hotel_setup_unavailable" },
+        }),
+      ),
+    ).toBe("Hotel setup is temporarily unavailable. Please try again in a few minutes.");
+    expect(
+      setupErrorMessage({
+        status: 503,
+        data: { code: "other_unavailable", message: "private diagnostic" },
+      }),
+    ).toBe("Something went wrong on our end. Please try again.");
+    expect(setupErrorMessage({ status: 500, data: { code: "hotel_setup_unavailable" } })).toBe(
       "Something went wrong on our end. Please try again.",
     );
     expect(
@@ -184,7 +205,7 @@ describe("property profile requests", () => {
     ).toBeNull();
   });
 
-  it("promotes matching legacy contacts and preserves the existing website", () => {
+  it("preserves untouched private contacts and the existing website", () => {
     const profile = createProfileFromDraft(draft);
     profile.contacts = [
       ...profile.contacts.map((contact) => ({ ...contact, isPublic: false })),
@@ -196,21 +217,241 @@ describe("property profile requests", () => {
       },
     ];
 
-    const request = profileUpdateFromDraft(draft, {
+    const response = {
       propertyId: "property-1",
       profileRevision: 9,
       profile,
-    });
+    };
+    const request = profileUpdateFromDraft(draftFromProfile(response, null, null), response);
 
-    expect(request?.patch.contacts).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ channelType: "phone", isPublic: true }),
-        expect.objectContaining({ channelType: "whatsapp", isPublic: true }),
-        expect.objectContaining({ channelType: "email", isPublic: true }),
-        expect.objectContaining({ channelType: "website", isPublic: true }),
-      ]),
+    expect(request).toBeNull();
+    expect(profile.contacts.filter(({ channelType }) => channelType !== "website")).toEqual(
+      expect.arrayContaining([expect.objectContaining({ isPublic: false })]),
     );
   });
+
+  it.each([
+    "national phone",
+    "compact phone",
+    "private contacts",
+    "non-general contacts",
+    "multiple public contacts",
+    "public geo",
+    "lowercase country",
+  ])("keeps a loaded %s profile unchanged when only a logo is selected", (variant) => {
+    const profile = createProfileFromDraft(draft);
+    if (variant === "national phone") profile.contacts[0]!.value = "089123456";
+    if (variant === "compact phone") profile.contacts[0]!.value = "+4989123456";
+    if (variant === "private contacts")
+      profile.contacts = profile.contacts.map((contact) => ({ ...contact, isPublic: false }));
+    if (variant === "non-general contacts")
+      profile.contacts = profile.contacts.map((contact) => ({ ...contact, purpose: "operations" }));
+    if (variant === "multiple public contacts")
+      profile.contacts.push({
+        channelType: "email",
+        value: "other@example.test",
+        purpose: "guest",
+        isPublic: true,
+      });
+    if (variant === "public geo")
+      profile.location = { ...profile.location, geoPublic: true, mapDisplayMode: "exact" };
+    if (variant === "lowercase country") profile.location.countryCode = "de";
+    const response = { propertyId: "property-1", profileRevision: 8, profile };
+    const before = JSON.stringify(response);
+    const loaded = draftFromProfile(response, null, null);
+
+    expect(loaded.countryCode).toBe("DE");
+    expect(
+      profileUpdateFromDraft(
+        { ...loaded, logoMediaObjectId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" },
+        response,
+      ),
+    ).toBeNull();
+    expect(JSON.stringify(response)).toBe(before);
+  });
+
+  it("preserves untouched contact metadata and location consent during an explicit email edit", () => {
+    const profile = createProfileFromDraft(draft);
+    profile.location = { ...profile.location, geoPublic: true, mapDisplayMode: "exact" };
+    profile.contacts[0] = {
+      ...profile.contacts[0]!,
+      value: "089123456",
+      purpose: "operations",
+      isPublic: false,
+    };
+    profile.contacts[1] = { ...profile.contacts[1]!, purpose: "guest" };
+    const response = { propertyId: "property-1", profileRevision: 8, profile };
+    const loaded = draftFromProfile(response, null, null);
+    const update = profileUpdateFromDraft(
+      { ...loaded, contactEmail: "new@example.test" },
+      response,
+    );
+
+    expect(update).toEqual({
+      expectedProfileRevision: 8,
+      patch: {
+        contacts: [
+          profile.contacts[0],
+          profile.contacts[1],
+          {
+            channelType: "email",
+            value: "new@example.test",
+            purpose: "general",
+            isPublic: true,
+          },
+        ],
+      },
+    });
+  });
+
+  it("does not treat phone formatting or a country edit as a contact edit", () => {
+    const profile = createProfileFromDraft(draft);
+    profile.contacts[0]!.value = "089123456";
+    const response = { propertyId: "property-1", profileRevision: 8, profile };
+    const loaded = draftFromProfile(response, null, null);
+
+    expect(profileUpdateFromDraft({ ...loaded, phone: "+4989123456" }, response)).toBeNull();
+    expect(profileUpdateFromDraft({ ...loaded, countryCode: "LK" }, response)).toEqual({
+      expectedProfileRevision: 8,
+      patch: { location: { countryCode: "LK" } },
+    });
+    expect(
+      profileUpdateFromDraft({ ...loaded, phone: "+49 89 765432" }, response)?.patch.contacts,
+    ).toContainEqual({
+      channelType: "phone",
+      value: "+49 89 765432",
+      purpose: "general",
+      isPublic: true,
+    });
+  });
+
+  it("resets prior map consent when coordinates are deliberately changed", () => {
+    const profile = createProfileFromDraft(draft);
+    profile.location = { ...profile.location, geoPublic: true, mapDisplayMode: "exact" };
+    const response = { propertyId: "property-1", profileRevision: 8, profile };
+
+    expect(
+      profileUpdateFromDraft(
+        { ...draftFromProfile(response, null, null), latitude: 48.2 },
+        response,
+      ),
+    ).toEqual({
+      expectedProfileRevision: 8,
+      patch: {
+        location: { latitude: 48.2, geoPublic: false, mapDisplayMode: "hidden" },
+      },
+    });
+  });
+
+  it.each([
+    { existing: false, whatsapp: "", follows: true },
+    { existing: false, whatsapp: "+49 170 1234567", follows: false },
+    { existing: true, whatsapp: "", follows: false },
+    { existing: true, whatsapp: draft.phone, follows: true },
+    { existing: true, whatsapp: "+49 170 1234567", follows: false },
+  ])(
+    "preserves contact entry intent for $existing/$whatsapp",
+    async ({ existing, whatsapp, follows }) => {
+      vi.stubGlobal("document", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+      vi.stubGlobal("requestAnimationFrame", vi.fn());
+      let renderer: ReactTestRenderer | undefined;
+      try {
+        const saved = {
+          propertyId: "property-1",
+          profileRevision: 1,
+          profile: createProfileFromDraft({ ...draft, whatsapp }),
+        };
+        const api = {
+          getStatus: vi.fn().mockResolvedValue({
+            contractVersion: "adaptive-hotel-setup.v1",
+            organization: {
+              organizationId: "organization-1",
+              displayName: "Group",
+              websiteUrl: null,
+              selectedTracks: ["creator_marketplace"],
+              trackRevision: 1,
+              canManageTracks: true,
+              tracks: [],
+            },
+            propertySelection: {
+              state: existing ? "single_property" : "no_property",
+              selectedPropertyId: existing ? saved.propertyId : null,
+              availableProperties: existing
+                ? [
+                    {
+                      propertyId: saved.propertyId,
+                      publicId: "hotel-1",
+                      displayName: draft.displayName,
+                      locationSummary: "Germany",
+                    },
+                  ]
+                : [],
+            },
+            setupPlan: existing
+              ? {
+                  tasks: [
+                    {
+                      taskId: "shared_identity",
+                      ownerProgress: "not_started",
+                      readiness: "actionable",
+                      callerCapability: "allowed",
+                    },
+                  ],
+                }
+              : null,
+            entryDecision: null,
+            updatedAt: "2026-10-06T00:00:00Z",
+          }),
+          getPropertyProfile: vi.fn().mockResolvedValue(saved),
+          getPublicPropertyProfile: vi.fn().mockResolvedValue({ publicProfile: { media: [] } }),
+          getPropertyTypes: vi
+            .fn()
+            .mockResolvedValue({ propertyTypes: [{ value: "hotel", label: "Hotel" }] }),
+        };
+        await act(async () => {
+          renderer = create(
+            createElement(Wizard, {
+              api: api as unknown as SharedHotelSetupApi,
+              entryProduct: "marketplace",
+              onContinue: () => undefined,
+              renderTaskForm: () => null,
+            }),
+          );
+        });
+        const form = () =>
+          renderer!.root.findAll(
+            (node) => typeof node.props.onSave === "function" && node.props.draft,
+          )[0]!;
+        if (!existing) await act(async () => form().props.onChange({ ...draft, whatsapp }));
+        await act(async () => form().props.onStepChange(2));
+        const initialWhatsapp = !existing && !whatsapp ? draft.phone : whatsapp;
+        expect(form().props.draft.whatsapp).toBe(initialWhatsapp);
+        await act(async () =>
+          renderer!.root.findByProps({ label: "Phone number" }).props.onChange("+49 89 765432"),
+        );
+        expect(form().props.draft.whatsapp).toBe(follows ? "+49 89 765432" : initialWhatsapp);
+        if (existing) {
+          await act(async () =>
+            renderer!.root.findByProps({ label: "WhatsApp number" }).props.onChange(""),
+          );
+          await act(async () =>
+            renderer!.root.findByProps({ label: "Phone number" }).props.onChange(draft.phone),
+          );
+          expect(form().props.draft.whatsapp).toBe("");
+          await act(async () =>
+            renderer!.root.findByProps({ label: "WhatsApp number" }).props.onChange(draft.phone),
+          );
+          await act(async () =>
+            renderer!.root.findByProps({ label: "Phone number" }).props.onChange("+49 89 765432"),
+          );
+          expect(form().props.draft.whatsapp).toBe("+49 89 765432");
+        }
+      } finally {
+        act(() => renderer?.unmount());
+        vi.unstubAllGlobals();
+      }
+    },
+  );
 
   it("removes every published WhatsApp contact when WhatsApp is left blank", () => {
     const profile = createProfileFromDraft(draft);

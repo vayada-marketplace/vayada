@@ -64,7 +64,11 @@ export type Queryable = {
 };
 
 export type CommandPoolClient = Queryable & { release(): void };
-export type CommandPool = { connect(): Promise<CommandPoolClient>; end(): Promise<void> };
+export type CommandPool = {
+  connect(): Promise<CommandPoolClient>;
+  end(): Promise<void>;
+  authorizeTransaction?(client: CommandPoolClient): Promise<void>;
+};
 export type PropertyMediaReadModelSync = (
   client: Queryable,
   input: { propertyId: string },
@@ -145,7 +149,7 @@ export async function markIdempotencyPending(
     `UPDATE platform.idempotency_keys
      SET last_seen_at = $4::timestamptz,
          locked_until = $4::timestamptz + make_interval(secs => $5::double precision),
-         idempotency_metadata = jsonb_build_object(
+         idempotency_metadata = idempotency_metadata || jsonb_build_object(
            'publication', jsonb_build_object(
              'jobId', $2::text,
              'acceptedProfileRevision', $3::integer,
@@ -176,6 +180,7 @@ export async function claimPublicationJob(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await pool.authorizeTransaction?.(client);
     const leaseCutoff = new Date(input.now.getTime() - PUBLICATION_JOB_LEASE_MS);
     const result = await client.query<PublicationJobRow>(
       `SELECT
@@ -541,6 +546,7 @@ export async function finalizeInvalidPublicationJob(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await pool.authorizeTransaction?.(client);
     const scope = await client.query<{ propertyId: string }>(
       `SELECT job.property_id::text AS "propertyId"
        FROM platform.jobs job
@@ -802,6 +808,7 @@ export async function validatePublicationForCopy(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await pool.authorizeTransaction?.(client);
     await lockAndValidatePublication(client, claim, serving);
     await client.query("COMMIT");
   } catch (error) {
@@ -896,6 +903,7 @@ export async function renewPublicationLease(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await pool.authorizeTransaction?.(client);
     const job = await client.query(
       `UPDATE platform.jobs
        SET locked_at = $3::timestamptz, updated_at = $3::timestamptz
@@ -955,6 +963,7 @@ export async function finalizePublication(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await pool.authorizeTransaction?.(client);
     const currentRevision = await lockAndValidatePublication(client, claim, options.serving);
     await promoteRegistryRows(client, claim.payload.media);
     await replaceAssignments(client, claim.payload.command, claim.payload.media);
@@ -1099,6 +1108,7 @@ export async function deferPublicationJob(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await pool.authorizeTransaction?.(client);
     const retryAt = new Date(occurredAt.getTime() + publicationRetryDelayMs(claim));
     const deferred = await client.query(
       `UPDATE platform.jobs
@@ -1180,6 +1190,7 @@ export async function finalizePublicationFailure(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await pool.authorizeTransaction?.(client);
     await client.query(
       `SELECT property.id
        FROM hotel_catalog.properties property
@@ -1275,6 +1286,7 @@ export async function readCompletedResult(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await pool.authorizeTransaction?.(client);
     const row = await findIdempotency(client, command, keyHash);
     const replay = row ? replayIdempotency(row, fingerprint) : null;
     await client.query("ROLLBACK");
@@ -1969,10 +1981,10 @@ export async function reserveIdempotency(
   const result = await client.query<{ id: string }>(
     `INSERT INTO platform.idempotency_keys (
        operation_scope, operation, key_hash, request_fingerprint_hash,
-       tenant_scope, property_id, correlation_id, expires_at
+       tenant_scope, property_id, correlation_id, expires_at, idempotency_metadata
      ) VALUES (
        'hotel_catalog', $1, $2, $3, 'property', $4::uuid, $5,
-       'infinity'::timestamptz
+       'infinity'::timestamptz, jsonb_build_object('commandActorUserId',$6::text,'commandOrganizationId',$7::text)
      )
      ON CONFLICT DO NOTHING
      RETURNING id::text AS id`,
@@ -1982,6 +1994,8 @@ export async function reserveIdempotency(
       fingerprint,
       command.propertyId,
       command.audit.correlationId ?? command.audit.requestId,
+      command.actorUserId,
+      command.organizationId,
     ],
   );
   return result.rows[0]?.id ?? null;
@@ -2000,7 +2014,7 @@ export async function completeIdempotency(
          response_body_hash = $3, completed_at = $4::timestamptz,
          last_seen_at = $4::timestamptz,
          locked_until = NULL,
-         idempotency_metadata = jsonb_build_object('result', $5::jsonb)
+         idempotency_metadata = (idempotency_metadata - 'publication') || jsonb_build_object('result', $5::jsonb)
      WHERE id = $1::uuid AND status = 'in_progress'`,
     [
       id,

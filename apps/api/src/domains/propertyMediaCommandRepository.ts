@@ -32,6 +32,7 @@ export function createPgS3PropertyMediaCommandRepository(config: {
   syncReadModels: PropertyMediaReadModelSync;
   max?: number;
   pool?: CommandPool;
+  authorizeTransaction?: CommandPool["authorizeTransaction"];
   publisher?: PropertyMediaVariantPublisher;
   now?: () => Date;
   randomId?: () => string;
@@ -40,8 +41,15 @@ export function createPgS3PropertyMediaCommandRepository(config: {
     throw new Error("Property media command repository connectionString must not be empty");
   }
   const ownsPool = !config.pool;
-  const pool = (config.pool ??
+  const basePool = (config.pool ??
     new pg.Pool({ connectionString: config.connectionString, max: config.max })) as CommandPool;
+  const pool: CommandPool = config.authorizeTransaction
+    ? {
+        connect: () => basePool.connect(),
+        end: () => basePool.end(),
+        authorizeTransaction: config.authorizeTransaction,
+      }
+    : basePool;
   const ownsPublisher = !config.publisher;
   const publisher = config.publisher ?? createS3PropertyMediaVariantPublisher(config.serving);
   const now = config.now ?? (() => new Date());
