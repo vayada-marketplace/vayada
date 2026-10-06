@@ -357,13 +357,31 @@ describe.runIf(required || (databaseUrl && rollbackRoot))(
         const secretsBefore = records.size;
         await fromStart(mode);
         installFault(rds, flow, fault, target, organizationId, actorUserId);
+        let inspection: HotelSetupHelperGrantInspection["receipt"] | undefined;
         const first = await pass(mode).then(
           ({ receipts }) => receipts,
           (error: unknown) => {
             if (!(error instanceof HotelSetupHelperGrantInspection)) throw error;
+            inspection = error.receipt;
             return [{ organizationId, status: "helper_grant_inspection" }];
           },
         );
+        if (fault === "helperCommitLost") {
+          // The independent observer classifies the committed exact grant on A's staged role.
+          expect(inspection).toMatchObject({
+            phase: "grant_attempted",
+            commitAttempted: true,
+            catalog: "exact_granted",
+          });
+          expect(inspection?.login.startsWith(target())).toBe(true);
+          const acl = await rds.su.query(
+            `SELECT count(*)::int AS edges FROM pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a
+             WHERE a.grantee=$1::oid AND a.privilege_type='EXECUTE' AND NOT a.is_grantable
+               AND a.grantor='vayada_target_prod_user'::regrole`,
+            [inspection?.roleOid],
+          );
+          expect(acl.rows).toEqual([{ edges: mode === "organization" ? 2 : 1 }]);
+        }
         rds.setHook(undefined);
         const expected = outcomes[fault][mode];
         const of = (receipts: typeof first, id: string) =>
