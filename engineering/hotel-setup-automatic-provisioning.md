@@ -181,32 +181,50 @@ RDS shape it would have stopped every automatic staging before activation. It
 now accepts no incoming edge or exactly that single ADMIN-only creator edge.
 
 `hotelSetupAutomaticRdsOperator.fixture.ts` mirrors this posture on owned
-PostgreSQL 16/17. Only exact role-management statements (fresh role creation,
-its parent grant and LOGIN password activation) borrow a fixture superuser role
-to reproduce the RDS edge shape. Every read, row lock, ACL grant, RLS check,
-readiness write and native proof runs as the restricted operator. Helper EXECUTE
-grants go through the non-superuser owner connection. The required CI job runs
-the whole reconciler with primary and serving-rollback (`3efb2195a`) proofs:
+PostgreSQL 16/17. Only three whole statements borrow a fixture superuser role
+to reproduce the RDS edge shape: fresh role creation, its parent grant and
+LOGIN-password activation. The restricted operator performs every other read,
+row lock, ACL grant, RLS-checked query and assignment write. Helper EXECUTE
+grants go through the non-superuser owner connection. Native proofs
+authenticate as the new role.
+
+The required CI job runs the whole reconciler with primary and
+serving-rollback (`3efb2195a`) proofs. Faults hit one hotel while an unrelated
+hotel is in the same pass. Coverage:
 
 - organization and property first setup, replay and serving admission;
 - lost-before-COMMIT staging (the only retried case);
-- lost staging, activation and readiness COMMIT acknowledgements;
+- lost staging, helper-grant, activation and readiness COMMIT acknowledgements;
 - rollback proof failure;
 - failed, lost and mismatched secret publication;
-- Owner revocation before readiness;
-- cross-property credential denial;
-- an unrelated hotel provisioned and serving in the same passes.
+- Owner revocation before readiness, then reinstatement without adoption;
+- cross-property credential denial and revoked-Owner command denial.
 
-No case adopts or cleans up an earlier identity, reads `pg_authid`, or creates
-a second role.
+A helper-grant inspection aborts its pass by design. The next pass skips the
+inspected scope and continues with other hotels. No case adopts or cleans up an
+earlier identity, reads `pg_authid`, or creates a second role.
 
-This is an emulation, not proof of RDS internals. Before enabling the schedule,
-a protected read-only production inspection must confirm all of the following
-for the operator:
+The fixture grants the operator broad grantable ACLs. This is an emulation, not
+proof of RDS internals. Before enabling the schedule, a protected read-only
+production inspection must confirm all of the following for `vayada_admin`:
 
-- grantable column privileges for the creation, `launch_settings`,
-  `currency_ready` and `feature_hub` inventories, and grantable CONNECT/USAGE;
-- INSERT/SELECT/UPDATE on both assignment tables and SELECT/UPDATE on the cursor;
-- EXECUTE on every RLS helper its authority reads initialize;
-- the ability to grant the setup scope roles and to alter roles it created;
-- the helper owner's ownership of the two Channex helpers.
+- **Discovery and authority:**
+  - SELECT on `identity.organizations`, `organization_memberships`,
+    `membership_property_assignments`, `users`, `organization_roles`,
+    `role_permission_grants`, `product_entitlements` and
+    `organization_resource_links`, on `hotel_catalog.properties` and
+    `organization_setup_track_intents`, and on `finance.billing_entitlements`;
+  - UPDATE on at least one column of each row it locks;
+  - EXECUTE on every function their RLS policies initialize, including both
+    Channex helpers.
+- **Assignment state:** INSERT/SELECT/UPDATE on
+  `platform.hotel_setup_creation_scopes` and `hotel_setup_property_scopes`,
+  and SELECT/UPDATE on `hotel_setup_reconciliation_cursors`.
+- **Native grants:**
+  - grantable column privileges for the creation, `launch_settings`,
+    `currency_ready` and `feature_hub` inventories, plus grantable DELETE on
+    `hotel_catalog.property_contact_channels`;
+  - grantable CONNECT and schema USAGE.
+- **Roles:** the ability to grant the setup scope roles and to alter roles it
+  created.
+- **Helper owner:** `vayada_target_prod_user` owns both Channex helpers.
