@@ -1,0 +1,82 @@
+{
+  "vay965-launch-save-20261003": {
+    "primary": {
+      "digest": "sha256:b673453b253fac2e94822c24158f6d599696d0fb71a2bc68c7f4a3be0f98f38a",
+      "source": "d51cb02975995ffd8388958e295e23ae63474fd7"
+    },
+    "rollback": {
+      "digest": "sha256:9c6ad66294c188ff16b141922cc3cc57d0fc7dd7dfd45eda59e4c4492bb51f79",
+      "source": "b83da0787e098d59490b48b392967cb6d67b97b7"
+    }
+  },
+  "vay965-automatic-ready-20261004": {
+    "primary": {
+      "digest": "sha256:f80c4779f5f54f03525e0a95358018c2307af2ef65556a78a3e34d899f6ca28a",
+      "source": "21b492dd9beb60fb774e1c7ec6206158e3f436a0"
+    },
+    "rollback": {
+      "digest": "sha256:259f22ca5f9d90cfa87239adfff6a396bd3877598372c20a377dc055dfd3df6b",
+      "source": "187eeea3a5d6864283b854815334fe34c7ec752b"
+    }
+  },
+  "vay965-automatic-hardened-20261004": {
+    "primary": {
+      "digest": "sha256:3316fce31bb4382def31ef37a7e6ff9d83d69ee6ea582ac1dcea8722551f827d",
+      "source": "c2acd36190563e6c589c7d9202059a4b3f2c55be"
+    },
+    "rollback": {
+      "digest": "sha256:259f22ca5f9d90cfa87239adfff6a396bd3877598372c20a377dc055dfd3df6b",
+      "source": "187eeea3a5d6864283b854815334fe34c7ec752b"
+    }
+  },
+  "vay965-helper-owner-20261004": {
+    "primary": {
+      "digest": "sha256:bafc5880043ff7019d9921d195a5d5998d8b99f57b95bf3f251e85b0e1e8c698",
+      "source": "7acb01ab601146d50c5c514abf1b23a8bac08c18"
+    },
+    "rollback": {
+      "digest": "sha256:259f22ca5f9d90cfa87239adfff6a396bd3877598372c20a377dc055dfd3df6b",
+      "source": "187eeea3a5d6864283b854815334fe34c7ec752b"
+    }
+  },
+  "vay965-offline-catalog-lock-20261004": {
+    "primary": {
+      "digest": "sha256:8fdd394ce806f2ba928b3aa330d02422064742d4016801c113e860b838284d11",
+      "source": "be8c6d4052f2c37cee8d06de46de958fd6087f58"
+    },
+    "rollback": {
+      "digest": "sha256:259f22ca5f9d90cfa87239adfff6a396bd3877598372c20a377dc055dfd3df6b",
+      "source": "187eeea3a5d6864283b854815334fe34c7ec752b"
+    }
+  },
+  "vay965-native-no-catalog-20261005": {
+    "primary": {
+      "digest": "sha256:35d75f64188bb20bd512a9d1640e34a48484d460b7789cd4de7813efe8a96d47",
+      "source": "eddb53c841575b4136935fb3e1130ecc80cb56fa"
+    },
+    "rollback": {
+      "digest": "sha256:259f22ca5f9d90cfa87239adfff6a396bd3877598372c20a377dc055dfd3df6b",
+      "source": "187eeea3a5d6864283b854815334fe34c7ec752b"
+    }
+  },
+  "vay965-logo-manual-20261005": {
+    "primary": {
+      "digest": "sha256:18fa7587a09fa58916e734ea9c3b2d38c274783bc98d793308cc2f122d688965",
+      "source": "3efb2195a823f40b7cd5a716db5bf08ac3fe90ad"
+    },
+    "rollback": {
+      "digest": "sha256:18fa7587a09fa58916e734ea9c3b2d38c274783bc98d793308cc2f122d688965",
+      "source": "3efb2195a823f40b7cd5a716db5bf08ac3fe90ad"
+    }
+  },
+  "vay965-logo-rds-20261006": {
+    "primary": {
+      "digest": "sha256:50b20c753673bdc943a367353c4890c4684e49401b91557ab672c8cb205a38c7",
+      "source": "767ce3c7e9113bbdf51c0d819c75145f08c945b6"
+    },
+    "rollback": {
+      "digest": "sha256:18fa7587a09fa58916e734ea9c3b2d38c274783bc98d793308cc2f122d688965",
+      "source": "3efb2195a823f40b7cd5a716db5bf08ac3fe90ad"
+    }
+  }
+}

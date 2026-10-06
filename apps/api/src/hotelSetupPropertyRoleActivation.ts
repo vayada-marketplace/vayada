@@ -1,5 +1,8 @@
 import { assertHotelSetupBootstrapLock } from "./hotelSetupHelperOwnerGrants.js";
-import { publishHotelSetupPropertySecret } from "./hotelSetupPropertySecretPublication.js";
+import {
+  authenticateHotelSetupPropertyLogin,
+  publishHotelSetupPropertySecret,
+} from "./hotelSetupPropertySecretPublication.js";
 import { createHash } from "node:crypto";
 import pg from "pg";
 import { parseHotelSetupDatabaseUrl } from "./hotelSetupCommandServiceConfig.js";
@@ -30,8 +33,16 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
   let commitAttempted = false;
   let verifier = "";
   const { nativeDatabaseUrl, adminDatabaseUrl, databaseEndpoint } = input;
-  const { login, roleOid, propertyId, organizationId, actorUserId, operation, automatic } =
-    input.staged ?? {};
+  const {
+    login,
+    roleOid,
+    propertyId,
+    organizationId,
+    actorUserId,
+    operation,
+    automatic,
+    assignmentXid,
+  } = input.staged ?? {};
   const scope = Object.freeze({
     propertyId,
     organizationId,
@@ -39,7 +50,12 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
     operation,
     ...(automatic ? { automatic } : {}),
   });
-  const stagedScope = Object.freeze({ login, roleOid, ...scope });
+  const stagedScope = Object.freeze({
+    login,
+    roleOid,
+    ...scope,
+    ...(assignmentXid ? { assignmentXid } : {}),
+  });
   const { proveSecondary, publish } = input;
   try {
     const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -60,6 +76,8 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
         "property_profile",
       ].includes(operation) ||
       (isHotelSetupActorPurpose(operation) && automatic !== undefined) ||
+      (isHotelSetupActorPurpose(operation) && !/^[1-9][0-9]*$/.test(assignmentXid ?? "")) ||
+      (!isHotelSetupActorPurpose(operation) && assignmentXid !== undefined) ||
       !Number.isInteger(roleOid) ||
       roleOid <= 0 ||
       !login.startsWith(prefix) ||
@@ -103,6 +121,30 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
     await admin.query("SELECT pg_catalog.pg_advisory_lock(pg_catalog.hashtextextended($1,0))", [
       `hotel_setup_property_activation:${login}`,
     ]);
+    if (isHotelSetupActorPurpose(operation)) {
+      // Its fresh LOGIN and pending assignment already committed atomically during staging.
+      const proofScope = Object.freeze({ ...stagedScope, bootstrapPending: true as const });
+      const credential = { nativeDatabaseUrl, databaseEndpoint, login, roleOid };
+      await authenticateHotelSetupPropertyLogin(credential, (client) =>
+        checkHotelSetupPropertyCredential(client, proofScope),
+      );
+      if (proveSecondary)
+        await authenticateHotelSetupPropertyLogin(credential, (client) =>
+          proveSecondary(client, proofScope),
+        );
+      if (failed) throw new Error();
+      const publication = publish
+        ? await publishHotelSetupPropertySecret({
+            admin,
+            expectedAssignmentXid: assignmentXid,
+            nativeDatabaseUrl,
+            databaseEndpoint,
+            staged: stagedScope,
+          })
+        : undefined;
+      if (failed) throw new Error();
+      return { ...stagedScope, ...(publication ? { publication } : {}) };
+    }
     await admin.query("BEGIN");
     await lockHotelSetupPropertyBootstrapAuthority(admin, scope);
     const staged = await admin.query(
@@ -119,13 +161,7 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
         refclassid='pg_catalog.pg_authid'::regclass AND refobjid=r.oid AND deptype='o')
       AND NOT EXISTS (SELECT 1 FROM platform.hotel_setup_property_scopes
         WHERE database_login=$2 OR (property_id=$3::uuid AND operation_class=$4))`,
-      [
-        roleOid,
-        login,
-        propertyId,
-        operation,
-        `vayada_next_hotel_setup_${hotelSetupPurposeKind(operation)}_scope`,
-      ],
+      [roleOid, login, propertyId, operation, "vayada_next_hotel_setup_property_scope"],
     );
     if (failed || staged.rows.length !== 1) throw new Error();
     await admin.query(
@@ -139,13 +175,7 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
     await admin.query(
       `INSERT INTO platform.hotel_setup_property_scopes
       (database_login,property_id,organization_id,operation_class,active,actor_user_id) VALUES($1,$2,$3,$4,TRUE,$5::uuid)`,
-      [
-        login,
-        propertyId,
-        organizationId,
-        operation,
-        isHotelSetupActorPurpose(operation) ? actorUserId : null,
-      ],
+      [login, propertyId, organizationId, operation, null],
     );
     const identity = await admin.query<{ verifier: string }>(
       "SELECT rolpassword AS verifier FROM pg_catalog.pg_authid WHERE oid=$1::oid AND rolname=$2",
@@ -161,10 +191,7 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
       nativeFailed = true;
     });
     await nativeClient.connect();
-    const proofScope = Object.freeze({
-      ...stagedScope,
-      ...(isHotelSetupActorPurpose(operation) ? { bootstrapPending: true as const } : {}),
-    });
+    const proofScope = stagedScope;
     await checkHotelSetupPropertyCredential(nativeClient, proofScope);
     if (failed || nativeFailed) throw new Error();
     await proveSecondary?.(nativeClient, proofScope);
@@ -190,6 +217,9 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
     await nativeClient?.end().catch(() => undefined);
     nativeClient = undefined;
     await admin?.query("ROLLBACK").catch(() => undefined);
+    // No catalog verifier is available on RDS. Never mutate an uncertain committed actor identity.
+    if (isHotelSetupActorPurpose(operation))
+      throw new Error("Hotel setup logo bootstrap requires recovery inspection");
     // Readiness COMMIT can succeed despite a lost acknowledgement. Do not disable
     // a possibly admitted identity; inspect this exact attempt before cleanup.
     if (
@@ -227,9 +257,7 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
             assignment.rows.length !== 1 ||
             assigned?.property_id !== propertyId.toLowerCase() ||
             assigned.organization_id !== organizationId.toLowerCase() ||
-            assigned.operation_class !== operation ||
-            (isHotelSetupActorPurpose(operation) &&
-              assigned.actor_user_id !== actorUserId.toLowerCase())
+            assigned.operation_class !== operation
           )
             throw new Error();
           await admin!.query(`ALTER ROLE ${admin!.escapeIdentifier(login)} NOLOGIN PASSWORD NULL`);

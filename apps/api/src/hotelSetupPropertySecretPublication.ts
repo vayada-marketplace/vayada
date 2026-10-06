@@ -9,19 +9,22 @@ import {
 } from "@aws-sdk/client-secrets-manager";
 import { parseHotelSetupDatabaseUrl } from "./hotelSetupCommandServiceConfig.js";
 import { hotelSetupPurposeKind, isHotelSetupActorPurpose } from "./hotelSetupCommandScope.js";
+import { hotelSetupOrganizationConnection } from "./hotelSetupOrganizationRoleStaging.js";
 import { lockHotelSetupPropertyBootstrapAuthority } from "./hotelSetupPropertyRoleStaging.js";
 import type { stageHotelSetupPropertyRole } from "./hotelSetupPropertyRoleStaging.js";
 
 /** Trusted activation callback only, after both compiled native proofs in the same process.
- * Caller owns the connected admin client and exact verifier cleanup boundary. */
+ * Logo uses fresh authentication and its original assignment; other purposes pin the verifier. */
 export async function publishHotelSetupPropertySecret(input: {
   admin: pg.Client;
   staged: Awaited<ReturnType<typeof stageHotelSetupPropertyRole>>;
-  expectedVerifier: string;
+  expectedVerifier?: string;
+  expectedAssignmentXid?: string;
   nativeDatabaseUrl: string;
   databaseEndpoint: string;
 }) {
-  const { admin, expectedVerifier, nativeDatabaseUrl, databaseEndpoint } = input;
+  const { admin, expectedVerifier, expectedAssignmentXid, nativeDatabaseUrl, databaseEndpoint } =
+    input;
   let secrets: SecretsManagerClient | undefined;
   let sts: STSClient | undefined;
   let readinessCommitAttempted = false;
@@ -35,14 +38,16 @@ export async function publishHotelSetupPropertySecret(input: {
         `^vayada_next_hotel_setup_${hotelSetupPurposeKind(operation)}_[a-f0-9]{16}_[a-f0-9]{12}$`,
       ).test(login) ||
       (isHotelSetupActorPurpose(operation) && automatic !== undefined) ||
-      !expectedVerifier
+      (isHotelSetupActorPurpose(operation)
+        ? !/^[1-9][0-9]*$/.test(expectedAssignmentXid ?? "") || expectedVerifier !== undefined
+        : !expectedVerifier || expectedAssignmentXid !== undefined)
     )
       throw new Error();
     const url = parseHotelSetupDatabaseUrl(nativeDatabaseUrl, databaseEndpoint, login);
     const identity = async () => {
       const role = await admin.query(
-        `SELECT oid FROM pg_catalog.pg_authid r WHERE oid=$1::oid AND rolname=$2
-         AND rolpassword=$3 AND rolcanlogin AND rolvaliduntil IS NULL
+        `SELECT oid FROM ${isHotelSetupActorPurpose(operation) ? "pg_catalog.pg_roles" : "pg_catalog.pg_authid"} r WHERE oid=$1::oid AND rolname=$2
+         AND ${isHotelSetupActorPurpose(operation) ? "$3::text IS NULL" : "rolpassword=$3"} AND rolcanlogin AND rolvaliduntil IS NULL
          AND NOT rolsuper AND NOT rolinherit AND NOT rolcreaterole AND NOT rolcreatedb
          AND NOT rolreplication AND NOT rolbypassrls
          AND (SELECT count(*) FROM pg_catalog.pg_auth_members WHERE member=r.oid)=1
@@ -55,11 +60,18 @@ export async function publishHotelSetupPropertySecret(input: {
         [
           roleOid,
           login,
-          expectedVerifier,
+          expectedVerifier ?? null,
           `vayada_next_hotel_setup_${hotelSetupPurposeKind(operation)}_scope`,
         ],
       );
       if (role.rows.length !== 1) throw new Error();
+      if (isHotelSetupActorPurpose(operation))
+        await authenticateHotelSetupPropertyLogin({
+          nativeDatabaseUrl,
+          databaseEndpoint,
+          login,
+          roleOid,
+        });
     };
     const pending = async () => {
       await lockHotelSetupPropertyBootstrapAuthority(admin, scope);
@@ -72,9 +84,10 @@ export async function publishHotelSetupPropertySecret(input: {
         credential_role_oid: number | null;
         credential_secret_version: string | null;
         credential_ready_at: Date | null;
+        assignment_xid: string;
       }>(
         `SELECT property_id,organization_id,operation_class,actor_user_id,active,
-        credential_role_oid,credential_secret_version,credential_ready_at
+        credential_role_oid,credential_secret_version,credential_ready_at,xmin::text AS assignment_xid
        FROM platform.hotel_setup_property_scopes
        WHERE database_login=$1 OR (property_id=$2::uuid AND operation_class=$3) FOR UPDATE`,
         [login, propertyId, operation],
@@ -86,7 +99,8 @@ export async function publishHotelSetupPropertySecret(input: {
         assigned.organization_id !== organizationId.toLowerCase() ||
         assigned.operation_class !== operation ||
         (isHotelSetupActorPurpose(operation) &&
-          assigned.actor_user_id !== actorUserId.toLowerCase()) ||
+          (assigned.actor_user_id !== actorUserId.toLowerCase() ||
+            assigned.assignment_xid !== expectedAssignmentXid)) ||
         !assigned.active ||
         assigned.credential_role_oid !== null ||
         assigned.credential_secret_version !== null ||
@@ -185,6 +199,7 @@ export async function publishHotelSetupPropertySecret(input: {
          AND operation_class=$6 AND active AND credential_role_oid IS NULL
          AND credential_secret_version IS NULL AND credential_ready_at IS NULL
          AND actor_user_id IS NOT DISTINCT FROM $7::uuid
+         AND ($8::text IS NULL OR xmin=$8::text::xid)
        RETURNING database_login`,
       [
         login,
@@ -194,6 +209,7 @@ export async function publishHotelSetupPropertySecret(input: {
         organizationId,
         operation,
         isHotelSetupActorPurpose(operation) ? actorUserId : null,
+        expectedAssignmentXid ?? null,
       ],
     );
     if (ready.rows.length !== 1 || ready.rows[0]?.database_login !== login) throw new Error();
@@ -215,4 +231,49 @@ export async function publishHotelSetupPropertySecret(input: {
     secrets?.destroy();
     sts?.destroy();
   }
+}
+
+/** A fresh connection observes credential rotation; an existing session cannot. */
+export async function authenticateHotelSetupPropertyLogin(
+  input: {
+    nativeDatabaseUrl: string;
+    databaseEndpoint: string;
+    login: string;
+    roleOid: number;
+  },
+  prove?: (client: pg.Client) => Promise<void>,
+) {
+  const { nativeDatabaseUrl, databaseEndpoint, login, roleOid } = input;
+  parseHotelSetupDatabaseUrl(nativeDatabaseUrl, databaseEndpoint, login);
+  const client = hotelSetupOrganizationConnection(nativeDatabaseUrl, databaseEndpoint);
+  let failed = false;
+  client.on("error", () => {
+    failed = true;
+  });
+  try {
+    await client.connect();
+    const identity = await client.query<{
+      session_login: string;
+      effective_login: string;
+      role_oid: number;
+      effective_oid: number;
+    }>(
+      "SELECT session_user::text AS session_login,current_user::text AS effective_login,session_user::regrole::oid AS role_oid,current_user::regrole::oid AS effective_oid",
+    );
+    const role = identity.rows[0];
+    if (
+      identity.rows.length !== 1 ||
+      role?.session_login !== login ||
+      role.effective_login !== login ||
+      role.role_oid !== roleOid ||
+      role.effective_oid !== roleOid ||
+      failed
+    )
+      throw new Error();
+    await prove?.(client);
+    if (failed) throw new Error();
+  } finally {
+    await client.end();
+  }
+  if (failed) throw new Error();
 }
