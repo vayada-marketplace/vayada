@@ -62,6 +62,11 @@ export function parseHotelSetupHelperOwnerConfiguration(
   parseHotelSetupDatabaseUrl(url.toString(), databaseEndpoint, "vayada_target_prod_user");
   return url.toString();
 }
+/** A held scope needs operator inspection: fail the scheduled run loudly every time. */
+export function hotelSetupAutomaticExitCode(receipt: { receipts: Array<{ status: string }> }) {
+  return receipt.receipts.some(({ status }) => status === "inspection_required") ? 1 : 0;
+}
+
 let helperPhase:
   | Parameters<NonNullable<Parameters<typeof grantFreshHotelSetupHelpers>[0]["onPhase"]>>[0]
   | undefined;
@@ -99,7 +104,7 @@ export async function runHotelSetupAutomaticProvisioning(env: NodeJS.ProcessEnv 
       proveProperty: property.checkHotelSetupPropertyCredential,
     });
     console.log(JSON.stringify(receipt));
-    return 0;
+    return hotelSetupAutomaticExitCode(receipt);
   } catch (error) {
     if (error instanceof HotelSetupHelperGrantInspection)
       console.error(

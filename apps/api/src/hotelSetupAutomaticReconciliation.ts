@@ -62,6 +62,23 @@ export async function reconcileHotelSetupAutomaticScopes(input: {
   const deadline = Date.now() + 120_000;
   try {
     await admin.connect();
+    // A member of a native scope is treated as a native identity by setup RLS: its discovery and
+    // authority reads silently see nothing. Fail the pass loudly instead of reporting no work.
+    // Superusers count as members of every role but bypass RLS, so only they are exempt.
+    const member = await admin.query<{ safe: boolean }>(
+      `SELECT NOT pg_catalog.bool_or(pg_catalog.pg_has_role(current_user,scope,'MEMBER'))
+         OR (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname=current_user) AS safe
+       FROM pg_catalog.unnest($1::text[]) scope`,
+      [
+        [
+          "vayada_next_hotel_setup_scope",
+          "vayada_next_hotel_setup_property_scope",
+          "vayada_next_hotel_setup_logo_scope",
+        ],
+      ],
+    );
+    if (member.rows[0]?.safe !== true)
+      throw new Error("Hotel setup operator must not be a native scope member");
     if (input.helperOwnerDatabaseUrl) {
       const lock = await admin.query<{ held: boolean }>(
         "SELECT pg_catalog.pg_try_advisory_lock_shared(8734516) AS held",

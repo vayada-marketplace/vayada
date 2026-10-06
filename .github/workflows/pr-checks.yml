@@ -640,6 +640,7 @@ jobs:
           src/hotelSetupPropertySecretPublication.test.ts
           src/cli/hotelSetupPropertyBootstrap.test.ts
           src/hotelSetupAutomaticReconciliation.test.ts
+          src/hotelSetupHelperOwnerGrants.test.ts
           src/cli/hotelSetupAutomaticProvisioning.test.ts
           src/hotelSetupApprovedReadinessBackfill.test.ts
           src/hotelSetupReadinessReaderGrant.test.ts
@@ -825,6 +826,108 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+  automatic_setup_rds_postgres:
+    name: Automatic Setup RDS Operator PostgreSQL ${{ matrix.postgres }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["16", "17"]
+
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}-alpine
+        env:
+          POSTGRES_USER: vayada_test
+          POSTGRES_PASSWORD: vayada_test
+          POSTGRES_DB: vayada_api_test
+        options: >-
+          --health-cmd "pg_isready -U vayada_test -d vayada_api_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure trusted TLS
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          tls_dir="$(mktemp -d)"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
+            -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' \
+            -keyout "$tls_dir/server.key" -out "$tls_dir/server.crt" >/dev/null 2>&1
+          docker exec --user 0 "$PG_CONTAINER" mkdir -p /tmp/rds-tls
+          docker cp "$tls_dir/server.key" "$PG_CONTAINER:/tmp/rds-tls/server.key"
+          docker cp "$tls_dir/server.crt" "$PG_CONTAINER:/tmp/rds-tls/server.crt"
+          docker exec --user 0 "$PG_CONTAINER" chown -R postgres:postgres /tmp/rds-tls
+          docker exec --user 0 "$PG_CONTAINER" chmod 600 /tmp/rds-tls/server.key
+          for setting in "ssl_cert_file = '/tmp/rds-tls/server.crt'" "ssl_key_file = '/tmp/rds-tls/server.key'" "ssl = on"; do
+            docker exec "$PG_CONTAINER" psql -U vayada_test -d vayada_api_test -c "ALTER SYSTEM SET $setting"
+          done
+          docker exec "$PG_CONTAINER" psql -U vayada_test -d vayada_api_test -c 'SELECT pg_reload_conf()'
+          tls_ready=false
+          for attempt in $(seq 1 20); do
+            if docker exec --env PGPASSWORD=vayada_test --env PGSSLMODE=verify-full \
+              --env PGSSLROOTCERT=/tmp/rds-tls/server.crt "$PG_CONTAINER" \
+              psql -h 127.0.0.1 -U vayada_test -d vayada_api_test -c 'SELECT 1' >/dev/null 2>&1; then
+              tls_ready=true; break
+            fi
+            sleep 1
+          done
+          test "$tls_ready" = true
+          rm "$tls_dir/server.key"
+          echo "NODE_EXTRA_CA_CERTS=$tls_dir/server.crt" >> "$GITHUB_ENV"
+
+      # The serving private setup image's source is the rollback paired with any new operator release.
+      - name: Checkout serving setup rollback source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 3efb2195a823f40b7cd5a716db5bf08ac3fe90ad
+          path: .hotel-setup-serving-rollback
+          persist-credentials: false
+
+      - name: Build serving setup rollback
+        working-directory: .hotel-setup-serving-rollback
+        run: |
+          test "$(git rev-parse HEAD)" = 3efb2195a823f40b7cd5a716db5bf08ac3fe90ad
+          npm ci
+          npm run build:api
+
+      # Migrate as the production migration owner, then demote it before the restricted operator runs.
+      - name: Verify automatic setup under the restricted RDS operator
+        run: |
+          set -euo pipefail
+          owner_password="$(openssl rand -hex 24)"
+          psql_admin() { PGPASSWORD=vayada_test psql -X -v ON_ERROR_STOP=1 -h localhost -U vayada_test -d vayada_api_test -c "$1"; }
+          psql_admin "CREATE ROLE vayada_target_prod_user LOGIN SUPERUSER PASSWORD '$owner_password'"
+          psql_admin "CREATE DATABASE vay1092_automatic_rds_test OWNER vayada_target_prod_user TEMPLATE template0"
+          TARGET_DATABASE_URL="postgresql://vayada_target_prod_user:$owner_password@localhost:5432/vay1092_automatic_rds_test" \
+            npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          psql_admin "ALTER ROLE vayada_target_prod_user NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD NULL"
+          HOTEL_SETUP_AUTOMATIC_RDS_TEST_DATABASE_URL="postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay1092_automatic_rds_test?sslmode=verify-full" \
+          HOTEL_SETUP_AUTOMATIC_ROLLBACK_PREFLIGHT_ROOT="$GITHUB_WORKSPACE/.hotel-setup-serving-rollback" \
+          HOTEL_SETUP_AUTOMATIC_RDS_REQUIRED=1 AWS_EC2_METADATA_DISABLED=true \
+            npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupAutomaticRdsAuthority.integration.test.ts
+          test "$(PGPASSWORD=vayada_test psql -X -A -t -h localhost -U vayada_test -d vayada_api_test -c "SELECT count(*) FROM pg_roles WHERE rolname ~ '^(vayada_admin|rds_superuser|vay965_fixture_rds_role_manager|vayada_next_hotel_setup_(org|property|logo)_[a-f0-9]{16}_[a-f0-9]{12})$'")" = 0
+
   backend:
     name: Backend Tests (${{ matrix.app }})
     runs-on: ubuntu-latest
@@ -989,17 +1092,19 @@ jobs:
       - first_party_auth
       - api_postgres
       - setup_draft_reset_postgres
+      - automatic_setup_rds_postgres
       - backend
     if: always()
 
     steps:
       - name: Verify required jobs
         run: |
-          if [ "${{ needs.frontend.result }}" != "success" ] || [ "${{ needs.first_party_auth.result }}" != "success" ] || [ "${{ needs.api_postgres.result }}" != "success" ] || [ "${{ needs.setup_draft_reset_postgres.result }}" != "success" ] || [ "${{ needs.backend.result }}" != "success" ]; then
+          if [ "${{ needs.frontend.result }}" != "success" ] || [ "${{ needs.first_party_auth.result }}" != "success" ] || [ "${{ needs.api_postgres.result }}" != "success" ] || [ "${{ needs.setup_draft_reset_postgres.result }}" != "success" ] || [ "${{ needs.automatic_setup_rds_postgres.result }}" != "success" ] || [ "${{ needs.backend.result }}" != "success" ]; then
             echo "Frontend result: ${{ needs.frontend.result }}"
             echo "First-party auth result: ${{ needs.first_party_auth.result }}"
             echo "TypeScript API PostgreSQL result: ${{ needs.api_postgres.result }}"
             echo "Setup Draft Reset PostgreSQL result: ${{ needs.setup_draft_reset_postgres.result }}"
+            echo "Automatic Setup RDS Operator PostgreSQL result: ${{ needs.automatic_setup_rds_postgres.result }}"
             echo "Backend result: ${{ needs.backend.result }}"
             exit 1
           fi
