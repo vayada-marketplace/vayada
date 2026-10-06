@@ -49,9 +49,10 @@ jobs:
       - name: Finance domain contracts
         run: npm --workspace @vayada/domain-finance run test
 
-      - name: Product onboarding tests
+      - name: Hotel domain and product onboarding tests
         run: |
           npm --workspace @vayada/domain-hotels run build
+          npm --workspace @vayada/domain-hotels run test
           npm --workspace @vayada/product-onboarding run test
 
       - name: Typecheck
@@ -652,6 +653,12 @@ jobs:
           src/hotelSetupLogoCredentials.test.ts
           src/hotelSetupLogoProjection.test.ts
           src/hotelSetupLogoRuntime.test.ts
+          src/hotelSetupCurrencyCommands.test.ts
+          src/platformMedia.test.ts
+          src/propertyMedia.test.ts
+          src/platform/platformMediaRepository.test.ts
+          src/platform/platformMediaS3.test.ts
+          src/domains/propertyMediaCommandRepository.test.ts
 
       - name: Verify private hotel setup reader privileges
         run: npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupReaderPrivileges.integration.test.ts src/hotelSetupReaderAudit.integration.test.ts src/hotelSetupReaderSecretCandidate.test.ts src/hotelSetupReaderLoginVerification.test.ts
