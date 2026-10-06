@@ -28,8 +28,16 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
   let publicationSucceeded = false;
   let commitAttempted = false;
   const { nativeDatabaseUrl, adminDatabaseUrl, databaseEndpoint } = input;
-  const { login, roleOid, propertyId, organizationId, actorUserId, operation, automatic } =
-    input.staged ?? {};
+  const {
+    login,
+    roleOid,
+    propertyId,
+    organizationId,
+    actorUserId,
+    operation,
+    automatic,
+    assignmentXid,
+  } = input.staged ?? {};
   const scope = Object.freeze({
     propertyId,
     organizationId,
@@ -37,17 +45,29 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
     operation,
     ...(automatic ? { automatic } : {}),
   });
-  const stagedScope = Object.freeze({ login, roleOid, ...scope });
+  const stagedScope = Object.freeze({
+    login,
+    roleOid,
+    ...scope,
+    ...(assignmentXid ? { assignmentXid } : {}),
+  });
   const { proveSecondary, publish } = input;
   try {
     const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const prefix = `vayada_next_hotel_setup_property_${createHash("sha256")
+    const prefix = `vayada_next_hotel_setup_${operation === "property_logo" ? "logo" : "property"}_${createHash(
+      "sha256",
+    )
       .update(`${propertyId.toLowerCase()}:${operation}`)
       .digest("hex")
       .slice(0, 16)}_`;
     if (
       ![propertyId, organizationId, actorUserId].every((id) => uuid.test(id)) ||
-      !["launch_settings", "currency", "currency_ready", "feature_hub"].includes(operation) ||
+      !["launch_settings", "currency", "currency_ready", "feature_hub", "property_logo"].includes(
+        operation,
+      ) ||
+      (operation === "property_logo" && automatic !== undefined) ||
+      (operation === "property_logo" && !/^[1-9][0-9]*$/.test(assignmentXid ?? "")) ||
+      (operation !== "property_logo" && assignmentXid !== undefined) ||
       !Number.isInteger(roleOid) ||
       roleOid <= 0 ||
       !login.startsWith(prefix) ||
@@ -72,6 +92,30 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
     await admin.query("SELECT pg_catalog.pg_advisory_lock(pg_catalog.hashtextextended($1,0))", [
       `hotel_setup_property_activation:${login}`,
     ]);
+    if (operation === "property_logo") {
+      // Its fresh LOGIN and pending assignment already committed atomically during staging.
+      const proofScope = Object.freeze({ ...stagedScope, bootstrapPending: true as const });
+      const credential = { nativeDatabaseUrl, databaseEndpoint, login, roleOid };
+      await proveFreshHotelSetupNativeCredential(credential, (client) =>
+        checkHotelSetupPropertyCredential(client, proofScope),
+      );
+      if (proveSecondary)
+        await proveFreshHotelSetupNativeCredential(credential, (client) =>
+          proveSecondary(client, proofScope),
+        );
+      if (failed) throw new Error();
+      const publication = publish
+        ? await publishHotelSetupPropertySecret({
+            admin,
+            expectedAssignmentXid: assignmentXid,
+            nativeDatabaseUrl,
+            databaseEndpoint,
+            staged: stagedScope,
+          })
+        : undefined;
+      if (failed) throw new Error();
+      return { ...stagedScope, ...(publication ? { publication } : {}) };
+    }
     await admin.query("BEGIN");
     await lockHotelSetupPropertyBootstrapAuthority(admin, scope);
     const staged = await admin.query(
@@ -133,6 +177,9 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
     return { ...stagedScope, ...(publication ? { publication } : {}) };
   } catch (error) {
     await admin?.query("ROLLBACK").catch(() => undefined);
+    // No catalog verifier is available on RDS. Never mutate an uncertain committed logo identity.
+    if (operation === "property_logo")
+      throw new Error("Hotel setup logo bootstrap requires recovery inspection");
     // Readiness COMMIT can succeed despite a lost acknowledgement. Do not disable
     // a possibly admitted identity; inspect this exact attempt before cleanup.
     if (

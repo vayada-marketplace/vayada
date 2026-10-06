@@ -1,3 +1,4 @@
+import { createHotelSetupLogoRuntime } from "./hotelSetupLogoRuntime.js";
 import { createHotelSetupLaunchSettingsCommands } from "./hotelSetupLaunchSettingsCommands.js";
 import { createPgIdentityRepository, createWorkOSVerifier } from "@vayada/backend-auth";
 import {
@@ -69,6 +70,9 @@ try {
       propertyAccessRepository: createPgPropertyAccessRepository(repositoryConfig),
     },
     ...commandOptions,
+    ...(config.logoServing
+      ? { logoMedia: createHotelSetupLogoRuntime(credentials, config.logoServing) }
+      : {}),
   });
   app.addHook("onClose", () => runtime.close());
   registerShutdownSignals(app);

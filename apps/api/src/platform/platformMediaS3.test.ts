@@ -594,6 +594,50 @@ describe("S3 platform profile media adapter", () => {
     expect(puts.every((put) => put.input.Key?.startsWith("private/media/"))).toBe(true);
   });
 
+  it.each([false, true])(
+    "persists each exact private artifact before PUT (receipt failure=%s)",
+    async (failReceipt) => {
+      const source = await validJpeg();
+      const receipts: string[] = [];
+      const { client, send } = fakeS3(async (command) => {
+        if (command instanceof GetObjectCommand)
+          return { ContentLength: source.length, Body: Readable.from([source]) };
+        if (command instanceof PutObjectCommand) expect(receipts).toContain(command.input.Key);
+        return {};
+      });
+      const adapter = createAdapter(client),
+        session = propertySession(source.length, "property.logo"),
+        hotelPolicy = propertyPolicy("property.logo");
+      const sessionFile = session.files[0]!,
+        uploadTarget = session.uploadTargets[0]!;
+      const inspected = await adapter.inspectUploadedFile({
+        session,
+        sessionFile,
+        uploadTarget,
+        clientFile: { uploadTargetId },
+        policy: hotelPolicy,
+      });
+      if (!inspected.ok) throw new Error("Expected inspection success");
+      const generation = adapter.generateVariants({
+        session,
+        file: { sessionFile, uploadTarget, inspection: inspected.inspection },
+        fileIndex: 0,
+        policy: hotelPolicy,
+        beforeWriteVariant: async (variant) => {
+          if (failReceipt) throw new Error("manifest acknowledgement unavailable");
+          receipts.push(variant.storageKey);
+        },
+      });
+      if (failReceipt) {
+        await expect(generation).rejects.toThrow("manifest acknowledgement");
+        expect(send.mock.calls.some(([c]) => c instanceof PutObjectCommand)).toBe(false);
+      } else {
+        await expect(generation).resolves.toHaveLength(4);
+        expect(receipts).toHaveLength(4);
+      }
+    },
+  );
+
   it("rejects marketplace offer variants that bypass pending approval", async () => {
     const source = await validJpeg();
     const { client, send } = fakeS3(async (command) =>

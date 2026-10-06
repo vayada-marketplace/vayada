@@ -12,6 +12,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildHotelSetupCommandService } from "./hotelSetupCommandService.js";
 import { buildApp } from "./app.js";
 import { loadHotelSetupCommandForwarder } from "./hotelSetupCommandForwarder.js";
+import {
+  createInMemoryPlatformMediaRepository,
+  createDeterministicPlatformMediaUploadSigner,
+  createDeterministicPlatformMediaFinalizer,
+} from "./routes/platformMedia.js";
 import { registerPmsPricingCurrencyCommand } from "./routes/pmsPricing.js";
 
 const propertyId = "11111111-1111-4111-8111-111111111111";
@@ -159,6 +164,8 @@ it("forwards the original session through real private handlers without a local 
 function fixture(
   options: {
     session?: boolean;
+    roleKey?: string;
+    logoMedia?: Parameters<typeof buildHotelSetupCommandService>[0]["logoMedia"];
     creationOnly?: boolean;
     setupComplete?: boolean;
     globalFinancialsSuspended?: boolean;
@@ -184,7 +191,7 @@ function fixture(
     findActiveMembership: vi.fn().mockResolvedValue({
       membershipId: otherPropertyId,
       status: options.membership ?? "active",
-      roleKey: "owner",
+      roleKey: options.roleKey ?? (options.logoMedia ? "hotel_owner" : "owner"),
       workosMembershipId: null,
       workosRoleSlugs: ["owner"],
     }),
@@ -275,7 +282,7 @@ function fixture(
         recordInvalidPermissionOverride: vi.fn().mockResolvedValue(undefined),
         findMembershipPropertyScope: vi.fn().mockResolvedValue({
           mode: options.assignment ? "assigned" : "all",
-          roleKey: "owner",
+          roleKey: options.roleKey ?? (options.logoMedia ? "hotel_owner" : "owner"),
           accessOrigin: "agency",
           assignedPropertyIds: options.assignment
             ? [options.assignment === "current" ? propertyId : otherPropertyId]
@@ -285,6 +292,7 @@ function fixture(
         }),
       },
     },
+    logoMedia: options.logoMedia,
     launchSettings: options.creationOnly ? undefined : { updateLaunchSettings: launch },
     currencyCommands: options.creationOnly ? undefined : { upsertPropertyPricingCurrency: save },
     propertyCreation: { createPropertyProfile: create },
@@ -894,4 +902,185 @@ it("blocks public property creation before any ordinary writer", async () => {
   expect(response.statusCode).toBe(503);
   expect(write).not.toHaveBeenCalled();
   expect(transport).not.toHaveBeenCalled();
+});
+
+describe("private logo service boundary", () => {
+  function logoOptions() {
+    const repository = createInMemoryPlatformMediaRepository();
+    const acquire = vi.fn(async () => {
+      throw new Error("private credential unavailable");
+    });
+    const assignLogo = vi.fn().mockResolvedValue({ ok: true, response: { logoSaved: true } });
+    return {
+      acquire,
+      assignLogo,
+      logoMedia: {
+        uploads: {
+          repository,
+          targetResolver: { resolveTarget: vi.fn() },
+          signer: createDeterministicPlatformMediaUploadSigner(),
+          finalizer: createDeterministicPlatformMediaFinalizer(),
+          enabledPurposes: ["property.logo"] as const,
+          resolveRequestPersistence: acquire,
+        },
+        assignments: {
+          assignLogo,
+          replacePresentation: vi.fn(),
+          replacePlatformAdminHero: vi.fn(),
+          getPlatformAdminHero: vi.fn(),
+          runPublicationBatch: vi.fn(),
+          close: vi.fn(async () => {}),
+        },
+      },
+    };
+  }
+  it("rejects foreign-purpose signed and completed replay before any media work", async () => {
+    for (const status of ["signed", "completed"]) {
+      const logo = logoOptions();
+      const repository = logo.logoMedia.uploads.repository;
+      vi.spyOn(repository, "findUploadSessionForActor").mockResolvedValue({
+        actorUserId: userId,
+        ownerOrganizationId: organizationId,
+        purpose: "property.hero_image",
+        status,
+        resource: { product: "hotel_catalog", resourceType: "property", resourceId: propertyId },
+      } as never);
+      const complete = vi.spyOn(repository, "completeUploadSession");
+      const create = vi.spyOn(repository, "createUploadSession");
+      const inspect = vi.spyOn(logo.logoMedia.uploads.finalizer, "inspectUploadedFile");
+      const sign = vi.spyOn(logo.logoMedia.uploads.signer, "signUploadTarget");
+      const acquire = vi.fn(async () => ({
+        repository,
+        targetResolver: logo.logoMedia.uploads.targetResolver,
+        close: async () => {},
+      }));
+      const f = fixture({
+        logoMedia: {
+          ...logo.logoMedia,
+          uploads: { ...logo.logoMedia.uploads, resolveRequestPersistence: acquire },
+        },
+        permissions: ["hotel_catalog.setup.manage"],
+      });
+      expect(
+        (
+          await f.app.inject({
+            method: "POST",
+            url: `/media/upload-sessions/${propertyId}/finalize`,
+            headers: f.headers,
+            payload: { files: [] },
+          })
+        ).statusCode,
+      ).toBe(404);
+      acquire.mockClear();
+      expect(
+        (
+          await f.app.inject({
+            method: "POST",
+            url: "/media/upload-sessions",
+            headers: f.headers,
+            payload: {
+              ...logoPayload,
+              purpose: "property.hero_image",
+              idempotencyKey: "existing-completed",
+            },
+          })
+        ).statusCode,
+      ).toBe(400);
+      expect(acquire).not.toHaveBeenCalled();
+      expect(complete).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+      expect(inspect).not.toHaveBeenCalled();
+      expect(sign).not.toHaveBeenCalled();
+    }
+  });
+  const logoPayload = {
+    purpose: "property.logo",
+    visibility: "private",
+    resource: { product: "hotel_catalog", resourceType: "property", resourceId: propertyId },
+    files: [{ filename: "logo.png", contentType: "image/png", sizeBytes: 100 }],
+  };
+  it("independently verifies the original Owner and sanitizes private acquisition failure without PMS entitlement", async () => {
+    const logo = logoOptions();
+    const f = fixture({
+      ...logo,
+      permissions: ["hotel_catalog.setup.manage"],
+      entitlement: "missing",
+    });
+    const response = await f.app.inject({
+      method: "POST",
+      url: "/media/upload-sessions",
+      headers: f.headers,
+      payload: logoPayload,
+    });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ code: "hotel_setup_unavailable" });
+    expect(f.verifier).toHaveBeenCalledWith("valid");
+    expect(logo.acquire).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          actor: expect.objectContaining({ internalUserId: userId }),
+        }),
+      }),
+    );
+    expect(logo.assignLogo).not.toHaveBeenCalled();
+  });
+  it.each([
+    { session: false },
+    { roleKey: "hotel_staff" },
+    { permissions: [] as PermissionKey[] },
+    { link: "operator" as const },
+    { assignment: "other" as const },
+  ])("denies an unauthorized logo assignment before the command: %j", async (options) => {
+    const logo = logoOptions();
+    const f = fixture({ ...logo, permissions: ["hotel_catalog.setup.manage"], ...options });
+    const response = await f.app.inject({
+      method: "PUT",
+      url: `/properties/${propertyId}/media/logo`,
+      headers: f.headers,
+      payload: { expectedProfileRevision: 1, assignment: null },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(logo.assignLogo).not.toHaveBeenCalled();
+    expect(logo.acquire).not.toHaveBeenCalled();
+  });
+  it("exposes logo assignment only and rejects forwarded identity selectors", async () => {
+    const logo = logoOptions();
+    const f = fixture({
+      ...logo,
+      permissions: ["hotel_catalog.setup.manage"],
+      entitlement: "missing",
+    });
+    expect(
+      (
+        await f.app.inject({
+          method: "PUT",
+          url: `/properties/${propertyId}/media/logo`,
+          headers: f.headers,
+          payload: { expectedProfileRevision: 1, assignment: null },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(logo.assignLogo).toHaveBeenCalledOnce();
+    expect(
+      (
+        await f.app.inject({
+          method: "PUT",
+          url: `/properties/${propertyId}/media/presentation`,
+          headers: f.headers,
+          payload: {},
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect(
+      (
+        await f.app.inject({
+          method: "POST",
+          url: "/media/upload-sessions",
+          headers: { ...f.headers, "x-vayada-actor": userId },
+          payload: logoPayload,
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(logo.acquire).not.toHaveBeenCalled();
+  });
 });

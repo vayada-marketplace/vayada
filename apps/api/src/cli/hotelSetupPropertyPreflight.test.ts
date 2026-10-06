@@ -15,6 +15,16 @@ it("rejects mismatched or unsafe native configuration without exposing credentia
     { HOTEL_SETUP_COMMAND_DATABASE_LOGIN: "postgres" },
     { HOTEL_SETUP_COMMAND_DATABASE_LOGIN: login + "x".repeat(64) },
     { HOTEL_SETUP_COMMAND_OPERATION: "activate" },
+    { HOTEL_SETUP_COMMAND_OPERATION: "property_logo" },
+    { HOTEL_SETUP_COMMAND_DATABASE_LOGIN: "vayada_next_hotel_setup_logo_test" },
+    {
+      HOTEL_SETUP_COMMAND_OPERATION: "property_logo",
+      HOTEL_SETUP_COMMAND_DATABASE_LOGIN: "vayada_next_hotel_setup_logo_test",
+      HOTEL_SETUP_COMMAND_DATABASE_URL: env.HOTEL_SETUP_COMMAND_DATABASE_URL.replace(
+        login,
+        "vayada_next_hotel_setup_logo_test",
+      ),
+    },
     { HOTEL_SETUP_COMMAND_DATABASE_LOGIN: login + "x" },
     {
       HOTEL_SETUP_COMMAND_DATABASE_URL: env.HOTEL_SETUP_COMMAND_DATABASE_URL.replace(

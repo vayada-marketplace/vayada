@@ -755,8 +755,12 @@ describe.runIf(connectionString)("manual disabled property-role staging", () => 
       await sdkEntered;
       await readyClient.query("SET lock_timeout='750ms'");
       await readyClient.query("BEGIN");
+      expect(ready.staged.operation).toBe("launch_settings");
       await expect(
-        assertHotelSetupCommandScope(readyClient, ready.staged),
+        assertHotelSetupCommandScope(readyClient, {
+          ...ready.staged,
+          operation: "launch_settings",
+        }),
       ).resolves.toBeUndefined();
       await readyClient.query("ROLLBACK");
       expect(

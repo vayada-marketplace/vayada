@@ -82,16 +82,32 @@ export const HOTEL_SETUP_READER_READ_COLUMNS: Record<string, readonly string[]> 
     "property_id",
     "organization_id",
     "operation_class",
+    "actor_user_id",
     "active",
     "credential_role_oid",
     "credential_secret_version",
     "credential_ready_at",
   ],
+  "platform.media_upload_sessions": [
+    "id",
+    "actor_user_id",
+    "owner_organization_id",
+    "requested_purpose",
+    "property_id",
+    "resource_product",
+    "resource_type",
+    "resource_id",
+  ],
   "platform.product_audit_events": ["product", "audit_key"],
 };
 export const HOTEL_SETUP_CREATION_READER_READ_COLUMNS = Object.fromEntries(
   Object.entries(HOTEL_SETUP_READER_READ_COLUMNS)
-    .filter(([relation]) => relation !== "platform.hotel_setup_property_scopes")
+    .filter(
+      ([relation]) =>
+        !["platform.hotel_setup_property_scopes", "platform.media_upload_sessions"].includes(
+          relation,
+        ),
+    )
     .concat([
       [
         "platform.hotel_setup_creation_scopes",
@@ -280,7 +296,7 @@ export async function assertHotelSetupAuditBoundary(client: HotelSetupPrivilegeQ
           FROM pg_catalog.unnest(p.polroles) roles(role)),'')
         || COALESCE(pg_catalog.pg_get_expr(p.polqual,p.polrelid),'')
         || COALESCE(pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid),''),'' ORDER BY p.polname))
-        ='d1204ec07f6ad630751108c5a4e8e993'
+        ='bf4f04e98c1d12a86ee4b44e0ea57e71'
       FROM pg_catalog.pg_policy p WHERE p.polrelid=c.oid)
     AND pg_catalog.md5(pg_catalog.pg_get_functiondef(
       'platform.hotel_setup_reader_audit_allowed(platform.product_audit_events)'::regprocedure))

@@ -495,14 +495,14 @@ jobs:
       - name: Checkout reviewed compatible setup rollback source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 187eeea3a5d6864283b854815334fe34c7ec752b
+          ref: ef69824c3364c1e43caad5c474e1615f39aff8bd
           path: .hotel-setup-compatible-rollback
           persist-credentials: false
 
       - name: Build separately compiled compatible setup rollback
         working-directory: .hotel-setup-compatible-rollback
         run: |
-          test "$(git rev-parse HEAD)" = 187eeea3a5d6864283b854815334fe34c7ec752b
+          test "$(git rev-parse HEAD)" = ef69824c3364c1e43caad5c474e1615f39aff8bd
           npm ci
           npm run build:api
 

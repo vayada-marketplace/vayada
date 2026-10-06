@@ -6,7 +6,7 @@ import { expect, test, type Page } from "@playwright/test";
 // E2E_LANDING_ANALYTICS=1. The real vendor bytes are fetched once or supplied locally.
 // RUM requests are intercepted: tests never send measurements to Cloudflare.
 const source = "https://static.cloudflareinsights.com/beacon.min.js";
-const integrity = "rZU/V+RlKzHYA4/iZCw3bxslsQ5p/NEWjmbcnlJgM+uAQl7yofrR6Wa/+l+S8x0M";
+const integrity = "IJ+SAOzs9MgkuZ7AgklnzuCuJygVaKTjPTYXJMvM7piBSj4Q16DQGOWfe2kahIq+";
 const key = "vayada_cookie_consent";
 const choice = (analytics: boolean) => ({
   necessary: true,

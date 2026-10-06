@@ -337,6 +337,7 @@ export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolv
 
 type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   hotelSetupCommandForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
+  hotelSetupLogoForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
   hotelSetupCreationForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
   auth?: ApiAuthOptions;
   authSession?: AuthSessionRouteOptions;
@@ -810,6 +811,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPropertyMediaRoutes, {
       prefix: "/api/hotel-setup",
       repository: options.propertyMediaCommandRepository,
+      forwardLogo: options.hotelSetupLogoForwarder,
     });
     app.register(registerPlatformPropertyMediaRoutes, {
       prefix: "/api/platform/admin",

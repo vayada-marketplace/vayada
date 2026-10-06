@@ -10,7 +10,7 @@ import { parseHotelSetupHelperOwnerConfiguration } from "./hotelSetupAutomaticPr
 import { pathToFileURL } from "node:url";
 import { stageHotelSetupPropertyRole } from "../hotelSetupPropertyRoleStaging.js";
 import { activateVerifiedHotelSetupPropertyRole } from "../hotelSetupPropertyRoleActivation.js";
-import type { HotelSetupOperation } from "../hotelSetupCommandScope.js";
+import type { HotelSetupPropertyPurpose } from "../hotelSetupCommandScope.js";
 import type { checkHotelSetupPropertyCredential } from "./hotelSetupPropertyPreflight.js";
 
 /** Protected manual operational image only. Its driver must prove blocked public admission,
@@ -48,12 +48,14 @@ export async function runHotelSetupPropertyBootstrap(env: NodeJS.ProcessEnv = pr
       propertyId: env.HOTEL_SETUP_COMMAND_PROPERTY_ID ?? "",
       organizationId: env.HOTEL_SETUP_COMMAND_ORGANIZATION_ID ?? "",
       actorUserId: env.HOTEL_SETUP_COMMAND_ACTOR_USER_ID ?? "",
-      operation: env.HOTEL_SETUP_COMMAND_OPERATION as HotelSetupOperation,
+      operation: env.HOTEL_SETUP_COMMAND_OPERATION as HotelSetupPropertyPurpose,
     });
+    const password = randomBytes(36).toString("base64url");
     const staged = await stageHotelSetupPropertyRole({
       adminDatabaseUrl,
       databaseEndpoint,
       scope,
+      ...(scope.operation === "property_logo" ? { logoPassword: password } : {}),
       helperOwner: {
         databaseUrl: ownerDatabaseUrl,
         holder,
@@ -65,7 +67,7 @@ export async function runHotelSetupPropertyBootstrap(env: NodeJS.ProcessEnv = pr
     await assertHotelSetupBootstrapLock(holder);
     const native = new URL(adminDatabaseUrl);
     native.username = staged.login;
-    native.password = randomBytes(36).toString("base64url");
+    native.password = password;
     const nativeDatabaseUrl = native.toString();
     const receipt = await activateVerifiedHotelSetupPropertyRole({
       adminDatabaseUrl,

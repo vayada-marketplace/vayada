@@ -233,7 +233,9 @@ export async function assertHotelSetupCreationPrivileges(client: HotelSetupPrivi
   await assertHotelSetupAuditBoundary(client);
   const result = await client.query<{ safe: boolean }>(
     `SELECT (
-    NOT pg_catalog.has_database_privilege(current_user, pg_catalog.current_database(), 'TEMP')
+    pg_catalog.has_function_privilege(current_user,'platform.tenant_scope_key(text,uuid,uuid)','EXECUTE')
+    AND pg_catalog.has_function_privilege(current_user,'platform.valid_tenant_scope(text,uuid,uuid)','EXECUTE')
+    AND NOT pg_catalog.has_database_privilege(current_user, pg_catalog.current_database(), 'TEMP')
     AND NOT pg_catalog.has_database_privilege(current_user, pg_catalog.current_database(), 'CONNECT WITH GRANT OPTION')
     AND pg_catalog.has_database_privilege(current_user, pg_catalog.current_database(), 'CONNECT')
     AND (SELECT count(*) FROM pg_catalog.pg_proc p WHERE p.oid=ANY($4::regprocedure[])
@@ -255,12 +257,12 @@ export async function assertHotelSetupCreationPrivileges(client: HotelSetupPrivi
       || COALESCE(pg_catalog.pg_get_expr(p.polqual,p.polrelid),'')
       || COALESCE(pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid),''),'' ORDER BY c.oid::regclass::text,p.polname))
       FROM pg_catalog.pg_class c JOIN pg_catalog.pg_policy p ON p.polrelid=c.oid
-      WHERE c.oid=ANY($3::regclass[]))='aaf13c56e77687c5d9f719875aee93ae'
+      WHERE c.oid=ANY($3::regclass[]))='2962458a23eb07a33a780d458b0fa67d'
     AND (SELECT pg_catalog.md5(pg_catalog.string_agg(c.oid::regclass::text
       || pg_catalog.pg_get_triggerdef(t.oid) || pg_catalog.pg_get_functiondef(t.tgfoid)
       || t.tgenabled::text,'' ORDER BY c.oid::regclass::text,t.tgname))
       FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid
-      WHERE NOT t.tgisinternal AND c.oid=ANY($3::regclass[]))='be8e742e3e455d4c681078127de3f477'
+      WHERE NOT t.tgisinternal AND c.oid=ANY($3::regclass[]))='e2b189f2fa3ced50bd09130f50d306ef'
     AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_class c WHERE c.oid=ANY($3::regclass[])
       AND (c.relowner<>(SELECT relowner FROM pg_catalog.pg_class WHERE oid='platform.hotel_setup_creation_scopes'::regclass)
         OR (c.relkind IN ('r','p') AND NOT c.relrowsecurity)))

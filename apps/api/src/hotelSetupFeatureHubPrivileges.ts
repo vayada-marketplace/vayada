@@ -123,7 +123,7 @@ export async function assertHotelSetupFeatureHubPrivileges(client: Pick<pg.Pool,
   await assertHotelSetupNativePrivileges(
     client,
     HOTEL_SETUP_FEATURE_HUB_PRIVILEGES,
-    "16827da3dbb58d1daf6c2d1231323ad9",
+    "e55f55fa2d9d374518e1bcb0ad2aea33",
   );
   await assertHotelSetupPropertyRlsHelpers(client, "feature_hub");
 }
@@ -139,7 +139,9 @@ export async function assertHotelSetupNativePrivileges(
   await assertHotelSetupAuditBoundary(client);
   const result = await client.query<{ safe: boolean }>(
     `SELECT (
-    (SELECT count(*) FROM pg_catalog.pg_proc p WHERE p.oid=ANY($1::regprocedure[])
+    pg_catalog.has_function_privilege(current_user,'platform.tenant_scope_key(text,uuid,uuid)','EXECUTE')
+    AND pg_catalog.has_function_privilege(current_user,'platform.valid_tenant_scope(text,uuid,uuid)','EXECUTE')
+    AND (SELECT count(*) FROM pg_catalog.pg_proc p WHERE p.oid=ANY($1::regprocedure[])
       AND p.prosecdef AND pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE')
       AND p.proowner=(SELECT relowner FROM pg_catalog.pg_class
         WHERE oid='platform.hotel_setup_property_scopes'::regclass)

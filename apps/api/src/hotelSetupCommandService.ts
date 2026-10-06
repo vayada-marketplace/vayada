@@ -1,9 +1,16 @@
 import { timingSafeEqual } from "node:crypto";
+import {
+  registerPlatformMediaRoutes,
+  type PlatformMediaRoutesOptions,
+} from "./routes/platformMedia.js";
+import { registerPropertyMediaRoutes } from "./routes/propertyMedia.js";
+import type { PropertyMediaCommandRepository } from "./domains/propertyMediaCommandRepository.js";
 
 import {
   AuthorizationResolutionError,
   UnauthorizedError,
   backendAuthPlugin,
+  requireAuthContext,
   type BackendAuthPluginOptions,
 } from "@vayada/backend-auth";
 import {
@@ -35,6 +42,7 @@ type HotelSetupCommandServiceOptions = {
     entitlementRepository: EntitlementRepository;
     propertyAccessRepository: PropertyAccessRepository;
   };
+  logoMedia?: { uploads: PlatformMediaRoutesOptions; assignments: PropertyMediaCommandRepository };
   currencyCommands?: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">;
   propertyCreation?: Pick<SharedHotelSetupStatusRepository, "createPropertyProfile">;
   launchSettings?: {
@@ -92,6 +100,42 @@ export function buildHotelSetupCommandService(
       return reply.code(400).send({ code: "invalid_request" });
     return reply.code(503).send({ code: "hotel_setup_unavailable" });
   });
+  if (options.logoMedia) {
+    const uploads = options.logoMedia.uploads;
+    if (
+      uploads.enabledPurposes.length !== 1 ||
+      uploads.enabledPurposes[0] !== "property.logo" ||
+      !uploads.resolveRequestPersistence ||
+      uploads.forwardLogo
+    )
+      throw new Error("Private hotel logo persistence required");
+    // AuthKit verification runs independently here before selecting any native credential.
+    app.addHook("preHandler", async (request, reply) => {
+      const route = request.routeOptions.url;
+      if (!route?.startsWith("/media/") && route !== "/properties/:propertyId/media/logo") return;
+      if (
+        route?.startsWith("/media/") &&
+        route !== "/media/upload-sessions" &&
+        route !== "/media/upload-sessions/:sessionId/finalize"
+      )
+        return reply.code(404).send({ code: "not_found" });
+      const context = requireAuthContext(request);
+      if (
+        !context.actor.providerIdentity.sessionId ||
+        context.selectedOrganization.kind !== "hotel_group" ||
+        context.membership.roleKey !== "hotel_owner" ||
+        !context.membership.permissions.includes("hotel_catalog.setup.manage")
+      )
+        throw new AuthorizationError();
+    });
+    app.register(registerPlatformMediaRoutes, { prefix: "/media", ...uploads, logoOnly: true });
+    app.addHook("onClose", () => options.logoMedia!.assignments.close());
+    app.register(registerPropertyMediaRoutes, {
+      repository: options.logoMedia.assignments,
+      logoOnly: true,
+      propertyAccessRepository,
+    });
+  }
   if (options.currencyCommands)
     registerPmsPricingCurrencyCommand(app, options.currencyCommands, {
       requireOwnerSession: true,

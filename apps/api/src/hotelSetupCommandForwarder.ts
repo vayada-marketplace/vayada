@@ -1,7 +1,15 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { readIdempotencyKey } from "./routes/pmsPricing.js";
 
-type Operation = "currency" | "modules" | "financials" | "property_creation" | "launch_settings";
+type Operation =
+  | "currency"
+  | "modules"
+  | "financials"
+  | "property_creation"
+  | "launch_settings"
+  | "logo_upload"
+  | "logo_finalize"
+  | "logo_assignment";
 export type HotelSetupCommandForwarder = (
   request: FastifyRequest,
   reply: FastifyReply,
@@ -63,17 +71,23 @@ export function loadHotelSetupCommandForwarder(
     if (typeof authorization !== "string" || !/^Bearer \S+$/i.test(authorization))
       return reply.code(401).send({ code: "unauthenticated" });
     const suffix =
-      operation === "launch_settings"
-        ? "launch-settings"
-        : operation === "currency"
-          ? "pricing-source/currency"
-          : operation === "modules"
-            ? "module-activations"
-            : "module-activations/financials";
+      operation === "logo_assignment"
+        ? "media/logo"
+        : operation === "launch_settings"
+          ? "launch-settings"
+          : operation === "currency"
+            ? "pricing-source/currency"
+            : operation === "modules"
+              ? "module-activations"
+              : "module-activations/financials";
     const method =
-      operation === "property_creation"
+      operation === "property_creation" ||
+      operation === "logo_upload" ||
+      operation === "logo_finalize"
         ? "POST"
-        : operation === "currency" || operation === "launch_settings"
+        : operation === "currency" ||
+            operation === "launch_settings" ||
+            operation === "logo_assignment"
           ? "PUT"
           : operation === "modules"
             ? "GET"
@@ -84,7 +98,11 @@ export function loadHotelSetupCommandForwarder(
       "x-vayada-internal-token": internalToken,
       "content-type": "application/json",
     };
-    if (operation === "currency" || operation === "property_creation") {
+    if (
+      operation === "currency" ||
+      operation === "property_creation" ||
+      operation === "logo_assignment"
+    ) {
       const idempotencyKey = readIdempotencyKey(request);
       if (!idempotencyKey) return reply.code(400).send({ code: "invalid_request" });
       headers["idempotency-key"] = idempotencyKey;
@@ -92,14 +110,22 @@ export function loadHotelSetupCommandForwarder(
     try {
       const response = await transport(
         new URL(
-          operation === "property_creation" ? "/properties" : `/properties/${propertyId}/${suffix}`,
+          operation === "property_creation"
+            ? "/properties"
+            : operation === "logo_upload"
+              ? "/media/upload-sessions"
+              : operation === "logo_finalize"
+                ? `/media/upload-sessions/${propertyId}/finalize`
+                : `/properties/${propertyId}/${suffix}`,
           destination,
         ),
         {
           method,
           headers,
           redirect: "error",
-          signal: AbortSignal.timeout(5_000),
+          signal: AbortSignal.timeout(
+            operation === "logo_finalize" || operation === "logo_assignment" ? 30_000 : 5_000,
+          ),
           ...(method === "GET" ? {} : { body: JSON.stringify(request.body) }),
         },
       );

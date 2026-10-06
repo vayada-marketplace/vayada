@@ -1,5 +1,9 @@
 import { UnauthorizedError } from "@vayada/backend-auth";
-import { AuthorizationError } from "@vayada/backend-authorization";
+import {
+  AuthorizationError,
+  resolveEffectivePropertyAccess,
+  type PropertyAccessRepository,
+} from "@vayada/backend-authorization";
 import {
   PROPERTY_MEDIA_AUTHORIZATION,
   parseAssignPropertyLogoRequest,
@@ -11,6 +15,7 @@ import {
   propertyMediaCommandResultStatus,
   type PropertyMediaCommandRepository,
 } from "../domains/propertyMediaCommandRepository.js";
+import type { HotelSetupCommandForwarder } from "../hotelSetupCommandForwarder.js";
 import { enforceRoutePolicy } from "./policy.js";
 
 type PropertyMediaParams = { propertyId?: string };
@@ -21,12 +26,27 @@ type AuthorizedRequest = {
 
 export async function registerPropertyMediaRoutes(
   app: FastifyInstance,
-  options: { repository: PropertyMediaCommandRepository },
+  options: {
+    repository: PropertyMediaCommandRepository;
+    forwardLogo?: HotelSetupCommandForwarder;
+    logoOnly?: boolean;
+    propertyAccessRepository?: PropertyAccessRepository;
+  },
 ): Promise<void> {
   const authorized = new WeakMap<FastifyRequest, AuthorizedRequest>();
   const onRequest = async (request: FastifyRequest, reply: FastifyReply) => {
-    const access = authorizePropertyMediaRequest(request, reply);
-    if (access) authorized.set(request, access);
+    const access = authorizePropertyMediaRequest(request, reply, options.logoOnly);
+    if (!access) return;
+    if (options.logoOnly) {
+      if (!access.context.actor.providerIdentity.sessionId || !options.propertyAccessRepository)
+        throw new AuthorizationError();
+      const effective = await resolveEffectivePropertyAccess(
+        access.context,
+        options.propertyAccessRepository,
+      );
+      if (!effective?.propertyIds.includes(access.propertyId)) throw new AuthorizationError();
+    }
+    authorized.set(request, access);
   };
 
   app.put("/properties/:propertyId/media/logo", { onRequest }, async (request, reply) => {
@@ -35,6 +55,8 @@ export async function registerPropertyMediaRoutes(
     if (!body) return invalidRequest(reply, "A valid logo assignment is required.");
     const idempotencyKey = parseIdempotencyKey(request, reply);
     if (!idempotencyKey) return reply;
+    if (options.forwardLogo)
+      return options.forwardLogo(request, reply, access.propertyId, "logo_assignment");
     return sendResult(
       reply,
       await options.repository.assignLogo({
@@ -48,6 +70,7 @@ export async function registerPropertyMediaRoutes(
     );
   });
 
+  if (options.logoOnly) return;
   app.put("/properties/:propertyId/media/presentation", { onRequest }, async (request, reply) => {
     const access = requireAuthorizedRequest(authorized, request);
     const body = parseReplacePropertyPresentationMediaRequest(request.body);
@@ -71,6 +94,7 @@ export async function registerPropertyMediaRoutes(
 function authorizePropertyMediaRequest(
   request: FastifyRequest,
   reply: FastifyReply,
+  ownerOnly = false,
 ): AuthorizedRequest | null {
   try {
     const baseContext = enforceRoutePolicy(request, {
@@ -100,7 +124,9 @@ function authorizePropertyMediaRequest(
         product: PROPERTY_MEDIA_AUTHORIZATION.product,
         resourceType: PROPERTY_MEDIA_AUTHORIZATION.resourceType,
         resourceId: propertyId,
-        allowedRelationships: PROPERTY_MEDIA_AUTHORIZATION.allowedRelationships,
+        allowedRelationships: ownerOnly
+          ? ["owner"]
+          : PROPERTY_MEDIA_AUTHORIZATION.allowedRelationships,
       },
     });
     return { propertyId, context };

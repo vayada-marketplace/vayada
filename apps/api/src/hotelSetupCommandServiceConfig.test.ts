@@ -123,3 +123,33 @@ describe("private hotel setup configuration", () => {
     await expect(assertHotelSetupServiceReader({ query })).rejects.toThrow("database unavailable");
   });
 });
+
+describe("logo command admission", () => {
+  const env = {
+    HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: "x".repeat(32),
+    HOTEL_SETUP_COMMAND_DATABASE_ENDPOINT: "postgresql://db.example.com/vayada",
+    HOTEL_SETUP_COMMAND_SECRET_PREFIX: "hotel-setup-command/prod/property/",
+    HOTEL_SETUP_COMMAND_READER_DATABASE_URL: `postgresql://vayada_next_hotel_setup_reader:${"x".repeat(32)}@db.example.com/vayada?sslmode=verify-full`,
+    HOTEL_SETUP_COMMAND_WORKOS_JWKS_URL: "https://api.workos.com/jwks",
+    HOTEL_SETUP_COMMAND_WORKOS_ISSUER: "https://api.workos.com",
+    HOTEL_SETUP_COMMAND_WORKOS_AUDIENCE: "client-test",
+  };
+  it("blocks by default and requires complete explicit storage for admission", () => {
+    expect(loadHotelSetupCommandServiceConfig(env).logoServing).toBeUndefined();
+    expect(() =>
+      loadHotelSetupCommandServiceConfig({ ...env, HOTEL_SETUP_LOGO_COMMAND_ADMISSION: "enabled" }),
+    ).toThrow("storage required");
+    expect(() =>
+      loadHotelSetupCommandServiceConfig({ ...env, HOTEL_SETUP_LOGO_COMMAND_ADMISSION: "true" }),
+    ).toThrow("logo admission");
+    expect(
+      loadHotelSetupCommandServiceConfig({
+        ...env,
+        HOTEL_SETUP_LOGO_COMMAND_ADMISSION: "enabled",
+        PLATFORM_MEDIA_BUCKET: "owned-media",
+        PLATFORM_MEDIA_CDN_BASE_URL: "https://images.example.com",
+        PLATFORM_MEDIA_CDN_ORIGIN_HOST: "owned-media.s3.amazonaws.com",
+      }).logoServing?.bucketName,
+    ).toBe("owned-media");
+  });
+});

@@ -138,3 +138,69 @@ describe("private setup admission hold", () => {
     ).toBeTypeOf("function");
   });
 });
+
+describe("logo command transport", () => {
+  it.each([
+    ["logo_upload", "POST", "/media/upload-sessions"],
+    [
+      "logo_finalize",
+      "POST",
+      "/media/upload-sessions/10000000-0000-4000-8000-000000000001/finalize",
+    ],
+    ["logo_assignment", "PUT", "/properties/10000000-0000-4000-8000-000000000001/media/logo"],
+  ] as const)("forwards only the original %s wire request", async (operation, method, path) => {
+    const transport = vi.fn<typeof fetch>().mockResolvedValue(new Response("{}", { status: 200 }));
+    const forward = loadHotelSetupCommandForwarder(
+      {
+        HOTEL_SETUP_COMMAND_ORIGIN: "https://property-setup.internal",
+        HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: token,
+      },
+      transport,
+    )!;
+    const app = Fastify();
+    app.all("/command", (request, reply) =>
+      forward(request, reply, "10000000-0000-4000-8000-000000000001", operation),
+    );
+    try {
+      const payload = { example: "original body" };
+      expect(
+        (
+          await app.inject({
+            method,
+            url: "/command",
+            payload,
+            headers: {
+              authorization: "Bearer original-session",
+              "idempotency-key": "logo-attempt",
+              "x-hotel-id": "forged",
+              "x-vayada-actor": "forged",
+            },
+          })
+        ).statusCode,
+      ).toBe(200);
+      const [url, init] = transport.mock.calls[0]!;
+      expect(String(url)).toBe("https://property-setup.internal" + path);
+      expect(init!.body).toBe(JSON.stringify(payload));
+      expect(init!.headers).toEqual({
+        authorization: "Bearer original-session",
+        "x-vayada-internal-token": token,
+        "content-type": "application/json",
+        ...(operation === "logo_assignment" ? { "idempotency-key": "logo-attempt" } : {}),
+      });
+      transport.mockClear();
+      expect(
+        (
+          await app.inject({
+            method,
+            url: "/command?actor=forged",
+            payload,
+            headers: { authorization: "Bearer original-session" },
+          })
+        ).statusCode,
+      ).toBe(400);
+      expect(transport).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+});

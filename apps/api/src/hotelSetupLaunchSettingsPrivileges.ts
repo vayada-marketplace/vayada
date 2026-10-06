@@ -83,7 +83,7 @@ export async function assertHotelSetupLaunchSettingsPrivileges(
   await assertHotelSetupNativePrivileges(
     client,
     HOTEL_SETUP_LAUNCH_SETTINGS_PRIVILEGES,
-    "1806e2aa27adf206bf1bd347ed6165c1",
+    "6167ec974143c615fbc210fe7695539d",
     ["hotel_catalog.property_contact_channels"],
   );
   await assertHotelSetupPropertyRlsHelpers(client, "launch_settings");
@@ -94,7 +94,7 @@ export async function assertHotelSetupLaunchSettingsPrivileges(
       || t.tgenabled::text,'' ORDER BY c.oid::regclass::text,t.tgname))
     FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid
     WHERE NOT t.tgisinternal AND c.oid=ANY($1::regclass[])
-  )='1cb2d8e5be606992f7e70bf8d9ff9bf1'
+  )='7ef659a4b0923028b59bae8581f57f6f'
     AND (SELECT pg_catalog.md5(pg_catalog.string_agg(c.oid::regclass::text
       || pg_catalog.pg_get_viewdef(c.oid)||c.reloptions::text,'' ORDER BY c.oid::regclass::text))
       FROM pg_catalog.pg_class c WHERE c.oid=ANY(ARRAY[

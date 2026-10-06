@@ -26,6 +26,7 @@ import {
   normalizePlatformMediaPathPrefix,
   PROPERTY_MEDIA_PUBLIC_VARIANT_MAX_DIMENSIONS,
 } from "../platform/propertyMediaVariantContract.js";
+import type { HotelSetupCommandForwarder } from "../hotelSetupCommandForwarder.js";
 import { enforceRoutePolicy } from "./policy.js";
 import { sendPmsOperationsError, toPmsOperationsAccessError } from "./pmsOperations.js";
 
@@ -460,6 +461,7 @@ export type PlatformMediaUploadFinalizer = {
     file: PlatformMediaFinalizedFileRecord;
     fileIndex: number;
     policy: PlatformMediaPurposePolicy;
+    beforeWriteVariant?(variant: PlatformMediaVariantRecord): Promise<void>;
   }): Promise<PlatformMediaVariantRecord[]>;
   cleanupUploadedFile?(input: {
     session: PlatformMediaSessionRecord;
@@ -467,8 +469,25 @@ export type PlatformMediaUploadFinalizer = {
   }): Promise<void>;
 };
 
-export type PlatformMediaRoutesOptions = {
+export type PlatformMediaRequestPersistence = {
+  finalizer?: PlatformMediaUploadFinalizer;
   repository: PlatformMediaRepository;
+  targetResolver: PlatformMediaTargetResolver;
+  close(): Promise<void>;
+};
+
+export type PlatformMediaPersistenceRequest =
+  | { operation: "create"; context: RequestContext; request: PlatformMediaUploadSessionRequest }
+  | { operation: "finalize"; context: RequestContext; sessionId: string };
+
+export type PlatformMediaRoutesOptions = {
+  forwardLogo?: HotelSetupCommandForwarder;
+  logoOnly?: boolean;
+  repository: PlatformMediaRepository;
+  // A configured resolver must fail closed; it owns cleanup if acquisition fails.
+  resolveRequestPersistence?(
+    input: PlatformMediaPersistenceRequest,
+  ): Promise<PlatformMediaRequestPersistence>;
   signer: PlatformMediaUploadSigner;
   targetResolver: PlatformMediaTargetResolver;
   finalizer: PlatformMediaUploadFinalizer;
@@ -774,6 +793,23 @@ function policyForSession(
   return policyForPurpose(session.purpose);
 }
 
+async function resolveRequestPersistence(
+  options: PlatformMediaRoutesOptions,
+  input: PlatformMediaPersistenceRequest,
+): Promise<PlatformMediaRequestPersistence | undefined> {
+  if (!options.resolveRequestPersistence) return undefined;
+  const persistence = await options.resolveRequestPersistence(input);
+  if (
+    !persistence?.repository ||
+    !persistence.targetResolver ||
+    typeof persistence.close !== "function"
+  ) {
+    if (typeof persistence?.close === "function") await persistence.close();
+    throw new Error("Invalid platform media request persistence.");
+  }
+  return persistence;
+}
+
 export async function registerPlatformMediaRoutes(
   app: FastifyInstance,
   options: PlatformMediaRoutesOptions,
@@ -816,6 +852,18 @@ export async function registerPlatformMediaRoutes(
       const validation = validateUploadSessionRequest(request.body);
       if (!validation.ok) return sendMediaError(reply, 400, validation.code, validation.message);
 
+      if (
+        options.logoOnly &&
+        (request.body.purpose !== "property.logo" ||
+          request.body.resource.product !== "hotel_catalog" ||
+          request.body.resource.resourceType !== "property")
+      )
+        return sendMediaError(
+          reply,
+          400,
+          "invalid_media_purpose",
+          "Only canonical property logos are supported.",
+        );
       const policy = policyForPurpose(request.body.purpose);
       const resourceError = validateResourceScope(request.body.resource, policy);
       if (resourceError) {
@@ -895,6 +943,19 @@ export async function registerPlatformMediaRoutes(
         return sendMediaError(reply, 400, filePolicyError.code, filePolicyError.message);
       }
 
+      if (options.forwardLogo && policy.purpose === "property.logo") {
+        if (
+          request.body.resource.product !== "hotel_catalog" ||
+          request.body.resource.resourceType !== "property"
+        )
+          return sendMediaError(
+            reply,
+            400,
+            "invalid_resource_scope",
+            "Canonical property required.",
+          );
+        return options.forwardLogo(request, reply, request.body.resource.resourceId, "logo_upload");
+      }
       const createdAt = now().toISOString();
       const expiresAt = new Date(now().getTime() + 15 * 60 * 1000).toISOString();
       const idempotencyKey = request.body.idempotencyKey?.trim();
@@ -915,182 +976,197 @@ export async function registerPlatformMediaRoutes(
         visibility: requestedVisibility,
         files: normalizedFiles,
       };
-      const existingSession = idempotencyKey
-        ? await options.repository.findUploadSession(sessionId)
-        : null;
-      if (existingSession?.status === "completed") {
-        return sendUploadSessionReplay({
-          reply,
-          session: existingSession,
-          expected: {
-            context,
-            uploadSessionKey,
-            request: normalizedRequest,
-            target: existingSession.target,
-            ownerOrganizationId: existingSession.ownerOrganizationId,
-          },
-          signer: options.signer,
-          repository: options.repository,
-          now: now(),
-          mediaPathPrefix,
-        });
-      }
-      if (!existingSession && !isPurposeEnabled(options, request.body.purpose)) {
-        return sendPurposeUnavailable(reply);
-      }
-
-      const resolvedTarget = await options.targetResolver.resolveTarget({
+      const persistence = await resolveRequestPersistence(options, {
+        operation: "create",
         context,
-        request: request.body,
-        policy,
+        request: normalizedRequest,
       });
-      if (!resolvedTarget.ok) {
-        return sendMediaError(
-          reply,
-          resolvedTarget.statusCode,
-          resolvedTarget.code,
-          resolvedTarget.message,
-        );
-      }
-      const ownerOrganizationId = isPlatformAdminMedia
-        ? resolvedTarget.ownerOrganizationId
-        : context.selectedOrganization.organizationId;
-      if (!ownerOrganizationId) {
-        return sendMediaError(
-          reply,
-          404,
-          "media_target_not_found",
-          "The requested admin media target is unavailable.",
-        );
-      }
-
-      if (existingSession) {
-        return sendUploadSessionReplay({
-          reply,
-          session: existingSession,
-          expected: {
-            context,
-            uploadSessionKey,
-            request: normalizedRequest,
-            target: resolvedTarget.target,
-            ownerOrganizationId,
-          },
-          signer: options.signer,
-          repository: options.repository,
-          now: now(),
-          mediaPathPrefix,
-        });
-      }
-
-      const files = normalizedFiles.map((file) => ({
-        ...file,
-        uploadTargetId: randomUUID(),
-      }));
-      const uploadTargets = await Promise.all(
-        files.map(async (file, index) => {
-          const stagingKey = `${stagingPrefix}/${index + 1}/${file.filename}`;
-          const signed = await options.signer.signUploadTarget({
-            sessionId,
-            uploadTargetId: file.uploadTargetId,
-            stagingKey,
-            contentType: file.contentType,
-            sizeBytes: file.sizeBytes,
-            expiresAt,
-          });
-          return {
-            ...signed,
-            clientFileId: file.clientFileId,
-            stagingKey,
-          };
-        }),
-      );
-
-      let session: PlatformMediaSessionRecord;
+      const repository = persistence?.repository ?? options.repository;
+      const targetResolver = persistence?.targetResolver ?? options.targetResolver;
       try {
-        session = await options.repository.createUploadSession({
-          context,
-          sessionId,
-          uploadSessionKey,
-          stagingPrefix,
-          request: normalizedRequest,
-          policy,
-          target: resolvedTarget.target,
-          ownerOrganizationId,
-          platformAdmin: isPlatformAdminMedia,
-          uploadTargets,
-          now: createdAt,
-          expiresAt,
-          auditEvent: {
-            action: "platform_media.upload_session.created",
-            auditKey: uploadSessionKey,
-            actorUserId: context.actor.internalUserId,
-            organizationId: context.selectedOrganization.organizationId,
-            targetType: "media_upload_session",
-            targetId: sessionId,
-            requestId: context.audit.requestId,
-            metadata: {
-              purpose: request.body.purpose,
-              requestedVisibility,
-              resource: request.body.resource,
-              target: resolvedTarget.target,
-              fileCount: files.length,
+        const existingSession = idempotencyKey
+          ? await repository.findUploadSession(sessionId)
+          : null;
+        if (existingSession?.status === "completed") {
+          return await sendUploadSessionReplay({
+            reply,
+            session: existingSession,
+            expected: {
+              context,
+              uploadSessionKey,
+              request: normalizedRequest,
+              target: existingSession.target,
+              ownerOrganizationId: existingSession.ownerOrganizationId,
             },
-          },
-        });
-      } catch (error) {
-        if (error instanceof PlatformMediaPlanLimitError) {
-          return sendMediaError(reply, 409, error.code, error.message);
+            signer: options.signer,
+            repository: repository,
+            now: now(),
+            mediaPathPrefix,
+          });
         }
-        throw error;
-      }
+        if (!existingSession && !isPurposeEnabled(options, request.body.purpose)) {
+          return sendPurposeUnavailable(reply);
+        }
 
-      if (
-        !uploadSessionMatchesRequest(session, {
+        const resolvedTarget = await targetResolver.resolveTarget({
           context,
-          uploadSessionKey,
-          request: normalizedRequest,
-          target: resolvedTarget.target,
-          ownerOrganizationId,
-        })
-      ) {
-        return sendMediaError(
-          reply,
-          409,
-          "upload_session_idempotency_conflict",
-          "This idempotency key was already used for a different upload request.",
+          request: request.body,
+          policy,
+        });
+        if (!resolvedTarget.ok) {
+          return sendMediaError(
+            reply,
+            resolvedTarget.statusCode,
+            resolvedTarget.code,
+            resolvedTarget.message,
+          );
+        }
+        const ownerOrganizationId = isPlatformAdminMedia
+          ? resolvedTarget.ownerOrganizationId
+          : context.selectedOrganization.organizationId;
+        if (!ownerOrganizationId) {
+          return sendMediaError(
+            reply,
+            404,
+            "media_target_not_found",
+            "The requested admin media target is unavailable.",
+          );
+        }
+
+        if (existingSession) {
+          return await sendUploadSessionReplay({
+            reply,
+            session: existingSession,
+            expected: {
+              context,
+              uploadSessionKey,
+              request: normalizedRequest,
+              target: resolvedTarget.target,
+              ownerOrganizationId,
+            },
+            signer: options.signer,
+            repository: repository,
+            now: now(),
+            mediaPathPrefix,
+          });
+        }
+
+        const files = normalizedFiles.map((file) => ({
+          ...file,
+          uploadTargetId: randomUUID(),
+        }));
+        const uploadTargets = await Promise.all(
+          files.map(async (file, index) => {
+            const stagingKey = `${stagingPrefix}/${index + 1}/${file.filename}`;
+            const signed = await options.signer.signUploadTarget({
+              sessionId,
+              uploadTargetId: file.uploadTargetId,
+              stagingKey,
+              contentType: file.contentType,
+              sizeBytes: file.sizeBytes,
+              expiresAt,
+            });
+            return {
+              ...signed,
+              clientFileId: file.clientFileId,
+              stagingKey,
+            };
+          }),
         );
-      }
-      const replayedConcurrentCreate =
-        session.status !== "signed" ||
-        session.uploadTargets.some(
-          (target, index) => target.uploadTargetId !== uploadTargets[index]?.uploadTargetId,
-        );
-      if (replayedConcurrentCreate) {
-        return sendUploadSessionReplay({
-          reply,
-          session,
-          expected: {
+
+        let session: PlatformMediaSessionRecord;
+        try {
+          session = await repository.createUploadSession({
+            context,
+            sessionId,
+            uploadSessionKey,
+            stagingPrefix,
+            request: normalizedRequest,
+            policy,
+            target: resolvedTarget.target,
+            ownerOrganizationId,
+            platformAdmin: isPlatformAdminMedia,
+            uploadTargets,
+            now: createdAt,
+            expiresAt,
+            auditEvent: {
+              action: "platform_media.upload_session.created",
+              auditKey: uploadSessionKey,
+              actorUserId: context.actor.internalUserId,
+              organizationId: context.selectedOrganization.organizationId,
+              targetType: "media_upload_session",
+              targetId: sessionId,
+              requestId: context.audit.requestId,
+              metadata: {
+                purpose: request.body.purpose,
+                requestedVisibility,
+                resource: request.body.resource,
+                target: resolvedTarget.target,
+                fileCount: files.length,
+              },
+            },
+          });
+        } catch (error) {
+          if (error instanceof PlatformMediaPlanLimitError) {
+            return sendMediaError(reply, 409, error.code, error.message);
+          }
+          throw error;
+        }
+
+        if (
+          !uploadSessionMatchesRequest(session, {
             context,
             uploadSessionKey,
             request: normalizedRequest,
             target: resolvedTarget.target,
             ownerOrganizationId,
-          },
-          signer: options.signer,
-          repository: options.repository,
-          now: now(),
-          mediaPathPrefix,
-        });
-      }
+          })
+        ) {
+          return sendMediaError(
+            reply,
+            409,
+            "upload_session_idempotency_conflict",
+            "This idempotency key was already used for a different upload request.",
+          );
+        }
+        const replayedConcurrentCreate =
+          session.status !== "signed" ||
+          session.uploadTargets.some(
+            (target, index) => target.uploadTargetId !== uploadTargets[index]?.uploadTargetId,
+          );
+        if (replayedConcurrentCreate) {
+          return await sendUploadSessionReplay({
+            reply,
+            session,
+            expected: {
+              context,
+              uploadSessionKey,
+              request: normalizedRequest,
+              target: resolvedTarget.target,
+              ownerOrganizationId,
+            },
+            signer: options.signer,
+            repository: repository,
+            now: now(),
+            mediaPathPrefix,
+          });
+        }
 
-      reply.header("Cache-Control", "private, no-store");
-      reply.header("Vary", "Origin, Authorization");
-      return reply.code(201).send({
-        contractVersion: uploadContractVersion(session),
-        uploadSession: serializeSession(session),
-        uploadTargets: serializeUploadTargets(session),
-        audit: serializeAudit(context),
-      });
+        reply.header("Cache-Control", "private, no-store");
+        reply.header("Vary", "Origin, Authorization");
+        return reply.code(201).send({
+          contractVersion: uploadContractVersion(session),
+          uploadSession: serializeSession(session),
+          uploadTargets: serializeUploadTargets(session),
+          audit: serializeAudit(context),
+        });
+      } finally {
+        try {
+          await persistence?.close();
+        } catch {
+          request.log.warn("Platform media request persistence cleanup failed.");
+        }
+      }
     },
   );
 
@@ -1103,205 +1179,244 @@ export async function registerPlatformMediaRoutes(
       } catch (error) {
         return sendPmsInboxMediaAccessError(reply, request, "", error);
       }
-      const platformOrganizationSelected =
-        authenticatedContext.selectedOrganization.kind === "platform";
-      const session = platformOrganizationSelected
-        ? await options.repository.findUploadSession(request.params.sessionId)
-        : await options.repository.findUploadSessionForActor({
-            sessionId: request.params.sessionId,
-            actorUserId: authenticatedContext.actor.internalUserId,
-            ownerOrganizationId: authenticatedContext.selectedOrganization.organizationId,
-          });
-      if (!session || session.actorUserId !== authenticatedContext.actor.internalUserId) {
-        return sendMediaError(reply, 404, "upload_session_not_found", "Upload session not found.");
-      }
-      const policy = policyForSession(session);
-      const resourceError = validateResourceScope(session.resource, policy);
-      if (resourceError || !sessionVisibilityMatchesPolicy(session, policy)) {
-        return sendNonReusableUploadSession(reply);
-      }
-      let authorization: ReturnType<typeof authorizeMediaResource>;
+      const persistence = await resolveRequestPersistence(options, {
+        operation: "finalize",
+        context: authenticatedContext,
+        sessionId: request.params.sessionId,
+      });
+      const repository = persistence?.repository ?? options.repository;
+      const targetResolver = persistence?.targetResolver ?? options.targetResolver;
+      const finalizer = persistence?.finalizer ?? options.finalizer;
       try {
-        authorization = authorizeMediaResource(request, policy, session.resource);
-      } catch (error) {
-        if (policy.purpose === "pms.messaging.attachment") {
-          return sendPmsInboxMediaAccessError(reply, request, session.resource.resourceId, error);
+        const platformOrganizationSelected =
+          authenticatedContext.selectedOrganization.kind === "platform";
+        const session = platformOrganizationSelected
+          ? await repository.findUploadSession(request.params.sessionId)
+          : await repository.findUploadSessionForActor({
+              sessionId: request.params.sessionId,
+              actorUserId: authenticatedContext.actor.internalUserId,
+              ownerOrganizationId: authenticatedContext.selectedOrganization.organizationId,
+            });
+        if (!session || session.actorUserId !== authenticatedContext.actor.internalUserId) {
+          return sendMediaError(
+            reply,
+            404,
+            "upload_session_not_found",
+            "Upload session not found.",
+          );
         }
-        throw error;
-      }
-      if (!authorization.ok) {
-        if (policy.purpose === "pms.messaging.attachment") {
-          return sendPmsOperationsError(reply, {
-            statusCode: 403,
-            code: "missing_resource_access",
-            category: "authorization",
-            message: "Missing PMS property access.",
+        if (
+          options.logoOnly &&
+          (session.purpose !== "property.logo" ||
+            session.resource.product !== "hotel_catalog" ||
+            session.resource.resourceType !== "property")
+        )
+          return sendMediaError(
+            reply,
+            404,
+            "upload_session_not_found",
+            "Upload session not found.",
+          );
+        const policy = policyForSession(session);
+        const resourceError = validateResourceScope(session.resource, policy);
+        if (resourceError || !sessionVisibilityMatchesPolicy(session, policy)) {
+          return sendNonReusableUploadSession(reply);
+        }
+        let authorization: ReturnType<typeof authorizeMediaResource>;
+        try {
+          authorization = authorizeMediaResource(request, policy, session.resource);
+        } catch (error) {
+          if (policy.purpose === "pms.messaging.attachment") {
+            return sendPmsInboxMediaAccessError(reply, request, session.resource.resourceId, error);
+          }
+          throw error;
+        }
+        if (!authorization.ok) {
+          if (policy.purpose === "pms.messaging.attachment") {
+            return sendPmsOperationsError(reply, {
+              statusCode: 403,
+              code: "missing_resource_access",
+              category: "authorization",
+              message: "Missing PMS property access.",
+            });
+          }
+          return sendMediaError(reply, 403, "media_resource_forbidden", authorization.message);
+        }
+        const context = authorization.context;
+        if (session.platformAdmin && context.selectedOrganization.kind !== "platform") {
+          return sendMediaError(
+            reply,
+            403,
+            "media_resource_forbidden",
+            "Platform Admin media must be finalized from the platform organization.",
+          );
+        }
+        if (policy.actorOwned && session.resource.resourceId !== context.actor.internalUserId) {
+          return sendMediaError(
+            reply,
+            403,
+            "media_resource_forbidden",
+            "Profile images can only be finalized by the signed-in user.",
+          );
+        }
+        if (options.forwardLogo && session.purpose === "property.logo") {
+          const validation = validateFinalizeRequest(request.body, session);
+          if (!validation.ok)
+            return sendMediaError(reply, 400, validation.code, validation.message);
+          return await options.forwardLogo(request, reply, session.sessionId, "logo_finalize");
+        }
+        if (session.status === "completed") {
+          await cleanupUploadedFiles({
+            finalizer,
+            session,
+            files: finalizedFilesFromCompletedSession(session),
+            timeoutMs: cleanupTimeoutMs,
+            onError(error, file) {
+              request.log.warn(
+                {
+                  err: error,
+                  sessionId: session.sessionId,
+                  uploadTargetId: file.uploadTarget.uploadTargetId,
+                },
+                "Platform media staging cleanup failed; a finalize replay will retry it.",
+              );
+            },
           });
+          return sendCompletedFinalizeReplay(reply, session, mediaPathPrefix);
         }
-        return sendMediaError(reply, 403, "media_resource_forbidden", authorization.message);
-      }
-      const context = authorization.context;
-      if (session.platformAdmin && context.selectedOrganization.kind !== "platform") {
-        return sendMediaError(
-          reply,
-          403,
-          "media_resource_forbidden",
-          "Platform Admin media must be finalized from the platform organization.",
-        );
-      }
-      if (policy.actorOwned && session.resource.resourceId !== context.actor.internalUserId) {
-        return sendMediaError(
-          reply,
-          403,
-          "media_resource_forbidden",
-          "Profile images can only be finalized by the signed-in user.",
-        );
-      }
-      if (session.status === "completed") {
+        const currentTarget = await targetResolver.resolveTarget({
+          context,
+          request: uploadRequestFromSession(session),
+          policy,
+        });
+        if (
+          !currentTarget.ok ||
+          (session.platformAdmin
+            ? currentTarget.ownerOrganizationId
+            : context.selectedOrganization.organizationId) !== session.ownerOrganizationId ||
+          JSON.stringify(targetProjection(currentTarget.target)) !==
+            JSON.stringify(targetProjection(session.target))
+        ) {
+          return sendNonReusableUploadSession(reply);
+        }
+        if (new Date(session.expiresAt).getTime() <= now().getTime()) {
+          return sendMediaError(reply, 409, "upload_session_expired", "Upload session expired.");
+        }
+        const finalizationSession =
+          session.requestedVisibility === "public" && policy.autoApprovePublicOnFinalize === true
+            ? { ...session, effectiveVisibility: "public" as const }
+            : session;
+        const validation = validateFinalizeRequest(request.body, finalizationSession);
+        if (!validation.ok) return sendMediaError(reply, 400, validation.code, validation.message);
+
+        const finalizedFiles = await inspectFinalizedFiles({
+          request: request.body,
+          session: finalizationSession,
+          policy,
+          finalizer,
+        });
+        if (!finalizedFiles.ok) {
+          const replay = await findCompletedFinalizeReplay({
+            repository: repository,
+            session,
+          });
+          if (replay) return sendCompletedFinalizeReplay(reply, replay, mediaPathPrefix);
+          return sendMediaError(reply, 400, finalizedFiles.code, finalizedFiles.message);
+        }
+
+        const variantSets: PlatformMediaVariantRecord[][] = [];
+        try {
+          for (const [index, file] of finalizedFiles.files.entries()) {
+            variantSets.push(
+              await finalizer.generateVariants({
+                session: finalizationSession,
+                file,
+                fileIndex: index,
+                policy,
+              }),
+            );
+          }
+        } catch (error) {
+          if (error instanceof PlatformMediaStagingChangedError) {
+            const replay = await findCompletedFinalizeReplay({
+              repository: repository,
+              session,
+            });
+            if (replay) return sendCompletedFinalizeReplay(reply, replay, mediaPathPrefix);
+            return sendNonReusableUploadSession(reply);
+          }
+          throw error;
+        }
+        const completedAt = now().toISOString();
+        let completed: PlatformMediaCompleteUploadSessionResult;
+        try {
+          completed = await repository.completeUploadSession({
+            session: finalizationSession,
+            files: finalizedFiles.files,
+            variantSets,
+            bucketName,
+            now: completedAt,
+            auditEvent: {
+              action: "platform_media.upload_session.finalized",
+              auditKey: `media.finalize:${session.sessionId}`,
+              actorUserId: finalizationSession.actorUserId,
+              organizationId: finalizationSession.ownerOrganizationId,
+              targetType: "media_object",
+              targetId: finalizationSession.files[0]!.mediaId,
+              requestId: context.audit.requestId,
+              metadata: {
+                purpose: finalizationSession.purpose,
+                requestedVisibility: finalizationSession.requestedVisibility,
+                effectiveVisibility: finalizationSession.effectiveVisibility,
+                target: finalizationSession.target,
+                mediaIds: finalizationSession.files.map(({ mediaId }) => mediaId),
+                variantNames: variantSets[0]?.map(({ variantName }) => variantName) ?? [],
+              },
+            },
+          });
+        } catch (error) {
+          if (error instanceof PlatformMediaTargetInvalidError) {
+            return sendNonReusableUploadSession(reply);
+          }
+          throw error;
+        }
+        const completedSession = completed.uploadSession;
+        const mediaObjects = completed.mediaObjects;
+        const primaryMediaObject = mediaObjects[0]!;
         await cleanupUploadedFiles({
-          finalizer: options.finalizer,
-          session,
-          files: finalizedFilesFromCompletedSession(session),
+          finalizer,
+          session: completedSession,
+          files: finalizedFiles.files,
           timeoutMs: cleanupTimeoutMs,
           onError(error, file) {
             request.log.warn(
               {
                 err: error,
-                sessionId: session.sessionId,
+                sessionId: completedSession.sessionId,
                 uploadTargetId: file.uploadTarget.uploadTargetId,
               },
               "Platform media staging cleanup failed; a finalize replay will retry it.",
             );
           },
         });
-        return sendCompletedFinalizeReplay(reply, session, mediaPathPrefix);
-      }
-      const currentTarget = await options.targetResolver.resolveTarget({
-        context,
-        request: uploadRequestFromSession(session),
-        policy,
-      });
-      if (
-        !currentTarget.ok ||
-        (session.platformAdmin
-          ? currentTarget.ownerOrganizationId
-          : context.selectedOrganization.organizationId) !== session.ownerOrganizationId ||
-        JSON.stringify(targetProjection(currentTarget.target)) !==
-          JSON.stringify(targetProjection(session.target))
-      ) {
-        return sendNonReusableUploadSession(reply);
-      }
-      if (new Date(session.expiresAt).getTime() <= now().getTime()) {
-        return sendMediaError(reply, 409, "upload_session_expired", "Upload session expired.");
-      }
-      const finalizationSession =
-        session.requestedVisibility === "public" && policy.autoApprovePublicOnFinalize === true
-          ? { ...session, effectiveVisibility: "public" as const }
-          : session;
-      const validation = validateFinalizeRequest(request.body, finalizationSession);
-      if (!validation.ok) return sendMediaError(reply, 400, validation.code, validation.message);
 
-      const finalizedFiles = await inspectFinalizedFiles({
-        request: request.body,
-        session: finalizationSession,
-        policy,
-        finalizer: options.finalizer,
-      });
-      if (!finalizedFiles.ok) {
-        const replay = await findCompletedFinalizeReplay({
-          repository: options.repository,
-          session,
+        setPrivateMediaResponseHeaders(reply, completedSession);
+        return reply.code(200).send({
+          contractVersion: uploadContractVersion(completedSession),
+          uploadSession: serializeSession(completedSession),
+          mediaObject: serializeMediaObject(completedSession, primaryMediaObject, mediaPathPrefix),
+          mediaObjects: mediaObjects.map((mediaObject) =>
+            serializeMediaObject(completedSession, mediaObject, mediaPathPrefix),
+          ),
+          sideEffects: ["variant_generation", "audit_event"],
         });
-        if (replay) return sendCompletedFinalizeReplay(reply, replay, mediaPathPrefix);
-        return sendMediaError(reply, 400, finalizedFiles.code, finalizedFiles.message);
-      }
-
-      const variantSets: PlatformMediaVariantRecord[][] = [];
-      try {
-        for (const [index, file] of finalizedFiles.files.entries()) {
-          variantSets.push(
-            await options.finalizer.generateVariants({
-              session: finalizationSession,
-              file,
-              fileIndex: index,
-              policy,
-            }),
-          );
+      } finally {
+        try {
+          await persistence?.close();
+        } catch {
+          request.log.warn("Platform media request persistence cleanup failed.");
         }
-      } catch (error) {
-        if (error instanceof PlatformMediaStagingChangedError) {
-          const replay = await findCompletedFinalizeReplay({
-            repository: options.repository,
-            session,
-          });
-          if (replay) return sendCompletedFinalizeReplay(reply, replay, mediaPathPrefix);
-          return sendNonReusableUploadSession(reply);
-        }
-        throw error;
       }
-      const completedAt = now().toISOString();
-      let completed: PlatformMediaCompleteUploadSessionResult;
-      try {
-        completed = await options.repository.completeUploadSession({
-          session: finalizationSession,
-          files: finalizedFiles.files,
-          variantSets,
-          bucketName,
-          now: completedAt,
-          auditEvent: {
-            action: "platform_media.upload_session.finalized",
-            auditKey: `media.finalize:${session.sessionId}`,
-            actorUserId: finalizationSession.actorUserId,
-            organizationId: finalizationSession.ownerOrganizationId,
-            targetType: "media_object",
-            targetId: finalizationSession.files[0]!.mediaId,
-            requestId: context.audit.requestId,
-            metadata: {
-              purpose: finalizationSession.purpose,
-              requestedVisibility: finalizationSession.requestedVisibility,
-              effectiveVisibility: finalizationSession.effectiveVisibility,
-              target: finalizationSession.target,
-              mediaIds: finalizationSession.files.map(({ mediaId }) => mediaId),
-              variantNames: variantSets[0]?.map(({ variantName }) => variantName) ?? [],
-            },
-          },
-        });
-      } catch (error) {
-        if (error instanceof PlatformMediaTargetInvalidError) {
-          return sendNonReusableUploadSession(reply);
-        }
-        throw error;
-      }
-      const completedSession = completed.uploadSession;
-      const mediaObjects = completed.mediaObjects;
-      const primaryMediaObject = mediaObjects[0]!;
-      await cleanupUploadedFiles({
-        finalizer: options.finalizer,
-        session: completedSession,
-        files: finalizedFiles.files,
-        timeoutMs: cleanupTimeoutMs,
-        onError(error, file) {
-          request.log.warn(
-            {
-              err: error,
-              sessionId: completedSession.sessionId,
-              uploadTargetId: file.uploadTarget.uploadTargetId,
-            },
-            "Platform media staging cleanup failed; a finalize replay will retry it.",
-          );
-        },
-      });
-
-      setPrivateMediaResponseHeaders(reply, completedSession);
-      return reply.code(200).send({
-        contractVersion: uploadContractVersion(completedSession),
-        uploadSession: serializeSession(completedSession),
-        mediaObject: serializeMediaObject(completedSession, primaryMediaObject, mediaPathPrefix),
-        mediaObjects: mediaObjects.map((mediaObject) =>
-          serializeMediaObject(completedSession, mediaObject, mediaPathPrefix),
-        ),
-        sideEffects: ["variant_generation", "audit_event"],
-      });
     },
   );
 

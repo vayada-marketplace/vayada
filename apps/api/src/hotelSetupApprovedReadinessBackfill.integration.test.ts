@@ -36,7 +36,7 @@ describe.runIf(databaseUrl && rollbackRoot)(
       if (
         root === (await realpath(new URL("../../../", import.meta.url))) ||
         execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim() !==
-          "187eeea3a5d6864283b854815334fe34c7ec752b"
+          "ef69824c3364c1e43caad5c474e1615f39aff8bd"
       )
         throw new Error("Independent reviewed rollback source required");
       execFileSync("git", ["diff", "--quiet", "HEAD"], { cwd: root });
