@@ -68,5 +68,15 @@
       "digest": "sha256:18fa7587a09fa58916e734ea9c3b2d38c274783bc98d793308cc2f122d688965",
       "source": "3efb2195a823f40b7cd5a716db5bf08ac3fe90ad"
     }
+  },
+  "vay965-logo-rds-20261006": {
+    "primary": {
+      "digest": "sha256:50b20c753673bdc943a367353c4890c4684e49401b91557ab672c8cb205a38c7",
+      "source": "767ce3c7e9113bbdf51c0d819c75145f08c945b6"
+    },
+    "rollback": {
+      "digest": "sha256:18fa7587a09fa58916e734ea9c3b2d38c274783bc98d793308cc2f122d688965",
+      "source": "3efb2195a823f40b7cd5a716db5bf08ac3fe90ad"
+    }
   }
 }
