@@ -982,12 +982,14 @@ export function registerHotelSetupPropertyProfileUpdate(
         code: "idempotency_key_conflict",
         detail: "These hotel details changed during the save. Review them and try again.",
       });
-    if (result.status === "not_provisioned")
+    if (result.status === "not_provisioned") {
+      request.log.warn({ propertyId }, "Property profile credential is not provisioned");
       return reply.status(409).send({
         code: "profile_edit_not_provisioned",
         detail:
           "Editing hotel details isn't enabled for your account on this hotel yet. Please contact Vayada support.",
       });
+    }
     if (result.status === "private_contact_conflict")
       return reply.status(409).send({
         code: "private_contact_conflict",

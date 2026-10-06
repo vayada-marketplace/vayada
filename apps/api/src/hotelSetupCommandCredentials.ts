@@ -162,6 +162,10 @@ export function createHotelSetupActorCredentialResolver(
             AND link.relationship='owner' AND link.status='active')`,
       [propertyId, organizationId, actorUserId],
     );
+    // Only "no ready assignment" is a provisioning gap; duplicates or a row failing
+    // validation are integrity faults and stay generic (logged, retry-later).
+    if (result.rows.length === 0)
+      throw new HotelSetupAssignmentMissingError(`Missing hotel setup ${kind} assignment`);
     const scope = result.rows.length === 1 ? result.rows[0] : undefined;
     if (
       !scope ||
@@ -172,7 +176,7 @@ export function createHotelSetupActorCredentialResolver(
       !new RegExp(`^vayada_next_hotel_setup_${kind}_[a-z0-9_]+$`).test(scope.databaseLogin) ||
       Buffer.byteLength(scope.databaseLogin) > 63
     )
-      throw new HotelSetupAssignmentMissingError(`Missing hotel setup ${kind} assignment`);
+      throw new Error(`Missing hotel setup ${kind} assignment`);
     return readNativeSetupCredential(
       options.readNativeSecret,
       endpoint,

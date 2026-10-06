@@ -97,7 +97,9 @@ export async function runHotelSetupPropertyPreflight(env: NodeJS.ProcessEnv = pr
             typeof id === "string" && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id),
         )
       )
-        throw new Error("Invalid native logo binding");
+        throw new Error(
+          `Invalid native ${hotelSetupPurposeKind(operation as HotelSetupPropertyPurpose)} binding`,
+        );
       return parseHotelSetupDatabaseUrl(
         env.HOTEL_SETUP_COMMAND_DATABASE_URL ?? "",
         env.HOTEL_SETUP_COMMAND_DATABASE_ENDPOINT ?? "",

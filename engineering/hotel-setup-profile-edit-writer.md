@@ -99,17 +99,26 @@ Any failure rolls back the profile, location, contacts, projections, key and aud
 
 ## Release order
 
+**Merge gate:** merging the DB slice into `main` is itself a release, because public
+API startup applies 0470–0472. Do not merge it until step 1 has run against the final
+0470 bytes (sha256 `065464209d9d0f32bb20465c3f511bf7feb7a15199617a2d7ad06c135334e536`).
+The API hold must still capture the serving task.
+
 1. Pre-stage the NOLOGIN parent `vayada_next_hotel_setup_profile_scope` exactly like
    the logo parent (platform `hotel-setup-migration-scope.yml`, add `scope=profile_0470`
-   pinned to the 0470 bytes): the production migration owner cannot create roles, so
-   `vayada_admin` (NOSUPERUSER CREATEROLE) creates it. That yields its creator edge
+   pinned to the 0470 bytes above): the production migration owner cannot create roles,
+   so `vayada_admin` (NOSUPERUSER CREATEROLE) creates it. That yields its creator edge
    (ADMIN=true, INHERIT=false, SET=false, superuser grantor), which credential staging
    needs to grant the parent. 0470 then skips `CREATE ROLE` and only checks the posture.
    Without this step, startup fails with the same `CREATE ROLE` permission error 0466
    hit.
 2. Apply 0470–0472 through normal public API startup (no login or grant is created).
-3. Deploy private property-service primary and a compatible rollback that both
-   contain this purpose (the bootstrap's secondary proof requires it).
+3. Build the private primary, the rollback and the bootstrap pair from the final
+   reviewed source (no earlier than the review-fix head, because the native definition
+   pin changed). Register the pair in `engineering/hotel-setup-bootstrap-images.json`.
+   Then deploy the private property-service primary. An image from an earlier head
+   fails the profile attestation: as the secondary proof it blocks bootstrap, and as a
+   rollback every save returns 503.
 4. Protected bootstrap of the `property_profile` credential per original property
    with its exact Owner actor (RDS-compatible actor flow); publish the immutable
    secret version. Grant the profile secret prefix to the property task's secret

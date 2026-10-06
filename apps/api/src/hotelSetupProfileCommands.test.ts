@@ -182,7 +182,11 @@ describe("profile credential selection", () => {
     const r = resolver(rows);
     const missing = r.resolve(propertyId, organizationId, actorUserId);
     await expect(missing).rejects.toThrow("Missing hotel setup profile assignment");
-    await expect(missing).rejects.toBeInstanceOf(HotelSetupAssignmentMissingError);
+    // Only an absent assignment is a provisioning gap; anything else is an integrity fault.
+    const typed = await missing.catch(
+      (error: unknown) => error instanceof HotelSetupAssignmentMissingError,
+    );
+    expect(typed).toBe(rows.length === 0);
     expect(r.readNativeSecret).not.toHaveBeenCalled();
   });
 });
@@ -204,6 +208,22 @@ describe("profile command availability", () => {
     expect(await commands([]).updatePropertyProfile(context, propertyId, command())).toEqual({
       status: "not_provisioned",
     });
+  });
+  it("keeps duplicate or invalid assignments generic and unavailable", async () => {
+    const duplicate = {
+      databaseLogin: "vayada_next_hotel_setup_profile_test",
+      propertyId,
+      organizationId,
+      actorUserId,
+      credentialRoleOid: 7,
+      actualRoleOid: 7,
+      credentialSecretVersion: "11111111-1111-4111-8111-111111111111",
+      credentialReadyAt: new Date("2026-10-06T00:00:00Z"),
+    };
+    for (const rows of [[duplicate, duplicate], [{ ...duplicate, actualRoleOid: 8 }]])
+      await expect(
+        commands(rows).updatePropertyProfile(context, propertyId, command()),
+      ).rejects.toThrow(/^Hotel setup profile command unavailable$/);
   });
   it("keeps other credential failures generic and unavailable", async () => {
     const ready = {

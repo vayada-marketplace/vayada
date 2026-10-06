@@ -429,20 +429,42 @@ describe.skipIf(!url)("native property profile edit", () => {
       expect(await snapshot(bound)).toMatchObject({ profileRevision: revision + 2 });
       expect((await audits()).rows).toHaveLength(2);
 
-      // Two connections race. The organization lock serializes them: one revision
-      // writes and the other conflicts; one key writes once and the other replays.
+      // Two connections race. Hold the organization row so both writers are provably
+      // waiting on it at once; on release the lock serializes them: one revision writes
+      // and the other conflicts; one key writes once and the other replays.
       const racer = connect(login);
-      const race = await Promise.all([
+      await racer.query("SELECT 1");
+      const overlapped = async (writes: () => Promise<unknown>[]) => {
+        await admin.query("BEGIN");
+        await admin.query("SELECT id FROM identity.organizations WHERE id=$1 FOR UPDATE", [org]);
+        const all = Promise.all(writes());
+        for (let attempt = 0; ; attempt++) {
+          await admin.query("SELECT pg_catalog.pg_stat_clear_snapshot()");
+          const waiting = await count(
+            "SELECT count(*) AS n FROM pg_catalog.pg_stat_activity WHERE usename=$1 AND wait_event_type='Lock'",
+            [login],
+          );
+          if (waiting === 2) break;
+          if (attempt > 400) {
+            await admin.query("ROLLBACK");
+            throw new Error("Profile writers did not overlap");
+          }
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        await admin.query("COMMIT");
+        return (await all) as Record<string, unknown>[];
+      };
+      const race = await overlapped(() => [
         update(bound, revision + 2, profile("Race A", contacts), "race-a", "race-a", native),
         update(bound, revision + 2, profile("Race B", contacts), "race-b", "race-b", racer),
       ]);
-      expect(race.map((result) => result!["status"]).sort()).toEqual(["conflict", "updated"]);
+      expect(race.map((result) => result["status"]).sort()).toEqual(["conflict", "updated"]);
       const same = profile("Race C", contacts);
-      const replay = await Promise.all([
+      const replay = await overlapped(() => [
         update(bound, revision + 3, same, "race-c", "race-c", native),
         update(bound, revision + 3, same, "race-c", "race-c", racer),
       ]);
-      expect(replay.map((result) => result!["status"]).sort()).toEqual(["replayed", "updated"]);
+      expect(replay.map((result) => result["status"]).sort()).toEqual(["replayed", "updated"]);
       expect(await snapshot(bound)).toMatchObject({
         profileRevision: revision + 4,
         displayName: "Race C",
