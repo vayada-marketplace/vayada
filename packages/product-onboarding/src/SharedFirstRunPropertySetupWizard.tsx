@@ -3620,6 +3620,9 @@ export function setupErrorMessage(error: unknown): string {
   if (code === "idempotency_key_conflict") {
     return "Your setup changed during this save. Review it and try again.";
   }
+  if (code === "profile_edit_not_provisioned") {
+    return "Editing hotel details isn't enabled for your account on this hotel yet, so trying again won't help. Please contact Vayada support.";
+  }
 
   const data =
     error && typeof error === "object"
