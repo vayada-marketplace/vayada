@@ -13,9 +13,19 @@ const scopes = [
 // recorded by the bootstrap superuser. Vanilla PostgreSQL 16+ records an ADMIN creator edge,
 // which would make the operator an implicit member of every native scope. Only these exact
 // role-management statements borrow the fixture manager; every read, ACL grant, row lock and
-// RLS check keeps the restricted operator's own privileges.
-const roleManagement =
-  /^(?:CREATE ROLE "vayada_next_hotel_setup_(?:org|property|logo)_[a-f0-9]{16}_[a-f0-9]{12}" NOLOGIN NOINHERIT |GRANT vayada_next_hotel_setup_(?:scope|property_scope|logo_scope) TO "vayada_next_hotel_setup_(?:org|property|logo)_[a-f0-9]{16}_[a-f0-9]{12}"\s+WITH INHERIT TRUE, SET FALSE$|DO \$\$ BEGIN EXECUTE pg_catalog\.format\('ALTER ROLE %I LOGIN PASSWORD %L',)/;
+// RLS check keeps the restricted operator's own privileges. Whole statements must match.
+const login = '"vayada_next_hotel_setup_(?:org|property|logo)_[a-f0-9]{16}_[a-f0-9]{12}"';
+const roleManagement = new RegExp(
+  [
+    `CREATE ROLE ${login} NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`,
+    `GRANT vayada_next_hotel_setup_(?:scope|property_scope|logo_scope) TO ${login} WITH INHERIT TRUE, SET FALSE`,
+    "DO \\$\\$ BEGIN EXECUTE pg_catalog\\.format\\('ALTER ROLE %I LOGIN PASSWORD %L', " +
+      "pg_catalog\\.current_setting\\('(vay965\\.organization|vay1092\\.property)_login'\\), " +
+      "pg_catalog\\.current_setting\\('\\1_password'\\)\\); END \\$\\$",
+  ]
+    .map((statement) => `^${statement}$`)
+    .join("|"),
+);
 
 /** Owned disposable database only. Mirrors the inspected production operator posture:
  * NOSUPERUSER CREATEROLE, rds_superuser-style membership, grantable relation ACLs,
@@ -40,6 +50,10 @@ export async function createRdsOperatorFixture(superUrl: string) {
     await su.end();
     throw new Error("Restricted operator fixture roles must not pre-exist");
   }
+  const native = "^vayada_next_hotel_setup_(org|property|logo)_[a-f0-9]{16}_[a-f0-9]{12}$";
+  const earlier = (
+    await su.query<{ oid: number }>("SELECT oid FROM pg_roles WHERE rolname ~ $1", [native])
+  ).rows.map(({ oid }) => oid);
   // A superuser revoke acts as the object owner, and column grants made through a table grant
   // option survive its cascade. Revoke those as their grantor, then cascade the rest.
   const revokeOperator = async () => {
@@ -61,8 +75,10 @@ export async function createRdsOperatorFixture(superUrl: string) {
   const cleanup = async () => {
     try {
       await revokeOperator();
+      // Only identities this fixture's operator created; never another suite's roles.
       const natives = await su.query<{ rolname: string }>(
-        "SELECT rolname FROM pg_roles WHERE rolname ~ '^vayada_next_hotel_setup_(org|property|logo)_[a-f0-9]{16}_[a-f0-9]{12}$'",
+        "SELECT rolname FROM pg_roles WHERE rolname ~ $1 AND NOT oid=ANY($2::oid[])",
+        [native, earlier],
       );
       for (const { rolname } of natives.rows) {
         await su.query(`DROP OWNED BY ${su.escapeIdentifier(rolname)}`);
@@ -154,15 +170,16 @@ export async function createRdsOperatorFixture(superUrl: string) {
     operations.statements.push(sql);
     if (/\b(?:FROM|JOIN)\s+(?:pg_catalog\.)?pg_authid\b/i.test(sql)) operations.catalog++;
     const execute = async () => {
-      if (!roleManagement.test(sql.trim())) return run();
+      if (!roleManagement.test(sql.replace(/\s+/g, " ").trim())) return run();
       operations.borrowed++;
-      await (original as unknown as (sql: string) => Promise<unknown>).call(
-        this,
-        `SET ROLE ${manager}`,
-      );
-      const result = await run();
-      await (original as unknown as (sql: string) => Promise<unknown>).call(this, "RESET ROLE");
-      return result;
+      const call = original as unknown as (sql: string) => Promise<unknown>;
+      await call.call(this, `SET ROLE ${manager}`);
+      try {
+        return await run();
+      } finally {
+        // Inside an aborted transaction this fails, and ROLLBACK then undoes SET ROLE.
+        await call.call(this, "RESET ROLE").catch(() => undefined);
+      }
     };
     return execute();
   } as never);
