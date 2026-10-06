@@ -8,6 +8,7 @@ import {
   SecretsManagerClient,
 } from "@aws-sdk/client-secrets-manager";
 import { parseHotelSetupDatabaseUrl } from "./hotelSetupCommandServiceConfig.js";
+import { hotelSetupPurposeKind, isHotelSetupActorPurpose } from "./hotelSetupCommandScope.js";
 import { lockHotelSetupPropertyBootstrapAuthority } from "./hotelSetupPropertyRoleStaging.js";
 import type { stageHotelSetupPropertyRole } from "./hotelSetupPropertyRoleStaging.js";
 
@@ -30,12 +31,10 @@ export async function publishHotelSetupPropertySecret(input: {
   const name = `hotel-setup-command/prod/property/${login}`;
   try {
     if (
-      !(
-        operation === "property_logo"
-          ? /^vayada_next_hotel_setup_logo_[a-f0-9]{16}_[a-f0-9]{12}$/
-          : /^vayada_next_hotel_setup_property_[a-f0-9]{16}_[a-f0-9]{12}$/
+      !new RegExp(
+        `^vayada_next_hotel_setup_${hotelSetupPurposeKind(operation)}_[a-f0-9]{16}_[a-f0-9]{12}$`,
       ).test(login) ||
-      (operation === "property_logo" && automatic !== undefined) ||
+      (isHotelSetupActorPurpose(operation) && automatic !== undefined) ||
       !expectedVerifier
     )
       throw new Error();
@@ -57,9 +56,7 @@ export async function publishHotelSetupPropertySecret(input: {
           roleOid,
           login,
           expectedVerifier,
-          operation === "property_logo"
-            ? "vayada_next_hotel_setup_logo_scope"
-            : "vayada_next_hotel_setup_property_scope",
+          `vayada_next_hotel_setup_${hotelSetupPurposeKind(operation)}_scope`,
         ],
       );
       if (role.rows.length !== 1) throw new Error();
@@ -88,7 +85,8 @@ export async function publishHotelSetupPropertySecret(input: {
         assigned?.property_id !== propertyId.toLowerCase() ||
         assigned.organization_id !== organizationId.toLowerCase() ||
         assigned.operation_class !== operation ||
-        (operation === "property_logo" && assigned.actor_user_id !== actorUserId.toLowerCase()) ||
+        (isHotelSetupActorPurpose(operation) &&
+          assigned.actor_user_id !== actorUserId.toLowerCase()) ||
         !assigned.active ||
         assigned.credential_role_oid !== null ||
         assigned.credential_secret_version !== null ||
@@ -195,7 +193,7 @@ export async function publishHotelSetupPropertySecret(input: {
         propertyId,
         organizationId,
         operation,
-        operation === "property_logo" ? actorUserId : null,
+        isHotelSetupActorPurpose(operation) ? actorUserId : null,
       ],
     );
     if (ready.rows.length !== 1 || ready.rows[0]?.database_login !== login) throw new Error();

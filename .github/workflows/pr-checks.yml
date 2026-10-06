@@ -533,7 +533,8 @@ jobs:
               "src/hotelSetupReaderRoleStaging.integration.test.ts", "src/hotelSetupReaderLoginVerification.integration.test.ts",
               "src/hotelSetupReaderSecretCandidate.integration.test.ts", "src/cli/hotelSetupPropertyPreflight.test.ts",
               "src/cli/hotelSetupReaderPreflight.test.ts", "src/hotelSetupPropertyRoleStaging.integration.test.ts",
-              "src/hotelSetupAutomaticDiscovery.integration.test.ts"], {env, stdio: "inherit"});
+              "src/hotelSetupAutomaticDiscovery.integration.test.ts",
+              "src/hotelSetupProfileLifecycle.integration.test.ts"], {env, stdio: "inherit"});
             process.exitCode = result.status ?? 1;
             if (result.status === 0) {
               await admin.query("CREATE DATABASE vay1092_readiness_organization_test TEMPLATE vay1092_vay965_creation_test");
@@ -608,6 +609,7 @@ jobs:
           src/hotelSetupLaunchSettingsCredentials.test.ts
           src/hotelSetupLaunchSettingsRepository.test.ts
           src/hotelSetupProfileProjection.test.ts
+          src/hotelSetupProfileCommands.test.ts
           src/cli/hotelSetupLaunchSettingsPreflight.test.ts
           src/cli/hotelSetupPropertyPreflight.test.ts
           src/cli/hotelSetupCreationPreflight.test.ts

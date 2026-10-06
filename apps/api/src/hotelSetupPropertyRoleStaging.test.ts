@@ -178,6 +178,8 @@ it("rejects invalid purpose, identity and transport before constructing a client
     { ...input, adminDatabaseUrl: input.adminDatabaseUrl.replace("admin:", ":") },
     { ...input, scope: { ...input.scope, automatic: false } },
     { ...input, scope: { ...input.scope, automatic: true, operation: "currency" } },
+    { ...input, scope: { ...input.scope, automatic: true, operation: "property_logo" } },
+    { ...input, scope: { ...input.scope, automatic: true, operation: "property_profile" } },
   ])
     await expect(stageHotelSetupPropertyRole(invalid as typeof input)).rejects.toThrow(
       "staging failed",

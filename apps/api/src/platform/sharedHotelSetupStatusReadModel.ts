@@ -106,7 +106,7 @@ type AdaptiveHotelSetupFactsRow = {
   bookabilityUpdatedAt: unknown;
 };
 
-type SharedPropertyProfileRow = {
+export type SharedPropertyProfileRow = {
   propertyId: string;
   profileRevision: unknown;
   displayName: string | null;
@@ -1022,7 +1022,7 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function toSharedPropertyProfile(row: SharedPropertyProfileRow): SharedPropertyProfile {
+export function toSharedPropertyProfile(row: SharedPropertyProfileRow): SharedPropertyProfile {
   return {
     propertyId: row.propertyId,
     profileRevision: positiveInteger(row.profileRevision),
@@ -1367,7 +1367,7 @@ function taskRevision(...facts: unknown[]): string {
   return JSON.stringify(facts);
 }
 
-function propertyProfileWritePayload(
+export function propertyProfileWritePayload(
   profile: SharedPropertyProfileInput,
 ): SharedPropertyProfileWritePayload {
   return {

@@ -5,9 +5,13 @@ import {
   assertHotelSetupCommandScope,
   assertHotelSetupLogoScope,
   assertHotelSetupLogoBootstrapScope,
+  assertHotelSetupProfileScope,
+  hotelSetupPurposeKind,
+  isHotelSetupActorPurpose,
   type HotelSetupPropertyPurpose,
 } from "../hotelSetupCommandScope.js";
 import { assertHotelSetupLogoPrivileges } from "../hotelSetupLogoPrivileges.js";
+import { assertHotelSetupProfilePrivileges } from "../hotelSetupProfilePrivileges.js";
 import { parseHotelSetupDatabaseUrl } from "../hotelSetupCommandServiceConfig.js";
 import { assertHotelSetupCurrencyPrivileges } from "../hotelSetupCurrencyPrivileges.js";
 import { assertHotelSetupFeatureHubPrivileges } from "../hotelSetupFeatureHubPrivileges.js";
@@ -31,6 +35,8 @@ export async function checkHotelSetupPropertyCredential(
   try {
     await assertHotelSetupDatabaseIsolation(client);
     if (scope.operation === "property_logo") await assertHotelSetupLogoPrivileges(client);
+    else if (scope.operation === "property_profile")
+      await assertHotelSetupProfilePrivileges(client);
     else if (scope.operation === "launch_settings")
       await assertHotelSetupLaunchSettingsPrivileges(client);
     else if (scope.operation === "feature_hub") await assertHotelSetupFeatureHubPrivileges(client);
@@ -47,6 +53,12 @@ export async function checkHotelSetupPropertyCredential(
         ? assertHotelSetupLogoBootstrapScope
         : assertHotelSetupLogoScope;
       await proof(client, { ...scope, actorUserId: scope.actorUserId ?? "" });
+    } else if (scope.operation === "property_profile") {
+      await assertHotelSetupProfileScope(
+        client,
+        { ...scope, actorUserId: scope.actorUserId ?? "" },
+        scope.bootstrapPending,
+      );
     } else await assertHotelSetupCommandScope(client, { ...scope, operation: scope.operation });
   } finally {
     await client.query("ROLLBACK");
@@ -60,19 +72,22 @@ export async function runHotelSetupPropertyPreflight(env: NodeJS.ProcessEnv = pr
     () => {
       const login = env.HOTEL_SETUP_COMMAND_DATABASE_LOGIN ?? "";
       if (
-        !(
-          operation === "property_logo"
-            ? /^vayada_next_hotel_setup_logo_[a-z0-9_]+$/
-            : /^vayada_next_hotel_setup_property_[a-z0-9_]+$/
+        ![
+          "currency",
+          "currency_ready",
+          "feature_hub",
+          "launch_settings",
+          "property_logo",
+          "property_profile",
+        ].includes(operation ?? "") ||
+        !new RegExp(
+          `^vayada_next_hotel_setup_${hotelSetupPurposeKind(operation as HotelSetupPropertyPurpose)}_[a-z0-9_]+$`,
         ).test(login) ||
-        Buffer.byteLength(login) > 63 ||
-        !["currency", "currency_ready", "feature_hub", "launch_settings", "property_logo"].includes(
-          operation ?? "",
-        )
+        Buffer.byteLength(login) > 63
       )
         throw new Error("Invalid native credential configuration");
       if (
-        operation === "property_logo" &&
+        isHotelSetupActorPurpose(operation as HotelSetupPropertyPurpose) &&
         ![
           env.HOTEL_SETUP_COMMAND_PROPERTY_ID,
           env.HOTEL_SETUP_COMMAND_ORGANIZATION_ID,

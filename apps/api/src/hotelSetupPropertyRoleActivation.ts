@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import pg from "pg";
 import { parseHotelSetupDatabaseUrl } from "./hotelSetupCommandServiceConfig.js";
 import { checkHotelSetupPropertyCredential } from "./cli/hotelSetupPropertyPreflight.js";
+import { hotelSetupPurposeKind, isHotelSetupActorPurpose } from "./hotelSetupCommandScope.js";
 import {
   lockHotelSetupPropertyBootstrapAuthority,
   type stageHotelSetupPropertyRole,
@@ -42,7 +43,7 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
   const { proveSecondary, publish } = input;
   try {
     const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const prefix = `vayada_next_hotel_setup_${operation === "property_logo" ? "logo" : "property"}_${createHash(
+    const prefix = `vayada_next_hotel_setup_${hotelSetupPurposeKind(operation)}_${createHash(
       "sha256",
     )
       .update(`${propertyId.toLowerCase()}:${operation}`)
@@ -50,10 +51,15 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
       .slice(0, 16)}_`;
     if (
       ![propertyId, organizationId, actorUserId].every((id) => uuid.test(id)) ||
-      !["launch_settings", "currency", "currency_ready", "feature_hub", "property_logo"].includes(
-        operation,
-      ) ||
-      (operation === "property_logo" && automatic !== undefined) ||
+      ![
+        "launch_settings",
+        "currency",
+        "currency_ready",
+        "feature_hub",
+        "property_logo",
+        "property_profile",
+      ].includes(operation) ||
+      (isHotelSetupActorPurpose(operation) && automatic !== undefined) ||
       !Number.isInteger(roleOid) ||
       roleOid <= 0 ||
       !login.startsWith(prefix) ||
@@ -118,9 +124,7 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
         login,
         propertyId,
         operation,
-        operation === "property_logo"
-          ? "vayada_next_hotel_setup_logo_scope"
-          : "vayada_next_hotel_setup_property_scope",
+        `vayada_next_hotel_setup_${hotelSetupPurposeKind(operation)}_scope`,
       ],
     );
     if (failed || staged.rows.length !== 1) throw new Error();
@@ -140,7 +144,7 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
         propertyId,
         organizationId,
         operation,
-        operation === "property_logo" ? actorUserId : null,
+        isHotelSetupActorPurpose(operation) ? actorUserId : null,
       ],
     );
     const identity = await admin.query<{ verifier: string }>(
@@ -159,7 +163,7 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
     await nativeClient.connect();
     const proofScope = Object.freeze({
       ...stagedScope,
-      ...(operation === "property_logo" ? { bootstrapPending: true as const } : {}),
+      ...(isHotelSetupActorPurpose(operation) ? { bootstrapPending: true as const } : {}),
     });
     await checkHotelSetupPropertyCredential(nativeClient, proofScope);
     if (failed || nativeFailed) throw new Error();
@@ -224,7 +228,8 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
             assigned?.property_id !== propertyId.toLowerCase() ||
             assigned.organization_id !== organizationId.toLowerCase() ||
             assigned.operation_class !== operation ||
-            (operation === "property_logo" && assigned.actor_user_id !== actorUserId.toLowerCase())
+            (isHotelSetupActorPurpose(operation) &&
+              assigned.actor_user_id !== actorUserId.toLowerCase())
           )
             throw new Error();
           await admin!.query(`ALTER ROLE ${admin!.escapeIdentifier(login)} NOLOGIN PASSWORD NULL`);

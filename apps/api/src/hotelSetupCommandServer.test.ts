@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => {
     creation: vi.fn(),
     toggle: vi.fn(),
     launch: vi.fn(),
+    profile: vi.fn(),
     logo: vi.fn(),
     list: vi.fn(),
     ready: vi.fn(),
@@ -81,6 +82,9 @@ vi.mock("./hotelSetupCurrencyCommands.js", () => ({
 vi.mock("./hotelSetupLaunchSettingsCommands.js", () => ({
   createHotelSetupLaunchSettingsCommands: mocks.launch,
 }));
+vi.mock("./hotelSetupProfileCommands.js", () => ({
+  createHotelSetupProfileCommands: mocks.profile,
+}));
 vi.mock("./hotelSetupFeatureHubCommands.js", () => ({
   createHotelSetupFeatureHubCommands: mocks.toggle,
 }));
@@ -108,6 +112,7 @@ describe("private hotel setup executable", () => {
     mocks.currency.mockReturnValue({ upsertPropertyPricingCurrency: vi.fn() });
     mocks.toggle.mockReturnValue({ updateFinancials: vi.fn() });
     mocks.launch.mockReturnValue({ updateLaunchSettings: vi.fn() });
+    mocks.profile.mockReturnValue({ updatePropertyProfile: vi.fn() });
     mocks.logo.mockReturnValue({ uploads: {}, assignments: {} });
   });
 
@@ -139,6 +144,8 @@ describe("private hotel setup executable", () => {
     expect(options.currencyCommands).toBe(mocks.currency.mock.results[0]!.value);
     expect(options.launchSettings).toBe(mocks.launch.mock.results[0]!.value);
     expect(mocks.launch.mock.calls[0]![0].readNativeSecret).toBe(mocks.get);
+    expect(options.profileEdit).toBe(mocks.profile.mock.results[0]!.value);
+    expect(mocks.profile.mock.calls[0]![0].readNativeSecret).toBe(mocks.get);
     expect(mocks.preflight.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.launch.mock.invocationCallOrder[0]!,
     );
@@ -164,6 +171,8 @@ describe("private hotel setup executable", () => {
     expect(options.featureHub).toBeUndefined();
     expect(options.launchSettings).toBeUndefined();
     expect(mocks.launch).not.toHaveBeenCalled();
+    expect(options.profileEdit).toBeUndefined();
+    expect(mocks.profile).not.toHaveBeenCalled();
     expect(mocks.currency).not.toHaveBeenCalled();
     expect(mocks.toggle).not.toHaveBeenCalled();
   });
