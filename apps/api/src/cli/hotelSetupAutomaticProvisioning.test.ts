@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import {
+  hotelSetupAutomaticExitCode,
   parseHotelSetupAutomaticConfiguration,
   parseHotelSetupHelperOwnerConfiguration,
   runHotelSetupAutomaticProvisioning,
@@ -114,4 +115,12 @@ it("keeps automatic and fixed manual-child CA contracts separate", () => {
       "/tmp/hotel-setup-rds.pem",
     ),
   ).toThrow();
+});
+
+it("fails the scheduled run while any scope is held for inspection", () => {
+  const receipt = (status: string) => ({ receipts: [{ status: "existing_ready" }, { status }] });
+  expect(hotelSetupAutomaticExitCode({ receipts: [] })).toBe(0);
+  for (const status of ["provisioned", "existing_ready", "pending_authority"])
+    expect(hotelSetupAutomaticExitCode(receipt(status))).toBe(0);
+  expect(hotelSetupAutomaticExitCode(receipt("inspection_required"))).toBe(1);
 });

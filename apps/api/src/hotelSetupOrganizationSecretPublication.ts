@@ -84,6 +84,13 @@ export async function publishHotelSetupOrganizationSecret(input: {
         [roleOid, login],
       );
       if (failed || identity.rows.length !== 1) throw new Error();
+      // Reauthenticate the exact login and OID while the authority and assignment locks are held.
+      await proveFreshHotelSetupNativeCredential({
+        nativeDatabaseUrl: input.nativeDatabaseUrl,
+        databaseEndpoint: input.databaseEndpoint,
+        login,
+        roleOid,
+      });
     };
     const proveFresh = async () => {
       const credential = {

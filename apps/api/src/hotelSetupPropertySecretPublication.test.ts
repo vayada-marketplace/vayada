@@ -93,14 +93,16 @@ it.each(
   vi.mocked(checkHotelSetupPropertyCredential).mockResolvedValue(undefined);
   vi.mocked(proveFreshHotelSetupNativeCredential).mockImplementation(async (credential, prove) => {
     // Logo reauthenticates under the authority/assignment locks, like the reviewed RDS path.
-    expect(transaction).toBe(logo);
+    // Identity-only reauthentication runs under the locks; native proofs run outside them.
+    expect(transaction).toBe(prove === undefined);
     expect(credential.login).toBe(login);
     expect(credential.roleOid).toBe(42);
     nativeProofs++;
     // Logo authenticates within each pending check; other purposes prove twice per checkpoint.
-    if (mode === "native" || (mode === "lateNative" && nativeProofs === (logo ? 2 : 3)))
+    // lateNative fails the final locked reauthentication just before the readiness UPDATE.
+    if (mode === "native" || (mode === "lateNative" && nativeProofs === (logo ? 2 : 6)))
       throw new Error();
-    expect(prove === undefined).toBe(logo);
+    if (logo) expect(prove).toBeUndefined();
     await prove?.({ checkpoint: nativeProofs } as unknown as pg.Client);
   });
   vi.mocked(lockHotelSetupPropertyBootstrapAuthority).mockImplementation(async () => {
@@ -214,7 +216,7 @@ it.each(
   if (mode === "success") {
     await expect(result).resolves.toEqual({ secretArn: arn, versionId: expect.any(String) });
     expect(query.mock.calls.at(-1)?.[0]).toBe("COMMIT");
-    expect(proveFreshHotelSetupNativeCredential).toHaveBeenCalledTimes(logo ? 2 : 4);
+    expect(proveFreshHotelSetupNativeCredential).toHaveBeenCalledTimes(logo ? 2 : 6);
     expect(checkHotelSetupPropertyCredential).toHaveBeenCalledTimes(logo ? 0 : 2);
     expect(secondary).toHaveBeenCalledTimes(logo ? 0 : 2);
   } else {
