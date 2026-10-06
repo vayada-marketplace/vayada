@@ -50,7 +50,9 @@ jobs:
         run: npm --workspace @vayada/domain-finance run test
 
       - name: Product onboarding tests
-        run: npm --workspace @vayada/product-onboarding run test
+        run: |
+          npm --workspace @vayada/domain-hotels run build
+          npm --workspace @vayada/product-onboarding run test
 
       - name: Typecheck
         run: npm run typecheck
