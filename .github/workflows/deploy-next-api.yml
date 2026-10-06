@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       publish_private_creation_only:
-        description: "Publish an immutable private creation image without deploying the public API"
+        description: Publish an immutable private image without deploying the public API
         type: boolean
         default: false
       private_creation_source_sha:
-        description: "Optional reviewed 40-character source commit for the private primary or rollback image"
+        description: Optional reviewed 40-character source commit for the private image
         type: string
         default: ""
   push:
@@ -49,15 +49,24 @@ jobs:
           PRIVATE_ONLY: ${{ inputs.publish_private_creation_only }}
           SOURCE_SHA: ${{ inputs.private_creation_source_sha }}
         run: |
-          if [[ -n "$SOURCE_SHA" ]]; then
-            [[ "$PRIVATE_ONLY" == "true" && "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
-          fi
+          set -euo pipefail
+          case "$PRIVATE_ONLY" in
+            true)
+              test "$GITHUB_EVENT_NAME" = workflow_dispatch
+              test "$GITHUB_REF" = refs/heads/main
+              test "$GITHUB_REPOSITORY" = vayada-marketplace/vayada
+              [[ "${SOURCE_SHA:-$GITHUB_SHA}" =~ ^[a-f0-9]{40}$ ]] || exit 1
+              ;;
+            false|"") test -z "$SOURCE_SHA" ;;
+            *) exit 1 ;;
+          esac
           echo "sha=${SOURCE_SHA:-$GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout code
         uses: actions/checkout@v7
         with:
           ref: ${{ steps.source.outputs.sha }}
+          persist-credentials: false
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
@@ -94,8 +103,7 @@ jobs:
         env:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
-        run: |
-          printf 'Private creation source: `%s`\n\nImage digest: `%s`\n' "$SOURCE_SHA" "$IMAGE_DIGEST" >> "$GITHUB_STEP_SUMMARY"
+        run: printf 'Private source `%s`\n\nImage digest `%s`\n' "$SOURCE_SHA" "$IMAGE_DIGEST" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Dispatch deploy to platform
         if: ${{ !inputs.publish_private_creation_only }}

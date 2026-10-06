@@ -27,23 +27,15 @@ export const SOURCE_SNAPSHOT_TIME_SQL =
   "SELECT transaction_timestamp()::text AS source_snapshot_at";
 
 export const SOURCE_WRITABLE_PRIVILEGES_SQL = `
-WITH RECURSIVE role_memberships(role_oid) AS (
-  SELECT role.oid
-  FROM pg_catalog.pg_roles role
-  WHERE role.rolname = current_user
-  UNION
-  SELECT membership.roleid
-  FROM pg_catalog.pg_auth_members membership
-  JOIN role_memberships inherited ON inherited.role_oid = membership.member
-)
 SELECT (
   session_user <> current_user
   OR role.rolsuper OR role.rolcreatedb OR role.rolcreaterole
   OR role.rolreplication OR role.rolbypassrls
   OR EXISTS (
     SELECT 1
-    FROM role_memberships membership
-    WHERE membership.role_oid <> role.oid
+    FROM pg_catalog.pg_roles membership
+    WHERE membership.oid <> role.oid
+      AND pg_catalog.pg_has_role(current_user, membership.oid, 'MEMBER')
   )
   OR pg_catalog.has_database_privilege(current_user, current_database(), 'CREATE')
   OR EXISTS (

@@ -68,7 +68,8 @@ export async function prepareLegacyHistoricalBindingPreflightInput(
     const sourceEvidenceSha256 = hashSourceLedger(ledger);
 
     const requests = [];
-    for (const [propertyId, externalPropertyId] of APPROVED_PAIRS) {
+    const missingProperties: number[] = [];
+    for (const [index, [propertyId, externalPropertyId]] of APPROVED_PAIRS.entries()) {
       const sourceResult = await client.query<SourceRow>(
         `SELECT row_data->>'id' AS id, row_data->>'hotel_id' AS "hotelId",
            row_data->>'channex_property_id' AS "externalPropertyId",
@@ -90,10 +91,19 @@ export async function prepareLegacyHistoricalBindingPreflightInput(
       )
         throw new Error("Historical connection preparation source pair mismatch");
 
-      const target = await readLegacyHistoricalBindingTargetSnapshot(pools.target, {
-        propertyId,
-        externalPropertyId,
-      });
+      let target;
+      try {
+        target = await readLegacyHistoricalBindingTargetSnapshot(pools.target, {
+          propertyId,
+          externalPropertyId,
+        });
+      } catch (error) {
+        if (error instanceof Error && error.message === "Historical binding property missing") {
+          missingProperties.push(index + 1);
+          continue;
+        }
+        throw error;
+      }
       if (target.claims.length !== 1 || target.connections.length === 0)
         throw new Error("Historical connection preparation target pair mismatch");
       const expectedSource = {
@@ -128,6 +138,8 @@ export async function prepareLegacyHistoricalBindingPreflightInput(
         property: { id: target.property.id, rowStateSha256: target.property.rowStateSha256 },
       });
     }
+    if (missingProperties.length)
+      throw new Error(`Historical binding properties missing: ${missingProperties.join(",")}`);
     return canonicalizeJson({
       version: "vay2017-historical-binding-preflight.v1",
       environment: "production",
