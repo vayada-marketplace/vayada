@@ -8,7 +8,7 @@ import {
   type VerifiedSession,
 } from "@vayada/backend-auth";
 import { injectJson } from "@vayada/backend-test";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "./app.js";
 import type { BookingPublicationRefreshPort } from "./domains/bookingPublicationProductionRuntime.js";
@@ -149,6 +149,7 @@ function buildAuthenticatedApp(
     financialsActivationPropertyIds?: string[];
     reviewRepository?: PmsReviewRepository;
     bookingPublicationRefresh?: BookingPublicationRefreshPort;
+    featureHub?: Pick<PmsModuleActivationRepository, "updateFinancials">;
   } = {},
 ) {
   const linkedPropertyId =
@@ -184,6 +185,7 @@ function buildAuthenticatedApp(
     bookingPublicationRefresh: options.bookingPublicationRefresh,
     pmsOperationsAllowedOrigins: options.allowedOrigins,
     financialsActivationPropertyIds: options.financialsActivationPropertyIds,
+    hotelSetupFeatureHubCommands: options.featureHub,
     auth: {
       verifier: createFakeVerifier(new Map([["valid-token", session]])),
       repository: repo,
@@ -289,6 +291,52 @@ describe("PMS module activation routes", () => {
     });
     expect(update.statusCode).toBe(403);
     expect(update.json()).toMatchObject({ code: "financials_activation_not_allowed" });
+  });
+
+  it("lets a new hotel's Owner switch Financials off and on with no operator allow-list (VAY-2056)", async () => {
+    const ordinary = createActivationRepository(false);
+    const ordinaryUpdate = vi.spyOn(ordinary, "updateFinancials");
+    const setupComplete = vi.fn(async () => true);
+    const repository = { ...ordinary, isFinancialsSetupComplete: setupComplete };
+    const hub = { updateFinancials: vi.fn(ordinary.updateFinancials) };
+    const url = `/api/pms/properties/${propertyId}/module-activations`;
+    const headers = { authorization: "Bearer valid-token" };
+    const patch = (isActive: boolean) =>
+      app!.inject({
+        method: "PATCH",
+        url: `${url}/financials`,
+        headers,
+        payload: { moduleId: "financials", isActive },
+      });
+    const build = (linkedRelationship: ResourceRelationship) =>
+      buildAuthenticatedApp({
+        repository,
+        featureHub: hub,
+        linkedRelationship,
+        permissions: ["pms.operations.read", "pms.finance.read", "pms.finance.manage"],
+      });
+
+    app = build("owner");
+    const list = await injectJson<PmsModuleActivationsResponse>(app, {
+      method: "GET",
+      url,
+      headers,
+    });
+    expect(list.body).toMatchObject({ canManage: true, supportedModules: ["financials"] });
+    for (const isActive of [true, false, true])
+      expect((await patch(isActive)).json()).toMatchObject({ moduleId: "financials", isActive });
+    expect(hub.updateFinancials).toHaveBeenCalledTimes(3);
+    await app.close();
+
+    // An unfinished default stays locked; an operator never reaches the writer.
+    setupComplete.mockResolvedValue(false);
+    app = build("owner");
+    expect((await patch(true)).statusCode).toBe(403);
+    await app.close();
+    app = build("operator");
+    expect((await patch(false)).statusCode).toBe(403);
+    expect(hub.updateFinancials).toHaveBeenCalledTimes(3);
+    expect(ordinaryUpdate.mock.calls).toHaveLength(3);
   });
 
   it("allows a scoped finance owner to activate and roll back an approved property", async () => {
