@@ -6,7 +6,8 @@
 //
 // No dependencies on purpose: both jobs run before (or without) `npm ci`.
 import { execFileSync } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 export const SELECTABLE_JOBS = [
   "frontend",
@@ -42,7 +43,8 @@ export const RULES = [
     test: /^apps\/(marketplace-web|vayada-admin|booking-web|booking-admin|pms-web|landing)\//,
     jobs: ["frontend", "first_party_auth"],
   },
-  { name: "e2e", test: /^tests\/e2e\//, jobs: ["first_party_auth"] },
+  // The frontend job runs the landing Playwright suite; first_party_auth runs the auth suite.
+  { name: "e2e", test: /^tests\/e2e\//, jobs: ["frontend", "first_party_auth"] },
   // apps/api, shared packages and packages/backend-migration/migrations: full PG16 + PG17 coverage.
   { name: "typescript", test: /^(apps\/api|packages)\//, jobs: TYPESCRIPT_JOBS },
 ];
@@ -94,22 +96,14 @@ function changedFiles() {
   const parents = git(["rev-list", "--parents", "-n", "1", "HEAD"]).trim().split(/\s+/).length - 1;
   if (parents !== 2)
     throw new Error(`HEAD has ${parents} parent(s); expected a pull request merge commit`);
-  return git(["diff", "--name-only", "--no-renames", "HEAD^1", "HEAD"]).split("\n").filter(Boolean);
+  return git(["diff", "--name-only", "--no-renames", "-z", "HEAD^1", "HEAD"])
+    .split("\0")
+    .filter(Boolean);
 }
 
 function emit(line) {
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `${line}\n`);
   else console.log(line);
-}
-
-function summarize(lines) {
-  for (const line of lines) console.error(line);
-  if (process.env.GITHUB_STEP_SUMMARY) {
-    appendFileSync(
-      process.env.GITHUB_STEP_SUMMARY,
-      `${lines.map((line) => `- ${line}`).join("\n")}\n`,
-    );
-  }
 }
 
 function runSelect() {
@@ -122,7 +116,8 @@ function runSelect() {
     );
   }
   const { jobs, reasons } = selectJobs(files);
-  summarize([...reasons, `selected jobs: ${jobs.join(", ") || "none"}`]);
+  for (const line of [...reasons, `selected jobs: ${jobs.join(", ") || "none"}`])
+    console.error(line);
   for (const job of SELECTABLE_JOBS) emit(`run_${job}=${jobs.includes(job)}`);
 }
 
@@ -139,7 +134,8 @@ function runVerify() {
 }
 
 const commands = { select: runSelect, verify: runVerify };
-if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+// Compare real paths so a symlinked invocation can never turn the CLI into a silent no-op.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const command = commands[process.argv[2]];
   if (!command) {
     console.error("usage: pr-checks.mjs <select|verify>");

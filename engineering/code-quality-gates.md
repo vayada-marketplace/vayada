@@ -110,7 +110,7 @@ Currently the PR workflow runs `npm run check:architecture-boundaries`, root fro
 | `engineering/hotel-setup-bootstrap-images.json`                                                 | none beyond the inventory formatting + schema check that always runs in `changes` |
 | `apps/marketplace-api/**`, `apps/booking-api/**`, `apps/pms-api/**`                             | Backend Tests (Python)                                                            |
 | `apps/*-web/**`, `apps/vayada-admin/**`, `apps/landing/**`                                      | Frontend, First-Party Auth Contracts                                              |
-| `tests/e2e/**`                                                                                  | First-Party Auth Contracts                                                        |
+| `tests/e2e/**`                                                                                  | Frontend, First-Party Auth Contracts                                              |
 | `apps/api/**`, `packages/**` (including `packages/backend-migration/migrations`)                | Frontend, First-Party Auth, both PostgreSQL integration jobs on PG16 and PG17     |
 | anything else (workflows, `scripts/**`, lockfiles, `auth-db/**`, fixtures, …)                   | every job                                                                         |
 

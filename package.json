@@ -107,6 +107,7 @@
     "lint-staged": "^15.5.2",
     "postcss": "^8.5.10",
     "prettier": "^3.5.3",
-    "serialize-javascript": "^7.0.5"
+    "serialize-javascript": "^7.0.5",
+    "yaml": "^2.9.0"
   }
 }

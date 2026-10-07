@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { parse } from "yaml";
 import { SELECTABLE_JOBS, selectJobs, verifyRequiredChecks } from "./pr-checks.mjs";
@@ -36,6 +39,11 @@ test("frontend-only changes skip the PostgreSQL and Python jobs", () => {
     "first_party_auth",
   ]);
   assert.deepEqual(selectJobs(["tests/e2e/first-party-auth/login.spec.ts"]).jobs, [
+    "frontend",
+    "first_party_auth",
+  ]);
+  assert.deepEqual(selectJobs(["tests/e2e/landing/smoke.spec.ts"]).jobs, [
+    "frontend",
     "first_party_auth",
   ]);
 });
@@ -140,6 +148,38 @@ test("verify fails when a job is missing from needs or is not covered by a selec
   const extra = needsFor({});
   extra.new_job = { result: "skipped" };
   assert.deepEqual(verifyRequiredChecks(extra), ["new_job: skipped (run_new_job=unset)"]);
+});
+
+const cli = new URL("./pr-checks.mjs", import.meta.url).pathname;
+const runVerify = (needs, script = cli) =>
+  spawnSync(process.execPath, [script, "verify"], {
+    encoding: "utf8",
+    env: { ...process.env, NEEDS: JSON.stringify(needs) },
+  });
+
+test("the verify CLI exits non-zero on a failed job and zero when everything passed", () => {
+  const failed = runVerify(needsFor({ api_postgres: "failure" }));
+  assert.equal(failed.status, 1, failed.stderr);
+  assert.match(failed.stderr, /::error::api_postgres: failure/);
+  const passed = runVerify(needsFor({}));
+  assert.equal(passed.status, 0, passed.stderr);
+  assert.match(passed.stderr, /All required jobs succeeded/);
+});
+
+test("the verify CLI still runs (and fails) when invoked through a symlink", () => {
+  const link = join(mkdtempSync(join(tmpdir(), "pr-checks-")), "pr-checks.mjs");
+  symlinkSync(cli, link);
+  const result = runVerify(needsFor({ frontend: "cancelled" }), link);
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /::error::frontend: cancelled/);
+});
+
+test("the verify CLI refuses to run without the needs context", () => {
+  const result = spawnSync(process.execPath, [cli, "verify"], {
+    encoding: "utf8",
+    env: { ...process.env, NEEDS: "" },
+  });
+  assert.notEqual(result.status, 0);
 });
 
 test("pr-checks.yml wires every job through the change detector and the aggregator", () => {

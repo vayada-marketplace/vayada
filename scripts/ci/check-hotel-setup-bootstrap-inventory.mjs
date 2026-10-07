@@ -2,7 +2,8 @@
 // Formatting and schema check for engineering/hotel-setup-bootstrap-images.json. It mirrors the
 // shape scripts/select-hotel-setup-bootstrap-images.py accepts, so an inventory-only PR can skip
 // the heavy PR checks without being able to land an entry the publisher would reject.
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 export const INVENTORY_PATH = "engineering/hotel-setup-bootstrap-images.json";
 
@@ -43,7 +44,7 @@ export function validateInventory(text) {
   return problems;
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const problems = validateInventory(readFileSync(INVENTORY_PATH, "utf8"));
   for (const problem of problems) console.error(`::error file=${INVENTORY_PATH}::${problem}`);
   if (problems.length > 0) process.exit(1);

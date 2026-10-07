@@ -624,6 +624,8 @@ jobs:
         working-directory: .hotel-setup-compatible-rollback
         run: |
           test "$(git rev-parse HEAD)" = ef69824c3364c1e43caad5c474e1615f39aff8bd
+          # This checkout relies on its own prebuild hooks to compile its backend packages.
+          unset npm_config_ignore_scripts
           npm ci
           npm run build:api
 
