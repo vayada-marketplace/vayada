@@ -13,6 +13,7 @@ import {
 import { CalendarRoom, CalendarRoomType, calendarService } from "@/services/calendar";
 import type { BookingAddon } from "@/services/bookings";
 import { useTranslation } from "@/lib/i18n";
+import { NationalitySelect } from "@vayada/locale-ui/NationalitySelect";
 
 // prettier-ignore
 const SOURCES = [["call", "calendar.targetManualBooking.sourceCall"], ["email", "calendar.targetManualBooking.sourceEmail"], ["whatsapp", "calendar.targetManualBooking.sourceWhatsApp"], ["walk_in", "calendar.targetManualBooking.sourceWalkIn"], ["social_media", "calendar.targetManualBooking.sourceSocialMedia"], ["other", "calendar.targetManualBooking.sourceOther"]] as const;
@@ -47,6 +48,16 @@ function amount(value: string): string | null {
   return value.trim() && Number.isFinite(parsed) && parsed >= 0 ? parsed.toFixed(2) : null;
 }
 
+// Flexible first, then Non-refundable, then any other configured plan; Custom only when none exist.
+function defaultRatePlanId(type: CalendarRoomType | undefined): string {
+  const plans = type?.ratePlans ?? [];
+  const plan =
+    plans.find((item) => item.rateType === "flexible") ??
+    plans.find((item) => item.rateType === "non_refundable") ??
+    plans[0];
+  return plan?.id ?? "custom";
+}
+
 function stayDefaults(
   key: number,
   roomId: string,
@@ -64,7 +75,7 @@ function stayDefaults(
     checkOut,
     adults: 1,
     children: 0,
-    ratePlanId: type?.ratePlans[0]?.id ?? "missing",
+    ratePlanId: defaultRatePlanId(type),
     nightlyRate: "",
   };
 }
@@ -170,7 +181,6 @@ export default function TargetManualBookingModal({
         stay.children < 0 ||
         stay.adults + stay.children > roomType.maxOccupancy ||
         conflicts.has(index) ||
-        stay.ratePlanId === "missing" ||
         (stay.ratePlanId === "custom" && override === null)
       )
         return null;
@@ -194,14 +204,9 @@ export default function TargetManualBookingModal({
   }, [addonPackages, addons, conflicts, roomTypes, rooms, stays]);
   const previewKey = previewInput ? JSON.stringify(previewInput) : null;
   const preview = previewEvidence?.key === previewKey ? previewEvidence.result : null;
-  const missingRateStay = stays.find(
-    (stay) => stay.ratePlanId === "missing" && stay.checkIn && stay.checkOut > stay.checkIn,
+  const customRatePending = stays.some(
+    (stay) => stay.ratePlanId === "custom" && amount(stay.nightlyRate) === null,
   );
-  const missingRateMessage = missingRateStay
-    ? t("calendar.targetManualBooking.noRateFound", {
-        range: `${missingRateStay.checkIn} – ${missingRateStay.checkOut}`,
-      })
-    : "";
 
   useEffect(() => {
     if (!previewInput) {
@@ -263,11 +268,7 @@ export default function TargetManualBookingModal({
   function changeRoom(index: number, roomId: string) {
     const room = rooms.find((item) => item.id === roomId),
       roomType = roomTypes.find((item) => item.id === room?.roomTypeId);
-    updateStay(index, {
-      roomId,
-      ratePlanId: roomType?.ratePlans[0]?.id ?? "missing",
-      nightlyRate: "",
-    });
+    updateStay(index, { roomId, ratePlanId: defaultRatePlanId(roomType), nightlyRate: "" });
   }
   function addStay() {
     if (stays.length >= 20) return;
@@ -350,8 +351,8 @@ export default function TargetManualBookingModal({
       ) : null}
       {t("calendar.targetManualBooking.calculatingTotal")}
     </span>
-  ) : missingRateMessage ? (
-    t("calendar.targetManualBooking.totalUnavailable")
+  ) : customRatePending ? (
+    t("calendar.targetManualBooking.enterCustomRateForTotal")
   ) : (
     t("calendar.targetManualBooking.selectStayForTotal")
   );
@@ -427,6 +428,7 @@ export default function TargetManualBookingModal({
                       roomType && stay.adults + stay.children > roomType.maxOccupancy,
                     ),
                     conflict = conflicts.has(index),
+                    noPlanConfigured = Boolean(roomType && roomType.ratePlans.length === 0),
                     serverError = stayError?.key === stay.key ? stayError : null,
                     serverStay = preview?.stays.find((item) => item.position === index + 1);
                   return (
@@ -608,7 +610,9 @@ export default function TargetManualBookingModal({
                             aria-describedby={
                               serverError?.field === "ratePlanId"
                                 ? `stay-server-${stay.key}`
-                                : undefined
+                                : noPlanConfigured
+                                  ? `stay-no-plan-${stay.key}`
+                                  : undefined
                             }
                             value={stay.ratePlanId}
                             onChange={(event) =>
@@ -617,11 +621,6 @@ export default function TargetManualBookingModal({
                             className={inputClass}
                           >
                             {" "}
-                            {stay.ratePlanId === "missing" && (
-                              <option value="missing" disabled>
-                                {t("calendar.targetManualBooking.noRateAvailable")}
-                              </option>
-                            )}{" "}
                             {roomType?.ratePlans.map((plan) => (
                               <option key={plan.id} value={plan.id}>
                                 {plan.name}
@@ -662,6 +661,11 @@ export default function TargetManualBookingModal({
                           />{" "}
                         </label>{" "}
                       </div>
+                      {noPlanConfigured && (
+                        <p id={`stay-no-plan-${stay.key}`} className="mt-2 text-xs text-gray-600">
+                          {t("calendar.targetManualBooking.noRatePlanConfigured")}
+                        </p>
+                      )}
                       {occupancyExceeded && (
                         <p
                           id={`stay-occupancy-${stay.key}`}
@@ -697,17 +701,21 @@ export default function TargetManualBookingModal({
                       >
                         {" "}
                         <div className="flex justify-between">
-                          <span>
-                            {t("calendar.targetManualBooking.standard")}{" "}
-                            {serverStay?.standardTotal
-                              ? formatCurrency(
-                                  Number(serverStay.standardTotal.amountDecimal),
-                                  preview!.currency,
-                                )
-                              : "—"}
-                          </span>
-                          <strong>
-                            {t("calendar.targetManualBooking.applied")}{" "}
+                          {stay.ratePlanId !== "custom" && (
+                            <span>
+                              {t("calendar.targetManualBooking.standard")}{" "}
+                              {serverStay?.standardTotal
+                                ? formatCurrency(
+                                    Number(serverStay.standardTotal.amountDecimal),
+                                    preview!.currency,
+                                  )
+                                : "—"}
+                            </span>
+                          )}
+                          <strong className="ml-auto">
+                            {stay.ratePlanId === "custom"
+                              ? t("calendar.targetManualBooking.custom")
+                              : t("calendar.targetManualBooking.applied")}{" "}
                             {serverStay
                               ? formatCurrency(
                                   Number(serverStay.appliedTotal.amountDecimal),
@@ -793,8 +801,8 @@ export default function TargetManualBookingModal({
                     required
                   />{" "}
                 </label>
-                <div className="grid grid-cols-3 gap-3">
-                  <label className={`${labelClass} col-span-2`}>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <label className={`${labelClass} sm:col-span-2`}>
                     {t("calendar.newBookingModal.phoneLabel")}
                     <input
                       name="phoneE164"
@@ -809,18 +817,15 @@ export default function TargetManualBookingModal({
                       {t("calendar.targetManualBooking.includeCountryCode")}
                     </span>{" "}
                   </label>
-                  <label className={labelClass}>
-                    {" "}
-                    {t("calendar.targetManualBooking.guestCountry")}{" "}
-                    <input
-                      name="countryCode"
-                      pattern="[A-Za-z]{2}"
-                      placeholder="GR"
-                      value={countryCode}
-                      onChange={(e) => setCountryCode(e.target.value.slice(0, 2))}
-                      className={inputClass}
-                    />{" "}
-                  </label>{" "}
+                  <NationalitySelect
+                    label={t("bookings.detail.nationality")}
+                    value={countryCode}
+                    onChange={setCountryCode}
+                    placeholder={t("calendar.targetManualBooking.searchNationality")}
+                    containerClassName="space-y-1"
+                    labelClassName={labelClass}
+                    inputClassName={inputClass}
+                  />{" "}
                 </div>
               </div>{" "}
             </section>
@@ -1017,14 +1022,14 @@ export default function TargetManualBookingModal({
               </div>{" "}
             </section>{" "}
           </fieldset>
-          {(missingRateMessage || previewMessage) && (
+          {previewMessage && (
             <div
               role="alert"
               className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
             >
               {" "}
-              <span>{missingRateMessage || previewMessage}</span>{" "}
-              {!missingRateMessage && previewCanRetry && (
+              <span>{previewMessage}</span>{" "}
+              {previewCanRetry && (
                 <button
                   type="button"
                   onClick={() => {

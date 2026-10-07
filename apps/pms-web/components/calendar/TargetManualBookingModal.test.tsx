@@ -345,8 +345,10 @@ describe("target manual booking fields", () => {
     expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(true);
   });
 
-  it("shows missing-rate guidance before preview when the room type has no rate plan", async () => {
-    const request = vi.spyOn(calendarService, "previewManualBooking");
+  it("falls back to Custom rate when the room type has no rate plan", async () => {
+    const request = vi
+      .spyOn(calendarService, "previewManualBooking")
+      .mockImplementation(async (input) => previewFor(input));
     let view!: ReactTestRenderer;
     await act(async () => {
       view = create(
@@ -363,11 +365,79 @@ describe("target manual booking fields", () => {
     await settlePreview();
 
     expect(request).not.toHaveBeenCalled();
-    expect(JSON.stringify(view.toJSON())).toContain(
-      "No rate found for 2026-09-10 – 2026-09-11. Set up a season in Rooms & Rates first.",
-    );
+    const ratePlan = view.root.findByProps({ "aria-label": "Room 1 rate plan" });
+    expect(ratePlan.props.value).toBe("custom");
+    expect(ratePlan.props["aria-describedby"]).toBe("stay-no-plan-1");
+    const markup = JSON.stringify(view.toJSON());
+    expect(markup).toContain("No rate plan is configured for this room type.");
+    expect(markup).toContain("Enter a custom nightly rate to calculate the total");
+    expect(markup).not.toContain("No rate available");
     expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(true);
+
+    await act(async () =>
+      view.root
+        .findByProps({ "aria-label": "Room 1 nightly rate" })
+        .props.onChange({ target: { value: "150" } }),
+    );
+    await settlePreview();
+    expect(request.mock.calls[0]![0].stays[0]).toMatchObject({
+      ratePlanId: null,
+      pricing: { kind: "custom", nightlyAmount: { amountDecimal: "150.00", currency: "EUR" } },
+    });
+    const summary = JSON.stringify(view.toJSON());
+    expect(summary).toContain("Custom:");
+    expect(summary).not.toContain("Standard:");
+    expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(false);
   });
+
+  it("defaults to Flexible before Non-refundable regardless of server order", async () => {
+    // prettier-ignore
+    const plans = [{ id: "plan-nr", name: "Non-refundable", rateType: "non_refundable" as const, baseRate: 90 }, { id: "plan-flex", name: "Flexible", rateType: "flexible" as const, baseRate: 100 }];
+    let view!: ReactTestRenderer;
+    await act(async () => {
+      view = create(
+        createElement(TargetManualBookingModal, {
+          roomTypes: [
+            { ...roomTypes[0]!, ratePlans: plans },
+            { ...roomTypes[1]!, ratePlans: [plans[0]!] },
+          ],
+          rooms,
+          onSubmit: vi.fn(),
+          onClose: vi.fn(),
+        }),
+      );
+    });
+    const ratePlan = () => view.root.findByProps({ "aria-label": "Room 1 rate plan" });
+    expect(ratePlan().props.value).toBe("plan-flex");
+    act(() =>
+      view.root
+        .findByProps({ "aria-label": "Room 1 room" })
+        .props.onChange({ target: { value: "room-2" } }),
+    );
+    expect(ratePlan().props.value).toBe("plan-nr");
+  });
+
+  it("prefers any configured plan over Custom when only a package plan exists", async () => {
+    // prettier-ignore
+    const packagePlan = { id: "plan-pkg", name: "Half board", rateType: "package" as const, baseRate: 150 };
+    let view!: ReactTestRenderer;
+    await act(async () => {
+      view = create(
+        createElement(TargetManualBookingModal, {
+          roomTypes: [{ ...roomTypes[0]!, ratePlans: [packagePlan] }],
+          rooms: [rooms[0]!],
+          onSubmit: vi.fn(),
+          onClose: vi.fn(),
+        }),
+      );
+    });
+    const ratePlan = view.root.findByProps({ "aria-label": "Room 1 rate plan" });
+    expect(ratePlan.props.value).toBe("plan-pkg");
+    expect(ratePlan.props["aria-describedby"]).toBeUndefined();
+  });
+
+  // prettier-ignore
+  it("submits the searchable nationality as an ISO code", async () => { vi.spyOn(calendarService, "previewManualBooking").mockResolvedValue(preview); const onSubmit = vi.fn().mockResolvedValue({}); let view!: ReactTestRenderer; await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit, onClose: vi.fn() })); }); await settlePreview(); const nationality = view.root.findAllByType("input").find((input) => input.props.list)!; expect(nationality.props.placeholder).toBe("Search country"); expect(view.root.findByType("datalist").findAllByType("option").some((option) => option.props.value === "Germany" && option.props.label === "🇩🇪 DE")).toBe(true); expect(view.root.findAllByType("input").some((input) => input.props.name === "countryCode")).toBe(false); act(() => nationality.props.onChange({ target: { value: "Germany" } })); await act(async () => { await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() }); }); expect(onSubmit.mock.calls[0]![0].guest.countryCode).toBe("DE"); });
 
   // prettier-ignore
   it("cannot create from stale evidence after the current preview fails", async () => { let fail = false; const onSubmit = vi.fn(); vi.spyOn(calendarService, "previewManualBooking").mockImplementation(async (input) => { if (fail) throw new Error("Preview failed."); return previewFor(input); }); let view!: ReactTestRenderer; await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit, onClose: vi.fn() })); }); await settlePreview(); const adults = view.root.findByProps({ "aria-label": "Room 1 adults" }); fail = true; act(() => adults.props.onChange({ target: { value: "3" } })); await act(async () => view.root.findByProps({ "aria-label": "Room 1 adults" }).props.onChange({ target: { value: "1" } })); await settlePreview(); expect(JSON.stringify(view.toJSON())).toContain("Couldn't calculate pricing."); expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(true); await act(async () => view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() })); expect(onSubmit).not.toHaveBeenCalled(); });
