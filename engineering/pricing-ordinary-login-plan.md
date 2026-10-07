@@ -345,8 +345,10 @@ booking-web with pay-at-property, on the ordinary login.
   resolution under lock, append-only quotes, acceptance re-locks; a request
   cannot name a property.
 - Reuse: merged already (#2438, #2499, #2503, #2548, #2551, #2576, #2585,
-  #2615–#2691). The ~90 `fm/vay-1543-*` drafts (#2137–#2430) are stacked
-  slices whose content reached main through #2438; close them.
+  #2615–#2691). The `fm/vay-1543-*` drafts (#2077–#2430) are the stacked
+  review history of the squash-merged #2438 ("consolidates the stack while
+  preserving the existing draft PRs as its detailed review history"); none
+  carries content that main lacks. Close them.
 
 ### Slice D — Channex consumption (VAY-2030, VAY-1528, VAY-1547–1550)
 
@@ -367,9 +369,14 @@ Goal: published offers reach Channex rate plans and nightly ARI.
   helper (never rewrite the hash-pinned `platform.channex_management_worker_*`
   functions) and recompute `POLICY_DIGEST` in
   `jobs/channexManagementWorkerBoundary.ts`.
-- Reuse: #2342, #2348, #2383, #2403, #2408, #2414 (`fm/vay-1545-*` drafts)
-  need the classification in `open-pricing-prs.md`; most content merged via
-  VAY-2036.
+- Reuse: none. The `fm/vay-1545-*` and Channex drafts (#2142–#2414,
+  #1756–#1772) are the review history of the squash-merged #2447 and were
+  rebuilt again by VAY-2036/2030/2041; close them.
+
+Open-PR classification (`open-pricing-prs.md`, 191 PRs matching "pricing"):
+merged-content 30, superseded 159, live 1 (#2656, the private-service
+readiness probe → close), unknown 1 (#1748 pre-reset design doc → close).
+No open PR is a reuse candidate for any slice.
 
 ### Slice E — cleanup (after C is accepted on one real hotel)
 
@@ -412,24 +419,24 @@ result (slice A) in week 1 without waiting on any grant.
 "Done" means the code is on main and only human acceptance is missing; the
 status change itself stays with the human.
 
-| Group                                       | Tickets                                                                                                                                                                                           | Disposition                                                                                    |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Decision umbrella                           | VAY-1538                                                                                                                                                                                          | still needed as the umbrella until slice C; VAY-2057 supplies the credential decision          |
-| Contracts                                   | VAY-1539, VAY-1554, VAY-1555, VAY-1556                                                                                                                                                            | done (contracts on main, consumed by code)                                                     |
-| Storage                                     | VAY-1540, VAY-1557, VAY-1558                                                                                                                                                                      | done (0300–0311 on main)                                                                       |
-| Reset                                       | VAY-1546                                                                                                                                                                                          | done (#1764 merged; leftovers handled in slice A.3/E)                                          |
-| Publication pipeline (VAY-1541 children)    | VAY-1559, VAY-1560, VAY-1561, VAY-1667, VAY-1878, VAY-1925–1935, VAY-1936, VAY-1937, VAY-1938, VAY-1939, VAY-1940, VAY-1941                                                                       | done (merged via #2438 and successors); VAY-1938/1939/1941 need browser acceptance in slice B  |
-| Draft terms                                 | VAY-1996, VAY-1997, VAY-1998, VAY-1999                                                                                                                                                            | still needed, after slice B (not required for first setup)                                     |
-| Editor features (VAY-1544 children)         | VAY-1942, VAY-1945, VAY-1947–1951, VAY-1955, VAY-1957–1961, VAY-1965, VAY-1966, VAY-1968, VAY-1969, VAY-1971, VAY-1974–1980, VAY-1982, VAY-1984, VAY-1986, VAY-1987, VAY-1989, VAY-1992, VAY-1993 | done (components on main); one browser acceptance pass in slice B closes them                  |
-| Editor evidence                             | VAY-1990, VAY-1991                                                                                                                                                                                | still needed (slice A/B evidence; VAY-1991 identity reused)                                    |
-| Authority / offers / quotes                 | VAY-1543                                                                                                                                                                                          | still needed → slices 0 and C; the private-service and #344/#417 parts are obsolete            |
-| Manual booking                              | VAY-1422, VAY-647                                                                                                                                                                                 | still needed → slice A                                                                         |
-| Onboarding                                  | VAY-1943 (+VAY-1051)                                                                                                                                                                              | still needed → slice B unblocks                                                                |
-| Channex reads                               | VAY-1952, VAY-1953, VAY-1954, VAY-1956, VAY-1967, VAY-1970, VAY-1946, VAY-1944                                                                                                                    | done (worker reads on main, CI-proven)                                                         |
-| Channex offer lifecycle (VAY-1545 children) | VAY-1972, VAY-1973, VAY-1977, VAY-1983, VAY-1985, VAY-1988, VAY-1994, VAY-1995, VAY-2000–2012, VAY-2014–2016, VAY-2018                                                                            | done (VAY-1545 and VAY-2036 Done) pending the classification of the six `fm/vay-1545-*` drafts |
-| Channex activation                          | VAY-2030, VAY-1528, VAY-1547, VAY-1548, VAY-1549, VAY-1550                                                                                                                                        | still needed → slice D                                                                         |
-| Prerequisites                               | VAY-2054, VAY-2056                                                                                                                                                                                | VAY-2054 needed for slice C (and 0.3 is its follow-up); VAY-2056 independent                   |
-| Obsolete                                    | private pricing command service, per-property logins, `pricing-writer-hold`, verification reader, platform #417/#251, app #2656                                                                   | obsolete under this plan                                                                       |
+| Group                                       | Tickets                                                                                                                                                                                           | Disposition                                                                                   |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Decision umbrella                           | VAY-1538                                                                                                                                                                                          | still needed as the umbrella until slice C; VAY-2057 supplies the credential decision         |
+| Contracts                                   | VAY-1539, VAY-1554, VAY-1555, VAY-1556                                                                                                                                                            | done (contracts on main, consumed by code)                                                    |
+| Storage                                     | VAY-1540, VAY-1557, VAY-1558                                                                                                                                                                      | done (0300–0311 on main)                                                                      |
+| Reset                                       | VAY-1546                                                                                                                                                                                          | done (#1764 merged; leftovers handled in slice A.3/E)                                         |
+| Publication pipeline (VAY-1541 children)    | VAY-1559, VAY-1560, VAY-1561, VAY-1667, VAY-1878, VAY-1925–1935, VAY-1936, VAY-1937, VAY-1938, VAY-1939, VAY-1940, VAY-1941                                                                       | done (merged via #2438 and successors); VAY-1938/1939/1941 need browser acceptance in slice B |
+| Draft terms                                 | VAY-1996, VAY-1997, VAY-1998, VAY-1999                                                                                                                                                            | still needed, after slice B (not required for first setup)                                    |
+| Editor features (VAY-1544 children)         | VAY-1942, VAY-1945, VAY-1947–1951, VAY-1955, VAY-1957–1961, VAY-1965, VAY-1966, VAY-1968, VAY-1969, VAY-1971, VAY-1974–1980, VAY-1982, VAY-1984, VAY-1986, VAY-1987, VAY-1989, VAY-1992, VAY-1993 | done (components on main); one browser acceptance pass in slice B closes them                 |
+| Editor evidence                             | VAY-1990, VAY-1991                                                                                                                                                                                | still needed (slice A/B evidence; VAY-1991 identity reused)                                   |
+| Authority / offers / quotes                 | VAY-1543                                                                                                                                                                                          | still needed → slices 0 and C; the private-service and #344/#417 parts are obsolete           |
+| Manual booking                              | VAY-1422, VAY-647                                                                                                                                                                                 | still needed → slice A                                                                        |
+| Onboarding                                  | VAY-1943 (+VAY-1051)                                                                                                                                                                              | still needed → slice B unblocks                                                               |
+| Channex reads                               | VAY-1952, VAY-1953, VAY-1954, VAY-1956, VAY-1967, VAY-1970, VAY-1946, VAY-1944                                                                                                                    | done (worker reads on main, CI-proven)                                                        |
+| Channex offer lifecycle (VAY-1545 children) | VAY-1972, VAY-1973, VAY-1977, VAY-1983, VAY-1985, VAY-1988, VAY-1994, VAY-1995, VAY-2000–2012, VAY-2014–2016, VAY-2018                                                                            | done (VAY-1545 and VAY-2036 Done; the `fm/vay-1545-*` drafts are #2447's review history)      |
+| Channex activation                          | VAY-2030, VAY-1528, VAY-1547, VAY-1548, VAY-1549, VAY-1550                                                                                                                                        | still needed → slice D                                                                        |
+| Prerequisites                               | VAY-2054, VAY-2056                                                                                                                                                                                | VAY-2054 needed for slice C (and 0.3 is its follow-up); VAY-2056 independent                  |
+| Obsolete                                    | private pricing command service, per-property logins, `pricing-writer-hold`, verification reader, platform #417/#251, app #2656                                                                   | obsolete under this plan                                                                      |
 
 ## 7. Independent review
 
