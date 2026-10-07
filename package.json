@@ -32,6 +32,7 @@
     "test:architecture-boundaries": "node --test scripts/check-architecture-boundaries.test.mjs",
     "test:workos-local-config": "bash scripts/dev-workos-local-config.test.sh",
     "test:coordinated-release": "node --test scripts/coordinated-release/*.test.mjs",
+    "test:pr-checks": "node --test scripts/ci/*.test.mjs",
     "lint:python": "ruff check .",
     "format:python": "ruff format .",
     "e2e": "playwright test",
@@ -106,6 +107,7 @@
     "lint-staged": "^15.5.2",
     "postcss": "^8.5.10",
     "prettier": "^3.5.3",
-    "serialize-javascript": "^7.0.5"
+    "serialize-javascript": "^7.0.5",
+    "yaml": "^2.9.0"
   }
 }

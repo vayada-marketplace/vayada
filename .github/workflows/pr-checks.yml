@@ -16,11 +16,45 @@ concurrency:
   group: pr-checks-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# Job selection is path-based and fails safe: scripts/ci/pr-checks.mjs maps each changed file to
+# the jobs that cover it, and any file it cannot classify selects every job. "Required Checks"
+# stays the single required status and only accepts a job that succeeded or that was skipped
+# because the selector excluded it. Selection lives on the jobs, not on `on.pull_request.paths`,
+# so the required status is always reported.
 jobs:
+  changes:
+    name: Select checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      run_frontend: ${{ steps.select.outputs.run_frontend }}
+      run_first_party_auth: ${{ steps.select.outputs.run_first_party_auth }}
+      run_api_postgres: ${{ steps.select.outputs.run_api_postgres }}
+      run_setup_draft_reset_postgres: ${{ steps.select.outputs.run_setup_draft_reset_postgres }}
+      run_backend: ${{ steps.select.outputs.run_backend }}
+
+    steps:
+      - name: Checkout merge commit and its parents
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Validate hotel setup bootstrap image inventory
+        run: node scripts/ci/check-hotel-setup-bootstrap-inventory.mjs
+
+      - name: Select jobs from changed paths
+        id: select
+        run: node scripts/ci/pr-checks.mjs select
+
   frontend:
     name: Frontend Test, Typecheck, Lint, Build
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: [changes]
+    if: needs.changes.outputs.run_frontend == 'true'
 
     steps:
       - name: Checkout code
@@ -42,6 +76,9 @@ jobs:
 
       - name: Coordinated release contracts
         run: npm run test:coordinated-release
+
+      - name: PR check selection and aggregation contracts
+        run: npm run test:pr-checks
 
       - name: Private hotel setup image publication boundaries
         run: node scripts/check-hotel-setup-image-publication.mjs
@@ -93,6 +130,8 @@ jobs:
     name: First-Party Auth Contracts
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.run_first_party_auth == 'true'
     permissions:
       contents: read
 
@@ -134,14 +173,22 @@ jobs:
           E2E_FIRST_PARTY_AUTH_ONLY: "1"
           E2E_START_SERVERS: "1"
 
+  # Each shard gets its own PostgreSQL cluster, so cluster-wide role proofs stay isolated:
+  #   platform    - identity, legacy owner, finance worker, Channex worker and authorization proofs
+  #   pms         - the PMS/booking/finance integration batch and the migration suites
+  #   hotel-setup - native hotel setup creation, reader, credential and logo lifecycle proofs
+  # Steps without a `matrix.shard` condition run in every shard.
   api_postgres:
-    name: TypeScript API PostgreSQL Integration (PG${{ matrix.postgres }})
+    name: TypeScript API PostgreSQL Integration (PG${{ matrix.postgres }}, ${{ matrix.shard }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.run_api_postgres == 'true'
     strategy:
       fail-fast: false
       matrix:
         postgres: [16, 17]
+        shard: [platform, pms, hotel-setup]
 
     services:
       postgres:
@@ -173,8 +220,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Every `npm run test` in vayada-api has a pretest that rebuilds all backend packages
+      # (about 30 s each, two dozen times per job). Build once, then skip pre/post scripts.
+      - name: Build backend packages once
+        run: |
+          npm --workspace vayada-api run build:backend-packages
+          echo "npm_config_ignore_scripts=true" >> "$GITHUB_ENV"
+
       # Must run before any migration creates the cluster-wide setup reader role.
       - name: Verify setup reader RLS helper grants on a fresh cluster
+        if: matrix.shard == 'platform'
         env:
           HOTEL_SETUP_READER_RLS_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/side_rls_proof
         run: |
@@ -190,6 +245,7 @@ jobs:
           npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupReaderRlsHelpers.integration.test.ts
 
       - name: Verify restricted migration source reader
+        if: matrix.shard == 'platform'
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2042_source_privilege_test
         run: |
@@ -205,6 +261,7 @@ jobs:
           npm --workspace @vayada/backend-migration run test -- src/sourceExtractionPrivileges.integration.test.ts
 
       - name: Verify historical Channex binding evidence and transition guards
+        if: matrix.shard == 'platform'
         env:
           VAY2017_BINDING_READER_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_binding_reader_fixture
           VAY2017_BINDING_SOURCE_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_binding_source_fixture
@@ -246,6 +303,7 @@ jobs:
             src/legacyHistoricalBindingApprovals.integration.test.ts
 
       - name: Verify immutable legacy owner bootstrap receipts
+        if: matrix.shard == 'platform'
         env:
           VAY2017_RECEIPT_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_receipt_fixture
           VAY2017_RECEIPT_READER_TEST_DATABASE_URL: postgresql://vay2017_receipt_reader:reader_test_only@127.0.0.1:5432/vay2017_receipt_fixture
@@ -262,6 +320,7 @@ jobs:
           npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/legacyOwnerBootstrapReceipts.integration.test.ts
 
       - name: Verify scoped legacy owner email guard
+        if: matrix.shard == 'platform'
         env:
           VAY2017_EMAIL_GUARD_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_email_guard_fixture
         run: |
@@ -277,6 +336,7 @@ jobs:
           npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/legacyOwnerEmailIndexPlan.test.ts
 
       - name: Verify prepared owner lifecycle guard
+        if: matrix.shard == 'platform'
         env:
           VAY2017_LIFECYCLE_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_lifecycle_fixture
         run: |
@@ -293,6 +353,7 @@ jobs:
           npm --workspace vayada-api run test -- --no-file-parallelism src/platform/legacyOwnerLifecycleMutations.integration.test.ts
 
       - name: Verify Marketplace matching event storage
+        if: matrix.shard == 'platform'
         run: npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/matchingEventProjections.test.ts src/affiliatePercentagePolicyStorage.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
@@ -303,6 +364,7 @@ jobs:
           TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify creator payout reconciliation detail
+        if: matrix.shard == 'platform'
         run: >-
           npm --workspace vayada-api run test -- --no-file-parallelism
           src/financeAffiliatePayoutPortal.integration.test.ts
@@ -310,6 +372,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify restricted identity PMS Inbox enqueue
+        if: matrix.shard == 'platform'
         run: >-
           npm --workspace @vayada/backend-auth run test -- --no-file-parallelism
           src/staffInvitations.test.ts -t "enqueues an unreadable PMS Inbox job"
@@ -317,6 +380,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify Finance expense worker permissions and real handlers
+        if: matrix.shard == 'platform'
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2044_worker_test
         run: |
@@ -331,6 +395,7 @@ jobs:
           TEST_FINANCE_WORKER_DATABASE_URL=postgresql://vayada_next_finance_expense_worker:fixture@127.0.0.1:5432/vay2044_worker_test npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/financeExpenseGeneration.integration.test.ts
 
       - name: Verify Financials export worker permissions and real handlers
+        if: matrix.shard == 'platform'
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2045_worker_test
         run: |
@@ -350,6 +415,7 @@ jobs:
           '
 
       - name: Verify pricing command native login scope
+        if: matrix.shard == 'platform'
         run: >-
           npm --workspace vayada-api run test -- --no-file-parallelism
           src/pricingCommandServiceDatabaseScope.integration.test.ts
@@ -357,22 +423,27 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify identity runtime row scope
+        if: matrix.shard == 'platform'
         run: bash scripts/test-identity-runtime-row-scope.sh ${{ matrix.postgres }}
 
       - name: Verify Channex worker shared queue scope
+        if: matrix.shard == 'platform'
         run: npm --workspace @vayada/backend-migration run test -- src/channexManagementWorkerQueueScope.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify Channex worker effective privilege boundary
+        if: matrix.shard == 'platform'
         run: npm --workspace vayada-api run test -- src/jobs/channexManagementWorkerBoundary.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify Channex worker startup gating
+        if: matrix.shard == 'platform'
         run: npm --workspace vayada-api run test -- src/jobs/channexManagementWorkerStartup.test.ts src/channexManagementDatabaseRouting.test.ts
 
       - name: Verify restricted Channex provider flows
+        if: matrix.shard == 'platform'
         run: >-
           npm --workspace vayada-api run test -- --no-file-parallelism
           src/domains/replacementPricingOfferOwners.integration.test.ts
@@ -382,16 +453,19 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify hotel member role repair
+        if: matrix.shard == 'platform'
         run: npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/hotelMemberRoleRepair.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify current authorization and effective property access
+        if: matrix.shard == 'platform'
         run: npm --workspace @vayada/backend-authorization run test -- --no-file-parallelism src/index.test.ts -t 'createPgPropertyAccessRepository|createAuthorizationResolver|resolveMembershipRolePermissions'
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Run PMS TypeScript PostgreSQL integration
+        if: matrix.shard == 'pms'
         run: >-
           npm --workspace vayada-api run test --
           --no-file-parallelism
@@ -479,6 +553,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify canonical setup payment readiness
+        if: matrix.shard == 'hotel-setup'
         run: >-
           npm --workspace vayada-api run test --
           src/sharedHotelSetupProfile.integration.test.ts -t 'evaluates payment readiness'
@@ -486,12 +561,14 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify concurrent native property creation
+        if: matrix.shard == 'hotel-setup'
         run: |
           npm --workspace vayada-api run test -- --no-file-parallelism src/sharedHotelSetupProfile.integration.test.ts -t 'provisions one canonical property for concurrent stable-reference commands'
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Configure trusted TLS for native creation preflight
+        if: matrix.shard == 'hotel-setup'
         env:
           PG_CONTAINER: ${{ job.services.postgres.id }}
         run: |
@@ -524,6 +601,7 @@ jobs:
           echo "NODE_EXTRA_CA_CERTS=$tls_dir/server.crt" >> "$GITHUB_ENV"
 
       - name: Verify native property creation with exact grants
+        if: matrix.shard == 'hotel-setup'
         run: |
           node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay1092_vay965_creation_test"); await client.end();'
           TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
@@ -533,6 +611,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay1092_vay965_creation_test
 
       - name: Checkout reviewed compatible setup rollback source
+        if: matrix.shard == 'hotel-setup'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ef69824c3364c1e43caad5c474e1615f39aff8bd
@@ -540,13 +619,17 @@ jobs:
           persist-credentials: false
 
       - name: Build separately compiled compatible setup rollback
+        if: matrix.shard == 'hotel-setup'
         working-directory: .hotel-setup-compatible-rollback
         run: |
           test "$(git rev-parse HEAD)" = ef69824c3364c1e43caad5c474e1615f39aff8bd
+          # This checkout relies on its own prebuild hooks to compile its backend packages.
+          unset npm_config_ignore_scripts
           npm ci
           npm run build:api
 
       - name: Verify native reader staging, login and secret candidates
+        if: matrix.shard == 'hotel-setup'
         run: |
           node --input-type=module <<'NODE'
           import { randomBytes } from "node:crypto";
@@ -621,6 +704,7 @@ jobs:
           ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify private setup authentication and credential handling
+        if: matrix.shard == 'hotel-setup'
         run: >-
           npm --workspace vayada-api run test --
           src/sharedHotelSetupStatus.test.ts
@@ -661,11 +745,13 @@ jobs:
           src/domains/propertyMediaCommandRepository.test.ts
 
       - name: Verify private hotel setup reader privileges
+        if: matrix.shard == 'hotel-setup'
         run: npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupReaderPrivileges.integration.test.ts src/hotelSetupReaderAudit.integration.test.ts src/hotelSetupReaderSecretCandidate.test.ts src/hotelSetupReaderLoginVerification.test.ts
         env:
           HOTEL_SETUP_READER_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify Booking add-on economics migration
+        if: matrix.shard == 'pms'
         run: >-
           npm --workspace @vayada/backend-migration run test --
           --no-file-parallelism
@@ -688,6 +774,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify Finance OTA commission migration
+        if: matrix.shard == 'pms'
         run: >-
           npm --workspace @vayada/backend-migration run test --
           src/financeOtaCommissionRules.test.ts src/providerFeeEvidenceMigration.integration.test.ts
@@ -698,6 +785,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify membership property scope migration
+        if: matrix.shard == 'pms'
         run: >-
           npm --workspace @vayada/backend-migration run test --
           --no-file-parallelism src/membershipPropertyScope.test.ts
@@ -706,6 +794,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Run public gallery migration integration
+        if: matrix.shard == 'pms'
         run: >-
           npm --workspace @vayada/backend-migration run test --
           src/publicBookabilityGalleryMedia.test.ts
@@ -713,6 +802,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Run pending booking edits in an isolated database
+        if: matrix.shard == 'pms'
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_booking_edit_test
           TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_booking_edit_test
@@ -730,12 +820,14 @@ jobs:
           npm --workspace vayada-api run test -- --no-file-parallelism src/routes/pendingBookingEdits.integration.test.ts
 
       - name: Verify removed pricing boundaries
+        if: matrix.shard == 'pms'
         run: >-
           npm --workspace vayada-api run test -- --no-file-parallelism
           src/pricingReset.test.ts src/integrations/channexManagementPlans.test.ts
 
       # Last: it creates the cluster-wide RDS-like vayada_admin creator.
       - name: Verify protected logo lifecycle with an RDS-like creator
+        if: matrix.shard == 'hotel-setup'
         env:
           ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
           MIGRATION_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay1092_vay965_logo_test
@@ -777,6 +869,8 @@ jobs:
     name: Setup Draft Reset PostgreSQL ${{ matrix.postgres }} Integration
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.run_setup_draft_reset_postgres == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -829,6 +923,8 @@ jobs:
     name: Backend Tests (${{ matrix.app }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.run_backend == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -985,21 +1081,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs:
+      - changes
       - frontend
       - first_party_auth
       - api_postgres
       - setup_draft_reset_postgres
       - backend
+    # always(): run (and fail) even when a needed job failed, was cancelled or timed out. A skipped
+    # required job would satisfy the branch ruleset, so this job must never be skipped itself.
     if: always()
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
       - name: Verify required jobs
-        run: |
-          if [ "${{ needs.frontend.result }}" != "success" ] || [ "${{ needs.first_party_auth.result }}" != "success" ] || [ "${{ needs.api_postgres.result }}" != "success" ] || [ "${{ needs.setup_draft_reset_postgres.result }}" != "success" ] || [ "${{ needs.backend.result }}" != "success" ]; then
-            echo "Frontend result: ${{ needs.frontend.result }}"
-            echo "First-party auth result: ${{ needs.first_party_auth.result }}"
-            echo "TypeScript API PostgreSQL result: ${{ needs.api_postgres.result }}"
-            echo "Setup Draft Reset PostgreSQL result: ${{ needs.setup_draft_reset_postgres.result }}"
-            echo "Backend result: ${{ needs.backend.result }}"
-            exit 1
-          fi
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: node scripts/ci/pr-checks.mjs verify
