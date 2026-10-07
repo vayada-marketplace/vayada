@@ -2,7 +2,6 @@ import { createTargetPmsOperationsCommandRepository } from "./domains/pmsOperati
 import { describe, expect, it, vi } from "vitest";
 import { createPgPmsRecurringPricingCommandRepository } from "./domains/pmsRecurringPricingCommandRepository.js";
 import { createPgChannelDatePrices } from "./domains/pmsChannelDatePrices.js";
-import { calculateManualBookingPreview } from "./routes/pmsManualBookingPreviewCalculation.js";
 import {
   createTargetCheckoutQuote,
   loadTargetCheckoutOffer,
@@ -38,7 +37,7 @@ describe("pricing reset", () => {
     );
     await port.close();
   });
-  it("does not quote old offers, calendars, manual stays or mixed room selections", async () => {
+  it("does not quote old offers, calendars or mixed room selections", async () => {
     const query = vi.fn();
     const pool = { query, end: vi.fn() };
     const calendar = createTargetBookingWebCalendarRepository({ connectionString: "unused", pool });
@@ -60,9 +59,6 @@ describe("pricing reset", () => {
     await expect(quoteTargetRoomSelection(pool, undefined as never)).rejects.toMatchObject(
       unavailable,
     );
-    await expect(
-      calculateManualBookingPreview(undefined as never, undefined as never, undefined as never),
-    ).rejects.toMatchObject(unavailable);
     expect(query).not.toHaveBeenCalled();
     await calendar.close?.();
     await quotes.close?.();

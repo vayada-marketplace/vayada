@@ -37,7 +37,7 @@ export function createPmsManualBookingProductionCommandConfig(input: {
       attribution: createBookingPmsManualAttributionOwner(),
       financeSettlement: createFinanceManualBookingSettlementPort(),
       pricing: createPmsManualBookingTransactionalPricingPort(
-        createPmsManualBookingCurrentPricingEvidence(input.roomPublication),
+        createPmsManualBookingCurrentPricingEvidence(),
       ),
       roomAssignmentOptimization: createPmsRoomAssignmentOptimizationTriggerPort(),
     },
