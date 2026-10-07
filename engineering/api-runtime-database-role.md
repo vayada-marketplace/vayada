@@ -145,18 +145,20 @@ PostgreSQL requires an `UPDATE` privilege on at least one column for that.
   churn this decision ends. Adding the policy stays possible together with the
   next hotel-setup digest re-pin.
 - `identity.product_entitlements` and `identity.organization_resource_links`
-  keep the exact VAY-965 setup-track column matrix (`INSERT`/`UPDATE` on named
-  columns); any column `UPDATE` already permits the locks. The matrix's
-  `UPDATE (id)` on `organization_resource_links` is a live production grant (its
-  command uses `ON CONFLICT DO NOTHING`, so the column only serves locks);
-  narrowing it to `created_at` is a candidate for the follow-up that re-pins the
-  hotel-setup digests.
-- No other identity `INSERT`/`UPDATE`/`DELETE` is granted. The inventory found
-  three call sites reachable from `TARGET_DATABASE_URL` code whose columns
-  exceed that matrix (`platform/marketplaceOfferIdentityAccess.ts`,
-  `platform/sharedHotelSetupStatusReadModel.ts`, `routes/pmsModuleActivations.ts`);
-  they stay blocked until a separate decision moves them to the identity
-  runtime or extends the matrix.
+  are product-link tables, not users, memberships or roles. They keep the
+  VAY-965 setup-track column matrix and, in the product DML posture only, gain
+  the columns the ordinary API really writes (human decision 2026-10-07):
+  `product_entitlements` gets `INSERT (resource_product, resource_type,
+resource_id)` and `UPDATE (metadata)` for Financials module activation
+  (`routes/pmsModuleActivations.ts`) and the new-hotel Financials default
+  (`platform/sharedHotelSetupStatusReadModel.ts`); `organization_resource_links`
+  gets `UPDATE (status, updated_at)` for marketplace offer operator grant and
+  archive (`platform/marketplaceOfferIdentityAccess.ts`). No `DELETE`, no other
+  identity table gains a write, and the revoke scope restores the VAY-965
+  matrix exactly. The matrix's `UPDATE (id)` on `organization_resource_links`
+  is a live production grant that only serves locks; narrowing it to
+  `created_at` is a candidate for the follow-up that re-pins the hotel-setup
+  digests.
 
 ## What stays on SECURITY DEFINER functions
 
