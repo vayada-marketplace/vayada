@@ -154,6 +154,30 @@ describe("target manual-booking create route", () => {
     },
   );
 
+  it("passes a published offer id unchanged and the stay's child ages", async () => {
+    const state: State = { calls: [] };
+    app = await testApp(state);
+    const payload = command("unpaid", "cash") as any;
+    payload.stays[0] = {
+      ...payload.stays[0],
+      children: 1,
+      childAgesAtCheckIn: [7],
+      ratePlanId: "Flex-Offer_1",
+      pricing: { kind: "rate_plan", manualOverride: null },
+    };
+    expect((await request(app, payload)).statusCode).toBe(201);
+    expect(state.calls[0]?.stays[0]).toMatchObject({
+      ratePlanId: "Flex-Offer_1",
+      childAgesAtCheckIn: [7],
+    });
+    payload.stays[0].childAgesAtCheckIn = [];
+    const mismatch = await request(app, payload);
+    expect([mismatch.statusCode, mismatch.json().code]).toEqual([422, "child_ages_required"]);
+    payload.stays[0] = { ...payload.stays[0], childAgesAtCheckIn: [7], ratePlanId: " padded" };
+    expect((await request(app, payload)).json().code).toBe("invalid_body");
+    expect(state.calls).toHaveLength(1);
+  });
+
   it("passes trimmed additional guests in order and defaults an omitted list to none", async () => {
     const state: State = { calls: [] };
     app = await testApp(state);

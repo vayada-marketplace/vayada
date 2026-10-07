@@ -1,6 +1,8 @@
 import {
   PMS_PRICING_CONTRACT_VERSION,
+  isMinorAmount,
   parseFlexibleRatePlanSnapshot,
+  pricingCurrencyScale,
   parsePmsPricingSourceSnapshot,
   parsePropertyPricingCurrencySnapshot,
   type FlexibleRatePlanSnapshot,
@@ -86,6 +88,40 @@ LEFT JOIN pms.flexible_rate_plan_cancellation_extensions cancellation_extension
  AND cancellation_extension.room_type_id = plan.room_type_id
  AND cancellation_extension.pricing_contract_version = plan.pricing_contract_version`;
 
+// Every offer of the active pricing-v2 publication with the Booking terms it references, room by room.
+const PUBLISHED_OFFER_SELECT = `SELECT
+  room.room_type_id::text AS "roomTypeId",
+  room.currency::text AS currency,
+  room_type.room_facts_revision AS "sourceRoomFactsRevision",
+  head.revision AS "pricingRevision",
+  revision.created_at AS "publishedAt",
+  offer.value AS offer,
+  terms.terms AS terms
+FROM pms.pricing_v2_heads head
+JOIN pms.pricing_v2_revisions revision
+  ON revision.property_id = head.property_id AND revision.revision = head.revision
+JOIN pms.pricing_v2_rooms room
+  ON room.property_id = head.property_id AND room.revision = head.revision
+JOIN pms.room_types room_type
+  ON room_type.property_id = room.property_id AND room_type.id = room.room_type_id AND room_type.active
+CROSS JOIN LATERAL jsonb_array_elements(room.configuration->'offers') WITH ORDINALITY AS offer(value, position)
+-- The terms revision the publication references (immutable), as manual-booking pricing reads it.
+JOIN booking.pricing_v2_offer_terms terms
+  ON terms.property_id = room.property_id AND terms.room_type_id = room.room_type_id
+ AND terms.offer_id = offer.value->>'id' AND terms.revision::text = offer.value->>'termsRevision'
+WHERE head.property_id = $1::uuid
+ORDER BY room.room_type_id, offer.position`;
+
+type PublishedOfferRow = {
+  roomTypeId: string;
+  currency: string;
+  sourceRoomFactsRevision: number | string;
+  pricingRevision: number | string;
+  publishedAt: Date | string;
+  offer: Record<string, any>;
+  terms: Record<string, any>;
+};
+
 const PRICING_SOURCES_SELECT = `WITH pricing_currency AS (
   ${CURRENCY_SELECT}
   WHERE settings.property_id = $1::uuid
@@ -131,17 +167,13 @@ export function createPgPmsPricingReadModel(config: {
     },
 
     async getFlexibleRatePlan(propertyId, roomTypeId) {
-      throw Object.assign(
-        new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
-        { statusCode: 503, code: "PRICING_UNAVAILABLE" },
-      );
+      const normalizedRoomTypeId = readUuid(roomTypeId);
+      const plans = await readPublishedFlexibleRatePlans(pool, readUuid(propertyId));
+      return plans.find((plan) => plan.roomTypeId === normalizedRoomTypeId) ?? null;
     },
 
     async listFlexibleRatePlans(propertyId) {
-      throw Object.assign(
-        new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
-        { statusCode: 503, code: "PRICING_UNAVAILABLE" },
-      );
+      return readPublishedFlexibleRatePlans(pool, readUuid(propertyId));
     },
 
     async getPricingSourceSnapshot(propertyId) {
@@ -167,6 +199,117 @@ export function createPgPmsPricingReadModel(config: {
       closed = true;
     },
   };
+}
+
+/** Read adapter over the active pricing-v2 publication (slice A.2): one flexible plan per room,
+ * from the first independently priced offer whose current terms are refundable. Rooms without
+ * one, offers without a base price and non-UUID offer ids have no flexible plan. */
+export async function readPublishedFlexibleRatePlans(
+  queryable: Queryable,
+  propertyId: string,
+): Promise<FlexibleRatePlanSnapshot[]> {
+  const rows = await readPublishedOfferRows(queryable, propertyId);
+  const plans = new Map<string, FlexibleRatePlanSnapshot>();
+  for (const row of rows) {
+    if (plans.has(row.roomTypeId)) continue;
+    const plan = publishedFlexibleRatePlan(propertyId, row);
+    if (plan) plans.set(row.roomTypeId, plan);
+  }
+  return [...plans.values()];
+}
+
+/** Every published offer for rate-plan lists (e.g. the New Booking dropdown), in editor order.
+ * Labels come from the offer's current terms; only independent offers carry a base amount. */
+export type PublishedRatePlan = Readonly<{
+  roomTypeId: string;
+  ratePlanId: string;
+  rateType: "flexible" | "non_refundable";
+  mealPlan: string | null;
+  /** Publication currency; room types from the room-facts flow carry none. */
+  currency: string;
+  baseAmount: Readonly<{ amountDecimal: string; currency: string }> | null;
+  cancellation: Record<string, unknown>;
+}>;
+
+export async function readPublishedRatePlans(
+  queryable: Queryable,
+  propertyId: string,
+): Promise<PublishedRatePlan[]> {
+  return (await readPublishedOfferRows(queryable, propertyId)).flatMap((row) => {
+    const { offer, terms } = row;
+    const rateType = terms?.cancellation?.kind;
+    if (typeof offer?.id !== "string" || (rateType !== "flexible" && rateType !== "non_refundable"))
+      return [];
+    const minor =
+      offer.price?.kind === "independent" ? baseMinor(offer.price.calendar?.base) : null;
+    const scale = pricingCurrencyScale(row.currency);
+    const amountDecimal = minor === null || scale === null ? null : minorToDecimal(minor, scale);
+    return [
+      {
+        roomTypeId: row.roomTypeId,
+        ratePlanId: offer.id,
+        rateType,
+        mealPlan: typeof offer.meal?.kind === "string" ? offer.meal.kind : null,
+        currency: row.currency,
+        baseAmount: amountDecimal === null ? null : { amountDecimal, currency: row.currency },
+        cancellation: terms.cancellation,
+      },
+    ];
+  });
+}
+
+async function readPublishedOfferRows(queryable: Queryable, propertyId: string) {
+  return (await queryable.query<PublishedOfferRow>(PUBLISHED_OFFER_SELECT, [propertyId])).rows;
+}
+
+function publishedFlexibleRatePlan(
+  propertyId: string,
+  row: PublishedOfferRow,
+): FlexibleRatePlanSnapshot | null {
+  const { offer, terms } = row;
+  if (offer?.price?.kind !== "independent" || terms?.cancellation?.kind !== "flexible") return null;
+  const minor = baseMinor(offer.price.calendar?.base);
+  const scale = pricingCurrencyScale(row.currency);
+  const amountDecimal = minor === null || scale === null ? null : minorToDecimal(minor, scale);
+  if (amountDecimal === null) return null;
+  const mealPlan = offer.meal?.kind;
+  const publishedAt = isoDate(row.publishedAt);
+  return parseFlexibleRatePlanSnapshot({
+    contractVersion: PMS_PRICING_CONTRACT_VERSION,
+    propertyId,
+    roomTypeId: row.roomTypeId,
+    flexibleRatePlanId: offer.id,
+    flexibleRatePlanRevision: positiveInteger(row.pricingRevision),
+    sourceRoomFactsRevision: positiveInteger(row.sourceRoomFactsRevision),
+    baseAmount: { amountDecimal, currency: row.currency },
+    cancellationTerms: terms.cancellation.terms,
+    ...(mealPlan === "room_only" || mealPlan === "breakfast" ? { mealPlan } : {}),
+    createdAt: publishedAt,
+    updatedAt: publishedAt,
+  });
+}
+
+/** The base calendar's single-occupancy amount, whatever the room-price mode. */
+function baseMinor(base: Record<string, any> | null | undefined): string | null {
+  const minor =
+    base?.mode === "flat"
+      ? base.amountMinor
+      : base?.mode === "occupancy"
+        ? base.amountsMinor?.[0]
+        : base?.mode === "per_person"
+          ? base.unitMinor
+          : base?.mode === "included_guests"
+            ? base.baseMinor
+            : null;
+  return isMinorAmount(minor) ? minor : null;
+}
+
+/** PMS money is always written with two decimals; null when the amount needs more precision. */
+function minorToDecimal(minor: string, scale: number): string | null {
+  const padded = minor.padStart(scale + 1, "0");
+  const units = scale === 0 ? padded : padded.slice(0, -scale);
+  const fraction = (scale === 0 ? "" : padded.slice(-scale)).padEnd(2, "0");
+  return /^0*$/.test(fraction.slice(2)) ? `${units}.${fraction.slice(0, 2)}` : null;
 }
 
 export async function loadPmsPricingSourceSnapshot(

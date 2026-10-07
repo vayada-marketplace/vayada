@@ -20,6 +20,23 @@ const config: ChannexManagementConfig = {
     iframe: "observe_only",
   },
 };
+// VAY-2055: production connection-only scope; reviews stay independently mutating.
+const connectionOnly: ChannexManagementConfig = {
+  apiBaseUrl: "https://app.channex.io",
+  workerDatabaseUrl: "postgresql://fixture@invalid/test",
+  workerEnabled: true,
+  bookingMutationOwner: "legacy",
+  capabilityModes: {
+    connection: "mutating",
+    provisioning: "observe_only",
+    ariSync: "observe_only",
+    bookingSync: "observe_only",
+    markups: "observe_only",
+    messaging: "observe_only",
+    reviews: "mutating",
+    iframe: "observe_only",
+  },
+};
 afterEach(() => vi.restoreAllMocks());
 describe("Channex worker startup", () => {
   it("opens no connection while paused", async () => {
@@ -43,5 +60,31 @@ describe("Channex worker startup", () => {
       preflightChannexManagementWorker({ ...config, ...override }, true),
     ).rejects.toThrow("channex_worker_scope_unsupported");
     expect(connect).not.toHaveBeenCalled();
+  });
+  it.each([
+    { workerDatabaseUrl: undefined },
+    { apiBaseUrl: "https://example.invalid" },
+    { stagingInventoryEnabled: true },
+    { stagingNoShowEnabled: true },
+    { capabilityModes: { ...connectionOnly.capabilityModes, ariSync: "mutating" as const } },
+    { capabilityModes: { ...connectionOnly.capabilityModes, provisioning: "mutating" as const } },
+    { capabilityModes: { ...connectionOnly.capabilityModes, bookingSync: "mutating" as const } },
+    { capabilityModes: { ...connectionOnly.capabilityModes, markups: "mutating" as const } },
+    { capabilityModes: { ...connectionOnly.capabilityModes, messaging: "mutating" as const } },
+  ])("rejects a widened connection-only scope before connecting: %j", async (override) => {
+    const connect = vi.spyOn(pg.Client.prototype, "connect");
+    await expect(
+      preflightChannexManagementWorker({ ...connectionOnly, ...override }, true),
+    ).rejects.toThrow("channex_worker_scope_unsupported");
+    expect(connect).not.toHaveBeenCalled();
+  });
+  it("connects with the worker credential for the connection-only scope", async () => {
+    const connect = vi
+      .spyOn(pg.Client.prototype, "connect")
+      .mockRejectedValue(new Error("fixture_connect"));
+    await expect(preflightChannexManagementWorker(connectionOnly, true)).rejects.toThrow(
+      "fixture_connect",
+    );
+    expect(connect).toHaveBeenCalledTimes(1);
   });
 });

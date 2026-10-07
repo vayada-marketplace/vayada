@@ -5,7 +5,8 @@ import pg from "pg";
  * Test-only login shaped like the production API role `vayada_next_api_runtime` in the
  * VAY-2054 product-DML posture (engineering/api-runtime-database-role.md). The lists below
  * mirror platform `scripts/grant-target-database-runtime-product-dml.mjs` on main as of
- * 2026-10-07 (#454 merged); update both together. Production additionally keeps legacy
+ * 2026-10-07 (#454 merged); update both together, notably when VAY-2057 slice 0.3 edits the
+ * protected list. listOrdinaryPostureViolations re-runs the preflight's own posture queries. Production additionally keeps legacy
  * SELECT grants on identity tables, which the fixture reproduces with schema-wide SELECT.
  * No default privileges are set: the fixture is applied after migrations.
  */
@@ -242,4 +243,45 @@ export async function listExecutableDefinerFunctions(client: Queryable): Promise
      ORDER BY 1`,
   );
   return result.rows.map((row) => row.name);
+}
+
+/** The platform preflight's product-DML posture queries, run as the login: identity writes
+ * outside the product-link matrix and the created_at lock column, and readable protected
+ * relations. An empty list means the fixture still matches the production posture. */
+export async function listOrdinaryPostureViolations(client: Queryable): Promise<string[]> {
+  const allowed = {
+    ...PRODUCT_IDENTITY_COLUMNS,
+    ...Object.fromEntries(IDENTITY_LOCK_ONLY.map((name) => [name, { UPDATE: ["created_at"] }])),
+  };
+  const identity = await client.query<{ name: string }>(
+    `SELECT 'identity.' || relation.relname || '.' || attribute.attname || ':' || privilege.name AS name
+       FROM pg_class AS relation JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+       JOIN pg_attribute AS attribute ON attribute.attrelid = relation.oid AND attribute.attnum > 0 AND NOT attribute.attisdropped
+       CROSS JOIN (VALUES ('INSERT'),('UPDATE'),('REFERENCES')) AS privilege(name)
+       LEFT JOIN jsonb_each($1::jsonb) AS allowed(relation, privileges) ON allowed.relation = 'identity.' || relation.relname
+      WHERE namespace.nspname = 'identity' AND relation.relkind IN ('r','p','v','m','f')
+        AND has_column_privilege(current_user, relation.oid, attribute.attname, privilege.name)
+        AND NOT coalesce(allowed.privileges -> privilege.name ? attribute.attname, false)
+     UNION ALL
+     SELECT 'identity.' || relation.relname || ':' || privilege.name
+       FROM pg_class AS relation JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+       CROSS JOIN (VALUES ('INSERT'),('UPDATE'),('DELETE')) AS privilege(name)
+      WHERE namespace.nspname = 'identity' AND relation.relkind IN ('r','p','v','m','f')
+        AND has_table_privilege(current_user, relation.oid, privilege.name)`,
+    [JSON.stringify(allowed)],
+  );
+  const readable = await client.query<{ name: string }>(
+    `SELECT namespace.nspname || '.' || relation.relname AS name
+       FROM pg_class relation JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = ANY($1::text[]) AND relation.relkind IN ('r','p','v','m','f')
+        AND (has_table_privilege(current_user, relation.oid, 'SELECT')
+          OR has_any_column_privilege(current_user, relation.oid, 'SELECT'))`,
+    [SCHEMAS],
+  );
+  return [
+    ...identity.rows.map((row) => `identity_write:${row.name}`),
+    ...readable.rows
+      .filter((row) => matches(row.name, NO_READ, NO_READ_PATTERNS))
+      .map((row) => `protected_read:${row.name}`),
+  ];
 }
