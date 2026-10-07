@@ -55,9 +55,9 @@ transaction:
 GRANT USAGE ON SCHEMA <s> TO vayada_next_api_runtime;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA <s> TO vayada_next_api_runtime;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA <s> TO vayada_next_api_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE <migration owner> IN SCHEMA <s>
+ALTER DEFAULT PRIVILEGES IN SCHEMA <s>   -- for the executing migration owner
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO vayada_next_api_runtime;
-ALTER DEFAULT PRIVILEGES FOR ROLE <migration owner> IN SCHEMA <s>
+ALTER DEFAULT PRIVILEGES IN SCHEMA <s>
   GRANT USAGE, SELECT ON SEQUENCES TO vayada_next_api_runtime;
 -- then, in the same transaction, the protected list below is REVOKEd and re-verified
 ```
@@ -71,11 +71,22 @@ execution stay forbidden and are asserted by the preflight.
 
 ### Narrowings inside the product schemas
 
-| Relation                        | Granted          | Why                                                            |
-| ------------------------------- | ---------------- | -------------------------------------------------------------- |
-| `platform.product_audit_events` | `SELECT, INSERT` | append-only audit sink; no code updates or deletes it          |
-| `platform.domain_events`        | `SELECT, INSERT` | append-only event log; no code updates or deletes it           |
-| `hotel_catalog.properties`      | no `DELETE`      | no code path deletes a property; deleting one is unrecoverable |
+| Relation                                                                                                                                                                                                                  | Granted          | Why                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | -------------------------------------------------------------- |
+| `platform.product_audit_events`                                                                                                                                                                                           | `SELECT, INSERT` | append-only audit sink; no code updates or deletes it          |
+| `platform.domain_events`                                                                                                                                                                                                  | `SELECT, INSERT` | append-only event log; no code updates or deletes it           |
+| `hotel_catalog.properties`                                                                                                                                                                                                | no `DELETE`      | no code path deletes a property; deleting one is unrecoverable |
+| `booking.addon_revenue_evidence`, `pms.channex_offer_ari_receipts`, `pms.channex_offer_create_receipts`, `pms.channex_offer_target_versions`, `finance.commission_rate_changes`, `distribution.external_api_usage_events` | `SELECT, INSERT` | insert-only evidence without database-enforced immutability    |
+
+Default privileges are set by and for the executing migration owner, which the
+grant task requires to own every product schema and relation. A table created
+by any other role is not covered and shows up as `runtime_product_dml_missing`
+until the grant mode is re-run.
+
+Tables where the role's `UPDATE` exists only so row locks work (the API inserts
+or reads them but never updates them): `pms.channel_rate_plan_mappings`,
+`pms.channel_binding_claims`, `marketplace.affiliate_agreement_lifecycle_events`,
+and the identity lock set below.
 
 ## Protected list
 
@@ -98,13 +109,16 @@ either (table or column level, including PUBLIC or inherited grants).
 | `booking.pricing_authority_heads`, `booking.pricing_authority_revisions`, `booking.pricing_quotes`, `booking.pricing_runtime_effective_*` (views)                                                                                     | yes                          | pricing authority and quote ledger, reserved for the pricing command service (VAY-1543)      |
 | `marketplace.affiliate_click_occurrences`, `booking.affiliate_click_contexts`, `booking.affiliate_click_admissions`, `booking.affiliate_original_booking_bindings`                                                                    | yes                          | affiliate evidence; written only through the guarded `SECURITY DEFINER` commands (0417–0419) |
 | `finance.expense_generation_dispatches`                                                                                                                                                                                               | yes                          | Finance worker discovery state, written by source-writer triggers and the worker             |
-| `pms.channex_room_availability_attempts`, `pms.channex_room_availability_receipts`, `pms.channex_room_availability_reconciliation_attestations`, `pms.channex_ari_schedule_sources`                                                   | yes                          | Channex management worker-only state                                                         |
+| `pms.channex_room_availability_attempts`, `pms.channex_room_availability_receipts`, `pms.channex_room_availability_reconciliation_attestations`, `pms.channex_ari_schedule_sources`, `pms.channel_sync_status`                        | yes                          | Channex management worker-only state                                                         |
 
 Name patterns are a safety net for future tables: in `platform`, anything
 matching `^(production_|source_extraction_|legacy_|channex_adoption_|hotel_setup_|identity_migration_)`
 is write-protected, and `^(hotel_setup_|identity_migration_|legacy_historical_binding_)`
 or `^finance_.*_worker_properties$` is also read-protected (the Channex worker
-allowlist stays readable: the API reads it today). The grant task revokes by
+allowlist stays readable: the API reads it today). Outside `platform`,
+`^booking\.pricing_authority_`, `^pms\.channex_room_availability_`,
+`^pms\.channex_ari_schedule_`, `^(marketplace|booking)\.affiliate_click_` and
+`^finance\.expense_generation_` are write-protected. The grant task revokes by
 list and pattern; the preflight asserts both.
 
 ## Identity: lock capability only
@@ -132,7 +146,11 @@ PostgreSQL requires an `UPDATE` privilege on at least one column for that.
   next hotel-setup digest re-pin.
 - `identity.product_entitlements` and `identity.organization_resource_links`
   keep the exact VAY-965 setup-track column matrix (`INSERT`/`UPDATE` on named
-  columns); any column `UPDATE` already permits the locks.
+  columns); any column `UPDATE` already permits the locks. The matrix's
+  `UPDATE (id)` on `organization_resource_links` is a live production grant (its
+  command uses `ON CONFLICT DO NOTHING`, so the column only serves locks);
+  narrowing it to `created_at` is a candidate for the follow-up that re-pins the
+  hotel-setup digests.
 - No other identity `INSERT`/`UPDATE`/`DELETE` is granted. The inventory found
   three call sites reachable from `TARGET_DATABASE_URL` code whose columns
   exceed that matrix (`platform/marketplaceOfferIdentityAccess.ts`,
@@ -179,6 +197,8 @@ legacy branch.
    postures, then the retirement of the per-incident modes. Every ordinary
    apply keeps passing because production is still in the legacy posture.
 3. Operator Mac, `--profile vayada`: run
+   `scripts/run-target-database-runtime-preflight.sh --inspect-runtime-product-dml`
+   (dry run: applies, verifies, rolls back), then
    `scripts/run-target-database-runtime-preflight.sh --grant-runtime-product-dml`
    (owner-checked ECS task, migration-owner secret only). It applies the grant
    set, revokes the protected list, re-verifies, and commits or rolls back as a
