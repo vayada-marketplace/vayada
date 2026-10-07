@@ -100,6 +100,7 @@ export function createPgPmsManualBookingCommandRepository(config: {
             rooms,
             guestBookingId,
             acceptedAt: acceptedAt.toISOString(),
+            pricingRevision: preview.pricingRevision,
           })) ?? [];
         await config.dependencies.nightlyEvidence.appendExactNightlyEvidence({
           transaction,

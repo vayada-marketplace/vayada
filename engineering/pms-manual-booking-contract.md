@@ -29,9 +29,18 @@ only writer that accepts them.
 
 ### v1 amendments
 
-| Date       | Ticket   | Change                                                                                                       |
-| ---------- | -------- | ------------------------------------------------------------------------------------------------------------ |
-| 2026-10-07 | VAY-1422 | Optional `additionalGuests`, approved by product as an additive v1 field rather than `pms-manual-booking.v2` |
+| Date       | Ticket   | Change                                                                                                                                                 |
+| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 2026-10-07 | VAY-1422 | Optional `additionalGuests`, approved by product as an additive v1 field rather than `pms-manual-booking.v2`                                           |
+| 2026-10-07 | VAY-1422 | Slice A of `pricing-ordinary-login-plan.md`: `ratePlanId` names a published pricing-v2 offer, optional `childAgesAtCheckIn`, preview `pricingRevision` |
+
+The slice A row changes what `ratePlanId` refers to. It stays in v1 because the
+old meaning, a `pms.rate_plans` flexible plan, has had no working caller since
+VAY-1546 removed that pricing (every preview returned `503` from 2026-09-11),
+and the accepted pricing plan maps `ratePlanId` to the published offer. The
+product owner approved this v1 exception, instead of `pms-manual-booking.v2`,
+when approving the slice A merge on 2026-10-08. It applies to the target
+TypeScript endpoints only; the legacy adapter is unchanged.
 
 ## Current evidence and gaps
 
@@ -127,7 +136,9 @@ type Command = {
   directSource: "call" | "email" | "whatsapp" | "walk_in" | "social_media" | "other";
   stays: Array<{
     position: number; roomId: string; checkIn: Date; checkOut: Date;
-    adults: number; children: number; ratePlanId: string | null;
+    adults: number; children: number;
+    ratePlanId: string | null; // published pricing-v2 offer id (slice A amendment)
+    childAgesAtCheckIn?: number[]; // one 0–17 age per child (slice A amendment)
     pricing:
       | { kind: "rate_plan"; manualOverride: Money | null }
       | { kind: "custom"; nightlyAmount: Money };
@@ -158,6 +169,7 @@ POST /admin/bookings/preview                         # legacy adapter
 type PreviewCommand = Pick<Command, "contractVersion" | "stays" | "addOns">;
 type PreviewResult = {
   contractVersion: "pms-manual-booking.v1"; currency: string;
+  pricingRevision: number | null; // publication used; null when every stay is custom
   stays: Array<{
     position: number; roomId: string; ratePlanId: string | null;
     nightly: Array<{ serviceDate: Date; standard: Money | null; applied: Money }>;
@@ -179,8 +191,9 @@ Both endpoints return `{ code, message, field?, stayPosition? }` on failure:
 | `400` | `invalid_body`, `unknown_field`                                                                                                                         |
 | `403` | `forbidden`, `entitlement_required`; create also uses `paid_forbidden`                                                                                  |
 | `404` | `property_not_found`, `room_not_found`, `rate_plan_not_found`, `rate_not_found`, `addon_not_found`                                                      |
-| `409` | `room_unavailable`; create also uses `idempotency_conflict`                                                                                             |
+| `409` | `room_unavailable`, `pricing_not_published`; create also uses `idempotency_conflict`                                                                    |
 | `422` | `invalid_dates`, `occupancy_exceeded`, `currency_mismatch`, `inactive_rate_plan`, `invalid_addon_selection`, `invalid_source`, `invalid_payment_method` |
+| `422` | `child_ages_required`, `rate_restricted` (slice A amendment)                                                                                            |
 
 Preview is display evidence, not a reservation or price lock; it has no
 idempotency reservation. Create revalidates and recalculates inside the booking
@@ -205,8 +218,13 @@ the target manual writer can be accepted.
   fingerprint, so requests sent before the VAY-1422 amendment replay unchanged.
   A non-empty list is part of the fingerprint.
 - A command contains 1 to 20 stays. Positions are unique and contiguous from 1.
-- Each room and rate plan belongs to the authorized property. A selected rate
-  plan is active and belongs to that stay's room type.
+- Each room belongs to the authorized property. `rate_plan` pricing requires a
+  non-null `ratePlanId` and `custom` pricing requires `ratePlanId: null`; any
+  other pairing is `400 invalid_body`. A non-null `ratePlanId` is the
+  exact id of an offer in the property's active pricing-v2 publication for that
+  stay's room type (free text up to 200 characters, never case-folded); an id
+  the publication lacks is `404 rate_plan_not_found`. A stay that names an
+  offer while no publication is active is `409 pricing_not_published`.
 - Check-out is after check-in. Each room is available for its full stay, and
   duplicate/overlapping use of the same physical room is rejected.
 - Both writers lock selected physical-room rows in sorted room-ID order, then
@@ -217,12 +235,31 @@ the target manual writer can be accepted.
 - All money is a non-negative base-10 decimal string in the property pricing
   currency. JSON floating-point prices and client-computed totals are rejected.
 - `rate_plan` pricing is resolved server-side for every service night from the
-  selected plan and then snapshotted. A manual override replaces each nightly
-  plan amount but preserves the chosen plan ID and comparison evidence.
-- Additional-guest pricing uses a matching current Booking guest-policy
-  projection to decide whether children count. If that optional projection is
-  absent or its pricing fingerprint, selected rate, or additional-guest source
-  does not match current PMS evidence, all selected occupants count.
+  active publication, read inside the caller's transaction, and then
+  snapshotted. The read takes no row locks and is not gated by the booking
+  engine's pricing authority or online-payment readiness; route authorization
+  already scopes the property. The standard night is the offer's room plus
+  meal amount for the stay's adults and children. A manual override replaces
+  each nightly amount but preserves the chosen offer and comparison evidence.
+- Children are priced by the publication's age bands, so a stay that names an
+  offer and has children must send one `childAgesAtCheckIn` entry per child,
+  otherwise `child_ages_required` (422). A stay that the offer's restrictions
+  forbid (minimum or maximum stay, closed arrival or departure, stop-sell)
+  returns `rate_restricted` (422). Guests beyond the offer's capacity return
+  `occupancy_exceeded` (422). The target TypeScript endpoints no longer produce
+  `inactive_rate_plan`, as only published offers are priced; the legacy adapter
+  keeps it.
+- Published amounts use the currency's own minor unit (JPY none, KWD three
+  decimals) and are stored as two-decimal PMS money. An amount PMS cannot store
+  exactly returns `currency_mismatch` (422).
+- The stored assignment keeps `rate_plan_id` empty, because that column refers
+  to legacy `pms.rate_plans`; the offer id, publication revision and child ages
+  are kept in `assignment_payload.pricingOffer` instead (accepted
+  booking-engine quotes keep theirs under `pricingAcceptance`). The preview's
+  `pricingRevision` is null when no stay names an offer.
+- Custom-only bookings need no publication. Their currency is the published
+  currency when one exists, else the property's pricing currency; a property
+  with no pricing currency at all returns `pricing_not_published` (409).
 - `custom` pricing requires an explicit nightly amount and has no rate-plan ID.
   There is no silent fallback to the current flexible/base rate.
 - Per-night evidence is `exact` for resolved plans and uniform manual amounts.

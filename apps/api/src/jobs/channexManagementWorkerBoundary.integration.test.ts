@@ -14,6 +14,7 @@ import { createPgChannexAriSchedule } from "./pmsChannexAriSchedule.js";
 import { createPgPmsChannexManagementWorkerStore } from "./pmsChannexManagementWorkerStore.js";
 import { createPmsChannexManagementTargetState } from "./pmsChannexManagementTargetState.js";
 import { prepareChannexReceiptPersistence } from "../domains/channexCreationReceiptStore.js";
+import { createPgChannexManagementPlanPort } from "../integrations/channexManagementPlans.js";
 import type { ChannexManagementJob } from "./pmsChannexManagementWorker.js";
 
 const url = process.env["TEST_DATABASE_URL"];
@@ -383,6 +384,278 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
       } finally {
         await owner.query("ROLLBACK");
       }
+    }
+  });
+  // VAY-2055: production scope. Admission is the operation plus a live enable
+  // job for an unbound hotel; nothing is keyed on the property allowlist.
+  it("runs only unbound enable jobs in the connection-only scope", async () => {
+    const fresh = randomUUID(),
+      freshEnable = randomUUID(),
+      freshAri = randomUUID(),
+      boundEnable = randomUUID(),
+      freshExternal = randomUUID(),
+      freshKey = randomUUID();
+    const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+    // Earlier interrupted local runs may leave live enable jobs behind; they would
+    // widen the connection scope. A fresh CI database has none.
+    await owner.query(
+      "UPDATE platform.jobs SET status='canceled',finished_at=now(),locked_at=NULL,locked_by=NULL WHERE queue_name='pms.channex.management' AND job_type='channex.enable' AND status IN ('pending','running')",
+    );
+    await owner.query(
+      "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Fresh hotel')",
+      [fresh],
+    );
+    await owner.query(
+      "INSERT INTO hotel_catalog.property_locations(property_id,country_code,city,timezone) VALUES($1,'DE','Berlin','Europe/Berlin')",
+      [fresh],
+    );
+    await owner.query(
+      "INSERT INTO pms.room_types(id,property_id,name) VALUES($1,$2,'Fresh room'),($3,$4,'Denied room')",
+      [randomUUID(), fresh, randomUUID(), other],
+    );
+    const insert = `INSERT INTO platform.jobs(id,job_key,queue_name,job_type,tenant_scope,property_id,resource_product,resource_type,resource_id,payload,idempotency_key_hash)
+      VALUES($1::uuid,$1::text,'pms.channex.management',$3,'property',$2::uuid,'pms','channex_connection',$2::text,$4,$5)`;
+    for (const [id, propertyId, type, idempotencyKey] of [
+      [freshEnable, fresh, "enable", freshKey],
+      [freshAri, fresh, "sync_ari", randomUUID()],
+      [boundEnable, property, "enable", randomUUID()],
+    ] as const)
+      await owner.query(insert, [
+        id,
+        propertyId,
+        `channex.${type}`,
+        JSON.stringify({ operationType: type, commandId: randomUUID(), idempotencyKey }),
+        hash(idempotencyKey),
+      ]);
+    await owner.query(
+      `INSERT INTO platform.idempotency_keys(operation_scope,operation,key_hash,request_fingerprint_hash,tenant_scope,property_id,expires_at)
+      VALUES('pms','channex_management',$1,repeat('b',64),'property',$2,'infinity')`,
+      [hash(freshKey), fresh],
+    );
+    const login = pool.options.connectionString!;
+    const connection = createPgPmsChannexManagementWorkerStore({
+      connectionString: login,
+      targetState: createPmsChannexManagementTargetState(),
+      ariSyncMutating: false,
+      connectionOnly: true,
+    });
+    const plans = createPgChannexManagementPlanPort({
+      connectionString: login,
+      bookingRevisionHandoff: async () => {},
+    });
+    const production = {
+      workerEnabled: true,
+      workerDatabaseUrl: login,
+      apiBaseUrl: "https://app.channex.io",
+      bookingMutationOwner: "legacy" as const,
+      capabilityModes: {
+        connection: "mutating",
+        provisioning: "observe_only",
+        ariSync: "observe_only",
+        bookingSync: "observe_only",
+        markups: "observe_only",
+        messaging: "observe_only",
+        reviews: "mutating",
+        iframe: "observe_only",
+      } as const,
+    };
+    const jobStatus = async (id: string) =>
+      (await owner.query("SELECT status FROM platform.jobs WHERE id=$1", [id])).rows[0].status;
+    try {
+      await expect(preflightChannexManagementWorker(production, true)).rejects.toThrow(
+        "channex_worker_operation_scope_mismatch",
+      );
+      expect(await connection.claim({ workerId, now: new Date() })).toBeNull();
+      await owner.query(
+        "INSERT INTO platform.channex_management_worker_operations VALUES('enable')",
+      );
+      await preflightChannexManagementWorker(production, true);
+      await assertChannexManagementWorkerBoundary(owner, { propertyId: property });
+      const claimed = (await connection.claim({ workerId, now: new Date() }))!;
+      expect(claimed.jobId).toBe(freshEnable);
+      expect(await connection.claim({ workerId, now: new Date() })).toBeNull();
+      const plan = await plans.plan(claimed);
+      expect(plan.requests.map((request) => [request.method, request.path])).toEqual([
+        ["GET", "/api/v1/properties"],
+        ["POST", "/api/v1/properties"],
+      ]);
+      expect(plan.requests[1]?.body).toMatchObject({
+        property: { title: `Fresh hotel [Vayada:${fresh}]`, currency: "EUR", city: "Berlin" },
+      });
+      const created = {
+        ok: true as const,
+        externalPropertyId: freshExternal,
+        connectionStatus: "connected" as const,
+        createdProperty: { environment: "production" as const, externalPropertyId: freshExternal },
+        roomTypeMappings: [],
+        ratePlanMappings: [],
+      };
+      await plan.checkpoint!(created);
+      expect(
+        (
+          await pool.query(
+            "SELECT id FROM hotel_catalog.properties WHERE id=ANY($1::uuid[]) ORDER BY id",
+            [[property, fresh, other]],
+          )
+        ).rows,
+      ).toEqual([{ id: property }, { id: fresh }].sort((a, b) => a.id.localeCompare(b.id)));
+      expect(
+        (await pool.query("SELECT id FROM pms.room_types WHERE property_id=$1", [other])).rows,
+      ).toEqual([]);
+      for (const [sql, values] of [
+        [
+          "UPDATE pms.channel_connections SET external_property_id=$1 WHERE property_id=$2",
+          [randomUUID(), fresh],
+        ],
+        [
+          "UPDATE pms.channel_connections SET connection_metadata='{}' WHERE property_id=$1",
+          [fresh],
+        ],
+        [
+          "UPDATE pms.channel_connections SET connection_status='disconnected' WHERE property_id=$1",
+          [fresh],
+        ],
+        [
+          "UPDATE pms.channel_binding_claims SET claim_state='released' WHERE property_id=$1",
+          [fresh],
+        ],
+        [
+          "INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source) VALUES($1,'channex',$2,'active','enable')",
+          [other, randomUUID()],
+        ],
+        [
+          "INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source) VALUES($1,'channex',$2,'historical','enable')",
+          [fresh, randomUUID()],
+        ],
+        ["INSERT INTO platform.channex_management_worker_operations VALUES('enable')", []],
+        [
+          `INSERT INTO platform.jobs(job_key,queue_name,job_type,tenant_scope,property_id,resource_product,resource_type,resource_id,payload)
+           VALUES($1,'pms.channex.management','channex.enable','property',$2::uuid,'pms','channex_connection',$2::text,'{"operationType":"enable"}')`,
+          [randomUUID(), other],
+        ],
+      ] as const)
+        await denied(sql, [...values]);
+      // The binding-claim trigger rejects an unclaimed connection before RLS does.
+      await expect(
+        pool.query(
+          "INSERT INTO pms.channel_connections(property_id,provider,connection_status,external_property_id) VALUES($1,'channex','connected',$2)",
+          [other, randomUUID()],
+        ),
+      ).rejects.toMatchObject({ code: expect.stringMatching(/^(23514|42501)$/) });
+      await connection.succeed(claimed, created, { workerId, now: new Date() });
+      expect(
+        (
+          await owner.query(
+            `SELECT c.connection_status,c.external_property_id,c.connection_metadata->'airbnbCreationEvidence' AS evidence,b.claim_source,b.claim_state
+             FROM pms.channel_connections c JOIN pms.channel_binding_claims b ON b.property_id=c.property_id AND b.provider=c.provider
+             WHERE c.property_id=$1`,
+            [fresh],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          connection_status: "connected",
+          external_property_id: freshExternal,
+          claim_source: "enable",
+          claim_state: "active",
+          evidence: {
+            contractVersion: "channex-property-creation.v1",
+            environment: "production",
+            externalPropertyId: freshExternal,
+            jobId: freshEnable,
+          },
+        },
+      ]);
+      expect(await jobStatus(freshEnable)).toBe("succeeded");
+      expect(
+        (
+          await owner.query("SELECT status FROM platform.idempotency_keys WHERE key_hash=$1", [
+            hash(freshKey),
+          ])
+        ).rows,
+      ).toEqual([{ status: "completed" }]);
+      expect(
+        (
+          await owner.query("SELECT action FROM platform.product_audit_events WHERE job_id=$1", [
+            freshEnable,
+          ])
+        ).rows,
+      ).toEqual([{ action: "pms.channex.enable.succeeded" }]);
+      // The bound hotel left the scope; its queued ARI job and the already
+      // bound hotel's enable job are never claimed.
+      expect(
+        (
+          await pool.query("SELECT id FROM hotel_catalog.properties WHERE id=ANY($1::uuid[])", [
+            [property, fresh, other],
+          ])
+        ).rows,
+      ).toEqual([{ id: property }]);
+      expect(await connection.claim({ workerId, now: new Date() })).toBeNull();
+      expect(await jobStatus(freshAri)).toBe("pending");
+      expect(await jobStatus(boundEnable)).toBe("pending");
+      // A hotel with a stale disconnected row binds through the guarded UPDATE
+      // path, its own interrupted attempt may be re-claimed, a foreign binding
+      // with an expired lease never is.
+      const second = randomUUID(),
+        secondEnable = randomUUID(),
+        secondExternal = randomUUID(),
+        secondKey = randomUUID();
+      await owner.query(
+        "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Second hotel')",
+        [second],
+      );
+      await owner.query(
+        "INSERT INTO pms.channel_connections(property_id,provider,connection_status) VALUES($1,'channex','disconnected')",
+        [second],
+      );
+      await owner.query(insert, [
+        secondEnable,
+        second,
+        "channex.enable",
+        JSON.stringify({
+          operationType: "enable",
+          commandId: randomUUID(),
+          idempotencyKey: secondKey,
+        }),
+        hash(secondKey),
+      ]);
+      await owner.query(
+        "UPDATE platform.jobs SET status='running',attempts_count=1,locked_by='stale',locked_at=now()-interval '1 hour' WHERE id=$1",
+        [boundEnable],
+      );
+      const first = (await connection.claim({ workerId, now: new Date() }))!;
+      expect(first.jobId).toBe(secondEnable);
+      const secondCreated = { ...created, externalPropertyId: secondExternal };
+      secondCreated.createdProperty = {
+        environment: "production",
+        externalPropertyId: secondExternal,
+      };
+      await (
+        await plans.plan(first)
+      ).checkpoint!(secondCreated);
+      await owner.query("UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1", [
+        secondEnable,
+      ]);
+      const resumed = (await connection.claim({ workerId, now: new Date() }))!;
+      expect(resumed).toMatchObject({ jobId: secondEnable, attemptNumber: 2 });
+      await connection.succeed(resumed, secondCreated, { workerId, now: new Date() });
+      expect(
+        (
+          await owner.query(
+            "SELECT connection_status,external_property_id,connection_metadata->'airbnbCreationEvidence'->>'jobId' AS job FROM pms.channel_connections WHERE property_id=$1",
+            [second],
+          )
+        ).rows,
+      ).toEqual([
+        { connection_status: "connected", external_property_id: secondExternal, job: secondEnable },
+      ]);
+      expect(await jobStatus(secondEnable)).toBe("succeeded");
+      expect(await jobStatus(boundEnable)).toBe("running");
+      expect(await connection.claim({ workerId, now: new Date() })).toBeNull();
+    } finally {
+      await plans.close();
+      await connection.close?.();
+      await owner.query("DELETE FROM platform.channex_management_worker_operations");
     }
   });
 });

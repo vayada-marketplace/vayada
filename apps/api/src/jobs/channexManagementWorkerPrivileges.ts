@@ -1,11 +1,13 @@
 export const CHANNEX_MANAGEMENT_WORKER_ROLE = "vayada_next_channex_management_worker";
 
 // VAY-2041: exact effective grants for selected published offers and ARI.
+// VAY-2055: plus creating one binding claim and connection row per enable job.
 // Column UPDATE on source identities permits row locks; restrictive WITH CHECK
 // policies forbid actual source mutation. No grant is installed by this module.
 // prettier-ignore
 export const channexManagementWorkerPrivileges: Record<string, Record<string, true | string[]>> = {
   "platform.channex_management_worker_properties": { SELECT: true },
+  "platform.channex_management_worker_operations": { SELECT: true },
   "platform.external_webhook_events": { SELECT: ["id", "provider"] },
   "platform.jobs": { SELECT: true, INSERT: ["job_key", "queue_name", "job_type", "max_attempts", "tenant_scope", "property_id", "resource_product", "resource_type", "resource_id", "payload", "job_metadata"], UPDATE: ["status", "attempts_count", "max_attempts", "run_after", "locked_at", "locked_by", "finished_at", "updated_at", "job_metadata"] },
   "platform.job_attempts": { SELECT: true, INSERT: ["job_id", "attempt_number", "status", "worker_id", "started_at", "error_metadata"], UPDATE: ["status", "finished_at", "error_type", "error_message", "retry_after", "error_metadata"] },
@@ -43,8 +45,8 @@ export const channexManagementWorkerPrivileges: Record<string, Record<string, tr
   "pms.operating_calendar_room_bindings": { SELECT: true },
   "pms.inventory_days": { SELECT: true, UPDATE: ["property_id"] },
   "pms.inventory_materialization_coverage": { SELECT: true, UPDATE: ["property_id"] },
-  "pms.channel_binding_claims": { SELECT: true, UPDATE: ["id"] },
-  "pms.channel_connections": { SELECT: true, UPDATE: ["external_property_id", "messaging_app_installed", "last_booking_sync_at", "last_ari_sync_at", "connection_metadata", "updated_at"] },
+  "pms.channel_binding_claims": { SELECT: true, INSERT: ["property_id", "provider", "external_property_id", "claim_state", "claim_source", "updated_at"], UPDATE: ["id"] },
+  "pms.channel_connections": { SELECT: true, INSERT: ["property_id", "provider", "connection_status", "external_property_id"], UPDATE: ["connection_status", "external_property_id", "messaging_app_installed", "last_booking_sync_at", "last_ari_sync_at", "connection_metadata", "updated_at"] },
   "pms.channel_room_type_mappings": { SELECT: true, UPDATE: ["id"] },
   "pms.channel_rate_plan_mappings": { SELECT: true },
   "pms.channel_sync_status": { SELECT: true, INSERT: ["property_id", "connection_id", "sync_domain", "status", "last_attempt_at", "last_success_at", "last_error_code", "last_error_message", "retry_after"], UPDATE: ["status", "last_attempt_at", "last_success_at", "last_error_code", "last_error_message", "retry_after", "updated_at"] },
