@@ -71,12 +71,12 @@ execution stay forbidden and are asserted by the preflight.
 
 ### Narrowings inside the product schemas
 
-| Relation                                                                                                                                                                                                                  | Granted          | Why                                                            |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | -------------------------------------------------------------- |
-| `platform.product_audit_events`                                                                                                                                                                                           | `SELECT, INSERT` | append-only audit sink; no code updates or deletes it          |
-| `platform.domain_events`                                                                                                                                                                                                  | `SELECT, INSERT` | append-only event log; no code updates or deletes it           |
-| `hotel_catalog.properties`                                                                                                                                                                                                | no `DELETE`      | no code path deletes a property; deleting one is unrecoverable |
-| `booking.addon_revenue_evidence`, `pms.channex_offer_ari_receipts`, `pms.channex_offer_create_receipts`, `pms.channex_offer_target_versions`, `finance.commission_rate_changes`, `distribution.external_api_usage_events` | `SELECT, INSERT` | insert-only evidence without database-enforced immutability    |
+| Relation                                                                                                                                                                                                                                                                   | Granted          | Why                                                                                                                                              |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `platform.product_audit_events`                                                                                                                                                                                                                                            | `SELECT, INSERT` | append-only audit sink; no code updates or deletes it                                                                                            |
+| `platform.domain_events`                                                                                                                                                                                                                                                   | `SELECT, INSERT` | append-only event log; no code updates or deletes it                                                                                             |
+| `hotel_catalog.properties`                                                                                                                                                                                                                                                 | no `DELETE`      | no code path deletes a property; deleting one is unrecoverable                                                                                   |
+| `booking.addon_revenue_evidence`, `pms.channex_offer_ari_receipts`, `pms.channex_offer_create_receipts`, `pms.channex_offer_target_versions`, `finance.commission_rate_changes`, `distribution.external_api_usage_events`, `finance.affiliate_percentage_policy_approvals` | `SELECT, INSERT` | insert-only evidence without database-enforced immutability (`finance.ota_commission_evidence` keeps `UPDATE` only because the API row-locks it) |
 
 Default privileges are set by and for the executing migration owner, which the
 grant task requires to own every product schema and relation. A table created
@@ -110,6 +110,7 @@ either (table or column level, including PUBLIC or inherited grants).
 | `marketplace.affiliate_click_occurrences`, `booking.affiliate_click_contexts`, `booking.affiliate_click_admissions`, `booking.affiliate_original_booking_bindings`                                                                    | yes                          | affiliate evidence; written only through the guarded `SECURITY DEFINER` commands (0417–0419) |
 | `finance.expense_generation_dispatches`                                                                                                                                                                                               | yes                          | Finance worker discovery state, written by source-writer triggers and the worker             |
 | `pms.channex_room_availability_attempts`, `pms.channex_room_availability_receipts`, `pms.channex_room_availability_reconciliation_attestations`, `pms.channex_ari_schedule_sources`, `pms.channel_sync_status`                        | yes                          | Channex management worker-only state                                                         |
+| `booking.affiliate_referral_production_preflight_revocations`                                                                                                                                                                         | yes                          | revocation evidence with no API writer                                                       |
 
 Name patterns are a safety net for future tables: in `platform`, anything
 matching `^(production_|source_extraction_|legacy_|channex_adoption_|hotel_setup_|identity_migration_)`
@@ -169,6 +170,22 @@ affiliate commands (`marketplace.capture_affiliate_click`,
 `marketplace.consume_affiliate_click_quota`), the inventory coverage routines
 and the hotel-setup scope helpers remain owner- or purpose-role-only.
 
+## Accepted trade-offs
+
+- `UPDATE (created_at)` is a real, low-value write on six identity tables
+  (`identity.organization_roles` has no restrictive policy for this login);
+  accepted until the next hotel-setup digest re-pin can add the lock-only
+  policy.
+- The revoke scope restores the legacy-permitted superset (required plus
+  staged grants), not the exact live subset.
+- The grant task grants `USAGE` on `identity` without an ownership check on
+  that schema; the identity tables it touches are ownership-checked.
+- The runner guard inspects the local checkout; the operator runs from `main`.
+- The grant task runs the preflight's global posture checks (destructive
+  privileges, foreign default privileges, SECURITY DEFINER execute, ownership,
+  memberships, PUBLIC grants included) inside its transaction, so drift is
+  never committed together with the grant.
+
 ## Preflight contract
 
 `scripts/target-database-runtime-preflight.mjs` (platform) recognises two
@@ -176,7 +193,10 @@ postures from `pg_default_acl` for the migration owner in the seven product
 schemas:
 
 - **legacy**: no default privileges for the role; the historical allowlist is
-  asserted exactly as before.
+  asserted as before, with one deliberate tightening: the no-read list, the
+  name patterns and `vayada_migration_evidence` are unreadable in both
+  postures (`pms.inventory_coverage_validation_queue` was only exempt from the
+  required reads before). Production passed this read-only on 2026-10-07.
 - **product DML**: default privileges exist in all seven schemas; the preflight
   then requires `SELECT, INSERT, UPDATE, DELETE` on every non-protected
   relation in those schemas (`runtime_product_dml_missing`), the narrowings,
