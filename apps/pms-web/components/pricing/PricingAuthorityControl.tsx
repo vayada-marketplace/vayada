@@ -8,6 +8,7 @@ import type {
   PricingAuthority,
   createReplacementPricingClient,
 } from "@/services/api/replacementPricingClient";
+import { errorText, PricingError } from "./pricingAmounts";
 
 type Client = ReturnType<typeof createReplacementPricingClient>;
 /** This choice is explicit and separate from publishing rates or connecting channels. */
@@ -23,7 +24,7 @@ export function PricingAuthorityControl({
   const [current, setCurrent] = useState<PricingAuthority | null>(null);
   const [choice, setChoice] = useState<PricingAuthority["authority"]>("unconfigured");
   const [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState<Error | null>(null);
   const [pending, setPending] = useState<ReturnType<Client["authorityAction"]> | null>(null);
   const [confirming, setConfirming] = useState(false);
   const { t } = useTranslation();
@@ -33,7 +34,7 @@ export function PricingAuthorityControl({
   }, [busy, pending, onActivityChange]);
   const reload = useCallback(async () => {
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       const value = await client.readAuthority();
       if (alive.current) {
@@ -42,7 +43,7 @@ export function PricingAuthorityControl({
       }
     } catch (e) {
       if (alive.current)
-        setError(e instanceof Error ? e.message : "Could not load the price source.");
+        setError(e instanceof Error ? e : new PricingError("pricing.authority.loadFailed"));
     } finally {
       if (alive.current) setBusy(false);
     }
@@ -67,56 +68,54 @@ export function PricingAuthorityControl({
       setPending(() => action);
     }
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       const result = await action();
       setPending(null);
       const saved = await client.readAuthority();
       if (saved.revision !== result.revision || saved.authority !== choice)
-        throw new Error("Price source could not be verified. Reload it before continuing.");
+        throw new PricingError("pricing.authority.unverified");
       if (alive.current) setCurrent(saved);
     } catch (e) {
       if (e instanceof ApiErrorResponse && [400, 403, 409].includes(e.status)) setPending(null);
       if (alive.current)
         setError(
           e instanceof ApiErrorResponse && e.status === 409
-            ? "The price source changed. Reload before choosing again."
+            ? new PricingError("pricing.authority.changed")
             : e instanceof Error
-              ? e.message
-              : "Could not save the price source. Retry the same action.",
+              ? e
+              : new PricingError("pricing.authority.saveFailed"),
         );
     } finally {
       if (alive.current) setBusy(false);
     }
   }
   return (
-    <section className="rounded-xl border bg-white p-5" aria-label="Direct-booking price source">
-      <h2 className="font-semibold">Direct-booking price source</h2>
-      <p className="mt-1 text-sm text-gray-600">
-        Choose who owns prices shown to guests. Publishing rates alone does not make them bookable.
-        External PMS pricing remains unavailable until its connection is supported.
-      </p>
+    <section className="rounded-xl border bg-white p-5" aria-label={t("pricing.authority.title")}>
+      <h2 className="font-semibold">{t("pricing.authority.title")}</h2>
+      <p className="mt-1 text-sm text-gray-600">{t("pricing.authority.description")}</p>
       {current && (
         <p className="mt-3 text-sm">
-          Current: <strong>{t(`pricing.source.${current.authority}`)}</strong>
+          {t("pricing.authority.current")}{" "}
+          <strong>{t(`pricing.source.${current.authority}`)}</strong>
         </p>
       )}
       {error && (
         <p role="alert" className="mt-3 text-sm text-red-700">
-          {error}
+          {errorText(error, t, "pricing.authority.loadFailed")}
         </p>
       )}
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <select
-          aria-label="Price source"
+          aria-label={t("pricing.authority.select")}
           className="rounded border px-3 py-2 text-sm"
           disabled={!current || busy || blocked || !!pending}
           value={choice}
           onChange={(e) => setChoice(e.target.value as PricingAuthority["authority"])}
         >
-          <option value="unconfigured">No source selected</option>
-          <option value="vayada">Vayada prices</option>
-          <option value="external">External PMS prices</option>
+          <option value="unconfigured">{t("pricing.authority.none")}</option>
+          <option value="vayada">{t("pricing.source.vayada")}</option>
+          <option value="external">{t("pricing.source.external")}</option>
         </select>
         <button
           type="button"
@@ -125,10 +124,10 @@ export function PricingAuthorityControl({
           onClick={() => void save()}
         >
           {pending
-            ? "Retry same change"
+            ? t("pricing.authority.retry")
             : choice === current?.authority
-              ? "Reaffirm price source"
-              : "Save price source"}
+              ? t("pricing.authority.reaffirm")
+              : t("pricing.authority.save")}
         </button>
         <button
           type="button"
@@ -136,7 +135,7 @@ export function PricingAuthorityControl({
           disabled={busy || !!pending}
           onClick={() => void reload()}
         >
-          Reload source
+          {t("pricing.authority.reload")}
         </button>
       </div>
       {confirming && (

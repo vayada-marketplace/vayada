@@ -43,7 +43,7 @@ interface NavItem {
 
 const CORE_NAV_ITEMS: Omit<NavItem, "badge">[] = [
   {
-    label: "Pricing",
+    labelKey: "layout.sidebar.pricing",
     href: "/pricing",
     icon: RoomsIcon,
     requiredAny: ["pms.rooms_rates.read"],
