@@ -12,6 +12,40 @@ import {
 const propertyId = "83000000-0000-4000-8000-000000000001";
 const bookingId = "83000000-0000-4000-8000-000000000002";
 
+describe("manual booking request fingerprint", () => {
+  it("keeps the pre-amendment fingerprint when no additional guests are sent", () => {
+    const command = manualCommand();
+    const preAmendment = sha256(
+      stableJson({
+        contractVersion: command.contractVersion,
+        commandId: command.commandId,
+        propertyId: command.propertyId,
+        organizationId: command.organizationId,
+        guest: command.guest,
+        privateNote: command.privateNote,
+        directSource: command.directSource,
+        stays: command.stays,
+        addOns: command.addOns,
+        payment: command.payment,
+      }),
+    );
+    expect(manualBookingRequestFingerprint(command)).toBe(preAmendment);
+    expect(manualBookingRequestFingerprint({ ...command, additionalGuests: [] })).toBe(
+      preAmendment,
+    );
+    const guest = {
+      firstName: "Grace",
+      lastName: "Hopper",
+      email: null,
+      phoneE164: null,
+      countryCode: "US",
+    };
+    expect(manualBookingRequestFingerprint({ ...command, additionalGuests: [guest] })).not.toBe(
+      preAmendment,
+    );
+  });
+});
+
 describe("manual booking command replay", () => {
   it("normalizes a valid pre-feedback v1 result to zero rearranged bookings", async () => {
     const command = manualCommand();

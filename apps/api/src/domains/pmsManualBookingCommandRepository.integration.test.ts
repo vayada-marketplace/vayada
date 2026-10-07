@@ -348,6 +348,82 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
     });
   });
 
+  it("stores additional guests with the booking in request order and replays exactly", async () => {
+    const input: PmsManualBookingCreateCommand = {
+      ...command("guests", "unpaid", "cash", "2027-01-01", false),
+      additionalGuests: [
+        { firstName: "Grace", lastName: "Hopper", email: null, phoneE164: null, countryCode: "US" },
+        {
+          firstName: "Alan",
+          lastName: "Turing",
+          email: "alan@example.test",
+          phoneE164: "+447700900123",
+          countryCode: "GB",
+        },
+      ],
+    };
+    const created = await repository.createManualBooking(input);
+    await expect(repository.createManualBooking(input)).resolves.toEqual({
+      ...created,
+      outcome: "replayed",
+    });
+    await expect(
+      repository.createManualBooking({
+        ...input,
+        additionalGuests: input.additionalGuests!.slice(0, 1),
+      }),
+    ).rejects.toMatchObject({ code: "idempotency_conflict" });
+
+    const audit = await admin.query(
+      `SELECT redacted_payload AS payload FROM platform.product_audit_events
+       WHERE action = 'pms.manual_booking.create' AND target_resource_id = $1`,
+      [created.guestBookingId],
+    );
+    expect(audit.rows).toEqual([
+      {
+        payload: {
+          contractVersion: "pms-manual-booking.v1",
+          stayCount: 1,
+          additionalGuestCount: 2,
+        },
+      },
+    ]);
+    const guests = await admin.query(
+      `SELECT guest_role AS role, first_name AS "firstName", last_name AS "lastName",
+         email, phone, country_code AS "countryCode"
+       FROM booking.booking_guests
+       WHERE guest_booking_id = $1::uuid
+       ORDER BY CASE guest_role WHEN 'booker' THEN 0 ELSE 1 END, created_at, id`,
+      [created.guestBookingId],
+    );
+    expect(guests.rows).toEqual([
+      {
+        role: "booker",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        email: "ada@example.test",
+        phone: "+306900000000",
+        countryCode: "GR",
+      },
+      {
+        role: "additional_guest",
+        firstName: "Grace",
+        lastName: "Hopper",
+        email: null,
+        phone: null,
+        countryCode: "US",
+      },
+      {
+        role: "additional_guest",
+        firstName: "Alan",
+        lastName: "Turing",
+        email: "alan@example.test",
+        phone: "+447700900123",
+        countryCode: "GB",
+      },
+    ]);
+  });
+
   it("atomically clears manual room nights on no-show and replays exactly", async () => {
     const created = await repository.createManualBooking(
       command("no-show", "unpaid", "cash", "2026-08-10", true),

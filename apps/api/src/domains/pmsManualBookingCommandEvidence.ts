@@ -46,6 +46,8 @@ export function manualBookingRequestFingerprint(command: PmsManualBookingCreateC
       propertyId: command.propertyId,
       organizationId: command.organizationId,
       guest: command.guest,
+      // Left out when empty so requests sent before the VAY-1422 amendment replay unchanged.
+      ...(command.additionalGuests?.length ? { additionalGuests: command.additionalGuests } : {}),
       privateNote: command.privateNote,
       directSource: command.directSource,
       stays: command.stays,
@@ -288,7 +290,14 @@ async function insertAudit(
       eventId,
       idempotencyId,
       command.audit.correlationId ?? command.audit.requestId,
-      JSON.stringify({ contractVersion: command.contractVersion, stayCount: result.stayCount }),
+      JSON.stringify({
+        contractVersion: command.contractVersion,
+        stayCount: result.stayCount,
+        // Count only: guest PII stays in Booking, as for the booker.
+        ...(command.additionalGuests?.length
+          ? { additionalGuestCount: command.additionalGuests.length }
+          : {}),
+      }),
     ],
   );
 }

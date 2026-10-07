@@ -51,6 +51,17 @@ export type PmsManualBookingAddonSelection = Readonly<{
   }>[];
 }>;
 
+/** v1 amendment (VAY-1422): the other people staying, beyond the booker. */
+export const PMS_MANUAL_BOOKING_MAX_ADDITIONAL_GUESTS = 100;
+
+export type PmsManualBookingAdditionalGuest = Readonly<{
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phoneE164: string | null;
+  countryCode: string | null;
+}>;
+
 export type PmsManualBookingCreateCommand = Readonly<{
   contractVersion: typeof PMS_MANUAL_BOOKING_CONTRACT_VERSION;
   commandId: string;
@@ -65,6 +76,8 @@ export type PmsManualBookingCreateCommand = Readonly<{
     countryCode: string | null;
     specialRequests: string | null;
   }>;
+  /** Omitted means no additional guests. */
+  additionalGuests?: readonly PmsManualBookingAdditionalGuest[];
   privateNote: string | null;
   directSource: PmsManualBookingDirectSource;
   stays: readonly PmsManualBookingStay[];
@@ -72,7 +85,8 @@ export type PmsManualBookingCreateCommand = Readonly<{
   payment: Readonly<{
     expectedMethod: PmsManualBookingPaymentMethod;
     settlement:
-      Readonly<{ status: "unpaid" }> | Readonly<{ status: "paid"; reference: string | null }>;
+      | Readonly<{ status: "unpaid" }>
+      | Readonly<{ status: "paid"; reference: string | null }>;
   }>;
   audit: Readonly<{
     actor: Readonly<{ kind: "user"; userId: string; organizationId: string }>;
