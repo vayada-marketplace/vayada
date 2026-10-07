@@ -12,6 +12,8 @@ type PmsManualBookingStayBase = {
   checkOut: string;
   adults: number;
   children: number;
+  /** Slice A amendment: one 0–17 age per child, required to price a published offer. */
+  childAgesAtCheckIn?: number[];
 };
 export type PmsManualBookingStay = PmsManualBookingStayBase &
   (
@@ -63,6 +65,8 @@ export type PmsManualBookingCreateInput = PmsManualBookingPreviewInput & {
 export type PmsManualBookingPreviewResult = {
   contractVersion: typeof PMS_MANUAL_BOOKING_CONTRACT_VERSION;
   currency: string;
+  /** Publication revision the standard prices came from; null when every stay is custom. */
+  pricingRevision?: number | null;
   stays: Array<{
     position: number;
     roomId: string;
@@ -124,11 +128,14 @@ export const PMS_MANUAL_BOOKING_ERROR_CODES = [
   "rate_not_found",
   "addon_not_found",
   "room_unavailable",
+  "pricing_not_published",
   "idempotency_conflict",
   "invalid_dates",
   "occupancy_exceeded",
   "currency_mismatch",
   "inactive_rate_plan",
+  "child_ages_required",
+  "rate_restricted",
   "invalid_addon_selection",
   "invalid_source",
   "invalid_payment_method",

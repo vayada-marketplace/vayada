@@ -1082,7 +1082,7 @@ test.describe("pms-web smoke", () => {
               sourceRoomFactsRevision: 3,
               baseAmount: { amountDecimal: savedRate, currency: "EUR" },
               cancellationTerms: {},
-                    mealPlan: savedMeal,
+              mealPlan: savedMeal,
             },
           },
         });
@@ -1099,7 +1099,9 @@ test.describe("pms-web smoke", () => {
     const rateTable = page.getByText("Set rates per season").locator("xpath=../..");
     await rateTable.getByRole("spinbutton").first().fill("120");
     await page.getByLabel("Included meal — standard flexible rate").selectOption("breakfast");
-    await expect(page.getByLabel("Included meal — standard flexible rate").locator("option")).toHaveCount(2);
+    await expect(
+      page.getByLabel("Included meal — standard flexible rate").locator("option"),
+    ).toHaveCount(2);
     const readsBeforeLanguageChange = roomReads;
     await page.getByRole("button", { name: "PO", exact: true }).click();
     await page.getByRole("button", { name: /^Language/ }).click();
@@ -1124,7 +1126,9 @@ test.describe("pms-web smoke", () => {
     await expect(rateTable.getByRole("spinbutton").first()).toHaveValue("120");
     await page.reload();
     await page.getByRole("button", { name: "Pricing & Rates" }).click();
-    await expect(page.getByLabel("Included meal — standard flexible rate")).toHaveValue("breakfast");
+    await expect(page.getByLabel("Included meal — standard flexible rate")).toHaveValue(
+      "breakfast",
+    );
     await expect(rateTable.getByRole("spinbutton").first()).toHaveValue("120");
     await assertNoLegacyCalls();
     await assertHealthy();
@@ -1152,7 +1156,7 @@ test.describe("pms-web smoke", () => {
               ratePlans: [
                 {
                   ratePlanId: "flexible-rate",
-                  pricingContractVersion: "pms-pricing.v1",
+                  pricingContractVersion: "pricing.v2",
                   name: "Flexible",
                   rateType: "flexible",
                   baseRate: { amountDecimal: "180.00", currency: "EUR" },
@@ -1244,7 +1248,7 @@ test.describe("pms-web smoke", () => {
     await expect(dialog.getByRole("alert")).toContainText("Couldn't calculate pricing.");
     await dialog.getByRole("button", { name: "Retry pricing" }).click();
     await expect(dialog.getByRole("alert")).toContainText(
-      "No rate found for 2026-09-10 – 2026-09-13. Set up a season in Rooms & Rates first.",
+      "No rate found for 2026-09-10 – 2026-09-13. Set the price in Pricing first.",
     );
     await expect(createBooking).toBeDisabled();
     await assertNoLegacyCalls();

@@ -15,7 +15,7 @@ const manualBookingPath = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/manual-b
 function plan(ratePlanId: string, name: string, rateType: string, amountDecimal: string) {
   return {
     ratePlanId,
-    pricingContractVersion: "pms-pricing.v1",
+    pricingContractVersion: "pricing.v2",
     name,
     rateType,
     baseRate: { amountDecimal, currency: "EUR" },
@@ -23,8 +23,9 @@ function plan(ratePlanId: string, name: string, rateType: string, amountDecimal:
   };
 }
 
-// VAY-1422: Flexible is preferred over Non-refundable regardless of server order, a room type
-// without configured plans falls back to Custom, and nationality submits as an ISO code.
+// VAY-1422: the published offers are the rate plans; Flexible is preferred over Non-refundable
+// regardless of server order, children need ages before an offer is priced, a room type without
+// published offers falls back to Custom, and nationality submits as an ISO code.
 test("defaults the rate plan, falls back to Custom, and submits nationality as ISO code", async ({
   page,
 }) => {
@@ -101,8 +102,10 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
       json: { contractVersion: "pms-manual-booking.v1", canRecordPaidPayment: false },
     }),
   );
+  const previewBodies: Array<{ stays: Array<{ childAgesAtCheckIn?: number[] }> }> = [];
   await page.route(`${manualBookingPath}/preview`, (route) => {
     const body = route.request().postDataJSON();
+    previewBodies.push(body);
     const stays = body.stays.map(
       (stay: {
         position: number;
@@ -191,11 +194,22 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   await expect(dialog.getByText("Standard: €360")).toBeVisible();
   await expect(dialog.getByText("Applied: €360")).toBeVisible();
 
+  // Offers take the published price, so the nightly field is Custom-only, and children are
+  // priced by age: the stay is sent once every age is entered.
+  await expect(dialog.getByLabel("Room 1 nightly rate")).toHaveCount(0);
+  await dialog.getByLabel("Room 1 children").fill("1");
+  const childAge = dialog.getByLabel("Room 1 child 1 age");
+  await expect(childAge).toBeVisible();
+  await childAge.fill("6");
+  await expect.poll(() => previewBodies.at(-1)?.stays[0]?.childAgesAtCheckIn).toEqual([6]);
+  await dialog.getByLabel("Room 1 children").fill("0");
+  await expect(childAge).toHaveCount(0);
+
   // A room type without configured plans falls back to Custom instead of blocking.
   await dialog.getByLabel("Room 1 room").selectOption(GARDEN_ROOM_ID);
   await expect(ratePlan).toHaveValue("custom");
   await expect(ratePlan.locator("option")).toHaveText(["Custom rate"]);
-  await expect(dialog.getByText("No rate plan is configured for this room type.")).toBeVisible();
+  await expect(dialog.getByText("No rate plan is published for this room type.")).toBeVisible();
   await expect(page.getByText("Enter a custom nightly rate to calculate the total")).toBeVisible();
   await expect(createBooking).toBeDisabled();
   await dialog.getByLabel("Room 1 nightly rate").fill("150");
