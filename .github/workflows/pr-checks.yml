@@ -72,6 +72,10 @@ jobs:
         env:
           NEXT_PUBLIC_CLOUDFLARE_ANALYTICS_TOKEN: "00000000000000000000000000000000"
 
+      # Runs after Build because PMS Web tests import the built @vayada/domain-* packages.
+      - name: PMS Web tests
+        run: npm --workspace vayada-pms-frontend run test
+
       - name: Landing consent browser regressions
         run: |
           npx playwright install --with-deps chromium
