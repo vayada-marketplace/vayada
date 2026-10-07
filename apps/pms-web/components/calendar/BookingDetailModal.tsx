@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { bookingsService, Booking, type AssignmentSelector } from "@/services/bookings";
+import { calendarService } from "@/services/calendar";
+import type { PmsManualBookingPreviewInput } from "@/services/api/pmsManualBookingClient";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { CHANNEL_COLORS, getChannelLabel, normalizeChannelKey } from "@/lib/constants/statusStyles";
 import Modal from "@/components/Modal";
@@ -22,6 +24,7 @@ interface CalendarRoom {
   currency: string;
   maxOccupancy: number;
   size: number;
+  flexibleRatePlanId?: string | null;
 }
 
 interface CalendarBookingLite {
@@ -130,6 +133,11 @@ export default function BookingDetailModal({
   const [movedToRoomNumber, setMovedToRoomNumber] = useState<string>("");
   const [movedToRoomTypeName, setMovedToRoomTypeName] = useState<string>("");
   const [ratePolicy, setRatePolicy] = useState<"preserve" | "target_base">("preserve");
+  const [targetQuote, setTargetQuote] = useState<{
+    key: string;
+    total: number;
+    currency: string;
+  } | null>(null);
   const [editForm, setEditForm] = useState({
     checkIn: "",
     checkOut: "",
@@ -384,13 +392,59 @@ export default function BookingDetailModal({
       : null;
   const channelKey = normalizeChannelKey(booking?.channel);
   const isOtaMove = !["direct", "manual"].includes(channelKey);
+  // "Update to new rate" charges the target's published Flexible price, so quote exactly that
+  // through the manual-booking preview before staff can choose it.
+  const targetQuoteInput: PmsManualBookingPreviewInput | null =
+    channelKey === "manual" &&
+    isCrossType &&
+    selectedCandidate?.room.flexibleRatePlanId &&
+    movingStay?.checkIn &&
+    movingStay.checkOut
+      ? {
+          stays: [
+            {
+              position: 1,
+              roomId: selectedCandidate.room.id,
+              checkIn: movingStay.checkIn,
+              checkOut: movingStay.checkOut,
+              adults: movingStay.adults ?? 1,
+              children: movingStay.children ?? 0,
+              ratePlanId: selectedCandidate.room.flexibleRatePlanId,
+              pricing: { kind: "rate_plan", manualOverride: null },
+            },
+          ],
+          addOns: [],
+        }
+      : null;
+  const targetQuoteKey = targetQuoteInput ? JSON.stringify(targetQuoteInput) : null;
+  useEffect(() => {
+    if (!targetQuoteKey) return;
+    let active = true;
+    calendarService
+      .previewManualBooking(JSON.parse(targetQuoteKey) as PmsManualBookingPreviewInput)
+      .then((result) => {
+        if (active)
+          setTargetQuote({
+            key: targetQuoteKey,
+            total: Number(result.grandTotal.amountDecimal),
+            currency: result.currency,
+          });
+      })
+      .catch(() => {
+        if (active) setTargetQuote(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [targetQuoteKey]);
+  const quote = targetQuote && targetQuote.key === targetQuoteKey ? targetQuote : null;
   const targetRateCompatible = Boolean(
     channelKey === "manual" &&
     hasCompleteRateEvidence &&
     booking &&
     selectedCandidate &&
-    booking.currency === selectedCandidate.room.currency &&
-    selectedCandidate.room.baseRate > 0,
+    quote &&
+    booking.currency === quote.currency,
   );
 
   const handlePickerContinue = () => {
@@ -787,16 +841,10 @@ export default function BookingDetailModal({
                 </p>
                 <p>
                   {t("calendar.bookingDetail.new")}{" "}
-                  {moveNights !== null && moveNights > 0
+                  {quote && moveNights !== null && moveNights > 0
                     ? t("calendar.bookingDetail.rateTotal", {
-                        rate: formatCurrency(
-                          selectedCandidate.room.baseRate,
-                          selectedCandidate.room.currency,
-                        ),
-                        total: formatCurrency(
-                          selectedCandidate.room.baseRate * moveNights,
-                          selectedCandidate.room.currency,
-                        ),
+                        rate: formatCurrency(quote.total / moveNights, quote.currency),
+                        total: formatCurrency(quote.total, quote.currency),
                       })
                     : t("calendar.bookingDetail.totalUnavailable")}
                 </p>
@@ -804,11 +852,13 @@ export default function BookingDetailModal({
               <p className="mt-1 text-xs text-gray-600">
                 {originalNightlyRate === null || moveNights === null
                   ? t("calendar.bookingDetail.differenceIncompleteRates")
-                  : booking.currency !== selectedCandidate.room.currency
-                    ? t("calendar.bookingDetail.differenceCurrencies")
-                    : t("calendar.bookingDetail.difference", {
-                        amount: `${selectedCandidate.room.baseRate - originalNightlyRate >= 0 ? "+" : ""}${formatCurrency((selectedCandidate.room.baseRate - originalNightlyRate) * moveNights, booking.currency)}`,
-                      })}
+                  : !quote
+                    ? t("calendar.bookingDetail.noTargetBaseRate")
+                    : booking.currency !== quote.currency
+                      ? t("calendar.bookingDetail.differenceCurrencies")
+                      : t("calendar.bookingDetail.difference", {
+                          amount: `${quote.total - originalNightlyRate * moveNights >= 0 ? "+" : ""}${formatCurrency(quote.total - originalNightlyRate * moveNights, booking.currency)}`,
+                        })}
               </p>
               <div className="mt-3 space-y-2">
                 <label className="flex items-start gap-2">
@@ -844,10 +894,10 @@ export default function BookingDetailModal({
                           : t("calendar.bookingDetail.manualBookingsOnly")
                         : !hasCompleteRateEvidence
                           ? t("calendar.bookingDetail.incompleteRates")
-                          : booking.currency !== selectedCandidate.room.currency
-                            ? t("calendar.bookingDetail.differentCurrencies")
-                            : selectedCandidate.room.baseRate <= 0
-                              ? t("calendar.bookingDetail.noTargetBaseRate")
+                          : !quote
+                            ? t("calendar.bookingDetail.noTargetBaseRate")
+                            : booking.currency !== quote.currency
+                              ? t("calendar.bookingDetail.differentCurrencies")
                               : t("calendar.bookingDetail.recalculateTargetRate")}
                     </span>
                   </span>

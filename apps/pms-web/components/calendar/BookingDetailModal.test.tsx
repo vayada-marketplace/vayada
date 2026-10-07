@@ -2,9 +2,12 @@ import { act, create } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Booking } from "@/services/bookings";
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), moveRoom: vi.fn() }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), moveRoom: vi.fn(), preview: vi.fn() }));
 vi.mock("@/services/bookings", () => ({
   bookingsService: { get: mocks.get, moveRoom: mocks.moveRoom },
+}));
+vi.mock("@/services/calendar", () => ({
+  calendarService: { previewManualBooking: mocks.preview },
 }));
 
 import BookingDetailModal from "./BookingDetailModal";
@@ -12,7 +15,7 @@ import BookingDetailModal from "./BookingDetailModal";
 // prettier-ignore
 const booking = { id: "booking-1", bookingReference: "VAY-1", roomTypeId: "type-1", roomName: "Double", guestFirstName: "Ada", guestLastName: "Lovelace", guestEmail: "", guestPhone: "", checkIn: "2026-09-10", checkOut: "2026-09-12", nights: 2, adults: 1, children: 0, nightlyRate: 100, numberOfRooms: 2, totalAmount: 200, balanceAmount: 200, currency: "EUR", status: "confirmed", roomId: "room-1", roomNumber: "101", assignedRooms: [{ assignmentId: "a-1", roomId: "room-1", roomNumber: "101", position: 0, roomTypeId: "type-1" }, { assignmentId: "a-2", roomId: "room-2", roomNumber: "202", position: 1, roomTypeId: "type-1" }], stays: [{ position: 0, roomName: "Double", ratePlanName: null, roomNumber: "101", checkIn: "2026-09-10", checkOut: "2026-09-12", adults: 1, children: 0, nightly: [] }], channel: "manual", expectedPaymentMethod: "cash", createdAt: "2026-08-01" } as unknown as Booking;
 // prettier-ignore
-const rooms = [{ id: "room-1", roomTypeId: "type-1", roomTypeName: "Double", roomNumber: "101", floor: "1", status: "available", baseRate: 100, currency: "EUR", maxOccupancy: 2, size: 20 }, { id: "room-2", roomTypeId: "type-1", roomTypeName: "Double", roomNumber: "202", floor: "2", status: "available", baseRate: 100, currency: "EUR", maxOccupancy: 2, size: 20 }, { id: "room-3", roomTypeId: "type-2", roomTypeName: "Villa", roomNumber: "V1", floor: "", status: "available", baseRate: 220, currency: "EUR", maxOccupancy: 5, size: 80 }];
+const rooms = [{ id: "room-1", roomTypeId: "type-1", roomTypeName: "Double", roomNumber: "101", floor: "1", status: "available", baseRate: 100, currency: "EUR", maxOccupancy: 2, size: 20 }, { id: "room-2", roomTypeId: "type-1", roomTypeName: "Double", roomNumber: "202", floor: "2", status: "available", baseRate: 100, currency: "EUR", maxOccupancy: 2, size: 20 }, { id: "room-3", roomTypeId: "type-2", roomTypeName: "Villa", roomNumber: "V1", floor: "", status: "available", baseRate: 220, currency: "EUR", maxOccupancy: 5, size: 80, flexibleRatePlanId: "villa-flex" }];
 // prettier-ignore
 const bookings = [{ id: "booking-1", assignmentId: "a-1", roomId: "room-1", roomPosition: 0, checkIn: "2026-09-10", checkOut: "2026-09-12", status: "confirmed" }, { id: "booking-1", assignmentId: "a-2", roomId: "room-2", roomPosition: 1, checkIn: "2026-09-10", checkOut: "2026-09-12", status: "confirmed" }];
 
@@ -36,6 +39,11 @@ describe("cross-room-type move picker", () => {
     vi.clearAllMocks();
     mocks.get.mockResolvedValue(booking);
     mocks.moveRoom.mockResolvedValue(booking);
+    // The target's published Flexible price for the stay, as the server will charge it.
+    mocks.preview.mockResolvedValue({
+      currency: "EUR",
+      grandTotal: { amountDecimal: "440.00", currency: "EUR" },
+    });
   });
 
   it("hides unverified totals and nightly pricing in the calendar detail", async () => {
@@ -216,9 +224,24 @@ describe("cross-room-type move picker", () => {
       view = create(<BookingDetailModal bookingId="booking-1" sourceAssignmentSelector={{ assignmentId: "a-1" }} onClose={vi.fn()} onStatusChange={vi.fn()} rooms={rooms} bookings={bookings} />);
     });
     await selectCrossTypeRoom(view!);
+    expect(mocks.preview).toHaveBeenCalledWith({
+      stays: [
+        expect.objectContaining({
+          roomId: "room-3",
+          checkIn: "2026-09-10",
+          checkOut: "2026-09-12",
+          adults: 1,
+          children: 0,
+          ratePlanId: "villa-flex",
+          pricing: { kind: "rate_plan", manualOverride: null },
+        }),
+      ],
+      addOns: [],
+    });
     const rendered = JSON.stringify(view!.toJSON());
     const targetRate = view!.root.findAllByProps({ type: "radio" })[1]!;
     expect(rendered).toContain("€110/night · €220 total");
+    expect(rendered).toContain("€220/night · €440 total");
     expect(rendered).toContain("Difference: +€220");
     expect(targetRate.props.disabled).toBe(false);
     await act(async () => targetRate.props.onChange());
@@ -229,6 +252,30 @@ describe("cross-room-type move picker", () => {
       { assignmentId: "a-1" },
       "target_base",
     );
+    view!.unmount();
+  });
+  it("keeps the target rate unavailable when the target has no published Flexible price", async () => {
+    mocks.preview.mockRejectedValue(new Error("pricing not published"));
+    mocks.get.mockResolvedValue({
+      ...booking,
+      stays: [
+        {
+          ...booking.stays[0],
+          nightly: [
+            { appliedAmount: 100, currency: "EUR", evidenceQuality: "exact" },
+            { appliedAmount: 100, currency: "EUR", evidenceQuality: "exact" },
+          ],
+        },
+      ],
+    });
+    let view: ReturnType<typeof create>;
+    await act(async () => {
+      // prettier-ignore
+      view = create(<BookingDetailModal bookingId="booking-1" sourceAssignmentSelector={{ assignmentId: "a-1" }} onClose={vi.fn()} onStatusChange={vi.fn()} rooms={rooms} bookings={bookings} />);
+    });
+    await selectCrossTypeRoom(view!);
+    expect(view!.root.findAllByProps({ type: "radio" })[1]!.props.disabled).toBe(true);
+    expect(JSON.stringify(view!.toJSON())).toContain("no published Flexible price");
     view!.unmount();
   });
 });

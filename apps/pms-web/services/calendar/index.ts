@@ -48,6 +48,8 @@ export interface CalendarRoom {
   currency: string;
   maxOccupancy: number;
   size: number;
+  /** The room type's published Flexible offer with its own price: what "target base" moves charge. */
+  flexibleRatePlanId?: string | null;
 }
 
 export interface CalendarBooking {
@@ -468,6 +470,16 @@ function toCalendarData(
         currency: roomTypesById.get(room.roomTypeId)?.baseRate.currency ?? "EUR",
         maxOccupancy: maxOccupancy(roomTypesById.get(room.roomTypeId)),
         size: numericAttribute(roomTypesById.get(room.roomTypeId)?.attributes?.size),
+        flexibleRatePlanId:
+          roomTypesById
+            .get(room.roomTypeId)
+            ?.ratePlans?.find(
+              (plan) =>
+                plan.active &&
+                plan.pricingContractVersion === "pricing.v2" &&
+                plan.rateType === "flexible" &&
+                moneyAmount(plan.baseRate) > 0,
+            )?.ratePlanId ?? null,
       })),
     roomOrderVersion: range.roomOrderVersion,
     bookings: reservations.flatMap((reservation) =>
