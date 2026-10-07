@@ -110,7 +110,7 @@ export async function runManualBookingAcceptance(args: Args): Promise<void> {
     const email = `qa-next-manual-${environment.runId}@${environment.emailDomain}`;
     await dialog.locator('input[type="email"]').fill(email);
     await dialog.locator('input[name="phoneE164"]').fill("+49305550105");
-    await dialog.getByLabel("Guest country").fill("DE");
+    await dialog.getByLabel("Nationality").fill("Germany");
     await dialog.getByLabel("QA breakfast basket", { exact: true }).check();
     await dialog.getByLabel("QA breakfast basket packages").fill("2");
     await dialog.getByLabel("Manual source").selectOption("email");
