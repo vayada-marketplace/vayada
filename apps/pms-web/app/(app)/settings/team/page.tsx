@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SettingsCard, SettingsLayout, SettingsSection } from "@vayada/settings-ui";
 
+import ConfirmDialog from "@/components/ConfirmDialog";
 import AccountAdminCard from "@/components/settings/team/AccountAdminCard";
 import AdminTransferDialog from "@/components/settings/team/AdminTransferDialog";
 import PropertyAccessMatrix from "@/components/settings/team/PropertyAccessMatrix";
@@ -67,6 +68,7 @@ export default function TeamSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [updatingMemberId, setUpdatingMemberId] = useState<string | null>(null);
+  const [deactivating, setDeactivating] = useState<PmsStaffMember | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{
     memberId: string;
     type: "error" | "success";
@@ -140,13 +142,12 @@ export default function TeamSettingsPage() {
     }
   }, [completeTransfer, t]);
 
-  const changeStatus = async (member: PmsStaffMember) => {
+  const changeStatus = async (member: PmsStaffMember, confirmed = false) => {
     const nextStatus = member.status === "active" ? "deactivated" : "active";
     const label = member.name || member.email;
-    if (
-      nextStatus === "deactivated" &&
-      !window.confirm(t("settings.team.deactivateConfirm", { name: label }))
-    ) {
+    setDeactivating(null);
+    if (nextStatus === "deactivated" && !confirmed) {
+      setDeactivating(member);
       return;
     }
 
@@ -518,6 +519,21 @@ export default function TeamSettingsPage() {
             action={dialog.action}
             onClose={() => setDialog(null)}
             onSaved={saved}
+          />
+        )}
+        {deactivating && (
+          <ConfirmDialog
+            title={t("settings.team.deactivateNamed", {
+              name: deactivating.name || deactivating.email,
+            })}
+            message={t("settings.team.deactivateConfirm", {
+              name: deactivating.name || deactivating.email,
+            })}
+            confirmLabel={t("settings.team.deactivate")}
+            cancelLabel={t("common.cancel")}
+            variant="danger"
+            onConfirm={() => void changeStatus(deactivating, true)}
+            onCancel={() => setDeactivating(null)}
           />
         )}
         {dialog?.kind === "transfer" && (

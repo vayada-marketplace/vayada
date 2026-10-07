@@ -38,10 +38,11 @@ const client = { termsAction: vi.fn(), readTerms: vi.fn(), read: vi.fn(), prepar
 const button = (label: string) => view.root.findAllByType("button").find((node) => node.children.join("") === label)!;
 const click = async (label: string) => { await act(async () => { button(label).props.onClick(); }); };
 const input = () => view.root.findAllByType("input").find((node) => node.props.inputMode === "decimal")!;
+const reload = async () => { await click("Reload pricing"); if (button("Discard and reload")) await click("Discard and reload"); };
 const mount = async () => { await act(async () => { view = create(<PricingEditor client={client as ReturnType<typeof createReplacementPricingClient>} />); }); };
 beforeEach(() => {
   vi.resetAllMocks(); vi.stubGlobal("React", React);
-  vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn(), confirm: vi.fn(() => false) });
+  vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
   vi.stubGlobal("document", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
   client.readTerms.mockImplementation(async (roomTypeId, offerId, revision) => ({ roomTypeId, offerId, revision, cancellation: { kind: "non_refundable" }, payment: { kind: "full" } }));
   client.read.mockResolvedValue({ ...snapshot, revision: 1, sources, stale: false });
@@ -61,10 +62,9 @@ it("protects an uncertain source change and lets a new owner reaffirm the same s
   client.authorityAction.mockReturnValue(action);
   client.readAuthority.mockResolvedValueOnce({ authority: "unconfigured", revision: null, organizationId: null })
     .mockResolvedValue({ authority: "vayada", revision: draftId, organizationId: id });
-  vi.mocked(window.confirm).mockReturnValue(true);
   await mount();
   await act(async () => view.root.findByProps({ "aria-label": "Price source" }).props.onChange({ target: { value: "vayada" } }));
-  await click("Save price source");
+  await click("Save price source"); expect(client.authorityAction).not.toHaveBeenCalled(); await click("Confirm");
   expect(button("Retry same change").props.disabled).toBe(false);
   expect(button("Save draft").props.disabled).toBe(true);
   const warn = vi.mocked(window.addEventListener).mock.calls.filter(([name]) => name === "beforeunload").at(-1)![1] as (event: unknown) => void;
@@ -74,7 +74,7 @@ it("protects an uncertain source change and lets a new owner reaffirm the same s
   expect(action).toHaveBeenCalledTimes(2);
   expect(client.authorityAction).toHaveBeenCalledTimes(1);
   expect(button("Reaffirm price source").props.disabled).toBe(false);
-  await click("Reaffirm price source");
+  await click("Reaffirm price source"); await click("Confirm");
   expect(client.authorityAction).toHaveBeenLastCalledWith(draftId, "vayada");
 });
 it("saves edited amounts, shows charges, requires acknowledgment and retries the exact publication", async () => {
@@ -139,8 +139,10 @@ it("warns before leaving pending work and cancels property changes before select
   const listener = (name: string) => vi.mocked(window.addEventListener).mock.calls.filter(([event]) => event === name).at(-1)![1] as (event: Event) => void;
   const unload = new Event("beforeunload", { cancelable: true }); listener("beforeunload")(unload); expect(unload.defaultPrevented).toBe(true);
   const change = new Event("pms:before-property-change", { cancelable: true }); listener("pms:before-property-change")(change); expect(change.defaultPrevented).toBe(true);
-  vi.mocked(window.confirm).mockReturnValueOnce(true); const accepted = new Event("pms:before-property-change", { cancelable: true }); listener("pms:before-property-change")(accepted);
-  expect(accepted.defaultPrevented).toBe(false); const leaving = new Event("beforeunload", { cancelable: true }); listener("beforeunload")(leaving); expect(leaving.defaultPrevented).toBe(false);
+  const proceed = vi.fn(), accepted = new CustomEvent("pms:before-property-change", { cancelable: true, detail: { proceed } }); await act(async () => listener("pms:before-property-change")(accepted));
+  expect(accepted.defaultPrevented).toBe(true); await click("Cancel"); expect(proceed).not.toHaveBeenCalled();
+  await act(async () => listener("pms:before-property-change")(accepted)); await click("Leave"); expect(proceed).toHaveBeenCalledTimes(1);
+  const leaving = new Event("beforeunload", { cancelable: true }); listener("beforeunload")(leaving); expect(leaving.defaultPrevented).toBe(false);
 });
 
 it.each([new Error("lost preparation response")])("retains a created policy after preparation failure %s and requires draft review", async (failure) => {
@@ -891,8 +893,7 @@ it("prefills included settings, guards pending edits and saves current bases thr
   expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { base: { baseGuests: 1, baseMinor: "15025", adjustments: [{ kind: "fixed", deltaMinor: "0" }, { kind: "percentage", basisPoints: 1025 }, { kind: "fixed", deltaMinor: "2500" }] }, months: originalPrice.calendar.months } });
   expect(saved.snapshot.rooms[0].offers[2].price).toMatchObject({ calendar: { base: { amountMinor: "19999" } } });
   expect(client.termsAction).not.toHaveBeenCalled(); await click("Review saved charges"); expect(button("Edit included-adult adjustments").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
-  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true);
-  await click("Reload pricing"); await click("Edit included-adult adjustments"); expect(field("Adults included in the base price").props.value).toBe("1"); expect(field("Adjustment for 2 adults").props.value).toBe("10.25");
+  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); await reload(); await click("Edit included-adult adjustments"); expect(field("Adults included in the base price").props.value).toBe("1"); expect(field("Adjustment for 2 adults").props.value).toBe("10.25");
 });
 
 it("replaces monthly amounts in all modes while retaining each month's own settings", () => {
@@ -937,7 +938,7 @@ it("prefills monthly edits, protects pending values and saves the same monthly s
   expect(price.calendar.months).toEqual([{ ...source.calendar.months[0], price: { ...source.calendar.months[0].price, baseMinor: "21025" } }]); expect(price.calendar.base).toMatchObject({ baseGuests: 1, baseMinor: "15025" });
   expect(price.calendar.seasons).toEqual(source.calendar.seasons); expect(price.calendar.dates).toEqual(source.calendar.dates); expect(saved.snapshot.rooms[0].offers.slice(1)).toEqual(room.offers.slice(1));
   await click("Review saved charges"); expect(button("Edit monthly price").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
-  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true); await click("Reload pricing"); await click("Edit monthly price"); expect(field("Monthly 2 adults included for Room 1 Offer 1").props.value).toBe("210.25");
+  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); await reload(); await click("Edit monthly price"); expect(field("Monthly 2 adults included for Room 1 Offer 1").props.value).toBe("210.25");
 });
 
 it("edits seasonal prices in all four modes without replacing the season's settings", () => {
@@ -979,7 +980,7 @@ it("prefills seasonal edits, protects pending values and retains settings throug
   expect(price.calendar.seasons).toEqual([{ ...source.calendar.seasons[0], price: { ...source.calendar.seasons[0].price, baseMinor: "26025" } }]); expect(price.calendar.base).toMatchObject({ baseGuests: 1, baseMinor: "15025" });
   expect(price.calendar.months).toEqual(source.calendar.months); expect(price.calendar.dates).toEqual(source.calendar.dates); expect(saved.snapshot.rooms[0].offers.slice(1)).toEqual(room.offers.slice(1));
   await click("Review saved charges"); expect(button("Edit seasonal price").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
-  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true); await click("Reload pricing"); await click("Edit seasonal price"); expect(field("Seasonal 2 adults included for Room 1 Offer 1").props.value).toBe("260.25");
+  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); await reload(); await click("Edit seasonal price"); expect(field("Seasonal 2 adults included for Room 1 Offer 1").props.value).toBe("260.25");
 });
 
 it("moves only the original season and checks overlaps against other seasons", () => {
@@ -1005,7 +1006,7 @@ it("keeps a cleared season edit pending and saves renamed dates with the origina
   expect(field("Seasonal 2 adults included").props.value).toBe("250.00"); await click("Apply seasonal price"); expect(button("Review saved charges").props.disabled).toBe(true); await click("Save draft");
   expect(saved).toMatchObject({ draftId, revision: 2, baseRevision: 7 }); expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { seasons: [{ name: "Holiday", tier: "", from: "12-15", through: "01-10", price: { baseMinor: "25000", baseGuests: 2 } }] } }); expect(saved.snapshot.rooms[0].offers[0].restrictions).toEqual(room.offers[0].restrictions);
   await click("Review saved charges"); expect(button("Edit seasonal price").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
-  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true); await click("Reload pricing"); await click("Edit seasonal price"); expect(field("Season name").props.value).toBe("Holiday"); expect(field("End (MM-DD)").props.value).toBe("01-10");
+  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); await reload(); await click("Edit seasonal price"); expect(field("Season name").props.value).toBe("Holiday"); expect(field("End (MM-DD)").props.value).toBe("01-10");
 });
 
 it.each([false, true])("edits every stored date-price mode without flattening it (linked=%s)", (linked) => {
@@ -1041,7 +1042,7 @@ it("prefills a linked occupancy override and preserves pending guards through sa
   await fill("Room 1 Offer 1 Per room", "150.25"); await click("Edit date price"); await fill("Date 2 adults for Room 1 Offer 2", "180.99"); await click("Apply date price"); await click("Save draft");
   expect(saved).toMatchObject({ draftId, baseRevision: 7, revision: 2 }); expect(saved.snapshot.rooms[0].offers[1].price).toEqual({ ...offer.price, dateOverrides: [{ date: "2026-12-25", price: { mode: "occupancy", amountsMinor: ["10000", "18099"] } }] }); expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { base: { amountMinor: "15025" } } });
   await click("Review saved charges"); expect(button("Edit date price").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
-  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true); await click("Reload pricing"); await click("Edit date price"); expect(field("Date 2 adults for Room 1 Offer 2").props.value).toBe("180.99");
+  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); await reload(); await click("Edit date price"); expect(field("Date 2 adults for Room 1 Offer 2").props.value).toBe("180.99");
 });
 
 it("replaces weekday adjustments exactly and preserves other rules", () => {
@@ -1065,7 +1066,7 @@ it("prefills weekday edits and requires fresh saved review after replacing their
   await act(async () => input().props.onChange({ target: { value: "150.25" } })); await click("Edit weekday adjustment"); await fill("Weekday adjustment type", "percentage"); await fill("Weekday adjustment", "-10.25"); await click("Apply weekday adjustment"); expect(button("Review saved charges").props.disabled).toBe(true); await click("Save draft");
   expect(saved).toMatchObject({ draftId, revision: 2, baseRevision: 7 }); expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { base: { amountMinor: "15025" }, weekdays: [{ day: 0, adjustment: { kind: "percentage", basisPoints: -1025 } }] } });
   await click("Review saved charges"); expect(button("Edit weekday adjustment").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
-  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true); await click("Reload pricing"); await click("Edit weekday adjustment"); expect(field("Weekday adjustment").props.value).toBe("-10.25"); expect(field("Weekday adjustment type").props.value).toBe("percentage");
+  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); await reload(); await click("Edit weekday adjustment"); expect(field("Weekday adjustment").props.value).toBe("-10.25"); expect(field("Weekday adjustment type").props.value).toBe("percentage");
 });
 
 it("creates final date prices using the displayed recurring mode and keeps other rules", () => {
@@ -1095,7 +1096,7 @@ it("protects date mode selection, resets inputs and saves a complete occupancy d
   await fill("New date pricing", "recurring"); await fill("Override date", "2026-12-25"); await fill("Date 1 adult", "150.25"); await click("Add date price"); expect(button("Save draft").props.disabled).toBe(true); await fill("Date 2 adults", "180.99"); await click("Add date price"); expect(field("New date pricing").props.value).toBe("flat");
   await click("Save draft"); expect(saved).toMatchObject({ draftId, revision: 2, baseRevision: 7 }); expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { dates: [{ date: "2026-12-25", price: { mode: "occupancy", amountsMinor: ["15025", "18099"] } }] } });
   await click("Review saved charges"); expect(field("New date pricing").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
-  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true); await click("Reload pricing"); await click("Edit date price"); expect(field("Date 2 adults").props.value).toBe("180.99");
+  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); await reload(); await click("Edit date price"); expect(field("Date 2 adults").props.value).toBe("180.99");
 });
 
  it.each(["monthly", "seasonal"] as const)("edits %s included counts independently and retains them through save, review and reload", async (scope) => {
@@ -1126,8 +1127,7 @@ it("protects date mode selection, resets inputs and saves a complete occupancy d
   expect(price.calendar).toEqual({ ...source.calendar, [key]: [{ ...source.calendar[key][0], price: { mode: "included_guests", baseGuests: 1, baseMinor: scope === "monthly" ? "20000" : "25000", adjustments: [{ kind: "fixed", deltaMinor: "0" }, { kind: "fixed", deltaMinor: "1225" }, { kind: "percentage", basisPoints: 1575 }] } }] });
   expect(saved.snapshot.rooms[0].offers.slice(1)).toEqual(room.offers.slice(1));
   await click("Review saved charges"); expect(button(`Edit ${scope} price`).props.disabled).toBe(true);
-  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true);
-  await click("Reload pricing"); await click(`Edit ${scope} price`);
+  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); await reload(); await click(`Edit ${scope} price`);
   expect(field(`Adults included in the base price${suffix}`).props.value).toBe("1");
   expect(field(`Adjustment for 2 adults${suffix}`).props.value).toBe("12.25");
  });
@@ -1169,7 +1169,7 @@ it.each([false, true])("edits date-specific included settings through save revie
   expect(price).toEqual(target.price.kind === "linked" ? { ...target.price, dateOverrides: expectedDates } : { ...target.price, calendar: { ...target.price.calendar, dates: expectedDates } });
   expect(saved.snapshot.rooms[0].offers[0]).toEqual(root); expect(saved.snapshot.rooms[0].children).toEqual(room.children); expect(saved.snapshot.rooms[0].offers[1].meal).toEqual(target.meal);
   await click("Review saved charges"); expect(field("Edit 2026-12-25 price for Room 1 Offer 2").props.disabled).toBe(true);
-  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true); await click("Reload pricing"); await edit();
+  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); await reload(); await edit();
   expect(field(`Adults included in the base price${suffix}`).props.value).toBe("2"); expect(field(`Adjustment for 1 adult${suffix}`).props.value).toBe("-30.25");
   const entry = { adults: "2", adjustments: [{ kind: "fixed", value: "-30" }, { kind: "fixed", value: "0" }, { kind: "fixed", value: "20" }] };
   expect(() => changeDatePrice(room, "target", "2026-12-26", ["400"], false, entry)).toThrow("included-adult");
@@ -1206,7 +1206,7 @@ it.each(["monthly", "seasonal", "date"] as const)("creates a %s price with its o
   const price = { mode: "included_guests", baseGuests: 1, baseMinor: "24025", adjustments: [{ kind: "fixed", deltaMinor: "0" }, { kind: "fixed", deltaMinor: "1225" }, { kind: "percentage", basisPoints: 1575 }] };
   const row = scope === "monthly" ? { month: 9, price } : scope === "seasonal" ? { name: "Spring", tier: "", from: "03-01", through: "03-31", price } : { date: "2027-03-01", price };
   expect(result.calendar).toEqual({ ...source.calendar, [key]: [...source.calendar[key], row] }); expect(saved.snapshot.rooms[0].offers.slice(1)).toEqual(room.offers.slice(1));
-  await click("Review saved charges"); client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true); await click("Reload pricing");
+  await click("Review saved charges"); client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); await reload();
   const editLabel = scope === "monthly" ? "Edit September price" : scope === "seasonal" ? "Edit season 03-01 to 03-31" : "Edit 2027-03-01 price";
   await act(async () => field(`${editLabel} for Room 1 Offer 1`).props.onClick()); expect(field(`Adults included in the base price${suffix}`).props.value).toBe("1"); expect(field(`Adjustment for 2 adults${suffix}`).props.value).toBe("12.25");
 });

@@ -9,6 +9,7 @@ import {
   type LinkedInventoryGroup,
   type RoomType,
 } from "@/services/rooms";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import LinkedInventoryGroupsPanel from "./LinkedInventoryGroupsPanel";
 import RoomsPage from "./page";
 
@@ -20,6 +21,7 @@ vi.mock("@/lib/i18n", () => ({
         "rooms.linkedEditNamed": "Edit {name}",
         "rooms.linkedDeleteNamed": "Delete {name}",
         "rooms.linkedSaveGroup": "Save group",
+        "common.delete": "Delete",
       };
       let value = messages[key] ?? key;
       for (const [name, replacement] of Object.entries(params ?? {})) {
@@ -102,21 +104,22 @@ describe("LinkedInventoryGroupsPanel", () => {
     const remove = vi
       .spyOn(linkedInventoryGroupsService, "delete")
       .mockImplementation(() => new Promise((resolve) => (finishDelete = resolve)));
-    const confirm = vi.fn(() => true);
-    vi.stubGlobal("window", { confirm });
     const { view, onChange } = render([group, other]);
     act(() => view.root.findByProps({ "aria-label": "Edit Garden rooms" }).props.onClick());
     await act(async () => button(view, "Save group").props.onClick());
     let deleting!: Promise<void>;
+    act(() => view.root.findByProps({ "aria-label": "Delete Garden rooms" }).props.onClick());
     act(() => {
-      deleting = view.root.findByProps({ "aria-label": "Delete Garden rooms" }).props.onClick();
+      deleting = button(view, "Delete").props.onClick();
     });
     act(() => view.root.findByProps({ "aria-label": "Delete Other rooms" }).props.onClick());
+    expect(view.root.findAllByType(ConfirmDialog)).toHaveLength(0);
     await act(async () => {
       finishDelete();
       await deleting;
     });
     expect(update).toHaveBeenCalledWith(group);
+    expect(remove).toHaveBeenCalledTimes(1);
     expect(remove).toHaveBeenCalledWith(group);
     expect(onChange.mock.calls[0]![0]([group, other])).toEqual([{ ...group, revision: 5 }, other]);
     expect(onChange.mock.calls[1]![0]([group, other])).toEqual([other]);

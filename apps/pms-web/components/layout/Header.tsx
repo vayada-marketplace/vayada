@@ -216,9 +216,21 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                       key={hotel.id}
                       onClick={() => {
                         if (!isSelected) {
-                          if (!window.dispatchEvent(new Event("pms:before-property-change", { cancelable: true }))) return;
-                          storeSelectedPmsPropertyId(hotel.id);
-                          window.location.reload();
+                          const proceed = () => {
+                            storeSelectedPmsPropertyId(hotel.id);
+                            window.location.reload();
+                          };
+                          // A listener may cancel and call `proceed` itself once the user confirms in-app.
+                          if (
+                            !window.dispatchEvent(
+                              new CustomEvent("pms:before-property-change", {
+                                cancelable: true,
+                                detail: { proceed },
+                              }),
+                            )
+                          )
+                            return;
+                          proceed();
                         }
                         setPropertyOpen(false);
                       }}
