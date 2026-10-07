@@ -340,11 +340,6 @@ import {
 const postgresRuntime = installPostgresPoolRuntime(pg);
 const config = loadConfig();
 const hotelSetupCommandForwarder = loadHotelSetupCommandForwarder();
-const hotelSetupCreationForwarder = loadHotelSetupCommandForwarder({
-  HOTEL_SETUP_COMMAND_ADMISSION: process.env["HOTEL_SETUP_CREATION_COMMAND_ADMISSION"],
-  HOTEL_SETUP_COMMAND_ORIGIN: process.env["HOTEL_SETUP_CREATION_COMMAND_ORIGIN"],
-  HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: process.env["HOTEL_SETUP_CREATION_COMMAND_INTERNAL_TOKEN"],
-});
 
 const hotelSetupLogoForwarder = loadHotelSetupCommandForwarder({
   HOTEL_SETUP_COMMAND_ADMISSION: process.env["HOTEL_SETUP_LOGO_COMMAND_ADMISSION"] ?? "blocked",
@@ -1851,7 +1846,12 @@ const app = buildApp({
     : undefined,
   pmsModuleActivationRepository,
   hotelSetupCommandForwarder,
-  hotelSetupCreationForwarder,
+  // VAY-2056: the HOTEL_SETUP_CREATION_COMMAND_* variables are no longer read.
+  hotelSetupPropertyCreationRepository: createPgSharedHotelSetupStatusRepository({
+    connectionString: targetDatabaseUrl,
+    pool: propertySetupOwnerPool,
+    hotelSetupOwnerCreation: true,
+  }),
   // VAY-2056: the HOTEL_SETUP_PROFILE_COMMAND_* variables are no longer read.
   hotelSetupProfileCommand: createOrdinaryHotelSetupProfileCommand(propertySetupOwnerPool),
   hotelSetupLaunchSettingsCommand:

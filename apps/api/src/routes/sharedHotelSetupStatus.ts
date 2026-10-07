@@ -131,6 +131,9 @@ type SharedHotelSetupStatusRoutesOptions = {
   repository: SharedHotelSetupStatusRepository;
   trackCommandRepository: HotelSetupTrackCommandRepository;
   propertyCreationForwarder?: HotelSetupCommandForwarder;
+  /** Self-serve hotel creation on the ordinary login (VAY-2056), an Owner-mode repository
+   * separate from the one serving platform-admin provisioning; replaces the forwarder. */
+  propertyCreationRepository?: Pick<SharedHotelSetupStatusRepository, "createPropertyProfile">;
   launchSettingsForwarder?: HotelSetupCommandForwarder;
   /** Owner-only narrow launch-settings write on the ordinary login (VAY-2056); replaces the
    * forwarder and the broad Booking settings writer. Requires propertyAccessRepository. */
@@ -309,9 +312,14 @@ export async function registerSharedHotelSetupStatusRoutes(
     return profile;
   });
 
-  registerSharedHotelSetupPropertyCreation(app, repository, {
-    forward: options.propertyCreationForwarder,
-  });
+  if (options.propertyCreationRepository)
+    registerSharedHotelSetupPropertyCreation(app, options.propertyCreationRepository, {
+      requireOwnerSession: true,
+    });
+  else
+    registerSharedHotelSetupPropertyCreation(app, repository, {
+      forward: options.propertyCreationForwarder,
+    });
 
   const profileCommand =
     options.profileCommand &&

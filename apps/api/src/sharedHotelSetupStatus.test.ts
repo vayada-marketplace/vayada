@@ -1474,6 +1474,43 @@ describe("shared hotel setup status route", () => {
     expect(updateTracks).not.toHaveBeenCalled();
   });
 
+  it("creates a self-serve hotel through the Owner-mode repository, never the shared one", async () => {
+    const shared = vi.fn();
+    const selfServe = vi.fn(async ({ profile }: { profile: SharedPropertyProfileInput }) =>
+      profileResponse(propertyId, profile),
+    );
+    const request = {
+      method: "POST" as const,
+      url: "/api/hotel-setup/properties",
+      headers: { authorization: "Bearer valid-token", "idempotency-key": "create-self-serve" },
+      payload: minimalHotelInput(),
+    };
+    for (const [permissions, status] of [
+      [["hotel_catalog.setup.read", "hotel_catalog.setup.manage"], 201],
+      [["hotel_catalog.setup.read"], 403],
+    ] as const) {
+      app = buildSharedSetupApp({
+        linkedResources: [],
+        permissions: [...permissions],
+        repository: {
+          ...unusedStatusMethods(),
+          ...unusedPropertyProfileMethods(),
+          createPropertyProfile: shared,
+        },
+        propertyCreationRepository: { createPropertyProfile: selfServe },
+      });
+      expect((await injectJson(app, request)).statusCode).toBe(status);
+      await app.close();
+    }
+    expect(selfServe).toHaveBeenCalledTimes(1);
+    expect(selfServe.mock.calls[0]![0]).toMatchObject({
+      idempotencyKey: "create-self-serve",
+      audit: { actorUserId: expect.any(String) },
+    });
+    expect(shared).not.toHaveBeenCalled();
+    app = buildSharedSetupApp({ repository: repositoryWith([]) });
+  });
+
   it("creates the first canonical property profile with explicit contact metadata", async () => {
     const input = minimalHotelInput();
     const createPropertyProfile = vi.fn(
@@ -3526,6 +3563,7 @@ function buildSharedSetupApp(options: {
   launchSettingsRepository?: SharedPropertyLaunchSettingsRepository;
   launchForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
   profileCommand?: import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate;
+  propertyCreationRepository?: Pick<SharedHotelSetupStatusRepository, "createPropertyProfile">;
   launchSettingsCommand?: Parameters<
     typeof import("./routes/sharedHotelSetupStatus.js").registerSharedHotelSetupLaunchSettings
   >[1];
@@ -3544,6 +3582,7 @@ function buildSharedSetupApp(options: {
     propertyLaunchSettingsRepository: options.launchSettingsRepository,
     hotelSetupCommandForwarder: options.launchForwarder,
     hotelSetupProfileCommand: options.profileCommand,
+    hotelSetupPropertyCreationRepository: options.propertyCreationRepository,
     hotelSetupLaunchSettingsCommand: options.launchSettingsCommand,
     hotelSetupTrackCommandRepository:
       options.trackCommandRepository ?? unusedTrackCommandRepository(),

@@ -180,6 +180,10 @@ export function createPgSharedHotelSetupStatusRepository(config: {
   max?: number;
   pool?: SharedHotelSetupStatusPool;
   hotelSetupNativeCreation?: boolean;
+  /** Self-serve hotel creation on the ordinary login (VAY-2056): the creating Owner's current
+   * authority is re-locked in the creation transaction. Never set on the instance that serves
+   * platform-admin provisioning (its actor is not a member of the hotel's organization). */
+  hotelSetupOwnerCreation?: boolean;
 }): SharedHotelSetupStatusRepository {
   if (!config.connectionString.trim()) {
     throw new Error("Shared hotel setup status repository connectionString must not be empty");
@@ -233,6 +237,7 @@ export function createPgSharedHotelSetupStatusRepository(config: {
           mode: "create",
         },
         config.hotelSetupNativeCreation === true,
+        config.hotelSetupOwnerCreation === true,
       );
       if (!propertyId) {
         throw new Error("Created shared property profile did not return a property id");
@@ -629,6 +634,7 @@ async function writePropertyProfile(
         profile: SharedPropertyProfileInput;
       },
   nativeCreation = false,
+  ownerCreation = false,
 ): Promise<string | null> {
   const payload = propertyProfileWritePayload(input.profile);
   if (input.mode === "create") {
@@ -650,9 +656,10 @@ async function writePropertyProfile(
       }),
     );
     try {
-      await client.query("BEGIN");
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      const ownerAuthority = nativeCreation || ownerCreation;
       if (
-        nativeCreation &&
+        ownerAuthority &&
         (!input.audit ||
           input.targetAccountUserId !== undefined ||
           input.provisioningReference !== undefined ||
@@ -666,8 +673,16 @@ async function writePropertyProfile(
         input.organizationId,
         input.targetAccountUserId ?? null,
       );
-      if (nativeCreation) {
-        await assertHotelSetupCreationScope(client, input.organizationId);
+      // The native scope locks the organization FOR UPDATE; the ordinary Owner path does the same.
+      if (ownerCreation) {
+        const organization = await client.query(
+          "SELECT id FROM identity.organizations WHERE id=$1::uuid AND kind='hotel_group' AND status='active' FOR UPDATE",
+          [input.organizationId],
+        );
+        if (organization.rows.length !== 1) throw new AuthorizationError();
+      }
+      if (nativeCreation) await assertHotelSetupCreationScope(client, input.organizationId);
+      if (ownerAuthority) {
         const permissions = await lockHotelSetupCreationPermissions(client, {
           organizationId: input.organizationId,
           actorUserId: input.audit!.actorUserId,
