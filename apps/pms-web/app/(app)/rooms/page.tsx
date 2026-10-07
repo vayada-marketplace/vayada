@@ -149,6 +149,7 @@ function RoomTypeCard({
   const [newRoomNumberError, setNewRoomNumberError] = useState<string | null>(null);
   const [newRoomFloor, setNewRoomFloor] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
   const [editingRoomNumber, setEditingRoomNumber] = useState("");
   const [editingRoomNumberError, setEditingRoomNumberError] = useState<string | null>(null);
@@ -169,6 +170,7 @@ function RoomTypeCard({
       setNewRoomNumberError(t("rooms.duplicateRoomNumber"));
       return;
     }
+    setActionError(null);
     try {
       await individualRoomsService.create({
         roomTypeId: room.id,
@@ -184,7 +186,7 @@ function RoomTypeCard({
         setNewRoomNumberError(t("rooms.duplicateRoomNumber"));
         return;
       }
-      alert(err.message || t("rooms.failedToAddRoom"));
+      setActionError(err.message || t("rooms.failedToAddRoom"));
     }
   };
 
@@ -195,11 +197,12 @@ function RoomTypeCard({
   const doDeleteRoom = async () => {
     if (!confirmDelete) return;
     setConfirmDelete(null);
+    setActionError(null);
     try {
       await individualRoomsService.delete(rooms.find((room) => room.id === confirmDelete)!);
       onRoomsChange();
     } catch (err: any) {
-      alert(err.message || t("rooms.cannotDeleteRoom"));
+      setActionError(err.message || t("rooms.cannotDeleteRoom"));
     }
   };
 
@@ -231,6 +234,7 @@ function RoomTypeCard({
       setEditingRoomNumberError(t("rooms.duplicateRoomNumber"));
       return;
     }
+    setActionError(null);
     try {
       await individualRoomsService.update(rooms.find((room) => room.id === roomId)!, {
         roomNumber: trimmed,
@@ -242,16 +246,17 @@ function RoomTypeCard({
         setEditingRoomNumberError(t("rooms.duplicateRoomNumber"));
         return;
       }
-      alert(err.message || t("rooms.failedToRenameRoom"));
+      setActionError(err.message || t("rooms.failedToRenameRoom"));
     }
   };
 
   const handleStatusChange = async (roomId: string, status: string) => {
+    setActionError(null);
     try {
       await individualRoomsService.update(rooms.find((room) => room.id === roomId)!, { status });
       onRoomsChange();
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Room status could not be changed.");
+      setActionError(error instanceof Error ? error.message : t("rooms.failedToChangeStatus"));
     }
   };
 
@@ -609,6 +614,11 @@ function RoomTypeCard({
               <PlusIcon className="w-3.5 h-3.5" /> {t("rooms.addRoom")}
             </button>
           )}
+          {actionError && (
+            <p role="alert" className="mt-2 ml-5 text-[12px] text-red-600">
+              {actionError}
+            </p>
+          )}
         </div>
       )}
       {confirmDelete && (
@@ -616,6 +626,7 @@ function RoomTypeCard({
           title={t("rooms.deleteRoom")}
           message={t("rooms.deleteRoomConfirm")}
           confirmLabel={t("rooms.deleteRoom")}
+          cancelLabel={t("common.cancel")}
           variant="danger"
           onConfirm={doDeleteRoom}
           onCancel={() => setConfirmDelete(null)}
@@ -653,6 +664,7 @@ export default function RoomsPage() {
   const loadRevision = useRef(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [duplicatingRoomTypeIds, setDuplicatingRoomTypeIds] = useState<Set<string>>(new Set());
+  const [duplicateError, setDuplicateError] = useState("");
 
   const loadData = () => {
     const revision = ++loadRevision.current;
@@ -692,11 +704,12 @@ export default function RoomsPage() {
 
   const handleDuplicate = async (id: string) => {
     setDuplicatingRoomTypeIds((current) => new Set(current).add(id));
+    setDuplicateError("");
     try {
       await roomsService.duplicate(id);
       loadData();
     } catch (err: any) {
-      alert(err.message || t("rooms.failedToDuplicate"));
+      setDuplicateError(err.message || t("rooms.failedToDuplicate"));
     } finally {
       setDuplicatingRoomTypeIds((current) => {
         const next = new Set(current);
@@ -760,6 +773,14 @@ export default function RoomsPage() {
             {t(refreshing ? "common.loading" : "common.retry")}
           </button>
         </div>
+      )}
+      {duplicateError && (
+        <p
+          role="alert"
+          className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+        >
+          {duplicateError}
+        </p>
       )}
       <div className="mb-4 md:mb-5">
         <div className="relative">

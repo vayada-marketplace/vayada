@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReplacementOfferTerms } from "@vayada/domain-booking/replacement-pricing";
 import { pricingCurrencyScale, parsePricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
+import ConfirmDialog from "@/components/ConfirmDialog";
+import { useTranslation } from "@/lib/i18n";
 import { ApiErrorResponse } from "@/services/api/client";
 import { type createReplacementPricingClient, type PricingSnapshot, type PricingDraft, type PricingChargeReview, type PricingTermsInput } from "@/services/api/replacementPricingClient";
 
@@ -50,6 +52,8 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
   const retainFailure = useRef<(() => boolean) | null>(null);
   const action = useRef<(() => Promise<void>) | null>(null), locked = useRef(false), alive = useRef(true);
   const pendingDraftId = useRef(crypto.randomUUID()), leaving = useRef(false);
+  const [leave, setLeave] = useState<(() => void) | null>(null), [reloading, setReloading] = useState(false);
+  const { t } = useTranslation();
   const load = useCallback(async () => {
     setLoading(true); setEmpty(false); setError("");
     try {
@@ -75,8 +79,10 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
       event.preventDefault(); event.stopPropagation(); window.location.assign(link.href);
     };
     const switchProperty = (event: Event) => {
-      if (leaveRisk && !window.confirm("Leave pricing? This draft and any pending retry cannot be recovered after leaving.")) event.preventDefault();
-      else leaving.current = true;
+      if (!leaveRisk) { leaving.current = true; return; }
+      event.preventDefault(); // Hold the switch until the in-app dialog confirms; the dispatcher's `proceed` resumes it.
+      const proceed = (event as CustomEvent<{ proceed?: () => void } | undefined>).detail?.proceed;
+      if (proceed) setLeave(() => proceed);
     };
     window.addEventListener("beforeunload", warn); document.addEventListener("click", navigate, true);
     window.addEventListener("pms:before-property-change", switchProperty);
@@ -165,7 +171,9 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
   const scale = display ? pricingCurrencyScale(display.currency)! : 2;
   return <section className="mx-auto max-w-5xl space-y-6 p-4 sm:p-8">
     <header className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-2xl font-semibold text-gray-950">Pricing</h1><p className="mt-1 text-sm text-gray-600">Edit nightly prices and calendar rules, then review and approve your saved draft.</p></div>
-      <button className="rounded-lg border px-4 py-2 text-sm disabled:opacity-50" disabled={loading || busy || authorityActive || retry} onClick={() => { if (!leaveRisk || window.confirm("Discard this draft and reload pricing?")) void load(); }}>Reload pricing</button></header>
+      <button className="rounded-lg border px-4 py-2 text-sm disabled:opacity-50" disabled={loading || busy || authorityActive || retry} onClick={() => { if (leaveRisk) setReloading(true); else void load(); }}>Reload pricing</button></header>
+    {reloading && <ConfirmDialog title={t("pricing.reloadTitle")} message={t("pricing.reloadMessage")} confirmLabel={t("pricing.reloadConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { setReloading(false); void load(); }} onCancel={() => setReloading(false)} />}
+    {leave && <ConfirmDialog title={t("pricing.leaveTitle")} message={t("pricing.leaveMessage")} confirmLabel={t("pricing.leaveConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { leaving.current = true; setLeave(null); leave(); }} onCancel={() => setLeave(null)} />}
     <PricingAuthorityControl client={client} blocked={loading || hasPendingEntries || dirty || retry || busy || (!!draft && !done)} onActivityChange={setAuthorityActive} />
     {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">{error}{retry && <p className="mt-2">Keep this page open and retry the same action. Do not start another pricing action.</p>}</div>}
     {notice && <p role="status" className="rounded-lg bg-emerald-50 p-4 text-emerald-900">{notice}</p>}

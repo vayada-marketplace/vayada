@@ -8,6 +8,7 @@ import {
   type RoomType,
 } from "@/services/rooms";
 import { useTranslation } from "@/lib/i18n";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 type Draft = {
   groupId?: string;
@@ -29,6 +30,7 @@ export default function LinkedInventoryGroupsPanel({
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [removing, setRemoving] = useState<LinkedInventoryGroup | null>(null);
   const edit = (group?: LinkedInventoryGroup) => {
     if (saving) return;
     setError("");
@@ -82,8 +84,8 @@ export default function LinkedInventoryGroupsPanel({
   };
 
   const remove = async (group: LinkedInventoryGroup) => {
+    setRemoving(null);
     if (saving) return;
-    if (!window.confirm(t("rooms.linkedDeleteConfirm", { name: group.name }))) return;
     setSaving(true);
     setError("");
     try {
@@ -138,7 +140,7 @@ export default function LinkedInventoryGroupsPanel({
                 type="button"
                 disabled={saving}
                 aria-label={t("rooms.linkedDeleteNamed", { name: group.name })}
-                onClick={() => remove(group)}
+                onClick={() => !saving && setRemoving(group)}
                 className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600"
               >
                 <TrashIcon className="h-4 w-4" />
@@ -217,6 +219,17 @@ export default function LinkedInventoryGroupsPanel({
         </div>
       )}
       {!draft && error && <p className="mt-3 text-xs text-red-600">{error}</p>}
+      {removing && (
+        <ConfirmDialog
+          title={t("rooms.linkedDeleteNamed", { name: removing.name })}
+          message={t("rooms.linkedDeleteConfirm", { name: removing.name })}
+          confirmLabel={t("common.delete")}
+          cancelLabel={t("common.cancel")}
+          variant="danger"
+          onConfirm={() => remove(removing)}
+          onCancel={() => setRemoving(null)}
+        />
+      )}
     </section>
   );
 }
