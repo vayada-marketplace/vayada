@@ -763,7 +763,6 @@ jobs:
           npm --workspace @vayada/backend-migration run test --
           --no-file-parallelism
           src/bookingAddonEconomics.test.ts
-          src/apiRuntimeIdentityLockOnly.integration.test.ts
           src/pendingBookingEdits.integration.test.ts
           src/manualBookingReadiness.integration.test.ts
           src/workosBackfill.test.ts

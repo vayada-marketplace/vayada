@@ -113,22 +113,26 @@ The ordinary API never writes identity rows; identity writes go through
 `AUTH_DATABASE_URL`. It does take `FOR SHARE` / `FOR KEY SHARE` / `FOR UPDATE`
 locks on six identity tables (the shared scope-lock clause in 13 files, the
 onboarding draft path, pricing authorization, creator self-service), and
-PostgreSQL requires `UPDATE` privilege on at least one column for that.
+PostgreSQL requires an `UPDATE` privilege on at least one column for that.
 
-- App migration `0475_api_runtime_identity_lock_only.sql` adds the existing
-  lock-only RLS pattern (0413/0421/0422/0446) for `vayada_next_api_runtime` on
-  `identity.organizations`, `identity.users`, `identity.organization_memberships`,
+- The grant task grants `UPDATE (created_at)` on `identity.organizations`,
+  `identity.users`, `identity.organization_memberships`,
   `identity.role_permission_grants`, `identity.membership_property_assignments`
-  and `identity.organization_roles`: a `RESTRICTIVE FOR UPDATE` policy with
-  `USING (true)` and `WITH CHECK (current_user <> 'vayada_next_api_runtime' AND
-session_user <> 'vayada_next_api_runtime')`. Row locks pass; any real
-  `UPDATE` by the role fails with SQLSTATE 42501.
-- The grant task then grants `UPDATE (id)` on those six tables (platform #240
-  precedent) and refuses to do so unless the policy is present.
+  and `identity.organization_roles` (platform #240 precedent, which granted
+  `UPDATE (id)` on `hotel_catalog.properties` for the same reason). The audit
+  timestamp carries no authorization meaning; every other column stays
+  read-only for the login and a real `UPDATE` fails with SQLSTATE 42501.
+- Why not the lock-only RLS pattern (0413/0421/0422/0446): the hotel-setup
+  native preflights pin an md5 of every policy **and** trigger on exactly these
+  tables (`hotelSetupCreationPrivileges.ts`, `hotelSetupCurrencyPrivileges.ts`,
+  `hotelSetupLaunchSettingsPrivileges.ts`, `hotelSetupLogoPrivileges.ts`). A new
+  policy or trigger would stop the live creation, logo and profile purposes
+  until every pinned image is re-released, which is the protected-workflow
+  churn this decision ends. Adding the policy stays possible together with the
+  next hotel-setup digest re-pin.
 - `identity.product_entitlements` and `identity.organization_resource_links`
   keep the exact VAY-965 setup-track column matrix (`INSERT`/`UPDATE` on named
-  columns); any column `UPDATE` already permits the locks. No lock-only denial
-  is added there because `PUT /api/hotel-setup/tracks` really writes them.
+  columns); any column `UPDATE` already permits the locks.
 - No other identity `INSERT`/`UPDATE`/`DELETE` is granted. The inventory found
   three call sites reachable from `TARGET_DATABASE_URL` code whose columns
   exceed that matrix (`platform/marketplaceOfferIdentityAccess.ts`,
@@ -157,10 +161,10 @@ schemas:
   then requires `SELECT, INSERT, UPDATE, DELETE` on every non-protected
   relation in those schemas (`runtime_product_dml_missing`), the narrowings,
   the protected list and patterns (`runtime_protected_relation_write_forbidden`,
-  `*_read_forbidden`), the identity lock-only policy on the six tables
-  (`runtime_identity_lock_only_policy_missing`), no identity table-level writes
-  and no identity column writes outside the matrix, zero role memberships, and
-  all the existing posture checks.
+  `*_read_forbidden`), the `created_at` lock column on the six identity tables
+  (`runtime_identity_lock_column_missing`), no identity table-level writes and
+  no identity column writes outside the matrix plus that lock column, zero role
+  memberships, and all the existing posture checks.
 
 A partial state (some schemas) fails closed
 (`runtime_product_dml_posture_partial`). `--preflight-runtime-product-dml`
@@ -170,16 +174,15 @@ legacy branch.
 
 ## Transition plan (never breaks `tf-apply`)
 
-1. App: merge and deploy `0475` (lock-only policies). Harmless before the
-   grant: the policies only deny updates the role cannot make anyway.
-2. Platform: merge the preflight that accepts both postures, then the grant
-   mode, then the retirement of the per-incident modes. Every ordinary apply
-   keeps passing because production is still in the legacy posture.
+1. App: merge this architecture note (no migration is needed).
+2. Platform: merge the grant mode, then the preflight that accepts both
+   postures, then the retirement of the per-incident modes. Every ordinary
+   apply keeps passing because production is still in the legacy posture.
 3. Operator Mac, `--profile vayada`: run
    `scripts/run-target-database-runtime-preflight.sh --grant-runtime-product-dml`
-   (owner-checked ECS task, migration-owner secret only). It verifies the lock-only
-   policy, applies the grant set, revokes the protected list, re-verifies, and
-   commits or rolls back as a whole.
+   (owner-checked ECS task, migration-owner secret only). It applies the grant
+   set, revokes the protected list, re-verifies, and commits or rolls back as a
+   whole.
 4. Run `scripts/run-target-database-runtime-preflight.sh --preflight-runtime-product-dml`
    (must PASS) and watch `/ecs/vayada-next-api` for `permission denied`.
 5. Onboarding smoke: an original Owner saves "Present your hotel" through
@@ -187,9 +190,9 @@ legacy branch.
 6. Follow-up platform PR: drop the legacy branch from the preflight so the
    product posture is the only accepted state.
 
-Rollback is `--revoke-runtime-product-dml`: it revokes the schema-wide DML and
-default privileges and re-grants the legacy allowlist, returning to the posture
-the legacy preflight branch accepts. It does not touch the app migration.
+Rollback is `--revoke-runtime-product-dml`: it revokes the schema-wide DML,
+default privileges and the identity lock column, and re-grants the legacy
+allowlist, returning to the posture the legacy preflight branch accepts.
 
 ## Conventions for new tables
 
@@ -199,6 +202,6 @@ the legacy preflight branch accepts. It does not touch the app migration.
   preflight **and** its migration should `REVOKE ALL ... FROM vayada_next_api_runtime`
   so the preflight never sees it writable. Prefer the existing name prefixes so
   the pattern net catches it anyway.
-- A new identity table the API must lock gets the lock-only policy in its own
-  migration and `UPDATE (id)` through the grant mode; it never gets real
+- A new identity table the API must lock is added to the lock list in the grant
+  mode and the preflight (`UPDATE (created_at)` only); it never gets real
   identity writes through `TARGET_DATABASE_URL`.
