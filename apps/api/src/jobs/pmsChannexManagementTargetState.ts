@@ -129,23 +129,21 @@ async function requireChannexBindingClaim(
   mayCreate: boolean,
   now: Date,
 ) {
-  const result = mayCreate
-    ? await client.query<{ id: string }>(
-        `INSERT INTO pms.channel_binding_claims (
-           property_id, provider, external_property_id, claim_state, claim_source, updated_at
-         ) VALUES ($1::uuid, 'channex', $2, 'active', 'enable', $3::timestamptz)
-         ON CONFLICT (property_id, provider) DO UPDATE SET updated_at = EXCLUDED.updated_at
-           WHERE pms.channel_binding_claims.external_property_id = EXCLUDED.external_property_id
-             AND pms.channel_binding_claims.claim_state = 'active'
-         RETURNING id::text`,
-        [propertyId, externalPropertyId, now.toISOString()],
-      )
-    : await client.query<{ id: string }>(
-        `SELECT id::text FROM pms.channel_binding_claims
-         WHERE property_id = $1::uuid AND provider = 'channex'
-           AND external_property_id = $2 AND claim_state = 'active'`,
-        [propertyId, externalPropertyId],
-      );
+  // Insert only: the worker credential may create a claim but never edit one.
+  if (mayCreate)
+    await client.query(
+      `INSERT INTO pms.channel_binding_claims (
+         property_id, provider, external_property_id, claim_state, claim_source, updated_at
+       ) VALUES ($1::uuid, 'channex', $2, 'active', 'enable', $3::timestamptz)
+       ON CONFLICT (property_id, provider) DO NOTHING`,
+      [propertyId, externalPropertyId, now.toISOString()],
+    );
+  const result = await client.query<{ id: string }>(
+    `SELECT id::text FROM pms.channel_binding_claims
+     WHERE property_id = $1::uuid AND provider = 'channex'
+       AND external_property_id = $2 AND claim_state = 'active'`,
+    [propertyId, externalPropertyId],
+  );
   if (!result.rows[0]) throw new Error("Channex binding claim is not active");
 }
 

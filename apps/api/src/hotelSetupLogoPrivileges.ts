@@ -426,7 +426,7 @@ export async function assertHotelSetupLogoPrivileges(client: HotelSetupPrivilege
       ||COALESCE((SELECT pg_catalog.string_agg(CASE WHEN role=0 THEN 'PUBLIC' ELSE role::pg_catalog.regrole::text END,',' ORDER BY role::pg_catalog.regrole::text)
         FROM pg_catalog.unnest(p.polroles) roles(role)),'')
       ||COALESCE(pg_catalog.pg_get_expr(p.polqual,p.polrelid),'')||COALESCE(pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid),''),' ' ORDER BY c.oid::pg_catalog.regclass::text,p.polname))
-      FROM pg_catalog.pg_class c JOIN pg_catalog.pg_policy p ON p.polrelid=c.oid WHERE c.oid=ANY($2::pg_catalog.regclass[]))='7b295d5a3753af419bbc2c44fc231cb9'
+      FROM pg_catalog.pg_class c JOIN pg_catalog.pg_policy p ON p.polrelid=c.oid WHERE c.oid=ANY($2::pg_catalog.regclass[]))='748f1ad3de01782186ef887d3d0ab6dd'
     AND (SELECT pg_catalog.md5(pg_catalog.string_agg(c.oid::pg_catalog.regclass::text||pg_catalog.pg_get_triggerdef(t.oid)||pg_catalog.pg_get_functiondef(t.tgfoid)||t.tgenabled::text,'' ORDER BY c.oid::pg_catalog.regclass::text,t.tgname))
       FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid WHERE NOT t.tgisinternal AND c.oid=ANY($2::pg_catalog.regclass[]))='92be49d00e103495b69ca7bd12c8cbd0'
     AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class c WHERE c.oid=ANY($2::pg_catalog.regclass[]) AND c.relowner<>(SELECT relowner FROM pg_catalog.pg_class WHERE oid='platform.hotel_setup_property_scopes'::pg_catalog.regclass))

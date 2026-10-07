@@ -42,62 +42,29 @@ it("rejects an invalid manual source before transaction collaborators run", asyn
   expect(unexpected).not.toHaveBeenCalled();
 });
 
-it("loads create pricing evidence through the caller transaction", async () => {
+it("reads the pricing publication through the caller transaction without row locks", async () => {
   const query = vi.fn(async (sql: string) => {
-    if (sql.startsWith("WITH pricing_currency"))
-      return {
-        rows: [
-          {
-            pricingCurrency: {
-              propertyId,
-              currency: "EUR",
-              pricingCurrencyRevision: 1,
-              createdAt: new Date("2026-08-14T00:00:00Z"),
-              updatedAt: new Date("2026-08-14T00:00:00Z"),
-            },
-            flexibleRatePlans: [],
-          },
-        ],
-        rowCount: 1,
-      };
-    if (sql.includes("FROM pms.property_pricing_settings"))
-      return {
-        rows: [
-          {
-            propertyId,
-            currency: "EUR",
-            pricingCurrencyRevision: 1,
-            createdAt: new Date("2026-08-14T00:00:00Z"),
-            updatedAt: new Date("2026-08-14T00:00:00Z"),
-          },
-        ],
-        rowCount: 1,
-      };
-    if (sql.includes("FROM pms.rate_plans") || sql.includes("FROM pms.room_types room"))
-      return { rows: [], rowCount: 0 };
-    if (sql.includes("pms_room_publication_scope"))
-      return { rows: [{ authorized: true }], rowCount: 1 };
-    throw new Error(`unexpected query: ${sql}`);
-  });
-  const current = createPmsManualBookingCurrentPricingEvidence({
-    amenityVocabulary: { validateRoomAmenities: vi.fn() },
-    mediaResolver: { resolvePublicMedia: vi.fn() },
-    now: () => new Date("2026-08-14T00:00:00Z"),
+    expect(sql).not.toMatch(/^\s*(BEGIN|COMMIT|ROLLBACK)/);
+    return { rows: [], rowCount: 0 };
   });
   const transaction = { query } as unknown as PmsManualBookingTransaction;
+  const evidence = createPmsManualBookingCurrentPricingEvidence();
+  // No pricing head: no publication, so offer stays answer pricing_not_published.
   await expect(
-    current.getPricingSourceSnapshot({ transaction, propertyId }),
-  ).resolves.toMatchObject({ propertyId, pricingCurrency: { currency: "EUR" } });
+    evidence.readCurrentPricingPublication({
+      transaction,
+      propertyId,
+      organizationId: "81000000-0000-4000-8000-000000000002",
+    }),
+  ).resolves.toBeNull();
   await expect(
-    current.getRoomPublicationSnapshot({ transaction, propertyId, organizationId: propertyId }),
-  ).resolves.toMatchObject({ propertyId, status: "blocked", rooms: [] });
-  expect(query).toHaveBeenCalledTimes(8);
-  expect(
-    query.mock.calls.filter(
-      ([sql]) =>
-        sql.includes("FROM pms.property_pricing_settings") && sql.includes("FROM pms.rate_plans"),
-    ),
-  ).toHaveLength(1);
+    evidence.readPropertyPricingCurrency({ transaction, propertyId }),
+  ).resolves.toBeNull();
+  const statements = query.mock.calls.map(([sql]) => sql);
+  expect(statements.some((sql) => sql.includes("pms.pricing_v2_heads"))).toBe(true);
+  expect(statements.some((sql) => sql.includes("pms.property_pricing_settings"))).toBe(true);
+  // Front-desk pricing neither waits on nor blocks booking-engine authority or owner sources.
+  expect(statements.some((sql) => /FOR (SHARE|UPDATE)|pricing_authority/.test(sql))).toBe(false);
 });
 
 it("composes the exact production owners only when both PMS runtimes are ready", () => {
@@ -189,7 +156,8 @@ it("rolls back the booking transaction when create optimization fails", async ()
       pricing: {
         calculate: vi.fn(async () => ({
           contractVersion: "pms-manual-booking.v1" as const,
-          currency: "EUR" as never,
+          currency: "EUR",
+          pricingRevision: null,
           stays: [],
           addOns: [],
           grandTotal: { amountDecimal: "100.00", currency: "EUR" },

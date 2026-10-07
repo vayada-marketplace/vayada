@@ -2,7 +2,6 @@ import { createTargetPmsOperationsCommandRepository } from "./domains/pmsOperati
 import { describe, expect, it, vi } from "vitest";
 import { createPgPmsRecurringPricingCommandRepository } from "./domains/pmsRecurringPricingCommandRepository.js";
 import { createPgChannelDatePrices } from "./domains/pmsChannelDatePrices.js";
-import { calculateManualBookingPreview } from "./routes/pmsManualBookingPreviewCalculation.js";
 import {
   createTargetCheckoutQuote,
   loadTargetCheckoutOffer,
@@ -13,7 +12,7 @@ import { quoteTargetRoomSelection } from "./routes/bookingWebMixedQuote.js";
 
 const unavailable = { code: "PRICING_UNAVAILABLE", statusCode: 503 };
 describe("pricing reset", () => {
-  it("rejects every old recurring write without opening a database connection", async () => {
+  it("retires every old recurring write without opening a database connection", async () => {
     const pool = { connect: vi.fn(), end: vi.fn() };
     const port = createPgPmsRecurringPricingCommandRepository({ connectionString: "unused", pool });
     for (const method of [
@@ -24,7 +23,10 @@ describe("pricing reset", () => {
       port.disableRecurringPricingSource,
       port.materializeRecurringPricing,
     ]) {
-      await expect(method(undefined as never)).rejects.toMatchObject(unavailable);
+      await expect(method(undefined as never)).rejects.toMatchObject({
+        code: "PRICING_RETIRED",
+        statusCode: 503,
+      });
     }
     await port.close();
     expect(pool.connect).not.toHaveBeenCalled();
@@ -38,7 +40,7 @@ describe("pricing reset", () => {
     );
     await port.close();
   });
-  it("does not quote old offers, calendars, manual stays or mixed room selections", async () => {
+  it("does not quote old offers, calendars or mixed room selections", async () => {
     const query = vi.fn();
     const pool = { query, end: vi.fn() };
     const calendar = createTargetBookingWebCalendarRepository({ connectionString: "unused", pool });
@@ -60,9 +62,6 @@ describe("pricing reset", () => {
     await expect(quoteTargetRoomSelection(pool, undefined as never)).rejects.toMatchObject(
       unavailable,
     );
-    await expect(
-      calculateManualBookingPreview(undefined as never, undefined as never, undefined as never),
-    ).rejects.toMatchObject(unavailable);
     expect(query).not.toHaveBeenCalled();
     await calendar.close?.();
     await quotes.close?.();

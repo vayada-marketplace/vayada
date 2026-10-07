@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { sharedSetupClient } from "@/services/api/sharedHotelSetupClient";
 
-import { prepareAirbnbHotel, AirbnbPreparationError } from "./prepareAirbnbHotel";
+import { describeAirbnbStartError, prepareAirbnbHotel } from "./prepareAirbnbHotel";
 
 export function AirbnbImportStart({ propertyId }: { propertyId: string }) {
   const busy = useRef(false);
@@ -63,15 +63,7 @@ export function AirbnbImportStart({ propertyId }: { propertyId: string }) {
     } catch (cause) {
       if (signal.aborted) return;
       setPreparing(false);
-      const status =
-        typeof cause === "object" && cause !== null && "status" in cause ? cause.status : undefined;
-      setError(
-        cause instanceof AirbnbPreparationError
-          ? cause.message
-          : status === 409
-            ? "Airbnb import is not ready for this hotel yet. You can continue setting up rooms manually."
-            : "We couldn’t start the Airbnb connection. Please try again or continue setting up rooms manually.",
-      );
+      setError(describeAirbnbStartError(cause));
       busy.current = false;
       setConnecting(false);
     }

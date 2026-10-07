@@ -37,7 +37,14 @@ const stayInput = z.strictObject({
   checkOut: z.string(),
   adults: z.number().int(),
   children: z.number().int(),
-  ratePlanId: id.nullable(),
+  // Published pricing-v2 offer id: free text, kept exactly as published (no case folding).
+  ratePlanId: z
+    .string()
+    .min(1)
+    .max(200)
+    .refine((value) => value === value.trim())
+    .nullable(),
+  childAgesAtCheckIn: z.array(z.number().int().min(0).max(17)).max(20).optional(),
   pricing: z.discriminatedUnion("kind", [
     z.strictObject({ kind: z.literal("rate_plan"), manualOverride: moneyInput.nullable() }),
     z.strictObject({ kind: z.literal("custom"), nightlyAmount: moneyInput }),
@@ -73,8 +80,6 @@ export async function registerPmsManualBookingPreviewRoutes(
           addOns,
         });
       } catch (error) {
-        if (error instanceof Error && "code" in error && error.code === "PRICING_UNAVAILABLE")
-          return reply.status(503).send({ code: "PRICING_UNAVAILABLE", message: error.message });
         if (error instanceof UnauthorizedError)
           return reply.status(401).send({ code: "unauthenticated" });
         if (error instanceof AuthorizationError)
@@ -97,8 +102,6 @@ export async function registerPmsManualBookingPreviewRoutes(
           ),
         );
       } catch (error) {
-        if (error instanceof Error && "code" in error && error.code === "PRICING_UNAVAILABLE")
-          return reply.status(503).send({ code: "PRICING_UNAVAILABLE", message: error.message });
         if (error instanceof UnauthorizedError)
           return reply
             .status(401)
@@ -137,12 +140,17 @@ export function parseManualBookingPreviewCommand(value: unknown): ManualBookingP
     .map((stay): ManualBookingPreviewCommand["stays"][number] => {
       if (stay.adults < 1 || stay.children < 0)
         fail(422, "occupancy_exceeded", "stays", stay.position);
+      if (stay.childAgesAtCheckIn && stay.childAgesAtCheckIn.length !== stay.children)
+        fail(422, "child_ages_required", "childAgesAtCheckIn", stay.position);
+      // An empty age list means the same as none, so both replay with one fingerprint.
+      const { childAgesAtCheckIn, ...rest } = stay;
+      const base = childAgesAtCheckIn?.length ? { ...rest, childAgesAtCheckIn } : rest;
       if (stay.pricing.kind === "custom") {
         if (stay.ratePlanId !== null) invalid();
-        return { ...stay, ratePlanId: null, pricing: stay.pricing };
+        return { ...base, ratePlanId: null, pricing: stay.pricing };
       }
       if (stay.ratePlanId === null) invalid();
-      return { ...stay, ratePlanId: stay.ratePlanId, pricing: stay.pricing };
+      return { ...base, ratePlanId: stay.ratePlanId, pricing: stay.pricing };
     })
     .sort((a, b) => a.position - b.position);
   if (stays.some((stay, index) => stay.position !== index + 1)) invalid();
