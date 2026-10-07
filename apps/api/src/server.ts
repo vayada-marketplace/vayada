@@ -180,6 +180,7 @@ import {
 } from "./domains/pmsPricingCurrencyCapabilities.js";
 import { createPgPmsManualBookingCommandRepository } from "./domains/pmsManualBookingCommandRepository.js";
 import { createPmsManualBookingProductionCommandConfig } from "./domains/pmsManualBookingProductionRuntime.js";
+import { createManualBookingPricingPublicationReader } from "./domains/pmsManualBookingTransactionalPricing.js";
 import { createPmsRoomAssignmentOptimizationTriggerPort } from "./domains/pmsRoomAssignmentOptimizationTriggers.js";
 import { createPgPmsRoomAssignmentSettingsPort } from "./domains/pmsRoomAssignmentSettings.js";
 import { createPgPmsRoomAssignmentOptimizationHistoryPort } from "./domains/pmsRoomAssignmentOptimizationHistory.js";
@@ -1781,20 +1782,10 @@ const app = buildApp({
     pmsOperationsRepository && pmsRoomPublicationRuntime
       ? {
           pms: pmsOperationsRepository,
-          pricing: {
-            getPricingSourceSnapshot: (propertyId) =>
-              pmsPricingReadModel.getPricingSourceSnapshot(propertyId),
-            getRecurringPricingBookingEvidence: (propertyId) =>
-              propertySetupPmsRuntime.recurringPricing.getRecurringPricingBookingEvidence(
-                propertyId,
-              ),
-          },
-          roomPublication: pmsRoomPublicationRuntime.readModel,
+          publication: createManualBookingPricingPublicationReader(propertySetupOwnerPool),
           booking: {
             listAddonItemsByHotelId: (propertyId) =>
               bookingAddonItemsRepository.listAddonItemsByHotelId(propertyId),
-            getCurrentGuestPolicy: (scope) =>
-              bookingGuestPolicyRepository.getCurrentGuestPolicy(scope),
           },
         }
       : undefined,
