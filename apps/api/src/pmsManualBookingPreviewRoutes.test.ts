@@ -1,5 +1,5 @@
 import type { RequestContext } from "@vayada/backend-auth";
-import { createBookingPricingSourceFingerprint } from "@vayada/domain-booking";
+import type { PricingConfiguration } from "@vayada/domain-pms";
 import Fastify from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -12,29 +12,21 @@ const id = (value: number) => `71000000-0000-4000-8000-${String(value).padStart(
 const propertyId = id(1),
   organizationId = id(2),
   roomTypeId = id(3),
-  planId = id(4),
-  seasonId = id(5),
-  weekendId = id(6),
-  extraId = id(7),
-  otherRoomTypeId = id(8),
-  legacyPlanId = id(9),
+  termsRevision = id(4),
   roomIds = [id(10), id(11), id(12)],
   addonIds = [id(20), id(21), id(22), id(23)],
   now = "2026-08-12T12:00:00.000Z";
 type State = {
   reads: string[];
   unavailable?: boolean;
-  capacityUnavailable?: boolean;
-  inactivePlan?: boolean;
   addonCurrency?: string;
-  missingProperty?: boolean;
-  missingPricingPlan?: boolean;
-  stalePlan?: boolean;
-  staleAdditionalBinding?: boolean;
-  missingSeasonBinding?: boolean;
-  unboundedOccupancy?: boolean;
-  childCountPolicy?: "adult_only" | "all";
-  stalePolicy?: boolean;
+  unpublished?: boolean;
+  minStay?: number;
+  /** Publication currency and Flexible occupancy amounts in that currency's minor units. */
+  currency?: string;
+  amountsMinor?: string[];
+  propertyCurrency?: string | null;
+  roomTypeCurrency?: string | null;
 };
 type Auth = Partial<Record<"token" | "permission" | "entitlement" | "link", boolean>> & {
   organizationKind?: "hotel_group" | "creator_workspace";
@@ -81,7 +73,7 @@ describe("target manual-booking preview", () => {
       "unknown_field",
     );
     for (const mutate of [
-      (body: any) => (body.stays[1].ratePlanId = planId),
+      (body: any) => (body.stays[1].ratePlanId = "flex"),
       (body: any) => (body.stays[0].ratePlanId = null),
     ]) {
       const body = command();
@@ -92,20 +84,136 @@ describe("target manual-booking preview", () => {
 
   // prettier-ignore
   const errors: [number, string, (body: any) => void, Partial<State>][] = [
-    [404, "rate_not_found", () => undefined, { missingProperty: true }],
-    [404, "rate_not_found", () => undefined, { missingPricingPlan: true }],
     [409, "room_unavailable", () => undefined, { unavailable: true }],
     [404, "room_not_found", (body) => (body.stays[0].roomId = propertyId), {}],
     [422, "invalid_dates", (body) => (body.stays[0].checkOut = "2027-06-29"), {}],
     [422, "occupancy_exceeded", (body) => (body.stays[0].adults = 5), {}],
     [422, "occupancy_exceeded", (body) => (body.stays[0].adults = 0), {}],
-    [404, "rate_plan_not_found", (body) => (body.stays[0].ratePlanId = propertyId), {}],
-    [404, "rate_plan_not_found", (body) => (body.stays[0].ratePlanId = legacyPlanId), {}],
-    [422, "inactive_rate_plan", () => undefined, { inactivePlan: true }],
+    [422, "occupancy_exceeded", (body) => (body.stays[0].adults = 4), {}],
+    [404, "rate_plan_not_found", (body) => (body.stays[0].ratePlanId = "unknown-offer"), {}],
+    [409, "pricing_not_published", () => undefined, { unpublished: true }],
+    [422, "child_ages_required", (body) => (body.stays[0].children = 1), {}],
+    [422, "rate_restricted", () => undefined, { minStay: 3 }],
     [422, "currency_mismatch", () => undefined, { addonCurrency: "USD" }],
     [404, "addon_not_found", (body) => (body.addOns[0].addonId = propertyId), {}],
     [422, "invalid_addon_selection", (body) => (body.addOns[0].packageCount = 0), {}],
   ];
+  it.each(errors)("returns %s %s", async (status, code, mutate, state) => {
+    app = await testApp({ reads: [], ...state });
+    const body = command();
+    mutate(body);
+    const response = await request(app, body);
+    expect([response.statusCode, response.json().code]).toEqual([status, code]);
+  });
+
+  it("prices published offers per night, keeps overrides and custom rates, and adds add-ons", async () => {
+    app = await testApp({ reads: [] });
+    const response = await request(app, command());
+    expect(response.statusCode).toBe(200);
+    const preview = response.json();
+    expect(preview).toMatchObject({
+      currency: "EUR",
+      pricingRevision: 7,
+      grandTotal: { amountDecimal: "649.00" },
+    });
+    // Flexible, one adult: the published occupancy price of 100.00 a night.
+    expect(preview.stays[0]).toMatchObject({
+      ratePlanId: "flex",
+      standardTotal: { amountDecimal: "200.00" },
+      appliedTotal: { amountDecimal: "200.00" },
+    });
+    expect(preview.stays[0].nightly[0]).toEqual({
+      serviceDate: "2027-06-30",
+      standard: { amountDecimal: "100.00", currency: "EUR" },
+      applied: { amountDecimal: "100.00", currency: "EUR" },
+    });
+    // Custom rate: no standard price.
+    expect(preview.stays[1]).toMatchObject({
+      ratePlanId: null,
+      standardTotal: null,
+      appliedTotal: { amountDecimal: "160.00" },
+    });
+    // Non-refundable is 10% below Flexible for three adults (155.00 → 139.50); the override applies.
+    expect(preview.stays[2]).toMatchObject({
+      ratePlanId: "nr",
+      standardTotal: { amountDecimal: "279.00" },
+      appliedTotal: { amountDecimal: "180.00" },
+    });
+    expect(preview.addOns.map((addon: any) => addon.total.amountDecimal)).toEqual([
+      "20.00",
+      "25.00",
+      "16.00",
+      "48.00",
+    ]);
+  });
+
+  it("prices children by age band", async () => {
+    app = await testApp({ reads: [] });
+    const body = command();
+    body.stays = [{ ...body.stays[0], children: 1, childAgesAtCheckIn: [5] }];
+    body.addOns = [];
+    const priced = (await request(app, body)).json();
+    expect(priced.stays[0].nightly[0].standard.amountDecimal).toBe("120.00");
+  });
+
+  // prettier-ignore
+  const scales: [string, string, number, string | undefined][] = [
+    ["JPY", "8000", 200, "8000.00"],
+    ["KWD", "25500", 200, "25.50"],
+    ["KWD", "25505", 422, undefined],
+  ];
+  it.each(scales)(
+    "stores %s %s minor units as PMS money (%s)",
+    async (currency, amount, status, decimal) => {
+      app = await testApp({ reads: [], currency, amountsMinor: [amount, amount, amount] });
+      const body = command();
+      body.stays = [body.stays[0]];
+      body.addOns = [];
+      const response = await request(app, body);
+      expect(response.statusCode).toBe(status);
+      if (decimal)
+        expect(response.json().stays[0].nightly[0].standard).toEqual({
+          amountDecimal: decimal,
+          currency,
+        });
+      else expect(response.json().code).toBe("currency_mismatch");
+    },
+  );
+
+  it("prices custom-only stays in the property currency without a publication", async () => {
+    const custom = command();
+    custom.stays = [{ ...custom.stays[1], position: 1 }];
+    custom.addOns = [];
+    // With a publication, custom stays use its currency but cite no revision.
+    app = await testApp({ reads: [] });
+    const published = await request(app, custom);
+    expect([published.statusCode, published.json().pricingRevision]).toEqual([200, null]);
+    await app.close();
+
+    // Room types from the room-facts flow carry no rate or currency.
+    const state: State = { reads: [], unpublished: true, roomTypeCurrency: null };
+    app = await testApp(state);
+    const response = await request(app, custom);
+    expect([
+      response.statusCode,
+      response.json().currency,
+      response.json().pricingRevision,
+    ]).toEqual([200, "EUR", null]);
+    expect(state.reads).toContain("currency");
+
+    await app.close();
+    app = await testApp({
+      reads: [],
+      unpublished: true,
+      roomTypeCurrency: null,
+      propertyCurrency: null,
+    });
+    const unconfigured = await request(app, custom);
+    expect([unconfigured.statusCode, unconfigured.json().code]).toEqual([
+      409,
+      "pricing_not_published",
+    ]);
+  });
 });
 
 async function testApp(state: State, auth: Auth = {}) {
@@ -152,65 +260,91 @@ async function testApp(state: State, auth: Auth = {}) {
 }
 
 function ports(state: State): PmsManualBookingPreviewRoutesOptions {
-  const read = (name: string) => state.reads.push(name),
-    evidence = ownerEvidence(state),
-    fingerprint = createBookingPricingSourceFingerprint({ organizationId, propertyId }, evidence),
-    extra = evidence.recurringPricing.sources.find(
-      (source: any) => source.sourceKind === "additional_guest",
-    ) as any;
+  const read = (name: string) => state.reads.push(name);
   // prettier-ignore
-  const ports: PmsManualBookingPreviewRoutesOptions = {
+  return {
     pms: {
       async listRoomsByPropertyId() { read("rooms"); return { items: roomIds.map((roomId) => ({ roomId, roomTypeId })) } as any; },
-      async listRoomTypesByPropertyId() { read("types"); return { items: [{ roomTypeId, active: true, occupancyLimits: state.unboundedOccupancy ? { total: 4 } : { adults: 4, children: 4, total: 4 }, ratePlans: [{ ratePlanId: legacyPlanId, pricingContractVersion: null, active: true }, { ratePlanId: planId, pricingContractVersion: "pms-pricing.v1", active: !state.inactivePlan }] }] } as any; },
-      async getPhysicalRoomAvailability(_propertyId, stays) { read("available"); return stays.map((_, index) => state.unavailable || (state.capacityUnavailable && index === 1) ? false : true); },
+      async listRoomTypesByPropertyId() { read("types"); return { items: [{ roomTypeId, active: true, occupancyLimits: { adults: 4, children: 4, total: 4 }, baseRate: { amountDecimal: state.roomTypeCurrency === null ? null : "0", currency: state.roomTypeCurrency === undefined ? "EUR" : state.roomTypeCurrency } }] } as any; },
+      async getPhysicalRoomAvailability(_propertyId, stays) { read("available"); return stays.map(() => !state.unavailable); },
     },
-    pricing: {
-      async getPricingSourceSnapshot() { read("pricing"); return state.missingProperty ? null : evidence.pricing; },
-      async getRecurringPricingBookingEvidence() { read("recurring"); return evidence.recurringPricing; },
+    publication: {
+      async readCurrentPricingPublication() {
+        read("publication");
+        if (state.unpublished) return null;
+        return { revision: 7, currency: state.currency ?? "EUR", rooms: [configuration(state)], terms: [
+          { roomTypeId, offerId: "flex", revision: termsRevision, cancellation: { kind: "non_refundable" }, payment: { kind: "full" } },
+          { roomTypeId, offerId: "nr", revision: termsRevision, cancellation: { kind: "non_refundable" }, payment: { kind: "full" } },
+        ] } as any;
+      },
+      async readPropertyPricingCurrency() {
+        read("currency");
+        return state.propertyCurrency === undefined ? "EUR" : state.propertyCurrency;
+      },
     },
-    roomPublication: { async getRoomPublicationSnapshot() { read("publication"); return evidence.roomPublication; } },
     booking: {
       async listAddonItemsByHotelId() { read("addons"); return { addonItems: addonIds.map((addonItemId, index) => ({ addonItemId, propertyId, name: `Add-on ${index + 1}`, description: "", category: "dining", price: ["10.00", "5.00", "4.00", "2.00"][index], currency: state.addonCurrency ?? "EUR", pricingModel: ["per_stay", "per_guest", "per_night", "per_guest_night"][index], status: "active" })), propertyPlan: {} } as any; },
-      async getCurrentGuestPolicy() { read("policy"); if (!state.childCountPolicy) return null; return { organizationId, propertyId, bundle: { pricingSourceFingerprint: state.stalePolicy ? "stale" : fingerprint, rates: [{ roomTypeId, flexible: { source: { entityId: planId } }, additionalGuest: { source: { source: { entityId: extra.sourceId } }, countedGuestTypes: state.childCountPolicy === "adult_only" ? ["adult"] : ["adult", "child"] } }] } } as any; },
     },
   };
-  return ports;
 }
 
-function ownerEvidence(state: State): any {
-  const planRevision = state.stalePlan ? 4 : 3,
-    binding = {
-      roomTypeId,
-      roomFactsRevision: 4,
-      flexibleRatePlanId: planId,
-      flexibleRatePlanRevision: state.stalePlan ? 3 : planRevision,
-    },
-    source = (sourceId: string) => ({
-      contractVersion: "pms-recurring-pricing.v1",
-      propertyId,
-      sourceId,
-      sourceRevision: 3,
-      pricingCurrencyRevision: 2,
-      currency: "EUR",
-      configuredState: "active",
-      validation: { state: "valid", validationRevision: 2, validatedAt: now },
-      lifecycle: "active",
-      materializationRevision: 1,
-      createdAt: now,
-      updatedAt: now,
-    });
-  // prettier-ignore
-  const evidence = {
-    roomPublication: { contractVersion: "pms-room-publication.v1", propertyId, status: "ready", rooms: [{ propertyId, roomTypeId, facts: { name: "Suite", description: "Complete", category: null, occupancy: { maxGuests: 4, maxAdults: 4, maxChildren: 4 }, beds: [], bedrooms: null, bathrooms: null, bathroomType: "private", size: null }, activeUnitCount: 3, media: [], amenities: [], sourceRevisions: { roomFactsRevision: 4, roomUnitsRevision: 1, roomMediaRevision: 1, roomAmenitiesRevision: 1 }, sourceRevision: "room:4" }], blockers: [], sourceRevision: "rooms:4" },
-    pricing: { contractVersion: "pms-pricing.v1", propertyId, pricingCurrency: { contractVersion: "pms-pricing.v1", propertyId, currency: "EUR", pricingCurrencyRevision: 2, createdAt: now, updatedAt: now }, flexibleRatePlans: state.missingPricingPlan ? [] : [{ contractVersion: "pms-pricing.v1", propertyId, roomTypeId, flexibleRatePlanId: planId, flexibleRatePlanRevision: planRevision, sourceRoomFactsRevision: 4, baseAmount: { amountDecimal: "100.00", currency: "EUR" }, cancellationTerms: { type: "free_until_days_before_arrival", freeCancellationDeadlineDays: 7, afterDeadlinePenalty: "full_booking_amount", noShowPenalty: "full_booking_amount" }, createdAt: now, updatedAt: now }], capturedAt: now },
-    recurringPricing: { contractVersion: "pms-recurring-pricing.v1", propertyId, pricingCurrencyRevision: 2, optionalPricingAggregateRevision: 5, currency: "EUR", sources: [
-      { ...source(seasonId), sourceKind: "season", name: "Summer", startMonthDay: "07-01", endMonthDay: "08-31", roomPrices: [{ ...(state.missingSeasonBinding ? { ...binding, roomTypeId: otherRoomTypeId } : binding), amountDecimal: "150.00" }] },
-      { ...source(weekendId), sourceKind: "weekend_surcharge", weekdays: ["friday", "saturday"], roomSurcharges: [{ ...binding, amountDecimal: "10.00" }] },
-      { ...source(extraId), sourceKind: "additional_guest", ...binding, ...(state.staleAdditionalBinding ? { roomFactsRevision: 3 } : {}), maximumAdultGuests: 4, includedGuests: 1, amountDecimal: "5.00" },
-    ], capturedAt: now },
+function configuration(state: State): PricingConfiguration {
+  const rules = {
+    minArrivalNights: state.minStay ?? 1,
+    maxStayNights: null,
+    closedToArrival: false,
+    closedToDeparture: false,
+    stopSell: false,
   };
-  return evidence;
+  const meal = { kind: "room_only" as const, charge: { kind: "room" as const, amountMinor: "0" } };
+  return {
+    version: "pricing.v2",
+    propertyId,
+    roomTypeId,
+    revision: 7,
+    currency: state.currency ?? "EUR",
+    capacity: { total: 4, adults: 3, children: 2 },
+    children: {
+      adultFromAge: 12,
+      bands: [
+        { fromAge: 0, throughAge: 2, nightlyMinor: "0", countsTowardCapacity: false },
+        { fromAge: 3, throughAge: 11, nightlyMinor: "2000", countsTowardCapacity: true },
+      ],
+    },
+    offers: [
+      {
+        id: "flex",
+        termsRevision,
+        meal,
+        price: {
+          kind: "independent",
+          calendar: {
+            base: {
+              mode: "occupancy",
+              amountsMinor: state.amountsMinor ?? ["10000", "13000", "15500"],
+            },
+            months: [],
+            seasons: [],
+            weekdays: [],
+            dates: [],
+          },
+        },
+        restrictions: { kind: "own", rules, seasons: [], dates: [] },
+      },
+      {
+        id: "nr",
+        termsRevision,
+        meal,
+        price: {
+          kind: "linked",
+          parentId: "flex",
+          adjustment: { kind: "percentage", basisPoints: -1000 },
+          dateOverrides: [],
+        },
+        restrictions: { kind: "inherit" },
+      },
+    ],
+  };
 }
 
 function command(): any {
@@ -221,16 +355,16 @@ function command(): any {
     checkOut: string,
     adults: number,
     pricing: any,
-    ratePlanId: string | null = planId,
+    ratePlanId: string | null,
   ) => ({ position, roomId, checkIn, checkOut, adults, children: 0, ratePlanId, pricing });
   const dates = ["2027-06-30", "2027-07-01", "2027-07-02", "2027-07-03"];
   // prettier-ignore
   const body = {
     contractVersion: "pms-manual-booking.v1",
     stays: [
-      stay(1, roomIds[0]!, "2027-06-30", "2027-07-02", 1, { kind: "rate_plan", manualOverride: null }),
+      stay(1, roomIds[0]!, "2027-06-30", "2027-07-02", 1, { kind: "rate_plan", manualOverride: null }, "flex"),
       stay(2, roomIds[1]!, "2027-07-01", "2027-07-03", 2, { kind: "custom", nightlyAmount: { amountDecimal: "80", currency: "EUR" } }, null),
-      stay(3, roomIds[2]!, "2027-07-02", "2027-07-04", 3, { kind: "rate_plan", manualOverride: { amountDecimal: "90", currency: "EUR" } }),
+      stay(3, roomIds[2]!, "2027-07-02", "2027-07-04", 3, { kind: "rate_plan", manualOverride: { amountDecimal: "90", currency: "EUR" } }, "nr"),
     ],
     addOns: [
       { addonId: addonIds[0], packageCount: 2, serviceUnits: [{ serviceDate: null, guestCount: null }] },

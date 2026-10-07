@@ -791,6 +791,39 @@ describe("roomsService.update", () => {
     });
   });
 
+  it("ignores published pricing-v2 offers when showing the legacy room rates", async () => {
+    mocks.get.mockImplementation(async (endpoint: string) =>
+      endpoint.endsWith("/pricing-source")
+        ? {
+            pricingCurrency: { currency: "EUR", pricingCurrencyRevision: 4 },
+            flexibleRatePlans: [],
+          }
+        : {
+            propertyId: "pms-property-1",
+            item: pmsRoomTypeItem({
+              baseRate: { amountDecimal: "180.00", currency: "EUR" },
+              // A linked Non-refundable offer has no base of its own (0 in the payload).
+              ratePlans: [
+                {
+                  ratePlanId: "nr-offer",
+                  pricingContractVersion: "pricing.v2",
+                  code: "nr-offer",
+                  name: "Non-refundable",
+                  rateType: "non_refundable",
+                  mealPlan: "room_only",
+                  baseRate: { amountDecimal: "0", currency: "EUR" },
+                  cancellationPolicySnapshot: { kind: "non_refundable" },
+                  active: true,
+                },
+              ],
+            }),
+          },
+    );
+
+    const roomType = await roomsService.get("room-type-1");
+    expect(roomType).toMatchObject({ nonRefundableEnabled: false, nonRefundableDiscount: 5 });
+  });
+
   it("uses the property currency when a room has no canonical plan yet", async () => {
     mocks.get.mockImplementation(async (endpoint: string) =>
       endpoint.endsWith("/pricing-source")

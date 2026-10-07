@@ -11,6 +11,7 @@ import {
   HIDDEN_GUEST_CONTACT,
 } from "./bookingGuestContactAccess.js";
 import { readPropertyPlan } from "./propertyPlanReadModel.js";
+import { readPublishedRatePlans, type PublishedRatePlan } from "./pmsPricingReadModel.js";
 
 export type PmsDecimalAmount = string;
 export type PmsCurrencyCode = string;
@@ -1277,9 +1278,42 @@ async function listRoomTypes(
     params,
   );
 
+  // Published pricing-v2 offers join the legacy plans as "pricing.v2" entries (slice A.2).
+  const published = await readPublishedRatePlans(pool, propertyId);
   return {
-    items: result.rows.map(toPmsRoomType),
+    items: result.rows.map((row) => {
+      const roomType = toPmsRoomType(row);
+      return {
+        ...roomType,
+        ratePlans: [
+          ...roomType.ratePlans,
+          ...published
+            .filter((plan) => plan.roomTypeId === roomType.roomTypeId)
+            .map(toPublishedRatePlan),
+        ],
+      };
+    }),
     sourceFreshness: {},
+  };
+}
+
+function toPublishedRatePlan(plan: PublishedRatePlan): PmsRatePlan {
+  return {
+    ratePlanId: plan.ratePlanId,
+    pricingContractVersion: "pricing.v2",
+    code: plan.ratePlanId,
+    // Several offers can share a cancellation type; the meal tells them apart in pickers.
+    name: `${plan.rateType === "non_refundable" ? "Non-refundable" : "Flexible"}${
+      plan.mealPlan && plan.mealPlan !== "room_only"
+        ? ` · ${plan.mealPlan.replaceAll("_", " ")}`
+        : ""
+    }`,
+    rateType: plan.rateType,
+    mealPlan: plan.mealPlan,
+    // Linked offers have no own base; their nightly price comes from the preview.
+    baseRate: plan.baseAmount ?? { amountDecimal: "0", currency: plan.currency },
+    cancellationPolicySnapshot: toJsonRecord(plan.cancellation),
+    active: true,
   };
 }
 

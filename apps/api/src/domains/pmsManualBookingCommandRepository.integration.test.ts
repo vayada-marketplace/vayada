@@ -2176,6 +2176,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
         return {
           contractVersion: input.contractVersion,
           currency: "EUR",
+          pricingRevision: null,
           stays,
           addOns,
           grandTotal: {

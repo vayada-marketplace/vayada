@@ -287,10 +287,8 @@ describe.skipIf(!url)("room closure eligibility PostgreSQL", () => {
           roomTypeId,
         ]);
       const original = (await savedPlan()).rows;
-      await expect(pricing.getFlexibleRatePlan(propertyId, roomTypeId)).rejects.toMatchObject({
-        statusCode: 503,
-        code: "PRICING_UNAVAILABLE",
-      });
+      // Flexible plans come from the pricing-v2 publication (VAY-1422 A.2); this property has none.
+      await expect(pricing.getFlexibleRatePlan(propertyId, roomTypeId)).resolves.toBeNull();
       await close(db);
       expect(
         (await pricing.getPricingSourceSnapshot(propertyId))?.flexibleRatePlans.map(
@@ -298,10 +296,7 @@ describe.skipIf(!url)("room closure eligibility PostgreSQL", () => {
         ),
       ).toEqual([otherRoom]);
       expect((await savedPlan()).rows).toEqual(original);
-      await expect(pricing.getFlexibleRatePlan(propertyId, roomTypeId)).rejects.toMatchObject({
-        statusCode: 503,
-        code: "PRICING_UNAVAILABLE",
-      });
+      await expect(pricing.getFlexibleRatePlan(propertyId, roomTypeId)).resolves.toBeNull();
       const roomSnapshot = await setup.getRoomOwnerSnapshot({ organizationId, propertyId });
       expect(roomSnapshot.rooms.map((room) => room.roomTypeId)).toEqual([otherRoom]);
       const publicationSource = createPmsMandatoryChargePricingSourceSnapshot({

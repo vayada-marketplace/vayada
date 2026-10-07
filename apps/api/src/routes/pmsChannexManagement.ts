@@ -24,6 +24,8 @@ export type PmsChannexManagementRoutesOptions = {
   noShowReportingEnabled?: boolean;
   noShowReportingPropertyId?: string;
   capabilityModes: ChannexManagementCapabilityModes;
+  /** VAY-2055: only `enable` is processed; `disable` is refused like a paused capability. */
+  connectionOnly?: boolean;
   commandPort?: PmsChannexManagementCommandPort;
   iframeSessionPort?: PmsChannexIframeSessionPort;
   datePrices?: ChannelDatePricesPort;
@@ -253,7 +255,11 @@ export async function registerPmsChannexManagementRoutes(
       );
       const input = parseCommand(request.body);
       if (!input) return reply.code(400).send({ code: "invalid_channex_command" });
-      if (!isMutating(options.capabilityModes, input.operationType)) {
+      // VAY-2055: the connection-only worker never claims disable jobs.
+      if (
+        !isMutating(options.capabilityModes, input.operationType) ||
+        (options.connectionOnly && input.operationType === "disable")
+      ) {
         return reply.code(409).send({ code: "channex_capability_not_mutating" });
       }
       if (!options.commandPort) {

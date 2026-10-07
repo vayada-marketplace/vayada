@@ -31,6 +31,7 @@ export type PmsChannexManagementCommandResult =
       ok: false;
       code:
         | "connection_required"
+        | "channex_binding_exists"
         | "idempotency_conflict"
         | "invalid_inventory_rules"
         | "invalid_stay_restrictions"
