@@ -342,6 +342,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   /** Owner-only hotel-detail edits on the ordinary login; unset keeps the sparse writer. */
   hotelSetupProfileCommand?: import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate;
   /** Owner-only launch settings on the ordinary login; unset keeps the forwarder or broad writer. */
+  /** Owner-only currency saves on the ordinary login; unset keeps the forwarder. */
+  hotelSetupCurrencyCommandPort?: import("./routes/pmsPricing.js").PmsPricingRoutesOptions["currencyCommandPort"];
   hotelSetupLaunchSettingsCommand?: Parameters<
     typeof import("./routes/sharedHotelSetupStatus.js").registerSharedHotelSetupLaunchSettings
   >[1];
@@ -1031,6 +1033,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api/pms",
       ...options.pmsPricing,
       currencyForward: options.hotelSetupCommandForwarder,
+      currencyCommandPort: options.hotelSetupCurrencyCommandPort,
+      propertyAccessRepository: options.auth?.propertyAccessRepository,
       inventoryPublicOfferProjector: options.pmsInventoryPublicOfferProjector,
     });
   }

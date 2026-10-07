@@ -2,6 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { beginHotelSetupCommandScope } from "../hotelSetupCommandScope.js";
 import { lockHotelSetupCurrencyMembership } from "../hotelSetupCurrencyMembership.js";
 import { seedPendingHotelFinancialsCategories } from "./financeStarterCategories.js";
+import { completeOrdinaryHotelSetupFirstCurrency } from "./hotelSetupFirstCurrencyCompletion.js";
+import { lockHotelSetupOrdinaryPropertyScope } from "../hotelSetupOrdinaryScope.js";
 import { enqueueChannexMealChange } from "./pmsChannexMealChange.js";
 
 import {
@@ -46,6 +48,10 @@ export type PmsPricingCommandRepositoryConfig = {
   currencyChangeGuard: PmsPricingCurrencyChangeGuardPort;
   /** Trusted private-service configuration; never read from the request DTO. */
   hotelSetupCurrencyOperation?: "currency" | "currency_ready";
+  /** Public API hotel setup on the ordinary login (VAY-2056): organization-first scope lock,
+   * the strict Owner membership re-check and the first-currency Financials completion.
+   * Trusted configuration; mutually exclusive with hotelSetupCurrencyOperation. */
+  hotelSetupOrdinaryOwner?: boolean;
   channexMealSyncEnabled?: boolean;
   channexMealSyncPropertyId?: string;
   max?: number;
@@ -126,6 +132,10 @@ export function createPgPmsPricingCommandRepository(
   if (!config.currencyChangeGuard) {
     throw new Error("PMS pricing command repository requires a currency-change guard");
   }
+  if (config.hotelSetupOrdinaryOwner && config.hotelSetupCurrencyOperation) {
+    throw new Error("PMS pricing command repository has two hotel setup scopes");
+  }
+  const setupOwnerScope = !!config.hotelSetupCurrencyOperation || !!config.hotelSetupOrdinaryOwner;
   const ownsPool = !config.pool;
   const pool: PmsPricingCommandPool =
     config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: config.max });
@@ -133,19 +143,24 @@ export function createPgPmsPricingCommandRepository(
   const makeId = config.randomId ?? randomUUID;
   let closed = false;
 
+  /** False when the ordinary hotel-setup scope no longer authorizes the property. */
   async function beginCurrencyTransaction(
     client: PmsPricingCommandClient,
     command: AnyCommand,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (config.hotelSetupCurrencyOperation) {
       await beginHotelSetupCommandScope(client, {
         propertyId: command.propertyId,
         organizationId: command.organizationId,
         operation: config.hotelSetupCurrencyOperation,
       });
+    } else if (config.hotelSetupOrdinaryOwner) {
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      return lockHotelSetupOrdinaryPropertyScope(client, command);
     } else {
       await client.query("BEGIN");
     }
+    return true;
   }
 
   async function runCommand<C extends AnyCommand, R extends AnyResult>(
@@ -160,16 +175,9 @@ export function createPgPmsPricingCommandRepository(
     const client = await pool.connect();
 
     try {
-      await beginCurrencyTransaction(client, command);
+      const inScope = await beginCurrencyTransaction(client, command);
       await lockPropertyPricingScope(client, command.propertyId);
-      if (
-        !(await lockAuthorizedScope(
-          client,
-          command,
-          acceptedAt,
-          !!config.hotelSetupCurrencyOperation,
-        ))
-      ) {
+      if (!inScope || !(await lockAuthorizedScope(client, command, acceptedAt, setupOwnerScope))) {
         await rollbackQuietly(client);
         return spec.scopeFailure();
       }
@@ -206,14 +214,13 @@ export function createPgPmsPricingCommandRepository(
       if (result.ok !== Boolean(worked.change)) {
         throw new Error("PMS pricing command change notification invariant failed");
       }
-      if (
-        config.hotelSetupCurrencyOperation === "currency_ready" &&
+      const firstCurrency =
+        (config.hotelSetupCurrencyOperation === "currency_ready" ||
+          !!config.hotelSetupOrdinaryOwner) &&
         spec.operation === CURRENCY_OPERATION &&
         result.ok &&
-        result.response.outcome === "created"
-      ) {
-        await seedPendingHotelFinancialsCategories(client, command);
-      }
+        result.response.outcome === "created";
+      if (firstCurrency) await seedPendingHotelFinancialsCategories(client, command);
 
       const domainEventId = worked.change
         ? await enqueuePricingChange(
@@ -242,7 +249,7 @@ export function createPgPmsPricingCommandRepository(
           correlationId: command.audit.correlationId ?? command.audit.requestId,
         });
       }
-      await recordAudit(
+      const audit = await recordAudit(
         client,
         command,
         spec.operation,
@@ -252,6 +259,18 @@ export function createPgPmsPricingCommandRepository(
         domainEventId,
         acceptedAt,
       );
+      if (firstCurrency && config.hotelSetupOrdinaryOwner && command.audit.actor.kind === "user")
+        await completeOrdinaryHotelSetupFirstCurrency(client, {
+          propertyId: command.propertyId,
+          organizationId: command.organizationId,
+          currency: (command as UpsertPropertyPricingCurrencyCommand).currency,
+          actorUserId: command.audit.actor.userId,
+          currencyAudit: audit,
+          domainEventId,
+          idempotencyKeyId: reservation.id,
+          correlationId: command.audit.correlationId ?? command.audit.requestId,
+          causationId: command.audit.requestId,
+        });
       await completeIdempotency(client, reservation.id, spec.operation, result, acceptedAt);
       await client.query("COMMIT");
       return result;
@@ -275,9 +294,9 @@ export function createPgPmsPricingCommandRepository(
     const fingerprint = sha256(CURRENCY_SPEC.serializeFingerprint(command));
     const client = await pool.connect();
     try {
-      await beginCurrencyTransaction(client, command);
+      const inScope = await beginCurrencyTransaction(client, command);
       await lockPropertyPricingScope(client, command.propertyId);
-      if (!(await lockAuthorizedScope(client, command, at, !!config.hotelSetupCurrencyOperation))) {
+      if (!inScope || !(await lockAuthorizedScope(client, command, at, setupOwnerScope))) {
         await rollbackQuietly(client);
         return { kind: "result", result: CURRENCY_SPEC.scopeFailure() };
       }
@@ -928,9 +947,10 @@ async function recordAudit(
   result: AnyResult,
   domainEventId: string | null,
   at: Date,
-): Promise<void> {
+): Promise<{ id: string | undefined; auditKey: string }> {
   if (command.audit.actor.kind !== "user") throw new Error("PMS pricing audit requires user actor");
-  await client.query(
+  const auditKey = `pms.pricing.property.${command.propertyId}.operation.${operation}.key.${keyHash}.attempt.${reservation.attempt}.v1`;
+  const inserted = await client.query<{ id: string }>(
     `INSERT INTO platform.product_audit_events (
        audit_key, product, action, occurred_at, tenant_scope, organization_id,
        property_id, actor_type, actor_user_id, target_resource_product,
@@ -941,9 +961,9 @@ async function recordAudit(
        $1, 'pms', $2, $3::timestamptz, 'property', NULL, $4::uuid,
        'user', $5::uuid, 'pms', $6, $7, $8::uuid, $9::uuid, $10, $11,
        $12::jsonb, '{}'::jsonb, $13::jsonb, 'confidential'
-     )`,
+     ) RETURNING id::text`,
     [
-      `pms.pricing.property.${command.propertyId}.operation.${operation}.key.${keyHash}.attempt.${reservation.attempt}.v1`,
+      auditKey,
       operation,
       at.toISOString(),
       command.propertyId,
@@ -963,6 +983,7 @@ async function recordAudit(
       }),
     ],
   );
+  return { id: inserted.rows[0]?.id, auditKey };
 }
 
 function redactedAuditPayload(command: AnyCommand, result: AnyResult): Record<string, unknown> {

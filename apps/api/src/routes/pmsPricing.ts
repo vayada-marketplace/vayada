@@ -33,6 +33,10 @@ type AuthorizedScope = {
 
 export type PmsPricingRoutesOptions = {
   currencyForward?: import("../hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
+  /** Owner-only first-currency and currency saves on the ordinary login (VAY-2056); replaces
+   * the forwarder. Requires propertyAccessRepository. */
+  currencyCommandPort?: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">;
+  propertyAccessRepository?: PropertyAccessRepository;
   commandPort: PmsPricingCommandPort;
   readPort: PmsPricingReadPort;
   currencyCapabilitiesReadPort: PmsPricingCurrencyCapabilitiesReadPort;
@@ -112,7 +116,17 @@ export async function registerPmsPricingRoutes(
     if (scope) authorized.set(request, scope);
   };
 
-  registerPmsPricingCurrencyCommand(app, options.commandPort, { forward: options.currencyForward });
+  if (options.currencyCommandPort) {
+    if (!options.propertyAccessRepository)
+      throw new Error("Currency saves require property access");
+    registerPmsPricingCurrencyCommand(app, options.currencyCommandPort, {
+      requireOwnerSession: true,
+      propertyAccessRepository: options.propertyAccessRepository,
+    });
+  } else
+    registerPmsPricingCurrencyCommand(app, options.commandPort, {
+      forward: options.currencyForward,
+    });
 
   app.put<{ Params: RoomTypeParams; Body: unknown }>(
     "/properties/:propertyId/room-types/:roomTypeId/flexible-rate-plan",
