@@ -67,6 +67,7 @@ import { createHmac } from "node:crypto";
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
 import { loadHotelSetupCommandForwarder } from "./hotelSetupCommandForwarder.js";
+import { createOrdinaryHotelSetupProfileCommand } from "./platform/hotelSetupProfileWriter.js";
 import { type ApiConfig, loadConfig, stripeSubscriptionRuntimeEnabled } from "./config.js";
 import { createPgBookingDesignCatalogEvidenceRepository } from "./domains/bookingDesignCatalogEvidenceRepository.js";
 import { createPgBookingDesignRepository } from "./domains/bookingDesignRepository.js";
@@ -342,12 +343,6 @@ const hotelSetupCreationForwarder = loadHotelSetupCommandForwarder({
   HOTEL_SETUP_COMMAND_ADMISSION: process.env["HOTEL_SETUP_CREATION_COMMAND_ADMISSION"],
   HOTEL_SETUP_COMMAND_ORIGIN: process.env["HOTEL_SETUP_CREATION_COMMAND_ORIGIN"],
   HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: process.env["HOTEL_SETUP_CREATION_COMMAND_INTERNAL_TOKEN"],
-});
-
-const hotelSetupProfileForwarder = loadHotelSetupCommandForwarder({
-  HOTEL_SETUP_COMMAND_ADMISSION: process.env["HOTEL_SETUP_PROFILE_COMMAND_ADMISSION"],
-  HOTEL_SETUP_COMMAND_ORIGIN: process.env["HOTEL_SETUP_PROFILE_COMMAND_ORIGIN"],
-  HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: process.env["HOTEL_SETUP_PROFILE_COMMAND_INTERNAL_TOKEN"],
 });
 
 const hotelSetupLogoForwarder = loadHotelSetupCommandForwarder({
@@ -1856,7 +1851,8 @@ const app = buildApp({
   pmsModuleActivationRepository,
   hotelSetupCommandForwarder,
   hotelSetupCreationForwarder,
-  hotelSetupProfileForwarder,
+  // VAY-2056: the HOTEL_SETUP_PROFILE_COMMAND_* variables are no longer read.
+  hotelSetupProfileCommand: createOrdinaryHotelSetupProfileCommand(propertySetupOwnerPool),
   financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,

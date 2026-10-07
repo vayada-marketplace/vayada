@@ -1,5 +1,10 @@
 # Hotel setup profile-edit writer (VAY-965)
 
+> **Superseded for the public API by VAY-2056** ([ordinary login](hotel-setup-ordinary-login.md)):
+> the public route now runs the same Owner-only handler with an ordinary-login port of the
+> writer (`platform/hotelSetupProfileWriter.ts`). The private service and its credentials stay
+> until the decommission steps; this contract describes them.
+
 Status: implementation contract; no production grant, credential or caller change.
 Predecessors: [credential lifecycle](hotel-setup-command-credential-lifecycle.md),
 [launch settings](hotel-setup-launch-settings-command.md) and [logo](hotel-setup-logo-writer.md).

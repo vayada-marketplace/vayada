@@ -339,8 +339,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   hotelSetupCommandForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
   hotelSetupLogoForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
   hotelSetupCreationForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
-  /** Optional private property-profile destination; unset keeps the ordinary writer. */
-  hotelSetupProfileForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
+  /** Owner-only hotel-detail edits on the ordinary login; unset keeps the sparse writer. */
+  hotelSetupProfileCommand?: import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate;
   auth?: ApiAuthOptions;
   authSession?: AuthSessionRouteOptions;
   browserAllowedOrigins?: string[];
@@ -795,7 +795,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       launchSettingsRepository: options.propertyLaunchSettingsRepository,
       propertyCreationForwarder: options.hotelSetupCreationForwarder,
       launchSettingsForwarder: options.hotelSetupCommandForwarder,
-      profileForwarder: options.hotelSetupProfileForwarder,
+      profileCommand: options.hotelSetupProfileCommand,
     });
   }
   if (options.propertySetupRouteStateReadPort) {

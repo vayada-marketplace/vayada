@@ -2390,46 +2390,86 @@ describe("shared hotel setup status route", () => {
     expect(updatePropertySettingsByHotelId).toHaveBeenCalledTimes(1);
   });
 
-  it("forwards profile edits after access checks without the ordinary reader or writer", async () => {
+  it("edits hotel details through the Owner-only ordinary command without the sparse writer", async () => {
     const ordinary = repositoryWith([]);
     const getPropertyProfile = vi.spyOn(ordinary, "getPropertyProfile");
     const updatePropertyProfile = vi.spyOn(ordinary, "updatePropertyProfile");
-    const forward = vi
-      .fn<import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder>()
-      .mockImplementation(async (_request, reply) =>
-        reply.code(503).send({ code: "hotel_setup_unavailable" }),
-      );
+    const saved = {
+      propertyId,
+      profileRevision: 2,
+      profile: {
+        displayName: "Edited",
+        propertyType: "hotel",
+        location: {
+          countryCode: "LK",
+          city: "Galle",
+          streetAddress: "",
+          postalCode: "",
+          timezone: "Asia/Colombo",
+          latitude: null,
+          longitude: null,
+          localityPublic: false,
+          geoPublic: false,
+          mapDisplayMode: "hidden" as const,
+        },
+        contacts: [],
+      },
+    };
+    const command = vi
+      .fn<import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate>()
+      .mockResolvedValue({ status: "updated", profile: saved });
     const request = {
       method: "PUT" as const,
       url: `/api/hotel-setup/properties/${propertyId}/profile`,
       headers: { authorization: "Bearer valid-token", "idempotency-key": "save-1" },
       payload: { expectedProfileRevision: 1, patch: { displayName: "Edited" } },
     };
-    app = buildSharedSetupApp({
-      permissions: ["hotel_catalog.setup.manage"],
-      linkedResources: [propertyLink(propertyId)],
-      repository: ordinary,
-      profileForwarder: forward,
+    const owner = () =>
+      buildSharedSetupApp({
+        permissions: ["hotel_catalog.setup.manage", "marketplace.profile.manage"],
+        linkedResources: [propertyLink(propertyId)],
+        repository: ordinary,
+        profileCommand: command,
+      });
+
+    app = owner();
+    const response = await injectJson(app, request);
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual(saved);
+    expect(command).toHaveBeenCalledWith(expect.anything(), propertyId, {
+      idempotencyKey: "save-1",
+      fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+      merge: expect.any(Function),
     });
-    expect((await injectJson(app, request)).statusCode).toBe(503);
-    expect(forward).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      propertyId,
-      "property_profile",
-    );
+    command.mockResolvedValueOnce({ status: "conflict", currentRevision: 3 });
+    expect(await injectJson(app, request)).toMatchObject({ statusCode: 409 });
+    const withoutKey = { authorization: request.headers.authorization };
+    expect((await injectJson(app, { ...request, headers: withoutKey })).statusCode).toBe(422);
+    expect(command).toHaveBeenCalledTimes(2);
+    await app.close();
+
+    // A non-Owner member and a member without setup permission never reach the writer.
+    for (const denied of [
+      {
+        roleKey: "hotel_manager",
+        permissions: ["hotel_catalog.setup.manage", "marketplace.profile.manage"],
+      },
+      { roleKey: "hotel_owner", permissions: ["hotel_catalog.setup.read"] },
+    ] as const) {
+      app = buildSharedSetupApp({
+        permissions: [...denied.permissions],
+        roleKey: denied.roleKey,
+        linkedResources: [propertyLink(propertyId)],
+        repository: ordinary,
+        profileCommand: command,
+      });
+      expect((await injectJson(app, request)).statusCode).toBe(403);
+      await app.close();
+    }
+    expect(command).toHaveBeenCalledTimes(2);
     expect(getPropertyProfile).not.toHaveBeenCalled();
     expect(updatePropertyProfile).not.toHaveBeenCalled();
-    await app.close();
-    forward.mockClear();
-    app = buildSharedSetupApp({
-      permissions: ["hotel_catalog.setup.read"],
-      linkedResources: [propertyLink(propertyId)],
-      repository: ordinary,
-      profileForwarder: forward,
-    });
-    expect((await injectJson(app, request)).statusCode).toBe(403);
-    expect(forward).not.toHaveBeenCalled();
+    app = owner();
   });
 
   it("blocks public launch Save with an existing private pair before any ordinary writer", async () => {
@@ -3437,7 +3477,7 @@ function buildSharedSetupApp(options: {
   repository: SharedHotelSetupStatusRepository;
   launchSettingsRepository?: SharedPropertyLaunchSettingsRepository;
   launchForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
-  profileForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
+  profileCommand?: import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate;
   trackCommandRepository?: HotelSetupTrackCommandRepository;
   propertyAccessRepository?: PropertyAccessRepository;
   permissions?: PermissionKey[];
@@ -3452,7 +3492,7 @@ function buildSharedSetupApp(options: {
     sharedHotelSetupStatusRepository: options.repository,
     propertyLaunchSettingsRepository: options.launchSettingsRepository,
     hotelSetupCommandForwarder: options.launchForwarder,
-    hotelSetupProfileForwarder: options.profileForwarder,
+    hotelSetupProfileCommand: options.profileCommand,
     hotelSetupTrackCommandRepository:
       options.trackCommandRepository ?? unusedTrackCommandRepository(),
     auth: {

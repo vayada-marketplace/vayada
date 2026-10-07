@@ -5,6 +5,7 @@ import { syncPropertyOfferReadModels } from "../routes/marketplaceAdmin.js";
 import type {
   HotelSetupPropertyProfileCommand,
   HotelSetupPropertyProfileResult,
+  HotelSetupPropertyProfileUpdate,
 } from "../routes/sharedHotelSetupStatus.js";
 import {
   propertyProfileWritePayload,
@@ -237,4 +238,21 @@ export async function writeOrdinaryHotelSetupPropertyProfile(
   } finally {
     client.release();
   }
+}
+
+/** Public route adapter: scope, actor and correlation come only from the verified context. */
+export function createOrdinaryHotelSetupProfileCommand(
+  pool: Pick<pg.Pool, "connect">,
+): HotelSetupPropertyProfileUpdate {
+  return (context, propertyId, command) =>
+    writeOrdinaryHotelSetupPropertyProfile(
+      pool,
+      {
+        propertyId,
+        organizationId: context.selectedOrganization.organizationId,
+        actorUserId: context.actor.internalUserId,
+      },
+      (context.audit.correlationId ?? context.audit.requestId).slice(0, 200),
+      command,
+    );
 }
