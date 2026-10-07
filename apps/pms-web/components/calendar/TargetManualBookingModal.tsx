@@ -58,6 +58,12 @@ function defaultRatePlanId(type: CalendarRoomType | undefined): string {
   return plan?.id ?? "custom";
 }
 
+// Server amounts are exact decimals: keep cents when present (a 150.50 custom rate is not €151).
+function money(amountDecimal: string, currency: string): string {
+  const amount = Number(amountDecimal);
+  return formatCurrency(amount, currency, Number.isInteger(amount) ? 0 : 2);
+}
+
 function stayDefaults(
   key: number,
   roomId: string,
@@ -338,7 +344,7 @@ export default function TargetManualBookingModal({
 
   const previewTotal = preview ? (
     t("calendar.targetManualBooking.total", {
-      amount: formatCurrency(Number(preview.grandTotal.amountDecimal), preview.currency),
+      amount: money(preview.grandTotal.amountDecimal, preview.currency),
     })
   ) : previewState === "loading" ? (
     <span className="inline-flex items-center gap-2" role="status">
@@ -705,10 +711,7 @@ export default function TargetManualBookingModal({
                             <span>
                               {t("calendar.targetManualBooking.standard")}{" "}
                               {serverStay?.standardTotal
-                                ? formatCurrency(
-                                    Number(serverStay.standardTotal.amountDecimal),
-                                    preview!.currency,
-                                  )
+                                ? money(serverStay.standardTotal.amountDecimal, preview!.currency)
                                 : "—"}
                             </span>
                           )}
@@ -717,10 +720,7 @@ export default function TargetManualBookingModal({
                               ? t("calendar.targetManualBooking.custom")
                               : t("calendar.targetManualBooking.applied")}{" "}
                             {serverStay
-                              ? formatCurrency(
-                                  Number(serverStay.appliedTotal.amountDecimal),
-                                  preview!.currency,
-                                )
+                              ? money(serverStay.appliedTotal.amountDecimal, preview!.currency)
                               : previewState === "loading"
                                 ? t("calendar.targetManualBooking.calculating")
                                 : "—"}
@@ -734,12 +734,9 @@ export default function TargetManualBookingModal({
                                 <span>{night.serviceDate}</span>
                                 <span>
                                   {night.standard
-                                    ? `${formatCurrency(Number(night.standard.amountDecimal), preview!.currency)} → `
+                                    ? `${money(night.standard.amountDecimal, preview!.currency)} → `
                                     : ""}
-                                  {formatCurrency(
-                                    Number(night.applied.amountDecimal),
-                                    preview!.currency,
-                                  )}
+                                  {money(night.applied.amountDecimal, preview!.currency)}
                                 </span>
                               </li>
                             ))}{" "}
@@ -888,10 +885,7 @@ export default function TargetManualBookingModal({
                       )}{" "}
                       <strong className="w-20 text-right">
                         {serverAddon
-                          ? formatCurrency(
-                              Number(serverAddon.total.amountDecimal),
-                              preview!.currency,
-                            )
+                          ? money(serverAddon.total.amountDecimal, preview!.currency)
                           : "—"}
                       </strong>{" "}
                     </div>

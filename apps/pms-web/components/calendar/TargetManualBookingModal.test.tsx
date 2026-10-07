@@ -390,6 +390,22 @@ describe("target manual booking fields", () => {
     expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(false);
   });
 
+  it("shows cents from the server amount instead of rounding a custom rate", async () => {
+    const cents = { amountDecimal: "150.50", currency: "EUR" };
+    // prettier-ignore
+    vi.spyOn(calendarService, "previewManualBooking").mockResolvedValue({ ...preview, stays: [{ ...preview.stays[0]!, ratePlanId: null, nightly: [{ serviceDate: "2026-09-10", standard: null, applied: cents }], standardTotal: null, appliedTotal: cents }], grandTotal: cents });
+    let view!: ReactTestRenderer;
+    // prettier-ignore
+    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes: [{ ...roomTypes[0]!, ratePlans: [] }], rooms: [rooms[0]!], initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit: vi.fn(), onClose: vi.fn() })); });
+    // prettier-ignore
+    await act(async () => view.root.findByProps({ "aria-label": "Room 1 nightly rate" }).props.onChange({ target: { value: "150.50" } }));
+    await settlePreview();
+    const markup = JSON.stringify(view.toJSON());
+    expect(markup).toContain("Total €150.50");
+    expect(markup).toContain("€150.50");
+    expect(markup).not.toContain("€151");
+  });
+
   it("defaults to Flexible before Non-refundable regardless of server order", async () => {
     // prettier-ignore
     const plans = [{ id: "plan-nr", name: "Non-refundable", rateType: "non_refundable" as const, baseRate: 90 }, { id: "plan-flex", name: "Flexible", rateType: "flexible" as const, baseRate: 100 }];
