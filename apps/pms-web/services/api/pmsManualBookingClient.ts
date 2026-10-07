@@ -45,6 +45,14 @@ export type PmsManualBookingCreateInput = PmsManualBookingPreviewInput & {
     countryCode: string | null;
     specialRequests: string | null;
   };
+  /** v1 amendment (VAY-1422). Sent only when non-empty, so older APIs keep accepting bookings. */
+  additionalGuests?: Array<{
+    firstName: string;
+    lastName: string;
+    email: string | null;
+    phoneE164: string | null;
+    countryCode: string | null;
+  }>;
   privateNote: string | null;
   directSource: "call" | "email" | "whatsapp" | "walk_in" | "social_media" | "other";
   payment: {
