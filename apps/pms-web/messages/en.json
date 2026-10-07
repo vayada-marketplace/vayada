@@ -2633,6 +2633,7 @@
   "handoff.transferring": "Transferring your session",
   "auth.chooseProperty.empty": "No property has been created yet. Start or resume setup when you're ready.",
   "common.done": "Done",
+  "common.selectPmsPropertyFirst": "Select a property to continue.",
   "layout.sidebar.unavailableNamed": "{label} — not available yet",
   "layout.sidebar.soon": "Soon",
   "inbox.loadingInbox": "Loading Inbox",

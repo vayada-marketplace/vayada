@@ -110,6 +110,16 @@ export async function listPmsProperties(): Promise<PmsPropertySummary[]> {
   }));
 }
 
+// The English message keeps the caller's action for logs; the UI shows one translated message.
+export class PmsPropertySelectionRequiredError extends Error {
+  readonly messageKey = "common.selectPmsPropertyFirst";
+
+  constructor(action: string) {
+    super(`Select a PMS property before ${action}.`);
+    this.name = "PmsPropertySelectionRequiredError";
+  }
+}
+
 export async function resolveSelectedPmsPropertyId(action = "loading PMS data"): Promise<string> {
   const storedPropertyId = getStoredPmsPropertyId();
   if (storedPropertyId) {
@@ -131,7 +141,7 @@ export async function resolveSelectedPmsPropertyId(action = "loading PMS data"):
     return propertyId;
   }
 
-  throw new Error(`Select a PMS property before ${action}.`);
+  throw new PmsPropertySelectionRequiredError(action);
 }
 
 export async function getPmsPropertyProfile(): Promise<PmsPropertyProfile> {

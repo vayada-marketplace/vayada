@@ -27,6 +27,7 @@ import {
   getPmsPropertyProfile,
   getPmsCalendarSettings,
   listPmsRoomShuffleHistory,
+  PmsPropertySelectionRequiredError,
   resolveSelectedPmsPropertyId,
   updatePmsCalendarSettings,
   updatePmsCalendarAutoOpen,
@@ -350,8 +351,12 @@ describe("PMS property profile", () => {
       },
     });
 
-    await expect(resolveSelectedPmsPropertyId("loading booking details")).rejects.toThrow(
+    const resolution = resolveSelectedPmsPropertyId("loading booking details");
+
+    await expect(resolution).rejects.toThrow(
       "Select a PMS property before loading booking details.",
     );
+    await expect(resolution).rejects.toBeInstanceOf(PmsPropertySelectionRequiredError);
+    await expect(resolution).rejects.toMatchObject({ messageKey: "common.selectPmsPropertyFirst" });
   });
 });

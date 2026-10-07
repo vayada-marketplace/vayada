@@ -17,6 +17,7 @@ import {
 } from "@/components/settings/BillingSettingsUi";
 import { formatBillingAmount, formatInvoiceDate } from "@/lib/settings/billing";
 import { useTranslation } from "@/lib/i18n";
+import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { getPmsSettingsSections } from "@/lib/settings/navigation";
 import { usePmsAccess } from "@/lib/settings/PmsAccessContext";
 import {
@@ -38,6 +39,7 @@ export default function BillingSettingsPage() {
   const [billing, setBilling] = useState<BillingOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [loadFailure, setLoadFailure] = useState<{ cause: unknown; text: string } | null>(null);
   const [notice, setNotice] = useState("");
   const [selectedMethod, setSelectedMethod] = useState<BillingPaymentMethod>("card");
   const [companyName, setCompanyName] = useState("");
@@ -63,7 +65,9 @@ export default function BillingSettingsPage() {
     try {
       hydrate(await getFinanceBilling());
     } catch (loadError) {
-      setError(message(loadError, "We couldn’t load billing settings."));
+      const text = message(loadError, "We couldn’t load billing settings.");
+      setLoadFailure({ cause: loadError, text });
+      setError(text);
     } finally {
       setLoading(false);
     }
@@ -167,7 +171,7 @@ export default function BillingSettingsPage() {
           role="alert"
           className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
         >
-          {error}
+          {loadFailure?.text === error ? localizedErrorText(loadFailure.cause, error, t) : error}
         </div>
       )}
       {notice && (

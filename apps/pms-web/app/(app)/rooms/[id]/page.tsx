@@ -14,6 +14,7 @@ import {
 import RoomTypeForm from "@/components/rooms/RoomTypeForm";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useTranslation } from "@/lib/i18n";
+import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 
 export default function EditRoomPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -21,7 +22,7 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
   const router = useRouter();
   const [room, setRoom] = useState<RoomType | null>(null);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<{ cause: unknown; message: string } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -41,7 +42,7 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
       })
       .catch((cause) => {
         console.error(cause);
-        setLoadError(cause instanceof Error ? cause.message : "");
+        setLoadError({ cause, message: cause instanceof Error ? cause.message : "" });
       })
       .finally(() => setLoading(false));
   }, [id]);
@@ -92,7 +93,11 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
       <div className="p-6">
         <p className={loadError !== null ? "text-red-600" : "text-gray-500"}>
           {loadError !== null
-            ? loadError || t("rooms.edit.failedToLoad")
+            ? localizedErrorText(
+                loadError.cause,
+                loadError.message || t("rooms.edit.failedToLoad"),
+                t,
+              )
             : t("rooms.edit.notFound")}
         </p>
         {loadError !== null && (
