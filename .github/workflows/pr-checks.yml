@@ -609,7 +609,7 @@ jobs:
         run: |
           node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay1092_vay965_creation_test"); await client.end();'
           TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
-          npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupCreationPrivileges.integration.test.ts src/hotelSetupCreationScope.integration.test.ts src/hotelSetupCreationContacts.integration.test.ts src/hotelSetupCreationIdentity.integration.test.ts src/hotelSetupCreationProducts.integration.test.ts src/hotelSetupPropertyFinancialsScope.integration.test.ts src/hotelSetupLaunchSettingsScope.integration.test.ts
+          npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupCreationPrivileges.integration.test.ts src/hotelSetupCreationScope.integration.test.ts src/hotelSetupCreationContacts.integration.test.ts src/hotelSetupCreationIdentity.integration.test.ts src/hotelSetupCreationProducts.integration.test.ts src/hotelSetupPropertyFinancialsScope.integration.test.ts src/hotelSetupLaunchSettingsScope.integration.test.ts src/hotelSetupProfileEdit.integration.test.ts
         env:
           ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay1092_vay965_creation_test
@@ -660,7 +660,8 @@ jobs:
               "src/hotelSetupReaderRoleStaging.integration.test.ts", "src/hotelSetupReaderLoginVerification.integration.test.ts",
               "src/hotelSetupReaderSecretCandidate.integration.test.ts", "src/cli/hotelSetupPropertyPreflight.test.ts",
               "src/cli/hotelSetupReaderPreflight.test.ts", "src/hotelSetupPropertyRoleStaging.integration.test.ts",
-              "src/hotelSetupAutomaticDiscovery.integration.test.ts"], {env, stdio: "inherit"});
+              "src/hotelSetupAutomaticDiscovery.integration.test.ts",
+              "src/hotelSetupProfileLifecycle.integration.test.ts"], {env, stdio: "inherit"});
             process.exitCode = result.status ?? 1;
             if (result.status === 0) {
               await admin.query("CREATE DATABASE vay1092_readiness_organization_test TEMPLATE vay1092_vay965_creation_test");
@@ -735,6 +736,8 @@ jobs:
           src/hotelSetupLaunchSettingsCommands.test.ts
           src/hotelSetupLaunchSettingsCredentials.test.ts
           src/hotelSetupLaunchSettingsRepository.test.ts
+          src/hotelSetupProfileProjection.test.ts
+          src/hotelSetupProfileCommands.test.ts
           src/cli/hotelSetupLaunchSettingsPreflight.test.ts
           src/cli/hotelSetupPropertyPreflight.test.ts
           src/cli/hotelSetupCreationPreflight.test.ts
@@ -851,7 +854,8 @@ jobs:
           await admin.query(`CREATE ROLE vayada_admin LOGIN NOINHERIT NOSUPERUSER CREATEROLE CREATEDB
             NOREPLICATION NOBYPASSRLS PASSWORD ${admin.escapeLiteral(process.env.CREATOR_PASSWORD)}`);
           await admin.query(`GRANT ALL ON DATABASE vay1092_vay965_logo_test TO vayada_admin WITH GRANT OPTION;
-            GRANT vayada_next_hotel_setup_logo_scope TO vayada_admin WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`);
+            GRANT vayada_next_hotel_setup_logo_scope TO vayada_admin WITH ADMIN TRUE, INHERIT FALSE, SET FALSE;
+            GRANT vayada_next_hotel_setup_profile_scope TO vayada_admin WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`);
           for (const schema of ["identity", "hotel_catalog", "platform"])
             await admin.query(`GRANT ALL ON SCHEMA ${schema} TO vayada_admin WITH GRANT OPTION;
               GRANT ALL ON ALL TABLES IN SCHEMA ${schema} TO vayada_admin WITH GRANT OPTION;
@@ -864,8 +868,10 @@ jobs:
           await admin.end();
           NODE
           VAY965_LOGO_CREATOR_DATABASE_URL="postgresql://vayada_admin:${CREATOR_PASSWORD}@127.0.0.1:5432/vay1092_vay965_logo_test?sslmode=verify-full" \
+            HOTEL_SETUP_PROPERTY_STAGE_TEST_DATABASE_URL="$TEST_DATABASE_URL" \
             npm --workspace vayada-api run test -- --no-file-parallelism \
-            src/hotelSetupLogoLifecycle.integration.test.ts src/hotelSetupLogoMedia.integration.test.ts \
+            src/hotelSetupLogoLifecycle.integration.test.ts src/hotelSetupProfileLifecycle.integration.test.ts \
+            src/hotelSetupLogoMedia.integration.test.ts \
             src/hotelSetupLogoScope.integration.test.ts src/hotelSetupLogoCleanup.integration.test.ts \
             src/domains/propertyMediaCommandRepository.integration.test.ts
 

@@ -96,8 +96,21 @@ export function createHotelSetupCredentialResolver(
   };
 }
 
+/** No ready assignment for this purpose, property, organization and actor (not retryable). */
+export class HotelSetupAssignmentMissingError extends Error {}
+
 /** Private logo only: purpose and actor are server-owned, never chosen by an HTTP override. */
 export function createHotelSetupLogoCredentialResolver(options: HotelSetupCredentialOptions) {
+  return createHotelSetupActorCredentialResolver(options, "property_logo");
+}
+
+/** Actor-bound purposes; the adapter fixes the purpose, never the HTTP caller. */
+export function createHotelSetupActorCredentialResolver(
+  options: HotelSetupCredentialOptions,
+  purpose: "property_logo" | "property_profile",
+) {
+  const kind = { property_logo: "logo", property_profile: "profile" }[purpose];
+  if (!kind) throw new Error("Invalid hotel setup credential purpose");
   const endpoint = parseHotelSetupCredentialConfiguration(options);
   return async (
     propertyId: string,
@@ -106,7 +119,7 @@ export function createHotelSetupLogoCredentialResolver(options: HotelSetupCreden
   ): Promise<string> => {
     const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
     if (![propertyId, organizationId, actorUserId].every((id) => uuid.test(id)))
-      throw new Error("Missing hotel setup logo assignment");
+      throw new HotelSetupAssignmentMissingError(`Missing hotel setup ${kind} assignment`);
     const result = await options.assignments.query<
       ReadyCredential & {
         propertyId: string;
@@ -121,7 +134,7 @@ export function createHotelSetupLogoCredentialResolver(options: HotelSetupCreden
       FROM platform.hotel_setup_property_scopes scope
       JOIN pg_catalog.pg_roles role ON role.rolname=scope.database_login
       JOIN identity.organizations organization ON organization.id=scope.organization_id
-      WHERE scope.active AND scope.operation_class='property_logo' AND scope.property_id=$1::uuid
+      WHERE scope.active AND scope.operation_class='${purpose}' AND scope.property_id=$1::uuid
         AND scope.organization_id=$2::uuid AND scope.actor_user_id=$3::uuid
         AND scope.credential_role_oid=role.oid AND role.rolcanlogin AND role.rolvaliduntil IS NULL
         AND NOT (role.rolinherit OR role.rolsuper OR role.rolcreatedb OR role.rolcreaterole OR role.rolreplication OR role.rolbypassrls)
@@ -149,6 +162,10 @@ export function createHotelSetupLogoCredentialResolver(options: HotelSetupCreden
             AND link.relationship='owner' AND link.status='active')`,
       [propertyId, organizationId, actorUserId],
     );
+    // Only "no ready assignment" is a provisioning gap; duplicates or a row failing
+    // validation are integrity faults and stay generic (logged, retry-later).
+    if (result.rows.length === 0)
+      throw new HotelSetupAssignmentMissingError(`Missing hotel setup ${kind} assignment`);
     const scope = result.rows.length === 1 ? result.rows[0] : undefined;
     if (
       !scope ||
@@ -156,10 +173,10 @@ export function createHotelSetupLogoCredentialResolver(options: HotelSetupCreden
       scope.organizationId !== organizationId ||
       scope.actorUserId !== actorUserId ||
       !isReadyCredential(scope) ||
-      !/^vayada_next_hotel_setup_logo_[a-z0-9_]+$/.test(scope.databaseLogin) ||
+      !new RegExp(`^vayada_next_hotel_setup_${kind}_[a-z0-9_]+$`).test(scope.databaseLogin) ||
       Buffer.byteLength(scope.databaseLogin) > 63
     )
-      throw new Error("Missing hotel setup logo assignment");
+      throw new Error(`Missing hotel setup ${kind} assignment`);
     return readNativeSetupCredential(
       options.readNativeSecret,
       endpoint,

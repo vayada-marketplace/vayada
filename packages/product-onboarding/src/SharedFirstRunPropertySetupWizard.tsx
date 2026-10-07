@@ -396,6 +396,8 @@ export default function SharedFirstRunPropertySetupWizard({
     !forceCreateProperty && status?.propertySelection.availableProperties.length === 0;
   const logoUploadKey = useRef<string | null>(null);
   const logoAssignmentKey = useRef<string | null>(null);
+  // One key per intended profile edit; an ambiguous failure retries the same save.
+  const profileUpdateKey = useRef<string | null>(null);
   const profileSaveInFlight = useRef(false);
 
   const view = useMemo(
@@ -592,9 +594,16 @@ export default function SharedFirstRunPropertySetupWizard({
       let saved: PropertyProfileResponse;
       if (view.profileMode === "update" && view.selectedPropertyId && loadedProfile) {
         const update = profileUpdateFromDraft(draft, loadedProfile);
-        saved = update
-          ? await api.updatePropertyProfile(view.selectedPropertyId, update)
-          : loadedProfile;
+        saved = loadedProfile;
+        if (update) {
+          saved = await api.updatePropertyProfile(
+            view.selectedPropertyId,
+            update,
+            (profileUpdateKey.current = idempotencyKeyForRetry(profileUpdateKey.current)),
+          );
+          // Committed: a later logo, settings or reload failure must not pin this key.
+          profileUpdateKey.current = null;
+        }
       } else if (loadedProfile) {
         saved = loadedProfile;
       } else {
@@ -670,10 +679,13 @@ export default function SharedFirstRunPropertySetupWizard({
       logoAssignmentKey.current = null;
     } catch (err) {
       if (
-        setupErrorCode(err) === "profile_revision_conflict" &&
+        ["profile_revision_conflict", "idempotency_key_conflict"].includes(
+          setupErrorCode(err) ?? "",
+        ) &&
         view.profileMode === "update" &&
         view.selectedPropertyId
       ) {
+        profileUpdateKey.current = null;
         try {
           const latestProfile = await api.getPropertyProfile(view.selectedPropertyId);
           setLoadedProfile(latestProfile);
@@ -3607,6 +3619,9 @@ export function setupErrorMessage(error: unknown): string {
   }
   if (code === "idempotency_key_conflict") {
     return "Your setup changed during this save. Review it and try again.";
+  }
+  if (code === "profile_edit_not_provisioned") {
+    return "Editing hotel details isn't enabled for your account on this hotel yet, so trying again won't help. Please contact Vayada support.";
   }
 
   const data =

@@ -10,7 +10,10 @@ import { parseHotelSetupHelperOwnerConfiguration } from "./hotelSetupAutomaticPr
 import { pathToFileURL } from "node:url";
 import { stageHotelSetupPropertyRole } from "../hotelSetupPropertyRoleStaging.js";
 import { activateVerifiedHotelSetupPropertyRole } from "../hotelSetupPropertyRoleActivation.js";
-import type { HotelSetupPropertyPurpose } from "../hotelSetupCommandScope.js";
+import {
+  isHotelSetupActorPurpose,
+  type HotelSetupPropertyPurpose,
+} from "../hotelSetupCommandScope.js";
 import type { checkHotelSetupPropertyCredential } from "./hotelSetupPropertyPreflight.js";
 
 /** Protected manual operational image only. Its driver must prove blocked public admission,
@@ -18,6 +21,14 @@ import type { checkHotelSetupPropertyCredential } from "./hotelSetupPropertyPref
 let helperPhase:
   | Parameters<NonNullable<Parameters<typeof grantFreshHotelSetupHelpers>[0]["onPhase"]>>[0]
   | undefined;
+/** RDS-compatible actor-bound purposes (logo, profile) create their LOGIN while staging. */
+export function hotelSetupBootstrapStagingSecret(
+  operation: HotelSetupPropertyPurpose,
+  password: string,
+): { logoPassword?: string } {
+  return isHotelSetupActorPurpose(operation) ? { logoPassword: password } : {};
+}
+
 export async function runHotelSetupPropertyBootstrap(env: NodeJS.ProcessEnv = process.env) {
   helperPhase = undefined;
   let holder: pg.Client | undefined;
@@ -55,7 +66,7 @@ export async function runHotelSetupPropertyBootstrap(env: NodeJS.ProcessEnv = pr
       adminDatabaseUrl,
       databaseEndpoint,
       scope,
-      ...(scope.operation === "property_logo" ? { logoPassword: password } : {}),
+      ...hotelSetupBootstrapStagingSecret(scope.operation, password),
       helperOwner: {
         databaseUrl: ownerDatabaseUrl,
         holder,

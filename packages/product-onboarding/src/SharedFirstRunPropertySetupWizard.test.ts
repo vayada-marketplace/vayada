@@ -54,6 +54,14 @@ describe("property create conflict recovery", () => {
     expect(
       setupErrorMessage({
         status: 409,
+        data: { code: "profile_edit_not_provisioned", detail: "server copy" },
+      }),
+    ).toBe(
+      "Editing hotel details isn't enabled for your account on this hotel yet, so trying again won't help. Please contact Vayada support.",
+    );
+    expect(
+      setupErrorMessage({
+        status: 409,
         data: { code: "private_contact_conflict", detail: "Publish this contact first." },
       }),
     ).toBe("Publish this contact first.");

@@ -101,27 +101,31 @@ describe("private setup forwarding configuration", () => {
 });
 
 describe("private setup admission hold", () => {
-  it.each(["currency", "modules", "financials", "property_creation", "launch_settings"] as const)(
-    "blocks %s without selecting transport or the ordinary writer",
-    async (operation) => {
-      const transport = vi.fn<typeof fetch>();
-      const forward = loadHotelSetupCommandForwarder(
-        { HOTEL_SETUP_COMMAND_ADMISSION: "blocked" },
-        transport,
-      )!;
-      const app = Fastify();
-      app.all("/hold", (request, reply) => forward(request, reply, null, operation));
-      try {
-        const response = await app.inject({ method: "POST", url: "/hold" });
-        expect(response.statusCode).toBe(503);
-        expect(response.headers["cache-control"]).toBe("no-store");
-        expect(response.json()).toEqual({ code: "hotel_setup_unavailable" });
-        expect(transport).not.toHaveBeenCalled();
-      } finally {
-        await app.close();
-      }
-    },
-  );
+  it.each([
+    "currency",
+    "modules",
+    "financials",
+    "property_creation",
+    "launch_settings",
+    "property_profile",
+  ] as const)("blocks %s without selecting transport or the ordinary writer", async (operation) => {
+    const transport = vi.fn<typeof fetch>();
+    const forward = loadHotelSetupCommandForwarder(
+      { HOTEL_SETUP_COMMAND_ADMISSION: "blocked" },
+      transport,
+    )!;
+    const app = Fastify();
+    app.all("/hold", (request, reply) => forward(request, reply, null, operation));
+    try {
+      const response = await app.inject({ method: "POST", url: "/hold" });
+      expect(response.statusCode).toBe(503);
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(response.json()).toEqual({ code: "hotel_setup_unavailable" });
+      expect(transport).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
   it("requires private forwarding when admission is enabled and rejects unknown states", () => {
     expect(() =>
       loadHotelSetupCommandForwarder({ HOTEL_SETUP_COMMAND_ADMISSION: "enabled" }),
@@ -148,6 +152,7 @@ describe("logo command transport", () => {
       "/media/upload-sessions/10000000-0000-4000-8000-000000000001/finalize",
     ],
     ["logo_assignment", "PUT", "/properties/10000000-0000-4000-8000-000000000001/media/logo"],
+    ["property_profile", "PUT", "/properties/10000000-0000-4000-8000-000000000001/profile"],
   ] as const)("forwards only the original %s wire request", async (operation, method, path) => {
     const transport = vi.fn<typeof fetch>().mockResolvedValue(new Response("{}", { status: 200 }));
     const forward = loadHotelSetupCommandForwarder(
@@ -185,7 +190,9 @@ describe("logo command transport", () => {
         authorization: "Bearer original-session",
         "x-vayada-internal-token": token,
         "content-type": "application/json",
-        ...(operation === "logo_assignment" ? { "idempotency-key": "logo-attempt" } : {}),
+        ...(operation === "logo_assignment" || operation === "property_profile"
+          ? { "idempotency-key": "logo-attempt" }
+          : {}),
       });
       transport.mockClear();
       expect(
@@ -198,6 +205,38 @@ describe("logo command transport", () => {
           })
         ).statusCode,
       ).toBe(400);
+      expect(transport).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe("profile command transport", () => {
+  it("requires one retry key and the PUT method before any transport", async () => {
+    const transport = vi.fn<typeof fetch>();
+    const forward = loadHotelSetupCommandForwarder(
+      {
+        HOTEL_SETUP_COMMAND_ORIGIN: "https://property-setup.internal",
+        HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: token,
+      },
+      transport,
+    )!;
+    const app = Fastify();
+    app.all("/profile", (request, reply) =>
+      forward(request, reply, "10000000-0000-4000-8000-000000000001", "property_profile"),
+    );
+    try {
+      for (const request of [
+        { method: "PUT" as const, headers: { authorization: "Bearer original-session" } },
+        {
+          method: "POST" as const,
+          headers: { authorization: "Bearer original-session", "idempotency-key": "save-1" },
+        },
+      ])
+        expect((await app.inject({ ...request, url: "/profile", payload: {} })).statusCode).toBe(
+          400,
+        );
       expect(transport).not.toHaveBeenCalled();
     } finally {
       await app.close();

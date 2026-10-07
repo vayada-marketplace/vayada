@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import pg from "pg";
 import { parseHotelSetupDatabaseUrl } from "./hotelSetupCommandServiceConfig.js";
 import { checkHotelSetupPropertyCredential } from "./cli/hotelSetupPropertyPreflight.js";
+import { hotelSetupPurposeKind, isHotelSetupActorPurpose } from "./hotelSetupCommandScope.js";
 import {
   lockHotelSetupPropertyBootstrapAuthority,
   type stageHotelSetupPropertyRole,
@@ -58,7 +59,7 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
   const { proveSecondary, publish } = input;
   try {
     const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const prefix = `vayada_next_hotel_setup_${operation === "property_logo" ? "logo" : "property"}_${createHash(
+    const prefix = `vayada_next_hotel_setup_${hotelSetupPurposeKind(operation)}_${createHash(
       "sha256",
     )
       .update(`${propertyId.toLowerCase()}:${operation}`)
@@ -66,12 +67,17 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
       .slice(0, 16)}_`;
     if (
       ![propertyId, organizationId, actorUserId].every((id) => uuid.test(id)) ||
-      !["launch_settings", "currency", "currency_ready", "feature_hub", "property_logo"].includes(
-        operation,
-      ) ||
-      (operation === "property_logo" && automatic !== undefined) ||
-      (operation === "property_logo" && !/^[1-9][0-9]*$/.test(assignmentXid ?? "")) ||
-      (operation !== "property_logo" && assignmentXid !== undefined) ||
+      ![
+        "launch_settings",
+        "currency",
+        "currency_ready",
+        "feature_hub",
+        "property_logo",
+        "property_profile",
+      ].includes(operation) ||
+      (isHotelSetupActorPurpose(operation) && automatic !== undefined) ||
+      (isHotelSetupActorPurpose(operation) && !/^[1-9][0-9]*$/.test(assignmentXid ?? "")) ||
+      (!isHotelSetupActorPurpose(operation) && assignmentXid !== undefined) ||
       !Number.isInteger(roleOid) ||
       roleOid <= 0 ||
       !login.startsWith(prefix) ||
@@ -115,7 +121,7 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
     await admin.query("SELECT pg_catalog.pg_advisory_lock(pg_catalog.hashtextextended($1,0))", [
       `hotel_setup_property_activation:${login}`,
     ]);
-    if (operation === "property_logo") {
+    if (isHotelSetupActorPurpose(operation)) {
       // Its fresh LOGIN and pending assignment already committed atomically during staging.
       const proofScope = Object.freeze({ ...stagedScope, bootstrapPending: true as const });
       const credential = { nativeDatabaseUrl, databaseEndpoint, login, roleOid };
@@ -211,9 +217,11 @@ export async function activateVerifiedHotelSetupPropertyRole(input: {
     await nativeClient?.end().catch(() => undefined);
     nativeClient = undefined;
     await admin?.query("ROLLBACK").catch(() => undefined);
-    // No catalog verifier is available on RDS. Never mutate an uncertain committed logo identity.
-    if (operation === "property_logo")
-      throw new Error("Hotel setup logo bootstrap requires recovery inspection");
+    // No catalog verifier is available on RDS. Never mutate an uncertain committed actor identity.
+    if (isHotelSetupActorPurpose(operation))
+      throw new Error(
+        `Hotel setup ${hotelSetupPurposeKind(operation)} bootstrap requires recovery inspection`,
+      );
     // Readiness COMMIT can succeed despite a lost acknowledgement. Do not disable
     // a possibly admitted identity; inspect this exact attempt before cleanup.
     if (

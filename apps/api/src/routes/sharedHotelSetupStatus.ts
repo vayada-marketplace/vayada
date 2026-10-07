@@ -132,6 +132,8 @@ type SharedHotelSetupStatusRoutesOptions = {
   trackCommandRepository: HotelSetupTrackCommandRepository;
   propertyCreationForwarder?: HotelSetupCommandForwarder;
   launchSettingsForwarder?: HotelSetupCommandForwarder;
+  /** Unset keeps the ordinary pre-cutover writer; set, there is no local-write fallback. */
+  profileForwarder?: HotelSetupCommandForwarder;
   propertyAccessRepository?: PropertyAccessRepository;
   launchSettingsRepository?: SharedPropertyLaunchSettingsRepository;
   now?: () => Date;
@@ -319,6 +321,8 @@ export async function registerSharedHotelSetupStatusRoutes(
       "hotel_catalog.setup.manage",
     );
     if (!access) return reply;
+    if (options.profileForwarder)
+      return options.profileForwarder(request, reply, propertyId, "property_profile");
 
     const existingProfile = await repository.getPropertyProfile({
       organizationId: access.organizationId,
@@ -892,6 +896,120 @@ export function registerSharedHotelSetupLaunchSettings(
   });
 }
 
+export type HotelSetupPropertyProfileCommand = {
+  idempotencyKey: string;
+  fingerprint: string;
+  merge(existing: PropertyProfile): ReturnType<typeof propertyProfileUpdate>;
+};
+export type HotelSetupPropertyProfileResult =
+  | { status: "updated" | "replayed"; profile: SharedPropertyProfile }
+  | { status: "conflict"; currentRevision: number }
+  | { status: "idempotency_conflict" }
+  | { status: "private_contact_conflict" }
+  | { status: "not_provisioned" }
+  | { status: "invalid"; fields: Record<string, string[]> };
+
+/** Private property-command service only. Checks the original Owner session, Owner link and
+ * effective access here; the native writer re-locks current authority before any write. */
+export function registerHotelSetupPropertyProfileUpdate(
+  app: FastifyInstance,
+  update: (
+    context: ReturnType<typeof enforceRoutePolicy>,
+    propertyId: string,
+    command: HotelSetupPropertyProfileCommand,
+  ) => Promise<HotelSetupPropertyProfileResult>,
+  options: { propertyAccessRepository: PropertyAccessRepository },
+): void {
+  app.put("/properties/:propertyId/profile", async (request, reply) => {
+    const params = request.params as SharedPropertyProfileParams;
+    const propertyId = parsePropertyId(params.propertyId, reply);
+    if (propertyId === false || propertyId === null) return reply;
+    const access = resolveSharedSetupAccess(
+      request,
+      reply,
+      propertyId,
+      "hotel_catalog.setup.manage",
+    );
+    if (!access) return reply;
+    const { context } = access;
+    if (
+      !context.actor.providerIdentity.sessionId ||
+      context.membership.roleKey !== "hotel_owner" ||
+      !hasPermission(context, "marketplace.profile.manage") ||
+      !context.linkedResources.some(
+        (link) =>
+          link.product === "hotel_catalog" &&
+          link.resourceType === "property" &&
+          link.resourceId === propertyId &&
+          link.relationship === "owner" &&
+          link.status === "active",
+      )
+    )
+      return reply.status(403).send({ code: "owner_session_required" });
+    const effective = await resolveEffectivePropertyAccess(
+      context,
+      options.propertyAccessRepository,
+    );
+    if (!effective?.propertyIds.includes(propertyId)) throw new AuthorizationError();
+    const idempotencyKey = parseIdempotencyKey(request, reply);
+    if (!idempotencyKey) return reply;
+    const body = request.body as SharedPropertyProfileBody;
+
+    let result: HotelSetupPropertyProfileResult;
+    try {
+      result = await update(context, propertyId, {
+        idempotencyKey,
+        fingerprint: createHash("sha256").update(canonicalJson(body)).digest("hex"),
+        merge: (existing) => propertyProfileUpdate(body, existing),
+      });
+    } catch (error) {
+      if (error instanceof AuthorizationError) throw error;
+      request.log.error({ err: error, propertyId }, "Property profile write failed");
+      return reply.status(503).send({
+        code: "profile_update_unavailable",
+        detail: "Hotel details could not be saved. Please try again.",
+      });
+    }
+    if (result.status === "invalid") return sendInvalidProfile(reply, result.fields);
+    if (result.status === "conflict")
+      return reply.status(409).send({
+        code: "profile_revision_conflict",
+        detail: "The property profile changed while it was being updated. Reload and try again.",
+        currentRevision: result.currentRevision,
+      });
+    if (result.status === "idempotency_conflict")
+      return reply.status(409).send({
+        code: "idempotency_key_conflict",
+        detail: "These hotel details changed during the save. Review them and try again.",
+      });
+    if (result.status === "not_provisioned") {
+      request.log.warn({ propertyId }, "Property profile credential is not provisioned");
+      return reply.status(409).send({
+        code: "profile_edit_not_provisioned",
+        detail:
+          "Editing hotel details isn't enabled for your account on this hotel yet. Please contact Vayada support.",
+      });
+    }
+    if (result.status === "private_contact_conflict")
+      return reply.status(409).send({
+        code: "private_contact_conflict",
+        detail:
+          "This contact is already saved privately or managed elsewhere for this hotel. Use a different contact.",
+      });
+    return result.profile;
+  });
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (isObjectRecord(value))
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(",")}}`;
+  return JSON.stringify(value) ?? "null";
+}
+
 /** Shared validation and policy for the public API and independently authenticated setup service. */
 export function registerSharedHotelSetupPropertyCreation(
   app: FastifyInstance,
@@ -1306,10 +1424,20 @@ function parsePropertyProfileUpdate(
   existing: PropertyProfile,
   reply: FastifyReply,
 ): { expectedProfileRevision: number; profile: PropertyProfile } | false {
+  const update = propertyProfileUpdate(body, existing);
+  return "fields" in update ? sendInvalidProfile(reply, update.fields) : update;
+}
+
+function propertyProfileUpdate(
+  body: SharedPropertyProfileBody,
+  existing: PropertyProfile,
+):
+  | { expectedProfileRevision: number; profile: PropertyProfile }
+  | { fields: Record<string, string[]> } {
   const errors: Record<string, string[]> = {};
   if (!isObjectRecord(body)) {
     addFieldError(errors, "request", "request must be an object.");
-    return sendInvalidProfile(reply, errors);
+    return { fields: errors };
   }
   validateKnownKeys(body, ["expectedProfileRevision", "patch"], "request", errors);
   const expectedProfileRevision = body["expectedProfileRevision"];
@@ -1327,7 +1455,7 @@ function parsePropertyProfileUpdate(
   const rawPatch = body["patch"];
   if (!isObjectRecord(rawPatch) || Object.keys(rawPatch).length === 0) {
     addFieldError(errors, "patch", "patch must be a non-empty object.");
-    return sendInvalidProfile(reply, errors);
+    return { fields: errors };
   }
   validateKnownKeys(
     rawPatch,
@@ -1369,7 +1497,7 @@ function parsePropertyProfileUpdate(
   if (profile && Object.keys(errors).length === 0 && typeof expectedProfileRevision === "number") {
     return { expectedProfileRevision, profile };
   }
-  return sendInvalidProfile(reply, errors);
+  return { fields: errors };
 }
 
 export function parseCanonicalPropertyProfile(

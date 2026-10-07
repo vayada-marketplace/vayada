@@ -11,7 +11,12 @@ import {
   resolveEffectivePropertyAccess,
 } from "@vayada/backend-authorization";
 import { parseHotelSetupDatabaseUrl } from "./hotelSetupCommandServiceConfig.js";
-import type { HotelSetupPropertyPurpose } from "./hotelSetupCommandScope.js";
+import {
+  hotelSetupPurposeKind,
+  isHotelSetupActorPurpose,
+  type HotelSetupPropertyPurpose,
+} from "./hotelSetupCommandScope.js";
+import { HOTEL_SETUP_PROFILE_FUNCTIONS } from "./hotelSetupProfilePrivileges.js";
 import {
   HOTEL_SETUP_LOGO_PRIVILEGES,
   HOTEL_SETUP_LOGO_RLS_HELPERS,
@@ -42,15 +47,17 @@ const inventories = {
   currency_ready: HOTEL_SETUP_CURRENCY_READY_PRIVILEGES,
   feature_hub: HOTEL_SETUP_FEATURE_HUB_PRIVILEGES,
   property_logo: HOTEL_SETUP_LOGO_PRIVILEGES,
+  // Profile edits run only through fixed definer functions; the login owns no table grant.
+  property_profile: {},
 };
 
 /** Isolated provisioner only; manual callers retain their blocked service gate.
- * Logo creates its password/pending assignment atomically; other purposes only stage. */
+ * Actor-bound logo/profile create their password/pending assignment atomically; others only stage. */
 export async function stageHotelSetupPropertyRole(input: {
   adminDatabaseUrl: string;
   databaseEndpoint: string;
   scope: HotelSetupPropertyBootstrapScope;
-  /** Private manual-logo input; never returned in a receipt. */
+  /** Private manual actor-purpose (logo/profile) input; never returned in a receipt. */
   logoPassword?: string;
   helperOwner?: {
     databaseUrl: string;
@@ -79,8 +86,8 @@ export async function stageHotelSetupPropertyRole(input: {
       !uuid.test(scope.actorUserId) ||
       !Object.hasOwn(inventories, scope.operation) ||
       (automatic !== undefined && automatic !== true) ||
-      (automatic && ["currency", "property_logo"].includes(operation)) ||
-      (operation === "property_logo"
+      (automatic && (operation === "currency" || isHotelSetupActorPurpose(operation))) ||
+      (isHotelSetupActorPurpose(operation)
         ? typeof logoPassword !== "string" || Buffer.byteLength(logoPassword) < 32
         : logoPassword !== undefined)
     )
@@ -115,9 +122,8 @@ export async function stageHotelSetupPropertyRole(input: {
     await lockHotelSetupPropertyBootstrapAuthority(admin, scope);
     // A stable prefix finds an earlier disabled attempt even before assignment exists.
     // It only rejects retries; the database assignment remains the scope authority.
-    const prefix = `vayada_next_hotel_setup_${scope.operation === "property_logo" ? "logo" : "property"}_${createHash(
-      "sha256",
-    )
+    const kind = hotelSetupPurposeKind(scope.operation);
+    const prefix = `vayada_next_hotel_setup_${kind}_${createHash("sha256")
       .update(`${scope.propertyId.toLowerCase()}:${scope.operation}`)
       .digest("hex")
       .slice(0, 16)}_`;
@@ -135,14 +141,14 @@ export async function stageHotelSetupPropertyRole(input: {
     const role = admin.escapeIdentifier(login);
     await admin.query(`CREATE ROLE ${role} NOLOGIN NOINHERIT NOSUPERUSER
       NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`);
-    await admin.query(`GRANT vayada_next_hotel_setup_${scope.operation === "property_logo" ? "logo" : "property"}_scope TO ${role}
+    await admin.query(`GRANT vayada_next_hotel_setup_${kind}_scope TO ${role}
       WITH INHERIT TRUE, SET FALSE`);
     await admin.query(
       `GRANT CONNECT ON DATABASE ${admin.escapeIdentifier(decodeURIComponent(url.pathname.slice(1)))} TO ${role}`,
     );
     const inventory = inventories[scope.operation];
     const schemas = [...new Set(Object.keys(inventory).map((table) => table.split(".")[0]!))];
-    await admin.query(`GRANT USAGE ON SCHEMA ${schemas.join(",")} TO ${role}`);
+    if (schemas.length) await admin.query(`GRANT USAGE ON SCHEMA ${schemas.join(",")} TO ${role}`);
     for (const [table, privileges] of Object.entries(inventory))
       for (const [privilege, columns] of Object.entries(privileges))
         await admin.query(`GRANT ${privilege}(${columns.join(",")}) ON ${table} TO ${role}`);
@@ -153,17 +159,19 @@ export async function stageHotelSetupPropertyRole(input: {
     const helpers =
       scope.operation === "property_logo"
         ? HOTEL_SETUP_LOGO_RLS_HELPERS
-        : HOTEL_SETUP_PROPERTY_RLS_HELPERS[scope.operation];
+        : scope.operation === "property_profile"
+          ? HOTEL_SETUP_PROFILE_FUNCTIONS
+          : HOTEL_SETUP_PROPERTY_RLS_HELPERS[scope.operation];
     if (helpers.length) {
       const helper = await admin.query<{ safe: boolean }>(
-        scope.operation === "property_logo"
+        isHotelSetupActorPurpose(scope.operation)
           ? "SELECT pg_catalog.has_function_privilege($2::name,oid,'EXECUTE') AND NOT pg_catalog.has_function_privilege($2::name,oid,'EXECUTE WITH GRANT OPTION') AS safe FROM pg_catalog.pg_proc WHERE oid=ANY($1::regprocedure[])"
           : "SELECT NOT prosecdef AS safe FROM pg_catalog.pg_proc WHERE oid=ANY($1::regprocedure[])",
-        scope.operation === "property_logo" ? [helpers, login] : [helpers],
+        isHotelSetupActorPurpose(scope.operation) ? [helpers, login] : [helpers],
       );
       if (helper.rows.length !== helpers.length || helper.rows.some(({ safe }) => safe !== true))
         throw new Error();
-      if (!input.helperOwner && scope.operation !== "property_logo")
+      if (!input.helperOwner && !isHotelSetupActorPurpose(scope.operation))
         for (const signature of helpers)
           await admin.query(`GRANT EXECUTE ON FUNCTION ${signature} TO ${role}`);
     }
@@ -173,7 +181,7 @@ export async function stageHotelSetupPropertyRole(input: {
     );
     if (failed || incompleteGrant || result.rows.length !== 1) throw new Error();
     let assignmentXid: string | undefined;
-    if (scope.operation === "property_logo") {
+    if (isHotelSetupActorPurpose(scope.operation)) {
       await admin.query(
         `SELECT pg_catalog.set_config('vay1092.property_login',$1,true),
         pg_catalog.set_config('vay1092.property_password',$2,true)`,
@@ -185,9 +193,9 @@ export async function stageHotelSetupPropertyRole(input: {
       const assignment = await admin.query<{ assignment_xid: string }>(
         `INSERT INTO platform.hotel_setup_property_scopes
         (database_login,property_id,organization_id,operation_class,active,actor_user_id)
-        VALUES($1,$2::uuid,$3::uuid,'property_logo',TRUE,$4::uuid)
+        VALUES($1,$2::uuid,$3::uuid,$5,TRUE,$4::uuid)
         RETURNING xmin::text AS assignment_xid`,
-        [login, scope.propertyId, scope.organizationId, scope.actorUserId],
+        [login, scope.propertyId, scope.organizationId, scope.actorUserId, scope.operation],
       );
       assignmentXid = assignment.rows[0]?.assignment_xid;
       if (failed || assignment.rows.length !== 1 || !/^[1-9][0-9]*$/.test(assignmentXid ?? ""))
@@ -196,7 +204,7 @@ export async function stageHotelSetupPropertyRole(input: {
     commitAttempted = true;
     await admin.query("COMMIT");
     if (failed) throw new Error();
-    if (input.helperOwner && scope.operation !== "property_logo")
+    if (input.helperOwner && !isHotelSetupActorPurpose(scope.operation))
       await grantFreshHotelSetupHelpers({
         ownerDatabaseUrl: input.helperOwner.databaseUrl,
         databaseEndpoint: input.databaseEndpoint,
@@ -232,8 +240,10 @@ export async function lockHotelSetupPropertyBootstrapAuthority(
   admin: pg.Client,
   scope: HotelSetupPropertyBootstrapScope,
 ) {
-  if (scope.operation === "property_logo" && scope.automatic)
-    throw new Error("Automatic logo provisioning is not admitted");
+  if (isHotelSetupActorPurpose(scope.operation) && scope.automatic)
+    throw new Error(
+      `Automatic ${hotelSetupPurposeKind(scope.operation)} provisioning is not admitted`,
+    );
   if (scope.automatic) {
     const organization = await admin.query(
       `SELECT id FROM identity.organizations WHERE id=$1::uuid
@@ -251,18 +261,18 @@ export async function lockHotelSetupPropertyBootstrapAuthority(
        AND catalog.product='hotel_catalog' AND catalog.resource_type='property'
        AND lower(catalog.resource_id)=$1::uuid::text AND catalog.relationship='owner' AND catalog.status='active'
      ${
-       scope.operation === "property_logo"
+       isHotelSetupActorPurpose(scope.operation)
          ? ""
          : `JOIN identity.organization_resource_links pms ON pms.organization_id=organization.id
        AND pms.product='pms' AND pms.resource_type='pms_property'
        AND lower(pms.resource_id)=$1::uuid::text AND pms.relationship='owner' AND pms.status='active'`
      }
-     WHERE property.id=$1::uuid FOR UPDATE OF property ${scope.operation === "property_logo" ? "FOR UPDATE OF organization FOR SHARE OF catalog" : "FOR SHARE OF organization,catalog,pms"}`,
+     WHERE property.id=$1::uuid FOR UPDATE OF property ${isHotelSetupActorPurpose(scope.operation) ? "FOR UPDATE OF organization FOR SHARE OF catalog" : "FOR SHARE OF organization,catalog,pms"}`,
     [scope.propertyId, scope.organizationId],
   );
   if (owner.rows.length !== 1) throw new Error("Hotel setup property authority unavailable");
   if (scope.automatic) await lockHotelSetupAutomaticPropertyEligibility(admin, scope);
-  if (scope.operation === "launch_settings" || scope.operation === "property_logo") {
+  if (scope.operation === "launch_settings" || isHotelSetupActorPurpose(scope.operation)) {
     const membership = await lockHotelSetupMembership(admin, scope);
     const access =
       membership &&
@@ -274,7 +284,9 @@ export async function lockHotelSetupPropertyBootstrapAuthority(
     if (
       !membership?.permissions.includes("hotel_catalog.setup.manage") ||
       !access?.propertyIds.includes(scope.propertyId) ||
-      (scope.operation === "property_logo" &&
+      (scope.operation === "property_profile" &&
+        !membership.permissions.includes("marketplace.profile.manage")) ||
+      (isHotelSetupActorPurpose(scope.operation) &&
         (membership.scope.roleKey !== "hotel_owner" ||
           (membership.scope.permissionOverrides !== null &&
             !isDeepStrictEqual(membership.scope.permissionOverrides, { grant: [], deny: [] })) ||

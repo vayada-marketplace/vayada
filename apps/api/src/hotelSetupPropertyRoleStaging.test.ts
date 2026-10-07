@@ -192,6 +192,12 @@ it("rejects invalid purpose, identity and transport before constructing a client
     { ...input, adminDatabaseUrl: input.adminDatabaseUrl.replace("admin:", ":") },
     { ...input, scope: { ...input.scope, automatic: false } },
     { ...input, scope: { ...input.scope, automatic: true, operation: "currency" } },
+    {
+      ...input,
+      logoPassword: "b".repeat(36),
+      scope: { ...input.scope, automatic: true, operation: "property_profile" },
+    },
+    { ...input, scope: { ...input.scope, operation: "property_profile" } },
     { ...input, scope: { ...input.scope, operation: "property_logo" } },
     { ...input, logoPassword: "b".repeat(36) },
     { ...input, logoPassword: "short", scope: { ...input.scope, operation: "property_logo" } },

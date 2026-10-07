@@ -8,6 +8,7 @@ import {
   SecretsManagerClient,
 } from "@aws-sdk/client-secrets-manager";
 import { parseHotelSetupDatabaseUrl } from "./hotelSetupCommandServiceConfig.js";
+import { hotelSetupPurposeKind, isHotelSetupActorPurpose } from "./hotelSetupCommandScope.js";
 import { hotelSetupOrganizationConnection } from "./hotelSetupOrganizationRoleStaging.js";
 import { lockHotelSetupPropertyBootstrapAuthority } from "./hotelSetupPropertyRoleStaging.js";
 import type { stageHotelSetupPropertyRole } from "./hotelSetupPropertyRoleStaging.js";
@@ -33,13 +34,11 @@ export async function publishHotelSetupPropertySecret(input: {
   const name = `hotel-setup-command/prod/property/${login}`;
   try {
     if (
-      !(
-        operation === "property_logo"
-          ? /^vayada_next_hotel_setup_logo_[a-f0-9]{16}_[a-f0-9]{12}$/
-          : /^vayada_next_hotel_setup_property_[a-f0-9]{16}_[a-f0-9]{12}$/
+      !new RegExp(
+        `^vayada_next_hotel_setup_${hotelSetupPurposeKind(operation)}_[a-f0-9]{16}_[a-f0-9]{12}$`,
       ).test(login) ||
-      (operation === "property_logo" && automatic !== undefined) ||
-      (operation === "property_logo"
+      (isHotelSetupActorPurpose(operation) && automatic !== undefined) ||
+      (isHotelSetupActorPurpose(operation)
         ? !/^[1-9][0-9]*$/.test(expectedAssignmentXid ?? "") || expectedVerifier !== undefined
         : !expectedVerifier || expectedAssignmentXid !== undefined)
     )
@@ -47,8 +46,8 @@ export async function publishHotelSetupPropertySecret(input: {
     const url = parseHotelSetupDatabaseUrl(nativeDatabaseUrl, databaseEndpoint, login);
     const identity = async () => {
       const role = await admin.query(
-        `SELECT oid FROM ${operation === "property_logo" ? "pg_catalog.pg_roles" : "pg_catalog.pg_authid"} r WHERE oid=$1::oid AND rolname=$2
-         AND ${operation === "property_logo" ? "$3::text IS NULL" : "rolpassword=$3"} AND rolcanlogin AND rolvaliduntil IS NULL
+        `SELECT oid FROM ${isHotelSetupActorPurpose(operation) ? "pg_catalog.pg_roles" : "pg_catalog.pg_authid"} r WHERE oid=$1::oid AND rolname=$2
+         AND ${isHotelSetupActorPurpose(operation) ? "$3::text IS NULL" : "rolpassword=$3"} AND rolcanlogin AND rolvaliduntil IS NULL
          AND NOT rolsuper AND NOT rolinherit AND NOT rolcreaterole AND NOT rolcreatedb
          AND NOT rolreplication AND NOT rolbypassrls
          AND (SELECT count(*) FROM pg_catalog.pg_auth_members WHERE member=r.oid)=1
@@ -62,13 +61,11 @@ export async function publishHotelSetupPropertySecret(input: {
           roleOid,
           login,
           expectedVerifier ?? null,
-          operation === "property_logo"
-            ? "vayada_next_hotel_setup_logo_scope"
-            : "vayada_next_hotel_setup_property_scope",
+          `vayada_next_hotel_setup_${hotelSetupPurposeKind(operation)}_scope`,
         ],
       );
       if (role.rows.length !== 1) throw new Error();
-      if (operation === "property_logo")
+      if (isHotelSetupActorPurpose(operation))
         await authenticateHotelSetupPropertyLogin({
           nativeDatabaseUrl,
           databaseEndpoint,
@@ -101,8 +98,9 @@ export async function publishHotelSetupPropertySecret(input: {
         assigned?.property_id !== propertyId.toLowerCase() ||
         assigned.organization_id !== organizationId.toLowerCase() ||
         assigned.operation_class !== operation ||
-        (operation === "property_logo" && assigned.actor_user_id !== actorUserId.toLowerCase()) ||
-        (operation === "property_logo" && assigned.assignment_xid !== expectedAssignmentXid) ||
+        (isHotelSetupActorPurpose(operation) &&
+          (assigned.actor_user_id !== actorUserId.toLowerCase() ||
+            assigned.assignment_xid !== expectedAssignmentXid)) ||
         !assigned.active ||
         assigned.credential_role_oid !== null ||
         assigned.credential_secret_version !== null ||
@@ -210,7 +208,7 @@ export async function publishHotelSetupPropertySecret(input: {
         propertyId,
         organizationId,
         operation,
-        operation === "property_logo" ? actorUserId : null,
+        isHotelSetupActorPurpose(operation) ? actorUserId : null,
         expectedAssignmentXid ?? null,
       ],
     );

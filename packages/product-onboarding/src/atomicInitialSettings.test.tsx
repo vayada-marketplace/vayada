@@ -190,6 +190,45 @@ describe("atomic initial hotel settings", () => {
     expect(api.createPropertyProfile).not.toHaveBeenCalled();
   });
 
+  it("retries an ambiguous hotel-detail edit with the same profile key", async () => {
+    const { api } = await mount(true, false);
+    await act(async () => form().props.onChange({ ...draft, displayName: "Edited Hotel" }));
+    api.updatePropertyProfile.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await act(async () => form().props.onSave());
+    await act(async () => form().props.onSave());
+    expect(api.updatePropertyProfile).toHaveBeenCalledTimes(2);
+    const [first, retry] = api.updatePropertyProfile.mock.calls;
+    expect(first[1]).toMatchObject({ patch: { displayName: "Edited Hotel" } });
+    expect(first[2]).toEqual(expect.any(String));
+    expect(retry[2]).toBe(first[2]);
+  });
+
+  it("starts a new profile key after a committed edit even when a later step fails", async () => {
+    const { api } = await mount(true, false);
+    await act(async () => form().props.onChange({ ...draft, displayName: "Edited Hotel" }));
+    api.getStatus.mockRejectedValueOnce(new Error("Reload failed"));
+    await act(async () => form().props.onSave());
+    await act(async () => form().props.onChange({ ...draft, displayName: "Edited Again" }));
+    await act(async () => form().props.onSave());
+    const [first, second] = api.updatePropertyProfile.mock.calls;
+    expect(second[1]).toMatchObject({ patch: { displayName: "Edited Again" } });
+    expect(second[2]).not.toBe(first[2]);
+  });
+
+  it("refreshes the profile and drops the key after an idempotency conflict", async () => {
+    const { api } = await mount(true, false);
+    await act(async () => form().props.onChange({ ...draft, displayName: "Edited Hotel" }));
+    api.updatePropertyProfile.mockRejectedValueOnce({
+      status: 409,
+      data: { code: "idempotency_key_conflict" },
+    });
+    await act(async () => form().props.onSave());
+    expect(api.getPropertyProfile).toHaveBeenCalledTimes(2);
+    await act(async () => form().props.onSave());
+    const [first, retry] = api.updatePropertyProfile.mock.calls;
+    expect(retry[2]).not.toBe(first[2]);
+  });
+
   it("retains the key after an ambiguous submission followed by permission denial", async () => {
     const { api, launchApi } = await mount();
     await act(async () => form().props.onLaunchSettingsChange(settings));

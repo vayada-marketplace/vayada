@@ -263,6 +263,7 @@ function fixture(
     },
   });
   const launch = vi.fn(async (_context, _id, settings) => settings);
+  const profile = vi.fn();
   const create = vi.fn().mockResolvedValue({ propertyId, profileRevision: 1 });
   const app = buildHotelSetupCommandService({
     internalToken,
@@ -294,6 +295,7 @@ function fixture(
     },
     logoMedia: options.logoMedia,
     launchSettings: options.creationOnly ? undefined : { updateLaunchSettings: launch },
+    profileEdit: options.creationOnly ? undefined : { updatePropertyProfile: profile },
     currencyCommands: options.creationOnly ? undefined : { upsertPropertyPricingCurrency: save },
     propertyCreation: { createPropertyProfile: create },
     featureHub: options.creationOnly
@@ -318,6 +320,7 @@ function fixture(
   return {
     app,
     launch,
+    profile,
     create,
     feature,
     setupComplete,
@@ -862,6 +865,146 @@ it("rejects extra launch claims and keeps creation-only service free of launch c
         url: launchPath,
         headers: creation.headers,
         payload: launchPayload,
+      })
+    ).statusCode,
+  ).toBe(404);
+});
+
+const profilePath = `/properties/${propertyId}/profile`;
+const ownerPermissions: PermissionKey[] = [
+  "hotel_catalog.setup.manage",
+  "marketplace.profile.manage",
+];
+const savedProfile = {
+  propertyId,
+  profileRevision: 4,
+  profile: {
+    displayName: "Edited TEST ONLY",
+    propertyType: "hotel",
+    location: {
+      streetAddress: "1 Beach Road",
+      postalCode: "80650",
+      city: "Ahangama",
+      countryCode: "LK",
+      timezone: "Asia/Colombo",
+      latitude: null,
+      longitude: null,
+      localityPublic: false,
+      geoPublic: false,
+      mapDisplayMode: "hidden" as const,
+    },
+    contacts: [
+      {
+        channelType: "email" as const,
+        value: "hello@example.test",
+        purpose: "guest" as const,
+        isPublic: true,
+      },
+      {
+        channelType: "phone" as const,
+        value: "+94 77 123 4567",
+        purpose: "guest" as const,
+        isPublic: false,
+      },
+    ],
+  },
+};
+const profileUpdate = { expectedProfileRevision: 3, patch: { displayName: "Edited TEST ONLY" } };
+it("saves profile edits through the original Owner session with a parsed merge and retry key", async () => {
+  const f = fixture({ roleKey: "hotel_owner", permissions: ownerPermissions });
+  f.profile.mockImplementation(async (_context, _id, command) => {
+    const merged = command.merge({ ...savedProfile.profile, displayName: "Old" });
+    expect(merged).toEqual({ expectedProfileRevision: 3, profile: savedProfile.profile });
+    return { status: "updated", profile: savedProfile };
+  });
+  const response = await f.app.inject({
+    method: "PUT",
+    url: profilePath,
+    headers: { ...f.headers, "idempotency-key": "profile-save-1" },
+    payload: profileUpdate,
+  });
+  expect(response.statusCode).toBe(200);
+  expect(response.json()).toEqual(savedProfile);
+  const [context, id, command] = f.profile.mock.calls[0]!;
+  expect(context).toMatchObject({
+    actor: { internalUserId: userId, providerIdentity: { sessionId: "session_workos" } },
+    selectedOrganization: { organizationId },
+  });
+  expect(id).toBe(propertyId);
+  expect(command.idempotencyKey).toBe("profile-save-1");
+  // Key order does not change the replay fingerprint.
+  await f.app.inject({
+    method: "PUT",
+    url: profilePath,
+    headers: { ...f.headers, "idempotency-key": "profile-save-1" },
+    payload: { patch: profileUpdate.patch, expectedProfileRevision: 3 },
+  });
+  expect(f.profile.mock.calls[1]![2].fingerprint).toBe(command.fingerprint);
+  expect(command.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+});
+it.each([
+  { session: false },
+  { roleKey: "owner" },
+  { permissions: ["hotel_catalog.setup.manage"] as PermissionKey[] },
+  { permissions: ["marketplace.profile.manage"] as PermissionKey[] },
+  { assignment: "other" as const },
+  { malformedOverride: true },
+  { membership: "inactive" as const },
+  { link: "missing" as const },
+  { link: "operator" as const },
+  { link: "other_property" as const },
+])("denies profile edits before credential selection: %j", async (options) => {
+  const f = fixture({ roleKey: "hotel_owner", permissions: ownerPermissions, ...options });
+  const response = await f.app.inject({
+    method: "PUT",
+    url: profilePath,
+    headers: f.headers,
+    payload: profileUpdate,
+  });
+  expect([401, 403]).toContain(response.statusCode);
+  expect(f.profile).not.toHaveBeenCalled();
+});
+it.each([
+  [{ status: "invalid", fields: { displayName: ["required"] } }, 422, "invalid_setup_request"],
+  [{ status: "conflict", currentRevision: 5 }, 409, "profile_revision_conflict"],
+  [{ status: "idempotency_conflict" }, 409, "idempotency_key_conflict"],
+  [{ status: "private_contact_conflict" }, 409, "private_contact_conflict"],
+  [{ status: "not_provisioned" }, 409, "profile_edit_not_provisioned"],
+  [new Error("native"), 503, "profile_update_unavailable"],
+  [new AuthorizationError(), 403, "forbidden"],
+])("surfaces every failed profile save: %j", async (outcome, status, code) => {
+  const f = fixture({ roleKey: "hotel_owner", permissions: ownerPermissions });
+  if (outcome instanceof Error) f.profile.mockRejectedValue(outcome);
+  else f.profile.mockResolvedValue(outcome);
+  const response = await f.app.inject({
+    method: "PUT",
+    url: profilePath,
+    headers: f.headers,
+    payload: profileUpdate,
+  });
+  expect(response.statusCode).toBe(status);
+  expect(response.json().code).toBe(code);
+});
+it("requires a retry key and keeps profile edits off the creation-only service", async () => {
+  const f = fixture({ roleKey: "hotel_owner", permissions: ownerPermissions });
+  const { "idempotency-key": _key, ...headers } = f.headers;
+  expect(
+    (await f.app.inject({ method: "PUT", url: profilePath, headers, payload: profileUpdate }))
+      .statusCode,
+  ).toBe(422);
+  expect(f.profile).not.toHaveBeenCalled();
+  const creation = fixture({
+    creationOnly: true,
+    roleKey: "hotel_owner",
+    permissions: ownerPermissions,
+  });
+  expect(
+    (
+      await creation.app.inject({
+        method: "PUT",
+        url: profilePath,
+        headers: creation.headers,
+        payload: profileUpdate,
       })
     ).statusCode,
   ).toBe(404);

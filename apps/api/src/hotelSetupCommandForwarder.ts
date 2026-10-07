@@ -7,6 +7,7 @@ type Operation =
   | "financials"
   | "property_creation"
   | "launch_settings"
+  | "property_profile"
   | "logo_upload"
   | "logo_finalize"
   | "logo_assignment";
@@ -75,11 +76,13 @@ export function loadHotelSetupCommandForwarder(
         ? "media/logo"
         : operation === "launch_settings"
           ? "launch-settings"
-          : operation === "currency"
-            ? "pricing-source/currency"
-            : operation === "modules"
-              ? "module-activations"
-              : "module-activations/financials";
+          : operation === "property_profile"
+            ? "profile"
+            : operation === "currency"
+              ? "pricing-source/currency"
+              : operation === "modules"
+                ? "module-activations"
+                : "module-activations/financials";
     const method =
       operation === "property_creation" ||
       operation === "logo_upload" ||
@@ -87,6 +90,7 @@ export function loadHotelSetupCommandForwarder(
         ? "POST"
         : operation === "currency" ||
             operation === "launch_settings" ||
+            operation === "property_profile" ||
             operation === "logo_assignment"
           ? "PUT"
           : operation === "modules"
@@ -101,6 +105,7 @@ export function loadHotelSetupCommandForwarder(
     if (
       operation === "currency" ||
       operation === "property_creation" ||
+      operation === "property_profile" ||
       operation === "logo_assignment"
     ) {
       const idempotencyKey = readIdempotencyKey(request);
@@ -124,7 +129,11 @@ export function loadHotelSetupCommandForwarder(
           headers,
           redirect: "error",
           signal: AbortSignal.timeout(
-            operation === "logo_finalize" || operation === "logo_assignment" ? 30_000 : 5_000,
+            operation === "logo_finalize" ||
+              operation === "logo_assignment" ||
+              operation === "property_profile"
+              ? 30_000
+              : 5_000,
           ),
           ...(method === "GET" ? {} : { body: JSON.stringify(request.body) }),
         },
