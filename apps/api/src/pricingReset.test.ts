@@ -12,7 +12,7 @@ import { quoteTargetRoomSelection } from "./routes/bookingWebMixedQuote.js";
 
 const unavailable = { code: "PRICING_UNAVAILABLE", statusCode: 503 };
 describe("pricing reset", () => {
-  it("rejects every old recurring write without opening a database connection", async () => {
+  it("retires every old recurring write without opening a database connection", async () => {
     const pool = { connect: vi.fn(), end: vi.fn() };
     const port = createPgPmsRecurringPricingCommandRepository({ connectionString: "unused", pool });
     for (const method of [
@@ -23,7 +23,10 @@ describe("pricing reset", () => {
       port.disableRecurringPricingSource,
       port.materializeRecurringPricing,
     ]) {
-      await expect(method(undefined as never)).rejects.toMatchObject(unavailable);
+      await expect(method(undefined as never)).rejects.toMatchObject({
+        code: "PRICING_RETIRED",
+        statusCode: 503,
+      });
     }
     await port.close();
     expect(pool.connect).not.toHaveBeenCalled();
