@@ -2,6 +2,22 @@ import type { sharedSetupClient } from "@/services/api/sharedHotelSetupClient";
 
 export class AirbnbPreparationError extends Error {}
 
+/** Message for a failed start or preparation; a disabled connection is not "not ready". */
+export function describeAirbnbStartError(cause: unknown): string {
+  if (cause instanceof AirbnbPreparationError) return cause.message;
+  const failure =
+    typeof cause === "object" && cause !== null ? (cause as Record<string, unknown>) : {};
+  const code = (failure.data as { code?: unknown } | undefined)?.code;
+  if (
+    (failure.status === 409 && code === "channex_capability_not_mutating") ||
+    (failure.status === 503 && code === "channex_commands_unavailable")
+  )
+    return "Connecting hotels to Airbnb is temporarily disabled. Continue setting up rooms manually and try the import again later.";
+  if (failure.status === 409)
+    return "Airbnb import is not ready for this hotel yet. You can continue setting up rooms manually.";
+  return "We couldn’t start the Airbnb connection. Please try again or continue setting up rooms manually.";
+}
+
 type Operation = {
   operationId: string;
   propertyId: string;

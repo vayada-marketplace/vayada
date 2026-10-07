@@ -5,8 +5,8 @@ import {
   channexManagementWorkerPrivileges,
 } from "./channexManagementWorkerPrivileges.js";
 
-// Worker policy catalog through 0437; shared trigger catalog through 0469, checked on PG16/17.
-const POLICY_DIGEST = "fc60ee7cf0ac6346843a77b8c62b9997eda39af3aa420cd06b732d775e0bd863";
+// Worker policy catalog through 0473; shared trigger catalog through 0473, checked on PG17.
+const POLICY_DIGEST = "c0c08b5d01df4b8fa3c1bed72e7a1fcdbfd77731383e63bd986f3d938ec26323";
 export const channexManagementWorkerFunctions = [
   "platform.channex_management_worker_scope(text,text,uuid)",
   "platform.channex_management_worker_source(text,text,uuid)",
@@ -21,7 +21,7 @@ const pricingScopeViews = new Set([
 ]);
 export async function assertChannexManagementWorkerBoundary(
   client: Pick<pg.Client, "query">,
-  options: { allowMissingGrants?: boolean; propertyId?: string } = {},
+  options: { allowMissingGrants?: boolean; propertyId?: string; connectionScope?: boolean } = {},
 ): Promise<void> {
   const role = CHANNEX_MANAGEMENT_WORKER_ROLE;
   const fail = (code: string): never => {
@@ -95,7 +95,7 @@ export async function assertChannexManagementWorkerBoundary(
   ).rows;
   if (
     createHash("sha256").update(JSON.stringify(catalog)).digest("hex") !==
-    "3c89af1ce59e55d30a9598621a9545499ba6977702eccebf7f3014bea6e6130f"
+    "10c6d40b2c7b7c4baacc4adaf468ddac1c3675344c114e40a5f77ba335b27794"
   )
     fail("catalog_drift");
   const version = Number(
@@ -145,6 +145,7 @@ export async function assertChannexManagementWorkerBoundary(
   for (const [name, privileges] of Object.entries(channexManagementWorkerPrivileges)) {
     if (
       name !== "platform.channex_management_worker_properties" &&
+      name !== "platform.channex_management_worker_operations" &&
       name !== "finance.online_card_readiness" &&
       !relations.find((row) => row.name === name)?.rls
     )
@@ -186,16 +187,28 @@ export async function assertChannexManagementWorkerBoundary(
     if (rows.length !== 1 || rows[0].property_id !== options.propertyId)
       fail("property_scope_mismatch");
   }
+  if (options.connectionScope) {
+    const rows = (
+      await client.query("SELECT operation_type FROM platform.channex_management_worker_operations")
+    ).rows;
+    if (rows.length !== 1 || rows[0].operation_type !== "enable") fail("operation_scope_mismatch");
+  }
 }
 
 // Attest transitive invoker functions, enabled triggers and the invoker view as
 // well as policies. A matching grant list alone must not accept a disabled guard.
+// The VAY-2055 connection-scope helper keeps PUBLIC execution on purpose: it is
+// referenced from policies every runtime role evaluates and returns true for
+// them before reading worker tables. Its definition is attested here instead.
+// The canary allowlist and the operation scope share this login; a provisioned
+// canary property stays readable to a connection-only worker by design.
 export const channexWorkerCatalogSql = `
 WITH relations AS (SELECT oid FROM pg_class WHERE oid=ANY($1::regclass[])),
 functions AS (
   SELECT tgfoid AS oid FROM pg_trigger WHERE tgrelid IN (SELECT oid FROM relations) AND NOT tgisinternal
   UNION SELECT unnest(ARRAY[
     'platform.channex_management_worker_scope(text,text,uuid)'::regprocedure,
+    'platform.channex_management_worker_connection_scope(text,text)'::regprocedure,
     'platform.channex_management_worker_source(text,text,uuid)'::regprocedure,
     'platform.tenant_scope_key(text,uuid,uuid)'::regprocedure,
     'platform.valid_tenant_scope(text,uuid,uuid)'::regprocedure,

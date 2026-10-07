@@ -433,7 +433,11 @@ function toRoomType(
   const sourcePlan = pricingSource?.flexibleRatePlans.find(
     (plan) => plan.roomTypeId === roomType.roomTypeId,
   );
-  const canonicalPlan = roomType.ratePlans.find(
+  // Published pricing-v2 offers belong to the pricing editor; linked ones carry no own rate.
+  const ratePlans = roomType.ratePlans.filter(
+    (plan) => plan.pricingContractVersion !== "pricing.v2",
+  );
+  const canonicalPlan = ratePlans.find(
     (plan) =>
       plan.active &&
       plan.rateType === "flexible" &&
@@ -447,14 +451,14 @@ function toRoomType(
   const derivedOccupancy = (maxAdults ?? 0) + (maxChildren ?? 0);
   const maxOccupancy =
     roomType.occupancyLimits.total ?? (derivedOccupancy > 0 ? derivedOccupancy : 0);
-  const nonRefundablePlan = roomType.ratePlans.find(
+  const nonRefundablePlan = ratePlans.find(
     (plan) => plan.active && plan.rateType === "non_refundable",
   );
   const nonRefundableRate = nonRefundablePlan
     ? asNumber(nonRefundablePlan.baseRate.amountDecimal)
     : null;
   const flexibleCancellation = cancellationPolicyFromRatePlans(
-    roomType.ratePlans,
+    ratePlans,
     sourcePlan?.cancellationTerms,
   );
 
@@ -528,7 +532,8 @@ function toRoomType(
     minimumAdvanceDays: 0,
     ratePaymentMethods: null,
     rateDepositSettings: null,
-    mealPlan: sourcePlan?.mealPlan ?? (canonicalPlan?.mealPlan === "breakfast" ? "breakfast" : "room_only"),
+    mealPlan:
+      sourcePlan?.mealPlan ?? (canonicalPlan?.mealPlan === "breakfast" ? "breakfast" : "room_only"),
     mealPlans: [],
     createdAt: "",
     updatedAt: "",
@@ -1459,11 +1464,17 @@ async function saveCanonicalRoomPricing(
 }
 
 function validateMealInclusion(data: RoomTypeCreate | RoomTypeUpdate): void {
-  if (Object.hasOwn(data, "mealPlan") && data.mealPlan !== "room_only" && data.mealPlan !== "breakfast") {
+  if (
+    Object.hasOwn(data, "mealPlan") &&
+    data.mealPlan !== "room_only" &&
+    data.mealPlan !== "breakfast"
+  ) {
     throw new Error("Choose room only or breakfast included.");
   }
   if (data.mealPlans?.length) {
-    throw new Error("Meal surcharge packages are unsupported. Choose the included meal on the standard rate.");
+    throw new Error(
+      "Meal surcharge packages are unsupported. Choose the included meal on the standard rate.",
+    );
   }
 }
 

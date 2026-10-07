@@ -31,8 +31,10 @@ export function createPgPmsRecurringPricingCommandRepository(
 ): PmsRecurringPricingCommandRepository {
   const unavailable = async (): Promise<never> => {
     throw Object.assign(
-      new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
-      { statusCode: 503, code: "PRICING_UNAVAILABLE" },
+      new Error(
+        "Legacy rate-plan writes are retired. Set prices in PMS → Pricing (pricing editor).",
+      ),
+      { statusCode: 503, code: "PRICING_RETIRED" },
     );
   };
   return {
