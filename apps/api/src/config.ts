@@ -101,6 +101,28 @@ export type ChannexManagementConfig = {
   };
 };
 
+/**
+ * VAY-2055: the production connection scope. Only `enable` is durable-mutating;
+ * every other durable capability stays observe_only and no staging scope is set.
+ */
+export function channexConnectionOnlyScope(config: ChannexManagementConfig): boolean {
+  const modes = config.capabilityModes;
+  return (
+    modes.connection === "mutating" &&
+    modes.provisioning === "observe_only" &&
+    modes.ariSync === "observe_only" &&
+    modes.bookingSync === "observe_only" &&
+    modes.markups === "observe_only" &&
+    modes.messaging === "observe_only" &&
+    !config.stagingRestrictionsPropertyId &&
+    !config.stagingMealsEnabled &&
+    !config.stagingPublishedOffersEnabled &&
+    !config.stagingInventoryEnabled &&
+    !config.stagingNoShowEnabled &&
+    ["https://app.channex.io", "https://staging.channex.io"].includes(config.apiBaseUrl ?? "")
+  );
+}
+
 export type StripeSubscriptionConfig = {
   secretKey?: string;
   fixedPlanPriceId?: string;

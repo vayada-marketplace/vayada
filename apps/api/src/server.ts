@@ -67,7 +67,12 @@ import { createHmac } from "node:crypto";
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
 import { loadHotelSetupCommandForwarder } from "./hotelSetupCommandForwarder.js";
-import { type ApiConfig, loadConfig, stripeSubscriptionRuntimeEnabled } from "./config.js";
+import {
+  type ApiConfig,
+  channexConnectionOnlyScope,
+  loadConfig,
+  stripeSubscriptionRuntimeEnabled,
+} from "./config.js";
 import { createPgBookingDesignCatalogEvidenceRepository } from "./domains/bookingDesignCatalogEvidenceRepository.js";
 import { createPgBookingDesignRepository } from "./domains/bookingDesignRepository.js";
 import { createBookingGuestPolicyCatalogCurrentOwnerEvidenceAdapter } from "./domains/bookingGuestPolicyCatalogCurrentOwnerEvidence.js";
@@ -180,6 +185,7 @@ import {
 } from "./domains/pmsPricingCurrencyCapabilities.js";
 import { createPgPmsManualBookingCommandRepository } from "./domains/pmsManualBookingCommandRepository.js";
 import { createPmsManualBookingProductionCommandConfig } from "./domains/pmsManualBookingProductionRuntime.js";
+import { createManualBookingPricingPublicationReader } from "./domains/pmsManualBookingTransactionalPricing.js";
 import { createPmsRoomAssignmentOptimizationTriggerPort } from "./domains/pmsRoomAssignmentOptimizationTriggers.js";
 import { createPgPmsRoomAssignmentSettingsPort } from "./domains/pmsRoomAssignmentSettings.js";
 import { createPgPmsRoomAssignmentOptimizationHistoryPort } from "./domains/pmsRoomAssignmentOptimizationHistory.js";
@@ -1259,6 +1265,7 @@ const channexManagementWorkerStore =
         stagingMealsEnabled: config.channexManagement.stagingMealsEnabled,
         stagingPublishedOffersEnabled: config.channexManagement.stagingPublishedOffersEnabled,
         stagingInventoryEnabled: config.channexManagement.stagingInventoryEnabled,
+        connectionOnly: channexConnectionOnlyScope(config.channexManagement),
       })
     : undefined;
 const channexOfferSchedule = channexManagementDatabase.scheduler
@@ -1768,6 +1775,7 @@ const app = buildApp({
           : undefined,
         datePrices: createPgChannelDatePrices(targetDatabaseUrl),
         capabilityModes: config.channexManagement.capabilityModes,
+        connectionOnly: channexConnectionOnlyScope(config.channexManagement),
         publishedOfferProvisioningEnabled:
           config.channexManagement.stagingPublishedOffersEnabled === true,
         publishedOfferProvisioningPropertyId:
@@ -1781,20 +1789,10 @@ const app = buildApp({
     pmsOperationsRepository && pmsRoomPublicationRuntime
       ? {
           pms: pmsOperationsRepository,
-          pricing: {
-            getPricingSourceSnapshot: (propertyId) =>
-              pmsPricingReadModel.getPricingSourceSnapshot(propertyId),
-            getRecurringPricingBookingEvidence: (propertyId) =>
-              propertySetupPmsRuntime.recurringPricing.getRecurringPricingBookingEvidence(
-                propertyId,
-              ),
-          },
-          roomPublication: pmsRoomPublicationRuntime.readModel,
+          publication: createManualBookingPricingPublicationReader(propertySetupOwnerPool),
           booking: {
             listAddonItemsByHotelId: (propertyId) =>
               bookingAddonItemsRepository.listAddonItemsByHotelId(propertyId),
-            getCurrentGuestPolicy: (scope) =>
-              bookingGuestPolicyRepository.getCurrentGuestPolicy(scope),
           },
         }
       : undefined,

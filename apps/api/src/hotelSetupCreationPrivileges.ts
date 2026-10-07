@@ -257,7 +257,7 @@ export async function assertHotelSetupCreationPrivileges(client: HotelSetupPrivi
       || COALESCE(pg_catalog.pg_get_expr(p.polqual,p.polrelid),'')
       || COALESCE(pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid),''),'' ORDER BY c.oid::regclass::text,p.polname))
       FROM pg_catalog.pg_class c JOIN pg_catalog.pg_policy p ON p.polrelid=c.oid
-      WHERE c.oid=ANY($3::regclass[]))='2962458a23eb07a33a780d458b0fa67d'
+      WHERE c.oid=ANY($3::regclass[]))='cf86ab3d06a9b30a7446ac35ce83d724'
     AND (SELECT pg_catalog.md5(pg_catalog.string_agg(c.oid::regclass::text
       || pg_catalog.pg_get_triggerdef(t.oid) || pg_catalog.pg_get_functiondef(t.tgfoid)
       || t.tgenabled::text,'' ORDER BY c.oid::regclass::text,t.tgname))

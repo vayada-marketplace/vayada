@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   createHotelSetupOrdinaryLoginFixture,
   listExecutableDefinerFunctions,
+  listOrdinaryPostureViolations,
 } from "./hotelSetupOrdinaryLogin.fixture.js";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -27,6 +28,7 @@ describe.skipIf(!url)("ordinary API login posture for hotel setup (VAY-2056)", (
 
       // Posture: no SECURITY DEFINER routine is executable, exactly as the platform preflight requires.
       expect(await listExecutableDefinerFunctions(pool)).toEqual([]);
+      expect(await listOrdinaryPostureViolations(pool)).toEqual([]);
       for (const signature of [
         "platform.hotel_setup_update_property_profile(uuid,uuid,uuid,bigint,jsonb,text,text,text)",
         "platform.hotel_setup_creation_assigned_organization()",

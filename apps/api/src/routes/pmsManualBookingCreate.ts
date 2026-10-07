@@ -37,7 +37,14 @@ const stay = z.strictObject({
   checkOut: z.string(),
   adults: z.number().int(),
   children: z.number().int(),
-  ratePlanId: id.nullable(),
+  // Published pricing-v2 offer id: free text, kept exactly as published (no case folding).
+  ratePlanId: z
+    .string()
+    .min(1)
+    .max(200)
+    .refine((value) => value === value.trim())
+    .nullable(),
+  childAgesAtCheckIn: z.array(z.number().int().min(0).max(17)).max(20).optional(),
   pricing: z.discriminatedUnion("kind", [
     z.strictObject({ kind: z.literal("rate_plan"), manualOverride: money.nullable() }),
     z.strictObject({ kind: z.literal("custom"), nightlyAmount: money }),

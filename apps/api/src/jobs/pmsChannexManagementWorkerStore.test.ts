@@ -24,6 +24,19 @@ describe("PMS Channex management worker store", () => {
     expect(harness.db.sql()).toContain("INSERT INTO platform.job_attempts");
   });
 
+  it("claims only unbound enable jobs in the connection-only scope", async () => {
+    const harness = setup({ withJob: true, connectionOnly: true });
+    await expect(harness.store.claim({ workerId: "worker-1", now })).resolves.toEqual(job);
+    const claim = harness.db.calls.find(({ text }) => text.includes("FOR UPDATE SKIP LOCKED"));
+    expect(claim?.values?.at(-1)).toBe(true);
+    expect(claim?.text).toContain("payload->>'operationType' = 'enable'");
+    // A pending job needs an unbound hotel; a running job may finish its own binding.
+    expect(claim?.text).toMatch(
+      /NOT EXISTS \(SELECT 1 FROM pms\.channel_binding_claims[\s\S]*NOT \(platform\.jobs\.status = 'running' AND claim\.claim_source = 'enable'[\s\S]*claim\.created_at >= platform\.jobs\.created_at/,
+    );
+    expect(harness.db.sql()).not.toContain("pms.enqueue_restriction_ari");
+  });
+
   it("persists completion", async () => {
     const harness = setup();
     await harness.store.succeed(
@@ -169,6 +182,7 @@ type FakeDbOptions = Partial<FakeJobRow> & {
   leaseUpdateRowCount?: number;
   attemptUpdateRowCount?: number;
   rollbackError?: Error;
+  connectionOnly?: boolean;
 };
 
 function setup(options: FakeDbOptions = {}) {
@@ -178,6 +192,7 @@ function setup(options: FakeDbOptions = {}) {
     connectionString: "postgresql://target",
     pool: db.pool(),
     targetState: state,
+    connectionOnly: options.connectionOnly,
   });
   return { db, state, store };
 }
