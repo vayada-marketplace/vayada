@@ -1,0 +1,231 @@
+import { expect, test } from "@playwright/test";
+import {
+  mockPmsWebAuthenticatedSession,
+  mockPmsWebTargetRoutes,
+  PMS_WEB_PROPERTY_ID,
+  PMS_WEB_ROOM_ID,
+  PMS_WEB_ROOM_TYPE_ID,
+  pmsWebRoomType,
+} from "../support/pmsWebMocks";
+
+const GARDEN_ROOM_TYPE_ID = "room_type_garden_studio";
+const GARDEN_ROOM_ID = "room_201";
+const manualBookingPath = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/manual-bookings`;
+
+function plan(ratePlanId: string, name: string, rateType: string, amountDecimal: string) {
+  return {
+    ratePlanId,
+    pricingContractVersion: "pms-pricing.v1",
+    name,
+    rateType,
+    baseRate: { amountDecimal, currency: "EUR" },
+    active: true,
+  };
+}
+
+// VAY-1422: Flexible is preferred over Non-refundable regardless of server order, a room type
+// without configured plans falls back to Custom, and nationality submits as an ISO code.
+test("defaults the rate plan, falls back to Custom, and submits nationality as ISO code", async ({
+  page,
+}) => {
+  await mockPmsWebAuthenticatedSession(page);
+  await mockPmsWebTargetRoutes(page);
+  await page.route("**/api/identity/staff/self-access", (route) =>
+    route.fulfill({
+      json: {
+        membershipId: "test-owner",
+        roleKey: "hotel_owner",
+        permissions: ["pms.operations.read", "pms.operations.manage"],
+      },
+    }),
+  );
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-types*`, (route) =>
+    route.fulfill({
+      json: {
+        contractVersion: "pms-operations.v1",
+        propertyId: PMS_WEB_PROPERTY_ID,
+        items: [
+          {
+            ...pmsWebRoomType,
+            ratePlans: [
+              plan("nr-rate", "Non-refundable", "non_refundable", "160.00"),
+              plan("flexible-rate", "Flexible", "flexible", "180.00"),
+            ],
+          },
+          {
+            ...pmsWebRoomType,
+            roomTypeId: GARDEN_ROOM_TYPE_ID,
+            name: "Garden Studio",
+            ratePlans: [],
+            sortOrder: 1,
+          },
+        ],
+        sourceFreshness: {},
+      },
+    }),
+  );
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/rooms*`, (route) =>
+    route.fulfill({
+      json: {
+        contractVersion: "pms-operations.v1",
+        propertyId: PMS_WEB_PROPERTY_ID,
+        items: [
+          {
+            roomId: PMS_WEB_ROOM_ID,
+            roomTypeId: PMS_WEB_ROOM_TYPE_ID,
+            roomNumber: "101",
+            floor: "1",
+            status: "available",
+            sortOrder: 0,
+            metadata: {},
+          },
+          {
+            roomId: GARDEN_ROOM_ID,
+            roomTypeId: GARDEN_ROOM_TYPE_ID,
+            roomNumber: "201",
+            floor: "2",
+            status: "available",
+            sortOrder: 1,
+            metadata: {},
+          },
+        ],
+        sourceFreshness: {},
+      },
+    }),
+  );
+  await page.route(`${manualBookingPath}/addons`, (route) =>
+    route.fulfill({ json: { contractVersion: "pms-manual-booking.v1", addOns: [] } }),
+  );
+  await page.route(`${manualBookingPath}/capabilities`, (route) =>
+    route.fulfill({
+      json: { contractVersion: "pms-manual-booking.v1", canRecordPaidPayment: false },
+    }),
+  );
+  await page.route(`${manualBookingPath}/preview`, (route) => {
+    const body = route.request().postDataJSON();
+    const stays = body.stays.map(
+      (stay: {
+        position: number;
+        roomId: string;
+        ratePlanId: string | null;
+        checkIn: string;
+        checkOut: string;
+        pricing: { kind: string; nightlyAmount?: { amountDecimal: string } };
+      }) => {
+        const nights = Math.round(
+          (Date.parse(stay.checkOut) - Date.parse(stay.checkIn)) / 86_400_000,
+        );
+        const custom = stay.pricing.kind === "custom";
+        const nightly = custom ? Number(stay.pricing.nightlyAmount!.amountDecimal) : 180;
+        const money = (amount: number) => ({ amountDecimal: amount.toFixed(2), currency: "EUR" });
+        return {
+          position: stay.position,
+          roomId: stay.roomId,
+          ratePlanId: stay.ratePlanId,
+          nightly: [],
+          standardTotal: custom ? null : money(180 * nights),
+          appliedTotal: money(nightly * nights),
+        };
+      },
+    );
+    const total = stays.reduce(
+      (sum: number, stay: { appliedTotal: { amountDecimal: string } }) =>
+        sum + Number(stay.appliedTotal.amountDecimal),
+      0,
+    );
+    return route.fulfill({
+      json: {
+        contractVersion: "pms-manual-booking.v1",
+        currency: "EUR",
+        stays,
+        addOns: [],
+        grandTotal: { amountDecimal: total.toFixed(2), currency: "EUR" },
+      },
+    });
+  });
+  let createBody: Record<string, unknown> | null = null;
+  await page.route(manualBookingPath, (route) => {
+    createBody = route.request().postDataJSON();
+    return route.fulfill({
+      status: 201,
+      json: {
+        contractVersion: "pms-manual-booking.v1",
+        outcome: "created",
+        commandId: createBody!["commandId"],
+        idempotencyKey: createBody!["idempotencyKey"],
+        guestBookingId: "guest_booking_new",
+        bookingReference: "VAY-NEW",
+        bookingChannel: "direct",
+        directSource: createBody!["directSource"],
+        stayCount: 1,
+        checkIn: "2026-09-10",
+        checkOut: "2026-09-12",
+        total: { amountDecimal: "300.00", currency: "EUR" },
+        balance: { amountDecimal: "300.00", currency: "EUR" },
+        paymentStatus: "unpaid",
+        paymentEvidenceId: null,
+        rearrangedBookingCount: 0,
+        sideEffects: ["calendar_refresh"],
+      },
+    });
+  });
+
+  await page.goto("/calendar");
+  await page
+    .getByRole("button", { name: /new booking/i })
+    .last()
+    .click();
+  const dialog = page.getByRole("dialog", { name: "New booking" });
+  const ratePlan = dialog.getByLabel("Room 1 rate plan");
+  const createBooking = dialog.getByRole("button", { name: "Create booking" });
+
+  // Flexible wins over the Non-refundable plan listed first by the server.
+  await expect(ratePlan).toHaveValue("flexible-rate");
+  await expect(ratePlan.locator("option")).toHaveText([
+    "Non-refundable",
+    "Flexible",
+    "Custom rate",
+  ]);
+  await dialog.getByLabel("Room 1 check-in").fill("2026-09-10");
+  await dialog.getByLabel("Room 1 check-out").fill("2026-09-12");
+  await expect(dialog.getByText("Standard: €360")).toBeVisible();
+  await expect(dialog.getByText("Applied: €360")).toBeVisible();
+
+  // A room type without configured plans falls back to Custom instead of blocking.
+  await dialog.getByLabel("Room 1 room").selectOption(GARDEN_ROOM_ID);
+  await expect(ratePlan).toHaveValue("custom");
+  await expect(ratePlan.locator("option")).toHaveText(["Custom rate"]);
+  await expect(dialog.getByText("No rate plan is configured for this room type.")).toBeVisible();
+  await expect(page.getByText("Enter a custom nightly rate to calculate the total")).toBeVisible();
+  await expect(createBooking).toBeDisabled();
+  await dialog.getByLabel("Room 1 nightly rate").fill("150");
+  await expect(dialog.getByText("Custom: €300")).toBeVisible();
+  await expect(dialog.getByText("Standard:")).toHaveCount(0);
+  await expect(page.getByText("Total €300")).toBeVisible();
+  await expect(createBooking).toBeEnabled();
+
+  // Nationality is a searchable country list that stores the ISO alpha-2 code.
+  const nationality = dialog.getByLabel("Nationality");
+  await expect(nationality).toHaveAttribute("placeholder", "Search country");
+  await expect(dialog.locator('datalist option[value="Germany"]')).toHaveAttribute(
+    "label",
+    "🇩🇪 DE",
+  );
+  await nationality.fill("Germany");
+  await nationality.blur();
+  await dialog.getByRole("textbox", { name: "First Name *" }).fill("Ada");
+  await dialog.getByRole("textbox", { name: "Last Name *" }).fill("Lovelace");
+  await dialog.getByRole("textbox", { name: "Email *" }).fill("ada@example.com");
+  await createBooking.click();
+  await expect.poll(() => createBody).not.toBeNull();
+  expect(createBody).toMatchObject({
+    guest: { firstName: "Ada", lastName: "Lovelace", countryCode: "DE" },
+    stays: [
+      {
+        roomId: GARDEN_ROOM_ID,
+        ratePlanId: null,
+        pricing: { kind: "custom", nightlyAmount: { amountDecimal: "150.00", currency: "EUR" } },
+      },
+    ],
+  });
+});
