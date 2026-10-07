@@ -185,3 +185,5 @@ If a hook keeps flagging false positives, fix the hook config — don't normaliz
 - Once stable, promote ESLint warnings to errors in a follow-up; same for tightening Ruff rule set.
 
 None of these block product work today.
+
+_VAY-2050 fast-path demo: this line exercises the docs-only Required Checks path and is reverted with the demo PR._
