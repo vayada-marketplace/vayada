@@ -13,10 +13,11 @@ import {
 /** Compose owner readers on the command's transaction; never open a second connection under its locks. */
 export function marketplaceSubmissionTransactionSources(
   client: MarketplaceHotelCollaborationPreferencesClient,
+  readOnly = false,
 ) {
   return createMarketplaceSubmissionReadiness({
     catalog: createHotelCatalogMarketplaceSubmissionSource({
-      step1: { getState: (scope) => readLockedHotelCatalogStep1State(client, scope) },
+      step1: { getState: (scope) => readLockedHotelCatalogStep1State(client, scope, readOnly) },
       profiles: {
         getPropertyProfile: (scope) =>
           loadPropertyProfile(client, scope.organizationId, scope.propertyId),
@@ -26,7 +27,7 @@ export function marketplaceSubmissionTransactionSources(
     }),
     preferences: {
       getHotelCollaborationPreferences: (scope) =>
-        readLockedMarketplaceHotelCollaborationPreferences(client, scope, new Date()),
+        readLockedMarketplaceHotelCollaborationPreferences(client, scope, new Date(), readOnly),
     },
   });
 }

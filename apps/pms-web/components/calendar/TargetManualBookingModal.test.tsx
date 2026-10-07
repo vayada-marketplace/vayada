@@ -28,6 +28,7 @@ describe("target manual booking fields", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.spyOn(calendarService, "listAvailableAddons").mockResolvedValue([]);
+    vi.spyOn(calendarService, "getPropertyCountry").mockResolvedValue("ID");
     vi.spyOn(calendarService, "getManualBookingCapabilities").mockResolvedValue({
       contractVersion: "pms-manual-booking.v1",
       canRecordPaidPayment: false,
@@ -51,7 +52,8 @@ describe("target manual booking fields", () => {
     const markup = render();
     expect(markup).toContain('name="specialRequests"');
     expect(markup).toContain('name="privateNote"');
-    expect(markup).toContain('name="phoneE164" type="tel" pattern="\\+[1-9][0-9]{7,14}"');
+    expect(markup).toContain('aria-label="Phone country code"');
+    expect(markup).toContain('name="phone" type="tel"');
     expect(markup).toMatch(/disabled=""[^>]*value="paid"/);
     // prettier-ignore
     expect(markup).toMatch(/aria-describedby="paid-help"[^>]*>[\s\S]*Paid requires Finance write access/);
@@ -345,8 +347,10 @@ describe("target manual booking fields", () => {
     expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(true);
   });
 
-  it("shows missing-rate guidance before preview when the room type has no rate plan", async () => {
-    const request = vi.spyOn(calendarService, "previewManualBooking");
+  it("falls back to Custom rate when the room type has no rate plan", async () => {
+    const request = vi
+      .spyOn(calendarService, "previewManualBooking")
+      .mockImplementation(async (input) => previewFor(input));
     let view!: ReactTestRenderer;
     await act(async () => {
       view = create(
@@ -363,11 +367,142 @@ describe("target manual booking fields", () => {
     await settlePreview();
 
     expect(request).not.toHaveBeenCalled();
-    expect(JSON.stringify(view.toJSON())).toContain(
-      "No rate found for 2026-09-10 – 2026-09-11. Set up a season in Rooms & Rates first.",
-    );
+    const ratePlan = view.root.findByProps({ "aria-label": "Room 1 rate plan" });
+    expect(ratePlan.props.value).toBe("custom");
+    expect(ratePlan.props["aria-describedby"]).toBe("stay-no-plan-1");
+    const markup = JSON.stringify(view.toJSON());
+    expect(markup).toContain("No rate plan is configured for this room type.");
+    expect(markup).toContain("Enter a custom nightly rate to calculate the total");
+    expect(markup).not.toContain("No rate available");
     expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(true);
+
+    await act(async () =>
+      view.root
+        .findByProps({ "aria-label": "Room 1 nightly rate" })
+        .props.onChange({ target: { value: "150" } }),
+    );
+    await settlePreview();
+    expect(request.mock.calls[0]![0].stays[0]).toMatchObject({
+      ratePlanId: null,
+      pricing: { kind: "custom", nightlyAmount: { amountDecimal: "150.00", currency: "EUR" } },
+    });
+    const summary = JSON.stringify(view.toJSON());
+    expect(summary).toContain("Custom:");
+    expect(summary).not.toContain("Standard:");
+    expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(false);
   });
+
+  it("shows cents from the server amount instead of rounding a custom rate", async () => {
+    const cents = { amountDecimal: "150.50", currency: "EUR" };
+    // prettier-ignore
+    vi.spyOn(calendarService, "previewManualBooking").mockResolvedValue({ ...preview, stays: [{ ...preview.stays[0]!, ratePlanId: null, nightly: [{ serviceDate: "2026-09-10", standard: null, applied: cents }], standardTotal: null, appliedTotal: cents }], grandTotal: cents });
+    let view!: ReactTestRenderer;
+    // prettier-ignore
+    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes: [{ ...roomTypes[0]!, ratePlans: [] }], rooms: [rooms[0]!], initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit: vi.fn(), onClose: vi.fn() })); });
+    // prettier-ignore
+    await act(async () => view.root.findByProps({ "aria-label": "Room 1 nightly rate" }).props.onChange({ target: { value: "150.50" } }));
+    await settlePreview();
+    const markup = JSON.stringify(view.toJSON());
+    expect(markup).toContain("Total €150.50");
+    expect(markup).toContain("€150.50");
+    expect(markup).not.toContain("€151");
+  });
+
+  it("defaults to Flexible before Non-refundable regardless of server order", async () => {
+    // prettier-ignore
+    const plans = [{ id: "plan-nr", name: "Non-refundable", rateType: "non_refundable" as const, baseRate: 90 }, { id: "plan-flex", name: "Flexible", rateType: "flexible" as const, baseRate: 100 }];
+    let view!: ReactTestRenderer;
+    await act(async () => {
+      view = create(
+        createElement(TargetManualBookingModal, {
+          roomTypes: [
+            { ...roomTypes[0]!, ratePlans: plans },
+            { ...roomTypes[1]!, ratePlans: [plans[0]!] },
+          ],
+          rooms,
+          onSubmit: vi.fn(),
+          onClose: vi.fn(),
+        }),
+      );
+    });
+    const ratePlan = () => view.root.findByProps({ "aria-label": "Room 1 rate plan" });
+    expect(ratePlan().props.value).toBe("plan-flex");
+    act(() =>
+      view.root
+        .findByProps({ "aria-label": "Room 1 room" })
+        .props.onChange({ target: { value: "room-2" } }),
+    );
+    expect(ratePlan().props.value).toBe("plan-nr");
+  });
+
+  it("prefers any configured plan over Custom when only a package plan exists", async () => {
+    // prettier-ignore
+    const packagePlan = { id: "plan-pkg", name: "Half board", rateType: "package" as const, baseRate: 150 };
+    let view!: ReactTestRenderer;
+    await act(async () => {
+      view = create(
+        createElement(TargetManualBookingModal, {
+          roomTypes: [{ ...roomTypes[0]!, ratePlans: [packagePlan] }],
+          rooms: [rooms[0]!],
+          onSubmit: vi.fn(),
+          onClose: vi.fn(),
+        }),
+      );
+    });
+    const ratePlan = view.root.findByProps({ "aria-label": "Room 1 rate plan" });
+    expect(ratePlan.props.value).toBe("plan-pkg");
+    expect(ratePlan.props["aria-describedby"]).toBeUndefined();
+  });
+
+  it("keeps the host's dial code if the property country arrives later, and tolerates a failed lookup", async () => {
+    let resolveCountry!: (code: string) => void;
+    vi.spyOn(calendarService, "getPropertyCountry").mockReturnValueOnce(
+      new Promise((resolve) => (resolveCountry = resolve)),
+    );
+    let view!: ReactTestRenderer;
+    // prettier-ignore
+    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, onSubmit: vi.fn(), onClose: vi.fn() })); });
+    const dialCode = () => view.root.findByProps({ "aria-label": "Phone country code" });
+    act(() => dialCode().props.onChange({ target: { value: "GB" } }));
+    await act(async () => resolveCountry("ID"));
+    expect(dialCode().props.value).toBe("GB");
+    act(() => view.unmount());
+
+    vi.spyOn(calendarService, "getPropertyCountry").mockRejectedValueOnce(new Error("forbidden"));
+    // prettier-ignore
+    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, onSubmit: vi.fn(), onClose: vi.fn() })); });
+    expect(dialCode().props.value).toBe("");
+  });
+
+  it("defaults the dial code to the property country and submits E.164", async () => {
+    vi.spyOn(calendarService, "previewManualBooking").mockResolvedValue(preview);
+    const onSubmit = vi.fn().mockResolvedValue({});
+    let view!: ReactTestRenderer;
+    // prettier-ignore
+    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit, onClose: vi.fn() })); });
+    await settlePreview();
+    const dialCode = view.root.findByProps({ "aria-label": "Phone country code" });
+    expect(dialCode.props.value).toBe("ID");
+    const phone = () => view.root.findByProps({ name: "phone" });
+    const submit = () =>
+      act(async () => {
+        await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() });
+      });
+
+    act(() => phone().props.onChange({ target: { value: "12" } }));
+    await submit();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(view.root.findByProps({ role: "alert" }).children.join("")).toContain(
+      "Enter a valid phone number",
+    );
+
+    act(() => phone().props.onChange({ target: { value: "0812 3456 7890" } }));
+    await submit();
+    expect(onSubmit.mock.calls[0]![0].guest.phoneE164).toBe("+6281234567890");
+  });
+
+  // prettier-ignore
+  it("submits the searchable nationality as an ISO code", async () => { vi.spyOn(calendarService, "previewManualBooking").mockResolvedValue(preview); const onSubmit = vi.fn().mockResolvedValue({}); let view!: ReactTestRenderer; await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit, onClose: vi.fn() })); }); await settlePreview(); const nationality = view.root.findAllByType("input").find((input) => input.props.list)!; expect(nationality.props.placeholder).toBe("Search country"); expect(view.root.findByType("datalist").findAllByType("option").some((option) => option.props.value === "Germany" && option.props.label === "🇩🇪 DE")).toBe(true); expect(view.root.findAllByType("input").some((input) => input.props.name === "countryCode")).toBe(false); act(() => nationality.props.onChange({ target: { value: "Germany" } })); await act(async () => { await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() }); }); expect(onSubmit.mock.calls[0]![0].guest.countryCode).toBe("DE"); });
 
   // prettier-ignore
   it("cannot create from stale evidence after the current preview fails", async () => { let fail = false; const onSubmit = vi.fn(); vi.spyOn(calendarService, "previewManualBooking").mockImplementation(async (input) => { if (fail) throw new Error("Preview failed."); return previewFor(input); }); let view!: ReactTestRenderer; await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit, onClose: vi.fn() })); }); await settlePreview(); const adults = view.root.findByProps({ "aria-label": "Room 1 adults" }); fail = true; act(() => adults.props.onChange({ target: { value: "3" } })); await act(async () => view.root.findByProps({ "aria-label": "Room 1 adults" }).props.onChange({ target: { value: "1" } })); await settlePreview(); expect(JSON.stringify(view.toJSON())).toContain("Couldn't calculate pricing."); expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(true); await act(async () => view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() })); expect(onSubmit).not.toHaveBeenCalled(); });

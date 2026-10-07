@@ -3099,9 +3099,11 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       {/* Modals */}
       {confirmDialog && (
         <ConfirmDialog
+          title={t("common.confirm")}
           message={confirmDialog.message}
           variant={confirmDialog.variant}
           confirmLabel={confirmDialog.confirmLabel}
+          cancelLabel={t("common.cancel")}
           onConfirm={confirmDialog.onConfirm}
           onCancel={() => setConfirmDialog(null)}
         />

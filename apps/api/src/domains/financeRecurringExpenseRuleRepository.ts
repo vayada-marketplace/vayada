@@ -70,7 +70,9 @@ async function execute(pool: pg.Pool, raw: Command): Promise<FinanceRecurringExp
     await client.query("BEGIN");
     await client.query("SET LOCAL lock_timeout='3s'; SET LOCAL statement_timeout='10s'");
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`${operation}|${propertyId}|${keyHash}`]);
-    const property = await client.query("SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid FOR KEY SHARE", [propertyId]);
+    const property = await client.query(raw.action === "create"
+      ? "SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid"
+      : "SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid FOR KEY SHARE", [propertyId]);
     if (property.rowCount !== 1) return await stop(client, { ok: false, code: "not_found" });
     const existing = await client.query<KeyRow>(
       `SELECT status,request_fingerprint_hash AS fingerprint,response_body_hash AS "responseHash",

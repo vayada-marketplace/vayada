@@ -50,7 +50,7 @@ async def _proxy_provider_webhook_to_target(
         logger.exception("Legacy provider webhook proxy failed provider=%s: %s", provider, e)
         raise HTTPException(status_code=502, detail="Webhook proxy failed") from e
 
-    if response.status_code >= 400:
+    if not response.is_success:
         logger.warning(
             "Legacy provider webhook proxy target rejected provider=%s status=%s",
             provider,

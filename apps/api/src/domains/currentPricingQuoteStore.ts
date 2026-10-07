@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { parsePublicPricingSelection, parseStoredPricingQuote } from "@vayada/domain-booking";
 import { pricingKeys, pricingObject } from "@vayada/domain-pms";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { lockCurrentPricingQuote } from "./currentPricingQuote.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { PricingStorageError } from "./replacementPricingStore.js";
@@ -32,11 +32,19 @@ export function decodeCurrentPricingQuoteRecord(payload: unknown, propertyId: st
     : null;
 }
 /** Internal historical price records; no route, acceptance or inventory authority. */
-export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: number) {
+export function createCurrentPricingQuoteStore(
+  pool: Pool,
+  lifetimeSeconds: number,
+  options: {
+    assertRuntimeScope?: (
+      client: PoolClient,
+    ) => Promise<{ propertyId: string; organizationId: string }>;
+  } = {},
+) {
   if (!Number.isInteger(lifetimeSeconds) || lifetimeSeconds < 1 || lifetimeSeconds > 900)
     return fail("invalid");
   return {
-    async issue(slug: unknown, input: unknown) {
+    async issue(slug: unknown, input: unknown, signal?: AbortSignal) {
       if (
         !pricingObject(input) ||
         !pricingKeys(input, ["requestId", "selection", "paymentMethod"]) ||
@@ -54,11 +62,27 @@ export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: numb
       const requestHash = createHash("sha256")
         .update(canonical({ selection, method }))
         .digest("hex");
+      if (signal?.aborted) throw new Error("Pricing command aborted");
       const client = await pool.connect();
+      let destroyed = false;
+      const abort = () => {
+        if (destroyed) return;
+        destroyed = true;
+        client.release(new Error("Pricing command aborted"));
+      };
+      signal?.addEventListener("abort", abort, { once: true });
       try {
+        if (signal?.aborted) throw new Error("Pricing command aborted");
         await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+        const assigned = await options.assertRuntimeScope?.(client);
         const scope = await lockPublicPricingAuthority(client, slug);
-        if (!scope) return fail("denied");
+        if (
+          !scope ||
+          (assigned &&
+            (assigned.propertyId !== scope.propertyId ||
+              assigned.organizationId !== scope.organizationId))
+        )
+          return fail("denied");
         const prior = (
           await client.query(
             "SELECT id,organization_id,request_hash,payload FROM booking.pricing_quotes WHERE property_id=$1 AND request_id=$2",
@@ -70,7 +94,15 @@ export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: numb
           if (prior.request_hash !== requestHash) return fail("idempotency_conflict");
           const record = decodeCurrentPricingQuoteRecord(prior.payload, scope.propertyId, prior.id);
           if (!record) return fail("invalid");
-          if (!(await lockPublicPricingAuthority(client, slug))) return fail("denied");
+          const confirmed = await lockPublicPricingAuthority(client, slug);
+          if (
+            !confirmed ||
+            (assigned &&
+              (assigned.propertyId !== confirmed.propertyId ||
+                assigned.organizationId !== confirmed.organizationId))
+          )
+            return fail("denied");
+          if (signal?.aborted) throw new Error("Pricing command aborted");
           await client.query("COMMIT");
           return { ...record, replayed: true };
         }
@@ -96,13 +128,15 @@ export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: numb
           ],
         );
         if (!inserted.rowCount) return fail("stale");
+        if (signal?.aborted) throw new Error("Pricing command aborted");
         await client.query("COMMIT");
         return { ...record, replayed: false };
       } catch (error) {
-        await client.query("ROLLBACK");
+        if (!destroyed) await client.query("ROLLBACK");
         throw error;
       } finally {
-        client.release();
+        signal?.removeEventListener("abort", abort);
+        if (!destroyed) client.release();
       }
     },
     async read(slug: unknown, quoteId: unknown) {
@@ -114,15 +148,29 @@ export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: numb
       const client = await pool.connect();
       try {
         await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+        const assigned = await options.assertRuntimeScope?.(client);
         const scope = await lockPublicPricingAuthority(client, slug);
-        if (!scope) return null;
+        if (
+          !scope ||
+          (assigned &&
+            (assigned.propertyId !== scope.propertyId ||
+              assigned.organizationId !== scope.organizationId))
+        )
+          return null;
         const row = (
           await client.query(
             "SELECT id,payload FROM booking.pricing_quotes WHERE id=$1 AND property_id=$2 AND organization_id=$3",
             [quoteId, scope.propertyId, scope.organizationId],
           )
         ).rows[0];
-        if (!(await lockPublicPricingAuthority(client, slug))) return null;
+        const confirmed = await lockPublicPricingAuthority(client, slug);
+        if (
+          !confirmed ||
+          (assigned &&
+            (assigned.propertyId !== confirmed.propertyId ||
+              assigned.organizationId !== confirmed.organizationId))
+        )
+          return null;
         return row ? decodeCurrentPricingQuoteRecord(row.payload, scope.propertyId, row.id) : null;
       } finally {
         await client.query("ROLLBACK");

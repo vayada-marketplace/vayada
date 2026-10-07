@@ -627,6 +627,7 @@ function successfulCheckoutHandler(
     }
     if (text.includes("INSERT INTO booking.addon_revenue_evidence")) return ok([], 1);
     if (text.includes("INSERT INTO platform.product_audit_events")) return ok([], 1);
+    if (text.includes("INSERT INTO platform.domain_events")) return ok([], 1);
     if (text.includes("UPDATE platform.idempotency_keys")) return ok([], 1);
     throw new Error(`Unhandled SQL: ${text}`);
   };
@@ -1872,6 +1873,11 @@ describe("target PMS operations command repository", () => {
     expect(result.reservation.assignments).toEqual(
       expect.arrayContaining([expect.objectContaining({ assignmentStatus: "checked_out" })]),
     );
+    expect(
+      client.calls.some(({ text }) =>
+        text.includes("FROM booking.affiliate_original_booking_bindings"),
+      ),
+    ).toBe(false);
 
     const checkoutInsert = requiredCall(client, "INSERT INTO pms.booking_checkout_records");
     expect(JSON.parse(String(checkoutInsert.values[5]))).toEqual([
@@ -1986,6 +1992,13 @@ describe("target PMS operations command repository", () => {
     const final = await repository.executeCheckOutCommand(finalCommand);
 
     expect([first.ok, final.ok]).toEqual([true, true]);
+    const affiliateEvidence = client.calls.filter(({ text }) =>
+      text.includes("FROM booking.affiliate_original_booking_bindings"),
+    );
+    expect(affiliateEvidence).toHaveLength(2);
+    expect(
+      affiliateEvidence.map(({ values }) => JSON.parse(String(values[11])).stayItemId),
+    ).toEqual([assignmentOneId, assignmentTwoId]);
     expect(
       client.calls.filter(({ text }) =>
         text.includes("INSERT INTO booking.addon_revenue_evidence"),

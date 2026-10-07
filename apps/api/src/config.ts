@@ -1,6 +1,7 @@
 import { loadAirbnbImportConfig } from "./airbnbImportRuntime.js";
 import { loadServerConfig } from "@vayada/backend-config";
 import { createHmac } from "node:crypto";
+import pg from "pg";
 import { z } from "zod";
 
 import {
@@ -56,15 +57,21 @@ export type FinanceFolioRecipientKmsConfig = {
   region: string;
 };
 export type BookingWebEventSink = "disabled" | "target";
+export type AffiliateCaptureConfig = {
+  databaseUrl: string;
+  internalToken: string;
+};
 export type ProviderWebhookIntakeMode = "observe_only" | "mutating" | "ack_only_with_receipt";
 export type ApiRuntime = "legacy" | "next";
 
 export type ProviderWebhookConfig = {
   stripeSecret?: string;
+  stripeConnectSecret?: string;
   xenditSecret?: string;
   channexSecret?: string;
   resendSecret?: string;
   stripeMode: ProviderWebhookIntakeMode;
+  stripeConnectMode: ProviderWebhookIntakeMode;
   xenditMode: ProviderWebhookIntakeMode;
   channexMode: ProviderWebhookIntakeMode;
   channexReviewMode?: ProviderWebhookIntakeMode;
@@ -74,10 +81,12 @@ export type ChannexManagementMode = "observe_only" | "mutating";
 export type ChannexManagementConfig = {
   apiBaseUrl?: string;
   apiKey?: string;
+  workerDatabaseUrl?: string;
   bookingMutationOwner: "legacy" | "target" | "frozen";
   workerEnabled: boolean;
   stagingRestrictionsPropertyId?: string;
   stagingMealsEnabled?: boolean;
+  stagingPublishedOffersEnabled?: boolean;
   stagingInventoryEnabled?: boolean;
   stagingNoShowEnabled?: boolean;
   capabilityModes: {
@@ -162,6 +171,7 @@ export type ApiConfig = {
   auth?: ApiAuthConfig;
   authSession?: ApiAuthSessionConfig;
   targetDatabaseUrl?: string;
+  pricingDatabaseUrl?: string;
   publicHotelProfileSource: PublicHotelProfileSource;
   marketplaceAdminSource: MarketplaceAdminSource;
   marketplaceAdminLegacySuperadminFallbackEnabled: boolean;
@@ -169,11 +179,22 @@ export type ApiConfig = {
   pmsRoomClosureEnabled: boolean;
   pmsInboxSendingEnabled: boolean;
   financeSource: FinanceSource;
+  financeExpenseWorker?: { databaseUrl: string; propertyId: string };
+  financeExportWorker?: {
+    databaseUrl: string;
+    propertyId?: string;
+    exportId?: string;
+    acceptedAfter?: Date;
+  };
   financeFolioRecipientKms?: FinanceFolioRecipientKmsConfig;
   financeBankTransferKms?: { currentKeyArn: string; allowedKeyArns: string[]; region: string };
   marketplaceDiscoveryAllowedOrigins: string[];
   affiliatePublicSource?: "target";
+  affiliateCapture?: AffiliateCaptureConfig;
+  affiliatePublicRedirectEnabled: boolean;
+  affiliateBookingBindingEnabled: boolean;
   pmsOperationsAllowedOrigins: string[];
+  financialsActivationPropertyIds: string[];
   bookingWebEventSink: BookingWebEventSink;
   replacementPricingAcceptanceAllowedSlugs: string[];
   bookingHostBase?: string;
@@ -241,6 +262,49 @@ function readOptionalPgConnectionEnv(env: NodeJS.ProcessEnv, key: string): strin
   return value ? normalizePgConnectionString(value) : undefined;
 }
 
+type PgConnectionIdentity = Readonly<{
+  username: string;
+  hostname: string;
+  port: string;
+  database: string;
+}>;
+
+function pgConnectionIdentity(
+  connectionString: string | undefined,
+): PgConnectionIdentity | undefined {
+  if (!connectionString) return undefined;
+  try {
+    const url = new URL(connectionString);
+    if (
+      ["user", "host", "port", "dbname", "database", "options", "service"].some((key) =>
+        url.searchParams.has(key),
+      )
+    ) {
+      return undefined;
+    }
+    const username = decodeURIComponent(url.username);
+    // PostgreSQL URL parsing decodes ordinary escapes while preserving an encoded
+    // slash as part of the database name (for example, app%2Ftenant != app/tenant).
+    const database = decodeURI(url.pathname.replace(/^\//, ""));
+    if (
+      !["postgres:", "postgresql:"].includes(url.protocol) ||
+      !username ||
+      !url.hostname ||
+      !database
+    ) {
+      return undefined;
+    }
+    return Object.freeze({
+      username,
+      hostname: url.hostname.toLowerCase(),
+      port: url.port || "5432",
+      database,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 function loadAuthConfig(env: NodeJS.ProcessEnv): ApiAuthConfig | undefined {
   const authKeys = [
     "AUTH_DATABASE_URL",
@@ -288,6 +352,14 @@ function readSlugAllowlistEnv(env: NodeJS.ProcessEnv, key: string): string[] {
     throw new Error(`${key} requires up to 100 canonical lowercase slugs`);
   }
   return slugs;
+}
+
+function readPropertyIdAllowlistEnv(env: NodeJS.ProcessEnv, key: string): string[] {
+  const ids = [...new Set(readOptionalCsvEnv(env, key).map((id) => id.toLowerCase()))];
+  if (ids.length > 100 || ids.some((id) => !z.uuid().safeParse(id).success)) {
+    throw new Error(`${key} requires up to 100 property UUIDs`);
+  }
+  return ids;
 }
 
 function loadMarketplaceCommunicationUnsubscribeConfig(
@@ -485,6 +557,38 @@ function loadAffiliatePublicSource(env: NodeJS.ProcessEnv): "target" | undefined
   return "target";
 }
 
+function loadAffiliateCaptureConfig(
+  env: NodeJS.ProcessEnv,
+  otherDatabaseUrls: readonly (string | undefined)[],
+): AffiliateCaptureConfig | undefined {
+  const enabled = readBooleanEnv(env, "AFFILIATE_CAPTURE_ENABLED", false);
+  if (!enabled) return undefined;
+  const databaseUrl = readOptionalPgConnectionEnv(env, "AFFILIATE_CAPTURE_DATABASE_URL");
+  const internalToken = readOptionalEnv(env, "BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN");
+  if (!databaseUrl || !internalToken) {
+    throw new Error(
+      "AFFILIATE_CAPTURE_ENABLED requires AFFILIATE_CAPTURE_DATABASE_URL and BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN",
+    );
+  }
+  if (Buffer.byteLength(internalToken, "utf8") < 32) {
+    throw new Error("BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN must be at least 32 bytes");
+  }
+  const identity = pgConnectionIdentity(databaseUrl);
+  if (!identity || identity.username !== "vayada_next_affiliate_capture") {
+    throw new Error(
+      "AFFILIATE_CAPTURE_DATABASE_URL must use the exact vayada_next_affiliate_capture PostgreSQL login",
+    );
+  }
+  if (
+    otherDatabaseUrls.some(
+      (other) => other && new pg.Client({ connectionString: other }).user === identity.username,
+    )
+  ) {
+    throw new Error("AFFILIATE_CAPTURE_DATABASE_URL must use a distinct PostgreSQL user");
+  }
+  return { databaseUrl, internalToken };
+}
+
 function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | undefined {
   const authSessionKeys = [
     "WORKOS_CLIENT_ID",
@@ -571,12 +675,19 @@ function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | u
 function loadProviderWebhookConfig(env: NodeJS.ProcessEnv): ProviderWebhookConfig {
   return {
     stripeSecret: readOptionalEnv(env, "STRIPE_WEBHOOK_SECRET"),
+    stripeConnectSecret: readOptionalEnv(env, "STRIPE_CONNECT_WEBHOOK_SECRET"),
     xenditSecret: readOptionalEnv(env, "XENDIT_WEBHOOK_SECRET"),
     channexSecret: readOptionalEnv(env, "CHANNEX_WEBHOOK_SECRET"),
     resendSecret: readOptionalEnv(env, "RESEND_WEBHOOK_SECRET"),
     stripeMode: readSourceEnv(
       env,
       "STRIPE_WEBHOOK_INTAKE_MODE",
+      ["observe_only", "mutating", "ack_only_with_receipt"],
+      "observe_only",
+    ),
+    stripeConnectMode: readSourceEnv(
+      env,
+      "STRIPE_CONNECT_WEBHOOK_INTAKE_MODE",
       ["observe_only", "mutating", "ack_only_with_receipt"],
       "observe_only",
     ),
@@ -641,6 +752,21 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
   ) {
     throw new Error("Scoped Channex meals require a staging property and mutating provisioning");
   }
+  const stagingPublishedOffersEnabled = readBooleanEnv(
+    env,
+    "PMS_CHANNEX_STAGING_PUBLISHED_OFFERS_ENABLED",
+    false,
+  );
+  if (
+    stagingPublishedOffersEnabled &&
+    (!stagingRestrictionsPropertyId ||
+      capabilityModes.provisioning !== "mutating" ||
+      !stagingInventoryEnabled)
+  ) {
+    throw new Error(
+      "Scoped Channex published offers require a staging property, inventory, and mutating provisioning",
+    );
+  }
   if (
     stagingRestrictionsPropertyId &&
     (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
@@ -652,7 +778,7 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
       Object.entries(capabilityModes).some(
         ([name, mode]) =>
           name !== "ariSync" &&
-          !(stagingMealsEnabled && name === "provisioning") &&
+          !((stagingMealsEnabled || stagingPublishedOffersEnabled) && name === "provisioning") &&
           mode === "mutating",
       ))
   ) {
@@ -683,9 +809,37 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     );
   }
   const workerEnabled = readBooleanEnv(env, "PMS_CHANNEX_WORKER_ENABLED", durableCommandsMutating);
+  const workerDatabaseUrl = readOptionalPgConnectionEnv(env, "PMS_CHANNEX_MANAGEMENT_DATABASE_URL");
   // A validated isolated staging scope may retain queued commands while its worker is paused.
   if (durableCommandsMutating && !workerEnabled && !stagingRestrictionsPropertyId) {
     throw new Error("Mutating PMS Channex capabilities require PMS_CHANNEX_WORKER_ENABLED=true");
+  }
+  if (
+    durableCommandsMutating &&
+    workerEnabled &&
+    readOptionalEnv(env, "PMS_OPERATIONS_SOURCE") === "target" &&
+    !workerDatabaseUrl
+  ) {
+    throw new Error(
+      "Mutating PMS Channex worker capabilities require PMS_CHANNEX_MANAGEMENT_DATABASE_URL",
+    );
+  }
+  const workerDatabaseIdentity = pgConnectionIdentity(workerDatabaseUrl);
+  const targetDatabaseIdentity = pgConnectionIdentity(
+    readOptionalPgConnectionEnv(env, "TARGET_DATABASE_URL"),
+  );
+  if (
+    workerDatabaseUrl &&
+    (!workerDatabaseIdentity ||
+      !targetDatabaseIdentity ||
+      workerDatabaseIdentity.hostname !== targetDatabaseIdentity.hostname ||
+      workerDatabaseIdentity.port !== targetDatabaseIdentity.port ||
+      workerDatabaseIdentity.database !== targetDatabaseIdentity.database ||
+      workerDatabaseIdentity.username === targetDatabaseIdentity.username)
+  ) {
+    throw new Error(
+      "PMS_CHANNEX_MANAGEMENT_DATABASE_URL must use a dedicated credential for TARGET_DATABASE_URL",
+    );
   }
   if (capabilityModes.bookingSync === "mutating" && bookingMutationOwner !== "target") {
     throw new Error(
@@ -695,9 +849,11 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
   return {
     apiBaseUrl,
     apiKey,
+    workerDatabaseUrl,
     bookingMutationOwner,
     stagingRestrictionsPropertyId,
     stagingMealsEnabled,
+    stagingPublishedOffersEnabled,
     stagingInventoryEnabled,
     stagingNoShowEnabled,
     workerEnabled,
@@ -865,6 +1021,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   });
   const apiRuntime = readSourceEnv(env, "API_RUNTIME", ["legacy", "next"], "legacy");
   const targetDatabaseUrl = readOptionalPgConnectionEnv(env, "TARGET_DATABASE_URL");
+  const pricingDatabaseUrl = readOptionalPgConnectionEnv(env, "PRICING_DATABASE_URL");
   const publicHotelProfileSource = readSourceEnv(
     env,
     "PUBLIC_HOTEL_PROFILE_SOURCE",
@@ -895,6 +1052,40 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     "disabled",
   );
   const auth = loadAuthConfig(env);
+  const pricingDatabaseUser = pricingDatabaseUrl
+    ? new pg.Client({ connectionString: pricingDatabaseUrl }).user
+    : undefined;
+  if (
+    pricingDatabaseUrl &&
+    [targetDatabaseUrl, auth?.databaseUrl].some(
+      (url) => url && new pg.Client({ connectionString: url }).user === pricingDatabaseUser,
+    )
+  ) {
+    throw new Error("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
+  }
+  const affiliateCapture = loadAffiliateCaptureConfig(env, [
+    targetDatabaseUrl,
+    auth?.databaseUrl,
+    pricingDatabaseUrl,
+  ]);
+  const affiliatePublicRedirectEnabled = readBooleanEnv(
+    env,
+    "AFFILIATE_PUBLIC_REDIRECT_ENABLED",
+    false,
+  );
+  if (affiliatePublicRedirectEnabled && !affiliateCapture) {
+    throw new Error("AFFILIATE_PUBLIC_REDIRECT_ENABLED requires affiliate capture");
+  }
+  const affiliateBookingBindingEnabled = readBooleanEnv(
+    env,
+    "AFFILIATE_BOOKING_BINDING_ENABLED",
+    false,
+  );
+  if (affiliateBookingBindingEnabled && (!affiliateCapture || !targetDatabaseUrl)) {
+    throw new Error(
+      "AFFILIATE_BOOKING_BINDING_ENABLED requires affiliate capture and TARGET_DATABASE_URL",
+    );
+  }
   const authSession = loadAuthSessionConfig(env);
   const creatorPlatformConnections = loadCreatorPlatformConnectionsConfig(env);
   const bookingEmailDelivery = loadBookingEmailDeliveryConfig(env);
@@ -964,6 +1155,106 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   }
 
   const backgroundWorkersEnabled = readBooleanEnv(env, "API_BACKGROUND_WORKERS_ENABLED", true);
+  let financeExportWorker: ApiConfig["financeExportWorker"];
+  if (readBooleanEnv(env, "FINANCE_EXPORT_WORKER_ENABLED", false)) {
+    const databaseUrl = readOptionalEnv(env, "FINANCE_EXPORT_WORKER_DATABASE_URL");
+    const propertyId = readOptionalEnv(env, "FINANCE_EXPORT_WORKER_PROPERTY_ID")?.toLowerCase();
+    const exportId = readOptionalEnv(env, "FINANCE_EXPORT_WORKER_EXPORT_ID")?.toLowerCase();
+    const cutoff = readOptionalEnv(env, "FINANCE_EXPORT_WORKER_ACCEPTED_AFTER");
+    const acceptedAfter = cutoff ? new Date(cutoff) : undefined;
+    const ongoing = Boolean(
+      acceptedAfter &&
+      Number.isFinite(acceptedAfter.getTime()) &&
+      acceptedAfter.toISOString() === cutoff,
+    );
+    if (
+      cutoff &&
+      (!ongoing || propertyId || exportId || !readOptionalEnv(env, "NODE_EXTRA_CA_CERTS"))
+    )
+      throw new Error(
+        "Ongoing Finance exports require a canonical cutoff, verified CA and no single-job scope",
+      );
+    if (
+      apiRuntime !== "next" ||
+      !backgroundWorkersEnabled ||
+      financeSource !== "target" ||
+      !targetDatabaseUrl ||
+      !financeFolioRecipientKms ||
+      !platformMediaServing ||
+      !databaseUrl ||
+      (!ongoing &&
+        (!propertyId ||
+          !z.uuid().safeParse(propertyId).success ||
+          !exportId ||
+          !z.uuid().safeParse(exportId).success))
+    ) {
+      throw new Error(
+        "Finance export worker requires target Finance, background workers, folio KMS, private media, a dedicated URL, property UUID and export UUID",
+      );
+    }
+    let worker: URL, target: URL;
+    try {
+      worker = new URL(databaseUrl);
+      target = new URL(targetDatabaseUrl);
+    } catch {
+      throw new Error("Finance export worker database URL is invalid");
+    }
+    if (
+      !["postgres:", "postgresql:"].includes(worker.protocol) ||
+      !worker.password ||
+      decodeURIComponent(worker.username) !== "vayada_next_finance_export_worker" ||
+      worker.host !== target.host ||
+      worker.pathname !== target.pathname ||
+      worker.hash ||
+      worker.search !== "?sslmode=require"
+    ) {
+      throw new Error("Finance export worker requires its dedicated login on the target database");
+    }
+    if (ongoing) worker.search = "?sslmode=verify-full";
+    financeExportWorker = {
+      databaseUrl: ongoing ? worker.toString() : normalizePgConnectionString(databaseUrl),
+      propertyId,
+      exportId,
+      ...(ongoing ? { acceptedAfter } : {}),
+    };
+  }
+
+  let financeExpenseWorker: ApiConfig["financeExpenseWorker"];
+  if (readBooleanEnv(env, "FINANCE_EXPENSE_WORKER_ENABLED", false)) {
+    const databaseUrl = readOptionalEnv(env, "FINANCE_EXPENSE_WORKER_DATABASE_URL");
+    const propertyId = readOptionalEnv(env, "FINANCE_EXPENSE_WORKER_PROPERTY_ID")?.toLowerCase();
+    if (
+      !backgroundWorkersEnabled ||
+      financeSource !== "target" ||
+      !targetDatabaseUrl ||
+      !databaseUrl ||
+      !propertyId ||
+      !z.uuid().safeParse(propertyId).success
+    ) {
+      throw new Error(
+        "Finance expense worker requires target Finance, background workers, a dedicated URL and property UUID",
+      );
+    }
+    let worker: URL, target: URL;
+    try {
+      worker = new URL(databaseUrl);
+      target = new URL(targetDatabaseUrl);
+    } catch {
+      throw new Error("Finance expense worker database URL is invalid");
+    }
+    if (
+      !["postgres:", "postgresql:"].includes(worker.protocol) ||
+      !worker.password ||
+      decodeURIComponent(worker.username) !== "vayada_next_finance_expense_worker" ||
+      worker.host !== target.host ||
+      worker.pathname !== target.pathname ||
+      worker.hash ||
+      [...worker.searchParams.keys()].some((key) => key !== "sslmode")
+    ) {
+      throw new Error("Finance expense worker requires its dedicated login on the target database");
+    }
+    financeExpenseWorker = { databaseUrl: normalizePgConnectionString(databaseUrl), propertyId };
+  }
   let airbnbAlterations: ApiConfig["airbnbAlterations"];
   if (readBooleanEnv(env, "AIRBNB_ALTERATIONS_ENABLED", false)) {
     const allProperties = readOptionalEnv(env, "AIRBNB_ALTERATION_PROPERTY_IDS") === "*";
@@ -1014,6 +1305,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     auth,
     authSession,
     targetDatabaseUrl,
+    pricingDatabaseUrl,
     publicHotelProfileSource,
     marketplaceAdminSource,
     marketplaceAdminLegacySuperadminFallbackEnabled: readBooleanEnv(
@@ -1022,6 +1314,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ),
     pmsOperationsSource,
     financeSource,
+    financeExpenseWorker,
+    financeExportWorker,
     financeFolioRecipientKms,
     pmsRoomClosureEnabled: readBooleanEnv(env, "PMS_ROOM_CLOSURE_ENABLED", false),
     pmsInboxSendingEnabled: readBooleanEnv(env, "PMS_INBOX_SENDING_ENABLED", true),
@@ -1031,11 +1325,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS",
     ),
     affiliatePublicSource: loadAffiliatePublicSource(env),
+    affiliateCapture,
+    affiliatePublicRedirectEnabled,
+    affiliateBookingBindingEnabled,
     pmsOperationsAllowedOrigins: readOptionalCsvEnv(env, "PMS_OPERATIONS_ALLOWED_ORIGINS", [
       "https://pms.localhost",
       "https://admin.booking.localhost",
       "https://marketplace.localhost",
     ]),
+    financialsActivationPropertyIds: readPropertyIdAllowlistEnv(
+      env,
+      "PMS_FINANCIALS_ACTIVATION_PROPERTY_IDS",
+    ),
     bookingWebEventSink,
     replacementPricingAcceptanceAllowedSlugs: readSlugAllowlistEnv(
       env,

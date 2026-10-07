@@ -11,7 +11,7 @@ const SYMBOLS: Record<string, string> = {
   SGD: "S$",
 };
 
-export function formatCurrency(amount: number, currency: string): string {
+export function formatCurrency(amount: number, currency: string, fractionDigits = 0): string {
   const symbol = SYMBOLS[currency] || currency + " ";
-  return `${symbol}${amount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  return `${symbol}${amount.toLocaleString(undefined, { minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits })}`;
 }

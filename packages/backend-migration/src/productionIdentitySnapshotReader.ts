@@ -4,6 +4,7 @@ import type pg from "pg";
 import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
 import { RETIRED_AUTH_TABLES } from "./productionIdentityConsentSource.js";
 import { VAY_1350_INVENTORY_REVISION } from "./sourceExtraction.js";
+import { HISTORICAL_SOURCE_TABLES } from "./rawSourceDispositions.js";
 
 type QueryClient = Pick<pg.ClientBase, "query">;
 type SourceDatabase = IdentitySourceRow["sourceDatabase"];
@@ -124,6 +125,27 @@ export const VAY_1350_ACTIVE_SOURCE_TABLES: Record<SourceDatabase, readonly stri
   ],
 };
 
+export function expectedSourceTablesForLedger(
+  tables: readonly { sourceDatabase: string; sourceSchema: string; sourceTable: string }[],
+): Record<SourceDatabase, readonly string[]> {
+  const historicalCount = tables.filter(
+    (row) =>
+      row.sourceDatabase === "pms" &&
+      HISTORICAL_SOURCE_TABLES.includes(
+        `${row.sourceSchema}.${row.sourceTable}` as (typeof HISTORICAL_SOURCE_TABLES)[number],
+      ),
+  ).length;
+  if (historicalCount !== 0 && historicalCount !== HISTORICAL_SOURCE_TABLES.length) {
+    throw new Error("Source extraction has an incomplete historical PMS table set");
+  }
+  return historicalCount === 0
+    ? VAY_1350_ACTIVE_SOURCE_TABLES
+    : {
+        ...VAY_1350_ACTIVE_SOURCE_TABLES,
+        pms: [...VAY_1350_ACTIVE_SOURCE_TABLES.pms, ...HISTORICAL_SOURCE_TABLES],
+      };
+}
+
 export async function readProductionIdentitySnapshot(
   client: QueryClient,
   runId: string,
@@ -180,10 +202,11 @@ export async function readProductionIdentitySnapshot(
       row,
     ]),
   );
+  const expectedTables = expectedSourceTablesForLedger(tableResult.rows);
   for (const database of databases()) {
     const aggregate = createHash("sha256");
     let aggregateCount = 0;
-    for (const qualifiedTable of VAY_1350_ACTIVE_SOURCE_TABLES[database]) {
+    for (const qualifiedTable of expectedTables[database]) {
       const ledger = evidence.get(`${database}:${qualifiedTable}`);
       if (ledger?.status !== "completed" || !count(ledger.rowCount) || !sha256(ledger.checksum))
         throw new Error(
@@ -196,7 +219,7 @@ export async function readProductionIdentitySnapshot(
     if (aggregateCount !== Number(source.rowCount) || aggregate.digest("hex") !== source.checksum)
       throw new Error(`Source extraction ${runId} mismatches ${database} source aggregate`);
   }
-  if (evidence.size !== Object.values(VAY_1350_ACTIVE_SOURCE_TABLES).flat().length)
+  if (evidence.size !== Object.values(expectedTables).flat().length)
     throw new Error(`Source extraction ${runId} has an unexpected table ledger set`);
   const retiredResult = await client.query<{
     sourceTable: string;

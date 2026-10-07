@@ -68,6 +68,9 @@ describe("affiliate agreement endpoint", () => {
     expect(marketplaceCollaborationEndpoints.affiliateAssent("Existing:QA")).toBe(
       "/api/marketplace/collaborations/Existing%3AQA/affiliate-assent",
     );
+    expect(marketplaceCollaborationEndpoints.affiliateLink("Existing:QA")).toBe(
+      "/api/marketplace/collaborations/Existing%3AQA/affiliate-link",
+    );
   });
 });
 

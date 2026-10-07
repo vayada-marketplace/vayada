@@ -130,8 +130,8 @@ export function createPgHotelCatalogStep1Repository(config: {
     async getState(scope) {
       const client = await pool.connect();
       try {
-        await client.query("BEGIN");
-        const state = await readLockedHotelCatalogStep1State(client, scope);
+        await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+        const state = await readLockedHotelCatalogStep1State(client, scope, true);
         if (!state) {
           await rollback(client);
           return null;
@@ -397,21 +397,24 @@ export function createPgHotelCatalogStep1Repository(config: {
 export async function readLockedHotelCatalogStep1State(
   client: QueryClient,
   scope: HotelCatalogStep1Scope,
+  readOnly = false,
 ): Promise<HotelCatalogStep1State | null> {
-  const property = await lockAuthorizedProperty(client, scope);
+  const property = await lockAuthorizedProperty(client, scope, readOnly);
   return property ? loadState(client, property) : null;
 }
 
 export async function lockHotelCatalogSetupScope(
   client: QueryClient,
   scope: HotelCatalogStep1Scope,
+  readOnly = false,
 ): Promise<boolean> {
-  return (await lockAuthorizedProperty(client, scope)) !== null;
+  return (await lockAuthorizedProperty(client, scope, readOnly)) !== null;
 }
 
 async function lockAuthorizedProperty(
   client: QueryClient,
   scope: HotelCatalogStep1Scope,
+  readOnly = false,
 ): Promise<PropertyRow | null> {
   const result = await client.query<PropertyRow>(
     `SELECT property.id::text AS "propertyId",
@@ -443,9 +446,13 @@ async function lockAuthorizedProperty(
       AND permission_grant.role_key = membership.role_key
       AND permission_grant.permission_key = $4
      WHERE property.id = $2::uuid
-     FOR UPDATE OF property
+     ${
+       readOnly
+         ? ""
+         : `FOR UPDATE OF property
      FOR SHARE OF organization, resource, actor, membership
-     FOR KEY SHARE OF permission_grant`,
+     FOR KEY SHARE OF permission_grant`
+     }`,
     [scope.organizationId, scope.propertyId, scope.actorUserId, PERMISSION],
   );
   return result.rows[0] ?? null;

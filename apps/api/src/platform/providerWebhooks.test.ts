@@ -90,7 +90,7 @@ describe("provider webhook booking settlement", () => {
         receiptKey: "webhook:stripe:evt_1",
         receiptKeyHash: "hash",
         payloadHash: "payload-hash",
-        rawPayload: {},
+        rawPayload: { account: "acct_owner" },
         normalizedPreview: {
           domainEventKey: "payment.captured:stripe:pi_booking_1:60000:v1",
           domainEventType: "payment.captured",
@@ -107,6 +107,12 @@ describe("provider webhook booking settlement", () => {
     );
 
     const statements = query.mock.calls.map(([sql]) => sql);
+    expect(
+      query.mock.calls.find(([sql]) => sql.includes("FOR UPDATE OF payment, booking")),
+    ).toEqual([
+      expect.stringContaining("account.provider_account_id = $2"),
+      ["pi_booking_1", "acct_owner"],
+    ]);
     expect(statements.some((sql) => sql.includes("UPDATE finance.payments"))).toBe(true);
     expect(statements.some((sql) => sql.includes("UPDATE booking.guest_bookings"))).toBe(true);
     expect(statements.some((sql) => sql.includes("'pms-reservation-handoff'"))).toBe(true);

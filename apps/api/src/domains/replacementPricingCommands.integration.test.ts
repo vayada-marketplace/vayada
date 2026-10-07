@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import type { ReplacementOfferTerms } from "@vayada/domain-booking";
 import pg from "pg";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { createBookingPricingOfferTermsStore } from "./bookingPricingOfferTerms.js";
 import { replacementChargeFingerprint } from "./replacementChargeDeclarations.js";
 import { createReplacementPricingCommands } from "./replacementPricingCommands.js";
@@ -53,7 +53,7 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
           restrictions: { kind: "own", rules: { minArrivalNights: 1, maxStayNights: null, closedToArrival: false, closedToDeparture: false, stopSell: false }, seasons: [], dates: [] },
         })),
       })) };
-    const commands = createReplacementPricingCommands(pool, context);
+    const commands = createReplacementPricingCommands(pool, context, pool);
     const prepared = await commands.prepare(propertyId, proposed), draftId = randomUUID();
     const draft = { draftId, expectedDraftRevision: 0, baseRevision: 0, ...prepared };
     return { commands, context, scope, proposed, prepared, draft, membershipId };
@@ -74,6 +74,29 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
       (SELECT count(*)::int FROM pms.pricing_v2_revisions WHERE property_id=$1) AS revisions,
       (SELECT count(*)::int FROM platform.domain_events WHERE property_id=$1 AND event_type='pricing.v2.revised') AS events`, [propertyId])).rows[0];
   }
+  it("uses only the explicit authority pool for the owner authority read", async () => {
+    const f = await fixture();
+    const authorityPool = new pg.Pool({ connectionString: url, max: 1 });
+    const generalConnect = vi.spyOn(pool, "connect");
+    const authorityConnect = vi.spyOn(authorityPool, "connect");
+    try {
+      expect(
+        await createReplacementPricingCommands(pool, f.context, authorityPool).readAuthority(
+          f.scope.propertyId,
+        ),
+      ).toEqual({
+        authority: "unconfigured",
+        revision: null,
+        organizationId: null,
+      });
+      expect(authorityConnect).toHaveBeenCalledTimes(1);
+      expect(generalConnect).not.toHaveBeenCalled();
+    } finally {
+      generalConnect.mockRestore();
+      authorityConnect.mockRestore();
+      await authorityPool.end();
+    }
+  });
   it("prepares without writes and runs the complete draft/confirmation/publication flow", async () => {
     const f = await fixture(), id = f.scope.propertyId;
     expect(await counts(id)).toEqual({ drafts: 0, revisions: 0, events: 0 });
@@ -155,12 +178,12 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
     await pool.query("UPDATE pms.room_types SET active=false WHERE id=$1", [f.proposed.rooms[0].roomTypeId]);
     await expect(f.commands.prepare(id, f.proposed)).rejects.toMatchObject({ code: "denied" });
     await expect(other.commands.prepare(id, f.proposed)).rejects.toMatchObject({ code: "denied" });
-    await expect(createReplacementPricingCommands(pool, null).prepare(id, f.proposed)).rejects.toMatchObject({ code: "denied" });
+    await expect(createReplacementPricingCommands(pool, null, pool).prepare(id, f.proposed)).rejects.toMatchObject({ code: "denied" });
   });
   it("executes the protected HTTP flow against real pricing owners and storage", async () => {
     const f = await fixture(), id = f.scope.propertyId, app = Fastify();
     app.decorateRequest("authContext", null); app.addHook("onRequest", async (request) => { request.authContext = f.context; });
-    await app.register(registerReplacementPricingRoutes, { commands: (context) => createReplacementPricingCommands(pool, context) });
+    await app.register(registerReplacementPricingRoutes, { commands: (context) => createReplacementPricingCommands(pool, context, pool) });
     const base = `/properties/${id}/pricing-v2`, draftPath = `${base}/drafts/${f.draft.draftId}`;
     try {
       const room = f.proposed.rooms[0], offer = room.offers[0], termsPath = `${base}/rooms/${room.roomTypeId}/offers/${offer.id}/terms`;
@@ -214,7 +237,7 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
     await pool.query("UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", [id]);
     const app = Fastify(); app.decorateRequest("authContext", null);
     app.addHook("onRequest", async (request) => { request.authContext = f.context; });
-    await app.register(registerReplacementPricingRoutes, { commands: (context) => createReplacementPricingCommands(pool, context) });
+    await app.register(registerReplacementPricingRoutes, { commands: (context) => createReplacementPricingCommands(pool, context, pool) });
     try {
       const response = await app.inject({ method: "POST", url: `/properties/${id}/pricing-v2/charges`, headers: { "idempotency-key": "stale-review" },
         payload: { draftId: f.draft.draftId, expectedDraftRevision: latestReview.revision, claimedFingerprint: latestReview.fingerprint, declaration: latestReview.declaration } });
@@ -320,7 +343,7 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
     await expect(f.commands.publish(id, command)).rejects.toMatchObject({ code: "stale" });
     await expect(f.commands.confirmCharges(id, { draftId: context.draftId, expectedDraftRevision: 3, claimedFingerprint: oldReview.fingerprint,
       declaration: oldReview.declaration, requestId: randomUUID() })).rejects.toMatchObject({ code: "stale" });
-    const denied = createReplacementPricingCommands(pool, null), foreign = await fixture();
+    const denied = createReplacementPricingCommands(pool, null, pool), foreign = await fixture();
     for (const commands of [denied, foreign.commands]) {
       await expect(commands.prepare(id, { currency: "EUR", rooms }, context)).rejects.toMatchObject({ code: "denied" });
       await expect(commands.saveDraft(id, { ...f.draft, ...prepared, expectedDraftRevision: 3 })).rejects.toMatchObject({ code: "denied" });

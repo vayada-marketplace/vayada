@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import type pg from "pg";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   databaseUrl,
@@ -7,6 +8,7 @@ import {
 } from "./affiliatePublicationCommandTestFixture.js";
 import {
   AFFILIATE_REFERRAL_READINESS_MAX_AGE_SECONDS,
+  readAffiliateReferralRuntimeConfiguration,
   readAffiliateReferralRoundTripReadiness,
 } from "./bookingAffiliateReferralReadiness.js";
 
@@ -49,8 +51,10 @@ describe.skipIf(!databaseUrl)("affiliate referral round-trip readiness", () => {
   async function insertCertification(
     probeLifetime = "1 hour",
     identifiers = { probe: id(40), booking: id(41), certification: id(50) },
+    configuration = { connectionReference: certificationConnectionReference, adapterVersion },
+    database: Pick<pg.Pool, "query"> = fixture.pool(),
   ) {
-    await fixture.pool().query(
+    await database.query(
       `INSERT INTO booking.affiliate_validation_probes
       (id,property_id,destination_version_id,organization_id,actor_id,environment,
        connection_reference,adapter_version,request_id,key_hash,fingerprint,expires_at)
@@ -61,22 +65,23 @@ describe.skipIf(!databaseUrl)("affiliate referral round-trip readiness", () => {
         id(30),
         id(4),
         id(1),
-        certificationConnectionReference,
-        adapterVersion,
+        configuration.connectionReference,
+        configuration.adapterVersion,
         identifiers.probe.replaceAll("-", "").padEnd(64, "a").slice(0, 64),
         identifiers.certification.replaceAll("-", "").padEnd(64, "b").slice(0, 64),
         probeLifetime,
       ],
     );
-    await fixture
-      .pool()
-      .query("INSERT INTO booking.guest_bookings VALUES($1,$2)", [identifiers.booking, id(3)]);
-    await fixture.pool().query(
+    await database.query("INSERT INTO booking.guest_bookings VALUES($1,$2)", [
+      identifiers.booking,
+      id(3),
+    ]);
+    await database.query(
       `INSERT INTO booking.affiliate_validation_booking_bindings
       (booking_id,property_id,probe_id,request_id) VALUES($1,$2,$3,'binding')`,
       [identifiers.booking, id(3), identifiers.probe],
     );
-    await fixture.pool().query(
+    await database.query(
       `INSERT INTO booking.affiliate_referral_transport_certifications
       (id,probe_id,booking_id,property_id,destination_version_id,organization_id,environment,
        connection_reference,adapter_version,contract_version,evidence_references,actor_id,
@@ -91,8 +96,8 @@ describe.skipIf(!databaseUrl)("affiliate referral round-trip readiness", () => {
         id(3),
         id(30),
         id(4),
-        certificationConnectionReference,
-        adapterVersion,
+        configuration.connectionReference,
+        configuration.adapterVersion,
         id(1),
       ],
     );
@@ -101,14 +106,14 @@ describe.skipIf(!databaseUrl)("affiliate referral round-trip readiness", () => {
   async function insertPreflight(
     completedAt: Date | "infinity" = "infinity",
     preflightId = id(60),
+    configuration = { connectionReference: productionConnectionReference, adapterVersion },
+    database: Pick<pg.Pool, "query"> = fixture.pool(),
   ) {
     if (completedAt !== "infinity")
-      await fixture
-        .pool()
-        .query(
-          "ALTER TABLE booking.affiliate_referral_production_preflights DISABLE TRIGGER affiliate_referral_production_preflight_complete",
-        );
-    await fixture.pool().query(
+      await database.query(
+        "ALTER TABLE booking.affiliate_referral_production_preflights DISABLE TRIGGER affiliate_referral_production_preflight_complete",
+      );
+    await database.query(
       `INSERT INTO booking.affiliate_referral_production_preflights
       (id,property_id,destination_version_id,organization_id,connection_reference,adapter_version,
        correlation_hash,contract_version,evidence_references,actor_id,request_id,completed_at)
@@ -119,19 +124,17 @@ describe.skipIf(!databaseUrl)("affiliate referral round-trip readiness", () => {
         id(3),
         id(30),
         id(4),
-        productionConnectionReference,
-        adapterVersion,
+        configuration.connectionReference,
+        configuration.adapterVersion,
         preflightId.replaceAll("-", "").padEnd(64, "c").slice(0, 64),
         id(1),
         completedAt,
       ],
     );
     if (completedAt !== "infinity")
-      await fixture
-        .pool()
-        .query(
-          "ALTER TABLE booking.affiliate_referral_production_preflights ENABLE TRIGGER affiliate_referral_production_preflight_complete",
-        );
+      await database.query(
+        "ALTER TABLE booking.affiliate_referral_production_preflights ENABLE TRIGGER affiliate_referral_production_preflight_complete",
+      );
   }
 
   async function read(input = scope()) {
@@ -139,6 +142,18 @@ describe.skipIf(!databaseUrl)("affiliate referral round-trip readiness", () => {
     try {
       await client.query("BEGIN");
       const result = await readAffiliateReferralRoundTripReadiness(client, input);
+      await client.query("ROLLBACK");
+      return result;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function readConfiguration(input = scope()) {
+    const client = await fixture.pool().connect();
+    try {
+      await client.query("BEGIN");
+      const result = await readAffiliateReferralRuntimeConfiguration(client, input);
       await client.query("ROLLBACK");
       return result;
     } finally {
@@ -183,6 +198,103 @@ describe.skipIf(!databaseUrl)("affiliate referral round-trip readiness", () => {
       status: "blocked",
       reasons: ["production_preflight_unavailable"],
     });
+  });
+
+  it("selects one current runtime configuration and rejects ambiguous evidence", async () => {
+    await expect(readConfiguration()).resolves.toBeUndefined();
+    await insertCertification();
+    await insertPreflight();
+    await expect(readConfiguration()).resolves.toEqual({
+      certificationEnvironment: "sandbox",
+      certificationConnectionReference,
+      productionConnectionReference,
+      adapterVersion,
+    });
+
+    await insertCertification(
+      "1 hour",
+      { probe: id(42), booking: id(43), certification: id(51) },
+      { connectionReference: "next-sandbox-connection", adapterVersion: "native-v2" },
+    );
+    await insertPreflight("infinity", id(61), {
+      connectionReference: "next-live-connection",
+      adapterVersion: "native-v2",
+    });
+    await expect(readConfiguration()).resolves.toBeUndefined();
+
+    await fixture.pool().query(
+      `INSERT INTO booking.affiliate_validation_probe_revocations
+       (probe_id,actor_id,organization_id,request_id) VALUES($1,$2,$3,'retire-ambiguous')`,
+      [id(42), id(1), id(4)],
+    );
+    await fixture.pool().query(
+      `INSERT INTO booking.affiliate_referral_production_preflight_revocations
+       (preflight_id,actor_id,organization_id,request_id)
+       VALUES($1,$2,$3,'retire-ambiguous')`,
+      [id(61), id(1), id(4)],
+    );
+    await expect(readConfiguration()).resolves.toEqual({
+      certificationEnvironment: "sandbox",
+      certificationConnectionReference,
+      productionConnectionReference,
+      adapterVersion,
+    });
+  });
+
+  it("holds the shared property scope against a competing configuration command", async () => {
+    await insertCertification();
+    await insertPreflight();
+    const reader = await fixture.pool().connect();
+    const writer = await fixture.pool().connect();
+    let competingWrite: Promise<unknown> | undefined;
+    try {
+      await reader.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      await expect(readAffiliateReferralRuntimeConfiguration(reader, scope())).resolves.toEqual({
+        certificationEnvironment: "sandbox",
+        certificationConnectionReference,
+        productionConnectionReference,
+        adapterVersion,
+      });
+
+      await writer.query("BEGIN");
+      const pid = (await writer.query("SELECT pg_backend_pid() AS pid")).rows[0].pid as number;
+      competingWrite = (async () => {
+        await writer.query("SELECT id FROM hotel_catalog.properties WHERE id=$1 FOR UPDATE", [
+          id(3),
+        ]);
+        await insertCertification(
+          "1 hour",
+          { probe: id(42), booking: id(43), certification: id(51) },
+          { connectionReference: "next-sandbox-connection", adapterVersion: "native-v2" },
+          writer,
+        );
+        await insertPreflight(
+          "infinity",
+          id(61),
+          { connectionReference: "next-live-connection", adapterVersion: "native-v2" },
+          writer,
+        );
+      })();
+      await expect
+        .poll(async () => {
+          const result = await fixture
+            .pool()
+            .query("SELECT cardinality(pg_blocking_pids($1)) AS blocked", [pid]);
+          return result.rows[0].blocked;
+        })
+        .toBeGreaterThan(0);
+
+      await reader.query("COMMIT");
+      await competingWrite;
+      await writer.query("COMMIT");
+      await expect(readConfiguration()).resolves.toBeUndefined();
+    } finally {
+      await reader.query("ROLLBACK").catch(() => undefined);
+      await writer.query("ROLLBACK").catch(() => undefined);
+      await competingWrite?.catch(() => undefined);
+      reader.release();
+      writer.release();
+    }
   });
 
   it("reports each missing half without treating configuration as readiness", async () => {

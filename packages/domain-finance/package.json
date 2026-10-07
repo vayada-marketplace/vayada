@@ -17,6 +17,9 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "countries-and-timezones": "3.9.0"
+  },
   "devDependencies": {
     "@types/node": "^20",
     "typescript": "^5",

@@ -444,6 +444,27 @@ type AffiliatePayoutLedgerResponse = {
 };
 ```
 
+The integrated Marketplace creator surface resolves one active `creator_profile`
+and one active `affiliate` resource from the same `creator_workspace`. Finance
+then scopes every settings, payout-detail, and statement read to that exact
+organization and affiliate pair. The creator-facing detail contains the payout
+amounts/status plus its immutable `affiliate_earning_allocation_items`, with
+the earning currency, commission, adjustment, applied amount, property, and
+masked booking/provider references. It never promotes an unallocated eligible
+earning to paid.
+
+`GET /api/marketplace/affiliate-payouts/:payoutId/statement?currency=EUR`
+returns a UTF-8 CSV for one authorized payout. Currency is required and must
+match the payout. The export repeats no raw destination, provider account,
+provider payout, bank account, guest, or payment-evidence identifier. Empty,
+cross-organization, cross-affiliate, cross-currency, and unknown payout scopes
+return `404` so the route does not disclose their existence.
+
+Marketplace payout-setting and Stripe-onboarding commands reuse the accepted
+Finance commands and idempotency keys. The server derives organization and
+affiliate scope from the authenticated creator workspace; the browser cannot
+select either scope.
+
 Affiliate payout settings responses must not include referral-code ownership
 fields, raw bank account numbers, provider secrets, or marketplace profile PII.
 

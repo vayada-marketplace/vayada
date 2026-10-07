@@ -29,7 +29,8 @@ jobs:
   publish:
     if: >-
       ${{
-        vars.COORDINATED_RELEASES_ENABLED == 'true' &&
+        github.ref == 'refs/heads/main' &&
+        (vars.COORDINATED_RELEASES_ENABLED == 'true' || github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'workflow_dispatch') &&
         (
           github.event_name == 'workflow_dispatch' ||
           (
@@ -56,15 +57,26 @@ jobs:
           SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
           SOURCE_EVENT: ${{ github.event.workflow_run.event }}
           REDISPATCH_ARTIFACT_ID: ${{ inputs.published_artifact_id }}
+          RELEASES_ENABLED: ${{ vars.COORDINATED_RELEASES_ENABLED }}
         run: |
           set -euo pipefail
           mkdir -p release-work/content
           if test "${GITHUB_EVENT_NAME}" = workflow_run; then
+            # Uploaded publications are immutable, including after a failed dispatch.
+            existing_publications="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+              --jq '.artifacts[] | select(.name | startswith("next-release-published-v1-")) | .id')"
+            if test -n "$existing_publications"; then
+              echo "::error::Publication already exists (artifact IDs: $existing_publications). Start a fresh workflow_dispatch on main with published_artifact_id set to the existing non-expired artifact ID; do not rerun or replace this publication."
+              exit 1
+            fi
             case "$SOURCE_EVENT" in
               push|workflow_dispatch) ;;
               *) echo "::error::Source event is not allowlisted: $SOURCE_EVENT"; exit 1 ;;
             esac
-            run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}")"
+            run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/attempts/${SOURCE_RUN_ATTEMPT}")"
+            test "$(jq -r '.id' <<< "$run_json")" = "$SOURCE_RUN_ID"
+            test "$(jq -r '.repository.full_name' <<< "$run_json")" = "$GITHUB_REPOSITORY"
+            test "$(jq -r '.event' <<< "$run_json")" = "$SOURCE_EVENT"
             test "$(jq -r '.status' <<< "$run_json")" = completed
             test "$(jq -r '.conclusion' <<< "$run_json")" = success
             test "$(jq -r '.head_branch' <<< "$run_json")" = main
@@ -81,13 +93,21 @@ jobs:
               "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
               > release-work/artifact.zip
             unzip -q release-work/artifact.zip -d release-work/content
+            prepare_only="$(cat release-work/content/prepare-only)"
+            case "$prepare_only" in
+              true) test "$SOURCE_EVENT" = workflow_dispatch ;;
+              false) test "$RELEASES_ENABLED" = true ;;
+              *) echo "::error::Invalid preparation mode"; exit 1 ;;
+            esac
+            echo "prepare-only=$prepare_only" >> "$GITHUB_OUTPUT"
             node scripts/coordinated-release/validate.mjs manifest \
               release-work/content/manifest.json \
               "$(awk '{print $1}' release-work/content/manifest.sha256)"
             test "$(jq -r '.source.sha' release-work/content/manifest.json)" = "$SOURCE_SHA"
             test "$(jq -r '.build.runId' release-work/content/manifest.json)" = "$SOURCE_RUN_ID"
             test "$(jq -r '.build.runAttempt' release-work/content/manifest.json)" = "$SOURCE_RUN_ATTEMPT"
-            published_at="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+            # Bind the publication window to run creation, before GitHub starts artifact retention.
+            published_at="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq '.created_at')"
             published_name="$(node scripts/coordinated-release/prepare-publication.mjs \
               --manifest release-work/content/manifest.json \
               --manifest-hash release-work/content/manifest.sha256 \
@@ -119,7 +139,9 @@ jobs:
             test "$(jq -r '.workflow_run.id' <<< "$artifact_json")" = \
               "$(jq -r '.publisher.runId' release-work/content/published-record.json)"
             publisher_run_id="$(jq -r '.publisher.runId' release-work/content/published-record.json)"
-            publisher_run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${publisher_run_id}")"
+            publisher_run_attempt="$(jq -r '.publisher.runAttempt' release-work/content/published-record.json)"
+            publisher_run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${publisher_run_id}/attempts/${publisher_run_attempt}")"
+            test "$(jq -r '.id' <<< "$publisher_run")" = "$publisher_run_id"
             test "$(jq -r '.status' <<< "$publisher_run")" = completed
             test "$(jq -r '.event' <<< "$publisher_run")" = workflow_run
             test "$(jq -r '.head_branch' <<< "$publisher_run")" = main
@@ -146,12 +168,7 @@ jobs:
         run: |
           set -euo pipefail
           while IFS=$'\t' read -r repository digest image_source_sha; do
-            verified="$(aws ecr describe-images \
-              --repository-name "$repository" \
-              --image-ids "imageTag=next-${image_source_sha}" \
-              --query 'imageDetails[0].imageDigest' \
-              --output text)"
-            test "$verified" = "$digest"
+            node scripts/coordinated-release/verify-image.mjs "$repository" "$digest" "$image_source_sha"
           done < <(jq -r '.services[] | [.ecrRepository, .digest, .imageSourceSha] | @tsv' release-work/content/manifest.json)
 
       - name: Upload durable published release
@@ -171,6 +188,7 @@ jobs:
       - name: Resolve published artifact identity
         id: artifact
         env:
+          GH_TOKEN: ${{ github.token }}
           MODE: ${{ steps.prepare.outputs.mode }}
           NEW_ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
           EXISTING_ARTIFACT_ID: ${{ steps.prepare.outputs.published-artifact-id }}
@@ -182,9 +200,20 @@ jobs:
             artifact_id="$EXISTING_ARTIFACT_ID"
           fi
           [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]]
+          artifact_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}")"
+          test "$(jq -r '.expired' <<< "$artifact_json")" = false
+          node --input-type=module - "$artifact_json" <<'NODE'
+          import { readFileSync } from "node:fs";
+          const artifact = JSON.parse(process.argv[2]);
+          const record = JSON.parse(readFileSync("release-work/content/published-record.json", "utf8"));
+          if (!(Date.parse(artifact.expires_at) >= Date.parse(record.expiresAt))) {
+            throw new Error("Published artifact retention is shorter than the record");
+          }
+          NODE
           echo "id=$artifact_id" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch immutable release identity to platform
+        if: ${{ vars.COORDINATED_RELEASES_ENABLED == 'true' && steps.prepare.outputs.prepare-only != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.PLATFORM_DEPLOY_TOKEN }}
           PUBLISHED_ARTIFACT_ID: ${{ steps.artifact.outputs.id }}
@@ -203,9 +232,10 @@ jobs:
       - name: Summarize publication
         run: |
           jq -n \
+            --arg prepareOnly "${{ steps.prepare.outputs.prepare-only }}" \
             --arg mode "${{ steps.prepare.outputs.mode }}" \
             --arg manifestId "$(jq -r '.manifestId' release-work/content/manifest.json)" \
             --arg sourceSha "$(jq -r '.source.sha' release-work/content/manifest.json)" \
             --arg artifactId "${{ steps.artifact.outputs.id }}" \
-            '{mode: $mode, manifestId: $manifestId, sourceSha: $sourceSha, publishedArtifactId: $artifactId}' \
+            '{prepareOnly: $prepareOnly, mode: $mode, manifestId: $manifestId, sourceSha: $sourceSha, publishedArtifactId: $artifactId}' \
             >> "$GITHUB_STEP_SUMMARY"

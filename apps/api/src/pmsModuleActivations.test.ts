@@ -85,7 +85,7 @@ function pmsEntitlement(status: ProductEntitlement["status"] = "active"): Produc
   };
 }
 
-function createActivationRepository(): PmsModuleActivationRepository {
+function createActivationRepository(includeFinancials = true): PmsModuleActivationRepository {
   const now = "2026-06-29T08:00:00.000Z";
   const activations = new Map<string, PmsModuleActivation>([
     [
@@ -119,9 +119,21 @@ function createActivationRepository(): PmsModuleActivationRepository {
       },
     ],
   ]);
+  if (!includeFinancials) activations.delete("financials");
   return {
     async list() {
       return Array.from(activations.values());
+    },
+    async updateFinancials(_context, _propertyId, isActive) {
+      const updated = {
+        moduleId: "financials",
+        isActive,
+        activatedAt: isActive ? now : null,
+        deactivatedAt: isActive ? null : now,
+        updatedAt: now,
+      };
+      activations.set("financials", updated);
+      return updated;
     },
   };
 }
@@ -134,6 +146,7 @@ function buildAuthenticatedApp(
     linkedPropertyId?: string | null;
     linkedRelationship?: ResourceRelationship;
     allowedOrigins?: string[];
+    financialsActivationPropertyIds?: string[];
     reviewRepository?: PmsReviewRepository;
     bookingPublicationRefresh?: BookingPublicationRefreshPort;
   } = {},
@@ -152,6 +165,13 @@ function buildAuthenticatedApp(
               relationship: options.linkedRelationship ?? ("operator" as const),
               status: "active" as const,
             },
+            {
+              product: "hotel_catalog" as const,
+              resourceType: "property" as const,
+              resourceId: linkedPropertyId,
+              relationship: options.linkedRelationship ?? ("operator" as const),
+              status: "active" as const,
+            },
           ]
         : [];
     },
@@ -163,6 +183,7 @@ function buildAuthenticatedApp(
     pmsReviewRepository: options.reviewRepository,
     bookingPublicationRefresh: options.bookingPublicationRefresh,
     pmsOperationsAllowedOrigins: options.allowedOrigins,
+    financialsActivationPropertyIds: options.financialsActivationPropertyIds,
     auth: {
       verifier: createFakeVerifier(new Map([["valid-token", session]])),
       repository: repo,
@@ -201,7 +222,7 @@ describe("PMS module activation routes", () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).toMatchObject({
       hotelId: propertyId,
-      canManage: true,
+      canManage: false,
       supportedModules: [],
       activeModules: ["affiliates"],
     });
@@ -230,7 +251,7 @@ describe("PMS module activation routes", () => {
     expect(write.statusCode).toBe(403);
   });
 
-  it("does not advertise manage capability outside owner or operator property scope", async () => {
+  it("does not advertise manage capability outside an eligible finance owner scope", async () => {
     app = buildAuthenticatedApp({
       permissions: ["pms.operations.read", "pms.operations.manage"],
       linkedRelationship: "front_desk",
@@ -244,6 +265,235 @@ describe("PMS module activation routes", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body.canManage).toBe(false);
+  });
+
+  it("keeps Financials absent by default and rejects an unapproved activation", async () => {
+    app = buildAuthenticatedApp({
+      repository: createActivationRepository(false),
+      linkedRelationship: "owner",
+      permissions: ["pms.operations.read", "pms.finance.read", "pms.finance.manage"],
+    });
+    const headers = { authorization: "Bearer valid-token" };
+    const list = await injectJson<PmsModuleActivationsResponse>(app, {
+      method: "GET",
+      url: `/api/pms/properties/${propertyId}/module-activations`,
+      headers,
+    });
+    expect(list.body.supportedModules).toEqual([]);
+    expect(list.body.activeModules).toEqual(["affiliates"]);
+    const update = await app.inject({
+      method: "PATCH",
+      url: `/api/pms/properties/${propertyId}/module-activations/financials`,
+      headers,
+      payload: { moduleId: "financials", isActive: true },
+    });
+    expect(update.statusCode).toBe(403);
+    expect(update.json()).toMatchObject({ code: "financials_activation_not_allowed" });
+  });
+
+  it("allows a scoped finance owner to activate and roll back an approved property", async () => {
+    app = buildAuthenticatedApp({
+      repository: createActivationRepository(false),
+      linkedRelationship: "owner",
+      permissions: ["pms.operations.read", "pms.finance.read", "pms.finance.manage"],
+      financialsActivationPropertyIds: [propertyId],
+    });
+    const headers = { authorization: "Bearer valid-token" };
+    const url = `/api/pms/properties/${propertyId}/module-activations`;
+    const list = await injectJson<PmsModuleActivationsResponse>(app, {
+      method: "GET",
+      url,
+      headers,
+    });
+    expect(list.body).toMatchObject({ canManage: true, supportedModules: ["financials"] });
+    const enabled = await app.inject({
+      method: "PATCH",
+      url: `${url}/financials`,
+      headers,
+      payload: { moduleId: "financials", isActive: true },
+    });
+    expect(enabled.statusCode).toBe(200);
+    expect(enabled.json()).toMatchObject({ moduleId: "financials", isActive: true });
+    const disabled = await app.inject({
+      method: "PATCH",
+      url: `${url}/financials`,
+      headers,
+      payload: { moduleId: "financials", isActive: false },
+    });
+    expect(disabled.statusCode).toBe(200);
+    expect(disabled.json()).toMatchObject({ moduleId: "financials", isActive: false });
+  });
+
+  it("keeps rollback available after the property leaves the activation allowlist", async () => {
+    app = buildAuthenticatedApp({
+      linkedRelationship: "owner",
+      permissions: ["pms.operations.read", "pms.finance.read", "pms.finance.manage"],
+    });
+    const headers = { authorization: "Bearer valid-token" };
+    const url = `/api/pms/properties/${propertyId}/module-activations`;
+    const list = await injectJson<PmsModuleActivationsResponse>(app, {
+      method: "GET",
+      url,
+      headers,
+    });
+    expect(list.body.supportedModules).toEqual(["financials"]);
+    const disabled = await app.inject({
+      method: "PATCH",
+      url: `${url}/financials`,
+      headers,
+      payload: { isActive: false },
+    });
+    expect(disabled.statusCode).toBe(200);
+    expect(disabled.json()).toMatchObject({ isActive: false });
+  });
+
+  it("shows an effective organization-wide grant and allows property rollback", async () => {
+    app = buildAuthenticatedApp({
+      repository: createActivationRepository(false),
+      linkedRelationship: "owner",
+      permissions: ["pms.operations.read", "pms.finance.read", "pms.finance.manage"],
+      entitlements: [
+        pmsEntitlement(),
+        { product: "pms", key: "module:financials", status: "active" },
+      ],
+    });
+    const headers = { authorization: "Bearer valid-token" };
+    const url = `/api/pms/properties/${propertyId}/module-activations`;
+    const list = await injectJson<PmsModuleActivationsResponse>(app, {
+      method: "GET",
+      url,
+      headers,
+    });
+    expect(list.body).toMatchObject({
+      canManage: true,
+      supportedModules: ["financials"],
+      activeModules: ["affiliates", "financials"],
+    });
+    const disabled = await app.inject({
+      method: "PATCH",
+      url: `${url}/financials`,
+      headers,
+      payload: { isActive: false },
+    });
+    expect(disabled.statusCode).toBe(200);
+    expect(disabled.json()).toMatchObject({ isActive: false });
+  });
+
+  it("does not claim access through an organization-wide suspension", async () => {
+    app = buildAuthenticatedApp({
+      linkedRelationship: "owner",
+      permissions: ["pms.operations.read", "pms.finance.read", "pms.finance.manage"],
+      financialsActivationPropertyIds: [propertyId],
+      entitlements: [
+        pmsEntitlement(),
+        { product: "pms", key: "module:financials", status: "active" },
+        { product: "pms", key: "module:financials", status: "suspended" },
+      ],
+    });
+    const headers = { authorization: "Bearer valid-token" };
+    const url = `/api/pms/properties/${propertyId}/module-activations`;
+    const list = await injectJson<PmsModuleActivationsResponse>(app, {
+      method: "GET",
+      url,
+      headers,
+    });
+    expect(list.body.supportedModules).toEqual(["financials"]);
+    expect(list.body.activeModules).toEqual(["affiliates"]);
+    expect(list.body.canManage).toBe(false);
+    const update = await app.inject({
+      method: "PATCH",
+      url: `${url}/financials`,
+      headers,
+      payload: { isActive: true },
+    });
+    expect(update.statusCode).toBe(409);
+    expect(update.json()).toMatchObject({ code: "financials_globally_suspended" });
+  });
+
+  it("shows a property rollback as inactive despite a global grant", async () => {
+    app = buildAuthenticatedApp({
+      repository: createActivationRepository(false),
+      linkedRelationship: "owner",
+      permissions: ["pms.operations.read", "pms.finance.read", "pms.finance.manage"],
+      financialsActivationPropertyIds: [propertyId],
+      entitlements: [
+        pmsEntitlement(),
+        { product: "pms", key: "module:financials", status: "active" },
+        {
+          product: "pms",
+          key: "module:financials",
+          status: "suspended",
+          resource: { product: "pms", resourceType: "pms_property", resourceId: propertyId },
+        },
+      ],
+    });
+    const list = await injectJson<PmsModuleActivationsResponse>(app, {
+      method: "GET",
+      url: `/api/pms/properties/${propertyId}/module-activations`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(list.body.supportedModules).toEqual(["financials"]);
+    expect(list.body.activeModules).toEqual(["affiliates"]);
+  });
+
+  it("does not expose or allow Financials for an operator or front desk member", async () => {
+    for (const linkedRelationship of ["operator", "front_desk"] as const) {
+      app = buildAuthenticatedApp({
+        linkedRelationship,
+        permissions: ["pms.operations.read", "pms.finance.read", "pms.finance.manage"],
+        financialsActivationPropertyIds: [propertyId],
+      });
+      const headers = { authorization: "Bearer valid-token" };
+      const url = `/api/pms/properties/${propertyId}/module-activations`;
+      const list = await injectJson<PmsModuleActivationsResponse>(app, {
+        method: "GET",
+        url,
+        headers,
+      });
+      expect(list.body.supportedModules).toEqual([]);
+      expect(list.body.canManage).toBe(false);
+      const update = await app.inject({
+        method: "PATCH",
+        url: `${url}/financials`,
+        headers,
+        payload: { isActive: true },
+      });
+      expect(update.statusCode).toBe(403);
+      await app.close();
+      app = null;
+    }
+  });
+
+  it.each([
+    {
+      name: "missing finance manage permission",
+      permissions: ["pms.operations.read", "pms.finance.read"] as PermissionKey[],
+      entitlements: [pmsEntitlement()],
+    },
+    {
+      name: "inactive base entitlement",
+      permissions: [
+        "pms.operations.read",
+        "pms.finance.read",
+        "pms.finance.manage",
+      ] as PermissionKey[],
+      entitlements: [pmsEntitlement("suspended")],
+    },
+  ])("denies Financials activation with $name", async ({ permissions, entitlements }) => {
+    app = buildAuthenticatedApp({
+      linkedRelationship: "owner",
+      permissions,
+      entitlements,
+      financialsActivationPropertyIds: [propertyId],
+      repository: createActivationRepository(false),
+    });
+    const update = await app.inject({
+      method: "PATCH",
+      url: `/api/pms/properties/${propertyId}/module-activations/financials`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: { isActive: true },
+    });
+    expect(update.statusCode).toBe(403);
   });
 
   it.each([false, true])(
@@ -306,7 +556,7 @@ describe("PMS module activation routes", () => {
     expect(response.statusCode).toBe(400);
   });
 
-  it.each(["inbox", "financials", "lodgify", "stripe", "paypal", "xendit", "future-module"])(
+  it.each(["inbox", "lodgify", "stripe", "paypal", "xendit", "future-module"])(
     "rejects unsupported %s activation updates before writing",
     async (moduleId) => {
       const repository = createActivationRepository();
@@ -728,6 +978,10 @@ describe("PG PMS module activation repository", () => {
     expect(queries[0].text).toContain("FROM identity.product_entitlements");
     expect(queries[0].text).toContain("entitlement_key = ANY($3::text[])");
     expect(queries[0].text).toContain("starts_at IS NULL OR starts_at <= now()");
-    expect(queries[0].values).toEqual([organizationId, propertyId, ["module:affiliates"]]);
+    expect(queries[0].values).toEqual([
+      organizationId,
+      propertyId,
+      ["module:affiliates", "module:financials"],
+    ]);
   });
 });

@@ -535,6 +535,35 @@ describe.skipIf(!url)("Channex offer target storage", () => {
         .rows[0].active_version,
     ).toBeNull();
   });
+  it("retains a completed task outside the supported ARI horizon as terminal evidence", async () => {
+    const f = await ariFixture(),
+      attempt = (await f.insert()).rows[0];
+    const evidence = {
+      schemaVersion: 1,
+      completionBasis: "finished_task_outside_initial_horizon",
+      observationsSha256: "a".repeat(64),
+    };
+    await pool.query(
+      `UPDATE pms.channex_offer_ari_attempts
+       SET state='outside_horizon',reconciliation_evidence=$2
+       WHERE id=$1`,
+      [attempt.id, evidence],
+    );
+    expect(
+      (
+        await pool.query(
+          "SELECT state,reconciliation_evidence FROM pms.channex_offer_ari_attempts WHERE id=$1",
+          [attempt.id],
+        )
+      ).rows[0],
+    ).toEqual({ state: "outside_horizon", reconciliation_evidence: evidence });
+    await expect(
+      pool.query(
+        "UPDATE pms.channex_offer_ari_attempts SET reconciliation_evidence='{}' WHERE id=$1",
+        [attempt.id],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+  });
   it("rejects unresolved creation, foreign jobs, stale bindings and failed intents", async () => {
     const unresolved = await ariFixture(false);
     await expect(unresolved.insert()).rejects.toMatchObject({ code: "23514" });

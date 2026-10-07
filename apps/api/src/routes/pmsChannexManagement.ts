@@ -27,6 +27,8 @@ export type PmsChannexManagementRoutesOptions = {
   commandPort?: PmsChannexManagementCommandPort;
   iframeSessionPort?: PmsChannexIframeSessionPort;
   datePrices?: ChannelDatePricesPort;
+  publishedOfferProvisioningEnabled?: boolean;
+  publishedOfferProvisioningPropertyId?: string;
 };
 
 export async function registerPmsChannexManagementRoutes(
@@ -264,6 +266,36 @@ export async function registerPmsChannexManagementRoutes(
     },
   );
 
+  app.post<{ Params: { propertyId: string }; Body: unknown }>(
+    "/properties/:propertyId/channex/published-offers/provision",
+    async (request, reply) => {
+      const context = enforcePmsChannexPolicy(
+        request,
+        request.params.propertyId,
+        "pms.operations.manage",
+      );
+      const input = parsePublishedOfferProvision(request.body);
+      if (!input) return reply.code(400).send({ code: "invalid_published_offer_provision" });
+      if (
+        options.capabilityModes.provisioning !== "mutating" ||
+        !options.publishedOfferProvisioningEnabled ||
+        request.params.propertyId !== options.publishedOfferProvisioningPropertyId
+      )
+        return reply.code(409).send({ code: "channex_capability_not_mutating" });
+      if (!options.commandPort)
+        return reply.code(503).send({ code: "channex_commands_unavailable" });
+      return sendCommandResult(
+        reply,
+        await options.commandPort.enqueue(context, request.params.propertyId, {
+          commandId: input.commandId,
+          idempotencyKey: input.idempotencyKey,
+          operationType: "provision",
+          publishedOffer: input.publishedOffer,
+        }),
+      );
+    },
+  );
+
   app.put<{ Params: { propertyId: string }; Body: unknown }>(
     "/properties/:propertyId/channex/markups",
     async (request, reply) => {
@@ -399,6 +431,51 @@ function parseCommand(body: unknown) {
     commandId: value.commandId as string,
     idempotencyKey: value.idempotencyKey as string,
     operationType: value.operationType as Exclude<ChannexManagementOperationType, "update_markups">,
+  };
+}
+
+function parsePublishedOfferProvision(body: unknown) {
+  if (!body || typeof body !== "object") return null;
+  const value = body as Record<string, unknown>;
+  if (
+    !isCommandIdentity(value.commandId, value.idempotencyKey) ||
+    !z.uuid().safeParse(value.commandId).success ||
+    !z.uuid().safeParse(value.roomTypeId).success ||
+    typeof value.offerId !== "string" ||
+    !value.offerId.trim() ||
+    value.offerId !== value.offerId.trim() ||
+    typeof value.publicationRevision !== "number" ||
+    !Number.isSafeInteger(value.publicationRevision) ||
+    value.publicationRevision < 1 ||
+    typeof value.primaryOccupancy !== "number" ||
+    !Number.isSafeInteger(value.primaryOccupancy) ||
+    value.primaryOccupancy < 1 ||
+    value.primaryOccupancy > 100
+  )
+    return null;
+  if (
+    Object.keys(value).some(
+      (key) =>
+        ![
+          "commandId",
+          "idempotencyKey",
+          "roomTypeId",
+          "offerId",
+          "publicationRevision",
+          "primaryOccupancy",
+        ].includes(key),
+    )
+  )
+    return null;
+  return {
+    commandId: value.commandId as string,
+    idempotencyKey: value.idempotencyKey as string,
+    publishedOffer: {
+      roomTypeId: value.roomTypeId as string,
+      offerId: value.offerId as string,
+      publicationRevision: value.publicationRevision as number,
+      primaryOccupancy: value.primaryOccupancy as number,
+    },
   };
 }
 

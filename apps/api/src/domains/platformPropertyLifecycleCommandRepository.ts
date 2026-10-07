@@ -10,6 +10,7 @@ import {
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import { readPlatformPropertyRetirementImpact } from "./platformPropertyLifecycleImpactRepository.js";
+import { lockBookingPublication } from "./bookingPublicationLock.js";
 
 export type PlatformPropertyLifecycleAudit = {
   actorUserId: string;
@@ -181,19 +182,10 @@ async function runRetirementCommand(
   });
 }
 
-async function lockBookingPublication(client: CommandClient, propertyId: string): Promise<void> {
-  await client.query(
-    `SELECT pg_advisory_xact_lock(
-       hashtext('booking.publication'),
-       hashtext($1::uuid::text)
-     )`,
-    [propertyId],
-  );
-}
-
 export async function requireAuthorizedPlatformActor(
   client: CommandClient,
   audit: PlatformPropertyLifecycleAudit,
+  options: { lockRows?: boolean } = {},
 ): Promise<void> {
   const result = await client.query(
     `SELECT membership.id
@@ -212,7 +204,7 @@ export async function requireAuthorizedPlatformActor(
       AND resource.status = 'active'
      WHERE organization.id = $1::uuid AND organization.kind = 'platform'
        AND organization.status = 'active' AND actor.id = $2::uuid
-     FOR SHARE OF organization, membership, actor, resource`,
+     ${options.lockRows === false ? "" : "FOR SHARE OF organization, membership, actor, resource"}`,
     [audit.organizationId, audit.actorUserId],
   );
   if (result.rows.length !== 1) {

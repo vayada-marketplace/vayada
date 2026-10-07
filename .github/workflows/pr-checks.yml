@@ -4,16 +4,57 @@ on:
   pull_request:
     branches:
       - main
+      - "fm/vay-1092-*"
+      - "fix/vay-965-*"
+      - "fm/vay-965-*"
+      - flamurmaliqi2811/vay-2044-expense-worker-runtime
+      - fm/vay-2041-worker-permissions
+      - fm/vay-2041-worker-source-permissions
+      - fm/vay-2041-worker-preflight
 
 concurrency:
   group: pr-checks-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# Job selection is path-based and fails safe: scripts/ci/pr-checks.mjs maps each changed file to
+# the jobs that cover it, and any file it cannot classify selects every job. "Required Checks"
+# stays the single required status and only accepts a job that succeeded or that was skipped
+# because the selector excluded it. Selection lives on the jobs, not on `on.pull_request.paths`,
+# so the required status is always reported.
 jobs:
+  changes:
+    name: Select checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      run_frontend: ${{ steps.select.outputs.run_frontend }}
+      run_first_party_auth: ${{ steps.select.outputs.run_first_party_auth }}
+      run_api_postgres: ${{ steps.select.outputs.run_api_postgres }}
+      run_setup_draft_reset_postgres: ${{ steps.select.outputs.run_setup_draft_reset_postgres }}
+      run_backend: ${{ steps.select.outputs.run_backend }}
+
+    steps:
+      - name: Checkout merge commit and its parents
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Validate hotel setup bootstrap image inventory
+        run: node scripts/ci/check-hotel-setup-bootstrap-inventory.mjs
+
+      - name: Select jobs from changed paths
+        id: select
+        run: node scripts/ci/pr-checks.mjs select
+
   frontend:
     name: Frontend Test, Typecheck, Lint, Build
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: [changes]
+    if: needs.changes.outputs.run_frontend == 'true'
 
     steps:
       - name: Checkout code
@@ -36,8 +77,20 @@ jobs:
       - name: Coordinated release contracts
         run: npm run test:coordinated-release
 
+      - name: PR check selection and aggregation contracts
+        run: npm run test:pr-checks
+
+      - name: Private hotel setup image publication boundaries
+        run: node scripts/check-hotel-setup-image-publication.mjs
+
       - name: Finance domain contracts
         run: npm --workspace @vayada/domain-finance run test
+
+      - name: Hotel domain and product onboarding tests
+        run: |
+          npm --workspace @vayada/domain-hotels run build
+          npm --workspace @vayada/domain-hotels run test
+          npm --workspace @vayada/product-onboarding run test
 
       - name: Typecheck
         run: npm run typecheck
@@ -55,6 +108,10 @@ jobs:
         run: npm run build
         env:
           NEXT_PUBLIC_CLOUDFLARE_ANALYTICS_TOKEN: "00000000000000000000000000000000"
+
+      # Runs after Build because PMS Web tests import the built @vayada/domain-* packages.
+      - name: PMS Web tests
+        run: npm --workspace vayada-pms-frontend run test
 
       - name: Landing consent browser regressions
         run: |
@@ -77,6 +134,8 @@ jobs:
     name: First-Party Auth Contracts
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.run_first_party_auth == 'true'
     permissions:
       contents: read
 
@@ -118,14 +177,22 @@ jobs:
           E2E_FIRST_PARTY_AUTH_ONLY: "1"
           E2E_START_SERVERS: "1"
 
+  # Each shard gets its own PostgreSQL cluster, so cluster-wide role proofs stay isolated:
+  #   platform    - identity, legacy owner, finance worker, Channex worker and authorization proofs
+  #   pms         - the PMS/booking/finance integration batch and the migration suites
+  #   hotel-setup - native hotel setup creation, reader, credential and logo lifecycle proofs
+  # Steps without a `matrix.shard` condition run in every shard.
   api_postgres:
-    name: TypeScript API PostgreSQL Integration (PG${{ matrix.postgres }})
+    name: TypeScript API PostgreSQL Integration (PG${{ matrix.postgres }}, ${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.run_api_postgres == 'true'
     strategy:
       fail-fast: false
       matrix:
         postgres: [16, 17]
+        shard: [platform, pms, hotel-setup]
 
     services:
       postgres:
@@ -157,9 +224,93 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Every `npm run test` in vayada-api has a pretest that rebuilds all backend packages
+      # (about 30 s each, two dozen times per job). Build once, then skip pre/post scripts.
+      - name: Build backend packages once
+        run: |
+          npm --workspace vayada-api run build:backend-packages
+          echo "npm_config_ignore_scripts=true" >> "$GITHUB_ENV"
+
+      # Must run before any migration creates the cluster-wide setup reader role.
+      - name: Verify setup reader RLS helper grants on a fresh cluster
+        if: matrix.shard == 'platform'
+        env:
+          HOTEL_SETUP_READER_RLS_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/side_rls_proof
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.HOTEL_SETUP_READER_RLS_TEST_DATABASE_URL);
+            url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href });
+            await client.connect();
+            await client.query("CREATE DATABASE side_rls_proof");
+            await client.end();
+          '
+          npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupReaderRlsHelpers.integration.test.ts
+
+      - name: Verify restricted migration source reader
+        if: matrix.shard == 'platform'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2042_source_privilege_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL);
+            url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href });
+            await client.connect();
+            await client.query("CREATE DATABASE vay2042_source_privilege_test");
+            await client.end();
+          '
+          npm --workspace @vayada/backend-migration run test -- src/sourceExtractionPrivileges.integration.test.ts
+
+      - name: Verify historical Channex binding evidence and transition guards
+        if: matrix.shard == 'platform'
+        env:
+          VAY2017_BINDING_READER_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_binding_reader_fixture
+          VAY2017_BINDING_SOURCE_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_binding_source_fixture
+          VAY2017_EVIDENCE_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_evidence_fixture
+          VAY2017_TARGET_LOCK_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_target_lock_fixture
+          VAY2017_TRANSITION_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_transition_fixture
+          VAY2017_BINDING_APPROVAL_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_binding_approval_fixture
+          VAY2017_PRODUCTION_PREFLIGHT_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_production_preflight_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const root = new URL(process.env.VAY2017_BINDING_READER_TEST_DATABASE_URL);
+            root.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: root.href });
+            await client.connect();
+            for (const database of [
+              "vay2017_binding_reader_fixture",
+              "vay2017_binding_source_fixture",
+              "vay2017_evidence_fixture",
+              "vay2017_target_lock_fixture",
+              "vay2017_transition_fixture",
+              "vay2017_binding_approval_fixture",
+              "vay2017_production_preflight_test",
+            ]) await client.query(`CREATE DATABASE ${database}`);
+            await client.end();
+          '
+          TARGET_DATABASE_URL="$VAY2017_BINDING_READER_TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          TARGET_DATABASE_URL="$VAY2017_BINDING_SOURCE_TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          TARGET_DATABASE_URL="$VAY2017_PRODUCTION_PREFLIGHT_TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          VAY2017_PRODUCTION_PREFLIGHT_TEST_DATABASE_URL="$VAY2017_PRODUCTION_PREFLIGHT_TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run test -- --no-file-parallelism \
+            src/cli/legacyHistoricalBindingProductionPreflight.integration.test.ts \
+            src/legacyHistoricalBindingTargetReader.test.ts \
+            src/legacyHistoricalBindingSourceProof.test.ts \
+            src/legacyHistoricalBindingEvidenceSnapshot.test.ts \
+            src/legacyHistoricalBindingEnvelope.test.ts \
+            src/legacyOwnershipEvidenceReader.integration.test.ts \
+            src/legacyHistoricalBindingTargetLocks.integration.test.ts \
+            src/legacyHistoricalBindingTransitions.integration.test.ts \
+            src/legacyHistoricalBindingApprovals.integration.test.ts
+
       - name: Verify immutable legacy owner bootstrap receipts
+        if: matrix.shard == 'platform'
         env:
           VAY2017_RECEIPT_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_receipt_fixture
+          VAY2017_RECEIPT_READER_TEST_DATABASE_URL: postgresql://vay2017_receipt_reader:reader_test_only@127.0.0.1:5432/vay2017_receipt_fixture
         run: |
           node --input-type=module -e '
             import pg from "pg";
@@ -173,6 +324,7 @@ jobs:
           npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/legacyOwnerBootstrapReceipts.integration.test.ts
 
       - name: Verify scoped legacy owner email guard
+        if: matrix.shard == 'platform'
         env:
           VAY2017_EMAIL_GUARD_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_email_guard_fixture
         run: |
@@ -187,7 +339,25 @@ jobs:
           '
           npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/legacyOwnerEmailIndexPlan.test.ts
 
+      - name: Verify prepared owner lifecycle guard
+        if: matrix.shard == 'platform'
+        env:
+          VAY2017_LIFECYCLE_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_lifecycle_fixture
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.VAY2017_LIFECYCLE_TEST_DATABASE_URL);
+            url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href });
+            await client.connect();
+            await client.query("CREATE DATABASE vay2017_lifecycle_fixture");
+            await client.end();
+          '
+          TARGET_DATABASE_URL="$VAY2017_LIFECYCLE_TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism src/platform/legacyOwnerLifecycleMutations.integration.test.ts
+
       - name: Verify Marketplace matching event storage
+        if: matrix.shard == 'platform'
         run: npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/matchingEventProjections.test.ts src/affiliatePercentagePolicyStorage.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
@@ -197,22 +367,116 @@ jobs:
         env:
           TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      - name: Verify creator payout reconciliation detail
+        if: matrix.shard == 'platform'
+        run: >-
+          npm --workspace vayada-api run test -- --no-file-parallelism
+          src/financeAffiliatePayoutPortal.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify restricted identity PMS Inbox enqueue
+        if: matrix.shard == 'platform'
+        run: >-
+          npm --workspace @vayada/backend-auth run test -- --no-file-parallelism
+          src/staffInvitations.test.ts -t "enqueues an unreadable PMS Inbox job"
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify Finance expense worker permissions and real handlers
+        if: matrix.shard == 'platform'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2044_worker_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href }); await client.connect();
+            await client.query("CREATE DATABASE vay2044_worker_test"); await client.end();
+          '
+          TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/financeExpenseWorkerBoundary.integration.test.ts
+          TEST_FINANCE_WORKER_DATABASE_URL=postgresql://vayada_next_finance_expense_worker:fixture@127.0.0.1:5432/vay2044_worker_test npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/financeExpenseGeneration.integration.test.ts
+
+      - name: Verify Financials export worker permissions and real handlers
+        if: matrix.shard == 'platform'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2045_worker_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href }); await client.connect();
+            await client.query("CREATE DATABASE vay2045_worker_test"); await client.end();
+          '
+          TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/financeExportWorkerBoundary.integration.test.ts src/jobs/financeFolioExport.integration.test.ts src/jobs/runFinanceDashboardExportOnce.test.ts
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href }); await client.connect();
+            await client.query("DROP DATABASE vay2045_worker_test WITH (FORCE)"); await client.end();
+          '
+
+      - name: Verify pricing command native login scope
+        if: matrix.shard == 'platform'
+        run: >-
+          npm --workspace vayada-api run test -- --no-file-parallelism
+          src/pricingCommandServiceDatabaseScope.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify identity runtime row scope
+        if: matrix.shard == 'platform'
+        run: bash scripts/test-identity-runtime-row-scope.sh ${{ matrix.postgres }}
+
+      - name: Verify Channex worker shared queue scope
+        if: matrix.shard == 'platform'
+        run: npm --workspace @vayada/backend-migration run test -- src/channexManagementWorkerQueueScope.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify Channex worker effective privilege boundary
+        if: matrix.shard == 'platform'
+        run: npm --workspace vayada-api run test -- src/jobs/channexManagementWorkerBoundary.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify Channex worker startup gating
+        if: matrix.shard == 'platform'
+        run: npm --workspace vayada-api run test -- src/jobs/channexManagementWorkerStartup.test.ts src/channexManagementDatabaseRouting.test.ts
+
+      - name: Verify restricted Channex provider flows
+        if: matrix.shard == 'platform'
+        run: >-
+          npm --workspace vayada-api run test -- --no-file-parallelism
+          src/domains/replacementPricingOfferOwners.integration.test.ts
+          src/domains/pmsInventoryMaterializationRepository.integration.test.ts
+          -t "restricted Channex login"
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Verify hotel member role repair
+        if: matrix.shard == 'platform'
         run: npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/hotelMemberRoleRepair.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
-      - name: Verify effective property access
-        run: npm --workspace @vayada/backend-authorization run test -- --no-file-parallelism src/index.test.ts -t createPgPropertyAccessRepository
+      - name: Verify current authorization and effective property access
+        if: matrix.shard == 'platform'
+        run: npm --workspace @vayada/backend-authorization run test -- --no-file-parallelism src/index.test.ts -t 'createPgPropertyAccessRepository|createAuthorizationResolver|resolveMembershipRolePermissions'
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Run PMS TypeScript PostgreSQL integration
+        if: matrix.shard == 'pms'
         run: >-
           npm --workspace vayada-api run test --
           --no-file-parallelism
           src/marketplaceCollaborations.test.ts
           src/marketplaceAffiliateDestinationRoutes.test.ts
+          src/marketplaceAffiliateDiscrepancyRoutes.test.ts
+          src/domains/affiliateDiscrepancyRepository.integration.test.ts
           src/domains/bookingAffiliateDestinationSave.integration.test.ts
           src/domains/bookingAffiliateReferralTransportCertificationStorage.integration.test.ts
           src/domains/bookingAffiliateReferralTransportCertification.integration.test.ts
@@ -220,6 +484,7 @@ jobs:
           src/domains/bookingAffiliateReferralProductionPreflight.integration.test.ts
           src/domains/bookingAffiliateReferralReadiness.integration.test.ts
           src/domains/bookingAffiliateDestinationTrackingReadiness.integration.test.ts
+          src/domains/bookingAffiliateNativeDestinationSafety.integration.test.ts
           src/domains/bookingAffiliateSourceCapabilityEvidenceStorage.integration.test.ts
           src/domains/bookingAffiliateSourceCapabilityCertification.integration.test.ts
           src/domains/bookingAffiliateSourceCapabilityProductionPreflight.integration.test.ts
@@ -228,8 +493,11 @@ jobs:
           src/domains/marketplaceAffiliatePublication.integration.test.ts
           src/domains/marketplaceAffiliatePublicationStorage.integration.test.ts
           src/domains/marketplaceAffiliateAssentStorage.integration.test.ts
-          src/domains/marketplaceAffiliateAgreementActivationStorage.integration.test.ts \
+          src/domains/marketplaceAffiliateAgreementActivationStorage.integration.test.ts
+          src/domains/marketplaceAffiliateLinkStorage.integration.test.ts
+          src/domains/marketplaceAffiliateLinkCreation.integration.test.ts
           src/domains/marketplaceAffiliateAgreementActivation.integration.test.ts
+          src/domains/marketplaceAffiliateAgreementLifecycleCommand.integration.test.ts
           src/domains/marketplaceAffiliateAssentCommand.integration.test.ts
           src/domains/marketplaceAffiliateAssentRead.integration.test.ts
           src/domains/marketplaceAffiliateCollaborationRead.integration.test.ts
@@ -289,13 +557,208 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify canonical setup payment readiness
+        if: matrix.shard == 'hotel-setup'
         run: >-
           npm --workspace vayada-api run test --
           src/sharedHotelSetupProfile.integration.test.ts -t 'evaluates payment readiness'
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      - name: Verify concurrent native property creation
+        if: matrix.shard == 'hotel-setup'
+        run: |
+          npm --workspace vayada-api run test -- --no-file-parallelism src/sharedHotelSetupProfile.integration.test.ts -t 'provisions one canonical property for concurrent stable-reference commands'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Configure trusted TLS for native creation preflight
+        if: matrix.shard == 'hotel-setup'
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          tls_dir="$(mktemp -d)"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
+            -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' \
+            -keyout "$tls_dir/server.key" -out "$tls_dir/server.crt" >/dev/null 2>&1
+          docker exec --user 0 "$PG_CONTAINER" mkdir -p /tmp/creation-tls
+          docker cp "$tls_dir/server.key" "$PG_CONTAINER:/tmp/creation-tls/server.key"
+          docker cp "$tls_dir/server.crt" "$PG_CONTAINER:/tmp/creation-tls/server.crt"
+          docker exec --user 0 "$PG_CONTAINER" chown -R postgres:postgres /tmp/creation-tls
+          docker exec --user 0 "$PG_CONTAINER" chmod 600 /tmp/creation-tls/server.key
+          for setting in "ssl_cert_file = '/tmp/creation-tls/server.crt'" "ssl_key_file = '/tmp/creation-tls/server.key'" "ssl = on"; do
+            docker exec "$PG_CONTAINER" psql -U vayada_test -d vayada_api_test -c "ALTER SYSTEM SET $setting"
+          done
+          docker exec "$PG_CONTAINER" psql -U vayada_test -d vayada_api_test -c 'SELECT pg_reload_conf()'
+          tls_ready=false
+          for attempt in $(seq 1 20); do
+            if docker exec --env PGPASSWORD=vayada_test --env PGSSLMODE=verify-full \
+              --env PGSSLROOTCERT=/tmp/creation-tls/server.crt "$PG_CONTAINER" \
+              psql -h 127.0.0.1 -U vayada_test -d vayada_api_test -c 'SELECT 1' >/dev/null 2>&1; then
+              tls_ready=true; break
+            fi
+            sleep 1
+          done
+          test "$tls_ready" = true
+          # Retain only the public certificate for client trust.
+          rm "$tls_dir/server.key"
+          echo "NODE_EXTRA_CA_CERTS=$tls_dir/server.crt" >> "$GITHUB_ENV"
+
+      - name: Verify native property creation with exact grants
+        if: matrix.shard == 'hotel-setup'
+        run: |
+          node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay1092_vay965_creation_test"); await client.end();'
+          TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupCreationPrivileges.integration.test.ts src/hotelSetupCreationScope.integration.test.ts src/hotelSetupCreationContacts.integration.test.ts src/hotelSetupCreationIdentity.integration.test.ts src/hotelSetupCreationProducts.integration.test.ts src/hotelSetupPropertyFinancialsScope.integration.test.ts src/hotelSetupLaunchSettingsScope.integration.test.ts src/hotelSetupProfileEdit.integration.test.ts
+        env:
+          ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay1092_vay965_creation_test
+
+      - name: Checkout reviewed compatible setup rollback source
+        if: matrix.shard == 'hotel-setup'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ef69824c3364c1e43caad5c474e1615f39aff8bd
+          path: .hotel-setup-compatible-rollback
+          persist-credentials: false
+
+      - name: Build separately compiled compatible setup rollback
+        if: matrix.shard == 'hotel-setup'
+        working-directory: .hotel-setup-compatible-rollback
+        run: |
+          test "$(git rev-parse HEAD)" = ef69824c3364c1e43caad5c474e1615f39aff8bd
+          # This checkout relies on its own prebuild hooks to compile its backend packages.
+          unset npm_config_ignore_scripts
+          npm ci
+          npm run build:api
+
+      - name: Verify native reader staging, login and secret candidates
+        if: matrix.shard == 'hotel-setup'
+        run: |
+          node --input-type=module <<'NODE'
+          import { randomBytes } from "node:crypto";
+          import { spawnSync } from "node:child_process";
+          import pg from "pg";
+          const admin = new pg.Client({connectionString: process.env.ADMIN_URL});
+          await admin.connect();
+          const role = "vay1092_reader_proof_admin";
+          const password = randomBytes(36).toString("base64url");
+          await admin.query(`CREATE ROLE ${role} LOGIN SUPERUSER PASSWORD ${admin.escapeLiteral(password)}`);
+          try {
+            const url = new URL(process.env.ADMIN_URL);
+            url.hostname = "127.0.0.1";
+            url.pathname = "/vay1092_vay965_creation_test";
+            url.username = role;
+            url.password = password;
+            url.search = "?sslmode=verify-full";
+            const env = {...process.env};
+            for (const name of ["STAGE", "LOGIN", "CANDIDATE", "PREFLIGHT"])
+              env[`HOTEL_SETUP_READER_${name}_TEST_DATABASE_URL`] = url.toString();
+            env.HOTEL_SETUP_PROPERTY_STAGE_TEST_DATABASE_URL = url.toString();
+            env.HOTEL_SETUP_AUTOMATIC_DISCOVERY_TEST_DATABASE_URL = url.toString();
+            const result = spawnSync("npm", ["--workspace", "vayada-api", "run", "test", "--", "--no-file-parallelism",
+              "src/hotelSetupReaderRoleStaging.integration.test.ts", "src/hotelSetupReaderLoginVerification.integration.test.ts",
+              "src/hotelSetupReaderSecretCandidate.integration.test.ts", "src/cli/hotelSetupPropertyPreflight.test.ts",
+              "src/cli/hotelSetupReaderPreflight.test.ts", "src/hotelSetupPropertyRoleStaging.integration.test.ts",
+              "src/hotelSetupAutomaticDiscovery.integration.test.ts",
+              "src/hotelSetupProfileLifecycle.integration.test.ts"], {env, stdio: "inherit"});
+            process.exitCode = result.status ?? 1;
+            if (result.status === 0) {
+              await admin.query("CREATE DATABASE vay1092_readiness_organization_test TEMPLATE vay1092_vay965_creation_test");
+              url.pathname = "/vay1092_readiness_organization_test";
+              env.HOTEL_SETUP_ORGANIZATION_BOOTSTRAP_TEST_DATABASE_URL = url.toString();
+              const organization = spawnSync("npm", ["--workspace", "vayada-api", "run", "test", "--", "--no-file-parallelism",
+                "src/hotelSetupOrganizationProvisioning.integration.test.ts"], {env, stdio: "inherit"});
+              process.exitCode = organization.status ?? 1;
+            }
+            if (process.exitCode === 0) {
+              const connections = await admin.query("SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname='vay1092_vay965_creation_test'");
+              if (connections.rows[0]?.count !== 0) throw new Error("Native template connections must close before cloning");
+              await admin.query("CREATE DATABASE vay1092_automatic_owner_flow_test TEMPLATE vay1092_vay965_creation_test");
+              const flowUrl = new URL(url);
+              flowUrl.pathname = "/vay1092_automatic_owner_flow_test";
+              const flowEnv = {...env,
+                HOTEL_SETUP_AUTOMATIC_OWNER_FLOW_TEST_DATABASE_URL: flowUrl.toString(),
+                HOTEL_SETUP_AUTOMATIC_ROLLBACK_PREFLIGHT_ROOT: `${process.env.GITHUB_WORKSPACE}/.hotel-setup-compatible-rollback`};
+              const flow = spawnSync("npm", ["--workspace", "vayada-api", "run", "test", "--", "--no-file-parallelism",
+                "src/hotelSetupAutomaticOwnerFlow.integration.test.ts",
+                "src/hotelSetupAutomaticCreatorFlow.integration.test.ts",
+                "src/hotelSetupAutomaticReaderRls.integration.test.ts"], {env: flowEnv, stdio: "inherit"});
+              process.exitCode = flow.status ?? 1;
+            }
+            if (process.exitCode === 0) {
+              const connections = await admin.query("SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname='vay1092_vay965_creation_test'");
+              if (connections.rows[0]?.count !== 0) throw new Error("Native template connections must close before cloning");
+              await admin.query("CREATE DATABASE vay1092_approved_backfill_test TEMPLATE vay1092_vay965_creation_test");
+              const backfillUrl = new URL(url);
+              backfillUrl.pathname = "/vay1092_approved_backfill_test";
+              const backfillEnv = {...env,
+                HOTEL_SETUP_APPROVED_BACKFILL_TEST_DATABASE_URL: backfillUrl.toString(),
+                HOTEL_SETUP_APPROVED_BACKFILL_ROLLBACK_ROOT: `${process.env.GITHUB_WORKSPACE}/.hotel-setup-compatible-rollback`};
+              const backfill = spawnSync("npm", ["--workspace", "vayada-api", "run", "test", "--", "--no-file-parallelism",
+                "src/hotelSetupApprovedReadinessBackfill.integration.test.ts",
+                "src/hotelSetupReadinessReaderGrant.integration.test.ts"], {env: backfillEnv, stdio: "inherit"});
+              process.exitCode = backfill.status ?? 1;
+            }
+          } finally {
+            await admin.query(`DROP ROLE ${role}`);
+            await admin.end();
+          }
+          NODE
+        env:
+          ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify private setup authentication and credential handling
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace vayada-api run test --
+          src/sharedHotelSetupStatus.test.ts
+          src/hotelSetupCommandForwarder.test.ts
+          src/hotelSetupCommandScope.test.ts
+          src/hotelSetupCreationCommands.test.ts
+          src/hotelSetupCreationCredentials.test.ts
+          src/hotelSetupNativeSecretReader.test.ts
+          src/hotelSetupOrganizationRoleStaging.test.ts
+          src/hotelSetupOrganizationSecretPublication.test.ts
+          src/hotelSetupOrganizationRoleActivation.test.ts
+          src/hotelSetupCommandServiceConfig.test.ts
+          src/hotelSetupCommandService.test.ts
+          src/hotelSetupCommandServer.test.ts
+          src/hotelSetupPropertyRoleStaging.test.ts
+          src/hotelSetupPropertyRoleActivation.test.ts
+          src/hotelSetupPropertySecretPublication.test.ts
+          src/cli/hotelSetupPropertyBootstrap.test.ts
+          src/hotelSetupAutomaticReconciliation.test.ts
+          src/cli/hotelSetupAutomaticProvisioning.test.ts
+          src/hotelSetupApprovedReadinessBackfill.test.ts
+          src/hotelSetupReadinessReaderGrant.test.ts
+          src/cli/hotelSetupApprovedReadinessBackfill.test.ts
+          src/hotelSetupLaunchSettingsCommands.test.ts
+          src/hotelSetupLaunchSettingsCredentials.test.ts
+          src/hotelSetupLaunchSettingsRepository.test.ts
+          src/hotelSetupProfileProjection.test.ts
+          src/hotelSetupProfileCommands.test.ts
+          src/cli/hotelSetupLaunchSettingsPreflight.test.ts
+          src/cli/hotelSetupPropertyPreflight.test.ts
+          src/cli/hotelSetupCreationPreflight.test.ts
+          src/hotelSetupLogoCredentials.test.ts
+          src/hotelSetupLogoProjection.test.ts
+          src/hotelSetupLogoRuntime.test.ts
+          src/hotelSetupCurrencyCommands.test.ts
+          src/platformMedia.test.ts
+          src/propertyMedia.test.ts
+          src/platform/platformMediaRepository.test.ts
+          src/platform/platformMediaS3.test.ts
+          src/domains/propertyMediaCommandRepository.test.ts
+
+      - name: Verify private hotel setup reader privileges
+        if: matrix.shard == 'hotel-setup'
+        run: npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupReaderPrivileges.integration.test.ts src/hotelSetupReaderAudit.integration.test.ts src/hotelSetupReaderSecretCandidate.test.ts src/hotelSetupReaderLoginVerification.test.ts
+        env:
+          HOTEL_SETUP_READER_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Verify Booking add-on economics migration
+        if: matrix.shard == 'pms'
         run: >-
           npm --workspace @vayada/backend-migration run test --
           --no-file-parallelism
@@ -318,6 +781,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify Finance OTA commission migration
+        if: matrix.shard == 'pms'
         run: >-
           npm --workspace @vayada/backend-migration run test --
           src/financeOtaCommissionRules.test.ts src/providerFeeEvidenceMigration.integration.test.ts
@@ -328,6 +792,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify membership property scope migration
+        if: matrix.shard == 'pms'
         run: >-
           npm --workspace @vayada/backend-migration run test --
           --no-file-parallelism src/membershipPropertyScope.test.ts
@@ -336,6 +801,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Run public gallery migration integration
+        if: matrix.shard == 'pms'
         run: >-
           npm --workspace @vayada/backend-migration run test --
           src/publicBookabilityGalleryMedia.test.ts
@@ -343,6 +809,7 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Run pending booking edits in an isolated database
+        if: matrix.shard == 'pms'
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_booking_edit_test
           TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_booking_edit_test
@@ -360,14 +827,60 @@ jobs:
           npm --workspace vayada-api run test -- --no-file-parallelism src/routes/pendingBookingEdits.integration.test.ts
 
       - name: Verify removed pricing boundaries
+        if: matrix.shard == 'pms'
         run: >-
           npm --workspace vayada-api run test -- --no-file-parallelism
           src/pricingReset.test.ts src/integrations/channexManagementPlans.test.ts
+
+      # Last: it creates the cluster-wide RDS-like vayada_admin creator.
+      - name: Verify protected logo lifecycle with an RDS-like creator
+        if: matrix.shard == 'hotel-setup'
+        env:
+          ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+          MIGRATION_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay1092_vay965_logo_test
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay1092_vay965_logo_test?sslmode=verify-full
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: |
+          node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay1092_vay965_logo_test"); await client.end();'
+          TARGET_DATABASE_URL="$MIGRATION_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          CREATOR_PASSWORD="$(openssl rand -hex 24)"
+          echo "::add-mask::$CREATOR_PASSWORD"
+          export CREATOR_PASSWORD
+          # Mirror the RDS administrator: CREATEROLE without superuser or password-catalog access.
+          node --input-type=module <<'NODE'
+          import pg from "pg";
+          const admin = new pg.Client({connectionString: process.env.MIGRATION_URL});
+          await admin.connect();
+          await admin.query(`CREATE ROLE vayada_admin LOGIN NOINHERIT NOSUPERUSER CREATEROLE CREATEDB
+            NOREPLICATION NOBYPASSRLS PASSWORD ${admin.escapeLiteral(process.env.CREATOR_PASSWORD)}`);
+          await admin.query(`GRANT ALL ON DATABASE vay1092_vay965_logo_test TO vayada_admin WITH GRANT OPTION;
+            GRANT vayada_next_hotel_setup_logo_scope TO vayada_admin WITH ADMIN TRUE, INHERIT FALSE, SET FALSE;
+            GRANT vayada_next_hotel_setup_profile_scope TO vayada_admin WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`);
+          for (const schema of ["identity", "hotel_catalog", "platform"])
+            await admin.query(`GRANT ALL ON SCHEMA ${schema} TO vayada_admin WITH GRANT OPTION;
+              GRANT ALL ON ALL TABLES IN SCHEMA ${schema} TO vayada_admin WITH GRANT OPTION;
+              GRANT ALL ON ALL SEQUENCES IN SCHEMA ${schema} TO vayada_admin WITH GRANT OPTION`);
+          await admin.query(`REVOKE EXECUTE ON FUNCTION platform.tenant_scope_key(text,uuid,uuid),
+            platform.valid_tenant_scope(text,uuid,uuid) FROM PUBLIC`);
+          const {rows} = await admin.query(`SELECT pg_catalog.has_table_privilege('vayada_admin','pg_catalog.pg_authid','SELECT')
+            OR pg_catalog.has_table_privilege('vayada_admin','pg_catalog.pg_authid','UPDATE') AS catalog`);
+          if (rows[0].catalog) throw new Error("RDS-like creator must not access the password catalog");
+          await admin.end();
+          NODE
+          VAY965_LOGO_CREATOR_DATABASE_URL="postgresql://vayada_admin:${CREATOR_PASSWORD}@127.0.0.1:5432/vay1092_vay965_logo_test?sslmode=verify-full" \
+            HOTEL_SETUP_PROPERTY_STAGE_TEST_DATABASE_URL="$TEST_DATABASE_URL" \
+            npm --workspace vayada-api run test -- --no-file-parallelism \
+            src/hotelSetupLogoLifecycle.integration.test.ts src/hotelSetupProfileLifecycle.integration.test.ts \
+            src/hotelSetupLogoMedia.integration.test.ts \
+            src/hotelSetupLogoScope.integration.test.ts src/hotelSetupLogoCleanup.integration.test.ts \
+            src/domains/propertyMediaCommandRepository.integration.test.ts
 
   setup_draft_reset_postgres:
     name: Setup Draft Reset PostgreSQL ${{ matrix.postgres }} Integration
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.run_setup_draft_reset_postgres == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -420,6 +933,8 @@ jobs:
     name: Backend Tests (${{ matrix.app }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.run_backend == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -576,21 +1091,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs:
+      - changes
       - frontend
       - first_party_auth
       - api_postgres
       - setup_draft_reset_postgres
       - backend
+    # always(): run (and fail) even when a needed job failed, was cancelled or timed out. A skipped
+    # required job would satisfy the branch ruleset, so this job must never be skipped itself.
     if: always()
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
       - name: Verify required jobs
-        run: |
-          if [ "${{ needs.frontend.result }}" != "success" ] || [ "${{ needs.first_party_auth.result }}" != "success" ] || [ "${{ needs.api_postgres.result }}" != "success" ] || [ "${{ needs.setup_draft_reset_postgres.result }}" != "success" ] || [ "${{ needs.backend.result }}" != "success" ]; then
-            echo "Frontend result: ${{ needs.frontend.result }}"
-            echo "First-party auth result: ${{ needs.first_party_auth.result }}"
-            echo "TypeScript API PostgreSQL result: ${{ needs.api_postgres.result }}"
-            echo "Setup Draft Reset PostgreSQL result: ${{ needs.setup_draft_reset_postgres.result }}"
-            echo "Backend result: ${{ needs.backend.result }}"
-            exit 1
-          fi
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: node scripts/ci/pr-checks.mjs verify

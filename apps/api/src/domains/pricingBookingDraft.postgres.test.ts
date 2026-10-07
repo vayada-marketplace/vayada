@@ -26,7 +26,7 @@ describe.skipIf(!url)("PostgreSQL pricing draft composition", () => {
         people: null,
         dates: ["2026-10-01"],
       };
-      const input = pricingDraftFixture((quote) => {
+      const input: Parameters<typeof stagePricingBookingDraft>[2] = pricingDraftFixture((quote) => {
         Object.assign(quote, { quoteId: randomUUID() });
         Object.assign(quote.stay, { propertyId, addons: [selected] });
         Object.assign(quote.evidence, {
@@ -41,6 +41,7 @@ describe.skipIf(!url)("PostgreSQL pricing draft composition", () => {
       });
       input.bookingId = randomUUID();
       input.publicReference = `VAY-${randomUUID().replaceAll("-", "").toUpperCase()}`;
+      input.syntheticAffiliateContextId = randomUUID();
       input.current.scope.propertyId = propertyId;
       input.finance.scope.propertyId = propertyId;
       Object.assign(input.current, {
@@ -103,6 +104,15 @@ describe.skipIf(!url)("PostgreSQL pricing draft composition", () => {
           "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,($1::uuid)::text,'Synthetic draft')",
           [propertyId],
         );
+        await db.query(
+          "INSERT INTO booking.affiliate_click_contexts(id,property_id,synthetic) VALUES($1,$2,TRUE)",
+          [input.syntheticAffiliateContextId, propertyId],
+        );
+        await db.query(
+          `INSERT INTO booking.affiliate_click_admissions
+             (context_id,property_id,click_id,history_position) VALUES($1,$2,$3,1)`,
+          [input.syntheticAffiliateContextId, propertyId, randomUUID()],
+        );
         if (!missingDefinition)
           await db.query(
             "INSERT INTO booking.addon_definitions(id,property_id,name,pricing_model,price_amount,currency,ownership_kind,partner_commission_rate) VALUES($1,$2,'Synthetic extra','per_stay',12.5,'EUR','partner',12.5)",
@@ -137,6 +147,23 @@ describe.skipIf(!url)("PostgreSQL pricing draft composition", () => {
               pricingQuoteId: input.current.quote.quoteId,
               pricingSelections: input.current.quote.stay.rooms,
             },
+          });
+          expect(
+            (
+              await db.query(
+                `SELECT context_id,history_cutoff,original_public_reference,
+                      original_check_in::text,original_check_out::text,original_currency
+               FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1`,
+                [input.bookingId],
+              )
+            ).rows[0],
+          ).toEqual({
+            context_id: input.syntheticAffiliateContextId,
+            history_cutoff: "1",
+            original_public_reference: input.publicReference,
+            original_check_in: input.current.quote.stay.checkIn,
+            original_check_out: input.current.quote.stay.checkOut,
+            original_currency: input.current.quote.stay.currency,
           });
           expect(
             (
@@ -177,6 +204,7 @@ describe.skipIf(!url)("PostgreSQL pricing draft composition", () => {
           ["guest_bookings", "id"],
           ["booking_guests", "guest_booking_id"],
           ["booking_addon_selections", "guest_booking_id"],
+          ["affiliate_original_booking_bindings", "booking_id"],
         ])
           expect(
             (

@@ -54,9 +54,11 @@ export type SharedHotelSetupApi = {
     profile: CreatePropertyProfileRequest,
     idempotencyKey: string,
   ): Promise<PropertyProfileResponse>;
+  /** A retry of the same save must reuse its key; omitted keys are unique per call. */
   updatePropertyProfile(
     propertyId: string,
     request: UpdatePropertyProfileRequest,
+    idempotencyKey?: string,
   ): Promise<PropertyProfileResponse>;
   getPublicPropertyProfile(
     propertyId: string,
@@ -114,13 +116,18 @@ export function createSharedHotelSetupApi(client: SharedHotelSetupHttpClient): S
           idempotencyOptions(idempotencyKey),
         ),
       ),
-    updatePropertyProfile: async (propertyId, request) => {
+    updatePropertyProfile: async (
+      propertyId,
+      request,
+      idempotencyKey = globalThis.crypto.randomUUID(),
+    ) => {
       const update = parseUpdatePropertyProfileRequest(request);
       if (!update) throw new Error("Hotel profile update is invalid.");
       return propertyProfileResponse(
         await client.put<unknown>(
           `/api/hotel-setup/properties/${encodeURIComponent(propertyId)}/profile`,
           update,
+          idempotencyOptions(idempotencyKey),
         ),
       );
     },

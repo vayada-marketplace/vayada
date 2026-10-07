@@ -59,6 +59,8 @@ describe.skipIf(!URL)("PostgreSQL generated expense repository",()=>{
   it("creates, replays, races, corrects, reverses, and preserves immutable recurring economics",async()=>{
     const first=recurring("2026-08-10");
     await expect(repository.execute(first)).resolves.toMatchObject({ok:true,outcome:"created",expenseId:first.commandId});
+    // Setup stamping must not change ordinary replay evidence, even for superuser fixtures.
+    expect((await admin.query("SELECT idempotency_metadata ? 'hotelSetupTransaction' AS stamped FROM platform.idempotency_keys WHERE property_id=$1 AND operation='finance.generated_expense.execute'",[I.property])).rows).toEqual([{stamped:false}]);
     await expect(repository.execute(first)).resolves.toMatchObject({ok:true,outcome:"replayed"});
     await expect(repository.execute({...first,commandId:crypto.randomUUID()})).resolves.toMatchObject({ok:false,code:"source_conflict"});
     const concurrent=recurring("2026-08-11"),race=await Promise.all([repository.execute(concurrent),repository.execute(concurrent)]);

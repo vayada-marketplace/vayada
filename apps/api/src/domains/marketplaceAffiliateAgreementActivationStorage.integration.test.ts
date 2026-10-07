@@ -3,9 +3,14 @@ import { readFile } from "node:fs/promises";
 import { beforeEach, describe, expect, it } from "vitest";
 import { assentFixture, disclosureHash } from "./affiliateAssentTestFixture.js";
 import { databaseUrl, id } from "./affiliatePublicationTestFixture.js";
+import { readMarketplaceAffiliateAgreementLifecycle } from "./marketplaceAffiliateAgreementLifecycle.js";
 
 const migration = new URL(
   "../../../../packages/backend-migration/migrations/0214_marketplace_affiliate_agreement_activation.sql",
+  import.meta.url,
+);
+const lifecycleMigration = new URL(
+  "../../../../packages/backend-migration/migrations/0326_marketplace_affiliate_agreement_lifecycle.sql",
   import.meta.url,
 );
 
@@ -20,6 +25,7 @@ describe.skipIf(!databaseUrl)("affiliate agreement activation storage", () => {
 
   beforeEach(async () => {
     await pool().query(await readFile(migration, "utf8"));
+    await pool().query(await readFile(lifecycleMigration, "utf8"));
     await pool().query("INSERT INTO marketplace.affiliate_participations VALUES ($1,$2,$3,$4)", [
       participationId,
       id(50),
@@ -104,6 +110,38 @@ describe.skipIf(!databaseUrl)("affiliate agreement activation storage", () => {
     );
   }
 
+  async function lifecycle() {
+    const client = await pool().connect();
+    try {
+      await client.query("BEGIN");
+      const result = await readMarketplaceAffiliateAgreementLifecycle(client, agreementId);
+      await client.query("COMMIT");
+      return result;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function append(revision: number, action: string, side: string, effectiveAt?: string) {
+    return pool().query(
+      `INSERT INTO marketplace.affiliate_agreement_lifecycle_events
+       (id,agreement_id,revision,action,actor_side,actor_user_id,
+        actor_organization_id,reason,request_id,effective_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'fixture','fixture',COALESCE($8::timestamptz,clock_timestamp()))
+       RETURNING effective_at`,
+      [
+        randomUUID(),
+        agreementId,
+        revision,
+        action,
+        side,
+        id(side === "hotel" ? 1 : 81),
+        id(side === "hotel" ? 4 : 80),
+        effectiveAt ?? null,
+      ],
+    );
+  }
+
   it("pins one stable agreement to exact matching assent and readiness evidence", async () => {
     await agreement();
     await activate();
@@ -169,6 +207,133 @@ describe.skipIf(!databaseUrl)("affiliate agreement activation storage", () => {
       ])
         await expect(pool().query(sql)).rejects.toMatchObject({ code: "23514" });
       expect((await pool().query(`SELECT * FROM marketplace.${table}`)).rows).toEqual(before);
+    }
+  });
+
+  it("derives active, paused and ended from independent agreement history", async () => {
+    expect(await lifecycle()).toEqual({ status: "unavailable" });
+    await agreement();
+    await activate();
+    expect(await lifecycle()).toEqual({ status: "active", revision: 0, pausedBy: [] });
+    await append(1, "pause", "hotel");
+    await append(2, "pause", "creator");
+    expect(await lifecycle()).toEqual({
+      status: "paused",
+      revision: 2,
+      pausedBy: ["hotel", "creator"],
+    });
+    await append(3, "resume", "hotel");
+    expect(await lifecycle()).toEqual({ status: "paused", revision: 3, pausedBy: ["creator"] });
+    await append(4, "resume", "creator");
+    expect(await lifecycle()).toEqual({ status: "active", revision: 4, pausedBy: [] });
+    await append(5, "end", "hotel");
+    expect(await lifecycle()).toEqual({ status: "ended", revision: 5, pausedBy: [] });
+  });
+
+  it("fails closed on invalid history and protects event evidence", async () => {
+    await agreement();
+    await activate();
+    await append(2, "pause", "hotel");
+    expect(await lifecycle()).toEqual({ status: "invalid_history" });
+    await append(1, "pause", "hotel");
+    await expect(append(1, "pause", "hotel")).rejects.toMatchObject({ code: "23505" });
+    await expect(
+      pool().query("UPDATE marketplace.affiliate_agreement_lifecycle_events SET reason='changed'"),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      pool().query("DELETE FROM marketplace.affiliate_agreement_lifecycle_events"),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      pool().query("TRUNCATE marketplace.affiliate_agreement_lifecycle_events"),
+    ).rejects.toMatchObject({ code: "23514" });
+  });
+
+  it.each([
+    { events: [[1, "resume", "hotel"]] },
+    {
+      events: [
+        [1, "pause", "hotel"],
+        [2, "pause", "hotel"],
+      ],
+    },
+    {
+      events: [
+        [1, "pause", "creator"],
+        [2, "resume", "hotel"],
+      ],
+    },
+    {
+      events: [
+        [1, "end", "creator"],
+        [2, "pause", "hotel"],
+      ],
+    },
+  ])("rejects invalid lifecycle transitions in a fresh history: $events", async ({ events }) => {
+    await agreement();
+    await activate();
+    for (const [revision, action, side] of events)
+      await append(revision as number, action as string, side as string);
+    expect(await lifecycle()).toEqual({ status: "invalid_history" });
+  });
+
+  it("ignores caller-supplied lifecycle timestamps", async () => {
+    await agreement();
+    await activate();
+    const before = (await pool().query("SELECT clock_timestamp() AS now")).rows[0].now.getTime();
+    const inserted = await append(1, "end", "hotel", "2099-01-01T00:00:00Z");
+    const stamped = inserted.rows[0].effective_at.getTime();
+    const after = (await pool().query("SELECT clock_timestamp() AS now")).rows[0].now.getTime();
+    expect(stamped).toBeGreaterThanOrEqual(before);
+    expect(stamped).toBeLessThanOrEqual(after);
+    expect(await lifecycle()).toEqual({ status: "ended", revision: 1, pausedBy: [] });
+  });
+
+  it("stamps a pause after an in-flight active read releases its lock", async () => {
+    await agreement();
+    await activate();
+    const reader = await pool().connect();
+    const writer = await pool().connect();
+    let pending: Promise<Date> | undefined;
+    try {
+      await reader.query("BEGIN");
+      expect(await readMarketplaceAffiliateAgreementLifecycle(reader, agreementId)).toEqual({
+        status: "active",
+        revision: 0,
+        pausedBy: [],
+      });
+      const writerPid = (await writer.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      pending = writer
+        .query(
+          `INSERT INTO marketplace.affiliate_agreement_lifecycle_events
+         (id,agreement_id,revision,action,actor_side,actor_user_id,
+          actor_organization_id,reason,request_id)
+         VALUES ($1,$2,1,'pause','hotel',$3,$4,'fixture','fixture')
+         RETURNING effective_at`,
+          [randomUUID(), agreementId, id(1), id(4)],
+        )
+        .then((result) => result.rows[0].effective_at as Date);
+      let waiting = false;
+      for (let attempt = 0; attempt < 50; attempt++) {
+        const activity = await pool().query(
+          "SELECT wait_event_type FROM pg_stat_activity WHERE pid=$1",
+          [writerPid],
+        );
+        if (activity.rows[0]?.wait_event_type === "Lock") {
+          waiting = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(waiting).toBe(true);
+      const beforeRelease = (await reader.query("SELECT clock_timestamp() AS now")).rows[0].now;
+      await reader.query("COMMIT");
+      expect((await pending).getTime()).toBeGreaterThanOrEqual(beforeRelease.getTime());
+      expect(await lifecycle()).toEqual({ status: "paused", revision: 1, pausedBy: ["hotel"] });
+    } finally {
+      await reader.query("ROLLBACK");
+      if (pending) await pending.catch(() => undefined);
+      reader.release();
+      writer.release();
     }
   });
 });

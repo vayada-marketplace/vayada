@@ -23,7 +23,7 @@ import {
 } from "../routes/providerWebhooks.js";
 import { createPgProviderWebhookStore } from "../platform/providerWebhooks.js";
 import { createPgPmsChannexManagementCommandPort } from "./pmsChannexManagementCommandStore.js";
-import { listChannexAlerts } from "./channexOperationalAlerts.js";
+import { listChannexAlerts, resolveVerifiedChannexAlert } from "./channexOperationalAlerts.js";
 import { runChannexBookingJobs } from "../jobs/channexBookings.js";
 import type { RequestContext } from "@vayada/backend-auth";
 
@@ -315,6 +315,10 @@ describe.skipIf(!url)("operational alert receipt and canonical recovery", () => 
       `UPDATE platform.jobs SET status='succeeded',finished_at=now(),job_metadata=job_metadata||'{"alertRecoveryVerified":true}'::jsonb WHERE id=$1`,
       [rows.find((row) => row.input.operationType === "sync_ari")!.jobId],
     );
+    await resolveVerifiedChannexAlert(
+      db,
+      rows.find((row) => row.input.operationType === "sync_ari")!.jobId,
+    );
     expect(
       (await listChannexAlerts(db, P)).find((a) => a.id === alert.id)?.resolvedAt,
     ).not.toBeNull();
@@ -401,7 +405,8 @@ describe.skipIf(!url)("operational alert receipt and canonical recovery", () => 
       expect(initial.recovery).toHaveLength(2);
       expect(initial.linkedJobCount).toBe(2);
       expect(initial.recovery.every((j) => j.status === "succeeded")).toBe(true);
-      // Existing verified jobs would resolve this incident through listChannexAlerts; diagnostics must not.
+      // Listing and diagnostics remain read-only even when jobs already carry verified evidence.
+      await listChannexAlerts(client, P);
       expect(
         (
           await client.query("SELECT resolved_at FROM pms.channel_operational_alerts WHERE id=$1", [

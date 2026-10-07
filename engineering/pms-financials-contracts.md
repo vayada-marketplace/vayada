@@ -175,7 +175,8 @@ type FolioQuery = Cursor & { from?: Date; to?: Date; state?: FolioState; search?
 type FolioExportQuery = Omit<FolioQuery, "state"> & { state: "ready" };
 type Category = { id: string; systemKey: string | null; name: string; color: string; sortOrder: number; archived: boolean; revision: number };
 type Expense = { id: string; categoryId: string; origin: ExpenseOrigin; incurredOn: Date; vendor: string; amount: Money;
-  recurringRuleId: string | null; sourceKey: string | null; reversesExpenseId: string | null; revision: number } & ExpensePayment;
+  recurringRuleId: string | null; sourceKey: string | null; reversesExpenseId: string | null; revision: number;
+  supplierInvoiceNumber?: string | null } & ExpensePayment;
 type RecurringRule = { id: string; categoryId: string; vendor: string; amount: Money; notes?: string;
   paymentStatus: "paid" | "unpaid"; cadence: "weekly" | "monthly" | "yearly"; startsOn: Date;
   nextDueOn: Date; endsOn: Date | null; active: boolean; revision: number };
@@ -188,7 +189,7 @@ type RecurrencePatch = Command & Partial<Pick<RecurringRule,
   "categoryId" | "vendor" | "amount" | "notes" | "paymentStatus" | "cadence" | "nextDueOn" | "endsOn">>;
 type ExportWrite = Command & ({ tab: "dashboard"; filters: DashboardQuery } |
   { tab: "revenue"; filters: RevenueQuery } | { tab: "expenses"; filters: ExpenseQuery } |
-  { tab: "profit_loss"; filters: ProfitLossQuery } | { tab: "folios"; filters: FolioExportQuery }) &
+  { tab: "profit-loss"; filters: ProfitLossQuery } | { tab: "folios"; filters: FolioExportQuery }) &
   { format: "csv" };
 type Disposition = { resourceId: string } & (
   { state: "pending" | "failed"; downloadUrl?: never; expiresAt?: never } |
@@ -238,11 +239,36 @@ match the named tab's query type after normalization; unknown keys return `400`.
 | `GET`              | `/profit-loss`                                              | `ProfitLossQuery` → `ProfitLossResponse`                                        |
 | See VAY-1240       | `/folios` and `/folios/:folioId/*`                          | Operational folio list, revision, ready and archive contracts                   |
 | `POST/GET`         | `/exports` / `/exports/:exportId`                           | `ExportWrite` / none → `CommandResponse<Disposition>` / item response           |
+| `POST`             | `/exports/auto`                                             | `ExportWrite` → small CSV stream or `CommandResponse<Disposition>`              |
 
 V1 exports CSV for all five tabs. It does not create, retrieve, render, or send
 an official invoice document and does not promise PDF renditions.
 
+`POST /exports/auto` is an opt-in delivery choice; `POST /exports` remains the
+stable durable-job contract. Both accept the same request and idempotency-key
+header and use the same validated filters, property read permission, and captured
+evidence; the key governs durable fallback, while each direct stream reads and
+audits fresh evidence. A successful direct stream is not replayed: a same-key
+retry may return different CSV or switch to a JSON job disposition. The size
+decision uses UTF-8 byte counts of the canonical whitelisted captured snapshot
+serialized as JSON and of the rendered CSV. If those are at most 128 KiB and
+256 KiB respectively, `/exports/auto` returns `200 text/csv; charset=utf-8`
+as an attachment stream with a safe filename, `private, no-store`, and
+`nosniff`. The direct download is audited
+before any bytes are sent and is never persisted as an export artifact. The
+stream-or-job decision is complete before sending response headers or bytes.
+Larger exports return the same durable-job disposition, status lookup, private download,
+24-hour expiration, and idempotent retry behavior as `POST /exports`. Clients
+must branch on the response content type; a JSON disposition is not CSV data.
+
 `POST /expenses` returns `WriteResponse<Expense>` without `recurrence`. A `receiptMediaId` is valid only on that non-recurring write. With `recurrence`, it creates and returns only a `WriteResponse<RecurringRule>`; VAY-1232 owns future expense generation, and no current expense is created because no atomic expense-and-rule coordinator exists.
+
+A non-recurring write with `supplierInvoiceNumber` creates a `supplier_bill`
+expense; without it, the write creates a `manual` expense. Recurring writes cannot
+carry a supplier invoice number. The number is external document evidence, not a
+Vayada invoice identity. It is returned by expense reads, and changing it on an
+existing supplier bill appends a correction rather than rewriting the prior row.
+Manual expenses cannot be converted to supplier bills by patching in a number.
 
 P&L is computed from ledger/evidence rows; no second source-of-truth table is
 introduced.
@@ -375,6 +401,9 @@ No reset ticket drops a Finance table, deletes production data, changes provider
 credentials or disables payment/payout jobs.
 
 ## Backfill, activation and rollback
+
+The operational sequence and evidence record are in the
+[PMS Financials activation runbook](pms-financials-activation-runbook.md).
 
 1. Land this contract, then remove the inactive TypeScript/frontend surface.
 2. Add target schema and cross-domain projections behind no active UI.

@@ -1,8 +1,37 @@
+import {
+  BanknotesIcon,
+  ChartBarIcon,
+  ClipboardDocumentCheckIcon,
+} from "@heroicons/react/24/outline";
 import type { CoreNavItem, FeatureCategory, FeatureModule, FeatureProduct } from "./types";
 
-export const FEATURE_CATEGORIES: Array<"All" | FeatureCategory> = ["All", "Distribution"];
+export const FEATURE_CATEGORIES: Array<"All" | FeatureCategory> = [
+  "All",
+  "Distribution",
+  "Operations",
+];
 
-export const FEATURE_MODULES: FeatureModule[] = [];
+export const FEATURE_MODULES: FeatureModule[] = [
+  {
+    id: "financials",
+    name: "Financials",
+    description: "Revenue, expenses, profit and loss, and operational folios for your property.",
+    category: "Operations",
+    type: "internal",
+    product: "pms",
+    icon: "chart",
+    navItem: { label: "Financials", href: "/financials", icon: ChartBarIcon },
+    detail: {
+      headline: "Review your property's finances in one place.",
+      visualType: "financials",
+      features: [
+        { icon: ChartBarIcon, text: "Reconcile stay revenue and channel attribution." },
+        { icon: BanknotesIcon, text: "Track manual and generated expenses." },
+        { icon: ClipboardDocumentCheckIcon, text: "Export reports and operational folios." },
+      ],
+    },
+  },
+];
 
 export const CORE_NAV_ITEMS: Record<FeatureProduct, CoreNavItem[]> = {
   pms: [
@@ -24,7 +53,7 @@ export const CORE_NAV_ITEMS: Record<FeatureProduct, CoreNavItem[]> = {
 };
 
 export const FEATURE_MODULE_NAV_INDEX: Record<FeatureProduct, number> = {
-  pms: 6,
+  pms: 4,
   booking_engine: 3,
 };
 

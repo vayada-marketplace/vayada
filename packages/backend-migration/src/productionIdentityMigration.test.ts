@@ -95,10 +95,13 @@ describe("production identity migration transaction", () => {
       "snapshot",
       "target",
       "plan",
+      "read-provenance",
       "core",
       "privacy-audit",
       "target",
       "plan",
+      "read-provenance",
+      "write-provenance",
       "COMMIT",
     ]);
   });
@@ -137,6 +140,23 @@ describe("production identity migration transaction", () => {
     expect(log.at(-1)).toBe("ROLLBACK");
     expect(log).not.toContain("COMMIT");
   });
+
+  it("rolls back the verified writes when provenance fails", async () => {
+    const log: string[] = [];
+    const active = services(log, plan());
+    active.writeProvenance = async () => {
+      throw new Error("provenance failed");
+    };
+    await expect(
+      runProductionIdentityTransaction(
+        new TransactionClient(log) as never,
+        { sourceRunId: RUN, mode: "apply" },
+        active,
+      ),
+    ).rejects.toThrow("provenance failed");
+    expect(log.at(-1)).toBe("ROLLBACK");
+    expect(log).not.toContain("COMMIT");
+  });
 });
 
 class TransactionClient {
@@ -171,6 +191,13 @@ function services(
     },
     writePrivacyAudit: async () => {
       log.push("privacy-audit");
+    },
+    readProvenance: async () => {
+      log.push("read-provenance");
+      return [];
+    },
+    writeProvenance: async () => {
+      log.push("write-provenance");
     },
   };
 }

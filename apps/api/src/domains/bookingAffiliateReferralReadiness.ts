@@ -14,6 +14,14 @@ type Scope = {
   adapterVersion: string;
 };
 
+export type AffiliateReferralRuntimeConfiguration = Pick<
+  Scope,
+  | "certificationEnvironment"
+  | "certificationConnectionReference"
+  | "productionConnectionReference"
+  | "adapterVersion"
+>;
+
 export type AffiliateReferralReadiness =
   | {
       status: "ready";
@@ -42,6 +50,82 @@ export async function requireAffiliateReadinessTransaction(client: pg.PoolClient
   await client.query("RELEASE SAVEPOINT affiliate_referral_readiness_transaction");
   if (isolation !== "read committed")
     throw new Error("Affiliate referral readiness requires a READ COMMITTED transaction");
+}
+
+/**
+ * Selects the single current proof configuration for an exact destination.
+ * Multiple candidates fail closed because the evidence tables do not declare
+ * which connection supersedes another.
+ */
+export async function readAffiliateReferralRuntimeConfiguration(
+  client: pg.PoolClient,
+  scope: Pick<Scope, "propertyId" | "destinationVersionId" | "organizationId">,
+): Promise<AffiliateReferralRuntimeConfiguration | undefined> {
+  await requireAffiliateReadinessTransaction(client);
+  if (
+    !uuid.test(scope.propertyId) ||
+    !uuid.test(scope.destinationVersionId) ||
+    !uuid.test(scope.organizationId)
+  )
+    return undefined;
+  const lockedScope = await client.query(
+    `SELECT destination.id
+     FROM booking.affiliate_destination_versions destination
+     JOIN hotel_catalog.properties property ON property.id=destination.property_id
+     WHERE destination.id=$1 AND destination.property_id=$2
+       AND destination.created_by_organization_id=$3
+     FOR SHARE OF destination,property`,
+    [
+      scope.destinationVersionId.toLowerCase(),
+      scope.propertyId.toLowerCase(),
+      scope.organizationId.toLowerCase(),
+    ],
+  );
+  if (!lockedScope.rowCount) return undefined;
+  const result = await client.query(
+    `SELECT DISTINCT
+       certification.environment AS "certificationEnvironment",
+       certification.connection_reference AS "certificationConnectionReference",
+       preflight.connection_reference AS "productionConnectionReference",
+       certification.adapter_version AS "adapterVersion"
+     FROM booking.affiliate_referral_transport_certifications certification
+     JOIN booking.affiliate_validation_probes probe
+       ON probe.id=certification.probe_id
+      AND probe.property_id=certification.property_id
+      AND probe.destination_version_id=certification.destination_version_id
+      AND probe.organization_id=certification.organization_id
+      AND probe.environment=certification.environment
+      AND probe.connection_reference=certification.connection_reference
+      AND probe.adapter_version=certification.adapter_version
+     JOIN booking.affiliate_referral_production_preflights preflight
+       ON preflight.property_id=certification.property_id
+      AND preflight.destination_version_id=certification.destination_version_id
+      AND preflight.organization_id=certification.organization_id
+      AND preflight.adapter_version=certification.adapter_version
+     WHERE certification.property_id=$1
+       AND certification.destination_version_id=$2
+       AND certification.organization_id=$3
+       AND certification.completed_at >= clock_timestamp() - make_interval(secs => $4)
+       AND preflight.completed_at >= clock_timestamp() - make_interval(secs => $4)
+       AND NOT EXISTS (
+         SELECT 1 FROM booking.affiliate_validation_probe_revocations revoked
+         WHERE revoked.probe_id=probe.id
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM booking.affiliate_referral_production_preflight_revocations revoked
+         WHERE revoked.preflight_id=preflight.id
+       )
+     LIMIT 2`,
+    [
+      scope.propertyId.toLowerCase(),
+      scope.destinationVersionId.toLowerCase(),
+      scope.organizationId.toLowerCase(),
+      AFFILIATE_REFERRAL_READINESS_MAX_AGE_SECONDS,
+    ],
+  );
+  return result.rows.length === 1
+    ? (result.rows[0] as AffiliateReferralRuntimeConfiguration)
+    : undefined;
 }
 
 /**

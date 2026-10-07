@@ -96,6 +96,9 @@ required decisions before live browser capture. This contract does not choose a
 cookie default or permit tracking without those decisions. Tests use explicit
 synthetic contexts and must report that limitation.
 
+The [live link and click proposal](affiliate-live-link-capture-decision.md) makes
+these choices concrete for review; its proposed values are not yet accepted.
+
 ## Validation result and publication consumption
 
 Retain the run ID, authorized actor/organization/property, exact destination version,
@@ -368,11 +371,15 @@ explicit `READ COMMITTED` transaction when a trusted server-owned source configu
 installed. The destination and active property are locked with the evidence rows so a
 concurrent revocation or property change cannot produce a mixed readiness response.
 
-Only the exact current policy with one distinct, fresh, purpose-bound opaque reference for
-each of the four purposes may be returned as validated. Malformed, partial, duplicated,
-future or stale port results are redacted to the existing pending response. Without a current
-source-selection provider, the production repository continues to report pending; request
-payloads cannot supply configuration or readiness.
+Exact-version production reads derive source selection from Booking-owned
+certification and preflight rows. It requires one unambiguous, current pair for every purpose
+under the exact property, destination and organization; missing, cross-environment or
+ambiguous evidence leaves configuration unavailable. Only the exact current policy with one
+distinct, fresh, purpose-bound opaque reference for each purpose may be returned as validated.
+Malformed, partial, duplicated, future or stale results remain pending, and request payloads
+cannot supply configuration or readiness.
+Bounded history lists retain their one-query pending view instead of rechecking proof graphs
+for every obsolete destination version.
 
 ## Publication prerequisite composition
 
@@ -385,6 +392,6 @@ immutable published terms.
 Missing configuration, commercial conditions or a tracking purpose blocks publication and
 writes nothing. Pending purposes remain explicit; malformed port responses return a safe
 `tracking_readiness_invalid` blocker rather than throwing or storing partial proof. The
-default publication resolver remains blocking because the commercial-conditions and current
-source-selection providers do not yet exist. This composition adds no HTTP publication route,
+default publication resolver remains blocking because the commercial-conditions runtime and
+publication adapter are not installed. This composition adds no HTTP publication route,
 agreement or link activation, and no request payload can supply readiness.

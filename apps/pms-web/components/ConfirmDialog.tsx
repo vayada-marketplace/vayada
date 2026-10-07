@@ -22,7 +22,7 @@ export default function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps) {
   return (
-    <Modal onClose={onCancel}>
+    <Modal onClose={onCancel} ariaLabel={title}>
       <h3 className="text-lg font-semibold text-gray-900 mb-2">{title}</h3>
       <p className="text-sm text-gray-600 mb-6">{message}</p>
       <div className="flex justify-end gap-3">

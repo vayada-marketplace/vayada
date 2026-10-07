@@ -9,6 +9,7 @@ import {
   updatePmsPropertyProfile,
 } from "@/services/api/pmsPropertyClient";
 import { useTranslation } from "@/lib/i18n";
+import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { SettingsLayout } from "@vayada/settings-ui";
 import { PropertySection } from "@/components/settings/PropertySection";
 import { LocalizationSection } from "@/components/settings/LocalizationSection";
@@ -101,7 +102,11 @@ export default function SettingsPage() {
     } catch (loadError) {
       setPropertyProfileLoadStatus("error");
       setPropertyProfileLoadError(
-        humanizeApiError(loadError, t("settings.property.loadBeforeEditing")),
+        localizedErrorText(
+          loadError,
+          humanizeApiError(loadError, t("settings.property.loadBeforeEditing")),
+          t,
+        ),
       );
     }
   }, [t]);
@@ -113,7 +118,13 @@ export default function SettingsPage() {
       const settings = await settingsService.getBookingAcceptance();
       setAcceptanceMode(settings.acceptanceMode);
     } catch (loadError) {
-      setAcceptanceLoadError(humanizeApiError(loadError, t("settings.bookingEngine.loadError")));
+      setAcceptanceLoadError(
+        localizedErrorText(
+          loadError,
+          humanizeApiError(loadError, t("settings.bookingEngine.loadError")),
+          t,
+        ),
+      );
     } finally {
       setLoadingAcceptance(false);
     }
@@ -126,7 +137,13 @@ export default function SettingsPage() {
       const settings = await getPmsCalendarSettings();
       setAutoRearrangeEnabled(settings.autoRearrangeEnabled);
     } catch (loadError) {
-      setCalendarLoadError(humanizeApiError(loadError, t("settings.calendar.loadAssignmentError")));
+      setCalendarLoadError(
+        localizedErrorText(
+          loadError,
+          humanizeApiError(loadError, t("settings.calendar.loadAssignmentError")),
+          t,
+        ),
+      );
     } finally {
       setCalendarLoading(false);
     }
@@ -141,7 +158,13 @@ export default function SettingsPage() {
       setSameDayCutoffTime(settings.cutoffLocalTime);
       setSameDayTimeZone(settings.propertyTimeZone);
     } catch (loadError) {
-      setSameDayLoadError(humanizeApiError(loadError, t("settings.calendar.loadSameDayError")));
+      setSameDayLoadError(
+        localizedErrorText(
+          loadError,
+          humanizeApiError(loadError, t("settings.calendar.loadSameDayError")),
+          t,
+        ),
+      );
     } finally {
       setSameDayLoading(false);
     }

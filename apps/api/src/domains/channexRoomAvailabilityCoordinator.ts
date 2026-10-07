@@ -5,6 +5,7 @@ import type { PmsInventoryMaterializationRepository } from "./pmsInventoryMateri
 import { lockChannexPricingPropertyAuthority } from "./channexPricingPropertyAuthority.js";
 import { channexPropertyLocalDate } from "./channexInitialAriDate.js";
 import { prepareChannexRoomAvailabilityDispatch } from "./channexRoomAvailabilityDispatch.js";
+import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 
 type Inventory = Pick<
   PmsInventoryMaterializationRepository,
@@ -20,6 +21,7 @@ type Scope = Readonly<{
   through: string;
   roomCount: number;
   dayCount: number;
+  fullPropertyReadinessRequired: boolean;
 }>;
 
 /** Rechecks complete room availability evidence inside a caller-owned activation transaction. */
@@ -30,8 +32,10 @@ export async function lockCurrentChannexRoomAvailability(
     connectionId: string;
     externalPropertyId: string;
     bindingGeneration: string;
+    roomTypeId: string;
   }>,
 ) {
+  await lockPmsInventoryMutationScope(client, input.propertyId);
   const mappings = await client.query<{ bindingGeneration: string }>(
     `SELECT c.binding_generation::text AS "bindingGeneration"
      FROM pms.channel_room_type_mappings m
@@ -41,12 +45,19 @@ export async function lockCurrentChannexRoomAvailability(
      WHERE m.property_id=$1 AND m.connection_id=$2 AND m.status='active' AND r.active
        AND c.connection_status='connected' AND c.external_property_id=$3
        AND c.binding_generation=$4::uuid
+       AND m.room_type_id=$5::uuid
        AND m.external_room_type_id<>'' AND m.external_room_type_id=btrim(m.external_room_type_id)
        AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closed
          WHERE closed.property_id=r.property_id AND closed.room_type_id=r.id)
      ORDER BY m.room_type_id::text COLLATE "C",m.id
      FOR SHARE OF m,c,r NOWAIT`,
-    [input.propertyId, input.connectionId, input.externalPropertyId, input.bindingGeneration],
+    [
+      input.propertyId,
+      input.connectionId,
+      input.externalPropertyId,
+      input.bindingGeneration,
+      input.roomTypeId,
+    ],
   );
   if (!mappings.rows.length) return unavailable("room_availability_mapping_unavailable");
   const coverage = (
@@ -61,13 +72,20 @@ export async function lockCurrentChannexRoomAvailability(
        WHERE coverage.property_id=$1
          AND coverage.calendar_revision=coverage.materialized_revision
          AND coverage.materialized_day_count=coverage.expected_day_count
-         AND NOT EXISTS (SELECT 1 FROM pms.operating_calendar_revisions newer
-           WHERE newer.property_id=calendar.property_id
-             AND newer.calendar_revision>calendar.calendar_revision)
        FOR SHARE OF coverage,calendar NOWAIT`,
       [input.propertyId],
     )
   ).rows[0];
+  if (
+    coverage &&
+    !(await lockSelectedRoomMaterializationCurrent(
+      client,
+      input.propertyId,
+      input.roomTypeId,
+      coverage.materializedRevision,
+    ))
+  )
+    return unavailable("room_availability_coverage_unavailable");
   const now = (await client.query<{ now: Date }>("SELECT clock_timestamp() AS now")).rows[0]?.now;
   const localToday = coverage && now ? channexPropertyLocalDate(coverage.timeZone, now) : null;
   if (!coverage || !localToday || !inclusiveDayCount(localToday, coverage.through))
@@ -81,6 +99,7 @@ export async function lockCurrentChannexRoomAvailability(
       localToday,
       coverage.through,
       coverage.materializedRevision,
+      input.roomTypeId,
     ])
   ).rows[0];
   return candidate
@@ -103,12 +122,14 @@ export async function prepareNextChannexRoomAvailabilityDispatch(
   const lease = { ...input };
   const before = await readScope(pool, lease, false);
   if (before.kind !== "scope") return before;
-  const readiness = await inventory.getInventoryLaunchReadiness({
-    propertyId: before.value.propertyId,
-    requiredCoverage: { from: before.value.localToday, through: before.value.through },
-  });
-  if (!readiness?.ready)
-    return { kind: "unavailable" as const, reason: "room_availability_coverage_unavailable" };
+  if (before.value.fullPropertyReadinessRequired) {
+    const readiness = await inventory.getInventoryLaunchReadiness({
+      propertyId: before.value.propertyId,
+      requiredCoverage: { from: before.value.localToday, through: before.value.through },
+    });
+    if (!readiness?.ready)
+      return { kind: "unavailable" as const, reason: "room_availability_coverage_unavailable" };
+  }
   const selected = await readScope(pool, lease, true, before.value);
   if (selected.kind !== "selected") return selected;
   if (!selected.selection)
@@ -142,7 +163,23 @@ async function readScope(
     await client.query("SET LOCAL statement_timeout='5s'");
     await client.query("SET LOCAL lock_timeout='150ms'");
     const authority = await lockChannexPricingPropertyAuthority(client, lease);
-    if (authority.kind !== "authorized" || authority.lease.operationType !== "sync_ari")
+    if (
+      authority.kind !== "authorized" ||
+      (authority.lease.operationType !== "sync_ari" && !authority.lease.publishedOfferProvisioning)
+    )
+      return unavailable("room_availability_authority_unavailable");
+    await lockPmsInventoryMutationScope(client, authority.lease.propertyId);
+    const provisionRoomTypeId =
+      authority.lease.operationType === "provision"
+        ? authority.lease.publishedOfferRoomTypeId
+        : null;
+    if (
+      authority.lease.operationType === "provision" &&
+      (!provisionRoomTypeId ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          provisionRoomTypeId,
+        ))
+    )
       return unavailable("room_availability_authority_unavailable");
     const unrestricted = await client.query(
       `SELECT 1 FROM platform.jobs WHERE id=$1::uuid
@@ -168,11 +205,17 @@ async function readScope(
          AND c.external_property_id<>'' AND c.external_property_id=btrim(c.external_property_id)
          AND m.external_room_type_id<>''
          AND m.external_room_type_id=btrim(m.external_room_type_id)
+         AND ($4::uuid IS NULL OR m.room_type_id=$4::uuid)
          AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closed
            WHERE closed.property_id=r.property_id AND closed.room_type_id=r.id)
        ORDER BY m.room_type_id::text COLLATE "C",m.id
        FOR SHARE OF m,c,r NOWAIT`,
-      [authority.lease.propertyId, authority.connectionId, authority.externalPropertyId],
+      [
+        authority.lease.propertyId,
+        authority.connectionId,
+        authority.externalPropertyId,
+        provisionRoomTypeId,
+      ],
     );
     if (!mappings.rows.length) return unavailable("room_availability_mapping_unavailable");
     const coverage = (
@@ -193,13 +236,25 @@ async function readScope(
          WHERE coverage.property_id=$1
            AND coverage.calendar_revision=coverage.materialized_revision
            AND coverage.materialized_day_count=coverage.expected_day_count
-           AND NOT EXISTS (SELECT 1 FROM pms.operating_calendar_revisions newer
+           AND ($2::uuid IS NOT NULL OR NOT EXISTS (
+             SELECT 1 FROM pms.operating_calendar_revisions newer
              WHERE newer.property_id=calendar.property_id
-               AND newer.calendar_revision>calendar.calendar_revision)
+               AND newer.calendar_revision>calendar.calendar_revision))
          FOR SHARE OF coverage,calendar NOWAIT`,
-        [authority.lease.propertyId],
+        [authority.lease.propertyId, provisionRoomTypeId],
       )
     ).rows[0];
+    if (
+      coverage &&
+      provisionRoomTypeId &&
+      !(await lockSelectedRoomMaterializationCurrent(
+        client,
+        authority.lease.propertyId,
+        provisionRoomTypeId,
+        coverage.materializedRevision,
+      ))
+    )
+      return unavailable("room_availability_coverage_unavailable");
     const now = (await client.query<{ now: Date }>("SELECT clock_timestamp() AS now")).rows[0]?.now;
     const localToday = coverage && now ? channexPropertyLocalDate(coverage.timeZone, now) : null;
     if (!coverage || !localToday || coverage.from > localToday || coverage.through < localToday)
@@ -217,6 +272,7 @@ async function readScope(
       through: coverage.through,
       roomCount: mappings.rows.length,
       dayCount,
+      fullPropertyReadinessRequired: authority.lease.operationType !== "provision",
     };
     if (expected && !isDeepStrictEqual(expected, scope))
       return unavailable("room_availability_coverage_unavailable");
@@ -238,6 +294,7 @@ async function readScope(
         scope.localToday,
         scope.through,
         coverage.materializedRevision,
+        provisionRoomTypeId,
       ])
     ).rows[0];
     const finalAuthority = await lockChannexPricingPropertyAuthority(client, lease);
@@ -274,6 +331,57 @@ function inclusiveDayCount(from: string, through: string) {
   return Number.isSafeInteger(count) && count >= 1 && count <= 366 ? count : null;
 }
 
+async function lockSelectedRoomMaterializationCurrent(
+  client: Pick<PoolClient, "query">,
+  propertyId: string,
+  roomTypeId: string,
+  materializedRevision: number,
+) {
+  const row = (
+    await client.query<{ valid: boolean }>(
+      `WITH latest AS (
+         SELECT max(calendar_revision) AS calendar_revision
+         FROM pms.operating_calendar_revisions WHERE property_id=$1
+       )
+       SELECT materialized_calendar.contract_version=current_calendar.contract_version
+          AND materialized_calendar.property_profile_revision=current_calendar.property_profile_revision
+          AND materialized_calendar.property_time_zone=current_calendar.property_time_zone
+          AND materialized_calendar.schedule_mode=current_calendar.schedule_mode
+          AND materialized_calendar.recurring_period_count=current_calendar.recurring_period_count
+          AND materialized_calendar.default_minimum_stay_nights=current_calendar.default_minimum_stay_nights
+          AND materialized_binding.source_room_facts_revision=current_binding.source_room_facts_revision
+          AND materialized_binding.source_room_units_revision=current_binding.source_room_units_revision
+          AND materialized_binding.physical_capacity_count=current_binding.physical_capacity_count
+          AND materialized_binding.starting_sellable_limit_count=current_binding.starting_sellable_limit_count
+          AND COALESCE((SELECT jsonb_agg(jsonb_build_array(period_index,start_month,start_day,end_month,end_day)
+                         ORDER BY period_index)
+             FROM pms.operating_calendar_recurring_periods
+             WHERE property_id=$1 AND calendar_revision=materialized_calendar.calendar_revision),'[]'::jsonb)
+              = COALESCE((SELECT jsonb_agg(jsonb_build_array(period_index,start_month,start_day,end_month,end_day)
+                            ORDER BY period_index)
+                FROM pms.operating_calendar_recurring_periods
+                WHERE property_id=$1 AND calendar_revision=current_calendar.calendar_revision),'[]'::jsonb)
+          AS valid
+       FROM latest
+       JOIN pms.operating_calendar_revisions materialized_calendar
+         ON materialized_calendar.property_id=$1 AND materialized_calendar.calendar_revision=$3
+       JOIN pms.operating_calendar_revisions current_calendar
+         ON current_calendar.property_id=$1 AND current_calendar.calendar_revision=latest.calendar_revision
+       JOIN pms.operating_calendar_room_bindings materialized_binding
+         ON materialized_binding.property_id=$1
+        AND materialized_binding.calendar_revision=materialized_calendar.calendar_revision
+        AND materialized_binding.room_type_id=$2
+       JOIN pms.operating_calendar_room_bindings current_binding
+         ON current_binding.property_id=$1
+        AND current_binding.calendar_revision=current_calendar.calendar_revision
+        AND current_binding.room_type_id=$2
+      `,
+      [propertyId, roomTypeId, materializedRevision],
+    )
+  ).rows[0];
+  return row?.valid === true;
+}
+
 const selectionSql = `
 WITH mapped AS (
   SELECT m.id,m.room_type_id AS mapped_room_type_id,m.external_room_type_id,
@@ -289,6 +397,7 @@ WITH mapped AS (
     ON calendar.property_id=binding.property_id
    AND calendar.calendar_revision=binding.calendar_revision
   WHERE m.property_id=$1 AND m.connection_id=$2 AND m.status='active' AND room.active
+    AND ($8::uuid IS NULL OR m.room_type_id=$8::uuid)
     AND m.external_room_type_id<>'' AND m.external_room_type_id=btrim(m.external_room_type_id)
     AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closed
       WHERE closed.property_id=room.property_id AND closed.room_type_id=room.id)

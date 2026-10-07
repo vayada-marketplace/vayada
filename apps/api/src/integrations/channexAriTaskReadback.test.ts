@@ -89,7 +89,8 @@ describe("original ARI task finish observation", () => {
     { finished_at: "2026-02-30T00:00:00.000000" },
     { finished_at: "2026-09-13T24:00:00.000000" },
     { finished_at: "2026-09-13T04:25:17.650179" },
-    { executed_at: "2026-09-13T04:25:17.522332" },
+    { received_at: "2026-09-13T04:25:17.675390" },
+    { executed_at: "2026-09-13T04:25:17.675390" },
     { payload: { values: [] } },
   ])("rejects mismatched, failed, pending or invalid task details", async (change) => {
     const body = response();
@@ -177,6 +178,15 @@ describe("original ARI task finish observation", () => {
       received_at: "2026-09-13T04:25:17",
       executed_at: "2026-09-13T04:25:17.1",
       finished_at: "2026-09-13T04:25:17.100001",
+    });
+    expect((await verify(expected(), async () => body)).kind).toBe("task_finish_observed");
+  });
+  it("accepts Channex tasks that record execution just before receipt", async () => {
+    const body = response();
+    Object.assign(body.data.attributes, {
+      received_at: "2026-09-23T11:43:56.357239",
+      executed_at: "2026-09-23T11:43:56.354371",
+      finished_at: "2026-09-23T11:43:56.398595",
     });
     expect((await verify(expected(), async () => body)).kind).toBe("task_finish_observed");
   });

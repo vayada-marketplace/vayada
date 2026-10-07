@@ -7,10 +7,10 @@ describe("initial ARI property-local date admission", () => {
   it("includes today and the existing full-ARI boundary, excluding adjacent dates", () => {
     expect(admit("2026-01-01", "UTC", now)).toMatchObject({
       kind: "admitted",
-      through: "2027-07-03",
+      through: "2027-05-15",
     });
-    expect(admit("2027-07-03", "UTC", now).kind).toBe("admitted");
-    for (const date of ["2025-12-31", "2027-07-04"])
+    expect(admit("2027-05-15", "UTC", now).kind).toBe("admitted");
+    for (const date of ["2025-12-31", "2027-05-16"])
       expect(admit(date, "UTC", now).kind).toBe("unavailable");
   });
   it("uses the hotel's date on either side of UTC midnight", () => {
@@ -70,11 +70,43 @@ describe("next initial ARI calendar date", () => {
   });
   it("includes the last horizon day and returns no date only after all days are covered", () => {
     const now = new Date("2026-01-01T12:00:00Z");
-    const days = Array.from({ length: 549 }, (_, i) =>
+    const days = Array.from({ length: 500 }, (_, i) =>
       new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10),
     );
-    expect(next("UTC", now, days.slice(0, -1))).toMatchObject({ date: "2027-07-03" });
+    expect(next("UTC", now, days.slice(0, -1))).toMatchObject({ date: "2027-05-15" });
     expect(next("UTC", now, days)).toMatchObject({ kind: "selected", date: null });
+  });
+  it("keeps a provisioning run anchored across hotel-local midnight", () => {
+    const days = Array.from({ length: 500 }, (_, i) =>
+      new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10),
+    );
+    const beforeMidnight = next(
+      "America/Los_Angeles",
+      new Date("2026-01-02T07:59:59Z"),
+      days,
+      "2026-01-01",
+    );
+    const afterMidnight = next(
+      "America/Los_Angeles",
+      new Date("2026-01-02T08:00:01Z"),
+      days,
+      "2026-01-01",
+    );
+    expect(beforeMidnight).toMatchObject({
+      kind: "selected",
+      propertyLocalDate: "2026-01-01",
+      through: "2027-05-15",
+      date: null,
+    });
+    expect(afterMidnight).toEqual(beforeMidnight);
+    expect(
+      admit("2027-05-16", "America/Los_Angeles", new Date("2026-01-02T08:00:01Z"), "2026-01-01")
+        .kind,
+    ).toBe("unavailable");
+    expect(
+      admit("2025-12-31", "America/Los_Angeles", new Date("2026-01-02T08:00:01Z"), "2026-01-01")
+        .kind,
+    ).toBe("unavailable");
   });
   it("rejects invalid timezone or clock without selecting a fallback", () => {
     for (const zone of [undefined, "invalid/zone", " UTC "])

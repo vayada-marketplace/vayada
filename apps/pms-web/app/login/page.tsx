@@ -9,11 +9,15 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const params = (await searchParams) ?? {};
   const returnTo = safeRelativeReturnTo(params.returnTo, "/dashboard");
   const authError = firstSearchParam(params.auth_error);
+  const workosReturn = firstSearchParam(params.workos_return);
   return (
     <LoginContent
       returnTo={returnTo}
       resumeSession={firstSearchParam(params.auth) === "callback"}
       authError={authError}
+      workosReturn={
+        workosReturn === "complete" || workosReturn === "failed" ? workosReturn : undefined
+      }
     />
   );
 }

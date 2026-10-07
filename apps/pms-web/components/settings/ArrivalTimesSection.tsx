@@ -8,6 +8,8 @@ import type {
 } from "@vayada/domain-booking";
 import { SettingsCard } from "@vayada/settings-ui";
 import { arrivalTimesService } from "@/services/settings/arrivalTimes";
+import { useTranslation } from "@/lib/i18n";
+import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { humanizeApiError } from "./constants";
 
 const fields = [
@@ -28,6 +30,7 @@ type ArrivalDraft = Omit<
 };
 
 export function ArrivalTimesSection() {
+  const { t } = useTranslation();
   const [setup, setSetup] = useState<BookingGuestPolicySetupAggregate | null>(null);
   const [choices, setChoices] = useState<ArrivalDraft | null>(null);
   const [preview, setPreview] = useState<Extract<
@@ -39,6 +42,7 @@ export function ArrivalTimesSection() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [saved, setSaved] = useState(false);
   const [reload, setReload] = useState(0);
   useEffect(() => {
@@ -47,6 +51,7 @@ export function ArrivalTimesSection() {
     setSetup(null);
     setChoices(null);
     setError("");
+    setLoadError(null);
     void arrivalTimesService
       .load(controller.signal)
       .then((value) => {
@@ -57,8 +62,9 @@ export function ArrivalTimesSection() {
         setConfirmed(false);
       })
       .catch((cause) => {
-        if (!controller.signal.aborted)
-          setError(humanizeApiError(cause, "Arrival times could not be loaded."));
+        if (controller.signal.aborted) return;
+        setLoadError(cause);
+        setError(humanizeApiError(cause, "Arrival times could not be loaded."));
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
@@ -130,7 +136,7 @@ export function ArrivalTimesSection() {
         <>
           {error && (
             <p className="mt-2 text-sm text-red-700" role="alert">
-              {error}
+              {localizedErrorText(loadError, error, t)}
             </p>
           )}
           {saved && (

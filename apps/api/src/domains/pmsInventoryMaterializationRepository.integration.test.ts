@@ -1,3 +1,7 @@
+import {
+  CHANNEX_MANAGEMENT_WORKER_ROLE,
+  channexManagementWorkerPrivileges,
+} from "../jobs/channexManagementWorkerPrivileges.js";
 import { appendExternalNightlyRevenueEconomics } from "./financeOtaCommissionEvidence.js";
 import { captureChannexAlterationFinance } from "./channexAlterationFinance.js";
 import { hasBookingFinancialEvidence } from "./financeBookingAlterationGuard.js";
@@ -13,7 +17,10 @@ import {
   prepareChannexRoomAvailabilityTransportFailurePersistence,
 } from "./channexRoomAvailabilityReceiptStore.js";
 import { prepareChannexRoomAvailabilityDispatch } from "./channexRoomAvailabilityDispatch.js";
-import { prepareNextChannexRoomAvailabilityDispatch } from "./channexRoomAvailabilityCoordinator.js";
+import {
+  lockCurrentChannexRoomAvailability,
+  prepareNextChannexRoomAvailabilityDispatch,
+} from "./channexRoomAvailabilityCoordinator.js";
 import { reconcilePendingChannexRoomAvailability } from "./channexPendingRoomAvailabilityReconciliation.js";
 import { channexPropertyLocalDate } from "./channexInitialAriDate.js";
 import { createPgPmsChannexManagementWorkerStore } from "../jobs/pmsChannexManagementWorkerStore.js";
@@ -64,6 +71,7 @@ type Fixture = Readonly<{
   authorizationState: { allowed: boolean };
   authorize: ReturnType<typeof vi.fn>;
   repository: PmsInventoryMaterializationRepository;
+  workerRepository: (connectionString: string) => PmsInventoryMaterializationRepository;
 }>;
 
 describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization repository", () => {
@@ -1710,8 +1718,20 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     ).toBe(0);
   });
 
-  async function channelInventoryFixture(horizonDays = 1, startAtLocalToday = false) {
-    const f = await createFixture(admin, repositories, [2]);
+  async function channelInventoryFixture(
+    horizonDays = 1,
+    startAtLocalToday = false,
+    includeUnrelatedMappedRoom = false,
+  ) {
+    const unrelatedRoomTypeId = includeUnrelatedMappedRoom
+      ? `00000000-0000-4000-8000-${randomUUID().slice(-12)}`
+      : null;
+    const f = await createFixture(
+      admin,
+      repositories,
+      [2],
+      unrelatedRoomTypeId ? [unrelatedRoomTypeId] : [],
+    );
     const date = startAtLocalToday
       ? channexPropertyLocalDate("Europe/Berlin", new Date())!
       : new Date(Date.now() + 86400000).toISOString().slice(0, 10);
@@ -1747,6 +1767,12 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       VALUES($1,$2,$3,$4)`,
       [f.propertyId, connectionId, f.roomTypeId, externalRoomTypeId],
     );
+    if (unrelatedRoomTypeId)
+      await admin.query(
+        `INSERT INTO pms.channel_room_type_mappings(property_id,connection_id,room_type_id,external_room_type_id)
+         VALUES($1,$2,$3,$4)`,
+        [f.propertyId, connectionId, unrelatedRoomTypeId, randomUUID()],
+      );
     const jobId = randomUUID();
     await admin.query(
       `INSERT INTO platform.jobs(id,job_key,queue_name,job_type,status,attempts_count,locked_by,locked_at,
@@ -1788,6 +1814,234 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       next: () => prepareNextChannexRoomAvailabilityDispatch(channelPool, f.repository, lease),
     };
   }
+  it.each(["sync_ari", "provision"])(
+    "uses the restricted Channex login for availability %s",
+    async (operation) => {
+      const f = await channelInventoryFixture(1, true, operation === "provision");
+      if (operation === "provision") {
+        const publishedOffer = {
+          roomTypeId: randomUUID(),
+          offerId: "offer",
+          publicationRevision: 1,
+          primaryOccupancy: 1,
+        };
+        await admin.query(
+          `UPDATE platform.jobs SET job_type='channex.provision',payload=$2 WHERE id=$1`,
+          [f.lease.jobId, JSON.stringify({ operationType: "provision", publishedOffer })],
+        );
+      }
+      const role = CHANNEX_MANAGEMENT_WORKER_ROLE;
+      await admin.query(
+        `CREATE ROLE ${role} LOGIN PASSWORD 'fixture' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`,
+      );
+      const login = new URL(TEST_DATABASE_URL!);
+      login.username = role;
+      login.password = "fixture";
+      const worker = new pg.Pool({ connectionString: login.toString() });
+      const inventory = f.workerRepository(login.toString());
+      const getInventoryLaunchReadiness = vi.fn(
+        inventory.getInventoryLaunchReadiness.bind(inventory),
+      );
+      const getCurrentInventoryDay = vi.fn(inventory.getCurrentInventoryDay.bind(inventory));
+      if (operation === "provision") getInventoryLaunchReadiness.mockResolvedValue(null);
+      try {
+        await admin.query(
+          `GRANT USAGE ON SCHEMA platform,pms,identity,hotel_catalog,booking,finance TO ${role}`,
+        );
+        for (const [table, grants] of Object.entries(channexManagementWorkerPrivileges))
+          for (const [kind, columns] of Object.entries(grants))
+            await admin.query(
+              `GRANT ${kind}${columns === true ? "" : `(${columns.join(",")})`} ON ${table} TO ${role}`,
+            );
+        await admin.query("INSERT INTO platform.channex_management_worker_properties VALUES($1)", [
+          f.propertyId,
+        ]);
+        if (operation === "provision") {
+          // The published offer must name the exact mapped room before a provider write is admitted.
+          await expect(
+            prepareChannexRoomAvailabilityDispatch(worker, inventory, f.lease, f.selection),
+          ).rejects.toMatchObject({
+            code: "23514",
+            message: "Active room mapping and correlated sync job required",
+          });
+          await admin.query(
+            `UPDATE platform.jobs SET payload=jsonb_set(payload,'{publishedOffer,roomTypeId}',to_jsonb($2::text)) WHERE id=$1`,
+            [f.lease.jobId, f.roomTypeId.toUpperCase()],
+          );
+        }
+        const prepared =
+          operation === "provision"
+            ? await prepareNextChannexRoomAvailabilityDispatch(
+                worker,
+                { ...inventory, getCurrentInventoryDay, getInventoryLaunchReadiness },
+                f.lease,
+              )
+            : await prepareChannexRoomAvailabilityDispatch(worker, inventory, f.lease, f.selection);
+        expect(prepared.kind).toBe("prepared");
+        if (prepared.kind !== "prepared")
+          throw new Error("Restricted availability dispatch required");
+        if (operation === "provision") expect(prepared).toMatchObject({ roomTypeId: f.roomTypeId });
+        if (operation === "provision") expect(getInventoryLaunchReadiness).not.toHaveBeenCalled();
+        if (operation === "provision")
+          expect(getCurrentInventoryDay).toHaveBeenCalledWith(
+            expect.objectContaining({ materializationScope: "room" }),
+            expect.any(Function),
+          );
+        const taskId = randomUUID();
+        let request: unknown;
+        const outcome = await prepared.dispatch(async (sent) => {
+          request = sent.body;
+          return new Response(
+            JSON.stringify({ data: [{ type: "task", id: taskId }], meta: { warnings: [] } }),
+          );
+        });
+        expect(["retained", "receipt_pending"]).toContain(outcome.kind);
+        if (outcome.kind === "receipt_pending") await outcome.persist();
+        const get = async (path: string) =>
+          path.includes("/tasks/")
+            ? {
+                data: {
+                  type: "task",
+                  id: taskId,
+                  attributes: {
+                    id: taskId,
+                    task: "Property.UpdateAvailability",
+                    payload: request,
+                    success: true,
+                    errors: [],
+                    received_at: "2026-09-16T00:00:00.000001",
+                    executed_at: "2026-09-16T00:00:00.000002",
+                    finished_at: "2026-09-16T00:00:00.000003",
+                  },
+                },
+              }
+            : {
+                data: { [f.externalRoomTypeId]: { [f.selection.date]: 2 } },
+                meta: { warnings: [] },
+              };
+        expect(
+          await reconcileCurrentChannexRoomAvailability(
+            worker,
+            inventory,
+            f.lease,
+            f.selection,
+            prepared.attemptId,
+            get,
+          ),
+        ).toEqual({ kind: "availability_reconciled", attemptId: prepared.attemptId });
+      } finally {
+        await inventory.close();
+        await worker.end();
+        await admin.query(
+          "DELETE FROM platform.channex_management_worker_properties WHERE property_id=$1",
+          [f.propertyId],
+        );
+        await admin.query(`DROP OWNED BY ${role}; DROP ROLE ${role}`);
+      }
+    },
+  );
+  it("keeps provision availability current when an unrelated room awaits materialization", async () => {
+    const f = await channelInventoryFixture(1, true);
+    const unrelatedRoomTypeId = randomUUID();
+    await admin.query(
+      `UPDATE platform.jobs SET job_type='channex.provision',payload=$2 WHERE id=$1`,
+      [
+        f.lease.jobId,
+        JSON.stringify({
+          operationType: "provision",
+          publishedOffer: {
+            roomTypeId: f.roomTypeId,
+            offerId: "offer",
+            publicationRevision: 1,
+            primaryOccupancy: 1,
+          },
+        }),
+      ],
+    );
+    await admin.query(
+      "INSERT INTO pms.room_types (id,property_id,name) VALUES ($1,$2,'Unmaterialized room')",
+      [unrelatedRoomTypeId, f.propertyId],
+    );
+    const next = f.configurations.get(2)!;
+    (f.configurations as Map<number, PmsOperatingCalendarConfigurationSnapshot>).set(2, {
+      ...next,
+      sourceInputs: {
+        ...next.sourceInputs,
+        roomBindings: [
+          ...next.sourceInputs.roomBindings,
+          { ...next.sourceInputs.roomBindings[0]!, roomTypeId: unrelatedRoomTypeId },
+        ].sort((left, right) => left.roomTypeId.localeCompare(right.roomTypeId)),
+      },
+    });
+    await activateCalendarRevision(admin, f, 2);
+    const prepared = await f.next();
+    expect(prepared).toMatchObject({ kind: "prepared", roomTypeId: f.roomTypeId });
+    if (prepared.kind !== "prepared") throw new Error("Scoped availability dispatch required");
+    let request: unknown;
+    const taskId = randomUUID();
+    const sent = await prepared.dispatch(async (input) => {
+      request = structuredClone(input.body);
+      return new Response(
+        JSON.stringify({ data: [{ type: "task", id: taskId }], meta: { warnings: [] } }),
+      );
+    });
+    if (sent.kind === "receipt_pending") await sent.persist();
+    const read = async (path: string) =>
+      path.includes("/tasks/")
+        ? {
+            data: {
+              type: "task",
+              id: taskId,
+              attributes: {
+                id: taskId,
+                task: "Property.UpdateAvailability",
+                payload: request,
+                success: true,
+                errors: [],
+                received_at: "2026-09-16T00:00:00.000001",
+                executed_at: "2026-09-16T00:00:00.000002",
+                finished_at: "2026-09-16T00:00:00.000003",
+              },
+            },
+          }
+        : {
+            data: { [f.externalRoomTypeId]: { [f.selection.date]: 2 } },
+            meta: { warnings: [] },
+          };
+    await expect(
+      reconcileCurrentChannexRoomAvailability(
+        channelPool,
+        f.repository,
+        f.lease,
+        f.selection,
+        prepared.attemptId,
+        read,
+      ),
+    ).resolves.toEqual({ kind: "availability_reconciled", attemptId: prepared.attemptId });
+    await expect(f.next()).resolves.toMatchObject({ kind: "room_availability_current" });
+    const connection = (
+      await admin.query(
+        "SELECT binding_generation::text FROM pms.channel_connections WHERE id=$1",
+        [f.connectionId],
+      )
+    ).rows[0];
+    await admin.query("BEGIN");
+    try {
+      await expect(
+        lockCurrentChannexRoomAvailability(admin, {
+          propertyId: f.propertyId,
+          connectionId: f.connectionId,
+          externalPropertyId: f.propertyId,
+          bindingGeneration: connection.binding_generation,
+          roomTypeId: f.roomTypeId,
+        }),
+      ).resolves.toMatchObject({ kind: "current" });
+      await admin.query("COMMIT");
+    } catch (error) {
+      await admin.query("ROLLBACK");
+      throw error;
+    }
+  });
   async function availabilityReconciliationFixture(startAtLocalToday = false) {
     const f = await channelInventoryFixture(1, startAtLocalToday),
       prepared = await f.dispatch(),
@@ -2997,6 +3251,83 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     ).rejects.toThrow("inventory materialization coverage is not exact and gap-free");
   });
 
+  it("keeps a selected room current when only an unrelated room awaits materialization", async () => {
+    const newRoom = randomUUID();
+    const additionalRoomTypes: string[] = [];
+    const fixture = await createFixture(admin, repositories, [2, 2], additionalRoomTypes);
+    await fixture.repository.materializeInventory(
+      materializationCommand(fixture, "selected-before-add", 1, "2026-08-04", "2026-08-04"),
+    );
+    await admin.query(
+      "INSERT INTO pms.room_types (id,property_id,name) VALUES ($1,$2,'Unmaterialized room')",
+      [newRoom, fixture.propertyId],
+    );
+    additionalRoomTypes.push(newRoom);
+    const next = fixture.configurations.get(2)!;
+    (fixture.configurations as Map<number, PmsOperatingCalendarConfigurationSnapshot>).set(2, {
+      ...next,
+      sourceInputs: {
+        ...next.sourceInputs,
+        roomBindings: [
+          ...next.sourceInputs.roomBindings,
+          { ...next.sourceInputs.roomBindings[0]!, roomTypeId: newRoom },
+        ].sort((a, b) => a.roomTypeId.localeCompare(b.roomTypeId)),
+      },
+    });
+    await activateCalendarRevision(admin, fixture, 2);
+    const request = {
+      propertyId: fixture.propertyId,
+      roomTypeId: fixture.roomTypeId,
+      stayDate: "2026-08-04",
+    };
+    expect(
+      Number(
+        (
+          await admin.query(
+            "SELECT calendar_revision FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2 AND stay_date=$3",
+            [fixture.propertyId, fixture.roomTypeId, request.stayDate],
+          )
+        ).rows[0]?.calendar_revision,
+      ),
+    ).toBe(1);
+    await expect(fixture.repository.getCurrentInventoryDay(request)).resolves.toMatchObject({
+      kind: "unavailable",
+      reason: "coverage_unavailable",
+    });
+    await expect(
+      fixture.repository.getCurrentInventoryDay({ ...request, materializationScope: "room" }),
+    ).resolves.toMatchObject({
+      kind: "available",
+      materializedRevision: 1,
+      configurationSource: { revision: "calendar:1" },
+      day: request,
+    });
+    const changed = configurationSnapshot({
+      propertyId: fixture.propertyId,
+      roomTypeId: fixture.roomTypeId,
+      revision: 3,
+      startingLimit: 1,
+      additionalRoomTypes: [newRoom],
+    });
+    (fixture.configurations as Map<number, PmsOperatingCalendarConfigurationSnapshot>).set(
+      3,
+      changed,
+    );
+    await seedCalendarRevision(admin, {
+      organizationId: fixture.organizationId,
+      propertyId: fixture.propertyId,
+      roomTypeId: fixture.roomTypeId,
+      actorUserId: fixture.actorUserId,
+      revision: 3,
+      startingLimit: 1,
+      additionalRoomTypes: [newRoom],
+    });
+    fixture.calendarState.currentRevision = 3;
+    await expect(
+      fixture.repository.getCurrentInventoryDay({ ...request, materializationScope: "room" }),
+    ).resolves.toMatchObject({ kind: "unavailable", reason: "coverage_unavailable" });
+  });
+
   it("applies, replays, extends, and rematerializes without erasing retained owners", async () => {
     const fixture = await createFixture(admin, repositories, [2, 1]);
     const first = materializationCommand(fixture, "first", 1, "2026-08-04", "2026-08-06");
@@ -3645,6 +3976,14 @@ async function createFixture(
     authorizationState,
     authorize,
     repository,
+    workerRepository: (connectionString) =>
+      createPgPmsInventoryMaterializationRepository({
+        connectionString,
+        authorization,
+        operatingCalendar,
+        propertyProfileEvidence,
+        roomCapacity,
+      }),
   };
 }
 

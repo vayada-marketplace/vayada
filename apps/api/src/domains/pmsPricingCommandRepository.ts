@@ -1,4 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
+import { beginHotelSetupCommandScope } from "../hotelSetupCommandScope.js";
+import { lockHotelSetupCurrencyMembership } from "../hotelSetupCurrencyMembership.js";
+import { seedPendingHotelFinancialsCategories } from "./financeStarterCategories.js";
 import { enqueueChannexMealChange } from "./pmsChannexMealChange.js";
 
 import {
@@ -41,6 +44,8 @@ export type PmsPricingCommandPool = {
 export type PmsPricingCommandRepositoryConfig = {
   connectionString: string;
   currencyChangeGuard: PmsPricingCurrencyChangeGuardPort;
+  /** Trusted private-service configuration; never read from the request DTO. */
+  hotelSetupCurrencyOperation?: "currency" | "currency_ready";
   channexMealSyncEnabled?: boolean;
   channexMealSyncPropertyId?: string;
   max?: number;
@@ -128,6 +133,21 @@ export function createPgPmsPricingCommandRepository(
   const makeId = config.randomId ?? randomUUID;
   let closed = false;
 
+  async function beginCurrencyTransaction(
+    client: PmsPricingCommandClient,
+    command: AnyCommand,
+  ): Promise<void> {
+    if (config.hotelSetupCurrencyOperation) {
+      await beginHotelSetupCommandScope(client, {
+        propertyId: command.propertyId,
+        organizationId: command.organizationId,
+        operation: config.hotelSetupCurrencyOperation,
+      });
+    } else {
+      await client.query("BEGIN");
+    }
+  }
+
   async function runCommand<C extends AnyCommand, R extends AnyResult>(
     command: C,
     spec: CommandSpec<C, R>,
@@ -140,9 +160,16 @@ export function createPgPmsPricingCommandRepository(
     const client = await pool.connect();
 
     try {
-      await client.query("BEGIN");
+      await beginCurrencyTransaction(client, command);
       await lockPropertyPricingScope(client, command.propertyId);
-      if (!(await lockAuthorizedScope(client, command, acceptedAt))) {
+      if (
+        !(await lockAuthorizedScope(
+          client,
+          command,
+          acceptedAt,
+          !!config.hotelSetupCurrencyOperation,
+        ))
+      ) {
         await rollbackQuietly(client);
         return spec.scopeFailure();
       }
@@ -179,6 +206,14 @@ export function createPgPmsPricingCommandRepository(
       if (result.ok !== Boolean(worked.change)) {
         throw new Error("PMS pricing command change notification invariant failed");
       }
+      if (
+        config.hotelSetupCurrencyOperation === "currency_ready" &&
+        spec.operation === CURRENCY_OPERATION &&
+        result.ok &&
+        result.response.outcome === "created"
+      ) {
+        await seedPendingHotelFinancialsCategories(client, command);
+      }
 
       const domainEventId = worked.change
         ? await enqueuePricingChange(
@@ -193,7 +228,8 @@ export function createPgPmsPricingCommandRepository(
         : null;
       if (
         config.channexMealSyncEnabled &&
-        (!config.channexMealSyncPropertyId || config.channexMealSyncPropertyId === command.propertyId) &&
+        (!config.channexMealSyncPropertyId ||
+          config.channexMealSyncPropertyId === command.propertyId) &&
         domainEventId &&
         worked.change?.resourceType === "flexible_rate_plan" &&
         command.audit.actor.kind === "user"
@@ -239,9 +275,9 @@ export function createPgPmsPricingCommandRepository(
     const fingerprint = sha256(CURRENCY_SPEC.serializeFingerprint(command));
     const client = await pool.connect();
     try {
-      await client.query("BEGIN");
+      await beginCurrencyTransaction(client, command);
       await lockPropertyPricingScope(client, command.propertyId);
-      if (!(await lockAuthorizedScope(client, command, at))) {
+      if (!(await lockAuthorizedScope(client, command, at, !!config.hotelSetupCurrencyOperation))) {
         await rollbackQuietly(client);
         return { kind: "result", result: CURRENCY_SPEC.scopeFailure() };
       }
@@ -477,8 +513,10 @@ async function lockAuthorizedScope(
   client: PmsPricingCommandClient,
   command: AnyCommand,
   at: Date,
+  nativeSetup: boolean,
 ): Promise<boolean> {
   if (command.audit.actor.kind !== "user") return false;
+  if (nativeSetup) return lockHotelSetupCurrencyMembership(client, command);
   const scope = await client.query(
     `SELECT property.id
      FROM hotel_catalog.properties property

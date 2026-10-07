@@ -59,7 +59,7 @@ export function createPgBookingAffiliateDestinationRepository(
 ) {
   const pool = new pg.Pool({ connectionString, max: 3 });
   const read = async (propertyId: string, organizationId: string, versionId?: string) => {
-    if (!tracking)
+    if (!tracking || versionId === undefined)
       return readBookingAffiliateDestinations(pool, propertyId, organizationId, versionId);
     const client = await pool.connect();
     try {

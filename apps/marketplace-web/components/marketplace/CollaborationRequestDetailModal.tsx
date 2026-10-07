@@ -348,6 +348,7 @@ export function CollaborationRequestDetailModal({
               <AffiliateAgreementPanel
                 collaborationId={collaboration.id}
                 currentUserType={currentUserType}
+                collaborationStatus={collaboration.status}
                 affiliateExpected={
                   collaboration.collaborationType === "Affiliate" ||
                   collaboration.creatorFee != null

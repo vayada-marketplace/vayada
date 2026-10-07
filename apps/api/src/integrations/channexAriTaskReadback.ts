@@ -81,7 +81,7 @@ async function verifyTaskFinish(
     !received ||
     !executed ||
     !finished ||
-    received > executed ||
+    received > finished ||
     executed > finished
   )
     throw new Error("ari_task_observation_unavailable");

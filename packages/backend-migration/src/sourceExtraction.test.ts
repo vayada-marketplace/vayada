@@ -27,6 +27,12 @@ import {
 } from "./sourceInventory.js";
 import { DEFAULT_REBUILD_SCHEMAS, SOURCE_EXTRACTION_SCHEMAS } from "./targetSchemas.js";
 import { ADVISORY_LOCK_ID } from "./runner.js";
+import { historicalSourceInventorySha256 } from "./rawSourceDispositions.js";
+
+const historicalInventoryText = readFileSync(
+  new URL("../raw-source-dispositions.tsv", import.meta.url),
+  "utf8",
+);
 
 const fingerprints: Record<SourceDatabase, string> = {
   auth: "a".repeat(32),
@@ -97,6 +103,14 @@ function makeConfig(): SourceExtractionConfig {
   };
 }
 
+function makeHistoricalConfig(): SourceExtractionConfig {
+  const config = makeConfig();
+  config.historicalInventoryText = historicalInventoryText;
+  config.manifest.historicalInventorySha256 =
+    historicalSourceInventorySha256(historicalInventoryText);
+  return config;
+}
+
 class FakeSource {
   readonly queries: string[] = [];
   writable = false;
@@ -106,6 +120,7 @@ class FakeSource {
   attestedFreezeProof: string | null = null;
   attestationTable: Map<string, string> | null = null;
   attestationTableTrusted = true;
+  attestationOwner: unknown;
   failTableOnce: string | null = null;
   private failed = false;
   private currentTable = "";
@@ -119,7 +134,7 @@ class FakeSource {
     this.attestedSnapshotIdentifier = `fixture:${sourceDatabase}-snapshot`;
   }
 
-  async query(sql: string) {
+  async query(sql: string, parameters?: unknown[]) {
     this.queries.push(sql);
     if (sql === SOURCE_WRITABLE_PRIVILEGES_SQL) return result([{ is_writable: this.writable }]);
     if (sql === "SHOW transaction_read_only") {
@@ -137,6 +152,7 @@ class FakeSource {
       ]);
     }
     if (sql === DATABASE_ATTESTATION_TABLE_STATE_SQL) {
+      this.attestationOwner = parameters?.[0];
       return result([
         {
           present: this.attestationTable !== null,
@@ -159,13 +175,15 @@ class FakeSource {
         },
       ]);
     }
-    const countTable = /FROM "[a-z_]+"\."([a-z_]+)"/.exec(sql)?.[1];
-    if (sql.startsWith("SELECT count(*)") && countTable) {
-      return result([{ row_count: String(this.rows[countTable]?.length ?? 0) }]);
+    const counted = /FROM "([a-z0-9_]+)"\."([a-z_]+)"/.exec(sql);
+    if (sql.startsWith("SELECT count(*)") && counted) {
+      const rows = this.rows[`${counted[1]}.${counted[2]}`] ?? this.rows[counted[2]] ?? [];
+      return result([{ row_count: String(rows.length) }]);
     }
-    const declaredTable = /FROM "[a-z_]+"\."([a-z_]+)" AS source_row/.exec(sql)?.[1];
-    if (sql.startsWith("DECLARE") && declaredTable) {
-      this.currentTable = declaredTable;
+    const declared = /FROM "([a-z0-9_]+)"\."([a-z_]+)" AS source_row/.exec(sql);
+    if (sql.startsWith("DECLARE") && declared) {
+      const qualified = `${declared[1]}.${declared[2]}`;
+      this.currentTable = qualified in this.rows ? qualified : declared[2];
       this.fetched = false;
       return result([]);
     }
@@ -405,6 +423,59 @@ describe("immutable source extraction", () => {
     expect(argumentError.message).not.toContain(secretUrl);
   });
 
+  it("binds historical tables to an exact reviewed inventory and a distinct run", async () => {
+    const config = makeHistoricalConfig();
+    const parsed = parseSourceExtractionManifest(JSON.parse(JSON.stringify(config.manifest)));
+    expect(parsed.historicalInventorySha256).toBe(config.manifest.historicalInventorySha256);
+    const plan = buildSourceExtractionPlan(config);
+    expect(plan.runId).not.toBe(buildSourceExtractionPlan(makeConfig()).runId);
+    expect(plan.sources.find((source) => source.sourceDatabase === "pms")?.activeTableCount).toBe(
+      7,
+    );
+
+    const missing = makeHistoricalConfig();
+    delete missing.historicalInventoryText;
+    expect(() => validateSourceExtractionConfig(missing)).toThrowError(
+      expect.objectContaining({ code: "HISTORICAL_INVENTORY_MISMATCH" }),
+    );
+    const changed = makeHistoricalConfig();
+    changed.historicalInventoryText = historicalInventoryText.replace(
+      "never_enqueue",
+      "never_schedule",
+    );
+    expect(() => validateSourceExtractionConfig(changed)).toThrowError(
+      expect.objectContaining({ code: "HISTORICAL_INVENTORY_MISMATCH" }),
+    );
+
+    const sources = makeSources();
+    sources.pms.rows["public.automation_sends"] = ['{"id":"same-send","state":"historical"}'];
+    sources.pms.rows["inbox_prototype_archive_20260905.automation_sends"] = [
+      '{"id":"same-send","state":"archived"}',
+    ];
+    const target = new FakeTarget();
+    const report = await runSourceExtraction(config, target as never, sources as never);
+    expect(sources.pms.queries).toContain(
+      'SELECT count(*)::bigint AS row_count FROM "public"."automation_sends"',
+    );
+    expect(sources.pms.queries).toContain(
+      'SELECT count(*)::bigint AS row_count FROM "inbox_prototype_archive_20260905"."automation_sends"',
+    );
+    expect(target.tableLedger.has("pms:public:automation_sends")).toBe(true);
+    expect(target.tableLedger.has("pms:inbox_prototype_archive_20260905:automation_sends")).toBe(
+      true,
+    );
+    expect(report.sources.find((source) => source.sourceDatabase === "pms")?.rowCount).toBe(3);
+    const publicKey = `${plan.runId}:public:automation_sends:1`;
+    const archivedKey = `${plan.runId}:inbox_prototype_archive_20260905:automation_sends:1`;
+    expect(target.staged.get(publicKey)).toBe('{"id":"same-send","state":"historical"}');
+    expect(target.staged.get(archivedKey)).toBe('{"id":"same-send","state":"archived"}');
+    expect(target.stagedChecksums.get(publicKey)).not.toBe(target.stagedChecksums.get(archivedKey));
+    expect(target.tableLedger.get("pms:public:automation_sends")?.rowCount).toBe(1);
+    expect(
+      target.tableLedger.get("pms:inbox_prototype_archive_20260905:automation_sends")?.rowCount,
+    ).toBe(1);
+  });
+
   it("rejects writable, unattested, and schema-drifted sources before reading rows", async () => {
     const writableSources = makeSources();
     writableSources.auth.writable = true;
@@ -430,13 +501,16 @@ describe("immutable source extraction", () => {
 
   it("accepts trusted RDS table evidence and rejects conflicting or writable evidence", async () => {
     const tableSources = makeSources();
+    const config = makeConfig();
+    config.attestationOwner = "vay2017_source_attestor_20260929";
     tableSources.auth.attestedSnapshotIdentifier = null;
     tableSources.auth.attestationTable = new Map([
       ["vayada.source_snapshot_identifier", "fixture:auth-snapshot"],
     ]);
     await expect(
-      runSourceExtraction(makeConfig(), new FakeTarget() as never, tableSources as never),
+      runSourceExtraction(config, new FakeTarget() as never, tableSources as never),
     ).resolves.toMatchObject({ status: "completed" });
+    expect(tableSources.auth.attestationOwner).toBe("vay2017_source_attestor_20260929");
 
     const conflictingSources = makeSources();
     conflictingSources.auth.attestationTable = new Map([
@@ -454,6 +528,14 @@ describe("immutable source extraction", () => {
     await expect(
       runSourceExtraction(makeConfig(), new FakeTarget() as never, untrustedSources as never),
     ).rejects.toMatchObject({ code: "UNTRUSTED_SOURCE_ATTESTATION" });
+  });
+
+  it("rejects an unsafe attestation owner before connecting", () => {
+    const config = makeConfig();
+    config.attestationOwner = "unsafe-owner;";
+    expect(() => validateSourceExtractionConfig(config)).toThrowError(
+      expect.objectContaining({ code: "INVALID_ATTESTATION_OWNER" }),
+    );
   });
 
   it("enforces a read-only transaction and redacts unexpected failures", async () => {
@@ -570,7 +652,8 @@ describe("immutable source extraction", () => {
     expect(SOURCE_EXTRACTION_LOCK_ID).toBe(ADVISORY_LOCK_ID);
     expect(SOURCE_WRITABLE_PRIVILEGES_SQL).toContain("has_sequence_privilege");
     expect(SOURCE_WRITABLE_PRIVILEGES_SQL).toContain("has_any_column_privilege");
-    expect(SOURCE_WRITABLE_PRIVILEGES_SQL).toContain("pg_auth_members");
+    expect(SOURCE_WRITABLE_PRIVILEGES_SQL).toContain("pg_has_role(current_user");
+    expect(SOURCE_WRITABLE_PRIVILEGES_SQL).not.toContain("pg_auth_members");
     expect(SOURCE_WRITABLE_PRIVILEGES_SQL).toContain("routine.prosecdef");
   });
 });

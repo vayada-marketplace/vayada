@@ -211,20 +211,12 @@ export function createPgStaffInvitationAcceptanceRepository(config: RepositoryCo
               !resolveTeamRolePermissions(invitation.role_definition, overrides)))
         )
           return reject("invitation_access_invalid", identity);
-        const linked = await client.query<{ property_id: string }>(
-          `SELECT assignment.property_id::text
-           FROM identity.staff_invitation_property_assignments assignment
-           JOIN identity.organization_resource_links link
-             ON link.organization_id = $2 AND link.product = 'hotel_catalog'
-            AND link.resource_type = 'property' AND link.resource_id = assignment.property_id::text
-            AND link.relationship IN ('owner', 'operator') AND link.status = 'active'
-           WHERE assignment.invitation_id = $1 FOR SHARE OF assignment, link`,
-          [invitation.id, invitation.organization_id],
+        const linkedPropertyIds = await loadLinkedStaffInvitationPropertyIds(
+          client,
+          invitation.id,
+          invitation.organization_id,
         );
-        if (
-          new Set(linked.rows.map(({ property_id }) => property_id)).size !==
-          invitation.property_ids.length
-        ) {
+        if (new Set(linkedPropertyIds).size !== invitation.property_ids.length) {
           return reject("invitation_access_invalid", identity);
         }
 
@@ -296,6 +288,26 @@ export function createPgStaffInvitationAcceptanceRepository(config: RepositoryCo
     },
     close: () => pool.end(),
   };
+}
+
+export async function loadLinkedStaffInvitationPropertyIds(
+  client: pg.PoolClient | pg.Client,
+  invitationId: string,
+  organizationId: string,
+): Promise<string[]> {
+  // The caller locks the parent invitation, which serializes its immutable assignments.
+  // Only mutable organization links need row locks while their scope is validated.
+  const linked = await client.query<{ property_id: string }>(
+    `SELECT assignment.property_id::text
+     FROM identity.staff_invitation_property_assignments assignment
+     JOIN identity.organization_resource_links link
+       ON link.organization_id = $2 AND link.product = 'hotel_catalog'
+      AND link.resource_type = 'property' AND link.resource_id = assignment.property_id::text
+      AND link.relationship IN ('owner', 'operator') AND link.status = 'active'
+     WHERE assignment.invitation_id = $1 FOR SHARE OF link`,
+    [invitationId, organizationId],
+  );
+  return linked.rows.map(({ property_id }) => property_id);
 }
 
 function normalizeEvent(

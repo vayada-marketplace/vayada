@@ -24,6 +24,7 @@ export type FinanceDashboardRoutesOptions = {
 };
 
 const PATH = "/finance/properties/:propertyId/financials/dashboard";
+const ACCESS_PATH = "/finance/properties/:propertyId/financials/access";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const BASE = [
   "contractVersion",
@@ -43,6 +44,11 @@ export async function registerFinanceDashboardRoutes(
   options: FinanceDashboardRoutesOptions,
 ): Promise<void> {
   const scopes = new WeakMap<FastifyRequest, string>();
+  app.get(
+    ACCESS_PATH,
+    { onRequest: authorize(scopes, options.propertyAccessRepository) },
+    (_request, reply) => reply.status(204).send(),
+  );
   app.get(
     PATH,
     { onRequest: authorize(scopes, options.propertyAccessRepository) },

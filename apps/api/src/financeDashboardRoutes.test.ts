@@ -14,6 +14,7 @@ import { agencyPropertyAccessRepository } from "./testAuthorization.js";
 const propertyId = "11280000-0000-4000-8000-000000000001";
 const otherProperty = "11280000-0000-4000-8000-000000000002";
 const root = `/api/finance/properties/${propertyId}/financials/dashboard`;
+const accessRoot = `/api/finance/properties/${propertyId}/financials/access`;
 const zero = money("0.0000");
 const metric = { value: zero, absoluteChange: zero, percentChange: null };
 const response = {
@@ -35,6 +36,16 @@ const response = {
 };
 
 describe("Financials Dashboard route", () => {
+  it("checks Financials access without reading financial data", async () => {
+    const options = ports(),
+      instance = await app(options);
+    const result = await instance.inject({ method: "GET", url: accessRoot });
+    expect(result.statusCode).toBe(204);
+    expect(result.body).toBe("");
+    expect(result.headers["cache-control"]).toBe("private, no-store");
+    expect(options.read.dashboard).not.toHaveBeenCalled();
+    await instance.close();
+  });
   it("returns a private property-scoped response for an optional local as-of date", async () => {
     const options = ports(),
       instance = await app(options);
@@ -120,12 +131,14 @@ describe("Financials Dashboard route", () => {
         instance = await app(options, auth),
         result = await instance.inject({ method: "GET", url: `${root}?secret=1` });
       expect(result.statusCode).toBe(status);
+      expect((await instance.inject({ method: "GET", url: accessRoot })).statusCode).toBe(status);
       expect(options.read.dashboard).not.toHaveBeenCalled();
       await instance.close();
     }
     const options = ports(),
       instance = await app(options, unassigned);
     expect((await instance.inject({ method: "GET", url: root })).statusCode).toBe(403);
+    expect((await instance.inject({ method: "GET", url: accessRoot })).statusCode).toBe(403);
     expect(options.read.dashboard).not.toHaveBeenCalled();
     await instance.close();
   });

@@ -19,6 +19,18 @@ async function setup(mutate: (c: RequestContext) => void = () => {}) {
     readForCollaboration: vi
       .fn<AffiliateAssentRepository["readForCollaboration"]>()
       .mockResolvedValue(null),
+    recordForCollaboration: vi
+      .fn<AffiliateAssentRepository["recordForCollaboration"]>()
+      .mockResolvedValue({ ok: false, code: "scope_unavailable" }),
+    changeLifecycleForCollaboration: vi
+      .fn<AffiliateAssentRepository["changeLifecycleForCollaboration"]>()
+      .mockResolvedValue({ ok: false, code: "scope_unavailable" }),
+    createLinkForCollaboration: vi
+      .fn<AffiliateAssentRepository["createLinkForCollaboration"]>()
+      .mockResolvedValue({ ok: false, code: "scope_unavailable" }),
+    diagnoseLinkForCollaboration: vi
+      .fn<AffiliateAssentRepository["diagnoseLinkForCollaboration"]>()
+      .mockResolvedValue({ ok: false, code: "scope_unavailable" }),
     close: vi.fn<AffiliateAssentRepository["close"]>().mockResolvedValue(undefined),
   };
   const app = Fastify();
@@ -100,6 +112,7 @@ describe("Affiliate assent HTTP read", () => {
       terms: { id: attemptId, disclosure: "{}", disclosureHash: "hash" },
       hotelApprovedAt: "2026-09-16T00:00:00.000Z",
       creatorAcceptedAt: null,
+      lifecycle: null,
     };
     repository.read.mockResolvedValue(result);
     repository.readForCollaboration.mockResolvedValue(result);
@@ -161,8 +174,220 @@ describe("Affiliate assent HTTP read", () => {
     expect((await denied.app.inject({ url, headers })).statusCode).toBe(403);
     expect(denied.repository.readForCollaboration).not.toHaveBeenCalled();
   });
+  it("records only a server-resolved collaboration decision with one idempotency key", async () => {
+    const { app, repository } = await setup((context) => {
+      context.membership.permissions.push("marketplace.collaboration.write");
+    });
+    repository.recordForCollaboration.mockResolvedValue({
+      ok: true,
+      revision: 1,
+      state: "pending",
+      replayed: false,
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/collaborations/Existing:QA/affiliate-assent",
+      headers: { ...headers, "idempotency-key": "decision-1" },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toEqual({ ok: true, revision: 1, state: "pending", replayed: false });
+    expect(repository.recordForCollaboration).toHaveBeenCalledWith(
+      expect.any(Object),
+      "Existing:QA",
+      "decision-1",
+    );
+
+    for (const request of [
+      { headers },
+      { headers: { ...headers, "idempotency-key": "decision-2" }, payload: { termsId: attemptId } },
+    ]) {
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: "/collaborations/Existing:QA/affiliate-assent",
+            ...request,
+          })
+        ).statusCode,
+      ).toBe(422);
+    }
+    expect(repository.recordForCollaboration).toHaveBeenCalledTimes(1);
+
+    const denied = await setup();
+    expect(
+      (
+        await denied.app.inject({
+          method: "POST",
+          url: "/collaborations/Existing:QA/affiliate-assent",
+          headers: { ...headers, "idempotency-key": "decision-1" },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(denied.repository.recordForCollaboration).not.toHaveBeenCalled();
+  });
+  it("changes only a server-resolved agreement lifecycle with one exact command", async () => {
+    const { app, repository } = await setup((context) => {
+      context.membership.permissions.push("marketplace.collaboration.write");
+    });
+    repository.changeLifecycleForCollaboration.mockResolvedValue({
+      ok: true,
+      eventId: attemptId,
+      revision: 2,
+      effectiveAt: "2026-09-27T00:00:00.000Z",
+      replayed: false,
+    });
+    const url = "/collaborations/Existing:QA/affiliate-lifecycle";
+    const payload = { action: "pause", reason: "Paused in Marketplace", expectedRevision: 1 };
+    const response = await app.inject({
+      method: "POST",
+      url,
+      headers: { ...headers, "idempotency-key": "lifecycle-1" },
+      payload,
+    });
+    expect(response.statusCode).toBe(201);
+    expect(repository.changeLifecycleForCollaboration).toHaveBeenCalledWith(
+      expect.any(Object),
+      "Existing:QA",
+      { ...payload, idempotencyKey: "lifecycle-1" },
+    );
+    for (const invalid of [
+      { headers, payload },
+      {
+        headers: { ...headers, "idempotency-key": "lifecycle-2" },
+        payload: { ...payload, extra: true },
+      },
+      {
+        headers: { ...headers, "idempotency-key": "lifecycle-3" },
+        payload: { ...payload, reason: " padded " },
+      },
+    ])
+      expect((await app.inject({ method: "POST", url, ...invalid })).statusCode).toBe(422);
+    expect(repository.changeLifecycleForCollaboration).toHaveBeenCalledTimes(1);
+  });
+  it("creates one stable creator link for the protected collaboration", async () => {
+    const { app, repository } = await setup((context) => {
+      context.membership.permissions.push("marketplace.collaboration.write");
+    });
+    const result = {
+      ok: true as const,
+      contractVersion: "marketplace-affiliate-link.v1" as const,
+      linkId: attemptId,
+      agreementId: attemptId,
+      propertyId: attemptId,
+      publicToken: `va_${"a".repeat(22)}`,
+      path: `/r/va_${"a".repeat(22)}`,
+      createdAt: "2026-09-29T00:00:00.000Z",
+      replayed: false,
+    };
+    repository.createLinkForCollaboration.mockResolvedValue(result);
+    const url = "/collaborations/Existing:QA/affiliate-link";
+    const response = await app.inject({
+      method: "POST",
+      url,
+      headers: { ...headers, "idempotency-key": "link-1" },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(repository.createLinkForCollaboration).toHaveBeenCalledWith(
+      expect.any(Object),
+      "Existing:QA",
+      "link-1",
+    );
+    repository.createLinkForCollaboration.mockResolvedValue({
+      ...result,
+      replayed: true,
+    });
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url,
+          headers: { ...headers, "idempotency-key": "link-1" },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect((await app.inject({ method: "POST", url, headers })).statusCode).toBe(422);
+    const denied = await setup();
+    expect(
+      (
+        await denied.app.inject({
+          method: "POST",
+          url,
+          headers: { ...headers, "idempotency-key": "link-1" },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(denied.repository.createLinkForCollaboration).not.toHaveBeenCalled();
+  });
+  it("runs a protected synthetic link diagnostic without claiming a purchase", async () => {
+    const { app, repository } = await setup((context) => {
+      context.membership.permissions.push("marketplace.collaboration.write");
+    });
+    repository.diagnoseLinkForCollaboration.mockResolvedValue({
+      ok: true,
+      contractVersion: "marketplace-affiliate-link-diagnostic.v1",
+      status: "ready",
+      association: "verified",
+      programStatus: "active",
+      destinationUrl: "https://alpine.next-booking.vayada.com/",
+      campaignLabel: "instagram.reel-1",
+      normalMetricsExcluded: true,
+      externalPurchaseVerified: false,
+    });
+    const url = "/collaborations/Existing:QA/affiliate-link/diagnostic";
+    const response = await app.inject({
+      method: "POST",
+      url,
+      headers,
+      payload: { campaignLabel: "instagram.reel-1" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: "ready",
+      normalMetricsExcluded: true,
+      externalPurchaseVerified: false,
+    });
+    expect(repository.diagnoseLinkForCollaboration).toHaveBeenCalledWith(
+      expect.any(Object),
+      "Existing:QA",
+      "instagram.reel-1",
+    );
+    for (const status of ["program_inactive", "destination_unavailable", "link_invalid"] as const) {
+      repository.diagnoseLinkForCollaboration.mockResolvedValueOnce({
+        ok: true,
+        contractVersion: "marketplace-affiliate-link-diagnostic.v1",
+        status,
+        association: "verified",
+        programStatus: status === "program_inactive" ? "paused" : "active",
+        destinationUrl: null,
+        campaignLabel: null,
+        normalMetricsExcluded: true,
+        externalPurchaseVerified: false,
+      });
+      expect(
+        (await app.inject({ method: "POST", url, headers, payload: { campaignLabel: null } })).json()
+          .status,
+      ).toBe(status);
+    }
+    for (const payload of [{}, { campaignLabel: 7 }, { campaignLabel: null, extra: true }])
+      expect((await app.inject({ method: "POST", url, headers, payload })).statusCode).toBe(422);
+    const denied = await setup();
+    expect(
+      (await denied.app.inject({ method: "POST", url, headers, payload: { campaignLabel: null } }))
+        .statusCode,
+    ).toBe(403);
+    expect(denied.repository.diagnoseLinkForCollaboration).not.toHaveBeenCalled();
+  });
   it("registers the production prefix and keeps upstream auth failures uncached", async () => {
-    const repository = { read: vi.fn(), readForCollaboration: vi.fn(), close: async () => {} };
+    const repository = {
+      read: vi.fn(),
+      readForCollaboration: vi.fn(),
+      recordForCollaboration: vi.fn(),
+      changeLifecycleForCollaboration: vi.fn(),
+      createLinkForCollaboration: vi.fn(),
+      diagnoseLinkForCollaboration: vi.fn(),
+      close: async () => {},
+    };
     const app = buildApp({
       logger: false,
       marketplaceAffiliateAssentRepository: repository,

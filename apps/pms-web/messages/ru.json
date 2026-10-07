@@ -58,6 +58,8 @@
   "auth.login.subtitle": "Войдите для управления вашим объектом",
   "auth.login.chooseHotelGroup": "Выберите группу отелей",
   "auth.login.chooseHotelGroupSubtitle": "Выберите группу отелей, которой хотите управлять.",
+  "auth.login.unnamedHotelGroup": "Группа отелей {index}",
+  "auth.login.useAnotherAccount": "Использовать другой аккаунт",
   "auth.login.redirecting": "Перенаправление ко входу...",
   "auth.login.emailLabel": "Электронная почта",
   "auth.login.emailPlaceholder": "admin@example.com",

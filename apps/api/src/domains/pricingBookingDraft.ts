@@ -17,6 +17,10 @@ type Input = {
   finance: NonNullable<Awaited<ReturnType<typeof lockFinancePricingAcceptanceTerms>>>;
   bookingId: string;
   publicReference: string;
+  /** Server-owned synthetic fixture only; never read from a guest command. */
+  syntheticAffiliateContextId?: string;
+  /** Server-derived first-party context only; never read from a guest command. */
+  affiliateContextId?: string;
 };
 const iso = (v: unknown): v is string =>
   typeof v === "string" && Number.isFinite(Date.parse(v)) && new Date(v).toISOString() === v;
@@ -106,6 +110,50 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
   const cents = numerator / unit,
     amount = `${cents / 100n}.${(cents % 100n).toString().padStart(2, "0")}`;
   const guest = parsed.guest;
+  if (input.syntheticAffiliateContextId !== undefined && input.affiliateContextId !== undefined)
+    return fail();
+  let affiliateContextId = input.syntheticAffiliateContextId ?? input.affiliateContextId;
+  const syntheticAffiliate = input.syntheticAffiliateContextId !== undefined;
+  if (affiliateContextId !== undefined) {
+    await client.query("SAVEPOINT pricing_affiliate_binding_guard");
+    await client.query("RELEASE SAVEPOINT pricing_affiliate_binding_guard");
+    if (
+      (await client.query("SHOW transaction_isolation")).rows[0]?.transaction_isolation !==
+      "read committed"
+    )
+      return fail();
+    const context = await client.query(
+      `SELECT id FROM booking.affiliate_click_contexts
+       WHERE id=$1 AND property_id=$2 AND synthetic=$3 FOR UPDATE`,
+      [affiliateContextId, scope.propertyId, syntheticAffiliate],
+    );
+    if (!context.rowCount) return fail();
+    // The snapshot after acquiring the lock includes admissions committed while waiting.
+    if (
+      !syntheticAffiliate &&
+      !(
+        await client.query(
+          "SELECT 1 FROM booking.affiliate_click_admissions WHERE context_id=$1 LIMIT 1",
+          [affiliateContextId],
+        )
+      ).rowCount
+    )
+      return fail();
+    // An old cookie may have passed the route lookup before waiting for this lock.
+    // Keep the booking, but do not bind a context past its unbound lifetime.
+    if (
+      !syntheticAffiliate &&
+      !(
+        await client.query(
+          `SELECT 1 FROM booking.affiliate_click_admissions
+           WHERE context_id=$1 AND admitted_at > clock_timestamp() - interval '90 days'
+           LIMIT 1`,
+          [affiliateContextId],
+        )
+      ).rowCount
+    )
+      affiliateContextId = undefined;
+  }
   await client.query(
     `WITH draft AS (
     INSERT INTO booking.guest_bookings(id,property_id,public_reference,source_system,booking_channel,direct_booking_source,
@@ -146,6 +194,31 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
       guest.specialRequests,
     ],
   );
+  if (affiliateContextId !== undefined && syntheticAffiliate)
+    await client.query(
+      `INSERT INTO booking.affiliate_original_booking_bindings
+         (booking_id,property_id,context_id,history_cutoff,
+          original_public_reference,original_check_in,original_check_out,original_currency,synthetic)
+       SELECT $1,$2,$3,COALESCE(MAX(history_position),0),$4,$5,$6,$7,$8
+       FROM booking.affiliate_click_admissions WHERE context_id=$3`,
+      [
+        bookingId,
+        scope.propertyId,
+        affiliateContextId,
+        publicReference,
+        quote.stay.checkIn,
+        quote.stay.checkOut,
+        quote.stay.currency,
+        syntheticAffiliate,
+      ],
+    );
+  else if (affiliateContextId !== undefined) {
+    const bound = await client.query(
+      "SELECT booking.bind_live_affiliate_original($1,$2) AS bound",
+      [bookingId, affiliateContextId],
+    );
+    if (bound.rows[0]?.bound !== true) return fail();
+  }
   await persistPricingBookingAddons(client, slug, current, bookingId);
   if (!isDeepStrictEqual(await lockPublicPricingAuthority(client, slug), scope)) return fail();
   return { bookingId, publicReference };

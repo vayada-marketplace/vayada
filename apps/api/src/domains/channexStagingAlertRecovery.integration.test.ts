@@ -14,6 +14,9 @@ import {
 
 const url = process.env.TEST_DATABASE_URL;
 if (url && !new URL(url).pathname.endsWith("_test")) throw new Error("Test database required");
+const targetDatabaseUrl = url ?? "postgresql://api_test@localhost/test";
+const managementDatabaseUrl = new URL(targetDatabaseUrl);
+managementDatabaseUrl.username = "channex_test_worker";
 const propertyId = "84610000-0000-4000-8000-000000000001",
   providerPropertyId = "84610000-0000-4000-8000-000000000002",
   userId = "84610000-0000-4000-8000-000000000003";
@@ -21,7 +24,8 @@ const config = () => ({
   ...loadConfig({
     API_BACKGROUND_WORKERS_ENABLED: "false",
     PMS_OPERATIONS_SOURCE: "target",
-    TARGET_DATABASE_URL: url ?? "postgresql://localhost/test",
+    TARGET_DATABASE_URL: targetDatabaseUrl,
+    PMS_CHANNEX_MANAGEMENT_DATABASE_URL: managementDatabaseUrl.toString(),
     CHANNEX_API_BASE_URL: "https://staging.channex.io",
     CHANNEX_API_KEY: "synthetic",
     PMS_CHANNEX_ARI_SYNC_MODE: "mutating",

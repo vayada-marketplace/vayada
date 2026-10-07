@@ -173,11 +173,12 @@ export function createPgMarketplaceHotelCollaborationPreferencesRepository(
       let client: MarketplaceHotelCollaborationPreferencesClient | undefined;
       try {
         client = await pool.connect();
-        await client.query("BEGIN");
+        await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
         const result = await readLockedMarketplaceHotelCollaborationPreferences(
           client,
           scope,
           now(),
+          true,
         );
         await client.query(result.outcome === "unavailable" ? "ROLLBACK" : "COMMIT");
         return result;
@@ -200,11 +201,18 @@ export async function readLockedMarketplaceHotelCollaborationPreferences(
   client: MarketplaceHotelCollaborationPreferencesClient,
   scope: { organizationId: string; propertyId: string },
   at: Date,
+  readOnly = false,
 ): Promise<MarketplaceHotelCollaborationPreferencesReadOutcome> {
   if (
     !validDate(at) ||
-    !(await lockReadableProfile(client, scope.organizationId, scope.propertyId)) ||
-    !(await hasActiveProfileEntitlement(client, scope.organizationId, scope.propertyId, at))
+    !(await lockReadableProfile(client, scope.organizationId, scope.propertyId, readOnly)) ||
+    !(await hasActiveProfileEntitlement(
+      client,
+      scope.organizationId,
+      scope.propertyId,
+      at,
+      readOnly,
+    ))
   ) {
     return unavailable();
   }
@@ -212,7 +220,7 @@ export async function readLockedMarketplaceHotelCollaborationPreferences(
     `SELECT ${PREFERENCE_COLUMNS}
            FROM marketplace.hotel_collaboration_preferences
            WHERE property_id = $1::uuid AND organization_id = $2::uuid
-           FOR SHARE`,
+           ${readOnly ? "" : "FOR SHARE"}`,
     [scope.propertyId, scope.organizationId],
   );
   if (result.rows.length > 1) return malformed();
@@ -229,6 +237,7 @@ export async function lockMarketplaceHotelProfileForSetup(
     "organizationId" | "propertyId" | "audit"
   >,
   at: Date,
+  readOnly = false,
 ): Promise<boolean> {
   if (command.audit.actor.kind !== "user") return false;
   const policy = MARKETPLACE_HOTEL_COLLABORATION_PREFERENCES_AUTHORIZATION;
@@ -257,9 +266,13 @@ export async function lockMarketplaceHotelProfileForSetup(
       AND permission_grant.role_key = membership.role_key
       AND permission_grant.permission_key = $7
      WHERE profile.property_id = $2::uuid
-     FOR UPDATE OF profile
+     ${
+       readOnly
+         ? ""
+         : `FOR UPDATE OF profile
      FOR SHARE OF organization, resource, actor, membership
-     FOR KEY SHARE OF permission_grant`,
+     FOR KEY SHARE OF permission_grant`
+     }`,
     [
       command.organizationId,
       command.propertyId,
@@ -272,7 +285,13 @@ export async function lockMarketplaceHotelProfileForSetup(
   );
   return (
     (scope.rowCount ?? 0) > 0 &&
-    (await hasActiveProfileEntitlement(client, command.organizationId, command.propertyId, at))
+    (await hasActiveProfileEntitlement(
+      client,
+      command.organizationId,
+      command.propertyId,
+      at,
+      readOnly,
+    ))
   );
 }
 
@@ -280,6 +299,7 @@ async function lockReadableProfile(
   client: MarketplaceHotelCollaborationPreferencesClient,
   organizationId: string,
   propertyId: string,
+  readOnly = false,
 ): Promise<boolean> {
   const result = await client.query(
     `SELECT profile.property_id
@@ -289,7 +309,7 @@ async function lockReadableProfile(
       AND organization.kind = 'hotel_group'
       AND organization.status = 'active'
      WHERE profile.property_id = $1::uuid AND profile.organization_id = $2::uuid
-     FOR SHARE OF profile, organization`,
+     ${readOnly ? "" : "FOR SHARE OF profile, organization"}`,
     [propertyId, organizationId],
   );
   return result.rowCount === 1;
@@ -300,6 +320,7 @@ async function hasActiveProfileEntitlement(
   organizationId: string,
   propertyId: string,
   at: Date,
+  readOnly = false,
 ): Promise<boolean> {
   const policy = MARKETPLACE_HOTEL_COLLABORATION_PREFERENCES_AUTHORIZATION.entitlement;
   const result = await client.query<{
@@ -316,7 +337,7 @@ async function hasActiveProfileEntitlement(
          resource_product IS NULL
          OR (resource_product = $3 AND resource_type = $5 AND resource_id = $2::uuid::text)
        )
-     FOR SHARE`,
+     ${readOnly ? "" : "FOR SHARE"}`,
     [organizationId, propertyId, policy.product, policy.key, policy.resourceType],
   );
   const applicable = result.rows.filter(

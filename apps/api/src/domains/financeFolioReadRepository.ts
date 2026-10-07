@@ -108,7 +108,7 @@ export function createPgFinanceFolioReadRepository(config: { connectionString?: 
     },
     async detail(propertyId, folioId) {
       const evidence = await meta(propertyId); if (!evidence) return null;
-      const row = (await pool.query<DetailRow>(`SELECT ${SUMMARY},${DETAIL} FROM finance.folios f JOIN LATERAL (SELECT * FROM finance.folio_revisions candidate WHERE candidate.folio_id=f.id AND candidate.property_id=f.property_id ORDER BY candidate.revision DESC LIMIT 1) r ON true WHERE f.property_id=$1::uuid AND f.id=$2::uuid AND r.currency=$3`, [evidence.propertyId, uuid(folioId), evidence.currency])).rows[0];
+      const row = (await pool.query<DetailRow>(`SELECT ${SUMMARY},${DETAIL} FROM finance.folios f JOIN LATERAL (SELECT candidate.id,candidate.folio_id,candidate.property_id,candidate.revision,candidate.state,candidate.service_from,candidate.service_to,candidate.total_amount,candidate.currency,candidate.created_at,candidate.recipient_snapshot_ciphertext,candidate.recipient_encryption_scheme,candidate.recipient_key_version,candidate.source_digest,candidate.source_freshness FROM finance.folio_revisions candidate WHERE candidate.folio_id=f.id AND candidate.property_id=f.property_id ORDER BY candidate.revision DESC LIMIT 1) r ON true WHERE f.property_id=$1::uuid AND f.id=$2::uuid AND r.currency=$3`, [evidence.propertyId, uuid(folioId), evidence.currency])).rows[0];
       if (!row) return null;
       const item = await hydrate(row, evidence, config.recipientDecoder);
       return { ...envelope(evidence, instant(row.createdAt)), item };

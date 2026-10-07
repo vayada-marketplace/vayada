@@ -68,8 +68,8 @@ export function publicationFixture() {
       `INSERT INTO marketplace.affiliate_offer_terms_drafts
       (id,offer_id,property_id,organization_id,revision,contract_version,booking_destination_id,
        finance_policy_version_id,attribution_window_days,actor_user_id,request_id)
-      VALUES ($1,$2,$3,$4,$5,'marketplace-affiliate-offer-terms.v1','destination-1','policy-1',14,$6,'fixture')`,
-      [draftId, offerId, propertyId, organizationId, revision, id(1)],
+      VALUES ($1,$2,$3,$4,$5,'marketplace-affiliate-offer-terms.v1',$7,'policy-1',14,$6,'fixture')`,
+      [draftId, offerId, propertyId, organizationId, revision, id(1), id(30)],
     );
   }
   return { pool: () => pool, draft };

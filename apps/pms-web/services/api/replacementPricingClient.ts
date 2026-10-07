@@ -12,6 +12,7 @@ export type PricingSources = { room: string; terms: string; finance: string };
 export type PricingSnapshot = { currency: string; rooms: readonly PricingConfiguration[]; ownerReferences: { finance: string; charges?: string } };
 export type PricingDraft = { draftId: string; revision: number; baseRevision: number; sources: PricingSources; effectiveSources?: PricingSources; snapshot: PricingSnapshot; stale: boolean };
 export type PricingChargeReview = PricingDraft & { fingerprint: string; declaration: "all_mandatory_charges_included" };
+export type PricingAuthority = { authority: "unconfigured" | "vayada" | "external"; revision: string | null; organizationId: string | null };
 export class PricingResponseError extends Error { constructor() { super("Pricing data could not be verified. Reload before continuing."); } }
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => pricingObject(item)
   ? Object.fromEntries(Object.keys(item).sort().map((key) => [key, item[key]])) : item);
@@ -74,6 +75,25 @@ export function createReplacementPricingClient(propertyId: string, http: Http = 
     catch (error) { if (error instanceof ApiErrorResponse && error.status === 404 && error.data.code === "not_found") return missing; throw error; }
   }
   return {
+    async readAuthority(): Promise<PricingAuthority> {
+      const value = await http.get<unknown>(`${base}/authority`, options());
+      if (!exact(value, ["authority", "revision", "organizationId"]) ||
+          !["unconfigured", "vayada", "external"].includes(value.authority as string) ||
+          !(value.revision === null || uuid(value.revision)) ||
+          !(value.organizationId === null || uuid(value.organizationId)) ||
+          (value.authority === "unconfigured" && value.revision === null && value.organizationId !== null) ||
+          (value.revision !== null && value.organizationId === null)) return bad();
+      return value as PricingAuthority;
+    },
+    authorityAction(expectedRevision: string | null, authority: PricingAuthority["authority"]) {
+      if (!(expectedRevision === null || uuid(expectedRevision)) || !["unconfigured", "vayada", "external"].includes(authority)) return bad();
+      const requestId = crypto.randomUUID();
+      return async () => {
+        const value = await http.put<unknown>(`${base}/authority`, { expectedRevision, authority }, options(requestId));
+        if (!exact(value, ["revision", "replayed"]) || !uuid(value.revision) || typeof value.replayed !== "boolean") return bad();
+        return { revision: value.revision as string, replayed: value.replayed as boolean };
+      };
+    },
     termsAction(input: PricingTermsInput, draftContext: PricingDraftContext) {
       const selected = context(draftContext);
       const sent = structuredClone(input);

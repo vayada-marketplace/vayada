@@ -5,6 +5,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      prepare_only:
+        description: Build and publish for verification without deploying
+        type: boolean
+        default: true
+        required: true
 
 permissions:
   actions: read
@@ -19,10 +25,12 @@ env:
   AWS_ACCOUNT_ID: "269416271598"
   AWS_REGION: eu-west-1
   NEXT_API_URL: https://next-api.vayada.com
+  PREPARE_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.prepare_only }}
+  IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.prepare_only && format('next-prepare-{0}', github.sha) || format('next-{0}', github.sha) }}
 
 jobs:
   prepare:
-    if: ${{ vars.COORDINATED_RELEASES_ENABLED == 'true' }}
+    if: ${{ vars.COORDINATED_RELEASES_ENABLED == 'true' || (github.event_name == 'workflow_dispatch' && inputs.prepare_only) }}
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
@@ -60,29 +68,32 @@ jobs:
             destination="release-work/downloads/${artifact_id}"
             mkdir -p "$destination"
             if (
-              set -e
-              artifact_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}")"
-              test "$(jq -r '.expired' <<< "$artifact_json")" = false
-              test "$(jq -r '.name' <<< "$artifact_json")" = "$artifact_name"
-              publisher_run_id="$(jq -r '.workflow_run.id' <<< "$artifact_json")"
-              publisher_run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${publisher_run_id}")"
-              test "$(jq -r '.status' <<< "$publisher_run")" = completed
-              test "$(jq -r '.event' <<< "$publisher_run")" = workflow_run
-              test "$(jq -r '.head_branch' <<< "$publisher_run")" = main
-              test "$(jq -r '.head_repository.full_name' <<< "$publisher_run")" = "$GITHUB_REPOSITORY"
-              test "$(jq -r '.path' <<< "$publisher_run")" = .github/workflows/publish-coordinated-release.yml
-              test "$(jq -r '.repository.full_name' <<< "$publisher_run")" = "$GITHUB_REPOSITORY"
+              # Bash disables errexit inside an if condition; fail each check explicitly.
+              artifact_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}")" || exit 1
+              test "$(jq -r '.expired' <<< "$artifact_json")" = false || exit 1
+              test "$(jq -r '.name' <<< "$artifact_json")" = "$artifact_name" || exit 1
+              publisher_run_id="$(jq -r '.workflow_run.id' <<< "$artifact_json")" || exit 1
               gh api \
                 -H "Accept: application/vnd.github+json" \
                 "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
-                > "$destination/artifact.zip"
-              unzip -q "$destination/artifact.zip" -d "$destination/content"
+                > "$destination/artifact.zip" || exit 1
+              unzip -q "$destination/artifact.zip" -d "$destination/content" || exit 1
               record="$destination/content/published-record.json"
-              test -f "$record"
-              test "$(jq -r '.publishedArtifactName' "$record")" = "$artifact_name"
-              test "$(jq -r '.publisher.runId' "$record")" = "$publisher_run_id"
+              test -f "$record" || exit 1
+              test "$(jq -r '.publishedArtifactName' "$record")" = "$artifact_name" || exit 1
+              test "$(jq -r '.publisher.runId' "$record")" = "$publisher_run_id" || exit 1
+              publisher_run_attempt="$(jq -r '.publisher.runAttempt' "$record")" || exit 1
+              [[ "$publisher_run_attempt" =~ ^[1-9][0-9]*$ ]] || exit 1
+              publisher_run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${publisher_run_id}/attempts/${publisher_run_attempt}")" || exit 1
+              test "$(jq -r '.status' <<< "$publisher_run")" = completed || exit 1
+              test "$(jq -r '.event' <<< "$publisher_run")" = workflow_run || exit 1
+              test "$(jq -r '.head_branch' <<< "$publisher_run")" = main || exit 1
+              test "$(jq -r '.head_repository.full_name' <<< "$publisher_run")" = "$GITHUB_REPOSITORY" || exit 1
+              test "$(jq -r '.path' <<< "$publisher_run")" = .github/workflows/publish-coordinated-release.yml || exit 1
+              test "$(jq -r '.repository.full_name' <<< "$publisher_run")" = "$GITHUB_REPOSITORY" || exit 1
+              test "$(jq -r '.id' <<< "$publisher_run")" = "$publisher_run_id" || exit 1
               test "$(jq -r '.publisher.runAttempt' "$record")" = \
-                "$(jq -r '.run_attempt' <<< "$publisher_run")"
+                "$(jq -r '.run_attempt' <<< "$publisher_run")" || exit 1
             ); then
               mv "$destination/content" "release-work/candidates/${artifact_id}"
             else
@@ -112,11 +123,7 @@ jobs:
           fi
           baseline_valid=true
           while IFS=$'\t' read -r repository digest image_source_sha; do
-            if ! verified="$(aws ecr describe-images \
-              --repository-name "$repository" \
-              --image-ids "imageTag=next-${image_source_sha}" \
-              --query 'imageDetails[0].imageDigest' \
-              --output text)" || test "$verified" != "$digest"; then
+            if ! node scripts/coordinated-release/verify-image.mjs "$repository" "$digest" "$image_source_sha"; then
               echo "::warning::Baseline image ${repository}:next-${image_source_sha} does not resolve to ${digest}; rebuilding all services"
               baseline_valid=false
               break
@@ -194,6 +201,18 @@ jobs:
         run: |
           set -euo pipefail
           image="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}"
+          image_tags=(--tag "${image}:next-latest" --tag "${image}:${IMAGE_TAG}")
+          if [ "$PREPARE_ONLY" = true ]; then
+            image_tags=(--tag "${image}:${IMAGE_TAG}")
+            # Do not overwrite a preparation image already used by a published bundle.
+            if aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+              --image-ids "imageTag=${IMAGE_TAG}" > /dev/null 2> existing-image-error; then
+              exit 0
+            elif ! grep -q 'ImageNotFoundException' existing-image-error; then
+              cat existing-image-error >&2
+              exit 1
+            fi
+          fi
           build_args=()
           case "$SERVICE" in
             next-target-backend)
@@ -270,8 +289,7 @@ jobs:
             --platform linux/amd64 \
             --push \
             --file "${APP_PATH}/Dockerfile" \
-            --tag "${image}:next-latest" \
-            --tag "${image}:next-${GITHUB_SHA}" \
+            "${image_tags[@]}" \
             --cache-from "type=gha,scope=${SERVICE}" \
             --cache-to "type=gha,mode=max,scope=${SERVICE}" \
             "${build_args[@]}" \
@@ -285,7 +303,7 @@ jobs:
           set -euo pipefail
           digest="$(aws ecr describe-images \
             --repository-name "$ECR_REPOSITORY" \
-            --image-ids "imageTag=next-${GITHUB_SHA}" \
+            --image-ids "imageTag=${IMAGE_TAG}" \
             --query 'imageDetails[0].imageDigest' \
             --output text)"
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
@@ -333,6 +351,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-work/images release-work/candidate
+          echo "$PREPARE_ONLY" > release-work/candidate/prepare-only
           baseline_args=()
           if test -f release-work/plan/accepted-baseline.json; then
             baseline_args=(--baseline release-work/plan/accepted-baseline.json)
@@ -357,12 +376,7 @@ jobs:
         run: |
           set -euo pipefail
           while IFS=$'\t' read -r repository digest image_source_sha; do
-            verified="$(aws ecr describe-images \
-              --repository-name "$repository" \
-              --image-ids "imageTag=next-${image_source_sha}" \
-              --query 'imageDetails[0].imageDigest' \
-              --output text)"
-            test "$verified" = "$digest"
+            node scripts/coordinated-release/verify-image.mjs "$repository" "$digest" "$image_source_sha"
           done < <(jq -r '.services[] | [.ecrRepository, .digest, .imageSourceSha] | @tsv' release-work/candidate/manifest.json)
 
       - name: Upload complete candidate manifest

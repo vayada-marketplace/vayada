@@ -15,6 +15,7 @@ import {
 } from "./marketplaceAffiliatePublication.js";
 import { createAffiliatePublicationPrerequisites } from "./marketplaceAffiliatePublicationPrerequisites.js";
 import type { AffiliateDestinationTrackingReadinessInput } from "./bookingAffiliateDestinationTrackingReadiness.js";
+import { readFinanceAffiliateCommercialConditions } from "./financeAffiliateCommercialConditions.js";
 
 // Synthetic owner-domain proof only; not a live adapter or real provider validation.
 const ready: AffiliatePublicationPrerequisites = async (_client, scope) => ({
@@ -83,12 +84,7 @@ describe.skipIf(!databaseUrl)("affiliate publication command", () => {
       ]),
     ) as AffiliateDestinationTrackingReadinessInput["purposes"];
     const resolve = createAffiliatePublicationPrerequisites({
-      commercialConditions: async () => ({
-        status: "ready",
-        conditionsText: "Complete creator-visible conditions",
-        attributionPolicyVersion: "last-eligible-click.v1",
-        evidenceReferences: ["commercial:conditions:1"],
-      }),
+      commercialConditions: readFinanceAffiliateCommercialConditions,
       trackingConfiguration: async () => ({
         certificationEnvironment: "sandbox",
         purposes,
@@ -123,7 +119,8 @@ describe.skipIf(!databaseUrl)("affiliate publication command", () => {
         .query("SELECT evidence_references FROM marketplace.affiliate_published_terms")
     ).rows[0];
     expect(stored.evidence_references).toEqual([
-      "commercial:conditions:1",
+      `finance:affiliate-percentage-policy:${terms.financePolicyVersionId}`,
+      `pms:pricing-currency:${id(3)}:1`,
       ...AFFILIATE_TRACKING_PURPOSES.map(
         (purpose, index) =>
           `booking:affiliate-destination-capability-readiness:${purpose}:` +
@@ -152,6 +149,42 @@ describe.skipIf(!databaseUrl)("affiliate publication command", () => {
     await expect(
       publish(fixture.pool(), { ...input(), idempotencyKey: "different" }, ready),
     ).resolves.toMatchObject({ code: "draft_already_published" });
+  });
+  it("blocks publication above 90 days while allowing a hotel-selected 90-day window", async () => {
+    const longer = await saveMarketplaceAffiliateDraft(fixture.pool(), {
+      ...input(),
+      idempotencyKey: "long-window-draft",
+      terms: { ...terms, attributionWindowDays: 91 },
+    });
+    if (!longer.ok) throw new Error(longer.code);
+    await expect(
+      publish(
+        fixture.pool(),
+        { ...input(), draftId: longer.draftId, expectedRevision: 2, idempotencyKey: "long-window" },
+        ready,
+      ),
+    ).resolves.toMatchObject({ ok: false, code: "attribution_window_exceeds_limit" });
+    await noPublication();
+
+    const maximum = await saveMarketplaceAffiliateDraft(fixture.pool(), {
+      ...input(),
+      expectedRevision: 2,
+      idempotencyKey: "maximum-window-draft",
+      terms: { ...terms, attributionWindowDays: 90 },
+    });
+    if (!maximum.ok) throw new Error(maximum.code);
+    await expect(
+      publish(
+        fixture.pool(),
+        {
+          ...input(),
+          draftId: maximum.draftId,
+          expectedRevision: 3,
+          idempotencyKey: "maximum-window",
+        },
+        ready,
+      ),
+    ).resolves.toMatchObject({ ok: true, replayed: false });
   });
   it("serializes concurrent retries and keeps one program across new terms versions", async () => {
     const results = await Promise.all([

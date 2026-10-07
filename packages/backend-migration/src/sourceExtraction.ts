@@ -15,6 +15,10 @@ import {
   type SourceDatabase,
   type SourceInventoryEntry,
 } from "./sourceInventory.js";
+import {
+  historicalSourceInventorySha256,
+  parseHistoricalSourceInventory,
+} from "./rawSourceDispositions.js";
 
 export const VAY_1350_INVENTORY_REVISION = "215242008bb990c25f65bd5c03099d56015a29cb";
 export const SOURCE_EXTRACTION_BATCH_SIZE = 500;
@@ -23,23 +27,15 @@ export const SOURCE_SNAPSHOT_TIME_SQL =
   "SELECT transaction_timestamp()::text AS source_snapshot_at";
 
 export const SOURCE_WRITABLE_PRIVILEGES_SQL = `
-WITH RECURSIVE role_memberships(role_oid) AS (
-  SELECT role.oid
-  FROM pg_catalog.pg_roles role
-  WHERE role.rolname = current_user
-  UNION
-  SELECT membership.roleid
-  FROM pg_catalog.pg_auth_members membership
-  JOIN role_memberships inherited ON inherited.role_oid = membership.member
-)
 SELECT (
   session_user <> current_user
   OR role.rolsuper OR role.rolcreatedb OR role.rolcreaterole
   OR role.rolreplication OR role.rolbypassrls
   OR EXISTS (
     SELECT 1
-    FROM role_memberships membership
-    WHERE membership.role_oid <> role.oid
+    FROM pg_catalog.pg_roles membership
+    WHERE membership.oid <> role.oid
+      AND pg_catalog.pg_has_role(current_user, membership.oid, 'MEMBER')
   )
   OR pg_catalog.has_database_privilege(current_user, current_database(), 'CREATE')
   OR EXISTS (
@@ -118,6 +114,7 @@ export type SourceExtractionManifest = {
   version: 1;
   environment: ExtractionEnvironment;
   sourceSchemaRevision: string;
+  historicalInventorySha256?: string;
   cutoverFreezeProofSha256?: string;
   sources: Record<
     SourceDatabase,
@@ -131,7 +128,9 @@ export type SourceExtractionManifest = {
 
 export type SourceExtractionConfig = {
   manifest: SourceExtractionManifest;
+  attestationOwner?: string;
   sourceSchemaRevision: string;
+  historicalInventoryText?: string;
   snapshotIdentifiers: Record<SourceDatabase, string>;
   cutoverFreezeProofSha256?: string;
   inventory: readonly SourceInventoryEntry[];
@@ -164,7 +163,7 @@ export class SourceExtractionError extends Error {
   }
 }
 
-async function readSourceProvenance(client: QueryClient) {
+async function readSourceProvenance(client: QueryClient, attestationOwner?: string) {
   const result = await client.query<{
     source_database: string;
     snapshot_identifier: string | null;
@@ -172,7 +171,7 @@ async function readSourceProvenance(client: QueryClient) {
   }>(SOURCE_PROVENANCE_SQL);
   const settings = result.rows[0];
   try {
-    const table = await readDatabaseAttestationTable(client);
+    const table = await readDatabaseAttestationTable(client, attestationOwner);
     const resolved = resolveDatabaseAttestation(
       {
         [SOURCE_SNAPSHOT_ATTESTATION_KEY]: settings?.snapshot_identifier ?? null,
@@ -252,6 +251,7 @@ export function parseSourceExtractionManifest(value: unknown): SourceExtractionM
   }
 
   const proof = root["cutoverFreezeProofSha256"];
+  const historicalInventory = root["historicalInventorySha256"];
   return {
     version: 1,
     environment: environment as ExtractionEnvironment,
@@ -260,6 +260,15 @@ export function parseSourceExtractionManifest(value: unknown): SourceExtractionM
       "manifest.sourceSchemaRevision",
       /^[0-9a-f]{40}$/,
     ),
+    ...(historicalInventory === undefined
+      ? {}
+      : {
+          historicalInventorySha256: requireString(
+            historicalInventory,
+            "manifest.historicalInventorySha256",
+            /^[0-9a-f]{64}$/,
+          ),
+        }),
     ...(proof === undefined
       ? {}
       : {
@@ -282,6 +291,15 @@ function isImmutableSnapshot(identifier: string, environment: ExtractionEnvironm
 
 export function validateSourceExtractionConfig(config: SourceExtractionConfig): void {
   if (
+    config.attestationOwner !== undefined &&
+    !/^[a-z_][a-z0-9_]{0,62}$/.test(config.attestationOwner)
+  ) {
+    throw new SourceExtractionError(
+      "INVALID_ATTESTATION_OWNER",
+      "source attestation owner is invalid",
+    );
+  }
+  if (
     config.sourceSchemaRevision !== VAY_1350_INVENTORY_REVISION ||
     config.manifest.sourceSchemaRevision !== config.sourceSchemaRevision
   ) {
@@ -296,6 +314,27 @@ export function validateSourceExtractionConfig(config: SourceExtractionConfig): 
       "cutover freeze proof does not match the reviewed manifest",
     );
   }
+  if (config.manifest.historicalInventorySha256 || config.historicalInventoryText) {
+    if (
+      !config.historicalInventoryText ||
+      historicalSourceInventorySha256(config.historicalInventoryText) !==
+        config.manifest.historicalInventorySha256
+    ) {
+      throw new SourceExtractionError(
+        "HISTORICAL_INVENTORY_MISMATCH",
+        "historical source inventory does not match the reviewed manifest",
+      );
+    }
+    try {
+      parseHistoricalSourceInventory(config.historicalInventoryText);
+    } catch {
+      throw new SourceExtractionError(
+        "INVALID_HISTORICAL_INVENTORY",
+        "historical source inventory is invalid",
+      );
+    }
+  }
+  effectiveInventory(config);
 
   for (const sourceDatabase of SOURCE_DATABASES) {
     const requested = config.snapshotIdentifiers[sourceDatabase];
@@ -319,16 +358,20 @@ export function validateSourceExtractionConfig(config: SourceExtractionConfig): 
 
 export function buildSourceExtractionPlan(config: SourceExtractionConfig) {
   validateSourceExtractionConfig(config);
+  const inventory = effectiveInventory(config);
   return {
     runId: computeRunId(config.manifest),
     environment: config.manifest.environment,
     sourceSchemaRevision: config.sourceSchemaRevision,
+    ...(config.manifest.historicalInventorySha256
+      ? { historicalInventorySha256: config.manifest.historicalInventorySha256 }
+      : {}),
     sources: SOURCE_DATABASES.map((sourceDatabase) => ({
       sourceDatabase,
       snapshotIdentifier: config.snapshotIdentifiers[sourceDatabase],
       expectedDatabaseName: config.manifest.sources[sourceDatabase].expectedDatabaseName,
       expectedSchemaFingerprint: config.manifest.sources[sourceDatabase].expectedSchemaFingerprint,
-      activeTableCount: buildSourceRowCountQueries(config.inventory, sourceDatabase).length,
+      activeTableCount: buildSourceRowCountQueries(inventory, sourceDatabase).length,
     })),
   };
 }
@@ -337,6 +380,9 @@ function computeRunId(manifest: SourceExtractionManifest): string {
   const input = JSON.stringify({
     environment: manifest.environment,
     sourceSchemaRevision: manifest.sourceSchemaRevision,
+    ...(manifest.historicalInventorySha256
+      ? { historicalInventorySha256: manifest.historicalInventorySha256 }
+      : {}),
     cutoverFreezeProofSha256: manifest.cutoverFreezeProofSha256 ?? null,
     sources: SOURCE_DATABASES.map((sourceDatabase) => [
       sourceDatabase,
@@ -344,6 +390,26 @@ function computeRunId(manifest: SourceExtractionManifest): string {
     ]),
   });
   return `vay1351-${createHash("sha256").update(input).digest("hex").slice(0, 24)}`;
+}
+
+function effectiveInventory(config: SourceExtractionConfig): SourceInventoryEntry[] {
+  const additional = config.historicalInventoryText
+    ? parseHistoricalSourceInventory(config.historicalInventoryText)
+    : [];
+  const existing = new Set(
+    config.inventory.map(
+      (entry) => `${entry.sourceDatabase}:${entry.objectType}:${entry.objectName}`,
+    ),
+  );
+  for (const entry of additional) {
+    if (existing.has(`${entry.sourceDatabase}:${entry.objectType}:${entry.objectName}`)) {
+      throw new SourceExtractionError(
+        "DUPLICATE_SOURCE_TABLE",
+        "source inventory overlaps history",
+      );
+    }
+  }
+  return [...config.inventory, ...additional];
 }
 
 function splitTableName(objectName: string): [string, string] {
@@ -613,6 +679,7 @@ export async function runSourceExtraction(
   sources: Record<SourceDatabase, pg.Client>,
 ): Promise<SourceExtractionReport> {
   validateSourceExtractionConfig(config);
+  const inventory = effectiveInventory(config);
   const now = config.now ?? Date.now;
   const startedAt = now();
   const runId = computeRunId(config.manifest);
@@ -710,7 +777,7 @@ export async function runSourceExtraction(
             `${sourceDatabase} source snapshot time is invalid`,
           );
         }
-        const attested = await readSourceProvenance(source);
+        const attested = await readSourceProvenance(source, config.attestationOwner);
         if (
           !attested ||
           attested.source_database !== approved.expectedDatabaseName ||
@@ -762,7 +829,7 @@ export async function runSourceExtraction(
 
         const sourceChecksum = createHash("sha256");
         let sourceRowCount = 0;
-        const countQueries = buildSourceRowCountQueries(config.inventory, sourceDatabase);
+        const countQueries = buildSourceRowCountQueries(inventory, sourceDatabase);
         for (const countQuery of countQueries) {
           const expected = await source.query<{ row_count: string }>(countQuery.sql);
           const expectedCount = Number(expected.rows[0]?.row_count);

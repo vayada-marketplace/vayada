@@ -26,6 +26,7 @@ import {
   requireActiveEntitlement,
   requireResourceAccess,
   resolveEffectivePropertyAccess,
+  resolveMembershipRolePermissions,
   createPgRolePermissionRepository,
   type EntitlementRepository,
   type EntitlementRequirement,
@@ -221,6 +222,61 @@ function requirement(
     resource: { product, resourceType, resourceId, allowedRelationships },
   };
 }
+
+describe("resolveMembershipRolePermissions", () => {
+  it("uses current saved defaults and denies without trusting cached permissions or mutating inputs", () => {
+    const candidate = contextFor({
+      roleKey: "hotel_custom",
+      permissions: ["pms.calendar.manage"],
+    });
+    const grants = Object.freeze([
+      "pms.calendar.manage",
+      "hotel_catalog.property_manifest.read",
+    ] as const);
+    const scope = propertyScope({
+      roleKey: "hotel_custom",
+      roleDefinitionId: "role_test",
+      roleDefinition: {
+        id: "role_test",
+        organizationId: "org_test",
+        securityClass: "staff",
+        baseRoleKey: "hotel_custom",
+        presetKey: null,
+        defaultPermissions: ["pms.calendar.read", "pms.calendar.manage"],
+      },
+      permissionOverrides: { grant: [], deny: ["pms.calendar.manage"] },
+    });
+    const original = structuredClone(scope);
+    expect(resolveMembershipRolePermissions(candidate, grants, scope)).toEqual({
+      ok: true,
+      permissions: ["pms.calendar.read", "hotel_catalog.property_manifest.read"],
+    });
+    expect(scope).toEqual(original);
+    expect(candidate.membership.permissions).toEqual(["pms.calendar.manage"]);
+
+    scope.permissionOverrides = { grant: [], deny: [] };
+    scope.roleDefinition!.defaultPermissions = ["pms.calendar.read"];
+    expect(resolveMembershipRolePermissions(candidate, grants, scope)).toEqual({
+      ok: true,
+      permissions: ["pms.calendar.read", "hotel_catalog.property_manifest.read"],
+    });
+    scope.roleDefinition!.organizationId = "other_org";
+    expect(resolveMembershipRolePermissions(candidate, grants, scope)).toEqual({
+      ok: false,
+      issueCodes: ["invalid_role_definition"],
+    });
+    scope.roleDefinitionId = null;
+    scope.permissionOverrides = { grant: [42], deny: [] };
+    expect(resolveMembershipRolePermissions(candidate, grants, scope)).toEqual({
+      ok: false,
+      issueCodes: ["malformed_permission_override"],
+    });
+    const baseline = resolveMembershipRolePermissions(creatorContext, grants);
+    expect(baseline).toEqual({ ok: true, permissions: [...grants] });
+    if (baseline.ok) baseline.permissions.length = 0;
+    expect(grants).toEqual(["pms.calendar.manage", "hotel_catalog.property_manifest.read"]);
+  });
+});
 
 describe("createAuthorizationResolver", () => {
   const definition = {

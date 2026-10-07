@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { loadConfig, stripeSubscriptionRuntimeEnabled } from "./config.js";
 
 const completeCreatorMarketplaceEnv = {
-  TARGET_DATABASE_URL: "postgresql://target-db",
+  TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
   AUTH_DATABASE_URL: "postgresql://auth-db",
   WORKOS_JWKS_URL: "https://api.workos.com/sso/jwks/client",
   WORKOS_ISSUER: "https://api.workos.com",
@@ -43,6 +43,161 @@ const financeFolioKmsEnv = {
 };
 
 describe("api config", () => {
+  it("keeps Financials activation closed without a scoped property allowlist", () => {
+    expect(loadConfig({}).financialsActivationPropertyIds).toEqual([]);
+    expect(
+      loadConfig({
+        PMS_FINANCIALS_ACTIVATION_PROPERTY_IDS:
+          "11111111-1111-4111-8111-111111111111,11111111-1111-4111-8111-111111111111",
+      }).financialsActivationPropertyIds,
+    ).toEqual(["11111111-1111-4111-8111-111111111111"]);
+    expect(() => loadConfig({ PMS_FINANCIALS_ACTIVATION_PROPERTY_IDS: "not-a-property" })).toThrow(
+      "PMS_FINANCIALS_ACTIVATION_PROPERTY_IDS",
+    );
+  });
+
+  it("does not reuse the general or auth database URL for pricing authority", () => {
+    const base = loadConfig(completeCreatorMarketplaceEnv);
+    expect(base.pricingDatabaseUrl).toBeUndefined();
+    expect(
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        PRICING_DATABASE_URL: "postgresql://pricing_runtime@pricing-db",
+      }).pricingDatabaseUrl,
+    ).toBe("postgresql://pricing_runtime@pricing-db");
+    expect(() =>
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        PRICING_DATABASE_URL: completeCreatorMarketplaceEnv.TARGET_DATABASE_URL,
+      }),
+    ).toThrow("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
+    expect(() =>
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        PRICING_DATABASE_URL: completeCreatorMarketplaceEnv.AUTH_DATABASE_URL,
+      }),
+    ).toThrow("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
+    expect(() =>
+      loadConfig({
+        TARGET_DATABASE_URL: "postgresql://general_runtime@target-db/vayada",
+        PRICING_DATABASE_URL:
+          "postgresql://general_runtime@target-db/vayada?application_name=pricing",
+      }),
+    ).toThrow("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
+    expect(() =>
+      loadConfig({
+        TARGET_DATABASE_URL: "postgresql://general_runtime@target-db/vayada",
+        PRICING_DATABASE_URL: "postgresql://pricing_runtime@target-db/vayada?user=general_runtime",
+      }),
+    ).toThrow("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
+  });
+
+  it("keeps affiliate capture closed unless its isolated runtime is complete", () => {
+    expect(loadConfig(completeCreatorMarketplaceEnv).affiliateCapture).toBeUndefined();
+    expect(
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        AFFILIATE_CAPTURE_ENABLED: "true",
+        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://vayada_next_affiliate_capture@target-db/app",
+        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
+      }).affiliateCapture,
+    ).toEqual({
+      databaseUrl: "postgresql://vayada_next_affiliate_capture@target-db/app",
+      internalToken: "x".repeat(32),
+    });
+    expect(() =>
+      loadConfig({ ...completeCreatorMarketplaceEnv, AFFILIATE_CAPTURE_ENABLED: "true" }),
+    ).toThrow("AFFILIATE_CAPTURE_ENABLED requires");
+    expect(() =>
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        AFFILIATE_CAPTURE_ENABLED: "true",
+        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://api_runtime@target-db/app",
+        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
+      }),
+    ).toThrow("exact vayada_next_affiliate_capture PostgreSQL login");
+    for (const conflictingDatabaseUrl of [
+      {
+        TARGET_DATABASE_URL:
+          "postgresql://api_runtime@target-db/app?user=vayada_next_affiliate_capture",
+      },
+      {
+        AUTH_DATABASE_URL:
+          "postgresql://auth_runtime@auth-db/app?user=vayada_next_affiliate_capture",
+      },
+      {
+        PRICING_DATABASE_URL:
+          "postgresql://pricing_runtime@pricing-db/app?user=vayada_next_affiliate_capture",
+      },
+    ]) {
+      expect(() =>
+        loadConfig({
+          ...completeCreatorMarketplaceEnv,
+          ...conflictingDatabaseUrl,
+          AFFILIATE_CAPTURE_ENABLED: "true",
+          AFFILIATE_CAPTURE_DATABASE_URL:
+            "postgresql://vayada_next_affiliate_capture@target-db/app",
+          BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
+        }),
+      ).toThrow("AFFILIATE_CAPTURE_DATABASE_URL must use a distinct PostgreSQL user");
+    }
+    expect(() =>
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        AFFILIATE_CAPTURE_ENABLED: "true",
+        AFFILIATE_CAPTURE_DATABASE_URL:
+          "postgresql://vayada_next_affiliate_capture@target-db/app?user=api_runtime",
+        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
+      }),
+    ).toThrow("exact vayada_next_affiliate_capture PostgreSQL login");
+    expect(() =>
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        AFFILIATE_CAPTURE_ENABLED: "true",
+        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://vayada_next_affiliate_capture@target-db/app",
+        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "short",
+      }),
+    ).toThrow("must be at least 32 bytes");
+  });
+
+  it("keeps live booking binding behind capture and target runtime gates", () => {
+    expect(loadConfig(completeCreatorMarketplaceEnv).affiliateBookingBindingEnabled).toBe(false);
+    expect(() =>
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        AFFILIATE_BOOKING_BINDING_ENABLED: "true",
+      }),
+    ).toThrow("requires affiliate capture and TARGET_DATABASE_URL");
+    expect(
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        AFFILIATE_CAPTURE_ENABLED: "true",
+        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://vayada_next_affiliate_capture@target-db/app",
+        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
+        AFFILIATE_BOOKING_BINDING_ENABLED: "true",
+      }).affiliateBookingBindingEnabled,
+    ).toBe(true);
+  });
+
+  it("keeps the public affiliate redirect behind the complete capture runtime", () => {
+    expect(loadConfig(completeCreatorMarketplaceEnv).affiliatePublicRedirectEnabled).toBe(false);
+    expect(() =>
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        AFFILIATE_PUBLIC_REDIRECT_ENABLED: "true",
+      }),
+    ).toThrow("AFFILIATE_PUBLIC_REDIRECT_ENABLED requires affiliate capture");
+    expect(
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        AFFILIATE_CAPTURE_ENABLED: "true",
+        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://vayada_next_affiliate_capture@target-db/app",
+        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
+        AFFILIATE_PUBLIC_REDIRECT_ENABLED: "true",
+      }).affiliatePublicRedirectEnabled,
+    ).toBe(true);
+  });
+
   it("loads complete Marketplace unsubscribe rotation keys and rejects partial config", () => {
     const keys = {
       "key-1": Buffer.alloc(32, 1).toString("base64url"),
@@ -107,12 +262,13 @@ describe("api config", () => {
 
   it("loads explicitly cut-over Channex capabilities only with target provider config", () => {
     const config = loadConfig({
-      TARGET_DATABASE_URL: "postgresql://target-db",
+      TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
       PMS_OPERATIONS_SOURCE: "target",
       CHANNEX_API_BASE_URL: "https://staging.channex.io",
       CHANNEX_API_KEY: "secret",
       PMS_CHANNEX_CONNECTION_MODE: "mutating",
       PMS_CHANNEX_WORKER_ENABLED: "true",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@target-db/app",
     });
     expect(config.channexManagement).toMatchObject({
       apiBaseUrl: "https://staging.channex.io",
@@ -123,12 +279,13 @@ describe("api config", () => {
 
   it("allows only isolated staging restrictions with the background workers disabled", () => {
     const base = {
-      TARGET_DATABASE_URL: "postgresql://target-db",
+      TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
       PMS_OPERATIONS_SOURCE: "target",
       CHANNEX_API_BASE_URL: "https://staging.channex.io",
       CHANNEX_API_KEY: "test",
       API_BACKGROUND_WORKERS_ENABLED: "false",
       PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@target-db/app",
       PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "65f6b2fc-c783-4963-9d6b-a85f82319769",
     };
     expect(loadConfig(base).channexManagement.stagingRestrictionsPropertyId).toBe(
@@ -151,12 +308,13 @@ describe("api config", () => {
 
   it("requires explicit opt-in and retains isolation for staged inventory rules", () => {
     const base = {
-      TARGET_DATABASE_URL: "postgresql://target-db",
+      TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
       PMS_OPERATIONS_SOURCE: "target",
       CHANNEX_API_BASE_URL: "https://staging.channex.io",
       CHANNEX_API_KEY: "test",
       API_BACKGROUND_WORKERS_ENABLED: "false",
       PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@target-db/app",
       PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "65f6b2fc-c783-4963-9d6b-a85f82319769",
     };
     expect(loadConfig(base).channexManagement.stagingInventoryEnabled).toBe(false);
@@ -175,12 +333,13 @@ describe("api config", () => {
 
   it("isolates no-show opt-in without enabling booking sync and permits worker pause", () => {
     const base = {
-      TARGET_DATABASE_URL: "postgresql://target-db",
+      TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
       PMS_OPERATIONS_SOURCE: "target",
       CHANNEX_API_BASE_URL: "https://staging.channex.io",
       CHANNEX_API_KEY: "test",
       API_BACKGROUND_WORKERS_ENABLED: "false",
       PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@target-db/app",
       PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "65f6b2fc-c783-4963-9d6b-a85f82319769",
     };
     expect(loadConfig(base).channexManagement.stagingNoShowEnabled).toBe(false);
@@ -207,12 +366,13 @@ describe("api config", () => {
 
   it("requires explicit opt-in and retains isolation for scoped meal processing", () => {
     const base = {
-      TARGET_DATABASE_URL: "postgresql://target-db",
+      TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
       PMS_OPERATIONS_SOURCE: "target",
       CHANNEX_API_BASE_URL: "https://staging.channex.io",
       CHANNEX_API_KEY: "test",
       API_BACKGROUND_WORKERS_ENABLED: "false",
       PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@target-db/app",
       PMS_CHANNEX_PROVISIONING_MODE: "mutating",
       PMS_CHANNEX_STAGING_MEALS_ENABLED: "true",
       PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "65f6b2fc-c783-4963-9d6b-a85f82319769",
@@ -231,9 +391,36 @@ describe("api config", () => {
       expect(() => loadConfig({ ...base, ...invalid })).toThrow();
   });
 
+  it("requires explicit opt-in and retains isolation for published offer provisioning", () => {
+    const base = {
+      TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
+      PMS_OPERATIONS_SOURCE: "target",
+      CHANNEX_API_BASE_URL: "https://staging.channex.io",
+      CHANNEX_API_KEY: "test",
+      API_BACKGROUND_WORKERS_ENABLED: "false",
+      PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@target-db/app",
+      PMS_CHANNEX_PROVISIONING_MODE: "mutating",
+      PMS_CHANNEX_STAGING_PUBLISHED_OFFERS_ENABLED: "true",
+      PMS_CHANNEX_STAGING_INVENTORY_ENABLED: "true",
+      PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "65f6b2fc-c783-4963-9d6b-a85f82319769",
+    };
+    expect(loadConfig(base).channexManagement.stagingPublishedOffersEnabled).toBe(true);
+    for (const invalid of [
+      { PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: undefined },
+      { PMS_CHANNEX_STAGING_PUBLISHED_OFFERS_ENABLED: "false" },
+      { PMS_CHANNEX_STAGING_INVENTORY_ENABLED: "false" },
+      { PMS_CHANNEX_PROVISIONING_MODE: "observe_only" },
+      { CHANNEX_API_BASE_URL: "https://app.channex.io" },
+      { API_BACKGROUND_WORKERS_ENABLED: "true" },
+      { PMS_CHANNEX_BOOKING_SYNC_MODE: "mutating" },
+    ])
+      expect(() => loadConfig({ ...base, ...invalid })).toThrow();
+  });
+
   it.each([false, true])("loads a paused isolated staging runtime (meals=%s)", (meals) => {
     const environment = {
-      TARGET_DATABASE_URL: "postgresql://target-db",
+      TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
       PMS_OPERATIONS_SOURCE: "target",
       CHANNEX_API_BASE_URL: "https://staging.channex.io",
       CHANNEX_API_KEY: "synthetic-test-key",
@@ -256,10 +443,18 @@ describe("api config", () => {
       stagingMealsEnabled: meals,
       capabilityModes: { ariSync: "mutating", provisioning: meals ? "mutating" : "observe_only" },
     });
-    const resumed = loadConfig({ ...environment, PMS_CHANNEX_WORKER_ENABLED: "true" });
+    const resumed = loadConfig({
+      ...environment,
+      PMS_CHANNEX_WORKER_ENABLED: "true",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@target-db/app",
+    });
     expect(resumed).toEqual({
       ...paused,
-      channexManagement: { ...paused.channexManagement, workerEnabled: true },
+      channexManagement: {
+        ...paused.channexManagement,
+        workerEnabled: true,
+        workerDatabaseUrl: "postgresql://channex_worker@target-db/app",
+      },
     });
     for (const invalid of [
       { PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: undefined },
@@ -291,7 +486,7 @@ describe("api config", () => {
     ).toThrow("Mutating PMS Channex capabilities require PMS_OPERATIONS_SOURCE=target");
     expect(() =>
       loadConfig({
-        TARGET_DATABASE_URL: "postgresql://target-db",
+        TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
         PMS_OPERATIONS_SOURCE: "target",
         PMS_CHANNEX_CONNECTION_MODE: "mutating",
         PMS_CHANNEX_WORKER_ENABLED: "false",
@@ -301,9 +496,79 @@ describe("api config", () => {
     ).toThrow("Mutating PMS Channex capabilities require PMS_CHANNEX_WORKER_ENABLED=true");
   });
 
+  it("requires a dedicated management database credential before the worker starts", () => {
+    const enabled = {
+      TARGET_DATABASE_URL: "postgresql://api_runtime@db/app",
+      PMS_OPERATIONS_SOURCE: "target",
+      CHANNEX_API_BASE_URL: "https://staging.channex.io",
+      CHANNEX_API_KEY: "secret",
+      PMS_CHANNEX_CONNECTION_MODE: "mutating",
+      PMS_CHANNEX_WORKER_ENABLED: "true",
+    };
+    expect(() => loadConfig(enabled)).toThrow("PMS_CHANNEX_MANAGEMENT_DATABASE_URL");
+    expect(() =>
+      loadConfig({
+        ...enabled,
+        PMS_CHANNEX_MANAGEMENT_DATABASE_URL:
+          "postgresql://api_runtime@db/app?application_name=channex",
+      }),
+    ).toThrow("must use a dedicated credential");
+    expect(() =>
+      loadConfig({
+        ...enabled,
+        PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@db/app?user=api_runtime",
+      }),
+    ).toThrow("must use a dedicated credential");
+    expect(() =>
+      loadConfig({
+        ...enabled,
+        PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@other-db/app",
+      }),
+    ).toThrow("must use a dedicated credential");
+    expect(() =>
+      loadConfig({
+        ...enabled,
+        PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@db/other_app",
+      }),
+    ).toThrow("must use a dedicated credential");
+    expect(() =>
+      loadConfig({
+        ...enabled,
+        TARGET_DATABASE_URL: "postgresql://api_runtime@db/app%2Ftenant",
+        PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@db/app/tenant",
+      }),
+    ).toThrow("must use a dedicated credential");
+    expect(() =>
+      loadConfig({
+        ...enabled,
+        TARGET_DATABASE_URL: "postgresql://api_runtime@db",
+        PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@db",
+      }),
+    ).toThrow("must use a dedicated credential");
+    expect(
+      loadConfig({
+        ...enabled,
+        PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@db/app",
+      }).channexManagement.workerDatabaseUrl,
+    ).toBe("postgresql://channex_worker@db/app");
+  });
+
+  it("normalizes the Channex management PostgreSQL TLS URL", () => {
+    const config = loadConfig({
+      TARGET_DATABASE_URL: "postgresql://api_runtime@db/app?sslmode=require",
+      PMS_OPERATIONS_SOURCE: "target",
+      CHANNEX_API_BASE_URL: "https://staging.channex.io",
+      CHANNEX_API_KEY: "secret",
+      PMS_CHANNEX_CONNECTION_MODE: "mutating",
+      PMS_CHANNEX_WORKER_ENABLED: "true",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@db/app?sslmode=require",
+    });
+    expect(config.channexManagement.workerDatabaseUrl).toContain("uselibpqcompat=true");
+  });
+
   it("requires explicit review cutover and credentials without a management worker", () => {
     const env = {
-      TARGET_DATABASE_URL: "postgresql://target-db",
+      TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
       PMS_OPERATIONS_SOURCE: "target",
       CHANNEX_API_BASE_URL: "https://staging.channex.io",
       CHANNEX_API_KEY: "test",
@@ -327,7 +592,7 @@ describe("api config", () => {
   it("does not require the durable worker for an iframe-only cutover", () => {
     expect(
       loadConfig({
-        TARGET_DATABASE_URL: "postgresql://target-db",
+        TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
         PMS_OPERATIONS_SOURCE: "target",
         CHANNEX_API_BASE_URL: "https://staging.channex.io",
         CHANNEX_API_KEY: "secret",
@@ -338,11 +603,12 @@ describe("api config", () => {
 
   it("requires an explicit legacy-poll freeze before target booking sync mutates", () => {
     const base = {
-      TARGET_DATABASE_URL: "postgresql://target-db",
+      TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
       PMS_OPERATIONS_SOURCE: "target",
       CHANNEX_API_BASE_URL: "https://staging.channex.io",
       CHANNEX_API_KEY: "secret",
       PMS_CHANNEX_BOOKING_SYNC_MODE: "mutating",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@target-db/app",
     };
     expect(() => loadConfig(base)).toThrow(
       "Mutating PMS Channex booking sync requires CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE=target-owned",
@@ -701,10 +967,12 @@ describe("api config", () => {
   it("defaults provider webhook intake modes to observe-only shadow intake", () => {
     expect(loadConfig({}).providerWebhooks).toEqual({
       stripeSecret: undefined,
+      stripeConnectSecret: undefined,
       xenditSecret: undefined,
       channexSecret: undefined,
       resendSecret: undefined,
       stripeMode: "observe_only",
+      stripeConnectMode: "observe_only",
       xenditMode: "observe_only",
       channexMode: "observe_only",
     });
@@ -713,10 +981,12 @@ describe("api config", () => {
   it("loads provider webhook secrets and per-provider intake modes", () => {
     const config = loadConfig({
       STRIPE_WEBHOOK_SECRET: "stripe-secret",
+      STRIPE_CONNECT_WEBHOOK_SECRET: "stripe-connect-secret",
       XENDIT_WEBHOOK_SECRET: "xendit-secret",
       CHANNEX_WEBHOOK_SECRET: "channex-secret",
       RESEND_WEBHOOK_SECRET: "resend-secret",
       STRIPE_WEBHOOK_INTAKE_MODE: "mutating",
+      STRIPE_CONNECT_WEBHOOK_INTAKE_MODE: "ack_only_with_receipt",
       XENDIT_WEBHOOK_INTAKE_MODE: "ack_only_with_receipt",
       CHANNEX_WEBHOOK_INTAKE_MODE: "observe_only",
       XENDIT_SECRET_KEY: "xendit-api-secret",
@@ -724,10 +994,12 @@ describe("api config", () => {
 
     expect(config.providerWebhooks).toEqual({
       stripeSecret: "stripe-secret",
+      stripeConnectSecret: "stripe-connect-secret",
       xenditSecret: "xendit-secret",
       channexSecret: "channex-secret",
       resendSecret: "resend-secret",
       stripeMode: "mutating",
+      stripeConnectMode: "ack_only_with_receipt",
       xenditMode: "ack_only_with_receipt",
       channexMode: "observe_only",
     });
@@ -1193,8 +1465,10 @@ describe("Airbnb alteration runtime opt-in", () => {
     AIRBNB_ALTERATIONS_ENABLED: "true",
     AIRBNB_ALTERATION_PROPERTY_IDS: propertyId,
     PMS_OPERATIONS_SOURCE: "target",
+    TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
     API_BACKGROUND_WORKERS_ENABLED: "true",
     PMS_CHANNEX_WORKER_ENABLED: "true",
+    PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@target-db/app",
     PMS_CHANNEX_BOOKING_SYNC_MODE: "mutating",
     CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE: "target-owned",
     CHANNEX_WEBHOOK_INTAKE_MODE: "mutating",
@@ -1283,5 +1557,161 @@ describe("Airbnb alteration runtime opt-in", () => {
     expect(() => loadConfig({ AIRBNB_ALTERATIONS_ENABLED: "sometimes" })).toThrow(
       "AIRBNB_ALTERATIONS_ENABLED",
     );
+  });
+});
+
+describe("Finance export worker boundary config", () => {
+  const env = {
+    ...financeFolioKmsEnv,
+    API_RUNTIME: "next",
+    PUBLIC_HOTEL_PROFILE_SOURCE: "target",
+    PMS_OPERATIONS_SOURCE: "disabled",
+    FINANCE_SOURCE: "target",
+    TARGET_DATABASE_URL: "postgresql://api:fixture@localhost/target",
+    PLATFORM_MEDIA_BUCKET: "vayada-media-test",
+    PLATFORM_MEDIA_CDN_BASE_URL: "https://cdn.test.vayada.com",
+    PLATFORM_MEDIA_CDN_ORIGIN_HOST: "vayada-media-test.s3.eu-west-1.amazonaws.com",
+    FINANCE_EXPORT_WORKER_ENABLED: "true",
+    FINANCE_EXPORT_WORKER_DATABASE_URL:
+      "postgresql://vayada_next_finance_export_worker:fixture@localhost/target?sslmode=require",
+    FINANCE_EXPORT_WORKER_PROPERTY_ID: "20450000-0000-4000-8000-000000000001",
+    FINANCE_EXPORT_WORKER_EXPORT_ID: "20450000-0000-4000-8000-000000000002",
+  };
+  it("defaults paused without opening the credential", () => {
+    expect(loadConfig({}).financeExportWorker).toBeUndefined();
+    expect(
+      loadConfig({
+        ...env,
+        FINANCE_EXPORT_WORKER_ENABLED: "false",
+        FINANCE_EXPORT_WORKER_DATABASE_URL: "invalid",
+      }).financeExportWorker,
+    ).toBeUndefined();
+  });
+  it("requires the dedicated login, target database, property, and worker gates", () => {
+    expect(loadConfig(env).financeExportWorker).toEqual({
+      databaseUrl: `${env.FINANCE_EXPORT_WORKER_DATABASE_URL}&uselibpqcompat=true`,
+      propertyId: env.FINANCE_EXPORT_WORKER_PROPERTY_ID,
+      exportId: env.FINANCE_EXPORT_WORKER_EXPORT_ID,
+    });
+    for (const overrides of [
+      { FINANCE_EXPORT_WORKER_DATABASE_URL: "" },
+      { FINANCE_EXPORT_WORKER_PROPERTY_ID: "" },
+      { FINANCE_EXPORT_WORKER_EXPORT_ID: "" },
+      { FINANCE_EXPORT_WORKER_EXPORT_ID: "not-a-uuid" },
+      { API_RUNTIME: "legacy" },
+      { API_BACKGROUND_WORKERS_ENABLED: "false" },
+      { FINANCE_SOURCE: "legacy" },
+      { FINANCE_FOLIO_RECIPIENT_KMS_CURRENT_KEY_ARN: undefined },
+      { PLATFORM_MEDIA_BUCKET: undefined },
+      { FINANCE_EXPORT_WORKER_DATABASE_URL: env.TARGET_DATABASE_URL },
+      {
+        FINANCE_EXPORT_WORKER_DATABASE_URL:
+          "postgresql://vayada_next_finance_export_worker:fixture@localhost/target",
+      },
+      {
+        FINANCE_EXPORT_WORKER_DATABASE_URL:
+          "postgresql://vayada_next_finance_export_worker:fixture@localhost/target?sslmode=disable",
+      },
+      {
+        FINANCE_EXPORT_WORKER_DATABASE_URL:
+          "postgresql://vayada_next_finance_export_worker:fixture@localhost/target?sslmode=require&sslmode=require",
+      },
+      {
+        FINANCE_EXPORT_WORKER_DATABASE_URL:
+          "postgresql://vayada_next_finance_export_worker:fixture@localhost/target?sslmode=require&application_name=worker",
+      },
+      {
+        FINANCE_EXPORT_WORKER_DATABASE_URL: `${env.FINANCE_EXPORT_WORKER_DATABASE_URL}?options=-crole=postgres`,
+      },
+      {
+        FINANCE_EXPORT_WORKER_DATABASE_URL: env.FINANCE_EXPORT_WORKER_DATABASE_URL.replace(
+          "/target",
+          "/other",
+        ),
+      },
+    ])
+      expect(() => loadConfig({ ...env, ...overrides })).toThrow();
+  });
+  it("enables all-hotel processing only with a fixed cutoff and verified TLS", () => {
+    const ongoing = {
+      ...env,
+      FINANCE_EXPORT_WORKER_PROPERTY_ID: "",
+      FINANCE_EXPORT_WORKER_EXPORT_ID: "",
+      FINANCE_EXPORT_WORKER_ACCEPTED_AFTER: "2026-09-25T00:00:00.000Z",
+      NODE_EXTRA_CA_CERTS: "/app/rds.pem",
+    };
+    expect(loadConfig(ongoing).financeExportWorker).toMatchObject({
+      acceptedAfter: new Date(ongoing.FINANCE_EXPORT_WORKER_ACCEPTED_AFTER),
+      databaseUrl: env.FINANCE_EXPORT_WORKER_DATABASE_URL.replace(
+        "sslmode=require",
+        "sslmode=verify-full",
+      ),
+    });
+    for (const changed of [
+      { NODE_EXTRA_CA_CERTS: "" },
+      { FINANCE_EXPORT_WORKER_ACCEPTED_AFTER: "bad" },
+      { FINANCE_EXPORT_WORKER_PROPERTY_ID: env.FINANCE_EXPORT_WORKER_PROPERTY_ID },
+      { FINANCE_EXPORT_WORKER_EXPORT_ID: env.FINANCE_EXPORT_WORKER_EXPORT_ID },
+    ])
+      expect(() => loadConfig({ ...ongoing, ...changed })).toThrow();
+  });
+  it("normalizes the required sslmode for the node-postgres worker pool", () => {
+    expect(loadConfig(env).financeExportWorker?.databaseUrl).toContain(
+      "sslmode=require&uselibpqcompat=true",
+    );
+  });
+});
+
+describe("Finance expense worker boundary config", () => {
+  const env = {
+    FINANCE_SOURCE: "target",
+    TARGET_DATABASE_URL: "postgresql://api:fixture@localhost/target",
+    FINANCE_EXPENSE_WORKER_ENABLED: "true",
+    FINANCE_EXPENSE_WORKER_DATABASE_URL:
+      "postgresql://vayada_next_finance_expense_worker:fixture@localhost/target",
+    FINANCE_EXPENSE_WORKER_PROPERTY_ID: "20440000-0000-4000-8000-000000000001",
+  };
+  it("defaults paused without opening a worker credential", () => {
+    expect(loadConfig({}).financeExpenseWorker).toBeUndefined();
+    expect(
+      loadConfig({
+        ...env,
+        FINANCE_EXPENSE_WORKER_ENABLED: "false",
+        FINANCE_EXPENSE_WORKER_DATABASE_URL: "invalid",
+      }).financeExpenseWorker,
+    ).toBeUndefined();
+  });
+  it("requires the dedicated login, target database, property, and both worker gates", () => {
+    expect(loadConfig(env).financeExpenseWorker).toEqual({
+      databaseUrl: env.FINANCE_EXPENSE_WORKER_DATABASE_URL,
+      propertyId: env.FINANCE_EXPENSE_WORKER_PROPERTY_ID,
+    });
+    for (const overrides of [
+      { FINANCE_EXPENSE_WORKER_DATABASE_URL: "" },
+      { FINANCE_EXPENSE_WORKER_PROPERTY_ID: "" },
+      { API_BACKGROUND_WORKERS_ENABLED: "false" },
+      { FINANCE_SOURCE: "legacy" },
+      { FINANCE_EXPENSE_WORKER_DATABASE_URL: env.TARGET_DATABASE_URL },
+      {
+        FINANCE_EXPENSE_WORKER_DATABASE_URL:
+          env.FINANCE_EXPENSE_WORKER_DATABASE_URL + "?options=-crole=postgres",
+      },
+      {
+        FINANCE_EXPENSE_WORKER_DATABASE_URL: env.FINANCE_EXPENSE_WORKER_DATABASE_URL.replace(
+          "/target",
+          "/other",
+        ),
+      },
+    ])
+      expect(() => loadConfig({ ...env, ...overrides })).toThrow();
+  });
+  it("normalizes the dedicated PostgreSQL TLS URL after validating its query keys", () => {
+    expect(
+      loadConfig({
+        ...env,
+        FINANCE_EXPENSE_WORKER_DATABASE_URL:
+          env.FINANCE_EXPENSE_WORKER_DATABASE_URL + "?sslmode=require",
+      }).financeExpenseWorker?.databaseUrl,
+    ).toContain("sslmode=require&uselibpqcompat=true");
   });
 });

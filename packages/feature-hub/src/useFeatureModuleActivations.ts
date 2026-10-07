@@ -9,6 +9,7 @@ const FALLBACK_STORAGE_KEY = "vayada-feature-modules";
 
 type ModuleSynchronizationDetail = {
   activeModuleIds: string[];
+  configuredModuleIds?: string[];
   hotelId?: string;
   source: "read" | "write";
   canManage?: boolean;
@@ -41,6 +42,8 @@ function publish(detail: ModuleSynchronizationDetail) {
   const scopedDetail = {
     ...detail,
     hotelId: detail.hotelId || selectedHotelId() || "default",
+    // Identical optimistic/confirmed payloads must still notify other tabs.
+    eventId: window.crypto.randomUUID(),
   };
   try {
     window.localStorage.setItem(storageKey(detail.hotelId), JSON.stringify(detail.activeModuleIds));
@@ -53,6 +56,7 @@ function publish(detail: ModuleSynchronizationDetail) {
 
 export function useFeatureModuleActivations(client: FeatureActivationClient) {
   const [activeModuleIds, setActiveModuleIds] = useState<string[]>(() => readCached());
+  const [configuredModuleIds, setConfiguredModuleIds] = useState<string[]>([]);
   const [supportedModuleIds, setSupportedModuleIds] = useState<string[]>([]);
   const [hotelId, setHotelId] = useState<string>("");
   const [canManage, setCanManage] = useState(false);
@@ -77,12 +81,21 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
   const applyResponse = useCallback((response: ModuleActivationsResponse) => {
     const next = response.activeModules || [];
     const supported = response.supportedModules || [];
+    // Configured switches differ from effective access when billing suspends a module.
+    const configured = new Map(next.map((id) => [id, true]));
+    for (const activation of response.activations || [])
+      configured.set(activation.moduleId, activation.isActive);
+    const configuredIds = Array.from(configured)
+      .filter(([, enabled]) => enabled)
+      .map(([id]) => id);
+    setConfiguredModuleIds(configuredIds);
     setHotelId(response.hotelId);
     setCanManage(response.canManage);
     setSupportedModuleIds(supported);
     setActiveModuleIds(next);
     publish({
       activeModuleIds: next,
+      configuredModuleIds: configuredIds,
       hotelId: response.hotelId,
       source: "read",
       canManage: response.canManage,
@@ -133,6 +146,9 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
         setSupportedModuleIds(supported);
       }
       setActiveModuleIds(activeModuleIds);
+      const configured = detail?.configuredModuleIds ?? activeModuleIds;
+      if (Array.isArray(configured) && configured.every((id) => typeof id === "string"))
+        setConfiguredModuleIds(configured);
       if (detail?.source === "read") setLoading(false);
     };
 
@@ -159,18 +175,39 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
   const setModuleActive = useCallback(
     async (moduleId: string, isActive: boolean) => {
       const previous = activeModuleIds;
-      const next = isActive
-        ? Array.from(new Set([...activeModuleIds, moduleId]))
-        : activeModuleIds.filter((id) => id !== moduleId);
+      const previousConfigured = configuredModuleIds;
+      const configured = isActive
+        ? Array.from(new Set([...configuredModuleIds, moduleId]))
+        : configuredModuleIds.filter((id) => id !== moduleId);
+      setConfiguredModuleIds(configured);
+      // Enabling a switch does not establish effective access until the server confirms it.
+      const next = isActive ? activeModuleIds : activeModuleIds.filter((id) => id !== moduleId);
       setActiveModuleIds(next);
-      publish({ activeModuleIds: next, hotelId, source: "write", canManage, supportedModuleIds });
+      publish({
+        activeModuleIds: next,
+        configuredModuleIds: configured,
+        hotelId,
+        source: "write",
+        canManage,
+        supportedModuleIds,
+      });
       try {
         await clientRef.current.update(moduleId, isActive);
-        publish({ activeModuleIds: next, hotelId, source: "write", canManage, supportedModuleIds });
+        publish({
+          activeModuleIds: next,
+          configuredModuleIds: configured,
+          hotelId,
+          source: "write",
+          canManage,
+          supportedModuleIds,
+        });
+        await refresh();
       } catch (err) {
         setActiveModuleIds(previous);
+        setConfiguredModuleIds(previousConfigured);
         publish({
           activeModuleIds: previous,
+          configuredModuleIds: previousConfigured,
           hotelId,
           source: "write",
           canManage,
@@ -179,12 +216,15 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
         throw err;
       }
     },
-    [activeModuleIds, canManage, hotelId, supportedModuleIds],
+    [activeModuleIds, configuredModuleIds, canManage, hotelId, supportedModuleIds, refresh],
   );
 
   const activeModuleSet = useMemo(() => new Set(activeModuleIds), [activeModuleIds]);
 
+  const configuredModuleSet = useMemo(() => new Set(configuredModuleIds), [configuredModuleIds]);
+
   return {
+    configuredModuleSet,
     activeModuleIds,
     activeModuleSet,
     supportedModuleIds,

@@ -24,7 +24,7 @@ import {
 } from "@vayada/backend-authorization";
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 
-import { mapWorkOSAuthError } from "../platform/workosAuthState.js";
+import { mapWorkOSAuthError, type VayadaAuthStateResponse } from "../platform/workosAuthState.js";
 import type {
   AuthHandoffRoutingHints,
   AuthSessionHandoff,
@@ -251,6 +251,41 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
   options: AuthSessionRouteOptions,
 ) => {
   const emailSendCooldowns = new Map<string, number>();
+
+  // WorkOS-hosted invitations and password recovery still return here. Exchange
+  // the one-time code, then use Vayada's first-party login for PMS.
+  app.get("/workos/callback", async (request, reply) => {
+    reply.header("Cache-Control", "private, no-store").header("Referrer-Policy", "no-referrer");
+    const pmsOrigin = options.surfacePolicies?.["pms-web"]?.publicOrigin;
+    if (!pmsOrigin || !options.allowedOrigins.includes(pmsOrigin)) {
+      return reply.code(503).send({
+        error: "invitation_return_unavailable",
+        message: "Sign-in is temporarily unavailable. Please try again later.",
+      });
+    }
+    const query = request.query as { code?: unknown; error?: unknown };
+    const returnUrl = new URL("/login", pmsOrigin);
+    const code = typeof query.code === "string" ? query.code : "";
+    if (!code || query.error) {
+      returnUrl.searchParams.set("workos_return", "failed");
+    } else {
+      try {
+        await authenticateGoogleForSurface(options, getSurfacePolicy("pms-web", options), {
+          code,
+          ipAddress: request.ip,
+          userAgent: request.headers["user-agent"],
+        });
+        returnUrl.searchParams.set("workos_return", "complete");
+      } catch (error) {
+        request.log.warn(
+          { workos: workosErrorDiagnostics(error) },
+          "WorkOS invitation code exchange failed",
+        );
+        returnUrl.searchParams.set("workos_return", "failed");
+      }
+    }
+    return reply.redirect(returnUrl.toString());
+  });
 
   if (options.adminTransfer) {
     const surfacePolicy = getSurfacePolicy("pms-web", options);
@@ -610,7 +645,17 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         userAgent: request.headers["user-agent"],
       });
     } catch (error) {
-      const mapped = mapWorkOSAuthError(error);
+      let mapped = mapWorkOSAuthError(error);
+      try {
+        mapped = await filterPasswordOrganizationChoices(
+          mapped,
+          options.identityRepository,
+          surfacePolicy,
+        );
+      } catch (filterError) {
+        request.log.error({ err: filterError }, "Password workspace filtering failed");
+        mapped = mapWorkOSAuthError(filterError);
+      }
       const canSelectRequestedOrganization =
         parsed.organizationId &&
         mapped.state === "organization_selection_required" &&
@@ -685,12 +730,10 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     }
 
     if (parsed.organizationId && resolution.session.organizationId !== parsed.organizationId) {
-      return reply
-        .code(403)
-        .send({
-          state: "auth_failed",
-          message: "Selected workspace is not available on this surface.",
-        });
+      return reply.code(403).send({
+        state: "auth_failed",
+        message: "Selected workspace is not available on this surface.",
+      });
     }
 
     await options.productAuditSink.record({
@@ -2354,6 +2397,32 @@ function statusForPasswordAuthFailure(state: string): 401 | 403 | 502 {
   if (state === "invalid_credentials") return 401;
   if (state === "auth_failed") return 502;
   return 403;
+}
+
+async function filterPasswordOrganizationChoices(
+  mapped: VayadaAuthStateResponse,
+  repository: IdentityRepository,
+  surfacePolicy: AuthSurfacePolicy,
+): Promise<VayadaAuthStateResponse> {
+  if (mapped.state !== "organization_selection_required" || !mapped.organizations?.length) {
+    return mapped;
+  }
+  const organizations = await Promise.all(
+    mapped.organizations.map(async (offered) => ({
+      offered,
+      organization: await repository.findOrganizationByWorkosOrgId(offered.id),
+    })),
+  );
+  return {
+    ...mapped,
+    organizations: organizations
+      .filter(
+        ({ organization }) =>
+          organization?.status === "active" &&
+          matchesOrganizationKind(organization.kind, surfacePolicy.requiredOrganizationKind),
+      )
+      .map(({ offered }) => offered),
+  };
 }
 
 async function recordPasswordLoginFailure(

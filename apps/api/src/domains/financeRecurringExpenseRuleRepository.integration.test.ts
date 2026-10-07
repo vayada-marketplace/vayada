@@ -81,6 +81,44 @@ describe.skipIf(!URL)("PostgreSQL Finance recurring expense rule repository", ()
     const residue = await admin.query(`SELECT (SELECT count(*)::int FROM finance.recurring_expense_rules WHERE id=$1) AS rules,(SELECT count(*)::int FROM platform.idempotency_keys WHERE key_hash=$2) AS keys`,[input.commandId,hashKey(input.idempotencyKey)]);
     expect(residue.rows[0]).toEqual({ rules: 0, keys: 0 });
   });
+
+  it("creates and replays under a non-owner login without property UPDATE", async () => {
+    const role = `vay2046_runtime_${crypto.randomUUID().replaceAll("-", "")}`;
+    const password = "vay2046_test_only";
+    const restrictedUrl = new globalThis.URL(URL!);
+    restrictedUrl.username = role;
+    restrictedUrl.password = password;
+    await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD '${password}'`);
+    await admin.query(`GRANT USAGE ON SCHEMA hotel_catalog,finance,platform TO ${role};
+      GRANT SELECT ON hotel_catalog.properties,finance.recurring_expense_rules,platform.idempotency_keys TO ${role};
+      GRANT INSERT ON finance.recurring_expense_rules,platform.idempotency_keys,platform.product_audit_events TO ${role};
+      GRANT UPDATE ON platform.idempotency_keys TO ${role}`);
+    const restricted = createPgFinanceRecurringExpenseRuleRepository(restrictedUrl.toString());
+    const probe = new pg.Client({ connectionString: restrictedUrl.toString() });
+    try {
+      await probe.connect();
+      const privileges = await probe.query(`SELECT
+        has_any_column_privilege(current_user,'hotel_catalog.properties','UPDATE') AS "propertyUpdate",
+        has_table_privilege(current_user,'finance.recurring_expense_rules','INSERT') AS "ruleInsert",
+        has_table_privilege(current_user,'finance.recurring_expense_rules','UPDATE') AS "ruleUpdate"`);
+      expect(privileges.rows[0]).toEqual({ propertyUpdate: false, ruleInsert: true, ruleUpdate: false });
+      await expect(probe.query("SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid FOR KEY SHARE", [PROPERTY]))
+        .rejects.toMatchObject({ code: "42501" });
+      const input = { ...create("restricted-runtime"), commandId: crypto.randomUUID() };
+      await expect(restricted.create(input)).resolves.toMatchObject({ ok: true, outcome: "created", item: { id: input.commandId } });
+      await expect(restricted.create(input)).resolves.toMatchObject({ ok: true, outcome: "replayed", item: { id: input.commandId } });
+      const evidence = await admin.query(`SELECT
+        (SELECT count(*)::int FROM finance.recurring_expense_rules WHERE id=$1) AS rules,
+        (SELECT count(*)::int FROM platform.idempotency_keys WHERE property_id=$2 AND key_hash=$3) AS keys,
+        (SELECT count(*)::int FROM platform.product_audit_events WHERE property_id=$2 AND target_resource_id=$1::text) AS audits`,
+        [input.commandId, PROPERTY, hashKey(input.idempotencyKey)]);
+      expect(evidence.rows[0]).toEqual({ rules: 1, keys: 1, audits: 1 });
+    } finally {
+      await restricted.close();
+      await probe.end().catch(() => {});
+      await admin.query(`DROP OWNED BY ${role}; DROP ROLE ${role}`);
+    }
+  });
   async function cleanup() { await admin.query(`BEGIN; SET LOCAL session_replication_role=replica; DELETE FROM platform.product_audit_events WHERE property_id IN ('${PROPERTY}','${OTHER_PROPERTY}'); DELETE FROM platform.idempotency_keys WHERE property_id IN ('${PROPERTY}','${OTHER_PROPERTY}'); DELETE FROM finance.expenses WHERE property_id IN ('${PROPERTY}','${OTHER_PROPERTY}'); DELETE FROM finance.recurring_expense_rules WHERE property_id IN ('${PROPERTY}','${OTHER_PROPERTY}'); DELETE FROM finance.expense_categories WHERE property_id IN ('${PROPERTY}','${OTHER_PROPERTY}'); DELETE FROM pms.property_pricing_settings WHERE property_id IN ('${PROPERTY}','${OTHER_PROPERTY}'); DELETE FROM hotel_catalog.properties WHERE id IN ('${PROPERTY}','${OTHER_PROPERTY}'); DELETE FROM identity.users WHERE id='${ACTOR}'; COMMIT`); }
 });
 

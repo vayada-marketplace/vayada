@@ -14,6 +14,223 @@ import type {
 const fixedNow = new Date("2026-06-11T12:00:00.000Z");
 
 describe("target provider webhook routes", () => {
+  it.each([
+    ["stripe/connect", "stripe", true, 400],
+    ["stripe", "stripe/connect", true, 400],
+    ["stripe/connect", "stripe/connect", false, 503],
+  ] as const)(
+    "separates %s signature from %s (configured=%s)",
+    async (path, signer, configured, status) => {
+      const store = createMemoryProviderWebhookStore();
+      const app = buildApp({
+        providerWebhooks: {
+          secrets: {
+            stripe: "whsec_stripe_test",
+            stripeConnect: configured ? "whsec_stripe_connect_test" : undefined,
+          },
+          store,
+          now: () => fixedNow,
+        },
+      });
+      try {
+        const payload = providerFixture("stripe/connect").payload;
+        const response = await app.inject({
+          method: "POST",
+          url: `/webhooks/${path}`,
+          headers: fixtureHeaders(signer, payload),
+          payload: JSON.stringify(payload),
+        });
+        expect(response.statusCode).toBe(status);
+        expect(store.receipts).toHaveLength(0);
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
+  it.each([undefined, 123, "", "acct_", "acct_other"])(
+    "rejects inconsistent Connect account identity %s",
+    async (account) => {
+      const store = createMemoryProviderWebhookStore();
+      const app = buildApp({
+        providerWebhooks: {
+          secrets: { stripe: "whsec_stripe_test", stripeConnect: "whsec_stripe_connect_test" },
+          modes: { stripe: "mutating" },
+          stripeConnectMode: "mutating",
+          store,
+          now: () => fixedNow,
+        },
+      });
+      try {
+        const response = await postProviderPayload(app, "stripe/connect", {
+          id: "evt_account_mismatch",
+          type: "account.updated",
+          account,
+          data: { object: { id: "acct_owner" } },
+        });
+        expect(response.statusCode).toBe(400);
+        expect(store.receipts).toHaveLength(0);
+        expect(store.jobs).toHaveLength(0);
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
+  it.each([undefined, "ack_only_with_receipt"] as const)(
+    "keeps Connect %s nonmutating while platform intake mutates",
+    async (stripeConnectMode) => {
+      const store = createMemoryProviderWebhookStore();
+      const app = buildApp({
+        providerWebhooks: {
+          secrets: { stripe: "whsec_stripe_test", stripeConnect: "whsec_stripe_connect_test" },
+          modes: { stripe: "mutating" },
+          stripeConnectMode,
+          store,
+          now: () => fixedNow,
+        },
+      });
+      try {
+        const response = await postProviderFixture(app, "stripe/connect");
+        expect(response.statusCode).toBe(200);
+        expect(response.json().status).toBe(stripeConnectMode ? "acknowledged" : "observed");
+        expect(store.receipts).toHaveLength(1);
+        expect(store.receipts[0]?.provider).toBe("stripe");
+        expect(store.jobs).toHaveLength(0);
+        const platformDelivery = await postProviderPayload(
+          app,
+          "stripe",
+          providerFixture("stripe/connect").payload,
+        );
+        expect(platformDelivery.json().status).toBe("promoted");
+        expect(store.receipts).toHaveLength(1);
+        expect(store.jobs).toHaveLength(1);
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
+  it.each(["invoice.paid", "payout.paid", "customer.future_event"])(
+    "observes unsupported Connect event %s without platform billing effects",
+    async (type) => {
+      const store = createMemoryProviderWebhookStore();
+      const app = buildApp({
+        providerWebhooks: {
+          secrets: { stripe: "whsec_stripe_test", stripeConnect: "whsec_stripe_connect_test" },
+          modes: { stripe: "mutating" },
+          stripeConnectMode: "mutating",
+          store,
+          now: () => fixedNow,
+        },
+      });
+      try {
+        const payload = {
+          id: "evt_connected_unreviewed",
+          type,
+          account: "acct_owner",
+          data: {
+            object: { id: "sub_foreign", metadata: { vayada_property_id: "foreign-property" } },
+          },
+        };
+        const response = await postProviderPayload(app, "stripe/connect", payload);
+        expect(response.json().status).toBe("observed");
+        const redelivery = await postProviderPayload(app, "stripe", payload);
+        expect(redelivery.json().status).toBe("duplicate_observed");
+        expect(store.receipts[0]?.normalizedPreview.jobType).toBe("provider.webhook-review");
+        expect(store.domainEvents).toHaveLength(0);
+        expect(store.jobs).toHaveLength(0);
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
+  it.each([
+    ["payment_intent.amount_capturable_updated", "payment.authorized"],
+    ["payment_intent.succeeded", "payment.captured"],
+    ["payment_intent.canceled", "payment.terminal"],
+    ["payment_intent.payment_failed", "payment.terminal"],
+    ["charge.updated", "payment.fee_updated"],
+    ["account.updated", "finance.provider-account.updated"],
+  ])("replays minimized Connect %s once with account-scoped %s", async (type, domainEventType) => {
+    const store = createMemoryProviderWebhookStore();
+    const options = {
+      secrets: { stripe: "whsec_stripe_test", stripeConnect: "whsec_stripe_connect_test" },
+      store,
+      now: () => fixedNow,
+    };
+    const payload = {
+      id: "evt_connect_replay",
+      type,
+      account: "acct_owner",
+      data: {
+        object: {
+          id: type === "account.updated" ? "acct_owner" : "pi_connect",
+          amount: 42000,
+          payment_intent: "pi_connect",
+          balance_transaction: "txn_connect",
+          client_secret: "secret-do-not-retain",
+          email: "private@example.test",
+        },
+      },
+    };
+    const observed = buildApp({ logger: false, providerWebhooks: options });
+    try {
+      expect((await postProviderPayload(observed, "stripe/connect", payload)).json().status).toBe(
+        "observed",
+      );
+      expect(store.jobs).toHaveLength(0);
+      expect(store.receipts[0]).toMatchObject({
+        provider: "stripe",
+        rawHeaders: {},
+        rawPayload: { receipt_version: 1, account: "acct_owner" },
+      });
+      expect(JSON.stringify(store.receipts)).not.toMatch(/secret-do-not-retain|private@example/);
+    } finally {
+      await observed.close();
+    }
+    const mutating = buildApp({
+      logger: false,
+      providerWebhooks: {
+        ...options,
+        modes: { stripe: "mutating" },
+        stripeConnectMode: "mutating",
+      },
+    });
+    try {
+      expect((await postProviderPayload(mutating, "stripe/connect", payload)).json().status).toBe(
+        "promoted",
+      );
+      for (const endpoint of ["stripe/connect", "stripe"] as const) {
+        expect((await postProviderPayload(mutating, endpoint, payload)).json().status).toBe(
+          "duplicate",
+        );
+      }
+      expect(store.receipts).toHaveLength(1);
+      expect(store.jobs).toHaveLength(1);
+      expect(store.domainEvents).toHaveLength(1);
+      expect(store.domainEvents[0]?.domainEventType).toBe(domainEventType);
+      expect(store.domainEvents[0]?.domainEventKey).toContain(
+        createHash("sha256").update("acct_owner").digest("hex"),
+      );
+      const conflict = await postProviderPayload(mutating, "stripe/connect", {
+        ...payload,
+        account: "acct_other",
+        data: {
+          object: {
+            ...payload.data.object,
+            id: type === "account.updated" ? "acct_other" : "pi_connect",
+          },
+        },
+      });
+      expect(conflict.statusCode).toBe(409);
+      expect(store.jobs).toHaveLength(1);
+    } finally {
+      await mutating.close();
+    }
+  });
+
   it("observes ambiguous alteration ownership without queuing a scan", async () => {
     const store = createMemoryProviderWebhookStore();
     store.resolveChannexPropertyId = async () => {
@@ -1822,7 +2039,7 @@ function promotionStatusForReceipt(
 
 async function postProviderFixture(
   app: ReturnType<typeof buildApp>,
-  provider: "stripe" | "xendit" | "channex",
+  provider: "stripe" | "stripe/connect" | "xendit" | "channex",
   options: { invalidAuth?: boolean } = {},
 ) {
   const fixture = providerFixture(provider);
@@ -1848,7 +2065,7 @@ async function postChannexPayload(
 
 async function postProviderPayload(
   app: ReturnType<typeof buildApp>,
-  provider: "stripe" | "xendit",
+  provider: "stripe" | "stripe/connect" | "xendit",
   payload: Record<string, unknown>,
 ) {
   return app.inject({
@@ -1937,10 +2154,12 @@ function channexReviewPayload(
   };
 }
 
-function providerFixture(provider: "stripe" | "xendit" | "channex"): {
+function providerFixture(provider: "stripe" | "stripe/connect" | "xendit" | "channex"): {
   payload: Record<string, unknown>;
 } {
   switch (provider) {
+    case "stripe/connect":
+      return { payload: { ...providerFixture("stripe").payload, account: "acct_owner" } };
     case "stripe":
       return {
         payload: {
@@ -2026,14 +2245,19 @@ function xenditPayoutPayload(
 }
 
 function fixtureHeaders(
-  provider: "stripe" | "xendit" | "channex",
+  provider: "stripe" | "stripe/connect" | "xendit" | "channex",
   payload: Record<string, unknown>,
   invalidAuth = false,
 ): Record<string, string> {
   switch (provider) {
+    case "stripe/connect":
     case "stripe": {
       const timestamp = Math.floor(fixedNow.getTime() / 1000);
-      const secret = invalidAuth ? "wrong-secret" : "whsec_stripe_test";
+      const secret = invalidAuth
+        ? "wrong-secret"
+        : provider === "stripe/connect"
+          ? "whsec_stripe_connect_test"
+          : "whsec_stripe_test";
       const signature = createHmac("sha256", secret)
         .update(`${timestamp}.${JSON.stringify(payload)}`)
         .digest("hex");

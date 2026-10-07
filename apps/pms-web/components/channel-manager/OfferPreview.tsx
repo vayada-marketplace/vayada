@@ -5,7 +5,11 @@ import Link from "next/link";
 import { ApiErrorResponse } from "@/services/api/client";
 import { createReplacementPricingClient } from "@/services/api/replacementPricingClient";
 import { pmsOperationsRoomsReadService } from "@/services/rooms";
-import { readOfferPreview, type OfferPreviewResult } from "@/services/channex/offerPreview";
+import {
+  readOfferPreview,
+  requestOfferProvisioning,
+  type OfferPreviewResult,
+} from "@/services/channex/offerPreview";
 import { channelManagerButtonClass } from "./ChannelManagerUi";
 
 type Publication = NonNullable<
@@ -124,7 +128,8 @@ function PreviewSelection({
     [primary, setPrimary] = useState("");
   const [result, setResult] = useState<OfferPreviewResult | null>(null),
     [loading, setLoading] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [provisioned, setProvisioned] = useState(false);
   const [refreshRequired, setRefreshRequired] = useState(false);
   const sequence = useRef(0);
   useEffect(
@@ -139,6 +144,7 @@ function PreviewSelection({
     setResult(null);
     setLoading(false);
     setError("");
+    setProvisioned(false);
   };
   async function preview() {
     if (!room || !offerId || !primary) return;
@@ -163,6 +169,27 @@ function PreviewSelection({
         setPrimary("");
         setError("Pricing changed. Refresh published pricing and choose again.");
       } else setError("The preview could not be loaded. Try again or refresh published pricing.");
+    } finally {
+      if (current === sequence.current) setLoading(false);
+    }
+  }
+  async function provision() {
+    if (!room || !offerId || !primary || result?.kind !== "preview") return;
+    const current = ++sequence.current;
+    setLoading(true);
+    setError("");
+    try {
+      await requestOfferProvisioning(propertyId, room, offerId, Number(primary));
+      if (current === sequence.current) setProvisioned(true);
+    } catch (failure) {
+      if (current !== sequence.current) return;
+      if (failure instanceof ApiErrorResponse && failure.status === 403) {
+        onDenied();
+        return;
+      }
+      if (failure instanceof ApiErrorResponse && failure.status === 409) {
+        setError("Channex setup is not enabled for this property.");
+      } else setError("The Channex setup request could not be saved. Try again.");
     } finally {
       if (current === sequence.current) setLoading(false);
     }
@@ -237,7 +264,7 @@ function PreviewSelection({
       </label>
       <p id="primary-guest-help" className="text-sm text-gray-500">
         The default occupancy option for the channel rate. This does not multiply the price. This
-        choice is not saved.
+        choice is saved only when you request Channex setup.
       </p>
       <button
         type="button"
@@ -279,6 +306,14 @@ function PreviewSelection({
             Live setup still requires channel mapping, supported booking rules, and verified price
             and restriction delivery.
           </p>
+          <button
+            type="button"
+            onClick={() => void provision()}
+            disabled={loading || provisioned}
+            className={`${channelManagerButtonClass} bg-gray-950 text-white`}
+          >
+            {provisioned ? "Channex setup requested" : "Request Channex setup"}
+          </button>
         </div>
       )}
     </div>

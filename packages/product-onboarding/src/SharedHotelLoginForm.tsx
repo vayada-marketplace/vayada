@@ -13,6 +13,7 @@ export type SharedHotelLoginFormCopy = {
   subtitle: string;
   chooseOrganizationTitle: string;
   chooseOrganizationSubtitle: string;
+  useAnotherAccount?: string;
   emailLabel: string;
   passwordLabel: string;
   forgotPassword?: string;
@@ -46,6 +47,7 @@ export type SharedHotelLoginFormProps = {
   onPasswordChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onOrganizationSelect: (workosOrganizationId: string) => void;
+  onUseAnotherAccount?: () => void;
 };
 
 const MARKETING_BASE_URL = process.env.NEXT_PUBLIC_MARKETING_URL || "https://vayada.com";
@@ -89,6 +91,7 @@ export default function SharedHotelLoginForm({
   onPasswordChange,
   onSubmit,
   onOrganizationSelect,
+  onUseAnotherAccount,
 }: SharedHotelLoginFormProps) {
   const [showPassword, setShowPassword] = useState(false);
   const choosingOrganization = organizations !== null;
@@ -127,6 +130,16 @@ export default function SharedHotelLoginForm({
                     {organization.displayName}
                   </button>
                 ))}
+                {onUseAnotherAccount && copy.useAnotherAccount && (
+                  <button
+                    type="button"
+                    onClick={onUseAnotherAccount}
+                    disabled={isSubmitting}
+                    className="text-sm text-primary-600 disabled:opacity-60"
+                  >
+                    {copy.useAnotherAccount}
+                  </button>
+                )}
               </div>
             )}
 

@@ -21,7 +21,7 @@ export function readChannexInitialAriHistory(
                         AND a.reconciliation_evidence->'taskCount'=to_jsonb(cardinality(r.task_ids)))) AS verified
                  FROM pms.channex_offer_ari_attempts a
                  WHERE a.external_property_id=$1 AND a.external_rate_plan_id=$2
-                   AND a.state<>'released'
+                   AND a.state IN ('unresolved','reconciled')
                    AND ($4::uuid IS NULL OR a.id<>$4::uuid)
                  ORDER BY a.service_date`,
     [

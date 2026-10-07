@@ -13566,10 +13566,16 @@ describe("vayada-api", () => {
       pmsOperationsAllowedOrigins: ["https://pms.localhost"],
     });
     const url = `/api/pms/properties/${pmsPropertyId}/messaging/threads/${threadId}/provider-actions/no-reply-needed`;
-    const post = (key?: string, payload: unknown = { expectedVersion: 4 }, closure = false) =>
+    const post = (
+      key?: string,
+      payload: unknown = { expectedVersion: 4 },
+      closure: boolean | "preapprove" = false,
+    ) =>
       injectJson(app!, {
         method: "POST",
-        url: closure ? url.replace("no-reply-needed", "close") : url,
+        url: closure
+          ? url.replace("no-reply-needed", closure === "preapprove" ? "preapprove" : "close")
+          : url,
         headers: {
           authorization: "Bearer valid-token",
           ...(key ? { "idempotency-key": key } : {}),
@@ -13604,6 +13610,10 @@ describe("vayada-api", () => {
     await expect(post("closure", { expectedVersion: 4 }, true)).resolves.toMatchObject({
       statusCode: 202,
       body: { action: "channex_close" },
+    });
+    await expect(post("preapproval", { expectedVersion: 4 }, "preapprove")).resolves.toMatchObject({
+      statusCode: 202,
+      body: { action: "airbnb_preapprove" },
     });
     const beforeInvalid = calls.length;
     await expect(post()).resolves.toMatchObject({
@@ -13668,36 +13678,37 @@ describe("vayada-api", () => {
         status: 403,
       },
     ] as const;
-    for (const candidate of cases) {
-      app = buildAuthenticatedApp({
-        permissions: [...candidate.permissions] as PermissionKey[],
-        entitlements: "entitlements" in candidate ? [...candidate.entitlements] : [entitlement],
-        pmsInboxProviderActionPort: port,
-      });
-      const response = await app.inject({
-        method: "POST",
-        url: `/api/pms/properties/${"propertyId" in candidate ? candidate.propertyId : pmsPropertyId}/messaging/threads/13736000-0000-4000-8000-000000000001/provider-actions/no-reply-needed`,
-        headers: {
-          ...(candidate.name === "missing auth" ? {} : { authorization: "Bearer valid-token" }),
-          "content-type": "application/json",
-          "idempotency-key": "private-key",
-        },
-        payload: "{",
-      });
-      expect(response.statusCode, candidate.name).toBe(candidate.status);
-      const closure = await app.inject({
-        method: "POST",
-        url: `/api/pms/properties/${"propertyId" in candidate ? candidate.propertyId : pmsPropertyId}/messaging/threads/13736000-0000-4000-8000-000000000001/provider-actions/close`,
-        headers: {
-          ...(candidate.name === "missing auth" ? {} : { authorization: "Bearer valid-token" }),
-          "idempotency-key": "closure",
-        },
-        payload: { expectedVersion: 4 },
-      });
-      expect(closure.statusCode, candidate.name).toBe(candidate.status);
-      await app.close();
-      app = null;
-    }
+    for (const candidate of cases)
+      for (const endpoint of ["no-reply-needed", "preapprove"]) {
+        app = buildAuthenticatedApp({
+          permissions: [...candidate.permissions] as PermissionKey[],
+          entitlements: "entitlements" in candidate ? [...candidate.entitlements] : [entitlement],
+          pmsInboxProviderActionPort: port,
+        });
+        const response = await app.inject({
+          method: "POST",
+          url: `/api/pms/properties/${"propertyId" in candidate ? candidate.propertyId : pmsPropertyId}/messaging/threads/13736000-0000-4000-8000-000000000001/provider-actions/${endpoint}`,
+          headers: {
+            ...(candidate.name === "missing auth" ? {} : { authorization: "Bearer valid-token" }),
+            "content-type": "application/json",
+            "idempotency-key": "private-key",
+          },
+          payload: "{",
+        });
+        expect(response.statusCode, candidate.name).toBe(candidate.status);
+        const closure = await app.inject({
+          method: "POST",
+          url: `/api/pms/properties/${"propertyId" in candidate ? candidate.propertyId : pmsPropertyId}/messaging/threads/13736000-0000-4000-8000-000000000001/provider-actions/close`,
+          headers: {
+            ...(candidate.name === "missing auth" ? {} : { authorization: "Bearer valid-token" }),
+            "idempotency-key": "closure",
+          },
+          payload: { expectedVersion: 4 },
+        });
+        expect(closure.statusCode, candidate.name).toBe(candidate.status);
+        await app.close();
+        app = null;
+      }
     expect(dispatches).toHaveLength(0);
   });
 
@@ -13983,6 +13994,7 @@ describe("vayada-api", () => {
     for (const [path, payload] of [
       ["messages", { expectedThreadVersion: 4, text: "Test", attachmentMediaIds: [] }],
       ["provider-actions/no-reply-needed", { expectedVersion: 4 }],
+      ["provider-actions/preapprove", { expectedVersion: 4 }],
     ] as const) {
       for (const authorization of [undefined, "Bearer invalid-token", "Bearer valid-token"]) {
         const response = await injectJson(app, {
@@ -17507,9 +17519,17 @@ describe("vayada-api", () => {
 
   it.each([
     [{ chargesSettled: [123] }, "chargesSettled entries must be UUIDs."],
-    [{ fulfilledAddonSelectionIds: null }, "fulfilledAddonSelectionIds entries must be unique UUIDs."],
     [
-      { fulfilledAddonSelectionIds: ["f6855600-0000-0000-0000-000000000001", "F6855600-0000-0000-0000-000000000001"] },
+      { fulfilledAddonSelectionIds: null },
+      "fulfilledAddonSelectionIds entries must be unique UUIDs.",
+    ],
+    [
+      {
+        fulfilledAddonSelectionIds: [
+          "f6855600-0000-0000-0000-000000000001",
+          "F6855600-0000-0000-0000-000000000001",
+        ],
+      },
       "fulfilledAddonSelectionIds entries must be unique UUIDs.",
     ],
   ])("rejects malformed PMS check-out input before dispatch", async (patch, message) => {

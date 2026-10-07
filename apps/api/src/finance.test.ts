@@ -140,7 +140,7 @@ const cancellationPolicy: CancellationPolicy = {
 
 const affiliatePayoutSettings: FinanceAffiliatePayoutSettingsReadModel = {
   affiliateId,
-  marketplaceOrganizationId: "a6000000-0000-0000-0000-000000000686",
+  marketplaceOrganizationId: affiliateOrganizationId,
   payoutsEnabled: true,
   payoutProvider: "stripe",
   payoutCurrency: "EUR",
@@ -199,7 +199,7 @@ const affiliatePayoutItems: FinancePayout[] = [
     payoutId: "affiliate_payout_2026_06",
     ownerScope: "organization",
     propertyId: null,
-    organizationId: "a6000000-0000-0000-0000-000000000686",
+    organizationId: affiliateOrganizationId,
     relatedPropertyId: propertyId,
     guestBookingId: payoutGuestBookingId,
     paymentId: payoutPaymentId,
@@ -1358,10 +1358,7 @@ describe("finance route contracts", () => {
   });
 
   it("passes F1i affiliate payout settings and payout ledger fixtures in target mode", async () => {
-    app = buildFinanceApp({
-      permissions: ["affiliate.payout.manage"],
-      entitlements: [affiliatePayoutEntitlement()],
-    });
+    app = buildAffiliateFinanceApp({ repository: financeRepository });
 
     for (const caseId of [
       "affiliate-payout-settings-read",
@@ -1385,6 +1382,14 @@ describe("finance route contracts", () => {
       expect(response.statusCode, caseId).toBe(contractCase!.expected.status);
       if (contractCase!.expected.itemCount !== undefined) {
         expect(response.body.payouts, caseId).toHaveLength(contractCase!.expected.itemCount);
+      }
+      if (caseId === "affiliate-payout-settings-read") {
+        expect(response.body.marketplaceOrganizationId).toBe(affiliateOrganizationId);
+      }
+      if (caseId === "affiliate-payout-list-read") {
+        expect(response.body.payouts).toEqual([
+          expect.objectContaining({ organizationId: affiliateOrganizationId }),
+        ]);
       }
       assertIncludes(response.body, contractCase!.expected.mustInclude ?? [], caseId);
       assertExcludes(response.body, contractCase!.expected.mustExclude ?? [], caseId);
@@ -2792,6 +2797,17 @@ describe("finance route contracts", () => {
           if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") {
             return { rows: [] as T[], rowCount: 0 };
           }
+          if (text.includes("thresholdPending") && text.includes("AS blocked")) {
+            expect(values).toContain("EUR");
+            return { rows: [{ blocked: false }] as unknown as T[], rowCount: 1 };
+          }
+          if (
+            text.includes("SELECT id FROM finance.payout_settings") &&
+            text.includes("FOR UPDATE")
+          ) {
+            expect(values).toContain(affiliateId);
+            return { rows: [{ id: "settings_1" }] as unknown as T[], rowCount: 1 };
+          }
           if (text.includes("FROM identity.organization_resource_links link")) {
             expect(text).toContain("link.product = 'affiliate'");
             expect(text).toContain("link.resource_type = 'affiliate'");
@@ -2839,6 +2855,12 @@ describe("finance route contracts", () => {
             expect(text).toContain("'organization'");
             return { rows: [] as T[], rowCount: 1 };
           }
+          if (text.includes("WITH current_settings AS MATERIALIZED")) {
+            expect(text).toContain("affiliate_payout_payment_evidence_items");
+            expect(text).toContain("job.attempts_count>0 OR attempt.job_id IS NOT NULL");
+            expect(text).toContain("INSERT INTO platform.jobs");
+            return { rows: [] as T[], rowCount: 0 };
+          }
           if (text.includes("INSERT INTO platform.product_audit_events")) {
             expect(text).toContain("'finance.affiliate_payout_settings.updated'");
             expect(text).toMatch(/'organization',\s+\$3::uuid,\s+NULL/);
@@ -2864,7 +2886,7 @@ describe("finance route contracts", () => {
         payoutSchedule: "monthly",
       },
       commandMeta: {
-        sideEffects: ["audit_event"],
+        sideEffects: ["payout_job", "audit_event"],
         jobs: [],
       },
     });
@@ -4115,11 +4137,15 @@ const financeRepository: FinancePropertyReadRepository = {
       sourceFreshness,
     };
   },
-  async getAffiliatePayoutSettings(requestedAffiliateId) {
-    return requestedAffiliateId === affiliateId ? affiliatePayoutSettings : null;
+  async getAffiliatePayoutSettings(requestedAffiliateId, requestedOrganizationId) {
+    return requestedAffiliateId === affiliateId &&
+      requestedOrganizationId === affiliateOrganizationId
+      ? affiliatePayoutSettings
+      : null;
   },
-  async listAffiliatePayouts(requestedAffiliateId, query) {
-    if (requestedAffiliateId !== affiliateId) return null;
+  async listAffiliatePayouts(requestedAffiliateId, query, requestedOrganizationId) {
+    if (requestedAffiliateId !== affiliateId || requestedOrganizationId !== affiliateOrganizationId)
+      return null;
     const filtered = filterAffiliatePayouts(query);
     return {
       payouts: filtered.slice(query.offset, query.offset + query.limit),

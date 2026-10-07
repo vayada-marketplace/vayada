@@ -11,6 +11,10 @@ import {
 import { writeProductionIdentityPrivacyAudit } from "./productionIdentityPrivacyAuditWriter.js";
 import { readProductionIdentitySnapshot } from "./productionIdentitySnapshotReader.js";
 import { readProductionIdentityTargetState } from "./productionIdentityTargetReader.js";
+import {
+  readProductionIdentityProvenance,
+  writeProductionIdentityProvenance,
+} from "./productionIdentityProvenance.js";
 
 type QueryClient = Pick<pg.ClientBase, "query">;
 export type ProductionIdentityMigrationMode = "dry-run" | "apply";
@@ -29,6 +33,8 @@ export type ProductionIdentityMigrationServices = {
   buildPlan: typeof buildProductionIdentityPlan;
   writeCore: typeof writeProductionIdentityCore;
   writePrivacyAudit: typeof writeProductionIdentityPrivacyAudit;
+  readProvenance: typeof readProductionIdentityProvenance;
+  writeProvenance: typeof writeProductionIdentityProvenance;
 };
 
 const productionServices: ProductionIdentityMigrationServices = {
@@ -37,6 +43,8 @@ const productionServices: ProductionIdentityMigrationServices = {
   buildPlan: buildProductionIdentityPlan,
   writeCore: writeProductionIdentityCore,
   writePrivacyAudit: writeProductionIdentityPrivacyAudit,
+  readProvenance: readProductionIdentityProvenance,
+  writeProvenance: writeProductionIdentityProvenance,
 };
 
 export async function runProductionIdentityMigration(config: {
@@ -89,6 +97,7 @@ export async function runProductionIdentityTransaction(
       return report(input, plan, false);
     }
 
+    const before = await services.readProvenance(client, plan, snapshot.rows);
     await services.writeCore(client, plan);
     await services.writePrivacyAudit(client, plan);
     const verified = services.buildPlan(
@@ -103,6 +112,12 @@ export async function runProductionIdentityTransaction(
     )
       throw new Error("Post-write identity verification does not match the migration plan");
 
+    await services.writeProvenance(client, {
+      sourceRunId: input.sourceRunId,
+      checksum: plan.checksum,
+      before,
+      after: await services.readProvenance(client, plan, snapshot.rows),
+    });
     await client.query("COMMIT");
     transactionFinished = true;
     return report(input, plan, true);

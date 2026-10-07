@@ -13,6 +13,7 @@ import {
   setupIncompleteAffiliatePayoutSettings,
   setupIncompletePaymentSettings,
   type FinanceAffiliatePayoutListResponse,
+  type FinanceAffiliatePayoutDetail,
   type FinanceAffiliatePayoutProvider,
   type FinanceAffiliatePayoutSettingsPatchCommand,
   type FinanceAffiliatePayoutSettingsPatchResult,
@@ -127,7 +128,10 @@ const PROPERTY_PAYOUT_DISPATCH_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] =
   "audit_event",
 ];
 
-const AFFILIATE_PAYOUT_SETTINGS_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] = ["audit_event"];
+const AFFILIATE_PAYOUT_SETTINGS_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] = [
+  "payout_job",
+  "audit_event",
+];
 const PAYMENT_SETTINGS_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] = ["audit_event"];
 const STRIPE_COMPENSATION_TIMEOUT_MS = 10_000;
 const STRIPE_PROVIDER_ACCOUNT_CREATE_LEASE_MS = 5 * 60_000;
@@ -304,6 +308,24 @@ type FinancePayoutRow = {
   retryCount: number;
   total: string | number;
   sourceFreshness: unknown;
+};
+
+type FinanceAffiliatePayoutDetailRow = FinancePayoutRow & {
+  sensitiveDestinationRef: string | null;
+  providerAccountRef: string | null;
+};
+
+type FinanceAffiliatePayoutAllocationRow = {
+  earningEntryId: string;
+  propertyId: string;
+  bookingId: string;
+  agreementId: string;
+  recordedAt: Date | string;
+  currency: string;
+  currencyMinorUnit: number;
+  commissionMinor: string;
+  adjustmentMinor: string;
+  appliedMinor: string;
 };
 
 type FinanceReconciliationRow = {
@@ -870,9 +892,13 @@ export async function registerFinanceRoutes(
     "/finance/affiliates/:affiliateId/payout-settings",
     async (request, reply) => {
       const affiliateId = request.params.affiliateId;
-      if (!enforceFinanceAffiliatePolicy(request, reply, affiliateId)) return reply;
+      const context = enforceFinanceAffiliatePolicy(request, reply, affiliateId);
+      if (!context) return reply;
 
-      const settings = await options.repository.getAffiliatePayoutSettings?.(affiliateId);
+      const settings = await options.repository.getAffiliatePayoutSettings?.(
+        affiliateId,
+        context.selectedOrganization.organizationId,
+      );
       if (!settings) {
         reply.code(404);
         return {
@@ -924,14 +950,19 @@ export async function registerFinanceRoutes(
     "/finance/affiliates/:affiliateId/payouts",
     async (request, reply) => {
       const affiliateId = request.params.affiliateId;
-      if (!enforceFinanceAffiliatePolicy(request, reply, affiliateId)) return reply;
+      const context = enforceFinanceAffiliatePolicy(request, reply, affiliateId);
+      if (!context) return reply;
       const query = parsePayoutListQuery(request.query);
       if ("statusCode" in query) {
         reply.code(query.statusCode);
         return query;
       }
 
-      const result = await options.repository.listAffiliatePayouts?.(affiliateId, query);
+      const result = await options.repository.listAffiliatePayouts?.(
+        affiliateId,
+        query,
+        context.selectedOrganization.organizationId,
+      );
       if (!result) {
         reply.code(404);
         return {
@@ -1434,8 +1465,8 @@ export function createTargetFinancePropertySettingsRepository(config: {
       const result = await loadPayoutRows(pool, propertyId, query);
       return toPayoutListResponseBody(result, query);
     },
-    async getAffiliatePayoutSettings(affiliateId) {
-      const resource = await resolveAffiliateResource(pool, affiliateId);
+    async getAffiliatePayoutSettings(affiliateId, organizationId) {
+      const resource = await resolveAffiliateResource(pool, affiliateId, organizationId);
       if (!resource) return null;
       const row = await loadAffiliatePayoutSettingsRow(pool, affiliateId, resource.organizationId);
       if (row) return toAffiliatePayoutSettingsReadModel(row);
@@ -1447,8 +1478,8 @@ export function createTargetFinancePropertySettingsRepository(config: {
           )
         : null;
     },
-    async listAffiliatePayouts(affiliateId, query) {
-      const resource = await resolveAffiliateResource(pool, affiliateId);
+    async listAffiliatePayouts(affiliateId, query, organizationId) {
+      const resource = await resolveAffiliateResource(pool, affiliateId, organizationId);
       if (!resource) return null;
       const result = await loadAffiliatePayoutRows(
         pool,
@@ -1457,6 +1488,9 @@ export function createTargetFinancePropertySettingsRepository(config: {
         query,
       );
       return toAffiliatePayoutListResponseBody(result, query);
+    },
+    async getAffiliatePayoutDetail(affiliateId, organizationId, payoutId, currency) {
+      return loadAffiliatePayoutDetail(pool, affiliateId, organizationId, payoutId, currency);
     },
     async listReconciliationItems(propertyId, view, query) {
       const result = await loadReconciliationRows(pool, propertyId, view, query);
@@ -4552,13 +4586,40 @@ async function updateAffiliatePayoutSettingsInClient(
   client: FinancePropertySettingsWriteClient,
   command: FinanceAffiliatePayoutSettingsPatchCommand,
 ): Promise<FinanceAffiliatePayoutSettingsPatchResult> {
-  const affiliateResource = await resolveAffiliateResource(client, command.affiliateId);
+  const organizationId =
+    command.audit.actor.kind === "user" ? command.audit.actor.organizationId : undefined;
+  const affiliateResource = await resolveAffiliateResource(
+    client,
+    command.affiliateId,
+    organizationId,
+  );
   if (!affiliateResource) {
     return {
       ok: false,
       statusCode: 404,
       code: "affiliate_not_found",
       message: "Affiliate finance resource was not found.",
+    };
+  }
+  await lockAffiliatePayoutSettingsForUpdate(
+    client,
+    command.affiliateId,
+    affiliateResource.organizationId,
+  );
+  if (
+    command.payload.payoutCurrency &&
+    (await affiliateThresholdBalanceBlocksCurrencyChange(
+      client,
+      command.affiliateId,
+      affiliateResource.organizationId,
+      command.payload.payoutCurrency,
+    ))
+  ) {
+    return {
+      ok: false,
+      statusCode: 409,
+      code: "invalid_command",
+      message: "Settle the existing threshold balance before changing payout currency.",
     };
   }
 
@@ -4662,6 +4723,12 @@ async function updateAffiliatePayoutSettingsInClient(
   }
 
   await upsertAffiliatePayoutSettings(client, command, affiliateResource.organizationId);
+  await reconcileAffiliateThresholdPayoutsAfterSettingsUpdate(
+    client,
+    command.affiliateId,
+    affiliateResource.organizationId,
+    requestedAt,
+  );
   await recordAffiliatePayoutSettingsAuditEvent(
     client,
     command,
@@ -4687,6 +4754,136 @@ async function updateAffiliatePayoutSettingsInClient(
     settings,
     commandMeta: buildAffiliatePayoutSettingsCommandMeta(command),
   };
+}
+
+async function lockAffiliatePayoutSettingsForUpdate(
+  client: FinancePropertySettingsWriteClient,
+  affiliateId: string,
+  organizationId: string,
+): Promise<void> {
+  await client.query(
+    `SELECT id FROM finance.payout_settings
+     WHERE owner_scope='organization' AND organization_id=$1::uuid
+       AND payout_preferences->>'affiliateId'=$2
+     ORDER BY updated_at DESC,id LIMIT 1 FOR UPDATE`,
+    [organizationId, affiliateId],
+  );
+}
+
+async function affiliateThresholdBalanceBlocksCurrencyChange(
+  client: FinancePropertySettingsWriteClient,
+  affiliateId: string,
+  organizationId: string,
+  nextCurrency: string,
+): Promise<boolean> {
+  const result = await client.query<{ blocked: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM finance.payout_settings settings
+       JOIN finance.payouts payout ON payout.payout_setting_id=settings.id
+        AND payout.organization_id=settings.organization_id
+       WHERE settings.owner_scope='organization' AND settings.organization_id=$1::uuid
+         AND settings.payout_preferences->>'affiliateId'=$2
+         AND settings.default_currency<>$3
+         AND payout.owner_scope='organization' AND payout.payout_status='pending'
+         AND payout.provider_payout_id IS NULL
+         AND payout.payout_metadata->>'affiliateId'=$2
+         AND payout.payout_metadata->>'thresholdPending'='true'
+     ) AS blocked`,
+    [organizationId, affiliateId, nextCurrency],
+  );
+  return Boolean(result.rows[0]?.blocked);
+}
+
+async function reconcileAffiliateThresholdPayoutsAfterSettingsUpdate(
+  client: FinancePropertySettingsWriteClient,
+  affiliateId: string,
+  organizationId: string,
+  requestedAt: string,
+): Promise<void> {
+  await client.query(
+    `WITH current_settings AS MATERIALIZED (
+       SELECT settings.id,settings.payout_method,settings.default_currency,
+         COALESCE(settings.schedule->>'type','monthly') AS schedule_type,
+         NULLIF(settings.schedule->>'thresholdAmount','')::numeric AS threshold_amount,
+         settings.organization_provider_account_id
+       FROM finance.payout_settings settings
+       LEFT JOIN finance.payment_provider_accounts account
+         ON account.id=settings.organization_provider_account_id
+        AND account.organization_id=settings.organization_id
+        AND account.account_scope='organization'
+       WHERE settings.owner_scope='organization' AND settings.organization_id=$1::uuid
+         AND settings.payout_preferences->>'affiliateId'=$2 AND settings.status='active'
+         AND settings.payout_method IN ('stripe','manual','bank_transfer','bank','bank_account')
+         AND NOT (settings.payout_method='stripe' AND
+           COALESCE(settings.schedule->>'type','monthly')='manual')
+         AND (settings.payout_method NOT IN ('bank_transfer','bank','bank_account') OR
+           settings.sensitive_destination_ref IS NOT NULL)
+         AND (COALESCE(settings.schedule->>'type','monthly')<>'threshold' OR
+           NULLIF(settings.schedule->>'thresholdAmount','')::numeric>0)
+         AND (settings.payout_method<>'stripe' OR (
+           account.provider='stripe' AND account.status='active' AND account.payouts_enabled=TRUE
+         ))
+       ORDER BY settings.updated_at DESC,settings.id
+       LIMIT 1
+     ), safe_payouts AS MATERIALIZED (
+       SELECT payout.id,payout.amount
+       FROM finance.payouts payout,current_settings settings
+       WHERE payout.owner_scope='organization' AND payout.organization_id=$1::uuid
+         AND payout.payout_setting_id=settings.id AND payout.currency=settings.default_currency
+         AND payout.payout_status='pending' AND payout.provider_payout_id IS NULL
+         AND payout.payout_metadata->>'affiliateId'=$2
+         AND payout.payout_metadata->>'thresholdPending'='true'
+         AND NOT EXISTS (
+           SELECT 1 FROM platform.jobs job
+           LEFT JOIN platform.job_attempts attempt ON attempt.job_id=job.id
+           WHERE job.queue_name='finance-affiliate-payout-dispatch'
+             AND job.job_key='finance.dispatch-affiliate-payout:affiliate:' || $2 ||
+               ':payout:' || payout.id::text || ':v1'
+             AND (job.attempts_count>0 OR attempt.job_id IS NOT NULL)
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM finance.affiliate_payout_payment_evidence_items evidence_item
+           WHERE evidence_item.payout_id=payout.id
+         )
+       FOR UPDATE OF payout
+     ), decision AS (
+       SELECT settings.*,
+         settings.schedule_type<>'threshold' OR
+           COALESCE((SELECT SUM(amount) FROM safe_payouts),0)>=settings.threshold_amount AS release
+       FROM current_settings settings
+     ), migrated AS (
+       UPDATE finance.payouts payout
+       SET organization_provider_account_id=CASE WHEN decision.payout_method='stripe'
+             THEN decision.organization_provider_account_id ELSE NULL END,
+         payout_status=CASE WHEN decision.release AND decision.schedule_type<>'manual'
+             THEN 'scheduled' ELSE payout.payout_status END,
+         scheduled_at=CASE WHEN decision.release AND decision.schedule_type='threshold' THEN $3::timestamptz
+           WHEN decision.release AND decision.schedule_type='monthly' THEN
+             CASE WHEN date_trunc('month',$3::timestamptz)+interval '14 days'>$3::timestamptz
+               THEN date_trunc('month',$3::timestamptz)+interval '14 days'
+               ELSE date_trunc('month',$3::timestamptz)+interval '1 month 14 days' END
+           ELSE payout.scheduled_at END,
+         payout_metadata=(jsonb_set(payout.payout_metadata,'{affiliatePayoutMethod}',
+             to_jsonb(decision.payout_method)) || CASE WHEN decision.release
+               THEN '{"affiliateSettlementReady":true}'::jsonb ELSE '{}'::jsonb END)
+             - CASE WHEN decision.release THEN 'thresholdPending' ELSE '' END,
+         updated_at=$3::timestamptz
+       FROM decision
+       WHERE payout.id IN (SELECT id FROM safe_payouts)
+       RETURNING payout.id,payout.scheduled_at,decision.payout_method,decision.schedule_type,
+         decision.release
+     )
+     INSERT INTO platform.jobs (job_key,queue_name,job_type,status,run_after,tenant_scope,
+       organization_id,resource_product,resource_type,resource_id,payload)
+     SELECT 'finance.dispatch-affiliate-payout:affiliate:' || $2 || ':payout:' || id::text || ':v1',
+       'finance-affiliate-payout-dispatch','finance.dispatch-affiliate-payout','pending',
+       COALESCE(scheduled_at,$3::timestamptz),'organization',$1::uuid,'finance','payout',id::text,
+       jsonb_build_object('payoutId',id::text,'affiliateId',$2)
+     FROM migrated
+     WHERE release AND payout_method='stripe' AND schedule_type<>'manual'
+     ON CONFLICT (queue_name,job_key) DO NOTHING`,
+    [organizationId, affiliateId, requestedAt],
+  );
 }
 
 async function upsertAffiliatePayoutSettings(
@@ -5242,21 +5439,23 @@ async function loadPaymentSettingsRow(
 async function resolveAffiliateResource(
   pool: FinanceQueryExecutor,
   affiliateId: string,
+  organizationId?: string,
 ): Promise<FinanceAffiliateResourceRow | null> {
   const result = await pool.query<FinanceAffiliateResourceRow>(
     `SELECT link.organization_id::text AS "organizationId"
      FROM identity.organization_resource_links link
      JOIN identity.organizations organization
        ON organization.id = link.organization_id
-      AND organization.kind = 'affiliate_partner'
+      AND organization.kind IN ('affiliate_partner', 'creator_workspace')
       AND organization.status = 'active'
      WHERE link.product = 'affiliate'
        AND link.resource_type = 'affiliate'
        AND link.resource_id = $1
+       AND ($2::uuid IS NULL OR link.organization_id = $2::uuid)
        AND link.status = 'active'
      ORDER BY link.updated_at DESC
      LIMIT 1`,
-    [affiliateId],
+    [affiliateId, organizationId ?? null],
   );
   return result.rows[0] ?? null;
 }
@@ -5286,7 +5485,7 @@ async function loadAffiliatePayoutSettingsRow(
      FROM identity.organization_resource_links link
      JOIN identity.organizations organization
        ON organization.id = link.organization_id
-      AND organization.kind = 'affiliate_partner'
+      AND organization.kind IN ('affiliate_partner', 'creator_workspace')
       AND organization.status = 'active'
      LEFT JOIN finance.payout_settings settings
        ON settings.organization_id = link.organization_id
@@ -5482,6 +5681,76 @@ async function loadAffiliatePayoutRows(
       sql: affiliatePayoutTotalSql(),
       values: [affiliateId, organizationId, query.status ?? null, query.provider ?? null],
     }),
+  };
+}
+
+async function loadAffiliatePayoutDetail(
+  pool: FinanceQueryExecutor,
+  affiliateId: string,
+  organizationId: string,
+  payoutId: string,
+  currency: string,
+): Promise<FinanceAffiliatePayoutDetail | null> {
+  const payout = await pool.query<FinanceAffiliatePayoutDetailRow>(
+    `SELECT payout.id::text AS "payoutId",payout.owner_scope AS "ownerScope",
+       payout.property_id::text AS "propertyId",payout.organization_id::text AS "organizationId",
+       payout.related_property_id::text AS "relatedPropertyId",
+       payout.guest_booking_id::text AS "guestBookingId",payout.payment_id::text AS "paymentId",
+       payout.payout_status AS "payoutStatus",payout.amount::text,payout.fee_amount::text AS "feeAmount",
+       payout.net_amount::text AS "netAmount",payout.currency,
+       COALESCE(account.provider,'manual') AS provider,payout.provider_payout_id AS "providerPayoutId",
+       payout.scheduled_at AS "scheduledAt",payout.paid_at AS "paidAt",
+       payout.failed_at AS "failedAt",payout.failure_code AS "failureCode",
+       payout.retry_count AS "retryCount",'1'::text AS total,'{}'::jsonb AS "sourceFreshness",
+       settings.sensitive_destination_ref AS "sensitiveDestinationRef",
+       account.provider_account_id AS "providerAccountRef"
+     FROM finance.payouts payout
+     LEFT JOIN finance.payout_settings settings ON settings.id=payout.payout_setting_id
+       AND settings.organization_id=payout.organization_id
+     LEFT JOIN finance.payment_provider_accounts account
+       ON account.id=payout.organization_provider_account_id
+       AND account.organization_id=payout.organization_id AND account.account_scope='organization'
+     WHERE payout.id=$1::uuid AND payout.organization_id=$2::uuid
+       AND payout.owner_scope='organization' AND payout.currency=$3
+       AND COALESCE(payout.payout_metadata->>'affiliateId',payout.payout_metadata->>'affiliate_id')=$4`,
+    [payoutId, organizationId, currency, affiliateId],
+  );
+  const row = payout.rows[0];
+  if (!row) return null;
+  const allocations = await pool.query<FinanceAffiliatePayoutAllocationRow>(
+    `SELECT allocation.earning_entry_id::text AS "earningEntryId",
+       allocation.property_id::text AS "propertyId",allocation.booking_id AS "bookingId",
+       allocation.agreement_id AS "agreementId",allocation.recorded_at AS "recordedAt",
+       allocation.currency,allocation.currency_minor_unit AS "currencyMinorUnit",
+       allocation.commission_minor::text AS "commissionMinor",
+       allocation.adjustment_minor::text AS "adjustmentMinor",item.applied_minor::text AS "appliedMinor"
+     FROM finance.affiliate_earning_allocation_items item
+     JOIN finance.affiliate_earning_allocations allocation
+       ON allocation.earning_entry_id=item.earning_entry_id
+     WHERE item.payout_id=$1::uuid AND allocation.organization_id=$2::uuid
+       AND allocation.affiliate_id=$3 AND allocation.currency=$4
+     ORDER BY allocation.recorded_at,allocation.earning_entry_id`,
+    [payoutId, organizationId, affiliateId, currency],
+  );
+  return {
+    ...toPayout(row),
+    guestBookingId: null,
+    paymentId: null,
+    providerPayoutId: null,
+    maskedDestination: row.sensitiveDestinationRef ? "Destination ••••" : null,
+    maskedProviderReference: maskReference(row.providerPayoutId ?? row.providerAccountRef),
+    includedEarnings: allocations.rows.map((allocation) => ({
+      earningEntryId: allocation.earningEntryId,
+      propertyId: allocation.propertyId,
+      bookingReference: maskReference(allocation.bookingId) ?? "••••",
+      agreementId: allocation.agreementId,
+      recordedAt: utcDateTime(allocation.recordedAt, ""),
+      currency: currencyCode(allocation.currency),
+      currencyMinorUnit: allocation.currencyMinorUnit,
+      commissionMinor: minorInteger(allocation.commissionMinor),
+      adjustmentMinor: minorInteger(allocation.adjustmentMinor),
+      appliedMinor: minorInteger(allocation.appliedMinor),
+    })),
   };
 }
 
@@ -6992,16 +7261,16 @@ function enforceFinanceAffiliatePolicy(
   request: FastifyRequest,
   reply: FastifyReply,
   affiliateId: string,
-): boolean {
+): RequestContext | null {
   const policy = financeAffiliatePolicy(affiliateId);
   try {
     enforceRoutePolicy(request, policy);
-    return true;
+    return requireAuthContext(request);
   } catch (error) {
     const accessError = toFinanceAffiliateAccessError(error, request, affiliateId);
     if (!accessError) throw error;
     reply.code(accessError.statusCode).send(accessError);
-    return false;
+    return null;
   }
 }
 
@@ -7581,6 +7850,15 @@ function decimalString(value: unknown): string {
   if (typeof value === "number" && Number.isFinite(value)) return value.toFixed(2);
   if (typeof value === "string" && value.trim()) return value;
   return "0.00";
+}
+
+function minorInteger(value: unknown): string {
+  return typeof value === "string" && /^-?\d+$/.test(value) ? value : "0";
+}
+
+function maskReference(value: string | null): string | null {
+  if (!value) return null;
+  return value.length > 4 ? `••••${value.slice(-4)}` : "••••";
 }
 
 function sha256(value: string): string {

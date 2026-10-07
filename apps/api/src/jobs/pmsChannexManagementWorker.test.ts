@@ -14,6 +14,15 @@ import {
 const now = new Date("2026-08-13T10:00:00.000Z");
 
 describe("PMS Channex management worker", () => {
+  it("continues a retained published rate creation", async () => {
+    const claimed = { ...job(), input: { ...job().input, operationType: "sync_ari" as const } };
+    const harness = store(claimed);
+    const progress = { ok: false as const, code: "offer_create_retained" as const, attemptId: "saved-rate" };
+    expect(await runPmsChannexManagementWorkerOnce({
+      store: harness.port, provider: { execute: async () => progress }, workerId: "worker-1", now,
+    })).toMatchObject({ outcome: "continued" });
+    expect(harness.continueUpload).toHaveBeenCalledWith(claimed, progress, { workerId: "worker-1", now });
+  });
   it("continues retained uploads even at the retry limit without reporting success or failure", async () => {
     const claimed = {
       ...job(),

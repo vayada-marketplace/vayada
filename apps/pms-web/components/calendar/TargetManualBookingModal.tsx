@@ -13,6 +13,8 @@ import {
 import { CalendarRoom, CalendarRoomType, calendarService } from "@/services/calendar";
 import type { BookingAddon } from "@/services/bookings";
 import { useTranslation } from "@/lib/i18n";
+import { NationalitySelect } from "@vayada/locale-ui/NationalitySelect";
+import PhoneNumberInput, { phoneCountryOrEmpty, phoneToE164 } from "@/components/PhoneNumberInput";
 
 // prettier-ignore
 const SOURCES = [["call", "calendar.targetManualBooking.sourceCall"], ["email", "calendar.targetManualBooking.sourceEmail"], ["whatsapp", "calendar.targetManualBooking.sourceWhatsApp"], ["walk_in", "calendar.targetManualBooking.sourceWalkIn"], ["social_media", "calendar.targetManualBooking.sourceSocialMedia"], ["other", "calendar.targetManualBooking.sourceOther"]] as const;
@@ -47,6 +49,22 @@ function amount(value: string): string | null {
   return value.trim() && Number.isFinite(parsed) && parsed >= 0 ? parsed.toFixed(2) : null;
 }
 
+// Flexible first, then Non-refundable, then any other configured plan; Custom only when none exist.
+function defaultRatePlanId(type: CalendarRoomType | undefined): string {
+  const plans = type?.ratePlans ?? [];
+  const plan =
+    plans.find((item) => item.rateType === "flexible") ??
+    plans.find((item) => item.rateType === "non_refundable") ??
+    plans[0];
+  return plan?.id ?? "custom";
+}
+
+// Server amounts are exact decimals: keep cents when present (a 150.50 custom rate is not €151).
+function money(amountDecimal: string, currency: string): string {
+  const amount = Number(amountDecimal);
+  return formatCurrency(amount, currency, Number.isInteger(amount) ? 0 : 2);
+}
+
 function stayDefaults(
   key: number,
   roomId: string,
@@ -64,7 +82,7 @@ function stayDefaults(
     checkOut,
     adults: 1,
     children: 0,
-    ratePlanId: type?.ratePlans[0]?.id ?? "missing",
+    ratePlanId: defaultRatePlanId(type),
     nightlyRate: "",
   };
 }
@@ -122,6 +140,7 @@ export default function TargetManualBookingModal({
   const firstRoom = rooms.find((room) => room.id === initialRoomId) ?? rooms[0];
   // prettier-ignore
   const [stays, setStays] = useState(() => [stayDefaults(1, firstRoom?.id ?? "", initialCheckIn, initialCheckOut, roomTypes, rooms)]), [addons, setAddons] = useState<BookingAddon[]>([]), [addonPackages, setAddonPackages] = useState<Record<string, number>>({}), [addonState, setAddonState] = useState<"loading" | "ready" | "error">("loading"), [firstName, setFirstName] = useState(""), [lastName, setLastName] = useState(""), [email, setEmail] = useState(""), [phone, setPhone] = useState(""), [countryCode, setCountryCode] = useState(""), [source, setSource] = useState<PmsManualBookingCreateInput["directSource"]>("call"), [method, setMethod] = useState<PmsManualBookingCreateInput["payment"]["expectedMethod"]>("pay_at_property"), [settlement, setSettlement] = useState<"paid" | "unpaid">("unpaid"), [specialRequests, setSpecialRequests] = useState(""), [privateNote, setPrivateNote] = useState(""), [previewEvidence, setPreviewEvidence] = useState<{ key: string; result: PmsManualBookingPreviewResult } | null>(null), [previewState, setPreviewState] = useState<"idle" | "loading" | "error">("idle"), [message, setMessage] = useState(""), [stayError, setStayError] = useState<{ key: number; field: string; message: string } | null>(null), [submitting, setSubmitting] = useState(false), [retryLocked, setRetryLocked] = useState(false), [focusTarget, setFocusTarget] = useState<string | null>(null), [canRecordPaidPayment, setCanRecordPaidPayment] = useState(suppliedPaidCapability ?? false);
+  const [phoneCountry, setPhoneCountry] = useState("");
   const [showPreviewSpinner, setShowPreviewSpinner] = useState(false);
   const [previewMessage, setPreviewMessage] = useState("");
   const [previewCanRetry, setPreviewCanRetry] = useState(false);
@@ -133,6 +152,18 @@ export default function TargetManualBookingModal({
 
   // prettier-ignore
   useEffect(() => { if (suppliedPaidCapability !== undefined) return setCanRecordPaidPayment(suppliedPaidCapability); void calendarService.getManualBookingCapabilities().then((capability) => setCanRecordPaidPayment(capability.canRecordPaidPayment)); }, [suppliedPaidCapability]);
+
+  // Default the phone country code to the property's country (VAY-647 §4).
+  useEffect(() => {
+    let active = true;
+    calendarService.getPropertyCountry().then(
+      (code) => active && setPhoneCountry((current) => current || phoneCountryOrEmpty(code)),
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!focusTarget) return;
@@ -170,7 +201,6 @@ export default function TargetManualBookingModal({
         stay.children < 0 ||
         stay.adults + stay.children > roomType.maxOccupancy ||
         conflicts.has(index) ||
-        stay.ratePlanId === "missing" ||
         (stay.ratePlanId === "custom" && override === null)
       )
         return null;
@@ -194,14 +224,9 @@ export default function TargetManualBookingModal({
   }, [addonPackages, addons, conflicts, roomTypes, rooms, stays]);
   const previewKey = previewInput ? JSON.stringify(previewInput) : null;
   const preview = previewEvidence?.key === previewKey ? previewEvidence.result : null;
-  const missingRateStay = stays.find(
-    (stay) => stay.ratePlanId === "missing" && stay.checkIn && stay.checkOut > stay.checkIn,
+  const customRatePending = stays.some(
+    (stay) => stay.ratePlanId === "custom" && amount(stay.nightlyRate) === null,
   );
-  const missingRateMessage = missingRateStay
-    ? t("calendar.targetManualBooking.noRateFound", {
-        range: `${missingRateStay.checkIn} – ${missingRateStay.checkOut}`,
-      })
-    : "";
 
   useEffect(() => {
     if (!previewInput) {
@@ -263,11 +288,7 @@ export default function TargetManualBookingModal({
   function changeRoom(index: number, roomId: string) {
     const room = rooms.find((item) => item.id === roomId),
       roomType = roomTypes.find((item) => item.id === room?.roomTypeId);
-    updateStay(index, {
-      roomId,
-      ratePlanId: roomType?.ratePlans[0]?.id ?? "missing",
-      nightlyRate: "",
-    });
+    updateStay(index, { roomId, ratePlanId: defaultRatePlanId(roomType), nightlyRate: "" });
   }
   function addStay() {
     if (stays.length >= 20) return;
@@ -296,10 +317,10 @@ export default function TargetManualBookingModal({
     setMessage("");
     setStayError(null);
     const retry = retryLocked && attempt.current;
-    const phoneE164 = phone.trim();
+    const phoneE164 = phoneToE164(phoneCountry, phone);
     const isoCountry = countryCode.trim().toUpperCase();
-    if (!retry && phoneE164 && !/^\+[1-9]\d{7,14}$/.test(phoneE164))
-      return setMessage(t("calendar.targetManualBooking.phoneValidation"));
+    if (!retry && phoneE164 === null)
+      return setMessage(t("calendar.targetManualBooking.phoneInvalid"));
     if (!retry && isoCountry && !/^[A-Z]{2}$/.test(isoCountry))
       return setMessage(t("calendar.targetManualBooking.countryValidation"));
     if (!retry && (!previewInput || !preview || previewState !== "idle"))
@@ -337,7 +358,7 @@ export default function TargetManualBookingModal({
 
   const previewTotal = preview ? (
     t("calendar.targetManualBooking.total", {
-      amount: formatCurrency(Number(preview.grandTotal.amountDecimal), preview.currency),
+      amount: money(preview.grandTotal.amountDecimal, preview.currency),
     })
   ) : previewState === "loading" ? (
     <span className="inline-flex items-center gap-2" role="status">
@@ -350,8 +371,8 @@ export default function TargetManualBookingModal({
       ) : null}
       {t("calendar.targetManualBooking.calculatingTotal")}
     </span>
-  ) : missingRateMessage ? (
-    t("calendar.targetManualBooking.totalUnavailable")
+  ) : customRatePending ? (
+    t("calendar.targetManualBooking.enterCustomRateForTotal")
   ) : (
     t("calendar.targetManualBooking.selectStayForTotal")
   );
@@ -427,6 +448,7 @@ export default function TargetManualBookingModal({
                       roomType && stay.adults + stay.children > roomType.maxOccupancy,
                     ),
                     conflict = conflicts.has(index),
+                    noPlanConfigured = Boolean(roomType && roomType.ratePlans.length === 0),
                     serverError = stayError?.key === stay.key ? stayError : null,
                     serverStay = preview?.stays.find((item) => item.position === index + 1);
                   return (
@@ -608,7 +630,9 @@ export default function TargetManualBookingModal({
                             aria-describedby={
                               serverError?.field === "ratePlanId"
                                 ? `stay-server-${stay.key}`
-                                : undefined
+                                : noPlanConfigured
+                                  ? `stay-no-plan-${stay.key}`
+                                  : undefined
                             }
                             value={stay.ratePlanId}
                             onChange={(event) =>
@@ -617,11 +641,6 @@ export default function TargetManualBookingModal({
                             className={inputClass}
                           >
                             {" "}
-                            {stay.ratePlanId === "missing" && (
-                              <option value="missing" disabled>
-                                {t("calendar.targetManualBooking.noRateAvailable")}
-                              </option>
-                            )}{" "}
                             {roomType?.ratePlans.map((plan) => (
                               <option key={plan.id} value={plan.id}>
                                 {plan.name}
@@ -662,6 +681,11 @@ export default function TargetManualBookingModal({
                           />{" "}
                         </label>{" "}
                       </div>
+                      {noPlanConfigured && (
+                        <p id={`stay-no-plan-${stay.key}`} className="mt-2 text-xs text-gray-600">
+                          {t("calendar.targetManualBooking.noRatePlanConfigured")}
+                        </p>
+                      )}
                       {occupancyExceeded && (
                         <p
                           id={`stay-occupancy-${stay.key}`}
@@ -697,22 +721,20 @@ export default function TargetManualBookingModal({
                       >
                         {" "}
                         <div className="flex justify-between">
-                          <span>
-                            {t("calendar.targetManualBooking.standard")}{" "}
-                            {serverStay?.standardTotal
-                              ? formatCurrency(
-                                  Number(serverStay.standardTotal.amountDecimal),
-                                  preview!.currency,
-                                )
-                              : "—"}
-                          </span>
-                          <strong>
-                            {t("calendar.targetManualBooking.applied")}{" "}
+                          {stay.ratePlanId !== "custom" && (
+                            <span>
+                              {t("calendar.targetManualBooking.standard")}{" "}
+                              {serverStay?.standardTotal
+                                ? money(serverStay.standardTotal.amountDecimal, preview!.currency)
+                                : "—"}
+                            </span>
+                          )}
+                          <strong className="ml-auto">
+                            {stay.ratePlanId === "custom"
+                              ? t("calendar.targetManualBooking.custom")
+                              : t("calendar.targetManualBooking.applied")}{" "}
                             {serverStay
-                              ? formatCurrency(
-                                  Number(serverStay.appliedTotal.amountDecimal),
-                                  preview!.currency,
-                                )
+                              ? money(serverStay.appliedTotal.amountDecimal, preview!.currency)
                               : previewState === "loading"
                                 ? t("calendar.targetManualBooking.calculating")
                                 : "—"}
@@ -726,12 +748,9 @@ export default function TargetManualBookingModal({
                                 <span>{night.serviceDate}</span>
                                 <span>
                                   {night.standard
-                                    ? `${formatCurrency(Number(night.standard.amountDecimal), preview!.currency)} → `
+                                    ? `${money(night.standard.amountDecimal, preview!.currency)} → `
                                     : ""}
-                                  {formatCurrency(
-                                    Number(night.applied.amountDecimal),
-                                    preview!.currency,
-                                  )}
+                                  {money(night.applied.amountDecimal, preview!.currency)}
                                 </span>
                               </li>
                             ))}{" "}
@@ -793,34 +812,30 @@ export default function TargetManualBookingModal({
                     required
                   />{" "}
                 </label>
-                <div className="grid grid-cols-3 gap-3">
-                  <label className={`${labelClass} col-span-2`}>
-                    {t("calendar.newBookingModal.phoneLabel")}
-                    <input
-                      name="phoneE164"
-                      type="tel"
-                      pattern="\+[1-9][0-9]{7,14}"
-                      placeholder="+306900000000"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      className={inputClass}
-                    />{" "}
-                    <span className="font-normal text-gray-500">
-                      {t("calendar.targetManualBooking.includeCountryCode")}
-                    </span>{" "}
-                  </label>
-                  <label className={labelClass}>
-                    {" "}
-                    {t("calendar.targetManualBooking.guestCountry")}{" "}
-                    <input
-                      name="countryCode"
-                      pattern="[A-Za-z]{2}"
-                      placeholder="GR"
-                      value={countryCode}
-                      onChange={(e) => setCountryCode(e.target.value.slice(0, 2))}
-                      className={inputClass}
-                    />{" "}
-                  </label>{" "}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <PhoneNumberInput
+                    label={t("calendar.newBookingModal.phoneLabel")}
+                    countryLabel={t("calendar.targetManualBooking.phoneCountryCode")}
+                    countryPlaceholder={t("calendar.targetManualBooking.phoneCountryPlaceholder")}
+                    country={phoneCountry}
+                    number={phone}
+                    onChange={(next) => {
+                      setPhoneCountry(next.country);
+                      setPhone(next.number);
+                    }}
+                    className="sm:col-span-2"
+                    labelClassName="block text-xs font-medium text-gray-700"
+                    inputClassName={inputClass}
+                  />
+                  <NationalitySelect
+                    label={t("bookings.detail.nationality")}
+                    value={countryCode}
+                    onChange={setCountryCode}
+                    placeholder={t("calendar.targetManualBooking.searchNationality")}
+                    containerClassName="space-y-1"
+                    labelClassName={labelClass}
+                    inputClassName={inputClass}
+                  />{" "}
                 </div>
               </div>{" "}
             </section>
@@ -883,10 +898,7 @@ export default function TargetManualBookingModal({
                       )}{" "}
                       <strong className="w-20 text-right">
                         {serverAddon
-                          ? formatCurrency(
-                              Number(serverAddon.total.amountDecimal),
-                              preview!.currency,
-                            )
+                          ? money(serverAddon.total.amountDecimal, preview!.currency)
                           : "—"}
                       </strong>{" "}
                     </div>
@@ -1017,14 +1029,14 @@ export default function TargetManualBookingModal({
               </div>{" "}
             </section>{" "}
           </fieldset>
-          {(missingRateMessage || previewMessage) && (
+          {previewMessage && (
             <div
               role="alert"
               className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
             >
               {" "}
-              <span>{missingRateMessage || previewMessage}</span>{" "}
-              {!missingRateMessage && previewCanRetry && (
+              <span>{previewMessage}</span>{" "}
+              {previewCanRetry && (
                 <button
                   type="button"
                   onClick={() => {

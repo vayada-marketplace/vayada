@@ -14,6 +14,10 @@ import {
 } from "./services/api/bookingWebPublic";
 
 const intlMiddleware = createMiddleware(routing);
+const affiliateContextCookie = "__Host-vayada_affiliate_context";
+const affiliateContextMaxAge = 90 * 24 * 60 * 60;
+const validClickReference = /^vc_[A-Za-z0-9_-]{22}$/;
+const validContext = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function normalizeHost(hostname: string): string {
   const normalized = hostname.trim().toLowerCase();
@@ -43,10 +47,84 @@ function getKnownSubdomainSlug(hostname: string): string | null {
 }
 
 function isLocalHost(hostname: string): boolean {
-  return hostname === "localhost" || hostname.startsWith("127.0.0.1") || hostname === "::1";
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
 export default async function middleware(request: NextRequest) {
+  // Until first-party admission is live, never forward an opaque click reference
+  // through a cached or changed canonical-host redirect.
+  if (request.nextUrl.searchParams.has("vref")) {
+    const cleanUrl = request.nextUrl.clone();
+    cleanUrl.searchParams.delete("vref");
+    // Next requires an absolute Location in middleware. Use the browser-facing
+    // host that Booking already uses for canonical-host redirects, not an
+    // internal proxy host in request.nextUrl.
+    const publicHost = getRequestHost(request.headers) || cleanUrl.host;
+    const publicHostname = normalizeHost(publicHost);
+    const localHost = isLocalHost(publicHostname) || publicHostname.endsWith(".localhost");
+    const requestHostname = normalizeHost(cleanUrl.host);
+    const localRequest = isLocalHost(requestHostname) || requestHostname.endsWith(".localhost");
+    if (
+      (localHost && !localRequest) ||
+      (!localHost &&
+        !getKnownSubdomainSlug(publicHostname) &&
+        !(await fetchHostResolution(publicHostname))?.slug)
+    ) {
+      return new Response(null, { status: 400, headers: { "Cache-Control": "no-store" } });
+    }
+    const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",", 1)[0]?.trim();
+    const publicProtocol = localHost
+      ? forwardedProto === "https" || forwardedProto === "http"
+        ? `${forwardedProto}:`
+        : cleanUrl.protocol
+      : "https:";
+    const publicUrl = new URL(
+      `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`,
+      `${publicProtocol}//${publicHost}`,
+    );
+    const redirect = NextResponse.redirect(publicUrl, 307);
+    redirect.headers.set("Cache-Control", "no-store");
+    redirect.headers.set("Referrer-Policy", "no-referrer");
+    const internalToken = process.env.BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN;
+    const references = request.nextUrl.searchParams.getAll("vref");
+    if (
+      process.env.BOOKING_WEB_AFFILIATE_ARRIVAL_ENABLED === "true" &&
+      internalToken &&
+      publicProtocol === "https:" &&
+      references.length === 1 &&
+      validClickReference.test(references[0]!)
+    ) {
+      try {
+        // A cached canonical-host result may outlive a custom-domain change.
+        // Recheck the final browser host before requesting admission.
+        const resolution = await fetchHostResolution(publicHostname, true);
+        if (resolution && new URL(resolution.bookingBaseUrl).hostname === publicHostname) {
+          const existing = request.cookies.get(affiliateContextCookie)?.value;
+          const admission = await bookingWebPublicApi.admitAffiliateArrival(
+            {
+              host: publicHostname,
+              referenceToken: references[0]!,
+              ...(existing && validContext.test(existing) ? { contextId: existing } : {}),
+            },
+            internalToken,
+          );
+          if (admission.status === "admitted" && validContext.test(admission.contextId)) {
+            redirect.cookies.set(affiliateContextCookie, admission.contextId, {
+              path: "/",
+              httpOnly: true,
+              secure: true,
+              sameSite: "lax",
+              maxAge: affiliateContextMaxAge,
+            });
+          }
+        }
+      } catch {
+        // A failed admission must not block the guest's booking page.
+      }
+    }
+    return redirect;
+  }
+
   const response = intlMiddleware(request);
 
   // Hostnames are case-insensitive per RFC 1035 §2.3.3 but the backend
@@ -91,10 +169,15 @@ export default async function middleware(request: NextRequest) {
   return response;
 }
 
-async function fetchHostResolution(hostname: string): Promise<BookingWebPublicHostResponse | null> {
+async function fetchHostResolution(
+  hostname: string,
+  fresh = false,
+): Promise<BookingWebPublicHostResponse | null> {
   try {
     return await bookingWebPublicApi.resolveHost(hostname, {
-      next: { revalidate: PUBLIC_BOOKING_HOST_REVALIDATE_SECONDS },
+      ...(fresh
+        ? { cache: "no-store" }
+        : { next: { revalidate: PUBLIC_BOOKING_HOST_REVALIDATE_SECONDS } }),
     });
   } catch {
     return null;

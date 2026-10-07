@@ -11,13 +11,17 @@ import {
 const url = process.env.TEST_DATABASE_URL;
 if (url && !/(^|[_-])(test|verify)([_-]|$)/i.test(new URL(url).pathname))
   throw new Error("Refusing non-test database");
+const targetDatabaseUrl = url ?? "postgresql://api_test@localhost/test";
+const managementDatabaseUrl = new URL(targetDatabaseUrl);
+managementDatabaseUrl.username = "channex_test_worker";
 describe.skipIf(!url)("Channex operational handoff and repair", () => {
   const db = new pg.Pool({ connectionString: url, max: 4 }),
     propertyId = randomUUID(),
     providerPropertyId = randomUUID();
   const config = {
     ...loadConfig({
-      TARGET_DATABASE_URL: url,
+      TARGET_DATABASE_URL: targetDatabaseUrl,
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: managementDatabaseUrl.toString(),
       API_BACKGROUND_WORKERS_ENABLED: "false",
       PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
       PMS_OPERATIONS_SOURCE: "target",

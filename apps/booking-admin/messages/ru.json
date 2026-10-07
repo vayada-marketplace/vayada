@@ -16,6 +16,8 @@
   "auth.login.subtitle": "Войдите в панель администратора",
   "auth.login.chooseHotelGroup": "Выберите гостиничную группу",
   "auth.login.chooseHotelGroupSubtitle": "Выберите гостиничную группу, которой хотите управлять.",
+  "auth.login.unnamedHotelGroup": "Гостиничная группа {index}",
+  "auth.login.useAnotherAccount": "Использовать другой аккаунт",
   "auth.login.errorInvalidCredentials": "Неверный адрес электронной почты или пароль.",
   "auth.login.errorSuspended": "Ваш аккаунт был заблокирован. Пожалуйста, свяжитесь с поддержкой.",
   "auth.login.errorValidation": "Ошибка валидации.",

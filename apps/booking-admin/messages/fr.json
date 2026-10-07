@@ -16,6 +16,8 @@
   "auth.login.subtitle": "Connectez-vous au panneau d'administration",
   "auth.login.chooseHotelGroup": "Choisissez un groupe hôtelier",
   "auth.login.chooseHotelGroupSubtitle": "Sélectionnez le groupe hôtelier que vous souhaitez gérer.",
+  "auth.login.unnamedHotelGroup": "Groupe hôtelier {index}",
+  "auth.login.useAnotherAccount": "Utiliser un autre compte",
   "auth.login.errorInvalidCredentials": "E-mail ou mot de passe invalide.",
   "auth.login.errorSuspended": "Votre compte a été suspendu. Veuillez contacter le support.",
   "auth.login.errorValidation": "Erreur de validation.",

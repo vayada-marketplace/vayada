@@ -1,6 +1,7 @@
 import type { RequestContext } from "@vayada/backend-auth";
 import { parsePricingConfiguration, pricingKeys, pricingObject } from "@vayada/domain-pms";
 import type { Pool } from "pg";
+import { createBookingPricingAuthorityStore } from "./bookingPricingAuthority.js";
 import { createBookingPricingOfferTermsStore, lockBookingPricingOfferTerms, projectBookingPricingDraftTerms, type BookingPricingDraft } from "./bookingPricingOfferTerms.js";
 import { lockFinanceReplacementPricingReadiness } from "./financeReplacementPricingReadiness.js";
 import { createReplacementChargeDeclarationStore, replacementChargeFingerprint } from "./replacementChargeDeclarations.js";
@@ -16,10 +17,15 @@ const fail = (code: "invalid" | "denied"): never => { throw new PricingStorageEr
 
 /** Server boundary: bind an authenticated context, never body-supplied identity.
  * Route policy enforcement is still required at the HTTP boundary. */
-export function createReplacementPricingCommands(pool: Pool, context: RequestContext | null) {
+export function createReplacementPricingCommands(
+  pool: Pool,
+  context: RequestContext | null,
+  authorityPool: Pool | null,
+) {
   const trustedContext = structuredClone(context);
   const store = createReplacementPricingStore(pool, createReplacementPricingStorageGuard(trustedContext));
   const booking = createBookingPricingOfferTermsStore(pool);
+  const authority = authorityPool && createBookingPricingAuthorityStore(authorityPool);
   const charges = createReplacementChargeDeclarationStore(pool);
   function scope(propertyId: string): PricingStorageScope {
     if (!uuid(propertyId)) return fail("invalid");
@@ -28,6 +34,14 @@ export function createReplacementPricingCommands(pool: Pool, context: RequestCon
     return { propertyId: propertyId.toLowerCase(), actorUserId: actorUserId.toLowerCase(), organizationId: organizationId.toLowerCase() };
   }
   return {
+    async readAuthority(propertyId: string) {
+      if (!authority) throw new Error("Pricing authority database unavailable");
+      return authority.read(trustedContext, scope(propertyId));
+    },
+    async chooseAuthority(propertyId: string, input: unknown) {
+      if (!authority) throw new Error("Pricing authority database unavailable");
+      return authority.save(trustedContext, scope(propertyId), input);
+    },
     /** Read-only preparation. Returned evidence can become stale; saves revalidate it. */
     async prepare(propertyId: string, input: unknown, draft?: BookingPricingDraft) {
       const currentScope = scope(propertyId);

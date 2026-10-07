@@ -66,6 +66,26 @@ describe("Financials expense routes", () => {
     let response = await instance.inject({ method: "POST", url: `${root}/expenses`, payload: { ...write, commandId: ruleId.toUpperCase(), categoryId: categoryId.toUpperCase(), recurrence: { cadence: "monthly", startsOn: "2026-08-11" } } }); expect(response.statusCode).toBe(201); expect(response.json()).toEqual({ ...base, item: rule, outcome: "created" }); expect(options.expenses.create).toHaveBeenCalledOnce(); expect(options.recurring.create).toHaveBeenCalledOnce(); expect(options.recurring.create).toHaveBeenLastCalledWith(expect.objectContaining({ commandId: ruleId, categoryId }));
     response = await instance.inject({ method: "POST", url: `${root}/expenses`, payload: { ...write, commandId: expenseId.toUpperCase(), categoryId: categoryId.toUpperCase(), idempotencyKey: "replay" } }); expect(response.statusCode).toBe(200); expect(response.json()).toEqual({ ...base, item: expense, outcome: "replayed" }); response = await instance.inject({ method: "POST", url: `${root}/expenses`, payload: { ...write, commandId: ruleId.toUpperCase(), categoryId: categoryId.toUpperCase(), idempotencyKey: "replay", recurrence: { cadence: "monthly", startsOn: "2026-08-11" } } }); expect(response.statusCode).toBe(200); expect(response.json().outcome).toBe("replayed"); expect(await instance.inject({ method: "POST", url: `${root}/recurring-expenses`, payload: command })).toHaveProperty("statusCode", 404); await instance.close(); });
 
+  it("accepts supplier-bill evidence but rejects it on recurring writes", async () => {
+    const options = ports();
+    const supplier = { ...expense, origin: "supplier_bill", sourceKey: `supplier_bill:${expenseId}`, supplierInvoiceNumber: "SUP-2026-001" };
+    options.expenses.create = vi.fn(async () => ({ ok: true, outcome: "created", item: supplier })) as never;
+    options.expenses.update = vi.fn(async () => ({ ok: true, outcome: "corrected", item: { ...supplier, supplierInvoiceNumber: "SUP-2026-002" } })) as never;
+    options.read.expense = vi.fn(async () => ({ ...base, item: supplier })) as never;
+    const instance = await app(options);
+    const created = await instance.inject({ method: "POST", url: `${root}/expenses`, payload: { ...write, supplierInvoiceNumber: "SUP-2026-001" } });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().item.supplierInvoiceNumber).toBe("SUP-2026-001");
+    expect(options.expenses.create).toHaveBeenCalledWith(expect.objectContaining({ supplierInvoiceNumber: "SUP-2026-001" }));
+    const patched = await instance.inject({ method: "PATCH", url: `${root}/expenses/${expenseId}`, payload: { ...command, supplierInvoiceNumber: "SUP-2026-002" } });
+    expect(patched.statusCode).toBe(200);
+    expect(options.expenses.update).toHaveBeenCalledWith(expect.objectContaining({ supplierInvoiceNumber: "SUP-2026-002" }));
+    const rejected = await instance.inject({ method: "POST", url: `${root}/expenses`, payload: { ...write, supplierInvoiceNumber: "SUP-2026-003", recurrence: { cadence: "monthly", startsOn: "2026-08-11" } } });
+    expect(rejected.statusCode).toBe(400);
+    expect(options.recurring.create).not.toHaveBeenCalled();
+    await instance.close();
+  });
+
   it("does not let manage imply read or return resource payloads", async () => { const options = ports(), instance = await app(options, context({ permissions: ["pms.finance.manage"] })); let response = await instance.inject({ method: "POST", url: `${root}/expense-categories`, payload: { commandId: expenseId.toUpperCase(), idempotencyKey: "replay", name: "Operations", color: "#123456", sortOrder: 1 } }); expect(response.json()).toEqual({ contractVersion: "pms-financials.v1", propertyId, resourceId: categoryId, outcome: "replayed" }); expect(options.categories.create).toHaveBeenCalledWith(expect.objectContaining({ commandId: expenseId })); response = await instance.inject({ method: "POST", url: `${root}/expenses`, payload: write }); expect(response.json()).toEqual({ contractVersion: "pms-financials.v1", propertyId, resourceId: expenseId, outcome: "created" }); response = await instance.inject({ method: "POST", url: `${root}/expenses`, payload: { ...write, commandId: ruleId, recurrence: { cadence: "monthly", startsOn: "2026-08-11" } } }); expect(response.json()).toEqual({ contractVersion: "pms-financials.v1", propertyId, resourceId: ruleId, outcome: "created" }); expect(options.read.categories).not.toHaveBeenCalled(); expect(options.read.expense).not.toHaveBeenCalled(); expect(options.read.recurringRule).not.toHaveBeenCalled(); expect(await instance.inject({ method: "GET", url: `${root}/expense-categories` })).toHaveProperty("statusCode", 403); await instance.close(); });
 
   // prettier-ignore

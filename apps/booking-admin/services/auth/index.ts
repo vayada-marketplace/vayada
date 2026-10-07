@@ -24,6 +24,7 @@ const AUTH_SURFACE = "booking-admin";
 const AUTH_BROWSER_BASE_PATH = "/auth";
 
 export interface LoginRequest {
+  organizationId?: string;
   email: string;
   password: string;
 }
@@ -32,6 +33,32 @@ export interface SignupRequest {
   name?: string;
   email: string;
   password: string;
+}
+
+export type AuthStateResponse = {
+  organizations?: { id: string; name?: string | null }[];
+  state:
+    | "invalid_credentials"
+    | "email_verification_required"
+    | "organization_selection_required"
+    | "mfa_required"
+    | "sso_required"
+    | "auth_failed";
+  message: string;
+};
+
+export class AuthStateError extends Error {
+  organizations?: { id: string; name?: string | null }[];
+  status: number;
+  state: AuthStateResponse["state"];
+
+  constructor(status: number, response: AuthStateResponse) {
+    super(response.message);
+    this.name = "AuthStateError";
+    this.status = status;
+    this.state = response.state;
+    this.organizations = response.organizations;
+  }
 }
 
 async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -51,12 +78,24 @@ async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promis
       : null;
 
   if (!response.ok) {
+    if (isAuthStateResponse(body)) {
+      throw new AuthStateError(response.status, body);
+    }
     throw new ApiErrorResponse(response.status, {
       detail: body?.message ?? body?.error ?? "Authentication request failed",
     });
   }
 
   return body as T;
+}
+
+function isAuthStateResponse(value: unknown): value is AuthStateResponse {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { state?: unknown }).state === "string" &&
+    typeof (value as { message?: unknown }).message === "string"
+  );
 }
 
 async function storeAuthSessionResponse(

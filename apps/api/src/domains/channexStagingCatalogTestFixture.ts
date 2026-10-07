@@ -5,6 +5,9 @@ import { retainedRevisionScope as retained } from "./channexStagingCatalogEviden
 export const databaseUrl = process.env.TEST_DATABASE_URL;
 if (databaseUrl && !new URL(databaseUrl).pathname.endsWith("_test"))
   throw new Error("Test database required");
+const targetDatabaseUrl = databaseUrl ?? "postgresql://api_test@localhost/test";
+const managementDatabaseUrl = new URL(targetDatabaseUrl);
+managementDatabaseUrl.username = "channex_test_worker";
 export const propertyId = retained.propertyId,
   roomId = retained.roomId,
   rateId = retained.rateId;
@@ -19,7 +22,8 @@ export const config = () => ({
   ...loadConfig({
     API_BACKGROUND_WORKERS_ENABLED: "false",
     PMS_OPERATIONS_SOURCE: "target",
-    TARGET_DATABASE_URL: databaseUrl ?? "postgresql://localhost/test",
+    TARGET_DATABASE_URL: targetDatabaseUrl,
+    PMS_CHANNEX_MANAGEMENT_DATABASE_URL: managementDatabaseUrl.toString(),
     CHANNEX_API_BASE_URL: "https://staging.channex.io",
     CHANNEX_API_KEY: "synthetic",
     PMS_CHANNEX_ARI_SYNC_MODE: "mutating",

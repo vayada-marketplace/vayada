@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { AdoptionQueryClient } from "./channexAdoptionTargetRows.js";
 import { readSourceLedger } from "./channexAdoptionEvidence.js";
 import { hashSourceLedger, hashSnapshotIdentifier } from "./channexAdoptionManifestCrypto.js";
-import { VAY_1350_ACTIVE_SOURCE_TABLES } from "./productionIdentitySnapshotReader.js";
+import { expectedSourceTablesForLedger } from "./productionIdentitySnapshotReader.js";
 import { VAY_1350_INVENTORY_REVISION } from "./sourceExtraction.js";
 
 export type OwnerSourceRequest = {
@@ -157,8 +157,14 @@ function validateCompleteLedger(ledger: Awaited<ReturnType<typeof readSourceLedg
   const sha256 = /^[0-9a-f]{64}$/;
   if (!Number.isFinite(Date.parse(ledger.run.finished_at))) throw Error();
   if (ledger.sources.length !== databases.length) throw Error();
-  const expectedTables = Object.values(VAY_1350_ACTIVE_SOURCE_TABLES).flat().length;
-  if (ledger.tables.length !== expectedTables) throw Error();
+  const expectedTables = expectedSourceTablesForLedger(
+    ledger.tables.map((row) => ({
+      sourceDatabase: row.source_database,
+      sourceSchema: row.source_schema,
+      sourceTable: row.source_table,
+    })),
+  );
+  if (ledger.tables.length !== Object.values(expectedTables).flat().length) throw Error();
   for (const database of databases) {
     const source = ledger.sources.filter((row) => row.source_database === database);
     if (
@@ -174,7 +180,7 @@ function validateCompleteLedger(ledger: Awaited<ReturnType<typeof readSourceLedg
       throw Error();
     const aggregate = createHash("sha256");
     let rowCount = 0;
-    for (const qualified of VAY_1350_ACTIVE_SOURCE_TABLES[database]) {
+    for (const qualified of expectedTables[database]) {
       const [schema, table] = qualified.split(".");
       const evidence = ledger.tables.filter(
         (row) =>

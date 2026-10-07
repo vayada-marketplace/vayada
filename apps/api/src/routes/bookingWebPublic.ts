@@ -6,6 +6,12 @@ import {
   PricingAcceptanceError,
   writePricingAcceptance,
 } from "../domains/pricingAcceptanceWriter.js";
+import { admitAffiliateArrivalForCurrentHost } from "../domains/bookingAffiliateArrivalHost.js";
+import { readBookingAffiliateContextForQuote } from "../domains/bookingAffiliateContextForQuote.js";
+import {
+  bindLiveAffiliateOriginal,
+  lockLiveAffiliateContextForOriginal,
+} from "../domains/bookingAffiliateLiveOriginalBinding.js";
 import {
   createReplacementBookingQuoteIssuer,
   requirePublicQuoteKey,
@@ -34,13 +40,14 @@ import {
 import type { BillingConfigReadModel, BillingConfigReadPort } from "@vayada/domain-finance";
 import { normalizeNationalityCode } from "@vayada/locale-constants";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 import {
   bookedMealDescription,
   projectBookingRoomSelection,
 } from "../domains/bookingRoomSelectionProjection.js";
 import { appendMissingAddonRevenueEvidence } from "../domains/bookingAddonRevenueEvidence.js";
+import { publishAffiliateReservationLifecycle } from "../domains/bookingAffiliateReservationLifecycle.js";
 import type { BankTransferBookingOperations } from "../domains/financeBankTransferBooking.js";
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
 import { releaseAbandonedBookingEdits } from "../jobs/pendingBookingEditCleanup.js";
@@ -248,7 +255,11 @@ export type BookingWebCheckoutAdapter = {
   getPricingOffers?(slug: string): Promise<unknown>;
   getPricingAddons?(slug: string): Promise<unknown>;
   getQuoteGuestDisclosure?(slug: string, quoteId: string): Promise<unknown>;
-  acceptPricingQuote?(slug: string, request: BookingWebCheckoutRequest): Promise<unknown>;
+  acceptPricingQuote?(
+    slug: string,
+    request: BookingWebCheckoutRequest,
+    affiliateContextCookie?: string,
+  ): Promise<unknown>;
   getCheckoutConfig(slug: string, context?: BookingWebCheckoutCommandContext): Promise<unknown>;
   quoteBooking(
     slug: string,
@@ -266,6 +277,7 @@ export type BookingWebCheckoutAdapter = {
     slug: string,
     request: BookingWebCheckoutRequest,
     context?: BookingWebCheckoutCommandContext,
+    affiliateContextCookie?: string,
   ): Promise<unknown>;
   confirmAuthorization(
     slug: string,
@@ -455,6 +467,9 @@ export type BookingWebPublicRoutesOptions = {
   quoteRepository?: PublicHotelQuoteRepository;
   calendarRepository?: BookingWebCalendarRepository;
   checkoutAdapter: BookingWebCheckoutAdapter;
+  /** Dormant until destination storage, runtime grants, and HTTPS transport are approved. */
+  affiliateContextBindingEnabled?: boolean;
+  affiliateArrival?: { pool: pg.Pool; internalToken: string };
   affiliateHotelResolver?: BookingWebAffiliateHotelResolver;
   affiliateRepository?: BookingWebAffiliateRepository;
   affiliateAdapter?: BookingWebAffiliateAdapter;
@@ -511,6 +526,29 @@ export async function registerBookingWebPublicRoutes(
     reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-host-read");
     return response;
   });
+
+  if (options.affiliateArrival) {
+    const { pool, internalToken } = options.affiliateArrival;
+    if (!internalToken) throw new Error("Booking affiliate arrival internal token is required");
+    app.post<{
+      Body: { host?: unknown; referenceToken?: unknown; contextId?: unknown };
+    }>("/affiliate/arrivals", { bodyLimit: 1024 }, async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      const supplied = request.headers["x-vayada-affiliate-arrival-token"];
+      const expected = Buffer.from(internalToken);
+      const actual = typeof supplied === "string" ? Buffer.from(supplied) : Buffer.alloc(0);
+      if (actual.length !== expected.length || !timingSafeEqual(actual, expected))
+        throw createHttpError(404, "Booking Web arrival unavailable.");
+      const result = await admitBookingWebAffiliateArrival(pool, {
+        host: request.body?.host,
+        referenceToken: request.body?.referenceToken,
+        contextId: request.body?.contextId,
+      });
+      return result.status === "admitted"
+        ? { status: "admitted" as const, contextId: result.contextId }
+        : { status: "unavailable" as const };
+    });
+  }
 
   app.get<{ Params: BookingWebHotelParams }>("/hotels/:slug", async (request, reply) => {
     const profile = await options.profileRepository.findProfileBySlug(request.params.slug);
@@ -580,7 +618,16 @@ export async function registerBookingWebPublicRoutes(
         body.requestId !== request.headers["idempotency-key"]
       )
         throw createHttpError(400, "Invalid quote acceptance request.");
-      const response = await checkoutAdapter.acceptPricingQuote(request.params.slug, body);
+      const affiliateContextCookie = options.affiliateContextBindingEnabled
+        ? readAffiliateContextCookie(request.headers.cookie)
+        : null;
+      const response = affiliateContextCookie
+        ? await checkoutAdapter.acceptPricingQuote(
+            request.params.slug,
+            body,
+            affiliateContextCookie,
+          )
+        : await checkoutAdapter.acceptPricingQuote(request.params.slug, body);
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-quote-acceptance");
       return response;
     },
@@ -692,6 +739,9 @@ export async function registerBookingWebPublicRoutes(
         request.params.slug,
         body,
         checkoutCommandContext(request, "booking-create", request.params.slug, body, now),
+        options.affiliateContextBindingEnabled
+          ? (readAffiliateContextCookie(request.headers.cookie) ?? undefined)
+          : undefined,
       );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-create");
@@ -1380,6 +1430,8 @@ export type PgTargetBookingWebCheckoutAdapterConfig = {
   stripePaymentProvider?: StripeBookingPaymentProvider;
   max?: number;
   pool?: pg.Pool;
+  /** Separate pricing credential; absent fails public offers and quote issuance closed. */
+  pricingPool?: pg.Pool | null;
   now?: () => Date;
 };
 
@@ -1446,12 +1498,12 @@ export function createTargetBookingWebCheckoutAdapter(
       max: config.max,
     });
 
-  const pricingOffers = createPublicPricingOfferCatalog(pool);
+  const pricingOffers = config.pricingPool && createPublicPricingOfferCatalog(config.pricingPool);
   const pricingAddons = createPublicPricingAddonCatalog(pool);
   const guestDisclosure = createPublicQuoteGuestDisclosure(pool);
-  const issueReplacementQuote = createReplacementBookingQuoteIssuer(
-    createCurrentPricingQuoteStore(pool, 300),
-  );
+  const issueReplacementQuote =
+    config.pricingPool &&
+    createReplacementBookingQuoteIssuer(createCurrentPricingQuoteStore(config.pricingPool, 300));
   const serializeTargetChangeRequest = (row: TargetChangeRequestRow, enabled = false) =>
     serializeChangeRequest(
       row,
@@ -1838,7 +1890,7 @@ export function createTargetBookingWebCheckoutAdapter(
     async editRequest(slug, bookingId, action, request, context) {
       return pendingBookingEdit(pool, config, slug, bookingId, action, request, context);
     },
-    async createBooking(slug, request, context) {
+    async createBooking(slug, request, context, affiliateContextCookie) {
       if (!context) {
         throw createHttpError(400, "Checkout command context is required.");
       }
@@ -1884,6 +1936,11 @@ export function createTargetBookingWebCheckoutAdapter(
         assertTargetCheckoutConfigMatchesQuote(checkoutConfig, quote);
         resolveTargetCheckoutAmountSnapshot(request, quote);
         assertTargetSameDayBookingOpen(property, quote.checkIn, config.now?.() ?? new Date());
+        const affiliateContextLocked = await lockLiveAffiliateContextForOriginal(
+          client,
+          property.propertyId,
+          affiliateContextCookie,
+        );
         const booking = await createTargetGuestBooking(
           client,
           config.inventoryReservationPort,
@@ -1895,6 +1952,11 @@ export function createTargetBookingWebCheckoutAdapter(
           billingConfig,
           checkoutConfig,
         );
+        if (affiliateContextLocked && affiliateContextCookie)
+          await bindLiveAffiliateOriginal(client, {
+            id: booking.guestBookingId,
+            contextId: affiliateContextCookie,
+          });
         if (quote.paymentMethod === "bank_transfer") {
           if (!config.bankTransfers) throw createHttpError(503, "Bank transfer is not configured.");
           await config.bankTransfers.bind(client, property.propertyId, booking.guestBookingId);
@@ -1989,11 +2051,29 @@ export function createTargetBookingWebCheckoutAdapter(
       if (!disclosure) throw createHttpError(404, "Guest rules unavailable.");
       return disclosure;
     },
-    async acceptPricingQuote(slug, request) {
+    async acceptPricingQuote(slug, request, affiliateContextCookie) {
       if (!config.replacementPricingAcceptanceAllowedSlugs?.includes(slug))
         throw createHttpError(404, "Quote acceptance unavailable.");
       try {
-        return await writePricingAcceptance(pool, { slug, command: request });
+        let contextId: string | null = null;
+        if (affiliateContextCookie) {
+          try {
+            contextId = await readBookingAffiliateContextForQuote(
+              pool,
+              slug,
+              affiliateContextCookie,
+            );
+          } catch {
+            // Context lookup must not block an otherwise valid booking.
+          }
+        }
+        return contextId
+          ? await writePricingAcceptance(
+              pool,
+              { slug, command: request },
+              { affiliateContextId: contextId },
+            )
+          : await writePricingAcceptance(pool, { slug, command: request });
       } catch (error) {
         const statusCode =
           error instanceof PricingAcceptanceError
@@ -2024,6 +2104,7 @@ export function createTargetBookingWebCheckoutAdapter(
     async getPricingOffers(slug) {
       let offers;
       try {
+        if (!pricingOffers) throw new Error("Pricing pool unavailable.");
         offers = await pricingOffers.read(slug);
       } catch (error) {
         throw Object.assign(
@@ -2035,6 +2116,7 @@ export function createTargetBookingWebCheckoutAdapter(
       return offers;
     },
     async quoteBooking(slug, request, context) {
+      if (!issueReplacementQuote) throw createHttpError(503, "Quote temporarily unavailable.");
       return issueReplacementQuote(slug, request, context?.idempotencyKey);
     },
     async confirmAuthorization(slug, handle, context) {
@@ -3785,6 +3867,19 @@ async function withGuestLifecycleMutation(
     if (!updated) {
       throw createHttpError(409, "Booking status changed. Please refresh and try again.");
     }
+    await publishAffiliateReservationLifecycle(client, {
+      source: "booking",
+      eventKey: `booking.affiliate-reservation.${mutation.action}.${updated.guestBookingId}.${context.fingerprint}.v1`,
+      eventType: "booking.affiliate_reservation.canceled",
+      occurredAt: context.occurredAt.toISOString(),
+      propertyId: updated.propertyId,
+      bookingId: updated.guestBookingId,
+      actorType: "user",
+      correlationId: context.correlationId,
+      causationId: context.requestId,
+      idempotencyKeyHash: sha256Hex(context.idempotencyKey),
+      evidence: { sourceEventType: mutation.eventType, lifecycleStatus: updated.lifecycleStatus },
+    });
     await reverseTargetPromoRedemption(
       client,
       updated.propertyId,
@@ -4762,6 +4857,26 @@ async function applyAcceptedTargetDateChange(
   );
   const updated = result.rows[0];
   if (!updated) throw createHttpError(409, "Booking change request status changed.");
+  await publishAffiliateReservationLifecycle(pool, {
+    source: "booking",
+    eventKey: `booking.affiliate-reservation.amended.${input.changeRequest.id}.v1`,
+    eventType: "booking.affiliate_reservation.amended",
+    occurredAt: input.context.occurredAt.toISOString(),
+    propertyId: updated.propertyId,
+    bookingId: updated.guestBookingId,
+    actorType: "user",
+    actorUserId: input.context.actorUserId,
+    correlationId: input.context.correlationId,
+    causationId: input.changeRequest.id,
+    idempotencyKeyHash: sha256Hex(input.context.idempotencyKey),
+    evidence: {
+      changeRequestId: input.changeRequest.id,
+      oldCheckIn: input.preview.oldCheckIn,
+      oldCheckOut: input.preview.oldCheckOut,
+      checkIn: input.preview.requestedCheckIn,
+      checkOut: input.preview.requestedCheckOut,
+    },
+  });
   return updated;
 }
 
@@ -5586,6 +5701,19 @@ async function findProfileForHost(config: {
   return repository.findProfileByCustomDomain?.(host) ?? null;
 }
 
+/**
+ * Dormant native-arrival boundary. Derive the property from the final,
+ * canonical Booking host; a caller cannot choose the property to credit.
+ * The transport route and privacy gate must be added before invoking this
+ * with live traffic.
+ */
+export async function admitBookingWebAffiliateArrival(
+  pool: pg.Pool,
+  input: { host: unknown; referenceToken: unknown; contextId?: unknown },
+) {
+  return admitAffiliateArrivalForCurrentHost(pool, input);
+}
+
 function serializeHostResolution(
   host: string,
   projection: PublicBookabilityProfileProjection,
@@ -5726,6 +5854,21 @@ function normalizeHost(value: string): string {
     return decoded.replace(/^\[([^\]]+)\](?::\d+)?$/, "$1");
   }
   return decoded.replace(/:\d+$/, "").replace(/^\.+|\.+$/g, "");
+}
+
+function readAffiliateContextCookie(header: string | undefined): string | null {
+  if (!header) return null;
+  const values = header
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.startsWith("__Host-vayada_affiliate_context="))
+    .map((part) => part.slice("__Host-vayada_affiliate_context=".length));
+  if (
+    values.length !== 1 ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(values[0]!)
+  )
+    return null;
+  return values[0]!.toLowerCase();
 }
 
 function slugFromKnownBookingHost(host: string): string | null {

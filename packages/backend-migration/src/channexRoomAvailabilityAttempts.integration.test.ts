@@ -326,6 +326,36 @@ describe.skipIf(!url)("Channex room availability attempt storage", () => {
     await expect(f.insert()).rejects.toMatchObject({ code: "23514" });
   });
 
+  it("requires an exact published-offer room for provision jobs", async () => {
+    const f = await fixture();
+    await pool.query(
+      `UPDATE platform.jobs
+       SET job_type='channex.provision',payload=$2::jsonb
+       WHERE id=$1`,
+      [
+        f.jobId,
+        JSON.stringify({
+          operationType: "provision",
+          publishedOffer: {
+            roomTypeId: randomUUID(),
+            offerId: "offer",
+            publicationRevision: 1,
+            primaryOccupancy: 1,
+          },
+        }),
+      ],
+    );
+    await expect(f.insert()).rejects.toMatchObject({ code: "23514" });
+
+    await pool.query(
+      `UPDATE platform.jobs
+       SET payload=jsonb_set(payload,'{publishedOffer,roomTypeId}',to_jsonb($2::text))
+       WHERE id=$1`,
+      [f.jobId, f.roomTypeId.toUpperCase()],
+    );
+    await expect(f.insert()).resolves.toMatchObject({ rowCount: 1 });
+  });
+
   it.each(["expired", "finished", "superseded", "wrong-scope"])(
     "rejects a %s job attempt",
     async (mode) => {

@@ -3,6 +3,31 @@
 VAY-2017 — PMS-only product intent approved; technical contract under review.
 Not authorization to execute a production migration.
 
+## Identity migration provenance (VAY-2017)
+
+Migration `0425` records immutable before/after evidence for PMS-owner identity
+chains written by `target:identity:migrate`. Receipts bind the verified extraction
+run, deterministic plan checksum, exact table/row ID, existing full-row fingerprint
+format, statuses before/after, and the writing transaction's full PostgreSQL XID.
+They commit with the identity writes after post-write verification. Dry runs,
+rollbacks, unchanged replays, and newer untouched target restrictions produce no
+receipt. Existing rows are never retroactively attributed. No runtime grant is added.
+
+This is origin evidence, **not eligibility or access**. Consumers must still verify
+proven prior PMS use, current owner/WorkOS control, the exact property chain,
+approvals/revocations, and status eligibility. An already-restricted before-state
+is not a migration-created restriction merely because another field changed.
+Marketplace eligibility remains independent.
+
+After-state fingerprints cannot detect later updates restoring identical values,
+including timestamps. A consumer must also match current `xmin` to the low 32 bits
+of receipt `transaction_id`, and fail closed unless the current full transaction
+ID is at least the recorded ID and less than `2^31` transactions newer. Even benign
+later updates invalidate this evidence and require an independently approved
+transition, not timestamp/status equality or relabeling the old receipt. Database
+restore/rebuild requires fresh evidence. This prerequisite introduces no login
+fallback, disposition, provider action, canonical-link transition, or binding activation.
+
 ## Evidence and problem
 
 The VAY-1362 September 11 source snapshot retains eight exact PMS hotel/user
@@ -220,6 +245,143 @@ or active state. Retain both events; do not erase history. A replay of the
 original success after revocation is a receipt, not renewed eligibility.
 
 ## Required tests and implementation slices
+
+### Retained transition storage (0432)
+
+`platform.legacy_historical_binding_transitions` stores append-only `prepare`
+and `compensate` events under `legacy-historical-binding-transition.v1`. Each
+command UUID is unique. The original claim UUID is retained by a restrictive
+foreign key; the original pair, provider, migration source, creation timestamp
+and source-run evidence are recorded alongside full command, approval-envelope,
+executor and target before/after hashes. No raw contact/provider payload is stored.
+The target hashes cover the complete evidence set, not just claim state.
+
+A compensation has its own command and fresh approval-envelope hash, references
+one original prepare uniquely, retains its exact environment/pair/provenance and
+matches its prepared after-hash as the compensation before-hash. It cannot refer
+to another compensation. The new after-hash describes the actual restored
+historical state, including its own update timestamp; it need not equal the old
+before-hash. The only stored state edges are historical to verified_non_active
+and the reverse. Source-inactive evidence and either protected QA/staging key
+are excluded; this version has no inactive-source override.
+
+This is storage, not an executable signed command or authorization. Inserting an
+event does not alter or certify current claims/connections. The future consumer
+must authenticate the full payload and registry authorities, verify current
+eligibility and exhaustive claim/connection evidence under locks, and atomically
+compare-and-set the claim and insert the event/audit. It must verify stored
+provenance against the real claim, preserve disconnected/null connections and
+reject stale replay/compensation. No consumer, signature contract admission,
+runtime grant, activation or access release is added by this migration. The
+existing append-only triggers reject update/delete/truncate; PUBLIC has no access.
+
+### Remaining consumer and integration coverage
+
+The `legacy-historical-binding-transition.v1` envelope uses a distinct Ed25519
+domain and canonical bytes, signing command, purpose/original prepare UUID,
+environment/expiry, key and both authority IDs over the complete owner/binding
+requests, true source-activity assertion and current target before/after hashes.
+Pinned keys/environment/clock remain trusted. Signature matching alone requires
+registry authorities, revocation and locked eligibility; it authorizes no write.
+
+Migration 0433 admits the transition contract without replacing owner/setup
+contracts; coordinated integration must apply the owner approval registry 0211 first.
+The registry verifier requires a caller-owned READ COMMITTED transaction with
+bounded timeouts, locks the exact two approval rows in ID order FOR UPDATE and
+then reads current revocations in a separate statement. Revocation inserts'
+foreign-key KEY SHARE locks serialize against those locks. It verifies exact
+envelope/version/environment/expiry and trusted dual-authority/principal policy,
+rejects policy-filtered reads, and retains locks until the caller commits or
+rolls back. Failures require rollback. Eligibility, original-prepare verification
+and the atomic claim/event consumer remain mandatory; no grant or writer is added.
+
+`lockLegacyHistoricalBindingTarget` is a prepare-only target prerequisite in the
+caller's bounded READ COMMITTED transaction, after authority verification. It
+pins catalog resolution, takes connection SHARE NOWAIT, then the existing sorted
+external-property/management advisory keys and NOWAIT property/claim row locks.
+The relation fence is necessary: null-live-ID inserts and metadata-only updates
+do not participate in the existing binding trigger's advisory protocol. It
+briefly excludes all connection writers, not only this pair; a busy writer causes
+immediate failure, never a wait for this relation. Any partial-acquisition failure
+rolls back this helper's savepoint. Success retains locks until outer completion.
+The caller must keep that window bounded and abort the command on any failure.
+
+Under these locks it rejects incomplete/RLS-filtered visibility, fingerprints all
+physical target columns and compares exhaustive OR-key claim/connection sets.
+Inactive and protected pairs remain excluded. It does not authenticate source
+activity, verify current ownership, read replay receipts or write claims/events.
+Its non-executable result must not replace fresh source/owner eligibility,
+approval-expiry rechecks, compensation verification or atomic receipt/audit writes.
+
+`lockLegacyHistoricalBindingOwner` then fences the seven canonical ownership and
+identity relations in sorted order with SHARE NOWAIT in that same bounded READ
+COMMITTED transaction. This rejects busy writers instead of waiting; retained
+locks briefly prevent all writes to these relations, including unrelated owners.
+Use only in the controlled migration transaction, never ordinary request traffic.
+It rejects nonordinary, inherited or policy-filtered relations, rereads exhaustive
+ownership relationships/full-row fingerprints and compares an already verified
+owner session to current database identity bindings. Failure releases only this
+helper's locks; the caller must still abort. No source proof, migration-derived
+restriction disposition, entitlement, property eligibility or approval is inferred.
+Pending/suspended statuses stay explicit in its non-executable result. These
+locks are not provider-session revocation checks or a completed transition.
+Statement/lock timeouts do not bound idle transaction time: the controlled
+executor must enforce prompt completion and an idle-transaction deadline.
+
+The target-lock integration suite now composes real signed approval records,
+binding fences and owner fences in one transaction on the branch's migrated
+PG16/17 schema. It checks unchanged rows before rollback, retained locks against
+revocation/ownership/connection writes, release on outer rollback, later expiry,
+and a synthetic non-superuser role with complete versus withheld visibility.
+The fixture role's grants are not a reviewed production permission policy.
+Source hashes and before/after aggregate hashes in this guard-only fixture are
+synthetic assertions, not verified source provenance or transition evidence.
+These tests add no writer, claim transition, audit receipt, compensation or access
+release. Current-main migration integration and actual executor-role verification
+remain separate gates.
+
+`storeHistoricalBindingTransition` is an internal storage primitive, not a
+signature verifier or executable command. The future caller must authenticate
+and authorize before even receipt lookup, prove source/disposition/ownership and
+full target evidence under locks, and bind its chosen update timestamp and exact
+claim hashes to the signed aggregate before/after evidence. This primitive checks
+full claim drift, immutable provenance, disconnected retained-pair connections,
+and bounded transaction/visibility conditions; it atomically updates the claim
+and inserts the constrained transition plus restricted audit. Exact input replay
+returns history, never renewed eligibility; compensation uses a new command and
+the original prepare lineage. Savepoint failure restores all three writes, while
+success remains uncommitted. No runtime route/CLI/package-index export is wired;
+commit recovery, approved timestamp construction and full eligibility composition
+remain mandatory before any real execution.
+Compensation must also authenticate the original successful transition; a ledger
+row's existence and valid lineage alone are not authority.
+
+### Signed prepare write intent
+
+`buildHistoricalBindingWriteIntent` is an internal, prepare-only translator, not
+the executable consumer. It requires freshly signed evidence with a `write`
+object binding the original claim creation timestamp, chosen update timestamp
+(canonical UTC with six fractional digits), and complete expected after-row hash.
+Old diagnostic envelopes without this object cannot produce a write intent; do
+not modify old signatures or approval records. Generate new evidence/approvals.
+
+Before/after target hashes use domain `vayada:legacy-historical-binding-transition:v1`
+and `target-state` separators over canonical JSON containing the complete sorted
+owner fingerprint set, current identity evidence, property, claim fingerprint
+and sorted connection fingerprints. Only the claim fingerprint changes. Source
+proof and the exact write timestamps are additionally bound by the full signed
+evidence digest. The translator derives all event fields; payload hash is SHA256
+of canonical envelope bytes, and executor hash uses the same domain with the
+`executor` separator and the trusted runner principal. These are not user inputs.
+
+The result remains `executable: false`: hashes describe supplied expectations,
+not independent database observations. Current authorities, source provenance,
+owner/disposition eligibility and target evidence must still be verified under
+retained locks before receipt lookup or storage. Storage must compare actual
+full before/after row hashes and creation timestamp; signature alone does not
+prove the supplied after hash describes the chosen timestamp. Compensation is
+explicitly rejected until its original-transition authentication is composed.
+No command, provider call, access exception or production execution is wired.
 
 - Design acceptance first; identity disposition/evidence next; append-only
   transition storage next; signed consumer/replay/rollback next; integration

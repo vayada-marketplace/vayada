@@ -9,6 +9,20 @@ The Stripe route verifies `stripe-signature` against the exact request body,
 then discards that body. `platform.external_webhook_events` stores no request
 headers and only a versioned replay envelope:
 
+`POST /webhooks/stripe/connect` verifies the distinct
+`STRIPE_CONNECT_WEBHOOK_SECRET` and defaults independently to `observe_only`
+through `STRIPE_CONNECT_WEBHOOK_INTAKE_MODE`. This mode controls only that route:
+reviewed connected events sent to `/webhooks/stripe` still obey
+`STRIPE_WEBHOOK_INTAKE_MODE`. Freeze both routes before draining target mutation.
+It uses the same Stripe receipt
+identity, minimization, retention, and signed-redelivery dedupe as the platform
+endpoint. Only the four reviewed PaymentIntent transitions, `charge.updated`,
+and `account.updated` can promote; other connected events stay observed even
+when redelivered through the platform endpoint. Account updates must agree with
+the signed envelope's connected-account ID. Deployment, enabled event selection,
+live/test separation, affiliate ownership, and signed delivery remain cutover
+verification requirements; this change does not establish production readiness.
+
 | Event family             | Retained fields                                                                                                              |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
 | All events               | event `id`, `type`, optional `created`, optional connected `account`                                                         |

@@ -11,6 +11,7 @@ import {
 } from "./legacyOwnerBootstrapSourceReader.js";
 import { VAY_1350_ACTIVE_SOURCE_TABLES } from "./productionIdentitySnapshotReader.js";
 import { VAY_1350_INVENTORY_REVISION } from "./sourceExtraction.js";
+import { HISTORICAL_SOURCE_TABLES } from "./rawSourceDispositions.js";
 vi.mock("./channexAdoptionEvidence.js", () => ({ readSourceLedger: vi.fn() }));
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const ledger: SourceLedger = {
@@ -116,6 +117,51 @@ beforeEach(() => {
   vi.mocked(readSourceLedger).mockResolvedValue(structuredClone(ledger));
 });
 describe("bounded source reader", () => {
+  it("accepts complete historical extraction evidence but rejects a partial set", async () => {
+    const changed = structuredClone(ledger);
+    const emptyChecksum = createHash("sha256").digest("hex");
+    for (const qualified of HISTORICAL_SOURCE_TABLES) {
+      const [source_schema, source_table] = qualified.split(".") as [string, string];
+      changed.tables.push({
+        source_database: "pms",
+        source_schema,
+        source_table,
+        status: "completed",
+        row_count: 0,
+        checksum_sha256: emptyChecksum,
+      });
+    }
+    const aggregate = createHash("sha256");
+    for (const qualified of [...VAY_1350_ACTIVE_SOURCE_TABLES.pms, ...HISTORICAL_SOURCE_TABLES]) {
+      aggregate.update(`${qualified}|0|${emptyChecksum}\n`);
+    }
+    changed.sources.find((source) => source.source_database === "pms")!.checksum_sha256 =
+      aggregate.digest("hex");
+    changed.tables.sort((left, right) =>
+      `${left.source_database}\0${left.source_schema}\0${left.source_table}`.localeCompare(
+        `${right.source_database}\0${right.source_schema}\0${right.source_table}`,
+      ),
+    );
+    vi.mocked(readSourceLedger).mockResolvedValue(changed);
+    const input = request();
+    input.ledgerSha256 = hashSourceLedger(changed);
+    await expect(readLegacyOwnerBootstrapSources(client() as never, input)).resolves.toHaveLength(
+      8,
+    );
+
+    changed.tables = changed.tables.filter(
+      (row) =>
+        !(
+          row.source_schema === "inbox_prototype_archive_20260905" &&
+          row.source_table === "message_templates"
+        ),
+    );
+    input.ledgerSha256 = hashSourceLedger(changed);
+    await expect(readLegacyOwnerBootstrapSources(client() as never, input)).rejects.toThrow(
+      "OWNER_SOURCE_READ_FAILED",
+    );
+  });
+
   it("reads only exact IDs and returns projected source fields", async () => {
     const db = client(),
       input = request();

@@ -350,6 +350,90 @@ describe("PMS Channex management command routes", () => {
     );
   });
 
+  it("queues only an explicit, scoped published-offer provisioning request", async () => {
+    const harness = await testApp();
+    app = harness.app;
+    const payload = {
+      commandId: "323e4567-e89b-42d3-a456-426614174000",
+      idempotencyKey: "offer-provision-1",
+      roomTypeId: operationId,
+      offerId: "breakfast",
+      publicationRevision: 7,
+      primaryOccupancy: 2,
+    };
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/properties/${propertyId}/channex/published-offers/provision`,
+          headers: { authorization: "Bearer valid" },
+          payload,
+        })
+      ).statusCode,
+    ).toBe(409);
+    await app.close();
+    const enabled = await testApp({}, mutating, undefined, false, true);
+    app = enabled.app;
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/properties/${propertyId}/channex/published-offers/provision`,
+          headers: { authorization: "Bearer valid" },
+          payload,
+        })
+      ).statusCode,
+    ).toBe(202);
+    expect(enabled.enqueue).toHaveBeenCalledWith(expect.anything(), propertyId, {
+      commandId: payload.commandId,
+      idempotencyKey: payload.idempotencyKey,
+      operationType: "provision",
+      publishedOffer: {
+        roomTypeId: payload.roomTypeId,
+        offerId: payload.offerId,
+        publicationRevision: 7,
+        primaryOccupancy: 2,
+      },
+    });
+    for (const invalid of [
+      { ...payload, primaryOccupancy: 0 },
+      { ...payload, publicationRevision: 0 },
+      { ...payload, roomTypeId: "not-a-uuid" },
+      { ...payload, providerRatePlanId: "forged" },
+    ])
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: `/properties/${propertyId}/channex/published-offers/provision`,
+            headers: { authorization: "Bearer valid" },
+            payload: invalid,
+          })
+        ).statusCode,
+      ).toBe(400);
+    await app.close();
+    const wrongScope = await testApp(
+      {},
+      mutating,
+      undefined,
+      false,
+      true,
+      "99999999-9999-4999-8999-999999999999",
+    );
+    app = wrongScope.app;
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/properties/${propertyId}/channex/published-offers/provision`,
+          headers: { authorization: "Bearer valid" },
+          payload,
+        })
+      ).statusCode,
+    ).toBe(409);
+    expect(wrongScope.enqueue).not.toHaveBeenCalled();
+  });
+
   it("fails closed for observe-only capabilities and invalid payloads", async () => {
     const harness = await testApp({}, { ...mutating, connection: "observe_only" });
     app = harness.app;
@@ -540,6 +624,8 @@ async function testApp(
   capabilityModes: ChannexManagementCapabilityModes = mutating,
   reportScope?: string,
   stagingRecovery = false,
+  publishedOfferProvisioningEnabled = false,
+  publishedOfferProvisioningPropertyId = propertyId,
 ) {
   const app = Fastify({ logger: false });
   const getAlertDiagnostics = vi.fn().mockResolvedValue(null);
@@ -603,6 +689,8 @@ async function testApp(
     },
     noShowReportingEnabled: Boolean(reportScope) || capabilityModes.bookingSync === "mutating",
     noShowReportingPropertyId: reportScope,
+    publishedOfferProvisioningEnabled,
+    publishedOfferProvisioningPropertyId,
   });
   return {
     app,

@@ -12,6 +12,92 @@ import {
 import { createPgPlatformMediaRepository } from "./platformMediaRepository.js";
 
 describe("PostgreSQL platform media repository", () => {
+  it.each([
+    "actorUserId",
+    "ownerOrganizationId",
+    "propertyId",
+    "resourceProduct",
+    "resourceType",
+    "resourceId",
+    "purpose",
+    "visibility",
+    "approvalStatus",
+    "storageKey",
+  ] as const)("rejects a completed logo snapshot with forged %s before replay", async (field) => {
+    const database = createFakeDatabase();
+    const repository = repositoryFor(database.pool);
+    const session = await createSession(repository, "property.logo");
+    await repository.completeUploadSession(completionInput(session));
+    Object.assign(database.session!.completedMediaObjects![0]!, { [field]: "foreign" });
+    await expect(
+      repository.findUploadSessionForActor({
+        sessionId: session.sessionId,
+        actorUserId: session.actorUserId,
+        ownerOrganizationId: session.ownerOrganizationId,
+      }),
+    ).rejects.toThrow("Completed property media is not reusable");
+  });
+
+  it("replays the private completion snapshot and ignores a forged alias", async () => {
+    const database = createFakeDatabase();
+    const repository = repositoryFor(database.pool);
+    const session = await createSession(repository, "property.logo");
+    const completed = await repository.completeUploadSession(completionInput(session));
+    database.session!.completedMediaObject = {
+      ...completed.mediaObjects[0]!,
+      actorUserId: "foreign",
+    };
+    const restored = await repository.findUploadSession(session.sessionId);
+    expect(restored?.completedMediaObject).toEqual(completed.mediaObjects[0]);
+    expect(restored?.completedMediaObject?.visibility).toBe("private");
+  });
+
+  it.each(["create", "renew", "complete", "audit"] as const)(
+    "authorizes %s writes inside the transaction and rejects revoked authority before mutation",
+    async (operation) => {
+      const database = createFakeDatabase();
+      const session = await createSession(repositoryFor(database.pool), "property.logo");
+      let revoked = false;
+      const authorizeWriteTransaction = vi.fn(async () => {
+        expect(database.clientQueries.at(-1)?.text).toBe("BEGIN");
+        if (revoked) throw new Error("owner revoked");
+      });
+      const repository = createPgPlatformMediaRepository({
+        connectionString: "postgresql://target.test/vayada",
+        publicCdnBaseUrl: "https://cdn.example.com",
+        pool: database.pool as never,
+        authorizeWriteTransaction,
+      });
+      const write = () =>
+        operation === "create"
+          ? createSession(repository, "property.logo")
+          : operation === "renew"
+            ? repository.renewSignedUploadSession({
+                session,
+                expiresAt: "2026-07-16T13:15:00.000Z",
+                now: "2026-07-16T13:00:00.000Z",
+              })
+            : operation === "complete"
+              ? repository.completeUploadSession(completionInput(session))
+              : repository.recordAudit(completionInput(session).auditEvent);
+      database.queries.length = 0;
+      database.poolQueries.length = 0;
+      await write();
+      expect(authorizeWriteTransaction).toHaveBeenCalledTimes(1);
+      expect(database.poolQueries.some(({ text }) => /INSERT|UPDATE|DELETE/.test(text))).toBe(
+        false,
+      );
+      expect(database.clientQueries.at(-1)?.text).toBe("COMMIT");
+      revoked = true;
+      database.queries.length = 0;
+      await expect(write()).rejects.toThrow(
+        operation === "complete" ? "Platform media completion was rolled back." : "owner revoked",
+      );
+      expect(authorizeWriteTransaction).toHaveBeenCalledTimes(2);
+      expect(database.queries.map(({ text }) => text)).toEqual(["BEGIN", "ROLLBACK"]);
+    },
+  );
+
   it("persists upload targets and stable media IDs across repository instances", async () => {
     const database = createFakeDatabase();
     const first = repositoryFor(database.pool);

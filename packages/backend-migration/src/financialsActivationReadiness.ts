@@ -43,8 +43,10 @@ eligible AS (
   WHERE property_id=$1::uuid AND lifecycle_status IN ('confirmed','completed')
 ),
 revenue AS (
-  SELECT evidence.*
-  FROM booking.finance_nightly_revenue_evidence evidence
+  SELECT evidence.id AS evidence_id,evidence.property_id,evidence.guest_booking_id,
+    evidence.stay_date,evidence.line_position,evidence.gross_room_amount,
+    evidence.economic_event,evidence.source_kind,evidence.corrects_evidence_id
+  FROM booking.nightly_revenue_evidence evidence
   WHERE evidence.property_id=$1::uuid
 ),
 roots AS (
@@ -104,9 +106,9 @@ SELECT
   (SELECT count(*)::int FROM eligible booking JOIN assignment_coverage coverage
     ON coverage.guest_booking_id=booking.id WHERE coverage.assignment_count<>booking.room_count
       OR (booking.room_count>1 AND coverage.exact_count<>booking.room_count)) AS "assignmentCoverageGaps",
-  (SELECT count(*)::int FROM expected night WHERE NOT EXISTS(SELECT 1 FROM roots
-    WHERE guest_booking_id=night.guest_booking_id AND stay_date=night.stay_date
-      AND (night.line_position IS NULL OR line_position=night.line_position))) AS "missingRevenueLines",
+  (SELECT count(*)::int FROM expected night WHERE NOT EXISTS(SELECT 1 FROM roots root
+    WHERE root.guest_booking_id=night.guest_booking_id AND root.stay_date=night.stay_date
+      AND (night.line_position IS NULL OR root.line_position=night.line_position))) AS "missingRevenueLines",
   (SELECT count(*)::int FROM effective_price WHERE NOT resolved) AS "unresolvedRevenueLines",
   (SELECT count(*)::int FROM eligible WHERE booking_channel='unknown') AS "unknownAttributionBookings",
   (SELECT count(*)::int FROM ota WHERE source_kind<>'ota') AS "otaSourceMismatches",

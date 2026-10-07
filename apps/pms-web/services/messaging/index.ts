@@ -136,9 +136,19 @@ export type InboxThreadListResponse = {
 export type InboxThreadDetailResponse = {
   contractVersion: typeof INBOX_CONTRACT_VERSION;
   thread: InboxThread;
-  availableProviderActions: Array<"booking_com_no_reply_needed" | "channex_close">;
+  availableProviderActions: Array<
+    "booking_com_no_reply_needed" | "channex_close" | "airbnb_preapprove"
+  >;
+  inquiryPreapproval?: {
+    listingId: string;
+    arrivalDate: string;
+    departureDate: string;
+    adults: number;
+    children: number;
+    currency: string;
+  } | null;
   providerActions?: Array<{
-    action: "booking_com_no_reply_needed" | "channex_close";
+    action: "booking_com_no_reply_needed" | "channex_close" | "airbnb_preapprove";
     state: "pending" | "retrying" | "confirmed" | "held" | "failed";
     reason: string | null;
     threadVersion: number | null;
@@ -385,7 +395,7 @@ export const messagingService = {
     propertyId: string,
     threadId: string,
     expectedVersion: number,
-    action: "no-reply-needed" | "close" = "no-reply-needed",
+    action: "no-reply-needed" | "close" | "preapprove" = "no-reply-needed",
   ) {
     return postCommand<
       ContractResponse<{ propertyId: string; threadId: string; acceptedAt: string }>

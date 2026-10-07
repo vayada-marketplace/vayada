@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import SharedHotelLoginForm from "@vayada/product-onboarding/SharedHotelLoginForm";
-import { authService } from "@/services/auth";
+import { AuthStateError, authService } from "@/services/auth";
+import { ApiErrorResponse } from "@/services/api/client";
 import {
   isAuthOrganizationSelectionResponse,
   type AuthOrganizationSelectionResponse,
@@ -15,21 +16,27 @@ type LoginContentProps = {
   returnTo?: string;
   resumeSession?: boolean;
   authError?: string;
+  workosReturn?: "complete" | "failed";
 };
 
 export function LoginContent({
   returnTo = "/dashboard",
   resumeSession = false,
   authError,
+  workosReturn,
 }: LoginContentProps) {
   const { t } = useTranslation();
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitError, setSubmitError] = useState(authError ?? "");
+  const [showReturnFailure, setShowReturnFailure] = useState(workosReturn === "failed");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [organizationSelection, setOrganizationSelection] =
     useState<AuthOrganizationSelectionResponse | null>(null);
+  const [passwordOrganizations, setPasswordOrganizations] = useState<
+    { id: string; name?: string | null }[]
+  >([]);
 
   const redirectAfterLogin = useCallback(async () => {
     if (new URL(returnTo, "https://vayada.local").pathname === "/handoff") {
@@ -49,7 +56,10 @@ export function LoginContent({
       setSubmitError("");
       setIsSubmitting(true);
       try {
-        const response = await authService.refreshSession(workosOrganizationId);
+        const response = passwordOrganizations.length
+          ? await authService.login({ email, password, organizationId: workosOrganizationId })
+          : await authService.refreshSession(workosOrganizationId);
+        setPasswordOrganizations([]);
         if (isAuthOrganizationSelectionResponse(response)) {
           setOrganizationSelection(response);
           return;
@@ -61,14 +71,16 @@ export function LoginContent({
         setIsSubmitting(false);
       }
     },
-    [redirectAfterLogin, t],
+    [email, password, passwordOrganizations.length, redirectAfterLogin, t],
   );
 
   const handleLogin = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
+      setShowReturnFailure(false);
       setSubmitError("");
       setIsSubmitting(true);
+      setPasswordOrganizations([]);
       try {
         const response = await authService.login({ email, password });
         if (isAuthOrganizationSelectionResponse(response)) {
@@ -77,12 +89,26 @@ export function LoginContent({
         }
         await redirectAfterLogin();
       } catch (error) {
-        setSubmitError(error instanceof Error ? error.message : t("auth.login.unexpectedError"));
+        if (
+          error instanceof AuthStateError &&
+          error.state === "organization_selection_required" &&
+          error.organizations?.length
+        ) {
+          setPasswordOrganizations(error.organizations);
+          return;
+        }
+        setSubmitError(
+          workosReturn === "complete" && error instanceof ApiErrorResponse && error.status === 403
+            ? t("auth.login.invitationPending")
+            : error instanceof Error
+              ? error.message
+              : t("auth.login.unexpectedError"),
+        );
       } finally {
         setIsSubmitting(false);
       }
     },
-    [email, password, redirectAfterLogin, t],
+    [email, password, redirectAfterLogin, t, workosReturn],
   );
 
   useEffect(() => {
@@ -113,13 +139,24 @@ export function LoginContent({
     };
   }, [redirectAfterLogin, resumeSession, t]);
 
+  const workspaceOptions = passwordOrganizations.length
+    ? passwordOrganizations.map(({ id, name }, index) => ({
+        workosOrganizationId: id,
+        displayName: name?.trim() || t("auth.login.unnamedHotelGroup", { index: index + 1 }),
+      }))
+    : organizationSelection?.organizations;
+
   return (
     <SharedHotelLoginForm
       copy={{
         title: t("auth.login.formTitle"),
-        subtitle: t("auth.login.formSubtitle"),
+        subtitle:
+          workosReturn === "complete"
+            ? t("auth.login.workosReturnComplete")
+            : t("auth.login.formSubtitle"),
         chooseOrganizationTitle: t("auth.login.chooseHotelGroup"),
         chooseOrganizationSubtitle: t("auth.login.chooseHotelGroupSubtitle"),
+        useAnotherAccount: t("auth.login.useAnotherAccount"),
         emailLabel: t("auth.login.emailLabel"),
         passwordLabel: t("auth.login.passwordLabel"),
         forgotPassword: t("auth.login.forgotPassword"),
@@ -133,14 +170,24 @@ export function LoginContent({
       email={email}
       password={password}
       isSubmitting={isSubmitting}
-      submitError={submitError}
-      organizations={organizationSelection?.organizations ?? null}
+      submitError={submitError || (showReturnFailure ? t("auth.login.workosReturnFailed") : "")}
+      organizations={workspaceOptions ?? null}
       forgotPasswordHref="/forgot-password"
       onEmailChange={setEmail}
       onPasswordChange={setPassword}
       onSubmit={handleLogin}
       onGoogleLogin={() => authService.startGoogleLogin(returnTo)}
       onOrganizationSelect={handleOrganizationSelect}
+      onUseAnotherAccount={
+        passwordOrganizations.length
+          ? () => {
+              setEmail("");
+              setPassword("");
+              setPasswordOrganizations([]);
+              setSubmitError("");
+            }
+          : undefined
+      }
     />
   );
 }

@@ -387,10 +387,17 @@ export default function SharedFirstRunPropertySetupWizard({
   const profileHeading = useRef<HTMLHeadingElement>(null);
   const trackCommandKey = useRef<string | null>(null);
   const createPropertyCommandKey = useRef<string | null>(null);
+  const pendingCreateFingerprint = useRef<string | null>(null);
+  const ambiguousCreateAttempt = useRef(false);
+  const launchSettingsEnabled =
+    Boolean(propertyLaunchSettingsApi) &&
+    Boolean(status?.organization.selectedTracks.includes("hotel_operations"));
   const usePreparedProperty =
     !forceCreateProperty && status?.propertySelection.availableProperties.length === 0;
   const logoUploadKey = useRef<string | null>(null);
   const logoAssignmentKey = useRef<string | null>(null);
+  // One key per intended profile edit; an ambiguous failure retries the same save.
+  const profileUpdateKey = useRef<string | null>(null);
   const profileSaveInFlight = useRef(false);
 
   const view = useMemo(
@@ -463,7 +470,7 @@ export default function SharedFirstRunPropertySetupWizard({
       propertyId
         ? api.getPublicPropertyProfile(propertyId)
         : Promise.resolve<PublicPropertyProfileResponse | null>(null),
-      propertyId && propertyLaunchSettingsApi
+      propertyId && launchSettingsEnabled && propertyLaunchSettingsApi
         ? propertyLaunchSettingsApi.get(propertyId)
         : Promise.resolve<PropertyLaunchSettings | null>(null),
     ])
@@ -521,6 +528,7 @@ export default function SharedFirstRunPropertySetupWizard({
     initialProfileSuggestions,
     usePreparedProperty,
     propertyLaunchSettingsApi,
+    launchSettingsEnabled,
     view.profileMode,
     view.screen,
     view.selectedPropertyId,
@@ -553,7 +561,7 @@ export default function SharedFirstRunPropertySetupWizard({
     setError("");
     setFieldErrors({});
     const nextFieldErrors = validateProfileDraft(draft);
-    if (propertyLaunchSettingsApi && !skipLaunchSettings) {
+    if (launchSettingsEnabled && !skipLaunchSettings) {
       Object.assign(nextFieldErrors, validatePropertyLaunchSettings(launchSettings));
     }
     if (Object.keys(nextFieldErrors).length > 0) {
@@ -564,6 +572,21 @@ export default function SharedFirstRunPropertySetupWizard({
     profileSaveInFlight.current = true;
     setSaving(true);
     try {
+      const profile = createProfileFromDraft(draft);
+      if (launchSettingsEnabled && !skipLaunchSettings) {
+        profile.initialLaunchSettings = normalizedPropertyLaunchSettings(launchSettings);
+      }
+      const createFingerprint = JSON.stringify(profile);
+      if (
+        view.profileMode === "create" &&
+        pendingCreateFingerprint.current &&
+        pendingCreateFingerprint.current !== createFingerprint
+      ) {
+        setError(
+          "This hotel was already submitted. Reload setup to review its saved details before making changes.",
+        );
+        return;
+      }
       if (view.profileMode === "update" && !loadedProfile) {
         setError("The existing property profile could not be loaded.");
         return;
@@ -571,13 +594,20 @@ export default function SharedFirstRunPropertySetupWizard({
       let saved: PropertyProfileResponse;
       if (view.profileMode === "update" && view.selectedPropertyId && loadedProfile) {
         const update = profileUpdateFromDraft(draft, loadedProfile);
-        saved = update
-          ? await api.updatePropertyProfile(view.selectedPropertyId, update)
-          : loadedProfile;
+        saved = loadedProfile;
+        if (update) {
+          saved = await api.updatePropertyProfile(
+            view.selectedPropertyId,
+            update,
+            (profileUpdateKey.current = idempotencyKeyForRetry(profileUpdateKey.current)),
+          );
+          // Committed: a later logo, settings or reload failure must not pin this key.
+          profileUpdateKey.current = null;
+        }
       } else if (loadedProfile) {
         saved = loadedProfile;
       } else {
-        const profile = createProfileFromDraft(draft);
+        pendingCreateFingerprint.current = createFingerprint;
         const idempotencyKey = (createPropertyCommandKey.current = idempotencyKeyForRetry(
           createPropertyCommandKey.current ??
             (usePreparedProperty ? (propertyCreateIdempotencyKey ?? null) : null),
@@ -585,10 +615,17 @@ export default function SharedFirstRunPropertySetupWizard({
         try {
           saved = await api.createPropertyProfile(profile, idempotencyKey);
         } catch (createError) {
+          if ([403, 422].includes(setupErrorStatus(createError) ?? 0)) {
+            if (!ambiguousCreateAttempt.current) pendingCreateFingerprint.current = null;
+          } else {
+            ambiguousCreateAttempt.current = true;
+          }
           const code = setupErrorCode(createError);
           if (code !== "idempotency_key_conflict" && code !== "command_in_progress") {
             throw createError;
           }
+
+          if (profile.initialLaunchSettings) throw createError;
 
           if (
             usePreparedProperty &&
@@ -618,7 +655,12 @@ export default function SharedFirstRunPropertySetupWizard({
         assignmentKey: logoAssignmentKey,
       });
       setLoadedProfile(saved);
-      if (propertyLaunchSettingsApi && !skipLaunchSettings) {
+      if (
+        view.profileMode === "update" &&
+        launchSettingsEnabled &&
+        propertyLaunchSettingsApi &&
+        !skipLaunchSettings
+      ) {
         await propertyLaunchSettingsApi.update(
           saved.propertyId,
           normalizedPropertyLaunchSettings(launchSettings),
@@ -631,14 +673,19 @@ export default function SharedFirstRunPropertySetupWizard({
         await onPropertySelected?.(saved.propertyId);
       }
       createPropertyCommandKey.current = null;
+      pendingCreateFingerprint.current = null;
+      ambiguousCreateAttempt.current = false;
       logoUploadKey.current = null;
       logoAssignmentKey.current = null;
     } catch (err) {
       if (
-        setupErrorCode(err) === "profile_revision_conflict" &&
+        ["profile_revision_conflict", "idempotency_key_conflict"].includes(
+          setupErrorCode(err) ?? "",
+        ) &&
         view.profileMode === "update" &&
         view.selectedPropertyId
       ) {
+        profileUpdateKey.current = null;
         try {
           const latestProfile = await api.getPropertyProfile(view.selectedPropertyId);
           setLoadedProfile(latestProfile);
@@ -804,6 +851,8 @@ export default function SharedFirstRunPropertySetupWizard({
           onSelect={handleSelectProperty}
           onAdd={() => {
             createPropertyCommandKey.current = null;
+            pendingCreateFingerprint.current = null;
+            ambiguousCreateAttempt.current = false;
             setDraft(newPropertyDraft());
             setLaunchSettings(propertyLaunchSettingsDefaults(""));
             setLaunchSettingsTouched(false);
@@ -830,7 +879,7 @@ export default function SharedFirstRunPropertySetupWizard({
           loading={!propertyTypeOptions}
           saving={saving}
           fieldErrors={fieldErrors}
-          launchSettings={propertyLaunchSettingsApi ? launchSettings : null}
+          launchSettings={launchSettingsEnabled ? launchSettings : null}
           skipLaunchSettings={skipLaunchSettings}
           launchSettingsTouched={launchSettingsTouched}
           propertyTypeOptions={propertyTypeOptions ?? []}
@@ -838,6 +887,7 @@ export default function SharedFirstRunPropertySetupWizard({
           onChange={(nextDraft) => {
             if (
               view.profileMode === "create" &&
+              !pendingCreateFingerprint.current &&
               (!usePreparedProperty || !propertyCreateIdempotencyKey)
             )
               createPropertyCommandKey.current = null;
@@ -1236,9 +1286,7 @@ function ProfileForm({
   const focusAddressFieldsWhenShown = useRef(false);
   const stepHeading = useRef<HTMLHeadingElement>(null);
   const timezoneWasAutoDetected = useRef(false);
-  const [whatsappFollowsPhone, setWhatsappFollowsPhone] = useState(
-    () => !draft.whatsapp || draft.whatsapp === draft.phone,
-  );
+  const [whatsappFollowsPhone, setWhatsappFollowsPhone] = useState<boolean | null>(null);
 
   useEffect(() => {
     const errorStep = profileStepFields.findIndex((fields) =>
@@ -1288,14 +1336,15 @@ function ProfileForm({
 
   useEffect(() => {
     if (
+      mode === "create" &&
       step === contactStep &&
-      whatsappFollowsPhone &&
+      (whatsappFollowsPhone ?? (!draft.whatsapp || draft.whatsapp === draft.phone)) &&
       draft.phone &&
       draft.whatsapp !== draft.phone
     ) {
       onChange({ ...draft, whatsapp: draft.phone });
     }
-  }, [contactStep, draft, onChange, step, whatsappFollowsPhone]);
+  }, [contactStep, draft, mode, onChange, step, whatsappFollowsPhone]);
 
   if (loading) {
     return (
@@ -1525,7 +1574,9 @@ function ProfileForm({
               How can guests reach you?
             </h3>
             <p className="mt-2 text-sm text-gray-500">
-              This information is shown when guests click &apos;Contact&apos; on your booking page.
+              {mode === "update"
+                ? "Only contact details you change here are published on your booking page. Unchanged contacts keep their current visibility."
+                : "This information is shown when guests click 'Contact' on your booking page."}
             </p>
           </div>
           <div className="space-y-4">
@@ -1536,13 +1587,17 @@ function ProfileForm({
               placeholder="+94 77 123 4567"
               required
               error={fieldErrors.phone?.[0]}
-              onChange={(value) =>
+              onChange={(value) => {
+                const follow =
+                  whatsappFollowsPhone ??
+                  (draft.whatsapp ? draft.whatsapp === draft.phone : mode === "create");
+                setWhatsappFollowsPhone(follow);
                 onChange({
                   ...draft,
                   phone: value,
-                  whatsapp: whatsappFollowsPhone ? value : draft.whatsapp,
-                })
-              }
+                  whatsapp: follow ? value : draft.whatsapp,
+                });
+              }}
             />
             <PhoneField
               label="WhatsApp number"
@@ -1942,7 +1997,9 @@ function ProfileForm({
                       Show city and country publicly
                     </span>
                     <span className="mt-1 block text-xs leading-5 text-gray-600">
-                      Street address, postal code, and map coordinates stay private.
+                      {mode === "update"
+                        ? "Existing location visibility is preserved. If you edit the location, street address, postal code, and map coordinates stay private."
+                        : "Street address, postal code, and map coordinates stay private."}
                     </span>
                   </span>
                 </label>
@@ -3302,7 +3359,7 @@ function SelectField({
   );
 }
 
-function draftFromProfile(
+export function draftFromProfile(
   response: PropertyProfileResponse,
   publicResponse: PublicPropertyProfileResponse | null,
   pendingLogo: PendingPropertyLogoAssignment | null,
@@ -3320,7 +3377,7 @@ function draftFromProfile(
   return {
     displayName: profile.displayName,
     propertyType: profile.propertyType,
-    countryCode: profile.location.countryCode,
+    countryCode: profileCountry,
     city: profile.location.city,
     streetAddress: profile.location.streetAddress,
     postalCode: profile.location.postalCode,
@@ -3362,32 +3419,26 @@ export function profileUpdateFromDraft(
   existing: PropertyProfileResponse,
 ): UpdatePropertyProfileRequest | null {
   const profile = existing.profile;
+  const baseline = draftFromProfile(existing, null, null);
+  const original = createProfileFromDraft(baseline);
+  const edited = createProfileFromDraft(draft);
   const patch: PropertyProfilePatch = {};
-  const displayName = draft.displayName.trim();
-  const propertyType = draft.propertyType;
-  if (displayName !== profile.displayName) patch.displayName = displayName;
-  if (propertyType !== profile.propertyType) patch.propertyType = propertyType;
+  if (edited.displayName !== original.displayName) patch.displayName = edited.displayName;
+  if (edited.propertyType !== original.propertyType) patch.propertyType = edited.propertyType;
 
-  const location = {
-    countryCode: draft.countryCode.trim().toUpperCase(),
-    city: draft.city.trim(),
-    streetAddress: draft.streetAddress.trim(),
-    postalCode: draft.postalCode.trim(),
-    timezone: draft.timezone.trim(),
-    latitude: draft.latitude,
-    longitude: draft.longitude,
-    localityPublic: draft.localityPublic,
-    geoPublic: false,
-    mapDisplayMode: "hidden" as const,
-  };
   const locationPatch = Object.fromEntries(
-    Object.entries(location).filter(
-      ([key, value]) => value !== profile.location[key as keyof typeof location],
+    Object.entries(edited.location).filter(
+      ([key, value]) => value !== original.location[key as keyof typeof original.location],
     ),
   ) as NonNullable<PropertyProfilePatch["location"]>;
-  if (Object.keys(locationPatch).length > 0) patch.location = locationPatch;
+  if (Object.keys(locationPatch).length > 0) {
+    // Consent for an existing location does not publish newly entered location details.
+    if (profile.location.geoPublic) locationPatch.geoPublic = false;
+    if (profile.location.mapDisplayMode !== "hidden") locationPatch.mapDisplayMode = "hidden";
+    patch.location = locationPatch;
+  }
 
-  const contacts = contactsFromDraft(draft, profile.contacts);
+  const contacts = contactsFromDraft(draft, profile.contacts, baseline);
   if (!sameContacts(contacts, profile.contacts)) patch.contacts = contacts;
   if (Object.keys(patch).length === 0) return null;
 
@@ -3440,17 +3491,19 @@ function normalizedPropertyLaunchSettings(
 function contactsFromDraft(
   draft: ProfileDraft,
   existing: PropertyProfileContact[] = [],
+  baseline?: ProfileDraft,
 ): PropertyProfileContact[] {
   return (
     [
-      ["phone", draft.phone],
-      ["whatsapp", draft.whatsapp],
-      ["email", draft.contactEmail],
+      ["phone", draft.phone, baseline?.phone],
+      ["whatsapp", draft.whatsapp, baseline?.whatsapp],
+      ["email", draft.contactEmail, baseline?.contactEmail],
     ] as const
-  ).reduce<PropertyProfileContact[]>(
-    (contacts, [channelType, value]) => replaceContact(contacts, channelType, value),
-    existing,
-  );
+  ).reduce<PropertyProfileContact[]>((contacts, [channelType, value, original]) => {
+    const displayed = channelType === "email" ? value.trim() : normalizedPhoneNumber(value.trim());
+    if (original !== undefined && displayed === original.trim()) return contacts;
+    return replaceContact(contacts, channelType, value);
+  }, existing);
 }
 
 function replaceContact(
@@ -3553,16 +3606,22 @@ function propertyTypeOptionsFromCatalog(options: unknown): SharedPropertyTypeOpt
 
 export function setupErrorMessage(error: unknown): string {
   const status = setupErrorStatus(error);
+  const code = setupErrorCode(error);
+  if (status === 503 && code === "hotel_setup_unavailable") {
+    return "Hotel setup is temporarily unavailable. Please try again in a few minutes.";
+  }
   if (status !== null && status >= 500) {
     return "Something went wrong on our end. Please try again.";
   }
 
-  const code = setupErrorCode(error);
   if (code === "command_in_progress") {
     return "We're still finishing your setup. Please try again in a moment.";
   }
   if (code === "idempotency_key_conflict") {
     return "Your setup changed during this save. Review it and try again.";
+  }
+  if (code === "profile_edit_not_provisioned") {
+    return "Editing hotel details isn't enabled for your account on this hotel yet, so trying again won't help. Please contact Vayada support.";
   }
 
   const data =

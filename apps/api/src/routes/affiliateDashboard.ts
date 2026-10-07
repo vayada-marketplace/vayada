@@ -307,6 +307,7 @@ export async function registerAffiliateDashboardRoutes(
 
     const settings = await options.financeRepository.getAffiliatePayoutSettings(
       resolved.affiliateId,
+      resolved.context.selectedOrganization.organizationId,
     );
     if (!settings) {
       return sendRouteError(reply, affiliateNotFound());
@@ -363,6 +364,7 @@ export async function registerAffiliateDashboardRoutes(
     const result = await options.financeRepository.listAffiliatePayouts(
       resolved.affiliateId,
       query,
+      resolved.context.selectedOrganization.organizationId,
     );
     if (!result) {
       return sendRouteError(reply, affiliateNotFound());

@@ -946,7 +946,8 @@ describe("Booking Web public bootstrap parity", () => {
       },
       async end() {},
     };
-    const adapter = createTargetBookingWebCheckoutAdapter({ externalChanges: externalBookingChanges,
+    const adapter = createTargetBookingWebCheckoutAdapter({
+      externalChanges: externalBookingChanges,
       connectionString: "postgres://unused",
       inventoryReservationPort: createTargetPmsInventoryReservationPort(),
       pool: pool as never,
@@ -1203,7 +1204,8 @@ describe("Booking Web public bootstrap parity", () => {
       },
       async end() {},
     };
-    const adapter = createTargetBookingWebCheckoutAdapter({ externalChanges: externalBookingChanges,
+    const adapter = createTargetBookingWebCheckoutAdapter({
+      externalChanges: externalBookingChanges,
       connectionString: "postgres://unused",
       inventoryReservationPort: createTargetPmsInventoryReservationPort(),
       pool: pool as never,
@@ -1221,10 +1223,12 @@ describe("Booking Web public bootstrap parity", () => {
           fingerprint: "c".repeat(64),
           occurredAt: new Date("2026-09-01T10:00:00.000Z"),
         },
+        "aa29a9d9-9ca4-4931-9ef5-4d41e9a9cc41",
       ),
     ).resolves.toEqual(replayBody);
     expect(calls.some((text) => text.includes("FROM booking.quote_sessions"))).toBe(false);
     expect(calls.some((text) => text.includes("INSERT INTO booking.guest_bookings"))).toBe(false);
+    expect(calls.some((text) => text.includes("booking.affiliate_click_contexts"))).toBe(false);
     expect(calls.some((text) => text.includes("INSERT INTO platform.jobs"))).toBe(false);
   });
 
@@ -1311,7 +1315,8 @@ describe("Booking Web public bootstrap parity", () => {
       },
       async end() {},
     };
-    const adapter = createTargetBookingWebCheckoutAdapter({ externalChanges: externalBookingChanges,
+    const adapter = createTargetBookingWebCheckoutAdapter({
+      externalChanges: externalBookingChanges,
       connectionString: "postgres://unused",
       inventoryReservationPort: createTargetPmsInventoryReservationPort(),
       pool: pool as never,
@@ -1459,7 +1464,8 @@ describe("Booking Web public bootstrap parity", () => {
       },
       async end() {},
     };
-    const adapter = createTargetBookingWebCheckoutAdapter({ externalChanges: externalBookingChanges,
+    const adapter = createTargetBookingWebCheckoutAdapter({
+      externalChanges: externalBookingChanges,
       connectionString: "postgres://unused",
       inventoryReservationPort: createTargetPmsInventoryReservationPort(),
       pool: pool as never,
@@ -1672,7 +1678,8 @@ describe("Booking Web public bootstrap parity", () => {
       },
       async end() {},
     };
-    const adapter = createTargetBookingWebCheckoutAdapter({ externalChanges: externalBookingChanges,
+    const adapter = createTargetBookingWebCheckoutAdapter({
+      externalChanges: externalBookingChanges,
       connectionString: "postgres://unused",
       inventoryReservationPort: createTargetPmsInventoryReservationPort(),
       pool: pool as never,
@@ -1752,7 +1759,8 @@ describe("Booking Web public bootstrap parity", () => {
       },
       async end() {},
     };
-    const adapter = createTargetBookingWebCheckoutAdapter({ externalChanges: externalBookingChanges,
+    const adapter = createTargetBookingWebCheckoutAdapter({
+      externalChanges: externalBookingChanges,
       connectionString: "postgres://unused",
       inventoryReservationPort: createTargetPmsInventoryReservationPort(),
       pool: pool as never,

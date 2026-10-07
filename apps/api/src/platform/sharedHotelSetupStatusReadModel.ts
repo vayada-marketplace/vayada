@@ -1,13 +1,21 @@
 import { createHash } from "node:crypto";
+import { AuthorizationError } from "@vayada/backend-authorization";
 
 import type {
   PropertyProfileContact,
+  PropertyInitialLaunchSettings,
   PropertyProfileMapDisplayMode,
   PublicPropertyProfileMedia,
   PublicPropertyProfilePatch,
 } from "@vayada/domain-hotels";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
+import { lockHotelSetupOrganization } from "../domains/hotelSetupTrackCommandRepository.js";
+import { assertHotelSetupCreationScope } from "../hotelSetupCommandScope.js";
+import { assertHotelSetupCreationPrivileges } from "../hotelSetupCreationPrivileges.js";
+import { lockHotelSetupCreationPermissions } from "../hotelSetupMembership.js";
+import { hasPublishedPropertySurface } from "../routes/sharedHotelSetupStatus.js";
+import { BookingContactPublicationConflictError } from "../routes/bookingSettings.js";
 import type {
   AdaptivePropertySetupFacts,
   AdaptiveSetupTaskFact,
@@ -98,7 +106,7 @@ type AdaptiveHotelSetupFactsRow = {
   bookabilityUpdatedAt: unknown;
 };
 
-type SharedPropertyProfileRow = {
+export type SharedPropertyProfileRow = {
   propertyId: string;
   profileRevision: unknown;
   displayName: string | null;
@@ -171,6 +179,7 @@ export function createPgSharedHotelSetupStatusRepository(config: {
   connectionString: string;
   max?: number;
   pool?: SharedHotelSetupStatusPool;
+  hotelSetupNativeCreation?: boolean;
 }): SharedHotelSetupStatusRepository {
   if (!config.connectionString.trim()) {
     throw new Error("Shared hotel setup status repository connectionString must not be empty");
@@ -217,10 +226,14 @@ export function createPgSharedHotelSetupStatusRepository(config: {
       return loadPropertyProfile(pool, organizationId, propertyId);
     },
     async createPropertyProfile(input) {
-      const propertyId = await writePropertyProfile(pool, {
-        ...input,
-        mode: "create",
-      });
+      const propertyId = await writePropertyProfile(
+        pool,
+        {
+          ...input,
+          mode: "create",
+        },
+        config.hotelSetupNativeCreation === true,
+      );
       if (!propertyId) {
         throw new Error("Created shared property profile did not return a property id");
       }
@@ -615,6 +628,7 @@ async function writePropertyProfile(
         expectedProfileRevision: number;
         profile: SharedPropertyProfileInput;
       },
+  nativeCreation = false,
 ): Promise<string | null> {
   const payload = propertyProfileWritePayload(input.profile);
   if (input.mode === "create") {
@@ -630,28 +644,51 @@ async function writePropertyProfile(
         provisioningReference: input.provisioningReference ?? null,
         reason: input.audit?.reason ?? null,
         profile: payload,
+        ...(input.profile.initialLaunchSettings
+          ? { initialLaunchSettings: input.profile.initialLaunchSettings }
+          : {}),
       }),
     );
     try {
       await client.query("BEGIN");
-      const organization = await client.query(
-        `SELECT id
-         FROM identity.organizations
-         WHERE id = $1::uuid
-           AND kind = 'hotel_group'
-           AND status = 'active'
-           AND ($2::uuid IS NULL OR EXISTS (
-             SELECT 1 FROM identity.organization_memberships membership
-             JOIN identity.users account ON account.id = membership.user_id
-             WHERE membership.organization_id = identity.organizations.id
-               AND membership.user_id = $2::uuid
-               AND membership.status = 'active' AND account.status = 'active'
-           ))
-         FOR UPDATE`,
-        [input.organizationId, input.targetAccountUserId ?? null],
+      if (
+        nativeCreation &&
+        (!input.audit ||
+          input.targetAccountUserId !== undefined ||
+          input.provisioningReference !== undefined ||
+          input.audit.reason !== undefined)
+      )
+        throw new AuthorizationError();
+      if (nativeCreation) await assertHotelSetupCreationPrivileges(client);
+      // Match the track command's advisory-lock order before taking organization row locks.
+      await lockHotelSetupOrganization(
+        client,
+        input.organizationId,
+        input.targetAccountUserId ?? null,
       );
-      if (organization.rows.length !== 1) {
-        throw new Error("Active hotel-group organization was not found");
+      if (nativeCreation) {
+        await assertHotelSetupCreationScope(client, input.organizationId);
+        const permissions = await lockHotelSetupCreationPermissions(client, {
+          organizationId: input.organizationId,
+          actorUserId: input.audit!.actorUserId,
+        });
+        if (
+          !permissions ||
+          (hasPublishedPropertySurface(input.profile) &&
+            !permissions.includes("marketplace.profile.manage") &&
+            !permissions.includes("booking.settings.manage"))
+        )
+          throw new AuthorizationError();
+      }
+      const initialSettings = input.profile.initialLaunchSettings;
+      if (initialSettings) {
+        const intent = await client.query<{ selectedTracks: string[] }>(
+          `SELECT selected_tracks AS "selectedTracks"
+           FROM hotel_catalog.organization_setup_track_intents WHERE organization_id=$1::uuid`,
+          [input.organizationId],
+        );
+        if (!intent.rows[0]?.selectedTracks.includes("hotel_operations"))
+          throw new AuthorizationError();
       }
       if (input.provisioningReference) {
         await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
@@ -700,13 +737,31 @@ async function writePropertyProfile(
         await client.query("COMMIT");
         return provisionedPropertyId;
       }
-      const result = await client.query<PropertyProfileWriteRow>(createPropertyProfileSql(), [
+      const created = await client.query<PropertyProfileWriteRow>(createBasePropertySql(), [
         input.organizationId,
         payload,
       ]);
-      const propertyId = result.rows[0]?.propertyId;
+      const propertyId = created.rows[0]?.propertyId;
       if (!propertyId)
         throw new Error("Created shared property profile did not return a property id");
+      // Native policies need parent links visible in a later statement's snapshot.
+      // All stages stay on this client and roll back together.
+      await client.query(createPropertyCatalogOwnerSql(), [input.organizationId, propertyId]);
+      const result = await client.query<PropertyProfileWriteRow>(createPropertyProfileSql(), [
+        input.organizationId,
+        payload,
+        propertyId,
+      ]);
+      if (result.rows[0]?.propertyId !== propertyId)
+        throw new Error("Created shared property profile links did not return the property id");
+      const initialized = await client.query<{ bookingInitialized: boolean }>(
+        createPropertyProductDefaultsSql(Boolean(initialSettings)),
+        [input.organizationId, propertyId, ...(initialSettings ? [initialSettings] : [])],
+      );
+      if (initialSettings) {
+        if (!initialized.rows[0]?.bookingInitialized) throw new AuthorizationError();
+        await createInitialSocialContacts(client, propertyId, initialSettings);
+      }
       if (input.provisioningReference) {
         await linkProvisioningReference(client, {
           propertyId,
@@ -967,7 +1022,7 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function toSharedPropertyProfile(row: SharedPropertyProfileRow): SharedPropertyProfile {
+export function toSharedPropertyProfile(row: SharedPropertyProfileRow): SharedPropertyProfile {
   return {
     propertyId: row.propertyId,
     profileRevision: positiveInteger(row.profileRevision),
@@ -1312,7 +1367,7 @@ function taskRevision(...facts: unknown[]): string {
   return JSON.stringify(facts);
 }
 
-function propertyProfileWritePayload(
+export function propertyProfileWritePayload(
   profile: SharedPropertyProfileInput,
 ): SharedPropertyProfileWritePayload {
   return {
@@ -1445,6 +1500,105 @@ function publicPropertyProfileSql(): string {
   `;
 }
 
+function createBasePropertySql(): string {
+  return `
+    WITH generated_property AS (SELECT gen_random_uuid() AS property_id)
+    INSERT INTO hotel_catalog.properties (
+      id, public_id, display_name, property_type, creation_organization_id
+    )
+    SELECT generated_property.property_id,
+           'prop_' || replace(generated_property.property_id::text, '-', ''),
+           $2::jsonb ->> 'display_name', $2::jsonb ->> 'property_type', $1::uuid
+    FROM generated_property
+    RETURNING id::text AS "propertyId"
+  `;
+}
+
+function createPropertyCatalogOwnerSql(): string {
+  return `INSERT INTO identity.organization_resource_links
+    (organization_id, product, resource_type, resource_id, relationship, status)
+    VALUES ($1::uuid, 'hotel_catalog', 'property', $2::uuid::text, 'owner', 'active')`;
+}
+
+async function createInitialSocialContacts(
+  client: SharedHotelSetupQueryClient,
+  propertyId: string,
+  settings: PropertyInitialLaunchSettings,
+) {
+  const contacts = (["instagram", "facebook", "tiktok", "youtube"] as const)
+    .filter((channel_type) => settings[channel_type] !== "")
+    .map((channel_type) => ({ channel_type, value: settings[channel_type] }));
+  if (!contacts.length) return;
+  const conflicts = await client.query(
+    `SELECT contact.id FROM hotel_catalog.property_contact_channels contact
+     JOIN jsonb_to_recordset($2::jsonb) input(channel_type text,value text)
+       ON contact.channel_type=input.channel_type AND contact.value=input.value
+     WHERE contact.property_id=$1::uuid AND NOT contact.is_public`,
+    [propertyId, JSON.stringify(contacts)],
+  );
+  if (conflicts.rows.length) throw new BookingContactPublicationConflictError();
+  await client.query(
+    `INSERT INTO hotel_catalog.property_contact_channels
+      (property_id,channel_type,value,is_public,source_system)
+     SELECT $1::uuid,input.channel_type,input.value,TRUE,'booking'
+     FROM jsonb_to_recordset($2::jsonb) input(channel_type text,value text)
+     WHERE NOT EXISTS (SELECT 1 FROM hotel_catalog.property_contact_channels contact
+       WHERE contact.property_id=$1::uuid AND contact.channel_type=input.channel_type
+         AND contact.value=input.value AND contact.is_public)`,
+    [propertyId, JSON.stringify(contacts)],
+  );
+}
+
+function createPropertyProductDefaultsSql(initialSettings = false): string {
+  return `WITH linked_product_properties AS (
+    SELECT product, resource_id FROM identity.organization_resource_links
+    WHERE organization_id=$1::uuid AND resource_id=$2::uuid::text
+      AND relationship='owner' AND status='active'
+      AND (product, resource_type) IN (('booking', 'booking_hotel'), ('marketplace', 'hotel_profile'), ('pms', 'pms_property'))
+  ),
+    initialized_pending_financials AS (
+      INSERT INTO identity.product_entitlements (
+        organization_id, product, entitlement_key, status,
+        resource_product, resource_type, resource_id, metadata
+      )
+      SELECT $1::uuid, 'pms', 'module:financials', 'suspended',
+        'pms', 'pms_property', resource_id,
+        '{"newHotelFinancialsDefault":"pending"}'::jsonb
+      FROM linked_product_properties WHERE product = 'pms'
+      ON CONFLICT DO NOTHING
+      RETURNING resource_id
+    ),
+    initialized_marketplace_profile AS (
+      INSERT INTO marketplace.marketplace_hotel_profiles (
+        property_id,
+        organization_id,
+        source_system,
+        source_hotel_profile_id
+      )
+      SELECT resource_id::uuid, $1::uuid, 'marketplace', resource_id
+      FROM linked_product_properties
+      WHERE product = 'marketplace'
+      ON CONFLICT (property_id) DO NOTHING
+      RETURNING property_id
+    ),
+    initialized_booking_settings AS (
+      INSERT INTO booking.booking_settings (property_id${initialSettings ? ", default_currency, supported_currencies, default_language, supported_languages" : ""})
+      SELECT resource_id::uuid${
+        initialSettings
+          ? `, $3::jsonb->>'defaultCurrency',
+        ARRAY(SELECT jsonb_array_elements_text($3::jsonb->'supportedCurrencies')),
+        $3::jsonb->>'defaultLanguage',
+        ARRAY(SELECT jsonb_array_elements_text($3::jsonb->'supportedLanguages'))`
+          : ""
+      }
+      FROM linked_product_properties
+      WHERE product = 'booking'
+      ON CONFLICT (property_id) DO NOTHING
+      RETURNING property_id
+    )
+  ${initialSettings ? 'SELECT EXISTS (SELECT 1 FROM initialized_booking_settings) AS "bookingInitialized"' : "SELECT 1"}`;
+}
+
 function createPropertyProfileSql(): string {
   return `
     WITH profile_input AS (
@@ -1465,45 +1619,8 @@ function createPropertyProfileSql(): string {
         contacts jsonb
       )
     ),
-    generated_property AS (
-      SELECT gen_random_uuid() AS property_id
-    ),
     created_property AS (
-      INSERT INTO hotel_catalog.properties (
-        id,
-        public_id,
-        display_name,
-        property_type
-      )
-      SELECT
-        generated_property.property_id,
-        'prop_' || replace(generated_property.property_id::text, '-', ''),
-        profile_input.display_name,
-        profile_input.property_type
-      FROM generated_property, profile_input
-      RETURNING
-        id AS property_id
-    ),
-    linked_property AS (
-      INSERT INTO identity.organization_resource_links (
-        organization_id,
-        product,
-        resource_type,
-        resource_id,
-        relationship,
-        status
-      )
-      SELECT
-        $1::uuid,
-        'hotel_catalog',
-        'property',
-        created_property.property_id::text,
-        'owner',
-        'active'
-      FROM created_property
-      ON CONFLICT (organization_id, product, resource_type, resource_id, relationship)
-      DO UPDATE SET status = 'active', updated_at = now()
-      RETURNING product, resource_id
+      SELECT $3::uuid AS property_id
     ),
     setup_product_keys(product, entitlement_key) AS (
       VALUES
@@ -1607,35 +1724,12 @@ function createPropertyProfileSql(): string {
         'active'
       FROM created_property
       JOIN enabled_products entitlement ON TRUE
-      ON CONFLICT (organization_id, product, resource_type, resource_id, relationship)
-      DO UPDATE SET status = 'active', updated_at = now()
       RETURNING product, resource_id
-    ),
-    initialized_marketplace_profile AS (
-      INSERT INTO marketplace.marketplace_hotel_profiles (
-        property_id,
-        organization_id,
-        source_system,
-        source_hotel_profile_id
-      )
-      SELECT resource_id::uuid, $1::uuid, 'marketplace', resource_id
-      FROM linked_product_properties
-      WHERE product = 'marketplace'
-      ON CONFLICT (property_id) DO NOTHING
-      RETURNING property_id
-    ),
-    initialized_booking_settings AS (
-      INSERT INTO booking.booking_settings (property_id)
-      SELECT resource_id::uuid
-      FROM linked_product_properties
-      WHERE product = 'booking'
-      ON CONFLICT (property_id) DO NOTHING
-      RETURNING property_id
     ),
     written_property AS (
       SELECT * FROM created_property
     )
-    ${propertyProfileMutationCtes()}
+    ${propertyProfileMutationCtes("create")}
     SELECT written_property.property_id::text AS "propertyId"
     FROM written_property
   `;
@@ -1689,13 +1783,14 @@ function updatePropertyProfileSql(): string {
     written_property AS (
       SELECT * FROM updated_property
     )
-    ${propertyProfileMutationCtes()}
+    ${propertyProfileMutationCtes("update")}
     SELECT written_property.property_id::text AS "propertyId"
     FROM written_property
   `;
 }
 
-function propertyProfileMutationCtes(): string {
+function propertyProfileMutationCtes(mode: "create" | "update"): string {
+  // A new UUID has no existing location or contacts to replace. Creation needs INSERT only.
   return `,
     upserted_location AS (
       INSERT INTO hotel_catalog.property_locations (
@@ -1728,7 +1823,9 @@ function propertyProfileMutationCtes(): string {
         'verified',
         now()
       FROM written_property, profile_input
-      ON CONFLICT (property_id) DO UPDATE
+      ${
+        mode === "update"
+          ? `ON CONFLICT (property_id) DO UPDATE
       SET country_code = EXCLUDED.country_code,
           city = EXCLUDED.city,
           street_address = EXCLUDED.street_address,
@@ -1740,7 +1837,9 @@ function propertyProfileMutationCtes(): string {
           geo_public = EXCLUDED.geo_public,
           map_display_mode = EXCLUDED.map_display_mode,
           source_confidence = EXCLUDED.source_confidence,
-          updated_at = now()
+          updated_at = now()`
+          : ""
+      }
       RETURNING property_id
     ),
     contact_input AS (
@@ -1754,7 +1853,9 @@ function propertyProfileMutationCtes(): string {
       JOIN LATERAL jsonb_to_recordset(COALESCE(profile_input.contacts, '[]'::jsonb))
         AS contact(channel_type text, value text, purpose text, is_public boolean) ON TRUE
     ),
-    deleted_contacts AS (
+    ${
+      mode === "update"
+        ? `deleted_contacts AS (
       DELETE FROM hotel_catalog.property_contact_channels contact
       USING written_property
       WHERE contact.property_id = written_property.property_id
@@ -1777,6 +1878,9 @@ function propertyProfileMutationCtes(): string {
         AND contact.channel_type IN ('phone', 'whatsapp', 'email')
       RETURNING contact.property_id
     ),
+    `
+        : ""
+    }
     upserted_contacts AS (
       INSERT INTO hotel_catalog.property_contact_channels (
         property_id,
@@ -1796,7 +1900,9 @@ function propertyProfileMutationCtes(): string {
         'platform',
         now()
       FROM contact_input
-      CROSS JOIN (
+      ${
+        mode === "update"
+          ? `CROSS JOIN (
         SELECT count(*) AS deleted_count
         FROM deleted_external_guest_contacts
       ) external_guest_contact_cleanup
@@ -1804,7 +1910,9 @@ function propertyProfileMutationCtes(): string {
       SET purpose = EXCLUDED.purpose,
           is_public = EXCLUDED.is_public,
           source_system = EXCLUDED.source_system,
-          updated_at = now()
+          updated_at = now()`
+          : ""
+      }
       RETURNING property_id
     )
   `;

@@ -9,8 +9,8 @@ export type MarketplaceCollaborationReadsContractVersion =
 export type MarketplaceCollaborationSide = "creator" | "hotel";
 
 export type MarketplaceAffiliateAssentRead = {
-  participationId: string;
-  attemptId: string;
+  participationId: string | null;
+  attemptId: string | null;
   programId: string;
   propertyId: string;
   offerId: string;
@@ -25,6 +25,50 @@ export type MarketplaceAffiliateAssentRead = {
   };
   hotelApprovedAt: string | null;
   creatorAcceptedAt: string | null;
+  lifecycle: null | {
+    status: "active" | "paused" | "ended";
+    revision: number;
+    pausedBy: ("hotel" | "creator")[];
+  };
+};
+
+export type MarketplaceAffiliateAssentCommandResponse = {
+  ok: true;
+  revision: number;
+  state: "pending" | "matched";
+  replayed: boolean;
+};
+
+export type MarketplaceAffiliateLifecycleCommandResponse = {
+  ok: true;
+  eventId: string;
+  revision: number;
+  effectiveAt: string;
+  replayed: boolean;
+};
+
+export type MarketplaceAffiliateLinkCommandResponse = {
+  ok: true;
+  contractVersion: "marketplace-affiliate-link.v1";
+  linkId: string;
+  agreementId: string;
+  propertyId: string;
+  publicToken: string;
+  path: string;
+  createdAt: string;
+  replayed: boolean;
+};
+
+export type MarketplaceAffiliateLinkDiagnosticResponse = {
+  ok: true;
+  contractVersion: "marketplace-affiliate-link-diagnostic.v1";
+  status: "ready" | "program_inactive" | "destination_unavailable" | "link_invalid";
+  association: "verified";
+  programStatus: "active" | "paused" | "ended";
+  destinationUrl: string | null;
+  campaignLabel: string | null;
+  normalMetricsExcluded: true;
+  externalPurchaseVerified: false;
 };
 
 export type MarketplaceCollaborationStatus =
@@ -362,6 +406,12 @@ export const marketplaceCollaborationEndpoints = {
     `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}?side=${side}`,
   affiliateAssent: (collaborationId: string) =>
     `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/affiliate-assent`,
+  affiliateLifecycle: (collaborationId: string) =>
+    `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/affiliate-lifecycle`,
+  affiliateLink: (collaborationId: string) =>
+    `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/affiliate-link`,
+  affiliateLinkDiagnostic: (collaborationId: string) =>
+    `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/affiliate-link/diagnostic`,
   conversations: (
     input: {
       side?: MarketplaceCollaborationSide;
@@ -418,6 +468,54 @@ export async function getMarketplaceCollaborationAffiliateAssent(
   return vayadaApiClient.get<MarketplaceAffiliateAssentRead>(
     marketplaceCollaborationEndpoints.affiliateAssent(collaborationId),
     options,
+  );
+}
+
+export async function recordMarketplaceCollaborationAffiliateAssent(
+  collaborationId: string,
+  idempotencyKey: string,
+): Promise<MarketplaceAffiliateAssentCommandResponse> {
+  return vayadaApiClient.post<MarketplaceAffiliateAssentCommandResponse>(
+    marketplaceCollaborationEndpoints.affiliateAssent(collaborationId),
+    undefined,
+    toIdempotencyOptions(idempotencyKey),
+  );
+}
+
+export async function changeMarketplaceCollaborationAffiliateLifecycle(
+  collaborationId: string,
+  input: {
+    action: "pause" | "resume" | "end";
+    reason: string;
+    expectedRevision: number;
+  },
+  idempotencyKey: string,
+): Promise<MarketplaceAffiliateLifecycleCommandResponse> {
+  return vayadaApiClient.post<MarketplaceAffiliateLifecycleCommandResponse>(
+    marketplaceCollaborationEndpoints.affiliateLifecycle(collaborationId),
+    input,
+    toIdempotencyOptions(idempotencyKey),
+  );
+}
+
+export async function createMarketplaceCollaborationAffiliateLink(
+  collaborationId: string,
+  idempotencyKey: string,
+): Promise<MarketplaceAffiliateLinkCommandResponse> {
+  return vayadaApiClient.post<MarketplaceAffiliateLinkCommandResponse>(
+    marketplaceCollaborationEndpoints.affiliateLink(collaborationId),
+    undefined,
+    toIdempotencyOptions(idempotencyKey),
+  );
+}
+
+export async function diagnoseMarketplaceCollaborationAffiliateLink(
+  collaborationId: string,
+  campaignLabel: string | null,
+): Promise<MarketplaceAffiliateLinkDiagnosticResponse> {
+  return vayadaApiClient.post<MarketplaceAffiliateLinkDiagnosticResponse>(
+    marketplaceCollaborationEndpoints.affiliateLinkDiagnostic(collaborationId),
+    { campaignLabel },
   );
 }
 

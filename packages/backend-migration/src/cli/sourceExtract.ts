@@ -31,6 +31,9 @@ try {
   const inventory = parseSourceInventory(
     await readFile(join(packageRoot, "source-inventory.tsv"), "utf8"),
   );
+  const historicalInventoryText = manifest.historicalInventorySha256
+    ? await readFile(join(packageRoot, "raw-source-dispositions.tsv"), "utf8")
+    : undefined;
   const snapshotIdentifiers = Object.fromEntries(
     SOURCE_DATABASES.map((sourceDatabase) => [
       sourceDatabase,
@@ -39,7 +42,11 @@ try {
   ) as Record<SourceDatabase, string>;
   const config = {
     manifest,
+    ...(process.env["SOURCE_ATTESTATION_OWNER"]
+      ? { attestationOwner: process.env["SOURCE_ATTESTATION_OWNER"] }
+      : {}),
     inventory,
+    historicalInventoryText,
     sourceSchemaRevision: values.get("--source-schema-revision")!,
     snapshotIdentifiers,
     cutoverFreezeProofSha256: values.get("--cutover-freeze-proof-sha256"),

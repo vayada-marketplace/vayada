@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { NationalitySelect } from "@/components/NationalitySelect";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import { nationalityLabel } from "@vayada/locale-constants";
 import { useParams, useSearchParams } from "next/navigation";
 import {
@@ -20,6 +21,7 @@ import BookingStaySummary, {
   expectedPaymentMethodLabel,
 } from "@/components/bookings/BookingStaySummary";
 import { useTranslation } from "@/lib/i18n";
+import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { localizeBuiltInCheckinStep } from "@/lib/settings/checklistCopy";
 
 type GuestDraft = BookingAdditionalGuestPayload & { id?: string; position: number };
@@ -173,6 +175,7 @@ export default function CheckInPage() {
   const [loading, setLoading] = useState(true);
   const [savingGuest, setSavingGuest] = useState<string | null>(null);
   const [removingGuest, setRemovingGuest] = useState<string | null>(null);
+  const [confirmRemoveIndex, setConfirmRemoveIndex] = useState<number | null>(null);
   const [savingNote, setSavingNote] = useState(false);
   const [error, setError] = useState("");
   const [confirmationFlags, setConfirmationFlags] = useState<string[] | null>(null);
@@ -196,7 +199,7 @@ export default function CheckInPage() {
         setChecklistSteps(checklistRes.steps || []);
         setNotes(noteRes.notes || []);
       })
-      .catch((err) => setError(err.message || t("checkIn.loadError")))
+      .catch((err) => setError(localizedErrorText(err, err.message || t("checkIn.loadError"), t)))
       .finally(() => setLoading(false));
   }, [id, t]);
 
@@ -243,13 +246,14 @@ export default function CheckInPage() {
     ]);
   };
 
-  const removeGuest = async (index: number) => {
+  const removeGuest = async (index: number, confirmed = false) => {
     if (!booking) return;
     const draft = guests[index];
     if (!draft) return;
-    if (guestHasData(draft)) {
-      const confirmed = window.confirm(t("checkIn.removeGuestConfirm", { number: index + 2 }));
-      if (!confirmed) return;
+    setConfirmRemoveIndex(null);
+    if (guestHasData(draft) && !confirmed) {
+      setConfirmRemoveIndex(index);
+      return;
     }
     setRemovingGuest(`guest-${index}`);
     setError("");
@@ -507,6 +511,17 @@ export default function CheckInPage() {
           <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {error}
           </p>
+        )}
+        {confirmRemoveIndex !== null && (
+          <ConfirmDialog
+            title={t("checkIn.guestNumber", { number: confirmRemoveIndex + 2 })}
+            message={t("checkIn.removeGuestConfirm", { number: confirmRemoveIndex + 2 })}
+            confirmLabel={t("checkIn.remove")}
+            cancelLabel={t("common.cancel")}
+            variant="danger"
+            onConfirm={() => void removeGuest(confirmRemoveIndex, true)}
+            onCancel={() => setConfirmRemoveIndex(null)}
+          />
         )}
 
         {completedGuests < totalGuests(booking) && (

@@ -68,7 +68,7 @@ describe("AuthKit session routes", () => {
     app = undefined;
   });
 
-  it.each(["/auth/workos/login", "/auth/workos/signup", "/auth/workos/callback"])(
+  it.each(["/auth/workos/login", "/auth/workos/signup"])(
     "does not expose hosted AuthKit route %s",
     async (url) => {
       app = buildAuthSessionApp();
@@ -81,6 +81,96 @@ describe("AuthKit session routes", () => {
       expect(response.statusCode).toBe(404);
     },
   );
+
+  it("returns hosted invitation users to the configured PMS login without forwarding the auth code", async () => {
+    const authenticateWithCode = vi.fn(async () => session);
+    app = buildAuthSessionApp({
+      authKitClient: createAuthKitClient({ authenticateWithCode }),
+      allowedOrigins: ["https://pms.localhost"],
+      surfacePolicies: {
+        "pms-web": {
+          requiredOrganizationKind: "hotel_group",
+          publicOrigin: "https://pms.localhost",
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/workos/callback?code=one-time-workos-code",
+    });
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe("https://pms.localhost/login?workos_return=complete");
+    expect(authenticateWithCode).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "one-time-workos-code" }),
+    );
+    expect(response.headers["cache-control"]).toContain("no-store");
+    expect(response.headers["referrer-policy"]).toBe("no-referrer");
+    expect(response.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("returns an error to PMS login if hosted invitation code exchange fails", async () => {
+    const authenticateWithCode = vi.fn(async () => {
+      throw new Error("provider-secret");
+    });
+    app = buildAuthSessionApp({
+      authKitClient: createAuthKitClient({ authenticateWithCode }),
+      allowedOrigins: ["https://pms.localhost"],
+      surfacePolicies: {
+        "pms-web": {
+          requiredOrganizationKind: "hotel_group",
+          publicOrigin: "https://pms.localhost",
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/workos/callback?code=one-time-workos-code",
+    });
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe("https://pms.localhost/login?workos_return=failed");
+    expect(response.headers.location).not.toContain("provider-secret");
+    expect(response.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("does not exchange a hosted callback without a code", async () => {
+    const authenticateWithCode = vi.fn(async () => session);
+    app = buildAuthSessionApp({
+      authKitClient: createAuthKitClient({ authenticateWithCode }),
+      allowedOrigins: ["https://pms.localhost"],
+      surfacePolicies: {
+        "pms-web": {
+          requiredOrganizationKind: "hotel_group",
+          publicOrigin: "https://pms.localhost",
+        },
+      },
+    });
+
+    const response = await app.inject({ method: "GET", url: "/auth/workos/callback?error=denied" });
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe("https://pms.localhost/login?workos_return=failed");
+    expect(authenticateWithCode).not.toHaveBeenCalled();
+  });
+
+  it("does not redirect hosted callbacks to an unconfigured origin", async () => {
+    app = buildAuthSessionApp();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/workos/callback?code=one-time-workos-code",
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.headers.location).toBeUndefined();
+    expect(response.json()).toEqual({
+      error: "invitation_return_unavailable",
+      message: "Sign-in is temporarily unavailable. Please try again later.",
+    });
+  });
 
   it("keeps legacy password register absent from next-api", async () => {
     app = buildAuthSessionApp();
@@ -655,6 +745,78 @@ describe("AuthKit session routes", () => {
     expect(callback.statusCode).toBe(400);
     expect(callback.json()).toEqual({ error: "invalid_callback_origin" });
     expect(authenticateWithCode).not.toHaveBeenCalled();
+  });
+
+  it("filters password workspace choices to active organizations allowed on the surface", async () => {
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://pms.localhost"],
+      surfacePolicies: {
+        "pms-web": { requiredOrganizationKind: "hotel_group" },
+      },
+      identityRepository: createIdentityRepository({
+        organizationByWorkosOrgId: async (id) => {
+          if (id === "org_hotel") {
+            return {
+              organizationId: "hotel",
+              workosOrgId: id,
+              name: "Hotel Group",
+              kind: "hotel_group",
+              status: "active",
+            };
+          }
+          if (id === "org_inactive") {
+            return {
+              organizationId: "inactive",
+              workosOrgId: id,
+              name: "Inactive Hotel",
+              kind: "hotel_group",
+              status: "suspended",
+            };
+          }
+          if (id === "org_platform") {
+            return {
+              organizationId: "platform",
+              workosOrgId: id,
+              name: "Platform",
+              kind: "platform",
+              status: "active",
+            };
+          }
+          return null;
+        },
+      }),
+      authKitClient: createAuthKitClient({
+        async authenticateWithPassword() {
+          throw {
+            code: "organization_selection_required",
+            pending_authentication_token: "pending-secret",
+            organizations: [
+              { id: "org_hotel", name: "Hotel Group" },
+              { id: "org_inactive", name: "Inactive Hotel" },
+              { id: "org_platform", name: "Platform" },
+              { id: "org_unmapped", name: "Unmapped" },
+            ],
+          };
+        },
+      }),
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/password/login",
+      headers: { origin: "https://pms.localhost" },
+      payload: {
+        email: "owner@example.test",
+        password: "correct-password",
+        surface: "pms-web",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({
+      state: "organization_selection_required",
+      organizations: [{ id: "org_hotel", name: "Hotel Group" }],
+    });
   });
 
   it("uses host-only HttpOnly cookies and response CSRF tokens in first-party mode", async () => {
@@ -1563,6 +1725,15 @@ describe("AuthKit session routes", () => {
     const auditEvents: ProductAuditEvent[] = [];
     app = buildAuthSessionApp({
       allowedOrigins: ["https://marketplace.localhost"],
+      identityRepository: createIdentityRepository({
+        organizationByWorkosOrgId: async (id) => ({
+          organizationId: id,
+          workosOrgId: id,
+          name: "Creator Workspace",
+          kind: "creator_workspace",
+          status: "active",
+        }),
+      }),
       authKitClient: createAuthKitClient({
         async authenticateWithPassword() {
           throw error;

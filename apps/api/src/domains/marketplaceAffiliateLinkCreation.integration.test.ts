@@ -1,0 +1,1627 @@
+import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import pg from "pg";
+import { beforeEach, describe, expect, it } from "vitest";
+import { assentCommandFixture, assentInput } from "./affiliateAssentCommandTestFixture.js";
+import { databaseUrl, id } from "./affiliatePublicationTestFixture.js";
+import {
+  activateMarketplaceAffiliateAgreement,
+  type AffiliateAgreementActivationReadiness,
+} from "./marketplaceAffiliateAgreementActivation.js";
+import { recordAffiliateAssent } from "./marketplaceAffiliateAssentCommand.js";
+import { changeMarketplaceAffiliateAgreementLifecycle } from "./marketplaceAffiliateAgreementLifecycleCommand.js";
+import {
+  createMarketplaceAffiliateLink,
+  type AffiliateLinkCreationReadiness,
+} from "./marketplaceAffiliateLinkCreation.js";
+import { readMarketplaceAffiliateLinkCreationReadiness } from "./marketplaceAffiliateLinkCreationReadiness.js";
+import { readMarketplaceAffiliateLinkEligibility } from "./marketplaceAffiliateLinkEligibility.js";
+import { readMarketplaceAffiliateVisitScope } from "./marketplaceAffiliateVisitScope.js";
+import { createMarketplaceAffiliateVisit } from "./marketplaceAffiliateVisit.js";
+import {
+  affiliateTrafficSource,
+  recordMarketplaceAffiliateClick,
+  recordSyntheticMarketplaceAffiliateClick,
+} from "./marketplaceAffiliateClickOccurrence.js";
+import {
+  admitAffiliateArrival,
+  admitSyntheticAffiliateClick,
+  createSyntheticAffiliateClickContext,
+} from "./bookingAffiliateClickAdmission.js";
+import { createSyntheticAffiliateOriginalBooking } from "./bookingAffiliateOriginalBinding.js";
+import {
+  bindLiveAffiliateOriginal,
+  lockLiveAffiliateContextForOriginal,
+} from "./bookingAffiliateLiveOriginalBinding.js";
+
+const migrations = new URL("../../../../packages/backend-migration/migrations/", import.meta.url);
+
+describe.skipIf(!databaseUrl)("affiliate link creation", () => {
+  const fixture = assentCommandFixture();
+  const pool = () => fixture.pool();
+  let agreementId: string;
+
+  const ready: AffiliateLinkCreationReadiness = async (_client, scope) => ({
+    status: "ready",
+    scope,
+  });
+
+  const input = () => ({
+    context: assentInput(false).context,
+    agreementId,
+    idempotencyKey: "create-link",
+  });
+
+  beforeEach(async () => {
+    await pool().query(
+      await readFile(
+        new URL("0214_marketplace_affiliate_agreement_activation.sql", migrations),
+        "utf8",
+      ),
+    );
+    expect(await recordAffiliateAssent(pool(), assentInput())).toMatchObject({ ok: true });
+    expect(
+      await recordAffiliateAssent(pool(), { ...assentInput(false), expectedRevision: 1 }),
+    ).toMatchObject({ ok: true, state: "matched" });
+    const activationReadiness: AffiliateAgreementActivationReadiness = async (_client, scope) => ({
+      status: "ready",
+      scope,
+      enrollmentOpen: true,
+      evidenceReferences: ["synthetic-readiness"],
+    });
+    const activation = await activateMarketplaceAffiliateAgreement(
+      pool(),
+      {
+        context: assentInput(false).context,
+        propertyId: id(3),
+        programId: id(50),
+        creatorProfileId: id(82),
+        attemptId: id(100),
+        termsId: id(51),
+        expectedRevision: 0,
+        idempotencyKey: "activation-before-link",
+      },
+      activationReadiness,
+    );
+    if (!activation.ok) throw new Error(`Synthetic activation failed: ${activation.code}`);
+    agreementId = activation.agreementId;
+    for (const statement of (
+      await readFile(new URL("0324_marketplace_affiliate_links.sql", migrations), "utf8")
+    ).split("-- vayada:next-statement"))
+      await pool().query(statement);
+    await pool().query(
+      await readFile(new URL("0325_marketplace_affiliate_links.sql", migrations), "utf8"),
+    );
+    await pool().query(
+      await readFile(
+        new URL("0326_marketplace_affiliate_agreement_lifecycle.sql", migrations),
+        "utf8",
+      ),
+    );
+    await pool().query(
+      await readFile(
+        new URL("0403_marketplace_affiliate_click_occurrences.sql", migrations),
+        "utf8",
+      ),
+    );
+    await pool().query(`DROP SCHEMA IF EXISTS booking,finance CASCADE;
+      CREATE SCHEMA booking; CREATE SCHEMA finance;
+      CREATE TABLE finance.affiliate_earning_journal(property_id UUID,booking_id TEXT);
+      CREATE FUNCTION booking.try_affiliate_booking_uuid(value TEXT)
+      RETURNS UUID LANGUAGE plpgsql IMMUTABLE AS $$
+      BEGIN RETURN value::uuid;
+      EXCEPTION WHEN invalid_text_representation THEN RETURN NULL;
+      END $$;`);
+    await pool().query(await readFile(new URL("0005_booking_checkout.sql", migrations), "utf8"));
+    await pool().query(
+      await readFile(new URL("0404_booking_affiliate_click_admissions.sql", migrations), "utf8"),
+    );
+    await pool().query(
+      await readFile(new URL("0405_booking_affiliate_original_bindings.sql", migrations), "utf8"),
+    );
+    await pool().query(
+      await readFile(new URL("0406_affiliate_live_click_storage.sql", migrations), "utf8"),
+    );
+    await pool().query(
+      await readFile(
+        new URL("0412_booking_affiliate_live_original_bindings.sql", migrations),
+        "utf8",
+      ),
+    );
+    await pool().query(
+      await readFile(new URL("0411_affiliate_click_campaign_label.sql", migrations), "utf8"),
+    );
+    await pool().query(
+      await readFile(new URL("0417_affiliate_guarded_click_capture.sql", migrations), "utf8"),
+    );
+    await pool().query(
+      await readFile(new URL("0418_affiliate_guarded_click_admission.sql", migrations), "utf8"),
+    );
+    await pool().query(
+      await readFile(new URL("0419_affiliate_guarded_original_binding.sql", migrations), "utf8"),
+    );
+    await pool().query(
+      await readFile(new URL("0423_affiliate_public_link_quota.sql", migrations), "utf8"),
+    );
+  });
+
+  it("creates one stable creator-owned link with a default share path", async () => {
+    const created = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    expect(created).toMatchObject({
+      ok: true,
+      contractVersion: "marketplace-affiliate-link.v1",
+      agreementId,
+      propertyId: id(3),
+      replayed: false,
+    });
+    if (!created.ok) throw new Error("Expected link");
+    expect(created.publicToken).toMatch(/^va_[A-Za-z0-9_-]{22}$/);
+    expect(created.path).toBe(`/r/${created.publicToken}`);
+    expect(await createMarketplaceAffiliateLink(pool(), input())).toEqual({
+      ...created,
+      replayed: true,
+    });
+    expect(
+      await createMarketplaceAffiliateLink(pool(), { ...input(), idempotencyKey: "another-retry" }),
+    ).toEqual({ ...created, replayed: true });
+    const revoked = input();
+    revoked.context.linkedResources = [];
+    await expect(createMarketplaceAffiliateLink(pool(), revoked)).rejects.toThrow();
+    expect(
+      (await pool().query("SELECT count(*) FROM marketplace.affiliate_links")).rows[0].count,
+    ).toBe("1");
+  });
+
+  it("uses current native destination safety for the production link command", async () => {
+    await pool().query(`
+      ALTER TABLE hotel_catalog.properties ADD COLUMN lifecycle_status TEXT DEFAULT 'active';
+      CREATE TABLE hotel_catalog.property_slugs(property_id UUID,slug TEXT,purpose TEXT,status TEXT);
+      CREATE TABLE hotel_catalog.property_domains(property_id UUID,verification_status TEXT,
+        canonical_when_verified BOOLEAN);
+      CREATE TABLE booking.affiliate_destination_versions(id UUID PRIMARY KEY,property_id UUID,
+        created_by_organization_id UUID,booking_url TEXT);
+      INSERT INTO hotel_catalog.property_slugs VALUES
+        ('${id(3)}','hotel-alpenrose','canonical','active');
+      INSERT INTO booking.affiliate_destination_versions VALUES
+        ('${id(30)}','${id(3)}','${id(4)}','https://external.example/');
+    `);
+    expect(
+      await createMarketplaceAffiliateLink(
+        pool(),
+        input(),
+        readMarketplaceAffiliateLinkCreationReadiness,
+      ),
+    ).toEqual({
+      ok: false,
+      code: "link_creation_blocked",
+      reasons: ["destination_unavailable"],
+    });
+    await pool().query(
+      `UPDATE booking.affiliate_destination_versions
+       SET booking_url='https://hotel-alpenrose.next-booking.vayada.com/' WHERE id=$1`,
+      [id(30)],
+    );
+    expect(
+      await createMarketplaceAffiliateLink(
+        pool(),
+        input(),
+        readMarketplaceAffiliateLinkCreationReadiness,
+      ),
+    ).toMatchObject({ ok: true, agreementId, propertyId: id(3) });
+  });
+
+  it("shares a fixed per-link click quota without storing visitor data", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const allowed = await Promise.all(
+      Array.from({ length: 300 }, () =>
+        pool().query("SELECT * FROM marketplace.consume_affiliate_click_quota($1)", [
+          link.publicToken,
+        ]),
+      ),
+    );
+    expect(allowed.every((result) => result.rows[0]?.allowed === true)).toBe(true);
+    await pool().query(
+      `UPDATE marketplace.affiliate_click_quota_windows
+       SET consumed=2999 WHERE link_id=$1`,
+      [link.linkId],
+    );
+    const boundary = await Promise.all([
+      pool().query("SELECT * FROM marketplace.consume_affiliate_click_quota($1)", [
+        link.publicToken,
+      ]),
+      pool().query("SELECT * FROM marketplace.consume_affiliate_click_quota($1)", [
+        link.publicToken,
+      ]),
+    ]);
+    expect(boundary.filter((result) => result.rows[0]?.allowed === true)).toHaveLength(1);
+    const limited = boundary.find((result) => result.rows[0]?.allowed === false)?.rows[0];
+    expect(limited?.retry_after_seconds).toBeGreaterThan(0);
+    expect(limited?.retry_after_seconds).toBeLessThanOrEqual(60);
+
+    const unknown = await pool().query(
+      "SELECT * FROM marketplace.consume_affiliate_click_quota($1)",
+      [`va_${"z".repeat(22)}`],
+    );
+    expect(unknown.rows[0]).toEqual({ allowed: true, retry_after_seconds: null });
+    expect(
+      (await pool().query("SELECT count(*) FROM marketplace.affiliate_click_quota_windows")).rows[0]
+        .count,
+    ).toBe("1");
+    expect(
+      Object.keys(
+        (await pool().query("SELECT * FROM marketplace.affiliate_click_quota_windows LIMIT 1"))
+          .rows[0],
+      ),
+    ).toEqual(["link_id", "window_started_at", "consumed"]);
+  });
+
+  it("resolves the accepted destination and window under the click transaction", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const client = await pool().connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      expect(await readMarketplaceAffiliateVisitScope(client, link.publicToken)).toEqual({
+        status: "eligible",
+        linkId: link.linkId,
+        agreementId,
+        propertyId: id(3),
+        termsId: id(51),
+        organizationId: id(4),
+        destinationVersionId: id(30),
+        attributionWindowDays: 14,
+      });
+      expect(await readMarketplaceAffiliateVisitScope(client, "invalid")).toEqual({
+        status: "unavailable",
+      });
+      await client.query("COMMIT");
+    } finally {
+      client.release();
+    }
+  });
+
+  it("records distinct eligible visits only after native safety and referral readiness", async () => {
+    await pool().query(
+      `
+      ALTER TABLE hotel_catalog.properties ADD COLUMN lifecycle_status TEXT DEFAULT 'active';
+      CREATE TABLE hotel_catalog.property_slugs(property_id UUID,slug TEXT,purpose TEXT,status TEXT);
+      CREATE TABLE hotel_catalog.property_domains(property_id UUID,verification_status TEXT,
+        canonical_when_verified BOOLEAN);
+      CREATE TABLE booking.affiliate_destination_versions(id UUID PRIMARY KEY,property_id UUID,
+        created_by_organization_id UUID,booking_url TEXT);`,
+    );
+    await pool().query(
+      "INSERT INTO hotel_catalog.property_slugs VALUES ($1,'hotel-alpenrose','canonical','active')",
+      [id(3)],
+    );
+    await pool().query(
+      `INSERT INTO booking.affiliate_destination_versions VALUES
+        ($1,$2,$3,'https://hotel-alpenrose.next-booking.vayada.com/')`,
+      [id(30), id(3), id(4)],
+    );
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const visit = (campaignLabel: string | null, source: "instagram" | "unknown") =>
+      createMarketplaceAffiliateVisit(
+        pool(),
+        { publicToken: link.publicToken, campaignLabel, source },
+        async () => ({
+          certificationEnvironment: "sandbox",
+          certificationConnectionReference: "synthetic-certification",
+          productionConnectionReference: "synthetic-preflight",
+          adapterVersion: "synthetic-v1",
+        }),
+        async () => ({
+          status: "ready",
+          capability: "referral_round_trip",
+          policyVersion: "booking-affiliate-referral-readiness.v1",
+          evidenceReferences: ["synthetic-only"],
+          validatedAt: new Date().toISOString(),
+        }),
+      );
+    expect(
+      await createMarketplaceAffiliateVisit(
+        pool(),
+        {
+          publicToken: link.publicToken,
+          campaignLabel: null,
+          source: "unknown",
+        },
+        async () => undefined,
+      ),
+    ).toEqual({ status: "unavailable" });
+    expect(await visit("instagram.reel-1", "instagram")).toMatchObject({ status: "ready" });
+    expect(await visit(null, "unknown")).toMatchObject({ status: "ready" });
+    expect(
+      (
+        await pool().query(
+          `SELECT link_id,property_id,terms_id,source,synthetic,campaign_label,reference_token
+         FROM marketplace.affiliate_click_occurrences ORDER BY clicked_at,id`,
+        )
+      ).rows,
+    ).toMatchObject([
+      {
+        link_id: link.linkId,
+        property_id: id(3),
+        terms_id: id(51),
+        source: "instagram",
+        synthetic: false,
+        campaign_label: "instagram.reel-1",
+      },
+      {
+        link_id: link.linkId,
+        property_id: id(3),
+        terms_id: id(51),
+        source: "unknown",
+        synthetic: false,
+        campaign_label: null,
+      },
+    ]);
+    const references = (
+      await pool().query("SELECT reference_token FROM marketplace.affiliate_click_occurrences")
+    ).rows.map((row) => row.reference_token);
+    expect(new Set(references).size).toBe(2);
+    await pool().query("INSERT INTO hotel_catalog.property_domains VALUES ($1,'verified',TRUE)", [
+      id(3),
+    ]);
+    expect(await visit(null, "unknown")).toEqual({ status: "unavailable" });
+    expect(
+      (await pool().query("SELECT count(*) FROM marketplace.affiliate_click_occurrences")).rows[0]
+        .count,
+    ).toBe("2");
+    expect(
+      (await pool().query("SELECT count(*) FROM finance.affiliate_earning_journal")).rows[0].count,
+    ).toBe("0");
+  });
+
+  it("lets an execute-only capture role derive and admit a click but denies direct inserts", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const role = `affiliate_capture_fixture_${randomUUID().replaceAll("-", "")}`;
+    await pool().query(`CREATE ROLE ${role} NOLOGIN NOINHERIT NOBYPASSRLS`);
+    try {
+      await pool().query(`GRANT USAGE ON SCHEMA marketplace TO ${role}`);
+      await pool().query(`GRANT USAGE ON SCHEMA booking TO ${role}`);
+      expect(
+        (
+          await pool().query(
+            `SELECT has_function_privilege($1,
+               'booking.admit_affiliate_click(text,uuid,uuid)', 'EXECUTE') AS allowed`,
+            [role],
+          )
+        ).rows[0].allowed,
+      ).toBe(false);
+      await pool().query(
+        `GRANT EXECUTE ON FUNCTION marketplace.capture_affiliate_click(TEXT,TEXT,TEXT)
+         TO ${role}`,
+      );
+      await pool().query(
+        `GRANT EXECUTE ON FUNCTION booking.admit_affiliate_click(TEXT,UUID,UUID)
+         TO ${role}`,
+      );
+      const client = await pool().connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(`SET LOCAL ROLE ${role}`);
+        const captured = await client.query(
+          "SELECT * FROM marketplace.capture_affiliate_click($1,'unknown',NULL)",
+          [link.publicToken],
+        );
+        expect(captured.rows[0]).toMatchObject({
+          link_id: link.linkId,
+          property_id: id(3),
+          terms_id: id(51),
+        });
+        expect(captured.rows[0].reference_token).toMatch(/^vc_[A-Za-z0-9_-]{22}$/);
+        const admitted = await client.query(
+          "SELECT * FROM booking.admit_affiliate_click($1,$2,NULL)",
+          [captured.rows[0].reference_token, id(3)],
+        );
+        expect(admitted.rows[0]).toMatchObject({
+          status: "admitted",
+          context_created: true,
+          click_id: captured.rows[0].click_id,
+          history_position: "1",
+          replayed: false,
+        });
+        expect(
+          await client.query("SELECT * FROM marketplace.capture_affiliate_click($1,NULL,NULL)", [
+            link.publicToken,
+          ]),
+        ).toHaveProperty("rowCount", 0);
+        await client.query("COMMIT");
+
+        await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+        await client.query(`SET LOCAL ROLE ${role}`);
+        expect(
+          await client.query(
+            "SELECT * FROM marketplace.capture_affiliate_click($1,'unknown',NULL)",
+            [link.publicToken],
+          ),
+        ).toHaveProperty("rowCount", 0);
+        expect(
+          (
+            await client.query("SELECT * FROM booking.admit_affiliate_click($1,$2,NULL)", [
+              captured.rows[0].reference_token,
+              id(3),
+            ])
+          ).rows[0].status,
+        ).toBe("unavailable");
+        await client.query("ROLLBACK");
+
+        await client.query("BEGIN");
+        await client.query(`SET LOCAL ROLE ${role}`);
+        await expect(
+          client.query(
+            `INSERT INTO marketplace.affiliate_click_occurrences
+             (id,link_id,property_id,terms_id,reference_token,source,synthetic)
+             VALUES($1,$2,$3,$4,'vc_AAAAAAAAAAAAAAAAAAAAAA','unknown',FALSE)`,
+            [id(99), link.linkId, id(3), id(51)],
+          ),
+        ).rejects.toThrow(/permission denied/i);
+        await client.query("ROLLBACK");
+
+        await client.query("BEGIN");
+        await client.query(`SET LOCAL ROLE ${role}`);
+        await expect(
+          client.query(
+            "INSERT INTO booking.affiliate_click_contexts(id,property_id,synthetic) VALUES($1,$2,FALSE)",
+            [id(98), id(3)],
+          ),
+        ).rejects.toThrow(/permission denied/i);
+        await client.query("ROLLBACK");
+
+        await client.query("BEGIN");
+        await client.query(`SET LOCAL ROLE ${role}`);
+        await expect(
+          client.query(
+            `INSERT INTO booking.affiliate_click_admissions
+               (context_id,property_id,click_id,history_position)
+             VALUES($1,$2,$3,2)`,
+            [admitted.rows[0].context_id, id(3), id(97)],
+          ),
+        ).rejects.toThrow(/permission denied/i);
+        await client.query("ROLLBACK");
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    } finally {
+      await pool().query(`DROP OWNED BY ${role}; DROP ROLE ${role}`);
+    }
+  });
+
+  it("allows concurrent captures while retaining the lifecycle lock", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const first = await pool().connect();
+    const second = await pool().connect();
+    try {
+      await first.query("BEGIN");
+      await first.query("SELECT * FROM marketplace.capture_affiliate_click($1,'unknown',NULL)", [
+        link.publicToken,
+      ]);
+      await second.query("BEGIN");
+      await second.query("SET LOCAL lock_timeout='200ms'");
+      await expect(
+        second.query("SELECT * FROM marketplace.capture_affiliate_click($1,'unknown',NULL)", [
+          link.publicToken,
+        ]),
+      ).resolves.toHaveProperty("rowCount", 1);
+    } finally {
+      await Promise.all([first.query("ROLLBACK"), second.query("ROLLBACK")]);
+      first.release();
+      second.release();
+    }
+  });
+
+  it("records separate synthetic visits without trusting referrer for ownership", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const first = await recordSyntheticMarketplaceAffiliateClick(
+      pool(),
+      link.publicToken,
+      "https://www.instagram.com/p/example",
+    );
+    const second = await recordSyntheticMarketplaceAffiliateClick(
+      pool(),
+      link.publicToken,
+      "https://notinstagram.com/p/example",
+    );
+    expect(first).toMatchObject({ status: "recorded", source: "instagram" });
+    expect(second).toMatchObject({ status: "recorded", source: "unknown" });
+    if (first.status !== "recorded" || second.status !== "recorded")
+      throw new Error("Missing click");
+    expect(second.clickId).not.toBe(first.clickId);
+    expect(second.referenceToken).not.toBe(first.referenceToken);
+    await expect(
+      pool().query("UPDATE marketplace.affiliate_click_occurrences SET source='x' WHERE id=$1", [
+        first.clickId,
+      ]),
+    ).rejects.toThrow();
+    expect(
+      (
+        await pool().query(
+          `SELECT c.link_id,l.agreement_id,g.creator_profile_id,c.terms_id,c.property_id,
+                  c.synthetic,c.source
+           FROM marketplace.affiliate_click_occurrences c
+           JOIN marketplace.affiliate_links l ON l.id=c.link_id
+           JOIN marketplace.affiliate_agreements g ON g.id=l.agreement_id
+           ORDER BY c.source`,
+        )
+      ).rows,
+    ).toEqual([
+      {
+        link_id: link.linkId,
+        agreement_id: agreementId,
+        creator_profile_id: id(82),
+        terms_id: id(51),
+        property_id: id(3),
+        synthetic: true,
+        source: "instagram",
+      },
+      {
+        link_id: link.linkId,
+        agreement_id: agreementId,
+        creator_profile_id: id(82),
+        terms_id: id(51),
+        property_id: id(3),
+        synthetic: true,
+        source: "unknown",
+      },
+    ]);
+    expect(affiliateTrafficSource("https://instagram.com.evil.example/")).toBe("unknown");
+  });
+
+  it("blocks synthetic capture after a hotel pauses the agreement", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    expect(await recordSyntheticMarketplaceAffiliateClick(pool(), link.publicToken)).toMatchObject({
+      status: "recorded",
+      source: "unknown",
+    });
+    expect(
+      await changeMarketplaceAffiliateAgreementLifecycle(pool(), {
+        context: assentInput().context,
+        agreementId,
+        action: "pause",
+        reason: "Hotel pause",
+        expectedRevision: 0,
+        idempotencyKey: "pause-before-next-click",
+      }),
+    ).toMatchObject({ ok: true });
+    expect(await recordSyntheticMarketplaceAffiliateClick(pool(), link.publicToken)).toEqual({
+      status: "unavailable",
+    });
+    expect(
+      (await pool().query("SELECT count(*) FROM marketplace.affiliate_click_occurrences")).rows[0]
+        .count,
+    ).toBe("1");
+  });
+
+  it("persists a live click and admits its opaque reference only to its trusted property", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const click = await recordMarketplaceAffiliateClick(
+      pool(),
+      link.publicToken,
+      "https://www.tiktok.com/@creator/video/1",
+    );
+    if (click.status !== "recorded") throw new Error("Expected live click");
+
+    expect(
+      await admitAffiliateArrival(pool(), {
+        propertyId: id(6),
+        referenceToken: click.referenceToken,
+      }),
+    ).toEqual({ status: "unavailable" });
+    expect(
+      await admitAffiliateArrival(pool(), {
+        propertyId: id(3),
+        referenceToken: click.referenceToken,
+        contextId: "untrusted-cookie",
+      }),
+    ).toEqual({ status: "unavailable" });
+    expect(
+      (await pool().query("SELECT count(*) FROM booking.affiliate_click_contexts")).rows[0].count,
+    ).toBe("0");
+    const admitted = await admitAffiliateArrival(pool(), {
+      propertyId: id(3),
+      referenceToken: click.referenceToken,
+    });
+    expect(admitted).toMatchObject({
+      status: "admitted",
+      clickId: click.clickId,
+      historyPosition: "1",
+      replayed: false,
+      contextCreated: true,
+    });
+    if (admitted.status !== "admitted") throw new Error("Expected admitted arrival");
+    expect(
+      await admitAffiliateArrival(pool(), {
+        propertyId: id(6),
+        referenceToken: click.referenceToken,
+        contextId: admitted.contextId,
+      }),
+    ).toEqual({ status: "unavailable" });
+    expect(
+      (await pool().query("SELECT count(*) FROM booking.affiliate_click_admissions")).rows[0].count,
+    ).toBe("1");
+    expect(
+      await admitAffiliateArrival(pool(), {
+        propertyId: id(3),
+        referenceToken: click.referenceToken,
+        contextId: admitted.contextId,
+      }),
+    ).toEqual({ ...admitted, contextCreated: false, replayed: true });
+    const syntheticContext = await createSyntheticAffiliateClickContext(pool(), id(3));
+    expect(
+      await admitSyntheticAffiliateClick(pool(), syntheticContext, click.referenceToken),
+    ).toEqual({ status: "unavailable" });
+
+    expect(
+      (
+        await pool().query(
+          `SELECT l.agreement_id,g.creator_profile_id,c.property_id,c.terms_id,
+                  c.source,c.synthetic,x.synthetic AS context_synthetic
+           FROM marketplace.affiliate_click_occurrences c
+           JOIN marketplace.affiliate_links l ON l.id=c.link_id
+           JOIN marketplace.affiliate_agreements g ON g.id=l.agreement_id
+           JOIN booking.affiliate_click_admissions a ON a.click_id=c.id
+           JOIN booking.affiliate_click_contexts x ON x.id=a.context_id
+           WHERE c.id=$1`,
+          [click.clickId],
+        )
+      ).rows[0],
+    ).toEqual({
+      agreement_id: agreementId,
+      creator_profile_id: id(82),
+      property_id: id(3),
+      terms_id: id(51),
+      source: "tiktok",
+      synthetic: false,
+      context_synthetic: false,
+    });
+    await expect(
+      pool().query("DELETE FROM marketplace.affiliate_click_occurrences WHERE id=$1", [
+        click.clickId,
+      ]),
+    ).rejects.toThrow("Affiliate click occurrences are immutable");
+    await expect(
+      pool().query("TRUNCATE marketplace.affiliate_click_occurrences CASCADE"),
+    ).rejects.toThrow("Affiliate click occurrences are immutable");
+  });
+
+  it("keeps one context when first arrival is delivered concurrently", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const click = await recordMarketplaceAffiliateClick(pool(), link.publicToken);
+    if (click.status !== "recorded") throw new Error("Expected live click");
+
+    const arrivals = await Promise.all([
+      admitAffiliateArrival(pool(), { propertyId: id(3), referenceToken: click.referenceToken }),
+      admitAffiliateArrival(pool(), { propertyId: id(3), referenceToken: click.referenceToken }),
+    ]);
+    expect(arrivals.filter((result) => result.status === "admitted")).toHaveLength(1);
+    expect(arrivals.filter((result) => result.status === "conflict")).toHaveLength(1);
+    expect(
+      (
+        await pool().query(
+          `SELECT
+             (SELECT count(*) FROM booking.affiliate_click_contexts) AS contexts,
+             (SELECT count(*) FROM booking.affiliate_click_admissions) AS admissions`,
+        )
+      ).rows[0],
+    ).toEqual({ contexts: "1", admissions: "1" });
+  });
+
+  it("orders distinct concurrent live clicks in one existing context", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const first = await recordMarketplaceAffiliateClick(pool(), link.publicToken);
+    const second = await recordMarketplaceAffiliateClick(pool(), link.publicToken);
+    const third = await recordMarketplaceAffiliateClick(pool(), link.publicToken);
+    if (first.status !== "recorded" || second.status !== "recorded" || third.status !== "recorded")
+      throw new Error("Expected live clicks");
+    const initial = await admitAffiliateArrival(pool(), {
+      propertyId: id(3),
+      referenceToken: first.referenceToken,
+    });
+    if (initial.status !== "admitted") throw new Error("Expected initial admission");
+
+    const concurrent = await Promise.all([
+      admitAffiliateArrival(pool(), {
+        propertyId: id(3),
+        contextId: initial.contextId,
+        referenceToken: second.referenceToken,
+      }),
+      admitAffiliateArrival(pool(), {
+        propertyId: id(3),
+        contextId: initial.contextId,
+        referenceToken: third.referenceToken,
+      }),
+    ]);
+    expect(concurrent.map((result) => result.status)).toEqual(["admitted", "admitted"]);
+    expect(
+      concurrent
+        .map((result) => (result.status === "admitted" ? result.historyPosition : null))
+        .sort(),
+    ).toEqual(["2", "3"]);
+  });
+
+  it("does not create an orphan context for an expired live reference", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const referenceToken = `vc_${"L".repeat(22)}`;
+    await pool().query(
+      `INSERT INTO marketplace.affiliate_click_occurrences
+         (id,link_id,property_id,terms_id,reference_token,source,synthetic,clicked_at)
+       VALUES ($1,$2,$3,$4,$5,'unknown',FALSE,clock_timestamp()-interval '16 minutes')`,
+      [id(139), link.linkId, id(3), id(51), referenceToken],
+    );
+
+    expect(await admitAffiliateArrival(pool(), { propertyId: id(3), referenceToken })).toEqual({
+      status: "unavailable",
+    });
+    expect(
+      (await pool().query("SELECT count(*) FROM booking.affiliate_click_contexts")).rows[0].count,
+    ).toBe("0");
+  });
+
+  it("rolls back a new context when its reference expires during a property lock wait", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const clickId = id(138);
+    const referenceToken = `vc_${"W".repeat(22)}`;
+    await pool().query(
+      `INSERT INTO marketplace.affiliate_click_occurrences
+         (id,link_id,property_id,terms_id,reference_token,source,synthetic,clicked_at)
+       VALUES ($1,$2,$3,$4,$5,'unknown',FALSE,
+               clock_timestamp()-interval '14 minutes 58 seconds')`,
+      [clickId, link.linkId, id(3), id(51), referenceToken],
+    );
+    const blocker = await pool().connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM hotel_catalog.properties WHERE id=$1 FOR UPDATE", [
+        id(3),
+      ]);
+      const pending = admitAffiliateArrival(pool(), { propertyId: id(3), referenceToken });
+      await expect
+        .poll(async () => {
+          const activity = await pool().query(
+            `SELECT count(*)::int AS count FROM pg_stat_activity
+             WHERE datname=current_database() AND wait_event_type='Lock'
+               AND query LIKE '%booking.admit_affiliate_click%'`,
+          );
+          return activity.rows[0].count;
+        })
+        .toBe(1);
+      await pool().query(
+        `SELECT pg_sleep(GREATEST(0,
+          EXTRACT(EPOCH FROM clicked_at + interval '15 minutes' - clock_timestamp()) + 0.25))
+         FROM marketplace.affiliate_click_occurrences WHERE id=$1`,
+        [clickId],
+      );
+      await blocker.query("COMMIT");
+      expect(await pending).toEqual({ status: "unavailable" });
+      expect(
+        (
+          await pool().query(
+            `SELECT
+               (SELECT count(*) FROM booking.affiliate_click_contexts) AS contexts,
+               (SELECT count(*) FROM booking.affiliate_click_admissions) AS admissions`,
+          )
+        ).rows[0],
+      ).toEqual({ contexts: "0", admissions: "0" });
+    } finally {
+      await blocker.query("ROLLBACK");
+      blocker.release();
+    }
+  }, 20_000);
+
+  it("binds an admitted live click to an original booking without classifying it as synthetic", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const click = await recordMarketplaceAffiliateClick(pool(), link.publicToken);
+    if (click.status !== "recorded") throw new Error("Expected live click");
+    const arrival = await admitAffiliateArrival(pool(), {
+      propertyId: id(3),
+      referenceToken: click.referenceToken,
+    });
+    if (arrival.status !== "admitted") throw new Error("Expected admitted arrival");
+    const bookingId = id(140);
+    const client = await pool().connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      expect(await lockLiveAffiliateContextForOriginal(client, id(3), arrival.contextId)).toBe(
+        true,
+      );
+      await client.query(
+        `INSERT INTO booking.guest_bookings
+           (id,property_id,public_reference,lifecycle_status,check_in,check_out,currency)
+         VALUES ($1,$2,'live-original','draft','2027-01-01','2027-01-02','EUR')`,
+        [bookingId, id(3)],
+      );
+      expect(
+        await bindLiveAffiliateOriginal(client, {
+          id: bookingId,
+          contextId: arrival.contextId,
+        }),
+      ).toBe(true);
+      await client.query("COMMIT");
+    } finally {
+      client.release();
+    }
+    expect(
+      (
+        await pool().query(
+          "SELECT history_cutoff,synthetic FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0],
+    ).toEqual({ history_cutoff: "1", synthetic: false });
+    const laterClick = await recordMarketplaceAffiliateClick(pool(), link.publicToken);
+    if (laterClick.status !== "recorded") throw new Error("Expected later click");
+    expect(
+      await admitAffiliateArrival(pool(), {
+        propertyId: id(3),
+        contextId: arrival.contextId,
+        referenceToken: laterClick.referenceToken,
+      }),
+    ).toMatchObject({ status: "admitted", historyPosition: "2" });
+    expect(
+      (
+        await pool().query(
+          "SELECT history_cutoff FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].history_cutoff,
+    ).toBe("1");
+    await expect(
+      pool().query("INSERT INTO finance.affiliate_earning_journal VALUES ($1,$2)", [
+        id(3),
+        bookingId,
+      ]),
+    ).resolves.toMatchObject({ rowCount: 1 });
+  });
+
+  it("lets an execute-only booking role bind only a booking created in its transaction", async () => {
+    const contextId = id(160),
+      bookingId = id(161),
+      oldBookingId = id(162);
+    await pool().query(
+      "INSERT INTO booking.affiliate_click_contexts(id,property_id,synthetic) VALUES($1,$2,FALSE)",
+      [contextId, id(3)],
+    );
+    await pool().query(
+      `INSERT INTO booking.affiliate_click_admissions
+         (context_id,property_id,click_id,history_position,admitted_at)
+       VALUES($1,$2,$3,1,clock_timestamp()),
+             ($1,$2,$4,2,clock_timestamp()-interval '91 days')`,
+      [contextId, id(3), id(163), id(164)],
+    );
+    await pool().query(
+      `INSERT INTO booking.guest_bookings
+         (id,property_id,public_reference,lifecycle_status,check_in,check_out,currency)
+       VALUES($1,$2,'old-binding-candidate','draft','2027-01-01','2027-01-02','EUR')`,
+      [oldBookingId, id(3)],
+    );
+    const role = `affiliate_booking_fixture_${randomUUID().replaceAll("-", "")}`;
+    await pool().query(`CREATE ROLE ${role} NOLOGIN NOINHERIT NOBYPASSRLS`);
+    try {
+      await pool().query(`GRANT USAGE ON SCHEMA booking TO ${role}`);
+      expect(
+        (
+          await pool().query(
+            `SELECT has_function_privilege($1,
+               'booking.bind_live_affiliate_original(uuid,uuid)', 'EXECUTE') AS allowed`,
+            [role],
+          )
+        ).rows[0].allowed,
+      ).toBe(false);
+      await pool().query(
+        `GRANT EXECUTE ON FUNCTION booking.bind_live_affiliate_original(UUID,UUID) TO ${role}`,
+      );
+      const client = await pool().connect();
+      try {
+        await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+        await client.query(
+          `INSERT INTO booking.guest_bookings
+             (id,property_id,public_reference,lifecycle_status,check_in,check_out,currency)
+           VALUES($1,$2,'guarded-original','draft','2027-02-01','2027-02-02','EUR')`,
+          [bookingId, id(3)],
+        );
+        await client.query(`SET LOCAL ROLE ${role}`);
+        expect(
+          (
+            await client.query("SELECT booking.bind_live_affiliate_original($1,$2) AS bound", [
+              bookingId,
+              contextId,
+            ])
+          ).rows[0].bound,
+        ).toBe(true);
+        expect(
+          (
+            await client.query("SELECT booking.bind_live_affiliate_original($1,$2) AS bound", [
+              oldBookingId,
+              contextId,
+            ])
+          ).rows[0].bound,
+        ).toBe(false);
+        await client.query("COMMIT");
+
+        await client.query("BEGIN");
+        await client.query(`SET LOCAL ROLE ${role}`);
+        await expect(
+          client.query(
+            `INSERT INTO booking.affiliate_original_booking_bindings
+               (booking_id,property_id,context_id,history_cutoff,
+                original_public_reference,original_check_in,original_check_out,
+                original_currency,synthetic)
+             VALUES($1,$2,$3,1,'forged','2027-01-01','2027-01-02','EUR',FALSE)`,
+            [oldBookingId, id(3), contextId],
+          ),
+        ).rejects.toThrow(/permission denied/i);
+        await client.query("ROLLBACK");
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    } finally {
+      await pool().query(`DROP OWNED BY ${role}; DROP ROLE ${role}`);
+    }
+    expect(
+      (
+        await pool().query(
+          `SELECT original_public_reference,original_check_in::text,original_check_out::text,
+                  original_currency,history_cutoff
+           FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1`,
+          [bookingId],
+        )
+      ).rows[0],
+    ).toEqual({
+      original_public_reference: "guarded-original",
+      original_check_in: "2027-02-01",
+      original_check_out: "2027-02-02",
+      original_currency: "EUR",
+      history_cutoff: "2",
+    });
+  });
+
+  it("leaves stale, foreign and synthetic contexts and an older booking unbound", async () => {
+    const staleId = id(141),
+      syntheticId = id(142),
+      freshId = id(143),
+      bookingId = id(144),
+      staleBookingId = id(165),
+      foreignBookingId = id(166),
+      syntheticBookingId = id(167);
+    for (const [contextId, synthetic] of [
+      [staleId, false],
+      [syntheticId, true],
+      [freshId, false],
+    ] as const)
+      await pool().query(
+        "INSERT INTO booking.affiliate_click_contexts(id,property_id,synthetic) VALUES($1,$2,$3)",
+        [contextId, id(3), synthetic],
+      );
+    for (const [contextId, clickId, age] of [
+      [staleId, id(145), "91 days"],
+      [syntheticId, id(146), "0 days"],
+      [freshId, id(147), "0 days"],
+    ])
+      await pool().query(
+        `INSERT INTO booking.affiliate_click_admissions
+           (context_id,property_id,click_id,history_position,admitted_at)
+         VALUES($1,$2,$3,1,clock_timestamp()-$4::interval)`,
+        [contextId, id(3), clickId, age],
+      );
+    await pool().query(
+      `INSERT INTO booking.guest_bookings
+         (id,property_id,public_reference,lifecycle_status,check_in,check_out,currency)
+       VALUES ($1,$2,'unbound-original','draft','2027-01-01','2027-01-02','EUR')`,
+      [bookingId, id(3)],
+    );
+    const client = await pool().connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      expect(await lockLiveAffiliateContextForOriginal(client, id(3), staleId)).toBe(false);
+      expect(await lockLiveAffiliateContextForOriginal(client, id(6), freshId)).toBe(false);
+      expect(await lockLiveAffiliateContextForOriginal(client, id(3), syntheticId)).toBe(false);
+      expect(await lockLiveAffiliateContextForOriginal(client, id(3), freshId)).toBe(true);
+      for (const [idValue, propertyId, reference] of [
+        [staleBookingId, id(3), "stale-guarded-original"],
+        [foreignBookingId, id(6), "foreign-guarded-original"],
+        [syntheticBookingId, id(3), "synthetic-guarded-original"],
+      ])
+        await client.query(
+          `INSERT INTO booking.guest_bookings
+             (id,property_id,public_reference,lifecycle_status,check_in,check_out,currency)
+           VALUES($1,$2,$3,'draft','2027-03-01','2027-03-02','EUR')`,
+          [idValue, propertyId, reference],
+        );
+      for (const [idValue, contextId] of [
+        [staleBookingId, staleId],
+        [foreignBookingId, freshId],
+        [syntheticBookingId, syntheticId],
+      ])
+        expect(
+          (
+            await client.query("SELECT booking.bind_live_affiliate_original($1,$2) AS bound", [
+              idValue,
+              contextId,
+            ])
+          ).rows[0].bound,
+        ).toBe(false);
+      expect(
+        await bindLiveAffiliateOriginal(client, {
+          id: bookingId,
+          contextId: freshId,
+        }),
+      ).toBe(false);
+      await client.query("COMMIT");
+    } finally {
+      client.release();
+    }
+    expect(
+      (await pool().query("SELECT count(*) FROM booking.guest_bookings WHERE id=$1", [bookingId]))
+        .rows[0].count,
+    ).toBe("1");
+    expect(
+      (
+        await pool().query(
+          "SELECT count(*) FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].count,
+    ).toBe("0");
+  });
+
+  it("admits trusted clicks once in destination order and rejects another context", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const first = await recordSyntheticMarketplaceAffiliateClick(pool(), link.publicToken);
+    const second = await recordSyntheticMarketplaceAffiliateClick(pool(), link.publicToken);
+    if (first.status !== "recorded" || second.status !== "recorded")
+      throw new Error("Missing click");
+    const contextId = await createSyntheticAffiliateClickContext(pool(), id(3));
+    const [admitted, replay] = await Promise.all([
+      admitSyntheticAffiliateClick(pool(), contextId, first.referenceToken),
+      admitSyntheticAffiliateClick(pool(), contextId, first.referenceToken),
+    ]);
+    expect([admitted, replay]).toEqual(
+      expect.arrayContaining([
+        { status: "admitted", clickId: first.clickId, historyPosition: "1", replayed: false },
+        { status: "admitted", clickId: first.clickId, historyPosition: "1", replayed: true },
+      ]),
+    );
+    expect(await admitSyntheticAffiliateClick(pool(), contextId, second.referenceToken)).toEqual({
+      status: "admitted",
+      clickId: second.clickId,
+      historyPosition: "2",
+      replayed: false,
+    });
+    const another = await createSyntheticAffiliateClickContext(pool(), id(3));
+    expect(await admitSyntheticAffiliateClick(pool(), another, first.referenceToken)).toEqual({
+      status: "conflict",
+    });
+    const wrongProperty = await createSyntheticAffiliateClickContext(pool(), id(6));
+    expect(
+      await admitSyntheticAffiliateClick(pool(), wrongProperty, second.referenceToken),
+    ).toEqual({
+      status: "unavailable",
+    });
+    expect(await admitSyntheticAffiliateClick(pool(), contextId, "vc_invalid")).toEqual({
+      status: "unavailable",
+    });
+    await expect(
+      pool().query("UPDATE booking.affiliate_click_admissions SET history_position=3"),
+    ).rejects.toThrow();
+    await expect(pool().query("DELETE FROM booking.affiliate_click_admissions")).rejects.toThrow();
+    await expect(
+      pool().query("DELETE FROM booking.affiliate_click_contexts WHERE id=$1", [wrongProperty]),
+    ).rejects.toThrow("Affiliate click context history is immutable");
+    await expect(pool().query("TRUNCATE booking.affiliate_click_admissions")).rejects.toThrow(
+      "Affiliate click context history is immutable",
+    );
+    await expect(pool().query("TRUNCATE booking.affiliate_click_contexts CASCADE")).rejects.toThrow(
+      "Affiliate click context history is immutable",
+    );
+    expect(
+      (await pool().query("SELECT count(*) FROM booking.affiliate_click_admissions")).rows[0].count,
+    ).toBe("2");
+  });
+
+  it("rejects an expired transport reference without deleting the historical click", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const staleReference = `vc_${"A".repeat(22)}`;
+    await pool().query(
+      `INSERT INTO marketplace.affiliate_click_occurrences
+         (id,link_id,property_id,terms_id,reference_token,source,synthetic,clicked_at)
+       VALUES ($1,$2,$3,$4,$5,'unknown',TRUE,clock_timestamp() - interval '16 minutes')`,
+      [id(130), link.linkId, id(3), id(51), staleReference],
+    );
+    const contextId = await createSyntheticAffiliateClickContext(pool(), id(3));
+    expect(await admitSyntheticAffiliateClick(pool(), contextId, staleReference)).toEqual({
+      status: "unavailable",
+    });
+    // An earlier admission remains an idempotent replay after transport expiry.
+    await pool().query(
+      `INSERT INTO booking.affiliate_click_admissions
+         (context_id,property_id,click_id,history_position) VALUES ($1,$2,$3,1)`,
+      [contextId, id(3), id(130)],
+    );
+    expect(await admitSyntheticAffiliateClick(pool(), contextId, staleReference)).toEqual({
+      status: "admitted",
+      clickId: id(130),
+      historyPosition: "1",
+      replayed: true,
+    });
+    const anotherContext = await createSyntheticAffiliateClickContext(pool(), id(3));
+    expect(await admitSyntheticAffiliateClick(pool(), anotherContext, staleReference)).toEqual({
+      status: "conflict",
+    });
+    expect(
+      (
+        await pool().query(
+          "SELECT count(*) FROM marketplace.affiliate_click_occurrences WHERE id=$1",
+          [id(130)],
+        )
+      ).rows[0].count,
+    ).toBe("1");
+  });
+
+  it("does not commit first admission after a conflicting insert delays it past expiry", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const reference = `vc_${"B".repeat(22)}`;
+    const waitingContext = await createSyntheticAffiliateClickContext(pool(), id(3));
+    const blockingContext = await createSyntheticAffiliateClickContext(pool(), id(3));
+    await pool().query(
+      `INSERT INTO marketplace.affiliate_click_occurrences
+         (id,link_id,property_id,terms_id,reference_token,source,synthetic,clicked_at)
+       VALUES ($1,$2,$3,$4,$5,'unknown',TRUE,clock_timestamp() - interval '14 minutes 50 seconds')`,
+      [id(131), link.linkId, id(3), id(51), reference],
+    );
+    const blocker = await pool().connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query(
+        `INSERT INTO booking.affiliate_click_admissions
+           (context_id,property_id,click_id,history_position) VALUES ($1,$2,$3,1)`,
+        [blockingContext, id(3), id(131)],
+      );
+      const pending = admitSyntheticAffiliateClick(pool(), waitingContext, reference);
+      await expect
+        .poll(async () => {
+          const activity = await pool().query(
+            `SELECT count(*)::int AS count FROM pg_stat_activity
+           WHERE datname=current_database() AND wait_event_type='Lock'
+             AND query LIKE '%INSERT INTO booking.affiliate_click_admissions%'`,
+          );
+          return activity.rows[0].count;
+        })
+        .toBe(1);
+      const validity = await pool().query(
+        `SELECT clicked_at > clock_timestamp() - interval '15 minutes' AS valid
+         FROM marketplace.affiliate_click_occurrences WHERE id=$1`,
+        [id(131)],
+      );
+      expect(validity.rows[0].valid).toBe(true);
+      await pool().query(
+        `SELECT pg_sleep(GREATEST(0,
+          EXTRACT(EPOCH FROM clicked_at + interval '15 minutes' - clock_timestamp()) + 0.25))
+         FROM marketplace.affiliate_click_occurrences WHERE id=$1`,
+        [id(131)],
+      );
+      await blocker.query("ROLLBACK");
+      expect(await pending).toEqual({ status: "unavailable" });
+      expect(
+        (await pool().query("SELECT count(*) FROM booking.affiliate_click_admissions")).rows[0]
+          .count,
+      ).toBe("0");
+    } finally {
+      await blocker.query("ROLLBACK");
+      blocker.release();
+    }
+  }, 20_000);
+
+  it("freezes the original booking's context and click-history cutoff in its creation transaction", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const first = await recordSyntheticMarketplaceAffiliateClick(pool(), link.publicToken);
+    const later = await recordSyntheticMarketplaceAffiliateClick(pool(), link.publicToken);
+    if (first.status !== "recorded" || later.status !== "recorded")
+      throw new Error("Missing clicks");
+    const contextId = await createSyntheticAffiliateClickContext(pool(), id(3));
+    expect(
+      await admitSyntheticAffiliateClick(pool(), contextId, first.referenceToken),
+    ).toMatchObject({
+      status: "admitted",
+      historyPosition: "1",
+    });
+    const bookingId = id(120);
+    const booking = {
+      id: bookingId,
+      propertyId: id(3),
+      contextId,
+      publicReference: "synthetic-original",
+      checkIn: "2027-01-01",
+      checkOut: "2027-01-02",
+      currency: "EUR",
+    };
+    const client = await pool().connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      expect(await createSyntheticAffiliateOriginalBooking(client, booking)).toEqual({
+        historyCutoff: "1",
+        replayed: false,
+      });
+      await client.query("COMMIT");
+    } finally {
+      client.release();
+    }
+    expect(
+      await admitSyntheticAffiliateClick(pool(), contextId, later.referenceToken),
+    ).toMatchObject({
+      status: "admitted",
+      historyPosition: "2",
+    });
+    await pool().query("UPDATE booking.guest_bookings SET check_out='2027-01-04' WHERE id=$1", [
+      bookingId,
+    ]);
+    const replay = await pool().connect();
+    try {
+      await replay.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      expect(await createSyntheticAffiliateOriginalBooking(replay, booking)).toEqual({
+        historyCutoff: "1",
+        replayed: true,
+      });
+      await expect(
+        createSyntheticAffiliateOriginalBooking(replay, {
+          ...booking,
+          checkOut: "2027-01-03",
+        }),
+      ).rejects.toThrow("differs from stored reservation");
+      await replay.query("COMMIT");
+    } finally {
+      replay.release();
+    }
+    const otherContextId = await createSyntheticAffiliateClickContext(pool(), id(3));
+    const conflicting = await pool().connect();
+    try {
+      await conflicting.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      await expect(
+        createSyntheticAffiliateOriginalBooking(conflicting, {
+          ...booking,
+          contextId: otherContextId,
+        }),
+      ).rejects.toThrow("another affiliate context");
+      await conflicting.query("ROLLBACK");
+    } finally {
+      conflicting.release();
+    }
+    await expect(
+      pool().query(
+        "UPDATE booking.affiliate_original_booking_bindings SET history_cutoff=2 WHERE booking_id=$1",
+        [bookingId],
+      ),
+    ).rejects.toThrow();
+    await expect(
+      pool().query("DELETE FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1", [
+        bookingId,
+      ]),
+    ).rejects.toThrow();
+    await expect(
+      pool().query("TRUNCATE booking.affiliate_original_booking_bindings"),
+    ).rejects.toThrow();
+    await expect(
+      pool().query(
+        "INSERT INTO finance.affiliate_earning_journal(property_id,booking_id) VALUES ($1,$2)",
+        [id(3), bookingId],
+      ),
+    ).rejects.toThrow("cannot create earning evidence");
+    expect(
+      (
+        await pool().query(
+          "SELECT history_cutoff FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].history_cutoff,
+    ).toBe("1");
+  });
+
+  it("rejects binding a reservation created before the caller's transaction", async () => {
+    const contextId = await createSyntheticAffiliateClickContext(pool(), id(3));
+    const bookingId = id(121);
+    await pool().query(
+      `INSERT INTO booking.guest_bookings
+         (id,property_id,public_reference,lifecycle_status,check_in,check_out,currency)
+       VALUES ($1,$2,'synthetic-old','draft','2027-01-01','2027-01-02','EUR')`,
+      [bookingId, id(3)],
+    );
+    const client = await pool().connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      await client.query(
+        "UPDATE booking.guest_bookings SET created_at=clock_timestamp() WHERE id=$1",
+        [bookingId],
+      );
+      await expect(
+        createSyntheticAffiliateOriginalBooking(client, {
+          id: bookingId,
+          propertyId: id(3),
+          contextId,
+          publicReference: "synthetic-old",
+          checkIn: "2027-01-01",
+          checkOut: "2027-01-02",
+          currency: "EUR",
+        }),
+      ).rejects.toThrow("already exists without affiliate binding");
+      await client.query("ROLLBACK");
+    } finally {
+      client.release();
+    }
+    expect(
+      (await pool().query("SELECT count(*) FROM booking.affiliate_original_booking_bindings"))
+        .rows[0].count,
+    ).toBe("0");
+  });
+
+  it("rejects binding if Finance already has evidence for the synthetic booking ID", async () => {
+    const contextId = await createSyntheticAffiliateClickContext(pool(), id(3));
+    const bookingId = id(122);
+    await pool().query(
+      "INSERT INTO finance.affiliate_earning_journal(property_id,booking_id) VALUES ($1,$2)",
+      [id(3), bookingId],
+    );
+    const client = await pool().connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      await expect(
+        createSyntheticAffiliateOriginalBooking(client, {
+          id: bookingId,
+          propertyId: id(3),
+          contextId,
+          publicReference: "synthetic-finance",
+          checkIn: "2027-01-01",
+          checkOut: "2027-01-02",
+          currency: "EUR",
+        }),
+      ).rejects.toThrow("cannot have earning evidence");
+      await client.query("ROLLBACK");
+    } finally {
+      client.release();
+    }
+    expect(
+      (await pool().query("SELECT count(*) FROM booking.guest_bookings WHERE id=$1", [bookingId]))
+        .rows[0].count,
+    ).toBe("0");
+  });
+
+  it("serializes concurrent requests for the same agreement", async () => {
+    const results = await Promise.all([
+      createMarketplaceAffiliateLink(pool(), input(), ready),
+      createMarketplaceAffiliateLink(pool(), input(), ready),
+    ]);
+    expect(results.filter((result) => result.ok && !result.replayed)).toHaveLength(1);
+    expect(results.filter((result) => result.ok && result.replayed)).toHaveLength(1);
+    expect(results[0]).toMatchObject({ linkId: (results[1] as { linkId: string }).linkId });
+  });
+
+  it("uses READ COMMITTED even when the database session defaults to REPEATABLE READ", async () => {
+    const rrPool = new pg.Pool({ connectionString: pool().options.connectionString, max: 1 });
+    try {
+      await rrPool.query(
+        "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ",
+      );
+      expect(
+        (await rrPool.query("SHOW default_transaction_isolation")).rows[0]
+          .default_transaction_isolation,
+      ).toBe("repeatable read");
+      expect(await createMarketplaceAffiliateLink(rrPool, input(), ready)).toMatchObject({
+        ok: true,
+        agreementId,
+      });
+    } finally {
+      await rrPool.end();
+    }
+  });
+
+  it("blocks new links while paused and resolves the stable link only while active", async () => {
+    const change = async (
+      hotel: boolean,
+      action: "pause" | "resume" | "end",
+      expectedRevision: number,
+    ) =>
+      changeMarketplaceAffiliateAgreementLifecycle(pool(), {
+        context: assentInput(hotel).context,
+        agreementId,
+        action,
+        reason: `${hotel ? "Hotel" : "Creator"} ${action}`,
+        expectedRevision,
+        idempotencyKey: `${action}-${expectedRevision}`,
+      });
+    const read = async (token: string) => {
+      const client = await pool().connect();
+      try {
+        await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+        const result = await readMarketplaceAffiliateLinkEligibility(client, token);
+        await client.query("COMMIT");
+        return result;
+      } finally {
+        client.release();
+      }
+    };
+
+    expect(await change(true, "pause", 0)).toMatchObject({ ok: true, revision: 1 });
+    expect(await createMarketplaceAffiliateLink(pool(), input(), ready)).toEqual({
+      ok: false,
+      code: "agreement_not_active",
+    });
+    expect(await change(true, "resume", 1)).toMatchObject({ ok: true, revision: 2 });
+    const created = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!created.ok) throw new Error("Expected link after resume");
+    expect(await read(created.publicToken)).toMatchObject({
+      status: "eligible",
+      linkId: created.linkId,
+    });
+    expect(await read("invalid")).toEqual({ status: "unavailable" });
+
+    expect(await change(false, "pause", 2)).toMatchObject({ ok: true, revision: 3 });
+    expect(await read(created.publicToken)).toEqual({ status: "unavailable" });
+    expect(await createMarketplaceAffiliateLink(pool(), input())).toMatchObject({
+      ok: true,
+      linkId: created.linkId,
+      replayed: true,
+    });
+    expect(await change(false, "resume", 3)).toMatchObject({ ok: true, revision: 4 });
+    expect(await read(created.publicToken)).toMatchObject({
+      status: "eligible",
+      linkId: created.linkId,
+    });
+    expect(await change(true, "end", 4)).toMatchObject({ ok: true, revision: 5 });
+    expect(await read(created.publicToken)).toEqual({ status: "unavailable" });
+  });
+
+  it("orders a click eligibility read before a competing pause and rejects stale isolation", async () => {
+    const created = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!created.ok) throw new Error("Expected link");
+    const reader = await pool().connect();
+    let committed = false;
+    let waiting = false;
+    let pause: ReturnType<typeof changeMarketplaceAffiliateAgreementLifecycle> | undefined;
+    try {
+      await reader.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      expect(
+        await readMarketplaceAffiliateLinkEligibility(reader, created.publicToken),
+      ).toMatchObject({ status: "eligible", linkId: created.linkId });
+      pause = changeMarketplaceAffiliateAgreementLifecycle(pool(), {
+        context: assentInput().context,
+        agreementId,
+        action: "pause",
+        reason: "Hotel pause",
+        expectedRevision: 0,
+        idempotencyKey: "pause-behind-click",
+      });
+      for (let attempt = 0; attempt < 100 && !waiting; attempt++) {
+        waiting = (
+          await pool().query(
+            `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+             WHERE datname=current_database() AND wait_event_type='Lock'
+               AND query LIKE '%JOIN marketplace.affiliate_agreement_activations a ON a.agreement_id=g.id%') AS waiting`,
+          )
+        ).rows[0].waiting;
+        if (!waiting) await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      await reader.query("COMMIT");
+      committed = true;
+    } finally {
+      if (!committed) await reader.query("ROLLBACK");
+      reader.release();
+    }
+    expect(await pause).toMatchObject({ ok: true, revision: 1 });
+    expect(waiting).toBe(true);
+
+    const stale = await pool().connect();
+    try {
+      await expect(
+        readMarketplaceAffiliateLinkEligibility(stale, created.publicToken),
+      ).rejects.toMatchObject({
+        code: "25P01",
+      });
+      await stale.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+      await expect(
+        readMarketplaceAffiliateLinkEligibility(stale, created.publicToken),
+      ).rejects.toThrow("Affiliate link eligibility requires READ COMMITTED");
+      await stale.query("ROLLBACK");
+      await stale.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      expect(await readMarketplaceAffiliateLinkEligibility(stale, created.publicToken)).toEqual({
+        status: "unavailable",
+      });
+      await stale.query("COMMIT");
+    } finally {
+      stale.release();
+    }
+  });
+
+  it("fails closed when readiness is unavailable and creates no partial link", async () => {
+    expect(await createMarketplaceAffiliateLink(pool(), input())).toEqual({
+      ok: false,
+      code: "link_creation_blocked",
+      reasons: ["link_creation_readiness_adapter_missing"],
+    });
+    expect(
+      (await pool().query("SELECT count(*) FROM marketplace.affiliate_links")).rows[0].count,
+    ).toBe("0");
+  });
+
+  it("rejects another actor, organization, and revoked creator scope", async () => {
+    const other = input();
+    other.context.actor.internalUserId = id(9);
+    expect(await createMarketplaceAffiliateLink(pool(), other, ready)).toEqual({
+      ok: false,
+      code: "scope_unavailable",
+    });
+    const hotel = { ...input(), context: assentInput().context };
+    expect(await createMarketplaceAffiliateLink(pool(), hotel, ready)).toEqual({
+      ok: false,
+      code: "scope_unavailable",
+    });
+    const revoked = input();
+    revoked.context.linkedResources = [];
+    await expect(createMarketplaceAffiliateLink(pool(), revoked, ready)).rejects.toThrow();
+    await pool().query(
+      "UPDATE identity.organization_resource_links SET status='inactive' WHERE id=$1",
+      [id(91)],
+    );
+    expect(await createMarketplaceAffiliateLink(pool(), input(), ready)).toEqual({
+      ok: false,
+      code: "scope_unavailable",
+    });
+    expect(
+      (await pool().query("SELECT count(*) FROM marketplace.affiliate_links")).rows[0].count,
+    ).toBe("0");
+  });
+
+  it("rejects an incorrect readiness scope and rolls back a failed receipt", async () => {
+    const mismatched: AffiliateLinkCreationReadiness = async (_client, scope) => ({
+      status: "ready",
+      scope: { ...scope, propertyId: id(6) },
+    });
+    await expect(createMarketplaceAffiliateLink(pool(), input(), mismatched)).rejects.toThrow(
+      "Invalid affiliate link readiness proof",
+    );
+    await pool().query(
+      `CREATE FUNCTION platform.fail_link_receipt_test() RETURNS trigger LANGUAGE plpgsql AS $$
+       BEGIN RAISE EXCEPTION 'synthetic link receipt failure'; END $$;
+       CREATE TRIGGER fail_link_receipt_test BEFORE INSERT ON platform.idempotency_keys
+       FOR EACH ROW WHEN (NEW.operation = 'marketplace.affiliate_link.create')
+       EXECUTE FUNCTION platform.fail_link_receipt_test()`,
+    );
+    await expect(createMarketplaceAffiliateLink(pool(), input(), ready)).rejects.toThrow(
+      "synthetic link receipt failure",
+    );
+    expect(
+      (await pool().query("SELECT count(*) FROM marketplace.affiliate_links")).rows[0].count,
+    ).toBe("0");
+  });
+
+  it.each([{ agreementId: "invalid" }, { idempotencyKey: " " }])(
+    "rejects invalid input without writing: %j",
+    async (change) => {
+      expect(
+        await createMarketplaceAffiliateLink(pool(), { ...input(), ...change }, ready),
+      ).toEqual({
+        ok: false,
+        code: "invalid_request",
+      });
+      expect(
+        (await pool().query("SELECT count(*) FROM marketplace.affiliate_links")).rows[0].count,
+      ).toBe("0");
+    },
+  );
+});

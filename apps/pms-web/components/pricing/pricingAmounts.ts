@@ -1,13 +1,25 @@
 import { pricingCurrencyScale, type PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
-import type { PricingSnapshot } from "@/services/api/replacementPricingClient";
+import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
+import en from "@/messages/en.json";
+import { PricingResponseError, type PricingSnapshot } from "@/services/api/replacementPricingClient";
+
+export type MessageKey = keyof typeof en & keyof typeof import("@/messages/de.json");
+export type Translate = (key: string, params?: Record<string, string | number>) => string;
+/** English text for helpers that run outside the language provider (and for tests). */
+export const english: Translate = (key, params = {}) => Object.entries(params).reduce((text, [name, value]) => text.split(`{${name}}`).join(String(value)), (en as Record<string, string>)[key] ?? key);
+/** Keeps the English message for logs and tests; the pricing UI shows `key` in the selected language. */
+export class PricingError extends Error { constructor(readonly key: MessageKey) { super(english(key)); } }
+/** Translates pricing errors raised in the frontend; other messages, such as API errors, pass through unchanged. */
+export const errorText = (cause: unknown, t: Translate, fallback: MessageKey) => cause instanceof PricingError ? t(cause.key) : cause instanceof PricingResponseError ? t("pricing.error.unverified")
+  : cause instanceof Error ? localizedErrorText(cause, cause.message, t) : t(fallback);
 
 type Base = Extract<PricingConfiguration["offers"][number]["price"], { kind: "independent" }>["calendar"]["base"];
-export function baseAmounts(base: Base): [string, string][] {
+export function baseAmounts(base: Base, t: Translate = english): [string, string][] {
   if (!base) return [];
-  if (base.mode === "occupancy") return base.amountsMinor.map((amount, index) => [`${index + 1} adult${index ? "s" : ""}`, amount]);
-  if (base.mode === "per_person") return [["Per adult", base.unitMinor]];
-  if (base.mode === "included_guests") return [[`${base.baseGuests} adult${base.baseGuests === 1 ? "" : "s"} included`, base.baseMinor]];
-  return [["Per room", base.amountMinor]];
+  if (base.mode === "occupancy") return base.amountsMinor.map((amount, index) => [t(index ? "pricing.adults.other" : "pricing.adults.one", { count: index + 1 }), amount]);
+  if (base.mode === "per_person") return [[t("pricing.perAdult"), base.unitMinor]];
+  if (base.mode === "included_guests") return [[t(base.baseGuests === 1 ? "pricing.includedAdults.one" : "pricing.includedAdults.other", { count: base.baseGuests }), base.baseMinor]];
+  return [[t("pricing.perRoom"), base.amountMinor]];
 }
 export function decimalAmount(minor: string, scale: number) {
   const digits = minor.padStart(scale + 1, "0");
@@ -27,15 +39,15 @@ export function editedSnapshot(snapshot: PricingSnapshot, inputs: Record<string,
 }
 
 export function parseMinorInput(value: string, scale: number, allowZero = false) {
-  if (!new RegExp(`^\\d+(?:\\.\\d{1,${scale || 1}})?$`).test(value) || (!scale && value.includes("."))) throw new Error("Enter a valid price using a decimal point.");
+  if (!new RegExp(`^\\d+(?:\\.\\d{1,${scale || 1}})?$`).test(value) || (!scale && value.includes("."))) throw new PricingError("pricing.error.invalidPrice");
   const [whole, fraction = ""] = value.split("."), minor = `${whole}${fraction.padEnd(scale, "0")}`.replace(/^0+(?=\d)/, "");
-  if (!allowZero && minor === "0") throw new Error("Enter a price greater than zero.");
-  if (minor.length > 18) throw new Error("This price is too large.");
+  if (!allowZero && minor === "0") throw new PricingError("pricing.error.priceZero");
+  if (minor.length > 18) throw new PricingError("pricing.error.priceTooLarge");
   return minor;
 }
 
 export function parseAdjustmentInput(input: { kind: string; value: string }, currency: string) {
-  if (!["fixed", "percentage"].includes(input.kind) || !/^[+-]?\d+(?:\.\d+)?$/.test(input.value)) throw new Error("Choose an adjustment type and enter a valid signed amount.");
+  if (!["fixed", "percentage"].includes(input.kind) || !/^[+-]?\d+(?:\.\d+)?$/.test(input.value)) throw new PricingError("pricing.error.adjustmentInvalid");
   const unsigned = parseMinorInput(input.value.replace(/^[+-]/, ""), input.kind === "fixed" ? pricingCurrencyScale(currency)! : 2, true);
   const signed = BigInt(unsigned) * (input.value.startsWith("-") ? -BigInt("1") : BigInt("1"));
   const adjustment = input.kind === "fixed" ? { kind: "fixed" as const, deltaMinor: signed.toString() } : { kind: "percentage" as const, basisPoints: Number(signed) };

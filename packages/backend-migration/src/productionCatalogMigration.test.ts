@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { affiliateDestinationSafetyLockKey } from "@vayada/domain-booking";
 
 import {
   runProductionCatalogPrerequisiteTransaction,
@@ -59,6 +60,29 @@ describe("production catalog migration transaction", () => {
       "projection",
       "COMMIT",
     ]);
+  });
+
+  it("locks each property in deterministic order before presentation writers", async () => {
+    const log: string[] = [];
+    const first = "15060000-0000-4000-8000-000000000001";
+    const second = "15060000-0000-4000-8000-000000000002";
+    const expected = plan();
+    expected.propertyIds = [second, first, second];
+
+    await runProductionCatalogTransaction(
+      new TransactionClient(log) as never,
+      { sourceRunId: RUN, mode: "apply" },
+      services(log, expected),
+    );
+
+    expect(log).toContain(`SAFETY:${affiliateDestinationSafetyLockKey(first)}`);
+    expect(log).toContain(`SAFETY:${affiliateDestinationSafetyLockKey(second)}`);
+    expect(log.indexOf(`SAFETY:${affiliateDestinationSafetyLockKey(first)}`)).toBeLessThan(
+      log.indexOf(`SAFETY:${affiliateDestinationSafetyLockKey(second)}`),
+    );
+    expect(log.indexOf(`SAFETY:${affiliateDestinationSafetyLockKey(second)}`)).toBeLessThan(
+      log.indexOf("core:complete"),
+    );
   });
 
   it("writes only catalog prerequisites while media blockers remain", async () => {
@@ -154,8 +178,10 @@ describe("production catalog migration transaction", () => {
 
 class TransactionClient {
   constructor(private readonly log: string[]) {}
-  async query(sql: string): Promise<{ rows: never[] }> {
-    this.log.push(sql.split(" ")[0]!);
+  async query(sql: string, values?: readonly unknown[]): Promise<{ rows: never[] }> {
+    this.log.push(
+      sql.includes("pg_advisory_xact_lock") ? `SAFETY:${String(values?.[0])}` : sql.split(" ")[0]!,
+    );
     return { rows: [] };
   }
 }

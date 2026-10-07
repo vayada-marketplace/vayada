@@ -41,6 +41,7 @@ type PgPlatformMediaRepositoryConfig = {
   mediaPathPrefix?: string;
   max?: number;
   pool?: PlatformMediaPool;
+  authorizeWriteTransaction?(client: Queryable): Promise<void>;
 };
 
 type SessionRow = {
@@ -150,6 +151,7 @@ export function createPgPlatformMediaRepository(
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
+        await config.authorizeWriteTransaction?.(client);
         await assertRoomMediaUploadWithinPlan(client, session);
         const inserted = await client.query<{ id: string }>(
           `INSERT INTO platform.media_upload_sessions
@@ -185,7 +187,7 @@ export function createPgPlatformMediaRepository(
           ],
         );
         if (inserted.rows.length === 0) {
-          const existing = await readSession(client, session.sessionId);
+          const existing = await readSession(client, session.sessionId, mediaPathPrefix);
           if (!existing) {
             throw new Error("Platform media upload session idempotency conflict");
           }
@@ -203,10 +205,10 @@ export function createPgPlatformMediaRepository(
       return session;
     },
     async findUploadSession(sessionId) {
-      return readSession(pool, sessionId);
+      return readSession(pool, sessionId, mediaPathPrefix);
     },
     async findUploadSessionForActor(input) {
-      return readSession(pool, input.sessionId, false, {
+      return readSession(pool, input.sessionId, mediaPathPrefix, false, {
         actorUserId: input.actorUserId,
         ownerOrganizationId: input.ownerOrganizationId,
       });
@@ -220,8 +222,9 @@ export function createPgPlatformMediaRepository(
           expiresAt: input.expiresAt,
         })),
       };
-      const result = await pool.query<SessionRow>(
-        `UPDATE platform.media_upload_sessions
+      const renew = async (client: Queryable) => {
+        const result = await client.query<SessionRow>(
+          `UPDATE platform.media_upload_sessions
          SET expires_at = $4::timestamptz,
              completion_metadata = jsonb_set(
                completion_metadata,
@@ -238,19 +241,23 @@ export function createPgPlatformMediaRepository(
            completed_media_object_id::text AS "completedMediaObjectId",
            completion_metadata -> 'mediaObjectIds' AS "mediaObjectIds"
          /* platform_media_upload_session_renewal */`,
-        [
-          input.session.sessionId,
-          input.session.expiresAt,
-          JSON.stringify(persistedSession(renewed)),
-          input.expiresAt,
-          input.now,
-        ],
-      );
-      if (result.rows[0]?.session) return result.rows[0].session;
+          [
+            input.session.sessionId,
+            input.session.expiresAt,
+            JSON.stringify(persistedSession(renewed)),
+            input.expiresAt,
+            input.now,
+          ],
+        );
+        if (result.rows[0]?.session) return result.rows[0].session;
 
-      const current = await readSession(pool, input.session.sessionId);
-      if (!current) throw new Error("Platform media upload session was not found");
-      return current;
+        const current = await readSession(client, input.session.sessionId, mediaPathPrefix);
+        if (!current) throw new Error("Platform media upload session was not found");
+        return current;
+      };
+      return config.authorizeWriteTransaction
+        ? withAuthorizedMediaWrite(pool, config.authorizeWriteTransaction, renew)
+        : renew(pool);
     },
     async findMediaObject(mediaId) {
       return readMediaObject(pool, mediaId);
@@ -259,7 +266,7 @@ export function createPgPlatformMediaRepository(
       return resolveTarget(pool, input);
     },
     async completeUploadSession(input) {
-      return completeUploadSession(pool, input, mediaPathPrefix);
+      return completeUploadSession(pool, input, mediaPathPrefix, config.authorizeWriteTransaction);
     },
     async createImportJob() {
       throw new Error(
@@ -267,12 +274,38 @@ export function createPgPlatformMediaRepository(
       );
     },
     async recordAudit(event) {
-      await recordAudit(pool, event);
+      if (config.authorizeWriteTransaction) {
+        await withAuthorizedMediaWrite(pool, config.authorizeWriteTransaction, (client) =>
+          recordAudit(client, event),
+        );
+      } else {
+        await recordAudit(pool, event);
+      }
     },
     async close() {
       if (ownsPool) await pool.end();
     },
   };
+}
+
+async function withAuthorizedMediaWrite<T>(
+  pool: PlatformMediaPool,
+  authorize: NonNullable<PgPlatformMediaRepositoryConfig["authorizeWriteTransaction"]>,
+  work: (client: Queryable) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await authorize(client);
+    const result = await work(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function assertRoomMediaUploadWithinPlan(
@@ -661,6 +694,7 @@ async function completeUploadSession(
   pool: PlatformMediaPool,
   input: Parameters<PlatformMediaRepository["completeUploadSession"]>[0],
   mediaPathPrefix: string,
+  authorizeWriteTransaction?: PgPlatformMediaRepositoryConfig["authorizeWriteTransaction"],
 ): ReturnType<PlatformMediaRepository["completeUploadSession"]> {
   const client = await pool.connect();
   let transactionStarted = false;
@@ -669,7 +703,8 @@ async function completeUploadSession(
   try {
     await client.query("BEGIN");
     transactionStarted = true;
-    const session = await readSession(client, input.session.sessionId, true);
+    await authorizeWriteTransaction?.(client);
+    const session = await readSession(client, input.session.sessionId, mediaPathPrefix, true);
     if (!session) throw new Error("Platform media upload session was not found");
     if (session.status === "completed") {
       assertCompletedPropertyMediaIsCanonical(session, mediaPathPrefix);
@@ -772,7 +807,7 @@ async function completeUploadSession(
   }
 
   try {
-    const reconciled = await readSession(pool, input.session.sessionId);
+    const reconciled = await readSession(pool, input.session.sessionId, mediaPathPrefix);
     if (reconciled?.status === "completed") {
       assertCompletedPropertyMediaIsCanonical(reconciled, mediaPathPrefix);
       return {
@@ -930,6 +965,12 @@ function assertCompletedPropertyMediaIsCanonical(
       (mediaObject) =>
         !expectedMediaIds.delete(mediaObject.mediaId) ||
         mediaObject.purpose !== session.purpose ||
+        mediaObject.actorUserId !== session.actorUserId ||
+        mediaObject.ownerOrganizationId !== session.ownerOrganizationId ||
+        mediaObject.propertyId !== session.target.propertyId ||
+        mediaObject.resourceProduct !== session.target.resourceProduct ||
+        mediaObject.resourceType !== session.target.resourceType ||
+        mediaObject.resourceId !== session.target.resourceId ||
         !(isAutoApprovedPublicSession(session)
           ? isCanonicalPublicRoomMediaObject(mediaObject)
           : isCanonicalPrivatePropertyMediaObject({ mediaObject, mediaPathPrefix })),
@@ -1039,6 +1080,7 @@ async function insertVariant(
 async function readSession(
   queryable: Queryable,
   sessionId: string,
+  mediaPathPrefix: string,
   forUpdate = false,
   scope?: { actorUserId: string; ownerOrganizationId: string },
 ): Promise<PlatformMediaSessionRecord | null> {
@@ -1066,7 +1108,12 @@ async function readSession(
     isCanonicalPropertyMediaRequest(row.session) &&
     (row.session.completedMediaObjects?.length || row.session.completedMediaObject)
   ) {
-    return row.session;
+    assertCompletedPropertyMediaIsCanonical(row.session, mediaPathPrefix);
+    return {
+      ...row.session,
+      completedMediaObject:
+        row.session.completedMediaObjects?.[0] ?? row.session.completedMediaObject,
+    };
   }
 
   const mediaObjectIds = completedMediaObjectIds(row);

@@ -43,7 +43,8 @@ export async function reconcilePendingChannexUploads(
       candidate.attemptId,
       get,
     );
-    if (result.kind !== "ari_reconciled") return result;
+    if (result.kind === "ari_reconciled" || result.kind === "ari_retired") continue;
+    return result;
   }
   return candidates.length > 10
     ? { kind: "unavailable" as const, reason: "reconciliation_batch_pending" }

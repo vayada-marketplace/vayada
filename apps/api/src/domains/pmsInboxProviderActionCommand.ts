@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { readPmsInboxInquiryContext } from "./pmsInboxInquiryContext.js";
+import type { AirbnbInquiryEvidence } from "./airbnbInquiryEvidence.js";
 
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 import { lockPmsInboxRolePermissions } from "./pmsInboxRolePermissions.js";
@@ -22,7 +24,9 @@ export type PgPmsInboxProviderActionPort = PmsInboxProviderActionPort & {
   close(): Promise<void>;
 };
 
-type Input = Parameters<PmsInboxProviderActionPort["noReplyNeeded"]>[0];
+type Input = Parameters<PmsInboxProviderActionPort["noReplyNeeded"]>[0] & {
+  inquiry?: AirbnbInquiryEvidence;
+};
 type Result = Awaited<ReturnType<PmsInboxProviderActionPort["noReplyNeeded"]>>;
 type Success = Extract<Result, { ok: true }>;
 type IdempotencyRow = {
@@ -50,9 +54,11 @@ type ConnectionRow = { connectionStatus: string; messagingAppInstalled: boolean 
 type InsertedIdRow = { id: string };
 
 const operation = (input: Input) =>
-  input.action === "channex_close"
-    ? "pms.inbox.provider.close"
-    : "pms.inbox.provider.no_reply_needed";
+  input.action === "airbnb_preapprove"
+    ? "pms.inbox.provider.preapprove"
+    : input.action === "channex_close"
+      ? "pms.inbox.provider.close"
+      : "pms.inbox.provider.no_reply_needed";
 const action = (input: Input) => input.action ?? "booking_com_no_reply_needed";
 const JOB_TYPE = "pms.inbox.provider-action.deliver";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -143,6 +149,34 @@ export function createPgPmsInboxProviderActionPort(config: {
             acceptedAt,
           );
 
+        if (action(input) === "airbnb_preapprove") {
+          const inquiry = await readPmsInboxInquiryContext(
+            client,
+            input.propertyId,
+            input.threadId,
+          );
+          const prior = inquiry
+            ? await client.query(
+                `SELECT 1 FROM platform.jobs
+            WHERE property_id = $1 AND job_type = $2 AND payload->>'action' = 'airbnb_preapprove'
+              AND payload->'inquiry'->>'eventId' = $3
+              AND (status <> 'failed' OR job_metadata->>'reason' = 'ambiguous_provider_outcome')`,
+                [input.propertyId, JOB_TYPE, inquiry.eventId],
+              )
+            : null;
+          if (!inquiry || prior?.rows.length)
+            return await commitResult(
+              client,
+              idempotencyId,
+              failure(
+                "provider_action_unavailable",
+                "Inquiry evidence is incomplete or a decision already exists.",
+              ),
+              acceptedAt,
+            );
+          input.inquiry = inquiry;
+        }
+
         const providerIdempotencyReference = `vayada-no-reply-${sha256(
           `${input.propertyId}:${input.threadId}:${action(input)}:${keyHash}`,
         )}`;
@@ -168,7 +202,12 @@ export function createPgPmsInboxProviderActionPort(config: {
             JOB_TYPE,
             acceptedAt,
             JSON.stringify(
-              deliveryPayload(input, thread.sourceThreadId, providerIdempotencyReference),
+              deliveryPayload(
+                input,
+                thread.sourceThreadId,
+                providerIdempotencyReference,
+                acceptedAt,
+              ),
             ),
             action(input),
           ],
@@ -247,7 +286,9 @@ function normalizeInput(input: Input): Input | null {
     !Number.isSafeInteger(input.expectedVersion) ||
     input.expectedVersion < 1 ||
     (input.action !== undefined &&
-      !["booking_com_no_reply_needed", "channex_close"].includes(input.action)) ||
+      !["booking_com_no_reply_needed", "channex_close", "airbnb_preapprove"].includes(
+        input.action,
+      )) ||
     !UUID.test(input.propertyId) ||
     !UUID.test(input.threadId) ||
     !UUID.test(input.organizationId) ||
@@ -424,7 +465,7 @@ async function lockThread(
                AND thread.delivery_channel = 'ota'
                AND lower(BTRIM(thread.provider_channel)) IN
                  ('booking.com', 'booking_com', 'bookingcom', 'airbnb', 'expedia')
-               AND ($3 = 'channex_close' OR lower(BTRIM(thread.provider_channel)) IN ('booking.com', 'booking_com', 'bookingcom'))
+               AND ($3 = 'channex_close' OR ($3 = 'airbnb_preapprove' AND lower(BTRIM(thread.provider_channel)) = 'airbnb' AND thread.conversation_context_state = 'inquiry' AND thread.guest_booking_id IS NULL) OR ($3 = 'booking_com_no_reply_needed' AND lower(BTRIM(thread.provider_channel)) IN ('booking.com', 'booking_com', 'bookingcom')))
              AND BTRIM(thread.source_thread_id) <> ''
 ) AS "providerCapable"
      FROM pms.message_threads thread
@@ -552,6 +593,7 @@ function deliveryPayload(
   input: Input,
   sourceThreadId: string,
   providerIdempotencyReference: string,
+  acceptedAt: Date,
 ) {
   return {
     propertyId: input.propertyId,
@@ -563,6 +605,7 @@ function deliveryPayload(
     actorUserId: input.actorUserId,
     actorMembershipId: input.actorMembershipId,
     providerConversationId: sourceThreadId,
+    ...(input.inquiry ? { inquiry: input.inquiry, acceptedAt: acceptedAt.toISOString() } : {}),
     providerIdempotencyReference,
   };
 }
@@ -595,7 +638,9 @@ async function insertOutbox(
       acceptedAt,
       input.audit.correlationId,
       keyHash,
-      JSON.stringify(deliveryPayload(input, sourceThreadId, providerIdempotencyReference)),
+      JSON.stringify(
+        deliveryPayload(input, sourceThreadId, providerIdempotencyReference, acceptedAt),
+      ),
       JSON.stringify({
         contractVersion: "native-guest-inbox.v2",
         ambiguousOutcomePolicy: "hold_for_review",
@@ -637,7 +682,9 @@ async function insertJob(
       input.threadId,
       input.audit.correlationId,
       keyHash,
-      JSON.stringify(deliveryPayload(input, sourceThreadId, providerIdempotencyReference)),
+      JSON.stringify(
+        deliveryPayload(input, sourceThreadId, providerIdempotencyReference, acceptedAt),
+      ),
       JSON.stringify({
         contractVersion: "native-guest-inbox.v2",
         ambiguousOutcomePolicy: "hold_for_review",
@@ -705,7 +752,9 @@ function parseStoredResult(value: unknown): Result | null {
     !stored ||
     typeof stored["propertyId"] !== "string" ||
     typeof stored["threadId"] !== "string" ||
-    !["booking_com_no_reply_needed", "channex_close"].includes(String(stored["action"])) ||
+    !["booking_com_no_reply_needed", "channex_close", "airbnb_preapprove"].includes(
+      String(stored["action"]),
+    ) ||
     typeof stored["jobId"] !== "string" ||
     !UUID.test(stored["jobId"]) ||
     typeof stored["acceptedAt"] !== "string" ||

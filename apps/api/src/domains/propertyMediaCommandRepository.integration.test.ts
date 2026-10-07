@@ -82,6 +82,15 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL property media publication saga"
       );
       if (inspectedCommittedCas) return;
       inspectedCommittedCas = true;
+      const binding = await admin.query(
+        "SELECT idempotency_metadata FROM platform.idempotency_keys WHERE property_id=$1::uuid AND operation_scope='hotel_catalog'",
+        [propertyId],
+      );
+      expect(binding.rows[0]?.idempotency_metadata).toMatchObject({
+        commandActorUserId: userId,
+        commandOrganizationId: organizationId,
+        publication: { status: "running" },
+      });
       await expect(readPropertyRevision()).resolves.toBe(2);
       await expect(readPendingAssignmentCount()).resolves.toBe(2);
       await expect(readMediaState(mediaId)).resolves.toMatchObject({
@@ -96,6 +105,17 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL property media publication saga"
       response: { outcome: "updated", profileRevision: 3 },
     });
     expect(copyToPublic).toHaveBeenCalledTimes(PROPERTY_MEDIA_PUBLIC_VARIANTS.length);
+    const completedBinding = await admin.query(
+      "SELECT idempotency_metadata FROM platform.idempotency_keys WHERE property_id=$1::uuid AND operation_scope='hotel_catalog'",
+      [propertyId],
+    );
+    expect(completedBinding.rows[0]?.idempotency_metadata).toMatchObject({
+      commandActorUserId: userId,
+      commandOrganizationId: organizationId,
+      result: { ok: true },
+    });
+    expect(completedBinding.rows[0]?.idempotency_metadata).not.toHaveProperty("publication");
+
     expect(inspectedCommittedCas).toBe(true);
     expect(deletePublic).not.toHaveBeenCalled();
     await expect(readProjectionMedia()).resolves.toMatchObject([
@@ -524,7 +544,12 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL property media publication saga"
     const copiesReleased = new Promise<void>((resolve) => {
       releaseCopies = resolve;
     });
+    let signalCopyStarted!: () => void;
+    const copyStarted = new Promise<void>((resolve) => {
+      signalCopyStarted = resolve;
+    });
     copyToPublic.mockImplementation(async ({ publicStorageKey }) => {
+      signalCopyStarted();
       await copiesReleased;
       publicObjects.add(publicStorageKey);
     });
@@ -534,6 +559,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL property media publication saga"
 
     const staleWorker = repository.replacePresentation(command);
     await waitForPublicationStatus("running");
+    await copyStarted;
     await admin.query(
       `UPDATE platform.idempotency_keys
        SET idempotency_metadata = '{}'::jsonb

@@ -18,6 +18,26 @@ const client = () => createReplacementPricingClient(id, http);
 beforeEach(() => vi.resetAllMocks());
 afterEach(() => { vi.unstubAllGlobals(); clearAuthData(); });
 describe("replacement pricing browser workflow", () => {
+  it("reads the exact price source and retries a choice with one idempotency key", async () => {
+    const api = client();
+    http.get.mockResolvedValue({ authority: "unconfigured", revision: null, organizationId: null });
+    expect(await api.readAuthority()).toEqual({ authority: "unconfigured", revision: null, organizationId: null });
+    for (const malformed of [null, { authority: "other", revision: null, organizationId: null },
+      { authority: "vayada", revision: id, organizationId: null },
+      { authority: "vayada", revision: id, organizationId: id, extra: true }]) {
+      http.get.mockResolvedValue(malformed);
+      await expect(api.readAuthority()).rejects.toBeInstanceOf(PricingResponseError);
+    }
+    const action = api.authorityAction(null, "vayada");
+    http.put.mockRejectedValueOnce(new Error("lost response")).mockResolvedValue({ revision: draftId, replayed: true });
+    await expect(action()).rejects.toThrow("lost response");
+    expect(await action()).toEqual({ revision: draftId, replayed: true });
+    const [first, retry] = http.put.mock.calls;
+    expect(first[0]).toBe(`/api/pms/properties/${id}/pricing-v2/authority`);
+    expect(first[1]).toEqual({ expectedRevision: null, authority: "vayada" });
+    expect(retry[1]).toEqual(first[1]);
+    expect(new Headers(retry[2].headers).get("Idempotency-Key")).toBe(new Headers(first[2].headers).get("Idempotency-Key"));
+  });
   it("prepares and saves a draft without confirming or publishing and validates the returned version", async () => {
     const api = client(), input = { currency: "EUR", rooms: snapshot.rooms };
     http.post.mockResolvedValue({ sources, snapshot });

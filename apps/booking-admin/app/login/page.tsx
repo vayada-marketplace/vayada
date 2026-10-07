@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useState, type FormEvent } from "reac
 import { useRouter, useSearchParams } from "next/navigation";
 import SharedHotelLoginForm from "@vayada/product-onboarding/SharedHotelLoginForm";
 import { safeRelativeReturnTo } from "@vayada/product-onboarding/returnTo";
-import { authService } from "@/services/auth";
+import { AuthStateError, authService } from "@/services/auth";
 import {
   isAuthOrganizationSelectionResponse,
   type AuthOrganizationSelectionResponse,
@@ -25,6 +25,9 @@ function LoginContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [organizationSelection, setOrganizationSelection] =
     useState<AuthOrganizationSelectionResponse | null>(null);
+  const [passwordOrganizations, setPasswordOrganizations] = useState<
+    { id: string; name?: string | null }[]
+  >([]);
   const returnTo = safeRelativeReturnTo(searchParams.get("returnTo"), "/dashboard");
 
   const redirectAfterLogin = useCallback(async () => {
@@ -45,19 +48,22 @@ function LoginContent() {
       setSubmitError("");
       setIsSubmitting(true);
       try {
-        const response = await authService.refreshSession(workosOrganizationId);
+        const response = passwordOrganizations.length
+          ? await authService.login({ email, password, organizationId: workosOrganizationId })
+          : await authService.refreshSession(workosOrganizationId);
+        setPasswordOrganizations([]);
         if (isAuthOrganizationSelectionResponse(response)) {
           setOrganizationSelection(response);
           return;
         }
         await redirectAfterLogin();
-      } catch {
-        setSubmitError(t("auth.login.errorUnexpected"));
+      } catch (error) {
+        setSubmitError(error instanceof Error ? error.message : t("auth.login.errorUnexpected"));
       } finally {
         setIsSubmitting(false);
       }
     },
-    [redirectAfterLogin, t],
+    [email, password, passwordOrganizations.length, redirectAfterLogin, t],
   );
 
   const handleLogin = useCallback(
@@ -65,6 +71,7 @@ function LoginContent() {
       event.preventDefault();
       setSubmitError("");
       setIsSubmitting(true);
+      setPasswordOrganizations([]);
       try {
         const response = await authService.login({ email, password });
         if (isAuthOrganizationSelectionResponse(response)) {
@@ -72,8 +79,16 @@ function LoginContent() {
           return;
         }
         await redirectAfterLogin();
-      } catch {
-        setSubmitError(t("auth.login.errorUnexpected"));
+      } catch (error) {
+        if (
+          error instanceof AuthStateError &&
+          error.state === "organization_selection_required" &&
+          error.organizations?.length
+        ) {
+          setPasswordOrganizations(error.organizations);
+          return;
+        }
+        setSubmitError(error instanceof Error ? error.message : t("auth.login.errorUnexpected"));
       } finally {
         setIsSubmitting(false);
       }
@@ -109,6 +124,13 @@ function LoginContent() {
     };
   }, [redirectAfterLogin, returnTo, searchParams, t]);
 
+  const workspaceOptions = passwordOrganizations.length
+    ? passwordOrganizations.map(({ id, name }, index) => ({
+        workosOrganizationId: id,
+        displayName: name?.trim() || t("auth.login.unnamedHotelGroup", { index: index + 1 }),
+      }))
+    : organizationSelection?.organizations;
+
   return (
     <SharedHotelLoginForm
       copy={{
@@ -123,6 +145,7 @@ function LoginContent() {
         subtitle: t("admin.useYourEmailAndPasswordToContinue"),
         chooseOrganizationTitle: t("auth.login.chooseHotelGroup"),
         chooseOrganizationSubtitle: t("auth.login.chooseHotelGroupSubtitle"),
+        useAnotherAccount: t("auth.login.useAnotherAccount"),
         emailLabel: t("auth.login.emailLabel"),
         passwordLabel: t("auth.login.passwordLabel"),
         forgotPassword: t("auth.login.forgotPassword"),
@@ -137,13 +160,23 @@ function LoginContent() {
       password={password}
       isSubmitting={isSubmitting}
       submitError={submitError}
-      organizations={organizationSelection?.organizations ?? null}
+      organizations={workspaceOptions ?? null}
       forgotPasswordHref="/forgot-password"
       onEmailChange={setEmail}
       onPasswordChange={setPassword}
       onSubmit={handleLogin}
       onGoogleLogin={() => authService.startGoogleLogin(returnTo)}
       onOrganizationSelect={handleOrganizationSelect}
+      onUseAnotherAccount={
+        passwordOrganizations.length
+          ? () => {
+              setEmail("");
+              setPassword("");
+              setPasswordOrganizations([]);
+              setSubmitError("");
+            }
+          : undefined
+      }
     />
   );
 }

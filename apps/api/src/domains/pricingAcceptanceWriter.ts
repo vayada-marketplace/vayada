@@ -35,6 +35,9 @@ export async function writePricingAcceptance(
     slug: unknown;
     command: unknown;
   },
+  internal?:
+    | { syntheticAffiliateContextId: string; affiliateContextId?: never }
+    | { affiliateContextId: string; syntheticAffiliateContextId?: never },
 ) {
   let client: pg.PoolClient | undefined;
   try {
@@ -55,6 +58,8 @@ export async function writePricingAcceptance(
       ...prepared,
       bookingId,
       publicReference,
+      syntheticAffiliateContextId: internal?.syntheticAffiliateContextId,
+      affiliateContextId: internal?.affiliateContextId,
     });
     const lifecycle = await stagePricingBookingLifecycle(
       client,

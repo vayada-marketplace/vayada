@@ -281,6 +281,7 @@ function fingerprintPayload(input: PmsChannexManagementCommandInput) {
     ...(input.inventoryRules ? { inventoryRules: input.inventoryRules } : {}),
     ...(input.restrictions ? { restrictions: input.restrictions } : {}),
     ...(input.recoveryAlertId ? { recoveryAlertId: input.recoveryAlertId } : {}),
+    ...(input.publishedOffer ? { publishedOffer: input.publishedOffer } : {}),
     markups: input.markups
       ? [...input.markups].sort((a, b) => a.channel.localeCompare(b.channel))
       : [],

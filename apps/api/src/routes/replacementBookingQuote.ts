@@ -23,7 +23,7 @@ export function requirePublicQuoteKey(request: FastifyRequest): string {
 export function createReplacementBookingQuoteIssuer(
   store: Pick<ReturnType<typeof createCurrentPricingQuoteStore>, "issue">,
 ) {
-  return async (slug: string, input: unknown, requestId: unknown) => {
+  return async (slug: string, input: unknown, requestId: unknown, signal?: AbortSignal) => {
     if (
       !validKey(requestId) ||
       !pricingObject(input) ||
@@ -35,11 +35,15 @@ export function createReplacementBookingQuoteIssuer(
     const selection = parsePublicPricingSelection(input.selection);
     if (!selection) throw httpError(400, "Invalid quote selection.");
     try {
-      const { quote, replayed } = await store.issue(slug, {
-        requestId,
-        selection,
-        paymentMethod: input.paymentMethod,
-      });
+      const { quote, replayed } = await store.issue(
+        slug,
+        {
+          requestId,
+          selection,
+          paymentMethod: input.paymentMethod,
+        },
+        signal,
+      );
       if (quote.acceptanceMode !== "instant" && quote.acceptanceMode !== "request")
         throw new PricingStorageError("stale");
       const evidence = quote.evidence;

@@ -129,7 +129,7 @@ export async function registerFinanceExpenseRoutes(app: FastifyInstance, options
     if (!empty(request.query) || !parsed || parsed.expectedRevision !== undefined || !headerMatches(request, parsed.idempotencyKey)) return bad(reply);
     parsed.commandId = parsed.commandId.toLowerCase(); parsed.categoryId = parsed.categoryId.toLowerCase();
     if (parsed.receiptMediaId) parsed.receiptMediaId = parsed.receiptMediaId.toLowerCase();
-    if (parsed.supplierInvoiceNumber) return failure(reply, "write_unavailable");
+    if (parsed.recurrence && parsed.supplierInvoiceNumber) return bad(reply);
     const current = scope(request);
     if (parsed.recurrence) {
       const { recurrence, incurredOn: _incurredOn, paidOn: _paidOn, ...template } = parsed;
@@ -163,7 +163,6 @@ export async function registerFinanceExpenseRoutes(app: FastifyInstance, options
   app.patch(`${ROOT}/expenses/:expenseId`, { onRequest: write }, async (request, reply) => safe(reply, async () => {
     const value = expensePatch(request), current = scope(request), expenseId = pathId(request, "expenseId");
     if (!empty(request.query) || !value || !expenseId) return bad(reply);
-    if (Object.hasOwn(value, "supplierInvoiceNumber")) return failure(reply, "write_unavailable");
     const result = expenseResult(await options.expenses.update({ ...value as Omit<UpdateFinanceManualExpenseCommand, "propertyId" | "expenseId" | "audit">, propertyId: current.propertyId, expenseId, audit: audit(current, "finance.manual_expense.update") }), [expenseId, String(value.commandId).toLowerCase()]);
     return result.ok ? sendExpenseWrite(reply, current, options, result) : failure(reply, result.code);
   }));
@@ -286,7 +285,7 @@ function validEnvelope(value: unknown, propertyId: string, kind: ReadKind, id?: 
 // prettier-ignore
 function category(value: unknown): value is Record<string, any> { return record(value) && exact(value, ["id", "systemKey", "name", "color", "sortOrder", "archived", "revision"]) && uuid(value.id) && (value.systemKey === null || text(value.systemKey, 1, 100)) && text(value.name, 1, 120) && typeof value.color === "string" && /^#[0-9A-Fa-f]{6}$/.test(value.color) && integer(value.sortOrder, 0) && typeof value.archived === "boolean" && integer(value.revision, 1); }
 // prettier-ignore
-function expense(value: unknown): value is Record<string, any> { return record(value) && exact(value, ["id", "categoryId", "origin", "incurredOn", "paidOn", "vendor", "amount", "paymentStatus", "recurringRuleId", "sourceKey", "reversesExpenseId", "revision"]) && uuid(value.id) && uuid(value.categoryId) && FINANCE_EXPENSE_ORIGINS.includes(value.origin as never) && date(value.incurredOn) && text(value.vendor, 1, 200) && money(value.amount) && ((value.paymentStatus === "paid" && date(value.paidOn)) || (value.paymentStatus === "unpaid" && value.paidOn === null)) && [value.recurringRuleId, value.reversesExpenseId].every((part) => part === null || uuid(part)) && (value.sourceKey === null || text(value.sourceKey, 1, 250)) && integer(value.revision, 1); }
+function expense(value: unknown): value is Record<string, any> { const keys = ["id", "categoryId", "origin", "incurredOn", "paidOn", "vendor", "amount", "paymentStatus", "recurringRuleId", "sourceKey", "reversesExpenseId", "revision"]; return record(value) && (exact(value, keys) || exact(value, [...keys, "supplierInvoiceNumber"])) && uuid(value.id) && uuid(value.categoryId) && FINANCE_EXPENSE_ORIGINS.includes(value.origin as never) && date(value.incurredOn) && text(value.vendor, 1, 200) && money(value.amount) && ((value.paymentStatus === "paid" && date(value.paidOn)) || (value.paymentStatus === "unpaid" && value.paidOn === null)) && [value.recurringRuleId, value.reversesExpenseId].every((part) => part === null || uuid(part)) && (value.sourceKey === null || text(value.sourceKey, 1, 250)) && (value.supplierInvoiceNumber == null || (value.origin === "supplier_bill" && text(value.supplierInvoiceNumber, 1, 200))) && integer(value.revision, 1); }
 // prettier-ignore
 function recurring(value: unknown): value is Record<string, any> { return record(value) && exact(value, ["id", "categoryId", "vendor", "amount", "notes", "paymentStatus", "cadence", "startsOn", "nextDueOn", "endsOn", "active", "revision"], true) && uuid(value.id) && uuid(value.categoryId) && text(value.vendor, 1, 200) && money(value.amount) && (value.notes === undefined || text(value.notes, 1, 2000)) && FINANCE_EXPENSE_PAYMENT_STATUSES.includes(value.paymentStatus as never) && FINANCE_EXPENSE_CADENCES.includes(value.cadence as never) && date(value.startsOn) && date(value.nextDueOn) && value.nextDueOn >= value.startsOn && (value.endsOn === null || (date(value.endsOn) && value.endsOn >= value.nextDueOn)) && typeof value.active === "boolean" && integer(value.revision, 1); }
 // prettier-ignore

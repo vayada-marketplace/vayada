@@ -1,0 +1,206 @@
+import { randomUUID } from "node:crypto";
+import type { IdentityLifecycleCommandBusCommand } from "@vayada/backend-auth";
+import pg from "pg";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { createPgIdentityLifecycleCommandBus } from "./identityLifecycle.js";
+
+const databaseUrl = process.env["VAY2017_LIFECYCLE_TEST_DATABASE_URL"];
+const hash = "a".repeat(64);
+const roleName = `vay2017_lifecycle_reader_${randomUUID().replaceAll("-", "")}`;
+const databaseName = "vay2017_lifecycle_fixture";
+const rolePassword = "reader_test_only";
+
+describe.skipIf(!databaseUrl)("prepared-owner lifecycle mutations in PostgreSQL", () => {
+  const admin = new pg.Client({ connectionString: databaseUrl });
+  let readerUrl: string;
+  let lifecycle: ReturnType<typeof createPgIdentityLifecycleCommandBus>;
+  let protectedUserId: string;
+  let suspendedProtectedUserId: string;
+  let deletedProtectedUserId: string;
+  let ordinaryUserId: string;
+  let adminConnected = false;
+  let readerRoleCreated = false;
+
+  beforeAll(async () => {
+    const parsed = new URL(databaseUrl!);
+    if (parsed.hostname !== "127.0.0.1" || parsed.pathname !== `/${databaseName}` || parsed.search)
+      throw new Error("Dedicated loopback lifecycle fixture required");
+    await admin.connect();
+    adminConnected = true;
+    await admin.query(`CREATE ROLE ${roleName} LOGIN PASSWORD '${rolePassword}'`);
+    readerRoleCreated = true;
+    await admin.query(`GRANT USAGE ON SCHEMA identity, platform TO ${roleName}`);
+    await admin.query(`GRANT SELECT, UPDATE ON identity.users TO ${roleName}`);
+    await admin.query(`GRANT SELECT, UPDATE ON identity.external_identities TO ${roleName}`);
+    await admin.query(
+      `GRANT SELECT (owner_user_ids) ON platform.legacy_owner_bootstrap_receipts TO ${roleName}`,
+    );
+
+    protectedUserId = randomUUID();
+    suspendedProtectedUserId = randomUUID();
+    deletedProtectedUserId = randomUUID();
+    ordinaryUserId = randomUUID();
+    await admin.query(
+      `INSERT INTO identity.users(id, email, status)
+       VALUES ($1, $2, 'pending'), ($3, $4, 'suspended'), ($5, $6, 'deleted'), ($7, $8, 'pending')`,
+      [
+        protectedUserId,
+        `protected-${protectedUserId}@example.test`,
+        suspendedProtectedUserId,
+        `suspended-${suspendedProtectedUserId}@example.test`,
+        deletedProtectedUserId,
+        `deleted-${deletedProtectedUserId}@example.test`,
+        ordinaryUserId,
+        `ordinary-${ordinaryUserId}@example.test`,
+      ],
+    );
+    await admin.query(
+      `INSERT INTO identity.external_identities(user_id, provider, provider_user_id, provider_email)
+       VALUES ($1, 'workos', $2, $3), ($4, 'workos', $5, $6)`,
+      [
+        protectedUserId,
+        `user_${protectedUserId}`,
+        `protected-${protectedUserId}@example.test`,
+        ordinaryUserId,
+        `user_${ordinaryUserId}`,
+        `ordinary-${ordinaryUserId}@example.test`,
+      ],
+    );
+    await admin.query(
+      `INSERT INTO platform.legacy_owner_bootstrap_receipts
+       (command_id, contract_version, environment, payload_sha256, owner_user_ids,
+        source_run_id, source_evidence_sha256, target_before_sha256, target_after_sha256,
+        approval_envelope_sha256, executor_principal_sha256, checkpoint)
+       VALUES ($1, 'legacy-owner-internal-setup.v1', 'local', $2, $3,
+        'vay1351-aaaaaaaaaaaaaaaaaaaaaaaa', $2, $2, $2, $2, $2, 'internal_users_prepared')`,
+      [
+        randomUUID(),
+        hash,
+        [protectedUserId, suspendedProtectedUserId, deletedProtectedUserId].sort(),
+      ],
+    );
+
+    parsed.username = roleName;
+    parsed.password = rolePassword;
+    readerUrl = parsed.toString();
+    lifecycle = createPgIdentityLifecycleCommandBus({ connectionString: readerUrl, max: 1 });
+  });
+
+  afterAll(async () => {
+    await lifecycle?.close();
+    if (adminConnected && readerRoleCreated) {
+      await admin.query(
+        `REVOKE SELECT (owner_user_ids) ON platform.legacy_owner_bootstrap_receipts FROM ${roleName}`,
+      );
+      await admin.query(`REVOKE SELECT, UPDATE ON identity.external_identities FROM ${roleName}`);
+      await admin.query(`REVOKE SELECT, UPDATE ON identity.users FROM ${roleName}`);
+      await admin.query(`REVOKE USAGE ON SCHEMA identity, platform FROM ${roleName}`);
+      await admin.query(`DROP ROLE IF EXISTS ${roleName}`);
+    }
+    if (adminConnected) await admin.end();
+    const cleanupUrl = new URL(databaseUrl!);
+    cleanupUrl.pathname = "/postgres";
+    const cleanup = new pg.Client({ connectionString: cleanupUrl.toString() });
+    await cleanup.connect();
+    await cleanup.query(`DROP DATABASE IF EXISTS ${databaseName} WITH (FORCE)`);
+    await cleanup.end();
+  });
+
+  function emailCommand(userId: string, email: string): IdentityLifecycleCommandBusCommand {
+    return {
+      commandType: "identity.user.email.update",
+      commandId: randomUUID(),
+      idempotencyKey: randomUUID(),
+      audit: {
+        actor: { kind: "system", service: "test" },
+        source: "web",
+        requestId: randomUUID(),
+        reason: "Synthetic PostgreSQL lifecycle guard test",
+        requestedAt: new Date().toISOString(),
+      },
+      payload: { userId, email, providerEmailVerified: true },
+    };
+  }
+
+  function statusCommand(
+    userId: string,
+    status: "active" | "pending" | "suspended",
+  ): IdentityLifecycleCommandBusCommand {
+    return {
+      commandType: "identity.user.status.update",
+      commandId: randomUUID(),
+      idempotencyKey: randomUUID(),
+      audit: {
+        actor: { kind: "system", service: "test" },
+        source: "web",
+        requestId: randomUUID(),
+        reason: "Synthetic PostgreSQL lifecycle guard test",
+        requestedAt: new Date().toISOString(),
+      },
+      payload: { userId, status },
+    };
+  }
+
+  it("denies protected email, active, and pending updates while allowing suspension", async () => {
+    await expect(
+      lifecycle.execute(emailCommand(protectedUserId, "blocked@example.test")),
+    ).rejects.toThrow("Legacy owner account reconciliation required");
+    const protectedState = async () =>
+      (
+        await admin.query("SELECT email, status FROM identity.users WHERE id = $1", [
+          protectedUserId,
+        ])
+      ).rows;
+    await expect(protectedState()).resolves.toEqual([
+      { email: `protected-${protectedUserId}@example.test`, status: "pending" },
+    ]);
+    for (const status of ["active", "pending"] as const) {
+      await expect(lifecycle.execute(statusCommand(protectedUserId, status))).rejects.toThrow(
+        "Legacy owner account reconciliation required",
+      );
+      await expect(protectedState()).resolves.toEqual([
+        { email: `protected-${protectedUserId}@example.test`, status: "pending" },
+      ]);
+    }
+    await expect(
+      lifecycle.execute(statusCommand(protectedUserId, "suspended")),
+    ).resolves.toMatchObject({ status: "accepted" });
+    expect(
+      (
+        await admin.query("SELECT email, status FROM identity.users WHERE id = $1", [
+          protectedUserId,
+        ])
+      ).rows,
+    ).toEqual([{ email: `protected-${protectedUserId}@example.test`, status: "suspended" }]);
+  });
+
+  it("denies email updates for suspended and deleted protected users", async () => {
+    for (const [userId, status] of [
+      [suspendedProtectedUserId, "suspended"],
+      [deletedProtectedUserId, "deleted"],
+    ] as const) {
+      await expect(lifecycle.execute(emailCommand(userId, "blocked@example.test"))).rejects.toThrow(
+        "Legacy owner account reconciliation required",
+      );
+      expect(
+        (await admin.query("SELECT status FROM identity.users WHERE id = $1", [userId])).rows,
+      ).toEqual([{ status }]);
+    }
+  });
+
+  it("allows ordinary email updates and keeps receipt columns private", async () => {
+    await expect(
+      lifecycle.execute(emailCommand(ordinaryUserId, "ordinary-updated@example.test")),
+    ).resolves.toMatchObject({ status: "accepted" });
+    const reader = new pg.Client({ connectionString: readerUrl });
+    await reader.connect();
+    try {
+      await expect(
+        reader.query("SELECT payload_sha256 FROM platform.legacy_owner_bootstrap_receipts"),
+      ).rejects.toMatchObject({ code: "42501" });
+    } finally {
+      await reader.end();
+    }
+  });
+});

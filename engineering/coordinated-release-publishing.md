@@ -10,8 +10,10 @@ fixtures live in [`deployment-contract`](deployment-contract/).
 ## Activation boundary
 
 Both coordinated workflows require the repository variable
-`COORDINATED_RELEASES_ENABLED=true`. This change intentionally does not set that
-variable and does not disable any existing automatic lane. VAY-2029 installs and
+`COORDINATED_RELEASES_ENABLED=true`. The six legacy `deploy-next-*` automatic jobs skip when that variable is true;
+their explicit `workflow_dispatch` build entrypoints remain available. Setting
+the variable switches all six automatic builders together. It does not grant
+platform mutation ownership, resolve holds, or drain previously started jobs. VAY-2029 installs and
 validates the platform receiver first, inventories and drains old events, then
 switches all six automatic lanes together. Existing per-service
 `workflow_dispatch` entrypoints remain available during preparation.
@@ -147,7 +149,8 @@ gh api --paginate repos/vayada-marketplace/vayada/actions/artifacts \
   --jq '.artifacts[] | select(.expired == false and (.name | startswith("next-release-published-v1-"))) | [.id, .name, .expires_at] | @tsv'
 ```
 
-Redispatch an exact published record without rebuilding:
+If a publication already exists, start a **fresh manual run on main** with its
+non-expired artifact ID to redispatch without rebuilding:
 
 ```bash
 gh workflow run publish-coordinated-release.yml \
@@ -159,7 +162,15 @@ gh workflow run publish-coordinated-release.yml \
 The recovery run verifies artifact metadata, both hashes, expiry, publisher
 provenance, all six ECR digest/source-tag bindings, and then sends the same
 manifest ID and idempotency key. It cannot substitute a rerun's candidate
-artifact.
+artifact. Source validation, redispatch, and baseline discovery fetch the exact
+recorded run attempt; a later rerun does not invalidate historical provenance.
+
+Rerunning an original publisher with an existing publication is rejected before
+candidate download or upload, with the existing artifact ID and redispatch
+instructions. No artifact is overwritten or deleted. A rerun before any durable
+publication exists can still publish. With `COORDINATED_RELEASES_ENABLED` off,
+the fresh manual publisher still verifies the artifact and images but does not
+send a platform dispatch; enabling delivery remains a separate approved action.
 
 If the durable record expired or its contents cannot be verified, run the
 manual build entrypoint at current `main`; the missing baseline deliberately
@@ -177,6 +188,20 @@ dispatched, never deployed. Because upload precedes dispatch, a completed
 publisher run that failed only after uploading remains an eligible baseline and
 redispatch source. Platform reconciliation and deployed acceptance are separate
 VAY-2028/VAY-2029 evidence.
+
+## Publication retention
+
+`publishedAt` marks the start of the publication workflow: the GitHub run's
+`created_at`, including on a retry. `expiresAt` is exactly 90 days later.
+Using the later upload-step wall clock would overstate artifact retention;
+GitHub's observed expiry is based on the workflow run's earlier timestamp.
+After upload (and before redispatch), the publisher checks the actual artifact
+is not expired and its `expires_at` covers the record's promised expiry. A
+shorter retention fails closed; the receiver retains its independent check.
+
+An already-published record is immutable. A record with an overstated expiry
+requires a new preparation/publication, not an edited artifact or weaker
+receiver expiry validation.
 
 ## Local validation
 

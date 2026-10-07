@@ -44,7 +44,7 @@ export class MarketplaceSubmissionError extends Error {
 }
 export function createPgMarketplaceSubmissionRepository(config: {
   connectionString: string;
-  sources: (client: Client) => MarketplaceSubmissionReadinessPort;
+  sources: (client: Client, readOnly?: boolean) => MarketplaceSubmissionReadinessPort;
   pool?: { connect(): Promise<Client>; end(): Promise<void> };
 }) {
   if (!config.connectionString.trim())
@@ -60,19 +60,24 @@ export function createPgMarketplaceSubmissionRepository(config: {
   async function transaction<T>(
     scope: MarketplaceSubmissionScope,
     run: (client: Client) => Promise<T>,
+    readOnly = false,
   ): Promise<T> {
     const client = await pool.connect();
     try {
-      await client.query("BEGIN");
+      await client.query(readOnly ? "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY" : "BEGIN");
       await client.query("SET LOCAL lock_timeout = '5s'");
       if (
         scope.audit.actor.kind !== "user" ||
-        !(await lockHotelCatalogSetupScope(client, {
-          organizationId: scope.organizationId,
-          propertyId: scope.propertyId,
-          actorUserId: scope.audit.actor.userId,
-        })) ||
-        !(await lockMarketplaceHotelProfileForSetup(client, scope, new Date()))
+        !(await lockHotelCatalogSetupScope(
+          client,
+          {
+            organizationId: scope.organizationId,
+            propertyId: scope.propertyId,
+            actorUserId: scope.audit.actor.userId,
+          },
+          readOnly,
+        )) ||
+        !(await lockMarketplaceHotelProfileForSetup(client, scope, new Date(), readOnly))
       )
         throw new MarketplaceSubmissionError("setup_scope_unavailable", 403);
       const result = await run(client);
@@ -236,38 +241,42 @@ export function createPgMarketplaceSubmissionRepository(config: {
       });
     },
     async getReview(scope: MarketplaceSubmissionScope, idempotencyKey?: string) {
-      return transaction(scope, async (client) => {
-        const latest = await latestSubmission(client, scope);
-        let recovered: MarketplaceSubmissionReceipt | null = null;
-        if (idempotencyKey) {
-          const result = await client.query<{ revisionId: string }>(
-            `SELECT response_resource_id AS "revisionId" FROM platform.idempotency_keys WHERE operation_scope='marketplace' AND operation=$1 AND key_hash=$2 AND tenant_scope='property' AND property_id=$3::uuid`,
-            [
-              OPERATION,
-              hash(JSON.stringify([scope.organizationId, idempotencyKey])),
-              scope.propertyId,
-            ],
+      return transaction(
+        scope,
+        async (client) => {
+          const latest = await latestSubmission(client, scope);
+          let recovered: MarketplaceSubmissionReceipt | null = null;
+          if (idempotencyKey) {
+            const result = await client.query<{ revisionId: string }>(
+              `SELECT response_resource_id AS "revisionId" FROM platform.idempotency_keys WHERE operation_scope='marketplace' AND operation=$1 AND key_hash=$2 AND tenant_scope='property' AND property_id=$3::uuid`,
+              [
+                OPERATION,
+                hash(JSON.stringify([scope.organizationId, idempotencyKey])),
+                scope.propertyId,
+              ],
+            );
+            if (result.rows[0])
+              recovered = await readSubmission(client, scope, result.rows[0].revisionId);
+          }
+          const active = await client.query<{
+            revisionId: string;
+            status: MarketplaceActivationStatus;
+          }>(
+            `SELECT active.submission_revision_id::text AS "revisionId", active.activation_status AS status FROM marketplace.active_hotel_submission_revisions active JOIN marketplace.hotel_submission_revisions revision ON revision.id=active.submission_revision_id AND revision.property_id=active.property_id WHERE active.property_id=$1::uuid AND revision.organization_id=$2::uuid`,
+            [scope.propertyId, scope.organizationId],
           );
-          if (result.rows[0])
-            recovered = await readSubmission(client, scope, result.rows[0].revisionId);
-        }
-        const active = await client.query<{
-          revisionId: string;
-          status: MarketplaceActivationStatus;
-        }>(
-          `SELECT active.submission_revision_id::text AS "revisionId", active.activation_status AS status FROM marketplace.active_hotel_submission_revisions active JOIN marketplace.hotel_submission_revisions revision ON revision.id=active.submission_revision_id AND revision.property_id=active.property_id WHERE active.property_id=$1::uuid AND revision.organization_id=$2::uuid`,
-          [scope.propertyId, scope.organizationId],
-        );
-        const readiness = await config.sources(client).getReadiness(sourceScope(scope));
-        return {
-          contractVersion: "marketplace-submission-review.v1" as const,
-          propertyId: scope.propertyId,
-          latestSubmission: latest,
-          recoveredSubmission: recovered,
-          activeSubmission: active.rows[0] ?? null,
-          readiness,
-        };
-      });
+          const readiness = await config.sources(client, true).getReadiness(sourceScope(scope));
+          return {
+            contractVersion: "marketplace-submission-review.v1" as const,
+            propertyId: scope.propertyId,
+            latestSubmission: latest,
+            recoveredSubmission: recovered,
+            activeSubmission: active.rows[0] ?? null,
+            readiness,
+          };
+        },
+        true,
+      );
     },
     async close() {
       if (!config.pool) await pool.end();

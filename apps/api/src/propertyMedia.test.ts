@@ -35,6 +35,28 @@ afterEach(async () => {
 });
 
 describe("property media assignment routes", () => {
+  it("forwards an authorized logo without falling back to the ambient writer", async () => {
+    const assignLogo = vi.fn(async () => successResponse());
+    const forwardLogo = vi.fn(async (_request, reply) =>
+      reply.code(503).send({ code: "hotel_setup_unavailable" }),
+    );
+    app = buildPropertyMediaApp({ repository: commandRepository({ assignLogo }), forwardLogo });
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: `/api/hotel-setup/properties/${propertyId}/media/logo`,
+      headers: { authorization: "Bearer valid-token", "idempotency-key": "logo-forward" },
+      payload: { expectedProfileRevision: 1, assignment: null },
+    });
+    expect(response.statusCode).toBe(503);
+    expect(forwardLogo).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      propertyId,
+      "logo_assignment",
+    );
+    expect(assignLogo).not.toHaveBeenCalled();
+  });
+
   it("assigns a logo for an actively linked hotel owner", async () => {
     const assignLogo = vi.fn(async () => successResponse());
     const repository = commandRepository({ assignLogo });
@@ -365,6 +387,7 @@ describe("Platform Admin property hero routes", () => {
 
 function buildPropertyMediaApp(options: {
   repository: PropertyMediaCommandRepository;
+  forwardLogo?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
   permissions?: PermissionKey[];
   linkedResources?: LinkedResource[];
   organizationKind?: "hotel_group" | "creator_workspace" | "platform";
@@ -372,6 +395,7 @@ function buildPropertyMediaApp(options: {
   return buildApp({
     logger: false,
     propertyMediaCommandRepository: options.repository,
+    hotelSetupLogoForwarder: options.forwardLogo,
     auth: {
       verifier: createFakeVerifier(new Map([["valid-token", session]])),
       repository: identityRepository(options),
