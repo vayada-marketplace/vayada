@@ -1,4 +1,8 @@
+import { formatBookingPriceMinorUnits } from "@vayada/domain-booking";
 import {
+  calculateReplacementRoomStay,
+  PMS_ROOM_TYPE_DUPLICATION_COPIED_FACTS,
+  PMS_ROOM_TYPE_DUPLICATION_RESET_FACTS,
   PMS_ROOM_TYPE_LIFECYCLE_CONTRACT_VERSION,
   type PmsRoomTypeRetirementBlocker,
   type PmsRoomTypeRetirementImpact,
@@ -67,10 +71,12 @@ import {
   ManualCancellationStateError,
 } from "./bookingPmsManualCancellationNightlyRevenueEvidence.js";
 import { appendPmsManualNoShowNightlyRevenueEvidence } from "./bookingPmsManualNoShowNightlyRevenueEvidence.js";
+import { publishedMinorToCents } from "../routes/pmsManualBookingPreviewCalculation.js";
 import {
   correctBookingPmsManualPrices,
   ManualPriceCorrectionEvidenceError,
   ManualPriceCorrectionStateError,
+  propertyDate,
 } from "./bookingPmsManualPriceCorrection.js";
 import {
   ManualRefundEvidenceError,
@@ -111,6 +117,7 @@ import type { PmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
 import { lockPmsPhysicalRoomUnitMutationScope } from "./pmsPhysicalRoomUnitMutationLock.js";
 import type { PmsRoomAssignmentOptimizationTriggerPort } from "./pmsRoomAssignmentOptimizationTriggers.js";
 import { lockPmsRoomOrder, pmsRoomOrderVersion } from "./pmsRoomOrder.js";
+import { readManualBookingPricingPublication } from "./pmsManualBookingTransactionalPricing.js";
 import type {
   StripeBookingPaymentIntent,
   StripeBookingPaymentProvider,
@@ -514,10 +521,142 @@ export function createTargetPmsOperationsCommandRepository(
     },
 
     async duplicateRoomType(command) {
-      throw Object.assign(
-        new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
-        { statusCode: 503, code: "PRICING_UNAVAILABLE" },
-      );
+      const client = await pool.connect();
+      const acceptedAt = now().toISOString();
+      const keyHash = sha256(command.idempotencyKey);
+      const requestFingerprintHash = sha256(stableJson(roomTypeCommandFingerprint(command)));
+      const commandMeta: PmsCommandMeta = {
+        contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        acceptedAt,
+        sideEffects: ["ari_changed", "distribution_refresh", "audit_event"],
+      };
+
+      try {
+        await client.query("BEGIN");
+        const replay = await findRoomTypeCommandReplay(
+          client,
+          "room_type_duplicate",
+          command,
+          keyHash,
+          requestFingerprintHash,
+        );
+        if (replay) {
+          await client.query("ROLLBACK");
+          return replay;
+        }
+
+        const source = await lockActiveRoomTypeForLifecycle(client, command);
+        if (!source) {
+          await client.query("ROLLBACK");
+          return roomTypeNotFound(command.roomTypeId);
+        }
+        if (roomTypeVersion(source.roomFactsRevision) !== command.expectedVersion) {
+          await client.query("ROLLBACK");
+          return roomTypeConflict("version_conflict", "Room type version is stale.");
+        }
+        const sourceReadModel = await config.readRepository.findRoomTypeById(
+          command.propertyId,
+          command.roomTypeId,
+        );
+        if (!sourceReadModel) {
+          await client.query("ROLLBACK");
+          return roomTypeNotFound(command.roomTypeId);
+        }
+
+        const insertedIdempotencyKey = await recordRoomTypeCommandIdempotency(
+          client,
+          "room_type_duplicate",
+          command,
+          keyHash,
+          requestFingerprintHash,
+          acceptedAt,
+        );
+        if (!insertedIdempotencyKey) {
+          await client.query("ROLLBACK");
+          return roomTypeConflict(
+            "idempotency_conflict",
+            "Room type duplicate idempotency key could not be reserved.",
+          );
+        }
+
+        const duplicateName = await availableRoomTypeCopyName(
+          client,
+          command.propertyId,
+          source.name,
+        );
+        const duplicated = await insertDuplicatedRoomType(
+          client,
+          command,
+          duplicateName,
+          acceptedAt,
+        );
+        await copyRoomTypeMediaAssignments(client, command, duplicated.roomTypeId, acceptedAt);
+
+        // Rates belong to the pricing editor: the copy has no rate plans until it is published.
+        const roomType: PmsRoomType = {
+          ...sourceReadModel,
+          roomTypeId: duplicated.roomTypeId,
+          version: roomTypeVersion(1),
+          name: duplicateName,
+          active: true,
+          sortOrder: duplicated.sortOrder,
+          roomMediaRevision: 1,
+          ratePlans: [],
+          rateRulesSummary: {
+            minStayNights: null,
+            maxStayNights: null,
+            closedToArrival: false,
+            closedToDeparture: false,
+            activeRuleCount: 0,
+          },
+          roomCount: 0,
+        };
+        await enqueueInventoryChangedSideEffects(
+          client,
+          command,
+          lifecycleInventoryResource(command, duplicated.roomTypeId, acceptedAt),
+          commandMeta,
+          keyHash,
+          acceptedAt,
+        );
+        await insertRoomTypeLifecycleAuditEvent(
+          client,
+          command,
+          "pms.room_type.duplicated",
+          duplicated.roomTypeId,
+          commandMeta,
+          keyHash,
+          {
+            sourceRoomTypeId: command.roomTypeId,
+            copiedFacts: PMS_ROOM_TYPE_DUPLICATION_COPIED_FACTS,
+            resetFacts: PMS_ROOM_TYPE_DUPLICATION_RESET_FACTS,
+          },
+        );
+        await completeRoomTypeCommandIdempotency(
+          client,
+          "room_type_duplicate",
+          command,
+          keyHash,
+          commandMeta,
+          acceptedAt,
+          roomType,
+        );
+        await client.query("COMMIT");
+        return { ok: true, roomType, commandMeta };
+      } catch (error) {
+        await rollbackQuietly(client);
+        if (isPgUniqueViolation(error)) {
+          return roomTypeConflict(
+            "room_type_conflict",
+            "Room type duplication conflicts with the current property state.",
+          );
+        }
+        throw error;
+      } finally {
+        client.release();
+      }
     },
 
     async inspectRoomTypeRetirement(propertyId, roomTypeId) {
@@ -3028,6 +3167,81 @@ async function lockActiveRoomTypeForLifecycle(
 
 function roomTypeVersion(revision: number | string): string {
   return `room-type-facts-v${Number(revision)}`;
+}
+
+async function availableRoomTypeCopyName(
+  client: PmsOperationsCommandClient,
+  propertyId: string,
+  sourceName: string,
+): Promise<string> {
+  const names = await client.query<{ name: string }>(
+    `SELECT lower(name) AS name
+     FROM pms.room_types
+     WHERE property_id = $1::uuid AND active
+     ORDER BY lower(name)`,
+    [propertyId],
+  );
+  const existing = new Set(names.rows.map(({ name }) => name));
+  for (let copyNumber = 1; copyNumber <= 999; copyNumber += 1) {
+    const suffix = copyNumber === 1 ? " Copy" : ` Copy ${copyNumber}`;
+    const candidate = `${sourceName.slice(0, 200 - suffix.length).trimEnd()}${suffix}`;
+    if (!existing.has(candidate.toLowerCase())) return candidate;
+  }
+  throw new Error("Room type copy name space is exhausted");
+}
+
+async function insertDuplicatedRoomType(
+  client: PmsOperationsCommandClient,
+  command: PmsRoomTypeDuplicateCommand,
+  name: string,
+  acceptedAt: string,
+): Promise<{ roomTypeId: string; sortOrder: number }> {
+  const result = await client.query<{ roomTypeId: string; sortOrder: number }>(
+    `INSERT INTO pms.room_types (
+       property_id, source_system, source_room_type_id, setup_draft_room_id,
+       name, description, category, occupancy_limits, room_attributes,
+       amenities_snapshot, media_snapshot, base_rate_amount, currency, active,
+       sort_order, location_summary, room_facts_revision, room_units_revision,
+       room_media_revision, room_amenities_revision, room_amenities_reviewed_at,
+       linked_inventory_group_id, created_at, updated_at
+     )
+     SELECT
+       source.property_id, 'pms', NULL, NULL,
+       $3, source.description, source.category, source.occupancy_limits,
+       source.room_attributes, source.amenities_snapshot, source.media_snapshot,
+       source.base_rate_amount, source.currency, TRUE,
+       COALESCE((SELECT max(sort_order) + 1 FROM pms.room_types
+                 WHERE property_id = source.property_id AND active), 0),
+       source.location_summary, 1, 1, 1, 1, NULL, NULL,
+       $4::timestamptz, $4::timestamptz
+     FROM pms.room_types source
+     WHERE source.property_id = $1::uuid AND source.id = $2::uuid AND source.active
+     RETURNING id::text AS "roomTypeId", sort_order AS "sortOrder"`,
+    [command.propertyId, command.roomTypeId, name, acceptedAt],
+  );
+  const duplicated = result.rows[0];
+  if (!duplicated) throw new Error("Room type duplication lost its locked source");
+  return duplicated;
+}
+
+async function copyRoomTypeMediaAssignments(
+  client: PmsOperationsCommandClient,
+  command: PmsRoomTypeDuplicateCommand,
+  duplicatedRoomTypeId: string,
+  acceptedAt: string,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO pms.room_type_media (
+       property_id, room_type_id, platform_media_object_id, alt_text,
+       sort_order, created_at, updated_at
+     )
+     SELECT property_id, $3::uuid, platform_media_object_id, alt_text,
+            sort_order, $4::timestamptz, $4::timestamptz
+     FROM pms.room_type_media
+     WHERE property_id = $1::uuid AND room_type_id = $2::uuid
+     ORDER BY sort_order, platform_media_object_id`,
+    [command.propertyId, command.roomTypeId, duplicatedRoomTypeId, acceptedAt],
+  );
 }
 
 type PmsRoomTypeRetirementCountsRow = {
@@ -6224,6 +6438,7 @@ async function applyAssignmentCommandMutation(
     return assignmentConflict("room_unavailable", "Requested room is unavailable for this stay.");
   }
 
+  let pricingOffer: MovePricingOffer | null = null;
   if (
     command.action === "move" &&
     command.ratePolicy === "target_base" &&
@@ -6237,6 +6452,7 @@ async function applyAssignmentCommandMutation(
       acceptedAt,
     );
     if (!rateChange.ok) return rateChange;
+    pricingOffer = rateChange.pricingOffer;
   }
 
   const nextVersion = nextAssignmentVersion(source);
@@ -6250,8 +6466,12 @@ async function applyAssignmentCommandMutation(
            ELSE 'assigned'
          END,
          assigned_at = COALESCE(assigned_at, now()),
+         -- An offer belongs to one room type: a cross-type move keeps only the target's offer.
          assignment_payload = jsonb_set(
-           COALESCE(assignment_payload, '{}'::jsonb),
+           CASE WHEN room_type_id = $6::uuid THEN COALESCE(assignment_payload, '{}'::jsonb)
+             ELSE (COALESCE(assignment_payload, '{}'::jsonb) - 'pricingOffer')
+               || jsonb_strip_nulls(jsonb_build_object('pricingOffer', $7::jsonb))
+           END,
            '{version}',
            to_jsonb($5::text),
            true
@@ -6267,6 +6487,7 @@ async function applyAssignmentCommandMutation(
       command.guestBookingId,
       nextVersion,
       room.roomTypeId,
+      pricingOffer === null ? null : JSON.stringify(pricingOffer),
     ],
   );
   return {
@@ -6284,18 +6505,142 @@ async function applyAssignmentCommandMutation(
   };
 }
 
+type MoveRateScope = {
+  evidenceIds: string[] | null;
+  evidenceCount: number;
+  nightCount: number;
+  adults: number;
+  children: number;
+  childAges: unknown;
+  timezone: string | null;
+};
+type MovePricingOffer = { offerId: string; pricingRevision: number; childAgesAtCheckIn?: number[] };
+
+/** Reprices a cross-type move at the target room type's published Flexible offer, its base
+ * rate, for the stay's guests, and corrects the exact manual price evidence to that total. */
 async function applyTargetBaseRateForMove(
   client: PmsOperationsCommandClient,
   command: PmsAssignmentCommand,
   source: PmsAssignmentRow,
   targetRoomTypeId: string,
   acceptedAt: string,
-): Promise<{ ok: true } | Exclude<PmsAssignmentCommandResult, { ok: true }>> {
-  throw Object.assign(
-    new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
-    { statusCode: 503, code: "PRICING_UNAVAILABLE" },
+): Promise<
+  { ok: true; pricingOffer: MovePricingOffer } | Exclude<PmsAssignmentCommandResult, { ok: true }>
+> {
+  const result = await client.query<MoveRateScope>(
+    `WITH evidence_state AS (
+       SELECT id,stay_date,line_position,
+         SUM(gross_room_amount) OVER scope AS amount,
+         row_number() OVER (scope ORDER BY source_revision DESC,created_at DESC,id DESC) AS tip
+       FROM booking.nightly_revenue_evidence
+       WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid
+         AND economic_event<>'retained_charge'
+       WINDOW scope AS (PARTITION BY stay_date,line_position)
+     ), tips AS (
+       SELECT id,stay_date,amount FROM evidence_state WHERE tip=1 AND line_position=$6::int
+         AND stay_date >= $4::date AND stay_date < $5::date
+     )
+     SELECT array_agg(tips.id::text ORDER BY tips.stay_date)
+         FILTER (WHERE tips.id IS NOT NULL) AS "evidenceIds",
+       COUNT(tips.id)::int AS "evidenceCount",($5::date-$4::date)::int AS "nightCount",
+       assignment.adults,assignment.children,
+       assignment.assignment_payload->'pricingOffer'->'childAgesAtCheckIn' AS "childAges",
+       location.timezone
+     FROM pms.operational_booking_assignments assignment
+     LEFT JOIN hotel_catalog.property_locations location ON location.property_id=assignment.property_id
+     LEFT JOIN tips ON TRUE
+     WHERE assignment.property_id=$1::uuid AND assignment.id=$3::uuid
+     GROUP BY assignment.id,location.timezone`,
+    [
+      command.propertyId,
+      command.guestBookingId,
+      source.assignmentId,
+      source.checkIn,
+      source.checkOut,
+      source.position,
+    ],
   );
+  const scope = result.rows[0];
+  if (!scope?.timezone || !scope.evidenceIds?.length || scope.evidenceCount !== scope.nightCount)
+    return assignmentConflict(
+      "assignment_conflict",
+      "Target rate requires exact manual price evidence.",
+    );
+  const unavailable = assignmentConflict(
+    "target_base_unavailable",
+    "The target room type has no published Flexible price for this stay.",
+  );
+  const publication = await readManualBookingPricingPublication(client, command.propertyId);
+  const configuration = publication?.rooms.find((room) => room.roomTypeId === targetRoomTypeId);
+  const terms = publication?.terms.filter((item) => item.roomTypeId === targetRoomTypeId) ?? [];
+  const offer = configuration?.offers.find(
+    (item) =>
+      item.price.kind === "independent" &&
+      terms.some((term) => term.offerId === item.id && term.cancellation.kind === "flexible"),
+  );
+  const ages = Array.isArray(scope.childAges) ? (scope.childAges as number[]) : [];
+  if (!publication || !configuration || !offer || ages.length !== scope.children)
+    return unavailable;
+  const priced = calculateReplacementRoomStay(configuration, {
+    propertyId: configuration.propertyId,
+    roomTypeId: configuration.roomTypeId,
+    offerId: offer.id,
+    expectedRevision: publication.revision,
+    expectedTermsRevisions: Object.fromEntries(terms.map((term) => [term.offerId, term.revision])),
+    checkIn: source.checkIn,
+    checkOut: source.checkOut,
+    guests: { adults: scope.adults, childAgesAtCheckIn: ages },
+  });
+  if (priced.kind === "unavailable" && priced.reason === "restriction")
+    return assignmentConflict(
+      "target_base_unavailable",
+      "The target room type's Flexible rate is closed or restricted for these dates.",
+    );
+  const cents =
+    priced.kind === "priced"
+      ? publishedMinorToCents(priced.totalMinor, publication.currency)
+      : null;
+  const amountDecimal = cents === null ? null : formatBookingPriceMinorUnits(String(cents));
+  if (!amountDecimal) return unavailable;
+  try {
+    await correctBookingPmsManualPrices(
+      client,
+      {
+        propertyId: command.propertyId,
+        guestBookingId: command.guestBookingId,
+        idempotencyKey: `${command.idempotencyKey}:target-base`,
+        accountingDate: [propertyDate(acceptedAt, scope.timezone), previousDate(source.checkOut)]
+          .sort()
+          .at(-1)!,
+        pricing: {
+          kind: "equal_inferred",
+          targetEvidenceIds: scope.evidenceIds,
+          replacementTotal: { amountDecimal, currency: publication.currency },
+        },
+      },
+      acceptedAt,
+      { allowNoChange: true, requirePricedTargets: true },
+    );
+  } catch (error) {
+    if (
+      error instanceof ManualPriceCorrectionEvidenceError ||
+      error instanceof ManualPriceCorrectionStateError
+    )
+      return assignmentConflict("assignment_conflict", error.message);
+    throw error;
+  }
+  return {
+    ok: true,
+    pricingOffer: {
+      offerId: offer.id,
+      pricingRevision: publication.revision,
+      ...(ages.length ? { childAgesAtCheckIn: ages } : {}),
+    },
+  };
 }
+
+const previousDate = (date: string) =>
+  new Date(Date.parse(`${date}T00:00:00.000Z`) - 86_400_000).toISOString().slice(0, 10);
 
 type AssignmentInventoryTransfer = {
   sourceRoomTypeId: string;
@@ -7638,7 +7983,8 @@ function isPmsRoomType(value: unknown): value is PmsRoomType {
     (roomType.category === null || typeof roomType.category === "string") &&
     !!roomType.baseRate &&
     typeof roomType.baseRate.amountDecimal === "string" &&
-    typeof roomType.baseRate.currency === "string" &&
+    // Room types from the room-facts flow carry no legacy currency.
+    (typeof roomType.baseRate.currency === "string" || roomType.baseRate.currency === null) &&
     typeof roomType.active === "boolean" &&
     typeof roomType.sortOrder === "number" &&
     Array.isArray(roomType.ratePlans) &&

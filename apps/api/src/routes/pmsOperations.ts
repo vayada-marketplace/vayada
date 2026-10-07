@@ -736,6 +736,7 @@ export type PmsAssignmentCommandConflictCode =
   | "version_conflict"
   | "room_unavailable"
   | "assignment_conflict"
+  | "target_base_unavailable"
   | "idempotency_conflict";
 
 export type PmsAssignmentCommandResult =

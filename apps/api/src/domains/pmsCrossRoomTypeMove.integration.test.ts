@@ -30,6 +30,7 @@ const I = {
   otherAssignment: id(23),
   receipt: id(24),
   manualBlock: id(25),
+  termsRevision: id(26),
 };
 const acceptedAt = "2026-08-31T12:30:00.000Z";
 
@@ -155,10 +156,22 @@ describe.skipIf(!DATABASE_URL)("PostgreSQL cross-room-type assignment moves", ()
     ["target base", "target_base", "120.0000"],
   ] as const)("applies the %s rate policy atomically", async (_label, ratePolicy, amount) => {
     await addManualPriceEvidence();
+    await publishTarget();
+    await fixture(`UPDATE pms.operational_booking_assignments
+      SET assignment_payload='{"pricingOffer":{"offerId":"double-flex","pricingRevision":1}}'
+      WHERE id='${I.assignment}'`);
     await expect(move(`rate-${ratePolicy ?? "preserve"}`, ratePolicy)).resolves.toMatchObject({
       ok: true,
     });
     await expect(nightlyAmounts()).resolves.toEqual([{ amount }, { amount }]);
+    // The source room type's offer never follows the stay; target base records the target's.
+    const payload = await pool.query(
+      "SELECT assignment_payload->'pricingOffer' AS offer FROM pms.operational_booking_assignments WHERE id=$1",
+      [I.assignment],
+    );
+    expect(payload.rows[0].offer).toEqual(
+      ratePolicy ? { offerId: "twin-flex", pricingRevision: 1 } : null,
+    );
     const reservation = await readRepository.findReservationByGuestBookingId(I.property, I.booking);
     expect(
       reservation?.assignments[0]?.nightly?.map((night) => night.applied?.amountDecimal),
@@ -175,15 +188,15 @@ describe.skipIf(!DATABASE_URL)("PostgreSQL cross-room-type assignment moves", ()
 
   it("moves without a correction when the selected target rate is unchanged", async () => {
     await addManualPriceEvidence();
-    await fixture(`UPDATE pms.room_types SET base_rate_amount=100 WHERE id='${I.targetType}'`);
+    await publishTarget("10000");
     await expect(move("same-rate", "target_base")).resolves.toMatchObject({ ok: true });
     await expect(correctionCount()).resolves.toBe(0);
   });
 
   it("corrects each night when the aggregate already matches the target total", async () => {
     await addManualPriceEvidence();
-    await fixture(`UPDATE pms.room_types SET base_rate_amount=100 WHERE id='${I.targetType}';
-      UPDATE booking.nightly_revenue_evidence SET gross_room_amount=
+    await publishTarget("10000");
+    await fixture(`UPDATE booking.nightly_revenue_evidence SET gross_room_amount=
         CASE stay_date WHEN '2026-09-02' THEN 80 ELSE 120 END
       WHERE guest_booking_id='${I.booking}' AND line_position=1`);
     await expect(move("uneven-rate", "target_base")).resolves.toMatchObject({ ok: true });
@@ -203,30 +216,34 @@ describe.skipIf(!DATABASE_URL)("PostgreSQL cross-room-type assignment moves", ()
 
   it("rejects a target rate when a nightly price is explicitly missing", async () => {
     await addManualPriceEvidence();
+    await publishTarget();
     await fixture(`UPDATE booking.nightly_revenue_evidence
       SET gross_room_amount=NULL,evidence_quality='missing'
       WHERE guest_booking_id='${I.booking}' AND line_position=1 AND stay_date='2026-09-03'`);
     await expectRateConflict("missing-nightly-price");
   });
 
-  it("rejects a target rate when the target room type has no published base rate", async () => {
+  it("rejects a target rate when the target room type has no published Flexible price", async () => {
     await addManualPriceEvidence();
-    await fixture(
-      `UPDATE pms.room_types SET base_rate_amount=NULL,currency=NULL WHERE id='${I.targetType}'`,
-    );
-    await expectRateConflict("missing-rate");
+    // The legacy room-type rate is no longer a price source.
+    await expectRateConflict("missing-rate", "target_base_unavailable");
+  });
+
+  it("rejects a target rate that the published restrictions forbid for the stay", async () => {
+    await addManualPriceEvidence();
+    await publishTarget("12000", "EUR", 3);
+    await expectRateConflict("restricted-rate", "target_base_unavailable");
   });
 
   it("rejects an unchanged numeric target rate in a different currency", async () => {
     await addManualPriceEvidence();
-    await fixture(
-      `UPDATE pms.room_types SET base_rate_amount=100,currency='USD' WHERE id='${I.targetType}'`,
-    );
+    await publishTarget("10000", "USD");
     await expectRateConflict("currency-mismatch");
   });
 
   it("rejects a target rate when the property timezone is unknown", async () => {
     await addManualPriceEvidence();
+    await publishTarget();
     await fixture(
       `UPDATE hotel_catalog.property_locations SET timezone='Foo/Bar' WHERE property_id='${I.property}'`,
     );
@@ -294,6 +311,52 @@ describe.skipIf(!DATABASE_URL)("PostgreSQL cross-room-type assignment moves", ()
     expect((await inventory()).map(({ type, assigned }) => ({ type, assigned }))).toEqual(moved);
   });
 
+  it("duplicates a room type without seeding legacy rate plans and replays exactly", async () => {
+    const lifecycle = createTargetPmsOperationsCommandRepository({
+      connectionString: DATABASE_URL ?? "postgresql://disabled",
+      pool,
+      now: () => new Date(acceptedAt),
+      readRepository,
+    });
+    const command = {
+      propertyId: I.property,
+      roomTypeId: I.sourceType,
+      commandId: "duplicate-double",
+      idempotencyKey: "duplicate-double",
+      expectedVersion: "room-type-facts-v1",
+      audit: {
+        actor: { kind: "system" as const, service: "apps/api" as const },
+        requestId: "duplicate-request",
+        reason: "Duplicate room type",
+        requestedAt: acceptedAt,
+      },
+    };
+    const duplicated = await lifecycle.duplicateRoomType(command);
+    expect(duplicated).toMatchObject({
+      ok: true,
+      roomType: { name: "Double Copy", ratePlans: [], roomCount: 0 },
+    });
+    if (!duplicated.ok) return;
+    await expect(lifecycle.duplicateRoomType(command)).resolves.toEqual({
+      ...duplicated,
+      replayed: true,
+    });
+    const copy = await pool.query(
+      `SELECT base_rate_amount::text AS amount,currency,
+         (SELECT count(*)::int FROM pms.rate_plans plan WHERE plan.room_type_id=room_type.id) AS plans
+       FROM pms.room_types room_type WHERE id=$1`,
+      [duplicated.roomType.roomTypeId],
+    );
+    expect(copy.rows).toEqual([{ amount: "100.00", currency: "EUR", plans: 0 }]);
+    const audit = await pool.query(
+      `SELECT redacted_payload FROM platform.product_audit_events
+       WHERE property_id=$1 AND action='pms.room_type.duplicated'`,
+      [I.property],
+    );
+    expect(audit.rows[0].redacted_payload.resetFacts).toContain("legacy_rate_plan_configuration");
+    await lifecycle.close?.();
+  });
+
   async function move(suffix: string, ratePolicy?: "target_base", roomId = I.targetRoom) {
     return repository.executeAssignmentCommand({
       propertyId: I.property,
@@ -344,14 +407,81 @@ describe.skipIf(!DATABASE_URL)("PostgreSQL cross-room-type assignment moves", ()
     return result.rows[0]!.count;
   }
 
-  async function expectRateConflict(suffix: string) {
+  async function expectRateConflict(suffix: string, code = "assignment_conflict") {
     const before = await state();
-    await expect(move(suffix, "target_base")).resolves.toMatchObject({
-      ok: false,
-      code: "assignment_conflict",
-    });
+    await expect(move(suffix, "target_base")).resolves.toMatchObject({ ok: false, code });
     await expect(state()).resolves.toEqual(before);
     await expect(correctionCount()).resolves.toBe(0);
+  }
+
+  /** The target room type's published Flexible offer, priced flat per night (minor units). */
+  async function publishTarget(amountMinor = "12000", currency = "EUR", minArrivalNights = 1) {
+    const offerId = "twin-flex";
+    const terms = {
+      roomTypeId: I.targetType,
+      offerId,
+      revision: I.termsRevision,
+      cancellation: {
+        kind: "flexible",
+        terms: {
+          type: "free_until_days_before_arrival",
+          freeCancellationDeadlineDays: 7,
+          afterDeadlinePenalty: "full_booking_amount",
+          noShowPenalty: "full_booking_amount",
+        },
+      },
+      payment: { kind: "full" },
+    };
+    const rules = {
+      minArrivalNights,
+      maxStayNights: null,
+      closedToArrival: false,
+      closedToDeparture: false,
+      stopSell: false,
+    };
+    const configuration = {
+      version: "pricing.v2",
+      propertyId: I.property,
+      roomTypeId: I.targetType,
+      revision: 1,
+      currency,
+      capacity: { total: 2, adults: 2, children: 0 },
+      children: {
+        adultFromAge: 12,
+        bands: [{ fromAge: 0, throughAge: 11, nightlyMinor: "0", countsTowardCapacity: true }],
+      },
+      offers: [
+        {
+          id: offerId,
+          termsRevision: I.termsRevision,
+          meal: { kind: "room_only", charge: { kind: "room", amountMinor: "0" } },
+          price: {
+            kind: "independent",
+            calendar: {
+              base: { mode: "flat", amountMinor },
+              months: [],
+              seasons: [],
+              weekdays: [],
+              dates: [],
+            },
+          },
+          restrictions: { kind: "own", rules, seasons: [], dates: [] },
+        },
+      ],
+    };
+    const hash = "0".repeat(64);
+    await fixture(`
+      INSERT INTO pms.pricing_v2_heads (property_id,revision) VALUES ('${I.property}',1);
+      INSERT INTO pms.pricing_v2_revisions (property_id,revision,room_count,currency,
+        source_revisions,owner_references,request_id,request_hash,actor_user_id)
+        VALUES ('${I.property}',1,1,'${currency}','{"room":"r","terms":"t","finance":"f"}',
+          '{"finance":"f","charges":"c"}','move-publish','${hash}','${I.user}');
+      INSERT INTO pms.pricing_v2_rooms (property_id,revision,room_type_id,currency,configuration)
+        VALUES ('${I.property}',1,'${I.targetType}','${currency}','${JSON.stringify(configuration)}');
+      INSERT INTO booking.pricing_v2_offer_terms
+        (property_id,room_type_id,offer_id,revision,terms,request_id,request_hash,actor_user_id)
+        VALUES ('${I.property}','${I.targetType}','${offerId}','${I.termsRevision}',
+          '${JSON.stringify(terms)}','move-terms','${hash}','${I.user}');`);
   }
 
   async function seed(durableReceipt: boolean) {
@@ -541,6 +671,12 @@ describe.skipIf(!DATABASE_URL)("PostgreSQL cross-room-type assignment moves", ()
       DELETE FROM pms.operating_calendar_room_bindings WHERE property_id='${I.property}';
       DELETE FROM pms.operating_calendar_revisions WHERE property_id='${I.property}';
       DELETE FROM pms.rooms WHERE property_id='${I.property}';
+      DELETE FROM booking.pricing_v2_offer_terms WHERE property_id='${I.property}';
+      DELETE FROM pms.pricing_v2_rooms WHERE property_id='${I.property}';
+      DELETE FROM pms.pricing_v2_revisions WHERE property_id='${I.property}';
+      DELETE FROM pms.pricing_v2_heads WHERE property_id='${I.property}';
+      DELETE FROM pms.room_type_media WHERE property_id='${I.property}';
+      DELETE FROM platform.product_audit_events WHERE property_id='${I.property}';
       DELETE FROM pms.rate_plans WHERE property_id='${I.property}';
       DELETE FROM pms.room_types WHERE property_id='${I.property}';
       DELETE FROM pms.linked_inventory_groups WHERE property_id='${I.property}';

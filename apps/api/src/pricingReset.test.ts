@@ -68,7 +68,9 @@ describe("pricing reset", () => {
   });
 });
 
-it("cannot seed rates through room creation or duplication", async () => {
+// Duplication is back without rate seeding (VAY-1422 slice A.3); creation still embeds legacy
+// rates in its command, so it stays unavailable until the room form drops them.
+it("cannot seed rates through room creation", async () => {
   const pool = { connect: vi.fn(), end: vi.fn() };
   const repository = createTargetPmsOperationsCommandRepository({
     connectionString: "unused",
@@ -76,7 +78,6 @@ it("cannot seed rates through room creation or duplication", async () => {
     readRepository: undefined as never,
   });
   await expect(repository.createRoomType(undefined as never)).rejects.toMatchObject(unavailable);
-  await expect(repository.duplicateRoomType(undefined as never)).rejects.toMatchObject(unavailable);
   expect(pool.connect).not.toHaveBeenCalled();
   await repository.close?.();
 });
