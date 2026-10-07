@@ -1,10 +1,12 @@
 "use client";
 
+import { useTranslation } from "@/lib/i18n";
+
 export type PaymentMethod = "card" | "pay_at_property";
 
 const options = [
-  { value: "card", label: "Card online" },
-  { value: "pay_at_property", label: "Pay at property" },
+  { value: "card", labelKey: "pricing.paymentMethods.card" },
+  { value: "pay_at_property", labelKey: "pricing.paymentMethods.payAtProperty" },
 ] as const;
 
 export function AcceptedPaymentMethods({
@@ -16,14 +18,15 @@ export function AcceptedPaymentMethods({
   disabled: boolean;
   onChange(methods: PaymentMethod[]): void;
 }) {
+  const { t } = useTranslation();
   return (
     <fieldset className="space-y-2">
-      <legend className="text-sm font-medium">Accepted payment methods</legend>
-      {options.map(({ value, label }) => (
+      <legend className="text-sm font-medium">{t("pricing.paymentMethods.legend")}</legend>
+      {options.map(({ value, labelKey }) => (
         <label key={value} className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
-            aria-label={label}
+            aria-label={t(labelKey)}
             disabled={disabled}
             checked={methods.includes(value)}
             onChange={(event) =>
@@ -36,12 +39,10 @@ export function AcceptedPaymentMethods({
               )
             }
           />
-          {label}
+          {t(labelKey)}
         </label>
       ))}
-      <p className="text-xs text-gray-600">
-        Only payment methods ready in Payment settings can be used at checkout.
-      </p>
+      <p className="text-xs text-gray-600">{t("pricing.paymentMethods.hint")}</p>
     </fieldset>
   );
 }
