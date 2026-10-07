@@ -288,7 +288,8 @@ for the launch-settings, currency and Feature Hub native commands.
 
 ## 7. The explicit definer exception list
 
-Platform PR #454 (open, branch `fm/vay-2054-runtime-function-execute`) adds
+Platform PR #454 (merged 2026-10-07, main `be9377e`; its grant was re-applied in
+production the same evening, preflight PASS in the product DML posture) adds
 `runtimeExecutableFunctions` (invoker-rights helpers) to the grant script and
 the preflight with parity tests. The brief asks for a sibling
 `runtimeDefinerFunctions` list for this ticket. Given §3, the correct content
@@ -303,7 +304,7 @@ grant transaction's `verifyGlobalPosture`). Two ways to record this:
   existing check is the exact list, and how the private services are retired.
   Acceptance "preflight lists the exact definer functions" is met by the
   existing fail-closed check; no grant re-run is needed.
-- **Option B: add the empty explicit list anyway** (stacked on #454, same
+- **Option B: add the empty explicit list anyway** (on current platform main, same
   three files plus parity test): `runtimeDefinerFunctions = []` in both scripts,
   carve-out `AND procedure.oid <> ALL($n)` in both definer queries, codes
   `runtime_definer_function_missing` / `_not_definer` / `_owner_required` /
@@ -333,7 +334,7 @@ source + tests + docs.
 | A7  | `fm/vay-2056-creation-feature-hub-ordinary`       | creation: unconditional `lockHotelSetupCreationPermissions`, drop creation forwarder; Feature Hub: drop `forward`, keep owner session; tests: creation denial matrix on the fixture login (revoked Owner, foreign org, replayed key, private contact), Financials activate/deactivate as fixture login                                                                                        | ~350               | Do creation and Feature Hub hold their denials without the native scope?          |
 | A8  | `fm/vay-2056-logo-ordinary`                       | remove the `blocked` default and `forwardLogo` wiring; logo upload → finalize → assign → publication worker integration test on the fixture login (`hotelSetupLogoOrdinary.integration.test.ts`, modelled on `hotelSetupLogoLifecycle.integration.test.ts` minus the native scope); `hotel-setup-logo-writer.md` superseded note                                                              | ~350               | Does the standard media protocol carry the logo end to end on the ordinary login? |
 | A9  | `fm/vay-2056-docs-and-ci`                         | CI `hotel-setup` shard runs the new suites on PG16/17; `engineering/` contracts (credential lifecycle, launch settings, automatic provisioning, initial settings) get a "superseded by hotel-setup-ordinary-login.md" header; `api-runtime-database-role.md` "What stays on SECURITY DEFINER" paragraph updated                                                                               | ~150               | Are docs and CI consistent with the shipped behaviour?                            |
-| P1  | platform `fm/vay-2056-runtime-definer-exceptions` | Option A: `docs/environments.md` VAY-2056 paragraph (ordinary login path, zero definer exceptions, decommission order). Option B adds the empty `runtimeDefinerFunctions` mechanism stacked on #454                                                                                                                                                                                           | ~60 (A) / ~200 (B) | Does the platform record match the app behaviour?                                 |
+| P1  | platform `fm/vay-2056-runtime-definer-exceptions` | Option A: `docs/environments.md` VAY-2056 paragraph (ordinary login path, zero definer exceptions, decommission order). Option B adds the empty `runtimeDefinerFunctions` mechanism on current main (#454 is merged)                                                                                                                                                                          | ~60 (A) / ~200 (B) | Does the platform record match the app behaviour?                                 |
 
 Order: A1 → A2 → A3 → A4 (profile first: it is the 409 that blocks new hotels
 and the acceptance check on the two original Owners) → A5 (the misleading 503
@@ -348,7 +349,8 @@ first release.
 1. Merge A1–A9 (each PR is CI-green; merging does not change production: the
    public API image keeps forwarding until a new image is deployed).
 2. Platform P1 merged (docs; Option B would also need `--grant-runtime-product-dml`
-   re-run after #454, which is #454's own release step, not this ticket's).
+   re-run, which already happened for #454 on 2026-10-07; a new entry would need
+   one more re-run).
 3. **Cutover = one ordinary next-API release** (`deploy-next-api.yml`). The
    new image ignores `HOTEL_SETUP_CREATION_COMMAND_*`, `HOTEL_SETUP_COMMAND_*`,
    `HOTEL_SETUP_PROFILE_COMMAND_*` and `HOTEL_SETUP_LOGO_COMMAND_*`; the task
@@ -488,15 +490,17 @@ Dependency order; each step is reversible until step 6.
 7. **Cleanup**: `engineering/hotel-setup-*.md` contracts archived under a
    historical heading, Linear VAY-965/VAY-1092 closed by the human.
 
-## 13. Open questions for the PLAN checkpoint
+## 13. Decisions taken at the PLAN checkpoint (coordinator, 2026-10-08)
 
-1. Option A or B for the definer exception list (§7). Recommendation: A.
-2. Fixture parity (A2): the test login mirrors the platform grant list by hand;
-   acceptable, or should the platform publish the grant list as JSON the app
-   test can read? Recommendation: hand mirror now, JSON only if it drifts.
-3. First-currency completion on the ordinary login (A6) reproduces the 0448
-   default-Financials activation. Confirm this is wanted for every new hotel
-   (it is what the native path does today and what PR #2692 intended).
-4. Launch settings: the ordinary endpoint stops bumping `profile_revision`
-   (native behaviour). Clients re-read the revision after each PUT, so no
-   caller depends on the bump; confirm.
+1. **Option A** for the definer exception list (§7): no new platform
+   mechanism; the platform PR is docs-only. The existing fail-closed check is
+   the exact (empty) list.
+2. **Fixture parity (A2)**: the test login mirrors the platform grant list by
+   hand; a platform-published JSON only if it drifts.
+3. **First-currency completion (A6)** activates the default Financials
+   entitlement for every new hotel exactly as the native 0448 trigger does.
+4. **Launch settings (A5)** stop bumping `profile_revision`, matching the
+   native writer.
+
+An independent adversarial review of this note ran before Phase 2; its
+findings are addressed in the implementation slices.
