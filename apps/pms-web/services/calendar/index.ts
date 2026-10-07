@@ -1,5 +1,9 @@
 import { pmsOperationsClient, pmsOperationsRequestOptions } from "../api/pmsOperationsClient";
-import { propertyEndpoint, resolveSelectedPmsPropertyId } from "../api/pmsPropertyClient";
+import {
+  getPmsPropertyProfile,
+  propertyEndpoint,
+  resolveSelectedPmsPropertyId,
+} from "../api/pmsPropertyClient";
 import { pmsManualBookingClient } from "../api/pmsManualBookingClient";
 import { unsupportedPmsNextStackFeature } from "../api/unsupported";
 import { BookingAddon } from "../bookings";
@@ -257,6 +261,8 @@ export const calendarService = {
   },
 
   getManualBookingCapabilities: pmsManualBookingClient.capabilities,
+
+  getPropertyCountry: async (): Promise<string> => (await getPmsPropertyProfile()).country,
 
   previewManualBooking: pmsManualBookingClient.preview,
 

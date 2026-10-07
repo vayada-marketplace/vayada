@@ -14,6 +14,7 @@ import { CalendarRoom, CalendarRoomType, calendarService } from "@/services/cale
 import type { BookingAddon } from "@/services/bookings";
 import { useTranslation } from "@/lib/i18n";
 import { NationalitySelect } from "@vayada/locale-ui/NationalitySelect";
+import PhoneNumberInput, { phoneCountryOrEmpty, phoneToE164 } from "@/components/PhoneNumberInput";
 
 // prettier-ignore
 const SOURCES = [["call", "calendar.targetManualBooking.sourceCall"], ["email", "calendar.targetManualBooking.sourceEmail"], ["whatsapp", "calendar.targetManualBooking.sourceWhatsApp"], ["walk_in", "calendar.targetManualBooking.sourceWalkIn"], ["social_media", "calendar.targetManualBooking.sourceSocialMedia"], ["other", "calendar.targetManualBooking.sourceOther"]] as const;
@@ -139,6 +140,7 @@ export default function TargetManualBookingModal({
   const firstRoom = rooms.find((room) => room.id === initialRoomId) ?? rooms[0];
   // prettier-ignore
   const [stays, setStays] = useState(() => [stayDefaults(1, firstRoom?.id ?? "", initialCheckIn, initialCheckOut, roomTypes, rooms)]), [addons, setAddons] = useState<BookingAddon[]>([]), [addonPackages, setAddonPackages] = useState<Record<string, number>>({}), [addonState, setAddonState] = useState<"loading" | "ready" | "error">("loading"), [firstName, setFirstName] = useState(""), [lastName, setLastName] = useState(""), [email, setEmail] = useState(""), [phone, setPhone] = useState(""), [countryCode, setCountryCode] = useState(""), [source, setSource] = useState<PmsManualBookingCreateInput["directSource"]>("call"), [method, setMethod] = useState<PmsManualBookingCreateInput["payment"]["expectedMethod"]>("pay_at_property"), [settlement, setSettlement] = useState<"paid" | "unpaid">("unpaid"), [specialRequests, setSpecialRequests] = useState(""), [privateNote, setPrivateNote] = useState(""), [previewEvidence, setPreviewEvidence] = useState<{ key: string; result: PmsManualBookingPreviewResult } | null>(null), [previewState, setPreviewState] = useState<"idle" | "loading" | "error">("idle"), [message, setMessage] = useState(""), [stayError, setStayError] = useState<{ key: number; field: string; message: string } | null>(null), [submitting, setSubmitting] = useState(false), [retryLocked, setRetryLocked] = useState(false), [focusTarget, setFocusTarget] = useState<string | null>(null), [canRecordPaidPayment, setCanRecordPaidPayment] = useState(suppliedPaidCapability ?? false);
+  const [phoneCountry, setPhoneCountry] = useState("");
   const [showPreviewSpinner, setShowPreviewSpinner] = useState(false);
   const [previewMessage, setPreviewMessage] = useState("");
   const [previewCanRetry, setPreviewCanRetry] = useState(false);
@@ -150,6 +152,18 @@ export default function TargetManualBookingModal({
 
   // prettier-ignore
   useEffect(() => { if (suppliedPaidCapability !== undefined) return setCanRecordPaidPayment(suppliedPaidCapability); void calendarService.getManualBookingCapabilities().then((capability) => setCanRecordPaidPayment(capability.canRecordPaidPayment)); }, [suppliedPaidCapability]);
+
+  // Default the phone country code to the property's country (VAY-647 §4).
+  useEffect(() => {
+    let active = true;
+    calendarService.getPropertyCountry().then(
+      (code) => active && setPhoneCountry((current) => current || phoneCountryOrEmpty(code)),
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!focusTarget) return;
@@ -303,10 +317,10 @@ export default function TargetManualBookingModal({
     setMessage("");
     setStayError(null);
     const retry = retryLocked && attempt.current;
-    const phoneE164 = phone.trim();
+    const phoneE164 = phoneToE164(phoneCountry, phone);
     const isoCountry = countryCode.trim().toUpperCase();
-    if (!retry && phoneE164 && !/^\+[1-9]\d{7,14}$/.test(phoneE164))
-      return setMessage(t("calendar.targetManualBooking.phoneValidation"));
+    if (!retry && phoneE164 === null)
+      return setMessage(t("calendar.targetManualBooking.phoneInvalid"));
     if (!retry && isoCountry && !/^[A-Z]{2}$/.test(isoCountry))
       return setMessage(t("calendar.targetManualBooking.countryValidation"));
     if (!retry && (!previewInput || !preview || previewState !== "idle"))
@@ -799,21 +813,20 @@ export default function TargetManualBookingModal({
                   />{" "}
                 </label>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <label className={`${labelClass} sm:col-span-2`}>
-                    {t("calendar.newBookingModal.phoneLabel")}
-                    <input
-                      name="phoneE164"
-                      type="tel"
-                      pattern="\+[1-9][0-9]{7,14}"
-                      placeholder="+306900000000"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      className={inputClass}
-                    />{" "}
-                    <span className="font-normal text-gray-500">
-                      {t("calendar.targetManualBooking.includeCountryCode")}
-                    </span>{" "}
-                  </label>
+                  <PhoneNumberInput
+                    label={t("calendar.newBookingModal.phoneLabel")}
+                    countryLabel={t("calendar.targetManualBooking.phoneCountryCode")}
+                    countryPlaceholder={t("calendar.targetManualBooking.phoneCountryPlaceholder")}
+                    country={phoneCountry}
+                    number={phone}
+                    onChange={(next) => {
+                      setPhoneCountry(next.country);
+                      setPhone(next.number);
+                    }}
+                    className="sm:col-span-2"
+                    labelClassName="block text-xs font-medium text-gray-700"
+                    inputClassName={inputClass}
+                  />
                   <NationalitySelect
                     label={t("bookings.detail.nationality")}
                     value={countryCode}

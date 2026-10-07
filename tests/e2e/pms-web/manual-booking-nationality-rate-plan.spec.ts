@@ -216,10 +216,28 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   await dialog.getByRole("textbox", { name: "First Name *" }).fill("Ada");
   await dialog.getByRole("textbox", { name: "Last Name *" }).fill("Lovelace");
   await dialog.getByRole("textbox", { name: "Email *" }).fill("ada@example.com");
+
+  // Phone dial code defaults to the property's country (DE in the shared profile mock);
+  // a pasted international number switches the code, and the request carries E.164.
+  const dialCode = dialog.getByLabel("Phone country code");
+  await expect(dialCode).toHaveValue("DE");
+  await expect(dialCode.locator("option:checked")).toHaveText("Germany 🇩🇪 +49");
+  const phone = dialog.getByRole("textbox", { name: "Phone" });
+  await phone.fill("+62 812 3456 7890");
+  await phone.blur();
+  await expect(dialCode).toHaveValue("ID");
+  await expect(phone).toHaveValue("0812-3456-7890");
+  await dialCode.selectOption("DE");
+  await phone.fill("089 1234567");
   await createBooking.click();
   await expect.poll(() => createBody).not.toBeNull();
   expect(createBody).toMatchObject({
-    guest: { firstName: "Ada", lastName: "Lovelace", countryCode: "DE" },
+    guest: {
+      firstName: "Ada",
+      lastName: "Lovelace",
+      countryCode: "DE",
+      phoneE164: "+49891234567",
+    },
     stays: [
       {
         roomId: GARDEN_ROOM_ID,

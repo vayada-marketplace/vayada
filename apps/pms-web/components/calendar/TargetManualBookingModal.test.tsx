@@ -28,6 +28,7 @@ describe("target manual booking fields", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.spyOn(calendarService, "listAvailableAddons").mockResolvedValue([]);
+    vi.spyOn(calendarService, "getPropertyCountry").mockResolvedValue("ID");
     vi.spyOn(calendarService, "getManualBookingCapabilities").mockResolvedValue({
       contractVersion: "pms-manual-booking.v1",
       canRecordPaidPayment: false,
@@ -51,7 +52,8 @@ describe("target manual booking fields", () => {
     const markup = render();
     expect(markup).toContain('name="specialRequests"');
     expect(markup).toContain('name="privateNote"');
-    expect(markup).toContain('name="phoneE164" type="tel" pattern="\\+[1-9][0-9]{7,14}"');
+    expect(markup).toContain('aria-label="Phone country code"');
+    expect(markup).toContain('name="phone" type="tel"');
     expect(markup).toMatch(/disabled=""[^>]*value="paid"/);
     // prettier-ignore
     expect(markup).toMatch(/aria-describedby="paid-help"[^>]*>[\s\S]*Paid requires Finance write access/);
@@ -450,6 +452,53 @@ describe("target manual booking fields", () => {
     const ratePlan = view.root.findByProps({ "aria-label": "Room 1 rate plan" });
     expect(ratePlan.props.value).toBe("plan-pkg");
     expect(ratePlan.props["aria-describedby"]).toBeUndefined();
+  });
+
+  it("keeps the host's dial code if the property country arrives later, and tolerates a failed lookup", async () => {
+    let resolveCountry!: (code: string) => void;
+    vi.spyOn(calendarService, "getPropertyCountry").mockReturnValueOnce(
+      new Promise((resolve) => (resolveCountry = resolve)),
+    );
+    let view!: ReactTestRenderer;
+    // prettier-ignore
+    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, onSubmit: vi.fn(), onClose: vi.fn() })); });
+    const dialCode = () => view.root.findByProps({ "aria-label": "Phone country code" });
+    act(() => dialCode().props.onChange({ target: { value: "GB" } }));
+    await act(async () => resolveCountry("ID"));
+    expect(dialCode().props.value).toBe("GB");
+    act(() => view.unmount());
+
+    vi.spyOn(calendarService, "getPropertyCountry").mockRejectedValueOnce(new Error("forbidden"));
+    // prettier-ignore
+    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, onSubmit: vi.fn(), onClose: vi.fn() })); });
+    expect(dialCode().props.value).toBe("");
+  });
+
+  it("defaults the dial code to the property country and submits E.164", async () => {
+    vi.spyOn(calendarService, "previewManualBooking").mockResolvedValue(preview);
+    const onSubmit = vi.fn().mockResolvedValue({});
+    let view!: ReactTestRenderer;
+    // prettier-ignore
+    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit, onClose: vi.fn() })); });
+    await settlePreview();
+    const dialCode = view.root.findByProps({ "aria-label": "Phone country code" });
+    expect(dialCode.props.value).toBe("ID");
+    const phone = () => view.root.findByProps({ name: "phone" });
+    const submit = () =>
+      act(async () => {
+        await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() });
+      });
+
+    act(() => phone().props.onChange({ target: { value: "12" } }));
+    await submit();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(view.root.findByProps({ role: "alert" }).children.join("")).toContain(
+      "Enter a valid phone number",
+    );
+
+    act(() => phone().props.onChange({ target: { value: "0812 3456 7890" } }));
+    await submit();
+    expect(onSubmit.mock.calls[0]![0].guest.phoneE164).toBe("+6281234567890");
   });
 
   // prettier-ignore
