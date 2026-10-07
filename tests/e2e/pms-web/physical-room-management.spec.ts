@@ -11,6 +11,15 @@ test("creates, renames and safely retires physical rooms using target commands",
 }) => {
   await mockPmsWebAuthenticatedSession(page);
   await mockPmsWebTargetRoutes(page);
+  await page.route("**/api/identity/staff/self-access", (route) =>
+    route.fulfill({
+      json: {
+        membershipId: "test-owner",
+        roleKey: "hotel_owner",
+        permissions: ["pms.operations.read", "pms.operations.manage"],
+      },
+    }),
+  );
   const roomTypeId = "f1000000-0000-4000-8000-000000000002";
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-types*`, (route) =>
     route.fulfill({
@@ -122,20 +131,21 @@ test("creates, renames and safely retires physical rooms using target commands",
   await page.getByRole("button", { name: "Add Room", exact: true }).click();
   await page.getByPlaceholder(/room number/i).fill("102");
   await page.getByRole("button", { name: "Add", exact: true }).click();
-  await expect(page.getByRole("alert")).toHaveText("A room with this number already exists.");
+  await expect(page.locator('p[role="alert"]')).toHaveText(
+    "A room with this number already exists.",
+  );
   await expect(page.getByPlaceholder(/room number/i)).toHaveValue("102");
   await page.getByPlaceholder(/room number/i).fill("103");
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.locator('p[role="alert"]')).toHaveCount(0);
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await page.getByRole("button", { name: /delete room/i }).click();
-  const dialog = page.waitForEvent("dialog");
   await page
     .getByRole("button", { name: /delete room/i })
     .last()
     .click();
-  const blocker = await dialog;
-  expect(blocker.message()).toContain("protected reservation");
-  await blocker.accept();
+  await expect(page.locator('p[role="alert"]')).toHaveText(
+    "This room has a protected reservation.",
+  );
   await expect(page.getByText(/^#102/)).toBeVisible();
   await page.getByRole("button", { name: /delete room/i }).click();
   await page
@@ -146,10 +156,12 @@ test("creates, renames and safely retires physical rooms using target commands",
   await page.getByRole("button", { name: "Add Room", exact: true }).click();
   await page.getByPlaceholder(/room number/i).fill("104");
   await page.getByRole("button", { name: "Add", exact: true }).click();
-  await expect(page.getByRole("alert")).toHaveText("A room with this number already exists.");
+  await expect(page.locator('p[role="alert"]')).toHaveText(
+    "A room with this number already exists.",
+  );
   await expect(page.getByPlaceholder(/room number/i)).toHaveValue("104");
   await page.getByPlaceholder(/room number/i).fill("103");
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.locator('p[role="alert"]')).toHaveCount(0);
   await page.getByRole("button", { name: "Add", exact: true }).click();
   await expect(page.getByText(/^#103/)).toBeVisible();
   expect(writes).toEqual(["PUT", "DELETE", "DELETE", "POST", "POST"]);

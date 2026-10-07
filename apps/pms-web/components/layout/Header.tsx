@@ -216,9 +216,21 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                       key={hotel.id}
                       onClick={() => {
                         if (!isSelected) {
-                          if (!window.dispatchEvent(new Event("pms:before-property-change", { cancelable: true }))) return;
-                          storeSelectedPmsPropertyId(hotel.id);
-                          window.location.reload();
+                          const proceed = () => {
+                            storeSelectedPmsPropertyId(hotel.id);
+                            window.location.reload();
+                          };
+                          // A listener may cancel and call `proceed` itself once the user confirms in-app.
+                          if (
+                            !window.dispatchEvent(
+                              new CustomEvent("pms:before-property-change", {
+                                cancelable: true,
+                                detail: { proceed },
+                              }),
+                            )
+                          )
+                            return;
+                          proceed();
                         }
                         setPropertyOpen(false);
                       }}
@@ -244,7 +256,8 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                 <button
                   onClick={() => {
                     setPropertyOpen(false);
-                    if (window.location.pathname === "/pricing") window.location.assign("/setup?mode=add&entryProduct=pms");
+                    if (window.location.pathname === "/pricing")
+                      window.location.assign("/setup?mode=add&entryProduct=pms");
                     else router.push("/setup?mode=add&entryProduct=pms");
                   }}
                   className="w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-[13px] text-primary-600 hover:bg-primary-50 transition-colors"
@@ -326,7 +339,8 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                 <button
                   onClick={() => {
                     setProfileOpen(false);
-                    if (window.location.pathname === "/pricing") window.location.assign("/settings");
+                    if (window.location.pathname === "/pricing")
+                      window.location.assign("/settings");
                     else router.push("/settings");
                   }}
                   className="w-full text-left px-3.5 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors"

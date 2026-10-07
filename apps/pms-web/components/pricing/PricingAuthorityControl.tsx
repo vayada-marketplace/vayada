@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import ConfirmDialog from "@/components/ConfirmDialog";
+import { useTranslation } from "@/lib/i18n";
 import { ApiErrorResponse } from "@/services/api/client";
 import type {
   PricingAuthority,
@@ -8,12 +10,6 @@ import type {
 } from "@/services/api/replacementPricingClient";
 
 type Client = ReturnType<typeof createReplacementPricingClient>;
-const labels = {
-  unconfigured: "No direct-booking price source selected",
-  vayada: "Vayada prices",
-  external: "External PMS prices",
-} as const;
-
 /** This choice is explicit and separate from publishing rates or connecting channels. */
 export function PricingAuthorityControl({
   client,
@@ -29,6 +25,8 @@ export function PricingAuthorityControl({
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const [pending, setPending] = useState<ReturnType<Client["authorityAction"]> | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const { t } = useTranslation();
   const alive = useRef(true);
   useEffect(() => {
     onActivityChange(busy || !!pending);
@@ -56,16 +54,15 @@ export function PricingAuthorityControl({
       alive.current = false;
     };
   }, [reload]);
-  async function save() {
+  async function save(confirmed = false) {
+    setConfirming(false);
     if (!current || busy || blocked) return;
     let action = pending;
     if (!action) {
-      if (
-        !window.confirm(
-          `Use ${labels[choice]} for this property's direct-booking prices? Existing quotes will need a fresh price.`,
-        )
-      )
+      if (!confirmed) {
+        setConfirming(true);
         return;
+      }
       action = client.authorityAction(current.revision, choice);
       setPending(() => action);
     }
@@ -101,7 +98,7 @@ export function PricingAuthorityControl({
       </p>
       {current && (
         <p className="mt-3 text-sm">
-          Current: <strong>{labels[current.authority]}</strong>
+          Current: <strong>{t(`pricing.source.${current.authority}`)}</strong>
         </p>
       )}
       {error && (
@@ -142,6 +139,16 @@ export function PricingAuthorityControl({
           Reload source
         </button>
       </div>
+      {confirming && (
+        <ConfirmDialog
+          title={t("pricing.authorityTitle")}
+          message={t("pricing.authorityMessage", { source: t(`pricing.source.${choice}`) })}
+          confirmLabel={t("common.confirm")}
+          cancelLabel={t("common.cancel")}
+          onConfirm={() => void save(true)}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
     </section>
   );
 }
