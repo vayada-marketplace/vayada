@@ -56,6 +56,8 @@ export function createPgPmsChannexManagementWorkerStore(config: {
   stagingMealsEnabled?: boolean;
   stagingPublishedOffersEnabled?: boolean;
   stagingInventoryEnabled?: boolean;
+  /** VAY-2055: claim only `enable` jobs for hotels without a Channex binding. */
+  connectionOnly?: boolean;
 }): ChannexManagementWorkerStore {
   const pool =
     config.pool ?? new pg.Pool({ connectionString: required(config.connectionString), max: 5 });
@@ -70,6 +72,7 @@ export function createPgPmsChannexManagementWorkerStore(config: {
         config.stagingMealsEnabled ?? false,
         config.stagingPublishedOffersEnabled ?? false,
         config.stagingInventoryEnabled ?? false,
+        config.connectionOnly ?? false,
       ),
     heartbeat: (job, input) => heartbeat(pool, job, input),
     continueUpload: (job, progress, input) => continueUpload(pool, job, progress, input),
@@ -90,9 +93,10 @@ async function claim(
   stagingMealsEnabled: boolean,
   stagingPublishedOffersEnabled: boolean,
   stagingInventoryEnabled: boolean,
+  connectionOnly: boolean,
 ): Promise<ChannexManagementJob | null> {
   return transaction(pool, async (client) => {
-    if (ariSyncMutating)
+    if (ariSyncMutating && !connectionOnly)
       await client.query(
         `SELECT pms.enqueue_restriction_ari(connection.property_id,
          'full:'||(now() AT TIME ZONE location.timezone)::date)
@@ -119,6 +123,11 @@ async function claim(
              OR ($7::boolean AND payload->>'operationType' = 'provision'
                AND payload ? 'publishedOffer'))))
          AND ($3::boolean OR payload->>'operationType' NOT IN ('sync_ari','update_markups'))
+         AND (NOT $8::boolean OR (payload->>'operationType' = 'enable'
+           AND NOT EXISTS (SELECT 1 FROM pms.channel_binding_claims claim
+             WHERE claim.property_id = platform.jobs.property_id AND claim.provider = 'channex'
+               AND NOT (platform.jobs.status = 'running' AND claim.claim_source = 'enable'
+                 AND claim.claim_state = 'active' AND claim.created_at >= platform.jobs.created_at))))
          AND NOT EXISTS (
          SELECT 1 FROM platform.jobs active
          WHERE active.queue_name = $1 AND active.property_id = platform.jobs.property_id
@@ -138,6 +147,7 @@ async function claim(
         stagingMealsEnabled,
         stagingInventoryEnabled,
         stagingPublishedOffersEnabled,
+        connectionOnly,
       ],
     );
     const row = result.rows[0];
@@ -180,6 +190,15 @@ async function claim(
         message: "Channex worker lease expired after the final attempt",
       };
       await targetState.fail(client, expiredJob, failure, { now: input.now, retryAt: null });
+      // Terminal bookkeeping precedes the status change: the connection-scoped
+      // worker loses the property once its job is no longer pending or running.
+      await insertDeadLetter(client, expiredJob, {
+        reasonCode: "max_attempts_exhausted",
+        failureSummary: failure.message,
+        replayEligible: true,
+      });
+      await finishIdempotency(client, expiredJob, input.now, "failed");
+      await insertOutcomeAudit(client, expiredJob, input.now, "failed");
       await client.query(
         `UPDATE platform.jobs SET status = 'dead_lettered', finished_at = now(),
            locked_at = NULL, locked_by = NULL, updated_at = now(),
@@ -188,13 +207,6 @@ async function claim(
          WHERE id = $1::uuid`,
         [row.jobId, failure.code, failure.message],
       );
-      await insertDeadLetter(client, expiredJob, {
-        reasonCode: "max_attempts_exhausted",
-        failureSummary: failure.message,
-        replayEligible: true,
-      });
-      await finishIdempotency(client, expiredJob, input.now, "failed");
-      await insertOutcomeAudit(client, expiredJob, input.now, "failed");
       return null;
     }
     await client.query(
@@ -333,6 +345,8 @@ async function complete(
       ],
     );
     assertLeaseUpdated(attemptUpdate);
+    await finishIdempotency(client, job, input.now, "completed");
+    await insertOutcomeAudit(client, job, input.now, "succeeded", result.providerRequestId);
     const jobUpdate = await client.query(
       `UPDATE platform.jobs SET status = 'succeeded', finished_at = $4::timestamptz,
          locked_at = NULL, locked_by = NULL, updated_at = $4::timestamptz,
@@ -348,8 +362,6 @@ async function complete(
       ],
     );
     assertLeaseUpdated(jobUpdate);
-    await finishIdempotency(client, job, input.now, "completed");
-    await insertOutcomeAudit(client, job, input.now, "succeeded", result.providerRequestId);
   });
 }
 
@@ -404,6 +416,13 @@ async function fail(
       assertLeaseUpdated(jobUpdate);
       return "retry_scheduled";
     }
+    await insertDeadLetter(client, job, {
+      reasonCode: input.retryable ? "max_attempts_exhausted" : "non_retryable_error",
+      failureSummary: failure.message.slice(0, 500),
+      replayEligible: input.retryable,
+    });
+    await finishIdempotency(client, job, input.now, "failed");
+    await insertOutcomeAudit(client, job, input.now, "failed", failure.providerRequestId);
     const jobUpdate = await client.query(
       `UPDATE platform.jobs SET status = 'dead_lettered', finished_at = $4::timestamptz,
          locked_at = NULL, locked_by = NULL, updated_at = $4::timestamptz,
@@ -420,13 +439,6 @@ async function fail(
       ],
     );
     assertLeaseUpdated(jobUpdate);
-    await insertDeadLetter(client, job, {
-      reasonCode: input.retryable ? "max_attempts_exhausted" : "non_retryable_error",
-      failureSummary: failure.message.slice(0, 500),
-      replayEligible: input.retryable,
-    });
-    await finishIdempotency(client, job, input.now, "failed");
-    await insertOutcomeAudit(client, job, input.now, "failed", failure.providerRequestId);
     return "dead_lettered";
   });
 }

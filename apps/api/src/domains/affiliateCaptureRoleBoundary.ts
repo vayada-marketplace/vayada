@@ -251,7 +251,7 @@ const hotelLockPolicies = [
     "channex_management_worker_scope",
     "*",
     false,
-    "((CURRENT_USER <> 'vayada_next_channex_management_worker'::name) OR platform.channex_management_worker_scope('property'::text, (id)::text))",
+    "((CURRENT_USER <> 'vayada_next_channex_management_worker'::name) OR platform.channex_management_worker_connection_scope('property'::text, (id)::text))",
     "NULL",
   ],
   ["hotel_catalog.properties", "finance_expense_worker_compat", "*", true, "true", "NULL"],

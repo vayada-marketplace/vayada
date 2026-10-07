@@ -1,5 +1,5 @@
 import pg from "pg";
-import type { ChannexManagementConfig } from "../config.js";
+import { channexConnectionOnlyScope, type ChannexManagementConfig } from "../config.js";
 import { assertChannexManagementWorkerBoundary } from "./channexManagementWorkerBoundary.js";
 import { CHANNEX_MANAGEMENT_WORKER_ROLE } from "./channexManagementWorkerPrivileges.js";
 
@@ -9,19 +9,8 @@ export async function preflightChannexManagementWorker(
   commandsMutating: boolean,
 ) {
   if (!config.workerEnabled || !commandsMutating) return;
-  if (
-    !config.workerDatabaseUrl ||
-    !config.stagingRestrictionsPropertyId ||
-    config.apiBaseUrl !== "https://staging.channex.io" ||
-    config.stagingMealsEnabled ||
-    config.stagingNoShowEnabled ||
-    Object.entries(config.capabilityModes).some(
-      ([name, mode]) =>
-        mode === "mutating" &&
-        name !== "ariSync" &&
-        !(name === "provisioning" && config.stagingPublishedOffersEnabled),
-    )
-  )
+  const connectionOnly = channexConnectionOnlyScope(config);
+  if (!config.workerDatabaseUrl || !(connectionOnly || stagingCanaryScope(config)))
     throw new Error("channex_worker_scope_unsupported");
   const client = new pg.Client({
     connectionString: config.workerDatabaseUrl,
@@ -37,10 +26,29 @@ export async function preflightChannexManagementWorker(
       login.session_user !== CHANNEX_MANAGEMENT_WORKER_ROLE
     )
       throw new Error("channex_worker_login_mismatch");
-    await assertChannexManagementWorkerBoundary(client, {
-      propertyId: config.stagingRestrictionsPropertyId,
-    });
+    await assertChannexManagementWorkerBoundary(
+      client,
+      connectionOnly
+        ? { connectionScope: true }
+        : { propertyId: config.stagingRestrictionsPropertyId },
+    );
   } finally {
     await client.end();
   }
+}
+
+/** VAY-2041: the single staging ARI canary (optionally with published offers). */
+function stagingCanaryScope(config: ChannexManagementConfig) {
+  return (
+    !!config.stagingRestrictionsPropertyId &&
+    config.apiBaseUrl === "https://staging.channex.io" &&
+    !config.stagingMealsEnabled &&
+    !config.stagingNoShowEnabled &&
+    !Object.entries(config.capabilityModes).some(
+      ([name, mode]) =>
+        mode === "mutating" &&
+        name !== "ariSync" &&
+        !(name === "provisioning" && config.stagingPublishedOffersEnabled),
+    )
+  );
 }
