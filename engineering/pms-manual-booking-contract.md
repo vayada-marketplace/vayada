@@ -37,7 +37,10 @@ only writer that accepts them.
 The slice A row changes what `ratePlanId` refers to. It stays in v1 because the
 old meaning, a `pms.rate_plans` flexible plan, has had no working caller since
 VAY-1546 removed that pricing (every preview returned `503` from 2026-09-11),
-and the accepted pricing plan maps `ratePlanId` to the published offer.
+and the accepted pricing plan maps `ratePlanId` to the published offer. The
+product owner approved this v1 exception, instead of `pms-manual-booking.v2`,
+when approving the slice A merge on 2026-10-08. It applies to the target
+TypeScript endpoints only; the legacy adapter is unchanged.
 
 ## Current evidence and gaps
 
@@ -215,7 +218,9 @@ the target manual writer can be accepted.
   fingerprint, so requests sent before the VAY-1422 amendment replay unchanged.
   A non-empty list is part of the fingerprint.
 - A command contains 1 to 20 stays. Positions are unique and contiguous from 1.
-- Each room belongs to the authorized property. A non-null `ratePlanId` is the
+- Each room belongs to the authorized property. `rate_plan` pricing requires a
+  non-null `ratePlanId` and `custom` pricing requires `ratePlanId: null`; any
+  other pairing is `400 invalid_body`. A non-null `ratePlanId` is the
   exact id of an offer in the property's active pricing-v2 publication for that
   stay's room type (free text up to 200 characters, never case-folded); an id
   the publication lacks is `404 rate_plan_not_found`. A stay that names an
@@ -241,8 +246,9 @@ the target manual writer can be accepted.
   otherwise `child_ages_required` (422). A stay that the offer's restrictions
   forbid (minimum or maximum stay, closed arrival or departure, stop-sell)
   returns `rate_restricted` (422). Guests beyond the offer's capacity return
-  `occupancy_exceeded` (422). `inactive_rate_plan` is no longer produced, as only
-  published offers are priced.
+  `occupancy_exceeded` (422). The target TypeScript endpoints no longer produce
+  `inactive_rate_plan`, as only published offers are priced; the legacy adapter
+  keeps it.
 - Published amounts use the currency's own minor unit (JPY none, KWD three
   decimals) and are stored as two-decimal PMS money. An amount PMS cannot store
   exactly returns `currency_mismatch` (422).
