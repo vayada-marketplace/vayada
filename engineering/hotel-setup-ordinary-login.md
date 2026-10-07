@@ -26,12 +26,12 @@ rewritten (they are hash-pinned by the running native services, §4). The plan
 moves the in-transaction Owner re-check, idempotency, revision CAS, audit and
 contact-privacy behaviour into ordinary application SQL that already exists for
 the pre-cutover writers, re-checks current Owner authority inside each write
-transaction with the login-independent helper the native commands already use
-(`lockHotelSetupMembership`), and makes the public API stop reading the four
+transaction behind one shared scope wrapper and the login-independent helpers the
+native commands already use (§5), and makes the public API stop reading the four
 `HOTEL_SETUP_*_COMMAND_*` admission variables. Release is one ordinary API image;
-rollback is the previous image. The explicit `runtimeDefinerFunctions` allowlist
-asked for in the brief is therefore **empty**; §7 gives the two ways to record
-that and recommends one.
+rollback is the previous image, within the window §9 defines. The explicit
+`runtimeDefinerFunctions` allowlist asked for in the brief is therefore **empty**
+and recorded without a new mechanism (§7, decision 1).
 
 ## 1. Owner operations still on native logins (inventory)
 
@@ -40,13 +40,20 @@ and `apps/api/src/app.ts` (796–798, 817, 1028, 1089). Production renders all
 four admissions `enabled` (platform `infra/hotel_setup_staging.auto.tfvars`).
 
 | #   | Owner operation               | Public route                                                                                                                                                                          | Forwarder op / env prefix                                                                                                     | Private handler → adapter → writer                                                                                                          | Native purpose / login                                                                                         | Authority source today                                                                                                                                                              | Idempotency, CAS, audit                                                                                               | Error today for a new hotel                                                                             |
-| --- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| --- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------- |
 | 1   | Create hotel                  | `POST /api/hotel-setup/properties` (`routes/sharedHotelSetupStatus.ts:1019`, forwards before any auth)                                                                                | `property_creation` / `HOTEL_SETUP_CREATION_COMMAND_*`                                                                        | `hotelSetupCommandService.ts:148` → `hotelSetupCreationCommands.ts` → `writePropertyProfile(create, nativeCreation=true)`                   | `creation`, org login `vayada_next_hotel_setup_org_*` (manual bootstrap, `hotel-setup-creation-bootstrap.yml`) | route: original session, `hotel_catalog.setup.manage`; transaction: `assertHotelSetupCreationScope` (login-bound) + `lockHotelSetupCreationPermissions` (login-independent)         | header key, op `hotel_setup.property.create`; audit `hotel_setup.property.create`                                     | `503 hotel_setup_unavailable` (no org credential)                                                       |
 | 2   | Edit hotel details            | `PUT /api/hotel-setup/properties/:id/profile` (`:312` public, `:923` private)                                                                                                         | `property_profile` / `HOTEL_SETUP_PROFILE_COMMAND_*`                                                                          | `:157` → `hotelSetupProfileCommands.ts` → `platform.hotel_setup_property_profile_snapshot` + `platform.hotel_setup_update_property_profile` | `property_profile`, actor-bound login `…_profile_*` (manual bootstrap per property × Owner)                    | route: Owner session, `hotel_owner`, `marketplace.profile.manage`, owner link; SQL: `hotel_setup_profile_authority` (login-bound)                                                   | header key, op `hotel_setup_property_profile_update`, CAS `expectedProfileRevision`, audit `property_profile_updated` | `409 profile_edit_not_provisioned`                                                                      |
 | 3   | Launch settings               | `PUT …/launch-settings` (`:831`)                                                                                                                                                      | `launch_settings` / `HOTEL_SETUP_COMMAND_*`                                                                                   | `:152` → `hotelSetupLaunchSettingsCommands.ts` → `writeHotelSetupLaunchSettings`                                                            | `launch_settings`, property login `…_property_*` (automatic provisioning, parked)                              | route: Owner session + owner link; transaction: `withHotelSetupCommandScope` (login-bound) + `lockHotelSetupMembership`                                                             | none; no CAS; audit `property_launch_settings_updated`                                                                | `503 hotel_setup_unavailable`; identity editor shows a misleading error after a successful profile save |
 | 4   | Pricing currency              | `PUT /api/pms/properties/:id/pricing-source/currency` (`routes/pmsPricing.ts:66`)                                                                                                     | `currency` / `HOTEL_SETUP_COMMAND_*`                                                                                          | `:143` → `hotelSetupCurrencyCommands.ts` → `pmsPricingCommandRepository` with `hotelSetupCurrencyOperation="currency_ready"`                | `currency_ready`, property login                                                                               | `beginHotelSetupCommandScope` (login-bound) + `lockHotelSetupCurrencyMembership`; first-currency completion by trigger `platform.complete_hotel_setup_first_currency` (login-gated) | header key, CAS `expectedPricingCurrencyRevision`, audit `pms.pricing_currency.upsert`                                | `503 hotel_setup_unavailable`                                                                           |
 | 5   | Feature Hub (Financials)      | `GET …/module-activations`, `PATCH …/module-activations/financials` (`routes/pmsModuleActivations.ts:98/161`)                                                                         | `modules`, `financials` / `HOTEL_SETUP_COMMAND_*`                                                                             | `:161` → `hotelSetupFeatureHubCommands.ts` → audit insert; trigger `platform.apply_hotel_setup_feature_hub_command` flips the entitlement   | `feature_hub`, property login                                                                                  | `withHotelSetupCommandScope` (login-bound) + `lockHotelSetupCurrencyMembership(pms.finance.manage)`                                                                                 | none; audit `financials_module_activated                                                                              | deactivated`                                                                                            | `503 hotel_setup_unavailable` |
 | 6   | Logo upload, finalize, assign | `POST /api/media/upload-sessions`, `POST …/:sessionId/finalize` (`routes/platformMedia.ts:946/1262`), `PUT /api/hotel-setup/properties/:id/media/logo` (`routes/propertyMedia.ts:58`) | `logo_upload`, `logo_finalize`, `logo_assignment` / `HOTEL_SETUP_LOGO_COMMAND_*` (**defaults to `blocked`**, `server.ts:354`) | `:107–141` → `hotelSetupLogoRuntime.ts` request-bound media repositories                                                                    | `property_logo`, actor-bound login `…_logo_*` (manual bootstrap)                                               | `assertHotelSetupLogoScope` (login-bound) + per-table RLS keyed on `platform.hotel_setup_logo_context()`                                                                            | assign: header key, op `hotel_catalog.property_media.logo.assign`, CAS `expectedProfileRevision`; media receipts      | `503 hotel_setup_unavailable`                                                                           |
+
+Forwarding happens **before** route authorization for creation, currency, the
+module list and the Financials toggle (`sharedHotelSetupStatus.ts:1020`,
+`pmsPricing.ts:56/70`, `pmsModuleActivations.ts:109/184`), and **after** it for
+profile, launch settings and the three logo routes (`sharedHotelSetupStatus.ts:324/869`,
+`platformMedia.ts:875→957` and `:1227→1266`, `propertyMedia.ts:37→59`). The
+ordinary routes therefore add the private handlers' gates explicitly (§5.1).
 
 Web callers (all already send the `Idempotency-Key` the forwarder demands):
 `packages/product-onboarding/src/sharedHotelSetupApi.ts` (create 111, profile
@@ -221,50 +228,78 @@ or CHECK changes, ownership changes, any `GRANT … TO PUBLIC`.
 is empty: no policy, trigger, function, view or constraint changes; no grant
 changes (a `GRANT` to a different role is not covered by any digest, and none is
 needed anyway). The running native services keep passing their preflights
-throughout, which is what makes image-only rollback possible (§9).
+throughout, which is what makes image-only rollback possible (§9). VAY-2055 (migration 0473, merged and applied
+2026-10-07) re-pinned six digests and re-released the native images; §9 states
+the rule for any later migration.
 
 Rules for the later decommission migrations (§12): they may only run after the
 native services are stopped and the native preflights are retired from the
 codebase; every `DROP POLICY` / `DROP TRIGGER` / `DROP FUNCTION` there is by
 definition a pinned-object change.
 
-## 5. Target design per operation
+## 5. Target design per operation (as built, PRs #2930–#2935)
 
-Common shape for every write on the ordinary pool (`createPgSharedHotelSetupStatusRepository`,
-`createPgPmsPricingCommandRepository`, `createPgPmsModuleActivationRepository`,
-media repositories, all on `TARGET_DATABASE_URL`):
+Common shape for every write on the ordinary login. The scope wrapper is
+implemented once, `withOrdinaryHotelSetupPropertyScope` in
+`apps/api/src/hotelSetupOrdinaryScope.ts`:
 
-1. Route authorization stays as today's **private handler** semantics, moved
-   into the public route: `enforceRoutePolicy`, hotel-group organization,
-   original WorkOS session (`providerIdentity.sessionId`), `hotel_owner` where the
-   private handler required it, the active canonical owner link, effective
-   property access. `owner_session_required` (403) keeps its meaning.
-2. One transaction: lock the organization row and the canonical owner link
-   `FOR SHARE`, then `lockHotelSetupMembership(actor)` and re-derive permissions
-   (revocation after the request started still denies, same as the native
-   commands), then the write, idempotency and audit statements, then `COMMIT`.
+1. Route authorization runs the private handler's gates on the public route
+   (§5.1). `owner_session_required` (403) keeps its meaning.
+2. One READ COMMITTED transaction. The organization row is locked `FOR UPDATE`
+   (only `FOR UPDATE` makes a concurrent suspension wait, 0444/0447), the
+   active catalog **and** PMS owner links `FOR SHARE` and verified, because
+   `lockHotelSetupMembership` assumes the owner link (`hotelSetupMembership.ts:67-78`).
+   Then the actor's membership, role definition, grants, assignments and user
+   row are re-locked and permissions re-derived (`lockHotelSetupMembership` or
+   `lockHotelSetupCurrencyMembership`, which also re-reads the entitlements
+   after the locks). Then the write, idempotency and audit statements, `COMMIT`.
+   A lost scope denies with `AuthorizationError` (403) or the operation's own
+   scope failure.
 3. No `assertHotelSetup*Privileges`, no `withHotelSetupCommandScope`, no
    credential resolver, no `HotelSetupAssignmentMissingError`, no
    `not_provisioned` result.
 
-| Op                | Ordinary writer                                                                                                                                                                               | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Writes (all granted)                                                                                                                                                                                                                                                                                                                                                                                                |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1 Create          | `writePropertyProfile(mode:"create")` (`platform/sharedHotelSetupStatusReadModel.ts:611`), already the pre-cutover path                                                                       | run `lockHotelSetupCreationPermissions` unconditionally (today only when `nativeCreation`), keep `requireOwnerSession`; drop the creation forwarder                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `hotel_catalog.properties`, `property_locations`, `property_contact_channels`, `property_owner_revisions`, `identity.organization_resource_links` (INSERT, matrix), `identity.product_entitlements` (pending Financials default, INSERT with `resource_*` + `metadata`, matrix), `marketplace.marketplace_hotel_profiles`, `booking.booking_settings`, `platform.idempotency_keys`, `platform.product_audit_events` |
-| 2 Profile         | **new** `writePropertyProfileCommand` next to `writePropertyProfile`: port of `platform.hotel_setup_update_property_profile` (0472) to application SQL                                        | snapshot `FOR UPDATE` of the property + existing `updatePropertyProfileSql` CTEs; idempotency replay/reserve (op `hotel_setup_property_profile_update`, tenant scope property, fingerprint = sha256 of canonical body as today); CAS on `profile_revision`; `private_contact_conflict` check copied from the definer (and from the launch-settings writer); audit `property_profile_updated` with changed field names only; `syncPropertyOfferReadModels` as the existing ordinary writer does. Public route takes over the private handler's gates and result mapping (`profile_revision_conflict`, `idempotency_key_conflict`, `private_contact_conflict`, 422); `profile_edit_not_provisioned` disappears | `hotel_catalog.properties`, `property_locations`, `property_contact_channels`, read-model projections, `platform.idempotency_keys`, `platform.product_audit_events`                                                                                                                                                                                                                                                 |
-| 3 Launch settings | body of `writeHotelSetupLaunchSettings` (`hotelSetupLaunchSettingsRepository.ts:24–147`), extracted into `applyLaunchSettings(client, …)`                                                     | ordinary wrapper = BEGIN + org/owner-link lock + the existing `lockHotelSetupMembership` call; the native wrapper keeps `withHotelSetupCommandScope` until decommission. Replaces the broad `bookingSettingsRepository.updatePropertySettingsByHotelId` for this endpoint, which bumps `profile_revision` and rewrites policies (the native writer never did)                                                                                                                                                                                                                                                                                                                                                | `booking.booking_settings` (4 columns), `hotel_catalog.property_contact_channels` (4 social types, `source_system='booking'`), `hotel_catalog.property_public_profile_read_model.public_contacts`, `platform.product_audit_events`                                                                                                                                                                                  |
-| 4 Currency        | `createPgPmsPricingCommandRepository` without `hotelSetupCurrencyOperation` (already the ordinary API's port)                                                                                 | add the first-currency completion the trigger did for native logins (`0448`): on `outcome='created'` with a pending `module:financials` default row, `seedPendingHotelFinancialsCategories` (already in `domains/financeStarterCategories.ts`) and the entitlement flip (`status='active'`, `metadata                                                                                                                                                                                                                                                                                                                                                                                                        |                                                                                                                                                                                                                                                                                                                                                                                                                     | {newHotelFinancialsDefault:'ready', newHotelFinancialsActivationTransaction:<txid>}`) with the same prerequisite checks (active base entitlement, no other suspended PMS entitlement, seven categories). Gate it on a repository option the public API sets (`hotelSetupFirstCurrencyCompletion: true`); drop the currency forwarder | `pms.property_pricing_settings`, `finance.expense_categories`, `identity.product_entitlements` (UPDATE status/metadata/updated_at, matrix), `platform.domain_events`, `outbox_events`, `idempotency_keys`, `product_audit_events` |
-| 5 Feature Hub     | `createPgPmsModuleActivationRepository.updateFinancials` (`routes/pmsModuleActivations.ts:475`), the writer VAY-2054 granted the matrix for                                                   | drop the `forward` option; keep `requireOwnerSession` on the public PATCH as the private handler had. The route's `isFinancialsSetupComplete` guard reads `metadata->>'newHotelFinancialsDefault'='ready'` (`:442`), which only the first-currency completion sets, so A6 is a prerequisite for Feature Hub on new hotels. The native trigger's `newHotelFinancialsOwnerDisabled` key is not written (the 0449 receipt trigger strips it for non-native logins) and nothing in the ordinary API reads it; Owner-off is `status='suspended'`                                                                                                                                                                  | `identity.product_entitlements` (INSERT/UPDATE, matrix), `platform.product_audit_events`                                                                                                                                                                                                                                                                                                                            |
-| 6 Logo            | ordinary `platformMedia` routes + `propertyMedia` assignment + `propertyMediaPublication` worker (`server.ts:2925`), i.e. the standard property-media protocol every other media purpose uses | remove the `?? "blocked"` default and the `forwardLogo` wiring; the ordinary routes authorize through the shared media policy (`hotel_catalog.setup.manage` on the linked property) exactly like booking-design media, which VAY-2054 already verified on the ordinary login                                                                                                                                                                                                                                                                                                                                                                                                                                 | `platform.media_upload_sessions`, `media_objects`, `media_variants`, `platform.jobs`, `hotel_catalog.property_media`, `properties.profile_revision`, `platform.idempotency_keys`, `product_audit_events`                                                                                                                                                                                                            |
+| Op                | PR           | Ordinary writer                                                                                            | Authority in the transaction                                                                                                                                                                                                                                                                                          | Writes (all granted)                                                                                                                                                                                                                                                                                                                                                                    |
+| ----------------- | ------------ | ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 Create          | #2934        | `writePropertyProfile(create)` on a **separate** repository instance with `hotelSetupOwnerCreation`        | organization `FOR UPDATE` + `lockHotelSetupCreationPermissions` (setup permission, published-surface permission), provisioning-only inputs refused, owner link only for a property created in this transaction (`xmin`). Platform-admin provisioning keeps the shared instance without the Owner re-check (review H3) | properties, locations, contacts, owner revisions, product links and pending Financials default (identity matrix), Marketplace profile, Booking settings, idempotency key, audit                                                                                                                                                                                                         |
+| 2 Profile         | #2930, #2931 | `writeOrdinaryHotelSetupPropertyProfile` (`platform/hotelSetupProfileWriter.ts`), port of 0472             | the parameterised half of `hotel_setup_profile_authority` (0470:82-111): `hotel_owner`, no overrides, account-admin preset, both permission grants, active actor, property access, active catalog owner link to a non-retired property, behind organization `FOR UPDATE`                                              | properties, locations, contacts, read models (`syncPropertyOfferReadModels`), idempotency key (same operation, tenant scope, key hash and fingerprint as native, so retries replay across the cutover), audit with changed field names                                                                                                                                                  |
+| 3 Launch settings | #2932        | the native body of `writeHotelSetupLaunchSettings` with the ordinary scope runner                          | wrapper + `lockHotelSetupMembership` + setup permission + effective access                                                                                                                                                                                                                                            | Booking settings (4 columns), social contacts, public-contact projection, audit. No `profile_revision` bump (decision 4). A missing Booking settings row answers 404                                                                                                                                                                                                                    |
+| 4 Currency        | #2933        | `createPgPmsPricingCommandRepository({ hotelSetupOrdinaryOwner: true })` for the currency route only       | wrapper first, then `lockHotelSetupCurrencyMembership` (overrides, role definitions, assignments, PMS access flag, `property-management`/`pms-core`/`account_access` aliases and suspensions)                                                                                                                         | pricing settings, starter categories, then `completeOrdinaryHotelSetupFirstCurrency`, a port of the 0448 trigger: same currency list and prerequisites, entitlement `active` with `newHotelFinancialsDefault='ready'` and the activation transaction, a `pms.financials.default_activated` audit linked to the currency audit. A failed prerequisite aborts the whole save (decision 3) |
+| 5 Feature Hub     | #2935        | `createOrdinaryHotelSetupFeatureHubCommands` (`hotelSetupFeatureHubOrdinary.ts`), port of the 0449 command | wrapper + `lockHotelSetupCurrencyMembership(pms.finance.manage, base access when enabling)`, `module:financials` row `FOR UPDATE`, the 0449 activation predicate (completed default, live window, supported currency, no other suspended PMS entitlement, active base)                                                | entitlement status and Owner-off marker, audit with the native action names and metadata keys (`actorOrganizationId`, `hotelSetupTransaction`)                                                                                                                                                                                                                                          |
+| 6 Logo            | A9           | the standard property-media protocol with the logo-only Owner gates (§5.2)                                 | as today on the private service                                                                                                                                                                                                                                                                                       | media sessions, objects, variants, jobs, property media, profile revision, idempotency key, receipts                                                                                                                                                                                                                                                                                    |
 
-The public API stops calling `loadHotelSetupCommandForwarder` (server.ts
-340–357) and stops passing `forward` / `currencyForward` / `forwardLogo` /
-`propertyCreationForwarder` / `launchSettingsForwarder` / `profileForwarder`.
-The installed `HOTEL_SETUP_*_COMMAND_*` task-definition variables become inert
-and stay installed until the decommission PR relaxes
+**Owner-off versus a foreign suspension (review H1).** The 0449 receipt
+trigger strips `newHotelFinancialsOwnerDisabled` from every non-native write
+(`0449:2-14`), so the ordinary login records an Owner's switch-off as
+`featureHubOwnerDisabled: true`. Re-enabling requires `active`, or `suspended`
+with either Owner-off key: rows switched off natively before the cutover can
+still be switched back on, and a suspension by anyone else never can.
+
+### 5.1 Public route options (review H2)
+
+| Route                                     | Registration on the public API                                                                                                                                                         | Denial test (public app)                                                                  |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `POST /api/hotel-setup/properties`        | `propertyCreationRepository` (Owner mode) + `requireOwnerSession`                                                                                                                      | `sharedHotelSetupStatus.test.ts` "self-serve hotel through the Owner-mode repository"     |
+| `PUT …/profile`                           | `hotelSetupPropertyProfileUpdateHandler`, the private handler: original session, `hotel_owner`, `marketplace.profile.manage`, owner link, effective access, `Idempotency-Key`          | "Owner-only ordinary command without the sparse writer"                                   |
+| `PUT …/launch-settings`                   | `launchSettingsCommand` + `requireOwnerSession` + `propertyAccessRepository`                                                                                                           | "Owner-only ordinary command, never the broad writer"                                     |
+| `PUT /api/pms/…/pricing-source/currency`  | `currencyCommandPort` + `requireOwnerSession` + `propertyAccessRepository`                                                                                                             | `pmsPricingRoutes.test.ts` "ordinary hotel-setup port behind Owner-only gates"            |
+| `GET/PATCH /api/pms/…/module-activations` | `requireOwnerSession` + `financialsSetupComplete` (repository) + `propertyAccessRepository`; without `financialsSetupComplete` every new hotel would need an operator allow-list entry | `pmsModuleActivations.test.ts` "switch Financials off and on with no operator allow-list" |
+| logo upload, finalize, assign             | §5.2                                                                                                                                                                                   | A9                                                                                        |
+
+### 5.2 Logo authorization (review M3, decision)
+
+The ordinary logo path keeps today's Owner-only rules from the private service
+(`hotelSetupCommandService.ts:117-134`): original session, hotel group,
+`hotel_owner`, `hotel_catalog.setup.manage`, active owner link and effective
+access for `property.logo`. It does **not** relax to the shared media policy
+(owner or operator). Other media purposes are unchanged.
+
+The public API stops calling `loadHotelSetupCommandForwarder` for the six
+operations. The installed `HOTEL_SETUP_*_COMMAND_*` task-definition variables
+become inert and stay installed until the decommission PR relaxes
 `assert-hotel-setup-caller-retained.py` (platform tf-apply gate). The forwarder
 module, the private service entry point and the native adapters stay in the
-tree, unreferenced by the public API, for the rollback image and for the
-decommission PRs.
+tree for the rollback image and the decommission PRs.
 
 ## 6. What stays `SECURITY DEFINER`, and why
 
@@ -298,7 +333,7 @@ set of definer functions the role may execute (none) and fails closed on any
 other (`runtime_security_definer_execute_forbidden`, both postures, plus the
 grant transaction's `verifyGlobalPosture`). Two ways to record this:
 
-- **Option A (recommended): no new mechanism.** Platform PR limited to docs:
+- **Option A (decided, §13.1): no new mechanism.** Platform PR limited to docs:
   `docs/environments.md` gets a VAY-2056 paragraph stating that the hotel-setup
   purposes run on the ordinary login with zero definer exceptions, that the
   existing check is the exact list, and how the private services are retired.
@@ -312,51 +347,43 @@ grant transaction's `verifyGlobalPosture`). Two ways to record this:
   proving the carve-out and `app.owner_only()` still failing. About 150–200
   lines; useful only if a future ticket really needs a definer exception.
 
-The coordinator picks at the PLAN checkpoint. The app slices are identical
-either way.
+Option A was chosen at the PLAN checkpoint.
 
-## 8. PR slices
+## 8. PR slices (as built)
 
-All app PRs stack on `fm/vay-2056-self-serve-signup` (merge commits, never
-force-pushed), ≤ ~400 changed lines each, CI green, each with the native
-PG16/PG17 tests it introduces wired into the `hotel-setup` shard of
-`.github/workflows/pr-checks.yml`. Line counts are estimates of non-generated
-source + tests + docs.
+All app PRs stack on `fm/vay-2056-self-serve-signup` with merge commits, never
+force-pushed. Each brings its PG16/PG17 suite into the `hotel-setup` shard of
+`.github/workflows/pr-checks.yml`, which also runs on `fm/vay-2056-*` bases.
 
-| #   | Branch (stacked)                                  | Content                                                                                                                                                                                                                                                                                                                                                                                       | Size               | Review question                                                                   |
-| --- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | --------------------------------------------------------------------------------- |
-| A1  | `fm/vay-2056-self-serve-signup`                   | this note                                                                                                                                                                                                                                                                                                                                                                                     | ~330               | Is the ordinary-login design and release order sound?                             |
-| A2  | `fm/vay-2056-ordinary-role-fixture`               | test fixture `hotelSetupOrdinaryLogin.fixture.ts`: creates a login shaped like `vayada_next_api_runtime` with the VAY-2054 grant set (schema DML, narrowings, identity matrix and lock column, no definer execute) from one checked-in list that mirrors the platform grant script; shared Owner/organization/property seeding reused from `hotelSetupProfileEdit.integration.test.ts`        | ~250               | Does the fixture reproduce the production posture closely enough?                 |
-| A3  | `fm/vay-2056-profile-ordinary-writer`             | `writePropertyProfileCommand` (ordinary SQL port of 0472) + `hotelSetupProfileOrdinary.integration.test.ts` (foreign org/property, revoked Owner, non-Owner manager, stale revision, replayed key, changed fingerprint, hidden private contact, location consent preserved, audit/idempotency rows exactly once, direct `UPDATE` as the fixture login still allowed only via the writer path) | ~400               | Does the ordinary writer keep the definer's semantics?                            |
-| A4  | `fm/vay-2056-profile-route`                       | public `PUT …/profile` takes over the private gates, Idempotency-Key and result mapping; `server.ts` stops loading the profile forwarder; route unit tests (denial matrix, 409 codes) ; `sharedHotelSetupStatus.test.ts` updates; `hotel-setup-profile-edit-writer.md` marked superseded                                                                                                      | ~300               | Is the public route behaviour identical to the private handler?                   |
-| A5  | `fm/vay-2056-launch-settings-ordinary`            | extract `applyLaunchSettings`; ordinary wrapper with org/link lock + `lockHotelSetupMembership`; public route uses it; drop launch-settings forwarder; `hotelSetupLaunchSettingsOrdinary.integration.test.ts` (same denial matrix, no `profile_revision` bump, private contact preserved, identity-editor sequence profile→launch settings)                                                   | ~350               | Does the narrow writer replace the broad booking-settings writer safely?          |
-| A6  | `fm/vay-2056-currency-ordinary`                   | first-currency completion in `pmsPricingCommandRepository` behind `hotelSetupFirstCurrencyCompletion`; drop currency forwarder; integration test: created → seven categories + Financials `ready`, replay creates nothing twice, non-pending property untouched, suspended base entitlement denies                                                                                            | ~350               | Does the ordinary path reproduce the 0448 completion exactly?                     |
-| A7  | `fm/vay-2056-creation-feature-hub-ordinary`       | creation: unconditional `lockHotelSetupCreationPermissions`, drop creation forwarder; Feature Hub: drop `forward`, keep owner session; tests: creation denial matrix on the fixture login (revoked Owner, foreign org, replayed key, private contact), Financials activate/deactivate as fixture login                                                                                        | ~350               | Do creation and Feature Hub hold their denials without the native scope?          |
-| A8  | `fm/vay-2056-logo-ordinary`                       | remove the `blocked` default and `forwardLogo` wiring; logo upload → finalize → assign → publication worker integration test on the fixture login (`hotelSetupLogoOrdinary.integration.test.ts`, modelled on `hotelSetupLogoLifecycle.integration.test.ts` minus the native scope); `hotel-setup-logo-writer.md` superseded note                                                              | ~350               | Does the standard media protocol carry the logo end to end on the ordinary login? |
-| A9  | `fm/vay-2056-docs-and-ci`                         | CI `hotel-setup` shard runs the new suites on PG16/17; `engineering/` contracts (credential lifecycle, launch settings, automatic provisioning, initial settings) get a "superseded by hotel-setup-ordinary-login.md" header; `api-runtime-database-role.md` "What stays on SECURITY DEFINER" paragraph updated                                                                               | ~150               | Are docs and CI consistent with the shipped behaviour?                            |
-| P1  | platform `fm/vay-2056-runtime-definer-exceptions` | Option A: `docs/environments.md` VAY-2056 paragraph (ordinary login path, zero definer exceptions, decommission order). Option B adds the empty `runtimeDefinerFunctions` mechanism on current main (#454 is merged)                                                                                                                                                                          | ~60 (A) / ~200 (B) | Does the platform record match the app behaviour?                                 |
-
-Order: A1 → A2 → A3 → A4 (profile first: it is the 409 that blocks new hotels
-and the acceptance check on the two original Owners) → A5 (the misleading 503
-in the identity editor) → A6 → A7 → A8 → A9; P1 in parallel. A2–A8 can be
-reviewed independently; each keeps the previous slice's behaviour green.
+| #   | PR    | Branch                                            | Content                                                                                                                                                                                                                                                     |
+| --- | ----- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1  | #2928 | `fm/vay-2056-self-serve-signup`                   | this note; CI on the stacked branches                                                                                                                                                                                                                       |
+| A2  | #2929 | `fm/vay-2056-ordinary-role-fixture`               | test login mirroring the VAY-2054 grant set; asserts the preflight's own posture queries (no definer execute, identity writes only in the matrix and lock column, protected reads denied). Must be updated when VAY-2057 slice 0.3 edits the protected list |
+| A3  | #2930 | `fm/vay-2056-profile-ordinary-writer`             | ordinary profile writer + native-parity suite. Denials are proven at the application layer: the login itself has table `UPDATE`                                                                                                                             |
+| A4  | #2931 | `fm/vay-2056-profile-route`                       | public profile route on the Owner-only handler                                                                                                                                                                                                              |
+| A5  | #2932 | `fm/vay-2056-launch-settings-ordinary`            | shared scope wrapper, launch settings, 404 on a missing Booking row                                                                                                                                                                                         |
+| A6  | #2933 | `fm/vay-2056-currency-ordinary`                   | currency route, strict Owner re-check, first-currency completion                                                                                                                                                                                            |
+| A7  | #2934 | `fm/vay-2056-creation-ordinary`                   | Owner-mode creation, provisioning regression, same-transaction owner link                                                                                                                                                                                   |
+| A8  | #2935 | `fm/vay-2056-feature-hub-ordinary`                | Feature Hub port, Owner-only module routes with `financialsSetupComplete`                                                                                                                                                                                   |
+| A9  | —     | `fm/vay-2056-logo-ordinary`                       | logo on the ordinary login with the Owner-only gates (§5.2)                                                                                                                                                                                                 |
+| A10 | —     | `fm/vay-2056-docs`                                | superseded headers on the VAY-965 contracts, `api-runtime-database-role.md`                                                                                                                                                                                 |
+| P1  | —     | platform `fm/vay-2056-runtime-definer-exceptions` | `docs/environments.md` VAY-2056 paragraph (Option A)                                                                                                                                                                                                        |
 
 ## 9. Release and rollback sequence
 
 No migration, no grant, no protected workflow, no Terraform change in the
 first release.
 
-1. Merge A1–A9 (each PR is CI-green; merging does not change production: the
-   public API image keeps forwarding until a new image is deployed).
-2. Platform P1 merged (docs; Option B would also need `--grant-runtime-product-dml`
-   re-run, which already happened for #454 on 2026-10-07; a new entry would need
-   one more re-run).
+1. **The stack lands on `main` as one release** (review L7): merge the stack in
+   one go immediately before the cutover deploy. Merging slices one by one
+   would ship each with the next unrelated `deploy-next-api`.
+2. Platform P1 merged (docs only).
 3. **Cutover = one ordinary next-API release** (`deploy-next-api.yml`). The
-   new image ignores `HOTEL_SETUP_CREATION_COMMAND_*`, `HOTEL_SETUP_COMMAND_*`,
-   `HOTEL_SETUP_PROFILE_COMMAND_*` and `HOTEL_SETUP_LOGO_COMMAND_*`; the task
-   definition keeps them (the tf-apply retention gate is untouched). The private
+   new image ignores `HOTEL_SETUP_CREATION_COMMAND_*`, `HOTEL_SETUP_COMMAND_*`
+   (currency, launch settings, modules), `HOTEL_SETUP_PROFILE_COMMAND_*` and
+   `HOTEL_SETUP_LOGO_COMMAND_*`; the task definition keeps them. The private
    services `vayada-hotel-setup-service` and `vayada-hotel-setup-property-service`
-   keep running idle; their preflights keep passing because nothing pinned changed.
+   keep running idle on the images re-released with VAY-2055 (migration 0473).
 4. Production acceptance (coordinator, read-only evidence + throwaway Owner on
    the `next-*` hosts): sign up → create hotel → logo → edit details → launch
    settings → currency → Feature Hub, zero operator steps; both original Owners
@@ -364,17 +391,29 @@ first release.
 5. Observation window 1–2 weeks with the native services still running but
    uncalled, then the decommission PRs (§12).
 
-Rollback (any time before decommission): redeploy the previous next-API image.
-It reads the still-installed admission variables and forwards to the still
-running private services; no pinned object changed, so no native service needs
-a re-release. Rows written by the ordinary path are ordinary rows (same tables,
-same idempotency operations, same audit actions), so the native writers accept
-them after rollback. The one asymmetry: profile edits made through the ordinary
-writer carry no `platform.hotel_setup_*` scope evidence, which the native path
-never reads for existing rows.
+**Operations note (review L3).** After the cutover the admission variables are
+no longer a kill switch: `hotel-setup-release.yml state=blocked` changes nothing
+on the new image. Stopping the six operations means rolling the API image back.
 
-Partial rollback is not needed: the six operations are independent code paths,
-but the image is the unit of release.
+**Rollback window (review H4).** Rollback is redeploying the previous next-API
+image: it reads the still-installed admission variables and forwards to the
+still-running private services. This holds only while every object the native
+preflights pin (§4) is unchanged. VAY-2055 (#2917, migration 0473) re-pinned six
+digests and the native images were re-released with it, so the window is open
+today. **Any later migration that changes a native-pinned object** (for example
+VAY-2057 slice E) **ends the image-only rollback window** unless the native
+images are re-released with it.
+
+What a rollback does not undo (review M4):
+
+- Hotels created after the cutover have no native credentials and get
+  `503`/`409` again until they are bootstrapped or the API rolls forward.
+- An Owner switch-off made on the ordinary path carries `featureHubOwnerDisabled`,
+  not the native receipt key, so the native trigger refuses to re-enable that
+  row (`0449:64-67,83`). Accepted: an operator re-enables it on request.
+- Profile edits replay across the cutover in both directions, because the
+  ordinary writer uses the native operation name, tenant scope, key hash and
+  fingerprint (review L8).
 
 ## 10. Verification plan
 
@@ -412,6 +451,10 @@ retire the `profile_edit_not_provisioned` copy from the clients once the code is
 gone from the API.
 
 ## 12. Decommission list (separate PRs after the observation window)
+
+Until step 2 below has run, the §9 rollback window rule applies: a migration
+that changes any native-pinned object (§4) either ships with re-released native
+images or ends the image-only rollback window.
 
 Dependency order; each step is reversible until step 6.
 
@@ -504,3 +547,24 @@ Dependency order; each step is reversible until step 6.
 
 An independent adversarial review of this note ran before Phase 2; its
 findings are addressed in the implementation slices.
+
+## 14. Coordinator review r1 (2026-10-08): how each item is addressed
+
+| Item                                                                        | Where                                    |
+| --------------------------------------------------------------------------- | ---------------------------------------- |
+| H1 Feature Hub safety checks, Owner-off vs suspension                       | §5 op 5, #2935                           |
+| H2 explicit Owner gates per public route, `financialsSetupComplete`         | §5.1, #2931–#2935, A9                    |
+| H3 creation re-check not on admin provisioning                              | §5 op 1, #2934 (regression test)         |
+| H4 VAY-2055 merged; rule for later pinned-object migrations                 | §9, `main` merged into the stack         |
+| M1 one wrapper: READ COMMITTED, organization `FOR UPDATE`, both owner links | §5, `hotelSetupOrdinaryScope.ts` (#2932) |
+| M2 first-currency audit row and abort semantics                             | §5 op 4, #2933                           |
+| M3 logo Owner-only decision, forwarding list corrected                      | §1, §5.2, A9                             |
+| M4 rollback asymmetries                                                     | §9                                       |
+| L1 A3 denials proven at the application layer                               | §8 A3                                    |
+| L2 Feature Hub audit metadata keys as native                                | §5 op 5                                  |
+| L3 admission variables no longer a kill switch                              | §9 operations note                       |
+| L4 404 on a missing Booking settings row                                    | §5 op 3, #2932                           |
+| L5 fixture asserts the preflight posture; VAY-2057 0.3 update               | §8 A2, #2929                             |
+| L6 owner link only for a property created in this transaction               | §5 op 1, #2934                           |
+| L7 one release right before the cutover deploy                              | §9 step 1                                |
+| L8 cross-cutover profile replays                                            | §5 op 2, §9                              |
