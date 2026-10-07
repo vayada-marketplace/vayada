@@ -7,6 +7,7 @@ on:
       - "fm/vay-1092-*"
       - "fix/vay-965-*"
       - "fm/vay-965-*"
+      - "fm/vay-2056-*"
       - flamurmaliqi2811/vay-2044-expense-worker-runtime
       - fm/vay-2041-worker-permissions
       - fm/vay-2041-worker-source-permissions
