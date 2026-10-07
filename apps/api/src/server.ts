@@ -67,7 +67,12 @@ import { createHmac } from "node:crypto";
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
 import { loadHotelSetupCommandForwarder } from "./hotelSetupCommandForwarder.js";
-import { type ApiConfig, loadConfig, stripeSubscriptionRuntimeEnabled } from "./config.js";
+import {
+  type ApiConfig,
+  channexConnectionOnlyScope,
+  loadConfig,
+  stripeSubscriptionRuntimeEnabled,
+} from "./config.js";
 import { createPgBookingDesignCatalogEvidenceRepository } from "./domains/bookingDesignCatalogEvidenceRepository.js";
 import { createPgBookingDesignRepository } from "./domains/bookingDesignRepository.js";
 import { createBookingGuestPolicyCatalogCurrentOwnerEvidenceAdapter } from "./domains/bookingGuestPolicyCatalogCurrentOwnerEvidence.js";
@@ -1259,6 +1264,7 @@ const channexManagementWorkerStore =
         stagingMealsEnabled: config.channexManagement.stagingMealsEnabled,
         stagingPublishedOffersEnabled: config.channexManagement.stagingPublishedOffersEnabled,
         stagingInventoryEnabled: config.channexManagement.stagingInventoryEnabled,
+        connectionOnly: channexConnectionOnlyScope(config.channexManagement),
       })
     : undefined;
 const channexOfferSchedule = channexManagementDatabase.scheduler

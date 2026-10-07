@@ -11,6 +11,11 @@ const property = randomUUID(),
 const allowed = randomUUID(),
   deniedQueue = randomUUID(),
   deniedProperty = randomUUID();
+// VAY-2055: a hotel outside the allowlist with queued enable and other jobs.
+const fresh = randomUUID(),
+  freshEnable = randomUUID(),
+  freshTagged = randomUUID(),
+  freshAri = randomUUID();
 const tables = [
   "jobs",
   "job_attempts",
@@ -33,6 +38,7 @@ describe.skipIf(!url)("Channex management shared queue boundary", () => {
     workerCreated = true;
     await owner.query(`GRANT USAGE ON SCHEMA platform TO ${role}`);
     await owner.query(`GRANT SELECT ON platform.channex_management_worker_properties TO ${role}`);
+    await owner.query(`GRANT SELECT ON platform.channex_management_worker_operations TO ${role}`);
     await owner.query(`GRANT SELECT(id,provider) ON platform.external_webhook_events TO ${role}`);
     for (const table of tables)
       await owner.query(`GRANT SELECT,INSERT,UPDATE,DELETE ON platform.${table} TO ${role}`);
@@ -65,14 +71,15 @@ describe.skipIf(!url)("Channex management shared queue boundary", () => {
     await worker?.end();
     if (workerCreated) {
       await owner.query("DELETE FROM platform.jobs WHERE id=ANY($1::uuid[])", [
-        [allowed, deniedQueue, deniedProperty],
+        [allowed, deniedQueue, deniedProperty, freshEnable, freshTagged, freshAri],
       ]);
       await owner.query(
         "DELETE FROM platform.channex_management_worker_properties WHERE property_id=$1",
         [property],
       );
+      await owner.query("DELETE FROM platform.channex_management_worker_operations");
       await owner.query("DELETE FROM hotel_catalog.properties WHERE id=ANY($1::uuid[])", [
-        [property, other],
+        [property, other, fresh],
       ]);
       await owner.query(`DROP OWNED BY ${role}; DROP ROLE ${role}`);
     }
@@ -235,6 +242,67 @@ describe.skipIf(!url)("Channex management shared queue boundary", () => {
         `REVOKE UPDATE(delivery_status) ON platform.external_webhook_events FROM ${role}`,
       );
     }
+  });
+
+  it("admits enable jobs for unlisted hotels only while the owner admits the operation", async () => {
+    await owner.query(
+      "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Fresh test')",
+      [fresh],
+    );
+    const insert = `INSERT INTO platform.jobs(id,job_key,queue_name,job_type,tenant_scope,property_id,resource_product,resource_type,resource_id,payload,idempotency_key_hash)
+      VALUES($1::uuid,$1::text,'pms.channex.management',$3,'property',$2::uuid,'pms','channex_connection',$2::text,$4::jsonb,repeat('c',64))`;
+    for (const [id, type, payload] of [
+      [freshEnable, "channex.enable", { operationType: "enable", commandId: randomUUID() }],
+      [freshTagged, "channex.enable", { operationType: "enable", recoveryAlertId: randomUUID() }],
+      [freshAri, "channex.sync_ari", { operationType: "sync_ari" }],
+    ] as const)
+      await owner.query(insert, [id, fresh, type, JSON.stringify(payload)]);
+    const freshJobs = () =>
+      worker.query("SELECT id FROM platform.jobs WHERE property_id=$1 ORDER BY id", [fresh]);
+    await denied("INSERT INTO platform.channex_management_worker_operations VALUES('enable')");
+    expect((await freshJobs()).rows).toEqual([]);
+    await owner.query("INSERT INTO platform.channex_management_worker_operations VALUES('enable')");
+    expect((await freshJobs()).rows).toEqual([{ id: freshEnable }]);
+    expect(
+      (await worker.query("SELECT id FROM platform.jobs ORDER BY id")).rows.map((row) => row.id),
+    ).toEqual([allowed, freshEnable].sort());
+    const enqueue = `INSERT INTO platform.jobs(job_key,queue_name,job_type,tenant_scope,property_id,resource_product,resource_type,resource_id,payload)
+      VALUES($1,'pms.channex.management','channex.enable','property',$2::uuid,'pms','channex_connection',$2::text,'{"operationType":"enable"}')`;
+    await denied(enqueue, [randomUUID(), fresh]);
+    await denied(enqueue, [randomUUID(), property]);
+    const audit = `INSERT INTO platform.product_audit_events(occurred_at,audit_key,product,action,tenant_scope,property_id,actor_type,target_resource_product,target_resource_type,target_resource_id,job_id)
+      VALUES(now(),$1,'pms',$2,'property',$3::uuid,'system','pms','channex_connection',$3::text,$4)`;
+    await worker.query("BEGIN");
+    await worker.query(
+      "UPDATE platform.jobs SET status='running',attempts_count=1,locked_by='fixture',locked_at=now() WHERE id=$1",
+      [freshEnable],
+    );
+    await worker.query(
+      "INSERT INTO platform.job_attempts(job_id,attempt_number,worker_id) VALUES($1,1,'fixture')",
+      [freshEnable],
+    );
+    await worker.query(audit, [randomUUID(), "pms.channex.enable.failed", fresh, freshEnable]);
+    await worker.query(
+      `INSERT INTO platform.idempotency_keys(operation_scope,operation,key_hash,request_fingerprint_hash,tenant_scope,property_id,expires_at)
+      VALUES('pms','channex_management',repeat('c',64),repeat('b',64),'property',$1,'infinity')`,
+      [fresh],
+    );
+    await worker.query(
+      `INSERT INTO platform.dead_letter_events(source_kind,job_id,tenant_scope,property_id,resource_product,resource_type,resource_id,reason_code,failure_summary)
+      VALUES('job',$1,'property',$2::uuid,'pms','channex_connection',$2::text,'non_retryable_error','fixture')`,
+      [freshEnable, fresh],
+    );
+    // The connection scope closes with the job: finished jobs admit no more writes.
+    await worker.query(
+      "UPDATE platform.jobs SET status='succeeded',finished_at=now(),locked_by=NULL,locked_at=NULL WHERE id=$1",
+      [freshEnable],
+    );
+    await expect(
+      worker.query(audit, [randomUUID(), "pms.channex.enable.succeeded", fresh, freshEnable]),
+    ).rejects.toMatchObject({ code: "42501" });
+    await worker.query("ROLLBACK");
+    await owner.query("DELETE FROM platform.channex_management_worker_operations");
+    expect((await freshJobs()).rows).toEqual([]);
   });
 
   it("preserves existing identity policies without granting access to the worker allowlist", async () => {
