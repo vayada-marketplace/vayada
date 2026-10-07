@@ -100,6 +100,38 @@ When a deferred rule eventually graduates to enforced, it gets its own follow-up
 
 Currently the PR workflow runs `npm run check:architecture-boundaries`, root frontend typecheck/lint/build, and the backend test matrix. Playwright smoke tests stay local/on-demand until the team decides the pilot is stable enough to gate PRs.
 
+### Which PR checks run
+
+`.github/workflows/pr-checks.yml` has one required status, **Required Checks**. A `changes` job diffs the PR merge commit against the base branch and `scripts/ci/pr-checks.mjs select` maps each changed file to the jobs that cover it. The first matching rule wins per file and the PR runs the union:
+
+| Changed path                                                                                    | Jobs                                                                              |
+| ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `**/*.md`, `.agents/**`, `engineering/evidence/**`, `LICENSE`, `.gitignore`, `.coderabbit.yaml` | none                                                                              |
+| `engineering/hotel-setup-bootstrap-images.json`                                                 | none beyond the inventory formatting + schema check that always runs in `changes` |
+| `apps/marketplace-api/**`, `apps/booking-api/**`, `apps/pms-api/**`                             | Backend Tests (Python)                                                            |
+| `apps/*-web/**`, `apps/vayada-admin/**`, `apps/landing/**`                                      | Frontend, First-Party Auth Contracts                                              |
+| `tests/e2e/**`                                                                                  | First-Party Auth Contracts                                                        |
+| `apps/api/**`, `packages/**` (including `packages/backend-migration/migrations`)                | Frontend, First-Party Auth, both PostgreSQL integration jobs on PG16 and PG17     |
+| anything else (workflows, `scripts/**`, lockfiles, `auth-db/**`, fixtures, …)                   | every job                                                                         |
+
+The TypeScript API PostgreSQL job is a `postgres × shard` matrix (`platform`, `pms`, `hotel-setup`); every shard gets a fresh cluster so cluster-wide role proofs stay ordered. Adding an integration step means picking a shard with `if: matrix.shard == '<shard>'`.
+
+### Required Checks fails closed
+
+`scripts/ci/pr-checks.mjs verify` reads the `needs` context and passes only when every job either **succeeded** or was **skipped while `changes` set `run_<job>=false`**. Each of these fails the required status (see `scripts/ci/pr-checks.test.mjs` for the executable version):
+
+| Situation                                                     | `needs.<job>.result`                    | Required Checks |
+| ------------------------------------------------------------- | --------------------------------------- | --------------- |
+| Every selected job passed                                     | `success` / legitimately `skipped`      | passes          |
+| Docs-only PR, everything skipped by the selector              | all `skipped`, all `run_*=false`        | passes (~1 min) |
+| A selected job failed                                         | `failure`                               | fails           |
+| A selected job hit `timeout-minutes` or the run was cancelled | `cancelled`                             | fails           |
+| A job was skipped although the selector asked for it          | `skipped` with `run_<job>=true`         | fails           |
+| The `changes` job itself failed (so its outputs are unset)    | all dependants `skipped`, `run_*` unset | fails           |
+| A job was added to the workflow but not to `required.needs`   | missing from `needs`                    | fails           |
+
+Selection is on the jobs, never on `on.pull_request.paths`: a workflow that does not trigger never reports the required status and the ruleset would wait forever. The aggregator keeps `if: always()` because a skipped required job would satisfy the ruleset.
+
 When the baseline is clean enough to enforce globally, add a `.github/workflows/quality.yml` that runs:
 
 ```bash
