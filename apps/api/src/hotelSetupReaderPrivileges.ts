@@ -296,7 +296,7 @@ export async function assertHotelSetupAuditBoundary(client: HotelSetupPrivilegeQ
           FROM pg_catalog.unnest(p.polroles) roles(role)),'')
         || COALESCE(pg_catalog.pg_get_expr(p.polqual,p.polrelid),'')
         || COALESCE(pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid),''),'' ORDER BY p.polname))
-        ='bf4f04e98c1d12a86ee4b44e0ea57e71'
+        ='5db27ef0f9ae44a24f8725bbdb881835'
       FROM pg_catalog.pg_policy p WHERE p.polrelid=c.oid)
     AND pg_catalog.md5(pg_catalog.pg_get_functiondef(
       'platform.hotel_setup_reader_audit_allowed(platform.product_audit_events)'::regprocedure))

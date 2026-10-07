@@ -28,7 +28,7 @@ export async function writeHotelSetupLaunchSettings(
   propertyId: string,
   settings: SharedPropertyLaunchSettings,
   runScope: HotelSetupPropertyScopeRunner = nativeScope,
-): Promise<SharedPropertyLaunchSettings> {
+): Promise<SharedPropertyLaunchSettings | null> {
   if (!context.actor.providerIdentity.sessionId) throw new AuthorizationError();
   const organizationId = context.selectedOrganization.organizationId;
   return runScope(pool, { propertyId, organizationId }, async (client) => {
@@ -60,7 +60,8 @@ export async function writeHotelSetupLaunchSettings(
       "SELECT property_id FROM booking.booking_settings WHERE property_id=$1::uuid FOR UPDATE",
       [propertyId],
     );
-    if (locked.rows.length !== 1) throw new Error("Property launch settings unavailable");
+    // No Booking settings row: the route answers 404 like the GET and the broad writer.
+    if (locked.rows.length !== 1) return null;
     const channels = ["instagram", "facebook", "tiktok", "youtube"] as const;
     const contacts = JSON.stringify(
       channels.map((channel_type) => ({

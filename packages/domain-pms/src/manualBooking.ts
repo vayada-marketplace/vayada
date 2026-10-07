@@ -28,6 +28,8 @@ type PmsManualBookingStayBase = Readonly<{
   checkOut: string;
   adults: number;
   children: number;
+  /** One age per child at check-in; required to price a published offer when children > 0. */
+  childAgesAtCheckIn?: readonly number[];
 }>;
 
 export type PmsManualBookingStay = PmsManualBookingStayBase &

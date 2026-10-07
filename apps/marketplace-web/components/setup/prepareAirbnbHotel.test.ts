@@ -1,5 +1,9 @@
-import { afterEach, expect, it, vi } from "vitest";
-import { prepareAirbnbHotel } from "./prepareAirbnbHotel";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  AirbnbPreparationError,
+  describeAirbnbStartError,
+  prepareAirbnbHotel,
+} from "./prepareAirbnbHotel";
 const id = "10090000-0000-4000-8000-000000000001";
 const operation = {
   operationId: id,
@@ -117,4 +121,24 @@ it("times out a stalled API request", async () => {
   ).rejects.toThrow("progress could not be confirmed");
   await vi.advanceTimersByTimeAsync(70_000);
   await result;
+});
+
+describe("describeAirbnbStartError", () => {
+  it("explains a disabled connection instead of calling the hotel not ready", () => {
+    const disabled = describeAirbnbStartError({
+      status: 409,
+      data: { code: "channex_capability_not_mutating" },
+    });
+    expect(disabled).toContain("temporarily disabled");
+    expect(
+      describeAirbnbStartError({ status: 503, data: { code: "channex_commands_unavailable" } }),
+    ).toBe(disabled);
+  });
+  it("keeps the not-ready and generic messages for other failures", () => {
+    expect(
+      describeAirbnbStartError({ status: 409, data: { code: "channex_binding_required" } }),
+    ).toContain("not ready for this hotel yet");
+    expect(describeAirbnbStartError({ status: 500 })).toContain("couldn’t start");
+    expect(describeAirbnbStartError(new AirbnbPreparationError("Custom"))).toBe("Custom");
+  });
 });

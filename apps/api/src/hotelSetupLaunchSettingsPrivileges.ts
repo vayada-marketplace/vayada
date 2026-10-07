@@ -83,7 +83,7 @@ export async function assertHotelSetupLaunchSettingsPrivileges(
   await assertHotelSetupNativePrivileges(
     client,
     HOTEL_SETUP_LAUNCH_SETTINGS_PRIVILEGES,
-    "6167ec974143c615fbc210fe7695539d",
+    "ab434c6113f2f2ecd94369fd674f9d4d",
     ["hotel_catalog.property_contact_channels"],
   );
   await assertHotelSetupPropertyRlsHelpers(client, "launch_settings");

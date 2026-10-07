@@ -174,6 +174,10 @@ describe.skipIf(!url)("ordinary launch settings (VAY-2056)", () => {
       await expect(pending).rejects.toBeInstanceOf(AuthorizationError);
       await admin.query("UPDATE identity.organizations SET status='active' WHERE id=$1", [org]);
       expect(await audits()).toBe(2);
+
+      // A property without Booking settings answers 404 (null), not 503.
+      await admin.query("DELETE FROM booking.booking_settings WHERE property_id=$1", [property]);
+      expect(await save(context(), property, settings)).toBeNull();
     } finally {
       await admin.query("ROLLBACK").catch(() => undefined);
       await pool.end();
