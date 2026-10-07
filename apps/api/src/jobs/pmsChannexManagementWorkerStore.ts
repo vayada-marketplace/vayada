@@ -124,12 +124,10 @@ async function claim(
                AND payload ? 'publishedOffer'))))
          AND ($3::boolean OR payload->>'operationType' NOT IN ('sync_ari','update_markups'))
          AND (NOT $8::boolean OR (payload->>'operationType' = 'enable'
-           AND (status = 'running' OR (
-             NOT EXISTS (SELECT 1 FROM pms.channel_binding_claims claim
-               WHERE claim.property_id = platform.jobs.property_id AND claim.provider = 'channex')
-             AND NOT EXISTS (SELECT 1 FROM pms.channel_connections connection
-               WHERE connection.property_id = platform.jobs.property_id AND connection.provider = 'channex'
-                 AND connection.external_property_id IS NOT NULL)))))
+           AND NOT EXISTS (SELECT 1 FROM pms.channel_binding_claims claim
+             WHERE claim.property_id = platform.jobs.property_id AND claim.provider = 'channex'
+               AND NOT (platform.jobs.status = 'running' AND claim.claim_source = 'enable'
+                 AND claim.claim_state = 'active' AND claim.created_at >= platform.jobs.created_at))))
          AND NOT EXISTS (
          SELECT 1 FROM platform.jobs active
          WHERE active.queue_name = $1 AND active.property_id = platform.jobs.property_id

@@ -30,8 +30,9 @@ describe("PMS Channex management worker store", () => {
     const claim = harness.db.calls.find(({ text }) => text.includes("FOR UPDATE SKIP LOCKED"));
     expect(claim?.values?.at(-1)).toBe(true);
     expect(claim?.text).toContain("payload->>'operationType' = 'enable'");
+    // A pending job needs an unbound hotel; a running job may finish its own binding.
     expect(claim?.text).toMatch(
-      /NOT EXISTS \(SELECT 1 FROM pms\.channel_binding_claims[\s\S]*NOT EXISTS \(SELECT 1 FROM pms\.channel_connections[\s\S]*external_property_id IS NOT NULL/,
+      /NOT EXISTS \(SELECT 1 FROM pms\.channel_binding_claims[\s\S]*NOT \(platform\.jobs\.status = 'running' AND claim\.claim_source = 'enable'[\s\S]*claim\.created_at >= platform\.jobs\.created_at/,
     );
     expect(harness.db.sql()).not.toContain("pms.enqueue_restriction_ari");
   });

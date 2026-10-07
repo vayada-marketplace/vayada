@@ -85,6 +85,25 @@ async function enqueue(
       if (!transactionClient) await client.query("ROLLBACK");
       return { ok: false, code: "connection_required", message: "Enable Channex first." };
     }
+    // VAY-2055: the connection worker only serves hotels without a binding; a
+    // retained claim needs audited repair, so never queue work nobody will claim.
+    if (input.operationType === "enable") {
+      const claim = await client.query<{ active: boolean }>(
+        `SELECT claim_state = 'active' AS active FROM pms.channel_binding_claims
+         WHERE property_id = $1::uuid AND provider = 'channex'`,
+        [propertyId],
+      );
+      if (claim.rows[0]) {
+        if (!transactionClient) await client.query("ROLLBACK");
+        return {
+          ok: false,
+          code: "channex_binding_exists",
+          message: claim.rows[0].active
+            ? "Channex is already connected for this hotel."
+            : "This hotel's retained Channex binding needs audited repair before it can be enabled.",
+        };
+      }
+    }
     const reservation = await client.query<{ id: string }>(
       `INSERT INTO platform.idempotency_keys (
          operation_scope, operation, key_hash, request_fingerprint_hash, status,

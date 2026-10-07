@@ -593,6 +593,65 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
       expect(await connection.claim({ workerId, now: new Date() })).toBeNull();
       expect(await jobStatus(freshAri)).toBe("pending");
       expect(await jobStatus(boundEnable)).toBe("pending");
+      // A hotel with a stale disconnected row binds through the guarded UPDATE
+      // path, its own interrupted attempt may be re-claimed, a foreign binding
+      // with an expired lease never is.
+      const second = randomUUID(),
+        secondEnable = randomUUID(),
+        secondExternal = randomUUID(),
+        secondKey = randomUUID();
+      await owner.query(
+        "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Second hotel')",
+        [second],
+      );
+      await owner.query(
+        "INSERT INTO pms.channel_connections(property_id,provider,connection_status) VALUES($1,'channex','disconnected')",
+        [second],
+      );
+      await owner.query(insert, [
+        secondEnable,
+        second,
+        "channex.enable",
+        JSON.stringify({
+          operationType: "enable",
+          commandId: randomUUID(),
+          idempotencyKey: secondKey,
+        }),
+        hash(secondKey),
+      ]);
+      await owner.query(
+        "UPDATE platform.jobs SET status='running',attempts_count=1,locked_by='stale',locked_at=now()-interval '1 hour' WHERE id=$1",
+        [boundEnable],
+      );
+      const first = (await connection.claim({ workerId, now: new Date() }))!;
+      expect(first.jobId).toBe(secondEnable);
+      const secondCreated = { ...created, externalPropertyId: secondExternal };
+      secondCreated.createdProperty = {
+        environment: "production",
+        externalPropertyId: secondExternal,
+      };
+      await (
+        await plans.plan(first)
+      ).checkpoint!(secondCreated);
+      await owner.query("UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1", [
+        secondEnable,
+      ]);
+      const resumed = (await connection.claim({ workerId, now: new Date() }))!;
+      expect(resumed).toMatchObject({ jobId: secondEnable, attemptNumber: 2 });
+      await connection.succeed(resumed, secondCreated, { workerId, now: new Date() });
+      expect(
+        (
+          await owner.query(
+            "SELECT connection_status,external_property_id,connection_metadata->'airbnbCreationEvidence'->>'jobId' AS job FROM pms.channel_connections WHERE property_id=$1",
+            [second],
+          )
+        ).rows,
+      ).toEqual([
+        { connection_status: "connected", external_property_id: secondExternal, job: secondEnable },
+      ]);
+      expect(await jobStatus(secondEnable)).toBe("succeeded");
+      expect(await jobStatus(boundEnable)).toBe("running");
+      expect(await connection.claim({ workerId, now: new Date() })).toBeNull();
     } finally {
       await plans.close();
       await connection.close?.();

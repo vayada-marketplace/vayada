@@ -141,3 +141,21 @@ BEGIN
   RAISE EXCEPTION 'Channex worker connection identity is read only' USING ERRCODE='42501';
 END;
 $$;
+
+-- Binding an unbound row rotates the generation but has no unresolved tombstones
+-- to settle: those only exist for a bound generation and were resolved when the
+-- binding was released. Skip that UPDATE so the connection worker needs no
+-- tombstone privilege; the rotation itself is unchanged.
+CREATE OR REPLACE FUNCTION pms.rotate_channel_connection_binding() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD.external_property_id IS DISTINCT FROM NEW.external_property_id THEN
+    IF OLD.external_property_id IS NOT NULL THEN
+      UPDATE pms.channel_booking_revision_tombstones
+        SET resolved_at = COALESCE(resolved_at, now()), updated_at = now()
+        WHERE connection_id = OLD.id AND binding_generation = OLD.binding_generation
+          AND resolved_at IS NULL;
+    END IF;
+    NEW.binding_generation := gen_random_uuid();
+  END IF;
+  RETURN NEW;
+END $$;

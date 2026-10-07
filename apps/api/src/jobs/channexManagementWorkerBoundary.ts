@@ -95,7 +95,7 @@ export async function assertChannexManagementWorkerBoundary(
   ).rows;
   if (
     createHash("sha256").update(JSON.stringify(catalog)).digest("hex") !==
-    "cf7d9e9b4058788df91a9e69a82a19a56d517afb8ecba0274b86a7e7a04a8f70"
+    "10c6d40b2c7b7c4baacc4adaf468ddac1c3675344c114e40a5f77ba335b27794"
   )
     fail("catalog_drift");
   const version = Number(
@@ -197,6 +197,11 @@ export async function assertChannexManagementWorkerBoundary(
 
 // Attest transitive invoker functions, enabled triggers and the invoker view as
 // well as policies. A matching grant list alone must not accept a disabled guard.
+// The VAY-2055 connection-scope helper keeps PUBLIC execution on purpose: it is
+// referenced from policies every runtime role evaluates and returns true for
+// them before reading worker tables. Its definition is attested here instead.
+// The canary allowlist and the operation scope share this login; a provisioned
+// canary property stays readable to a connection-only worker by design.
 export const channexWorkerCatalogSql = `
 WITH relations AS (SELECT oid FROM pg_class WHERE oid=ANY($1::regclass[])),
 functions AS (

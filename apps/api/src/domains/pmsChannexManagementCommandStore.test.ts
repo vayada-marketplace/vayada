@@ -57,6 +57,23 @@ describe("PMS Channex management command store", () => {
     expect(db.calls.at(-1)?.text).toBe("ROLLBACK");
   });
 
+  it("refuses to queue enable for a hotel that already has a binding claim", async () => {
+    const db = new FakeDb("bound");
+    const port = createPgPmsChannexManagementCommandPort({
+      connectionString: "postgresql://target",
+      pool: db.pool(),
+    });
+
+    expect(await port.enqueue(context(), propertyId, command("enable"))).toEqual({
+      ok: false,
+      code: "channex_binding_exists",
+      message:
+        "This hotel's retained Channex binding needs audited repair before it can be enabled.",
+    });
+    expect(db.sql()).not.toContain("INSERT INTO platform.jobs");
+    expect(db.calls.at(-1)?.text).toBe("ROLLBACK");
+  });
+
   it("requires a target connection before dependent operations", async () => {
     const db = new FakeDb("disconnected");
     const port = createPgPmsChannexManagementCommandPort({
@@ -73,7 +90,7 @@ describe("PMS Channex management command store", () => {
   });
 });
 
-type Mode = "new" | "replay" | "conflict" | "disconnected";
+type Mode = "new" | "replay" | "conflict" | "disconnected" | "bound";
 
 class FakeDb {
   calls: Array<{ text: string; values?: readonly unknown[] }> = [];
@@ -95,6 +112,8 @@ class FakeDb {
   async query<T>(text: string, values?: unknown[]) {
     this.calls.push({ text, values });
     if (text.includes("FROM pms.channel_connections")) return rows<T>([]);
+    if (text.includes("FROM pms.channel_binding_claims"))
+      return rows<T>(this.mode === "bound" ? [{ active: false }] : []);
     if (text.includes("INSERT INTO platform.idempotency_keys")) {
       this.fingerprint = String(values?.[2]);
       return rows<T>(this.mode === "new" ? [{ id: "idem-1" }] : []);

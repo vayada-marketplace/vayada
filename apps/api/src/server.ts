@@ -1774,6 +1774,7 @@ const app = buildApp({
           : undefined,
         datePrices: createPgChannelDatePrices(targetDatabaseUrl),
         capabilityModes: config.channexManagement.capabilityModes,
+        connectionOnly: channexConnectionOnlyScope(config.channexManagement),
         publishedOfferProvisioningEnabled:
           config.channexManagement.stagingPublishedOffersEnabled === true,
         publishedOfferProvisioningPropertyId:
