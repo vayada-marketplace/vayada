@@ -4,12 +4,14 @@ import { roundBookingPriceDecimalToMinorUnits } from "@vayada/domain-booking";
 import {
   PMS_MANUAL_BOOKING_CONTRACT_VERSION,
   PMS_MANUAL_BOOKING_DIRECT_SOURCES,
+  PMS_MANUAL_BOOKING_MAX_ADDITIONAL_GUESTS,
   PMS_MANUAL_BOOKING_PAYMENT_METHODS,
   PmsManualBookingCreateError,
   type PmsManualBookingCreateCommand,
   type PmsManualBookingCreatePort,
 } from "@vayada/domain-pms";
 import { FinanceManualBookingSettlementError } from "@vayada/domain-finance";
+import { normalizeNationalityCode } from "@vayada/locale-constants";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 
@@ -51,6 +53,24 @@ const addon = z.strictObject({
     }),
   ),
 });
+const email = z.string().trim().email().max(320);
+const phoneE164 = z
+  .string()
+  .regex(/^\+[1-9]\d{7,14}$/)
+  .nullable();
+// Supported codes only, so the booking_guests nationality check never turns a typo into a 500.
+const countryCode = z
+  .string()
+  .regex(/^[A-Z]{2}$/)
+  .refine((code) => normalizeNationalityCode(code) === code)
+  .nullable();
+const additionalGuest = z.strictObject({
+  firstName: text(200),
+  lastName: text(200),
+  email: email.nullable(),
+  phoneE164,
+  countryCode,
+});
 const bodySchema = z.strictObject({
   contractVersion: z.literal("pms-manual-booking.v1"),
   commandId: text(200),
@@ -58,17 +78,15 @@ const bodySchema = z.strictObject({
   guest: z.strictObject({
     firstName: text(200),
     lastName: text(200),
-    email: z.string().trim().email().max(320),
-    phoneE164: z
-      .string()
-      .regex(/^\+[1-9]\d{7,14}$/)
-      .nullable(),
-    countryCode: z
-      .string()
-      .regex(/^[A-Z]{2}$/)
-      .nullable(),
+    email,
+    phoneE164,
+    countryCode,
     specialRequests: nullableText(5_000),
   }),
+  additionalGuests: z
+    .array(additionalGuest)
+    .max(PMS_MANUAL_BOOKING_MAX_ADDITIONAL_GUESTS)
+    .optional(),
   privateNote: nullableText(10_000),
   directSource: z.enum(PMS_MANUAL_BOOKING_DIRECT_SOURCES),
   stays: z.array(stay).min(1).max(20),
@@ -212,6 +230,7 @@ function parseCreateCommand(
   });
   return {
     ...parsed.data,
+    additionalGuests: parsed.data.additionalGuests ?? [],
     stays: preview.stays,
     addOns: preview.addOns,
     propertyId: scope.propertyId,

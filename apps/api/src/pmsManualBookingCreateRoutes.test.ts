@@ -154,6 +154,128 @@ describe("target manual-booking create route", () => {
     },
   );
 
+  it("passes trimmed additional guests in order and defaults an omitted list to none", async () => {
+    const state: State = { calls: [] };
+    app = await testApp(state);
+    const payload = {
+      ...command("unpaid", "cash"),
+      additionalGuests: [
+        {
+          firstName: " Grace ",
+          lastName: "Hopper",
+          email: null,
+          phoneE164: null,
+          countryCode: "US",
+        },
+        {
+          firstName: "Alan",
+          lastName: "Turing",
+          email: "alan@example.com",
+          phoneE164: "+447700900123",
+          countryCode: null,
+        },
+      ],
+    };
+    expect((await request(app, payload)).statusCode).toBe(201);
+    expect(state.calls[0]?.additionalGuests).toEqual([
+      { firstName: "Grace", lastName: "Hopper", email: null, phoneE164: null, countryCode: "US" },
+      payload.additionalGuests[1],
+    ]);
+    expect((await request(app, command("unpaid", "cash"))).statusCode).toBe(201);
+    expect(state.calls[1]?.additionalGuests).toEqual([]);
+  });
+
+  it.each([
+    [
+      "missing last name",
+      { firstName: "Grace", email: null, phoneE164: null, countryCode: null },
+      "invalid_body",
+    ],
+    [
+      "blank first name",
+      { firstName: " ", lastName: "Hopper", email: null, phoneE164: null, countryCode: null },
+      "invalid_body",
+    ],
+    [
+      "non-E.164 phone",
+      {
+        firstName: "Grace",
+        lastName: "Hopper",
+        email: null,
+        phoneE164: "0891234",
+        countryCode: null,
+      },
+      "invalid_body",
+    ],
+    [
+      "lowercase country",
+      { firstName: "Grace", lastName: "Hopper", email: null, phoneE164: null, countryCode: "us" },
+      "invalid_body",
+    ],
+    [
+      "unsupported country",
+      { firstName: "Grace", lastName: "Hopper", email: null, phoneE164: null, countryCode: "UK" },
+      "invalid_body",
+    ],
+    [
+      "unknown key",
+      {
+        firstName: "Grace",
+        lastName: "Hopper",
+        email: null,
+        phoneE164: null,
+        countryCode: null,
+        role: "booker",
+      },
+      "unknown_field",
+    ],
+  ] as const)(
+    "rejects an additional guest with %s before the command port",
+    async (_label, guest, code) => {
+      const state: State = { calls: [] };
+      app = await testApp(state);
+      const response = await request(app, {
+        ...command("unpaid", "cash"),
+        additionalGuests: [guest],
+      });
+      expect([response.statusCode, response.json().code, state.calls]).toEqual([400, code, []]);
+    },
+  );
+
+  it("rejects an unsupported booker nationality as a validation error", async () => {
+    const state: State = { calls: [] };
+    app = await testApp(state);
+    const payload = command("unpaid", "cash");
+    payload.guest.countryCode = "UK";
+    const response = await request(app, payload);
+    expect([response.statusCode, response.json().code, state.calls]).toEqual([
+      400,
+      "invalid_body",
+      [],
+    ]);
+  });
+
+  it("rejects more than 100 additional guests", async () => {
+    const state: State = { calls: [] };
+    app = await testApp(state);
+    const guest = {
+      firstName: "Guest",
+      lastName: "Party",
+      email: null,
+      phoneE164: null,
+      countryCode: null,
+    };
+    const response = await request(app, {
+      ...command("unpaid", "cash"),
+      additionalGuests: Array.from({ length: 101 }, () => guest),
+    });
+    expect([response.statusCode, response.json().code, state.calls]).toEqual([
+      400,
+      "invalid_body",
+      [],
+    ]);
+  });
+
   it.each([
     ["unauthenticated", { token: false }],
     ["forbidden", { operationsPermission: false }],

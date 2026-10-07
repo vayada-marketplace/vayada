@@ -227,6 +227,21 @@ async function insertGuest(
       command.guest.specialRequests,
     ],
   );
+  if (!command.additionalGuests?.length) return;
+  // Microsecond offsets keep request order, which Booking Detail reads by created_at.
+  await transaction.query(
+    `INSERT INTO booking.booking_guests (
+       guest_booking_id, guest_role, first_name, last_name, email, phone,
+       country_code, created_at, updated_at
+     )
+     SELECT $1::uuid, 'additional_guest', item.value->>'firstName',
+       item.value->>'lastName', item.value->>'email', item.value->>'phoneE164',
+       item.value->>'countryCode',
+       now() + item.ord * interval '1 microsecond',
+       now() + item.ord * interval '1 microsecond'
+     FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY AS item(value, ord)`,
+    [guestBookingId, JSON.stringify(command.additionalGuests)],
+  );
 }
 
 async function insertAssignments(
