@@ -19,6 +19,15 @@ implementations:
 
 The contract version is `pms-manual-booking.v1`. Breaking request or semantic
 changes require a new version. Additive response evidence may be added to v1.
+An optional request field may also be added to v1 when omitting it keeps the
+exact previous meaning, idempotency fingerprint and response, and when the
+amendment is recorded below. Existing callers then need no change.
+
+### v1 amendments
+
+| Date       | Ticket   | Change                                                                                                       |
+| ---------- | -------- | ------------------------------------------------------------------------------------------------------------ |
+| 2026-10-07 | VAY-1422 | Optional `additionalGuests`, approved by product as an additive v1 field rather than `pms-manual-booking.v2` |
 
 ## Current evidence and gaps
 
@@ -106,6 +115,10 @@ type Command = {
     phoneE164: string | null; countryCode: string | null;
     specialRequests: string | null;
   };
+  additionalGuests?: Array<{ // v1 amendment, VAY-1422; omitted means []
+    firstName: string; lastName: string; email: string | null;
+    phoneE164: string | null; countryCode: string | null;
+  }>;
   privateNote: string | null;
   directSource: "call" | "email" | "whatsapp" | "walk_in" | "social_media" | "other";
   stays: Array<{
@@ -184,6 +197,9 @@ the target manual writer can be accepted.
 - Unknown request keys are rejected on command routes.
 - `commandId` and `idempotencyKey` are required and bounded. An exact replay
   returns the original result; changed payload reuse returns `409`.
+- An empty or omitted `additionalGuests` list is left out of the request
+  fingerprint, so requests sent before the VAY-1422 amendment replay unchanged.
+  A non-empty list is part of the fingerprint.
 - A command contains 1 to 20 stays. Positions are unique and contiguous from 1.
 - Each room and rate plan belongs to the authorized property. A selected rate
   plan is active and belongs to that stay's room type.
@@ -220,6 +236,12 @@ the target manual writer can be accepted.
   times the sum of each unit's guest count, or one when null.
 - Email is required for v1. Phone is optional, but a supplied value is stored in
   E.164 form; `countryCode` is the guest country and is not a dial-code field.
+- `additionalGuests` are the other people staying, beyond the booker. The
+  list is booking-level, not assigned to a stay. It holds at most 100 entries.
+  Each entry needs first and last name; email, E.164 phone and `countryCode`
+  are optional and validated like the booker's. The count is not checked
+  against stay occupancy: the UI warns, and the host may override. Omitting
+  the field or sending `[]` means no additional guests.
 - `privateNote` is access-controlled PMS data. `specialRequests` is guest-facing
   Booking PII and may be used by confirmed guest communication.
 
@@ -269,7 +291,8 @@ The successful transaction commits, in owner order:
 1. command/idempotency reservation and audit context;
 2. Booking guest booking with `source_system = pms`, canonical attribution,
    expected payment method and aggregate totals;
-3. Booking guest PII and guest-facing special requests;
+3. Booking guest PII, guest-facing special requests and any additional guests
+   (`booking_guests.guest_role = 'additional_guest'`, in request order);
 4. one PMS operational stay/assignment per command stay;
 5. exact Booking nightly revenue evidence and add-on economic snapshots;
 6. optional PMS private note;
@@ -307,6 +330,7 @@ credentials, or unrestricted guest PII beyond the authorized PMS response.
 | Rate plan/pricing | Active matching plan or explicit custom amount | PMS selection; Booking nightly snapshot | Plan ID and exact nights      | PMS plan + VAY-1184 evidence | Server preview is authoritative            |
 | Guest/phone       | Required name/email; optional E.164 phone      | Booking guest PII                       | Booking guest fields          | Booking owner port           | Property country only defaults dial code   |
 | Special requests  | Bounded guest-facing text                      | Booking guest PII                       | `bookings.special_requests`   | Booking owner port           | Separate from internal note                |
+| Additional guests | Names required; optional contact/nationality   | Booking guest PII (`additional_guest`)  | Not built (target only)       | Same transaction as booker   | Soft occupancy warning; Booking Detail     |
 | Private note      | PMS-authorized bounded text                    | PMS private notes                       | Transactional `booking_notes` | PMS note owner port          | Never guest-visible                        |
 | Direct source     | Canonical enum; reject OTA/Booking Engine      | Booking attribution                     | Constrained canonical field   | VAY-1186/1187                | Required; channel fixed to Direct          |
 | Expected method   | Canonical enum for paid and unpaid             | Booking payment intent                  | New canonical field           | Booking owner port           | Display on detail/check-in                 |
