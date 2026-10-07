@@ -418,7 +418,7 @@ describe("target PMS room media compatibility", () => {
       async query<T extends QueryResultRow = QueryResultRow>(
         text: string,
       ): Promise<QueryResult<T>> {
-        roomTypeQuery = text;
+        if (!text.includes("pms.pricing_v2_heads")) roomTypeQuery = text;
         return { command: "SELECT", rowCount: 0, oid: 0, fields: [], rows: [] };
       },
     };
@@ -443,7 +443,7 @@ describe("target PMS room media compatibility", () => {
       async query<T extends QueryResultRow = QueryResultRow>(
         text: string,
       ): Promise<QueryResult<T>> {
-        roomTypeQuery = text;
+        if (!text.includes("pms.pricing_v2_heads")) roomTypeQuery = text;
         const rows = [
           {
             roomTypeId: "room-type-1",

@@ -27,6 +27,8 @@ import {
   createPmsManualBookingCurrentPricingEvidence,
   createPmsManualBookingTransactionalPricingPort,
 } from "./pmsManualBookingTransactionalPricing.js";
+import { createTargetPmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
+import { createPgPmsPricingReadModel } from "./pmsPricingReadModel.js";
 import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
 import { createPmsRoomAssignmentOptimizationTriggerPort } from "./pmsRoomAssignmentOptimizationTriggers.js";
 import {
@@ -53,6 +55,8 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
     roomTypeId = randomUUID(),
     roomIds = [randomUUID(), randomUUID()],
     membershipId = randomUUID(),
+    flexId = randomUUID(),
+    nrId = randomUUID(),
     roleKey = `manual_pricing_${randomUUID()}`,
     scope = { actorUserId, organizationId, propertyId };
   const acceptedAt = new Date("2026-10-07T10:00:00.000Z");
@@ -127,7 +131,7 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
   afterAll(() => pool.end());
 
   it("refuses offer stays before publishing and books custom rates in the property currency", async () => {
-    const offer = command("flex");
+    const offer = command(flexId);
     await expect(repository().createManualBooking(offer)).rejects.toMatchObject({
       status: 409,
       body: { code: "pricing_not_published" },
@@ -163,14 +167,47 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
       const publication = await reader.readCurrentPricingPublication({ propertyId });
       expect(publication).toMatchObject({ revision: 1, currency: "EUR" });
       expect(publication!.rooms.map((room) => room.offers.map((offer) => offer.id))).toEqual([
-        ["flex", "nr"],
+        [flexId, nrId],
       ]);
-      expect(publication!.terms.map((terms) => terms.offerId).sort()).toEqual(["flex", "nr"]);
+      expect(publication!.terms.map((terms) => terms.offerId).sort()).toEqual(
+        [flexId, nrId].sort(),
+      );
       expect(await reader.readCurrentPricingPublication({ propertyId: randomUUID() })).toBeNull();
     });
 
+    it("serves the published offers as flexible plans and room-type rate plans", async () => {
+      const pricing = createPgPmsPricingReadModel({ connectionString: url!, pool });
+      expect(await pricing.listFlexibleRatePlans(propertyId)).toEqual([
+        expect.objectContaining({
+          roomTypeId,
+          flexibleRatePlanId: flexId,
+          flexibleRatePlanRevision: 1,
+          baseAmount: { amountDecimal: "100.00", currency: "EUR" },
+          cancellationTerms: expect.objectContaining({ freeCancellationDeadlineDays: 7 }),
+        }),
+      ]);
+      const operations = createTargetPmsOperationsReadRepository({ connectionString: url!, pool });
+      const roomTypes = await operations.listRoomTypesByPropertyId(propertyId);
+      expect(
+        roomTypes.items[0]!.ratePlans.filter(
+          (plan) => plan.pricingContractVersion === "pricing.v2",
+        ).map(({ ratePlanId, rateType, baseRate }) => ({ ratePlanId, rateType, baseRate })),
+      ).toEqual([
+        {
+          ratePlanId: flexId,
+          rateType: "flexible",
+          baseRate: { amountDecimal: "100.00", currency: "EUR" },
+        },
+        {
+          ratePlanId: nrId,
+          rateType: "non_refundable",
+          baseRate: { amountDecimal: "0", currency: "EUR" },
+        },
+      ]);
+    });
+
     it("stores the published price and keeps the offer out of the legacy rate-plan column", async () => {
-      const created = await repository().createManualBooking(command("nr"));
+      const created = await repository().createManualBooking(command(nrId));
       // Non-refundable is 10% below the flat 100.00 Flexible price: 90.00 for each of two nights.
       expect(created).toMatchObject({ outcome: "created", total: { amountDecimal: "180.00" } });
       const assignment = (
@@ -183,7 +220,7 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
       expect(assignment.rate_plan_id).toBeNull();
       expect(assignment.assignment_payload).toMatchObject({
         contractVersion: "pms-manual-booking.v1",
-        pricingOffer: { offerId: "nr", pricingRevision: 1 },
+        pricingOffer: { offerId: nrId, pricingRevision: 1 },
       });
       const nights = (
         await pool.query(
@@ -200,10 +237,10 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
       // Separate dates: each create re-optimizes room assignments, which may move the other stay.
       const [first, second, preview] = await Promise.all([
         repository().createManualBooking(
-          command("flex", { roomId: roomIds[0]!, checkIn: "2027-05-01" }),
+          command(flexId, { roomId: roomIds[0]!, checkIn: "2027-05-01" }),
         ),
         repository().createManualBooking(
-          command("nr", { roomId: roomIds[1]!, checkIn: "2027-05-10" }),
+          command(nrId, { roomId: roomIds[1]!, checkIn: "2027-05-10" }),
         ),
         reader.readCurrentPricingPublication({ propertyId }),
       ]);
@@ -241,7 +278,7 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
       }
       // ...while staff bookings still price from the publication.
       const created = await repository().createManualBooking(
-        command("flex", { roomId: roomIds[1]!, checkIn: "2027-06-01" }),
+        command(flexId, { roomId: roomIds[1]!, checkIn: "2027-06-01" }),
       );
       expect(created.total.amountDecimal).toBe("200.00");
     });
@@ -282,17 +319,21 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
   /** Terms, owner sources, charge declaration and authority through their real stores, then publish. */
   async function publish(context: RequestContext) {
     const terms: ReplacementOfferTerms[] = [];
-    for (const offerId of ["flex", "nr"])
+    const flexible = {
+      type: "free_until_days_before_arrival" as const,
+      freeCancellationDeadlineDays: 7,
+      afterDeadlinePenalty: "full_booking_amount" as const,
+      noShowPenalty: "full_booking_amount" as const,
+    };
+    for (const [offerId, cancellation] of [
+      [flexId, { kind: "flexible" as const, terms: flexible }],
+      [nrId, { kind: "non_refundable" as const }],
+    ] as const)
       terms.push(
         await createBookingPricingOfferTermsStore(pool).save(context, scope, {
           requestId: randomUUID(),
           expectedRevision: null,
-          terms: {
-            roomTypeId,
-            offerId,
-            cancellation: { kind: "non_refundable" },
-            payment: { kind: "full" },
-          },
+          terms: { roomTypeId, offerId, cancellation, payment: { kind: "full" } },
         }),
       );
     const client = await pool.connect();
@@ -328,8 +369,8 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
       kind: "room_only" as const,
       charge: { kind: "room" as const, amountMinor: "0" },
     };
-    const flex = terms.find((t) => t.offerId === "flex")!,
-      nr = terms.find((t) => t.offerId === "nr")!;
+    const flex = terms.find((t) => t.offerId === flexId)!,
+      nr = terms.find((t) => t.offerId === nrId)!;
     const snapshot: PricingStorageSnapshot = {
       currency: "EUR",
       ownerReferences: { finance: finance.evidenceId },
@@ -347,7 +388,7 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
           },
           offers: [
             {
-              id: "flex",
+              id: flexId,
               termsRevision: flex.revision,
               meal,
               price: {
@@ -363,12 +404,12 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
               restrictions: { kind: "own", rules, seasons: [], dates: [] },
             },
             {
-              id: "nr",
+              id: nrId,
               termsRevision: nr.revision,
               meal,
               price: {
                 kind: "linked",
-                parentId: "flex",
+                parentId: flexId,
                 adjustment: { kind: "percentage", basisPoints: -1000 },
                 dateOverrides: [],
               },

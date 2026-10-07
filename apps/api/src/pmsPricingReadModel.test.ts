@@ -115,3 +115,103 @@ describe("PMS pricing read model", () => {
     expect(calls.at(-1)?.sql).toBe("ROLLBACK");
   });
 });
+
+describe("published flexible rate plans", () => {
+  const flexibleTerms = {
+    type: "free_until_days_before_arrival",
+    freeCancellationDeadlineDays: 7,
+    afterDeadlinePenalty: "full_booking_amount",
+    noShowPenalty: "full_booking_amount",
+  };
+  const offer = (id: string, base: unknown, meal = "room_only", kind = "independent") =>
+    kind === "independent"
+      ? { id, meal: { kind: meal }, price: { kind, calendar: { base } } }
+      : { id, meal: { kind: meal }, price: { kind, parentId: planId } };
+  const row = (roomType: string, published: unknown, cancellation: unknown, currency = "EUR") => ({
+    roomTypeId: roomType,
+    currency,
+    sourceRoomFactsRevision: "4",
+    pricingRevision: 7,
+    publishedAt: now,
+    offer: published,
+    terms: { cancellation },
+  });
+  function model(rows: unknown[]) {
+    const pool: PmsPricingReadPool = {
+      async query(text: string) {
+        expect(text).toContain("pms.pricing_v2_heads");
+        return { rows, rowCount: rows.length } as never;
+      },
+      async connect() {
+        throw new Error("plan reads need no transaction");
+      },
+    };
+    return createPgPmsPricingReadModel({ connectionString: "unused", pool });
+  }
+
+  it("maps the first refundable independent offer of each room", async () => {
+    const otherRoom = "40000000-0000-4000-8000-000000000002";
+    const read = model([
+      // Non-refundable and linked offers are not the room's flexible plan.
+      row(
+        roomTypeId,
+        offer("60000000-0000-4000-8000-000000000001", { mode: "flat", amountMinor: "9000" }),
+        { kind: "non_refundable" },
+      ),
+      row(roomTypeId, offer("60000000-0000-4000-8000-000000000002", null, "room_only", "linked"), {
+        kind: "flexible",
+        terms: flexibleTerms,
+      }),
+      row(
+        roomTypeId,
+        offer(planId, { mode: "occupancy", amountsMinor: ["12550", "15000"] }, "half_board"),
+        { kind: "flexible", terms: flexibleTerms },
+      ),
+      row(
+        otherRoom,
+        offer(
+          "60000000-0000-4000-8000-000000000003",
+          { mode: "per_person", unitMinor: "8000" },
+          "breakfast",
+        ),
+        { kind: "flexible", terms: flexibleTerms },
+        "JPY",
+      ),
+    ]);
+    const plans = await read.listFlexibleRatePlans(propertyId);
+    expect(plans).toEqual([
+      {
+        contractVersion: "pms-pricing.v1",
+        propertyId,
+        roomTypeId,
+        flexibleRatePlanId: planId,
+        flexibleRatePlanRevision: 7,
+        sourceRoomFactsRevision: 4,
+        baseAmount: { amountDecimal: "125.50", currency: "EUR" },
+        cancellationTerms: flexibleTerms,
+        createdAt: now,
+        updatedAt: now,
+      },
+      expect.objectContaining({
+        roomTypeId: otherRoom,
+        mealPlan: "breakfast",
+        baseAmount: { amountDecimal: "8000.00", currency: "JPY" },
+      }),
+    ]);
+    expect(await read.getFlexibleRatePlan(propertyId, otherRoom)).toMatchObject({
+      roomTypeId: otherRoom,
+    });
+  });
+
+  it("has no plan for unpublished rooms, missing base prices or non-UUID offer ids", async () => {
+    const read = model([
+      row(roomTypeId, offer("flex", { mode: "flat", amountMinor: "10000" }), {
+        kind: "flexible",
+        terms: flexibleTerms,
+      }),
+      row(roomTypeId, offer(planId, null), { kind: "flexible", terms: flexibleTerms }),
+    ]);
+    expect(await read.listFlexibleRatePlans(propertyId)).toEqual([]);
+    expect(await read.getFlexibleRatePlan(propertyId, roomTypeId)).toBeNull();
+  });
+});
