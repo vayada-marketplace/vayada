@@ -22,6 +22,10 @@ changes require a new version. Additive response evidence may be added to v1.
 An optional request field may also be added to v1 when omitting it keeps the
 exact previous meaning, idempotency fingerprint and response, and when the
 amendment is recorded below. Existing callers then need no change.
+Amendments after the VAY-647 clarification of 2026-08-13 apply to the target
+TypeScript track only: the legacy release track and its backport (VAY-1258)
+were cancelled, so no legacy caller can send them. The target route is the
+only writer that accepts them.
 
 ### v1 amendments
 
