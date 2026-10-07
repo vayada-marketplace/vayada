@@ -618,7 +618,7 @@ jobs:
         if: matrix.shard == 'hotel-setup'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ef69824c3364c1e43caad5c474e1615f39aff8bd
+          ref: 480602efd31b71e7997be1c5aae2c23930be3933
           path: .hotel-setup-compatible-rollback
           persist-credentials: false
 
@@ -626,7 +626,7 @@ jobs:
         if: matrix.shard == 'hotel-setup'
         working-directory: .hotel-setup-compatible-rollback
         run: |
-          test "$(git rev-parse HEAD)" = ef69824c3364c1e43caad5c474e1615f39aff8bd
+          test "$(git rev-parse HEAD)" = 480602efd31b71e7997be1c5aae2c23930be3933
           # This checkout relies on its own prebuild hooks to compile its backend packages.
           unset npm_config_ignore_scripts
           npm ci
