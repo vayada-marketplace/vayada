@@ -14,6 +14,7 @@ import {
 import { CheckoutInspectionStep, settingsService } from "@/services/settings";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { useTranslation } from "@/lib/i18n";
+import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { localizeCheckoutInspectionStep } from "@/lib/settings/checklistCopy";
 
 type InspectionDraft = {
@@ -158,7 +159,7 @@ export default function CheckOutPage() {
         setCharges(chargeRes.charges || []);
         setNotes(noteRes.notes || []);
       })
-      .catch((err) => setError(err.message || t("checkOut.loadError")))
+      .catch((err) => setError(localizedErrorText(err, err.message || t("checkOut.loadError"), t)))
       .finally(() => setLoading(false));
   }, [id, t]);
 

@@ -13,6 +13,7 @@ import {
 import { isPmsOperationsReadModelEnabled } from "@/services/api/pmsOperationsClient";
 import { CheckoutInspectionStep, settingsService } from "@/services/settings";
 import { useTranslation } from "@/lib/i18n";
+import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { localizeCheckoutInspectionStep } from "@/lib/settings/checklistCopy";
 
 const DRAFT_STORAGE_KEY = "vayada:pms:checkout-inspection-preview";
@@ -90,7 +91,9 @@ export function CheckoutInspectionBuilder() {
     settingsService
       .getCheckoutInspection()
       .then((template) => setSteps(template.steps || []))
-      .catch((err) => setError(err.message || t("settings.inspection.loadError")))
+      .catch((err) =>
+        setError(localizedErrorText(err, err.message || t("settings.inspection.loadError"), t)),
+      )
       .finally(() => setLoading(false));
   }, [t]);
 

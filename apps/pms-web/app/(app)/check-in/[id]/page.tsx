@@ -21,6 +21,7 @@ import BookingStaySummary, {
   expectedPaymentMethodLabel,
 } from "@/components/bookings/BookingStaySummary";
 import { useTranslation } from "@/lib/i18n";
+import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import { localizeBuiltInCheckinStep } from "@/lib/settings/checklistCopy";
 
 type GuestDraft = BookingAdditionalGuestPayload & { id?: string; position: number };
@@ -198,7 +199,7 @@ export default function CheckInPage() {
         setChecklistSteps(checklistRes.steps || []);
         setNotes(noteRes.notes || []);
       })
-      .catch((err) => setError(err.message || t("checkIn.loadError")))
+      .catch((err) => setError(localizedErrorText(err, err.message || t("checkIn.loadError"), t)))
       .finally(() => setLoading(false));
   }, [id, t]);
 

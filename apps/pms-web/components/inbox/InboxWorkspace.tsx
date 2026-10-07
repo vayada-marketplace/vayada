@@ -73,6 +73,7 @@ import {
   propertyLocalDateTimeToIso,
 } from "./inboxFormat";
 import { useTranslation } from "@/lib/i18n";
+import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 
 type ComposerMode = "reply" | "note";
 type Draft = {
@@ -315,7 +316,8 @@ export default function InboxWorkspace() {
       })
       .catch((error) => {
         if (!cancelled) {
-          setListError(inboxError(error));
+          const parsed = inboxError(error);
+          setListError({ ...parsed, message: localizedErrorText(error, parsed.message, t) });
           setListLoading(false);
         }
       });

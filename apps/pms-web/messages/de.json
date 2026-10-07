@@ -2647,6 +2647,7 @@
   "handoff.transferring": "Ihre Sitzung wird übertragen",
   "auth.chooseProperty.empty": "Es wurde noch keine Unterkunft erstellt. Starten Sie die Einrichtung oder setzen Sie sie fort, sobald Sie bereit sind.",
   "common.done": "Fertig",
+  "common.selectPmsPropertyFirst": "Wählen Sie eine Unterkunft aus, um fortzufahren.",
   "layout.sidebar.unavailableNamed": "{label} — noch nicht verfügbar",
   "layout.sidebar.soon": "Bald",
   "inbox.loadingInbox": "Posteingang wird geladen",

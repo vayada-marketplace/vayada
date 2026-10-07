@@ -17,6 +17,7 @@ import {
   settingsService,
 } from "@/services/settings";
 import { useTranslation } from "@/lib/i18n";
+import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import {
   defaultCheckinChecklistSteps,
   localizeBuiltInCheckinStep,
@@ -98,7 +99,9 @@ export function CheckinChecklistBuilder() {
     settingsService
       .getCheckinChecklist()
       .then((template) => setSteps(template.steps || []))
-      .catch((err) => setError(err.message || t("settings.checklist.loadError")))
+      .catch((err) =>
+        setError(localizedErrorText(err, err.message || t("settings.checklist.loadError"), t)),
+      )
       .finally(() => setLoading(false));
   }, [t]);
 
