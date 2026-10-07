@@ -229,6 +229,13 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   await expect(phone).toHaveValue("0812-3456-7890");
   await dialCode.selectOption("DE");
   await phone.fill("089 1234567");
+
+  // Additional guests are booking-level cards; exceeding room capacity only warns.
+  await dialog.getByRole("button", { name: "+ Add guest" }).click();
+  await dialog.getByLabel("Guest 1 first name").fill("Grace");
+  await dialog.getByLabel("Guest 1 last name").fill("Hopper");
+  await dialog.getByText("Guest 1 · Grace Hopper").click();
+  await expect(dialog.getByLabel("Guest 1 first name")).toBeHidden();
   await createBooking.click();
   await expect.poll(() => createBody).not.toBeNull();
   expect(createBody).toMatchObject({
@@ -238,6 +245,9 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
       countryCode: "DE",
       phoneE164: "+49891234567",
     },
+    additionalGuests: [
+      { firstName: "Grace", lastName: "Hopper", email: null, phoneE164: null, countryCode: null },
+    ],
     stays: [
       {
         roomId: GARDEN_ROOM_ID,

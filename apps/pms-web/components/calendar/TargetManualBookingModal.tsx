@@ -15,6 +15,10 @@ import type { BookingAddon } from "@/services/bookings";
 import { useTranslation } from "@/lib/i18n";
 import { NationalitySelect } from "@vayada/locale-ui/NationalitySelect";
 import PhoneNumberInput, { phoneCountryOrEmpty, phoneToE164 } from "@/components/PhoneNumberInput";
+import AdditionalGuestsEditor, {
+  additionalGuestValid,
+  type AdditionalGuestDraft,
+} from "@/components/calendar/AdditionalGuestsEditor";
 
 // prettier-ignore
 const SOURCES = [["call", "calendar.targetManualBooking.sourceCall"], ["email", "calendar.targetManualBooking.sourceEmail"], ["whatsapp", "calendar.targetManualBooking.sourceWhatsApp"], ["walk_in", "calendar.targetManualBooking.sourceWalkIn"], ["social_media", "calendar.targetManualBooking.sourceSocialMedia"], ["other", "calendar.targetManualBooking.sourceOther"]] as const;
@@ -141,6 +145,8 @@ export default function TargetManualBookingModal({
   // prettier-ignore
   const [stays, setStays] = useState(() => [stayDefaults(1, firstRoom?.id ?? "", initialCheckIn, initialCheckOut, roomTypes, rooms)]), [addons, setAddons] = useState<BookingAddon[]>([]), [addonPackages, setAddonPackages] = useState<Record<string, number>>({}), [addonState, setAddonState] = useState<"loading" | "ready" | "error">("loading"), [firstName, setFirstName] = useState(""), [lastName, setLastName] = useState(""), [email, setEmail] = useState(""), [phone, setPhone] = useState(""), [countryCode, setCountryCode] = useState(""), [source, setSource] = useState<PmsManualBookingCreateInput["directSource"]>("call"), [method, setMethod] = useState<PmsManualBookingCreateInput["payment"]["expectedMethod"]>("pay_at_property"), [settlement, setSettlement] = useState<"paid" | "unpaid">("unpaid"), [specialRequests, setSpecialRequests] = useState(""), [privateNote, setPrivateNote] = useState(""), [previewEvidence, setPreviewEvidence] = useState<{ key: string; result: PmsManualBookingPreviewResult } | null>(null), [previewState, setPreviewState] = useState<"idle" | "loading" | "error">("idle"), [message, setMessage] = useState(""), [stayError, setStayError] = useState<{ key: number; field: string; message: string } | null>(null), [submitting, setSubmitting] = useState(false), [retryLocked, setRetryLocked] = useState(false), [focusTarget, setFocusTarget] = useState<string | null>(null), [canRecordPaidPayment, setCanRecordPaidPayment] = useState(suppliedPaidCapability ?? false);
   const [phoneCountry, setPhoneCountry] = useState("");
+  const [additionalGuests, setAdditionalGuests] = useState<AdditionalGuestDraft[]>([]);
+  const [guestFocus, setGuestFocus] = useState<{ key: number } | null>(null);
   const [showPreviewSpinner, setShowPreviewSpinner] = useState(false);
   const [previewMessage, setPreviewMessage] = useState("");
   const [previewCanRetry, setPreviewCanRetry] = useState(false);
@@ -224,6 +230,24 @@ export default function TargetManualBookingModal({
   }, [addonPackages, addons, conflicts, roomTypes, rooms, stays]);
   const previewKey = previewInput ? JSON.stringify(previewInput) : null;
   const preview = previewEvidence?.key === previewKey ? previewEvidence.result : null;
+  // Capacity is the tightest night, so split or back-to-back stays are not double counted.
+  const stayCapacity = (stay: StayDraft) =>
+    roomTypes.find((type) => type.id === rooms.find((room) => room.id === stay.roomId)?.roomTypeId)
+      ?.maxOccupancy ?? 0;
+  const nights = new Set<string>();
+  for (const stay of stays)
+    for (let date = stay.checkIn; date && date < stay.checkOut; date = addDay(date))
+      nights.add(date);
+  const guestCapacity = nights.size
+    ? Math.min(
+        ...Array.from(nights, (date) =>
+          stays
+            .filter((stay) => stay.checkIn <= date && date < stay.checkOut)
+            .reduce((sum, stay) => sum + stayCapacity(stay), 0),
+        ),
+      )
+    : stays.reduce((sum, stay) => sum + stayCapacity(stay), 0);
+  const partySize = stays.reduce((sum, stay) => sum + stay.adults + stay.children, 0);
   const customRatePending = stays.some(
     (stay) => stay.ratePlanId === "custom" && amount(stay.nightlyRate) === null,
   );
@@ -323,12 +347,22 @@ export default function TargetManualBookingModal({
       return setMessage(t("calendar.targetManualBooking.phoneInvalid"));
     if (!retry && isoCountry && !/^[A-Z]{2}$/.test(isoCountry))
       return setMessage(t("calendar.targetManualBooking.countryValidation"));
+    const invalidGuest = additionalGuests.findIndex((guest) => !additionalGuestValid(guest));
+    if (!retry && invalidGuest >= 0) {
+      setAdditionalGuests((current) =>
+        current.map((guest, index) => (index === invalidGuest ? { ...guest, open: true } : guest)),
+      );
+      setGuestFocus({ key: additionalGuests[invalidGuest]!.key });
+      return setMessage(
+        t("calendar.targetManualBooking.additionalGuestInvalid", { number: invalidGuest + 1 }),
+      );
+    }
     if (!retry && (!previewInput || !preview || previewState !== "idle"))
       return setMessage(t("calendar.targetManualBooking.waitForPreview"));
     if (!retry && settlement === "paid" && !canRecordPaidPayment)
       return setMessage(t("calendar.targetManualBooking.paidPermissionRequired"));
     // prettier-ignore
-    attempt.current ??= { commandId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID(), ...previewInput!, guest: { firstName: firstName.trim(), lastName: lastName.trim(), email: email.trim(), phoneE164: phoneE164 || null, countryCode: isoCountry || null, specialRequests: specialRequests.trim() || null }, privateNote: privateNote.trim() || null, directSource: source, payment: { expectedMethod: method, settlement: settlement === "paid" ? { status: "paid", reference: null } : { status: "unpaid" } } };
+    attempt.current ??= { commandId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID(), ...previewInput!, guest: { firstName: firstName.trim(), lastName: lastName.trim(), email: email.trim(), phoneE164: phoneE164 || null, countryCode: isoCountry || null, specialRequests: specialRequests.trim() || null }, ...(additionalGuests.length ? { additionalGuests: additionalGuests.map((guest) => ({ firstName: guest.firstName.trim(), lastName: guest.lastName.trim(), email: guest.email.trim() || null, phoneE164: phoneToE164(guest.phoneCountry, guest.phone) || null, countryCode: guest.countryCode || null })) } : {}), privateNote: privateNote.trim() || null, directSource: source, payment: { expectedMethod: method, settlement: settlement === "paid" ? { status: "paid", reference: null } : { status: "unpaid" } } };
     attemptLocked.current = true;
     setRetryLocked(true);
     setSubmitting(true);
@@ -837,6 +871,16 @@ export default function TargetManualBookingModal({
                     inputClassName={inputClass}
                   />{" "}
                 </div>
+                <AdditionalGuestsEditor
+                  guests={additionalGuests}
+                  onChange={setAdditionalGuests}
+                  defaultPhoneCountry={phoneCountry}
+                  guestCapacity={guestCapacity}
+                  partySize={partySize}
+                  focusGuest={guestFocus}
+                  inputClass={inputClass}
+                  labelClass={labelClass}
+                />
               </div>{" "}
             </section>
             <section>

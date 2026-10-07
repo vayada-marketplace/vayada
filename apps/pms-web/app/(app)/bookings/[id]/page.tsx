@@ -1735,7 +1735,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     booking.paymentStatus === "unpaid" &&
     booking.hostResponseDeadline;
   const totalParty = booking.adults + booking.children;
-  const additionalCapacity = Math.max(0, totalParty - 1);
+  // Never below the stored guests: a manual booking may list more people than adults + children.
+  const additionalCapacity = Math.max(0, totalParty - 1, guests.length);
 
   // Build the per-room rows: bookings have numberOfRooms physical slots; the
   // assignedRooms list says which physical rooms map to which slot. If we
