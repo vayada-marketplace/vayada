@@ -6,6 +6,12 @@ nothing here grants, deploys, merges or activates anything. Evidence:
 (`inventory-api.md`, `migrations-and-rls.md`, `platform-apparatus.md`,
 `open-pricing-prs.md`, `vay1543-comments-export.md`)._
 
+## 0. Decision
+
+2026-10-07, Flamur: "yes proceed". Pricing writes rely on application-level
+tenant isolation (the VAY-2054 posture) instead of per-hotel database logins;
+the private pricing command service is not built. Slice A starts first.
+
 ## 1. Recommendation in one paragraph
 
 Run every pricing operation of the public TypeScript API as
