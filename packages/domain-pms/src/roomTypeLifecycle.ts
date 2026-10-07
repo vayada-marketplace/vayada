@@ -4,7 +4,8 @@ export const PMS_ROOM_TYPE_LIFECYCLE_CONTRACT_VERSION = "pms-room-type-lifecycle
  * The complete room-type-owned snapshot copied by duplication. Media objects
  * stay Platform-owned; only their PMS assignment references are copied.
  * Canonical pricing has its own revisioned authoring contracts and is not
- * inferred or cloned by this command.
+ * inferred or cloned by this command; the copy has no rate plans or rate rules
+ * until the pricing editor publishes it.
  */
 export const PMS_ROOM_TYPE_DUPLICATION_COPIED_FACTS = [
   "name_with_copy_suffix",
@@ -17,8 +18,6 @@ export const PMS_ROOM_TYPE_DUPLICATION_COPIED_FACTS = [
   "legacy_media_snapshot",
   "room_media_assignments",
   "legacy_base_rate_and_currency",
-  "legacy_rate_plan_configuration",
-  "legacy_dated_rate_rules",
 ] as const;
 
 export const PMS_ROOM_TYPE_DUPLICATION_RESET_FACTS = [
@@ -31,6 +30,8 @@ export const PMS_ROOM_TYPE_DUPLICATION_RESET_FACTS = [
   "inventory_days_and_reservations",
   "booking_assignments_and_room_blocks",
   "linked_inventory_membership",
+  "legacy_rate_plan_configuration",
+  "legacy_dated_rate_rules",
   "canonical_pricing_source_bindings",
   "channel_provider_mappings",
   "publication_snapshots",

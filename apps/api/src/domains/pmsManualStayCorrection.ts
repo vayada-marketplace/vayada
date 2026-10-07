@@ -80,8 +80,10 @@ export async function correctPmsManualStays(
        room_type_id=item."roomTypeId"::uuid,room_id=item."roomId"::uuid,
        rate_plan_id=item."ratePlanId"::uuid,check_in=item."checkIn"::date,
        check_out=item."checkOut"::date,
-       assignment_payload=jsonb_set(COALESCE(assignment_payload,'{}'),'{version}',
-         to_jsonb($4::text),true),updated_at=$5::timestamptz
+       -- A published offer belongs to one room type, like rate_plan_id above.
+       assignment_payload=jsonb_set(CASE WHEN assignment.room_type_id=item."roomTypeId"::uuid
+           THEN COALESCE(assignment_payload,'{}') ELSE COALESCE(assignment_payload,'{}')-'pricingOffer' END,
+         '{version}',to_jsonb($4::text),true),updated_at=$5::timestamptz
      FROM jsonb_to_recordset($3::jsonb) item(
        "assignmentId" text,"roomTypeId" text,"roomId" text,"ratePlanId" text,
        "checkIn" text,"checkOut" text)

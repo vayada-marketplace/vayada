@@ -206,15 +206,25 @@ function publishedNights(
   });
 }
 
-/** PMS money has two decimals; publication minor units use the currency's own scale (JPY 0,
- * KWD 3). Converted as accepted booking-engine quotes are; a remainder cannot be stored. */
 function cents(totalMinor: number | string, currency: string, stayPosition: number): bigint {
+  return (
+    publishedMinorToCents(totalMinor, currency) ??
+    fail(422, "currency_mismatch", "ratePlanId", stayPosition)
+  );
+}
+
+/** PMS money has two decimals; publication minor units use the currency's own scale (JPY 0,
+ * KWD 3). Converted as accepted booking-engine quotes are; null when a remainder cannot be
+ * stored. */
+export function publishedMinorToCents(
+  totalMinor: number | string,
+  currency: string,
+): bigint | null {
   const scale = pricingCurrencyScale(currency);
   if (scale === null) throw new Error(`Unsupported publication currency ${currency}`);
   const numerator = BigInt(totalMinor) * 100n,
     unit = 10n ** BigInt(scale);
-  if (numerator % unit !== 0n) fail(422, "currency_mismatch", "ratePlanId", stayPosition);
-  return numerator / unit;
+  return numerator % unit === 0n ? numerator / unit : null;
 }
 
 function unitFactor(
