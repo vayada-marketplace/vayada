@@ -465,7 +465,7 @@ async function createUiBooking(
   await dialog.getByLabel("First name").fill("Vera");
   await dialog.getByLabel("Last name").fill(label);
   await dialog.locator('input[type="email"]').fill(email);
-  await dialog.locator('input[name="phoneE164"]').fill("+49305550166");
+  await dialog.getByRole("textbox", { name: "Phone", exact: true }).fill("+49305550166");
   await dialog.getByLabel("Nationality").fill("Germany");
   const submit = dialog.getByRole("button", { name: "Create booking" });
   await expect(submit).toBeEnabled({ timeout: 15_000 });
