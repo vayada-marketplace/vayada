@@ -1,4 +1,5 @@
 import { pricingCurrencyScale, type PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
+import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
 import en from "@/messages/en.json";
 import { PricingResponseError, type PricingSnapshot } from "@/services/api/replacementPricingClient";
 
@@ -10,7 +11,7 @@ export const english: Translate = (key, params = {}) => Object.entries(params).r
 export class PricingError extends Error { constructor(readonly key: MessageKey) { super(english(key)); } }
 /** Translates pricing errors raised in the frontend; other messages, such as API errors, pass through unchanged. */
 export const errorText = (cause: unknown, t: Translate, fallback: MessageKey) => cause instanceof PricingError ? t(cause.key) : cause instanceof PricingResponseError ? t("pricing.error.unverified")
-  : cause instanceof Error ? cause.message : t(fallback);
+  : cause instanceof Error ? localizedErrorText(cause, cause.message, t) : t(fallback);
 
 type Base = Extract<PricingConfiguration["offers"][number]["price"], { kind: "independent" }>["calendar"]["base"];
 export function baseAmounts(base: Base, t: Translate = english): [string, string][] {
