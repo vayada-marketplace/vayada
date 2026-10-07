@@ -112,11 +112,18 @@ class FakeDb {
   async query<T>(text: string, values?: unknown[]) {
     this.calls.push({ text, values });
     if (text.includes("FROM pms.channel_connections")) return rows<T>([]);
+    // A replayed enable already created its active claim; replay must still win.
     if (text.includes("FROM pms.channel_binding_claims"))
-      return rows<T>(this.mode === "bound" ? [{ active: false }] : []);
+      return rows<T>(
+        this.mode === "bound"
+          ? [{ active: false }]
+          : this.mode === "replay"
+            ? [{ active: true }]
+            : [],
+      );
     if (text.includes("INSERT INTO platform.idempotency_keys")) {
       this.fingerprint = String(values?.[2]);
-      return rows<T>(this.mode === "new" ? [{ id: "idem-1" }] : []);
+      return rows<T>(this.mode === "new" || this.mode === "bound" ? [{ id: "idem-1" }] : []);
     }
     if (text.includes("SELECT request_fingerprint_hash")) {
       return rows<T>([
