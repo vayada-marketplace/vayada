@@ -341,6 +341,10 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   hotelSetupCreationForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
   /** Owner-only hotel-detail edits on the ordinary login; unset keeps the sparse writer. */
   hotelSetupProfileCommand?: import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate;
+  /** Owner-only launch settings on the ordinary login; unset keeps the forwarder or broad writer. */
+  hotelSetupLaunchSettingsCommand?: Parameters<
+    typeof import("./routes/sharedHotelSetupStatus.js").registerSharedHotelSetupLaunchSettings
+  >[1];
   auth?: ApiAuthOptions;
   authSession?: AuthSessionRouteOptions;
   browserAllowedOrigins?: string[];
@@ -795,6 +799,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       launchSettingsRepository: options.propertyLaunchSettingsRepository,
       propertyCreationForwarder: options.hotelSetupCreationForwarder,
       launchSettingsForwarder: options.hotelSetupCommandForwarder,
+      launchSettingsCommand: options.hotelSetupLaunchSettingsCommand,
       profileCommand: options.hotelSetupProfileCommand,
     });
   }

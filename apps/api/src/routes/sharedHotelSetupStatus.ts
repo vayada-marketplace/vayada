@@ -132,6 +132,9 @@ type SharedHotelSetupStatusRoutesOptions = {
   trackCommandRepository: HotelSetupTrackCommandRepository;
   propertyCreationForwarder?: HotelSetupCommandForwarder;
   launchSettingsForwarder?: HotelSetupCommandForwarder;
+  /** Owner-only narrow launch-settings write on the ordinary login (VAY-2056); replaces the
+   * forwarder and the broad Booking settings writer. Requires propertyAccessRepository. */
+  launchSettingsCommand?: Parameters<typeof registerSharedHotelSetupLaunchSettings>[1];
   /** Owner-only hotel-detail edits on the ordinary login (VAY-2056); unset keeps the
    * pre-cutover sparse writer used by local stacks and tests. Requires propertyAccessRepository. */
   profileCommand?: HotelSetupPropertyProfileUpdate;
@@ -411,15 +414,23 @@ export async function registerSharedHotelSetupStatusRoutes(
 
     registerSharedHotelSetupLaunchSettings(
       app,
-      async (context, propertyId, settings) => {
-        const stored = await launchSettingsRepository.updatePropertySettingsByHotelId(
-          propertyId,
-          settings,
-          context.selectedOrganization.organizationId,
-        );
-        return stored ? toSharedPropertyLaunchSettings(stored) : null;
-      },
-      { forward: options.launchSettingsForwarder },
+      options.launchSettingsCommand ??
+        (async (context, propertyId, settings) => {
+          const stored = await launchSettingsRepository.updatePropertySettingsByHotelId(
+            propertyId,
+            settings,
+            context.selectedOrganization.organizationId,
+          );
+          return stored ? toSharedPropertyLaunchSettings(stored) : null;
+        }),
+      options.launchSettingsCommand
+        ? {
+            requireOwnerSession: true,
+            propertyAccessRepository: requirePropertyAccessRepository(
+              options.propertyAccessRepository,
+            ),
+          }
+        : { forward: options.launchSettingsForwarder },
     );
   }
 

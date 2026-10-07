@@ -68,6 +68,7 @@ import { createHmac } from "node:crypto";
 import { buildApp, type ApiAuthOptions } from "./app.js";
 import { loadHotelSetupCommandForwarder } from "./hotelSetupCommandForwarder.js";
 import { createOrdinaryHotelSetupProfileCommand } from "./platform/hotelSetupProfileWriter.js";
+import { createOrdinaryHotelSetupLaunchSettingsCommand } from "./hotelSetupLaunchSettingsRepository.js";
 import {
   type ApiConfig,
   channexConnectionOnlyScope,
@@ -1851,6 +1852,8 @@ const app = buildApp({
   hotelSetupCreationForwarder,
   // VAY-2056: the HOTEL_SETUP_PROFILE_COMMAND_* variables are no longer read.
   hotelSetupProfileCommand: createOrdinaryHotelSetupProfileCommand(propertySetupOwnerPool),
+  hotelSetupLaunchSettingsCommand:
+    createOrdinaryHotelSetupLaunchSettingsCommand(propertySetupOwnerPool),
   financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,
