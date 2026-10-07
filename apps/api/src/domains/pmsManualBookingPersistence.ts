@@ -168,9 +168,16 @@ async function persistOperationalFacts(
     rooms: readonly PmsManualBookingRoom[];
     guestBookingId: string;
     acceptedAt: string;
+    pricingRevision: number | null;
   },
 ): Promise<readonly PmsOccupiedInventoryChange[]> {
-  await insertAssignments(transaction, input.command, input.guestBookingId, input.rooms);
+  await insertAssignments(
+    transaction,
+    input.command,
+    input.guestBookingId,
+    input.rooms,
+    input.pricingRevision,
+  );
   const roomTypes = new Map(input.rooms.map((room) => [room.roomId, room.roomTypeId]));
   try {
     const changes = await reconcilePmsOccupiedInventory(
@@ -249,6 +256,7 @@ async function insertAssignments(
   command: PmsManualBookingCreateCommand,
   guestBookingId: string,
   rooms: readonly PmsManualBookingRoom[],
+  pricingRevision: number | null,
 ): Promise<void> {
   const roomTypes = new Map(rooms.map((room) => [room.roomId, room.roomTypeId]));
   const assignments = command.stays.map((stay) => ({
@@ -262,13 +270,20 @@ async function insertAssignments(
        assigned_at, stay_evidence_kind, check_in, check_out, adults, children
      )
      SELECT $1::uuid, $2::uuid, item."roomTypeId"::uuid,
-       item."ratePlanId"::uuid, item."roomId"::uuid, item.position,
-       'assigned', 'direct', 'manual', jsonb_build_object('contractVersion', $4::text),
+       -- rate_plan_id references legacy pms.rate_plans; the published offer is kept in the payload.
+       NULL, item."roomId"::uuid, item.position,
+       'assigned', 'direct', 'manual',
+       jsonb_strip_nulls(jsonb_build_object(
+         'contractVersion', $4::text,
+         'pricingOffer', CASE WHEN item."ratePlanId" IS NULL THEN NULL ELSE jsonb_build_object(
+           'offerId', item."ratePlanId", 'pricingRevision', $6::int,
+           'childAgesAtCheckIn', item."childAgesAtCheckIn") END
+       )),
        $5::timestamptz, 'exact', item."checkIn"::date, item."checkOut"::date,
        item.adults, item.children
      FROM jsonb_to_recordset($3::jsonb) AS item(
        position int, "roomId" text, "roomTypeId" text, "ratePlanId" text,
-       "checkIn" text, "checkOut" text, adults int, children int
+       "checkIn" text, "checkOut" text, adults int, children int, "childAgesAtCheckIn" jsonb
      )`,
     [
       command.propertyId,
@@ -276,6 +291,7 @@ async function insertAssignments(
       JSON.stringify(assignments),
       command.contractVersion,
       command.audit.requestedAt,
+      pricingRevision,
     ],
   );
 }

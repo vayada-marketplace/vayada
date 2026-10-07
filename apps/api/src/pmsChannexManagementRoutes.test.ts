@@ -434,6 +434,23 @@ describe("PMS Channex management command routes", () => {
     expect(wrongScope.enqueue).not.toHaveBeenCalled();
   });
 
+  it("refuses disable in the connection-only scope while still queueing enable", async () => {
+    const harness = await testApp({}, mutating, undefined, false, false, propertyId, true);
+    app = harness.app;
+
+    const disable = await app.inject({
+      method: "POST",
+      url: `/properties/${propertyId}/channex/commands`,
+      headers: { authorization: "Bearer valid" },
+      payload: { commandId: "command-2", idempotencyKey: "key-2", operationType: "disable" },
+    });
+    expect(disable.statusCode).toBe(409);
+    expect(disable.json()).toEqual({ code: "channex_capability_not_mutating" });
+    expect(harness.enqueue).not.toHaveBeenCalled();
+    expect((await command(app)).statusCode).toBe(202);
+    expect(harness.enqueue).toHaveBeenCalledTimes(1);
+  });
+
   it("fails closed for observe-only capabilities and invalid payloads", async () => {
     const harness = await testApp({}, { ...mutating, connection: "observe_only" });
     app = harness.app;
@@ -626,6 +643,7 @@ async function testApp(
   stagingRecovery = false,
   publishedOfferProvisioningEnabled = false,
   publishedOfferProvisioningPropertyId = propertyId,
+  connectionOnly = false,
 ) {
   const app = Fastify({ logger: false });
   const getAlertDiagnostics = vi.fn().mockResolvedValue(null);
@@ -691,6 +709,7 @@ async function testApp(
     noShowReportingPropertyId: reportScope,
     publishedOfferProvisioningEnabled,
     publishedOfferProvisioningPropertyId,
+    connectionOnly,
   });
   return {
     app,

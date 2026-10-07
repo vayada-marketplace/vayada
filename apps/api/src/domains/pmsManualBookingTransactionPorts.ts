@@ -8,7 +8,7 @@ import type {
 import type { QueryResult, QueryResultRow } from "pg";
 
 import type { ManualBookingPreviewResult } from "../routes/pmsManualBookingPreview.js";
-import type { PmsManualBookingPreviewRoutesOptions } from "../routes/pmsManualBookingPreviewCalculation.js";
+import type { ManualBookingPricingPublication } from "../routes/pmsManualBookingPreviewCalculation.js";
 import type { PmsRoomAssignmentOptimizationTriggerPort } from "./pmsRoomAssignmentOptimizationTriggers.js";
 import type { PmsOccupiedInventoryChange } from "./pmsOccupiedInventory.js";
 
@@ -70,6 +70,8 @@ export interface PmsManualBookingOperationsOwnerPort {
     rooms: readonly PmsManualBookingRoom[];
     guestBookingId: string;
     acceptedAt: string;
+    /** Publication revision that priced the offer stays; null when every stay is custom. */
+    pricingRevision: number | null;
   }): Promise<readonly PmsOccupiedInventoryChange[]>;
 }
 
@@ -121,17 +123,15 @@ export interface PmsManualBookingTransactionalPricingPort {
 }
 
 export type PmsManualBookingCurrentPricingEvidence = {
-  getPricingSourceSnapshot(input: {
-    transaction: PmsManualBookingTransaction;
-    propertyId: string;
-  }): ReturnType<PmsManualBookingPreviewRoutesOptions["pricing"]["getPricingSourceSnapshot"]>;
-  getRoomPublicationSnapshot(input: {
+  readCurrentPricingPublication(input: {
     transaction: PmsManualBookingTransaction;
     propertyId: string;
     organizationId: string;
-  }): ReturnType<
-    PmsManualBookingPreviewRoutesOptions["roomPublication"]["getRoomPublicationSnapshot"]
-  >;
+  }): Promise<ManualBookingPricingPublication | null>;
+  readPropertyPricingCurrency(input: {
+    transaction: PmsManualBookingTransaction;
+    propertyId: string;
+  }): Promise<string | null>;
 };
 
 export type PmsManualBookingTransactionDependencies = Readonly<{
