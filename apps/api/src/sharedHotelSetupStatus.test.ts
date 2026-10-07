@@ -15,6 +15,7 @@ import type {
   MembershipPropertyScope,
   PropertyAccessRepository,
 } from "@vayada/backend-authorization";
+import { AuthorizationError } from "@vayada/backend-authorization";
 import { injectJson } from "@vayada/backend-test";
 import type {
   AdaptiveHotelSetupStatus,
@@ -2561,6 +2562,53 @@ describe("shared hotel setup status route", () => {
     expect(forward).toHaveBeenCalledTimes(2);
   });
 
+  it("saves launch settings through the Owner-only ordinary command, never the broad writer", async () => {
+    const write = vi.fn();
+    const payload = {
+      defaultCurrency: "LKR",
+      supportedCurrencies: [],
+      defaultLanguage: "en",
+      supportedLanguages: [],
+      instagram: "",
+      facebook: "",
+      tiktok: "",
+      youtube: "",
+    };
+    const command = vi.fn().mockResolvedValue(payload);
+    const request = {
+      method: "PUT" as const,
+      url: `/api/hotel-setup/properties/${propertyId}/launch-settings`,
+      headers: { authorization: "Bearer valid-token" },
+      payload,
+    };
+    const build = (relationship: "owner" | "operator") =>
+      buildSharedSetupApp({
+        permissions: ["hotel_catalog.setup.manage"],
+        linkedResources: [{ ...propertyLink(propertyId), relationship }],
+        repository: repositoryWith([]),
+        launchSettingsCommand: command,
+        launchSettingsRepository: {
+          findPropertySettingsByHotelId: vi.fn(),
+          updatePropertySettingsByHotelId: write,
+        },
+      });
+
+    app = build("owner");
+    expect(await injectJson(app, request)).toEqual({ statusCode: 200, body: payload });
+    expect(command).toHaveBeenCalledWith(expect.anything(), propertyId, payload);
+    command.mockRejectedValueOnce(new AuthorizationError());
+    expect((await injectJson(app, request)).statusCode).toBe(403);
+    await app.close();
+
+    app = build("operator");
+    expect(await injectJson(app, request)).toMatchObject({
+      statusCode: 403,
+      body: { code: "owner_session_required" },
+    });
+    expect(command).toHaveBeenCalledTimes(2);
+    expect(write).not.toHaveBeenCalled();
+  });
+
   it("rejects launch settings access outside the selected hotel group", async () => {
     const launchSettingsRepository: SharedPropertyLaunchSettingsRepository = {
       async findPropertySettingsByHotelId() {
@@ -3478,6 +3526,9 @@ function buildSharedSetupApp(options: {
   launchSettingsRepository?: SharedPropertyLaunchSettingsRepository;
   launchForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
   profileCommand?: import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate;
+  launchSettingsCommand?: Parameters<
+    typeof import("./routes/sharedHotelSetupStatus.js").registerSharedHotelSetupLaunchSettings
+  >[1];
   trackCommandRepository?: HotelSetupTrackCommandRepository;
   propertyAccessRepository?: PropertyAccessRepository;
   permissions?: PermissionKey[];
@@ -3493,6 +3544,7 @@ function buildSharedSetupApp(options: {
     propertyLaunchSettingsRepository: options.launchSettingsRepository,
     hotelSetupCommandForwarder: options.launchForwarder,
     hotelSetupProfileCommand: options.profileCommand,
+    hotelSetupLaunchSettingsCommand: options.launchSettingsCommand,
     hotelSetupTrackCommandRepository:
       options.trackCommandRepository ?? unusedTrackCommandRepository(),
     auth: {
