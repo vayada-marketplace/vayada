@@ -218,19 +218,27 @@ export async function readPublishedFlexibleRatePlans(
   return [...plans.values()];
 }
 
-/** Flexible plans of the PMS pricing source once the property has a pricing-v2 publication
- * (its legacy writers are retired): the published adapter, limited to open rooms like the legacy
- * rows. Null without a publication, so the caller keeps the legacy rows. The pricing source and
- * the mandatory-charge fingerprint both read this, so their evidence stays identical. */
-export async function readSourcePublishedFlexibleRatePlans(
-  queryable: Queryable,
-  propertyId: string,
-): Promise<FlexibleRatePlanSnapshot[] | null> {
+/** True once the property has a pricing-v2 publication; it then supersedes the retired legacy
+ * flexible plans and recurring pricing in the PMS pricing source. */
+export async function hasPricingPublication(queryable: Queryable, propertyId: string) {
   const head = await queryable.query(
     "SELECT 1 FROM pms.pricing_v2_heads WHERE property_id = $1::uuid",
     [propertyId],
   );
-  if (head.rows.length === 0) return null;
+  return head.rows.length > 0;
+}
+
+/** Flexible plans of the PMS pricing source once the property has a pricing-v2 publication:
+ * the published adapter, limited to open rooms like the legacy rows and to the property's
+ * pricing currency (a plan in another currency is missing, not malformed). Null without a
+ * publication, so the caller keeps the legacy rows. The pricing source and the
+ * mandatory-charge fingerprint both read this, so their evidence stays identical. */
+export async function readSourcePublishedFlexibleRatePlans(
+  queryable: Queryable,
+  propertyId: string,
+  currency: string,
+): Promise<FlexibleRatePlanSnapshot[] | null> {
+  if (!(await hasPricingPublication(queryable, propertyId))) return null;
   const closed = await queryable.query<{ roomTypeId: string }>(
     `SELECT room_type_id::text AS "roomTypeId" FROM pms.room_type_closures
      WHERE property_id = $1::uuid`,
@@ -238,7 +246,7 @@ export async function readSourcePublishedFlexibleRatePlans(
   );
   const closedRoomIds = new Set(closed.rows.map(({ roomTypeId }) => roomTypeId));
   return (await readPublishedFlexibleRatePlans(queryable, propertyId)).filter(
-    ({ roomTypeId }) => !closedRoomIds.has(roomTypeId),
+    (plan) => !closedRoomIds.has(plan.roomTypeId) && plan.baseAmount.currency === currency,
   );
 }
 
@@ -349,7 +357,11 @@ export async function loadPmsPricingSourceSnapshot(
   if (result.rows.length !== 1) throw new Error("PMS pricing sources read is malformed");
   const row = result.rows[0]!;
   if (!row.pricingCurrency) return null;
-  const published = await readSourcePublishedFlexibleRatePlans(queryable, normalizedPropertyId);
+  const published = await readSourcePublishedFlexibleRatePlans(
+    queryable,
+    normalizedPropertyId,
+    row.pricingCurrency.currency,
+  );
   const snapshot = parsePmsPricingSourceSnapshot({
     contractVersion: PMS_PRICING_CONTRACT_VERSION,
     propertyId: normalizedPropertyId,

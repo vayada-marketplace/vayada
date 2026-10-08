@@ -5,10 +5,7 @@ import {
   createBookingMandatoryChargeConfirmationEvidenceAdapter,
   type ReplacementOfferTerms,
 } from "@vayada/domain-booking";
-import {
-  parseConfirmMandatoryChargesIncludedCommand,
-  type PmsManualBookingCreateCommand,
-} from "@vayada/domain-pms";
+import type { PmsManualBookingCreateCommand } from "@vayada/domain-pms";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -35,7 +32,6 @@ import {
   createPmsManualBookingTransactionalPricingPort,
 } from "./pmsManualBookingTransactionalPricing.js";
 import { createTargetPmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
-import { createPgPmsMandatoryChargeConfirmationCommandRepository } from "./pmsMandatoryChargeConfirmationCommandRepository.js";
 import { createPgPmsMandatoryChargeConfirmationReadModel } from "./pmsMandatoryChargeConfirmationReadModel.js";
 import { loadPmsMandatoryChargePricingSourceSnapshot } from "./pmsMandatoryChargePricingSourceSnapshot.js";
 import { createPgPmsPricingReadModel } from "./pmsPricingReadModel.js";
@@ -289,32 +285,27 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
           sourceRoomFactsRevision: 1,
         },
       ]);
-      await pool.query(
-        `INSERT INTO identity.role_permission_grants(organization_kind,role_key,permission_key)
-         VALUES('hotel_group',$1,'pms.operations.manage')`,
-        [roleKey],
-      );
-      const fingerprint = createHash("sha256").update(source!.serializedPayload).digest("hex");
-      const confirmed = await createPgPmsMandatoryChargeConfirmationCommandRepository({
+      expect(recurringPricing).toMatchObject({ optionalPricingAggregateRevision: 0, sources: [] });
+      // The publication's charge declaration is the final-price confirmation: no legacy write.
+      const read = await createPgPmsMandatoryChargeConfirmationReadModel({
         connectionString: url!,
         pool,
-      }).confirmMandatoryChargesIncluded(
-        parseConfirmMandatoryChargesIncludedCommand({
-          organizationId,
-          propertyId,
-          expectedConfirmationRevision: 0,
-          claimedPricingSourceFingerprint: fingerprint,
-          expectedPricingSourceRevisions: source!.sourceRevisions,
-          idempotencyKey: randomUUID(),
-          audit: {
-            actor: { kind: "user", userId: actorUserId },
-            requestId: randomUUID(),
-            correlationId: randomUUID(),
-            requestedAt: new Date().toISOString(),
-          },
-        })!,
-      );
-      expect(confirmed).toMatchObject({ ok: true });
+      }).getMandatoryChargeConfirmation({ organizationId, propertyId });
+      expect(read).toMatchObject({
+        outcome: "available",
+        evidence: {
+          pricingSourceFingerprint: createHash("sha256")
+            .update(source!.serializedPayload)
+            .digest("hex"),
+          confirmationRevision: 1,
+        },
+      });
+      expect(
+        await createPgPmsMandatoryChargeConfirmationReadModel({
+          connectionString: url!,
+          pool,
+        }).getMandatoryChargeConfirmation({ organizationId: randomUUID(), propertyId }),
+      ).toMatchObject({ outcome: "missing" });
       const confirmation = await createBookingMandatoryChargeConfirmationEvidenceAdapter(
         createPgPmsMandatoryChargeConfirmationReadModel({ connectionString: url!, pool }),
       ).getMandatoryChargeConfirmation({ organizationId, propertyId });
