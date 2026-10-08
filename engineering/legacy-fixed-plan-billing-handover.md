@@ -6,16 +6,16 @@ note is the contract they implement. It changes no production state._
 
 ## Decisions (2026-10-08)
 
-| Topic                         | Decision                                                                                                                                        |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Owner                         | Legacy billing is **frozen before go-day**. The target owns billing **right after the import and before reopen**.                               |
-| Stripe objects                | **Keep** the existing subscriptions, customers and cards. No re-checkout, no double charge.                                                     |
-| Cycle                         | **Keep the 30-day cycle** for adopted hotels. New target checkouts stay monthly.                                                                 |
-| Price                         | **Keep each hotel's current price**, including custom per-hotel prices. The price is never swapped.                                             |
-| Dunning                       | When Stripe's retries are exhausted the hotel **reverts to Commission**, as on legacy today.                                                     |
-| Outside the cohort            | A live subscription of a hotel outside the migration cohort is **cancelled at period end, with notice** to the hotel.                            |
-| Rollback                      | 0-day window. Before reopen adoption is reversible per hotel. After reopen fix forward.                                                          |
-| Inventory                     | Two subscriptions exist on the platform account (dashboard). Which hotels, and their status, come from a read-only counts run (human step 0).   |
+| Topic              | Decision                                                                                                                                      |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Owner              | Legacy billing is **frozen before go-day**. The target owns billing **right after the import and before reopen**.                             |
+| Stripe objects     | **Keep** the existing subscriptions, customers and cards. No re-checkout, no double charge.                                                   |
+| Cycle              | **Keep the 30-day cycle** for adopted hotels. New target checkouts stay monthly.                                                              |
+| Price              | **Keep each hotel's current price**, including custom per-hotel prices. The price is never swapped.                                           |
+| Dunning            | When Stripe's retries are exhausted the hotel **reverts to Commission**, as on legacy today.                                                  |
+| Outside the cohort | A live subscription of a hotel outside the migration cohort is **cancelled at period end, with notice** to the hotel.                         |
+| Rollback           | 0-day window. Before reopen adoption is reversible per hotel. After reopen fix forward.                                                       |
+| Inventory          | Two subscriptions exist on the platform account (dashboard). Which hotels, and their status, come from a read-only counts run (human step 0). |
 
 ## One writer at a time
 
@@ -40,17 +40,17 @@ reopen only after every live subscription is adopted or scheduled to end
 | Research item                      | Decision applied                                                                            | PR  |
 | ---------------------------------- | ------------------------------------------------------------------------------------------- | --- |
 | 0 read-only inventory              | Human step. The command below never queries production or Stripe on its own.                | —   |
-| 1 legacy freeze switch             | `FIXED_PLAN_BILLING_MODE=legacy\|frozen`, default `legacy` (today's behaviour).              | 1   |
-| 2 target ignores unowned events    | Legacy-shaped events finish as `ignored_unowned`; no retries, no dead letter.                | 2   |
-| 3 adoption command                 | Keeps subscription, customer, price and cycle. Adds target metadata. Writes `fixed`.         | 3   |
-| 4 payment-failed ops email         | Ops email and `unpaid` → Commission, **adopted legacy subscriptions only**.                  | 4   |
-| 5 Stripe dashboard event mask      | Human go-day step, documented in the runbook. Never done by an agent.                        | 6   |
-| 6 migration: billing events table  | Hash-only `omitted_row` disposition instead of a blocker. Tiny change on `main`.             | 5   |
-| 7 docs                             | Runbook billing steps, this note, route-contract wording.                                    | 6   |
-| 8 (optional) hide legacy UI button | Not done. Frozen legacy answers `409` with a clear message instead.                          | —   |
-| G3 cadence, G4 price               | Resolved by "keep": the target accepts a retained legacy 30-day flat price (see below).      | 3   |
-| G7 dunning end state               | Resolved: `unpaid` reverts adopted hotels to Commission.                                     | 4   |
-| G9 non-cohort subscriptions        | Human dashboard step: cancel at period end, then notify the hotel. Two subscriptions exist.  | 6   |
+| 1 legacy freeze switch             | `FIXED_PLAN_BILLING_MODE=legacy\|frozen`, default `legacy` (today's behaviour).             | 1   |
+| 2 target ignores unowned events    | Legacy-shaped events finish as `ignored_unowned`; no retries, no dead letter.               | 2   |
+| 3 adoption command                 | Keeps subscription, customer, price and cycle. Adds target metadata. Writes `fixed`.        | 3   |
+| 4 payment-failed ops email         | Ops email and `unpaid` → Commission, **adopted legacy subscriptions only**.                 | 4   |
+| 5 Stripe dashboard event mask      | Human go-day step, documented in the runbook. Never done by an agent.                       | 6   |
+| 6 migration: billing events table  | Hash-only `omitted_row` disposition instead of a blocker. Tiny change on `main`.            | 5   |
+| 7 docs                             | Runbook billing steps, this note, route-contract wording.                                   | 6   |
+| 8 (optional) hide legacy UI button | Not done. Frozen legacy answers `409` with a clear message instead.                         | —   |
+| G3 cadence, G4 price               | Resolved by "keep": the target accepts a retained legacy 30-day flat price (see below).     | 3   |
+| G7 dunning end state               | Resolved: `unpaid` reverts adopted hotels to Commission.                                    | 4   |
+| G9 non-cohort subscriptions        | Human dashboard step: cancel at period end, then notify the hotel. Two subscriptions exist. | 6   |
 
 ## 1. Legacy freeze (`apps/pms-api`)
 
@@ -99,28 +99,28 @@ target property ID (VAY-2017).
 
 Stripe side, one metadata update per subscription, idempotent:
 
-| Key                        | Value                               |
-| -------------------------- | ----------------------------------- |
-| `vayada_property_id`       | property ID                         |
-| `vayada_organization_id`   | organization ID from the entitlement |
-| `vayada_plan`              | `fixed`                             |
-| `vayada_legacy_adoption`   | `v1`                                |
+| Key                      | Value                                |
+| ------------------------ | ------------------------------------ |
+| `vayada_property_id`     | property ID                          |
+| `vayada_organization_id` | organization ID from the entitlement |
+| `vayada_plan`            | `fixed`                              |
+| `vayada_legacy_adoption` | `v1`                                 |
 
 `hotel_id` and `vayada_payment_kind=fixed_plan` stay for audit. The item, price,
 quantity (1) and billing cycle are untouched, so no invoice is created.
 
 Target side, `finance.billing_entitlements` for the property:
 
-| Column                           | Value                                                                |
-| -------------------------------- | -------------------------------------------------------------------- |
-| `plan_key` / `billing_status`    | `fixed` / `active` (`past_due` when Stripe says `past_due`)          |
-| `billing_provider`               | `stripe`                                                             |
-| `billing_customer_ref` / `billing_subscription_ref` | from Stripe                                      |
-| period columns, `cancel_at_period_end` | from Stripe (item-level period)                               |
-| `billing_amount_minor`           | the retained price: `unit_amount × quantity`                         |
-| `active_room_count`              | target room inventory                                                |
-| `last_provider_event_created_at` | adoption time, so older queued events are stale                      |
-| `entitlement_metadata`           | `planSelectedBy: legacy-adoption`, `legacyAdoptedAt`, `providerReentryRequired: false` |
+| Column                                              | Value                                                                                  |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `plan_key` / `billing_status`                       | `fixed` / `active` (`past_due` when Stripe says `past_due`)                            |
+| `billing_provider`                                  | `stripe`                                                                               |
+| `billing_customer_ref` / `billing_subscription_ref` | from Stripe                                                                            |
+| period columns, `cancel_at_period_end`              | from Stripe (item-level period)                                                        |
+| `billing_amount_minor`                              | the retained price: `unit_amount × quantity`                                           |
+| `active_room_count`                                 | target room inventory                                                                  |
+| `last_provider_event_created_at`                    | adoption time, so older queued events are stale                                        |
+| `entitlement_metadata`                              | `planSelectedBy: legacy-adoption`, `legacyAdoptedAt`, `providerReentryRequired: false` |
 
 Verification: the target's subscription snapshot check (`fixedPlanVerified`)
 learns a third shape next to the monthly and 30-day tiered prices: a **retained
