@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode, Suspense } from "react";
 import { usePathname } from "next/navigation";
 import { AffiliateClickTracker } from "@/components/AffiliateClickTracker";
-import { Hotel, RoomType, Addon } from "@/lib/types";
+import { Hotel, Addon } from "@/lib/types";
 import { hotelService } from "@/services/api/hotel";
 import { generateColorPalette } from "@/lib/utils/colors";
 
@@ -38,43 +38,24 @@ const FONT_PAIRINGS: Record<string, { heading: string; body: string; googleFamil
   },
 };
 
-// The legacy availability search (GET /offers) is retired (VAY-1543 C.2): rooms are never
-// loaded here any more. The room fields keep their shape only for the retired checkout
-// pages that still compile against it; guests price rooms on /book instead.
-const NO_ROOMS: RoomType[] = [];
-const noRoomSearch = async () => {};
-
+// Rooms, availability and prices are served by the room-and-price page (/book); this
+// provider only carries the hotel profile and its add-on catalogue.
 interface HotelContextValue {
   hotel: Hotel | null;
-  /** Always empty: see NO_ROOMS. */
-  rooms: RoomType[];
   addons: Addon[];
   loading: boolean;
-  roomsLoading: boolean;
-  searchMessage: string | null;
   error: string | null;
   locale: string;
   slug: string;
-  refetchRooms: (
-    checkIn?: string,
-    checkOut?: string,
-    adults?: number,
-    children?: number,
-    roomCount?: number,
-  ) => Promise<void>;
 }
 
 const HotelContext = createContext<HotelContextValue>({
   hotel: null,
-  rooms: [],
   addons: [],
   loading: true,
-  roomsLoading: false,
-  searchMessage: null,
   error: null,
   locale: "en",
   slug: "",
-  refetchRooms: noRoomSearch,
 });
 
 // Resolve the active hotel slug. In production the server layout has
@@ -276,15 +257,11 @@ export function HotelProvider({
     <HotelContext.Provider
       value={{
         hotel,
-        rooms: NO_ROOMS,
         addons,
         loading,
-        roomsLoading: false,
-        searchMessage: null,
         error,
         locale,
         slug: slug ?? "",
-        refetchRooms: noRoomSearch,
       }}
     >
       {children}
@@ -300,12 +277,6 @@ export function HotelProvider({
 export function useHotel() {
   const { hotel, loading, error } = useContext(HotelContext);
   return { hotel: hotel!, loading, error };
-}
-
-export function useRooms() {
-  const { rooms, loading, roomsLoading, searchMessage, error, refetchRooms } =
-    useContext(HotelContext);
-  return { rooms, loading, roomsLoading, searchMessage, error, refetchRooms };
 }
 
 export function useAddons() {

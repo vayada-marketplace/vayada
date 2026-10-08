@@ -13,18 +13,11 @@ import { bookingImageSizes } from "@/components/booking/imageSizes";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { Booking } from "@/lib/types";
-import {
-  bookingService,
-  type BookingChangeRequest,
-  type BookingCreateRequest,
-  type BookingQuote,
-} from "@/services/api/booking";
+import { bookingService, type BookingChangeRequest } from "@/services/api/booking";
 import { ApiError } from "@/services/api/client";
 import {
-  clearPendingBookingCreate,
   readGuestDetails,
   readLastBooking,
-  readPendingBookingCreate,
   saveLastBooking,
   toConfirmationBooking,
 } from "@/lib/storage/bookingDraft";
@@ -119,16 +112,13 @@ export default function BookingConfirmationPageClient({
   const [hydrating, setHydrating] = useState(false);
   const [hydrateError, setHydrateError] = useState(false);
   const [changeRequest, setChangeRequest] = useState<BookingChangeRequest | null>(null);
-  const cardRecovery = useRef<Promise<Booking | null> | null>(null);
   const confirmationLookup = useRef<Promise<Booking | null> | null>(null);
   const [paypalInfo, setPaypalInfo] = useState<{
     email: string;
     windowHours: number;
   } | null>(null);
 
-  // Use the saved booking on refresh. If Stripe redirected away for a payment
-  // challenge, replay the original create command: the backend checks the same
-  // PaymentIntent and materializes the booking without charging again.
+  // Use the saved booking on refresh.
   useEffect(() => {
     setHydrateError(false);
     const stored = readLastBooking();
@@ -148,83 +138,6 @@ export default function BookingConfirmationPageClient({
       setStatus(normalized.status);
       saveLastBooking(normalized);
       return;
-    }
-
-    const recovery = readPendingBookingCreate<BookingQuote, BookingCreateRequest>(slug);
-    if (
-      recovery?.paymentMethod === "card" &&
-      (!tokenParam || recovery.confirmationToken === tokenParam)
-    ) {
-      let cancelled = false;
-      setHydrating(true);
-      cardRecovery.current ??= (async () => {
-        for (let attempt = 0; attempt < 15; attempt += 1) {
-          try {
-            const result = await bookingService.create(
-              slug,
-              recovery.requestBody,
-              recovery.createIdempotencyKey,
-            );
-            if (result.authorizationExpired) {
-              clearPendingBookingCreate();
-              return null;
-            }
-            if (result.authorizationComplete) {
-              const quote = recovery.quote;
-              const request = recovery.requestBody;
-              const normalized = toConfirmationBooking(result.booking, {
-                hotelName: hotel.name,
-                roomName: quote.roomName,
-                guestFirstName: request.guestFirstName,
-                guestLastName: request.guestLastName,
-                guestEmail: request.guestEmail,
-                checkIn: request.checkIn,
-                checkOut: request.checkOut,
-                adults: request.adults,
-                children: request.children,
-                numberOfRooms: request.numberOfRooms,
-                nightlyRate: quote.nightlyRate,
-                totalAmount: quote.totalAmount,
-                depositRequired: quote.depositRequired,
-                depositPercentage: quote.depositPercentage ?? 0,
-                depositAmount: quote.depositAmount,
-                balanceAmount: quote.balanceAmount,
-                addonTotal: quote.addonTotal,
-                addonIds: request.addonIds,
-                addonQuantities: request.addonQuantities,
-                addonPackageQuantities: request.addonPackageQuantities,
-                addonDates: request.addonDates,
-                currency: quote.currency,
-                paymentMethod: "card",
-              });
-              if (normalized.bookingReference !== reference) return null;
-              saveLastBooking(normalized);
-              clearPendingBookingCreate();
-              return normalized;
-            }
-          } catch {
-            // A command may still be completing; retry with the same key.
-          }
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-        }
-        return null;
-      })();
-      void cardRecovery.current
-        .then((normalized) => {
-          if (cancelled) return;
-          if (!normalized) {
-            setHydrateError(true);
-            return;
-          }
-          setBooking(normalized);
-          setStatus(normalized.status);
-        })
-        .finally(() => {
-          if (!cancelled) setHydrating(false);
-        });
-      return () => {
-        cancelled = true;
-      };
     }
 
     if (tokenParam) {

@@ -1,11 +1,6 @@
-import { Hotel, RoomType, Addon } from "@/lib/types";
+import { Hotel, Addon } from "@/lib/types";
 import { bookingWebPublic } from "./client";
-import {
-  bookingWebPublicApi,
-  defaultOfferDates,
-  toLegacyHotel,
-  toLegacyRooms,
-} from "./bookingWebPublic";
+import { bookingWebPublicApi, toLegacyHotel } from "./bookingWebPublic";
 import { getBookingWebSessionId } from "./session";
 
 export const hotelService = {
@@ -33,53 +28,6 @@ export const hotelService = {
     } catch {
       // Click tracking is best-effort — never block UX on it.
     }
-  },
-
-  async getRooms(
-    slug: string,
-    checkIn?: string,
-    checkOut?: string,
-    adults?: number,
-    children?: number,
-    locale?: string,
-  ): Promise<RoomType[]> {
-    return (await hotelService.searchRooms(slug, checkIn, checkOut, adults, children, locale))
-      .rooms;
-  },
-
-  async searchRooms(
-    slug: string,
-    checkIn?: string,
-    checkOut?: string,
-    adults?: number,
-    children?: number,
-    locale?: string,
-    roomCount = 1,
-  ) {
-    const dates = checkIn && checkOut ? { checkIn, checkOut } : defaultOfferDates();
-    const data = await bookingWebPublicApi.getOffers(slug, {
-      checkIn: dates.checkIn,
-      checkOut: dates.checkOut,
-      adults,
-      children,
-      rooms: roomCount,
-      locale,
-    });
-    let searchMessage: string | null = null;
-    if (data.status !== "bookable") {
-      const reasons = data.unavailableReasons ?? [];
-      searchMessage = "noAvailability";
-      if (
-        data.status === "stale" ||
-        reasons.some(({ code }) => ["stale_data", "unavailable_data"].includes(code))
-      ) {
-        searchMessage = "availabilityError";
-      } else if (reasons.length === 1) {
-        if (reasons[0].code === "occupancy_unavailable") searchMessage = "guestCountUnavailable";
-        if (reasons[0].code === "unsupported_occupancy") searchMessage = "guestCountUnsupported";
-      }
-    }
-    return { rooms: toLegacyRooms(data), searchMessage };
   },
 
   async getAddons(slug: string): Promise<Addon[]> {
