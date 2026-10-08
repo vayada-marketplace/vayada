@@ -17,6 +17,7 @@ import Fastify from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { registerPmsPricingRoutes, type PmsPricingRoutesOptions } from "./routes/pmsPricing.js";
+import { agencyPropertyAccessRepository } from "./testAuthorization.js";
 import {
   PMS_PRICING_CURRENCY_CAPABILITIES_PORT,
   PMS_PRICING_CURRENCY_CAPABILITIES_V1,
@@ -281,6 +282,61 @@ describe("PMS pricing routes", () => {
         requestedAt: now,
       },
     });
+  });
+
+  it("sends currency saves to the ordinary hotel-setup port behind Owner-only gates", async () => {
+    const ports = fakePorts();
+    const setup = fakePorts();
+    const build = async (relationship: LinkedResource["relationship"], sessionId?: string) => {
+      const owned = Fastify({ logger: false });
+      owned.decorateRequest("authContext", null);
+      owned.addHook("onRequest", async (request) => {
+        request.authContext = {
+          actor: { internalUserId: actorUserId, status: "active", providerIdentity: { sessionId } },
+          selectedOrganization: { organizationId, kind: "hotel_group", status: "active" },
+          membership: {
+            membershipId: "membership-1",
+            roleKey: "hotel_owner",
+            status: "active",
+            permissions: ["pms.operations.read", "pms.operations.manage"],
+          },
+          linkedResources: [
+            link(relationship),
+            { ...link(relationship), product: "hotel_catalog", resourceType: "property" },
+          ],
+          entitlements: [entitlement()],
+          audit: { requestId: "request-1", correlationId: null, source: "api", receivedAt: now },
+        } as unknown as RequestContext;
+      });
+      await owned.register(registerPmsPricingRoutes, {
+        ...ports,
+        currencyCommandPort: setup.commandPort,
+        propertyAccessRepository: agencyPropertyAccessRepository,
+      });
+      return owned;
+    };
+    const request = {
+      method: "PUT" as const,
+      url: `/properties/${propertyId}/pricing-source/currency`,
+      headers: headers("currency-key"),
+      payload: { expectedPricingCurrencyRevision: 0, currency: "EUR" },
+    };
+
+    app = await build("owner", "session-1");
+    expect((await injectJson(app, request)).statusCode).toBe(201);
+    expect(setup.currencyCalls).toHaveLength(1);
+    await app.close();
+    for (const [relationship, sessionId] of [
+      ["operator", "session-1"],
+      ["owner", undefined],
+    ] as const) {
+      app = await build(relationship, sessionId);
+      expect((await injectJson(app, request)).statusCode).toBe(403);
+      await app.close();
+    }
+    expect(setup.currencyCalls).toHaveLength(1);
+    expect(ports.currencyCalls).toHaveLength(0);
+    app = await testApp(ports);
   });
 
   it("accepts only scale-2 string money and exact structured cancellation terms", async () => {

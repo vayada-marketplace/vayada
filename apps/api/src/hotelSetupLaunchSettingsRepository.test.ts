@@ -3,12 +3,8 @@ import { AuthorizationError } from "@vayada/backend-authorization";
 import { beforeEach, expect, it, vi } from "vitest";
 import { lockHotelSetupMembership } from "./hotelSetupMembership.js";
 import { writeHotelSetupLaunchSettings } from "./hotelSetupLaunchSettingsRepository.js";
-import { assertHotelSetupLaunchSettingsPrivileges } from "./hotelSetupLaunchSettingsPrivileges.js";
 
 vi.mock("./hotelSetupMembership.js", () => ({ lockHotelSetupMembership: vi.fn() }));
-vi.mock("./hotelSetupLaunchSettingsPrivileges.js", () => ({
-  assertHotelSetupLaunchSettingsPrivileges: vi.fn(),
-}));
 vi.mock("@vayada/backend-authorization", async (original) => ({
   ...(await original<object>()),
   resolveEffectivePropertyAccess: vi.fn(async () => ({ propertyIds: [propertyId] })),
@@ -32,7 +28,6 @@ const settings = {
 };
 
 beforeEach(() => {
-  vi.mocked(assertHotelSetupLaunchSettingsPrivileges).mockReset().mockResolvedValue(undefined);
   vi.mocked(lockHotelSetupMembership)
     .mockReset()
     .mockResolvedValue({
@@ -41,34 +36,14 @@ beforeEach(() => {
       scope: {},
     } as Awaited<ReturnType<typeof lockHotelSetupMembership>>);
 });
-it("denies changed native privileges before writes and rolls back", async () => {
-  vi.mocked(assertHotelSetupLaunchSettingsPrivileges).mockRejectedValueOnce(
-    new Error("unsafe privileges"),
-  );
-  const f = fixture();
-  await expect(
-    writeHotelSetupLaunchSettings(f.pool, context, propertyId, settings),
-  ).rejects.toThrow("unsafe privileges");
-  expect(f.statements).toEqual(["BEGIN", "ROLLBACK"]);
-  expect(lockHotelSetupMembership).not.toHaveBeenCalled();
-});
 function fixture(options: { revoked?: boolean; conflict?: boolean; auditFailure?: boolean } = {}) {
   const statements: string[] = [];
   const release = vi.fn();
   const query = vi.fn(async (sql: string) => {
     statements.push(sql);
-    if (sql.includes('AS "sessionUser"'))
-      return {
-        rows: [
-          {
-            sessionUser: "vayada_next_hotel_setup_property_launch_test",
-            currentUser: "vayada_next_hotel_setup_property_launch_test",
-            allowed: !options.revoked,
-            organizationAllowed: true,
-            safeRole: true,
-          },
-        ],
-      };
+    if (sql.includes("transaction_isolation")) return { rows: [{ level: "read committed" }] };
+    // The ordinary scope's active catalog and PMS Owner links (hotelSetupOrdinaryScope.ts).
+    if (sql.includes("FOR SHARE OF catalog_link")) return { rows: options.revoked ? [] : [{}] };
     if (sql.startsWith("SELECT contact.id"))
       return { rows: options.conflict ? [{ id: "private" }] : [] };
     if (sql.includes("INSERT INTO platform.product_audit_events") && options.auditFailure)
@@ -91,7 +66,7 @@ it("returns the scoped saved values and commits only after the audit succeeds", 
   expect(await writeHotelSetupLaunchSettings(f.pool, context, propertyId, settings)).toEqual(
     settings,
   );
-  expect(f.statements[0]).toBe("BEGIN");
+  expect(f.statements[0]).toBe("BEGIN ISOLATION LEVEL READ COMMITTED");
   expect(f.statements.at(-1)).toBe("COMMIT");
   expect(
     f.statements.findIndex((s) => s.includes("INSERT INTO platform.product_audit_events")),
@@ -99,7 +74,7 @@ it("returns the scoped saved values and commits only after the audit succeeds", 
   expect(f.release).toHaveBeenCalledOnce();
 });
 it.each([{ revoked: true }, { conflict: true }, { auditFailure: true }])(
-  "rolls back a revoked assignment, private contact conflict or audit failure: %j",
+  "rolls back a lost Owner link, private contact conflict or audit failure: %j",
   async (options) => {
     const f = fixture(options);
     await expect(
@@ -121,7 +96,8 @@ it("rejects a revoked member before writes and releases the transaction", async 
     writeHotelSetupLaunchSettings(f.pool, context, propertyId, settings),
   ).rejects.toBeInstanceOf(AuthorizationError);
   expect(f.statements.at(-1)).toBe("ROLLBACK");
-  expect(f.statements).toHaveLength(3);
+  // BEGIN, isolation, organization lock, Owner links, ROLLBACK: no write statement.
+  expect(f.statements).toHaveLength(5);
 });
 it("requires an original owner session before opening a database connection", async () => {
   const f = fixture();
