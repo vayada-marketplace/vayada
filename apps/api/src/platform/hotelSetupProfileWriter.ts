@@ -37,10 +37,15 @@ const PROFILE_ROW = `SELECT jsonb_build_object(
   LEFT JOIN hotel_catalog.property_locations location ON location.property_id = property.id
   WHERE property.id = $1::uuid`;
 
-/** The parameterised half of platform.hotel_setup_profile_authority (0470): the original Owner
- * shape, re-locked in this transaction. The organization FOR UPDATE serializes concurrent edits
- * and revocation exactly as the native writer did. */
-async function lockProfileAuthority(client: Client, scope: ProfileScope): Promise<boolean> {
+/** The parameterised half of platform.hotel_setup_profile_authority (0470) and
+ * hotel_setup_logo_authority (0468): the original Owner shape, re-locked in this transaction,
+ * with the purpose's required hotel_owner grants. The organization FOR UPDATE serializes
+ * concurrent edits and revocation exactly as the native writers did. */
+export async function lockHotelSetupOwnerAuthority(
+  client: Client,
+  scope: ProfileScope,
+  permissions: readonly string[],
+): Promise<boolean> {
   const result = await client.query<{ allowed: boolean }>(
     `WITH organization AS (
        SELECT id FROM identity.organizations
@@ -56,12 +61,10 @@ async function lockProfileAuthority(client: Client, scope: ProfileScope): Promis
            WHERE role.id=member.role_definition_id AND role.organization_id=member.organization_id
              AND role.security_class='account_admin' AND role.base_role_key='hotel_owner'
              AND role.preset_key='account_admin' AND role.default_permissions='[]'::jsonb FOR SHARE))
-         AND EXISTS (SELECT 1 FROM identity.role_permission_grants permission
+         AND (SELECT count(DISTINCT locked.permission_key) FROM (SELECT permission.permission_key
+           FROM identity.role_permission_grants permission
            WHERE permission.organization_kind='hotel_group' AND permission.role_key='hotel_owner'
-             AND permission.permission_key='hotel_catalog.setup.manage' FOR SHARE)
-         AND EXISTS (SELECT 1 FROM identity.role_permission_grants permission
-           WHERE permission.organization_kind='hotel_group' AND permission.role_key='hotel_owner'
-             AND permission.permission_key='marketplace.profile.manage' FOR SHARE)
+             AND permission.permission_key = ANY($4::text[]) FOR SHARE) locked) = cardinality($4::text[])
          AND EXISTS (SELECT 1 FROM identity.users actor
            WHERE actor.id=member.user_id AND actor.status='active' FOR SHARE)
          AND (member.property_access_mode='all' OR (member.property_access_mode='assigned'
@@ -73,10 +76,12 @@ async function lockProfileAuthority(client: Client, scope: ProfileScope): Promis
              AND owner_link.resource_type='property' AND lower(owner_link.resource_id)=$1::uuid::text
              AND owner_link.relationship='owner' AND owner_link.status='active'
            FOR SHARE OF owner_link, property)) AS allowed`,
-    [scope.propertyId, scope.organizationId, scope.actorUserId],
+    [scope.propertyId, scope.organizationId, scope.actorUserId, permissions],
   );
   return result.rows[0]?.allowed === true;
 }
+
+const PROFILE_PERMISSIONS = ["hotel_catalog.setup.manage", "marketplace.profile.manage"];
 
 async function profileRow(client: Client, propertyId: string) {
   const result = await client.query<{ value: SharedPropertyProfileRow }>(PROFILE_ROW, [propertyId]);
@@ -98,7 +103,8 @@ export async function writeOrdinaryHotelSetupPropertyProfile(
   const client = await pool.connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
-    if (!(await lockProfileAuthority(client, scope))) throw new AuthorizationError();
+    if (!(await lockHotelSetupOwnerAuthority(client, scope, PROFILE_PERMISSIONS)))
+      throw new AuthorizationError();
     const replay = await client.query<{ fingerprint: string }>(
       `SELECT request_fingerprint_hash AS fingerprint FROM platform.idempotency_keys
        WHERE operation_scope='hotel_catalog' AND operation=$1 AND tenant_scope='property'
