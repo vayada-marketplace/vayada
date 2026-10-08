@@ -121,6 +121,9 @@ describe("Finance subscription webhook lifecycle", () => {
     // only, so the intake maps no organization. Nothing retries or dead-letters.
     const fixture = setup("commission");
     fixture.store.findEntitlement = async () => null;
+    fixture.provider.snapshot.organizationId = null;
+    fixture.provider.snapshot.propertyId = null;
+    fixture.provider.snapshot.fixedPlanVerified = false;
     const legacy = {
       ...payload("invoice.paid", 43),
       subscriptionId: "sub_legacy",
@@ -138,7 +141,7 @@ describe("Finance subscription webhook lifecycle", () => {
       ),
     ).resolves.toBe("ignored_unowned");
 
-    expect(fixture.provider.retrieveSubscription).not.toHaveBeenCalled();
+    expect(fixture.provider.retrieveSubscription).toHaveBeenCalledWith("sub_legacy");
     expect(fixture.store.entitlement.planKey).toBe("commission");
   });
 
@@ -149,6 +152,21 @@ describe("Finance subscription webhook lifecycle", () => {
     await expect(
       processFinanceSubscriptionWebhook(payload("invoice.paid", 45), fixture.dependencies),
     ).rejects.toThrow("does not map to a Finance entitlement");
+  });
+
+  it("retries an event without metadata when the live subscription is target-owned", async () => {
+    // A native invoice can arrive before its checkout completion is linked;
+    // the live subscription carries the organization, so it must not be dropped.
+    const fixture = setup("commission");
+    fixture.store.findEntitlement = async () => null;
+
+    await expect(
+      processFinanceSubscriptionWebhook(
+        { ...payload("invoice.paid", 47), propertyId: null, organizationId: null },
+        fixture.dependencies,
+      ),
+    ).rejects.toThrow("does not map to a Finance entitlement");
+    expect(fixture.provider.retrieveSubscription).toHaveBeenCalledWith("sub_fixed");
   });
 
   it("records the ignored outcome on the finished job", async () => {
@@ -164,6 +182,7 @@ describe("Finance subscription webhook lifecycle", () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] });
     const provider = setup("commission").provider;
+    provider.snapshot.organizationId = null;
     await expect(
       runFinanceSubscriptionWebhookJobs(
         "postgres://unused",
