@@ -230,6 +230,12 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
         )
       ).rows.map((row) => row.amount);
       expect(nights).toEqual(["90.00", "90.00"]);
+      // Booking Detail names the plan from the stored offer, as rate_plan_id stays empty.
+      const reservation = await createTargetPmsOperationsReadRepository({
+        connectionString: url!,
+        pool,
+      }).findReservationByGuestBookingId(propertyId, created.guestBookingId);
+      expect(reservation?.assignments[0]).toMatchObject({ ratePlanId: null, pricingOfferId: nrId });
     });
 
     it("books concurrently while previews read the same publication", async () => {

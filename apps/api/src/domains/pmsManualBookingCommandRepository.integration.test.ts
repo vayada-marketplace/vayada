@@ -748,6 +748,40 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
     });
   });
 
+  it("keeps child ages as a stay fact when a correction drops the offer link", async () => {
+    const input = command("child-ages", "unpaid", "cash", "2026-08-24", false);
+    const created = await repository.createManualBooking({
+      ...input,
+      stays: [{ ...input.stays[0]!, children: 1, childAgesAtCheckIn: [6] }],
+    });
+    const payload = async () =>
+      (
+        await admin.query(
+          `SELECT assignment_payload AS payload FROM pms.operational_booking_assignments
+           WHERE guest_booking_id=$1`,
+          [created.guestBookingId],
+        )
+      ).rows[0].payload;
+    expect(await payload()).toMatchObject({ childAgesAtCheckIn: [6] });
+    // A stay priced before the ages became a stay fact kept them only with the offer.
+    await admin.query(
+      `UPDATE pms.operational_booking_assignments
+       SET assignment_payload=(assignment_payload-'childAgesAtCheckIn')
+         || '{"pricingOffer":{"offerId":"flex","pricingRevision":1,"childAgesAtCheckIn":[6]}}'
+       WHERE guest_booking_id=$1`,
+      [created.guestBookingId],
+    );
+    const correction = await stayCorrection(created.guestBookingId, "child-ages", [
+      { roomId: otherRoomId, checkIn: "2026-08-24" },
+    ]);
+    await expect(operations.correctManualBookingStays!(correction)).resolves.toMatchObject({
+      ok: true,
+    });
+    const corrected = await payload();
+    expect(corrected.pricingOffer).toBeUndefined();
+    expect(corrected.childAgesAtCheckIn).toEqual([6]);
+  });
+
   it("emits exact source and target room-type ranges for a cross-type stay correction", async () => {
     const created = await repository.createManualBooking(
       command("cross-type-correction", "unpaid", "cash", "2026-08-20", false),
