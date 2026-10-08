@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mockBookingApis, publicOffers, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
+import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
 import { watchPageHealth } from "../support/pageHealth";
 
 test.describe("booking-web tenant smoke", () => {
