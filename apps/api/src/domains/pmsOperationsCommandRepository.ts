@@ -6573,8 +6573,10 @@ async function applyTargetBaseRateForMove(
   const publication = await readManualBookingPricingPublication(client, command.propertyId);
   const configuration = publication?.rooms.find((room) => room.roomTypeId === targetRoomTypeId);
   const terms = publication?.terms.filter((item) => item.roomTypeId === targetRoomTypeId) ?? [];
+  // The offer the client quoted when it names one, else the first eligible one.
   const offer = configuration?.offers.find(
     (item) =>
+      (command.targetRatePlanId === undefined || item.id === command.targetRatePlanId) &&
       item.price.kind === "independent" &&
       terms.some((term) => term.offerId === item.id && term.cancellation.kind === "flexible"),
   );

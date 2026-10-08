@@ -346,6 +346,7 @@ describe("calendarService manual-booking rates", () => {
       },
     ]);
     expect(result.rooms[0]?.size).toBe(38);
+    expect(result.rooms[0]?.flexibleRatePlanId).toBe("canonical-plan");
     expect(result.bookings.map(({ id, channel }) => ({ id, channel }))).toEqual([
       { id: "manual-booking", channel: "manual" },
       { id: "ota-booking", channel: "booking.com" },

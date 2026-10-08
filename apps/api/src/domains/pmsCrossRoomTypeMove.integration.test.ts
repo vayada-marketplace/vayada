@@ -229,6 +229,23 @@ describe.skipIf(!DATABASE_URL)("PostgreSQL cross-room-type assignment moves", ()
     await expectRateConflict("missing-rate", "target_base_unavailable");
   });
 
+  it("charges exactly the quoted Flexible offer and refuses one the publication lacks", async () => {
+    await addManualPriceEvidence();
+    await publishTarget();
+    const before = await state();
+    await expect(
+      move("unknown-offer", "target_base", I.targetRoom, "not-published"),
+    ).resolves.toMatchObject({ ok: false, code: "target_base_unavailable" });
+    await expect(state()).resolves.toEqual(before);
+    await expect(
+      move("quoted-offer", "target_base", I.targetRoom, "twin-flex"),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(nightlyAmounts()).resolves.toEqual([
+      { amount: "120.0000" },
+      { amount: "120.0000" },
+    ]);
+  });
+
   it("rejects a target rate that the published restrictions forbid for the stay", async () => {
     await addManualPriceEvidence();
     await publishTarget("12000", "EUR", 3);
@@ -357,7 +374,12 @@ describe.skipIf(!DATABASE_URL)("PostgreSQL cross-room-type assignment moves", ()
     await lifecycle.close?.();
   });
 
-  async function move(suffix: string, ratePolicy?: "target_base", roomId = I.targetRoom) {
+  async function move(
+    suffix: string,
+    ratePolicy?: "target_base",
+    roomId = I.targetRoom,
+    targetRatePlanId?: string,
+  ) {
     return repository.executeAssignmentCommand({
       propertyId: I.property,
       guestBookingId: I.booking,
@@ -367,6 +389,7 @@ describe.skipIf(!DATABASE_URL)("PostgreSQL cross-room-type assignment moves", ()
       assignmentId: I.assignment,
       roomId,
       ...(ratePolicy ? { ratePolicy } : {}),
+      ...(targetRatePlanId ? { targetRatePlanId } : {}),
     });
   }
 
