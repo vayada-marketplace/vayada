@@ -1054,15 +1054,45 @@ const propertySetupOwnerPool = new pg.Pool({
   connectionTimeoutMillis: 5_000,
   max: 5,
 });
+// VAY-2056: the six hotel-setup Owner operations run on the ordinary API login, only with
+// WorkOS auth configured (their routes need the property-access repository). Their own pool keeps
+// a burst of setup writes, each holding the organization row lock, off the shared setup pools.
+const hotelSetupOrdinaryPool = config.auth
+  ? new pg.Pool({ connectionString: targetDatabaseUrl, connectionTimeoutMillis: 5_000, max: 10 })
+  : undefined;
 const hotelSetupOrdinaryLogo =
-  platformMediaRuntime && config.platformMediaServing
+  hotelSetupOrdinaryPool && platformMediaRuntime && config.platformMediaServing
     ? createOrdinaryHotelSetupLogoRuntime({
         connectionString: targetDatabaseUrl,
-        lookup: propertySetupOwnerPool,
+        lookup: hotelSetupOrdinaryPool,
         serving: config.platformMediaServing,
         defaults: platformMediaRuntime.routes,
       })
     : undefined;
+const hotelSetupOrdinaryOptions = hotelSetupOrdinaryPool
+  ? {
+      hotelSetupPropertyCreationRepository: createPgSharedHotelSetupStatusRepository({
+        connectionString: targetDatabaseUrl,
+        pool: hotelSetupOrdinaryPool,
+        hotelSetupOwnerCreation: true,
+      }),
+      hotelSetupProfileCommand: createOrdinaryHotelSetupProfileCommand(hotelSetupOrdinaryPool),
+      hotelSetupLaunchSettingsCommand:
+        createOrdinaryHotelSetupLaunchSettingsCommand(hotelSetupOrdinaryPool),
+      hotelSetupFeatureHubCommands:
+        createOrdinaryHotelSetupFeatureHubCommands(hotelSetupOrdinaryPool),
+      hotelSetupCurrencyCommandPort:
+        config.pmsOperationsSource === "target"
+          ? createPgPmsPricingCommandRepository({
+              connectionString: targetDatabaseUrl,
+              pool: hotelSetupOrdinaryPool,
+              currencyChangeGuard: PMS_PRICING_CURRENCY_CHANGE_FAIL_CLOSED_GUARD,
+              hotelSetupOrdinaryOwner: true,
+            })
+          : undefined,
+      hotelSetupLogoAssignments: hotelSetupOrdinaryLogo?.assignments,
+    }
+  : {};
 const financePaymentSetupRuntime = createFinancePaymentSetupRuntime({
   connectionString: targetDatabaseUrl,
   pricing: pmsPricingReadModel,
@@ -1848,26 +1878,7 @@ const app = buildApp({
     ? { commandPort: pmsPhysicalRoomOperationalLabels }
     : undefined,
   pmsModuleActivationRepository,
-  // VAY-2056: the HOTEL_SETUP_CREATION_COMMAND_* variables are no longer read.
-  hotelSetupPropertyCreationRepository: createPgSharedHotelSetupStatusRepository({
-    connectionString: targetDatabaseUrl,
-    pool: propertySetupOwnerPool,
-    hotelSetupOwnerCreation: true,
-  }),
-  // VAY-2056: the HOTEL_SETUP_PROFILE_COMMAND_* variables are no longer read.
-  hotelSetupProfileCommand: createOrdinaryHotelSetupProfileCommand(propertySetupOwnerPool),
-  hotelSetupLaunchSettingsCommand:
-    createOrdinaryHotelSetupLaunchSettingsCommand(propertySetupOwnerPool),
-  hotelSetupFeatureHubCommands: createOrdinaryHotelSetupFeatureHubCommands(propertySetupOwnerPool),
-  hotelSetupCurrencyCommandPort:
-    config.pmsOperationsSource === "target"
-      ? createPgPmsPricingCommandRepository({
-          connectionString: targetDatabaseUrl,
-          pool: propertySetupOwnerPool,
-          currencyChangeGuard: PMS_PRICING_CURRENCY_CHANGE_FAIL_CLOSED_GUARD,
-          hotelSetupOrdinaryOwner: true,
-        })
-      : undefined,
+  ...hotelSetupOrdinaryOptions,
   financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,
@@ -2207,7 +2218,6 @@ const app = buildApp({
         resolveRequestPersistence: hotelSetupOrdinaryLogo?.uploads.resolveRequestPersistence,
       }
     : undefined,
-  hotelSetupLogoAssignments: hotelSetupOrdinaryLogo?.assignments,
 });
 app.addHook("onClose", async () => {
   await affiliateCaptureRuntime?.pool.end();
@@ -2466,6 +2476,7 @@ app.addHook("onClose", async () => {
     bookingSetupLifecycleStatusRepository.close(),
     bookingGuestPolicyRepository.close(),
     propertySetupOwnerPool.end(),
+    hotelSetupOrdinaryPool?.end(),
     pricingRuntimePool?.end(),
     propertySetupDraftRepository.close(),
     ...propertySetupPmsRuntime.resources.map((resource) => resource.close?.()),

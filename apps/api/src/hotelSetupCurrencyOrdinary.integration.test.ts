@@ -164,9 +164,9 @@ describe.skipIf(!url)("ordinary first currency and Financials default (VAY-2056)
         "UPDATE identity.product_entitlements SET starts_at=now()+interval '1 day' WHERE entitlement_key='module:financials' AND resource_id=$1",
         [blocked],
       );
-      await expect(
-        repository.upsertPropertyPricingCurrency(command(blocked, "blocked")),
-      ).rejects.toMatchObject({ code: "23514" });
+      expect(await repository.upsertPropertyPricingCurrency(command(blocked, "blocked"))).toEqual(
+        denied,
+      );
       expect(
         await count(
           "SELECT count(*) AS n FROM pms.property_pricing_settings WHERE property_id=$1",

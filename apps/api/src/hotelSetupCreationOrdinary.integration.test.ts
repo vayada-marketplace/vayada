@@ -116,6 +116,11 @@ describe.skipIf(!url)("ordinary self-serve hotel creation (VAY-2056)", () => {
         "UPDATE identity.organization_memberships SET permission_overrides=NULL WHERE user_id=$1",
         [owner],
       );
+      await admin.query("UPDATE identity.organizations SET status='suspended' WHERE id=$1", [org]);
+      await expect(create("suspended")).rejects.toThrow(
+        "Active hotel-group organization was not found",
+      );
+      await admin.query("UPDATE identity.organizations SET status='active' WHERE id=$1", [org]);
       // Self-serve never accepts provisioning-only inputs.
       await expect(
         selfServe.createPropertyProfile({

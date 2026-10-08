@@ -356,9 +356,9 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
     import("./routes/sharedHotelSetupStatus.js").SharedHotelSetupStatusRepository,
     "createPropertyProfile"
   >;
-  /** Owner-only launch settings on the ordinary login; unset keeps the forwarder or broad writer. */
   /** Owner-only currency saves on the ordinary login; unset keeps the forwarder. */
   hotelSetupCurrencyCommandPort?: import("./routes/pmsPricing.js").PmsPricingRoutesOptions["currencyCommandPort"];
+  /** Owner-only launch settings on the ordinary login; unset keeps the forwarder or broad writer. */
   hotelSetupLaunchSettingsCommand?: Parameters<
     typeof import("./routes/sharedHotelSetupStatus.js").registerSharedHotelSetupLaunchSettings
   >[1];

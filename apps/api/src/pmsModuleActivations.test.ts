@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "./app.js";
 import type { BookingPublicationRefreshPort } from "./domains/bookingPublicationProductionRuntime.js";
 import { agencyPropertyAccessRepository } from "./testAuthorization.js";
+import { HotelSetupFinancialsUnavailableError } from "./hotelSetupFeatureHubOrdinary.js";
 import {
   createPgPmsModuleActivationRepository,
   type PmsModuleActivationPool,
@@ -150,6 +151,7 @@ function buildAuthenticatedApp(
     reviewRepository?: PmsReviewRepository;
     bookingPublicationRefresh?: BookingPublicationRefreshPort;
     featureHub?: Pick<PmsModuleActivationRepository, "updateFinancials">;
+    session?: VerifiedSession;
   } = {},
 ) {
   const linkedPropertyId =
@@ -187,7 +189,7 @@ function buildAuthenticatedApp(
     financialsActivationPropertyIds: options.financialsActivationPropertyIds,
     hotelSetupFeatureHubCommands: options.featureHub,
     auth: {
-      verifier: createFakeVerifier(new Map([["valid-token", session]])),
+      verifier: createFakeVerifier(new Map([["valid-token", options.session ?? session]])),
       repository: repo,
       propertyAccessRepository: agencyPropertyAccessRepository,
       rolePermissionRepository: {
@@ -295,7 +297,6 @@ describe("PMS module activation routes", () => {
 
   it("lets a new hotel's Owner switch Financials off and on with no operator allow-list (VAY-2056)", async () => {
     const ordinary = createActivationRepository(false);
-    const ordinaryUpdate = vi.spyOn(ordinary, "updateFinancials");
     const setupComplete = vi.fn(async () => true);
     const repository = { ...ordinary, isFinancialsSetupComplete: setupComplete };
     const hub = { updateFinancials: vi.fn(ordinary.updateFinancials) };
@@ -328,15 +329,37 @@ describe("PMS module activation routes", () => {
     expect(hub.updateFinancials).toHaveBeenCalledTimes(3);
     await app.close();
 
-    // An unfinished default stays locked; an operator never reaches the writer.
+    // A writer refusal (precondition or foreign suspension) is a 409, not a raw 500.
+    app = build("owner");
+    hub.updateFinancials.mockRejectedValueOnce(
+      new HotelSetupFinancialsUnavailableError("Hotel setup Financials activation unavailable"),
+    );
+    expect((await patch(true)).json()).toMatchObject({ code: "financials_activation_unavailable" });
+    await app.close();
+
+    // An unfinished default stays locked in both directions and is not manageable.
     setupComplete.mockResolvedValue(false);
     app = build("owner");
     expect((await patch(true)).statusCode).toBe(403);
+    expect((await patch(false)).statusCode).toBe(403);
+    expect(
+      (await injectJson<PmsModuleActivationsResponse>(app, { method: "GET", url, headers })).body,
+    ).toMatchObject({ canManage: false });
     await app.close();
+    setupComplete.mockResolvedValue(true);
+    // An operator and a request without the original session never reach the writer.
     app = build("operator");
     expect((await patch(false)).statusCode).toBe(403);
-    expect(hub.updateFinancials).toHaveBeenCalledTimes(3);
-    expect(ordinaryUpdate.mock.calls).toHaveLength(3);
+    await app.close();
+    app = buildAuthenticatedApp({
+      repository,
+      featureHub: hub,
+      linkedRelationship: "owner",
+      permissions: ["pms.operations.read", "pms.finance.read", "pms.finance.manage"],
+      session: { ...session, sessionId: null },
+    });
+    expect((await patch(false)).statusCode).toBe(403);
+    expect(hub.updateFinancials).toHaveBeenCalledTimes(4);
   });
 
   it("allows a scoped finance owner to activate and roll back an approved property", async () => {
