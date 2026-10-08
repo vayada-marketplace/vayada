@@ -336,7 +336,7 @@ export async function readProductionIdentitySnapshot(
   return { rows: loaded, sourceHorizonAt: sources.get("pms")!.sourceSnapshotAt!, cohort };
 }
 
-function assertCohortInSource(cohort: ProductionMigrationCohort, rows: IdentitySourceRow[]) {
+export function assertCohortInSource(cohort: ProductionMigrationCohort, rows: IdentitySourceRow[]) {
   const sourceIds = (database: SourceDatabase, table: string) =>
     new Set(
       rows

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { IdentityCohortScope } from "./productionIdentityCohortScope.js";
 import type {
   IdentityMigrationBlocker,
@@ -254,7 +256,10 @@ export function planCatalogOwnership(
     sourceLinks.push(planned);
   }
   addDuplicateSlugs(booking, blockers);
-  if (cohort) addCohortMismatches([...groups.values()], cohort, blockers);
+  if (cohort) {
+    addCohortMismatches([...groups.values()], cohort, blockers);
+    addUnresolvedCohortHotels(sourceLinks, cohort, blockers);
+  }
 
   return {
     properties: sortedBy([...groups.values()], (row) => row.propertyId),
@@ -324,6 +329,44 @@ function addCohortMismatches(
         "Booking, PMS and Marketplace members disagree on migration cohort membership",
       );
   }
+}
+
+/** COHORT_HOTEL_UNRESOLVED: every cohort hotel needs exactly one planned link, canonical and at a
+ * cohort Booking anchor, so parity's cohortHotelUnresolved/cohortPropertyQuarantined cannot fail
+ * after writes. Evidence carries only the hashed source ID, as the parity finding does. */
+function addUnresolvedCohortHotels(
+  sourceLinks: PlannedCatalogSourceLink[],
+  cohort: IdentityCohortScope,
+  blockers: IdentityMigrationBlocker[],
+): void {
+  const cohortIds = {
+    booking: cohort.bookingHotelIds,
+    pms: cohort.pmsHotelIds,
+    marketplace: cohort.marketplaceHotelIds,
+  };
+  for (const [sourceSystem, ids] of Object.entries(cohortIds) as [CatalogSourceSystem, string[]][])
+    for (const id of ids) {
+      const links = sourceLinks.filter(
+        (link) => link.sourceSystem === sourceSystem && link.sourceId === id,
+      );
+      const [only] = links;
+      const message =
+        links.length !== 1
+          ? `Cohort hotel resolves to ${links.length} catalog properties, not exactly one`
+          : only!.migrationDisposition !== "canonical"
+            ? `Cohort hotel resolves to a private property (${only!.migrationDispositionReason})`
+            : !cohort.bookingHotelIds.includes(only!.propertyId)
+              ? "Cohort hotel attaches to a property without a cohort Booking anchor"
+              : null;
+      if (message)
+        addBlocker(
+          blockers,
+          "COHORT_HOTEL_UNRESOLVED",
+          `${sourceSystem}.${TABLES[sourceSystem]}`,
+          `sha256:${createHash("sha256").update(id).digest("hex")}`,
+          message,
+        );
+    }
 }
 
 function validateRelationship(

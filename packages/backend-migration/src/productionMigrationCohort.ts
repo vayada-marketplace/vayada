@@ -16,7 +16,8 @@ export type ProductionMigrationCohort = ProductionMigrationCohortInput & { cohor
 export type ProductionMigrationCohortErrorCode =
   | "INVALID_COHORT"
   | "COHORT_CONFLICT"
-  | "COHORT_HOTEL_NOT_IN_SOURCE";
+  | "COHORT_HOTEL_NOT_IN_SOURCE"
+  | "COHORT_HOTEL_UNRESOLVED";
 
 export class ProductionMigrationCohortError extends Error {
   constructor(
@@ -63,7 +64,8 @@ export function parseProductionMigrationCohort(value: unknown): ProductionMigrat
   return { sourceRunId, ...sets, approvalProofSha256, cohortSha256 };
 }
 
-/** Insert-once: the same cohort is a no-op; any other cohort for the run is a conflict. */
+/** Insert-once: the same cohort is a no-op; any other cohort for the run is a conflict. Bind
+ * through bindProductionMigrationCohort, which refuses unresolved cohort hotels first. */
 export async function writeProductionMigrationCohort(
   client: QueryClient,
   cohort: ProductionMigrationCohort,

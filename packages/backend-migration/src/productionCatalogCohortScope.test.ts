@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+
+import { describe, expect, it, vi } from "vitest";
 
 import type { IdentityCohortScope } from "./productionIdentityCohortScope.js";
 import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
@@ -6,6 +8,9 @@ import { planProductionCatalogContent } from "./productionCatalogContentPlan.js"
 import { planProductionCatalogCore } from "./productionCatalogCorePlan.js";
 import { planCatalogOwnership } from "./productionCatalogOwnership.js";
 import { buildProductionCatalogPlan } from "./productionCatalogPlan.js";
+import { stableCatalogId } from "./productionCatalogValues.js";
+import { parseProductionMigrationCohort } from "./productionMigrationCohort.js";
+import { bindProductionMigrationCohort } from "./productionMigrationCohortBinding.js";
 import {
   planProductionCatalogPresentation,
   type ExistingCatalogMediaObject,
@@ -123,6 +128,10 @@ describe("catalog cohort scope (VAY-1362)", () => {
     const scoped = buildProductionCatalogPlan(rows, target, cohort);
     expect(scoped.blockers).toEqual([]);
     expect(scoped.checksum).not.toBe(before.checksum);
+    // Computed on fm/vay-1362-cohort-parity-gate: the COHORT_HOTEL_UNRESOLVED check adds no writes.
+    expect(scoped.checksum).toBe(
+      "d27bf72af7e80652e4b640df9d6bca75ce3e398275edd9640ac6e5f5f462c4e2",
+    );
   });
 
   it("keeps a non-cohort anchor's ID and attaches its PMS and Marketplace rows privately", () => {
@@ -184,18 +193,16 @@ describe("catalog cohort scope (VAY-1362)", () => {
   it("blocks a property whose members disagree on cohort membership", () => {
     const pmsOnly = { ...cohort, pmsHotelIds: [A, B] };
     const marketplaceMissing = { ...cohort, marketplaceHotelIds: [] };
-    for (const [scope, propertyId] of [
-      [pmsOnly, B],
-      [marketplaceMissing, A],
+    for (const [scope, propertyId, unresolved] of [
+      [pmsOnly, B, ["COHORT_HOTEL_UNRESOLVED"]],
+      [marketplaceMissing, A, []],
     ] as const) {
       const { ownership } = plans(scope);
-      expect(ownership.blockers).toEqual([
-        expect.objectContaining({
-          code: "COHORT_MEMBERSHIP_MISMATCH",
-          source: "hotel_catalog.properties",
-          sourceId: propertyId,
-        }),
+      expect(ownership.blockers.map((row) => [row.code, row.source])).toEqual([
+        ...unresolved.map((code) => [code, "pms.hotels"]),
+        ["COHORT_MEMBERSHIP_MISMATCH", "hotel_catalog.properties"],
       ]);
+      expect(ownership.blockers.at(-1)!.sourceId).toBe(propertyId);
     }
   });
 
@@ -270,6 +277,160 @@ describe("catalog cohort scope (VAY-1362)", () => {
       "ambiguous_canonical_property",
       "ambiguous_canonical_property",
     ]);
+  });
+});
+
+describe("unresolved cohort hotels (VAY-1362)", () => {
+  const P = "55555555-5555-4555-8555-555555555555";
+  const MA2 = "66666666-6666-4666-8666-666666666666";
+  const UC = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const hash = (id: string) => `sha256:${createHash("sha256").update(id).digest("hex")}`;
+  const pmsHotel = (id: string, user: string) =>
+    row("pms", "hotels", { id, user_id: user, name: "PMS", slug: "p", ...AT });
+  const unresolved = (
+    sourceRows: IdentitySourceRow[],
+    scope: IdentityCohortScope | null,
+    existing: Parameters<typeof planCatalogOwnership>[1] = [],
+  ) =>
+    planCatalogOwnership(sourceRows, existing, undefined, scope)
+      .blockers.filter((blocker) => blocker.code === "COHORT_HOTEL_UNRESOLVED")
+      .map((blocker) => [blocker.source, blocker.sourceId, blocker.message]);
+  const withHotel = { ...cohort, pmsHotelIds: [A, P].sort() };
+  const resolvesTo = (reason: string) => [
+    ["pms.hotels", hash(P), `Cohort hotel resolves to a private property (${reason})`],
+  ];
+
+  it("passes a cohort whose hotels all resolve, and is absent without a cohort", () => {
+    expect(unresolved(rows, cohort)).toEqual([]);
+    expect(unresolved(rows, full)).toEqual([]);
+    const orphan = [...rows, row("auth", "users", { id: UC, type: "hotel" }), pmsHotel(P, UC)];
+    expect(unresolved(orphan, null)).toEqual([]);
+    expect(planCatalogOwnership(orphan).blockers).toEqual([]);
+  });
+
+  it("blocks a cohort hotel without a canonical property, with hashed evidence only", () => {
+    const orphan = [...rows, row("auth", "users", { id: UC, type: "hotel" }), pmsHotel(P, UC)];
+    expect(unresolved(orphan, withHotel)).toEqual(resolvesTo("missing_canonical_property"));
+    const invalid = rows.map((source) =>
+      source.data["id"] === A && source.sourceDatabase === "booking"
+        ? { ...source, data: { ...source.data, platform_status: "gone" } }
+        : source,
+    );
+    expect(unresolved(invalid, cohort)).toContainEqual([
+      "booking.booking_hotels",
+      hash(A),
+      "Cohort hotel resolves to 0 catalog properties, not exactly one",
+    ]);
+    expect(JSON.stringify(unresolved(orphan, withHotel))).not.toContain(P);
+  });
+
+  it("blocks duplicate canonical candidates for a cohort hotel", () => {
+    const profile = row("marketplace", "hotel_profiles", {
+      id: MA2,
+      user_id: UA,
+      name: "MA2",
+      status: "verified",
+      ...AT,
+    });
+    expect(unresolved([...rows, profile], { ...cohort, marketplaceHotelIds: [MA, MA2] })).toEqual(
+      [hash(MA), hash(MA2)]
+        .sort()
+        .map((subject) => [
+          "marketplace.hotel_profiles",
+          subject,
+          "Cohort hotel resolves to a private property (duplicate_marketplace_profile)",
+        ]),
+    );
+    const twice = [...rows, rows.find((source) => source.data["id"] === A)!];
+    expect(unresolved(twice, cohort)).toEqual([
+      [
+        "booking.booking_hotels",
+        hash(A),
+        "Cohort hotel resolves to 2 catalog properties, not exactly one",
+      ],
+    ]);
+  });
+
+  it("blocks a cohort hotel quarantined for an older reason", () => {
+    const creatorOwned = [
+      ...rows,
+      row("auth", "users", { id: UC, type: "creator" }),
+      pmsHotel(P, UC),
+    ];
+    expect(unresolved(creatorOwned, withHotel)).toEqual(resolvesTo("legacy_owner_quarantined"));
+    const previous = {
+      propertyId: stableCatalogId("private-property", `pms:hotels:${A}`),
+      sourceSystem: "pms" as const,
+      sourceTable: "hotels",
+      sourceId: A,
+      migrationDisposition: "private_quarantine" as const,
+      migrationDispositionReason: "ambiguous_canonical_property" as const,
+    };
+    expect(unresolved(rows, cohort, [previous])).toEqual([
+      [
+        "pms.hotels",
+        hash(A),
+        "Cohort hotel resolves to a private property (ambiguous_canonical_property)",
+      ],
+    ]);
+  });
+
+  it("blocks cohort PMS and Marketplace rows attached to a property outside the cohort", () => {
+    expect(unresolved(rows, { ...cohort, pmsHotelIds: [A, B] })).toEqual([
+      [
+        "pms.hotels",
+        hash(B),
+        "Cohort hotel resolves to a private property (outside_migration_cohort)",
+      ],
+    ]);
+    expect(unresolved(rows, { ...cohort, marketplaceHotelIds: [MA, MB] })).toEqual([
+      [
+        "marketplace.hotel_profiles",
+        hash(MB),
+        "Cohort hotel resolves to a private property (outside_migration_cohort)",
+      ],
+    ]);
+  });
+
+  it("refuses to bind such a cohort before any database write", async () => {
+    const approved = (input: Partial<IdentityCohortScope>) =>
+      parseProductionMigrationCohort({
+        sourceRunId: `vay1351-${"c0".repeat(12)}`,
+        ...cohort,
+        ...input,
+        approvalProofSha256: "a".repeat(64),
+      });
+    const client = { query: vi.fn() };
+    // A stale private link from an earlier run keeps cohort PMS hotel A private.
+    const stale = {
+      propertyId: stableCatalogId("private-property", `pms:hotels:${A}`),
+      sourceSystem: "pms" as const,
+      sourceTable: "hotels",
+      sourceId: A,
+      migrationDisposition: "private_quarantine" as const,
+      migrationDispositionReason: "missing_canonical_property" as const,
+    };
+    const readers = (stored: unknown = null, links: (typeof stale)[] = []) => ({
+      snapshot: async () => ({ rows, cohort: stored as null }),
+      sourceLinks: async () => links,
+    });
+    const cases: Array<[Partial<IdentityCohortScope>, string, ReturnType<typeof readers>]> = [
+      [{ pmsHotelIds: [A, B] }, "COHORT_HOTEL_UNRESOLVED", readers()],
+      [{ marketplaceHotelIds: [] }, "COHORT_HOTEL_UNRESOLVED", readers()],
+      [{}, "COHORT_HOTEL_UNRESOLVED", readers(null, [stale])],
+      [{}, "COHORT_CONFLICT", readers(approved({ pmsHotelIds: [] }))],
+      [{ bookingHotelIds: [P] }, "COHORT_HOTEL_NOT_IN_SOURCE", readers()],
+    ];
+    for (const [input, code, reader] of cases) {
+      const error: unknown = await bindProductionMigrationCohort(
+        client,
+        approved(input),
+        reader,
+      ).catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code });
+      for (const id of [A, B, MA, MB, P]) expect((error as Error).message).not.toContain(id);
+    }
+    expect(client.query).not.toHaveBeenCalled();
   });
 });
 

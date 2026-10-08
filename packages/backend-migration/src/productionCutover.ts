@@ -50,12 +50,11 @@ import {
   type SourceExtractionConfig,
 } from "./sourceExtraction.js";
 import { stableJson } from "./productionIdentitySourceValidation.js";
-import { readProductionIdentitySnapshot } from "./productionIdentitySnapshotReader.js";
+import { bindProductionMigrationCohort } from "./productionMigrationCohortBinding.js";
 import {
   parseProductionMigrationCohort,
   ProductionMigrationCohortError,
   readProductionMigrationCohort,
-  writeProductionMigrationCohort,
   type ProductionMigrationCohort,
 } from "./productionMigrationCohort.js";
 import { SOURCE_DATABASES, type SourceDatabase } from "./sourceInventory.js";
@@ -615,8 +614,9 @@ function validateCohort(config: ProductionCutoverConfig, cohort: ProductionMigra
 }
 
 /**
- * Binds the configured cohort before identity runs: written and checked against the attested
- * source in one transaction. A stored cohort must equal the configured one, absence included.
+ * Binds the configured cohort before identity runs: checked against the attested source and the
+ * catalog ownership plan, then written, in one transaction. A stored cohort must equal the
+ * configured one, absence included.
  */
 async function bindMigrationCohort(
   connectionString: string,
@@ -627,10 +627,8 @@ async function bindMigrationCohort(
   await client.connect();
   try {
     await client.query("BEGIN");
-    if (cohort) {
-      await writeProductionMigrationCohort(client, cohort);
-      await readProductionIdentitySnapshot(client, sourceRunId);
-    } else if (await readProductionMigrationCohort(client, sourceRunId))
+    if (cohort) await bindProductionMigrationCohort(client, cohort);
+    else if (await readProductionMigrationCohort(client, sourceRunId))
       throw new ProductionCutoverError("COHORT_CONFLICT", "Source run has an unconfigured cohort");
     await client.query("COMMIT");
   } catch (error) {
@@ -1012,7 +1010,9 @@ export async function runProductionCutover(
             : "STEP_FAILED";
         await failStep(client, config.runId, step, code);
         await persistProductionCutoverEvidence(client, config.runId);
-        throw new ProductionCutoverError(code, `${step} did not complete`);
+        // Cohort errors carry only hashed hotel IDs, so the operator sees which ones failed.
+        const detail = error instanceof ProductionMigrationCohortError ? `: ${error.message}` : "";
+        throw new ProductionCutoverError(code, `${step} did not complete${detail}`);
       }
     }
 
