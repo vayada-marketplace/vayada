@@ -527,6 +527,8 @@ jobs:
           src/domains/channexStagingAlertRecovery.integration.test.ts
           src/routes/bookingWebPublicAttribution.integration.test.ts
           src/jobs/financeSubscriptions.integration.test.ts
+          src/jobs/financeSubscriptions.test.ts
+          src/domains/stripeFinanceSubscriptions.test.ts
           src/platform/postgresRuntime.integration.test.ts
           src/platform/workosWebhooks.integration.test.ts
         env:

@@ -126,12 +126,16 @@ export async function processFinanceSubscriptionWebhook(
     if (!snapshot.subscriptionItemId) {
       throw new Error("Stripe subscription omitted its subscription item ID.");
     }
-    snapshot = await dependencies.stripe.updateRoomQuantity({
-      subscriptionId,
-      subscriptionItemId: snapshot.subscriptionItemId,
-      activeRoomCount,
-      idempotencyKey: `room-quantity:${payload.rawEventId}`,
-    });
+    // VAY-1362: an adopted legacy subscription keeps its flat per-hotel price.
+    // Pushing the room count into its quantity would multiply the charge.
+    if (!snapshot.retainedLegacyPrice) {
+      snapshot = await dependencies.stripe.updateRoomQuantity({
+        subscriptionId,
+        subscriptionItemId: snapshot.subscriptionItemId,
+        activeRoomCount,
+        idempotencyKey: `room-quantity:${payload.rawEventId}`,
+      });
+    }
   }
 
   const transition = transitionFor(payload.eventType);
@@ -301,7 +305,7 @@ export function createPgFinanceSubscriptionWebhookStore(
           snapshot.currentPeriodStart,
           snapshot.currentPeriodEnd,
           snapshot.cancelAtPeriodEnd,
-          fixedPlanAmountMinor(activeRoomCount, snapshot.currency),
+          billingAmountMinor(snapshot, activeRoomCount),
           snapshot.currency,
           activeRoomCount,
           JSON.stringify({ subscriptionItemId: snapshot.subscriptionItemId }),
@@ -378,7 +382,7 @@ export function createPgFinanceSubscriptionWebhookStore(
           snapshot.currentPeriodStart,
           snapshot.currentPeriodEnd,
           snapshot.cancelAtPeriodEnd,
-          fixedPlanAmountMinor(activeRoomCount, snapshot.currency),
+          billingAmountMinor(snapshot, activeRoomCount),
           snapshot.currency,
           activeRoomCount,
           JSON.stringify({
@@ -560,6 +564,17 @@ function transitionFor(eventType: string): "paid" | "payment_failed" | "sync" | 
   if (eventType === "invoice.upcoming" || eventType === "customer.subscription.updated")
     return "sync";
   throw new Error(`Unsupported Finance subscription event: ${eventType}`);
+}
+
+function billingAmountMinor(
+  snapshot: StripeSubscriptionSnapshot,
+  activeRoomCount: number,
+): number {
+  // VAY-1362: a retained legacy price is whatever Stripe charges, not the catalog.
+  if (snapshot.retainedLegacyPrice && typeof snapshot.amountMinor === "number") {
+    return snapshot.amountMinor;
+  }
+  return fixedPlanAmountMinor(activeRoomCount, snapshot.currency);
 }
 
 function eventCreatedAt(payload: FinanceSubscriptionWebhookPayload): string {
