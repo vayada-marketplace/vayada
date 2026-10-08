@@ -455,6 +455,13 @@ describe("Stripe fixed-plan provider", () => {
     const cases = [
       { metadata: { vayada_legacy_adoption: undefined } },
       { metadata: { hotel_id: "property-2" } },
+      { metadata: { vayada_payment_kind: undefined } },
+      { metadata: { vayada_organization_id: undefined } },
+      {
+        items: {
+          data: [{ ...adoptedLegacySubscription().items.data[0], price: fixedPrice() }],
+        },
+      },
       { items: { data: [{ ...adoptedLegacySubscription().items.data[0], quantity: 2 }] } },
       {
         items: {

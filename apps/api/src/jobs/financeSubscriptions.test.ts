@@ -238,6 +238,8 @@ describe("Finance subscription webhook lifecycle", () => {
     });
 
     expect(values[0]?.[10]).toBe(3_500);
+    expect(values[0]?.[11]).toBe("EUR");
+    expect(values[0]?.[12]).toBe(4);
     expect(values[1]?.[7]).toBe(3_500);
     expect(values[2]?.[10]).toBe(4_500);
   });
