@@ -1,6 +1,5 @@
 import {
   roomList,
-  pricingPlan,
   pricingSnapshot,
   recurringPricing,
   propertyProfile,
@@ -57,41 +56,70 @@ test.describe("adaptive pricing and calendar", () => {
     await expect(
       page.getByRole("heading", { name: "Set your room prices", level: 1 }),
     ).toBeVisible();
-    await expect(page.getByLabel("Hotel pricing currency")).toHaveValue("EUR");
-    await expect(page.getByRole("textbox", { name: "Nightly price" })).toHaveValue("160.00");
+    await expect(page.getByText("All prices are in EUR.")).toBeVisible();
+    await expect(page.getByText("Needs a rate")).toBeVisible();
     await expectNoSeriousAccessibilityViolations(page);
+    await page.screenshot({
+      path: testInfo.outputPath("pricing-1-first-rate.png"),
+      fullPage: true,
+    });
 
-    await page.getByRole("textbox", { name: "Nightly price" }).fill("175.50");
+    await page.getByRole("combobox", { name: "Room type" }).selectOption(roomTypeId);
+    await page.getByRole("combobox", { name: "How is the room priced?" }).selectOption("flat");
+    await page.getByRole("textbox", { name: "Room price per night" }).fill("175.50");
+    await page.getByRole("textbox", { name: "Adult pricing starts at age (1–18)" }).fill("12");
+    await page.getByRole("textbox", { name: "Price per child per night (0 is allowed)" }).fill("0");
+    await page
+      .getByRole("combobox", { name: "Children count toward room capacity" })
+      .selectOption("yes");
+    await page.getByRole("textbox", { name: "Minimum stay in nights" }).fill("1");
+    await page.getByRole("combobox", { name: "Cancellation policy" }).selectOption("flexible");
+    await page
+      .getByRole("textbox", { name: "Free cancellation until days before arrival (0–365)" })
+      .fill("7");
+    await page.getByRole("combobox", { name: "Payment policy" }).selectOption("full");
+    await page.getByRole("checkbox", { name: "Pay at property" }).check();
+    await page.getByRole("button", { name: "Add this rate" }).click();
+
+    await expect(page.getByText("Ready to publish")).toBeVisible();
     const priceConfirmation = page.getByRole("checkbox", {
       name: /These are the final prices guests will see/,
     });
     await priceConfirmation.focus();
     await page.keyboard.press("Space");
     await expect(priceConfirmation).toBeChecked();
-    await page.getByRole("button", { name: "Save and continue" }).click();
+    await expectNoSeriousAccessibilityViolations(page);
+    await page.screenshot({ path: testInfo.outputPath("pricing-2-ready.png"), fullPage: true });
+    await page.getByRole("button", { name: "Publish prices and continue" }).click();
 
     await expect(page.getByRole("heading", { name: "Open your calendar", level: 1 })).toBeVisible();
-    expect(api.pricingDrafts).toHaveLength(1);
-    expect(api.pricingDrafts[0]).toMatchObject({
-      stepId: "pricing",
-      expectedBaseRevisions: {
-        "pms.pricing_settings": "pricing:e2e:1",
-        "pms.rate_plans": "pricing:e2e:1",
-        "pms.rate_rules": "pricing:e2e:1",
-      },
-      payload: {
-        "rate.currency": "EUR",
-        "rate.base_nightly_rate": { [roomTypeId]: "175.50" },
-      },
-    });
-    expect(api.flexiblePlanWrites).toEqual([
-      expect.objectContaining({
-        expectedRoomFactsRevision: 3,
-        expectedPricingCurrencyRevision: 2,
-        expectedFlexibleRatePlanRevision: 4,
-        baseAmountDecimal: "175.50",
-      }),
+    await page.screenshot({ path: testInfo.outputPath("pricing-3-published.png"), fullPage: true });
+    expect(api.pricingDrafts).toEqual([]);
+    expect(api.pricingV2Writes.map(({ request }) => request)).toEqual([
+      `PUT /drafts/:id/rooms/${roomTypeId}/offers/:offer/terms`,
+      "POST /prepare",
+      "PUT /drafts/:id",
+      "POST /charges",
+      "PUT /drafts/:id",
+      "POST /publish",
     ]);
+    expect(api.pricingV2Writes[0]!.body).toMatchObject({
+      baseRevision: 0,
+      expectedRevision: null,
+      cancellation: { kind: "flexible", terms: { freeCancellationDeadlineDays: 7 } },
+      payment: { kind: "full", acceptedMethods: ["pay_at_property"] },
+    });
+    expect(api.pricingV2Writes[1]!.body).toMatchObject({
+      currency: "EUR",
+      rooms: [
+        {
+          roomTypeId,
+          revision: 1,
+          capacity: { total: 2, adults: 2, children: 1 },
+          offers: [{ price: { calendar: { base: { mode: "flat", amountMinor: "17550" } } } }],
+        },
+      ],
+    });
     expect(api.confirmationWrites).toHaveLength(1);
     expect(api.calendarWrites).toEqual([]);
 
@@ -198,8 +226,8 @@ test.describe("adaptive pricing and calendar", () => {
 
 async function mockPricingCalendarApis(page: Page) {
   let sessionRevision = 7;
-  let planRevision = 4;
-  let baseAmountDecimal = "160.00";
+  let publication: Record<string, unknown> | null = null;
+  let pricingDraft: Record<string, any> | null = null;
   let confirmationRevision = 0;
   let confirmedFingerprint: string | null = null;
   let acceptedCalendar: Record<string, unknown> | null = null;
@@ -207,7 +235,7 @@ async function mockPricingCalendarApis(page: Page) {
   const drafts = new Map<PropertySetupStepId, PropertySetupStepDraft>();
   const pricingDrafts: Record<string, unknown>[] = [];
   const calendarDrafts: Record<string, unknown>[] = [];
-  const flexiblePlanWrites: Record<string, unknown>[] = [];
+  const pricingV2Writes: { request: string; body: Record<string, unknown> }[] = [];
   const confirmationWrites: Record<string, unknown>[] = [];
   const previewWrites: Record<string, unknown>[] = [];
   const calendarWrites: Record<string, unknown>[] = [];
@@ -243,6 +271,7 @@ async function mockPricingCalendarApis(page: Page) {
             present_hotel: "complete",
             booking_design: "complete",
             rooms: "complete",
+            payments: "complete",
           },
         });
         const model = {
@@ -345,7 +374,7 @@ async function mockPricingCalendarApis(page: Page) {
       return;
     }
     if (pathname.endsWith("/pricing-source") && method === "GET") {
-      await ok(route, pricingSnapshot(planRevision, baseAmountDecimal));
+      await ok(route, pricingSnapshot(4, "160.00"));
       return;
     }
     if (pathname.endsWith("/pricing-source/recurring-booking-evidence") && method === "GET") {
@@ -365,18 +394,94 @@ async function mockPricingCalendarApis(page: Page) {
       });
       return;
     }
-    if (pathname.endsWith(`/room-types/${roomTypeId}/flexible-rate-plan`) && method === "PUT") {
-      const body = request.postDataJSON() as Record<string, unknown>;
-      flexiblePlanWrites.push(body);
-      planRevision += 1;
-      baseAmountDecimal = body.baseAmountDecimal as string;
-      await ok(route, {
-        contractVersion: PMS_PRICING_CONTRACT_VERSION,
-        outcome: "updated",
-        flexibleRatePlan: pricingPlan(planRevision, baseAmountDecimal),
-        acceptedAt,
-      });
-      return;
+    const pricingV2 = pathname.match(new RegExp(`/pricing-v2(/.*)?$`));
+    if (pricingV2) {
+      const suffix = pricingV2[1] ?? "";
+      const body = (method === "GET" ? {} : request.postDataJSON()) as Record<string, any>;
+      const write = (name: string) =>
+        pricingV2Writes.push({
+          request: `${method} ${name}`,
+          body,
+        });
+      if (suffix === "" && method === "GET") {
+        if (!publication) {
+          await route.fulfill({
+            status: 404,
+            headers: corsHeaders(route),
+            json: { code: "not_found" },
+          });
+        } else await ok(route, publication);
+        return;
+      }
+      const terms = suffix.match(/^\/drafts\/[^/]+\/rooms\/([^/]+)\/offers\/([^/]+)\/terms$/);
+      if (terms && method === "PUT") {
+        write(`/drafts/:id/rooms/${terms[1]}/offers/:offer/terms`);
+        await ok(route, {
+          roomTypeId: terms[1],
+          offerId: decodeURIComponent(terms[2]!),
+          revision: "66666666-6666-4666-8666-666666666666",
+          cancellation: body.cancellation,
+          payment: body.payment,
+        });
+        return;
+      }
+      if (suffix === "/prepare" && method === "POST") {
+        write("/prepare");
+        await ok(route, {
+          sources: pricingSources(),
+          effectiveSources: pricingSources(),
+          snapshot: {
+            currency: body.currency,
+            rooms: body.rooms,
+            ownerReferences: { finance: `finance.pricing.v2:${"1".repeat(64)}` },
+          },
+        });
+        return;
+      }
+      if (/^\/drafts\/[^/]+$/.test(suffix) && method === "PUT") {
+        write("/drafts/:id");
+        pricingDraft = {
+          ...body,
+          draftId: suffix.split("/")[2],
+          revision: body.expectedDraftRevision + 1,
+        };
+        await ok(route, { revision: body.expectedDraftRevision + 1 });
+        return;
+      }
+      if (/^\/drafts\/[^/]+\/charge-review$/.test(suffix) && method === "GET" && pricingDraft) {
+        await ok(route, {
+          draftId: pricingDraft.draftId,
+          snapshot: pricingDraft.snapshot,
+          revision: pricingDraft.revision,
+          baseRevision: pricingDraft.baseRevision,
+          sources: pricingDraft.sources,
+          effectiveSources: pricingDraft.effectiveSources,
+          stale: false,
+          fingerprint: "2".repeat(64),
+          declaration: "all_mandatory_charges_included",
+        });
+        return;
+      }
+      if (suffix === "/charges" && method === "POST") {
+        write("/charges");
+        await ok(route, {
+          id: "77777777-7777-4777-8777-777777777777",
+          fingerprint: body.claimedFingerprint,
+          declaration: body.declaration,
+        });
+        return;
+      }
+      if (suffix === "/publish" && method === "POST") {
+        write("/publish");
+        publication = {
+          ...body.snapshot,
+          revision: body.expectedRevision + 1,
+          sources: body.sources,
+          stale: false,
+        };
+        await ok(route, { revision: body.expectedRevision + 1, replayed: false });
+        return;
+      }
     }
     if (pathname.endsWith("/mandatory-charge-confirmation") && method === "PUT") {
       const body = request.postDataJSON() as Record<string, unknown>;
@@ -441,7 +546,7 @@ async function mockPricingCalendarApis(page: Page) {
   return {
     pricingDrafts,
     calendarDrafts,
-    flexiblePlanWrites,
+    pricingV2Writes,
     confirmationWrites,
     previewWrites,
     calendarWrites,
@@ -449,6 +554,14 @@ async function mockPricingCalendarApis(page: Page) {
     materializationWrites,
     forbiddenCalls,
     unexpectedCalls,
+  };
+}
+
+function pricingSources() {
+  return {
+    room: `pms.pricing.rooms.v2:${"3".repeat(64)}`,
+    terms: `booking.pricing.terms.v2:${"4".repeat(64)}`,
+    finance: `finance.pricing.source.v2:${"5".repeat(64)}`,
   };
 }
 
