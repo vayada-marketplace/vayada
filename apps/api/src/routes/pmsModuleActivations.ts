@@ -11,6 +11,7 @@ import {
 
 import { enforceRoutePolicy } from "./policy.js";
 import type { HotelSetupCommandForwarder } from "../hotelSetupCommandForwarder.js";
+import { HotelSetupFinancialsUnavailableError } from "../hotelSetupFeatureHubOrdinary.js";
 
 const MODULE_ENTITLEMENT_PREFIX = "module:";
 const MODULE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -134,27 +135,28 @@ export async function registerPmsModuleActivationRoutes(
         },
       };
       const financialsActive = hasActiveEntitlement(context, financialsEntitlement);
+      const setupComplete = (await options.financialsSetupComplete?.(context, propertyId)) === true;
       const financialsVisible =
         canReadFinancials(context, propertyId) &&
         (financialsActivationPropertyIds.has(propertyId) ||
-          (await options.financialsSetupComplete?.(context, propertyId)) === true ||
+          setupComplete ||
           financialsActive ||
           activations.some(
             (activation) => activation.moduleId === "financials" && activation.isActive,
           ));
-      return reply
-        .header("Cache-Control", "private, no-store")
-        .send(
-          moduleActivationsResponse(
-            propertyId,
-            financialsVisible &&
-              (options.requireOwnerSession || !hasGlobalFinancialsSuspension(context)) &&
-              canManageFinancials(context, propertyId),
-            activations,
-            financialsVisible,
-            financialsActive,
-          ),
-        );
+      return reply.header("Cache-Control", "private, no-store").send(
+        moduleActivationsResponse(
+          propertyId,
+          financialsVisible &&
+            (options.requireOwnerSession || !hasGlobalFinancialsSuspension(context)) &&
+            // Owner-session registrations toggle only a completed new-hotel default.
+            (!options.financialsSetupComplete || setupComplete) &&
+            canManageFinancials(context, propertyId),
+          activations,
+          financialsVisible,
+          financialsActive,
+        ),
+      );
     },
   );
 
@@ -197,10 +199,15 @@ export async function registerPmsModuleActivationRoutes(
           message: "The organization has suspended Financials.",
         });
       }
-      if (
-        !financialsActivationPropertyIds.has(propertyId) &&
-        (await options.financialsSetupComplete?.(context, propertyId)) !== true
-      ) {
+      const setupComplete = (await options.financialsSetupComplete?.(context, propertyId)) === true;
+      // Owner-session registrations toggle only a completed new-hotel default, in either
+      // direction; anything else stays with operators (VAY-2056).
+      if (options.requireOwnerSession && options.financialsSetupComplete && !setupComplete)
+        return reply.header("Cache-Control", "no-store").code(403).send({
+          code: "financials_activation_not_allowed",
+          message: "Financials activation is not approved for this property.",
+        });
+      if (!financialsActivationPropertyIds.has(propertyId) && !setupComplete) {
         const current = (await repository.list(context, propertyId)).find(
           (activation) => activation.moduleId === "financials",
         );
@@ -216,7 +223,16 @@ export async function registerPmsModuleActivationRoutes(
           });
         }
       }
-      const activation = await repository.updateFinancials(context, propertyId, parsed.isActive);
+      let activation: PmsModuleActivation;
+      try {
+        activation = await repository.updateFinancials(context, propertyId, parsed.isActive);
+      } catch (error) {
+        if (!(error instanceof HotelSetupFinancialsUnavailableError)) throw error;
+        return reply.header("Cache-Control", "no-store").code(409).send({
+          code: "financials_activation_unavailable",
+          message: "Financials cannot be changed for this property right now.",
+        });
+      }
       return reply.header("Cache-Control", "no-store").send(activation);
     },
   );

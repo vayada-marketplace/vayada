@@ -69,6 +69,7 @@ import { buildApp, type ApiAuthOptions } from "./app.js";
 import { loadHotelSetupCommandForwarder } from "./hotelSetupCommandForwarder.js";
 import { createOrdinaryHotelSetupProfileCommand } from "./platform/hotelSetupProfileWriter.js";
 import { createOrdinaryHotelSetupLaunchSettingsCommand } from "./hotelSetupLaunchSettingsRepository.js";
+import { createOrdinaryHotelSetupFeatureHubCommands } from "./hotelSetupFeatureHubOrdinary.js";
 import {
   type ApiConfig,
   channexConnectionOnlyScope,
@@ -1854,6 +1855,7 @@ const app = buildApp({
   hotelSetupProfileCommand: createOrdinaryHotelSetupProfileCommand(propertySetupOwnerPool),
   hotelSetupLaunchSettingsCommand:
     createOrdinaryHotelSetupLaunchSettingsCommand(propertySetupOwnerPool),
+  hotelSetupFeatureHubCommands: createOrdinaryHotelSetupFeatureHubCommands(propertySetupOwnerPool),
   hotelSetupCurrencyCommandPort:
     config.pmsOperationsSource === "target"
       ? createPgPmsPricingCommandRepository({

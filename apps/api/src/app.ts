@@ -341,6 +341,11 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   hotelSetupCreationForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
   /** Owner-only hotel-detail edits on the ordinary login; unset keeps the sparse writer. */
   hotelSetupProfileCommand?: import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate;
+  /** Owner-only Feature Hub Financials on the ordinary login; unset keeps the forwarder. */
+  hotelSetupFeatureHubCommands?: Pick<
+    import("./routes/pmsModuleActivations.js").PmsModuleActivationRepository,
+    "updateFinancials"
+  >;
   /** Self-serve hotel creation (Owner mode, ordinary login); unset keeps the forwarder. */
   hotelSetupPropertyCreationRepository?: Pick<
     import("./routes/sharedHotelSetupStatus.js").SharedHotelSetupStatusRepository,
@@ -1100,8 +1105,23 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   if (options.pmsModuleActivationRepository) {
     app.register(registerPmsModuleActivationRoutes, {
       prefix: "/api/pms",
-      repository: options.pmsModuleActivationRepository,
-      forward: options.hotelSetupCommandForwarder,
+      ...(options.hotelSetupFeatureHubCommands
+        ? {
+            // VAY-2056: the private service's Owner-only registration, on the ordinary login.
+            repository: {
+              ...options.pmsModuleActivationRepository,
+              updateFinancials: options.hotelSetupFeatureHubCommands.updateFinancials,
+            },
+            requireOwnerSession: true,
+            financialsSetupComplete:
+              options.pmsModuleActivationRepository.isFinancialsSetupComplete?.bind(
+                options.pmsModuleActivationRepository,
+              ),
+          }
+        : {
+            repository: options.pmsModuleActivationRepository,
+            forward: options.hotelSetupCommandForwarder,
+          }),
       allowedOrigins: options.pmsOperationsAllowedOrigins,
       financialsActivationPropertyIds: options.financialsActivationPropertyIds,
       propertyAccessRepository: options.auth?.propertyAccessRepository,
