@@ -82,8 +82,13 @@ export async function processFinanceSubscriptionWebhook(
     if (payload.eventType === "checkout.session.completed") return "ignored_stale";
     // VAY-1362: a legacy-shaped subscription (no target organization metadata)
     // is owned by nobody until the adoption command runs. Acknowledge it
-    // instead of retrying into the dead letter; the receipt stays stored.
-    if (!payload.organizationId) return "ignored_unowned";
+    // instead of retrying into the dead letter; the receipt stays stored. The
+    // live subscription is read once so a target event whose invoice omitted
+    // its metadata still retries instead of being dropped.
+    if (!payload.organizationId && payload.subscriptionId) {
+      const live = await dependencies.stripe.retrieveSubscription(payload.subscriptionId);
+      if (!live.organizationId) return "ignored_unowned";
+    }
     throw new Error("Stripe subscription webhook does not map to a Finance entitlement.");
   }
   const subscriptionId = payload.subscriptionId ?? existing.subscriptionRef;
@@ -459,6 +464,7 @@ async function claimJob(pool: pg.Pool, workerId: string, queue: string, jobType:
   return result.rows[0] ?? null;
 }
 
+// Without an outcome the job metadata is left as it is (the notification runner relies on that).
 async function finishJob(pool: pg.Pool, jobId: string, outcome?: string): Promise<void> {
   await pool.query(
     `UPDATE platform.jobs SET status = 'succeeded', finished_at = now(),
