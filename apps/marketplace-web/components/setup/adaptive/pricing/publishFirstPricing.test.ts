@@ -69,6 +69,31 @@ describe("publishFirstPricing", () => {
     expect(client.prepare.mock.calls[0]![1]).toMatchObject({ baseRevision: 0 });
   });
 
+  it("keeps a draft save whose response was lost", async () => {
+    const { client, calls } = fakeClient();
+    client.saveDraft.mockImplementationOnce(async () => {
+      calls.push("saveDraft");
+      throw new TypeError("Failed to fetch");
+    });
+    client.readDraft.mockResolvedValueOnce({ revision: 1 });
+    const progress = newPublishProgress();
+    await expect(publishFirstPricing(client as never, null, [added()], progress)).rejects.toThrow(
+      "Failed to fetch",
+    );
+    await publishFirstPricing(client as never, null, [added()], progress);
+    // The landed revision 1 is read back instead of saving revision 0 again (a 409).
+    expect(calls).toEqual([
+      "terms",
+      "prepare",
+      "saveDraft",
+      "review",
+      "confirm",
+      "saveDraft",
+      "publish",
+    ]);
+    expect(client.readDraft).toHaveBeenCalledOnce();
+  });
+
   it("refuses rooms priced in different currencies", async () => {
     const { client } = fakeClient();
     const current = { currency: "CHF", revision: 1, rooms: [] };
@@ -125,6 +150,7 @@ function fakeClient() {
       };
     }),
     confirmationAction: vi.fn(() => confirm),
+    readDraft: vi.fn(async (_draftId: string): Promise<{ revision: number } | null> => null),
     publicationAction: vi.fn((..._args: unknown[]) => async () => {
       calls.push("publish");
       return { revision: 3, replayed: false };

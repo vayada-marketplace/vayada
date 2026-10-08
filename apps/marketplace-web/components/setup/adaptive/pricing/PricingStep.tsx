@@ -44,7 +44,6 @@ export function PricingStep({
   refreshRoute,
   goToStep,
 }: AdaptiveSetupStepComponentProps) {
-  const organizationId = route.scope.organizationId;
   const pricingClient = useMemo(
     () => onboardingPricingApi.replacementPricing(propertyId),
     [propertyId],
@@ -58,6 +57,8 @@ export function PricingStep({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ message: string; reload: boolean } | null>(null);
   const progress = useRef(newPublishProgress());
+  const running = useRef(false);
+  const lastAction = useRef<() => Promise<void>>(async () => undefined);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -75,7 +76,7 @@ export function PricingStep({
     setLoaded(null);
     setLoadError(null);
     void Promise.all([
-      onboardingPricingApi.load(organizationId, propertyId, {
+      onboardingPricingApi.load(propertyId, {
         cache: "no-store",
         signal: controller.signal,
       }),
@@ -90,27 +91,28 @@ export function PricingStep({
         if (!controller.signal.aborted) setLoadError(errorMessage(cause));
       });
     return () => controller.abort();
-  }, [organizationId, pricingClient, propertyId, reload, route.scope.propertyId, step.stepId]);
+  }, [pricingClient, propertyId, reload, route.scope.propertyId, step.stepId]);
 
-  const run = useCallback(
-    async (action: () => Promise<void>) => {
-      if (busy) return;
-      setBusy(true);
-      setError(null);
-      try {
-        await action();
-      } catch (cause) {
-        if (!mounted.current) return;
-        const conflict =
-          (cause instanceof ApiErrorResponse && cause.status === 409) ||
-          (cause instanceof PricingOwnerError && cause.requiresRefresh);
-        setError({ message: publishErrorMessage(cause), reload: conflict });
-      } finally {
-        if (mounted.current) setBusy(false);
-      }
-    },
-    [busy],
-  );
+  const run = useCallback(async (action: () => Promise<void>) => {
+    // A ref, not `busy`: two clicks in one frame both see the old state.
+    if (running.current) return;
+    running.current = true;
+    lastAction.current = action;
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+    } catch (cause) {
+      if (!mounted.current) return;
+      const conflict =
+        (cause instanceof ApiErrorResponse && cause.status === 409) ||
+        (cause instanceof PricingOwnerError && cause.requiresRefresh);
+      setError({ message: publishErrorMessage(cause), reload: conflict });
+    } finally {
+      running.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  }, []);
 
   if (loadError) {
     return (
@@ -148,7 +150,8 @@ export function PricingStep({
   const payments = route.steps.find(({ stepId }) => stepId === "payments");
   const paymentsPending = !!payments && payments.state !== "complete";
   const allPriced = owners.rooms.length > 0 && unpriced.length === 0;
-  const complete = allPriced && added.length === 0 && owners.confirmationCurrent;
+  // The server completes the step: every operating room published and prices confirmed final.
+  const complete = allPriced && added.length === 0 && step.state === "complete";
 
   const finish = async () => {
     if (added.length > 0) {
@@ -158,7 +161,6 @@ export function PricingStep({
       setLoaded({ owners, publication: published });
       setAdded([]);
     }
-    await onboardingPricingApi.confirmFinalPrices(organizationId, propertyId);
     await refreshRoute();
     await saveAndContinue();
   };
@@ -174,12 +176,12 @@ export function PricingStep({
     <div className="mx-auto w-full max-w-5xl space-y-10">
       {error && (
         <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-4" role="alert">
-          <p className="text-sm font-semibold text-red-950">Prices were not published</p>
+          <p className="text-sm font-semibold text-red-950">Pricing was not saved</p>
           <p className="mt-1 text-sm leading-6 text-red-900">{error.message}</p>
           <button
             type="button"
             disabled={busy}
-            onClick={() => void (error.reload ? startOver() : run(finish))}
+            onClick={() => void (error.reload ? startOver() : run(lastAction.current))}
             className={secondaryButton}
           >
             {error.reload ? "Reload pricing" : "Try again"}
@@ -223,7 +225,6 @@ export function PricingStep({
               onClick={() =>
                 void run(async () => {
                   const next = await onboardingPricingApi.saveCurrency(
-                    organizationId,
                     propertyId,
                     currencyChoice,
                     owners,
@@ -248,7 +249,7 @@ export function PricingStep({
         <SectionHeading
           id="room-rates-heading"
           title="Room rates"
-          description="Give every room a first rate. Seasons, weekdays, meal plans and more rates are edited later in the PMS under Pricing."
+          description="Give every room a first rate. Guests booking directly need a rate with free cancellation for each room. Seasons, weekdays, meal plans and more rates are edited later in the PMS under Pricing."
         />
         {owners.rooms.length === 0 ? (
           <p className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
@@ -293,7 +294,17 @@ export function PricingStep({
             })}
           </ul>
         )}
-        {currency && !currencyMismatch && setupRooms.length > 0 && (
+        {currency && !currencyMismatch && setupRooms.length > 0 && paymentsPending && (
+          <div className="mt-6">
+            <Panel
+              title="Choose how guests pay first"
+              message="Rates are checked against the hotel's payment methods. Complete Payments, then come back here to set room rates."
+              actionLabel="Go to Payments"
+              onAction={() => goToStep?.("payments")}
+            />
+          </div>
+        )}
+        {currency && !currencyMismatch && setupRooms.length > 0 && !paymentsPending && (
           <div className="mt-6 rounded-xl border border-gray-200 bg-white p-5">
             <FirstPricingSetup
               key={setupRooms.map(({ roomTypeId }) => roomTypeId).join()}
@@ -313,16 +324,7 @@ export function PricingStep({
         )}
       </section>
 
-      {paymentsPending && added.length > 0 && (
-        <Panel
-          title="Choose how guests pay first"
-          message="Rates are checked against the hotel's payment methods. Complete Payments, then come back here to publish these rates. Rates you entered are not kept when you leave this step."
-          actionLabel="Go to Payments"
-          onAction={() => goToStep?.("payments")}
-        />
-      )}
-
-      {allPriced && !complete && (
+      {added.length > 0 && (
         <section className="border-t border-gray-200 pt-8">
           <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-300 bg-white p-4">
             <input
@@ -345,29 +347,33 @@ export function PricingStep({
         </section>
       )}
 
+      {allPriced && added.length === 0 && !complete && (
+        <Panel
+          title="Pricing is not complete yet"
+          message="Every room has a published rate, but setup has not confirmed it. Reload pricing; if this stays, check the room rates in the PMS under Pricing."
+          actionLabel="Reload pricing"
+          onAction={() => void startOver()}
+        />
+      )}
+
       <div className="flex flex-col items-stretch gap-3 border-t border-gray-200 pt-6 sm:items-end">
         {complete ? (
-          <button type="button" className={primaryButton} onClick={() => void saveAndContinue()}>
+          <button
+            type="button"
+            disabled={busy}
+            className={primaryButton}
+            onClick={() => void run(saveAndContinue)}
+          >
             Continue
           </button>
         ) : (
           <button
             type="button"
-            disabled={
-              busy ||
-              !allPriced ||
-              !confirmed ||
-              currencyMismatch ||
-              (paymentsPending && added.length > 0)
-            }
+            disabled={busy || !allPriced || added.length === 0 || !confirmed || currencyMismatch}
             className={primaryButton}
             onClick={() => void run(finish)}
           >
-            {busy
-              ? "Publishing prices..."
-              : added.length > 0
-                ? "Publish prices and continue"
-                : "Confirm final prices and continue"}
+            {busy ? "Publishing prices..." : "Publish prices and continue"}
           </button>
         )}
       </div>

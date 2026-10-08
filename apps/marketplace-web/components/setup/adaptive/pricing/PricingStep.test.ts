@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   load: vi.fn(),
   saveCurrency: vi.fn(),
-  confirmFinalPrices: vi.fn(),
   read: vi.fn(),
   publish: vi.fn(),
 }));
@@ -19,7 +18,6 @@ vi.mock("@/services/api/onboardingPricingClient", async () => ({
   onboardingPricingApi: {
     load: mocks.load,
     saveCurrency: mocks.saveCurrency,
-    confirmFinalPrices: mocks.confirmFinalPrices,
     replacementPricing: () => ({ read: mocks.read }),
   },
 }));
@@ -41,7 +39,6 @@ describe("PricingStep", () => {
     mocks.load.mockResolvedValue(owners());
     mocks.read.mockResolvedValue(null);
     mocks.publish.mockResolvedValue(undefined);
-    mocks.confirmFinalPrices.mockResolvedValue(owners({ confirmationCurrent: true }));
   });
   afterEach(() => vi.unstubAllGlobals());
 
@@ -58,12 +55,7 @@ describe("PricingStep", () => {
     ]);
     await act(async () => select.props.onChange({ target: { value: "EUR" } }));
     await act(async () => button(view.root, "Save currency").props.onClick());
-    expect(mocks.saveCurrency).toHaveBeenCalledWith(
-      organizationId,
-      propertyId,
-      "EUR",
-      owners({ currency: null }),
-    );
+    expect(mocks.saveCurrency).toHaveBeenCalledWith(propertyId, "EUR", owners({ currency: null }));
     expect(text(view.root)).toContain("All prices are in EUR.");
     expect(view.root.findByType(FirstPricingSetup).props).toMatchObject({
       fixedCurrency: "EUR",
@@ -82,7 +74,13 @@ describe("PricingStep", () => {
     expect(publishButton().props.disabled).toBe(true);
     await act(async () => checkbox(view.root).props.onChange({ target: { checked: true } }));
     mocks.read.mockResolvedValue(publication());
-    await act(async () => publishButton().props.onClick());
+    // A double click starts one publish.
+    await act(async () => {
+      const click = publishButton().props.onClick;
+      click();
+      click();
+    });
+    expect(mocks.publish).toHaveBeenCalledOnce();
 
     expect(mocks.publish).toHaveBeenCalledWith(
       expect.anything(),
@@ -90,17 +88,15 @@ describe("PricingStep", () => {
       [firstRate()],
       expect.objectContaining({ draftId: expect.any(String) }),
     );
-    expect(mocks.confirmFinalPrices).toHaveBeenCalledWith(organizationId, propertyId);
     expect(context.refreshRoute).toHaveBeenCalledOnce();
     expect(context.saveAndContinue).toHaveBeenCalledOnce();
     view.unmount();
   });
 
-  it("sends the owner to Payments before rates can be published", async () => {
+  it("sends the owner to Payments before any rate is entered", async () => {
     const context = props("not_started");
     const view = await render(context);
-    await act(async () => view.root.findByType(FirstPricingSetup).props.onCreate(firstRate()));
-    await act(async () => checkbox(view.root).props.onChange({ target: { checked: true } }));
+    expect(view.root.findAllByType(FirstPricingSetup)).toHaveLength(0);
     expect(button(view.root, "Publish prices and continue").props.disabled).toBe(true);
     await act(async () => button(view.root, "Go to Payments").props.onClick());
     expect(context.goToStep).toHaveBeenCalledWith("payments");
@@ -114,7 +110,7 @@ describe("PricingStep", () => {
     await act(async () => checkbox(view.root).props.onChange({ target: { checked: true } }));
     mocks.publish.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     await act(async () => button(view.root, "Publish prices and continue").props.onClick());
-    expect(text(view.root)).toContain("Prices were not published");
+    expect(text(view.root)).toContain("Pricing was not saved");
     await act(async () => button(view.root, "Try again").props.onClick());
     expect(mocks.publish).toHaveBeenCalledTimes(2);
     expect(mocks.publish.mock.calls[1]![3]).toBe(mocks.publish.mock.calls[0]![3]);
@@ -137,29 +133,26 @@ describe("PricingStep", () => {
     view.unmount();
   });
 
-  it("continues without writes when every room is published and confirmed", async () => {
-    mocks.load.mockResolvedValue(owners({ confirmationCurrent: true }));
+  it("continues without writes when setup confirms every room is published", async () => {
     mocks.read.mockResolvedValue(publication());
-    const context = props();
+    const context = props("complete", "complete");
     const view = await render(context);
     expect(text(view.root)).toContain("Published · 1 rate");
     expect(view.root.findAllByType(FirstPricingSetup)).toHaveLength(0);
+    expect(view.root.findAll((node) => node.props.type === "checkbox")).toHaveLength(0);
     await act(async () => button(view.root, "Continue").props.onClick());
     expect(context.saveAndContinue).toHaveBeenCalledOnce();
     expect(mocks.publish).not.toHaveBeenCalled();
-    expect(mocks.confirmFinalPrices).not.toHaveBeenCalled();
     view.unmount();
   });
 
-  it("confirms final prices for a publication made in the PMS", async () => {
+  it("explains a published publication that setup has not completed", async () => {
     mocks.read.mockResolvedValue(publication());
     const view = await render();
-    const confirm = () => button(view.root, "Confirm final prices and continue");
-    expect(confirm().props.disabled).toBe(true);
-    await act(async () => checkbox(view.root).props.onChange({ target: { checked: true } }));
-    await act(async () => confirm().props.onClick());
-    expect(mocks.publish).not.toHaveBeenCalled();
-    expect(mocks.confirmFinalPrices).toHaveBeenCalledOnce();
+    expect(text(view.root)).toContain("Pricing is not complete yet");
+    expect(button(view.root, "Publish prices and continue").props.disabled).toBe(true);
+    await act(async () => button(view.root, "Reload pricing").props.onClick());
+    expect(mocks.load).toHaveBeenCalledTimes(2);
     view.unmount();
   });
 
@@ -173,10 +166,7 @@ describe("PricingStep", () => {
   });
 });
 
-function owners({
-  currency = "EUR" as string | null,
-  confirmationCurrent = false,
-}: { currency?: string | null; confirmationCurrent?: boolean } = {}) {
+function owners({ currency = "EUR" as string | null }: { currency?: string | null } = {}) {
   return {
     currencies: ["CHF", "EUR"],
     rooms: [
@@ -187,12 +177,7 @@ function owners({
         facts: { name: "Garden Suite", occupancy: { maxGuests: 3, maxAdults: 2, maxChildren: 1 } },
       },
     ],
-    pricing: currency
-      ? { pricingCurrency: { currency, pricingCurrencyRevision: 2 }, flexibleRatePlans: [] }
-      : null,
-    recurringPricing: currency ? { sources: [] } : null,
-    confirmationRevision: 0,
-    confirmationCurrent,
+    pricing: currency ? { pricingCurrency: { currency, pricingCurrencyRevision: 2 } } : null,
   };
 }
 
@@ -207,7 +192,10 @@ function firstRate() {
   };
 }
 
-function route(paymentsState = "complete"): PropertySetupRouteReadModel {
+function route(
+  paymentsState = "complete",
+  pricingState = "not_started",
+): PropertySetupRouteReadModel {
   const step = (stepId: string, state: string) => ({
     stepId,
     position: stepId === "pricing" ? 5 : 8,
@@ -226,12 +214,12 @@ function route(paymentsState = "complete"): PropertySetupRouteReadModel {
     sessionRevision: null,
     resumeStepId: "pricing",
     progress: { complete: 0, total: 2 },
-    steps: [step("pricing", "not_started"), step("payments", paymentsState)],
+    steps: [step("pricing", pricingState), step("payments", paymentsState)],
   } as never;
 }
 
-function props(paymentsState = "complete") {
-  const value = route(paymentsState);
+function props(paymentsState = "complete", pricingState = "not_started") {
+  const value = route(paymentsState, pricingState);
   return {
     propertyId,
     route: value,

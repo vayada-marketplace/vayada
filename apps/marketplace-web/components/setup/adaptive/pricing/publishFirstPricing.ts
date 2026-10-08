@@ -19,6 +19,8 @@ export type PublishProgress = {
   confirm?: ReturnType<Client["confirmationAction"]>;
   chargesId?: string;
   attachedRevision?: number;
+  /** Draft saves sent without a known outcome; a retry reads the draft back first. */
+  sent: { draft?: true; attached?: true };
   publish?: ReturnType<Client["publicationAction"]>;
 };
 
@@ -26,7 +28,24 @@ export const newPublishProgress = (): PublishProgress => ({
   draftId: crypto.randomUUID(),
   terms: {},
   termsRevisions: {},
+  sent: {},
 });
+
+/** Draft saves carry no idempotency key: after a lost response, keep the revision that landed. */
+async function saveDraftOnce(
+  client: Client,
+  progress: PublishProgress,
+  stage: "draft" | "attached",
+  expectedRevision: number,
+  save: () => Promise<number>,
+): Promise<number> {
+  if (progress.sent[stage]) {
+    const saved = await client.readDraft(progress.draftId);
+    if (saved?.revision === expectedRevision) return expectedRevision;
+  }
+  progress.sent[stage] = true;
+  return save();
+}
 
 /**
  * Adds the first offers of unpriced rooms to the active publication, as the PMS pricing editor
@@ -66,12 +85,15 @@ export async function publishFirstPricing(
   ].map((room) => ({ ...room, revision: baseRevision + 1 }));
 
   progress.prepared ??= await client.prepare({ currency, rooms }, selected);
-  progress.draftRevision ??= await client.saveDraft({
-    draftId: progress.draftId,
-    expectedDraftRevision: 0,
-    baseRevision,
-    ...progress.prepared,
-  });
+  const prepared = progress.prepared;
+  progress.draftRevision ??= await saveDraftOnce(client, progress, "draft", 1, () =>
+    client.saveDraft({
+      draftId: progress.draftId,
+      expectedDraftRevision: 0,
+      baseRevision,
+      ...prepared,
+    }),
+  );
   if (!progress.review) {
     const review = await client.reviewCharges(progress.draftId);
     if (!review) throw new Error("The saved pricing draft is missing. Reload pricing.");
@@ -85,14 +107,21 @@ export async function publishFirstPricing(
     ownerReferences: { ...review.snapshot.ownerReferences, charges: progress.chargesId },
   };
   const effective = review.effectiveSources ? { effectiveSources: review.effectiveSources } : {};
-  progress.attachedRevision ??= await client.saveDraft({
-    draftId: review.draftId,
-    expectedDraftRevision: review.revision,
-    baseRevision: review.baseRevision,
-    sources: review.sources,
-    ...effective,
-    snapshot,
-  });
+  progress.attachedRevision ??= await saveDraftOnce(
+    client,
+    progress,
+    "attached",
+    review.revision + 1,
+    () =>
+      client.saveDraft({
+        draftId: review.draftId,
+        expectedDraftRevision: review.revision,
+        baseRevision: review.baseRevision,
+        sources: review.sources,
+        ...effective,
+        snapshot,
+      }),
+  );
   progress.publish ??= client.publicationAction({
     draftId: review.draftId,
     snapshot,
