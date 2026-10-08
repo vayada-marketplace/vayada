@@ -171,7 +171,7 @@ export async function startPricingCardPayment(
     `UPDATE booking.guest_bookings SET active_card_payment_id=$3,
       booking_metadata=booking_metadata || $4::jsonb,updated_at=$5::timestamptz
     WHERE id=$1 AND property_id=$2 AND lifecycle_status='pending_payment' AND payment_status='unpaid'
-      AND expected_payment_method IS NULL AND booking_metadata->>'paymentMethod'='card'
+      AND expected_payment_method='unknown' AND booking_metadata->>'paymentMethod'='card'
       AND active_card_payment_id IS NULL`,
     [
       input.bookingId,
