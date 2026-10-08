@@ -1,4 +1,3 @@
-import type { HotelSetupCommandForwarder } from "../hotelSetupCommandForwarder.js";
 import { createHash } from "node:crypto";
 
 import { UnauthorizedError, type PermissionKey } from "@vayada/backend-auth";
@@ -130,10 +129,15 @@ export type SharedHotelSetupStatusRepository = {
 type SharedHotelSetupStatusRoutesOptions = {
   repository: SharedHotelSetupStatusRepository;
   trackCommandRepository: HotelSetupTrackCommandRepository;
-  propertyCreationForwarder?: HotelSetupCommandForwarder;
-  launchSettingsForwarder?: HotelSetupCommandForwarder;
-  /** Unset keeps the ordinary pre-cutover writer; set, there is no local-write fallback. */
-  profileForwarder?: HotelSetupCommandForwarder;
+  /** Self-serve hotel creation on the ordinary login (VAY-2056), an Owner-mode repository
+   * separate from the one serving platform-admin provisioning. */
+  propertyCreationRepository?: Pick<SharedHotelSetupStatusRepository, "createPropertyProfile">;
+  /** Owner-only narrow launch-settings write on the ordinary login (VAY-2056); replaces the
+   * broad Booking settings writer. Requires propertyAccessRepository. */
+  launchSettingsCommand?: Parameters<typeof registerSharedHotelSetupLaunchSettings>[1];
+  /** Owner-only hotel-detail edits on the ordinary login (VAY-2056); unset keeps the
+   * pre-cutover sparse writer used by local stacks and tests. Requires propertyAccessRepository. */
+  profileCommand?: HotelSetupPropertyProfileUpdate;
   propertyAccessRepository?: PropertyAccessRepository;
   launchSettingsRepository?: SharedPropertyLaunchSettingsRepository;
   now?: () => Date;
@@ -305,10 +309,17 @@ export async function registerSharedHotelSetupStatusRoutes(
     return profile;
   });
 
-  registerSharedHotelSetupPropertyCreation(app, repository, {
-    forward: options.propertyCreationForwarder,
-  });
+  if (options.propertyCreationRepository)
+    registerSharedHotelSetupPropertyCreation(app, options.propertyCreationRepository, {
+      requireOwnerSession: true,
+    });
+  else registerSharedHotelSetupPropertyCreation(app, repository);
 
+  const profileCommand =
+    options.profileCommand &&
+    hotelSetupPropertyProfileUpdateHandler(options.profileCommand, {
+      propertyAccessRepository: requirePropertyAccessRepository(options.propertyAccessRepository),
+    });
   app.put("/properties/:propertyId/profile", async (request, reply) => {
     const params = request.params as SharedPropertyProfileParams;
     const propertyId = parsePropertyId(params.propertyId, reply);
@@ -321,8 +332,7 @@ export async function registerSharedHotelSetupStatusRoutes(
       "hotel_catalog.setup.manage",
     );
     if (!access) return reply;
-    if (options.profileForwarder)
-      return options.profileForwarder(request, reply, propertyId, "property_profile");
+    if (profileCommand) return profileCommand(request, reply);
 
     const existingProfile = await repository.getPropertyProfile({
       organizationId: access.organizationId,
@@ -406,15 +416,23 @@ export async function registerSharedHotelSetupStatusRoutes(
 
     registerSharedHotelSetupLaunchSettings(
       app,
-      async (context, propertyId, settings) => {
-        const stored = await launchSettingsRepository.updatePropertySettingsByHotelId(
-          propertyId,
-          settings,
-          context.selectedOrganization.organizationId,
-        );
-        return stored ? toSharedPropertyLaunchSettings(stored) : null;
-      },
-      { forward: options.launchSettingsForwarder },
+      options.launchSettingsCommand ??
+        (async (context, propertyId, settings) => {
+          const stored = await launchSettingsRepository.updatePropertySettingsByHotelId(
+            propertyId,
+            settings,
+            context.selectedOrganization.organizationId,
+          );
+          return stored ? toSharedPropertyLaunchSettings(stored) : null;
+        }),
+      options.launchSettingsCommand
+        ? {
+            requireOwnerSession: true,
+            propertyAccessRepository: requirePropertyAccessRepository(
+              options.propertyAccessRepository,
+            ),
+          }
+        : {},
     );
   }
 
@@ -814,7 +832,8 @@ function toSharedSetupTrackAccessError(error: unknown): SharedHotelSetupTrackAcc
   };
 }
 
-/** Shared input contract; private handler independently verifies the original session. */
+/** Shared input contract; with requireOwnerSession the Owner-only gates of the retired private
+ * service run here and the ordinary writer re-checks current authority in its transaction. */
 export function registerSharedHotelSetupLaunchSettings(
   app: FastifyInstance,
   update: (
@@ -824,7 +843,6 @@ export function registerSharedHotelSetupLaunchSettings(
   ) => Promise<SharedPropertyLaunchSettings | null>,
   options: {
     requireOwnerSession?: boolean;
-    forward?: HotelSetupCommandForwarder;
     propertyAccessRepository?: PropertyAccessRepository;
   } = {},
 ): void {
@@ -866,8 +884,6 @@ export function registerSharedHotelSetupLaunchSettings(
     const settings = parsePropertyLaunchSettings(request.body, reply);
     if (settings === false) return reply;
 
-    if (options.forward) return options.forward(request, reply, propertyId, "launch_settings");
-
     let stored: SharedPropertyLaunchSettings | null;
     try {
       stored = await update(access.context, propertyId, settings);
@@ -906,21 +922,26 @@ export type HotelSetupPropertyProfileResult =
   | { status: "conflict"; currentRevision: number }
   | { status: "idempotency_conflict" }
   | { status: "private_contact_conflict" }
-  | { status: "not_provisioned" }
   | { status: "invalid"; fields: Record<string, string[]> };
 
-/** Private property-command service only. Checks the original Owner session, Owner link and
- * effective access here; the native writer re-locks current authority before any write. */
-export function registerHotelSetupPropertyProfileUpdate(
-  app: FastifyInstance,
-  update: (
-    context: ReturnType<typeof enforceRoutePolicy>,
-    propertyId: string,
-    command: HotelSetupPropertyProfileCommand,
-  ) => Promise<HotelSetupPropertyProfileResult>,
+export type HotelSetupPropertyProfileUpdate = (
+  context: ReturnType<typeof enforceRoutePolicy>,
+  propertyId: string,
+  command: HotelSetupPropertyProfileCommand,
+) => Promise<HotelSetupPropertyProfileResult>;
+
+function requirePropertyAccessRepository(repository: PropertyAccessRepository | undefined) {
+  if (!repository) throw new Error("Hotel detail edits require the property access repository");
+  return repository;
+}
+
+/** Checks the original Owner session, Owner link and effective access here; the writer
+ * re-locks current authority in its transaction before any write. */
+export function hotelSetupPropertyProfileUpdateHandler(
+  update: HotelSetupPropertyProfileUpdate,
   options: { propertyAccessRepository: PropertyAccessRepository },
-): void {
-  app.put("/properties/:propertyId/profile", async (request, reply) => {
+) {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
     const params = request.params as SharedPropertyProfileParams;
     const propertyId = parsePropertyId(params.propertyId, reply);
     if (propertyId === false || propertyId === null) return reply;
@@ -982,14 +1003,6 @@ export function registerHotelSetupPropertyProfileUpdate(
         code: "idempotency_key_conflict",
         detail: "These hotel details changed during the save. Review them and try again.",
       });
-    if (result.status === "not_provisioned") {
-      request.log.warn({ propertyId }, "Property profile credential is not provisioned");
-      return reply.status(409).send({
-        code: "profile_edit_not_provisioned",
-        detail:
-          "Editing hotel details isn't enabled for your account on this hotel yet. Please contact Vayada support.",
-      });
-    }
     if (result.status === "private_contact_conflict")
       return reply.status(409).send({
         code: "private_contact_conflict",
@@ -997,7 +1010,7 @@ export function registerHotelSetupPropertyProfileUpdate(
           "This contact is already saved privately or managed elsewhere for this hotel. Use a different contact.",
       });
     return result.profile;
-  });
+  };
 }
 
 function canonicalJson(value: unknown): string {
@@ -1010,14 +1023,13 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value) ?? "null";
 }
 
-/** Shared validation and policy for the public API and independently authenticated setup service. */
+/** Shared hotel-creation validation and policy; requireOwnerSession adds the Owner-only gate. */
 export function registerSharedHotelSetupPropertyCreation(
   app: FastifyInstance,
   repository: Pick<SharedHotelSetupStatusRepository, "createPropertyProfile">,
-  options: { requireOwnerSession?: boolean; forward?: HotelSetupCommandForwarder } = {},
+  options: { requireOwnerSession?: boolean } = {},
 ): void {
   app.post("/properties", async (request, reply) => {
-    if (options.forward) return options.forward(request, reply, null, "property_creation");
     const access = resolveSharedSetupAccess(request, reply, null, "hotel_catalog.setup.manage");
     if (!access) return reply;
     if (options.requireOwnerSession && !access.context.actor.providerIdentity.sessionId)

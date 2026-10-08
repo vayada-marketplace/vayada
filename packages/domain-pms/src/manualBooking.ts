@@ -80,6 +80,8 @@ export type PmsManualBookingCreateCommand = Readonly<{
   }>;
   /** Omitted means no additional guests. */
   additionalGuests?: readonly PmsManualBookingAdditionalGuest[];
+  /** Publication revision the client's preview showed; a different current one refuses the save. */
+  expectedPricingRevision?: number;
   privateNote: string | null;
   directSource: PmsManualBookingDirectSource;
   stays: readonly PmsManualBookingStay[];

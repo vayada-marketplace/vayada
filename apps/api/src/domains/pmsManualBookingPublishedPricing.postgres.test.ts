@@ -238,6 +238,26 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
       expect(reservation?.assignments[0]).toMatchObject({ ratePlanId: null, pricingOfferId: nrId });
     });
 
+    it("refuses a save priced from a different publication revision, without writing", async () => {
+      const stale = { ...command(nrId, { checkIn: "2027-07-01" }), expectedPricingRevision: 2 };
+      await expect(repository().createManualBooking(stale)).rejects.toMatchObject({
+        status: 409,
+        body: { code: "pricing_changed", field: "expectedPricingRevision" },
+      });
+      expect(
+        (
+          await pool.query("SELECT 1 FROM booking.guest_bookings WHERE source_booking_id=$1", [
+            stale.commandId,
+          ])
+        ).rowCount,
+      ).toBe(0);
+      const current = await repository().createManualBooking({
+        ...stale,
+        expectedPricingRevision: 1,
+      });
+      expect(current).toMatchObject({ outcome: "created", total: { amountDecimal: "180.00" } });
+    });
+
     it("books concurrently while previews read the same publication", async () => {
       const reader = createManualBookingPricingPublicationReader(pool);
       // Separate dates: each create re-optimizes room assignments, which may move the other stay.

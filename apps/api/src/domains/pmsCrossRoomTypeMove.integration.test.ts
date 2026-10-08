@@ -246,6 +246,37 @@ describe.skipIf(!DATABASE_URL)("PostgreSQL cross-room-type assignment moves", ()
     ]);
   });
 
+  it("keeps child ages through a keep-rate move so a later target-rate move can price them", async () => {
+    await addManualPriceEvidence();
+    await publishTarget();
+    await fixture(`UPDATE pms.operational_booking_assignments SET children=1,
+      assignment_payload='{"pricingOffer":{"offerId":"double-flex","pricingRevision":1,"childAgesAtCheckIn":[7]}}'
+      WHERE id='${I.assignment}'`);
+    await expect(move("keep-rate-child")).resolves.toMatchObject({ ok: true });
+    const kept = await pool.query(
+      "SELECT assignment_payload AS payload FROM pms.operational_booking_assignments WHERE id=$1",
+      [I.assignment],
+    );
+    expect(kept.rows[0].payload.pricingOffer).toBeUndefined();
+    expect(kept.rows[0].payload.childAgesAtCheckIn).toEqual([7]);
+  });
+
+  it("prices a target-rate move from child ages stored as a stay fact", async () => {
+    await addManualPriceEvidence();
+    await publishTarget();
+    await fixture(`UPDATE pms.operational_booking_assignments SET children=1,
+      assignment_payload='{"childAgesAtCheckIn":[7]}' WHERE id='${I.assignment}'`);
+    await expect(move("child-target-rate", "target_base")).resolves.toMatchObject({ ok: true });
+    const offer = await pool.query(
+      "SELECT assignment_payload AS payload FROM pms.operational_booking_assignments WHERE id=$1",
+      [I.assignment],
+    );
+    expect(offer.rows[0].payload).toMatchObject({
+      childAgesAtCheckIn: [7],
+      pricingOffer: { offerId: "twin-flex", childAgesAtCheckIn: [7] },
+    });
+  });
+
   it("rejects a target rate that the published restrictions forbid for the stay", async () => {
     await addManualPriceEvidence();
     await publishTarget("12000", "EUR", 3);
@@ -468,7 +499,7 @@ describe.skipIf(!DATABASE_URL)("PostgreSQL cross-room-type assignment moves", ()
       roomTypeId: I.targetType,
       revision: 1,
       currency,
-      capacity: { total: 2, adults: 2, children: 0 },
+      capacity: { total: 2, adults: 2, children: 1 },
       children: {
         adultFromAge: 12,
         bands: [{ fromAge: 0, throughAge: 11, nightlyMinor: "0", countsTowardCapacity: true }],

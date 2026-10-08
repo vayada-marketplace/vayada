@@ -55,6 +55,8 @@ export type PmsManualBookingCreateInput = PmsManualBookingPreviewInput & {
     phoneE164: string | null;
     countryCode: string | null;
   }>;
+  /** The preview's pricingRevision; a republish in between answers 409 pricing_changed. */
+  expectedPricingRevision?: number;
   privateNote: string | null;
   directSource: "call" | "email" | "whatsapp" | "walk_in" | "social_media" | "other";
   payment: {
@@ -129,6 +131,7 @@ export const PMS_MANUAL_BOOKING_ERROR_CODES = [
   "addon_not_found",
   "room_unavailable",
   "pricing_not_published",
+  "pricing_changed",
   "idempotency_conflict",
   "invalid_dates",
   "occupancy_exceeded",
