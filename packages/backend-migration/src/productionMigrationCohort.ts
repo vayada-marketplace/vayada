@@ -118,3 +118,15 @@ export async function readProductionMigrationCohort(
     );
   return cohort;
 }
+
+/** VAY-1362: a catalog source link that the cohort placed outside the migration. Such a property
+ * is inert in every domain whatever its owner link says. Without a cohort no link carries it. */
+export function outsideMigrationCohortLink(link: {
+  migrationDisposition?: string | null;
+  migrationDispositionReason?: string | null;
+}): boolean {
+  return (
+    link.migrationDisposition === "private_quarantine" &&
+    link.migrationDispositionReason === "outside_migration_cohort"
+  );
+}

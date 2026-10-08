@@ -76,6 +76,8 @@ export type FinancePropertyLink = {
   relationship: string;
   status: string;
   migrationRunId: string | null;
+  migrationDisposition?: string | null;
+  migrationDispositionReason?: string | null;
 };
 
 export type FinanceResourceLink = {
@@ -124,6 +126,8 @@ export type FinanceBuildContext = {
   pmsSettingsByProperty: Map<string, IdentitySourceRow>;
   plannedTargetIdsByTable: Map<string, Set<string>>;
   quarantinedSourceRows: Set<IdentitySourceRow>;
+  /** VAY-1362: `${system}:${table}:${id}` property sources outside the migration cohort. */
+  outsideCohortSources: Set<string>;
 };
 
 export type FinanceParity = {

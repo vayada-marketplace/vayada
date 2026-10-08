@@ -1,6 +1,7 @@
 import { targetBooking } from "./productionPmsAssignmentRecords.js";
 import {
   addPmsBlocker,
+  outsideCohortHotel,
   ownerStatusForHotel,
   propertyForHotel,
   safePmsSourceId,
@@ -61,8 +62,12 @@ function connection(context: PmsBuildContext, source: IdentitySourceRow): PmsTar
   const capabilities = ["booking", "ari"];
   if (bool(data["messaging_app_installed"], "messaging_app_installed", false))
     capabilities.push("message");
+  // VAY-1362: a hotel outside the migration cohort stays on legacy, so the target keeps no claim
+  // on its Channex property and it cannot be restored or adopted from one.
+  const historicalClaim =
+    Boolean(externalPropertyId) && !retainedActive && !outsideCohortHotel(context, hotelId);
   const records: PmsTargetRecord[] = [];
-  if (externalPropertyId && !retainedActive) {
+  if (historicalClaim) {
     const claimCreatedAt = iso(data["created_at"], "created_at");
     records.push(
       pmsRecord(
@@ -115,7 +120,7 @@ function connection(context: PmsBuildContext, source: IdentitySourceRow): PmsTar
             ? {
                 legacyExternalPropertyId: externalPropertyId,
                 ownerStatus,
-                retainedClaimState: externalPropertyId ? "historical" : null,
+                retainedClaimState: historicalClaim ? "historical" : null,
                 legacyCapabilities: capabilities,
               }
             : {}),

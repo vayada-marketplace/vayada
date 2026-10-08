@@ -277,6 +277,77 @@ describe("production Finance plan", () => {
     });
   });
 
+  it("keeps a property outside the migration cohort inert and retires its open payouts", () => {
+    const plan = (state: ProductionFinanceTargetState, status = "scheduled") => {
+      const rows = sourceRows();
+      rows.find((row) => row.sourceTable === "payouts")!.data["status"] = status;
+      if (status === "completed")
+        rows.find((row) => row.sourceTable === "payouts")!.data["completed_at"] = AT;
+      return buildProductionFinancePlan({
+        sourceRunId: RUN,
+        completedAt: "2026-08-30T00:00:00.000Z",
+        rows,
+        target: state,
+      });
+    };
+    const scoped = (disposition: "canonical" | "private_quarantine", reason: string | null) => {
+      const state = target();
+      for (const link of state.propertyLinks)
+        Object.assign(link, {
+          migrationDisposition: disposition,
+          migrationDispositionReason: reason,
+        });
+      return state;
+    };
+    const row = (result: ReturnType<typeof plan>, table: string) =>
+      result.records.find((record) => record.targetTable === table)!.row;
+    // No cohort and cohort members keep their owner state exactly.
+    const unscoped = plan(target());
+    expect(plan(scoped("canonical", null)).checksum).toBe(unscoped.checksum);
+    expect(plan(scoped("private_quarantine", "legacy_owner_quarantined")).checksum).toBe(
+      unscoped.checksum,
+    );
+    expect(row(unscoped, "payouts")["payoutStatus"]).toBe("scheduled");
+    expect(row(unscoped, "payment_provider_accounts")["payoutsEnabled"]).toBe(true);
+
+    // Outside the cohort the active owner link is ignored.
+    const outside = scoped("private_quarantine", "outside_migration_cohort");
+    const inert = plan(outside);
+    expect(inert.blockers).toEqual([]);
+    expect(row(inert, "payment_provider_accounts")).toMatchObject({
+      status: "disabled",
+      chargesEnabled: false,
+      payoutsEnabled: false,
+    });
+    expect(row(inert, "payment_settings")).toMatchObject({ paymentsEnabled: false });
+    expect(row(inert, "commission_rules")["status"]).toBe("inactive");
+    expect(row(inert, "billing_entitlements")["billingStatus"]).toBe("suspended");
+    for (const [legacy, retired] of [
+      ["scheduled", "canceled"],
+      ["processing", "canceled"],
+      ["completed", "paid"],
+      ["failed", "failed"],
+    ]) {
+      const result = plan(outside, legacy);
+      expect(result.blockers).toEqual([]);
+      expect(row(result, "payouts")["payoutStatus"]).toBe(retired);
+      expect(row(result, "payouts")["payoutMetadata"]).toEqual(
+        retired === "canceled"
+          ? expect.objectContaining({
+              legacyPayoutStatus: legacy,
+              retiredReason: "outside_migration_cohort",
+            })
+          : expect.not.objectContaining({ retiredReason: expect.anything() }),
+      );
+      expect(Object.keys(result.parity.sourcePayoutCountsByCurrencyStatusOwner)[0]).toContain(
+        `:${retired}:`,
+      );
+      expect(result.parity.targetPayoutCountsByCurrencyStatusOwner).toEqual(
+        result.parity.sourcePayoutCountsByCurrencyStatusOwner,
+      );
+    }
+  });
+
   it("blocks Booking and PMS payment settings owned by different organizations", () => {
     const rows = sourceRows().filter((row) => row.sourceTable !== "payouts");
     const state = target();

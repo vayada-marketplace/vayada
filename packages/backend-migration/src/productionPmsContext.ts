@@ -9,6 +9,7 @@ import type {
   ProductionPmsTargetState,
 } from "./productionPmsTypes.js";
 import { requiredText, sourceId } from "./productionBookingValues.js";
+import { outsideMigrationCohortLink } from "./productionMigrationCohort.js";
 
 const ID_TABLES = [
   "booking_checkin_records",
@@ -173,6 +174,17 @@ export function ownerStatusForHotel(
   const status = context.ownerStatusByHotel.get(hotelId);
   if (!status) throw new Error(`no accepted owner status for pms.hotels ${hotelId}`);
   return status;
+}
+
+/** VAY-1362: the hotel's property lies outside the migration cohort. */
+export function outsideCohortHotel(context: PmsBuildContext, hotelId: string): boolean {
+  return context.target.propertyLinks.some(
+    (link) =>
+      link.status === "active" &&
+      link.relationship === "operational_input" &&
+      link.sourceId.toLowerCase() === hotelId &&
+      outsideMigrationCohortLink(link),
+  );
 }
 
 export function addPmsBlocker(

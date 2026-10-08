@@ -1048,7 +1048,8 @@ function payoutRecords(
     throw new Error(
       `payout currency ${payoutCurrency} disagrees with booking currency ${guestBooking.currency}`,
     );
-  const status = payoutStatus(row.data["status"]);
+  const legacyStatus = payoutStatus(row.data["status"]);
+  const status = targetPayoutStatus(context, hotelId, row.data["status"]);
   if (recipientType === "affiliate" && status === "paid")
     block(
       context,
@@ -1102,6 +1103,9 @@ function payoutRecords(
         notes: optionalText(row.data["notes"], "notes"),
         paidByUserId: row.data["paid_by_user_id"] ?? null,
         migrationDisposition: "historical_unbound",
+        ...(status !== legacyStatus
+          ? { legacyPayoutStatus: legacyStatus, retiredReason: "outside_migration_cohort" }
+          : {}),
         providerBindingRequiresReview: providerIds.length > 0,
         paymentAllocationRequiresReview: relatedPayments.length > 0,
         legacyProviderPayoutReferenceSha256: providerIds[0] ? sha256(providerIds[0]) : null,
@@ -1710,6 +1714,20 @@ export function payoutStatus(value: unknown): string {
   };
   if (!mapped[status]) throw new Error(`payout status ${status} is unsupported`);
   return mapped[status];
+}
+
+/** VAY-1362: legacy keeps paying out hotels outside the migration cohort, so their open legacy
+ * payouts are retired in the target and never left actionable. */
+export function targetPayoutStatus(
+  context: FinanceBuildContext,
+  hotelId: string,
+  value: unknown,
+): string {
+  const status = payoutStatus(value);
+  return (status === "scheduled" || status === "processing") &&
+    context.outsideCohortSources.has(`pms:hotels:${hotelId}`)
+    ? "canceled"
+    : status;
 }
 
 function paymentMethod(value: unknown): string {

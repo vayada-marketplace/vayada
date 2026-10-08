@@ -12,6 +12,7 @@ import type {
   ProductionBookingTargetState,
 } from "./productionBookingTypes.js";
 import { date, optionalText, requiredText, sha256, sourceId } from "./productionBookingValues.js";
+import { outsideMigrationCohortLink } from "./productionMigrationCohort.js";
 
 export function createProductionBookingContext(input: {
   sourceRunId: string;
@@ -254,8 +255,11 @@ function ownerStatusMap(
       );
       continue;
     }
+    // VAY-1362: like PMS, a property outside the migration cohort stays inert whatever its owner
+    // link says.
+    const status = outsideMigrationCohortLink(link) ? "archived" : link.ownerStatus;
     const prior = result.get(key);
-    if (prior && prior !== link.ownerStatus) {
+    if (prior && prior !== status) {
       result.delete(key);
       addBookingBlocker(
         blockers,
@@ -264,7 +268,7 @@ function ownerStatusMap(
         key,
         "Booking property source resolves to conflicting owner dispositions",
       );
-    } else result.set(key, link.ownerStatus);
+    } else result.set(key, status);
   }
   return result;
 }

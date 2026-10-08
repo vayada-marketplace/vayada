@@ -32,6 +32,7 @@ export type PmsPropertyLink = {
   status: string;
   migrationRunId: string | null;
   migrationDisposition?: "canonical" | "private_quarantine" | null;
+  migrationDispositionReason?: string | null;
   ownerStatus: string | null;
 };
 

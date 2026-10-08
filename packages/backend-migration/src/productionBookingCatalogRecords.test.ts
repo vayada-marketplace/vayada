@@ -77,8 +77,18 @@ describe("production Booking catalog records", () => {
     });
   });
 
-  it("preserves quarantined-owner history without reviving Booking sales state", () => {
-    const links = propertyLinks().map((link) => ({ ...link, ownerStatus: "archived" }));
+  it.each([
+    ["a quarantined owner", { ownerStatus: "archived" }],
+    // VAY-1362: the cohort disposition wins over an owner link that still looks active.
+    [
+      "a property outside the migration cohort",
+      {
+        migrationDisposition: "private_quarantine",
+        migrationDispositionReason: "outside_migration_cohort",
+      },
+    ],
+  ])("preserves history of %s without reviving Booking sales state", (_name, override) => {
+    const links = propertyLinks().map((link) => ({ ...link, ...override }));
     const rows = [
       row("booking_hotels", {
         id: HOTEL,
@@ -145,6 +155,27 @@ describe("production Booking catalog records", () => {
         metadata: { legacyIsActive: true, ownerStatus: "archived" },
       },
     );
+  });
+
+  it("keeps cohort and other private properties on their owner status", () => {
+    const rows = [
+      row("booking_hotels", { id: HOTEL, updated_at: "2026-08-29T12:00:00Z", instant_book: true }),
+    ];
+    for (const migrationDispositionReason of [null, "legacy_owner_quarantined"]) {
+      const links = propertyLinks().map((link) => ({
+        ...link,
+        migrationDisposition: migrationDispositionReason ? "private_quarantine" : "canonical",
+        migrationDispositionReason,
+      }));
+      const context = createProductionBookingContext({
+        ...input(rows),
+        target: { propertyLinks: links, propertySlugs: [], records: [], provenance: [] },
+      });
+      expect(buildBookingCatalogRecords(context)[0]!.row).toMatchObject({
+        acceptanceMode: "instant",
+        sourceFreshness: { ownerStatus: "active" },
+      });
+    }
   });
 
   it("stores funnel metadata privately and redacts the audit projection", () => {

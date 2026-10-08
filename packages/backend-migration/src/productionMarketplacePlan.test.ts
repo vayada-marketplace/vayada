@@ -162,6 +162,26 @@ describe("production Marketplace plan", () => {
     ).toBe(false);
   });
 
+  it("keeps a property outside the migration cohort on the private-quarantine path", () => {
+    const plan = (migrationDispositionReason: string | null) => {
+      const target = prerequisites();
+      Object.assign(target.propertyLinks[0]!, {
+        migrationDisposition: "private_quarantine",
+        migrationDispositionReason,
+      });
+      target.publicProperties = [];
+      return buildProductionMarketplacePlan({
+        sourceRunId: RUN,
+        completedAt: "2026-08-03T00:00:00.000Z",
+        rows: representativeRows(),
+        target,
+      });
+    };
+    const outside = plan("outside_migration_cohort");
+    expect(outside.blockers).toEqual([]);
+    expect(outside.checksum).toBe(plan(null).checksum);
+  });
+
   it("ignores a valid operator link when the owner is unambiguous", () => {
     const target = prerequisites();
     target.resourceLinks.push({

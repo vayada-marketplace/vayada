@@ -251,6 +251,45 @@ describe("production PMS channels", () => {
     ).toMatchObject({ status: "disabled" });
   });
 
+  it("keeps no Channex claim or live mapping for a property outside the migration cohort", () => {
+    const targetState = target();
+    Object.assign(targetState.propertyLinks[0]!, {
+      migrationDisposition: "private_quarantine",
+      migrationDispositionReason: "outside_migration_cohort",
+      ownerStatus: "active",
+    });
+    const context = createProductionPmsContext({
+      sourceRunId: "run",
+      completedAt: "2026-08-30T00:00:00Z",
+      rows: rows(),
+      target: targetState,
+    });
+    const rooms = buildPmsRoomRecords(context);
+    const assignments = buildPmsAssignmentRecords(context, rooms);
+    const records = buildPmsChannelRecords(context, rooms, assignments);
+    const rowsOf = (table: string) =>
+      records.filter((record) => record.targetTable === table).map((record) => record.row);
+
+    expect(context.blockers).toEqual([]);
+    expect(rowsOf("channel_binding_claims")).toEqual([]);
+    expect(rowsOf("channel_connections")).toEqual([
+      expect.objectContaining({
+        connectionStatus: "disconnected",
+        externalPropertyId: null,
+        connectionMetadata: expect.objectContaining({
+          legacyExternalPropertyId: EXTERNAL_PROPERTY,
+          retainedClaimState: null,
+        }),
+      }),
+    ]);
+    const mappings = [
+      ...rowsOf("channel_room_type_mappings"),
+      ...rowsOf("channel_rate_plan_mappings"),
+    ];
+    expect(mappings.length).toBeGreaterThan(0);
+    expect(mappings.every((row) => row["status"] === "disabled")).toBe(true);
+  });
+
   it("does not revive source-disabled provider mappings", () => {
     const sourceRows = rows();
     sourceRows.find((row) => row.sourceTable === "channex_room_type_mappings")!.data["is_active"] =
