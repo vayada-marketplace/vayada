@@ -365,7 +365,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       expect(booking).toEqual({
         lifecycle_status: "pending_payment",
         payment_status: "unpaid",
-        expected_payment_method: null,
+        expected_payment_method: "unknown",
         linked: true,
         expires: true,
         intent: "pi_writer_test",

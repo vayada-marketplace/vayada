@@ -196,8 +196,9 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
       guest.countryCode,
       guest.arrivalTime,
       guest.specialRequests,
-      // Online card bookings keep no at-property method; metadata.paymentMethod says card.
-      quote.paymentMethod === "pay_at_property" ? "pay_at_property" : null,
+      // Online card bookings keep the legacy checkout default ('unknown', no at-property
+      // method); booking_metadata.paymentMethod says card.
+      quote.paymentMethod === "pay_at_property" ? "pay_at_property" : "unknown",
     ],
   );
   if (affiliateContextId !== undefined && syntheticAffiliate)
