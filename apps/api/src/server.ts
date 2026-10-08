@@ -491,13 +491,6 @@ const airbnbAlterationRuntime = createAirbnbAlterationRuntime({
   config,
   connectionString: targetDatabaseUrl,
 });
-const pricingRuntimePool = config.pricingDatabaseUrl
-  ? new pg.Pool({
-      connectionString: config.pricingDatabaseUrl,
-      connectionTimeoutMillis: 5_000,
-      max: 5,
-    })
-  : null;
 if (config.affiliateBookingBindingEnabled) {
   const client = new pg.Client({ connectionString: targetDatabaseUrl });
   try {
@@ -514,7 +507,6 @@ const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   replacementPricingAcceptanceAllowedSlugs: config.replacementPricingAcceptanceAllowedSlugs,
   bankTransfers: bankTransferBookings,
   connectionString: targetDatabaseUrl,
-  pricingPool: pricingRuntimePool,
   inventoryReservationPort: createTargetPmsInventoryReservationPort(),
   billingConfigReadPortFactory: (executor) =>
     createTargetFinanceBillingConfigReadPort({
@@ -1835,8 +1827,7 @@ const app = buildApp({
   replacementPricing:
     config.pmsOperationsSource === "target"
       ? {
-          commands: (context) =>
-            createReplacementPricingCommands(propertySetupOwnerPool, context, pricingRuntimePool),
+          commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context),
         }
       : undefined,
   pmsPricing: pmsGuestPolicySetupCommands
@@ -2477,7 +2468,6 @@ app.addHook("onClose", async () => {
     bookingGuestPolicyRepository.close(),
     propertySetupOwnerPool.end(),
     hotelSetupOrdinaryPool?.end(),
-    pricingRuntimePool?.end(),
     propertySetupDraftRepository.close(),
     ...propertySetupPmsRuntime.resources.map((resource) => resource.close?.()),
   ]);

@@ -44,9 +44,6 @@ const NO_WRITE = [
   "platform.channex_management_worker_properties",
   "platform.legacy_owner_approval_records",
   "platform.legacy_owner_approval_revocations",
-  "booking.pricing_authority_heads",
-  "booking.pricing_authority_revisions",
-  "booking.pricing_quotes",
   "booking.pricing_runtime_effective_authority_scopes",
   "booking.pricing_runtime_effective_property_scopes",
   "marketplace.affiliate_click_occurrences",
@@ -63,7 +60,6 @@ const NO_WRITE = [
 ];
 const NO_WRITE_PATTERNS = [
   /^platform\.(production_|source_extraction_|legacy_|channex_adoption_|hotel_setup_|identity_migration_)/,
-  /^booking\.pricing_authority_/,
   /^pms\.channex_room_availability_/,
   /^pms\.channex_ari_schedule_/,
   /^(marketplace|booking)\.affiliate_click_/,
@@ -79,8 +75,15 @@ const APPEND_ONLY = [
   "finance.commission_rate_changes",
   "distribution.external_api_usage_events",
   "finance.affiliate_percentage_policy_approvals",
+  "booking.pricing_quotes",
 ];
-const NO_DELETE = ["hotel_catalog.properties"];
+// Pricing authority (VAY-2057, platform #461): revisions keep UPDATE only for the FOR SHARE lock
+// taken with the head; the append-only trigger rejects real updates.
+const NO_DELETE = [
+  "hotel_catalog.properties",
+  "booking.pricing_authority_heads",
+  "booking.pricing_authority_revisions",
+];
 const RUNTIME_EXECUTABLE_FUNCTIONS = [
   "pms.enqueue_restriction_ari(uuid,text)",
   "pms.claim_channex_external_rate(uuid,text,text,uuid,jsonb)",
