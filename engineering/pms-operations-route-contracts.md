@@ -179,6 +179,7 @@ type PmsOperationalAssignment = {
   assignmentId: string;
   roomTypeId: string;
   ratePlanId: string | null;
+  pricingOfferId?: string | null; // published pricing-v2 offer; rate_plan_id is empty for those (VAY-1422)
   roomId: string | null;
   roomNumber: string | null;
   position: number;
