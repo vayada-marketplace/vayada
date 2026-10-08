@@ -99,6 +99,22 @@ describe.skipIf(!url)("ordinary logo runtime (VAY-2056)", () => {
       // The Owner gets request-bound logo persistence on the ordinary login.
       const persistence = await create("property.logo");
       expect(persistence.repository).not.toBe(defaults.repository);
+      // Every logo write transaction re-checks the Owner, not only the acquisition probe: once
+      // the owner link is suspended, the next write fails authorization before any statement.
+      const write = () =>
+        persistence.repository.recordAudit(
+          {} as Parameters<typeof persistence.repository.recordAudit>[0],
+        );
+      await expect(write()).rejects.not.toBeInstanceOf(AuthorizationError);
+      await admin.query(
+        "UPDATE identity.organization_resource_links SET status='suspended' WHERE resource_id=$1::text",
+        [property],
+      );
+      await expect(write()).rejects.toBeInstanceOf(AuthorizationError);
+      await admin.query(
+        "UPDATE identity.organization_resource_links SET status='active' WHERE resource_id=$1::text",
+        [property],
+      );
       await persistence.close();
 
       // A non-Owner role is refused by the private service's gate; revoked authority by the
