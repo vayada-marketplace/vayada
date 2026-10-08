@@ -289,6 +289,27 @@ describe("Finance subscription webhook lifecycle", () => {
     expect(fixture.store.entitlement.planKey).toBe("fixed");
   });
 
+  it("keeps an adopted legacy entitlement active while Stripe retries", async () => {
+    const sql: string[] = [];
+    const store = createPgFinanceSubscriptionWebhookStore({
+      query: vi.fn(async (text: string) => {
+        sql.push(text);
+        return { rows: [{ propertyId: "property-1", planKey: "fixed" }] };
+      }),
+    } as never);
+
+    await store.applySubscriptionSnapshot({
+      payload: payload("invoice.payment_failed", 62),
+      snapshot: { ...verifiedSnapshot(), status: "past_due", retainedLegacyPrice: true },
+      transition: "payment_failed",
+      activeRoomCount: 2,
+    });
+
+    const statusCase = sql[0]!.slice(sql[0]!.indexOf("billing_status = CASE"));
+    expect(statusCase.indexOf("$19::boolean")).toBeGreaterThan(-1);
+    expect(statusCase.indexOf("$19::boolean")).toBeLessThan(statusCase.indexOf("'past_due'"));
+  });
+
   it("writes the unpaid Commission marker only for adopted legacy entitlements", async () => {
     const values: unknown[][] = [];
     const store = createPgFinanceSubscriptionWebhookStore({
@@ -318,6 +339,9 @@ describe("Finance subscription webhook lifecycle", () => {
     });
     expect(values[1]?.[2]).toBe(false);
     expect(JSON.parse(String(values[1]?.[13]))).not.toHaveProperty("planSelectedBy");
+    // The retained-legacy flag drives billing_status: past_due keeps the hotel active.
+    expect(values[0]?.[18]).toBe(true);
+    expect(values[1]?.[18]).toBe(false);
   });
 
   it("carries the adoption flag into the payment-failure notification and its email", async () => {

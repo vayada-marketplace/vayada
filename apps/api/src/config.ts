@@ -1171,8 +1171,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     const acceptedAfter = cutoff ? new Date(cutoff) : undefined;
     const ongoing = Boolean(
       acceptedAfter &&
-        Number.isFinite(acceptedAfter.getTime()) &&
-        acceptedAfter.toISOString() === cutoff,
+      Number.isFinite(acceptedAfter.getTime()) &&
+      acceptedAfter.toISOString() === cutoff,
     );
     if (
       cutoff &&

@@ -371,6 +371,12 @@ export function createPgFinanceSubscriptionWebhookStore(
                              ELSE entitlement.plan_key END,
              billing_status = CASE
                WHEN $3::boolean THEN 'active'
+               -- VAY-1362: an adopted legacy subscription keeps working while
+               -- Stripe retries, as on legacy; past_due shows only in
+               -- provider_subscription_status, so the 0089 trigger keeps the
+               -- product entitlement active.
+               WHEN $19::boolean AND entitlement.plan_key = 'fixed'
+                 AND $5 IN ('active', 'past_due', 'trialing') THEN 'active'
                WHEN $4 = 'payment_failed' AND entitlement.plan_key = 'fixed' THEN 'past_due'
                WHEN $2::boolean OR (entitlement.plan_key = 'fixed' AND $5 = 'active') THEN 'active'
                ELSE entitlement.billing_status END,
@@ -444,6 +450,7 @@ export function createPgFinanceSubscriptionWebhookStore(
           payload.rawEventId,
           payload.propertyId,
           payload.organizationId,
+          snapshot.retainedLegacyPrice === true,
         ],
       );
       return result.rows[0] ?? null;

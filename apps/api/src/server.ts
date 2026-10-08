@@ -2623,10 +2623,22 @@ if (config.financeBillingOpsEmail && !financeOpsEmailDelivery) {
 }
 const financeSubscriptionWebhooksEnabled = Boolean(
   stripeSubscriptionProvider &&
-    financeSubscriptionRoomInventory &&
-    stripeSubscriptionRuntimeEnabled(config),
+  financeSubscriptionRoomInventory &&
+  stripeSubscriptionRuntimeEnabled(config),
 );
 const financeSubscriptionJobsEnabled = config.financeSource === "target";
+if (
+  financeSubscriptionWebhooksEnabled &&
+  financeSubscriptionJobsEnabled &&
+  config.backgroundWorkersEnabled &&
+  !config.financeBillingOpsEmail
+) {
+  // VAY-1362: the target owns adopted legacy subscriptions; without the mailbox
+  // their failed payments only reach the log.
+  app.log.warn(
+    "FINANCE_BILLING_OPS_EMAIL is not set; failed payments on adopted legacy Fixed Plan subscriptions send no ops email",
+  );
+}
 const runFinanceSubscriptionJobs = () => {
   if (!config.backgroundWorkersEnabled) return;
   if (activeFinanceSubscriptionBatch || !financeSubscriptionJobsEnabled) return;
