@@ -122,18 +122,6 @@ export type BookingWebPublicOffersResponse = {
   };
 };
 
-export type BookingWebPublicCalendarResponse = {
-  calendar: {
-    unavailableDates: string[];
-    minStayByArrival: Record<string, number>;
-    validCheckOutsByArrival?: Record<string, string[]>;
-    maxStayByArrival: Record<string, number>;
-  };
-  freshness?: {
-    status: "fresh" | "stale" | "unavailable" | "unknown";
-  };
-};
-
 export type BookingWebPublicHostResponse = {
   slug: string;
   canonicalUrl: string;
@@ -216,17 +204,6 @@ export const bookingWebPublicApi = {
     if (query.locale) params.set("locale", query.locale);
     return bookingWebPublic.get<BookingWebPublicOffersResponse>(
       `/api/booking-web/hotels/${encodeURIComponent(slug)}/offers?${params.toString()}`,
-    );
-  },
-
-  async getCalendar(
-    slug: string,
-    start: string,
-    end: string,
-  ): Promise<BookingWebPublicCalendarResponse> {
-    const params = new URLSearchParams({ start, end });
-    return bookingWebPublic.get<BookingWebPublicCalendarResponse>(
-      `/api/booking-web/hotels/${encodeURIComponent(slug)}/calendar?${params.toString()}`,
     );
   },
 };
@@ -519,29 +496,6 @@ export function toLegacyRooms(
     ];
   });
   return [...legacyRooms, ...combinations];
-}
-
-export function toLegacyCalendar(data: BookingWebPublicCalendarResponse): {
-  dates: string[];
-  minStayByArrival: Record<string, number>;
-  validCheckOutsByArrival?: Record<string, string[]>;
-  maxStayByArrival: Record<string, number>;
-  availabilityUnavailable: boolean;
-} {
-  const unavailableDates = new Set(data.calendar.unavailableDates);
-  const hasSelectableCoverage = Object.keys(data.calendar.minStayByArrival).some(
-    (date) => !unavailableDates.has(date),
-  );
-
-  return {
-    dates: data.calendar.unavailableDates,
-    ...(data.calendar.validCheckOutsByArrival && {
-      validCheckOutsByArrival: data.calendar.validCheckOutsByArrival,
-    }),
-    minStayByArrival: data.calendar.minStayByArrival,
-    maxStayByArrival: data.calendar.maxStayByArrival,
-    availabilityUnavailable: data.freshness?.status === "unavailable" && !hasSelectableCoverage,
-  };
 }
 
 export function defaultOfferDates(): { checkIn: string; checkOut: string } {

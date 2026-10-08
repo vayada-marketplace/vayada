@@ -56,6 +56,7 @@ import type { BankTransferBookingOperations } from "../domains/financeBankTransf
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
 import { releaseAbandonedBookingEdits } from "../jobs/pendingBookingEditCleanup.js";
 import { quoteTargetRoomSelection } from "./bookingWebMixedQuote.js";
+import { pricingRetiredError } from "./pricingRetired.js";
 import { reserveTargetMixedBooking } from "./bookingWebMixedReservation.js";
 import {
   allocateMixedQuoteDiscount,
@@ -1239,11 +1240,8 @@ export function createTargetBookingWebCalendarRepository(config: {
     });
 
   return {
-    async findCalendarByHotel(hotel, query) {
-      throw Object.assign(
-        new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
-        { statusCode: 503, code: "PRICING_UNAVAILABLE" },
-      );
+    async findCalendarByHotel() {
+      throw pricingRetiredError();
     },
     async close() {
       await pool.end();
@@ -2929,10 +2927,7 @@ export async function createTargetCheckoutQuote(
   },
   mixed?: Awaited<ReturnType<typeof quoteTargetRoomSelection>>,
 ): Promise<TargetCheckoutQuoteSnapshot> {
-  throw Object.assign(
-    new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
-    { statusCode: 503, code: "PRICING_UNAVAILABLE" },
-  );
+  throw pricingRetiredError();
 }
 
 export async function loadTargetCheckoutOffer(
@@ -3012,10 +3007,7 @@ export async function loadTargetCheckoutQuoteSnapshot(
   request: BookingWebCheckoutRequest,
   now: Date,
 ): Promise<TargetCheckoutQuoteSnapshot> {
-  throw Object.assign(
-    new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
-    { statusCode: 503, code: "PRICING_UNAVAILABLE" },
-  );
+  throw pricingRetiredError();
 }
 
 export function serializeTargetCheckoutQuote(

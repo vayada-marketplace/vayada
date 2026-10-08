@@ -3,7 +3,6 @@ import { bookingWebPublic } from "./client";
 import {
   bookingWebPublicApi,
   defaultOfferDates,
-  toLegacyCalendar,
   toLegacyHotel,
   toLegacyRooms,
 } from "./bookingWebPublic";
@@ -88,20 +87,6 @@ export const hotelService = {
       `/api/booking-web/hotels/${encodeURIComponent(slug)}/checkout-config`,
     );
     return config.addons ?? [];
-  },
-
-  async getUnavailableDates(
-    slug: string,
-    start: string,
-    end: string,
-  ): Promise<{
-    dates: string[];
-    minStayByArrival: Record<string, number>;
-    validCheckOutsByArrival?: Record<string, string[]>;
-    maxStayByArrival: Record<string, number>;
-    availabilityUnavailable: boolean;
-  }> {
-    return toLegacyCalendar(await bookingWebPublicApi.getCalendar(slug, start, end));
   },
 
   async validatePromoCode(

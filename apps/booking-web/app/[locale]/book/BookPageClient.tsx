@@ -65,12 +65,21 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const [choices, setChoices] = useState<RoomChoice[]>([]);
   const [checkIn, setCheckIn] = useState("");
   const [checkOut, setCheckOut] = useState("");
+  const [promoCode, setPromoCode] = useState("");
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setCheckIn(params.get("checkIn") ?? "");
     setCheckOut(params.get("checkOut") ?? "");
+    setPromoCode(params.get("promoCode") ?? "");
+    // The hotel page hands over its party as a first room the guest can adjust or split;
+    // child ages stay blank until chosen.
+    const adults = Number(params.get("adults"));
+    if (Number.isInteger(adults) && adults >= 1 && adults <= 99) {
+      const children = Math.trunc(Number(params.get("children")) || 0);
+      const childCount = Math.min(Math.max(children, 0), 99 - adults);
+      setChoices([{ ...newRoom(), adults: String(adults), childAges: Array(childCount).fill("") }]);
+    }
   }, []);
-  const [promoCode, setPromoCode] = useState("");
   const [payment, setPayment] = useState<"" | "card" | "pay_at_property">("");
   useEffect(() => {
     const controller = new AbortController();

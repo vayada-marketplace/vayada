@@ -2,7 +2,6 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
-import { ApiError } from "@/services/api/client";
 import { HotelProvider, useHotel, useRooms } from "./HotelContext";
 
 const { getHotel, getRooms, getAddons } = vi.hoisted(() => ({
@@ -21,12 +20,9 @@ vi.mock("@/services/api/hotel", () => ({
   },
 }));
 
-it("keeps the hotel page available when initial pricing is unavailable", async () => {
+it("loads the hotel without the retired availability search", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   getHotel.mockResolvedValue({ slug: "pricing-test", name: "Pricing Test Hotel" });
-  getRooms.mockRejectedValue(
-    new ApiError("Pricing is unavailable", 503, { code: "PRICING_UNAVAILABLE" }),
-  );
   getAddons.mockResolvedValue([]);
   const container = document.createElement("div");
   const root = createRoot(container);
@@ -34,7 +30,8 @@ it("keeps the hotel page available when initial pricing is unavailable", async (
 
   function Probe() {
     const { hotel } = useHotel();
-    const { rooms, searchMessage } = useRooms();
+    const { rooms, searchMessage, refetchRooms } = useRooms();
+    void refetchRooms("2026-09-12", "2026-09-15", 2, 0);
     result = { hotelName: hotel.name, roomCount: rooms.length, searchMessage };
     return createElement("p", null, hotel.name);
   }
@@ -51,9 +48,10 @@ it("keeps the hotel page available when initial pricing is unavailable", async (
     expect(result).toEqual({
       hotelName: "Pricing Test Hotel",
       roomCount: 0,
-      searchMessage: "availabilityError",
+      searchMessage: null,
     });
     expect(container.textContent).toBe("Pricing Test Hotel");
+    expect(getRooms).not.toHaveBeenCalled();
   } finally {
     act(() => root.unmount());
     vi.unstubAllGlobals();
@@ -61,10 +59,9 @@ it("keeps the hotel page available when initial pricing is unavailable", async (
   }
 });
 
-it("keeps unexpected initial offer failures fatal", async () => {
+it("keeps hotel load failures fatal", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  getHotel.mockResolvedValue({ slug: "pricing-test", name: "Pricing Test Hotel" });
-  getRooms.mockRejectedValue(new ApiError("Unexpected failure", 500, { code: "INTERNAL_ERROR" }));
+  getHotel.mockRejectedValue(new Error("Unexpected failure"));
   getAddons.mockResolvedValue([]);
   const container = document.createElement("div");
   const root = createRoot(container);
