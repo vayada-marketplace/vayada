@@ -270,10 +270,28 @@ implemented once, `withOrdinaryHotelSetupPropertyScope` in
 
 **Owner-off versus a foreign suspension (review H1).** The 0449 receipt
 trigger strips `newHotelFinancialsOwnerDisabled` from every non-native write
-(`0449:2-14`), so the ordinary login records an Owner's switch-off as
-`featureHubOwnerDisabled: true`. Re-enabling requires `active`, or `suspended`
-with either Owner-off key: rows switched off natively before the cutover can
-still be switched back on, and a suspension by anyone else never can.
+(`0449:2-14`), so any later write by anyone cancels the native marker. The
+ordinary login cannot write that key; it records an Owner's switch-off as
+`featureHubOwnerDisabled: <switch-off transaction id>`, which counts only while
+it equals the row's `xmin`, so any later write to the row by anyone (an operator
+or billing suspension) cancels it the same way. Re-enabling requires `active`,
+or `suspended` with a live Owner-off marker of either kind: rows switched off
+natively before the cutover can still be switched back on, and a suspension made
+by anyone else, before or after the Owner's, never can. Owner-session
+registrations toggle only a completed new-hotel default, in both directions, and
+report `canManage: false` otherwise; older allow-listed rows stay with operators.
+A writer refusal answers `409 financials_activation_unavailable`.
+
+**First currency, other states.** The completion runs only for a pending
+new-hotel default (`suspended` and `newHotelFinancialsDefault='pending'`), which
+is the only state the native trigger ever saw, because only natively provisioned
+new hotels reached it. Any other Financials state (no row, already `ready`, an
+operator-managed row) only saves the currency. A pending default whose
+prerequisites fail rolls the whole save back and answers `setup_scope_unavailable`.
+
+**Wiring.** All six operations are built only when WorkOS auth is configured and
+share a dedicated 10-connection pool on the API connection, separate from the
+shared property-setup pool.
 
 ### 5.1 Public route options (review H2)
 
@@ -408,8 +426,8 @@ What a rollback does not undo (review M4):
 
 - Hotels created after the cutover have no native credentials and get
   `503`/`409` again until they are bootstrapped or the API rolls forward.
-- An Owner switch-off made on the ordinary path carries `featureHubOwnerDisabled`,
-  not the native receipt key, so the native trigger refuses to re-enable that
+- An Owner switch-off made on the ordinary path carries `featureHubOwnerDisabled`
+  (a transaction id), not the native receipt key, so the native trigger refuses to re-enable that
   row (`0449:64-67,83`). Accepted: an operator re-enables it on request.
 - Profile edits replay across the cutover in both directions, because the
   ordinary writer uses the native operation name, tenant scope, key hash and
@@ -568,3 +586,19 @@ findings are addressed in the implementation slices.
 | L6 owner link only for a property created in this transaction               | §5 op 1, #2934                           |
 | L7 one release right before the cutover deploy                              | §9 step 1                                |
 | L8 cross-cutover profile replays                                            | §5 op 2, §9                              |
+
+## 15. Final worker review (2026-10-08): findings and commits
+
+An independent adversarial review of the full stack found no blocker, no
+authorization gap and no native-path regression. Its findings:
+
+| Finding                                         | Fix                                                                                                    | Commit (PR)                                   |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
+| 1 Owner could undo a later foreign suspension   | Owner-off marker tied to the row's `xmin`                                                              | `b24a4e992` (#2935)                           |
+| 2 Older rows could be switched off but never on | Owner mode toggles only a completed default, both ways; `canManage: false` otherwise                   | `b24a4e992` (#2935)                           |
+| 3 API failed to start without auth settings     | hotel-setup options built only with auth                                                               | `8aca5ac45` (#2936)                           |
+| 4 Raw 500 on refusals                           | 409 for Feature Hub; `setup_scope_unavailable` for the first currency                                  | `b24a4e992`, `16d540c9f` (#2933)              |
+| 5 Pool capacity                                 | dedicated 10-connection hotel-setup pool                                                               | `8aca5ac45` (#2936)                           |
+| 6 First-currency skip states                    | documented above                                                                                       | this commit                                   |
+| 7 Test gaps                                     | suspended-organization creation case; no-session and non-ready route cases; per-write logo Owner check | `14e3700bd` (#2934), `b24a4e992`, `8aca5ac45` |
+| 8 Misplaced option comments                     | fixed                                                                                                  | `8aca5ac45`                                   |
