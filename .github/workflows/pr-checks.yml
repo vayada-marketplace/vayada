@@ -517,6 +517,19 @@ jobs:
           src/domains/pmsOperatingCalendarImpact.integration.test.ts
           src/domains/pmsManualBookingCommandRepository.integration.test.ts
           src/domains/pmsManualBookingPublishedPricing.postgres.test.ts
+          src/domains/bookingPricingAuthority.integration.test.ts
+          src/domains/replacementPricingStore.integration.test.ts
+          src/domains/replacementPricingCommands.integration.test.ts
+          src/domains/replacementPricingOfferOwners.integration.test.ts
+          src/domains/pmsAcceptedPricingReservationWorker.integration.test.ts
+          src/domains/preparePricingAcceptance.postgres.test.ts
+          src/domains/storePricingAcceptance.postgres.test.ts
+          src/domains/pricingAcceptanceWriter.postgres.test.ts
+          src/domains/pricingAcceptanceNotifications.postgres.test.ts
+          src/domains/pricingBookingDraft.postgres.test.ts
+          src/domains/pricingBookingLifecycle.postgres.test.ts
+          src/domains/pricingBookingRevenue.postgres.test.ts
+          src/domains/pricingInventoryAdoption.postgres.test.ts
           src/domains/pmsCrossRoomTypeMove.integration.test.ts
           src/domains/pmsManualBookingCommandRepository.test.ts
           src/pmsManualBookingPreviewRoutes.test.ts
