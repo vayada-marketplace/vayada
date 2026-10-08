@@ -10,7 +10,7 @@ import { stagePmsAcceptedPricingReservationJob } from "./pricingPmsAcceptedReser
 import { storePricingAcceptance } from "./storePricingAcceptance.js";
 import {
   pricingCardQuoteSupported,
-  stagePricingCardDraftHold,
+  readPendingPricingCardPayment,
   startPricingCardPayment,
 } from "./pricingCardPayment.js";
 import type { StripeBookingPaymentProvider } from "./stripeBookingPayments.js";
@@ -60,8 +60,12 @@ export async function writePricingAcceptance(
       card: cardPayments !== undefined,
     });
     if (prepared.kind === "replayed") {
+      // A card acceptance that still awaits payment answers with the same payment.
+      const pending =
+        cardPayments &&
+        (await readPendingPricingCardPayment(client, cardPayments.provider, input.slug, prepared));
       await client.query("COMMIT");
-      return prepared;
+      return pending || prepared;
     }
     const bookingId = randomUUID();
     const publicReference = `VAY-${bookingId.replaceAll("-", "").toUpperCase()}`;
@@ -72,11 +76,17 @@ export async function writePricingAcceptance(
       syntheticAffiliateContextId: internal?.syntheticAffiliateContextId,
       affiliateContextId: internal?.affiliateContextId,
     });
+    const lifecycle = await stagePricingBookingLifecycle(
+      client,
+      input.slug,
+      prepared.current,
+      bookingId,
+    );
     if (cardPayments && pricingCardQuoteSupported(prepared.current.quote)) {
-      // Card: hold the rooms and start the payment. Confirmation, revenue, notifications,
-      // the PMS job and the acceptance row follow once Stripe reports the payment; the
-      // command receipt stays in progress until then.
-      const hold = await stagePricingCardDraftHold(client, input.slug, prepared.current, bookingId);
+      // Card: the quote is accepted now, while it is valid, and the rooms stay held with the
+      // booking `pending_payment`. Revenue, notifications and the PMS job follow the
+      // confirmed Stripe payment.
+      const accepted = await storePricingAcceptance(client, input.slug, prepared, lifecycle, null);
       const intent = await startPricingCardPayment(client, cardPayments.provider, {
         slug: input.slug,
         current: prepared.current,
@@ -84,29 +94,23 @@ export async function writePricingAcceptance(
         bookingId,
         publicReference,
         requestId: prepared.command.requestId,
-        occurredAt: hold.occurredAt,
+        occurredAt: lifecycle.occurredAt,
       });
       await finishPricingAcceptance(client, input.slug, prepared.current, prepared.finance);
       await client.query("COMMIT");
       return {
         kind: "payment_required" as const,
-        bookingId,
+        ...accepted,
         bookingReference: publicReference,
         payment: {
           provider: "stripe" as const,
           clientSecret: intent.clientSecret,
           stripeAccountId: intent.providerAccountRef,
           paymentIntentId: intent.paymentIntentId,
-          expiresAt: hold.draftExpiresAt,
+          expiresAt: lifecycle.paymentDeadlineAt,
         },
       };
     }
-    const lifecycle = await stagePricingBookingLifecycle(
-      client,
-      input.slug,
-      prepared.current,
-      bookingId,
-    );
     const revenue = await stagePricingBookingRevenue(
       client,
       input.slug,

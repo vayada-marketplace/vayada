@@ -26,30 +26,32 @@ charges are collected at the property), and settlement stages the legacy
 ## Flow
 
 1. **Accept with card** (`POST …/quotes/:quoteId/accept`, quote
-   `paymentMethod: "card"`, `acceptanceMode: "instant"`). In one transaction:
-   the same prepare/lock steps as today, then reserve inventory, insert the
-   booking as `draft` / `unpaid` with expected method `card` and
-   `metadata.draftExpiresAt` (30 minutes, picked up by the existing
-   expired-draft sweep), insert `finance.payments` (`requires_action`,
-   amount = `dueNowMinor`, fee from the billing plan on that amount), and
-   create the PaymentIntent on the connected account with an idempotency key
-   derived from property + acceptance request id. The response is
-   `payment_required` with `clientSecret`, `stripeAccountId` and the booking id.
-   No acceptance row, revenue, notification or PMS job yet.
+   `paymentMethod: "card"`, `acceptanceMode: "instant"`). One transaction, while
+   the quote is still valid (quotes live five minutes; paying can take longer):
+   the same prepare/lock steps as today, the booking draft with expected method
+   `card`, the lifecycle step reserves inventory and sets the booking to
+   `pending_payment` with `metadata.paymentDeadlineAt` (30 minutes), the
+   append-only acceptance row and completed command receipt are stored, then
+   `finance.payments` (`requires_action`, amount = `dueNowMinor`, fee from the
+   billing plan on that amount) and the PaymentIntent on the connected account
+   (idempotency key from property + acceptance request id). The response is
+   `payment_required` with `clientSecret`, `stripeAccountId` and the deadline. No
+   revenue, notification or PMS job yet. A repeated request returns the same
+   intent while it still awaits payment.
 2. **Browser** confirms with the existing `StripeProvider` /
    `StripeConfirmStep` (`confirmPayment`, `redirect: "if_required"`).
-3. **Confirm payment** (`POST …/quotes/:quoteId/accept/payment`, same
-   idempotency key). Lock booking and payment, retrieve the intent, require
-   `succeeded`, amount = `dueNowMinor`, currency, account and
-   `vayada_booking_reference` metadata. Then run the existing post-confirmation
-   steps for the replacement path (status `confirmed`, payment `paid` or
-   partially paid when `dueLaterMinor > 0`, revenue, notifications, PMS
-   accepted-pricing job, acceptance row). Idempotent: a second call returns the
-   stored acceptance.
-4. **Webhook** `payment_intent.succeeded` for a booking created by step 1 runs
-   the same function as step 3; the legacy settlement must skip these bookings.
-5. **Expiry**: the existing sweep cancels the intent (or settles it through
-   step 3 if it already succeeded) and releases inventory.
+3. **Confirm payment** (`POST …/quotes/:quoteId/accept/payment`). Lock booking
+   and payment, retrieve the intent, require `succeeded`, amount =
+   `dueNowMinor`, currency, account and `vayada_booking_reference` metadata.
+   Then: payment `paid`, booking `confirmed` with payment status `paid` (or
+   partially paid when `dueLaterMinor > 0`), status event, revenue evidence from
+   the stored quote and its calculation, guest/host notifications and the PMS
+   accepted-pricing job. Idempotent.
+4. **Webhook** `payment_intent.succeeded` for these bookings runs step 3; the
+   legacy settlement must skip them.
+5. **Expiry**: after `paymentDeadlineAt` a sweep cancels the intent (or runs
+   step 3 if it already succeeded), cancels the booking and releases the rooms.
+   The acceptance row stays as history.
 
 ## Pull requests
 

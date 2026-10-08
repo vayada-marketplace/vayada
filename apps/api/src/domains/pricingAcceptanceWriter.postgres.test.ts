@@ -281,7 +281,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     });
   };
 
-  it("holds the rooms and starts a Stripe payment without confirming the booking", async () => {
+  it("accepts the quote, holds the rooms and starts a Stripe payment without confirming", async () => {
     const fixture = await setupFixture(cardQuote);
     const accountId = randomUUID();
     await fixture.observer.query(
@@ -307,7 +307,13 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       bookingReference: null,
       providerAccountRef: "acct_writer_test",
     }));
-    const provider = { createPaymentIntent } as never;
+    const retrievePaymentIntent = vi.fn(async () =>
+      createPaymentIntent({
+        amountMinor: Number(fixture.f.current.quote.evidence.dueNowMinor),
+        currency: fixture.f.current.quote.stay.currency,
+      }),
+    );
+    const provider = { createPaymentIntent, retrievePaymentIntent } as never;
     try {
       await expect(writePricingAcceptance(fixture.pool, fixture.input)).rejects.toMatchObject({
         code: "conflict",
@@ -335,7 +341,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       );
       await expect(snapshot(fixture.observer, fixture)).resolves.toEqual({
         bookings: 1,
-        acceptances: 0,
+        acceptances: 1,
         jobs: 0,
         revenue: 0,
         available: 2,
@@ -344,13 +350,13 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       const booking = (
         await fixture.observer.query(
           `SELECT lifecycle_status,payment_status,expected_payment_method,active_card_payment_id IS NOT NULL AS linked,
-            booking_metadata ? 'draftExpiresAt' AS expires,booking_metadata->>'providerPaymentIntentId' AS intent
+            booking_metadata ? 'paymentDeadlineAt' AS expires,booking_metadata->>'providerPaymentIntentId' AS intent
            FROM booking.guest_bookings WHERE property_id=$1`,
           [fixture.propertyId],
         )
       ).rows[0];
       expect(booking).toEqual({
-        lifecycle_status: "draft",
+        lifecycle_status: "pending_payment",
         payment_status: "unpaid",
         expected_payment_method: "card",
         linked: true,
@@ -370,6 +376,21 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
           provider_payment_intent_id: "pi_writer_test",
         },
       ]);
+      createPaymentIntent.mockClear();
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider }),
+      ).resolves.toMatchObject({
+        kind: "payment_required",
+        replayed: true,
+        bookingId: (result as { bookingId: string }).bookingId,
+        payment: { clientSecret: "pi_writer_test_secret", paymentIntentId: "pi_writer_test" },
+      });
+      expect(retrievePaymentIntent).toHaveBeenCalledWith("pi_writer_test", "acct_writer_test");
+      await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({
+        bookings: 1,
+        acceptances: 1,
+        available: 2,
+      });
     } finally {
       await fixture.close();
     }

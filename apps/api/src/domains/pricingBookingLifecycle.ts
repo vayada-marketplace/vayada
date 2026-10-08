@@ -5,13 +5,16 @@ import { pricingDecimalMinor } from "./pricingDecimalMinor.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { reserveRevalidatedQuoteInventory } from "./currentQuoteInventory.js";
 import type { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js";
+import { PRICING_CARD_PAYMENT_MINUTES, pricingCardQuoteSupported } from "./pricingCardPayment.js";
 
 type Current = NonNullable<Awaited<ReturnType<typeof lockCurrentQuoteRevalidation>>>;
-/** Internal pay-at-property staging after stagePricingBookingDraft, on the same
+/** Internal staging after stagePricingBookingDraft, on the same
  * retained READ COMMITTED transaction. Reserves inventory and stages lifecycle,
  * event and summary together. Caller must still stage revenue/outbox/acceptance/
  * receipt, run the final quote/Finance gate, and roll back ALL writes on failure.
- * Completed acceptance replay belongs before this helper; never reset a deadline. */
+ * Completed acceptance replay belongs before this helper; never reset a deadline.
+ * An instant card quote becomes `pending_payment` with a payment deadline; only the
+ * confirmed Stripe payment makes it `confirmed`. */
 export async function stagePricingBookingLifecycle(
   client: PoolClient,
   slug: unknown,
@@ -32,12 +35,16 @@ export async function stagePricingBookingLifecycle(
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookingId) ||
     scope.propertyId !== quote.stay.propertyId ||
     scale === null ||
-    quote.paymentMethod !== "pay_at_property" ||
-    (mode !== "instant" && mode !== "request") ||
-    quote.evidence.dueNowMinor !== "0" ||
-    quote.evidence.dueLaterMinor !== quote.evidence.totalMinor
+    !(
+      (quote.paymentMethod === "pay_at_property" &&
+        (mode === "instant" || mode === "request") &&
+        quote.evidence.dueNowMinor === "0" &&
+        quote.evidence.dueLaterMinor === quote.evidence.totalMinor) ||
+      pricingCardQuoteSupported(quote)
+    )
   )
     return fail();
+  const card = quote.paymentMethod === "card";
   const booking = (
     await client.query(
       `SELECT lifecycle_status,payment_status,source_system,booking_channel,direct_booking_source,
@@ -55,7 +62,7 @@ export async function stagePricingBookingLifecycle(
     booking.source_system !== "booking" ||
     booking.booking_channel !== "direct" ||
     booking.direct_booking_source !== "booking_engine" ||
-    booking.expected_payment_method !== "pay_at_property" ||
+    booking.expected_payment_method !== quote.paymentMethod ||
     booking.edit_revision !== 0 ||
     booking.check_in !== quote.stay.checkIn ||
     booking.check_out !== quote.stay.checkOut ||
@@ -84,9 +91,12 @@ export async function stagePricingBookingLifecycle(
   if (!(now instanceof Date) || !Number.isFinite(now.getTime())) return fail();
   const occurredAt = now.toISOString();
   if (occurredAt < quote.evidence.issuedAt || occurredAt >= quote.evidence.expiresAt) return fail();
-  const lifecycleStatus = mode === "instant" ? "confirmed" : "pending_payment";
+  const lifecycleStatus = mode === "instant" && !card ? "confirmed" : "pending_payment";
   const hostResponseDeadlineAt =
     mode === "request" ? new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString() : null;
+  const paymentDeadlineAt = card
+    ? new Date(now.getTime() + PRICING_CARD_PAYMENT_MINUTES * 60 * 1000).toISOString()
+    : null;
   const result = await client.query(
     `WITH changed AS (
       UPDATE booking.guest_bookings SET lifecycle_status=$3,updated_at=$4::timestamptz,
@@ -117,8 +127,13 @@ export async function stagePricingBookingLifecycle(
       {
         inventoryReservation: reserved.bundle,
         ...(hostResponseDeadlineAt ? { hostResponseDeadlineAt } : {}),
+        ...(paymentDeadlineAt ? { paymentDeadlineAt } : {}),
       },
-      mode === "instant" ? "Your booking is confirmed." : "We have received your booking request.",
+      card
+        ? "We are waiting for your card payment."
+        : mode === "instant"
+          ? "Your booking is confirmed."
+          : "We have received your booking request.",
       { pricingQuoteId: quote.quoteId, requestFingerprint: metadata.requestFingerprint },
       mode,
     ],
@@ -132,6 +147,7 @@ export async function stagePricingBookingLifecycle(
     bookingId,
     lifecycleStatus,
     hostResponseDeadlineAt,
+    paymentDeadlineAt,
     occurredAt,
     inventoryReservation: reserved.bundle,
   };
