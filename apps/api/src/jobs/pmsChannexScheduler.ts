@@ -740,16 +740,18 @@ async function selectCalendarAutoOpenCandidates(
          ) AS plans
          FROM (
            -- A pricing-v2 publication replaces the retired legacy plans (same rule as the
-           -- auto-open worker): a room with a published offer has a rate.
+           -- auto-open worker): a room with a published offer has a rate, at a constant
+           -- revision so price edits do not re-run auto-open.
            SELECT legacy.room_type_id, legacy.flexible_rate_plan_revision
            FROM pms.rate_plans legacy
            WHERE legacy.property_id = setting.property_id
              AND legacy.pricing_contract_version = 'pms-pricing.v1'
              AND NOT EXISTS (
-               SELECT 1 FROM pms.pricing_v2_heads head WHERE head.property_id = setting.property_id
+               SELECT 1 FROM pms.pricing_v2_heads head
+               WHERE head.property_id = setting.property_id AND head.revision > 0
              )
            UNION ALL
-           SELECT published.room_type_id, head.revision
+           SELECT published.room_type_id, 1
            FROM pms.pricing_v2_heads head
            JOIN pms.pricing_v2_rooms published
              ON published.property_id = head.property_id AND published.revision = head.revision

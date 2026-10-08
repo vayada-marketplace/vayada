@@ -644,15 +644,17 @@ async function loadCurrentSource(
     [propertyId],
   );
   // A pricing-v2 publication replaces the retired legacy plans: a room with a published offer
-  // has a rate. Same rule and order as the scheduler's candidate source.
+  // has a rate. Its plan revision is constant, so a publish re-runs auto-open only when rooms
+  // gain or lose offers, not on every price edit. Same rule and order as the scheduler.
   const published = await client.query(
-    `SELECT 1 FROM pms.pricing_v2_heads WHERE property_id=$1::uuid FOR SHARE`,
+    `SELECT revision FROM pms.pricing_v2_heads WHERE property_id=$1::uuid FOR SHARE`,
     [propertyId],
   );
   const plans = await client.query<PlanRow>(
-    published.rows.length > 0
+    // A draft-only head (revision 0) is not a publication.
+    published.rows[0] && Number(published.rows[0].revision) > 0
       ? `SELECT room.room_type_id::text AS "roomTypeId",
-                head.revision AS "flexibleRatePlanRevision"
+                1 AS "flexibleRatePlanRevision"
          FROM pms.pricing_v2_heads head
          JOIN pms.pricing_v2_rooms room
            ON room.property_id=head.property_id AND room.revision=head.revision
