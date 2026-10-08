@@ -214,6 +214,13 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
     expect(pricing?.flexibleRatePlans).toEqual([
       expect.objectContaining({ roomTypeId: legacyRoomTypeId, flexibleRatePlanId: legacyPlanId }),
     ]);
+    // The setup pricing step keeps the legacy completion rule too.
+    expect(
+      await createPgPmsPricingReadModel({
+        connectionString: url!,
+        pool,
+      }).listPublishedOfferRoomTypeIds(legacyPropertyId),
+    ).toBeNull();
   });
 
   describe("once published", () => {

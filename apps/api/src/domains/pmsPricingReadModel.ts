@@ -187,7 +187,7 @@ export function createPgPmsPricingReadModel(config: {
          LEFT JOIN pms.pricing_v2_rooms room
            ON room.property_id = head.property_id AND room.revision = head.revision
           AND jsonb_array_length(room.configuration->'offers') > 0
-         WHERE head.property_id = $1::uuid`,
+         WHERE head.property_id = $1::uuid AND head.revision > 0`,
         [readUuid(propertyId)],
       );
       if (result.rows.length === 0) return null;
