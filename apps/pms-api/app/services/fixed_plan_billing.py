@@ -89,6 +89,7 @@ async def billing_status(hotel_id: str) -> dict:
             (payment_settings or {}).get("stripe_billing_cancel_at_period_end")
         ),
         "canManageBilling": bool((payment_settings or {}).get("stripe_billing_customer_id")),
+        "frozen": settings.fixed_plan_billing_frozen,
     }
 
 

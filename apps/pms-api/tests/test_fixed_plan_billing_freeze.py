@@ -25,8 +25,9 @@ def frozen(monkeypatch):
 
 
 def test_mode_defaults_to_legacy_and_fails_closed_on_unknown_values(monkeypatch):
-    assert Settings().fixed_plan_billing_mode() == "legacy"
-    assert Settings().fixed_plan_billing_frozen is False
+    monkeypatch.delenv("FIXED_PLAN_BILLING_MODE", raising=False)
+    assert Settings(_env_file=None).fixed_plan_billing_mode() == "legacy"
+    assert Settings(_env_file=None).fixed_plan_billing_frozen is False
 
     monkeypatch.setattr(settings, "FIXED_PLAN_BILLING_MODE", " Frozen ")
     assert settings.fixed_plan_billing_frozen is True
@@ -93,6 +94,7 @@ async def test_frozen_status_is_read_only(frozen):
     assert status["plan"] == "fixed"
     assert status["status"] == "active"
     assert status["canManageBilling"] is True
+    assert status["frozen"] is True
 
 
 async def test_frozen_price_syncs_are_no_ops(frozen):
