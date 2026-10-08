@@ -1,10 +1,9 @@
 # Hotel setup logo writer (VAY-965)
 
-> **Superseded for the public API by VAY-2056** ([ordinary login](hotel-setup-ordinary-login.md) §5.2):
-> the public routes run the same request-bound logo protocol on the ordinary login
-> (`createOrdinaryHotelSetupLogoRuntime`), behind the private service's Owner-only gates and with
-> the parameterised Owner authority of `hotel_setup_logo_authority` re-locked in every write
-> transaction. The private service keeps this contract until decommission.
+> **Historical (VAY-2056).** The native hotel-setup code this contract describes was removed
+> from the app in decommission step 3 ([ordinary login](../hotel-setup-ordinary-login.md) §12);
+> the six Owner operations run on the ordinary API login. Kept for the record: file, line and
+> workflow references point to code that no longer exists.
 
 Status: repair contract; production remains on the existing media path until the
 complete scoped writer and release proofs pass.
@@ -21,7 +20,7 @@ Its exact runtime preflight intentionally denies unapproved relation writes.
 Preserve that boundary, and do not bypass the required logo or hide the error.
 
 Reuse the protocol and implementation in
-[platform media](platform-media-decision.md), `platformMediaRepository`,
+[platform media](../platform-media-decision.md), `platformMediaRepository`,
 `propertyMediaCommandRepository`, and `propertyMediaPublicationWorker`:
 
 1. Authorize the canonical property and persist a signed upload session.
