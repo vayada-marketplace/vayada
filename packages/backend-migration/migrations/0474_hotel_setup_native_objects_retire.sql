@@ -13,6 +13,30 @@
 -- CREATEROLE); see engineering/hotel-setup-ordinary-login.md §12.
 SET LOCAL lock_timeout = '5s';
 
+-- 0. Every table this migration alters, locked up front in one statement and a fixed order, so
+-- a busy table makes the run time out before anything changes instead of midway. The tables that
+-- carry a hotel_setup policy are also remembered for the final permissive-coverage check.
+CREATE TEMPORARY TABLE retired_policy_tables ON COMMIT DROP AS
+SELECT DISTINCT p.polrelid AS relation
+FROM pg_catalog.pg_policy p
+WHERE p.polname LIKE 'hotel\_setup\_%';
+
+DO $$
+DECLARE targets TEXT;
+BEGIN
+  SELECT string_agg(relation::regclass::text, ', ' ORDER BY relation::regclass::text) INTO targets
+  FROM (
+    SELECT relation FROM retired_policy_tables
+    UNION
+    SELECT t.tgrelid FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_proc p ON p.oid = t.tgfoid
+    WHERE NOT t.tgisinternal AND (t.tgname ~ 'hotel_setup' OR p.proname ~ 'hotel_setup')
+    UNION
+    SELECT c.oid FROM pg_catalog.pg_class c
+    WHERE c.relname ~ '^hotel_setup_' AND c.relkind IN ('r', 'v')
+  ) affected (relation);
+  EXECUTE format('LOCK TABLE %s IN ACCESS EXCLUSIVE MODE', targets);
+END $$;
+
 -- 1. Native Owner-off receipts become ordinary markers before their guard trigger goes. The
 -- ordinary marker counts while it equals the row's xmin, i.e. this transaction's id, so a
 -- receipt that was valid stays valid until the next write to its row, as before.
@@ -25,7 +49,9 @@ UPDATE identity.product_entitlements
 SET metadata = metadata - 'newHotelFinancialsOwnerDisabled'
 WHERE metadata ? 'newHotelFinancialsOwnerDisabled';
 
--- 2. Triggers. All of them return early for every login except the native ones.
+-- 2. Triggers. All of them return early for every login except the native ones, apart from
+-- record_hotel_setup_owner_link, which only fills platform.hotel_setup_linked_properties (dropped
+-- below; nothing else reads it).
 DROP TRIGGER hotel_setup_logo_profile_revision_guard ON hotel_catalog.properties;
 DROP TRIGGER record_hotel_setup_owner_link ON identity.organization_resource_links;
 DROP TRIGGER hotel_setup_completion_evidence ON platform.domain_events;
@@ -139,9 +165,19 @@ BEGIN
   END LOOP;
 END $$;
 
--- 6. Nothing of the native protocol may remain.
+-- 6. Nothing of the native protocol may remain, and no table that carried a hotel_setup policy
+-- may be left with RLS on but no permissive policy (it would silently deny every non-owner login).
 DO $$
+DECLARE denied TEXT;
 BEGIN
+  SELECT string_agg(c.oid::regclass::text, ', ') INTO denied
+  FROM retired_policy_tables retired
+  JOIN pg_catalog.pg_class c ON c.oid = retired.relation
+  WHERE c.relrowsecurity
+    AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_policy p WHERE p.polrelid = c.oid AND p.polpermissive);
+  IF denied IS NOT NULL THEN
+    RAISE EXCEPTION 'RLS left on without a permissive policy: %', denied;
+  END IF;
   IF EXISTS (SELECT 1 FROM pg_catalog.pg_policy WHERE polname LIKE 'hotel\_setup\_%')
     OR EXISTS (SELECT 1 FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_proc p ON p.oid = t.tgfoid
       WHERE NOT t.tgisinternal AND (t.tgname ~ 'hotel_setup' OR p.proname ~ 'hotel_setup')

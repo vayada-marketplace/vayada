@@ -115,9 +115,13 @@ describe.skipIf(!URL)("hotel setup native objects 0474 retirement", () => {
       expect(
         await count(
           `SELECT count(*) AS n FROM pg_class WHERE relrowsecurity AND oid = ANY(ARRAY[
-             'hotel_catalog.property_media'::regclass,'identity.organization_roles'::regclass,
-             'platform.domain_events'::regclass,'platform.media_upload_sessions'::regclass,
-             'pms.rate_rules'::regclass])`,
+             'booking.booking_settings','finance.billing_entitlements',
+             'hotel_catalog.organization_setup_track_intents','hotel_catalog.property_contact_channels',
+             'hotel_catalog.property_media','hotel_catalog.property_owner_revisions',
+             'hotel_catalog.property_profiles','hotel_catalog.property_public_profile_read_model',
+             'identity.organization_roles','marketplace.marketplace_hotel_profiles',
+             'platform.domain_events','platform.media_upload_sessions','platform.media_variants',
+             'platform.outbox_events','pms.rate_rules']::regclass[])`,
         ),
       ).toBe(0);
       // Nothing in this database depends on a hotel-setup role any more, so vayada_admin can drop them.
