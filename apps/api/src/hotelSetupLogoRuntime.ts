@@ -20,6 +20,7 @@ type LogoScope = { propertyId: string; organizationId: string; actorUserId: stri
 type LogoClient = Parameters<typeof lockHotelSetupOwnerAuthority>[0];
 
 const LOGO_PERMISSIONS = ["hotel_catalog.setup.manage"];
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The Owner-only logo gate the retired private service applied, for the shared public routes. */
 function assertLogoOwnerSession(context: RequestContext) {
@@ -97,6 +98,8 @@ export function createOrdinaryHotelSetupLogoRuntime(input: {
           throw new Error("Invalid logo target");
         propertyId = resource.resourceId;
       } else {
+        // A malformed id is never a logo session; the shared route answers 404 for it.
+        if (!UUID.test(request.sessionId)) return defaults;
         const result = await input.lookup.query<{ propertyId: string }>(
           `SELECT property_id::text AS "propertyId" FROM platform.media_upload_sessions
            WHERE id=$1::uuid AND actor_user_id=$2::uuid AND owner_organization_id=$3::uuid
@@ -104,7 +107,17 @@ export function createOrdinaryHotelSetupLogoRuntime(input: {
              AND resource_type='property' AND resource_id=property_id::text`,
           [request.sessionId, actorUserId, organizationId],
         );
-        if (result.rows.length === 0) return defaults;
+        if (result.rows.length === 0) {
+          // Fail closed: a logo session that is not this actor's never falls back to the shared
+          // media path, which would skip the Owner re-check.
+          const logo = await input.lookup.query<{ logo: boolean }>(
+            `SELECT EXISTS (SELECT 1 FROM platform.media_upload_sessions
+               WHERE id=$1::uuid AND requested_purpose='property.logo') AS logo`,
+            [request.sessionId],
+          );
+          if (logo.rows[0]?.logo !== false) throw new AuthorizationError();
+          return defaults;
+        }
         if (result.rows.length !== 1) throw new Error("Missing logo session");
         propertyId = result.rows[0]!.propertyId;
       }

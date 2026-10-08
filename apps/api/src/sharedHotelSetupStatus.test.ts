@@ -1506,7 +1506,25 @@ describe("shared hotel setup status route", () => {
       idempotencyKey: "create-self-serve",
       audit: { actorUserId: expect.any(String) },
     });
+    // A request without the original WorkOS session never reaches the Owner-mode repository.
+    app = buildSharedSetupApp({
+      linkedResources: [],
+      permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+      repository: {
+        ...unusedStatusMethods(),
+        ...unusedPropertyProfileMethods(),
+        createPropertyProfile: shared,
+      },
+      propertyCreationRepository: { createPropertyProfile: selfServe },
+      session: { ...session, sessionId: null },
+    });
+    expect(await injectJson(app, request)).toMatchObject({
+      statusCode: 403,
+      body: { code: "owner_session_required" },
+    });
+    expect(selfServe).toHaveBeenCalledTimes(1);
     expect(shared).not.toHaveBeenCalled();
+    await app.close();
     app = buildSharedSetupApp({ repository: repositoryWith([]) });
   });
 
@@ -3473,6 +3491,7 @@ function buildSharedSetupApp(options: {
   launchSettingsRepository?: SharedPropertyLaunchSettingsRepository;
   profileCommand?: import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate;
   propertyCreationRepository?: Pick<SharedHotelSetupStatusRepository, "createPropertyProfile">;
+  session?: VerifiedSession;
   launchSettingsCommand?: Parameters<
     typeof import("./routes/sharedHotelSetupStatus.js").registerSharedHotelSetupLaunchSettings
   >[1];
@@ -3495,7 +3514,7 @@ function buildSharedSetupApp(options: {
     hotelSetupTrackCommandRepository:
       options.trackCommandRepository ?? unusedTrackCommandRepository(),
     auth: {
-      verifier: createFakeVerifier(new Map([["valid-token", session]])),
+      verifier: createFakeVerifier(new Map([["valid-token", options.session ?? session]])),
       repository: identityRepository(options),
       propertyAccessRepository: options.propertyAccessRepository ?? agencyPropertyAccessRepository,
       rolePermissionRepository: {
