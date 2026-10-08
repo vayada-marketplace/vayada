@@ -94,7 +94,7 @@ export async function completePricingCardPayment(
       !history ||
       !quote ||
       !pricingCardQuoteSupported(quote) ||
-      row.expected_payment_method !== null ||
+      row.expected_payment_method !== "unknown" ||
       row.booking_metadata?.paymentMethod !== "card"
     )
       throw new PricingCardPaymentError("unavailable");
