@@ -10,8 +10,15 @@ import type { QueryResultRow } from "pg";
  */
 
 export const LEGACY_LIVE_STATUSES = new Set(["active", "past_due", "trialing"]);
-/** Stripe statuses with nothing left to collect; everything else counts as live. */
-const DEAD_STATUSES = new Set(["canceled", "incomplete_expired"]);
+/** Stripe statuses with nothing left to collect. */
+export const LEGACY_DEAD_STATUSES = new Set(["canceled", "incomplete_expired"]);
+/**
+ * Open but not collecting: retries exhausted (`unpaid`), first payment never
+ * completed (`incomplete`, which expires within a day). They do not block a
+ * Commission reset; an operator cancels them in the dashboard. Every other
+ * status (including `paused` and unknown ones) counts as live.
+ */
+export const LEGACY_NOT_COLLECTING_STATUSES = new Set(["unpaid", "incomplete"]);
 const PERIOD_END_GUARD_MS = 24 * 60 * 60 * 1_000;
 
 export type LegacyAdoptionEntitlement = {
@@ -51,6 +58,8 @@ export type LegacyAdoptionStore = {
     propertyId: string;
     organizationId: string;
     clearedAt: string;
+    /** VAY-1362 review #3: the legacy plan was Fixed and its subscription ended. */
+    revertedLegacyFixed?: boolean;
   }): Promise<boolean>;
 };
 
@@ -91,6 +100,8 @@ export type LegacyAdoptionReport = {
     | "already_cleared"
     | "refused";
   reasons: string[];
+  /** Non-blocking findings an operator acts on, for example an unpaid subscription to cancel. */
+  warnings?: string[];
   entitlementBefore: { planKey: string | null; billingStatus: string } | null;
   stripe: {
     status: string;
@@ -253,7 +264,15 @@ export async function adoptLegacyFixedPlanSubscription(
 }
 
 export async function clearStaleLegacyBillingReference(
-  input: { propertyId: string; apply: boolean },
+  input: {
+    propertyId: string;
+    apply: boolean;
+    /**
+     * Explicit operator flag: also reset a hotel whose legacy plan was Fixed but
+     * whose subscription ended or stopped collecting before go-day.
+     */
+    revertLegacyFixed?: boolean;
+  },
   dependencies: Pick<
     LegacyAdoptionDependencies,
     "store" | "stripe" | "now" | "refreshPublicBookability"
@@ -271,7 +290,9 @@ export async function clearStaleLegacyBillingReference(
     stripe: null,
     activeRoomCount: null,
     bookabilityRefreshed: false,
+    warnings: [],
   };
+  const revert = input.revertLegacyFixed === true;
   const entitlement = await dependencies.store.getEntitlement(input.propertyId);
   if (!entitlement) {
     report.reasons.push("entitlement_not_found");
@@ -300,18 +321,26 @@ export async function clearStaleLegacyBillingReference(
   // "Only" a stale reference: the legacy plan was Commission and nothing else
   // suspended the hotel (the migration deactivates the commission rule when the
   // owner link is inactive or the booking fee is noncanonical).
-  if (entitlement.metadata["legacyPlan"] !== "commission") {
+  const legacyPlan = entitlement.metadata["legacyPlan"];
+  if (legacyPlan === "fixed" && !revert) report.reasons.push("legacy_plan_fixed_needs_revert_flag");
+  else if (legacyPlan !== "commission" && legacyPlan !== "fixed") {
     report.reasons.push("legacy_plan_not_commission");
   }
   if (!entitlement.commissionRuleActive) report.reasons.push("commission_rule_not_active");
   if (entitlement.billingStatus !== "suspended") report.reasons.push("entitlement_not_suspended");
   // Stripe Search can lag a few seconds to minutes behind writes; a freshly
   // created subscription may be missing. Run this after the legacy freeze.
-  const live = (await dependencies.stripe.findLegacySubscriptionsForHotel(input.propertyId)).filter(
-    (subscription) => !DEAD_STATUSES.has(subscription.status),
-  );
-  for (const subscription of live) {
-    report.reasons.push(`live_subscription_exists:${subscription.subscriptionId}`);
+  for (const subscription of await dependencies.stripe.findLegacySubscriptionsForHotel(
+    input.propertyId,
+  )) {
+    if (LEGACY_DEAD_STATUSES.has(subscription.status)) continue;
+    if (LEGACY_NOT_COLLECTING_STATUSES.has(subscription.status)) {
+      report.warnings!.push(
+        `cancel_in_stripe:${subscription.subscriptionId}:${subscription.status}`,
+      );
+    } else {
+      report.reasons.push(`live_subscription_exists:${subscription.subscriptionId}`);
+    }
   }
   if (report.reasons.length > 0) return report;
   if (!input.apply) {
@@ -322,6 +351,7 @@ export async function clearStaleLegacyBillingReference(
     propertyId: input.propertyId,
     organizationId: entitlement.organizationId,
     clearedAt: now.toISOString(),
+    ...(legacyPlan === "fixed" ? { revertedLegacyFixed: true } : {}),
   });
   if (!written)
     throw new Error("The billing entitlement changed before the reference was cleared.");
@@ -427,7 +457,7 @@ export function createPgLegacyAdoptionStore(pool: Queryable): LegacyAdoptionStor
       return result.rowCount === 1;
     },
 
-    async clearStaleReference({ propertyId, organizationId, clearedAt }) {
+    async clearStaleReference({ propertyId, organizationId, clearedAt, revertedLegacyFixed }) {
       const result = await pool.query(
         `UPDATE finance.billing_entitlements entitlement
          SET billing_status = 'active',
@@ -446,8 +476,11 @@ export function createPgLegacyAdoptionStore(pool: Queryable): LegacyAdoptionStor
           organizationId,
           JSON.stringify({
             planSelectedAt: clearedAt,
-            planSelectedBy: "legacy-stale-reference-cleared",
+            planSelectedBy: revertedLegacyFixed
+              ? "legacy-fixed-reverted-to-commission"
+              : "legacy-stale-reference-cleared",
             legacyStaleReferenceClearedAt: clearedAt,
+            ...(revertedLegacyFixed ? { legacyFixedRevertedAt: clearedAt } : {}),
             providerReentryRequired: false,
           }),
         ],
