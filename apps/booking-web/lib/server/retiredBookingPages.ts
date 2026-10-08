@@ -17,5 +17,5 @@ export async function redirectToBookPage(
     const value = search[key];
     if (typeof value === "string" && value) query[key] = value;
   }
-  redirect({ href: { pathname: "/book", query }, locale });
+  return redirect({ href: { pathname: "/book", query }, locale });
 }
