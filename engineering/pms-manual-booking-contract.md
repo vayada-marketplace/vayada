@@ -34,6 +34,7 @@ only writer that accepts them.
 | 2026-10-07 | VAY-1422 | Optional `additionalGuests`, approved by product as an additive v1 field rather than `pms-manual-booking.v2`                                           |
 | 2026-10-07 | VAY-1422 | Slice A of `pricing-ordinary-login-plan.md`: `ratePlanId` names a published pricing-v2 offer, optional `childAgesAtCheckIn`, preview `pricingRevision` |
 | 2026-10-08 | VAY-1422 | Optional create field `expectedPricingRevision`; `409 pricing_changed` when prices were republished after the preview                                  |
+| 2026-10-08 | VAY-2065 | A `custom` stay's `nightlyAmount.currency` is optional; omitted, the server prices it in the currency it resolves for custom-only bookings (below)     |
 
 The slice A row changes what `ratePlanId` refers to. It stays in v1 because the
 old meaning, a `pms.rate_plans` flexible plan, has had no working caller since
@@ -143,7 +144,7 @@ type Command = {
     childAgesAtCheckIn?: number[]; // one 0–17 age per child (slice A amendment)
     pricing:
       | { kind: "rate_plan"; manualOverride: Money | null }
-      | { kind: "custom"; nightlyAmount: Money };
+      | { kind: "custom"; nightlyAmount: { amountDecimal: Decimal; currency?: string } }; // currency optional (v1 amendment, VAY-2065)
   }>;
   addOns: Array<{
     addonId: string; packageCount: number;
@@ -271,6 +272,9 @@ the target manual writer can be accepted.
 - Custom-only bookings need no publication. Their currency is the published
   currency when one exists, else the property's pricing currency; a property
   with no pricing currency at all returns `pricing_not_published` (409).
+  A custom `nightlyAmount` may omit its `currency` (VAY-2065): the server then
+  prices it in that resolved currency, because a room type from the room-facts
+  flow carries none for the client to send. A sent currency must still match.
 - `custom` pricing requires an explicit nightly amount and has no rate-plan ID.
   There is no silent fallback to the current flexible/base rate.
 - Per-night evidence is `exact` for resolved plans and uniform manual amounts.

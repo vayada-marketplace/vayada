@@ -232,10 +232,14 @@ export default function TargetManualBookingModal({
       const ages = stay.ratePlanId === "custom" ? [] : stay.childAges.map(childAge);
       if (ages.length !== (stay.ratePlanId === "custom" ? 0 : stay.children)) return null;
       if (ages.some((age) => age === null)) return null;
-      // Only a custom rate sets the nightly amount; offers take the published price.
+      // Only a custom rate sets the nightly amount; offers take the published price. A room
+      // type without a currency sends none: the server prices it in the property currency.
       const money =
         stay.ratePlanId === "custom" && override
-          ? { amountDecimal: override, currency: roomType.currency }
+          ? {
+              amountDecimal: override,
+              ...(roomType.currency ? { currency: roomType.currency } : {}),
+            }
           : null;
       return {
         position: index + 1,
