@@ -42,6 +42,9 @@ const stripeSecretKey = process.env["STRIPE_SECRET_KEY"];
 if (!databaseUrl || !stripeSecretKey || !propertyId) {
   throw new Error("TARGET_DATABASE_URL, STRIPE_SECRET_KEY and --property-id are required");
 }
+if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(propertyId)) {
+  throw new Error("--property-id must be a UUID");
+}
 if (mode !== "adopt" && mode !== "clear-stale-reference") {
   throw new Error("--mode must be adopt or clear-stale-reference");
 }
@@ -76,13 +79,14 @@ try {
       ? await adoptLegacyFixedPlanSubscription({ propertyId, subscriptionId, apply }, dependencies)
       : await clearStaleLegacyBillingReference({ propertyId, apply }, dependencies);
   process.stdout.write(JSON.stringify(report, null, 2) + "\n");
-  if (report.outcome === "refused") process.exitCode = 2;
+  if (report.outcome === "refused" || report.reasons.length > 0) process.exitCode = 2;
 } catch (error) {
   process.stderr.write(
     JSON.stringify({ error: error instanceof Error ? error.message : "adoption_failed" }) + "\n",
   );
   process.exitCode = 1;
 } finally {
+  await bookability?.close?.();
   await roomInventory.close?.();
   await pool.end();
 }

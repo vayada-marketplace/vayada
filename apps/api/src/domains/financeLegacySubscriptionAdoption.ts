@@ -10,12 +10,16 @@ import type { QueryResultRow } from "pg";
  */
 
 export const LEGACY_LIVE_STATUSES = new Set(["active", "past_due", "trialing"]);
+/** Stripe statuses with nothing left to collect; everything else counts as live. */
+const DEAD_STATUSES = new Set(["canceled", "incomplete_expired"]);
 const PERIOD_END_GUARD_MS = 24 * 60 * 60 * 1_000;
 
 export type LegacyAdoptionEntitlement = {
   organizationId: string;
   propertyId: string;
   organizationStatus: string;
+  /** The property's booking commission rule is active (owner link active, canonical fee). */
+  commissionRuleActive: boolean;
   planKey: string | null;
   billingStatus: string;
   subscriptionRef: string | null;
@@ -74,7 +78,14 @@ export type LegacyAdoptionReport = {
   propertyId: string;
   subscriptionId: string | null;
   apply: boolean;
-  outcome: "adopted" | "would_adopt" | "already_adopted" | "cleared" | "would_clear" | "refused";
+  outcome:
+    | "adopted"
+    | "would_adopt"
+    | "already_adopted"
+    | "cleared"
+    | "would_clear"
+    | "already_cleared"
+    | "refused";
   reasons: string[];
   entitlementBefore: { planKey: string | null; billingStatus: string } | null;
   stripe: {
@@ -87,6 +98,22 @@ export type LegacyAdoptionReport = {
   activeRoomCount: number | null;
   bookabilityRefreshed: boolean;
 };
+
+async function refreshBookability(
+  report: LegacyAdoptionReport,
+  dependencies: Pick<LegacyAdoptionDependencies, "refreshPublicBookability">,
+): Promise<void> {
+  if (!dependencies.refreshPublicBookability) return;
+  try {
+    await dependencies.refreshPublicBookability(report.propertyId);
+    report.bookabilityRefreshed = true;
+  } catch (error) {
+    // The entitlement write is committed; report it instead of hiding it behind an exception.
+    report.reasons.push(
+      `bookability_refresh_failed:${error instanceof Error ? error.message : "unknown"}`,
+    );
+  }
+}
 
 export async function adoptLegacyFixedPlanSubscription(
   input: { propertyId: string; subscriptionId: string; apply: boolean },
@@ -121,6 +148,7 @@ export async function adoptLegacyFixedPlanSubscription(
   if (entitlement.organizationStatus !== "active") refuse("organization_not_active");
   if (entitlement.planKey === "fixed" && entitlement.subscriptionRef === input.subscriptionId) {
     report.outcome = "already_adopted";
+    if (input.apply) await refreshBookability(report, dependencies);
     return report;
   }
   if (entitlement.subscriptionRef && entitlement.subscriptionRef !== input.subscriptionId) {
@@ -142,10 +170,8 @@ export async function adoptLegacyFixedPlanSubscription(
   if (!inspection.flatThirtyDayPrice) refuse("stripe_price_not_flat_30d");
   if (!snapshot.currency) refuse("stripe_currency_invalid");
   if (!snapshot.customerId) refuse("stripe_customer_missing");
-  if (
-    snapshot.currentPeriodEnd &&
-    Date.parse(snapshot.currentPeriodEnd) - now.getTime() < PERIOD_END_GUARD_MS
-  ) {
+  if (!snapshot.currentPeriodEnd) refuse("stripe_period_end_missing");
+  else if (Date.parse(snapshot.currentPeriodEnd) - now.getTime() < PERIOD_END_GUARD_MS) {
     refuse("within_24h_of_period_end");
   }
   const markedForOther =
@@ -164,15 +190,13 @@ export async function adoptLegacyFixedPlanSubscription(
     return report;
   }
 
-  const adopted =
-    inspection.adoptionMarker !== null
-      ? snapshot
-      : await dependencies.stripe.markAdopted({
-          subscriptionId: input.subscriptionId,
-          propertyId: input.propertyId,
-          organizationId: entitlement.organizationId,
-          idempotencyKey: `legacy-adoption:${input.propertyId}:${input.subscriptionId}:v1`,
-        });
+  // Always written: the metadata POST is idempotent and repairs a partial earlier run.
+  const adopted = await dependencies.stripe.markAdopted({
+    subscriptionId: input.subscriptionId,
+    propertyId: input.propertyId,
+    organizationId: entitlement.organizationId,
+    idempotencyKey: `legacy-adoption:${input.propertyId}:${input.subscriptionId}:v1`,
+  });
   if (
     !adopted.fixedPlanVerified ||
     !adopted.retainedLegacyPrice ||
@@ -194,10 +218,7 @@ export async function adoptLegacyFixedPlanSubscription(
   if (!written) throw new Error("The billing entitlement changed before adoption was written.");
   report.stripe.amountMinor = adopted.amountMinor;
   report.outcome = "adopted";
-  if (dependencies.refreshPublicBookability) {
-    await dependencies.refreshPublicBookability(input.propertyId);
-    report.bookabilityRefreshed = true;
-  }
+  await refreshBookability(report, dependencies);
   return report;
 }
 
@@ -230,16 +251,34 @@ export async function clearStaleLegacyBillingReference(
     planKey: entitlement.planKey,
     billingStatus: entitlement.billingStatus,
   };
+  if (
+    entitlement.planKey === "commission" &&
+    entitlement.billingStatus === "active" &&
+    !entitlement.subscriptionRef &&
+    typeof entitlement.metadata["legacyStaleReferenceClearedAt"] === "string"
+  ) {
+    report.outcome = "already_cleared";
+    if (input.apply) await refreshBookability(report, dependencies);
+    return report;
+  }
   if (entitlement.organizationStatus !== "active") report.reasons.push("organization_not_active");
   if (entitlement.planKey !== "commission") report.reasons.push("plan_not_commission");
   if (entitlement.subscriptionRef) report.reasons.push("subscription_reference_present");
   if (entitlement.metadata["providerReentryRequired"] !== true) {
     report.reasons.push("not_a_stale_legacy_reference");
   }
+  // "Only" a stale reference: the legacy plan was Commission and nothing else
+  // suspended the hotel (the migration deactivates the commission rule when the
+  // owner link is inactive or the booking fee is noncanonical).
+  if (entitlement.metadata["legacyPlan"] !== "commission") {
+    report.reasons.push("legacy_plan_not_commission");
+  }
+  if (!entitlement.commissionRuleActive) report.reasons.push("commission_rule_not_active");
   if (entitlement.billingStatus !== "suspended") report.reasons.push("entitlement_not_suspended");
+  // Stripe Search can lag a few seconds to minutes behind writes; a freshly
+  // created subscription may be missing. Run this after the legacy freeze.
   const live = (await dependencies.stripe.findLegacySubscriptionsForHotel(input.propertyId)).filter(
-    (subscription) =>
-      LEGACY_LIVE_STATUSES.has(subscription.status) || subscription.status === "unpaid",
+    (subscription) => !DEAD_STATUSES.has(subscription.status),
   );
   for (const subscription of live) {
     report.reasons.push(`live_subscription_exists:${subscription.subscriptionId}`);
@@ -257,10 +296,7 @@ export async function clearStaleLegacyBillingReference(
   if (!written)
     throw new Error("The billing entitlement changed before the reference was cleared.");
   report.outcome = "cleared";
-  if (dependencies.refreshPublicBookability) {
-    await dependencies.refreshPublicBookability(input.propertyId);
-    report.bookabilityRefreshed = true;
-  }
+  await refreshBookability(report, dependencies);
   return report;
 }
 
@@ -282,7 +318,14 @@ export function createPgLegacyAdoptionStore(pool: Queryable): LegacyAdoptionStor
                 entitlement.billing_status AS "billingStatus",
                 entitlement.billing_subscription_ref AS "subscriptionRef",
                 entitlement.billing_customer_ref AS "customerRef",
-                COALESCE(entitlement.entitlement_metadata, '{}'::jsonb) AS metadata
+                COALESCE(entitlement.entitlement_metadata, '{}'::jsonb) AS metadata,
+                EXISTS (
+                  SELECT 1 FROM finance.commission_rules rule
+                  WHERE rule.property_id = entitlement.property_id
+                    AND rule.product = 'booking'
+                    AND rule.rule_scope = 'property'
+                    AND rule.status = 'active'
+                ) AS "commissionRuleActive"
          FROM finance.billing_entitlements entitlement
          JOIN identity.organizations organization ON organization.id = entitlement.organization_id
          WHERE entitlement.property_id = $1::uuid
@@ -314,7 +357,10 @@ export function createPgLegacyAdoptionStore(pool: Queryable): LegacyAdoptionStor
              active_room_count = $11,
              starts_at = COALESCE(entitlement.starts_at, $12::timestamptz),
              entitlement_metadata = entitlement.entitlement_metadata || $13::jsonb,
-             last_provider_event_created_at = $12::timestamptz,
+             last_provider_event_created_at = GREATEST(
+               COALESCE(entitlement.last_provider_event_created_at, '-infinity'::timestamptz),
+               $12::timestamptz
+             ),
              last_provider_event_id = $14,
              updated_at = now()
          WHERE entitlement.property_id = $1::uuid
