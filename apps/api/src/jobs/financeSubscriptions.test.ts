@@ -128,9 +128,9 @@ describe("Finance subscription webhook lifecycle", () => {
       organizationId: null,
     };
 
-    await expect(
-      processFinanceSubscriptionWebhook(legacy, fixture.dependencies),
-    ).resolves.toBe("ignored_unowned");
+    await expect(processFinanceSubscriptionWebhook(legacy, fixture.dependencies)).resolves.toBe(
+      "ignored_unowned",
+    );
     await expect(
       processFinanceSubscriptionWebhook(
         { ...legacy, eventType: "customer.subscription.deleted", eventCreated: 44 },
