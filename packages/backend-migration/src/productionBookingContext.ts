@@ -12,17 +12,19 @@ import type {
   ProductionBookingTargetState,
 } from "./productionBookingTypes.js";
 import { date, optionalText, requiredText, sha256, sourceId } from "./productionBookingValues.js";
-import { outsideMigrationCohortLink } from "./productionMigrationCohort.js";
+import type { IdentityCohortScope } from "./productionIdentityCohortScope.js";
+import { outsideCohortSource } from "./productionMigrationCohort.js";
 
 export function createProductionBookingContext(input: {
   sourceRunId: string;
   completedAt: string;
   rows: IdentitySourceRow[];
   target: ProductionBookingTargetState;
+  cohort?: IdentityCohortScope | null;
 }): BookingBuildContext {
   const blockers: IdentityMigrationBlocker[] = [...(input.target.blockers ?? [])];
   const propertyBySource = propertySourceMap(input.target.propertyLinks, blockers);
-  const ownerStatusBySource = ownerStatusMap(input.target.propertyLinks, blockers);
+  const ownerStatusBySource = ownerStatusMap(input.target.propertyLinks, blockers, input.cohort);
   const propertyBySlug = propertySlugMap(input.target.propertySlugs, blockers);
   const bookings = input.rows.filter(
     (row) => row.sourceDatabase === "pms" && row.sourceTable === "bookings",
@@ -234,6 +236,7 @@ function propertySourceMap(
 function ownerStatusMap(
   links: BookingPropertyLink[],
   blockers: IdentityMigrationBlocker[],
+  cohort?: IdentityCohortScope | null,
 ): Map<string, "active" | "suspended" | "archived"> {
   const result = new Map<string, "active" | "suspended" | "archived">();
   for (const link of links) {
@@ -257,7 +260,9 @@ function ownerStatusMap(
     }
     // VAY-1362: like PMS, a property outside the migration cohort stays inert whatever its owner
     // link says.
-    const status = outsideMigrationCohortLink(link) ? "archived" : link.ownerStatus;
+    const system = link.sourceSystem as "booking" | "pms";
+    const outside = outsideCohortSource(cohort, system, link.sourceId.toLowerCase());
+    const status = outside ? "archived" : link.ownerStatus;
     const prior = result.get(key);
     if (prior && prior !== status) {
       result.delete(key);

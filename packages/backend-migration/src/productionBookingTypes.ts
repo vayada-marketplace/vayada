@@ -65,8 +65,6 @@ export type BookingPropertyLink = {
   relationship: string;
   status: string;
   ownerStatus: string | null;
-  migrationDisposition?: string | null;
-  migrationDispositionReason?: string | null;
 };
 
 export type BookingPropertySlug = {

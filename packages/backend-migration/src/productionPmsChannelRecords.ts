@@ -1,7 +1,6 @@
 import { targetBooking } from "./productionPmsAssignmentRecords.js";
 import {
   addPmsBlocker,
-  outsideCohortHotel,
   ownerStatusForHotel,
   propertyForHotel,
   safePmsSourceId,
@@ -24,6 +23,7 @@ import {
   requiredText,
   uuid,
 } from "./productionBookingValues.js";
+import { outsideCohortSource } from "./productionMigrationCohort.js";
 import { percentage, pmsRecord } from "./productionPmsValues.js";
 
 export function buildPmsChannelRecords(
@@ -65,7 +65,9 @@ function connection(context: PmsBuildContext, source: IdentitySourceRow): PmsTar
   // VAY-1362: a hotel outside the migration cohort stays on legacy, so the target keeps no claim
   // on its Channex property and it cannot be restored or adopted from one.
   const historicalClaim =
-    Boolean(externalPropertyId) && !retainedActive && !outsideCohortHotel(context, hotelId);
+    Boolean(externalPropertyId) &&
+    !retainedActive &&
+    !outsideCohortSource(context.cohort, "pms", hotelId);
   const records: PmsTargetRecord[] = [];
   if (historicalClaim) {
     const claimCreatedAt = iso(data["created_at"], "created_at");

@@ -119,14 +119,14 @@ export async function readProductionMigrationCohort(
   return cohort;
 }
 
-/** VAY-1362: a catalog source link that the cohort placed outside the migration. Such a property
- * is inert in every domain whatever its owner link says. Without a cohort no link carries it. */
-export function outsideMigrationCohortLink(link: {
-  migrationDisposition?: string | null;
-  migrationDispositionReason?: string | null;
-}): boolean {
-  return (
-    link.migrationDisposition === "private_quarantine" &&
-    link.migrationDispositionReason === "outside_migration_cohort"
-  );
+/** VAY-1362: the hotel lies outside the run's migration cohort, so every domain keeps it inert
+ * whatever its owner link says. Decided by the ID sets, not the catalog quarantine reason: a PMS
+ * hotel without a Booking anchor keeps its own private reason. Without a cohort, nothing is. */
+export function outsideCohortSource(
+  cohort: Pick<ProductionMigrationCohort, "bookingHotelIds" | "pmsHotelIds"> | null | undefined,
+  system: "booking" | "pms",
+  sourceId: string,
+): boolean {
+  if (!cohort) return false;
+  return !(system === "booking" ? cohort.bookingHotelIds : cohort.pmsHotelIds).includes(sourceId);
 }

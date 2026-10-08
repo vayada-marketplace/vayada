@@ -19,9 +19,7 @@ export async function readProductionFinancePrerequisites(
   const propertyLinks = await client.query<ProductionFinancePrerequisites["propertyLinks"][number]>(
     `SELECT source_system AS "sourceSystem", source_table AS "sourceTable", source_id AS "sourceId",
             property_id::text AS "propertyId", relationship, status,
-            metadata ->> 'migrationRunId' AS "migrationRunId",
-            metadata ->> 'migrationDisposition' AS "migrationDisposition",
-            metadata ->> 'migrationDispositionReason' AS "migrationDispositionReason"
+            metadata ->> 'migrationRunId' AS "migrationRunId"
      FROM hotel_catalog.property_source_links
      WHERE ((source_system = 'booking' AND source_table = 'booking_hotels')
          OR (source_system = 'pms' AND source_table = 'hotels'))

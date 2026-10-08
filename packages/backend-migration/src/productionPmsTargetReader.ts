@@ -22,7 +22,6 @@ export async function readProductionPmsPrerequisites(
     `SELECT source_id AS "sourceId", property_id::text AS "propertyId", relationship, status,
             metadata ->> 'migrationRunId' AS "migrationRunId",
             metadata ->> 'migrationDisposition' AS "migrationDisposition",
-            metadata ->> 'migrationDispositionReason' AS "migrationDispositionReason",
             CASE WHEN ownership.link_count = 1 THEN ownership.owner_status
                  WHEN ownership.link_count > 1 THEN 'ambiguous' END AS "ownerStatus"
      FROM hotel_catalog.property_source_links source_link

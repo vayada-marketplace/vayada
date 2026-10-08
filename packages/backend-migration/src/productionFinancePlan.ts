@@ -9,6 +9,7 @@ import {
   sourceId,
   sourceRows,
 } from "./productionFinanceContext.js";
+import type { IdentityCohortScope } from "./productionIdentityCohortScope.js";
 import {
   buildFinanceRecords,
   paymentStatus,
@@ -29,6 +30,7 @@ export function buildProductionFinancePlan(input: {
   completedAt: string;
   rows: IdentitySourceRow[];
   target: ProductionFinanceTargetState;
+  cohort?: IdentityCohortScope | null;
 }): ProductionFinancePlan {
   const context = createProductionFinanceContext(input);
   const candidates = buildFinanceRecords(context).sort((left, right) =>

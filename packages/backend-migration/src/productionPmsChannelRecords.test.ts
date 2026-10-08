@@ -251,18 +251,17 @@ describe("production PMS channels", () => {
     ).toMatchObject({ status: "disabled" });
   });
 
-  it("keeps no Channex claim or live mapping for a property outside the migration cohort", () => {
+  it("keeps no Channex claim or live mapping for a hotel outside the migration cohort", () => {
+    // The catalog marks the property private; only the cohort ID sets decide the claim, so a
+    // PMS hotel without a Booking anchor (with another quarantine reason) is covered too.
     const targetState = target();
-    Object.assign(targetState.propertyLinks[0]!, {
-      migrationDisposition: "private_quarantine",
-      migrationDispositionReason: "outside_migration_cohort",
-      ownerStatus: "active",
-    });
+    targetState.propertyLinks[0]!.migrationDisposition = "private_quarantine";
     const context = createProductionPmsContext({
       sourceRunId: "run",
       completedAt: "2026-08-30T00:00:00Z",
       rows: rows(),
       target: targetState,
+      cohort: { bookingHotelIds: [HOTEL], pmsHotelIds: [], marketplaceHotelIds: [] },
     });
     const rooms = buildPmsRoomRecords(context);
     const assignments = buildPmsAssignmentRecords(context, rooms);

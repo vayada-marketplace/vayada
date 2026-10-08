@@ -1,3 +1,4 @@
+import type { IdentityCohortScope } from "./productionIdentityCohortScope.js";
 import type {
   IdentityMigrationBlocker,
   IdentitySourceRow,
@@ -76,8 +77,6 @@ export type FinancePropertyLink = {
   relationship: string;
   status: string;
   migrationRunId: string | null;
-  migrationDisposition?: string | null;
-  migrationDispositionReason?: string | null;
 };
 
 export type FinanceResourceLink = {
@@ -126,8 +125,8 @@ export type FinanceBuildContext = {
   pmsSettingsByProperty: Map<string, IdentitySourceRow>;
   plannedTargetIdsByTable: Map<string, Set<string>>;
   quarantinedSourceRows: Set<IdentitySourceRow>;
-  /** VAY-1362: `${system}:${table}:${id}` property sources outside the migration cohort. */
-  outsideCohortSources: Set<string>;
+  /** VAY-1362: the run's approved cohort; null or absent means no cohort. */
+  cohort?: IdentityCohortScope | null;
 };
 
 export type FinanceParity = {

@@ -1,3 +1,4 @@
+import type { IdentityCohortScope } from "./productionIdentityCohortScope.js";
 import type {
   IdentityMigrationBlocker,
   IdentitySourceRow,
@@ -32,7 +33,6 @@ export type PmsPropertyLink = {
   status: string;
   migrationRunId: string | null;
   migrationDisposition?: "canonical" | "private_quarantine" | null;
-  migrationDispositionReason?: string | null;
   ownerStatus: string | null;
 };
 
@@ -98,6 +98,8 @@ export type PmsBuildContext = {
   rowsByTable: Map<string, IdentitySourceRow[]>;
   propertyByHotel: Map<string, string>;
   ownerStatusByHotel: Map<string, "active" | "suspended" | "archived">;
+  /** VAY-1362: the run's approved cohort; null or absent means no cohort. */
+  cohort?: IdentityCohortScope | null;
   hotelById: Map<string, IdentitySourceRow>;
   bookingById: Map<string, IdentitySourceRow>;
   targetBookingById: Map<string, PmsTargetBooking>;

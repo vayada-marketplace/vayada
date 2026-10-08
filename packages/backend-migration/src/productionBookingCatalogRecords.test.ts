@@ -13,6 +13,11 @@ const MEDIA = "13550000-0000-4000-8000-000000000006";
 const SOURCE_IMAGE = "https://legacy-media-test.s3.amazonaws.com/addons/breakfast.jpg";
 const MEDIA_STORAGE_KEY = `public/media/${MEDIA}/original_safe/original.webp`;
 const CDN_IMAGE = `https://media.example.test/media/${MEDIA}/original_safe/original.webp`;
+const OTHER_COHORT = {
+  bookingHotelIds: ["13550000-0000-4000-8000-0000000000ff"],
+  pmsHotelIds: [],
+  marketplaceHotelIds: [],
+};
 
 describe("production Booking catalog records", () => {
   it("maps settings, add-ons, and promo definitions without raw media", () => {
@@ -78,17 +83,11 @@ describe("production Booking catalog records", () => {
   });
 
   it.each([
-    ["a quarantined owner", { ownerStatus: "archived" }],
-    // VAY-1362: the cohort disposition wins over an owner link that still looks active.
-    [
-      "a property outside the migration cohort",
-      {
-        migrationDisposition: "private_quarantine",
-        migrationDispositionReason: "outside_migration_cohort",
-      },
-    ],
-  ])("preserves history of %s without reviving Booking sales state", (_name, override) => {
-    const links = propertyLinks().map((link) => ({ ...link, ...override }));
+    ["a quarantined owner", "archived", null],
+    // VAY-1362: a hotel outside the cohort stays inert even if its owner link looks active.
+    ["a hotel outside the migration cohort", "active", OTHER_COHORT],
+  ])("preserves history of %s without reviving Booking sales state", (_, ownerStatus, cohort) => {
+    const links = propertyLinks().map((link) => ({ ...link, ownerStatus }));
     const rows = [
       row("booking_hotels", {
         id: HOTEL,
@@ -127,6 +126,7 @@ describe("production Booking catalog records", () => {
     const context = createProductionBookingContext({
       ...input(rows),
       target: { propertyLinks: links, propertySlugs: [], records: [], provenance: [] },
+      cohort,
     });
     const records = buildBookingCatalogRecords(context);
 
@@ -157,20 +157,13 @@ describe("production Booking catalog records", () => {
     );
   });
 
-  it("keeps cohort and other private properties on their owner status", () => {
+  it("keeps cohort hotels on their owner status", () => {
     const rows = [
       row("booking_hotels", { id: HOTEL, updated_at: "2026-08-29T12:00:00Z", instant_book: true }),
     ];
-    for (const migrationDispositionReason of [null, "legacy_owner_quarantined"]) {
-      const links = propertyLinks().map((link) => ({
-        ...link,
-        migrationDisposition: migrationDispositionReason ? "private_quarantine" : "canonical",
-        migrationDispositionReason,
-      }));
-      const context = createProductionBookingContext({
-        ...input(rows),
-        target: { propertyLinks: links, propertySlugs: [], records: [], provenance: [] },
-      });
+    const cohort = { bookingHotelIds: [HOTEL], pmsHotelIds: [HOTEL], marketplaceHotelIds: [] };
+    for (const run of [input(rows), { ...input(rows), cohort }]) {
+      const context = createProductionBookingContext(run);
       expect(buildBookingCatalogRecords(context)[0]!.row).toMatchObject({
         acceptanceMode: "instant",
         sourceFreshness: { ownerStatus: "active" },

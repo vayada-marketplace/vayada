@@ -1,3 +1,4 @@
+import type { IdentityCohortScope } from "./productionIdentityCohortScope.js";
 import { buildBookingCatalogRecords } from "./productionBookingCatalogRecords.js";
 import { createProductionBookingContext } from "./productionBookingContext.js";
 import { buildBookingDraftRecords } from "./productionBookingDraftRecords.js";
@@ -19,6 +20,7 @@ export function buildProductionBookingPlan(input: {
   completedAt: string;
   rows: IdentitySourceRow[];
   target: ProductionBookingTargetState;
+  cohort?: IdentityCohortScope | null;
 }): ProductionBookingPlan {
   const context = createProductionBookingContext(input);
   const records = [

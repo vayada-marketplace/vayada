@@ -21,6 +21,7 @@ import {
   sourceRows,
 } from "./productionFinanceContext.js";
 import type { FinanceBuildContext, FinanceTargetRecord } from "./productionFinanceTypes.js";
+import { outsideCohortSource } from "./productionMigrationCohort.js";
 import {
   compareMoney,
   exactMoney,
@@ -1094,8 +1095,9 @@ function payoutRecords(
       providerPayoutId: null,
       scheduledAt: iso(row.data["scheduled_for"], "scheduled_for"),
       paidAt: status === "paid" ? completedAt : null,
-      failedAt: status === "failed" ? updatedAt : null,
-      failureCode: status === "failed" ? optionalText(row.data["last_error"], "last_error") : null,
+      failedAt: legacyStatus === "failed" ? updatedAt : null,
+      failureCode:
+        legacyStatus === "failed" ? optionalText(row.data["last_error"], "last_error") : null,
       retryCount,
       payoutMetadata: {
         paymentMethod: optionalText(row.data["payment_method"], "payment_method"),
@@ -1717,15 +1719,15 @@ export function payoutStatus(value: unknown): string {
 }
 
 /** VAY-1362: legacy keeps paying out hotels outside the migration cohort, so their open legacy
- * payouts are retired in the target and never left actionable. */
+ * payouts (including retryable failed ones) are retired in the target, never actionable. */
 export function targetPayoutStatus(
   context: FinanceBuildContext,
   hotelId: string,
   value: unknown,
 ): string {
   const status = payoutStatus(value);
-  return (status === "scheduled" || status === "processing") &&
-    context.outsideCohortSources.has(`pms:hotels:${hotelId}`)
+  return (status === "scheduled" || status === "processing" || status === "failed") &&
+    outsideCohortSource(context.cohort, "pms", hotelId)
     ? "canceled"
     : status;
 }

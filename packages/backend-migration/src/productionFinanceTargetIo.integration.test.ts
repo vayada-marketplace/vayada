@@ -16,6 +16,11 @@ import {
   writeProductionFinanceDispositions,
   writeProductionFinanceRecords,
 } from "./productionFinanceWriter.js";
+import {
+  parseProductionMigrationCohort,
+  readProductionMigrationCohort,
+  writeProductionMigrationCohort,
+} from "./productionMigrationCohort.js";
 import { assertSafeTestDatabase } from "./testUtils.js";
 
 const URL = process.env["TEST_DATABASE_URL"];
@@ -138,6 +143,8 @@ describe.skipIf(!URL)("production Finance target IO (PostgreSQL)", () => {
     }
   });
 
+  // VAY-1362: a PMS hotel without a Booking anchor keeps its own quarantine reason; the cohort
+  // ID sets still retire its payouts.
   it("retires open payouts of a hotel outside the migration cohort (VAY-1362)", async () => {
     const hotel = "fa000000-0000-4000-8000-000000000005";
     const booking = "fa000000-0000-4000-8000-000000000006";
@@ -153,7 +160,7 @@ describe.skipIf(!URL)("production Finance target IO (PostgreSQL)", () => {
       const metadata = JSON.stringify({
         migrationRunId: RUN,
         migrationDisposition: "private_quarantine",
-        migrationDispositionReason: "outside_migration_cohort",
+        migrationDispositionReason: "missing_canonical_property",
       });
       await client.query(
         `INSERT INTO hotel_catalog.property_source_links
@@ -198,10 +205,22 @@ describe.skipIf(!URL)("production Finance target IO (PostgreSQL)", () => {
         },
         payout(ID, "scheduled"),
         payout(BILLING, "processing"),
+        payout("fa000000-0000-4000-8000-000000000008", "failed"),
       ];
+      await writeProductionMigrationCohort(
+        client,
+        parseProductionMigrationCohort({
+          sourceRunId: RUN,
+          bookingHotelIds: [ORGANIZATION],
+          pmsHotelIds: [],
+          marketplaceHotelIds: [],
+          approvalProofSha256: "d".repeat(64),
+        }),
+      );
+      const cohort = await readProductionMigrationCohort(client, RUN);
       const prerequisites = await readProductionFinancePrerequisites(client, RUN);
       const build = (target: ProductionFinanceTargetState) =>
-        buildProductionFinancePlan({ sourceRunId: RUN, completedAt: at, rows, target });
+        buildProductionFinancePlan({ sourceRunId: RUN, completedAt: at, rows, target, cohort });
       const preliminary = build({ ...prerequisites, records: [], provenance: [] });
       const plan = build(
         await readProductionFinanceTargetState(client, preliminary.records, prerequisites),
@@ -209,7 +228,7 @@ describe.skipIf(!URL)("production Finance target IO (PostgreSQL)", () => {
       expect(plan.blockers).toEqual([]);
 
       await expect(writeProductionFinanceRecords(client, plan.writes)).resolves.toEqual({
-        payouts: 2,
+        payouts: 3,
       });
       const written = await client.query(
         `SELECT payout_status AS status, payout_metadata ->> 'legacyPayoutStatus' AS legacy,
@@ -220,6 +239,7 @@ describe.skipIf(!URL)("production Finance target IO (PostgreSQL)", () => {
       expect(written.rows).toEqual([
         { status: "canceled", legacy: "scheduled", reason: "outside_migration_cohort" },
         { status: "canceled", legacy: "processing", reason: "outside_migration_cohort" },
+        { status: "canceled", legacy: "failed", reason: "outside_migration_cohort" },
       ]);
     } finally {
       await client.query("ROLLBACK");

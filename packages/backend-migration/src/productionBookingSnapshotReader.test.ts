@@ -7,6 +7,7 @@ import {
 } from "./productionBookingSnapshotReader.js";
 
 const RUN = "vay1351-0123456789abcdef01234567";
+const COHORT = { sourceRunId: RUN } as never;
 
 describe("production Booking snapshot reader", () => {
   it("does not require promo redemptions that are absent from the deployed legacy schema", () => {
@@ -16,8 +17,9 @@ describe("production Booking snapshot reader", () => {
   it("returns only checksum-verified Booking rows and extraction time", async () => {
     const fixture = new BookingFixture();
     const result = await readProductionBookingSnapshot(fixture as never, RUN, {
-      validateRun: async () => [],
+      validateRun: async () => ({ cohort: COHORT }),
     });
+    expect(result.cohort).toBe(COHORT);
     expect(result.completedAt).toBe("2026-08-30T01:02:03.000Z");
     expect(result.rows.map((row) => `${row.sourceDatabase}.${row.sourceTable}`)).toEqual([
       "booking.booking_addons",

@@ -162,6 +162,8 @@ describe("production Marketplace plan", () => {
     ).toBe(false);
   });
 
+  // VAY-1362: no Marketplace change is needed. The catalog marks every property outside the
+  // cohort private_quarantine, whatever its reason; this pins that the reason is irrelevant.
   it("keeps a property outside the migration cohort on the private-quarantine path", () => {
     const plan = (migrationDispositionReason: string | null) => {
       const target = prerequisites();

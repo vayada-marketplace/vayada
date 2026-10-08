@@ -6,13 +6,15 @@ import type {
   ProductionFinanceTargetState,
 } from "./productionFinanceTypes.js";
 import { requiredText, sha256, uuid } from "./productionBookingValues.js";
-import { outsideMigrationCohortLink } from "./productionMigrationCohort.js";
+import type { IdentityCohortScope } from "./productionIdentityCohortScope.js";
+import { outsideCohortSource } from "./productionMigrationCohort.js";
 
 export function createProductionFinanceContext(input: {
   sourceRunId: string;
   completedAt: string;
   rows: IdentitySourceRow[];
   target: ProductionFinanceTargetState;
+  cohort?: IdentityCohortScope | null;
 }): FinanceBuildContext {
   const context: FinanceBuildContext = {
     ...input,
@@ -28,7 +30,6 @@ export function createProductionFinanceContext(input: {
     pmsSettingsByProperty: new Map(),
     plannedTargetIdsByTable: new Map(),
     quarantinedSourceRows: new Set(),
-    outsideCohortSources: new Set(),
   };
   indexPropertyLinks(context);
   indexResourceLinks(context);
@@ -93,7 +94,6 @@ function indexPropertyLinks(context: FinanceBuildContext): void {
       );
       continue;
     }
-    if (outsideMigrationCohortLink(link)) context.outsideCohortSources.add(key);
     const prior = context.propertyBySource.get(key);
     if (prior && prior !== link.propertyId.toLowerCase()) duplicates.add(key);
     else context.propertyBySource.set(key, link.propertyId.toLowerCase());
@@ -186,8 +186,7 @@ export function resourceStatusFor(
     throw new Error(`${product}.${resourceType} ${id} has ${matches.length} accepted owner links`);
   // VAY-1362: like PMS, a property outside the migration cohort stays inert whatever its owner
   // link says.
-  const source = resourceType === "booking_hotel" ? "booking:booking_hotels" : "pms:hotels";
-  if (product !== "affiliate" && context.outsideCohortSources.has(`${source}:${id}`))
+  if (product !== "affiliate" && outsideCohortSource(context.cohort, product, id))
     return "archived";
   return matches[0]!.status;
 }
