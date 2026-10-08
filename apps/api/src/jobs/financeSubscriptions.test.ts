@@ -247,7 +247,8 @@ describe("Finance subscription webhook lifecycle", () => {
 
   it("reverts an adopted legacy subscription to Commission once dunning is exhausted", async () => {
     const fixture = setup("fixed");
-    fixture.store.entitlement.legacyAdopted = true;
+    fixture.provider.snapshot.retainedLegacyPrice = true;
+    fixture.provider.snapshot.amountMinor = 3_500;
     fixture.provider.snapshot.status = "unpaid";
 
     await expect(
@@ -258,7 +259,22 @@ describe("Finance subscription webhook lifecycle", () => {
     ).resolves.toBe("applied");
 
     expect(fixture.store.entitlement.planKey).toBe("commission");
-    expect(fixture.store.lastApply?.legacyAdopted).toBe(true);
+    expect(fixture.store.lastApply?.snapshot.retainedLegacyPrice).toBe(true);
+  });
+
+  it("notifies ops on the final failed payment that reverts an adopted hotel", async () => {
+    const fixture = setup("fixed");
+    fixture.provider.snapshot.retainedLegacyPrice = true;
+    fixture.provider.snapshot.amountMinor = 3_500;
+    fixture.provider.snapshot.status = "unpaid";
+
+    await processFinanceSubscriptionWebhook(
+      payload("invoice.payment_failed", 65),
+      fixture.dependencies,
+    );
+
+    expect(fixture.store.entitlement.planKey).toBe("commission");
+    expect(fixture.store.notificationCount).toBe(1);
   });
 
   it("keeps a native Fixed subscription on Fixed while it is unpaid", async () => {
@@ -285,17 +301,15 @@ describe("Finance subscription webhook lifecycle", () => {
 
     await store.applySubscriptionSnapshot({
       payload: payload("customer.subscription.updated", 63),
-      snapshot: unpaid,
+      snapshot: { ...unpaid, retainedLegacyPrice: true, amountMinor: 3_500 },
       transition: "sync",
       activeRoomCount: 2,
-      legacyAdopted: true,
     });
     await store.applySubscriptionSnapshot({
       payload: payload("customer.subscription.updated", 64),
       snapshot: unpaid,
       transition: "sync",
       activeRoomCount: 2,
-      legacyAdopted: false,
     });
 
     expect(values[0]?.[2]).toBe(true);
@@ -311,11 +325,12 @@ describe("Finance subscription webhook lifecycle", () => {
     const store = createPgFinanceSubscriptionWebhookStore({ query } as never);
     await store.enqueuePaymentFailureNotification({
       payload: payload("invoice.payment_failed", 71),
-      entitlement: { ...setup("fixed").store.entitlement, legacyAdopted: true },
-      snapshot: { ...verifiedSnapshot(), status: "past_due" },
+      entitlement: setup("fixed").store.entitlement,
+      snapshot: { ...verifiedSnapshot(), status: "past_due", retainedLegacyPrice: true },
     });
     expect(JSON.parse(String(query.mock.calls[0]?.[1]?.[6]))).toMatchObject({
       legacyAdopted: true,
+      providerStatus: "past_due",
     });
 
     const notifyInternal = vi.fn();
@@ -325,6 +340,7 @@ describe("Finance subscription webhook lifecycle", () => {
       organizationId: "organization-1",
       subscriptionId: "sub_fixed",
       legacyAdopted: true,
+      providerStatus: "past_due",
     };
     const poolQuery = vi
       .fn()
@@ -339,6 +355,7 @@ describe("Finance subscription webhook lifecycle", () => {
     const email = financeSubscriptionPaymentFailedEmail(notification);
     expect(email.subject).toContain("property-1");
     expect(email.text).toContain("Subscription: sub_fixed");
+    expect(email.text).toContain("Stripe status: past_due");
     expect(email.text).toContain("reverts to Commission");
     expect(email.idempotencyKey).toBe("finance-subscription-payment-failed:evt_71");
   });
@@ -430,7 +447,6 @@ describe("Finance subscription webhook lifecycle", () => {
         checkoutSessionRef: "cs_fixed",
         activeRoomCount: 2,
         lastProviderEventCreatedAt: null,
-        legacyAdopted: false,
       },
       snapshot: {
         subscriptionId: "sub_fixed",
@@ -471,7 +487,11 @@ describe("Finance subscription webhook lifecycle", () => {
         pool: { query: successQuery } as never,
       }),
     ).resolves.toEqual({ processed: 1, failed: 0 });
-    expect(notifyInternal).toHaveBeenCalledWith({ ...notification, legacyAdopted: false });
+    expect(notifyInternal).toHaveBeenCalledWith({
+      ...notification,
+      legacyAdopted: false,
+      providerStatus: null,
+    });
     expect(String(successQuery.mock.calls[0]?.[0])).toContain("locked_at IS NULL");
     expect(String(successQuery.mock.calls[1]?.[0])).toContain("status = 'succeeded'");
 
@@ -565,7 +585,6 @@ class MemoryStore implements FinanceSubscriptionWebhookStore {
       checkoutSessionRef: "cs_fixed",
       activeRoomCount: 2,
       lastProviderEventCreatedAt: null,
-      legacyAdopted: false,
     };
   }
 
@@ -595,7 +614,7 @@ class MemoryStore implements FinanceSubscriptionWebhookStore {
     if (
       (input.transition === "deleted" &&
         ["canceled", "incomplete_expired"].includes(input.snapshot.status)) ||
-      (input.legacyAdopted === true && input.snapshot.status === "unpaid")
+      (input.snapshot.retainedLegacyPrice === true && input.snapshot.status === "unpaid")
     ) {
       this.entitlement.planKey = "commission";
     }

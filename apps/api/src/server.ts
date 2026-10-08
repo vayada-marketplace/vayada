@@ -2616,6 +2616,11 @@ const financeOpsEmailDelivery =
   config.bookingEmailDelivery && config.financeBillingOpsEmail
     ? createResendBookingEmailDelivery(config.bookingEmailDelivery)
     : undefined;
+if (config.financeBillingOpsEmail && !financeOpsEmailDelivery) {
+  app.log.warn(
+    "FINANCE_BILLING_OPS_EMAIL is set but RESEND_API_KEY/BOOKING_EMAIL_FROM are not; failed-payment emails are disabled",
+  );
+}
 const financeSubscriptionWebhooksEnabled = Boolean(
   stripeSubscriptionProvider &&
     financeSubscriptionRoomInventory &&
