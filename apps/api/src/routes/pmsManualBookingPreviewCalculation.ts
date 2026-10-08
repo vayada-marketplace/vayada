@@ -45,6 +45,8 @@ export type ManualBookingPreviewCommand = {
   contractVersion: "pms-manual-booking.v1";
   stays: ManualBookingStay[];
   addOns: ManualBookingAddonSelection[];
+  /** Create only: the revision the client's preview showed. */
+  expectedPricingRevision?: number;
 };
 /** The active pricing-v2 publication; amounts are minor units of its currency's own scale. */
 export type ManualBookingPricingPublication = Readonly<{
@@ -89,6 +91,13 @@ export async function calculateManualBookingPreview(
   const available = await ports.pms.getPhysicalRoomAvailability(propertyId, pricedStays);
   if (!addonContext) fail(404, "property_not_found");
   if (needsPublication && !publication) fail(409, "pricing_not_published");
+  // Prices were republished after the staff saw them: refuse before any other price outcome.
+  if (
+    needsPublication &&
+    command.expectedPricingRevision !== undefined &&
+    publication!.revision !== command.expectedPricingRevision
+  )
+    fail(409, "pricing_changed", "expectedPricingRevision");
   const addons = addonContext.addonItems;
   let currency = pricingCurrency;
   let grand = 0n;

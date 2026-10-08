@@ -48,6 +48,9 @@ export function manualBookingRequestFingerprint(command: PmsManualBookingCreateC
       guest: command.guest,
       // Left out when empty so requests sent before the VAY-1422 amendment replay unchanged.
       ...(command.additionalGuests?.length ? { additionalGuests: command.additionalGuests } : {}),
+      ...(command.expectedPricingRevision !== undefined
+        ? { expectedPricingRevision: command.expectedPricingRevision }
+        : {}),
       privateNote: command.privateNote,
       directSource: command.directSource,
       stays: command.stays,

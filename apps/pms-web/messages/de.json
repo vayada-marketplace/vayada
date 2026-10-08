@@ -778,6 +778,7 @@
   "calendar.targetManualBooking.childAgesHint": "Kinder werden nach ihrem Alter bei Anreise berechnet (0–17).",
   "calendar.targetManualBooking.pricingNotPublished": "Die Preise sind noch nicht veröffentlicht. Veröffentlichen Sie sie unter Preise oder wählen Sie einen benutzerdefinierten Preis.",
   "calendar.targetManualBooking.rateRestricted": "Diese Rate ist für {range} nicht buchbar (Mindestaufenthalt oder geschlossene Tage). Wählen Sie eine andere Rate oder einen benutzerdefinierten Preis.",
+  "calendar.targetManualBooking.pricingChanged": "Die Preise haben sich seit dieser Berechnung geändert. Prüfen Sie den neuen Gesamtbetrag und legen Sie die Buchung erneut an.",
   "calendar.blockModal.title": "Zimmer sperren",
   "calendar.blockModal.roomTypeLabel": "Zimmertyp",
   "calendar.blockModal.startDateLabel": "Startdatum",
