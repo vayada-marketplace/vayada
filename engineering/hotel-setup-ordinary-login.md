@@ -491,8 +491,8 @@ Dependency order; each step is reversible until step 6.
 3. **App PR: remove the native code paths** — _prepared as stacked drafts on
    #2950: #2955 (forwarder and its route options), #2956 (private service,
    native adapters, preflights, provisioning and bootstrap tooling, native
-   tests and CI steps) and the docs PR that moved the VAY-965/VAY-1092
-   contracts to [`historical/`](historical/); merge only after steps 1 and 2.
+   tests and CI steps) and #2957 (docs: the VAY-965/VAY-1092 contracts moved
+   to [`historical/`](historical/)); merge only after steps 1 and 2.
    As built: `hotelSetupLogoRuntime.ts` keeps its ordinary runtime (only the
    native strategy goes), `hotelSetupLogoCleanup.ts` and its CLI go too (they
    accept only a native logo scope row, so run any outstanding cleanup before
