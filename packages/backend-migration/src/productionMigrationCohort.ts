@@ -4,7 +4,7 @@ import type pg from "pg";
 import { stableJson } from "./productionIdentitySourceValidation.js";
 
 // VAY-1362 cohort input (engineering/legacy-migration-cohort-scope.md). The catalog-group
-// check COHORT_MEMBERSHIP_MISMATCH needs catalog ownership and lands with the catalog PR.
+// check COHORT_MEMBERSHIP_MISMATCH lives in catalog ownership (productionCatalogOwnership.ts).
 export type ProductionMigrationCohortInput = {
   sourceRunId: string;
   bookingHotelIds: string[];

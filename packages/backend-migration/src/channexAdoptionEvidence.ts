@@ -116,12 +116,14 @@ export async function verifyChannexAdoptionTargetEvidence(
   if (identityPlan.quarantinedOrganizations || identityPlan.quarantinedResourceLinks)
     rejectAdoption("IDENTITY_PLAN_WARNINGS");
 
-  const catalogRows = await readProductionCatalogSnapshot(client, manifest.sourceRunId, {
-    validateRun: async () => identitySnapshot,
-  });
+  const { rows: catalogRows, cohort } = await readProductionCatalogSnapshot(
+    client,
+    manifest.sourceRunId,
+    { validateRun: async () => identitySnapshot },
+  );
   const sourceLinks = await readProductionCatalogSourceLinks(client);
   const ownerLinks = await readCatalogOwnerLinks(client);
-  const ownership = planCatalogOwnership(catalogRows, sourceLinks, ownerLinks);
+  const ownership = planCatalogOwnership(catalogRows, sourceLinks, ownerLinks, cohort);
   if (ownership.blockers.length) rejectAdoption("CATALOG_PLAN_BLOCKED");
   const propertyIds = ownership.properties.map((row) => row.propertyId);
   const catalogTarget = await readProductionCatalogTargetState(
@@ -129,7 +131,7 @@ export async function verifyChannexAdoptionTargetEvidence(
     propertyIds,
     manifest.sourceRunId,
   );
-  const catalogPlan = buildProductionCatalogPlan(catalogRows, catalogTarget);
+  const catalogPlan = buildProductionCatalogPlan(catalogRows, catalogTarget, cohort);
   if (catalogPlan.blockers.length) rejectAdoption("CATALOG_PLAN_BLOCKED");
   if (catalogPlan.quarantinedSources.length) rejectAdoption("CATALOG_PLAN_WARNINGS");
 

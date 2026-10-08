@@ -120,9 +120,9 @@ export async function runProductionCatalogPrerequisiteTransaction(
          IN SHARE ROW EXCLUSIVE MODE`,
       );
     }
-    const rows = await services.readSnapshot(client, input.sourceRunId);
+    const { rows, cohort } = await services.readSnapshot(client, input.sourceRunId);
     const target = await services.readTarget(client, catalogPropertyIds(rows), input.sourceRunId);
-    const plan = services.buildPlan(rows, target);
+    const plan = services.buildPlan(rows, target, cohort);
     const remainingMediaBlockers = plan.blockers.filter(isMediaPrerequisiteBlocker);
     const blocking = plan.blockers.filter((blocker) => !isMediaPrerequisiteBlocker(blocker));
     if (input.mode === "dry-run" || blocking.length > 0) {
@@ -142,7 +142,7 @@ export async function runProductionCatalogPrerequisiteTransaction(
     assertPrerequisiteWriteCounts(plan, { ...core, ...content });
     const verifiedTarget = await services.readTarget(client, plan.propertyIds, input.sourceRunId);
     assertSourceLinks(plan, verifiedTarget.sourceLinks);
-    const verified = services.buildPlan(rows, verifiedTarget);
+    const verified = services.buildPlan(rows, verifiedTarget, cohort);
     const verifiedBlocking = verified.blockers.filter(
       (blocker) => !isMediaPrerequisiteBlocker(blocker),
     );
@@ -194,9 +194,9 @@ export async function runProductionCatalogTransaction(
          IN SHARE ROW EXCLUSIVE MODE`,
       );
     }
-    const rows = await services.readSnapshot(client, input.sourceRunId);
+    const { rows, cohort } = await services.readSnapshot(client, input.sourceRunId);
     const target = await services.readTarget(client, catalogPropertyIds(rows), input.sourceRunId);
-    const plan = services.buildPlan(rows, target);
+    const plan = services.buildPlan(rows, target, cohort);
     if (input.mode === "dry-run" || plan.blockers.length > 0) {
       await client.query("ROLLBACK");
       finished = true;
@@ -214,7 +214,7 @@ export async function runProductionCatalogTransaction(
     assertWriteCounts(plan, { ...core, ...content, ...presentation });
     const verifiedTarget = await services.readTarget(client, plan.propertyIds, input.sourceRunId);
     assertSourceLinks(plan, verifiedTarget.sourceLinks);
-    const verified = services.buildPlan(rows, verifiedTarget);
+    const verified = services.buildPlan(rows, verifiedTarget, cohort);
     if (
       verified.blockers.length > 0 ||
       verified.checksum !== plan.checksum ||

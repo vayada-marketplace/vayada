@@ -102,13 +102,17 @@ describe("Channex adoption evidence", () => {
     const manifest = fixtureManifest();
     const client = new EvidenceClient(manifest);
     arrangeTarget(manifest);
+    const cohort = { cohortSha256: "c".repeat(64) };
+    dependencies.readCatalogSnapshot.mockResolvedValueOnce({ rows: [], cohort });
 
     await expect(verifyChannexAdoptionTargetEvidence(client as never, manifest)).resolves.toBe(
       undefined,
     );
     expect(dependencies.buildIdentityPlan).toHaveBeenCalledOnce();
     expect(dependencies.planCatalogOwnership).toHaveBeenCalledOnce();
+    expect(dependencies.planCatalogOwnership.mock.calls[0]?.[3]).toBe(cohort);
     expect(dependencies.buildCatalogPlan).toHaveBeenCalledOnce();
+    expect(dependencies.buildCatalogPlan.mock.calls[0]?.[2]).toBe(cohort);
     expect(dependencies.readTargetRow).toHaveBeenCalledTimes(6);
 
     dependencies.readTargetRow.mockResolvedValueOnce({
@@ -165,7 +169,7 @@ function arrangeTarget(manifest: ChannexAdoptionManifest): void {
       },
     ],
   });
-  dependencies.readCatalogSnapshot.mockResolvedValue([]);
+  dependencies.readCatalogSnapshot.mockResolvedValue({ rows: [], cohort: null });
   dependencies.readCatalogSourceLinks.mockResolvedValue([]);
   dependencies.planCatalogOwnership.mockReturnValue({
     blockers: [],

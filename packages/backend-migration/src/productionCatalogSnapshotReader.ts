@@ -3,8 +3,14 @@ import type pg from "pg";
 
 import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
 import { readProductionIdentitySnapshot } from "./productionIdentitySnapshotReader.js";
+import type { ProductionMigrationCohort } from "./productionMigrationCohort.js";
 
 type QueryClient = Pick<pg.ClientBase, "query">;
+/** Catalog rows plus the VAY-1362 cohort loaded by the same validated run read. */
+export type ProductionCatalogSnapshot = {
+  rows: IdentitySourceRow[];
+  cohort: ProductionMigrationCohort | null;
+};
 type CatalogDatabase = "auth" | "booking" | "marketplace" | "pms";
 type SourceEvidence = {
   sourceDatabase: CatalogDatabase;
@@ -38,11 +44,14 @@ const databases = Object.keys(PRODUCTION_CATALOG_SOURCE_TABLES) as CatalogDataba
 export async function readProductionCatalogSnapshot(
   client: QueryClient,
   runId: string,
-  services: { validateRun: (client: QueryClient, runId: string) => Promise<unknown> } = {
-    validateRun: readProductionIdentitySnapshot,
-  },
-): Promise<IdentitySourceRow[]> {
-  await services.validateRun(client, runId);
+  services: {
+    validateRun: (
+      client: QueryClient,
+      runId: string,
+    ) => Promise<{ cohort?: ProductionMigrationCohort | null }>;
+  } = { validateRun: readProductionIdentitySnapshot },
+): Promise<ProductionCatalogSnapshot> {
+  const { cohort } = await services.validateRun(client, runId);
   const sourceResult = await client.query<SourceEvidence>(
     `SELECT source_database AS "sourceDatabase", snapshot_identifier AS "snapshotIdentifier", status
      FROM platform.source_extraction_sources
@@ -123,5 +132,5 @@ export async function readProductionCatalogSnapshot(
         throw new Error(`Source extraction ${runId} mismatches ${database}.${table} checksum`);
     }
   }
-  return loaded;
+  return { rows: loaded, cohort: cohort ?? null };
 }

@@ -1,3 +1,4 @@
+import type { IdentityCohortScope } from "./productionIdentityCohortScope.js";
 import type {
   IdentityMigrationBlocker,
   IdentitySourceRow,
@@ -37,7 +38,8 @@ export type CatalogQuarantineReason =
   | "missing_canonical_property"
   | "ambiguous_canonical_property"
   | "duplicate_pms_property"
-  | "duplicate_marketplace_profile";
+  | "duplicate_marketplace_profile"
+  | "outside_migration_cohort";
 export type CatalogOwnerLink = {
   organizationId: string;
   product: "booking" | "pms" | "marketplace";
@@ -95,6 +97,8 @@ const TABLES = {
   pms: "hotels",
   marketplace: "hotel_profiles",
 } as const;
+// Reasons accepted on an existing link at a private (synthetic) property ID. Cohort quarantine
+// keeps the Booking anchor's ID, so outside_migration_cohort is never valid there.
 const QUARANTINE_REASONS = new Set<CatalogQuarantineReason>([
   "legacy_owner_quarantined",
   "missing_canonical_property",
@@ -107,6 +111,7 @@ export function planCatalogOwnership(
   rows: IdentitySourceRow[],
   existingLinks: ExistingCatalogSourceLink[] = [],
   authoritativeOwnerLinks?: CatalogOwnerLink[],
+  cohort?: IdentityCohortScope | null,
 ): CatalogOwnershipPlan {
   const blockers: IdentityMigrationBlocker[] = [];
   const authUsers = new Map(
@@ -132,6 +137,7 @@ export function planCatalogOwnership(
   const anchors = new Map(booking.map((row) => [row.sourceId, row]));
   const anchorsByUser = groupBy(booking, (row) => row.userId);
   const existing = new Map(existingLinks.map((link) => [sourceKey(link), link]));
+  // VAY-1362: a Booking anchor outside the cohort keeps its ID but becomes private.
   const groups = new Map(
     booking.map((row) => [
       row.sourceId,
@@ -141,8 +147,12 @@ export function planCatalogOwnership(
         booking: row,
         pms: [],
         marketplace: [],
-        migrationDisposition: "canonical",
-        migrationDispositionReason: null,
+        ...(inCohort(row, cohort)
+          ? { migrationDisposition: "canonical", migrationDispositionReason: null }
+          : {
+              migrationDisposition: "private_quarantine",
+              migrationDispositionReason: "outside_migration_cohort",
+            }),
       } as CatalogPropertyGroup,
     ]),
   );
@@ -151,7 +161,7 @@ export function planCatalogOwnership(
 
   for (const row of booking) {
     const target = existing.get(sourceKey(row));
-    const planned = link(row, row.sourceId, "canonical", null);
+    const planned = attach(groups.get(row.sourceId)!, row, quarantinedSources);
     if (target && target.propertyId !== row.sourceId)
       addBlocker(
         blockers,
@@ -182,7 +192,7 @@ export function planCatalogOwnership(
       ...resolveCandidate(
         row,
         direct,
-        anchorsByUser.get(row.userId) ?? [],
+        ownerAnchorsFor(row, anchorsByUser.get(row.userId) ?? [], cohort),
         target,
         anchors,
         blockers,
@@ -235,14 +245,16 @@ export function planCatalogOwnership(
       sourceLinks.push(planned);
       continue;
     }
+    // Rows attached to an anchor share its disposition, including cohort quarantine.
     const group = groups.get(candidate.propertyId)!;
     if (row.sourceSystem === "pms") group.pms.push(row);
     else group.marketplace.push(row);
-    const planned = link(row, candidate.propertyId, "canonical", null);
+    const planned = attach(group, row, quarantinedSources);
     validateRelationship(target, planned, blockers);
     sourceLinks.push(planned);
   }
   addDuplicateSlugs(booking, blockers);
+  if (cohort) addCohortMismatches([...groups.values()], cohort, blockers);
 
   return {
     properties: sortedBy([...groups.values()], (row) => row.propertyId),
@@ -250,6 +262,68 @@ export function planCatalogOwnership(
     quarantinedSources: sortedBy(quarantinedSources, sourceKey),
     blockers: sortedBy(blockers, (row) => `${row.code}:${row.source}:${row.sourceId}`),
   };
+}
+
+function inCohort(row: CatalogPropertySource, cohort?: IdentityCohortScope | null): boolean {
+  if (!cohort) return true;
+  const ids =
+    row.sourceSystem === "booking"
+      ? cohort.bookingHotelIds
+      : row.sourceSystem === "pms"
+        ? cohort.pmsHotelIds
+        : cohort.marketplaceHotelIds;
+  return ids.includes(row.sourceId);
+}
+
+/** A cohort settles an owner's otherwise ambiguous anchors when exactly one is on the row's
+ * side of it. A single anchor is kept either way, so a mismatch still blocks. */
+function ownerAnchorsFor(
+  row: CatalogPropertySource,
+  anchors: CatalogPropertySource[],
+  cohort?: IdentityCohortScope | null,
+): CatalogPropertySource[] {
+  const sameSide = anchors.filter((anchor) => inCohort(anchor, cohort) === inCohort(row, cohort));
+  return anchors.length > 1 && sameSide.length === 1 ? sameSide : anchors;
+}
+
+function attach(
+  group: CatalogPropertyGroup,
+  row: CatalogPropertySource,
+  quarantinedSources: CatalogQuarantinedSource[],
+): PlannedCatalogSourceLink {
+  const reason = group.migrationDispositionReason;
+  if (reason)
+    quarantinedSources.push({
+      propertyId: group.propertyId,
+      sourceSystem: row.sourceSystem,
+      sourceTable: row.sourceTable,
+      sourceId: row.sourceId,
+      reason,
+    });
+  return link(row, group.propertyId, group.migrationDisposition, reason);
+}
+
+/** COHORT_MEMBERSHIP_MISMATCH: the Booking, PMS and Marketplace members of one property
+ * must all be inside or all outside the cohort. Each ID set is explicit, so this fails closed.
+ * With the anchor deciding the disposition, it also guarantees that no cohort row is ever
+ * quarantined as outside_migration_cohort in an unblocked plan. */
+function addCohortMismatches(
+  groups: CatalogPropertyGroup[],
+  cohort: IdentityCohortScope,
+  blockers: IdentityMigrationBlocker[],
+): void {
+  for (const group of groups) {
+    const members = [...(group.booking ? [group.booking] : []), ...group.pms, ...group.marketplace];
+    const inside = members.filter((row) => inCohort(row, cohort)).length;
+    if (inside > 0 && inside < members.length)
+      addBlocker(
+        blockers,
+        "COHORT_MEMBERSHIP_MISMATCH",
+        "hotel_catalog.properties",
+        group.propertyId,
+        "Booking, PMS and Marketplace members disagree on migration cohort membership",
+      );
+  }
 }
 
 function validateRelationship(
