@@ -6,6 +6,10 @@ import {
   PricingAcceptanceError,
   writePricingAcceptance,
 } from "../domains/pricingAcceptanceWriter.js";
+import {
+  completePricingCardPayment,
+  PricingCardPaymentError,
+} from "../domains/pricingCardPaymentCompletion.js";
 import { admitAffiliateArrivalForCurrentHost } from "../domains/bookingAffiliateArrivalHost.js";
 import { readBookingAffiliateContextForQuote } from "../domains/bookingAffiliateContextForQuote.js";
 import {
@@ -260,6 +264,7 @@ export type BookingWebCheckoutAdapter = {
     request: BookingWebCheckoutRequest,
     affiliateContextCookie?: string,
   ): Promise<unknown>;
+  completePricingCardPayment?(slug: string, quoteId: string, requestId: string): Promise<unknown>;
   getCheckoutConfig(slug: string, context?: BookingWebCheckoutCommandContext): Promise<unknown>;
   quoteBooking(
     slug: string,
@@ -628,6 +633,32 @@ export async function registerBookingWebPublicRoutes(
             affiliateContextCookie,
           )
         : await checkoutAdapter.acceptPricingQuote(request.params.slug, body);
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-quote-acceptance");
+      return response;
+    },
+  );
+
+  app.post<{ Params: BookingWebHotelParams & { quoteId: string } }>(
+    "/hotels/:slug/bookings/quotes/:quoteId/accept/payment",
+    {
+      bodyLimit: 1024,
+      async onRequest(request, reply) {
+        reply.header("Cache-Control", "no-store");
+        reply.header("X-Robots-Tag", "noindex");
+        requirePublicQuoteKey(request);
+      },
+    },
+    async (request, reply) => {
+      const requestId = request.headers["idempotency-key"];
+      if (!checkoutAdapter.completePricingCardPayment)
+        throw createHttpError(404, "Card payment unavailable.");
+      if (typeof requestId !== "string" || !requestId.length)
+        throw createHttpError(400, "Invalid card payment request.");
+      const response = await checkoutAdapter.completePricingCardPayment(
+        request.params.slug,
+        request.params.quoteId,
+        requestId,
+      );
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-quote-acceptance");
       return response;
     },
@@ -2092,6 +2123,38 @@ export function createTargetBookingWebCheckoutAdapter(
         });
       }
     },
+    ...(config.replacementPricingCardAcceptanceEnabled && config.stripePaymentProvider
+      ? {
+          async completePricingCardPayment(slug: string, quoteId: string, requestId: string) {
+            try {
+              return await completePricingCardPayment(pool, config.stripePaymentProvider!, {
+                slug,
+                quoteId,
+                requestId,
+              });
+            } catch (error) {
+              if (!(error instanceof PricingCardPaymentError))
+                throw Object.assign(
+                  new Error("Card payment temporarily unavailable.", { cause: error }),
+                  {
+                    statusCode: 503,
+                  },
+                );
+              if (error.code === "unavailable")
+                throw createHttpError(404, "Card payment unavailable.");
+              throw Object.assign(
+                createHttpError(
+                  409,
+                  error.code === "pending"
+                    ? "Card payment is not complete yet."
+                    : "Card payment does not match this booking.",
+                ),
+                { code: error.code === "pending" ? "PAYMENT_PENDING" : "PAYMENT_MISMATCH" },
+              );
+            }
+          },
+        }
+      : {}),
     async getPricingAddons(slug) {
       let addons;
       try {

@@ -6,6 +6,7 @@ import { parsePmsInventoryReservationBundle } from "@vayada/domain-pms";
 import { pricingDraftFixture } from "./pricingBookingDraft.fixtures.js";
 import { acceptanceFixture } from "./pricingAcceptanceHistory.fixtures.js";
 import { writePricingAcceptance } from "./pricingAcceptanceWriter.js";
+import { completePricingCardPayment } from "./pricingCardPaymentCompletion.js";
 import { readBookingAffiliateContextForQuote } from "./bookingAffiliateContextForQuote.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { reserveRevalidatedQuoteInventory } from "./currentQuoteInventory.js";
@@ -283,6 +284,12 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
 
   it("accepts the quote, holds the rooms and starts a Stripe payment without confirming", async () => {
     const fixture = await setupFixture(cardQuote);
+    const slug = `writer-${fixture.propertyId}`;
+    fixture.input.slug = slug;
+    await fixture.observer.query(
+      "INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose) VALUES($1,$2,'canonical')",
+      [fixture.propertyId, slug],
+    );
     const accountId = randomUUID();
     await fixture.observer.query(
       `INSERT INTO finance.payment_provider_accounts(id,property_id,account_scope,provider,provider_account_id,status,
@@ -304,7 +311,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       amountMinor: input.amountMinor,
       currency: input.currency,
       propertyId: fixture.propertyId,
-      bookingReference: null,
+      bookingReference: null as string | null,
       providerAccountRef: "acct_writer_test",
     }));
     const retrievePaymentIntent = vi.fn(async () =>
@@ -391,6 +398,67 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         acceptances: 1,
         available: 2,
       });
+
+      const reference = (result as { bookingReference: string }).bookingReference;
+      const complete = () =>
+        completePricingCardPayment(fixture.pool, provider, {
+          slug,
+          quoteId: fixture.f.current.quote.quoteId,
+          requestId: fixture.f.command.requestId,
+        });
+      const intent = await createPaymentIntent({
+        amountMinor: Number(fixture.f.current.quote.evidence.dueNowMinor),
+        currency: fixture.f.current.quote.stay.currency,
+      });
+      retrievePaymentIntent.mockResolvedValue({ ...intent, bookingReference: reference });
+      await expect(complete()).rejects.toMatchObject({ code: "pending" });
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: reference,
+        amountMinor: intent.amountMinor + 1,
+        status: "succeeded",
+      });
+      await expect(complete()).rejects.toMatchObject({ code: "conflict" });
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: reference,
+        status: "succeeded",
+      });
+      await expect(complete()).resolves.toMatchObject({ kind: "accepted", replayed: false });
+      await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({
+        bookings: 1,
+        acceptances: 1,
+        jobs: expect.any(Number),
+        available: 2,
+      });
+      const paid = (
+        await fixture.observer.query(
+          `SELECT b.lifecycle_status,b.payment_status,b.balance_amount::text AS balance,p.status AS payment,
+            (SELECT count(*)::int FROM booking.nightly_revenue_evidence r WHERE r.guest_booking_id=b.id) AS revenue,
+            (SELECT count(*)::int FROM platform.jobs j WHERE j.property_id=b.property_id
+              AND j.job_type='pms.reservation.accepted-pricing.create') AS pms
+           FROM booking.guest_bookings b JOIN finance.payments p ON p.id=b.active_card_payment_id
+           WHERE b.property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows[0];
+      expect(paid).toMatchObject({
+        lifecycle_status: "confirmed",
+        payment_status: "paid",
+        payment: "paid",
+        pms: 1,
+      });
+      expect(Number(paid.balance)).toBe(0);
+      expect(paid.revenue).toBeGreaterThan(0);
+      await expect(complete()).resolves.toMatchObject({ kind: "accepted", replayed: true });
+      expect(
+        (
+          await fixture.observer.query(
+            "SELECT count(*)::int AS n FROM platform.jobs WHERE property_id=$1 AND job_type='pms.reservation.accepted-pricing.create'",
+            [fixture.propertyId],
+          )
+        ).rows[0].n,
+      ).toBe(1);
     } finally {
       await fixture.close();
     }
@@ -496,7 +564,7 @@ async function setupFixture(changeQuote?: (quote: Fixture["f"]["current"]["quote
       organizationId,
       f.command.requestId,
       hash(f.command.requestId),
-      { quote, calculation: { version: "booking.quote-calculation.v1" } },
+      { quote, calculation: { ...f.current.calculation, version: "booking.quote-calculation.v1" } },
     ],
   );
   await observer.query("COMMIT");
