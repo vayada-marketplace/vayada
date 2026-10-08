@@ -733,7 +733,8 @@ function HomePageContent() {
             </div>
           )}
 
-        {!roomsRefetching && searchMessage !== "availabilityError" && (
+        {/* The new room-and-price page works even when the legacy availability search fails. */}
+        {!roomsRefetching && (
           <a
             href={`/${locale}/book?${new URLSearchParams({ checkIn, checkOut })}`}
             className="inline-block mb-6 rounded-full bg-primary-600 px-6 py-3 font-semibold text-white"
