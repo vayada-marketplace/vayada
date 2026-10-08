@@ -328,6 +328,8 @@ type PmsOperationalReservation = {
     position: number;
     channel: string;
     ratePlanId: string | null;
+    /** Published pricing-v2 offer of a manual stay; rate_plan_id stays empty for those. */
+    pricingOfferId?: string | null;
     stay?: { checkIn: string; checkOut: string; adults: number; children: number };
     nightly?: Array<{
       serviceDate: string;
@@ -1223,7 +1225,7 @@ function toBooking(
         : reservation.assignments.map((assignment) => {
             const assignmentRoomType = roomTypesById.get(assignment.roomTypeId);
             const ratePlan = assignmentRoomType?.ratePlans?.find(
-              (plan) => plan.ratePlanId === assignment.ratePlanId,
+              (plan) => plan.ratePlanId === (assignment.ratePlanId ?? assignment.pricingOfferId),
             );
             return {
               position: Math.max(assignment.position - 1, 0),
