@@ -80,7 +80,7 @@ describe("Legacy fixed-plan subscription adoption", () => {
     expect(fixture.store.adopt).not.toHaveBeenCalled();
   });
 
-  it("finishes a run whose Stripe write succeeded but whose entitlement write did not", async () => {
+  it("repairs a run whose Stripe write succeeded but whose entitlement write did not", async () => {
     const fixture = setup();
     fixture.inspection.adoptionMarker = "v1";
     fixture.inspection.snapshot = adoptedSnapshot();
@@ -91,7 +91,31 @@ describe("Legacy fixed-plan subscription adoption", () => {
     );
 
     expect(report.outcome).toBe("adopted");
-    expect(fixture.stripe.markAdopted).not.toHaveBeenCalled();
+    expect(fixture.stripe.markAdopted).toHaveBeenCalledTimes(1);
+    expect(fixture.store.adopt).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a failed bookability refresh after the committed write", async () => {
+    const fixture = setup();
+    fixture.refreshPublicBookability.mockRejectedValueOnce(new Error("publisher down"));
+
+    const report = await adoptLegacyFixedPlanSubscription(
+      { propertyId: PROPERTY, subscriptionId: "sub_legacy", apply: true },
+      fixture.dependencies,
+    );
+    expect(report).toMatchObject({
+      outcome: "adopted",
+      bookabilityRefreshed: false,
+      reasons: ["bookability_refresh_failed:publisher down"],
+    });
+
+    fixture.entitlement.planKey = "fixed";
+    fixture.entitlement.subscriptionRef = "sub_legacy";
+    const rerun = await adoptLegacyFixedPlanSubscription(
+      { propertyId: PROPERTY, subscriptionId: "sub_legacy", apply: true },
+      fixture.dependencies,
+    );
+    expect(rerun).toMatchObject({ outcome: "already_adopted", bookabilityRefreshed: true });
     expect(fixture.store.adopt).toHaveBeenCalledTimes(1);
   });
 
@@ -100,6 +124,7 @@ describe("Legacy fixed-plan subscription adoption", () => {
     ["stripe_payment_kind_mismatch", { paymentKind: "booking" }],
     ["stripe_price_not_flat_30d", { flatThirtyDayPrice: false }],
     ["stripe_status_canceled", { snapshot: { ...legacySnapshot(), status: "canceled" } }],
+    ["stripe_period_end_missing", { snapshot: { ...legacySnapshot(), currentPeriodEnd: null } }],
     [
       "within_24h_of_period_end",
       { snapshot: { ...legacySnapshot(), currentPeriodEnd: "2026-10-21T09:00:00.000Z" } },
@@ -165,12 +190,13 @@ describe("Legacy fixed-plan subscription adoption", () => {
   });
 
   it("clears a stale legacy reference only when Stripe holds no live subscription", async () => {
-    const fixture = setup({
-      metadata: { providerReentryRequired: true, legacyBillingReferenceSha256: "abc" },
-    });
+    const fixture = setup();
     fixture.stripe.findLegacySubscriptionsForHotel.mockResolvedValue([
       { subscriptionId: "sub_old", status: "canceled" },
+      { subscriptionId: "sub_expired", status: "incomplete_expired" },
       { subscriptionId: "sub_live", status: "past_due" },
+      { subscriptionId: "sub_pending", status: "incomplete" },
+      { subscriptionId: "sub_unpaid", status: "unpaid" },
     ]);
 
     const refused = await clearStaleLegacyBillingReference(
@@ -178,7 +204,11 @@ describe("Legacy fixed-plan subscription adoption", () => {
       fixture.dependencies,
     );
     expect(refused.outcome).toBe("refused");
-    expect(refused.reasons).toEqual(["live_subscription_exists:sub_live"]);
+    expect(refused.reasons).toEqual([
+      "live_subscription_exists:sub_live",
+      "live_subscription_exists:sub_pending",
+      "live_subscription_exists:sub_unpaid",
+    ]);
     expect(fixture.store.clearStaleReference).not.toHaveBeenCalled();
 
     fixture.stripe.findLegacySubscriptionsForHotel.mockResolvedValue([
@@ -204,7 +234,7 @@ describe("Legacy fixed-plan subscription adoption", () => {
   });
 
   it("refuses to clear a reference that is not a stale legacy one", async () => {
-    const fixture = setup({ billingStatus: "active" });
+    const fixture = setup({ billingStatus: "active", metadata: {} });
 
     const report = await clearStaleLegacyBillingReference(
       { propertyId: PROPERTY, apply: true },
@@ -212,7 +242,50 @@ describe("Legacy fixed-plan subscription adoption", () => {
     );
 
     expect(report.outcome).toBe("refused");
-    expect(report.reasons).toEqual(["not_a_stale_legacy_reference", "entitlement_not_suspended"]);
+    expect(report.reasons).toEqual([
+      "not_a_stale_legacy_reference",
+      "legacy_plan_not_commission",
+      "entitlement_not_suspended",
+    ]);
+  });
+
+  it("refuses to clear a hotel that is also suspended for another reason", async () => {
+    const legacyFixed = setup({ metadata: { providerReentryRequired: true, legacyPlan: "fixed" } });
+    const ruleInactive = setup({ commissionRuleActive: false });
+
+    const fixedPlan = await clearStaleLegacyBillingReference(
+      { propertyId: PROPERTY, apply: true },
+      legacyFixed.dependencies,
+    );
+    const noRule = await clearStaleLegacyBillingReference(
+      { propertyId: PROPERTY, apply: true },
+      ruleInactive.dependencies,
+    );
+
+    expect(fixedPlan.reasons).toEqual(["legacy_plan_not_commission"]);
+    expect(noRule.reasons).toEqual(["commission_rule_not_active"]);
+    expect(legacyFixed.store.clearStaleReference).not.toHaveBeenCalled();
+    expect(ruleInactive.store.clearStaleReference).not.toHaveBeenCalled();
+  });
+
+  it("reports an already cleared hotel and refreshes bookability on apply", async () => {
+    const fixture = setup({
+      billingStatus: "active",
+      metadata: {
+        providerReentryRequired: false,
+        legacyPlan: "commission",
+        legacyStaleReferenceClearedAt: NOW.toISOString(),
+      },
+    });
+
+    const report = await clearStaleLegacyBillingReference(
+      { propertyId: PROPERTY, apply: true },
+      fixture.dependencies,
+    );
+
+    expect(report).toMatchObject({ outcome: "already_cleared", bookabilityRefreshed: true });
+    expect(fixture.stripe.findLegacySubscriptionsForHotel).not.toHaveBeenCalled();
+    expect(fixture.store.clearStaleReference).not.toHaveBeenCalled();
   });
 
   it("writes the adopted entitlement with the retained amount and an adoption event marker", async () => {
@@ -232,6 +305,7 @@ describe("Legacy fixed-plan subscription adoption", () => {
     const [sql, values] = query.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain("plan_key = 'fixed'");
     expect(sql).toContain("billing_subscription_ref IS NULL");
+    expect(sql).toContain("GREATEST(");
     expect(values.slice(0, 5)).toEqual([
       PROPERTY,
       ORGANIZATION,
@@ -256,6 +330,11 @@ describe("Legacy fixed-plan subscription adoption", () => {
     const [clearSql] = query.mock.calls[1] as [string, unknown[]];
     expect(clearSql).toContain("billing_status = 'suspended'");
     expect(clearSql).toContain("billing_subscription_ref IS NULL");
+
+    await store.getEntitlement(PROPERTY);
+    const [selectSql] = query.mock.calls[2] as [string, unknown[]];
+    expect(selectSql).toContain("finance.commission_rules");
+    expect(selectSql).toContain("identity.organizations");
   });
 });
 
@@ -293,11 +372,12 @@ function setup(entitlementOverride: Partial<LegacyAdoptionEntitlement> = {}) {
     organizationId: ORGANIZATION,
     propertyId: PROPERTY,
     organizationStatus: "active",
+    commissionRuleActive: true,
     planKey: "commission",
     billingStatus: "suspended",
     subscriptionRef: null,
     customerRef: null,
-    metadata: { providerReentryRequired: true },
+    metadata: { providerReentryRequired: true, legacyPlan: "commission" },
     ...entitlementOverride,
   };
   const inspection: LegacySubscriptionInspection = {
