@@ -409,6 +409,10 @@ export default function BookingDetailModal({
               checkOut: movingStay.checkOut,
               adults: movingStay.adults ?? 1,
               children: movingStay.children ?? 0,
+              // Offers price children by age; without recorded ages the quote stays unavailable.
+              ...(movingStay.children && movingStay.childAgesAtCheckIn?.length
+                ? { childAgesAtCheckIn: movingStay.childAgesAtCheckIn }
+                : {}),
               ratePlanId: selectedCandidate.room.flexibleRatePlanId,
               pricing: { kind: "rate_plan", manualOverride: null },
             },
