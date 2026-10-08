@@ -1,6 +1,8 @@
 from pydantic import ConfigDict, Field
 from pydantic_settings import BaseSettings
 
+FIXED_PLAN_BILLING_MODES = {"legacy", "frozen"}
+
 PROVIDER_WEBHOOK_CUTOVER_MODES = {
     "mutating",
     "ack_only_with_receipt",
@@ -145,6 +147,11 @@ class Settings(BaseSettings):
     PMS_XENDIT_WEBHOOK_TARGET_URL: str = ""
     PMS_CHANNEX_WEBHOOK_TARGET_URL: str = ""
 
+    # Legacy fixed-plan Stripe billing handover (VAY-1362).
+    # legacy: today's behaviour. frozen: no billing job, no price syncs, no
+    # webhook billing writes; checkout and cancel answer 409; status is read-only.
+    FIXED_PLAN_BILLING_MODE: str = "legacy"
+
     # Legacy finance payout reconciliation cutover controls.
     # Modes: legacy-owned, disabled, proxy-to-target, target-owned.
     FINANCE_XENDIT_PAYOUT_RECONCILIATION_LEGACY_MODE: str = "legacy-owned"
@@ -178,6 +185,17 @@ class Settings(BaseSettings):
                 seen.add(o)
                 unique.append(o)
         return unique
+
+    def fixed_plan_billing_mode(self) -> str:
+        mode = (self.FIXED_PLAN_BILLING_MODE or "legacy").strip().lower()
+        if mode not in FIXED_PLAN_BILLING_MODES:
+            valid = ", ".join(sorted(FIXED_PLAN_BILLING_MODES))
+            raise ValueError(f"Invalid FIXED_PLAN_BILLING_MODE {mode!r}; expected one of {valid}")
+        return mode
+
+    @property
+    def fixed_plan_billing_frozen(self) -> bool:
+        return self.fixed_plan_billing_mode() == "frozen"
 
     def provider_webhook_cutover_mode(self, provider: str) -> str:
         provider_key = provider.upper()

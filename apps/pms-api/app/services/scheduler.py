@@ -591,9 +591,15 @@ def setup_scheduler(target_scheduler: AsyncIOScheduler | None = None):
 def setup_fixed_plan_billing_scheduler(
     target_scheduler: AsyncIOScheduler | None = None,
 ) -> AsyncIOScheduler:
-    """Configure the billing outbox worker independently of frozen legacy jobs."""
+    """Configure the billing outbox worker independently of frozen legacy jobs.
+
+    FIXED_PLAN_BILLING_MODE=frozen registers no job: the target owns billing
+    after the VAY-1362 handover.
+    """
     target_scheduler = target_scheduler or fixed_plan_billing_scheduler
     target_scheduler.remove_all_jobs()
+    if app_settings.fixed_plan_billing_frozen:
+        return target_scheduler
     target_scheduler.add_job(
         sync_all_subscription_prices,
         trigger=IntervalTrigger(minutes=5),

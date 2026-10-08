@@ -162,6 +162,10 @@ def _subscription_id(value: object) -> str | None:
 
 
 async def _fixed_plan_context(event_type: str, data: dict) -> tuple[str, str | None] | None:
+    if settings.fixed_plan_billing_frozen:
+        # VAY-1362: the target owns subscription events; never classify or
+        # read Stripe here. The event falls through to the cutover mode guard.
+        return None
     metadata = data.get("metadata") or {}
     subscription_id = None
     if event_type.startswith("invoice."):

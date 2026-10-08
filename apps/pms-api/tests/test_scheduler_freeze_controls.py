@@ -95,3 +95,12 @@ def test_fixed_plan_billing_worker_is_independent_of_legacy_freeze():
     job = billing_scheduler.get_job("sync_fixed_plan_subscription_prices")
     assert job is not None
     assert str(job.trigger) == "interval[0:05:00]"
+
+
+def test_fixed_plan_billing_worker_registers_no_job_when_frozen(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "FIXED_PLAN_BILLING_MODE", "frozen")
+    billing_scheduler = setup_fixed_plan_billing_scheduler(AsyncIOScheduler())
+
+    assert billing_scheduler.get_jobs() == []

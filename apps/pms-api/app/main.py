@@ -110,8 +110,11 @@ async def lifespan(app: FastAPI):
             "Scheduler not started because all legacy PMS jobs are frozen: frozen_jobs=%s",
             [job["id"] for job in scheduler_status["frozen_jobs"]],
         )
-    billing_scheduler.start()
-    logger.info("Fixed-plan billing scheduler started")
+    if settings.fixed_plan_billing_frozen:
+        logger.warning("Fixed-plan billing is frozen (FIXED_PLAN_BILLING_MODE=frozen)")
+    else:
+        billing_scheduler.start()
+        logger.info("Fixed-plan billing scheduler started")
     yield
     logger.info("Shutting down vayada PMS...")
     promo_usage_task.cancel()

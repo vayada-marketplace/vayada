@@ -11,6 +11,19 @@ logger = logging.getLogger(__name__)
 
 ACTIVE_SUBSCRIPTION_STATUSES = {"active", "past_due", "trialing"}
 TERMINAL_SUBSCRIPTION_STATUSES = {"canceled", "incomplete_expired", "unpaid"}
+FROZEN_MESSAGE = "Fixed-plan billing is moving to the new platform; contact Vayada support"
+
+
+class FixedPlanBillingFrozenError(Exception):
+    """Raised when a billing mutation is attempted while legacy billing is frozen (VAY-1362)."""
+
+    def __init__(self) -> None:
+        super().__init__(FROZEN_MESSAGE)
+
+
+def _ensure_not_frozen() -> None:
+    if settings.fixed_plan_billing_frozen:
+        raise FixedPlanBillingFrozenError()
 
 
 def _amount_cents(config: dict, room_count: int) -> int:
@@ -52,7 +65,11 @@ async def fixed_plan_quote(hotel_id: str) -> dict:
 
 async def billing_status(hotel_id: str) -> dict:
     payment_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
-    if payment_settings and payment_settings.get("stripe_billing_status") == "active":
+    if (
+        payment_settings
+        and payment_settings.get("stripe_billing_status") == "active"
+        and not settings.fixed_plan_billing_frozen
+    ):
         await sync_subscription_price(payment_settings)
         payment_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
     quote = await fixed_plan_quote(hotel_id)
@@ -76,6 +93,7 @@ async def billing_status(hotel_id: str) -> dict:
 
 
 async def create_checkout(hotel_id: str, user_id: str) -> str:
+    _ensure_not_frozen()
     payment_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
     if (
         payment_settings
@@ -300,6 +318,7 @@ async def create_portal(hotel_id: str) -> str:
 
 
 async def cancel_at_period_end(hotel_id: str) -> datetime | None:
+    _ensure_not_frozen()
     payment_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
     subscription_id = (payment_settings or {}).get("stripe_billing_subscription_id")
     if not subscription_id:
@@ -317,6 +336,8 @@ async def cancel_at_period_end(hotel_id: str) -> datetime | None:
 
 
 async def sync_subscription_price(payment_settings: dict) -> None:
+    if settings.fixed_plan_billing_frozen:
+        return
     hotel_id = str(payment_settings["hotel_id"])
     pool = await Database.get_pool()
     async with pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as connection:
@@ -383,6 +404,8 @@ async def _sync_subscription_price_locked(payment_settings: dict) -> None:
 
 
 async def sync_all_subscription_prices() -> None:
+    if settings.fixed_plan_billing_frozen:
+        return
     for payment_settings in await HotelPaymentSettingsRepository.list_fixed_plan_subscriptions():
         try:
             await sync_subscription_price(payment_settings)
@@ -396,6 +419,8 @@ async def sync_all_subscription_prices() -> None:
 
 async def sync_subscription_price_for_hotel(hotel_id: str) -> None:
     """Best-effort update after room inventory changes; the billing worker retries failures."""
+    if settings.fixed_plan_billing_frozen:
+        return
     try:
         await sync_subscription_price({"hotel_id": hotel_id})
     except Exception:
