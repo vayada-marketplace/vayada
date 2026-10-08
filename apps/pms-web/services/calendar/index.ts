@@ -45,7 +45,8 @@ export interface CalendarRoom {
   floor: string;
   status: string;
   baseRate: number;
-  currency: string;
+  /** Null when the room type has neither a published offer nor a legacy rate currency. */
+  currency: string | null;
   maxOccupancy: number;
   size: number;
   /** The room type's published Flexible offer with its own price: what "target base" moves charge. */
@@ -467,7 +468,7 @@ function toCalendarData(
         floor: room.floor ?? "",
         status: room.status,
         baseRate: moneyAmount(roomTypesById.get(room.roomTypeId)?.baseRate),
-        currency: roomTypesById.get(room.roomTypeId)?.baseRate.currency ?? "EUR",
+        currency: roomTypeCurrency(roomTypesById.get(room.roomTypeId)),
         maxOccupancy: maxOccupancy(roomTypesById.get(room.roomTypeId)),
         size: numericAttribute(roomTypesById.get(room.roomTypeId)?.attributes?.size),
         flexibleRatePlanId:
@@ -544,6 +545,18 @@ function splitGuestName(displayName: string): [string, string] {
   if (parts.length === 0) return ["", ""];
   const [firstName, ...rest] = parts;
   return [firstName, rest.join(" ")];
+}
+
+/**
+ * The currency the calendar shows for a room type: the published offer's, else the legacy
+ * rate's, else none. A room type from the room-facts flow has neither until prices are
+ * published, and the calendar must not invent one (VAY-2068).
+ */
+function roomTypeCurrency(roomType: PmsOperationsRoomType | undefined): string | null {
+  const published = roomType?.ratePlans?.find(
+    (plan) => plan.active && plan.pricingContractVersion === "pricing.v2",
+  );
+  return published?.baseRate.currency ?? roomType?.baseRate.currency ?? null;
 }
 
 function moneyAmount(money: PmsOperationsMoney | undefined): number {
