@@ -208,6 +208,8 @@ export type StripeSubscriptionSnapshot = {
 /** Subscription metadata written by the legacy adoption command (VAY-1362). */
 export const FINANCE_LEGACY_ADOPTION_METADATA_KEY = "vayada_legacy_adoption" as const;
 export const FINANCE_LEGACY_ADOPTION_METADATA_VALUE = "v1" as const;
+/** The Stripe product of the retained legacy price, pinned at adoption (VAY-1362). */
+export const FINANCE_LEGACY_PRODUCT_METADATA_KEY = "vayada_legacy_product" as const;
 
 export type StripeFinanceSubscriptionProvider = {
   createFixedPlanCheckout(input: StripeFixedPlanCheckoutInput): Promise<{
