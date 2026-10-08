@@ -177,108 +177,6 @@ type ErrorResponse = {
 };
 
 describe("platform media upload routes", () => {
-  it("forwards validated logo uploads without ambient persistence on failure", async () => {
-    const repository = createInMemoryPlatformMediaRepository();
-    const create = vi.spyOn(repository, "createUploadSession");
-    const forwardLogo = vi.fn(async (_request, reply) =>
-      reply.code(503).send({ code: "hotel_setup_unavailable" }),
-    );
-    const app = buildMediaApp({ repository, forwardLogo });
-    try {
-      const response = await injectJson(app, {
-        method: "POST",
-        url: "/api/media/upload-sessions",
-        headers: { authorization: "Bearer valid-token" },
-        payload: { ...propertyGalleryCase.request.body, purpose: "property.logo" },
-      });
-      expect(response.statusCode).toBe(503);
-      expect(forwardLogo).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.anything(),
-        financePropertyId,
-        "logo_upload",
-      );
-      expect(create).not.toHaveBeenCalled();
-    } finally {
-      await app.close();
-    }
-  });
-
-  it("routes finalize from actor-scoped session evidence and never invokes the ambient finalizer", async () => {
-    const repository = createInMemoryPlatformMediaRepository();
-    const seed = buildMediaApp({ repository });
-    let sessionId: string;
-    let uploadTargetId: string;
-    try {
-      const response = await injectJson<MediaCreateResponse>(seed, {
-        method: "POST",
-        url: "/api/media/upload-sessions",
-        headers: { authorization: "Bearer valid-token" },
-        payload: { ...propertyGalleryCase.request.body, purpose: "property.logo" },
-      });
-      expect(response.statusCode).toBe(201);
-      sessionId = response.body.uploadSession.sessionId;
-      uploadTargetId = response.body.uploadTargets[0]!.uploadTargetId;
-    } finally {
-      await seed.close();
-    }
-    const finalizer = createDeterministicPlatformMediaFinalizer();
-    const inspect = vi.spyOn(finalizer, "inspectUploadedFile");
-    const complete = vi.spyOn(repository, "completeUploadSession");
-    const forwardLogo = vi.fn(async (_request, reply) =>
-      reply.code(503).send({ code: "hotel_setup_unavailable" }),
-    );
-    const app = buildMediaApp({ repository, finalizer, forwardLogo });
-    try {
-      const response = await injectJson(app, {
-        method: "POST",
-        url: `/api/media/upload-sessions/${sessionId!}/finalize`,
-        headers: { authorization: "Bearer valid-token" },
-        payload: { files: [{ uploadTargetId: uploadTargetId! }] },
-      });
-      expect(response.statusCode).toBe(503);
-      expect(forwardLogo).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.anything(),
-        sessionId!,
-        "logo_finalize",
-      );
-      expect(inspect).not.toHaveBeenCalled();
-      expect(complete).not.toHaveBeenCalled();
-      forwardLogo.mockClear();
-      expect(
-        (
-          await injectJson(app, {
-            method: "POST",
-            url: `/api/media/upload-sessions/${sessionId!}/finalize`,
-            headers: { authorization: "Bearer valid-token" },
-            payload: { files: [] },
-          })
-        ).statusCode,
-      ).toBe(400);
-      expect(forwardLogo).not.toHaveBeenCalled();
-    } finally {
-      await app.close();
-    }
-    const denied = buildMediaApp({ repository, forwardLogo, permissions: [] });
-    try {
-      expect(
-        (
-          await injectJson(denied, {
-            method: "POST",
-            url: `/api/media/upload-sessions/${sessionId!}/finalize`,
-            headers: { authorization: "Bearer valid-token" },
-            payload: { files: [{ uploadTargetId: uploadTargetId! }] },
-          })
-        ).statusCode,
-      ).toBe(403);
-      expect(forwardLogo).not.toHaveBeenCalled();
-      expect(complete).not.toHaveBeenCalled();
-    } finally {
-      await denied.close();
-    }
-  });
-
   it("uses authenticated request persistence for create and finalize without ambient writes", async () => {
     const repository = createInMemoryPlatformMediaRepository();
     const ambient = createInMemoryPlatformMediaRepository();
@@ -3106,7 +3004,6 @@ describe("platform media upload routes", () => {
 function buildMediaApp(
   options: {
     repository?: PlatformMediaRepository;
-    forwardLogo?: PlatformMediaRoutesOptions["forwardLogo"];
     resolveRequestPersistence?: PlatformMediaRoutesOptions["resolveRequestPersistence"];
     permissions?: PermissionKey[];
     entitlements?: ProductEntitlement[];
@@ -3134,7 +3031,6 @@ function buildMediaApp(
     platformMedia: {
       repository: options.repository ?? createInMemoryPlatformMediaRepository(),
       resolveRequestPersistence: options.resolveRequestPersistence,
-      forwardLogo: options.forwardLogo,
       signer: createDeterministicPlatformMediaUploadSigner(),
       targetResolver: options.targetResolver ?? propertyMediaTargetResolver,
       finalizer: options.finalizer ?? createDeterministicPlatformMediaFinalizer(),
