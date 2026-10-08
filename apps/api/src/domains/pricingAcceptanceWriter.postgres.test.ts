@@ -357,7 +357,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       const booking = (
         await fixture.observer.query(
           `SELECT lifecycle_status,payment_status,expected_payment_method,active_card_payment_id IS NOT NULL AS linked,
-            booking_metadata ? 'paymentDeadlineAt' AS expires,booking_metadata->>'providerPaymentIntentId' AS intent
+            booking_metadata ? 'pendingExpiresAt' AS expires,booking_metadata->>'providerPaymentIntentId' AS intent
            FROM booking.guest_bookings WHERE property_id=$1`,
           [fixture.propertyId],
         )

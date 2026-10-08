@@ -25,9 +25,7 @@ export type BookingLifecycleAction =
   | "expired-draft-cleanup";
 
 export type BookingLifecycleRunName =
-  | "pendingBookingExpiry"
-  | "staleUnpaidCancellation"
-  | "expiredDraftCleanup";
+  "pendingBookingExpiry" | "staleUnpaidCancellation" | "expiredDraftCleanup";
 
 export type BookingLifecycleCandidate = {
   guestBookingId: string;
@@ -578,13 +576,20 @@ async function applyPgLifecycleMutation(
         return cardResult;
       }
     }
-    if (mutation.deleteDraft && candidate.providerPaymentIntentId) {
+    // An unpaid card booking (draft, or a replacement-pricing acceptance awaiting payment)
+    // cancels its PaymentIntent first, or settles if the payment arrived in time.
+    if (
+      candidate.providerPaymentIntentId &&
+      (mutation.deleteDraft ||
+        (mutation.action === "pending-expiry" && candidate.paymentStatus === "unpaid"))
+    ) {
       const cardResult = await resolveExpiredStripeDraft(
         client,
         candidate,
         mutation,
         context,
         config,
+        mutation.deleteDraft ? "draft" : "pending_payment",
       );
       if (cardResult) {
         await client.query("COMMIT");
@@ -715,12 +720,14 @@ async function resolveExpiredStripeDraft(
   mutation: BookingLifecycleMutation,
   context: BookingLifecycleJobContext,
   config: Pick<PgBookingLifecycleStoreConfig, "stripePaymentProvider">,
+  lifecycleStatus: "draft" | "pending_payment" = "draft",
 ): Promise<BookingLifecycleMutationResult | null> {
   const locked = await client.query(
     `SELECT id FROM booking.guest_bookings
-     WHERE id = $1::uuid AND property_id = $2::uuid AND lifecycle_status = 'draft'
+     WHERE id = $1::uuid AND property_id = $2::uuid AND lifecycle_status = $3
+       AND ($3 = 'draft' OR payment_status = 'unpaid')
      FOR UPDATE`,
-    [candidate.guestBookingId, candidate.propertyId],
+    [candidate.guestBookingId, candidate.propertyId, lifecycleStatus],
   );
   if (locked.rows.length === 0) return lifecycleNoopResult(candidate, mutation);
   const provider = config.stripePaymentProvider;
@@ -782,6 +789,13 @@ async function resolveExpiredStripeDraft(
     }
     if (intent.status !== "canceled") return lifecycleNoopResult(candidate, mutation);
   }
+  if (lifecycleStatus === "pending_payment")
+    await client.query(
+      `UPDATE finance.payments SET status = 'canceled', updated_at = $3::timestamptz
+       WHERE provider_payment_intent_id = $1 AND guest_booking_id = $2::uuid
+         AND status = 'requires_action'`,
+      [paymentIntentId, candidate.guestBookingId, context.now.toISOString()],
+    );
   return null;
 }
 

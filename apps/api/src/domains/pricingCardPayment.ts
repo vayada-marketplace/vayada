@@ -19,7 +19,7 @@ type Current = NonNullable<Awaited<ReturnType<typeof lockCurrentQuoteRevalidatio
 type Finance = NonNullable<Awaited<ReturnType<typeof lockFinancePricingAcceptanceTerms>>>;
 
 /** How long an accepted card booking holds its rooms while the guest pays
- * (`booking_metadata.paymentDeadlineAt`). */
+ * (`booking_metadata.pendingExpiresAt`, read by the pending-booking expiry sweep). */
 export const PRICING_CARD_PAYMENT_MINUTES = 30;
 
 const fail = (): never => {
@@ -202,7 +202,7 @@ export async function readPendingPricingCardPayment(
   if (!scope) return fail();
   const row = (
     await client.query(
-      `SELECT booking.booking_metadata->>'paymentDeadlineAt' AS deadline,
+      `SELECT booking.booking_metadata->>'pendingExpiresAt' AS deadline,
         payment.provider_payment_intent_id AS intent,account.provider_account_id AS account
       FROM booking.guest_bookings booking
       JOIN finance.payments payment ON payment.id=booking.active_card_payment_id

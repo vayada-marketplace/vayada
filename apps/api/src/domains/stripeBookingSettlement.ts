@@ -6,6 +6,12 @@ import type { QueryResult, QueryResultRow } from "pg";
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
 import type { StripeBookingPaymentIntent } from "./stripeBookingPayments.js";
 import { stripeAmountDecimal, stripeAmountMinor } from "./stripeMoney.js";
+import {
+  pricingCardPaymentProperty,
+  settlePricingCardPayment,
+} from "./pricingCardPaymentCompletion.js";
+
+type PricingQueryable = Parameters<typeof pricingCardPaymentProperty>[0];
 
 type SettlementExecutor = {
   query<T extends QueryResultRow = QueryResultRow>(
@@ -48,6 +54,11 @@ export async function authorizeStripeBookingPayment(
     occurredAt: Date;
   },
 ): Promise<"authorized" | "already_authorized" | "not_found"> {
+  // Replacement-pricing card bookings are instant only; nothing authorizes them for capture.
+  if (
+    await pricingCardPaymentProperty(client as unknown as PricingQueryable, input.paymentIntentId)
+  )
+    return "not_found";
   const selected = await client.query<StripePaymentBookingRow>(
     `SELECT
        payment.id::text AS "paymentId",
@@ -148,6 +159,15 @@ export async function settleStripeBookingPayment(
     sourceDomainEventId?: string | null;
   },
 ): Promise<"settled" | "already_settled" | "not_found"> {
+  // Replacement-pricing card bookings settle through their stored acceptance (revenue, PMS
+  // accepted-pricing job), never the legacy way. Checked before any row lock so that path can
+  // take the inventory lock first.
+  const pricingProperty = await pricingCardPaymentProperty(
+    client as unknown as PricingQueryable,
+    input.paymentIntentId,
+  );
+  if (pricingProperty)
+    return settlePricingCardPayment(client as unknown as PricingQueryable, pricingProperty, input);
   const selected = await client.query<StripePaymentBookingRow>(
     `SELECT
        payment.id::text AS "paymentId",
@@ -640,7 +660,7 @@ const text = (value: unknown): string | null =>
   typeof value === "string" && value.trim() ? value.trim() : null;
 function dates(from: string, to: string): string[] {
   const result: string[] = [];
-  for (let date = new Date(`${from}T00:00:00Z`); date < new Date(`${to}T00:00:00Z`); ) {
+  for (let date = new Date(`${from}T00:00:00Z`); date < new Date(`${to}T00:00:00Z`);) {
     result.push(date.toISOString().slice(0, 10));
     date = new Date(date.getTime() + 86_400_000);
   }
