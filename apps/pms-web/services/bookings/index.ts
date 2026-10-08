@@ -520,12 +520,26 @@ export type BookingAdditionalGuestPayload = Partial<
 
 export interface AirbnbChangeRequestState {
   provider: "airbnb";
-  state: "pending" | "queued" | "unknown" | "awaiting_confirmation" | "applied" | "declined" | "withdrawn" | "unavailable";
+  state:
+    | "pending"
+    | "queued"
+    | "unknown"
+    | "awaiting_confirmation"
+    | "applied"
+    | "declined"
+    | "withdrawn"
+    | "unavailable";
   allowedActions: Array<"accept" | "decline">;
   supportsUnverifiedMoney?: boolean;
   refreshAction: "accept" | "decline" | null;
-  oldTotal: number | null; newTotal: number | null; priceDifference: number | null; currency: string | null;
-  oldAdults: number | null; oldChildren: number | null; requestedAdults: number | null; requestedChildren: number | null;
+  oldTotal: number | null;
+  newTotal: number | null;
+  priceDifference: number | null;
+  currency: string | null;
+  oldAdults: number | null;
+  oldChildren: number | null;
+  requestedAdults: number | null;
+  requestedChildren: number | null;
 }
 export interface BookingChangeRequest {
   providerRequest?: AirbnbChangeRequestState;
@@ -805,6 +819,8 @@ export const bookingsService = {
     roomId: string,
     sourceAssignmentSelector?: AssignmentSelector,
     ratePolicy: "preserve" | "target_base" = "preserve",
+    /** The published Flexible offer the move dialog quoted; the server prices exactly it. */
+    targetRatePlanId?: string,
   ) => {
     const booking = await refreshBooking(id);
     const sourceAssignment = findAssignedRoom(booking.assignedRooms, sourceAssignmentSelector);
@@ -826,6 +842,7 @@ export const bookingsService = {
             : { position: sourceAssignment.position + 1 }
           : {}),
         ...(ratePolicy === "target_base" ? { ratePolicy } : {}),
+        ...(ratePolicy === "target_base" && targetRatePlanId ? { targetRatePlanId } : {}),
       },
       pmsOperationsRequestOptions,
     );

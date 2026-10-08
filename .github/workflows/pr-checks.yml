@@ -526,6 +526,7 @@ jobs:
           src/domains/pmsOperatingCalendarImpact.integration.test.ts
           src/domains/pmsManualBookingCommandRepository.integration.test.ts
           src/domains/pmsManualBookingPublishedPricing.postgres.test.ts
+          src/domains/pmsCrossRoomTypeMove.integration.test.ts
           src/domains/pmsManualBookingCommandRepository.test.ts
           src/pmsManualBookingPreviewRoutes.test.ts
           src/pmsManualBookingCreateRoutes.test.ts

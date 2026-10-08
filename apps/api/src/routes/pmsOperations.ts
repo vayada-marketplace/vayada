@@ -300,6 +300,8 @@ export type PmsAssignmentCommandRequest = {
   targetAssignmentId?: string;
   targetPosition?: number;
   ratePolicy?: PmsAssignmentRatePolicy;
+  /** With target_base: the published Flexible offer the client quoted; the server prices exactly it. */
+  targetRatePlanId?: string;
 };
 
 export type PmsPrivateNoteCreateRequest = {
@@ -736,6 +738,7 @@ export type PmsAssignmentCommandConflictCode =
   | "version_conflict"
   | "room_unavailable"
   | "assignment_conflict"
+  | "target_base_unavailable"
   | "idempotency_conflict";
 
 export type PmsAssignmentCommandResult =
@@ -7091,6 +7094,8 @@ function toAssignmentCommand(
   const roomId = nullableStringField(raw.roomId);
   const hasRatePolicy = Object.hasOwn(raw, "ratePolicy");
   const ratePolicy = raw.ratePolicy;
+  const hasTargetRatePlan = Object.hasOwn(raw, "targetRatePlanId");
+  const targetRatePlanId = raw.targetRatePlanId;
 
   for (const [field, value] of [
     ["assignmentId", assignmentId],
@@ -7112,6 +7117,18 @@ function toAssignmentCommand(
       !["preserve", "target_base"].includes(ratePolicy))
   ) {
     return { error: invalidAssignmentBodyError("ratePolicy is invalid for this command.") };
+  }
+  if (
+    hasTargetRatePlan &&
+    (ratePolicy !== "target_base" ||
+      typeof targetRatePlanId !== "string" ||
+      !targetRatePlanId ||
+      targetRatePlanId.length > 200 ||
+      targetRatePlanId !== targetRatePlanId.trim())
+  ) {
+    return {
+      error: invalidAssignmentBodyError("targetRatePlanId is only valid with a target_base move."),
+    };
   }
   if (inferredAction === "unassign" && roomId !== null) {
     return { error: invalidAssignmentBodyError("Unassign commands must not include roomId.") };
@@ -7138,6 +7155,7 @@ function toAssignmentCommand(
       targetAssignmentId,
       targetPosition,
       ...(inferredAction === "move" && ratePolicy === "target_base" ? { ratePolicy } : {}),
+      ...(hasTargetRatePlan ? { targetRatePlanId: targetRatePlanId as string } : {}),
     },
   };
 }
