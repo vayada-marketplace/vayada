@@ -97,7 +97,10 @@ export function planIdentityOwnership(
     const kind = KIND[user.type];
     if (kind === "platform" || user.isSuperadmin)
       groups.set(`${user.id}:platform`, groups.get(`${user.id}:platform`) ?? []);
-    if (kind !== "platform" && user.status === "active" && !groups.has(`${user.id}:${kind}`))
+    const key = `${user.id}:${kind}`;
+    // A superadmin keeps platform access; only their non-cohort hotels are quarantined.
+    if (user.isSuperadmin && cohortQuarantine.has(key)) continue;
+    if (kind !== "platform" && user.status === "active" && !groups.has(key))
       block(
         blockers,
         "ACTIVE_USER_WITHOUT_OWNERSHIP",

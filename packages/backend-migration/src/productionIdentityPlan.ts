@@ -121,6 +121,7 @@ export function buildProductionIdentityPlan(
     disposition.users,
     current.users,
     sourceHorizonAt,
+    cohort,
   );
   const plannedUsers = sortedBy([...disposition.users, ...quarantine.users], (user) => user.id);
   const ownership = planIdentityOwnership(

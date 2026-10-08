@@ -101,6 +101,37 @@ describe("production identity cohort scope (VAY-1362)", () => {
     expect(verified.checksum).toBe(plan.checksum);
   });
 
+  it("keeps a superadmin's platform access and a missing owner's placeholder", () => {
+    const admin = rows().map((row) =>
+      row.data["id"] === OUTSIDE ? { ...row, data: { ...row.data, is_superadmin: true } } : row,
+    );
+    const plan = buildProductionIdentityPlan(admin, undefined, undefined, COHORT);
+    expect(plan.blockers).toEqual([]);
+    expect(plan.users.find((user) => user.id === OUTSIDE)).toMatchObject({ status: "active" });
+    expect(plan.memberships.filter((row) => row.userId === OUTSIDE)).toMatchObject([
+      { roleKey: "platform_admin" },
+    ]);
+
+    const orphan = [
+      ...rows().filter((row) => row.data["id"] !== OUTSIDE),
+      source("pms", "bookings", {
+        id: "eeeeeeee-0000-4000-8000-000000000001",
+        hotel_id: OUT_PMS,
+        status: "confirmed",
+        check_out: "2026-06-01",
+      }),
+    ];
+    expect(
+      buildProductionIdentityPlan(orphan, undefined, FEB).blockers.map((row) => row.code),
+    ).toContain("ORPHAN_PRODUCT_USER_WITH_FUTURE_BOOKING");
+    const scoped = buildProductionIdentityPlan(orphan, undefined, FEB, COHORT);
+    expect(scoped.blockers).toEqual([]);
+    expect(scoped.users.find((user) => user.id === OUTSIDE)).toMatchObject({
+      status: "deleted",
+      disposition: "quarantine_missing_owner",
+    });
+  });
+
   it("fails closed when the target keeps a non-cohort owner's access", () => {
     const existing = emptyProductionIdentityState();
     const newer = "2026-03-01T00:00:00.000Z";

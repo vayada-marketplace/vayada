@@ -5,6 +5,10 @@ import type {
   PlannedIdentityUser,
 } from "./productionIdentityDisposition.js";
 import {
+  outsideMigrationCohort,
+  type IdentityCohortScope,
+} from "./productionIdentityCohortScope.js";
+import {
   hasFutureOperationalBooking,
   parseIdentityOwnershipRows,
   type OrganizationKind,
@@ -26,6 +30,7 @@ export function planMissingOwnerQuarantine(
   sourceUsers: PlannedIdentityUser[],
   existingUsers: ExistingIdentityUser[] = [],
   sourceHorizonAt?: string,
+  cohort?: IdentityCohortScope | null,
 ): MissingOwnerQuarantinePlan {
   const knownUsers = new Set(sourceUsers.map((user) => user.id));
   const missing = new Map<string, ReturnType<typeof parseIdentityOwnershipRows>["owners"]>();
@@ -49,7 +54,15 @@ export function planMissingOwnerQuarantine(
       });
       continue;
     }
-    if (owners.some((owner) => hasFutureOperationalBooking(rows, owner, sourceHorizonAt))) continue;
+    // Non-cohort hotels stay on legacy (VAY-1362), so their bookings do not hold the placeholder.
+    if (
+      owners.some(
+        (owner) =>
+          !outsideMigrationCohort(owner, cohort) &&
+          hasFutureOperationalBooking(rows, owner, sourceHorizonAt),
+      )
+    )
+      continue;
     const kind = kinds[0] as Exclude<OrganizationKind, "platform">;
     const planned: PlannedIdentityUser = {
       id: userId,
