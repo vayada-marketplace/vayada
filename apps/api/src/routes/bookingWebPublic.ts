@@ -1686,8 +1686,8 @@ export function createTargetBookingWebCheckoutAdapter(
             result,
             Boolean(
               config.airbnbAlterations &&
-              (!config.airbnbAlterations.propertyIds ||
-                config.airbnbAlterations.propertyIds.includes(propertyId)),
+                (!config.airbnbAlterations.propertyIds ||
+                  config.airbnbAlterations.propertyIds.includes(propertyId)),
             ),
           )
         : null;
@@ -2110,6 +2110,10 @@ export function createTargetBookingWebCheckoutAdapter(
           cardPayments,
         );
       } catch (error) {
+        if (error instanceof PricingAcceptanceError && error.code === "card_unavailable")
+          throw Object.assign(createHttpError(404, "Online card payment is unavailable."), {
+            code: "CARD_PAYMENT_UNAVAILABLE",
+          });
         const statusCode =
           error instanceof PricingAcceptanceError
             ? error.code === "conflict"

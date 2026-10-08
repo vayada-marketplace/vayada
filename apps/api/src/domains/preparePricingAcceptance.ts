@@ -62,6 +62,9 @@ export async function preparePricingAcceptance(
     current.quote.evidence.dueNowMinor === "0" &&
     current.quote.evidence.dueLaterMinor === current.quote.evidence.totalMinor;
   const card = options.card === true && pricingCardQuoteSupported(current.quote);
+  // A card quote while online card acceptance is off is unavailable, not a stale price.
+  if (command && !card && current.quote.paymentMethod === "card")
+    throw new Error("Card acceptance unavailable");
   if (
     !command ||
     !(payAtProperty || card) ||

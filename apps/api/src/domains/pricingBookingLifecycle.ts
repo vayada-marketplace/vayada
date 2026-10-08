@@ -127,7 +127,8 @@ export async function stagePricingBookingLifecycle(
       {
         inventoryReservation: reserved.bundle,
         ...(hostResponseDeadlineAt ? { hostResponseDeadlineAt } : {}),
-        ...(paymentDeadlineAt ? { paymentDeadlineAt } : {}),
+        // The pending-booking expiry sweep reads pendingExpiresAt (jobs/bookingLifecycle.ts).
+        ...(paymentDeadlineAt ? { pendingExpiresAt: paymentDeadlineAt } : {}),
       },
       card
         ? "We are waiting for your card payment."

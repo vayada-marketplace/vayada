@@ -10,14 +10,15 @@ import { stagePmsAcceptedPricingReservationJob } from "./pricingPmsAcceptedReser
 import { storePricingAcceptance } from "./storePricingAcceptance.js";
 import {
   pricingCardQuoteSupported,
-  readPendingPricingCardPayment,
+  pricingCardBookingId,
+  readPricingCardReplay,
   startPricingCardPayment,
 } from "./pricingCardPayment.js";
 import type { StripeBookingPaymentProvider } from "./stripeBookingPayments.js";
 
 export class PricingAcceptanceError extends Error {
   constructor(
-    readonly code: "conflict" | "storage" | "unexpected",
+    readonly code: "conflict" | "storage" | "unexpected" | "card_unavailable",
     cause: unknown,
   ) {
     super("Pricing acceptance failed", { cause });
@@ -60,14 +61,21 @@ export async function writePricingAcceptance(
       card: cardPayments !== undefined,
     });
     if (prepared.kind === "replayed") {
-      // A card acceptance that still awaits payment answers with the same payment.
-      const pending =
-        cardPayments &&
-        (await readPendingPricingCardPayment(client, cardPayments.provider, input.slug, prepared));
+      // A card acceptance that still awaits payment answers with the same payment; an
+      // expired one is a conflict, never the plain "accepted" replay.
+      const card = await readPricingCardReplay(
+        client,
+        cardPayments?.provider,
+        input.slug,
+        prepared,
+      );
       await client.query("COMMIT");
-      return pending || prepared;
+      return card || prepared;
     }
-    const bookingId = randomUUID();
+    const bookingId =
+      cardPayments && pricingCardQuoteSupported(prepared.current.quote)
+        ? pricingCardBookingId(prepared.current.scope.propertyId, prepared.command.requestId)
+        : randomUUID();
     const publicReference = `VAY-${bookingId.replaceAll("-", "").toUpperCase()}`;
     await stagePricingBookingDraft(client, input.slug, {
       ...prepared,
@@ -136,6 +144,8 @@ export async function writePricingAcceptance(
   } catch (error) {
     await client?.query("ROLLBACK").catch(() => undefined);
     if (error instanceof PricingAcceptanceError) throw error;
+    if (error instanceof Error && error.message === "Card acceptance unavailable")
+      throw new PricingAcceptanceError("card_unavailable", error);
     if (error instanceof Error && conflictMessages.has(error.message))
       throw new PricingAcceptanceError("conflict", error);
     if (
