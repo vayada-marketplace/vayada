@@ -1854,6 +1854,15 @@ const app = buildApp({
   hotelSetupProfileCommand: createOrdinaryHotelSetupProfileCommand(propertySetupOwnerPool),
   hotelSetupLaunchSettingsCommand:
     createOrdinaryHotelSetupLaunchSettingsCommand(propertySetupOwnerPool),
+  hotelSetupCurrencyCommandPort:
+    config.pmsOperationsSource === "target"
+      ? createPgPmsPricingCommandRepository({
+          connectionString: targetDatabaseUrl,
+          pool: propertySetupOwnerPool,
+          currencyChangeGuard: PMS_PRICING_CURRENCY_CHANGE_FAIL_CLOSED_GUARD,
+          hotelSetupOrdinaryOwner: true,
+        })
+      : undefined,
   financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,
