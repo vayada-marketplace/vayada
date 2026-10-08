@@ -1,4 +1,5 @@
 import type { StripeSubscriptionSnapshot } from "@vayada/domain-finance";
+import type { RoomInventorySnapshot } from "@vayada/domain-pms";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -474,11 +475,13 @@ function setup(entitlementOverride: Partial<LegacyAdoptionEntitlement> = {}) {
     ),
   } satisfies LegacyAdoptionStripe;
   const roomInventory = {
-    getRoomInventorySnapshot: vi.fn(async (propertyId: string) => ({
-      propertyId,
-      activeRoomCount: 3,
-      capturedAt: NOW.toISOString(),
-    })),
+    getRoomInventorySnapshot: vi.fn(
+      async (propertyId: string): Promise<RoomInventorySnapshot | null> => ({
+        propertyId,
+        activeRoomCount: 3,
+        capturedAt: NOW.toISOString(),
+      }),
+    ),
   };
   const refreshPublicBookability = vi.fn(async () => undefined);
   return {
