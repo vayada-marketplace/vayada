@@ -187,6 +187,7 @@ async def health():
         "scheduler": get_scheduler_health_status(),
         "cutover": {
             "legacyProviderWebhooks": settings.provider_webhook_cutover_status(),
+            "fixedPlanBillingMode": settings.fixed_plan_billing_mode(),
         },
     }
 

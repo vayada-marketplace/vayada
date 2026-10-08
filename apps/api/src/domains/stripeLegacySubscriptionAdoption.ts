@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 import {
   FINANCE_LEGACY_ADOPTION_METADATA_KEY,
   FINANCE_LEGACY_ADOPTION_METADATA_VALUE,
+  FINANCE_LEGACY_PRODUCT_METADATA_KEY,
 } from "@vayada/domain-finance";
 
 import type {
@@ -60,7 +61,7 @@ export function createStripeLegacySubscriptionAdoption(config: {
     },
 
     async markAdopted(input) {
-      const raw = await request(
+      await request(
         "POST",
         `/subscriptions/${encodeURIComponent(input.subscriptionId)}`,
         [
@@ -71,10 +72,10 @@ export function createStripeLegacySubscriptionAdoption(config: {
             `metadata[${FINANCE_LEGACY_ADOPTION_METADATA_KEY}]`,
             FINANCE_LEGACY_ADOPTION_METADATA_VALUE,
           ],
+          [`metadata[${FINANCE_LEGACY_PRODUCT_METADATA_KEY}]`, input.productId],
         ],
         input.idempotencyKey,
       );
-      return subscriptionSnapshot(raw);
     },
 
     async findLegacySubscriptionsForHotel(hotelId) {
@@ -113,9 +114,12 @@ export function inspectLegacySubscription(raw: StripeObject): LegacySubscription
   const price = asObject(item["price"]);
   const recurring = asObject(price["recurring"]);
   const unitAmount = Number(price["unit_amount"]);
+  const product = price["product"];
   const flatThirtyDayPrice =
     items.length === 1 &&
     text(price["billing_scheme"]) === "per_unit" &&
+    text(price["currency"])?.toUpperCase() === "EUR" &&
+    text(recurring["usage_type"]) === "licensed" &&
     text(recurring["interval"]) === "day" &&
     Number(recurring["interval_count"]) === 30 &&
     Number.isInteger(unitAmount) &&
@@ -127,6 +131,7 @@ export function inspectLegacySubscription(raw: StripeObject): LegacySubscription
     paymentKind: text(metadata["vayada_payment_kind"]),
     flatThirtyDayPrice,
     unitAmountMinor: flatThirtyDayPrice ? unitAmount : null,
+    productId: typeof product === "string" ? text(product) : text(asObject(product)["id"]),
     adoptionMarker: text(metadata[FINANCE_LEGACY_ADOPTION_METADATA_KEY]),
   };
 }

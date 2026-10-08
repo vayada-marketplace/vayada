@@ -49,8 +49,11 @@ describe("Legacy fixed-plan subscription adoption", () => {
       subscriptionId: "sub_legacy",
       propertyId: PROPERTY,
       organizationId: ORGANIZATION,
+      productId: "prod_legacy",
       idempotencyKey: `legacy-adoption:${PROPERTY}:sub_legacy:v1`,
     });
+    // The entitlement is written from a fresh read, not the idempotent POST reply.
+    expect(fixture.stripe.inspectLegacySubscription).toHaveBeenCalledTimes(2);
     expect(fixture.store.adopt).toHaveBeenCalledWith(
       expect.objectContaining({
         propertyId: PROPERTY,
@@ -68,6 +71,7 @@ describe("Legacy fixed-plan subscription adoption", () => {
       planKey: "fixed",
       billingStatus: "active",
       subscriptionRef: "sub_legacy",
+      metadata: { legacyAdoptedAt: NOW.toISOString(), providerReentryRequired: false },
     });
 
     const report = await adoptLegacyFixedPlanSubscription(
@@ -77,6 +81,62 @@ describe("Legacy fixed-plan subscription adoption", () => {
 
     expect(report.outcome).toBe("already_adopted");
     expect(fixture.stripe.inspectLegacySubscription).not.toHaveBeenCalled();
+    expect(fixture.store.adopt).not.toHaveBeenCalled();
+  });
+
+  it("stores the live state when the idempotent write replays a stale reply", async () => {
+    const fixture = setup();
+    fixture.afterMark.snapshot = {
+      ...adoptedSnapshot(),
+      status: "past_due",
+      currentPeriodEnd: "2026-11-30T00:00:00.000Z",
+    };
+
+    const report = await adoptLegacyFixedPlanSubscription(
+      { propertyId: PROPERTY, subscriptionId: "sub_legacy", apply: true },
+      fixture.dependencies,
+    );
+
+    expect(report.stripe).toMatchObject({
+      status: "past_due",
+      currentPeriodEnd: "2026-11-30T00:00:00.000Z",
+    });
+    expect(fixture.store.adopt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshot: expect.objectContaining({ status: "past_due" }),
+      }),
+    );
+  });
+
+  it("finishes the record when a webhook bound the subscription before the entitlement write", async () => {
+    const fixture = setup({
+      planKey: "fixed",
+      billingStatus: "active",
+      subscriptionRef: "sub_legacy",
+      metadata: { providerReentryRequired: true, legacyPlan: "fixed" },
+    });
+    fixture.inspection.adoptionMarker = "v1";
+    fixture.inspection.snapshot = adoptedSnapshot();
+
+    const report = await adoptLegacyFixedPlanSubscription(
+      { propertyId: PROPERTY, subscriptionId: "sub_legacy", apply: true },
+      fixture.dependencies,
+    );
+
+    expect(report.outcome).toBe("adopted");
+    expect(fixture.store.adopt).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not lift a suspension that is not about billing", async () => {
+    const fixture = setup({ commissionRuleActive: false });
+
+    const report = await adoptLegacyFixedPlanSubscription(
+      { propertyId: PROPERTY, subscriptionId: "sub_legacy", apply: true },
+      fixture.dependencies,
+    );
+
+    expect(report).toMatchObject({ outcome: "refused", reasons: ["commission_rule_not_active"] });
+    expect(fixture.stripe.markAdopted).not.toHaveBeenCalled();
     expect(fixture.store.adopt).not.toHaveBeenCalled();
   });
 
@@ -111,6 +171,10 @@ describe("Legacy fixed-plan subscription adoption", () => {
 
     fixture.entitlement.planKey = "fixed";
     fixture.entitlement.subscriptionRef = "sub_legacy";
+    fixture.entitlement.metadata = {
+      legacyAdoptedAt: NOW.toISOString(),
+      providerReentryRequired: false,
+    };
     const rerun = await adoptLegacyFixedPlanSubscription(
       { propertyId: PROPERTY, subscriptionId: "sub_legacy", apply: true },
       fixture.dependencies,
@@ -123,6 +187,7 @@ describe("Legacy fixed-plan subscription adoption", () => {
     ["stripe_hotel_id_mismatch", { hotelId: "other-hotel" }],
     ["stripe_payment_kind_mismatch", { paymentKind: "booking" }],
     ["stripe_price_not_flat_30d", { flatThirtyDayPrice: false }],
+    ["stripe_product_missing", { productId: null }],
     ["stripe_status_canceled", { snapshot: { ...legacySnapshot(), status: "canceled" } }],
     ["stripe_period_end_missing", { snapshot: { ...legacySnapshot(), currentPeriodEnd: null } }],
     [
@@ -175,10 +240,7 @@ describe("Legacy fixed-plan subscription adoption", () => {
 
   it("does not write the entitlement when the marked subscription fails verification", async () => {
     const fixture = setup();
-    fixture.stripe.markAdopted.mockResolvedValue({
-      ...adoptedSnapshot(),
-      retainedLegacyPrice: false,
-    });
+    fixture.afterMark.snapshot = { ...adoptedSnapshot(), retainedLegacyPrice: false };
 
     await expect(
       adoptLegacyFixedPlanSubscription(
@@ -306,6 +368,7 @@ describe("Legacy fixed-plan subscription adoption", () => {
     expect(sql).toContain("plan_key = 'fixed'");
     expect(sql).toContain("billing_subscription_ref IS NULL");
     expect(sql).toContain("GREATEST(");
+    expect(sql).toContain("billing_status = 'active'");
     expect(values.slice(0, 5)).toEqual([
       PROPERTY,
       ORGANIZATION,
@@ -386,16 +449,26 @@ function setup(entitlementOverride: Partial<LegacyAdoptionEntitlement> = {}) {
     paymentKind: "fixed_plan",
     flatThirtyDayPrice: true,
     unitAmountMinor: 3_500,
+    productId: "prod_legacy",
     adoptionMarker: null,
   };
+  // What a re-read returns once the metadata write went through.
+  const afterMark: LegacySubscriptionInspection = {
+    ...inspection,
+    snapshot: adoptedSnapshot(),
+    adoptionMarker: "v1",
+  };
+  let marked = false;
   const store = {
     getEntitlement: vi.fn(async () => entitlement),
     adopt: vi.fn(async () => true),
     clearStaleReference: vi.fn(async () => true),
   } satisfies LegacyAdoptionStore;
   const stripe = {
-    inspectLegacySubscription: vi.fn(async () => inspection),
-    markAdopted: vi.fn(async () => adoptedSnapshot()),
+    inspectLegacySubscription: vi.fn(async () => (marked ? afterMark : inspection)),
+    markAdopted: vi.fn(async () => {
+      marked = true;
+    }),
     findLegacySubscriptionsForHotel: vi.fn(
       async () => [] as Array<{ subscriptionId: string; status: string }>,
     ),
@@ -411,6 +484,7 @@ function setup(entitlementOverride: Partial<LegacyAdoptionEntitlement> = {}) {
   return {
     entitlement,
     inspection,
+    afterMark,
     store,
     stripe,
     roomInventory,

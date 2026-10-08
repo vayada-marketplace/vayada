@@ -5,6 +5,7 @@ import {
   FINANCE_FIXED_PLAN_INTERVAL_MONTHS,
   FINANCE_LEGACY_ADOPTION_METADATA_KEY,
   FINANCE_LEGACY_ADOPTION_METADATA_VALUE,
+  FINANCE_LEGACY_PRODUCT_METADATA_KEY,
   fixedPlanAmountMinor,
   type FinanceBillingDetails,
   type FinanceBillingInvoice,
@@ -435,14 +436,20 @@ export function subscriptionSnapshot(value: StripeObject): StripeSubscriptionSna
     (currentTerms || legacyTerms) &&
     targetMetadata;
   // VAY-1362: a legacy subscription adopted in place keeps its flat per-hotel
-  // price (per unit, every 30 days, quantity 1). It verifies only when the
-  // adoption command marked it and the legacy hotel is this property.
+  // price (licensed, per unit, EUR, every 30 days, quantity 1, on the product
+  // pinned at adoption). It verifies only when the adoption command marked it
+  // and the legacy hotel is this property. Reprice rules: the handover note.
   const unitAmount = Number(price["unit_amount"]);
   const quantity = Number(item["quantity"]);
+  const product = price["product"];
+  const productId = typeof product === "string" ? product : text(asObject(product)["id"]);
   const retainedLegacyPrice =
     items.length === 1 &&
-    validCurrency &&
+    currency === FINANCE_FIXED_PLAN_CURRENCY &&
     text(price["billing_scheme"]) === "per_unit" &&
+    text(recurring["usage_type"]) === "licensed" &&
+    Boolean(productId) &&
+    text(subscriptionMetadata[FINANCE_LEGACY_PRODUCT_METADATA_KEY]) === productId &&
     text(recurring["interval"]) === "day" &&
     Number(recurring["interval_count"]) === 30 &&
     Number.isInteger(unitAmount) &&
