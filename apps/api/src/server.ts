@@ -66,7 +66,7 @@ import pg from "pg";
 import { createHmac } from "node:crypto";
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
-import { loadHotelSetupCommandForwarder } from "./hotelSetupCommandForwarder.js";
+import { createOrdinaryHotelSetupLogoRuntime } from "./hotelSetupLogoRuntime.js";
 import { createOrdinaryHotelSetupProfileCommand } from "./platform/hotelSetupProfileWriter.js";
 import { createOrdinaryHotelSetupLaunchSettingsCommand } from "./hotelSetupLaunchSettingsRepository.js";
 import { createOrdinaryHotelSetupFeatureHubCommands } from "./hotelSetupFeatureHubOrdinary.js";
@@ -346,13 +346,8 @@ import {
 
 const postgresRuntime = installPostgresPoolRuntime(pg);
 const config = loadConfig();
-const hotelSetupCommandForwarder = loadHotelSetupCommandForwarder();
-
-const hotelSetupLogoForwarder = loadHotelSetupCommandForwarder({
-  HOTEL_SETUP_COMMAND_ADMISSION: process.env["HOTEL_SETUP_LOGO_COMMAND_ADMISSION"] ?? "blocked",
-  HOTEL_SETUP_COMMAND_ORIGIN: process.env["HOTEL_SETUP_LOGO_COMMAND_ORIGIN"],
-  HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: process.env["HOTEL_SETUP_LOGO_COMMAND_INTERNAL_TOKEN"],
-});
+// VAY-2056: hotel setup runs on the ordinary API login; the HOTEL_SETUP_*_COMMAND_* variables
+// installed on the task definition are no longer read and are not a kill switch.
 
 function buildAuthOptions(auth: ApiConfig["auth"]): ApiAuthOptions | undefined {
   if (!auth) {
@@ -1059,6 +1054,15 @@ const propertySetupOwnerPool = new pg.Pool({
   connectionTimeoutMillis: 5_000,
   max: 5,
 });
+const hotelSetupOrdinaryLogo =
+  platformMediaRuntime && config.platformMediaServing
+    ? createOrdinaryHotelSetupLogoRuntime({
+        connectionString: targetDatabaseUrl,
+        lookup: propertySetupOwnerPool,
+        serving: config.platformMediaServing,
+        defaults: platformMediaRuntime.routes,
+      })
+    : undefined;
 const financePaymentSetupRuntime = createFinancePaymentSetupRuntime({
   connectionString: targetDatabaseUrl,
   pricing: pmsPricingReadModel,
@@ -1844,7 +1848,6 @@ const app = buildApp({
     ? { commandPort: pmsPhysicalRoomOperationalLabels }
     : undefined,
   pmsModuleActivationRepository,
-  hotelSetupCommandForwarder,
   // VAY-2056: the HOTEL_SETUP_CREATION_COMMAND_* variables are no longer read.
   hotelSetupPropertyCreationRepository: createPgSharedHotelSetupStatusRepository({
     connectionString: targetDatabaseUrl,
@@ -2199,9 +2202,12 @@ const app = buildApp({
   bookingWebAffiliateHotelResolver,
   bookingWebAffiliateRepository,
   platformMedia: platformMediaRuntime
-    ? { ...platformMediaRuntime.routes, forwardLogo: hotelSetupLogoForwarder }
+    ? {
+        ...platformMediaRuntime.routes,
+        resolveRequestPersistence: hotelSetupOrdinaryLogo?.uploads.resolveRequestPersistence,
+      }
     : undefined,
-  hotelSetupLogoForwarder,
+  hotelSetupLogoAssignments: hotelSetupOrdinaryLogo?.assignments,
 });
 app.addHook("onClose", async () => {
   await affiliateCaptureRuntime?.pool.end();

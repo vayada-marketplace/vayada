@@ -15,6 +15,12 @@ import {
 
 type ProfileScope = { propertyId: string; organizationId: string; actorUserId: string };
 type Client = Pick<pg.PoolClient, "query">;
+type AuthorityClient = {
+  query<T extends pg.QueryResultRow>(
+    sql: string,
+    values?: readonly unknown[],
+  ): Promise<{ rows: T[] }>;
+};
 
 const OPERATION = "hotel_setup_property_profile_update";
 
@@ -42,7 +48,7 @@ const PROFILE_ROW = `SELECT jsonb_build_object(
  * with the purpose's required hotel_owner grants. The organization FOR UPDATE serializes
  * concurrent edits and revocation exactly as the native writers did. */
 export async function lockHotelSetupOwnerAuthority(
-  client: Client,
+  client: AuthorityClient,
   scope: ProfileScope,
   permissions: readonly string[],
 ): Promise<boolean> {
