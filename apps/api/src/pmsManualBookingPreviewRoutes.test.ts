@@ -7,6 +7,7 @@ import {
   registerPmsManualBookingPreviewRoutes,
   type PmsManualBookingPreviewRoutesOptions,
 } from "./routes/pmsManualBookingPreview.js";
+import { calculateManualBookingPreview } from "./routes/pmsManualBookingPreviewCalculation.js";
 
 const id = (value: number) => `71000000-0000-4000-8000-${String(value).padStart(12, "0")}`;
 const propertyId = id(1),
@@ -145,6 +146,28 @@ describe("target manual-booking preview", () => {
       "16.00",
       "48.00",
     ]);
+  });
+
+  it("refuses a create priced from another revision before any other price outcome", async () => {
+    // A restricted stay would otherwise answer rate_restricted; the republish wins.
+    const body = command();
+    body.stays = [body.stays[0]];
+    body.addOns = [];
+    const scope = { propertyId, organizationId };
+    await expect(
+      calculateManualBookingPreview(
+        scope,
+        { ...body, expectedPricingRevision: 6 },
+        ports({ reads: [], minStay: 3 }),
+      ),
+    ).rejects.toMatchObject({ status: 409, body: { code: "pricing_changed" } });
+    await expect(
+      calculateManualBookingPreview(
+        scope,
+        { ...body, expectedPricingRevision: 7 },
+        ports({ reads: [] }),
+      ),
+    ).resolves.toMatchObject({ pricingRevision: 7 });
   });
 
   it("prices children by age band", async () => {

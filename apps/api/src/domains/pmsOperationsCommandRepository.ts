@@ -6470,6 +6470,10 @@ async function applyAssignmentCommandMutation(
          assignment_payload = jsonb_set(
            CASE WHEN room_type_id = $6::uuid THEN COALESCE(assignment_payload, '{}'::jsonb)
              ELSE (COALESCE(assignment_payload, '{}'::jsonb) - 'pricingOffer')
+               -- Child ages are a stay fact and outlive the offer link.
+               || jsonb_strip_nulls(jsonb_build_object('childAgesAtCheckIn', COALESCE(
+                 assignment_payload->'childAgesAtCheckIn',
+                 assignment_payload->'pricingOffer'->'childAgesAtCheckIn')))
                || jsonb_strip_nulls(jsonb_build_object('pricingOffer', $7::jsonb))
            END,
            '{version}',
@@ -6544,7 +6548,8 @@ async function applyTargetBaseRateForMove(
          FILTER (WHERE tips.id IS NOT NULL) AS "evidenceIds",
        COUNT(tips.id)::int AS "evidenceCount",($5::date-$4::date)::int AS "nightCount",
        assignment.adults,assignment.children,
-       assignment.assignment_payload->'pricingOffer'->'childAgesAtCheckIn' AS "childAges",
+       COALESCE(assignment.assignment_payload->'childAgesAtCheckIn',
+         assignment.assignment_payload->'pricingOffer'->'childAgesAtCheckIn') AS "childAges",
        location.timezone
      FROM pms.operational_booking_assignments assignment
      LEFT JOIN hotel_catalog.property_locations location ON location.property_id=assignment.property_id

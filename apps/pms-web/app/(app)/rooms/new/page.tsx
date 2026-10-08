@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeftIcon, CheckIcon } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { roomsService, RoomTypeCreate, type PropertyPlan } from "@/services/rooms";
-import { bookingsService } from "@/services/bookings";
 import RoomTypeForm from "@/components/rooms/RoomTypeForm";
 import { useTranslation } from "@/lib/i18n";
 
@@ -19,7 +18,6 @@ export default function NewRoomPage() {
   const [setupComplete, setSetupComplete] = useState(false);
   const [error, setError] = useState("");
   const [propertyPlan, setPropertyPlan] = useState<PropertyPlan | null>(null);
-  const currencyTouched = useRef(false);
   const [form, setForm] = useState<RoomTypeCreate>({
     name: "",
     description: "",
@@ -29,9 +27,6 @@ export default function NewRoomPage() {
     maxChildren: null,
     bathroomType: "private",
     size: 0,
-    baseRate: 0,
-    nonRefundableRate: null,
-    currency: "EUR",
     locationAddress: "",
     latitude: null,
     longitude: null,
@@ -42,52 +37,16 @@ export default function NewRoomPage() {
     images: [],
     isActive: true,
     sortOrder: 0,
-    monthlyRates: {},
-    dailyRates: {},
   });
 
-  // Inherit currency from payment settings (authoritative source)
   useEffect(() => {
     roomsService.getPropertyPlan().then(setPropertyPlan).catch(console.error);
-    bookingsService
-      .getPaymentSettings()
-      .then((res) => {
-        const c = res.paymentSettings.defaultCurrency;
-        if (c && !currencyTouched.current) {
-          setForm((prev) => ({ ...prev, currency: c }));
-        }
-      })
-      .catch(console.error);
   }, []);
-
-  const handleFormChange: React.Dispatch<React.SetStateAction<RoomTypeCreate>> = (next) => {
-    setForm((current) => {
-      const updated = typeof next === "function" ? next(current) : next;
-      if (updated.currency !== current.currency) currencyTouched.current = true;
-      return updated;
-    });
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name) {
       setError(t("rooms.new.nameRequired"));
-      return;
-    }
-    if (!form.seasons?.length || !form.seasons.some((s) => s.rate && Number(s.rate) > 0)) {
-      setError(t("rooms.new.seasonRateRequired"));
-      return;
-    }
-    if (form.seasons.some((s) => s.from && s.to && (!s.rate || Number(s.rate) <= 0))) {
-      setError(t("rooms.new.everySeasonRateRequired"));
-      return;
-    }
-    if (
-      form.seasons.some(
-        (s) => s.maxStay != null && Number(s.maxStay) > 0 && Number(s.maxStay) < (s.minStay || 1),
-      )
-    ) {
-      setError(t("rooms.new.maxStayBeforeMinStay"));
       return;
     }
     setSaving(true);
@@ -136,10 +95,8 @@ export default function NewRoomPage() {
                   name: "",
                   description: "",
                   shortDescription: "",
-                  baseRate: 0,
                   totalRooms: 2,
                   images: [],
-                  seasons: [],
                 }));
                 setSetupComplete(false);
               }}
@@ -164,11 +121,10 @@ export default function NewRoomPage() {
           <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-600">
             {t("rooms.new.setupDescription")}
           </p>
-          <ol className="mt-5 grid gap-3 sm:grid-cols-3">
+          <ol className="mt-5 grid gap-3 sm:grid-cols-2">
             {[
               ["1", t("rooms.new.stepDetails")],
-              ["2", t("rooms.new.stepPricing")],
-              ["3", t("rooms.new.stepMedia")],
+              ["2", t("rooms.new.stepMedia")],
             ].map(([number, label]) => (
               <li
                 key={number}
@@ -199,7 +155,7 @@ export default function NewRoomPage() {
 
       <RoomTypeForm
         form={form}
-        onChange={handleFormChange}
+        onChange={setForm}
         onSubmit={handleSubmit}
         saving={saving}
         error={error}

@@ -135,11 +135,6 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
       </div>
 
       <RoomTypeForm
-        key={[
-          form.canonicalPricingSnapshot?.expectedRoomFactsRevision,
-          form.canonicalPricingSnapshot?.expectedPricingCurrencyRevision,
-          form.canonicalPricingSnapshot?.expectedFlexibleRatePlanRevision,
-        ].join(":")}
         form={form}
         onChange={setForm}
         onSubmit={handleSubmit}
