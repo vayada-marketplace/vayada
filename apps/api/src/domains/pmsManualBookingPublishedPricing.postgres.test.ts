@@ -166,6 +166,63 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
     expect(payload.pricingOffer).toBeUndefined();
   });
 
+  it("keeps legacy plans while pricing-v2 has only a draft head", async () => {
+    const legacyPropertyId = randomUUID(),
+      legacyRoomTypeId = randomUUID(),
+      legacyPlanId = randomUUID();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL session_replication_role = replica");
+      await client.query(
+        `INSERT INTO hotel_catalog.properties(id,public_id,display_name)
+         VALUES($1::uuid,$1::text,'Legacy pricing')`,
+        [legacyPropertyId],
+      );
+      await client.query(
+        `INSERT INTO pms.room_types(id,property_id,name,occupancy_limits)
+         VALUES($1,$2,'Legacy room','{"total":2,"adults":2,"children":0}'::jsonb)`,
+        [legacyRoomTypeId, legacyPropertyId],
+      );
+      await client.query(
+        "INSERT INTO pms.property_pricing_settings(property_id,currency) VALUES($1,'EUR')",
+        [legacyPropertyId],
+      );
+      await client.query(
+        `INSERT INTO pms.rate_plans(
+           id,property_id,room_type_id,code,name,rate_type,base_rate_amount,currency,active,
+           cancellation_policy_snapshot,pricing_contract_version,flexible_rate_plan_revision,
+           source_room_facts_revision,source_pricing_currency_revision)
+         VALUES($1,$2,$3,'flexible','Flexible','flexible',100,'EUR',TRUE,
+           '{"type":"free_until_days_before_arrival","freeCancellationDeadlineDays":1,
+             "afterDeadlinePenalty":"full_booking_amount","noShowPenalty":"full_booking_amount"}'::jsonb,
+           'pms-pricing.v1',1,1,1)`,
+        [legacyPlanId, legacyPropertyId, legacyRoomTypeId],
+      );
+      // Saving a pricing-v2 draft creates the head at revision 0; nothing is published yet.
+      await client.query("INSERT INTO pms.pricing_v2_heads(property_id) VALUES($1)", [
+        legacyPropertyId,
+      ]);
+      await client.query("COMMIT");
+    } finally {
+      client.release();
+    }
+    const pricing = await createPgPmsPricingReadModel({
+      connectionString: url!,
+      pool,
+    }).getPricingSourceSnapshot(legacyPropertyId);
+    expect(pricing?.flexibleRatePlans).toEqual([
+      expect.objectContaining({ roomTypeId: legacyRoomTypeId, flexibleRatePlanId: legacyPlanId }),
+    ]);
+    // The setup pricing step keeps the legacy completion rule too.
+    expect(
+      await createPgPmsPricingReadModel({
+        connectionString: url!,
+        pool,
+      }).listPublishedOfferRoomTypeIds(legacyPropertyId),
+    ).toBeNull();
+  });
+
   describe("once published", () => {
     beforeAll(() => publish(ownerContext()));
 
