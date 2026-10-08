@@ -33,6 +33,7 @@ only writer that accepts them.
 | ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 2026-10-07 | VAY-1422 | Optional `additionalGuests`, approved by product as an additive v1 field rather than `pms-manual-booking.v2`                                           |
 | 2026-10-07 | VAY-1422 | Slice A of `pricing-ordinary-login-plan.md`: `ratePlanId` names a published pricing-v2 offer, optional `childAgesAtCheckIn`, preview `pricingRevision` |
+| 2026-10-08 | VAY-1422 | Optional create field `expectedPricingRevision`; `409 pricing_changed` when prices were republished after the preview                                  |
 
 The slice A row changes what `ratePlanId` refers to. It stays in v1 because the
 old meaning, a `pms.rate_plans` flexible plan, has had no working caller since
@@ -132,6 +133,7 @@ type Command = {
     firstName: string; lastName: string; email: string | null;
     phoneE164: string | null; countryCode: string | null;
   }>;
+  expectedPricingRevision?: number; // preview pricingRevision (v1 amendment, VAY-1422)
   privateNote: string | null;
   directSource: "call" | "email" | "whatsapp" | "walk_in" | "social_media" | "other";
   stays: Array<{
@@ -191,7 +193,7 @@ Both endpoints return `{ code, message, field?, stayPosition? }` on failure:
 | `400` | `invalid_body`, `unknown_field`                                                                                                                         |
 | `403` | `forbidden`, `entitlement_required`; create also uses `paid_forbidden`                                                                                  |
 | `404` | `property_not_found`, `room_not_found`, `rate_plan_not_found`, `rate_not_found`, `addon_not_found`                                                      |
-| `409` | `room_unavailable`, `pricing_not_published`; create also uses `idempotency_conflict`                                                                    |
+| `409` | `room_unavailable`, `pricing_not_published`; create also uses `idempotency_conflict` and `pricing_changed`                                              |
 | `422` | `invalid_dates`, `occupancy_exceeded`, `currency_mismatch`, `inactive_rate_plan`, `invalid_addon_selection`, `invalid_source`, `invalid_payment_method` |
 | `422` | `child_ages_required`, `rate_restricted` (slice A amendment)                                                                                            |
 
@@ -217,6 +219,13 @@ the target manual writer can be accepted.
 - An empty or omitted `additionalGuests` list is left out of the request
   fingerprint, so requests sent before the VAY-1422 amendment replay unchanged.
   A non-empty list is part of the fingerprint.
+- `expectedPricingRevision` echoes the preview's `pricingRevision`. When the
+  booking names an offer and the active publication has another revision,
+  create returns `409 pricing_changed` before any other price outcome and
+  writes nothing, so staff never save room prices from a publication they did
+  not preview. Any republish counts, even one that leaves this stay's price
+  unchanged; add-on prices are not covered. It is ignored for custom-only
+  bookings, and it is part of the fingerprint only when sent.
 - A command contains 1 to 20 stays. Positions are unique and contiguous from 1.
 - Each room belongs to the authorized property. `rate_plan` pricing requires a
   non-null `ratePlanId` and `custom` pricing requires `ratePlanId: null`; any

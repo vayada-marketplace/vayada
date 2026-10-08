@@ -783,6 +783,7 @@
   "calendar.targetManualBooking.childAgesHint": "Children are priced by age at check-in (0–17).",
   "calendar.targetManualBooking.pricingNotPublished": "Prices are not published yet. Publish them in Pricing, or choose a custom rate.",
   "calendar.targetManualBooking.rateRestricted": "This rate cannot be booked for {range} (minimum stay or closed dates). Choose another rate or a custom rate.",
+  "calendar.targetManualBooking.pricingChanged": "Prices changed since this total was calculated. Check the new total and create the booking again.",
   "calendar.blockModal.title": "Block Rooms",
   "calendar.blockModal.roomTypeLabel": "Room Type",
   "calendar.blockModal.startDateLabel": "Start Date",
