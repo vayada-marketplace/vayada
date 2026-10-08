@@ -38,9 +38,15 @@ describe("production catalog core writer", () => {
     const ownerLinks = fixture.sql.find((sql) => sql.includes("organization_resource_links"))!;
     expect(ownerLinks).toContain("private_quarantine");
     expect(ownerLinks).toContain("status = 'archived'");
+    expect(ownerLinks).toContain(
+      `source."sourceSystem" = 'booking' AND owner_link.resource_type = 'booking_hotel'`,
+    );
     const entitlements = fixture.sql.find((sql) => sql.includes("product_entitlements"))!;
     expect(entitlements).toContain("private_quarantine");
-    expect(entitlements).toContain("status = 'suspended'");
+    expect(entitlements).toContain("WHEN 'booking' THEN 'expired' ELSE 'suspended'");
+    expect(entitlements).toContain(
+      `source."sourceSystem" = 'booking' AND entitlement.resource_type = 'booking_hotel'`,
+    );
     const locations = fixture.sql.find((sql) => sql.includes("property_locations"))!;
     expect(locations).toContain("property_owner_revisions");
     expect(locations).not.toMatch(/address_public\s*=|geo_public\s*=|map_display_mode\s*=/);

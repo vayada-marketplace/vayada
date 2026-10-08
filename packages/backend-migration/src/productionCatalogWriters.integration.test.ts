@@ -8,7 +8,10 @@ import { buildProductionCatalogPlan } from "./productionCatalogPlan.js";
 import { writeProductionCatalogPresentation } from "./productionCatalogPresentationWriter.js";
 import { rebuildProductionCatalogPublicProjection } from "./productionCatalogPublicProjection.js";
 import type { ReconciledCatalogWrites } from "./productionCatalogReconciliation.js";
-import type { ProductionCatalogTargetState } from "./productionCatalogTargetReader.js";
+import {
+  readProductionCatalogTargetState,
+  type ProductionCatalogTargetState,
+} from "./productionCatalogTargetReader.js";
 import { assertSafeTestDatabase } from "./testUtils.js";
 
 const URL = process.env["TEST_DATABASE_URL"];
@@ -20,6 +23,9 @@ const MEDIA_ASSIGNMENT = "13540000-0000-4000-8000-000000000005";
 const USER = "13540000-0000-4000-8000-000000000006";
 const ORGANIZATION = "13540000-0000-4000-8000-000000000007";
 const UPDATED = "2026-08-02T00:00:00Z";
+const RUN = "vay1351-0123456789abcdef01234567";
+const OUTSIDE = "13540000-0000-4000-8000-000000000008";
+const OUTSIDE_MEDIA = "13540000-0000-4000-8000-000000000009";
 
 describe.skipIf(!URL)("production catalog writers (PostgreSQL)", () => {
   let client: pg.Client;
@@ -211,7 +217,140 @@ describe.skipIf(!URL)("production catalog writers (PostgreSQL)", () => {
       await client.query("ROLLBACK");
     }
   });
+
+  it("keeps a hotel outside the VAY-1362 cohort private through writers and projection", async () => {
+    await client.query("BEGIN");
+    try {
+      // An owner path the identity step would normally have archived already.
+      await client.query(
+        `INSERT INTO identity.organizations (id, kind, name, slug, status)
+         VALUES ($1::uuid, 'hotel_group', 'Cohort outsider', $1::uuid::text, 'active')`,
+        [ORGANIZATION],
+      );
+      await client.query(
+        `INSERT INTO identity.organization_resource_links
+           (organization_id, product, resource_type, resource_id, relationship, status)
+         VALUES ($1, 'booking', 'booking_hotel', $2, 'owner', 'active')`,
+        [ORGANIZATION, OUTSIDE],
+      );
+      await client.query(
+        `INSERT INTO identity.product_entitlements
+           (organization_id, product, entitlement_key, status, resource_product, resource_type,
+            resource_id)
+         VALUES ($1, 'booking', 'booking-engine', 'active', 'booking', 'booking_hotel', $2)`,
+        [ORGANIZATION, OUTSIDE],
+      );
+      const rows = outsideRows();
+      const cohort = { bookingHotelIds: [PROPERTY], pmsHotelIds: [], marketplaceHotelIds: [] };
+      const target = await readProductionCatalogTargetState(client, [OUTSIDE], RUN);
+      target.mediaObjects = [
+        {
+          id: OUTSIDE_MEDIA,
+          propertyId: OUTSIDE,
+          purpose: "property.hero_image",
+          sourceSystem: "booking",
+          sourceTable: "booking_hotels",
+          sourceRowId: `${OUTSIDE}:hero_image`,
+          visibility: "public",
+          lifecycleStatus: "active",
+          publicApproved: true,
+        },
+      ];
+      const plan = buildProductionCatalogPlan(rows, target, cohort);
+      expect(plan.blockers).toEqual([]);
+      expect(plan.writes.domains).toEqual([]);
+
+      await writeProductionCatalogCore(client, plan.writes, plan.sourceLinks, RUN);
+      await client.query(
+        `INSERT INTO platform.media_objects
+           (id, bucket, storage_key, visibility, purpose, property_id, resource_product,
+            resource_type, lifecycle_status, source_system, source_table, source_row_id,
+            public_approved, source_metadata)
+         VALUES ($1, 'test', 'safe/outside.jpg', 'public', 'property.hero_image', $2,
+                 'hotel_catalog', 'property', 'active', 'booking', 'booking_hotels',
+                 $3, TRUE, jsonb_build_object('migrationRunId', $4::text))`,
+        [OUTSIDE_MEDIA, OUTSIDE, `${OUTSIDE}:hero_image`, RUN],
+      );
+      await client.query(
+        `INSERT INTO platform.media_variants
+           (media_object_id, variant_name, visibility, storage_key, content_type, public_cdn_url)
+         VALUES ($1, 'original_safe', 'public', 'safe/outside.jpg', 'image/jpeg',
+                 'https://cdn.example.test/outside.jpg')`,
+        [OUTSIDE_MEDIA],
+      );
+      await writeProductionCatalogContent(client, plan.writes);
+      await writeProductionCatalogPresentation(client, plan.writes);
+      await rebuildProductionCatalogPublicProjection(client, [OUTSIDE], RUN);
+
+      const access = await client.query(
+        `SELECT (SELECT status FROM identity.organization_resource_links
+                  WHERE resource_id = $1::uuid::text) AS link,
+                (SELECT status FROM identity.product_entitlements
+                  WHERE resource_id = $1::uuid::text) AS entitlement,
+                (SELECT metadata ->> 'migrationDispositionReason'
+                   FROM hotel_catalog.property_source_links
+                  WHERE source_id = $1::uuid::text) AS reason,
+                (SELECT count(*)::int FROM hotel_catalog.property_domains
+                  WHERE property_id = $1::uuid) AS domains,
+                (SELECT array_agg(slug ORDER BY slug) FROM hotel_catalog.property_slugs
+                  WHERE property_id = $1::uuid) AS slugs,
+                (SELECT bool_or(public_approved) FROM hotel_catalog.property_media
+                  WHERE property_id = $1::uuid) AS "publicMedia"`,
+        [OUTSIDE],
+      );
+      expect(access.rows[0]).toEqual({
+        link: "archived",
+        entitlement: "expired",
+        reason: "outside_migration_cohort",
+        domains: 0,
+        slugs: ["cohort-outsider", "cohort-outsider-old"],
+        publicMedia: false,
+      });
+      const projected = await client.query(
+        `SELECT public_id AS "publicId", canonical_slug AS "canonicalSlug",
+                verified_custom_domain AS "verifiedCustomDomain", profile_status AS "profileStatus",
+                media
+         FROM hotel_catalog.property_public_profile_read_model WHERE property_id = $1`,
+        [OUTSIDE],
+      );
+      expect(projected.rows[0]).toEqual({
+        publicId: `legacy-private-property-${OUTSIDE}`,
+        canonicalSlug: "cohort-outsider",
+        verifiedCustomDomain: null,
+        profileStatus: "private",
+        media: [],
+      });
+
+      const replanned = buildProductionCatalogPlan(
+        rows,
+        await readProductionCatalogTargetState(client, plan.propertyIds, RUN),
+        cohort,
+      );
+      expect(replanned.blockers).toEqual([]);
+      expect(replanned.checksum).toBe(plan.checksum);
+      expect(replanned.counts.writes).toBe(0);
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
 });
+
+function outsideRows(): IdentitySourceRow[] {
+  const [user, hotel] = catalogRows();
+  return [
+    user!,
+    {
+      ...hotel!,
+      data: {
+        ...hotel!.data,
+        id: OUTSIDE,
+        slug: "cohort-outsider",
+        custom_domain: "outsider.example.test",
+        previous_slugs: ["cohort-outsider-old"],
+      },
+    },
+  ];
+}
 
 function catalogRows(): IdentitySourceRow[] {
   return [
