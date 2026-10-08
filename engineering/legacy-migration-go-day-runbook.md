@@ -74,6 +74,14 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
      (each answers `503`)
    - `CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE=disabled` and
      `CHANNEX_ADMIN_MANUAL_ARI_SYNC_MODE=disabled`
+
+   `PMS_SCHEDULER_ENABLED=false` does **not** stop two in-process writers that
+   start at boot: the promo-usage reconciler (every 15 s) and the fixed-plan
+   billing job (every 5 min). Until legacy gains a switch for them, the freeze
+   proof must show they wrote nothing during the drain, or `pms-backend` must
+   be scaled to zero. If it is scaled to zero, fixed-plan billing pauses for the
+   window, so check the billing decision above first.
+
 3. Pause the target's native writers on the tables the imports lock. Domain
    applies abort after 5 s on lock contention, and parity takes `SHARE` locks.
    In practice that means native hotel-setup and PMS write paths go to
