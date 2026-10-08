@@ -1408,6 +1408,8 @@ export type PgTargetBookingWebCheckoutAdapterConfig = {
   /** Empty by default; use only for explicitly approved synthetic/public rollout slugs. */
   /** Kill switch; the acceptance writer still requires Vayada authority and a publication. */
   replacementPricingAcceptanceEnabled?: boolean;
+  /** Card quotes in acceptance; requires stripePaymentProvider. */
+  replacementPricingCardAcceptanceEnabled?: boolean;
   externalChanges: ExternalChangePresentationPort;
   /** Register only with the reviewed provider runtime; absent keeps Airbnb actions disabled. */
   airbnbAlterations?: {
@@ -2066,13 +2068,16 @@ export function createTargetBookingWebCheckoutAdapter(
             // Context lookup must not block an otherwise valid booking.
           }
         }
-        return contextId
-          ? await writePricingAcceptance(
-              pool,
-              { slug, command: request },
-              { affiliateContextId: contextId },
-            )
-          : await writePricingAcceptance(pool, { slug, command: request });
+        const cardPayments =
+          config.replacementPricingCardAcceptanceEnabled && config.stripePaymentProvider
+            ? { provider: config.stripePaymentProvider }
+            : undefined;
+        return await writePricingAcceptance(
+          pool,
+          { slug, command: request },
+          contextId ? { affiliateContextId: contextId } : undefined,
+          cardPayments,
+        );
       } catch (error) {
         const statusCode =
           error instanceof PricingAcceptanceError

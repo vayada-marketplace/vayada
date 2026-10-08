@@ -8,6 +8,12 @@ import { stagePricingBookingLifecycle } from "./pricingBookingLifecycle.js";
 import { stagePricingBookingRevenue } from "./pricingBookingRevenue.js";
 import { stagePmsAcceptedPricingReservationJob } from "./pricingPmsAcceptedReservationJob.js";
 import { storePricingAcceptance } from "./storePricingAcceptance.js";
+import {
+  pricingCardQuoteSupported,
+  stagePricingCardDraftHold,
+  startPricingCardPayment,
+} from "./pricingCardPayment.js";
+import type { StripeBookingPaymentProvider } from "./stripeBookingPayments.js";
 
 export class PricingAcceptanceError extends Error {
   constructor(
@@ -27,6 +33,7 @@ const conflictMessages = new Set([
   "Pricing booking draft is unavailable",
   "Pricing booking lifecycle is unavailable",
   "Pricing booking revenue is unavailable",
+  "Pricing card payment is unavailable",
 ]);
 
 export async function writePricingAcceptance(
@@ -38,6 +45,8 @@ export async function writePricingAcceptance(
   internal?:
     | { syntheticAffiliateContextId: string; affiliateContextId?: never }
     | { affiliateContextId: string; syntheticAffiliateContextId?: never },
+  /** Card quotes are accepted only with a payment provider (REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED). */
+  cardPayments?: { provider: StripeBookingPaymentProvider },
 ) {
   let client: pg.PoolClient | undefined;
   try {
@@ -47,7 +56,9 @@ export async function writePricingAcceptance(
   }
   try {
     await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
-    const prepared = await preparePricingAcceptance(client, input.slug, input.command);
+    const prepared = await preparePricingAcceptance(client, input.slug, input.command, {
+      card: cardPayments !== undefined,
+    });
     if (prepared.kind === "replayed") {
       await client.query("COMMIT");
       return prepared;
@@ -61,6 +72,35 @@ export async function writePricingAcceptance(
       syntheticAffiliateContextId: internal?.syntheticAffiliateContextId,
       affiliateContextId: internal?.affiliateContextId,
     });
+    if (cardPayments && pricingCardQuoteSupported(prepared.current.quote)) {
+      // Card: hold the rooms and start the payment. Confirmation, revenue, notifications,
+      // the PMS job and the acceptance row follow once Stripe reports the payment; the
+      // command receipt stays in progress until then.
+      const hold = await stagePricingCardDraftHold(client, input.slug, prepared.current, bookingId);
+      const intent = await startPricingCardPayment(client, cardPayments.provider, {
+        slug: input.slug,
+        current: prepared.current,
+        finance: prepared.finance,
+        bookingId,
+        publicReference,
+        requestId: prepared.command.requestId,
+        occurredAt: hold.occurredAt,
+      });
+      await finishPricingAcceptance(client, input.slug, prepared.current, prepared.finance);
+      await client.query("COMMIT");
+      return {
+        kind: "payment_required" as const,
+        bookingId,
+        bookingReference: publicReference,
+        payment: {
+          provider: "stripe" as const,
+          clientSecret: intent.clientSecret,
+          stripeAccountId: intent.providerAccountRef,
+          paymentIntentId: intent.paymentIntentId,
+          expiresAt: hold.draftExpiresAt,
+        },
+      };
+    }
     const lifecycle = await stagePricingBookingLifecycle(
       client,
       input.slug,

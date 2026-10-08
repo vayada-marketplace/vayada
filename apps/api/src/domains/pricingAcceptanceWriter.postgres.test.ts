@@ -271,7 +271,112 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
   });
 });
 
-async function setupFixture() {
+describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", () => {
+  beforeEach(() => vi.resetAllMocks());
+  const cardQuote = (quote: Fixture["f"]["current"]["quote"]) => {
+    Object.assign(quote, { paymentMethod: "card" });
+    Object.assign(quote.evidence, { dueNowMinor: quote.evidence.totalMinor, dueLaterMinor: "0" });
+    Object.assign(quote.evidence.terms[0], {
+      payment: { kind: "full", acceptedMethods: ["card"] },
+    });
+  };
+
+  it("holds the rooms and starts a Stripe payment without confirming the booking", async () => {
+    const fixture = await setupFixture(cardQuote);
+    const accountId = randomUUID();
+    await fixture.observer.query(
+      `INSERT INTO finance.payment_provider_accounts(id,property_id,account_scope,provider,provider_account_id,status,
+        onboarding_status,charges_enabled,payouts_enabled,capabilities,card_capability_revision,account_metadata)
+       VALUES($1,$2,'property','stripe','acct_writer_test','active','completed',true,true,ARRAY['card_payments'],1,'{}')`,
+      [accountId, fixture.propertyId],
+    );
+    await fixture.observer.query(
+      `INSERT INTO finance.payment_settings(property_id,provider_account_id,payments_enabled,accepted_methods,default_currency)
+       VALUES($1,$2,true,ARRAY['card'],$3)`,
+      [fixture.propertyId, accountId, fixture.f.current.quote.stay.currency],
+    );
+    mockOwners(fixture);
+    vi.mocked(finishCurrentQuoteAcceptanceTime).mockResolvedValue(new Date().toISOString());
+    const createPaymentIntent = vi.fn(async (input: { amountMinor: number; currency: string }) => ({
+      paymentIntentId: "pi_writer_test",
+      clientSecret: "pi_writer_test_secret",
+      status: "requires_payment_method",
+      amountMinor: input.amountMinor,
+      currency: input.currency,
+      propertyId: fixture.propertyId,
+      bookingReference: null,
+      providerAccountRef: "acct_writer_test",
+    }));
+    const provider = { createPaymentIntent } as never;
+    try {
+      await expect(writePricingAcceptance(fixture.pool, fixture.input)).rejects.toMatchObject({
+        code: "conflict",
+      });
+      expect(createPaymentIntent).not.toHaveBeenCalled();
+
+      const result = await writePricingAcceptance(fixture.pool, fixture.input, undefined, {
+        provider,
+      });
+      expect(result).toMatchObject({
+        kind: "payment_required",
+        payment: {
+          provider: "stripe",
+          clientSecret: "pi_writer_test_secret",
+          stripeAccountId: "acct_writer_test",
+          paymentIntentId: "pi_writer_test",
+        },
+      });
+      expect(createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providerAccountRef: "acct_writer_test",
+          captureMethod: "automatic",
+          currency: fixture.f.current.quote.stay.currency,
+        }),
+      );
+      await expect(snapshot(fixture.observer, fixture)).resolves.toEqual({
+        bookings: 1,
+        acceptances: 0,
+        jobs: 0,
+        revenue: 0,
+        available: 2,
+        assigned: 1,
+      });
+      const booking = (
+        await fixture.observer.query(
+          `SELECT lifecycle_status,payment_status,expected_payment_method,active_card_payment_id IS NOT NULL AS linked,
+            booking_metadata ? 'draftExpiresAt' AS expires,booking_metadata->>'providerPaymentIntentId' AS intent
+           FROM booking.guest_bookings WHERE property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows[0];
+      expect(booking).toEqual({
+        lifecycle_status: "draft",
+        payment_status: "unpaid",
+        expected_payment_method: "card",
+        linked: true,
+        expires: true,
+        intent: "pi_writer_test",
+      });
+      const payment = (
+        await fixture.observer.query(
+          "SELECT status,payment_method,provider_payment_intent_id FROM finance.payments WHERE property_id=$1",
+          [fixture.propertyId],
+        )
+      ).rows;
+      expect(payment).toEqual([
+        {
+          status: "requires_action",
+          payment_method: "card",
+          provider_payment_intent_id: "pi_writer_test",
+        },
+      ]);
+    } finally {
+      await fixture.close();
+    }
+  });
+});
+
+async function setupFixture(changeQuote?: (quote: Fixture["f"]["current"]["quote"]) => void) {
   if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
     throw new Error("test database required");
   const rawPool = new pg.Pool({ connectionString: url, max: 3 });
@@ -310,6 +415,7 @@ async function setupFixture() {
       sourceRevision: quote.evidence.revisions.charges,
     };
     Object.assign(quote.evidence, { mandatoryChargeEvidenceId: charges.basisEvidenceId });
+    changeQuote?.(quote);
   });
   Object.assign(f.current.scope, { propertyId, organizationId });
   Object.assign(f.finance.scope, { propertyId, organizationId });

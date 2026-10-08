@@ -68,7 +68,8 @@ beforeEach(() => {
 afterEach(async () => {
   await app?.close();
 });
-async function mount(available = true, acceptance = false, affiliateBinding = false) {
+const stripeProvider = { createPaymentIntent: vi.fn() } as never;
+async function mount(available = true, acceptance = false, affiliateBinding = false, card = false) {
   app = Fastify({ logger: false });
   const checkoutAdapter = available
     ? createTargetBookingWebCheckoutAdapter({
@@ -76,6 +77,8 @@ async function mount(available = true, acceptance = false, affiliateBinding = fa
         connectionString: "postgresql://unused",
         inventoryReservationPort: {} as never,
         replacementPricingAcceptanceEnabled: acceptance,
+        replacementPricingCardAcceptanceEnabled: card,
+        stripePaymentProvider: stripeProvider,
         pool: { query, connect: async () => ({ query, release }), end: async () => {} } as never,
       })
     : unusedBookingWebCheckoutAdapter;
@@ -173,10 +176,12 @@ it("binds the path and idempotency key before invoking enabled acceptance", asyn
   expect(accepted.statusCode).toBe(200);
   expect(accepted.headers["cache-control"]).toBe("no-store");
   expect(accepted.headers["x-robots-tag"]).toBe("noindex");
-  expect(writePricingAcceptance).toHaveBeenCalledWith(expect.anything(), {
-    slug: "hotel",
-    command: payload,
-  });
+  expect(writePricingAcceptance).toHaveBeenCalledWith(
+    expect.anything(),
+    { slug: "hotel", command: payload },
+    undefined,
+    undefined,
+  );
   for (const [quoteId, requestId] of [
     ["33333333-3333-4333-8333-333333333333", "accept-1"],
     [id, "other"],
@@ -190,6 +195,29 @@ it("binds the path and idempotency key before invoking enabled acceptance", asyn
     expect(response.statusCode).toBe(400);
   }
   expect(writePricingAcceptance).toHaveBeenCalledOnce();
+});
+
+it("passes the Stripe provider to the writer only when card acceptance is switched on", async () => {
+  vi.mocked(writePricingAcceptance).mockResolvedValue({ kind: "payment_required" } as never);
+  const payload = { version: "booking-quote-acceptance.v1", requestId: "accept-1", quoteId: id };
+  for (const card of [false, true]) {
+    vi.mocked(writePricingAcceptance).mockClear();
+    await mount(true, true, false, card);
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/booking-web/hotels/hotel/bookings/quotes/${id}/accept`,
+      headers: { "idempotency-key": "accept-1" },
+      payload,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(writePricingAcceptance).toHaveBeenCalledWith(
+      expect.anything(),
+      { slug: "hotel", command: payload },
+      undefined,
+      card ? { provider: stripeProvider } : undefined,
+    );
+    await app.close();
+  }
 });
 
 it("takes a valid affiliate handle only from the cookie and verifies it before the writer", async () => {
@@ -223,6 +251,7 @@ it("takes a valid affiliate handle only from the cookie and verifies it before t
     expect.anything(),
     { slug: "hotel", command: payload },
     { affiliateContextId: contextId },
+    undefined,
   );
 });
 
@@ -241,10 +270,12 @@ it("keeps affiliate cookie binding off by default even when a cookie is supplied
   });
   expect(response.statusCode).toBe(200);
   expect(readBookingAffiliateContextForQuote).not.toHaveBeenCalled();
-  expect(writePricingAcceptance).toHaveBeenCalledWith(expect.anything(), {
-    slug: "hotel",
-    command: payload,
-  });
+  expect(writePricingAcceptance).toHaveBeenCalledWith(
+    expect.anything(),
+    { slug: "hotel", command: payload },
+    undefined,
+    undefined,
+  );
 });
 
 it("ignores duplicate, invalid, or unavailable affiliate cookies without blocking acceptance", async () => {
@@ -265,10 +296,12 @@ it("ignores duplicate, invalid, or unavailable affiliate cookies without blockin
     expect(response.statusCode).toBe(200);
   }
   expect(readBookingAffiliateContextForQuote).not.toHaveBeenCalled();
-  expect(writePricingAcceptance).toHaveBeenCalledWith(expect.anything(), {
-    slug: "hotel",
-    command: payload,
-  });
+  expect(writePricingAcceptance).toHaveBeenCalledWith(
+    expect.anything(),
+    { slug: "hotel", command: payload },
+    undefined,
+    undefined,
+  );
   vi.mocked(readBookingAffiliateContextForQuote).mockRejectedValue(
     new Error("storage unavailable"),
   );
@@ -282,10 +315,12 @@ it("ignores duplicate, invalid, or unavailable affiliate cookies without blockin
     payload,
   });
   expect(fallback.statusCode).toBe(200);
-  expect(writePricingAcceptance).toHaveBeenLastCalledWith(expect.anything(), {
-    slug: "hotel",
-    command: payload,
-  });
+  expect(writePricingAcceptance).toHaveBeenLastCalledWith(
+    expect.anything(),
+    { slug: "hotel", command: payload },
+    undefined,
+    undefined,
+  );
 });
 it.each([
   ["conflict", 409],

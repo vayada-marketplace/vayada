@@ -9,6 +9,7 @@ import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import type { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js";
 import type { lockCurrentQuoteGuestDisclosure } from "./currentQuoteGuestDisclosure.js";
 import type { lockFinancePricingAcceptanceTerms } from "./financePricingAcceptanceTerms.js";
+import { pricingCardQuoteSupported } from "./pricingCardPayment.js";
 
 type Input = {
   current: NonNullable<Awaited<ReturnType<typeof lockCurrentQuoteRevalidation>>>;
@@ -83,10 +84,13 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
     !isDeepStrictEqual(parsed, command) ||
     parsed.acceptance.quoteEvidenceId !== disclosure.quoteEvidenceId ||
     parsed.acceptance.guestPolicyEvidenceId !== disclosure.guestPolicyEvidenceId ||
-    quote.paymentMethod !== "pay_at_property" ||
-    (quote.acceptanceMode !== "instant" && quote.acceptanceMode !== "request") ||
-    quote.evidence.dueNowMinor !== "0" ||
-    quote.evidence.dueLaterMinor !== quote.evidence.totalMinor
+    !(
+      (quote.paymentMethod === "pay_at_property" &&
+        (quote.acceptanceMode === "instant" || quote.acceptanceMode === "request") &&
+        quote.evidence.dueNowMinor === "0" &&
+        quote.evidence.dueLaterMinor === quote.evidence.totalMinor) ||
+      pricingCardQuoteSupported(quote)
+    )
   )
     return fail();
   const terms = finance.commissionTermsSnapshot;
@@ -159,7 +163,7 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
     INSERT INTO booking.guest_bookings(id,property_id,public_reference,source_system,booking_channel,direct_booking_source,
       lifecycle_status,payment_status,expected_payment_method,check_in,check_out,adults,children,room_count,currency,
       total_amount,balance_amount,booking_metadata,billing_plan_snapshot,commission_terms_snapshot,finance_terms_captured_at)
-    VALUES($1,$2,$3,'booking','direct','booking_engine','draft','unpaid','pay_at_property',$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13,$14)
+    VALUES($1,$2,$3,'booking','direct','booking_engine','draft','unpaid',$22,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13,$14)
     RETURNING id
   ) INSERT INTO booking.booking_guests(guest_booking_id,guest_role,first_name,last_name,email,phone,country_code,arrival_time,special_requests)
     SELECT id,'booker',$15,$16,$17,$18,$19,$20,$21 FROM draft`,
@@ -192,6 +196,7 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
       guest.countryCode,
       guest.arrivalTime,
       guest.specialRequests,
+      quote.paymentMethod,
     ],
   );
   if (affiliateContextId !== undefined && syntheticAffiliate)
