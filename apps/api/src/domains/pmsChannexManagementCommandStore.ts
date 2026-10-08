@@ -131,6 +131,23 @@ async function enqueue(
             : "This hotel's retained Channex binding needs audited repair before it can be enabled.",
         };
       }
+      // VAY-1362: an imported hotel is already connected through the source PMS,
+      // so enable would create a second Channex property until its VAY-2017
+      // historical binding claim exists. Native hotels have only platform links.
+      const imported = await client.query(
+        `SELECT 1 FROM hotel_catalog.property_source_links
+         WHERE property_id = $1::uuid AND source_system <> 'platform' LIMIT 1`,
+        [propertyId],
+      );
+      if (imported.rows[0]) {
+        if (!transactionClient) await client.query("ROLLBACK");
+        return {
+          ok: false,
+          code: "channex_historical_binding_required",
+          message:
+            "This hotel's existing Channex connection must be restored before it can be enabled.",
+        };
+      }
     }
     if (input.operationType === "update_inventory_rules") {
       const error = input.inventoryRules

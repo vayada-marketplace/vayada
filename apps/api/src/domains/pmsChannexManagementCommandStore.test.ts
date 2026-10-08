@@ -74,6 +74,56 @@ describe("PMS Channex management command store", () => {
     expect(db.calls.at(-1)?.text).toBe("ROLLBACK");
   });
 
+  it("refuses to queue enable for an imported hotel without a historical binding", async () => {
+    const db = new FakeDb("imported");
+    const port = createPgPmsChannexManagementCommandPort({
+      connectionString: "postgresql://target",
+      pool: db.pool(),
+    });
+
+    expect(await port.enqueue(context(), propertyId, command("enable"))).toEqual({
+      ok: false,
+      code: "channex_historical_binding_required",
+      message:
+        "This hotel's existing Channex connection must be restored before it can be enabled.",
+    });
+    expect(db.sql()).toContain("source_system <> 'platform'");
+    expect(db.sql()).not.toContain("INSERT INTO platform.jobs");
+    expect(db.calls.at(-1)?.text).toBe("ROLLBACK");
+  });
+
+  it("leaves an imported hotel with a binding claim to the binding rule", async () => {
+    const db = new FakeDb("importedBound");
+    const port = createPgPmsChannexManagementCommandPort({
+      connectionString: "postgresql://target",
+      pool: db.pool(),
+    });
+
+    expect(await port.enqueue(context(), propertyId, command("enable"))).toMatchObject({
+      ok: false,
+      code: "channex_binding_exists",
+    });
+    expect(db.sql()).not.toContain("FROM hotel_catalog.property_source_links");
+  });
+
+  it("checks source links only for a new enable reservation", async () => {
+    const native = new FakeDb("new");
+    await createPgPmsChannexManagementCommandPort({
+      connectionString: "postgresql://target",
+      pool: native.pool(),
+    }).enqueue(context(), propertyId, command("enable"));
+    expect(native.sql()).toContain("FROM hotel_catalog.property_source_links");
+
+    const replay = new FakeDb("importedReplay");
+    expect(
+      await createPgPmsChannexManagementCommandPort({
+        connectionString: "postgresql://target",
+        pool: replay.pool(),
+      }).enqueue(context(), propertyId, command("enable")),
+    ).toMatchObject({ ok: true, replayed: true });
+    expect(replay.sql()).not.toContain("FROM hotel_catalog.property_source_links");
+  });
+
   it("requires a target connection before dependent operations", async () => {
     const db = new FakeDb("disconnected");
     const port = createPgPmsChannexManagementCommandPort({
@@ -90,7 +140,15 @@ describe("PMS Channex management command store", () => {
   });
 });
 
-type Mode = "new" | "replay" | "conflict" | "disconnected" | "bound";
+type Mode =
+  | "new"
+  | "replay"
+  | "conflict"
+  | "disconnected"
+  | "bound"
+  | "imported"
+  | "importedBound"
+  | "importedReplay";
 
 class FakeDb {
   calls: Array<{ text: string; values?: readonly unknown[] }> = [];
@@ -115,15 +173,19 @@ class FakeDb {
     // A replayed enable already created its active claim; replay must still win.
     if (text.includes("FROM pms.channel_binding_claims"))
       return rows<T>(
-        this.mode === "bound"
+        this.mode === "bound" || this.mode === "importedBound"
           ? [{ active: false }]
-          : this.mode === "replay"
+          : this.mode === "replay" || this.mode === "importedReplay"
             ? [{ active: true }]
             : [],
       );
+    if (text.includes("FROM hotel_catalog.property_source_links"))
+      return rows<T>(this.mode.startsWith("imported") ? [{ "?column?": 1 }] : []);
     if (text.includes("INSERT INTO platform.idempotency_keys")) {
       this.fingerprint = String(values?.[2]);
-      return rows<T>(this.mode === "new" || this.mode === "bound" ? [{ id: "idem-1" }] : []);
+      return rows<T>(
+        ["new", "bound", "imported", "importedBound"].includes(this.mode) ? [{ id: "idem-1" }] : [],
+      );
     }
     if (text.includes("SELECT request_fingerprint_hash")) {
       return rows<T>([
