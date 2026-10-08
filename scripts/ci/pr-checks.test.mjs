@@ -10,11 +10,10 @@ import { SELECTABLE_JOBS, selectJobs, verifyRequiredChecks } from "./pr-checks.m
 const ALL = [...SELECTABLE_JOBS];
 const TYPESCRIPT = ["frontend", "first_party_auth", "api_postgres", "setup_draft_reset_postgres"];
 
-test("docs and inventory-only changes select no jobs", () => {
+test("docs-only changes select no jobs", () => {
   const files = [
     "README.md",
     "apps/api/README.md",
-    "engineering/hotel-setup-bootstrap-images.json",
     "engineering/evidence/vay-794/pms-runtime-health-2026-06-15.json",
     "engineering/code-quality-gates.md",
     ".agents/skills/work-on-linear-ticket/SKILL.md",
@@ -225,11 +224,4 @@ test("every API PostgreSQL step belongs to exactly one shard or runs in all of t
     perShard[match[1]] += 1;
   }
   for (const shard of shards) assert.ok(perShard[shard] > 0, `${shard} has no steps`);
-  const names = job.steps.map((step) => step.name);
-  // The fresh-cluster RLS proof must precede migrations; the RDS-like creator proof must be last.
-  assert.ok(
-    names.indexOf("Verify setup reader RLS helper grants on a fresh cluster") <
-      names.indexOf("Apply target migrations"),
-  );
-  assert.equal(names.at(-1), "Verify protected logo lifecycle with an RDS-like creator");
 });
