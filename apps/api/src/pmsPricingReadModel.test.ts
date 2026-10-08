@@ -148,6 +148,14 @@ describe("PMS pricing read model", () => {
         baseAmount: { amountDecimal: "160.00", currency: "EUR" },
       }),
     ]);
+    // A published offer in another currency than the property's is a missing plan.
+    const other = fakePool({ published: [{ ...published(roomTypeId), currency: "CHF" }] });
+    const otherRead = createPgPmsPricingReadModel({
+      connectionString: "test",
+      pool: other.pool,
+      now: () => new Date(now),
+    });
+    expect((await otherRead.getPricingSourceSnapshot(propertyId))?.flexibleRatePlans).toEqual([]);
     // Every read shares the snapshot's repeatable-read transaction.
     expect(calls[0]?.sql).toBe("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
     expect(calls.at(-1)?.sql).toBe("COMMIT");
