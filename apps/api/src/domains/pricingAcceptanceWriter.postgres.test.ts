@@ -341,7 +341,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       await cardFixture();
     try {
       await expect(writePricingAcceptance(fixture.pool, fixture.input)).rejects.toMatchObject({
-        code: "conflict",
+        code: "card_unavailable",
       });
       expect(createPaymentIntent).not.toHaveBeenCalled();
 
