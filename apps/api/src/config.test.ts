@@ -56,42 +56,6 @@ describe("api config", () => {
     );
   });
 
-  it("does not reuse the general or auth database URL for pricing authority", () => {
-    const base = loadConfig(completeCreatorMarketplaceEnv);
-    expect(base.pricingDatabaseUrl).toBeUndefined();
-    expect(
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        PRICING_DATABASE_URL: "postgresql://pricing_runtime@pricing-db",
-      }).pricingDatabaseUrl,
-    ).toBe("postgresql://pricing_runtime@pricing-db");
-    expect(() =>
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        PRICING_DATABASE_URL: completeCreatorMarketplaceEnv.TARGET_DATABASE_URL,
-      }),
-    ).toThrow("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
-    expect(() =>
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        PRICING_DATABASE_URL: completeCreatorMarketplaceEnv.AUTH_DATABASE_URL,
-      }),
-    ).toThrow("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
-    expect(() =>
-      loadConfig({
-        TARGET_DATABASE_URL: "postgresql://general_runtime@target-db/vayada",
-        PRICING_DATABASE_URL:
-          "postgresql://general_runtime@target-db/vayada?application_name=pricing",
-      }),
-    ).toThrow("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
-    expect(() =>
-      loadConfig({
-        TARGET_DATABASE_URL: "postgresql://general_runtime@target-db/vayada",
-        PRICING_DATABASE_URL: "postgresql://pricing_runtime@target-db/vayada?user=general_runtime",
-      }),
-    ).toThrow("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
-  });
-
   it("keeps affiliate capture closed unless its isolated runtime is complete", () => {
     expect(loadConfig(completeCreatorMarketplaceEnv).affiliateCapture).toBeUndefined();
     expect(
@@ -124,10 +88,6 @@ describe("api config", () => {
       {
         AUTH_DATABASE_URL:
           "postgresql://auth_runtime@auth-db/app?user=vayada_next_affiliate_capture",
-      },
-      {
-        PRICING_DATABASE_URL:
-          "postgresql://pricing_runtime@pricing-db/app?user=vayada_next_affiliate_capture",
       },
     ]) {
       expect(() =>

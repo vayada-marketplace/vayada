@@ -702,4 +702,32 @@ describe("target manual booking fields", () => {
     );
     expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(true);
   });
+  it("sends the preview's price version and re-prices when prices changed before saving", async () => {
+    const request = vi
+      .spyOn(calendarService, "previewManualBooking")
+      .mockImplementation(async (input) => ({ ...previewFor(input), pricingRevision: 4 }));
+    const onSubmit = vi
+      .fn()
+      .mockRejectedValue(
+        new PmsManualBookingServiceError("conflict", "pricing_changed", 409, "pricing changed."),
+      );
+    let view!: ReactTestRenderer;
+    // prettier-ignore
+    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit, onClose: vi.fn() })); });
+    await settlePreview();
+    const previews = request.mock.calls.length;
+    await act(async () => {
+      await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() });
+    });
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ expectedPricingRevision: 4 });
+    expect(JSON.stringify(view.toJSON())).toContain(
+      "Prices changed since this total was calculated.",
+    );
+    await settlePreview();
+    expect(request.mock.calls.length).toBeGreaterThan(previews);
+    // The notice outlives the successful re-price, so staff know why the total changed.
+    expect(JSON.stringify(view.toJSON())).toContain(
+      "Prices changed since this total was calculated.",
+    );
+  });
 });
