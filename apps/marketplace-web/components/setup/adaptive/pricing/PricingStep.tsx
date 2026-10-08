@@ -25,6 +25,8 @@ type Loaded = { owners: OnboardingPricingOwners; publication: CurrentPublication
 
 /** The shared form's English text, except where it describes the PMS editor's draft flow. */
 const onboardingText: Record<string, string> = {
+  // The currency is always fixed here, which the form reads as "another room".
+  "pricing.setup.titleAnotherRoom": "Set a room rate",
   "pricing.setup.continue": "Add this rate",
   "pricing.setup.continueHint":
     "Added rates are published together when you publish prices below. Nothing is sent to channels.",
