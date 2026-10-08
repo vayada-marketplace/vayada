@@ -5,12 +5,12 @@ import {
 } from "@vayada/backend-authorization";
 import type { UpsertPropertyPricingCurrencyCommand } from "@vayada/domain-pms";
 import { lockHotelSetupMembership } from "./hotelSetupMembership.js";
-import type { beginHotelSetupCommandScope } from "./hotelSetupCommandScope.js";
+import type { HotelSetupScopeQuery } from "./hotelSetupOrdinaryScope.js";
 
-/** Current membership, actor and base entitlement checks for the native command scope.
- * beginHotelSetupCommandScope already locks the organization and canonical Owner links. */
+/** Current membership, actor and base entitlement checks inside the ordinary property scope,
+ * which already locks the organization and canonical Owner links. */
 export async function lockHotelSetupCurrencyMembership(
-  client: Parameters<typeof beginHotelSetupCommandScope>[0],
+  client: HotelSetupScopeQuery,
   command: Pick<UpsertPropertyPricingCurrencyCommand, "organizationId" | "propertyId" | "audit">,
   options = { permission: "pms.operations.manage" as PermissionKey, requireBaseAccess: true },
 ): Promise<boolean> {

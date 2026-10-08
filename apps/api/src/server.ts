@@ -66,7 +66,10 @@ import pg from "pg";
 import { createHmac } from "node:crypto";
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
-import { loadHotelSetupCommandForwarder } from "./hotelSetupCommandForwarder.js";
+import { createOrdinaryHotelSetupLogoRuntime } from "./hotelSetupLogoRuntime.js";
+import { createOrdinaryHotelSetupProfileCommand } from "./platform/hotelSetupProfileWriter.js";
+import { createOrdinaryHotelSetupLaunchSettingsCommand } from "./hotelSetupLaunchSettingsRepository.js";
+import { createOrdinaryHotelSetupFeatureHubCommands } from "./hotelSetupFeatureHubOrdinary.js";
 import {
   type ApiConfig,
   channexConnectionOnlyScope,
@@ -343,24 +346,8 @@ import {
 
 const postgresRuntime = installPostgresPoolRuntime(pg);
 const config = loadConfig();
-const hotelSetupCommandForwarder = loadHotelSetupCommandForwarder();
-const hotelSetupCreationForwarder = loadHotelSetupCommandForwarder({
-  HOTEL_SETUP_COMMAND_ADMISSION: process.env["HOTEL_SETUP_CREATION_COMMAND_ADMISSION"],
-  HOTEL_SETUP_COMMAND_ORIGIN: process.env["HOTEL_SETUP_CREATION_COMMAND_ORIGIN"],
-  HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: process.env["HOTEL_SETUP_CREATION_COMMAND_INTERNAL_TOKEN"],
-});
-
-const hotelSetupProfileForwarder = loadHotelSetupCommandForwarder({
-  HOTEL_SETUP_COMMAND_ADMISSION: process.env["HOTEL_SETUP_PROFILE_COMMAND_ADMISSION"],
-  HOTEL_SETUP_COMMAND_ORIGIN: process.env["HOTEL_SETUP_PROFILE_COMMAND_ORIGIN"],
-  HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: process.env["HOTEL_SETUP_PROFILE_COMMAND_INTERNAL_TOKEN"],
-});
-
-const hotelSetupLogoForwarder = loadHotelSetupCommandForwarder({
-  HOTEL_SETUP_COMMAND_ADMISSION: process.env["HOTEL_SETUP_LOGO_COMMAND_ADMISSION"] ?? "blocked",
-  HOTEL_SETUP_COMMAND_ORIGIN: process.env["HOTEL_SETUP_LOGO_COMMAND_ORIGIN"],
-  HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: process.env["HOTEL_SETUP_LOGO_COMMAND_INTERNAL_TOKEN"],
-});
+// VAY-2056: hotel setup runs on the ordinary API login; the HOTEL_SETUP_*_COMMAND_* variables
+// installed on the task definition are no longer read and are not a kill switch.
 
 function buildAuthOptions(auth: ApiConfig["auth"]): ApiAuthOptions | undefined {
   if (!auth) {
@@ -1059,6 +1046,45 @@ const propertySetupOwnerPool = new pg.Pool({
   connectionTimeoutMillis: 5_000,
   max: 5,
 });
+// VAY-2056: the six hotel-setup Owner operations run on the ordinary API login, only with
+// WorkOS auth configured (their routes need the property-access repository). Their own pool keeps
+// a burst of setup writes, each holding the organization row lock, off the shared setup pools.
+const hotelSetupOrdinaryPool = config.auth
+  ? new pg.Pool({ connectionString: targetDatabaseUrl, connectionTimeoutMillis: 5_000, max: 10 })
+  : undefined;
+const hotelSetupOrdinaryLogo =
+  hotelSetupOrdinaryPool && platformMediaRuntime && config.platformMediaServing
+    ? createOrdinaryHotelSetupLogoRuntime({
+        connectionString: targetDatabaseUrl,
+        lookup: hotelSetupOrdinaryPool,
+        serving: config.platformMediaServing,
+        defaults: platformMediaRuntime.routes,
+      })
+    : undefined;
+const hotelSetupOrdinaryOptions = hotelSetupOrdinaryPool
+  ? {
+      hotelSetupPropertyCreationRepository: createPgSharedHotelSetupStatusRepository({
+        connectionString: targetDatabaseUrl,
+        pool: hotelSetupOrdinaryPool,
+        hotelSetupOwnerCreation: true,
+      }),
+      hotelSetupProfileCommand: createOrdinaryHotelSetupProfileCommand(hotelSetupOrdinaryPool),
+      hotelSetupLaunchSettingsCommand:
+        createOrdinaryHotelSetupLaunchSettingsCommand(hotelSetupOrdinaryPool),
+      hotelSetupFeatureHubCommands:
+        createOrdinaryHotelSetupFeatureHubCommands(hotelSetupOrdinaryPool),
+      hotelSetupCurrencyCommandPort:
+        config.pmsOperationsSource === "target"
+          ? createPgPmsPricingCommandRepository({
+              connectionString: targetDatabaseUrl,
+              pool: hotelSetupOrdinaryPool,
+              currencyChangeGuard: PMS_PRICING_CURRENCY_CHANGE_FAIL_CLOSED_GUARD,
+              hotelSetupOrdinaryOwner: true,
+            })
+          : undefined,
+      hotelSetupLogoAssignments: hotelSetupOrdinaryLogo?.assignments,
+    }
+  : {};
 const financePaymentSetupRuntime = createFinancePaymentSetupRuntime({
   connectionString: targetDatabaseUrl,
   pricing: pmsPricingReadModel,
@@ -1843,9 +1869,7 @@ const app = buildApp({
     ? { commandPort: pmsPhysicalRoomOperationalLabels }
     : undefined,
   pmsModuleActivationRepository,
-  hotelSetupCommandForwarder,
-  hotelSetupCreationForwarder,
-  hotelSetupProfileForwarder,
+  ...hotelSetupOrdinaryOptions,
   financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,
@@ -2180,9 +2204,11 @@ const app = buildApp({
   bookingWebAffiliateHotelResolver,
   bookingWebAffiliateRepository,
   platformMedia: platformMediaRuntime
-    ? { ...platformMediaRuntime.routes, forwardLogo: hotelSetupLogoForwarder }
+    ? {
+        ...platformMediaRuntime.routes,
+        resolveRequestPersistence: hotelSetupOrdinaryLogo?.uploads.resolveRequestPersistence,
+      }
     : undefined,
-  hotelSetupLogoForwarder,
 });
 app.addHook("onClose", async () => {
   await affiliateCaptureRuntime?.pool.end();
@@ -2441,6 +2467,7 @@ app.addHook("onClose", async () => {
     bookingSetupLifecycleStatusRepository.close(),
     bookingGuestPolicyRepository.close(),
     propertySetupOwnerPool.end(),
+    hotelSetupOrdinaryPool?.end(),
     propertySetupDraftRepository.close(),
     ...propertySetupPmsRuntime.resources.map((resource) => resource.close?.()),
   ]);

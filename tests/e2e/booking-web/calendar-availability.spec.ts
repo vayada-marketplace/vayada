@@ -24,7 +24,7 @@ test("keeps future dates selectable without the retired calendar", async ({ page
   await expect(page.getByText("Select your dates")).toBeHidden();
   await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toHaveAttribute(
     "href",
-    "/en/book?checkIn=2028-03-10&checkOut=2028-03-13&adults=2",
+    /^\/(en\/)?book\?checkIn=2028-03-10&checkOut=2028-03-13&adults=2$/,
   );
   expect(legacyRequests).toEqual([]);
 });

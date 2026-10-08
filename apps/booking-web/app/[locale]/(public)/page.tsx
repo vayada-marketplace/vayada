@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import Image from "next/image";
-import { useRouter } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
 import DatePickerCalendar from "@/components/booking/DatePickerCalendar";
@@ -440,12 +440,12 @@ function HomePageContent() {
         </div>
 
         {/* Rooms, availability and prices live on the room-and-price page. */}
-        <a
-          href={`/${locale}${bookTarget}`}
+        <Link
+          href={bookTarget}
           className="inline-block mb-6 rounded-full bg-primary-600 px-6 py-3 font-semibold text-white"
         >
           {t("chooseRoomsAndPrice")}
-        </a>
+        </Link>
       </div>
 
       <Surroundings key={slug} slug={slug} locality={hotel.contact.address} />
