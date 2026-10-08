@@ -62,9 +62,12 @@ export async function loadPmsMandatoryChargePricingSourceSnapshot(
   }
   const capturedAtIso = capturedAt.toISOString();
   const rooms = await queryActiveRooms(client, propertyId);
-  const flexibleRatePlans =
-    (await readSourcePublishedFlexibleRatePlans(client, propertyId)) ??
-    (await queryFlexiblePlans(client, propertyId));
+  const published = await readSourcePublishedFlexibleRatePlans(
+    client,
+    propertyId,
+    aggregate.currency,
+  );
+  const flexibleRatePlans = published ?? (await queryFlexiblePlans(client, propertyId));
   const pricing = parsePmsPricingSourceSnapshot({
     contractVersion: PMS_PRICING_CONTRACT_VERSION,
     propertyId,
@@ -73,14 +76,15 @@ export async function loadPmsMandatoryChargePricingSourceSnapshot(
     capturedAt: capturedAtIso,
   });
   if (!pricing) throw new Error("PMS mandatory-charge pricing source failed validation");
-  const sources = await queryRecurringSources(client, propertyId);
+  // A publication supersedes the retired legacy recurring pricing, as it does the legacy plans.
+  const sources = published ? [] : await queryRecurringSources(client, propertyId);
   const recurringPricing = parsePmsRecurringPricingBookingEvidence({
     contractVersion: PMS_RECURRING_PRICING_CONTRACT_VERSION,
     propertyId,
     pricingCurrencyRevision: positiveInteger(aggregate.pricingCurrencyRevision),
-    optionalPricingAggregateRevision: nonNegativeInteger(
-      aggregate.optionalPricingAggregateRevision,
-    ),
+    optionalPricingAggregateRevision: published
+      ? 0
+      : nonNegativeInteger(aggregate.optionalPricingAggregateRevision),
     currency: aggregate.currency,
     sources,
     capturedAt: capturedAtIso,

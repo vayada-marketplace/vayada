@@ -188,14 +188,14 @@ describe("PMS mandatory-charge pricing-source snapshot loader", () => {
       },
       terms: { cancellation: { kind: "flexible", terms: legacyPlan.cancellationTerms } },
     };
-    // Rooms, then the head probe, closures and published offers replace the legacy plan read.
+    // Rooms, then the head probe, closures and published offers replace the legacy plan and
+    // recurring reads.
     const { queryClient, queries } = client([
       sets[0]!,
       sets[1]!,
       [{ "?column?": 1 }],
       [],
       [published],
-      ...sets.slice(3),
     ]);
     const snapshot = await loadPmsMandatoryChargePricingSourceSnapshot(
       queryClient,
@@ -210,7 +210,11 @@ describe("PMS mandatory-charge pricing-source snapshot loader", () => {
         sourceRoomFactsRevision: 4,
       },
     ]);
-    expect(queries.map(({ text }) => text).join("\n")).not.toContain("FROM pms.rate_plans");
+    expect(snapshot?.sourceRevisions).toMatchObject({
+      optionalPricingAggregateRevision: 0,
+      recurringSources: [],
+    });
+    expect(queries).toHaveLength(5);
   });
 
   it("returns unconfigured without reading rooms or optional sources", async () => {

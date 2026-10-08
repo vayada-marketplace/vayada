@@ -4,7 +4,10 @@ import {
   type PmsMandatoryChargeConfirmationReadPort,
   type PmsMandatoryChargeConfirmationReadResult,
 } from "@vayada/domain-pms";
+import { createHash } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
+
+import { loadPmsMandatoryChargePricingSourceSnapshot } from "./pmsMandatoryChargePricingSourceSnapshot.js";
 
 export type PmsMandatoryChargeConfirmationReadPool = {
   query<T extends QueryResultRow = QueryResultRow>(
@@ -26,16 +29,8 @@ type ConfirmationRow = {
   confirmedAt: unknown;
 };
 
-const CONFIRMATION_SQL = `SELECT
-  confirmation.organization_id::text AS "organizationId",
-  confirmation.property_id::text AS "propertyId",
-  confirmation.pricing_source_fingerprint AS "pricingSourceFingerprint",
-  confirmation.confirmation_revision AS "confirmationRevision",
-  confirmation.confirmed_at AS "confirmedAt"
-FROM pms.mandatory_charge_confirmation_revisions confirmation
-WHERE confirmation.organization_id = $1::uuid
-  AND confirmation.property_id = $2::uuid
-  AND EXISTS (
+/** The organization owns or operates the property with active PMS property management. */
+const SCOPE_SQL = `EXISTS (
     SELECT 1 FROM identity.organizations organization
     WHERE organization.id = $1::uuid
       AND organization.kind = 'hotel_group'
@@ -81,10 +76,37 @@ WHERE confirmation.organization_id = $1::uuid
           AND entitlement.resource_id = $2::uuid::text
         )
       )
-  )
+  )`;
+
+const CONFIRMATION_SQL = `SELECT
+  confirmation.organization_id::text AS "organizationId",
+  confirmation.property_id::text AS "propertyId",
+  confirmation.pricing_source_fingerprint AS "pricingSourceFingerprint",
+  confirmation.confirmation_revision AS "confirmationRevision",
+  confirmation.confirmed_at AS "confirmedAt"
+FROM pms.mandatory_charge_confirmation_revisions confirmation
+WHERE confirmation.organization_id = $1::uuid
+  AND confirmation.property_id = $2::uuid
+  AND ${SCOPE_SQL}
 ORDER BY confirmation.confirmation_revision DESC
 LIMIT 1
 /* pms_mandatory_charge_confirmation_scope */`;
+
+/** With a pricing-v2 publication, the head revision's charge declaration ("all mandatory charges
+ * included", made for exactly the published prices) is the property's final-price confirmation. */
+const PUBLISHED_CONFIRMATION_SQL = `SELECT
+  $1::uuid::text AS "organizationId",
+  head.property_id::text AS "propertyId",
+  head.revision AS "confirmationRevision",
+  declaration.created_at AS "confirmedAt"
+FROM pms.pricing_v2_heads head
+JOIN pms.pricing_v2_revisions revision
+  ON revision.property_id = head.property_id AND revision.revision = head.revision
+JOIN pms.pricing_v2_charge_declarations declaration
+  ON declaration.property_id = head.property_id
+ AND declaration.id::text = revision.owner_references->>'charges'
+WHERE head.property_id = $2::uuid
+  AND ${SCOPE_SQL}`;
 
 export function createPgPmsMandatoryChargeConfirmationReadModel(config: {
   connectionString: string;
@@ -105,11 +127,31 @@ export function createPgPmsMandatoryChargeConfirmationReadModel(config: {
       if (!request) throw new Error("PMS mandatory-charge confirmation read scope is malformed");
 
       try {
-        const result = await pool.query<ConfirmationRow>(CONFIRMATION_SQL, [
-          request.organizationId,
-          request.propertyId,
-        ]);
-        const row = result.rows[0];
+        const scope = [request.organizationId, request.propertyId];
+        const published = (
+          await pool.query<Omit<ConfirmationRow, "pricingSourceFingerprint">>(
+            PUBLISHED_CONFIRMATION_SQL,
+            scope,
+          )
+        ).rows[0];
+        let row: ConfirmationRow | undefined;
+        if (published) {
+          // Bound to the pricing source the published prices produce now.
+          const source = await loadPmsMandatoryChargePricingSourceSnapshot(
+            pool,
+            request.propertyId,
+            new Date(),
+          );
+          if (!source) return readResult({ ...request, outcome: "missing" });
+          row = {
+            ...published,
+            pricingSourceFingerprint: createHash("sha256")
+              .update(source.serializedPayload)
+              .digest("hex"),
+          };
+        } else {
+          row = (await pool.query<ConfirmationRow>(CONFIRMATION_SQL, scope)).rows[0];
+        }
         if (!row) return readResult({ ...request, outcome: "missing" });
         const confirmationRevision = positiveInteger(row.confirmationRevision);
         const confirmedAt = isoDate(row.confirmedAt);
