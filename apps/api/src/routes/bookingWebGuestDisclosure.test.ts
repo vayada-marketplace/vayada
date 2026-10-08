@@ -372,6 +372,7 @@ it.each([
   ["conflict", 409],
   ["storage", 503],
   ["unexpected", 500],
+  ["card_unavailable", 404],
 ] as const)("maps %s acceptance failures to %i", async (code, statusCode) => {
   vi.mocked(writePricingAcceptance).mockRejectedValue(new PricingAcceptanceError(code, null));
   await mount(true, true);
