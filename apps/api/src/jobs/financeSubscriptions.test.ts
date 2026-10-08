@@ -4,7 +4,6 @@ import type {
   StripeFinanceSubscriptionProvider,
   StripeSubscriptionSnapshot,
 } from "@vayada/domain-finance";
-import pg from "pg";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -164,19 +163,15 @@ describe("Finance subscription webhook lifecycle", () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] });
-    const PoolSpy = vi.spyOn(pg, "Pool").mockImplementation(
-      () => ({ query, on: vi.fn(), end: vi.fn() }) as never,
-    );
-    try {
-      const provider = setup("commission").provider;
-      await expect(
-        runFinanceSubscriptionWebhookJobs("postgres://unused", provider, {
-          getRoomInventorySnapshot: vi.fn(),
-        }),
-      ).resolves.toEqual({ processed: 1, failed: 0 });
-    } finally {
-      PoolSpy.mockRestore();
-    }
+    const provider = setup("commission").provider;
+    await expect(
+      runFinanceSubscriptionWebhookJobs(
+        "postgres://unused",
+        provider,
+        { getRoomInventorySnapshot: vi.fn() },
+        { pool: { query } as never },
+      ),
+    ).resolves.toEqual({ processed: 1, failed: 0 });
     const finish = query.mock.calls.find((call) => String(call[0]).includes("'succeeded'"));
     expect(finish?.[1]).toEqual(["job-3", "ignored_unowned"]);
     expect(String(finish?.[0])).toContain("'outcome'");

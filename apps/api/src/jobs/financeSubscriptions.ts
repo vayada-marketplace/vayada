@@ -166,10 +166,12 @@ export async function runFinanceSubscriptionWebhookJobs(
     workerId?: string;
     limit?: number;
     refreshPublicBookability?: (propertyId: string) => Promise<void>;
+    pool?: pg.Pool;
   } = {},
 ): Promise<{ processed: number; failed: number }> {
-  const pool = new pg.Pool({ connectionString, max: 2 });
-  attachPoolErrorLogger(pool, "finance-subscriptions");
+  const ownsPool = !options.pool;
+  const pool = options.pool ?? new pg.Pool({ connectionString, max: 2 });
+  if (ownsPool) attachPoolErrorLogger(pool, "finance-subscriptions");
   const store = createPgFinanceSubscriptionWebhookStore(pool);
   let processed = 0;
   let failed = 0;
@@ -198,7 +200,7 @@ export async function runFinanceSubscriptionWebhookJobs(
     }
     return { processed, failed };
   } finally {
-    await pool.end();
+    if (ownsPool) await pool.end();
   }
 }
 
