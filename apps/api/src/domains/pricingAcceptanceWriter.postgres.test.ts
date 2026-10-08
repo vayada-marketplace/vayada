@@ -7,6 +7,7 @@ import { pricingDraftFixture } from "./pricingBookingDraft.fixtures.js";
 import { acceptanceFixture } from "./pricingAcceptanceHistory.fixtures.js";
 import { writePricingAcceptance } from "./pricingAcceptanceWriter.js";
 import { completePricingCardPayment } from "./pricingCardPaymentCompletion.js";
+import { settleStripeBookingPayment } from "./stripeBookingSettlement.js";
 import { readBookingAffiliateContextForQuote } from "./bookingAffiliateContextForQuote.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { reserveRevalidatedQuoteInventory } from "./currentQuoteInventory.js";
@@ -282,7 +283,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     });
   };
 
-  it("accepts the quote, holds the rooms and starts a Stripe payment without confirming", async () => {
+  async function cardFixture() {
     const fixture = await setupFixture(cardQuote);
     const slug = `writer-${fixture.propertyId}`;
     fixture.input.slug = slug;
@@ -321,6 +322,12 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       }),
     );
     const provider = { createPaymentIntent, retrievePaymentIntent } as never;
+    return { fixture, slug, createPaymentIntent, retrievePaymentIntent, provider };
+  }
+
+  it("accepts the quote, holds the rooms and starts a Stripe payment without confirming", async () => {
+    const { fixture, slug, createPaymentIntent, retrievePaymentIntent, provider } =
+      await cardFixture();
     try {
       await expect(writePricingAcceptance(fixture.pool, fixture.input)).rejects.toMatchObject({
         code: "conflict",
@@ -459,6 +466,49 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
           )
         ).rows[0].n,
       ).toBe(1);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("settles a card acceptance through the legacy Stripe settlement without the legacy PMS job", async () => {
+    const { fixture, provider } = await cardFixture();
+    try {
+      await writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider });
+      const client = await fixture.pool.connect();
+      try {
+        await client.query("BEGIN");
+        await expect(
+          settleStripeBookingPayment(client, {
+            paymentIntentId: "pi_writer_test",
+            providerAccountRef: "acct_writer_test",
+            amountMinor: Number(fixture.f.current.quote.evidence.dueNowMinor),
+            currency: fixture.f.current.quote.stay.currency,
+            occurredAt: new Date(),
+            correlationId: "webhook-test",
+          }),
+        ).resolves.toBe("settled");
+        await client.query("COMMIT");
+      } finally {
+        client.release();
+      }
+      const state = (
+        await fixture.observer.query(
+          `SELECT b.lifecycle_status,b.payment_status,
+            (SELECT count(*)::int FROM platform.jobs j WHERE j.property_id=b.property_id
+              AND j.job_type='pms.reservation.accepted-pricing.create') AS accepted_jobs,
+            (SELECT count(*)::int FROM platform.jobs j WHERE j.property_id=b.property_id
+              AND j.job_type='pms.reservation.create') AS legacy_jobs
+           FROM booking.guest_bookings b WHERE b.property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows[0];
+      expect(state).toEqual({
+        lifecycle_status: "confirmed",
+        payment_status: "paid",
+        accepted_jobs: 1,
+        legacy_jobs: 0,
+      });
     } finally {
       await fixture.close();
     }
