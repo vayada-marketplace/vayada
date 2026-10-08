@@ -159,6 +159,8 @@ export type PmsOperationalAssignment = {
   assignmentId: string;
   roomTypeId: string;
   ratePlanId: string | null;
+  /** Published pricing-v2 offer the stay was priced from (manual or booking-engine stays). */
+  pricingOfferId?: string | null;
   roomId: string | null;
   roomNumber: string | null;
   position: number;
@@ -1038,6 +1040,9 @@ LEFT JOIN LATERAL (
              'assignmentId', assignment.id::text,
              'roomTypeId', assignment.room_type_id::text,
              'ratePlanId', assignment.rate_plan_id::text,
+             -- Manual bookings keep the offer in pricingOffer, booking-engine ones in pricingAcceptance.
+             'pricingOfferId', COALESCE(assignment.assignment_payload->'pricingOffer'->>'offerId',
+               assignment.assignment_payload->'pricingAcceptance'->>'offerId'),
              'roomId', assignment.room_id::text,
              'roomNumber', room.room_number,
              'position', assignment.position,
@@ -1529,6 +1534,7 @@ function toOperationalAssignments(value: unknown): PmsOperationalAssignment[] {
         assignmentId: String(item.assignmentId ?? ""),
         roomTypeId: String(item.roomTypeId ?? ""),
         ratePlanId: typeof item.ratePlanId === "string" ? item.ratePlanId : null,
+        pricingOfferId: typeof item.pricingOfferId === "string" ? item.pricingOfferId : null,
         roomId: typeof item.roomId === "string" ? item.roomId : null,
         roomNumber: typeof item.roomNumber === "string" ? item.roomNumber : null,
         position: toInteger(Number(item.position ?? 0)),
