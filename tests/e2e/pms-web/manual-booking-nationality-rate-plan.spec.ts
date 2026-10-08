@@ -138,13 +138,8 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   await page.route(`${manualBookingPath}/preview`, (route) => {
     const body = route.request().postDataJSON();
     previewBodies.push(body);
-    // The property prices in CHF: a custom rate sent without a currency is answered in it.
-    const currency = body.stays.some(
-      (stay: PreviewStay) =>
-        stay.pricing.kind === "custom" && !stay.pricing.nightlyAmount?.currency,
-    )
-      ? "CHF"
-      : "EUR";
+    // The property prices in EUR: a custom rate sent without a currency is answered in it.
+    const currency = "EUR";
     const stays = body.stays.map((stay: PreviewStay) => {
       const nights = Math.round(
         (Date.parse(stay.checkOut) - Date.parse(stay.checkIn)) / 86_400_000,
@@ -193,8 +188,8 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
         stayCount: 1,
         checkIn: "2026-09-10",
         checkOut: "2026-09-12",
-        total: { amountDecimal: "300.00", currency: "CHF" },
-        balance: { amountDecimal: "300.00", currency: "CHF" },
+        total: { amountDecimal: "300.00", currency: "EUR" },
+        balance: { amountDecimal: "300.00", currency: "EUR" },
         paymentStatus: "unpaid",
         paymentEvidenceId: null,
         rearrangedBookingCount: 0,
@@ -258,7 +253,7 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   await dialog.getByLabel("Room 1 room").selectOption(LOFT_ROOM_ID);
   await expect(ratePlan).toHaveValue("custom");
   await dialog.getByLabel("Room 1 nightly rate").fill("150");
-  await expect(page.getByText("Total CHF300")).toBeVisible();
+  await expect(page.getByText("Total €300")).toBeVisible();
   await expect(createBooking).toBeEnabled();
   expect(previewBodies.at(-1)?.stays[0]?.pricing.nightlyAmount).toEqual({
     amountDecimal: "150.00",

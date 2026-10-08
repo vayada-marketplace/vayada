@@ -270,8 +270,9 @@ the target manual writer can be accepted.
   survives when a room-type change drops the offer link. The preview's
   `pricingRevision` is null when no stay names an offer.
 - Custom-only bookings need no publication. Their currency is the published
-  currency when one exists, else the property's pricing currency; a property
-  with no pricing currency at all returns `pricing_not_published` (409).
+  currency when one exists, else the property's pricing currency, else the
+  legacy currency of the stay's room type; with none of these the stay returns
+  `pricing_not_published` (409).
   A custom `nightlyAmount` may omit its `currency` (VAY-2065): the server then
   prices it in that resolved currency, because a room type from the room-facts
   flow carries none for the client to send. A sent currency must still match.
