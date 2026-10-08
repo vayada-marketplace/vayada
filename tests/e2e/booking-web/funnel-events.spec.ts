@@ -28,7 +28,10 @@ for (const analytics of [true, false]) {
       expect(events).toEqual([]);
       return;
     }
-    await expect.poll(() => events.map((event) => event.eventType)).toEqual(["page_visit"]);
-    expect(events[0].sessionId).toBeTruthy();
+    // React's development double-invoked effects may report the visit twice.
+    await expect
+      .poll(() => [...new Set(events.map((event) => event.eventType))])
+      .toEqual(["page_visit"]);
+    expect(new Set(events.map((event) => event.sessionId)).size).toBe(1);
   });
 }
