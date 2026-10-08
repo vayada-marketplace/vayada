@@ -1406,7 +1406,8 @@ type TargetChangeRequestRow = QueryResultRow & {
 
 export type PgTargetBookingWebCheckoutAdapterConfig = {
   /** Empty by default; use only for explicitly approved synthetic/public rollout slugs. */
-  replacementPricingAcceptanceAllowedSlugs?: readonly string[];
+  /** Kill switch; the acceptance writer still requires Vayada authority and a publication. */
+  replacementPricingAcceptanceEnabled?: boolean;
   externalChanges: ExternalChangePresentationPort;
   /** Register only with the reviewed provider runtime; absent keeps Airbnb actions disabled. */
   airbnbAlterations?: {
@@ -2050,7 +2051,7 @@ export function createTargetBookingWebCheckoutAdapter(
       return disclosure;
     },
     async acceptPricingQuote(slug, request, affiliateContextCookie) {
-      if (!config.replacementPricingAcceptanceAllowedSlugs?.includes(slug))
+      if (!config.replacementPricingAcceptanceEnabled)
         throw createHttpError(404, "Quote acceptance unavailable.");
       try {
         let contextId: string | null = null;

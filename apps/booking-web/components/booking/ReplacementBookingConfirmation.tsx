@@ -76,11 +76,16 @@ export default function ReplacementBookingConfirmation({
       );
     } catch (failure) {
       const conflict = failure instanceof ApiError && failure.status === 409;
+      // 404 on a first attempt: online booking is off or this hotel is not bookable, so nothing
+      // was stored. A retry after an uncertain attempt keeps the uncertain message.
+      const unavailable = failure instanceof ApiError && failure.status === 404 && !pending;
       setRefreshRequired(conflict);
       setError(
         conflict
           ? "This price is no longer available. Get a new price and review its terms again."
-          : "We couldn’t confirm your booking. Your room may still have been booked, so retry with the same details.",
+          : unavailable
+            ? "Online booking is not available for this hotel right now. No room was reserved and no payment was taken."
+            : "We couldn’t confirm your booking. Your room may still have been booked, so retry with the same details.",
       );
     } finally {
       setLoading(false);

@@ -504,7 +504,7 @@ const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   airbnbAlterations: airbnbAlterationRuntime?.adapter,
   externalChanges: externalBookingChanges,
   mixedRoomSelectionsEnabled: true,
-  replacementPricingAcceptanceAllowedSlugs: config.replacementPricingAcceptanceAllowedSlugs,
+  replacementPricingAcceptanceEnabled: config.replacementPricingAcceptanceEnabled,
   bankTransfers: bankTransferBookings,
   connectionString: targetDatabaseUrl,
   inventoryReservationPort: createTargetPmsInventoryReservationPort(),
