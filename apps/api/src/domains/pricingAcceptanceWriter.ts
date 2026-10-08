@@ -18,7 +18,7 @@ import type { StripeBookingPaymentProvider } from "./stripeBookingPayments.js";
 
 export class PricingAcceptanceError extends Error {
   constructor(
-    readonly code: "conflict" | "storage" | "unexpected",
+    readonly code: "conflict" | "storage" | "unexpected" | "card_unavailable",
     cause: unknown,
   ) {
     super("Pricing acceptance failed", { cause });
@@ -144,6 +144,8 @@ export async function writePricingAcceptance(
   } catch (error) {
     await client?.query("ROLLBACK").catch(() => undefined);
     if (error instanceof PricingAcceptanceError) throw error;
+    if (error instanceof Error && error.message === "Card acceptance unavailable")
+      throw new PricingAcceptanceError("card_unavailable", error);
     if (error instanceof Error && conflictMessages.has(error.message))
       throw new PricingAcceptanceError("conflict", error);
     if (
