@@ -125,6 +125,19 @@ it("retires a rejected quote", async () => {
   expect(document.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
 });
 
+it("says nothing was booked when online booking is unavailable", async () => {
+  render();
+  input("firstName").value = "Ada";
+  input("lastName").value = "Lovelace";
+  input("email").value = "ada@example.test";
+  input("phone").value = "+49";
+  vi.mocked(acceptPricingQuote).mockRejectedValueOnce(new ApiError("hidden", 404, null));
+  await submit();
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+    "No room was reserved and no payment was taken",
+  );
+});
+
 it("keeps an uncertain attempt retryable", async () => {
   render();
   input("firstName").value = "Ada";

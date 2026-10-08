@@ -17,11 +17,7 @@ export type ApiAuthConfig = {
 };
 
 export type ApiAuthSurface =
-  | "platform-admin"
-  | "booking-admin"
-  | "pms-web"
-  | "affiliate-dashboard"
-  | "marketplace-web";
+  "platform-admin" | "booking-admin" | "pms-web" | "affiliate-dashboard" | "marketplace-web";
 
 export type ApiAuthSessionConfig = {
   workosClientId: string;
@@ -217,7 +213,9 @@ export type ApiConfig = {
   pmsOperationsAllowedOrigins: string[];
   financialsActivationPropertyIds: string[];
   bookingWebEventSink: BookingWebEventSink;
-  replacementPricingAcceptanceAllowedSlugs: string[];
+  /** Kill switch for public quote acceptance; each hotel still needs the Vayada pricing
+   * authority and a current publication. */
+  replacementPricingAcceptanceEnabled: boolean;
   bookingHostBase?: string;
   platformMediaServing?: PlatformMediaServingConfig;
   platformMediaCleanupEnabled: boolean;
@@ -365,14 +363,6 @@ function readOptionalCsvEnv(
         .map((entry) => entry.trim())
         .filter(Boolean)
     : defaultValue;
-}
-
-function readSlugAllowlistEnv(env: NodeJS.ProcessEnv, key: string): string[] {
-  const slugs = [...new Set(readOptionalCsvEnv(env, key).map((slug) => slug.toLowerCase()))];
-  if (slugs.length > 100 || slugs.some((slug) => !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug))) {
-    throw new Error(`${key} requires up to 100 canonical lowercase slugs`);
-  }
-  return slugs;
 }
 
 function readPropertyIdAllowlistEnv(env: NodeJS.ProcessEnv, key: string): string[] {
@@ -1072,10 +1062,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     "disabled",
   );
   const auth = loadAuthConfig(env);
-  const affiliateCapture = loadAffiliateCaptureConfig(env, [
-    targetDatabaseUrl,
-    auth?.databaseUrl,
-  ]);
+  const affiliateCapture = loadAffiliateCaptureConfig(env, [targetDatabaseUrl, auth?.databaseUrl]);
   const affiliatePublicRedirectEnabled = readBooleanEnv(
     env,
     "AFFILIATE_PUBLIC_REDIRECT_ENABLED",
@@ -1341,9 +1328,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "PMS_FINANCIALS_ACTIVATION_PROPERTY_IDS",
     ),
     bookingWebEventSink,
-    replacementPricingAcceptanceAllowedSlugs: readSlugAllowlistEnv(
+    replacementPricingAcceptanceEnabled: readBooleanEnv(
       env,
-      "REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS",
+      "REPLACEMENT_PRICING_ACCEPTANCE_ENABLED",
+      true,
     ),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
     platformMediaServing,

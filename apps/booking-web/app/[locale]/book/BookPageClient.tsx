@@ -14,7 +14,6 @@ import ReplacementBookingConfirmation from "@/components/booking/ReplacementBook
 import type { PublicQuoteGuestDisclosure } from "@vayada/domain-booking/replacement-pricing";
 import { useSlug } from "@/contexts/HotelContext";
 import { useReplacementQuote } from "@/lib/hooks/useReplacementQuote";
-import { replacementPricingAcceptanceEnabled } from "@/lib/replacementPricingAcceptance";
 import {
   displayQuoteMoney,
   getReplacementOffers,
@@ -39,7 +38,6 @@ export default function BookPageClient() {
 }
 
 function RoomQuoteForm({ slug }: { slug: string }) {
-  const acceptanceEnabled = replacementPricingAcceptanceEnabled(slug);
   const [termsAcknowledgement, setTermsAcknowledgement] =
     useState<QuoteTermsAcknowledgement | null>(null);
   const [guestDisclosure, setGuestDisclosure] = useState<PublicQuoteGuestDisclosure | null>(null);
@@ -385,20 +383,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             quote={quote}
             onAcknowledgementChange={setGuestDisclosure}
           />
-          {acceptanceEnabled ? (
-            <ReplacementBookingConfirmation
-              key={quote.quoteId}
-              slug={slug}
-              quote={quote}
-              disclosure={guestDisclosure}
-              termsAccepted={termsAcknowledgement?.quoteId === quote.quoteId}
-            />
-          ) : (
-            <p className="text-sm text-gray-600">
-              This is a price preview. No room is reserved and no payment is taken. Online
-              reservation submission is currently unavailable.
-            </p>
-          )}
+          <ReplacementBookingConfirmation
+            key={quote.quoteId}
+            slug={slug}
+            quote={quote}
+            disclosure={guestDisclosure}
+            termsAccepted={termsAcknowledgement?.quoteId === quote.quoteId}
+          />
         </section>
       )}
     </main>

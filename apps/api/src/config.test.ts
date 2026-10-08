@@ -896,20 +896,14 @@ describe("api config", () => {
     );
   });
 
-  it("loads a canonical replacement-pricing acceptance slug allowlist", () => {
+  it("enables replacement-pricing quote acceptance unless the kill switch is off", () => {
+    expect(loadConfig({}).replacementPricingAcceptanceEnabled).toBe(true);
     expect(
-      loadConfig({
-        REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS: "Test-Hotel, other-hotel,test-hotel",
-      }).replacementPricingAcceptanceAllowedSlugs,
-    ).toEqual(["test-hotel", "other-hotel"]);
-    expect(loadConfig({}).replacementPricingAcceptanceAllowedSlugs).toEqual([]);
-  });
-
-  it("rejects malformed replacement-pricing acceptance slugs", () => {
-    expect(() =>
-      loadConfig({ REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS: "test-hotel,*.vayada.com" }),
-    ).toThrow(
-      "REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS requires up to 100 canonical lowercase slugs",
+      loadConfig({ REPLACEMENT_PRICING_ACCEPTANCE_ENABLED: "false" })
+        .replacementPricingAcceptanceEnabled,
+    ).toBe(false);
+    expect(() => loadConfig({ REPLACEMENT_PRICING_ACCEPTANCE_ENABLED: "test-hotel" })).toThrow(
+      "REPLACEMENT_PRICING_ACCEPTANCE_ENABLED must be true or false",
     );
   });
 
