@@ -39,7 +39,8 @@ const { values } = parseArgs({
   },
 });
 const mode = values.mode ?? "adopt";
-const propertyId = values["property-id"] ?? "";
+// Legacy hotel_id metadata and target UUIDs are lowercase; normalize operator input.
+const propertyId = (values["property-id"] ?? "").toLowerCase();
 const subscriptionId = values["subscription-id"] ?? "";
 const apply = values["apply-for-property"] !== undefined;
 const revertLegacyFixed = values["revert-legacy-fixed"] === true;

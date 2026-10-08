@@ -49,7 +49,11 @@ export type LegacyInventoryReport = {
 };
 
 export type LegacyInventoryDependencies = {
-  stripe: { searchLegacyFixedPlanSubscriptions(): Promise<LegacySubscriptionInspection[]> };
+  stripe: {
+    searchLegacyFixedPlanSubscriptions(): Promise<LegacySubscriptionInspection[]>;
+    /** Live GET: search results lag writes, so every open row is re-read. */
+    inspectLegacySubscription(subscriptionId: string): Promise<LegacySubscriptionInspection>;
+  };
   store: Pick<LegacyAdoptionStore, "getEntitlement">;
   now?: () => Date;
 };
@@ -62,7 +66,10 @@ export async function inventoryLegacyFixedPlanSubscriptions(
 ): Promise<LegacyInventoryReport> {
   const now = dependencies.now?.() ?? new Date();
   const subscriptions: LegacyInventoryRow[] = [];
-  for (const inspection of await dependencies.stripe.searchLegacyFixedPlanSubscriptions()) {
+  for (const found of await dependencies.stripe.searchLegacyFixedPlanSubscriptions()) {
+    const inspection = LEGACY_DEAD_STATUSES.has(found.snapshot.status)
+      ? found
+      : await dependencies.stripe.inspectLegacySubscription(found.snapshot.subscriptionId);
     subscriptions.push(await classify(inspection, dependencies, now));
   }
   subscriptions.sort((left, right) => left.subscriptionId.localeCompare(right.subscriptionId));
@@ -108,9 +115,13 @@ async function classify(
     reason,
   });
 
-  if (LEGACY_DEAD_STATUSES.has(snapshot.status)) return row("ended", null);
   const entitlement = hotelId ? await dependencies.store.getEntitlement(hotelId) : null;
   const cohort = entitlement !== null;
+  if (LEGACY_DEAD_STATUSES.has(snapshot.status)) {
+    // Closed for the gate, but a cohort hotel still suspended needs the revert.
+    const suspended = cohort && entitlement.billingStatus === "suspended";
+    return row("ended", suspended ? "cohort_hotel_needs_revert" : null, cohort);
+  }
   if (snapshot.cancelAtPeriodEnd) {
     // Scheduled to end, so the gate holds; a cohort hotel that was never
     // adopted still needs adoption or a revert to leave suspension.
@@ -127,9 +138,11 @@ async function classify(
       entitlement.planKey === "fixed" &&
       typeof entitlement.metadata["legacyAdoptedAt"] === "string" &&
       entitlement.metadata["providerReentryRequired"] !== true;
-    return recorded
+    if (!recorded) return row("blocked", "adoption_incomplete_rerun_adopt", true);
+    // A repriced or edited subscription no longer verifies; its webhooks would dead-letter.
+    return snapshot.fixedPlanVerified && snapshot.retainedLegacyPrice === true
       ? row("adopted", null, true)
-      : row("blocked", "adoption_incomplete_rerun_adopt", true);
+      : row("blocked", "adopted_subscription_unverifiable", true);
   }
   if (entitlement.subscriptionRef && !bound) {
     return row("blocked", "entitlement_bound_to_other_subscription", true);
