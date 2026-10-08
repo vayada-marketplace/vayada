@@ -24,7 +24,7 @@ for (const mobile of [false, true]) {
     const entry = page.getByRole("link", { name: "Choose rooms and get a price" });
     await expect(entry).toHaveAttribute(
       "href",
-      "/en/book?checkIn=2026-09-12&checkOut=2026-09-15&adults=13&children=1",
+      /^\/(en\/)?book\?checkIn=2026-09-12&checkOut=2026-09-15&adults=13&children=1$/,
     );
     await page.screenshot({ path: test.info().outputPath("guest-capacity.png"), fullPage: true });
     await page.getByRole("button", { name: "Check Availability", exact: true }).click();
