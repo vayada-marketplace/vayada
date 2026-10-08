@@ -48,14 +48,7 @@ export function createPublicPricingOfferCatalog(pool: Pool) {
             return null;
         }
         const current = await lockPublicPricingAuthority(client, slug);
-        if (
-          !current ||
-          !isDeepStrictEqual(current, owner.scope) ||
-          (assigned &&
-            (assigned.propertyId !== current.propertyId ||
-              assigned.organizationId !== current.organizationId))
-        )
-          return null;
+        if (!current || !isDeepStrictEqual(current, owner.scope)) return null;
         return {
           version: "public-pricing-offers.v1" as const,
           rooms: content.rooms.map((room) => ({
