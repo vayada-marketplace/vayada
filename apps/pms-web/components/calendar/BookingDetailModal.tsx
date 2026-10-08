@@ -438,6 +438,9 @@ export default function BookingDetailModal({
     };
   }, [targetQuoteKey]);
   const quote = targetQuote && targetQuote.key === targetQuoteKey ? targetQuote : null;
+  // Quoted amounts are exact server decimals: keep cents when present.
+  const formatQuote = (amount: number, currency: string) =>
+    formatCurrency(amount, currency, Number.isInteger(amount) ? 0 : 2);
   const targetRateCompatible = Boolean(
     channelKey === "manual" &&
     hasCompleteRateEvidence &&
@@ -497,12 +500,26 @@ export default function BookingDetailModal({
     setMoveError(null);
     setMovingRoom(true);
     try {
-      const updated = await bookingsService.moveRoom(
-        bookingId,
-        pickerSelectedRoomId,
-        sourceAssignmentSelector,
-        isCrossType && targetRateCompatible ? ratePolicy : "preserve",
-      );
+      const targetBase = isCrossType && targetRateCompatible && ratePolicy === "target_base";
+      const quotedOffer = rooms.find(
+        (room) => room.id === pickerSelectedRoomId,
+      )?.flexibleRatePlanId;
+      // Target base charges exactly the offer quoted above.
+      const updated =
+        targetBase && quotedOffer
+          ? await bookingsService.moveRoom(
+              bookingId,
+              pickerSelectedRoomId,
+              sourceAssignmentSelector,
+              "target_base",
+              quotedOffer,
+            )
+          : await bookingsService.moveRoom(
+              bookingId,
+              pickerSelectedRoomId,
+              sourceAssignmentSelector,
+              "preserve",
+            );
       const target = rooms.find((r) => r.id === pickerSelectedRoomId);
       setMovedToRoomNumber(target?.roomNumber || updated.roomNumber || "");
       setMovedToRoomTypeName(target?.roomTypeName || updated.roomName || "");
@@ -843,8 +860,8 @@ export default function BookingDetailModal({
                   {t("calendar.bookingDetail.new")}{" "}
                   {quote && moveNights !== null && moveNights > 0
                     ? t("calendar.bookingDetail.rateTotal", {
-                        rate: formatCurrency(quote.total / moveNights, quote.currency),
-                        total: formatCurrency(quote.total, quote.currency),
+                        rate: formatQuote(quote.total / moveNights, quote.currency),
+                        total: formatQuote(quote.total, quote.currency),
                       })
                     : t("calendar.bookingDetail.totalUnavailable")}
                 </p>
@@ -857,7 +874,7 @@ export default function BookingDetailModal({
                     : booking.currency !== quote.currency
                       ? t("calendar.bookingDetail.differenceCurrencies")
                       : t("calendar.bookingDetail.difference", {
-                          amount: `${quote.total - originalNightlyRate * moveNights >= 0 ? "+" : ""}${formatCurrency(quote.total - originalNightlyRate * moveNights, booking.currency)}`,
+                          amount: `${quote.total - originalNightlyRate * moveNights >= 0 ? "+" : ""}${formatQuote(quote.total - originalNightlyRate * moveNights, booking.currency)}`,
                         })}
               </p>
               <div className="mt-3 space-y-2">

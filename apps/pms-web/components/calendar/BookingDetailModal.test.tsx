@@ -251,6 +251,7 @@ describe("cross-room-type move picker", () => {
       "room-3",
       { assignmentId: "a-1" },
       "target_base",
+      "villa-flex",
     );
     view!.unmount();
   });
@@ -275,7 +276,9 @@ describe("cross-room-type move picker", () => {
     });
     await selectCrossTypeRoom(view!);
     expect(view!.root.findAllByProps({ type: "radio" })[1]!.props.disabled).toBe(true);
-    expect(JSON.stringify(view!.toJSON())).toContain("no published Flexible price");
+    expect(JSON.stringify(view!.toJSON())).toContain(
+      "published Flexible price can't be calculated for this stay",
+    );
     view!.unmount();
   });
 });
