@@ -161,7 +161,10 @@ describe("request-bound ordinary logo runtime", () => {
     await ports.close();
   });
   it("keeps the shared persistence for other sessions and purposes without a request pool", async () => {
-    mocks.routing.mockResolvedValue({ rows: [] });
+    // Not this actor's logo session, and not a logo session at all.
+    mocks.routing
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ logo: false }] });
     const finalize = await runtime().uploads.resolveRequestPersistence!({
       operation: "finalize",
       context,
@@ -180,6 +183,19 @@ describe("request-bound ordinary logo runtime", () => {
         request: { ...logoRequest, resource: { ...logoRequest.resource, product: "pms" } },
       }),
     ).rejects.toThrow("Invalid logo target");
+    expect(mocks.pool).not.toHaveBeenCalled();
+  });
+  it("fails closed on another actor's logo session instead of using the shared path", async () => {
+    for (const lookup of [{ rows: [{ logo: true }] }, { rows: [] }]) {
+      mocks.routing.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce(lookup);
+      await expect(
+        runtime().uploads.resolveRequestPersistence!({
+          operation: "finalize",
+          context,
+          sessionId: propertyId,
+        }),
+      ).rejects.toBeInstanceOf(AuthorizationError);
+    }
     expect(mocks.pool).not.toHaveBeenCalled();
   });
   it("denies a non-Owner session before opening a request pool", async () => {

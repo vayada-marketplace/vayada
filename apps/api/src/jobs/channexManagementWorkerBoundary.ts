@@ -5,8 +5,15 @@ import {
   channexManagementWorkerPrivileges,
 } from "./channexManagementWorkerPrivileges.js";
 
-// Worker policy catalog through 0473; shared trigger catalog through 0474, checked on PG16 and PG17.
+// Worker policy catalog through 0473, checked on PG17.
 const POLICY_DIGEST = "c0c08b5d01df4b8fa3c1bed72e7a1fcdbfd77731383e63bd986f3d938ec26323";
+// Shared trigger catalog: through 0473, and after 0474 drops the native hotel-setup triggers
+// (VAY-2056 step 6, PG16 and PG17). Accepting both lets this image start on either side of
+// 0474, so it stays a safe rollback target when 0474 ships in a later release.
+const CATALOG_DIGESTS = new Set([
+  "10c6d40b2c7b7c4baacc4adaf468ddac1c3675344c114e40a5f77ba335b27794",
+  "739a61d86e2ec4698b47af2c2206a3a3cd60c37e4fb9c0a99886336ef5ab71fd",
+]);
 export const channexManagementWorkerFunctions = [
   "platform.channex_management_worker_scope(text,text,uuid)",
   "platform.channex_management_worker_source(text,text,uuid)",
@@ -93,10 +100,7 @@ export async function assertChannexManagementWorkerBoundary(
   const catalog = (
     await client.query(channexWorkerCatalogSql, [Object.keys(channexManagementWorkerPrivileges)])
   ).rows;
-  if (
-    createHash("sha256").update(JSON.stringify(catalog)).digest("hex") !==
-    "739a61d86e2ec4698b47af2c2206a3a3cd60c37e4fb9c0a99886336ef5ab71fd"
-  )
+  if (!CATALOG_DIGESTS.has(createHash("sha256").update(JSON.stringify(catalog)).digest("hex")))
     fail("catalog_drift");
   const version = Number(
     (await client.query("SHOW server_version_num")).rows[0].server_version_num,
