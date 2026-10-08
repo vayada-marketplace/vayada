@@ -29,7 +29,12 @@
     "./AddonEditor": "./src/AddonEditor.tsx",
     "./PreparedHotelEditor": "./src/PreparedHotelEditor.tsx",
     "./PreparedHotelImportPanel": "./src/PreparedHotelImportPanel.tsx",
-    "./replacementPricingClient": "./src/replacementPricingClient.ts"
+    "./replacementPricingClient": "./src/replacementPricingClient.ts",
+    "./FirstPricingSetup": "./src/FirstPricingSetup.tsx",
+    "./IncludedPricing": "./src/IncludedPricing.tsx",
+    "./AcceptedPaymentMethods": "./src/AcceptedPaymentMethods.tsx",
+    "./pricingSetupAmounts": "./src/pricingSetupAmounts.ts",
+    "./firstPricingSetupMessages": "./src/firstPricingSetupMessages.ts"
   },
   "dependencies": {
     "@vayada/domain-booking": "*",
