@@ -4,6 +4,10 @@ import pg from "pg";
 import { publishAffiliateReservationLifecycle } from "../domains/bookingAffiliateReservationLifecycle.js";
 import type { StripeBookingPaymentProvider } from "../domains/stripeBookingPayments.js";
 import {
+  expirePricingCardBooking,
+  pricingCardPaymentProperty,
+} from "../domains/pricingCardPaymentCompletion.js";
+import {
   captureDirectNightlyRevenueEvidence,
   reconcileStripeBookingPaymentProviderDetails,
   settleStripeBookingPayment,
@@ -25,7 +29,9 @@ export type BookingLifecycleAction =
   | "expired-draft-cleanup";
 
 export type BookingLifecycleRunName =
-  "pendingBookingExpiry" | "staleUnpaidCancellation" | "expiredDraftCleanup";
+  | "pendingBookingExpiry"
+  | "staleUnpaidCancellation"
+  | "expiredDraftCleanup";
 
 export type BookingLifecycleCandidate = {
   guestBookingId: string;
@@ -576,20 +582,51 @@ async function applyPgLifecycleMutation(
         return cardResult;
       }
     }
-    // An unpaid card booking (draft, or a replacement-pricing acceptance awaiting payment)
-    // cancels its PaymentIntent first, or settles if the payment arrived in time.
     if (
+      mutation.action === "pending-expiry" &&
+      candidate.paymentStatus === "unpaid" &&
       candidate.providerPaymentIntentId &&
-      (mutation.deleteDraft ||
-        (mutation.action === "pending-expiry" && candidate.paymentStatus === "unpaid"))
+      (await pricingCardPaymentProperty(client, candidate.providerPaymentIntentId))
     ) {
+      // Replacement-pricing card acceptance past its payment deadline (own lock order,
+      // no revenue to clear, no expiry email).
+      if (!config.stripePaymentProvider) {
+        await client.query("COMMIT");
+        return lifecycleNoopResult(candidate, mutation);
+      }
+      const outcome = await expirePricingCardBooking(
+        client,
+        config.stripePaymentProvider,
+        {
+          propertyId: candidate.propertyId,
+          guestBookingId: candidate.guestBookingId,
+          now: context.now,
+        },
+        (metadata) =>
+          releaseLifecycleInventory(
+            client,
+            config.inventoryReservationPort,
+            candidate.propertyId,
+            metadata,
+            context.now,
+          ),
+      );
+      await client.query("COMMIT");
+      return outcome === "pending"
+        ? lifecycleNoopResult(candidate, mutation)
+        : {
+            ...lifecycleNoopResult(candidate, mutation),
+            applied: true,
+            toStatus: outcome === "settled" ? "confirmed" : "expired",
+          };
+    }
+    if (mutation.deleteDraft && candidate.providerPaymentIntentId) {
       const cardResult = await resolveExpiredStripeDraft(
         client,
         candidate,
         mutation,
         context,
         config,
-        mutation.deleteDraft ? "draft" : "pending_payment",
       );
       if (cardResult) {
         await client.query("COMMIT");
@@ -720,14 +757,12 @@ async function resolveExpiredStripeDraft(
   mutation: BookingLifecycleMutation,
   context: BookingLifecycleJobContext,
   config: Pick<PgBookingLifecycleStoreConfig, "stripePaymentProvider">,
-  lifecycleStatus: "draft" | "pending_payment" = "draft",
 ): Promise<BookingLifecycleMutationResult | null> {
   const locked = await client.query(
     `SELECT id FROM booking.guest_bookings
-     WHERE id = $1::uuid AND property_id = $2::uuid AND lifecycle_status = $3
-       AND ($3 = 'draft' OR payment_status = 'unpaid')
+     WHERE id = $1::uuid AND property_id = $2::uuid AND lifecycle_status = 'draft'
      FOR UPDATE`,
-    [candidate.guestBookingId, candidate.propertyId, lifecycleStatus],
+    [candidate.guestBookingId, candidate.propertyId],
   );
   if (locked.rows.length === 0) return lifecycleNoopResult(candidate, mutation);
   const provider = config.stripePaymentProvider;
@@ -789,13 +824,6 @@ async function resolveExpiredStripeDraft(
     }
     if (intent.status !== "canceled") return lifecycleNoopResult(candidate, mutation);
   }
-  if (lifecycleStatus === "pending_payment")
-    await client.query(
-      `UPDATE finance.payments SET status = 'canceled', updated_at = $3::timestamptz
-       WHERE provider_payment_intent_id = $1 AND guest_booking_id = $2::uuid
-         AND status = 'requires_action'`,
-      [paymentIntentId, candidate.guestBookingId, context.now.toISOString()],
-    );
   return null;
 }
 

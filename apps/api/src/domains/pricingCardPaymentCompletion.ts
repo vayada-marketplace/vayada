@@ -321,3 +321,112 @@ export async function settlePricingCardPayment(
   });
   return "settled";
 }
+
+const CANCELABLE = ["requires_payment_method", "requires_confirmation", "requires_action"];
+
+/** Expiry sweep for an accepted card booking past `pendingExpiresAt`. Takes the inventory lock
+ * before the booking, like acceptance and payment, then cancels the PaymentIntent, or confirms
+ * the booking if the payment arrived in time. A canceled payment expires the booking and
+ * releases its rooms; the guest was never told the booking was confirmed, so no email. */
+export async function expirePricingCardBooking(
+  client: Queryable,
+  provider: StripeBookingPaymentProvider,
+  input: { propertyId: string; guestBookingId: string; now: Date },
+  releaseRooms: (bookingMetadata: unknown) => Promise<void>,
+): Promise<"settled" | "expired" | "pending"> {
+  await lockPmsInventoryMutationScope(client as pg.PoolClient, input.propertyId);
+  const row = (
+    await client.query(
+      `SELECT b.lifecycle_status,b.payment_status,b.public_reference,b.booking_metadata,
+        p.id AS payment_id,p.provider_payment_intent_id AS intent,acct.provider_account_id AS account_ref
+      FROM booking.guest_bookings b
+      JOIN finance.payments p ON p.id=b.active_card_payment_id AND p.property_id=b.property_id
+      JOIN finance.payment_provider_accounts acct ON acct.id=p.provider_account_id
+        AND acct.property_id=p.property_id
+      WHERE b.id=$1 AND b.property_id=$2 AND b.booking_metadata->>'targetSource'='pricing_quote_draft'
+      FOR UPDATE OF b,p`,
+      [input.guestBookingId, input.propertyId],
+    )
+  ).rows[0];
+  const deadline = Date.parse(row?.booking_metadata?.pendingExpiresAt ?? "");
+  if (
+    !row ||
+    row.lifecycle_status !== "pending_payment" ||
+    row.payment_status !== "unpaid" ||
+    !Number.isFinite(deadline) ||
+    deadline > input.now.getTime() ||
+    typeof row.intent !== "string" ||
+    typeof row.account_ref !== "string"
+  )
+    return "pending";
+  const check = (
+    intent: Awaited<ReturnType<StripeBookingPaymentProvider["retrievePaymentIntent"]>>,
+  ) => {
+    if (
+      intent.paymentIntentId !== row.intent ||
+      intent.propertyId !== input.propertyId ||
+      intent.bookingReference !== row.public_reference
+    )
+      throw new PricingCardPaymentError("conflict", "Card payment does not match the booking");
+    return intent;
+  };
+  const settle = async (intent: { amountMinor: number; currency: string }) => {
+    await settlePricingCardPayment(client, input.propertyId, {
+      paymentIntentId: row.intent,
+      amountMinor: intent.amountMinor,
+      currency: intent.currency,
+    });
+    return "settled" as const;
+  };
+  let intent = check(await provider.retrievePaymentIntent(row.intent, row.account_ref));
+  if (intent.status === "succeeded") return settle(intent);
+  if (CANCELABLE.includes(intent.status)) {
+    try {
+      intent = check(
+        await provider.cancelPaymentIntent(
+          row.intent,
+          row.account_ref,
+          `pricing-card-expire:${input.propertyId}:${input.guestBookingId}:v1`,
+        ),
+      );
+    } catch (error) {
+      if (error instanceof PricingCardPaymentError) throw error;
+      intent = check(await provider.retrievePaymentIntent(row.intent, row.account_ref));
+    }
+    if (intent.status === "succeeded") return settle(intent);
+  }
+  if (intent.status !== "canceled") return "pending";
+  const occurredAt = input.now.toISOString();
+  await client.query(
+    `UPDATE finance.payments SET status='canceled',updated_at=$2::timestamptz,
+      payment_metadata=payment_metadata || '{"providerStatus":"canceled"}'::jsonb
+    WHERE id=$1 AND status='requires_action'`,
+    [row.payment_id, occurredAt],
+  );
+  const expired = await client.query(
+    `WITH changed AS (
+      UPDATE booking.guest_bookings SET lifecycle_status='expired',updated_at=$3::timestamptz,
+        cancellation_reason='pending_booking_expired'
+      WHERE id=$1 AND property_id=$2 AND lifecycle_status='pending_payment' AND payment_status='unpaid'
+      RETURNING id
+    ), event AS (
+      INSERT INTO booking.booking_status_events
+        (guest_booking_id,event_type,from_status,to_status,actor_type,public_visible,public_message,event_payload,occurred_at)
+      SELECT id,'guest_booking.expired','pending_payment','expired','system',true,
+        'The booking expired because the card payment was not completed.',$4::jsonb,$3::timestamptz FROM changed RETURNING id
+    ), summary AS (
+      UPDATE booking.direct_booking_summary_read_model SET lifecycle_status='expired',projected_at=$3::timestamptz
+      WHERE guest_booking_id IN (SELECT id FROM changed) RETURNING guest_booking_id
+    ) SELECT (SELECT count(*)::int FROM changed) AS bookings,(SELECT count(*)::int FROM event) AS events`,
+    [
+      input.guestBookingId,
+      input.propertyId,
+      occurredAt,
+      { provider: "stripe", paymentIntentId: row.intent },
+    ],
+  );
+  if (expired.rows[0]?.bookings !== 1 || expired.rows[0]?.events !== 1)
+    throw new PricingCardPaymentError("conflict");
+  await releaseRooms(row.booking_metadata);
+  return "expired";
+}

@@ -26,16 +26,27 @@ const fail = (): never => {
   throw new Error("Pricing card payment is unavailable");
 };
 
-/** Card quotes this path can execute: instant, online part due now, rest at the property. */
+/** Card quotes this path can execute: instant and fully paid online. Quotes with an amount
+ * due at the property stay pay-at-property until partially paid bookings are supported
+ * downstream (balance collection, host cancel, PMS handoff). */
 export function pricingCardQuoteSupported(quote: Current["quote"]): boolean {
   const { totalMinor, dueNowMinor, dueLaterMinor } = quote.evidence;
   return (
     quote.paymentMethod === "card" &&
     quote.acceptanceMode === "instant" &&
     /^[1-9][0-9]*$/.test(dueNowMinor) &&
-    /^(0|[1-9][0-9]*)$/.test(dueLaterMinor) &&
-    BigInt(dueNowMinor) + BigInt(dueLaterMinor) === BigInt(totalMinor)
+    dueNowMinor === totalMinor &&
+    dueLaterMinor === "0"
   );
+}
+
+/** Stable booking id for a card acceptance command: a retry after a rollback sends Stripe the
+ * same idempotency key with the same booking reference instead of a conflicting request. */
+export function pricingCardBookingId(propertyId: string, requestId: string): string {
+  const h = createHash("sha256")
+    .update(`pricing-card-booking:${propertyId}:${requestId}`)
+    .digest("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-${((parseInt(h[16], 16) & 3) | 8).toString(16)}${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 
 /** Pricing minor units → two-decimal amount string, as the booking draft stores totals. */
@@ -57,7 +68,7 @@ export function pricingCardPaymentIdempotencyKey(propertyId: string, requestId: 
 /** After the card acceptance is stored (booking `pending_payment`): create the PaymentIntent for the amount due now on the
  * hotel's connected Stripe account and record it as `requires_action`. The Stripe call runs
  * inside the caller's transaction, as the legacy checkout does; a rollback leaves at most an
- * unconfirmed intent that the same idempotency key returns again. */
+ * unconfirmed intent, and a retry (same request, same booking id) gets the same intent back. */
 export async function startPricingCardPayment(
   client: PoolClient,
   provider: StripeBookingPaymentProvider,
@@ -189,12 +200,13 @@ export async function startPricingCardPayment(
   return intent;
 }
 
-/** Replay of an accepted card quote whose booking still awaits payment: return the same
- * PaymentIntent so the guest can finish paying. Null when the booking is not a pending card
- * booking (pay-at-property, already paid, cancelled), so the caller keeps the plain replay. */
-export async function readPendingPricingCardPayment(
+/** Replay of an accepted card quote. Null when the booking is not a card booking or is
+ * already paid (the plain replay is right). While it awaits payment: the same PaymentIntent,
+ * so the guest can finish paying. An expired or canceled card booking, or one awaiting payment
+ * while card acceptance is switched off, is a conflict, never a success. */
+export async function readPricingCardReplay(
   client: PoolClient,
-  provider: StripeBookingPaymentProvider,
+  provider: StripeBookingPaymentProvider | undefined,
   slug: unknown,
   replay: { bookingId: string; bookingReference: string },
 ) {
@@ -202,30 +214,44 @@ export async function readPendingPricingCardPayment(
   if (!scope) return fail();
   const row = (
     await client.query(
-      `SELECT booking.booking_metadata->>'pendingExpiresAt' AS deadline,
-        payment.provider_payment_intent_id AS intent,account.provider_account_id AS account
+      `SELECT booking.lifecycle_status,booking.payment_status,
+        booking.booking_metadata->>'paymentMethod' AS method,
+        booking.booking_metadata->>'pendingExpiresAt' AS deadline,
+        payment.status AS payment_row_status,payment.provider_payment_intent_id AS intent,
+        account.provider_account_id AS account
       FROM booking.guest_bookings booking
-      JOIN finance.payments payment ON payment.id=booking.active_card_payment_id
-        AND payment.property_id=booking.property_id AND payment.status='requires_action'
-      JOIN finance.payment_provider_accounts account ON account.id=payment.provider_account_id
+      LEFT JOIN finance.payments payment ON payment.id=booking.active_card_payment_id
+        AND payment.property_id=booking.property_id
+      LEFT JOIN finance.payment_provider_accounts account ON account.id=payment.provider_account_id
         AND account.property_id=payment.property_id
-      WHERE booking.id=$1 AND booking.property_id=$2 AND booking.lifecycle_status='pending_payment'
-        AND booking.payment_status='unpaid' AND booking.booking_metadata->>'paymentMethod'='card'
-      FOR SHARE OF booking,payment`,
+      WHERE booking.id=$1 AND booking.property_id=$2`,
       [replay.bookingId, scope.propertyId],
     )
   ).rows[0];
-  if (!row) return null;
-  if (typeof row.intent !== "string" || typeof row.account !== "string") return fail();
+  if (!row || row.method !== "card") return null;
+  if (row.lifecycle_status === "confirmed" && row.payment_status !== "unpaid") return null;
+  if (
+    !provider ||
+    row.lifecycle_status !== "pending_payment" ||
+    row.payment_status !== "unpaid" ||
+    row.payment_row_status !== "requires_action" ||
+    typeof row.intent !== "string" ||
+    typeof row.account !== "string"
+  )
+    throw new Error("Booking acceptance expired or unavailable");
   const intent = await provider.retrievePaymentIntent(row.intent, row.account);
   if (
     !intent.clientSecret ||
     intent.paymentIntentId !== row.intent ||
-    !["requires_payment_method", "requires_confirmation", "requires_action", "processing"].includes(
-      intent.status,
-    )
+    ![
+      "requires_payment_method",
+      "requires_confirmation",
+      "requires_action",
+      "processing",
+      "succeeded",
+    ].includes(intent.status)
   )
-    return null;
+    throw new Error("Booking acceptance expired or unavailable");
   return {
     kind: "payment_required" as const,
     bookingId: replay.bookingId,

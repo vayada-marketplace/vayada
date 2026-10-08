@@ -160,8 +160,10 @@ export async function settleStripeBookingPayment(
   },
 ): Promise<"settled" | "already_settled" | "not_found"> {
   // Replacement-pricing card bookings settle through their stored acceptance (revenue, PMS
-  // accepted-pricing job), never the legacy way. Checked before any row lock so that path can
-  // take the inventory lock first.
+  // accepted-pricing job), never the legacy way. This function takes no row lock before the
+  // hand-off; the webhook calls it first. The expiry sweep handles these bookings itself
+  // (inventory lock first); the legacy confirm-authorization route locks the booking before
+  // calling here, which PostgreSQL resolves as a retryable deadlock if it races the guest.
   const pricingProperty = await pricingCardPaymentProperty(
     client as unknown as PricingQueryable,
     input.paymentIntentId,
@@ -660,7 +662,7 @@ const text = (value: unknown): string | null =>
   typeof value === "string" && value.trim() ? value.trim() : null;
 function dates(from: string, to: string): string[] {
   const result: string[] = [];
-  for (let date = new Date(`${from}T00:00:00Z`); date < new Date(`${to}T00:00:00Z`);) {
+  for (let date = new Date(`${from}T00:00:00Z`); date < new Date(`${to}T00:00:00Z`); ) {
     result.push(date.toISOString().slice(0, 10));
     date = new Date(date.getTime() + 86_400_000);
   }

@@ -6,7 +6,10 @@ import { parsePmsInventoryReservationBundle } from "@vayada/domain-pms";
 import { pricingDraftFixture } from "./pricingBookingDraft.fixtures.js";
 import { acceptanceFixture } from "./pricingAcceptanceHistory.fixtures.js";
 import { writePricingAcceptance } from "./pricingAcceptanceWriter.js";
-import { completePricingCardPayment } from "./pricingCardPaymentCompletion.js";
+import {
+  completePricingCardPayment,
+  expirePricingCardBooking,
+} from "./pricingCardPaymentCompletion.js";
 import { settleStripeBookingPayment } from "./stripeBookingSettlement.js";
 import { readBookingAffiliateContextForQuote } from "./bookingAffiliateContextForQuote.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
@@ -321,8 +324,16 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         currency: fixture.f.current.quote.stay.currency,
       }),
     );
-    const provider = { createPaymentIntent, retrievePaymentIntent } as never;
-    return { fixture, slug, createPaymentIntent, retrievePaymentIntent, provider };
+    const cancelPaymentIntent = vi.fn();
+    const provider = { createPaymentIntent, retrievePaymentIntent, cancelPaymentIntent } as never;
+    return {
+      fixture,
+      slug,
+      createPaymentIntent,
+      retrievePaymentIntent,
+      cancelPaymentIntent,
+      provider,
+    };
   }
 
   it("accepts the quote, holds the rooms and starts a Stripe payment without confirming", async () => {
@@ -466,6 +477,61 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
           )
         ).rows[0].n,
       ).toBe(1);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("expires an unpaid card booking at its deadline, releases the rooms and never replays it as accepted", async () => {
+    const { fixture, provider, retrievePaymentIntent, cancelPaymentIntent } = await cardFixture();
+    try {
+      const accepted = (await writePricingAcceptance(fixture.pool, fixture.input, undefined, {
+        provider,
+      })) as { bookingId: string; bookingReference: string };
+      const intent = await retrievePaymentIntent();
+      const bound = { ...intent, bookingReference: accepted.bookingReference };
+      retrievePaymentIntent.mockResolvedValue(bound);
+      cancelPaymentIntent.mockResolvedValue({ ...bound, status: "canceled" });
+      const releaseRooms = vi.fn(async () => undefined);
+      const expire = async (now: Date) => {
+        const client = await fixture.pool.connect();
+        try {
+          await client.query("BEGIN");
+          const outcome = await expirePricingCardBooking(
+            client,
+            provider,
+            { propertyId: fixture.propertyId, guestBookingId: accepted.bookingId, now },
+            releaseRooms,
+          );
+          await client.query("COMMIT");
+          return outcome;
+        } finally {
+          client.release();
+        }
+      };
+      await expect(expire(new Date())).resolves.toBe("pending");
+      expect(cancelPaymentIntent).not.toHaveBeenCalled();
+      await expect(expire(new Date(Date.now() + 31 * 60_000))).resolves.toBe("expired");
+      expect(cancelPaymentIntent).toHaveBeenCalledOnce();
+      expect(releaseRooms).toHaveBeenCalledWith(
+        expect.objectContaining({ inventoryReservation: expect.anything() }),
+      );
+      const state = (
+        await fixture.observer.query(
+          `SELECT b.lifecycle_status,p.status AS payment,
+            (SELECT count(*)::int FROM platform.jobs j WHERE j.property_id=b.property_id) AS jobs
+           FROM booking.guest_bookings b JOIN finance.payments p ON p.id=b.active_card_payment_id
+           WHERE b.property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows[0];
+      expect(state).toEqual({ lifecycle_status: "expired", payment: "canceled", jobs: 0 });
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider }),
+      ).rejects.toMatchObject({ code: "conflict" });
+      await expect(writePricingAcceptance(fixture.pool, fixture.input)).rejects.toMatchObject({
+        code: "conflict",
+      });
     } finally {
       await fixture.close();
     }
