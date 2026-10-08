@@ -31,8 +31,6 @@ export const RULES = [
   { name: "docs", test: /^(LICENSE|\.gitignore|\.coderabbit\.yaml)$/, jobs: [] },
   { name: "docs", test: /^\.agents\//, jobs: [] },
   { name: "evidence", test: /^engineering\/evidence\//, jobs: [] },
-  // Schema-checked by the "changes" job itself; no PR check reads it otherwise.
-  { name: "inventory", test: /^engineering\/hotel-setup-bootstrap-images\.json$/, jobs: [] },
   {
     name: "python-backend",
     test: /^apps\/(marketplace-api|booking-api|pms-api)\//,
