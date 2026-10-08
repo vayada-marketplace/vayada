@@ -216,6 +216,9 @@ export type ApiConfig = {
   /** Kill switch for public quote acceptance; each hotel still needs the Vayada pricing
    * authority and a current publication. */
   replacementPricingAcceptanceEnabled: boolean;
+  /** Card quotes in public acceptance (Stripe). Off until confirmation, webhook and expiry
+   * handling for these bookings are live. */
+  replacementPricingCardAcceptanceEnabled: boolean;
   bookingHostBase?: string;
   platformMediaServing?: PlatformMediaServingConfig;
   platformMediaCleanupEnabled: boolean;
@@ -1332,6 +1335,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       env,
       "REPLACEMENT_PRICING_ACCEPTANCE_ENABLED",
       true,
+    ),
+    replacementPricingCardAcceptanceEnabled: readBooleanEnv(
+      env,
+      "REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED",
     ),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
     platformMediaServing,

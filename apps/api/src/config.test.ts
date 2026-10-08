@@ -907,6 +907,14 @@ describe("api config", () => {
     );
   });
 
+  it("keeps card quote acceptance off unless explicitly enabled", () => {
+    expect(loadConfig({}).replacementPricingCardAcceptanceEnabled).toBe(false);
+    expect(
+      loadConfig({ REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED: "true" })
+        .replacementPricingCardAcceptanceEnabled,
+    ).toBe(true);
+  });
+
   it("rejects next API runtime when source selectors would default to legacy or disabled", () => {
     expect(() =>
       loadConfig({

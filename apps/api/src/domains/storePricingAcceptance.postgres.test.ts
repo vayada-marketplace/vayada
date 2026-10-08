@@ -65,6 +65,7 @@ describe.skipIf(!url)("pricing acceptance persistence PostgreSQL", () => {
         bookingId,
         lifecycleStatus: "confirmed",
         hostResponseDeadlineAt: null,
+        paymentDeadlineAt: null,
         occurredAt: now.toISOString(),
         inventoryReservation: bundle,
       };
