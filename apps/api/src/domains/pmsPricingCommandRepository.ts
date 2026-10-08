@@ -258,6 +258,7 @@ export function createPgPmsPricingCommandRepository(
         result,
         domainEventId,
         acceptedAt,
+        firstCurrency && !!config.hotelSetupOrdinaryOwner,
       );
       if (firstCurrency && config.hotelSetupOrdinaryOwner && command.audit.actor.kind === "user")
         await completeOrdinaryHotelSetupFirstCurrency(client, {
@@ -949,6 +950,9 @@ async function recordAudit(
   result: AnyResult,
   domainEventId: string | null,
   at: Date,
+  // Only the ordinary first-currency completion needs the id; native setup logins hold
+  // INSERT without SELECT on the audit table, so RETURNING would be denied (42501).
+  returnId = false,
 ): Promise<{ id: string | undefined; auditKey: string }> {
   if (command.audit.actor.kind !== "user") throw new Error("PMS pricing audit requires user actor");
   const auditKey = `pms.pricing.property.${command.propertyId}.operation.${operation}.key.${keyHash}.attempt.${reservation.attempt}.v1`;
@@ -963,7 +967,7 @@ async function recordAudit(
        $1, 'pms', $2, $3::timestamptz, 'property', NULL, $4::uuid,
        'user', $5::uuid, 'pms', $6, $7, $8::uuid, $9::uuid, $10, $11,
        $12::jsonb, '{}'::jsonb, $13::jsonb, 'confidential'
-     ) RETURNING id::text`,
+     )${returnId ? " RETURNING id::text" : ""}`,
     [
       auditKey,
       operation,
