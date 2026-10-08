@@ -24,12 +24,12 @@ describe("Legacy fixed-plan subscription inventory", () => {
     entitlements.get(hotel(4))!.metadata = { providerReentryRequired: true };
     const getEntitlement = vi.fn(async (id: string) => entitlements.get(id) ?? null);
     const search = vi.fn(async () => [
-      inspection("sub_adopted", hotel(1), { adoptionMarker: "v1" }),
+      inspection("sub_adopted", hotel(1), { adoptionMarker: "v1", snapshot: verified }),
       inspection("sub_live", hotel(2), {
         snapshot: { status: "past_due", currentPeriodEnd: "2026-10-21T09:00:00.000Z" },
       }),
       inspection("sub_unpaid", hotel(3), { snapshot: { status: "unpaid" } }),
-      inspection("sub_half", hotel(4), { adoptionMarker: "v1" }),
+      inspection("sub_half", hotel(4), { adoptionMarker: "v1", snapshot: verified }),
       inspection("sub_outside", hotel(9)),
       inspection("sub_outside_ending", hotel(8), { snapshot: { cancelAtPeriodEnd: true } }),
       inspection("sub_cohort_ending", hotel(5), { snapshot: { cancelAtPeriodEnd: true } }),
@@ -39,7 +39,11 @@ describe("Legacy fixed-plan subscription inventory", () => {
     ]);
 
     const report = await inventoryLegacyFixedPlanSubscriptions({
-      stripe: { searchLegacyFixedPlanSubscriptions: search },
+      stripe: {
+        searchLegacyFixedPlanSubscriptions: search,
+        inspectLegacySubscription: async (id) =>
+          (await search()).find((found) => found.snapshot.subscriptionId === id)!,
+      },
       store: { getEntitlement },
       now: () => NOW,
     });
@@ -55,7 +59,7 @@ describe("Legacy fixed-plan subscription inventory", () => {
       sub_outside: ["blocked", "outside_cohort_cancel_at_period_end"],
       sub_outside_ending: ["ending", null],
       sub_cohort_ending: ["ending", "cohort_hotel_not_adopted"],
-      sub_old: ["ended", null],
+      sub_old: ["ended", "cohort_hotel_needs_revert"],
       sub_paused: ["needs_revert", "cancel_in_stripe_then_revert_to_commission"],
       sub_no_hotel: ["blocked", "hotel_id_missing_or_invalid"],
     });
@@ -87,15 +91,47 @@ describe("Legacy fixed-plan subscription inventory", () => {
     ]);
   });
 
-  it("allows reopen once every subscription is adopted, ending or ended", async () => {
+  it("re-reads open rows live and blocks an adopted subscription that no longer verifies", async () => {
     const adopted = entitlement(hotel(1), { planKey: "fixed", subscriptionRef: "sub_adopted" });
+    const inspect = vi.fn(async () =>
+      inspection("sub_adopted", hotel(1), { adoptionMarker: "v1", snapshot: { status: "active" } }),
+    );
     const report = await inventoryLegacyFixedPlanSubscriptions({
       stripe: {
+        // Search still shows the stale cancel_at_period_end the hotel has since undone.
         searchLegacyFixedPlanSubscriptions: async () => [
-          inspection("sub_adopted", hotel(1), { adoptionMarker: "v1" }),
-          inspection("sub_outside", hotel(9), { snapshot: { cancelAtPeriodEnd: true } }),
-          inspection("sub_old", hotel(9), { snapshot: { status: "incomplete_expired" } }),
+          inspection("sub_adopted", hotel(1), {
+            adoptionMarker: "v1",
+            snapshot: { ...verified, cancelAtPeriodEnd: true },
+          }),
         ],
+        inspectLegacySubscription: inspect,
+      },
+      store: { getEntitlement: async () => adopted },
+      now: () => NOW,
+    });
+
+    expect(inspect).toHaveBeenCalledWith("sub_adopted");
+    expect(report.subscriptions[0]).toMatchObject({
+      class: "blocked",
+      reason: "adopted_subscription_unverifiable",
+      cancelAtPeriodEnd: false,
+    });
+    expect(report.reopenAllowed).toBe(false);
+  });
+
+  it("allows reopen once every subscription is adopted, ending or ended", async () => {
+    const adopted = entitlement(hotel(1), { planKey: "fixed", subscriptionRef: "sub_adopted" });
+    const found = [
+      inspection("sub_adopted", hotel(1), { adoptionMarker: "v1", snapshot: verified }),
+      inspection("sub_outside", hotel(9), { snapshot: { cancelAtPeriodEnd: true } }),
+      inspection("sub_old", hotel(9), { snapshot: { status: "incomplete_expired" } }),
+    ];
+    const report = await inventoryLegacyFixedPlanSubscriptions({
+      stripe: {
+        searchLegacyFixedPlanSubscriptions: async () => found,
+        inspectLegacySubscription: async (id) =>
+          found.find((item) => item.snapshot.subscriptionId === id)!,
       },
       store: { getEntitlement: async (id) => (id === hotel(1) ? adopted : null) },
       now: () => NOW,
@@ -104,6 +140,8 @@ describe("Legacy fixed-plan subscription inventory", () => {
     expect(report.reopenAllowed).toBe(true);
   });
 });
+
+const verified = { fixedPlanVerified: true, retainedLegacyPrice: true, amountMinor: 3_500 };
 
 function entitlement(
   propertyId: string,
