@@ -1,4 +1,3 @@
-import type { HotelSetupCommandForwarder } from "../hotelSetupCommandForwarder.js";
 import { createHash } from "node:crypto";
 
 import { UnauthorizedError, type PermissionKey } from "@vayada/backend-auth";
@@ -130,13 +129,11 @@ export type SharedHotelSetupStatusRepository = {
 type SharedHotelSetupStatusRoutesOptions = {
   repository: SharedHotelSetupStatusRepository;
   trackCommandRepository: HotelSetupTrackCommandRepository;
-  propertyCreationForwarder?: HotelSetupCommandForwarder;
   /** Self-serve hotel creation on the ordinary login (VAY-2056), an Owner-mode repository
-   * separate from the one serving platform-admin provisioning; replaces the forwarder. */
+   * separate from the one serving platform-admin provisioning. */
   propertyCreationRepository?: Pick<SharedHotelSetupStatusRepository, "createPropertyProfile">;
-  launchSettingsForwarder?: HotelSetupCommandForwarder;
   /** Owner-only narrow launch-settings write on the ordinary login (VAY-2056); replaces the
-   * forwarder and the broad Booking settings writer. Requires propertyAccessRepository. */
+   * broad Booking settings writer. Requires propertyAccessRepository. */
   launchSettingsCommand?: Parameters<typeof registerSharedHotelSetupLaunchSettings>[1];
   /** Owner-only hotel-detail edits on the ordinary login (VAY-2056); unset keeps the
    * pre-cutover sparse writer used by local stacks and tests. Requires propertyAccessRepository. */
@@ -316,10 +313,7 @@ export async function registerSharedHotelSetupStatusRoutes(
     registerSharedHotelSetupPropertyCreation(app, options.propertyCreationRepository, {
       requireOwnerSession: true,
     });
-  else
-    registerSharedHotelSetupPropertyCreation(app, repository, {
-      forward: options.propertyCreationForwarder,
-    });
+  else registerSharedHotelSetupPropertyCreation(app, repository);
 
   const profileCommand =
     options.profileCommand &&
@@ -438,7 +432,7 @@ export async function registerSharedHotelSetupStatusRoutes(
               options.propertyAccessRepository,
             ),
           }
-        : { forward: options.launchSettingsForwarder },
+        : {},
     );
   }
 
@@ -848,7 +842,6 @@ export function registerSharedHotelSetupLaunchSettings(
   ) => Promise<SharedPropertyLaunchSettings | null>,
   options: {
     requireOwnerSession?: boolean;
-    forward?: HotelSetupCommandForwarder;
     propertyAccessRepository?: PropertyAccessRepository;
   } = {},
 ): void {
@@ -889,8 +882,6 @@ export function registerSharedHotelSetupLaunchSettings(
 
     const settings = parsePropertyLaunchSettings(request.body, reply);
     if (settings === false) return reply;
-
-    if (options.forward) return options.forward(request, reply, propertyId, "launch_settings");
 
     let stored: SharedPropertyLaunchSettings | null;
     try {
@@ -1056,10 +1047,9 @@ function canonicalJson(value: unknown): string {
 export function registerSharedHotelSetupPropertyCreation(
   app: FastifyInstance,
   repository: Pick<SharedHotelSetupStatusRepository, "createPropertyProfile">,
-  options: { requireOwnerSession?: boolean; forward?: HotelSetupCommandForwarder } = {},
+  options: { requireOwnerSession?: boolean } = {},
 ): void {
   app.post("/properties", async (request, reply) => {
-    if (options.forward) return options.forward(request, reply, null, "property_creation");
     const access = resolveSharedSetupAccess(request, reply, null, "hotel_catalog.setup.manage");
     if (!access) return reply;
     if (options.requireOwnerSession && !access.context.actor.providerIdentity.sessionId)

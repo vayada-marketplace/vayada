@@ -109,8 +109,7 @@ export function buildHotelSetupCommandService(
     if (
       uploads.enabledPurposes.length !== 1 ||
       uploads.enabledPurposes[0] !== "property.logo" ||
-      !uploads.resolveRequestPersistence ||
-      uploads.forwardLogo
+      !uploads.resolveRequestPersistence
     )
       throw new Error("Private hotel logo persistence required");
     // AuthKit verification runs independently here before selecting any native credential.
