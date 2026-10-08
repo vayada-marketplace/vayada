@@ -1,12 +1,11 @@
 import {
   type PmsMealPlan,
-  parseFlexibleRatePlanCommandResult,
+  type RoomTypeFacts,
+  parseConfirmRoomTypeAmenitiesResult,
+  parseCreateRoomTypeFactsResult,
   parsePhysicalRoomUnitIdentity,
-  parsePmsPricingSourceSnapshot,
-  parsePropertyPricingCurrencyCommandResult,
   parseReconcilePhysicalRoomUnitsResult,
   parseRoomTypeCapacitySnapshot,
-  parseRoomTypeFactsSnapshot,
   parseSetPhysicalRoomOperationalLabelResult,
 } from "@vayada/domain-pms";
 
@@ -20,6 +19,14 @@ import { resolveSelectedPmsPropertyId } from "../api/pmsPropertyClient";
 import { unsupportedPmsNextStackFeature } from "../api/unsupported";
 import type { RoomImageReference } from "../upload";
 import { imageReferenceUrl, pmsRoomMediaResource, uploadService } from "../upload";
+import {
+  bedSummaryFromFacts,
+  roomAmenityKeys,
+  roomAmenityLabels,
+  roomCategoryLabel,
+  roomSizeValue,
+  roomTypeFactsFromForm,
+} from "./roomFacts";
 
 export interface MonthlyRate {
   baseRate?: number | null;
@@ -421,7 +428,7 @@ function toRoomType(propertyId: string, roomType: PmsOperationsRoomType): RoomTy
     version: roomType.version,
     hotelId: propertyId,
     name: roomType.name,
-    category: roomType.category ?? "",
+    category: roomCategoryLabel(roomType.category),
     description: roomType.description,
     shortDescription: asString(roomType.attributes.shortDescription, roomType.description),
     maxOccupancy,
@@ -429,14 +436,14 @@ function toRoomType(propertyId: string, roomType: PmsOperationsRoomType): RoomTy
     maxChildren,
     bedrooms: asNumber(roomType.attributes.bedrooms, 1),
     bathrooms: asNumber(roomType.attributes.bathrooms, 1),
-    size: asNumber(roomType.attributes.size),
+    size: asNumber(roomSizeValue(roomType.attributes.size)),
     baseRate,
     nonRefundableRate,
     currency,
     locationAddress: asString(roomType.attributes.locationAddress),
     latitude: asNullableNumber(roomType.attributes.latitude),
     longitude: asNullableNumber(roomType.attributes.longitude),
-    amenities: roomType.amenities,
+    amenities: roomAmenityLabels(roomType.amenities),
     images: roomType.media.map((image) =>
       image.altText === undefined
         ? { url: image.url, platformMediaObjectId: image.mediaObjectId }
@@ -447,7 +454,7 @@ function toRoomType(propertyId: string, roomType: PmsOperationsRoomType): RoomTy
           },
     ),
     roomMediaRevision: roomType.roomMediaRevision ?? 1,
-    bedType: asString(roomType.attributes.bedType),
+    bedType: asString(roomType.attributes.bedType, bedSummaryFromFacts(roomType.attributes.beds)),
     features: [],
     benefits: [],
     totalRooms: roomType.roomCount,
@@ -598,35 +605,46 @@ export const roomsService = {
   },
 
   create: async (data: RoomTypeCreate) => {
-    validateMealInclusion(data);
     const propertyId = await resolveSelectedPmsPropertyId("creating room type");
+    // The same room-facts command as hotel setup; prices are published from PMS → Pricing.
+    const facts = roomTypeFactsFromForm(data);
+    const amenities = roomAmenityKeys(data.amenities ?? []);
+    const location = roomTypeUpdatePayload(data);
     const stagedImages = (data.images ?? []).filter(
       (image): image is Exclude<RoomImageReference, string> & { pendingFile: File } =>
         typeof File !== "undefined" &&
         typeof image !== "string" &&
         image.pendingFile instanceof File,
     );
-    const commandPayload = {
-      ...data,
-      images: [],
-    };
+    const fingerprintParts = ["create", propertyId, facts, amenities, location];
     return runRoomTypeLifecycleCommand(
-      ["create", propertyId, commandPayload],
+      fingerprintParts,
       "pms-room-type-create",
       async (commandId) => {
-        const response = await pmsOperationsRoomsReadService.createRoomType(
-          propertyId,
-          commandPayload,
-          commandId,
-        );
-        await preparePhysicalRooms(
-          propertyId,
-          response.item.roomTypeId,
-          response.item.name,
-          data.totalRooms,
-        );
-        await ensureCanonicalFlexibleRatePlan(propertyId, response.item, data);
-        let created = toRoomType(response.propertyId, response.item);
+        let roomTypeId: string;
+        try {
+          roomTypeId = await createRoomTypeFacts(propertyId, commandId, facts);
+        } catch (error) {
+          // Nothing was created, so the next attempt must not replay this rejection.
+          const response = error instanceof Error ? (error.cause ?? error) : error;
+          if (
+            response instanceof ApiErrorResponse &&
+            response.status >= 400 &&
+            response.status < 500 &&
+            response.data.code !== "command_in_progress"
+          ) {
+            pendingRoomTypeLifecycleCommands.delete(JSON.stringify(fingerprintParts));
+          }
+          throw error;
+        }
+        if (location.locationAddress || location.latitude != null || location.longitude != null) {
+          await pmsOperationsRoomsReadService.updateRoomType(propertyId, roomTypeId, location);
+        }
+        // Confirming, even an empty list, marks the amenities reviewed for room publication.
+        await confirmNewRoomTypeAmenities(propertyId, roomTypeId, commandId, amenities);
+        await preparePhysicalRooms(propertyId, roomTypeId, facts.name, data.totalRooms);
+        const current = await pmsOperationsRoomsReadService.getRoomType(propertyId, roomTypeId);
+        let created = toRoomType(current.propertyId, current.item);
         if (stagedImages.length > 0) {
           const existingMediaContinuation = pendingRoomTypeCreateMedia.get(commandId);
           let mediaContinuation: {
@@ -649,8 +667,6 @@ export const roomsService = {
             };
             pendingRoomTypeCreateMedia.set(commandId, mediaContinuation);
           }
-          const current = await pmsOperationsRoomsReadService.getRoomType(propertyId, created.id);
-          created = toRoomType(current.propertyId, current.item);
           if (!sameRoomImageOrder(mediaContinuation.images, created.images)) {
             await replaceRoomTypeMedia(
               propertyId,
@@ -722,6 +738,58 @@ export const roomsService = {
     return toRoomType(response.propertyId, response.item);
   },
 };
+
+async function createRoomTypeFacts(
+  propertyId: string,
+  commandId: string,
+  facts: RoomTypeFacts,
+): Promise<string> {
+  let value: unknown;
+  try {
+    value = await pmsOperationsClient.post<unknown>(
+      `/api/pms/setup/properties/${encodeURIComponent(propertyId)}/room-types`,
+      { draftRoomId: commandId, expectedRevision: 0, facts },
+      idempotentRequestOptions(commandId),
+    );
+  } catch (error) {
+    if (error instanceof ApiErrorResponse && error.data.code === "room_type_name_conflict") {
+      throw new Error("A room type with this name already exists. Choose another name.", {
+        cause: error,
+      });
+    }
+    if (error instanceof ApiErrorResponse && error.data.code === "unsupported_room_fact_keys") {
+      throw new Error("This room category or bed type is not supported. Choose another one.", {
+        cause: error,
+      });
+    }
+    throw error;
+  }
+  const result = parseCreateRoomTypeFactsResult({ ok: true, response: value });
+  if (
+    !result?.ok ||
+    result.response.roomType.propertyId !== propertyId.toLowerCase() ||
+    result.response.draftRoomBinding.draftRoomId !== commandId
+  ) {
+    throw new Error("The room type could not be confirmed. Reload the rooms list and try again.");
+  }
+  return result.response.roomType.roomTypeId;
+}
+
+async function confirmNewRoomTypeAmenities(
+  propertyId: string,
+  roomTypeId: string,
+  commandId: string,
+  amenities: string[],
+): Promise<void> {
+  const response = await pmsOperationsClient.put<unknown>(
+    `/api/pms/properties/${encodeURIComponent(propertyId)}/room-types/${encodeURIComponent(roomTypeId)}/amenities`,
+    { expectedRoomAmenitiesRevision: 1, amenities },
+    idempotentRequestOptions(`${commandId}:amenities`),
+  );
+  if (!parseConfirmRoomTypeAmenitiesResult({ ok: true, response })?.ok) {
+    throw new Error("Room amenities could not be confirmed. Reload the room and try again.");
+  }
+}
 
 async function preparePhysicalRooms(
   propertyId: string,
@@ -841,124 +909,6 @@ function unusedGeneratedRoomLabel(
   }
 }
 
-async function ensureCanonicalFlexibleRatePlan(
-  propertyId: string,
-  roomType: PmsOperationsRoomType,
-  data: RoomTypeUpdate,
-): Promise<void> {
-  const expectedPropertyId = propertyId.toLowerCase();
-  const pricingPath = `/api/pms/properties/${encodeURIComponent(propertyId)}/pricing-source`;
-  let pricingSource;
-  try {
-    pricingSource = parsePmsPricingSourceSnapshot(
-      await pmsOperationsClient.get<unknown>(pricingPath, {
-        ...pmsOperationsRequestOptions,
-        cache: "no-store",
-      }),
-    );
-    if (!pricingSource || pricingSource.propertyId !== expectedPropertyId) {
-      throw new Error("Canonical room pricing is unavailable. Reload the room and try again.");
-    }
-  } catch (error) {
-    if (
-      !(error instanceof ApiErrorResponse) ||
-      error.status !== 404 ||
-      error.data.code !== "pricing_currency_not_configured"
-    ) {
-      throw error;
-    }
-    const response = await pmsOperationsClient.put<unknown>(
-      `${pricingPath}/currency`,
-      { expectedPricingCurrencyRevision: 0, currency: roomType.baseRate.currency },
-      commandOptions("pms-pricing-currency-create"),
-    );
-    const result = parsePropertyPricingCurrencyCommandResult({ ok: true, response });
-    if (
-      !result?.ok ||
-      result.response.pricingCurrency.propertyId !== expectedPropertyId ||
-      result.response.pricingCurrency.currency !== roomType.baseRate.currency
-    ) {
-      throw new Error(
-        "Canonical pricing currency could not be saved. Reload the room and try again.",
-      );
-    }
-    pricingSource = {
-      contractVersion: result.response.contractVersion,
-      propertyId,
-      pricingCurrency: result.response.pricingCurrency,
-      flexibleRatePlans: [],
-      capturedAt: result.response.acceptedAt,
-    };
-  }
-  if (pricingSource.pricingCurrency.currency !== roomType.baseRate.currency) {
-    throw new Error(
-      "This room's currency does not match the property's canonical pricing currency.",
-    );
-  }
-
-  const setupPath = `/api/pms/setup/properties/${encodeURIComponent(propertyId)}/room-types/${encodeURIComponent(roomType.roomTypeId)}`;
-  const roomFacts = parseRoomTypeFactsSnapshot(
-    await pmsOperationsClient.get<unknown>(setupPath, {
-      ...pmsOperationsRequestOptions,
-      cache: "no-store",
-    }),
-  );
-  if (
-    !roomFacts ||
-    roomFacts.propertyId !== expectedPropertyId ||
-    roomFacts.roomTypeId !== roomType.roomTypeId
-  ) {
-    throw new Error("Canonical room facts are unavailable. Reload the room and try again.");
-  }
-
-  const cancellationTerms = {
-    type: "free_until_days_before_arrival" as const,
-    freeCancellationDeadlineDays: 7,
-    afterDeadlinePenalty: "full_booking_amount" as const,
-    noShowPenalty: "full_booking_amount" as const,
-    text: data.cancellationPolicy || "Free until 7 days before",
-    flexibleCancellationType: data.flexibleCancellationType ?? "free",
-    partialRefundCancelWindowDays: data.partialRefundCancelWindowDays ?? 30,
-    partialRefundAmountPercent: data.partialRefundAmountPercent ?? 50,
-    partialRefundTiers: data.partialRefundTiers ?? [],
-  };
-  const existing = pricingSource.flexibleRatePlans.find(
-    (candidate) => candidate.roomTypeId === roomType.roomTypeId,
-  );
-  if (
-    existing?.sourceRoomFactsRevision === roomFacts.roomFactsRevision &&
-    existing.baseAmount.amountDecimal === roomType.baseRate.amountDecimal &&
-    (data.mealPlan === undefined || data.mealPlan === (existing.mealPlan ?? "room_only")) &&
-    JSON.stringify(existing.cancellationTerms) === JSON.stringify(cancellationTerms)
-  ) {
-    return;
-  }
-
-  const response = await pmsOperationsClient.put<unknown>(
-    `/api/pms/properties/${encodeURIComponent(propertyId)}/room-types/${encodeURIComponent(roomType.roomTypeId)}/flexible-rate-plan`,
-    {
-      expectedRoomFactsRevision: roomFacts.roomFactsRevision,
-      expectedPricingCurrencyRevision: pricingSource.pricingCurrency.pricingCurrencyRevision,
-      expectedFlexibleRatePlanRevision: existing?.flexibleRatePlanRevision ?? 0,
-      baseAmountDecimal: roomType.baseRate.amountDecimal,
-      ...(data.mealPlan === undefined ? {} : { mealPlan: data.mealPlan }),
-      cancellationTerms,
-    },
-    commandOptions("pms-flexible-rate-plan-upsert"),
-  );
-  const result = parseFlexibleRatePlanCommandResult({ ok: true, response });
-  if (
-    !result?.ok ||
-    result.response.flexibleRatePlan.propertyId !== expectedPropertyId ||
-    result.response.flexibleRatePlan.roomTypeId !== roomType.roomTypeId ||
-    result.response.flexibleRatePlan.sourceRoomFactsRevision !== roomFacts.roomFactsRevision ||
-    result.response.flexibleRatePlan.flexibleRatePlanRevision !==
-      (existing?.flexibleRatePlanRevision ?? 0) + 1
-  ) {
-    throw new Error("Canonical room pricing could not be saved. Reload the room and try again.");
-  }
-}
-
 function commandOptions(prefix: string) {
   return idempotentRequestOptions(randomCommandId(prefix));
 }
@@ -1064,19 +1014,6 @@ export const pmsOperationsRoomsReadService = {
         ...pmsOperationsRequestOptions,
         body: JSON.stringify({ commandId, idempotencyKey: commandId, expectedVersion }),
       },
-    );
-  },
-
-  createRoomType: (propertyId: string, data: RoomTypeCreate, commandId: string) => {
-    assertPmsOperationsReadModelEnabled();
-    return pmsOperationsClient.post<PmsOperationsCommandResponse<PmsOperationsRoomType>>(
-      `/api/pms/properties/${encodeURIComponent(propertyId)}/room-types`,
-      {
-        ...data,
-        commandId,
-        idempotencyKey: commandId,
-      },
-      pmsOperationsRequestOptions,
     );
   },
 
@@ -1303,21 +1240,6 @@ function sameRoomImageOrder(left: RoomImageReference[], right: RoomImageReferenc
         : `url:${imageReferenceUrl(image)}`,
     );
   return JSON.stringify(keys(left)) === JSON.stringify(keys(right));
-}
-
-function validateMealInclusion(data: RoomTypeCreate | RoomTypeUpdate): void {
-  if (
-    Object.hasOwn(data, "mealPlan") &&
-    data.mealPlan !== "room_only" &&
-    data.mealPlan !== "breakfast"
-  ) {
-    throw new Error("Choose room only or breakfast included.");
-  }
-  if (data.mealPlans?.length) {
-    throw new Error(
-      "Meal surcharge packages are unsupported. Choose the included meal on the standard rate.",
-    );
-  }
 }
 
 function roomTypeUpdatePayload(data: RoomTypeUpdate) {
