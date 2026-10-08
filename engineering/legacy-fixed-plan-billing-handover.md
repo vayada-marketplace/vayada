@@ -174,7 +174,9 @@ or `trialing`, has one item, and its metadata names this hotel.
 Already-adopted hotels are reported and left alone, unless a webhook bound the
 subscription first (between the Stripe write and the database write); then the
 command finishes the adoption record. Adoption is refused inside the 24 hours
-before `current_period_end`.
+before `current_period_end`, both on the first read and on the re-read after the
+metadata write; if the subscription moved on in between, the entitlement is left
+unchanged and the operator re-runs the dry run.
 
 The 24-hour guard and a renewal near go-day. A subscription that renews in the
 window around go-day cannot be adopted until its renewal invoice settles and
@@ -203,15 +205,16 @@ Third mode, `inventory` (read-only, Stripe search plus database reads). It
 lists every Stripe subscription with
 `metadata['vayada_payment_kind']:'fixed_plan'` and classifies each one:
 
-| Class          | Meaning                                                                                  |
-| -------------- | ---------------------------------------------------------------------------------------- |
-| `adopted`      | marker present and the entitlement is Fixed on this subscription                         |
-| `ending`       | `cancel_at_period_end`                                                                   |
-| `ended`        | `canceled` or `incomplete_expired`                                                       |
-| `adoptable`    | cohort hotel, `active`/`past_due`/`trialing`, not yet adopted                            |
-| `needs_revert` | cohort hotel, `unpaid`/`incomplete`/`paused`: revert to Commission and cancel in Stripe  |
-| `blocked`      | anything else open, for example a non-cohort hotel not yet cancelled, or a half adoption |
+| Class          | Meaning                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------- |
+| `adopted`      | marker present, the entitlement is Fixed on it, and it still verifies as the retained price |
+| `ending`       | `cancel_at_period_end`                                                                      |
+| `ended`        | `canceled` or `incomplete_expired` (a still-suspended cohort hotel is flagged for revert)   |
+| `adoptable`    | cohort hotel, `active`/`past_due`/`trialing`, not yet adopted                               |
+| `needs_revert` | cohort hotel, `unpaid`/`incomplete`/`paused`: revert to Commission and cancel in Stripe     |
+| `blocked`      | anything else open, for example a non-cohort hotel not yet cancelled, or a half adoption    |
 
+Every open search hit is re-read with a live GET, because search lags writes.
 It prints the subscription ID, the hotel ID, status, `currentPeriodEnd` and
 the reason, and no names or emails. It exits non-zero while any subscription is
 `adoptable`, `needs_revert` or `blocked`: that is the reopen gate. Stripe
