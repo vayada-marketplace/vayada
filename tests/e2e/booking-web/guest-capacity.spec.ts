@@ -89,7 +89,7 @@ test("initial unavailable pricing keeps the hotel page usable", async ({ page })
   releaseRetry?.();
   await expect(page.getByRole("status")).toContainText("We couldn’t check availability");
   await expect(page.getByRole("heading", { name: "Unable to Load Hotel" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toBeVisible();
 });
 
 test("an older search cannot replace a newer result", async ({ page }) => {
