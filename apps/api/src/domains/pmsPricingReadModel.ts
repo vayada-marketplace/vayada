@@ -28,7 +28,11 @@ export type PmsPricingReadPool = {
   end?(): Promise<void>;
 };
 
-export type PmsPricingReadModel = PmsPricingReadPort & { close(): Promise<void> };
+export type PmsPricingReadModel = PmsPricingReadPort & {
+  /** Room types with at least one offer in the active publication; null without a publication. */
+  listPublishedOfferRoomTypeIds(propertyId: string): Promise<string[] | null>;
+  close(): Promise<void>;
+};
 
 export type PmsPricingCurrencyRow = {
   propertyId: string;
@@ -174,6 +178,20 @@ export function createPgPmsPricingReadModel(config: {
 
     async listFlexibleRatePlans(propertyId) {
       return readPublishedFlexibleRatePlans(pool, readUuid(propertyId));
+    },
+
+    async listPublishedOfferRoomTypeIds(propertyId) {
+      const result = await pool.query<{ roomTypeId: string | null }>(
+        `SELECT room.room_type_id::text AS "roomTypeId"
+         FROM pms.pricing_v2_heads head
+         LEFT JOIN pms.pricing_v2_rooms room
+           ON room.property_id = head.property_id AND room.revision = head.revision
+          AND jsonb_array_length(room.configuration->'offers') > 0
+         WHERE head.property_id = $1::uuid`,
+        [readUuid(propertyId)],
+      );
+      if (result.rows.length === 0) return null;
+      return result.rows.flatMap(({ roomTypeId }) => (roomTypeId ? [roomTypeId] : []));
     },
 
     async getPricingSourceSnapshot(propertyId) {

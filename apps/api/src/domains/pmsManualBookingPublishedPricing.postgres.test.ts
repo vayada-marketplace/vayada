@@ -259,6 +259,12 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
       expect(preview?.revision).toBe(1);
     });
 
+    it("lists the room types the publication offers for the setup pricing step", async () => {
+      const pricing = createPgPmsPricingReadModel({ connectionString: url!, pool });
+      expect(await pricing.listPublishedOfferRoomTypeIds(propertyId)).toEqual([roomTypeId]);
+      expect(await pricing.listPublishedOfferRoomTypeIds(randomUUID())).toBeNull();
+    });
+
     // VAY-1943 slice B.2: guest-policy pricing evidence of a property with only pricing-v2 data.
     it("binds the pricing source and mandatory-charge confirmation to the publication", async () => {
       const pricing = await createPgPmsPricingReadModel({
