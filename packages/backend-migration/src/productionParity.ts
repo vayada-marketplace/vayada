@@ -168,6 +168,7 @@ export type ProductionParityReport = {
   }>;
   domains: Partial<Record<ProductionParityDomain, ProductionParityDomainResult>>;
   findings: ProductionParityFinding[];
+  cohortSha256?: string;
   reportChecksumSha256: string;
 };
 
@@ -184,6 +185,8 @@ export type ProductionParityConfig = {
   migrationsDir: string;
   targetMediaBucket: string;
   mediaCdnBaseUrl: string;
+  /** VAY-1362 cohort bound by the orchestrator; only present for cohort-scoped runs. */
+  cohortSha256?: string;
 };
 
 export type ProductionParityServices = {
@@ -315,6 +318,7 @@ async function buildProductionParityReport(
       failedTableCount: source.failedTableCount,
     }))
     .sort((left, right) => left.sourceDatabase.localeCompare(right.sourceDatabase));
+  const cohort = config.cohortSha256 ? { cohortSha256: config.cohortSha256 } : {};
   const checksumMaterial = {
     sourceRunId: config.sourceRunId,
     sourceEnvironment: config.sourceEnvironment,
@@ -334,6 +338,7 @@ async function buildProductionParityReport(
     migrationLedger,
     domains: redactedDomains,
     findings: orderedFindings,
+    ...cohort,
   };
 
   return {
@@ -364,6 +369,7 @@ async function buildProductionParityReport(
     migrationLedger,
     domains: redactedDomains,
     findings: orderedFindings,
+    ...cohort,
     reportChecksumSha256: sha256(stableJson(checksumMaterial)),
   };
 }

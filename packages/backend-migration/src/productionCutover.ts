@@ -50,6 +50,14 @@ import {
   type SourceExtractionConfig,
 } from "./sourceExtraction.js";
 import { stableJson } from "./productionIdentitySourceValidation.js";
+import { readProductionIdentitySnapshot } from "./productionIdentitySnapshotReader.js";
+import {
+  parseProductionMigrationCohort,
+  ProductionMigrationCohortError,
+  readProductionMigrationCohort,
+  writeProductionMigrationCohort,
+  type ProductionMigrationCohort,
+} from "./productionMigrationCohort.js";
 import { SOURCE_DATABASES, type SourceDatabase } from "./sourceInventory.js";
 
 export const PRODUCTION_CUTOVER_LOCK_ID = 1_360_001;
@@ -99,6 +107,8 @@ export type ProductionCutoverConfig = {
   approvalReport?: unknown;
   confirmation?: string;
   resume?: boolean;
+  /** VAY-1362 approved cohort; omitted means every legacy hotel migrates as before. */
+  cohort?: ProductionMigrationCohort;
   sourceExtraction: SourceExtractionConfig;
   sourceConnectionStrings: Record<SourceDatabase, string>;
   media: Omit<ProductionMediaMigrationConfig, "connectionString" | "sourceRunId" | "mode">;
@@ -151,6 +161,7 @@ export type ProductionCutoverReport = {
   applicationRelease: string;
   targetIdentitySha256: string;
   configSha256: string;
+  cohortSha256?: string;
   operator: "[REDACTED]";
   operatorSha256: string;
   abortOperatorSha256: string | null;
@@ -210,6 +221,7 @@ type RunRow = {
   abortOperatorSha256: string | null;
   sourceTagsSha256: Record<SourceDatabase, string>;
   configSha256: string;
+  cohortSha256: string | null;
   targetCleanProofSha256: string;
   freezeProofSha256: string;
   smokeProofSha256: string | null;
@@ -269,6 +281,7 @@ export type ProductionCutoverApprovalReport = {
   sourceRunId: string;
   sourceTags: Record<SourceDatabase, { sha256: string }>;
   freezeProofSha256: string;
+  cohortSha256?: string;
   approvedRunId: string;
   approvedRunEvidenceSha256: string;
   parityReportChecksumSha256: string;
@@ -408,7 +421,10 @@ const defaultServices: ProductionCutoverServices = {
       });
     }
     const runners: Record<Exclude<typeof domain, "catalog">, () => Promise<DomainReport>> = {
-      identity: () => runProductionIdentityMigration(input),
+      identity: async () => {
+        await bindMigrationCohort(config.connectionString, config.sourceRunId, config.cohort);
+        return runProductionIdentityMigration(input);
+      },
       booking: () => runProductionBookingMigration(input),
       pms: () =>
         runProductionPmsMigration({
@@ -448,6 +464,7 @@ const defaultServices: ProductionCutoverServices = {
       migrationsDir: config.migrationsDir,
       targetMediaBucket: config.media.targetBucket,
       mediaCdnBaseUrl: config.media.cdnBaseUrl,
+      ...(config.cohort ? { cohortSha256: config.cohort.cohortSha256 } : {}),
     });
     if (report.decision !== "go")
       throw new ProductionCutoverError("PARITY_NOT_GO", "Migration parity did not return GO");
@@ -502,6 +519,7 @@ export function validateProductionCutoverConfig(config: ProductionCutoverConfig)
     if (!config.sourceTags[database]?.trim())
       throw new ProductionCutoverError("MISSING_SOURCE_TAG", `${database} source tag is required`);
   validateSourceEvidence(config);
+  if (config.cohort) validateCohort(config, config.cohort);
   const expectedConfirmation = {
     staging_rehearsal: `STAGING_REHEARSAL:${config.runId}:${config.sourceRunId}`,
     cutover_dry_run: `CUTOVER_DRY_RUN:${config.runId}:${config.sourceRunId}`,
@@ -576,6 +594,48 @@ function validateMediaConfig(config: ProductionCutoverConfig["media"]): void {
     );
 }
 
+function validateCohort(config: ProductionCutoverConfig, cohort: ProductionMigrationCohort): void {
+  const { cohortSha256, ...input } = cohort;
+  let canonicalSha256: string | null = null;
+  try {
+    canonicalSha256 = parseProductionMigrationCohort(input).cohortSha256;
+  } catch {
+    canonicalSha256 = null;
+  }
+  if (canonicalSha256 !== cohortSha256 || cohort.sourceRunId !== config.sourceRunId)
+    throw new ProductionCutoverError(
+      "INVALID_COHORT",
+      "Migration cohort is not the canonical cohort for this source run",
+    );
+}
+
+/**
+ * Binds the configured cohort before identity runs: written and checked against the attested
+ * source in one transaction. A stored cohort must equal the configured one, absence included.
+ */
+async function bindMigrationCohort(
+  connectionString: string,
+  sourceRunId: string,
+  cohort: ProductionMigrationCohort | undefined,
+): Promise<void> {
+  const client = new pg.Client({ connectionString: normalizePgConnectionString(connectionString) });
+  await client.connect();
+  try {
+    await client.query("BEGIN");
+    if (cohort) {
+      await writeProductionMigrationCohort(client, cohort);
+      await readProductionIdentitySnapshot(client, sourceRunId);
+    } else if (await readProductionMigrationCohort(client, sourceRunId))
+      throw new ProductionCutoverError("COHORT_CONFLICT", "Source run has an unconfigured cohort");
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
 function validateSourceEvidence(config: ProductionCutoverConfig): void {
   try {
     const plan = buildSourceExtractionPlan(config.sourceExtraction);
@@ -621,6 +681,7 @@ function validateApprovedRunReport(config: ProductionCutoverConfig): string {
     report["failureCode"] === null &&
     report["currentStep"] === null &&
     report["lastSafeCheckpoint"] === "smoke_evidence" &&
+    (report["cohortSha256"] ?? null) === (config.cohort?.cohortSha256 ?? null) &&
     guards?.["freezeProofSha256"] === config.freezeProofSha256 &&
     isSha256(guards?.["targetCleanProofSha256"]) &&
     isSha256(guards?.["smokeProofSha256"]) &&
@@ -714,6 +775,7 @@ function validateApprovalReport(
     report["applicationRelease"] !== config.applicationRelease ||
     report["sourceRunId"] !== config.sourceRunId ||
     report["freezeProofSha256"] !== config.freezeProofSha256 ||
+    (report["cohortSha256"] ?? null) !== (config.cohort?.cohortSha256 ?? null) ||
     !SOURCE_DATABASES.every(
       (database) =>
         (sourceTags?.[database] as Record<string, unknown> | undefined)?.["sha256"] ===
@@ -939,7 +1001,10 @@ export async function runProductionCutover(
         const result = await runStep(step, config, services, smokeContext);
         await completeStep(client, config.runId, step, result);
       } catch (error) {
-        const code = error instanceof ProductionCutoverError ? error.code : "STEP_FAILED";
+        const code =
+          error instanceof ProductionCutoverError || error instanceof ProductionMigrationCohortError
+            ? error.code
+            : "STEP_FAILED";
         await failStep(client, config.runId, step, code);
         await persistProductionCutoverEvidence(client, config.runId);
         throw new ProductionCutoverError(code, `${step} did not complete`);
@@ -1089,6 +1154,44 @@ function mapMigrationRows(
   return rows.map((row) => ({ ...row, appliedAt: row.appliedAt.toISOString() }));
 }
 
+/** Immutable run inputs; a cohort only changes the material when one is configured. */
+export function productionCutoverConfigSha256(
+  config: ProductionCutoverConfig,
+  targetIdentitySha256: string,
+  approvedRunEvidenceSha256: string | null,
+): string {
+  return sha256(
+    stableJson({
+      mode: config.mode,
+      runId: config.runId,
+      sourceRunId: config.sourceRunId,
+      sourceTagsSha256: Object.fromEntries(
+        SOURCE_DATABASES.map((database) => [database, sha256(config.sourceTags[database])]),
+      ),
+      sourceEnvironment: config.sourceEnvironment,
+      environment: config.environment,
+      applicationRelease: config.applicationRelease,
+      targetIdentitySha256,
+      operatorSha256: sha256(config.operator),
+      targetCleanProofSha256: config.targetCleanProofSha256,
+      freezeProofSha256: config.freezeProofSha256,
+      backupProofSha256: config.backupProofSha256 ?? null,
+      approvedRunId: config.approvedRunId ?? null,
+      approvedReportChecksumSha256: config.approvedReportChecksumSha256 ?? null,
+      approvedRunEvidenceSha256,
+      approvedParityDecision: config.approvedParityDecision ?? null,
+      approvalProofSha256: config.approvalProofSha256 ?? null,
+      mediaConfigSha256: sha256(stableJson(config.media)),
+      ...(config.cohort
+        ? {
+            cohortSha256: config.cohort.cohortSha256,
+            cohortApprovalProofSha256: config.cohort.approvalProofSha256,
+          }
+        : {}),
+    }),
+  );
+}
+
 async function initializeRun(
   client: pg.Client,
   config: ProductionCutoverConfig,
@@ -1100,27 +1203,10 @@ async function initializeRun(
   ) as Record<SourceDatabase, string>;
   const approvedRunEvidenceSha256 =
     config.mode === "production_cutover" ? validateApprovedRunReport(config) : null;
-  const configSha256 = sha256(
-    stableJson({
-      mode: config.mode,
-      runId: config.runId,
-      sourceRunId: config.sourceRunId,
-      sourceTagsSha256,
-      sourceEnvironment: config.sourceEnvironment,
-      environment: config.environment,
-      applicationRelease: config.applicationRelease,
-      targetIdentitySha256: targetAttestation.targetIdentitySha256,
-      operatorSha256: sha256(config.operator),
-      targetCleanProofSha256: config.targetCleanProofSha256,
-      freezeProofSha256: config.freezeProofSha256,
-      backupProofSha256: config.backupProofSha256 ?? null,
-      approvedRunId: config.approvedRunId ?? null,
-      approvedReportChecksumSha256: config.approvedReportChecksumSha256 ?? null,
-      approvedRunEvidenceSha256,
-      approvedParityDecision: config.approvedParityDecision ?? null,
-      approvalProofSha256: config.approvalProofSha256 ?? null,
-      mediaConfigSha256: sha256(stableJson(config.media)),
-    }),
+  const configSha256 = productionCutoverConfigSha256(
+    config,
+    targetAttestation.targetIdentitySha256,
+    approvedRunEvidenceSha256,
   );
   await client.query("BEGIN");
   try {
@@ -1143,8 +1229,10 @@ async function initializeRun(
             approved_run_id,
             approved_report_checksum_sha256, approved_run_evidence_sha256,
             approved_parity_decision, approval_proof_sha256, backup_proof_sha256,
-            target_clean_proof_sha256, freeze_proof_sha256, smoke_proof_sha256, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NULL,'running')`,
+            target_clean_proof_sha256, freeze_proof_sha256, smoke_proof_sha256, status,
+            cohort_sha256)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NULL,'running',
+                 $19)`,
         [
           config.runId,
           config.mode,
@@ -1164,6 +1252,7 @@ async function initializeRun(
           config.backupProofSha256 ?? null,
           config.targetCleanProofSha256,
           config.freezeProofSha256,
+          config.cohort?.cohortSha256 ?? null,
         ],
       );
       for (const [index, step] of PRODUCTION_CUTOVER_STEPS.entries())
@@ -1401,6 +1490,7 @@ async function readRun(client: pg.Client, runId: string): Promise<RunRow | null>
             operator_sha256 AS "operatorSha256",
             abort_operator_sha256 AS "abortOperatorSha256",
             source_tags_sha256 AS "sourceTagsSha256", config_sha256 AS "configSha256", status,
+            cohort_sha256 AS "cohortSha256",
             target_clean_proof_sha256 AS "targetCleanProofSha256",
             freeze_proof_sha256 AS "freezeProofSha256",
             smoke_proof_sha256 AS "smokeProofSha256",
@@ -1461,6 +1551,7 @@ async function readProductionCutoverReport(
     applicationRelease: run.applicationRelease,
     targetIdentitySha256: run.targetIdentitySha256,
     configSha256: run.configSha256,
+    ...(run.cohortSha256 ? { cohortSha256: run.cohortSha256 } : {}),
     operatorSha256: run.operatorSha256,
     abortOperatorSha256: run.abortOperatorSha256,
     sourceTags,

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   PRODUCTION_CUTOVER_STEPS,
   ProductionCutoverError,
+  productionCutoverConfigSha256,
   productionCutoverExitCode,
   validateProductionCutoverConfig,
   type ProductionCutoverApprovalReport,
@@ -12,6 +13,7 @@ import {
   type ProductionCutoverReport,
 } from "./productionCutover.js";
 import { stableJson } from "./productionIdentitySourceValidation.js";
+import { parseProductionMigrationCohort } from "./productionMigrationCohort.js";
 import {
   buildSourceExtractionPlan,
   VAY_1350_INVENTORY_REVISION,
@@ -165,6 +167,108 @@ describe("production cutover guards", () => {
     expect(productionCutoverExitCode(report)).toBe(0);
   });
 });
+
+describe("production cutover cohort binding", () => {
+  it("keeps the no-cohort configuration hash and changes it only for a cohort", () => {
+    const input = productionConfig();
+    const legacy = hash(
+      stableJson({
+        mode: input.mode,
+        runId: input.runId,
+        sourceRunId: input.sourceRunId,
+        sourceTagsSha256: Object.fromEntries(
+          Object.entries(input.sourceTags).map(([database, tag]) => [database, hash(tag)]),
+        ),
+        sourceEnvironment: input.sourceEnvironment,
+        environment: input.environment,
+        applicationRelease: input.applicationRelease,
+        targetIdentitySha256: SHA,
+        operatorSha256: hash(input.operator),
+        targetCleanProofSha256: input.targetCleanProofSha256,
+        freezeProofSha256: input.freezeProofSha256,
+        backupProofSha256: input.backupProofSha256,
+        approvedRunId: input.approvedRunId,
+        approvedReportChecksumSha256: input.approvedReportChecksumSha256,
+        approvedRunEvidenceSha256: SHA,
+        approvedParityDecision: input.approvedParityDecision,
+        approvalProofSha256: input.approvalProofSha256,
+        mediaConfigSha256: hash(stableJson(input.media)),
+      }),
+    );
+    expect(productionCutoverConfigSha256(input, SHA, SHA)).toBe(legacy);
+    const scoped = { ...input, cohort: cohortFor(input.sourceRunId) };
+    expect(productionCutoverConfigSha256(scoped, SHA, SHA)).not.toBe(legacy);
+  });
+
+  it("rejects a cohort for another source run or with a forged checksum", () => {
+    const input = config();
+    const cohort = cohortFor(input.sourceRunId);
+    expect(() => validateProductionCutoverConfig({ ...input, cohort })).not.toThrow();
+    for (const forged of [
+      cohortFor(`vay1351-${"f".repeat(24)}`),
+      { ...cohort, cohortSha256: SHA },
+      { ...cohort, bookingHotelIds: [] },
+    ])
+      expectProductionError(
+        () => validateProductionCutoverConfig({ ...input, cohort: forged }),
+        "INVALID_COHORT",
+      );
+  });
+
+  it("requires production to carry the approved dry-run and approval cohort", () => {
+    const input = productionConfig();
+    input.cohort = cohortFor(input.sourceRunId);
+    expectProductionError(
+      () => validateProductionCutoverConfig(input),
+      "APPROVED_RUN_EVIDENCE_MISMATCH",
+    );
+
+    const { contractVersion, operator, evidenceChecksumSha256, ...material } =
+      approvedDryRunReport(input);
+    void evidenceChecksumSha256;
+    const scopedMaterial = { ...material, cohortSha256: input.cohort.cohortSha256 };
+    const approved = { contractVersion, ...scopedMaterial, operator };
+    input.approvedRunReport = {
+      ...approved,
+      evidenceChecksumSha256: hash(stableJson(scopedMaterial)),
+    };
+    const approvedEvidence = hash(stableJson(scopedMaterial));
+    input.approvalReport = productionApprovalReport(input, approvedEvidence);
+    input.approvalProofSha256 = (
+      input.approvalReport as ProductionCutoverApprovalReport
+    ).evidenceChecksumSha256;
+    expectProductionError(
+      () => validateProductionCutoverConfig(input),
+      "APPROVAL_EVIDENCE_MISMATCH",
+    );
+
+    const { evidenceChecksumSha256: unscoped, ...approval } = productionApprovalReport(
+      input,
+      approvedEvidence,
+    );
+    void unscoped;
+    const scopedApproval = { ...approval, cohortSha256: input.cohort.cohortSha256 };
+    input.approvalReport = {
+      ...scopedApproval,
+      evidenceChecksumSha256: hash(stableJson(scopedApproval)),
+    };
+    input.approvalProofSha256 = hash(stableJson(scopedApproval));
+    expect(() => validateProductionCutoverConfig(input)).not.toThrow();
+  });
+});
+
+function cohortFor(sourceRunId: string) {
+  return parseProductionMigrationCohort({
+    sourceRunId,
+    bookingHotelIds: [
+      "22222222-2222-4222-8222-222222222222",
+      "11111111-1111-4111-8111-111111111111",
+    ],
+    pmsHotelIds: [],
+    marketplaceHotelIds: [],
+    approvalProofSha256: SHA,
+  });
+}
 
 function config(): ProductionCutoverConfig {
   const sourceExtraction = extraction("staging");
