@@ -705,6 +705,13 @@ stored cohort for a run started without `--cohort`, fails with `COHORT_CONFLICT`
 Without `--cohort`, configuration and evidence hashes are unchanged; the target
 must carry migration 0474, as every target must match the deployed release.
 
+With a cohort, the identity step moves every hotel resource outside the cohort to
+the owner's archived quarantine organization (archived links, expired
+entitlements, no membership). A mixed owner's active organization keeps only its
+cohort hotels; a hotel user with no cohort hotel is `suspended` with disposition
+`outside_migration_cohort`. The identity counts then add `cohortSuspendedUsers`,
+`cohortQuarantinedOrganizations` and `cohortQuarantinedResourceLinks`.
+
 Before a run, a database administrator must bind the target itself with durable
 evidence. The database-level settings path remains supported where available;
 the command reads it only from `pg_catalog.pg_db_role_setting` for the current

@@ -90,7 +90,12 @@ export async function runProductionIdentityTransaction(
     }
     const snapshot = await services.readSnapshot(client, input.sourceRunId);
     const existing = await services.readTarget(client, snapshot.rows);
-    const plan = services.buildPlan(snapshot.rows, existing, snapshot.sourceHorizonAt);
+    const plan = services.buildPlan(
+      snapshot.rows,
+      existing,
+      snapshot.sourceHorizonAt,
+      snapshot.cohort ?? null,
+    );
     if (input.mode === "dry-run" || plan.blockers.length > 0) {
       await client.query("ROLLBACK");
       transactionFinished = true;
@@ -104,6 +109,7 @@ export async function runProductionIdentityTransaction(
       snapshot.rows,
       await services.readTarget(client, snapshot.rows),
       snapshot.sourceHorizonAt,
+      snapshot.cohort ?? null,
     );
     if (
       verified.blockers.length > 0 ||

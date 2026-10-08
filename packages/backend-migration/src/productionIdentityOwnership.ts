@@ -1,4 +1,8 @@
 import { PLATFORM_ORGANIZATION_ID } from "./platformIdentityBootstrap.js";
+import {
+  outsideMigrationCohort,
+  type IdentityCohortScope,
+} from "./productionIdentityCohortScope.js";
 import type {
   IdentityMigrationBlocker,
   IdentitySourceRow,
@@ -45,13 +49,23 @@ export function planIdentityOwnership(
   users: PlannedIdentityUser[],
   existing: ExistingOwnershipState = { organizations: [], memberships: [], resourceLinks: [] },
   sourceHorizonAt?: string,
+  cohort?: IdentityCohortScope | null,
 ): IdentityOwnershipPlan {
   const parsed = parseIdentityOwnershipRows(rows);
   const blockers = [...parsed.blockers];
   const usersById = new Map(users.map((user) => [user.id, user]));
   const groups = new Map<string, IdentityOwnershipSource[]>();
   const quarantineGroups = new Map<string, IdentityOwnershipSource[]>();
+  // VAY-1362: resources outside the cohort move to the archived quarantine organization, so
+  // a mixed owner's active organization (propertyAccessMode "all") holds cohort hotels only.
+  const cohortQuarantine = new Map<string, number>();
   for (const owner of parsed.owners) {
+    if (outsideMigrationCohort(owner, cohort)) {
+      const key = `${owner.userId}:${owner.kind}`;
+      append(quarantineGroups, key, owner);
+      cohortQuarantine.set(key, (cohortQuarantine.get(key) ?? 0) + 1);
+      continue;
+    }
     const user = usersById.get(owner.userId);
     if (!user) {
       if (hasFutureOperationalBooking(rows, owner, sourceHorizonAt))
@@ -363,15 +377,23 @@ export function planIdentityOwnership(
       );
     }
   }
+  const cohortLinks = [...cohortQuarantine.values()].reduce((sum, count) => sum + count, 0);
   return {
     organizations: sortedBy([...organizations.values()], (row) => row.id),
     memberships: sortedBy(memberships, (row) => `${row.organizationId}:${row.userId}`),
     resourceLinks: sortedBy(resourceLinks, resourceKey),
-    quarantinedOrganizations: quarantineGroups.size,
-    quarantinedResourceLinks: [...quarantineGroups.values()].reduce(
-      (count, owners) => count + owners.length,
-      0,
-    ),
+    quarantinedOrganizations: [...quarantineGroups].filter(
+      ([key, owners]) => owners.length > (cohortQuarantine.get(key) ?? 0),
+    ).length,
+    quarantinedResourceLinks:
+      [...quarantineGroups.values()].reduce((count, owners) => count + owners.length, 0) -
+      cohortLinks,
+    ...(cohort
+      ? {
+          cohortQuarantinedOrganizations: cohortQuarantine.size,
+          cohortQuarantinedResourceLinks: cohortLinks,
+        }
+      : {}),
     blockers: sortedBy(blockers, (row) => `${row.code}:${row.source}:${row.sourceId}`),
   };
 }

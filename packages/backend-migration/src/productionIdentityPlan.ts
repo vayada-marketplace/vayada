@@ -6,6 +6,10 @@ import {
   type PlannedIdentityAuditEvent,
 } from "./productionIdentityAudit.js";
 import {
+  outsideCohortOnlyOwners,
+  type IdentityCohortScope,
+} from "./productionIdentityCohortScope.js";
+import {
   planIdentityConsentSource,
   type PlannedUserConsent,
 } from "./productionIdentityConsentSource.js";
@@ -89,12 +93,17 @@ export type ProductionIdentityCounts = {
   gdprRequests: number;
   loginAuditEvents: number;
   retiredAuthRows: number;
+  /** Present only when the run has a VAY-1362 cohort. */
+  cohortSuspendedUsers?: number;
+  cohortQuarantinedOrganizations?: number;
+  cohortQuarantinedResourceLinks?: number;
 };
 
 export function buildProductionIdentityPlan(
   rows: IdentitySourceRow[],
   existing: ProductionIdentityExistingState = emptyProductionIdentityState(),
   sourceHorizonAt?: string,
+  cohort?: IdentityCohortScope | null,
 ): ProductionIdentityPlan {
   const orderedRows = sortedBy(
     rows,
@@ -105,6 +114,7 @@ export function buildProductionIdentityPlan(
     orderedRows,
     current.users,
     current.workosIdentities,
+    outsideCohortOnlyOwners(orderedRows, cohort),
   );
   const quarantine = planMissingOwnerQuarantine(
     orderedRows,
@@ -118,6 +128,7 @@ export function buildProductionIdentityPlan(
     plannedUsers,
     current.ownership,
     sourceHorizonAt,
+    cohort,
   );
   const entitlements = planIdentityEntitlements(
     orderedRows,
@@ -176,7 +187,18 @@ export function buildProductionIdentityPlan(
         .length,
     blockers,
   };
-  const counts = planCounts(content, current);
+  const counts: ProductionIdentityCounts = {
+    ...planCounts(content, current),
+    ...(cohort
+      ? {
+          cohortSuspendedUsers: plannedUsers.filter(
+            (user) => user.disposition === "outside_migration_cohort",
+          ).length,
+          cohortQuarantinedOrganizations: ownership.cohortQuarantinedOrganizations ?? 0,
+          cohortQuarantinedResourceLinks: ownership.cohortQuarantinedResourceLinks ?? 0,
+        }
+      : {}),
+  };
   const { pendingTargetWrites: _pendingTargetWrites, ...stableCounts } = counts;
   return {
     ...content,

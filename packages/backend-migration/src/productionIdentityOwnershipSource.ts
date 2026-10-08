@@ -6,7 +6,10 @@ import type {
 } from "./productionIdentityDisposition.js";
 
 export type OrganizationKind =
-  "platform" | "hotel_group" | "creator_workspace" | "affiliate_partner";
+  | "platform"
+  | "hotel_group"
+  | "creator_workspace"
+  | "affiliate_partner";
 export type OrganizationStatus = "active" | "suspended" | "archived";
 export type MembershipStatus = "active" | "pending" | "suspended" | "inactive";
 
@@ -51,6 +54,9 @@ export type IdentityOwnershipPlan = {
   resourceLinks: PlannedResourceLink[];
   quarantinedOrganizations: number;
   quarantinedResourceLinks: number;
+  /** Present only when the run has a VAY-1362 cohort. */
+  cohortQuarantinedOrganizations?: number;
+  cohortQuarantinedResourceLinks?: number;
   blockers: IdentityMigrationBlocker[];
 };
 

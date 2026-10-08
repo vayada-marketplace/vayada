@@ -44,22 +44,26 @@ describe("production identity migration transaction", () => {
     expect(log).toEqual(["BEGIN", "snapshot", "target", "plan", "ROLLBACK"]);
   });
 
-  it("threads the immutable source horizon from the reader into planning", async () => {
+  it("threads the immutable source horizon and cohort from the reader into planning", async () => {
     const log: string[] = [];
     const active = services(log, plan());
     active.buildPlan = vi.fn(() => plan());
+    const cohort = { bookingHotelIds: ["h"], pmsHotelIds: [], marketplaceHotelIds: [] };
 
-    await runProductionIdentityTransaction(
-      new TransactionClient(log) as never,
-      { sourceRunId: RUN, mode: "dry-run" },
-      active,
-    );
-
-    expect(active.buildPlan).toHaveBeenCalledWith(
-      [],
-      emptyProductionIdentityState(),
-      "2026-08-30T00:00:00.000Z",
-    );
+    for (const bound of [undefined, cohort]) {
+      const snapshot = { rows: [], sourceHorizonAt: "2026-08-30T00:00:00.000Z", cohort: bound };
+      await runProductionIdentityTransaction(
+        new TransactionClient(log) as never,
+        { sourceRunId: RUN, mode: "dry-run" },
+        { ...active, readSnapshot: async () => snapshot as never },
+      );
+      expect(active.buildPlan).toHaveBeenLastCalledWith(
+        [],
+        emptyProductionIdentityState(),
+        "2026-08-30T00:00:00.000Z",
+        bound ?? null,
+      );
+    }
   });
 
   it("rolls a blocked apply back before invoking writers", async () => {
