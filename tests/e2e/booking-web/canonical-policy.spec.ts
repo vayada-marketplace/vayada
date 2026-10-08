@@ -108,7 +108,7 @@ test.describe("booking-web canonical URL policy", () => {
     ).toBeNull();
   });
 
-  test("derives localized room-page URLs from the canonical hotel policy", () => {
+  test("derives localized hotel-page URLs from the canonical hotel policy", () => {
     const policy = resolvePublicHotelUrls({
       requestHost: "hotel-alpenrose.booking.localhost:3002",
       requestProtocol: "http",

@@ -57,13 +57,6 @@ function safeSet(key: string, value: string): void {
   } catch {}
 }
 
-function safeRemove(key: string): void {
-  if (typeof window === "undefined") return;
-  try {
-    sessionStorage.removeItem(key);
-  } catch {}
-}
-
 export function saveGuestDetails(draft: GuestDetailsDraft): void {
   safeSet(GUEST_KEY, JSON.stringify(draft));
   safeSet(CHECKOUT_ATTEMPT_KEY, JSON.stringify({ keys: {} }));
