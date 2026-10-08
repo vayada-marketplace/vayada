@@ -1,5 +1,8 @@
 # Hotel setup command credentials (VAY-1092)
 
+> **Superseded by VAY-2056** ([ordinary login](hotel-setup-ordinary-login.md)): the six Owner operations no longer use per-hotel native credentials on the public API.
+> This contract describes the private services, which stay until the decommission steps.
+
 _Review contract. No service, login, secret, grant, or hotel is activated by this file._
 
 ## Scope

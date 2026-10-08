@@ -1072,10 +1072,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     "disabled",
   );
   const auth = loadAuthConfig(env);
-  const affiliateCapture = loadAffiliateCaptureConfig(env, [
-    targetDatabaseUrl,
-    auth?.databaseUrl,
-  ]);
+  const affiliateCapture = loadAffiliateCaptureConfig(env, [targetDatabaseUrl, auth?.databaseUrl]);
   const affiliatePublicRedirectEnabled = readBooleanEnv(
     env,
     "AFFILIATE_PUBLIC_REDIRECT_ENABLED",
