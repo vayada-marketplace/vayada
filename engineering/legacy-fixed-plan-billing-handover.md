@@ -84,10 +84,13 @@ removes billing from the runbook's "two in-process writers" caveat.
 
 The job `finance.subscription-webhook` throws today when no entitlement
 matches, which retries the job until dead letter. New rule: when no entitlement
-matches **and** the event carries no `vayada_organization_id`, the job finishes
-as `ignored_unowned`. The receipt in `platform.external_webhook_events` is kept.
-Events that carry target metadata but match no entitlement still throw, because
-that is a real inconsistency.
+matches **and** the event carries no `vayada_organization_id`, the job reads
+the live subscription once; if that subscription also carries no
+`vayada_organization_id` the job finishes as `ignored_unowned`. The receipt in
+`platform.external_webhook_events` is kept. Events whose subscription does carry
+target metadata but match no entitlement still throw and retry, because that is
+a real inconsistency (for example an invoice that arrives before its checkout
+completion is linked).
 
 Webhook intake itself (`routes/providerWebhooks.ts`, `platform.external_webhook_events`,
 `finance.payments`) is not touched.
@@ -146,6 +149,12 @@ legacy billing reference (an abandoned checkout) arrives as a suspended,
 provider-free Commission entitlement. The mode searches Stripe for a live
 subscription of the hotel, refuses when one exists, and otherwise sets the
 entitlement back to active Commission.
+
+Once adopted, a hotel gets the ordinary target self-service on its retained
+subscription: the plan page, invoices, card and collection-method changes, the
+customer portal, cancel at period end, and the immediate switch to Commission
+with Stripe's prorated final invoice. Legacy allowed only cancel at period end
+and the portal; the wider set is intended.
 
 Hotels **outside the cohort** are not imported, so there is nothing to adopt.
 Their subscriptions are cancelled at period end in the Stripe dashboard and the
