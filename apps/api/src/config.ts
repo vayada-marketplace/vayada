@@ -193,7 +193,6 @@ export type ApiConfig = {
   auth?: ApiAuthConfig;
   authSession?: ApiAuthSessionConfig;
   targetDatabaseUrl?: string;
-  pricingDatabaseUrl?: string;
   publicHotelProfileSource: PublicHotelProfileSource;
   marketplaceAdminSource: MarketplaceAdminSource;
   marketplaceAdminLegacySuperadminFallbackEnabled: boolean;
@@ -1043,7 +1042,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   });
   const apiRuntime = readSourceEnv(env, "API_RUNTIME", ["legacy", "next"], "legacy");
   const targetDatabaseUrl = readOptionalPgConnectionEnv(env, "TARGET_DATABASE_URL");
-  const pricingDatabaseUrl = readOptionalPgConnectionEnv(env, "PRICING_DATABASE_URL");
   const publicHotelProfileSource = readSourceEnv(
     env,
     "PUBLIC_HOTEL_PROFILE_SOURCE",
@@ -1074,22 +1072,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     "disabled",
   );
   const auth = loadAuthConfig(env);
-  const pricingDatabaseUser = pricingDatabaseUrl
-    ? new pg.Client({ connectionString: pricingDatabaseUrl }).user
-    : undefined;
-  if (
-    pricingDatabaseUrl &&
-    [targetDatabaseUrl, auth?.databaseUrl].some(
-      (url) => url && new pg.Client({ connectionString: url }).user === pricingDatabaseUser,
-    )
-  ) {
-    throw new Error("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
-  }
-  const affiliateCapture = loadAffiliateCaptureConfig(env, [
-    targetDatabaseUrl,
-    auth?.databaseUrl,
-    pricingDatabaseUrl,
-  ]);
+  const affiliateCapture = loadAffiliateCaptureConfig(env, [targetDatabaseUrl, auth?.databaseUrl]);
   const affiliatePublicRedirectEnabled = readBooleanEnv(
     env,
     "AFFILIATE_PUBLIC_REDIRECT_ENABLED",
@@ -1323,7 +1306,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     auth,
     authSession,
     targetDatabaseUrl,
-    pricingDatabaseUrl,
     publicHotelProfileSource,
     marketplaceAdminSource,
     marketplaceAdminLegacySuperadminFallbackEnabled: readBooleanEnv(
