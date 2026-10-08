@@ -104,15 +104,10 @@ it("reallocates held rooms without public stock and preserves every room and rat
   expect(document.querySelector<HTMLInputElement>("input[readonly]")!.value).toBe("3");
 });
 
-it("can restore a held original selection after choosing an alternative", async () => {
-  const change = await render(input);
-  const select = document.querySelector("select")!;
-  act(() => {
-    select.value = single.id;
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-  });
-  const alternative = { ...input, ...change.mock.lastCall![0] };
-  await render(alternative, [single], change);
+it("restores the held original selection from a changed room", async () => {
+  const change = await render({ ...input, roomTypeId: "suite", roomSelection: undefined });
+  const select = document.querySelector<HTMLSelectElement>("select")!;
+  expect(select.value).toBe("current-selection");
   act(() => {
     select.value = "original-selection";
     select.dispatchEvent(new Event("change", { bubbles: true }));
