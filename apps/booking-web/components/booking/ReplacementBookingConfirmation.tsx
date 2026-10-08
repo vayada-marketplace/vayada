@@ -8,9 +8,13 @@ import type {
 import { ApiError } from "@/services/api/client";
 import {
   acceptPricingQuote,
+  pricingQuoteBookableOnline,
   type PricingAcceptanceGuest,
   type PricingAcceptanceResult,
+  type PricingCardPaymentRequired,
+  type PricingCardPaymentResult,
 } from "@/services/api/pricingAcceptance";
+import ReplacementCardPayment from "./ReplacementCardPayment";
 
 const field = "mt-1 block w-full rounded-lg border border-gray-300 bg-white p-3 text-gray-900";
 const button = "rounded-full bg-primary-600 px-5 py-3 font-semibold text-white disabled:opacity-40";
@@ -29,16 +33,15 @@ export default function ReplacementBookingConfirmation({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [refreshRequired, setRefreshRequired] = useState(false);
-  const [result, setResult] = useState<PricingAcceptanceResult | null>(null);
+  const [result, setResult] = useState<PricingAcceptanceResult | PricingCardPaymentResult | null>(
+    null,
+  );
+  const [cardPayment, setCardPayment] = useState<PricingCardPaymentRequired | null>(null);
   const [pending, setPending] = useState<{
     guest: PricingAcceptanceGuest;
     disclosure: PublicQuoteGuestDisclosure;
   } | null>(null);
-  const supported =
-    quote.acceptanceMode === "instant" &&
-    quote.paymentMethod === "pay_at_property" &&
-    quote.dueNowMinor === "0" &&
-    quote.dueLaterMinor === quote.totalMinor;
+  const supported = pricingQuoteBookableOnline(quote);
   const ready =
     supported &&
     !refreshRequired &&
@@ -64,28 +67,33 @@ export default function ReplacementBookingConfirmation({
     setLoading(true);
     setError("");
     try {
-      setResult(
-        await acceptPricingQuote(
-          slug,
-          quote,
-          acceptedDisclosure,
-          guest,
-          undefined,
-          pending ? "uncertain-retry" : "fresh",
-        ),
+      const accepted = await acceptPricingQuote(
+        slug,
+        quote,
+        acceptedDisclosure,
+        guest,
+        undefined,
+        pending ? "uncertain-retry" : "fresh",
       );
+      if (accepted.kind === "payment_required") setCardPayment(accepted);
+      else setResult(accepted);
     } catch (failure) {
       const conflict = failure instanceof ApiError && failure.status === 409;
       // 404 on a first attempt: online booking is off or this hotel is not bookable, so nothing
       // was stored. A retry after an uncertain attempt keeps the uncertain message.
       const unavailable = failure instanceof ApiError && failure.status === 404 && !pending;
-      setRefreshRequired(conflict);
+      const cardUnavailable =
+        unavailable &&
+        (failure.detail as { code?: unknown } | null)?.code === "CARD_PAYMENT_UNAVAILABLE";
+      setRefreshRequired(conflict || cardUnavailable);
       setError(
         conflict
           ? "This price is no longer available. Get a new price and review its terms again."
-          : unavailable
-            ? "Online booking is not available for this hotel right now. No room was reserved and no payment was taken."
-            : "We couldn’t confirm your booking. Your room may still have been booked, so retry with the same details.",
+          : cardUnavailable
+            ? "Paying by card online isn’t available right now. Get a new price with “Pay at property”. No room was reserved and no payment was taken."
+            : unavailable
+              ? "Online booking is not available for this hotel right now. No room was reserved and no payment was taken."
+              : "We couldn’t confirm your booking. Your room may still have been booked, so retry with the same details.",
       );
     } finally {
       setLoading(false);
@@ -99,6 +107,16 @@ export default function ReplacementBookingConfirmation({
         <p>Your booking reference is {result.bookingReference}.</p>
         <p>We sent the confirmation details to the email address you provided.</p>
       </section>
+    );
+
+  if (cardPayment)
+    return (
+      <ReplacementCardPayment
+        slug={slug}
+        quoteId={quote.quoteId}
+        required={cardPayment}
+        onPaid={setResult}
+      />
     );
 
   const policy = disclosure?.choices;
@@ -173,7 +191,11 @@ export default function ReplacementBookingConfirmation({
       ) : null}
       {error && <p role="alert">{error}</p>}
       <button className={button} type="submit" disabled={!ready || loading}>
-        {loading ? "Confirming booking…" : "Confirm booking"}
+        {loading
+          ? "Confirming booking…"
+          : quote.paymentMethod === "card"
+            ? "Continue to card payment"
+            : "Confirm booking"}
       </button>
     </form>
   );

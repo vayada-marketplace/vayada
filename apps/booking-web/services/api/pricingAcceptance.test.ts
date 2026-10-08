@@ -4,7 +4,7 @@ import type {
   PublicBookingQuote,
   PublicQuoteGuestDisclosure,
 } from "@vayada/domain-booking/replacement-pricing";
-import { acceptPricingQuote } from "./pricingAcceptance";
+import { acceptPricingQuote, completePricingCardPayment } from "./pricingAcceptance";
 
 const quote = {
   version: "public-booking-quote.v1",
@@ -148,6 +148,7 @@ it("refuses stale, mismatched and unsupported evidence before sending", async ()
   for (const [candidateQuote, candidateDisclosure] of [
     [{ ...quote, acceptanceMode: "request" }, disclosure],
     [{ ...quote, paymentMethod: "card" }, disclosure],
+    [{ ...quote, paymentMethod: "card", dueNowMinor: "600", dueLaterMinor: "20000" }, disclosure],
     [quote, { ...disclosure, quoteEvidenceId: "unverified" }],
     [quote, { ...disclosure, quoteId: "other" }],
   ] as const)
@@ -182,6 +183,55 @@ it("accepts an exact replay and rejects malformed or private success payloads", 
       "confirmation could not be verified",
     );
   }
+});
+
+it("returns a card payment step and confirms it with the same request key", async () => {
+  const card = { ...quote, paymentMethod: "card", dueNowMinor: "20600", dueLaterMinor: "0" };
+  const required = {
+    kind: "payment_required",
+    bookingId: fresh.bookingId,
+    bookingReference: fresh.bookingReference,
+    acceptanceId: fresh.acceptanceId,
+    acceptedAt: fresh.acceptedAt,
+    payment: {
+      provider: "stripe",
+      clientSecret: "pi_123_secret_456",
+      stripeAccountId: "acct_789",
+      paymentIntentId: "pi_123",
+      expiresAt: "2026-09-14T12:31:00.000Z",
+    },
+  };
+  fetcher.mockResolvedValueOnce(new Response(JSON.stringify(required)));
+  const result = await acceptPricingQuote("hotel", card as PublicBookingQuote, disclosure, guest);
+  expect(result).toMatchObject({ kind: "payment_required", payment: required.payment });
+  const requestId = (result as { requestId: string }).requestId;
+  expect(requestId).toBeTruthy();
+  fetcher.mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({
+        kind: "accepted",
+        bookingId: fresh.bookingId,
+        bookingReference: fresh.bookingReference,
+        acceptanceId: fresh.acceptanceId,
+        acceptedAt: fresh.acceptedAt,
+        replayed: false,
+      }),
+    ),
+  );
+  await expect(
+    completePricingCardPayment("hotel", quote.quoteId, requestId),
+  ).resolves.toMatchObject({ kind: "accepted", bookingReference: fresh.bookingReference });
+  const [url, init] = fetcher.mock.calls.at(-1)!;
+  expect(String(url)).toContain(`/bookings/quotes/${quote.quoteId}/accept/payment`);
+  expect(new Headers((init as RequestInit).headers).get("Idempotency-Key")).toBe(requestId);
+  fetcher.mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({ ...required, payment: { ...required.payment, clientSecret: "x" } }),
+    ),
+  );
+  await expect(
+    acceptPricingQuote("hotel", card as PublicBookingQuote, disclosure, guest),
+  ).rejects.toThrow("confirmation could not be verified");
 });
 
 it("does not return a response after cancellation", async () => {

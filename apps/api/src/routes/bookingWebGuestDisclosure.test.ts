@@ -8,6 +8,10 @@ import {
   writePricingAcceptance,
 } from "../domains/pricingAcceptanceWriter.js";
 import {
+  completePricingCardPayment,
+  PricingCardPaymentError,
+} from "../domains/pricingCardPaymentCompletion.js";
+import {
   createTargetBookingWebCheckoutAdapter,
   registerBookingWebPublicRoutes,
 } from "./bookingWebPublic.js";
@@ -28,6 +32,14 @@ vi.mock("../domains/pricingAcceptanceWriter.js", () => ({
     }
   },
   writePricingAcceptance: vi.fn(),
+}));
+vi.mock("../domains/pricingCardPaymentCompletion.js", () => ({
+  PricingCardPaymentError: class PricingCardPaymentError extends Error {
+    constructor(readonly code: "unavailable" | "pending" | "conflict") {
+      super("Card payment is not complete");
+    }
+  },
+  completePricingCardPayment: vi.fn(),
 }));
 const id = "11111111-1111-4111-8111-111111111111";
 const choices = {
@@ -220,6 +232,40 @@ it("passes the Stripe provider to the writer only when card acceptance is switch
   }
 });
 
+it("completes a card payment only when card acceptance is switched on", async () => {
+  const pay = () =>
+    app.inject({
+      method: "POST",
+      url: `/api/booking-web/hotels/hotel/bookings/quotes/${id}/accept/payment`,
+      headers: { "idempotency-key": "accept-1" },
+    });
+  await mount(true, true, false, false);
+  expect((await pay()).statusCode).toBe(404);
+  expect(completePricingCardPayment).not.toHaveBeenCalled();
+  await app.close();
+
+  await mount(true, true, false, true);
+  vi.mocked(completePricingCardPayment).mockResolvedValueOnce({ kind: "accepted" } as never);
+  const paid = await pay();
+  expect(paid.statusCode).toBe(200);
+  expect(paid.headers["cache-control"]).toBe("no-store");
+  expect(completePricingCardPayment).toHaveBeenCalledWith(expect.anything(), stripeProvider, {
+    slug: "hotel",
+    quoteId: id,
+    requestId: "accept-1",
+  });
+  vi.mocked(completePricingCardPayment).mockRejectedValueOnce(
+    new PricingCardPaymentError("pending"),
+  );
+  const pending = await pay();
+  expect(pending.statusCode).toBe(409);
+  expect(pending.json()).toMatchObject({ code: "PAYMENT_PENDING" });
+  vi.mocked(completePricingCardPayment).mockRejectedValueOnce(
+    new PricingCardPaymentError("unavailable"),
+  );
+  expect((await pay()).statusCode).toBe(404);
+});
+
 it("takes a valid affiliate handle only from the cookie and verifies it before the writer", async () => {
   const contextId = "33333333-3333-4333-8333-333333333333";
   const forged = "44444444-4444-4444-8444-444444444444";
@@ -326,6 +372,7 @@ it.each([
   ["conflict", 409],
   ["storage", 503],
   ["unexpected", 500],
+  ["card_unavailable", 404],
 ] as const)("maps %s acceptance failures to %i", async (code, statusCode) => {
   vi.mocked(writePricingAcceptance).mockRejectedValue(new PricingAcceptanceError(code, null));
   await mount(true, true);
