@@ -91,7 +91,9 @@ test.describe("booking-web JSON-LD GEO contract", () => {
     const graph = await publicStructuredDataGraph(page);
     const roomNodes = graph.filter((node) => node["@type"] === "HotelRoom");
 
-    expect(roomNodes.length).toBeGreaterThan(0);
+    // Rooms are priced on /book since the public offers search was retired, so the
+    // hotel page publishes no HotelRoom nodes; any that reappear must stay price-free.
+    expect(roomNodes).toEqual([]);
 
     for (const roomNode of roomNodes) {
       const validation = validateHotelRoomJsonLdNode(roomNode as Record<string, unknown>);

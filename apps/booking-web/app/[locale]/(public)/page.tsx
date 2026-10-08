@@ -1,40 +1,27 @@
 "use client";
 
-import { useState, useRef, useEffect, Suspense, useCallback, useTransition } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import Image from "next/image";
-import { useRouter } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
 import DatePickerCalendar from "@/components/booking/DatePickerCalendar";
 import GuestSelector from "@/components/booking/GuestSelector";
-import RoomDetailModal from "@/components/booking/RoomDetailModal";
-import RoomCard from "@/components/booking/RoomCard";
-import RoomFiltersBar from "@/components/booking/RoomFiltersBar";
 import Surroundings from "@/components/booking/Surroundings";
 import PublicStructuredData from "@/components/booking/PublicStructuredData";
 import PropertyGallery from "@/components/booking/PropertyGallery";
-import { useHotel, useRooms, useAddons, useSlug } from "@/contexts/HotelContext";
+import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { calculateNights, formatDateShort, formatDate, ensureMinOneNight } from "@/lib/utils";
-import { useCurrency } from "@/contexts/CurrencyContext";
 import { trackEvent } from "@/services/api/tracking";
 import { hotelService } from "@/services/api/hotel";
 import { useBookingSteps } from "@/lib/hooks/useBookingSteps";
-import { getFlexibleNightlyRates, isFlexibleCancellationExpired } from "@/lib/constants/booking";
-import type { RoomType } from "@/lib/types";
 
 interface AppliedPromo {
   code: string;
   discountType: string;
   discountValue: number;
-}
-
-type RateType = "flexible" | "nonrefundable";
-
-interface PendingRateSelection {
-  roomId: string;
-  rateType: RateType;
 }
 
 function PromoPopover({
@@ -101,15 +88,6 @@ function HomePageContent() {
   const t = useTranslations("home");
   const tc = useTranslations("common");
   const { hotel } = useHotel();
-  const {
-    rooms,
-    loading: roomsLoading,
-    roomsLoading: roomsRefetching,
-    searchMessage,
-    refetchRooms,
-  } = useRooms();
-  const { addons } = useAddons();
-  const { formatPrice, convertAndRound, selectedCurrency } = useCurrency();
   const { slug } = useSlug();
   const searchParams = useSearchParams();
 
@@ -117,9 +95,9 @@ function HomePageContent() {
     trackEvent(slug, "page_visit");
   }, [slug]);
 
-  // Initialize from URL params so back-navigation from /book or /addons
-  // preserves the user's selected dates and guests. Sanitize so a same-day
-  // or invalid range from the URL never lands the page on "0 nights".
+  // Initialize from URL params so back-navigation from /book preserves the
+  // user's selected dates and guests. Sanitize so a same-day or invalid range
+  // from the URL never lands the page on "0 nights".
   const initialDates = (() => {
     const ciQ = searchParams.get("checkIn");
     const coQ = searchParams.get("checkOut");
@@ -146,54 +124,7 @@ function HomePageContent() {
   };
   const effectiveChildren = guestTypeSettings.childrenEnabled ? children : 0;
 
-  // "Committed" search params — only update when user clicks "Check Availability"
-  const [committedCheckIn, setCommittedCheckIn] = useState(checkIn);
-  const [committedCheckOut, setCommittedCheckOut] = useState(checkOut);
-  const [committedAdults, setCommittedAdults] = useState(adults);
-  const [committedChildren, setCommittedChildren] = useState(children);
-  const effectiveCommittedChildren = guestTypeSettings.childrenEnabled ? committedChildren : 0;
-
-  // Fetch rooms with default dates on initial load so prices reflect seasonal rates
-  const [initialFetchDone, setInitialFetchDone] = useState(false);
-  useEffect(() => {
-    if (!roomsLoading && !initialFetchDone) {
-      setInitialFetchDone(true);
-      refetchRooms(checkIn, checkOut, adults, effectiveChildren);
-    }
-  }, [
-    adults,
-    checkIn,
-    checkOut,
-    effectiveChildren,
-    initialFetchDone,
-    refetchRooms,
-    rooms.length,
-    roomsLoading,
-  ]);
-
-  // Auto-refetch when the user changes dates or guests, so availability updates
-  // without requiring a click on "Check Availability". Debounced to coalesce
-  // rapid +/- clicks in the guest selector into a single request.
-  const skipNextAutoRefetch = useRef(true);
-  useEffect(() => {
-    if (skipNextAutoRefetch.current) {
-      skipNextAutoRefetch.current = false;
-      return;
-    }
-    const handle = setTimeout(() => {
-      setCommittedCheckIn(checkIn);
-      setCommittedCheckOut(checkOut);
-      setCommittedAdults(adults);
-      setCommittedChildren(effectiveChildren);
-      refetchRooms(checkIn, checkOut, adults, effectiveChildren);
-    }, 300);
-    return () => clearTimeout(handle);
-  }, [adults, checkIn, checkOut, effectiveChildren, refetchRooms]);
-
-  // roomCount removed — now computed dynamically per room type
-  const [activeFilters, setActiveFilters] = useState<string[]>([]);
-  const [sortOption, setSortOption] = useState("recommended");
-  const [currentStep] = useState(1);
+  const currentStep = 1;
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [guestsOpen, setGuestsOpen] = useState(false);
   const [promoOpen, setPromoOpen] = useState(false);
@@ -201,186 +132,16 @@ function HomePageContent() {
   const [appliedPromo, setAppliedPromo] = useState<AppliedPromo | null>(null);
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoError, setPromoError] = useState("");
-  const [imageIndices, setImageIndices] = useState<Record<string, number>>({});
-  const [selectedRates, setSelectedRates] = useState<Record<string, string | null>>({});
-  const [detailModalIndex, setDetailModalIndex] = useState<number | null>(null);
-  const closeRoomDetails = useCallback(() => setDetailModalIndex(null), []);
-  const [searching, setSearching] = useState(false);
-  const [pendingRateSelection, setPendingRateSelection] = useState<PendingRateSelection | null>(
-    null,
-  );
-  const [isRateNavigationPending, startRateNavigation] = useTransition();
-  const roomsSectionRef = useRef<HTMLDivElement>(null);
 
-  // Reset stale modal index if the underlying room list shrinks (e.g. after a refetch)
-  useEffect(() => {
-    if (detailModalIndex !== null && detailModalIndex >= rooms.length) {
-      setDetailModalIndex(null);
-    }
-  }, [rooms.length, detailModalIndex]);
+  const nights = calculateNights(checkIn, checkOut);
+  const { steps: STEPS } = useBookingSteps("rooms");
 
-  // Default per-room rate selection: prefer non-refundable when available, else flexible.
-  useEffect(() => {
-    if (rooms.length > 0 && Object.keys(selectedRates).length === 0) {
-      const defaults: Record<string, string> = {};
-      rooms.forEach((room) => {
-        const hasNonRefundable = room.nonRefundableRate != null;
-        const hasFlexible = room.flexibleRateEnabled !== false;
-        if (hasNonRefundable) {
-          defaults[room.id] = "nonrefundable";
-        } else if (hasFlexible) {
-          defaults[room.id] = "flexible";
-        }
-      });
-      setSelectedRates(defaults);
-    }
-  }, [rooms]);
-
-  const nights = calculateNights(committedCheckIn, committedCheckOut);
-
-  // Build filter key→label map, only including filters that match at least one room
-  const FILTER_ENTRIES = (hotel?.bookingFilters || [])
-    .map((key) => ({
-      key,
-      label: hotel?.customFilters?.[key] || t(key),
-    }))
-    .filter(({ key, label }) => {
-      if (hotel?.filterRooms?.[key]?.length) {
-        return rooms.some((room) => hotel.filterRooms?.[key]?.includes(room.id));
-      }
-      const lower = label.toLowerCase();
-      return rooms.some(
-        (room) =>
-          room.features.some((f) => f.toLowerCase().includes(lower)) ||
-          room.amenities.some((a) => a.toLowerCase().includes(lower)),
-      );
-    });
-  const FILTERS = FILTER_ENTRIES.map((f) => f.label);
-
-  // Filter rooms using filterRooms mapping (room ID based) with fallback to text matching
-  const filteredRooms = (() => {
-    const result =
-      activeFilters.length === 0
-        ? [...rooms]
-        : rooms.filter((room) =>
-            activeFilters.every((label) => {
-              const entry = FILTER_ENTRIES.find((f) => f.label === label);
-              if (entry && hotel?.filterRooms?.[entry.key]?.length) {
-                return hotel.filterRooms[entry.key].includes(room.id);
-              }
-              const lower = label.toLowerCase();
-              return (
-                room.features.some((f) => f.toLowerCase().includes(lower)) ||
-                room.amenities.some((a) => a.toLowerCase().includes(lower))
-              );
-            }),
-          );
-    const stayTotal = (room: (typeof rooms)[number]) => {
-      if (room.combination) return room.combination.totalAmount;
-      const rates = getFlexibleNightlyRates(room, nights);
-      return rates.reduce((sum, rate) => sum + rate, 0);
-    };
-    if (sortOption === "priceLow") result.sort((a, b) => stayTotal(a) - stayTotal(b));
-    else if (sortOption === "priceHigh") result.sort((a, b) => stayTotal(b) - stayTotal(a));
-    else if (sortOption === "roomSize") result.sort((a, b) => (b.size || 0) - (a.size || 0));
-    const totalGuests = committedAdults + effectiveCommittedChildren;
-    const isSoldOut = (room: (typeof rooms)[number]) =>
-      room.remainingRooms < Math.ceil(totalGuests / room.maxOccupancy);
-    result.sort((a, b) => Number(isSoldOut(a)) - Number(isSoldOut(b)));
-    return result;
-  })();
-
-  const { steps: STEPS, hasAddons } = useBookingSteps("rooms");
-  const isSelectingRate = pendingRateSelection !== null || isRateNavigationPending;
-
-  const buildRateTarget = useCallback(
-    (roomId: string, requiredRooms: number, rateType: RateType) => {
-      const params = new URLSearchParams({
-        room: roomId,
-        checkIn: committedCheckIn,
-        checkOut: committedCheckOut,
-        adults: String(committedAdults),
-        children: String(effectiveCommittedChildren),
-        rooms: String(requiredRooms),
-        rateType,
-      });
-      if (appliedPromo) params.set("promoCode", appliedPromo.code);
-      return `${hasAddons ? "/addons" : "/book"}?${params.toString()}`;
-    },
-    [
-      appliedPromo,
-      committedAdults,
-      committedCheckIn,
-      committedCheckOut,
-      effectiveCommittedChildren,
-      hasAddons,
-    ],
-  );
-
-  const getSelectedAvailableRate = useCallback(
-    (room: RoomType): RateType | null => {
-      const selectedRate = selectedRates[room.id] as RateType | null | undefined;
-      const flexibleExpired = isFlexibleCancellationExpired(committedCheckIn, room, hotel.timezone);
-      const showFlexibleRate =
-        room.flexibleRateEnabled !== false && (!flexibleExpired || room.nonRefundableRate == null);
-      const hasNonRefundable = room.nonRefundableRate != null;
-
-      if (selectedRate === "flexible" && showFlexibleRate) return "flexible";
-      if (selectedRate === "nonrefundable" && hasNonRefundable) return "nonrefundable";
-      if (hasNonRefundable) return "nonrefundable";
-      if (showFlexibleRate) return "flexible";
-      return null;
-    },
-    [committedCheckIn, hotel.timezone, selectedRates],
-  );
-
-  useEffect(() => {
-    if (rooms.length === 0) return;
-    const totalGuests = committedAdults + effectiveCommittedChildren;
-    const targets = new Set<string>();
-    for (const room of rooms.slice(0, 8)) {
-      const requiredRooms = room.combination
-        ? room.combination.roomSelection.lines.reduce((sum, line) => sum + line.guests.length, 0)
-        : Math.ceil(totalGuests / room.maxOccupancy);
-      if (room.remainingRooms < requiredRooms) continue;
-      const rateType = getSelectedAvailableRate(room);
-      if (!rateType) continue;
-      targets.add(buildRateTarget(room.id, requiredRooms, rateType));
-    }
-    targets.forEach((target) => {
-      router.prefetch(target);
-    });
-  }, [
-    buildRateTarget,
-    committedAdults,
-    effectiveCommittedChildren,
-    getSelectedAvailableRate,
-    rooms,
-    router,
-  ]);
-
-  const handleSelectRate = (room: RoomType, rateType: RateType, requiredRooms: number) => {
-    if (pendingRateSelection || isRateNavigationPending) return;
-    trackEvent(slug, "rate_selected");
-    const target = buildRateTarget(room.id, requiredRooms, rateType);
-
-    setPendingRateSelection({ roomId: room.id, rateType });
-
-    startRateNavigation(() => {
-      try {
-        router.push(target);
-      } catch (error) {
-        setPendingRateSelection(null);
-        throw error;
-      }
-    });
-  };
-
-  const toggleFilter = (filter: string) => {
-    setActiveFilters((prev) =>
-      prev.includes(filter) ? prev.filter((f) => f !== filter) : [...prev, filter],
-    );
-  };
+  // The legacy availability search is retired (VAY-1543 C.2): rooms, availability and
+  // prices come from the room-and-price page, which starts from the stay chosen here.
+  const bookParams = new URLSearchParams({ checkIn, checkOut, adults: String(adults) });
+  if (effectiveChildren > 0) bookParams.set("children", String(effectiveChildren));
+  if (appliedPromo) bookParams.set("promoCode", appliedPromo.code);
+  const bookTarget = `/book?${bookParams}`;
 
   const heroImage = hotel.heroImage;
   const heroHeading = hotel.branding?.heroHeading || hotel.name;
@@ -388,7 +149,7 @@ function HomePageContent() {
 
   return (
     <div className="min-h-screen bg-white overflow-x-hidden">
-      <PublicStructuredData hotel={hotel} rooms={rooms} locale={locale} />
+      <PublicStructuredData hotel={hotel} rooms={[]} locale={locale} />
 
       {/* Hero Section */}
       <div className="relative h-[520px] w-full">
@@ -627,50 +388,21 @@ function HomePageContent() {
 
           {/* Check Availability Button */}
           <button
-            onClick={async () => {
+            onClick={() => {
               setCalendarOpen(false);
               setGuestsOpen(false);
               setPromoOpen(false);
-              setCommittedCheckIn(checkIn);
-              setCommittedCheckOut(checkOut);
-              setCommittedAdults(adults);
-              setCommittedChildren(effectiveChildren);
-              setSearching(true);
-              roomsSectionRef.current?.scrollIntoView({ behavior: "smooth" });
-              await refetchRooms(checkIn, checkOut, adults, effectiveChildren);
-              setSearching(false);
+              router.push(bookTarget);
             }}
-            disabled={searching || roomsRefetching}
-            className="w-full md:w-auto px-8 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors whitespace-nowrap disabled:opacity-80 flex items-center justify-center gap-2"
+            className="w-full md:w-auto px-8 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors whitespace-nowrap flex items-center justify-center gap-2"
           >
-            {searching ? (
-              <>
-                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                  />
-                </svg>
-                {tc("loading")}
-              </>
-            ) : (
-              tc("checkAvailability")
-            )}
+            {tc("checkAvailability")}
           </button>
         </div>
       </div>
 
       {/* Main Content */}
-      <div ref={roomsSectionRef} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         {/* Section Header + Step Indicator */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
           <h2 className="text-2xl md:text-3xl font-heading text-gray-900">
@@ -707,149 +439,16 @@ function HomePageContent() {
           </div>
         </div>
 
-        <RoomFiltersBar
-          filters={FILTERS}
-          activeFilters={activeFilters}
-          onToggleFilter={toggleFilter}
-          sortOption={sortOption}
-          onSortChange={setSortOption}
-        />
-
-        {!roomsLoading &&
-          !roomsRefetching &&
-          initialFetchDone &&
-          checkIn === committedCheckIn &&
-          checkOut === committedCheckOut &&
-          adults === committedAdults &&
-          effectiveChildren === effectiveCommittedChildren &&
-          (searchMessage || (filteredRooms.length === 0 ? "noMatchingRooms" : null)) && (
-            <div
-              role="status"
-              className="mb-6 rounded-xl border border-gray-200 bg-gray-50 p-6 text-gray-700"
-            >
-              {t(searchMessage || "noMatchingRooms", {
-                count: committedAdults + effectiveCommittedChildren,
-              })}
-            </div>
-          )}
-
-        {/* The new room-and-price page works even when the legacy availability search fails. */}
-        {!roomsRefetching && (
-          <a
-            href={`/${locale}/book?${new URLSearchParams({ checkIn, checkOut })}`}
-            className="inline-block mb-6 rounded-full bg-primary-600 px-6 py-3 font-semibold text-white"
-          >
-            Choose rooms and get a price
-          </a>
-        )}
-
-        {/* Room Cards */}
-        <div>
-          <div className="space-y-6">
-            {roomsLoading
-              ? Array.from({ length: 3 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className="bg-white border border-gray-200 rounded-2xl overflow-hidden animate-pulse"
-                  >
-                    <div className="flex flex-col md:flex-row">
-                      <div className="w-full md:w-[420px] h-64 md:min-h-[320px] bg-gray-200" />
-                      <div className="flex-1 p-5 space-y-4">
-                        <div className="h-6 bg-gray-200 rounded w-48" />
-                        <div className="h-4 bg-gray-200 rounded w-32" />
-                        <div className="flex gap-2">
-                          <div className="h-8 bg-gray-200 rounded-full w-24" />
-                          <div className="h-8 bg-gray-200 rounded-full w-20" />
-                          <div className="h-8 bg-gray-200 rounded-full w-28" />
-                        </div>
-                        <div className="h-px bg-gray-100" />
-                        <div className="h-16 bg-gray-200 rounded-xl" />
-                        <div className="h-16 bg-gray-200 rounded-xl" />
-                      </div>
-                    </div>
-                  </div>
-                ))
-              : filteredRooms.map((room, roomIndex) => (
-                  <div key={room.id} id={`room-${room.id}`}>
-                    <RoomCard
-                      room={room}
-                      nights={nights}
-                      totalGuests={committedAdults + effectiveCommittedChildren}
-                      imageIndex={imageIndices[room.id] ?? 0}
-                      checkIn={committedCheckIn}
-                      hotelTimezone={hotel.timezone}
-                      onChangeImageIndex={(i) =>
-                        setImageIndices((prev) => ({ ...prev, [room.id]: i }))
-                      }
-                      selectedRate={
-                        (selectedRates[room.id] as "flexible" | "nonrefundable" | null) ?? null
-                      }
-                      onChangeSelectedRate={(next) =>
-                        setSelectedRates((prev) => ({ ...prev, [room.id]: next }))
-                      }
-                      onView={() => {
-                        trackEvent(slug, "room_viewed", { roomId: room.id });
-                        setDetailModalIndex(roomIndex);
-                      }}
-                      onSelectRate={(rateType, requiredRooms) => {
-                        handleSelectRate(room, rateType, requiredRooms);
-                      }}
-                      selectRateDisabled={isSelectingRate}
-                      selectRatePending={pendingRateSelection?.roomId === room.id}
-                    />
-                  </div>
-                ))}
-          </div>
-        </div>
+        {/* Rooms, availability and prices live on the room-and-price page. */}
+        <Link
+          href={bookTarget}
+          className="inline-block mb-6 rounded-full bg-primary-600 px-6 py-3 font-semibold text-white"
+        >
+          {t("chooseRoomsAndPrice")}
+        </Link>
       </div>
 
       <Surroundings key={slug} slug={slug} locality={hotel.contact.address} />
-      {/* Room Detail Modal */}
-      {detailModalIndex !== null &&
-        filteredRooms[detailModalIndex] &&
-        (() => {
-          const modalRoom = filteredRooms[detailModalIndex];
-          const modalRequiredRooms = modalRoom.combination
-            ? modalRoom.combination.roomSelection.lines.reduce(
-                (sum, line) => sum + line.guests.length,
-                0,
-              )
-            : Math.ceil((committedAdults + effectiveCommittedChildren) / modalRoom.maxOccupancy);
-          const modalSoldOut = modalRoom.remainingRooms < modalRequiredRooms;
-          return (
-            <RoomDetailModal
-              room={modalRoom}
-              nights={nights}
-              open={true}
-              onClose={closeRoomDetails}
-              currentIndex={detailModalIndex}
-              totalRooms={filteredRooms.length}
-              onPrev={() =>
-                setDetailModalIndex(
-                  detailModalIndex === 0 ? filteredRooms.length - 1 : detailModalIndex - 1,
-                )
-              }
-              onNext={() =>
-                setDetailModalIndex(
-                  detailModalIndex === filteredRooms.length - 1 ? 0 : detailModalIndex + 1,
-                )
-              }
-              soldOut={modalSoldOut}
-              checkInTime={hotel.checkInTime}
-              checkInUntil={hotel.checkInUntil}
-              checkOutTime={hotel.checkOutTime}
-              checkOutFrom={hotel.checkOutFrom}
-              checkIn={committedCheckIn}
-              hotelTimezone={hotel.timezone}
-              onSelectRate={(rateType) => {
-                if (modalSoldOut) return;
-                handleSelectRate(modalRoom, rateType, modalRequiredRooms);
-              }}
-              selectRateDisabled={isSelectingRate}
-              selectRatePending={pendingRateSelection?.roomId === modalRoom.id}
-            />
-          );
-        })()}
 
       <BookingFooter />
     </div>
