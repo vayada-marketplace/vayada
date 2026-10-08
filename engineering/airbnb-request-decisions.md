@@ -116,12 +116,13 @@ and the active `property-management` entitlement. Read-only users receive no
 provider actions. Existing Booking Engine routes retain their own policy.
 
 For activation, first deploy the staff-route fix and repeat owner/front-desk,
-read-only and cross-property verification. Then select a connected Airbnb hotel
-and its canonical property UUID; the shared synthetic hotel has no Airbnb
-request fixture and is not proof of provider readiness.
+read-only and cross-property verification. Scope can be one or more canonical
+property UUIDs, or `*` for all connected hotels, including future connections.
+The shared synthetic hotel has no Airbnb request fixture and is not proof of
+provider readiness.
 
 The runtime requires `AIRBNB_ALTERATIONS_ENABLED=true` and an explicit
-`AIRBNB_ALTERATION_PROPERTY_IDS` allowlist, enabled background/Channex workers,
+`AIRBNB_ALTERATION_PROPERTY_IDS` scope, enabled background/Channex workers,
 `PMS_CHANNEX_BOOKING_SYNC_MODE=mutating`,
 `CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE=target-owned`, authenticated
 `CHANNEX_WEBHOOK_INTAKE_MODE=mutating`, provider credentials, target PMS and auth.
@@ -136,3 +137,36 @@ Pending tracked modified revisions are held without ACK while their property is
 disabled. Never replay an ambiguous decision as a fresh accept/decline.
 Real Airbnb E2E remains waived for this task; simulated responses and deployed
 read checks must be reported separately from successful live provider decisions.
+
+### All-hotels rollout (2026-09-20)
+
+Flamur authorized enabling alterations for all hotels and deferring a live Airbnb
+case. Set `AIRBNB_ALTERATION_PROPERTY_IDS=*` with the runtime enable flag after
+the ownership prerequisites above are met. This scope is not a booking ownership
+switch: target booking sync consumes all supported Channex booking revisions,
+not only Airbnb alterations.
+
+The rollout requires a coordinated handover before enabling the runtime:
+
+1. Verify current provider connections, booking/room mappings and target data
+   readiness against the active legacy booking owner. Preserve an export of
+   callback configuration and pending work for rollback.
+2. Freeze the legacy booking poller and manual booking sync by setting
+   `CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE=target-owned` on the legacy PMS
+   service. Verify the freeze for two polling intervals (currently ten minutes)
+   before enabling the target worker; the same setting on the target API alone
+   cannot freeze another service. Use separate platform applies: the existing
+   apply workflow deploys the target API before legacy PMS, so one combined
+   apply would temporarily leave both consumers active.
+3. Activate the target booking owner and required webhook/worker settings through
+   reviewed platform configuration. Account for general booking, manual-pull,
+   no-show and message-intake effects of those shared settings. Preserve the
+   separately configured review intake mode and avoid overlapping subscriptions.
+4. Enable the Airbnb runtime with wildcard scope; verify service health, bounded
+   scans and receipt/job ownership. Record real Airbnb decisions as untested
+   until a real case arrives.
+
+Follow [the Channex cutover plan](channex-webhook-cutover-plan.md) for ownership
+verification and reconciliation. Do not disable ownership validation or enable
+both booking consumers to make the Airbnb switch pass. This code change adds
+the scope option; it does not itself activate production.

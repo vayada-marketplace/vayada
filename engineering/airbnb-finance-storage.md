@@ -271,10 +271,12 @@ a second decision. No production registration or activation is implied.
 ### Property-scoped runtime composition
 
 `AIRBNB_ALTERATIONS_ENABLED` defaults to false. Enabling requires an explicit
-`AIRBNB_ALTERATION_PROPERTY_IDS` allowlist, authenticated target PMS, target booking
+`AIRBNB_ALTERATION_PROPERTY_IDS` scope (1–100 UUIDs or `*` for all connected hotels), authenticated target PMS, target booking
 mutation ownership, mutating booking sync/webhooks, background and Channex workers,
 and valid provider credentials. Listing import does not enable request decisions.
-One runtime supplies the same scope to staff actions, webhook promotion, periodic
+The wildcard includes future connected hotels without maintaining a UUID list. Empty
+or missing scope remains invalid. Bounded scan batches retain active binding claims
+and connection checks. One runtime supplies the same scope to staff actions, webhook promotion, periodic
 intake, status readback and authoritative alteration application. Other properties
 retain ordinary booking import behavior and have no new alteration actions.
 

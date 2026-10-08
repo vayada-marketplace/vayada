@@ -137,3 +137,19 @@ it("keeps decision pools open until an in-flight decision settles", async () => 
   await Promise.all([decision, closing]);
   expect(mocks.pools.every((pool) => pool.end.mock.calls.length === 1)).toBe(true);
 });
+
+it("passes explicit all-hotels scope through every boundary", async () => {
+  const runtime = createAirbnbAlterationRuntime({
+    config: { ...config(), airbnbAlterations: { propertyIds: undefined } },
+    connectionString: "unused",
+  })!;
+  expect(runtime.adapter.propertyIds).toBeUndefined();
+  expect(runtime.webhookOptions.channexAlterationPropertyIds).toBeUndefined();
+  expect(runtime.bookingWorkerOptions.airbnbAlterationPropertyIds).toBeUndefined();
+  await runtime.adapter.decide({ ...input, propertyId: otherId });
+  expect(mocks.decide).toHaveBeenCalledOnce();
+  await runtime.tick();
+  for (const call of [mocks.schedule, mocks.intake, mocks.readback])
+    expect(call.mock.calls[0]![0].propertyIds).toBeUndefined();
+  await runtime.close();
+});
