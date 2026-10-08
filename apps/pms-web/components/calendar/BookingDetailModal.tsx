@@ -21,7 +21,7 @@ interface CalendarRoom {
   floor: string;
   status: string;
   baseRate: number;
-  currency: string;
+  currency: string | null;
   maxOccupancy: number;
   size: number;
   flexibleRatePlanId?: string | null;

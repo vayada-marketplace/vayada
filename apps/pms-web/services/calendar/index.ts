@@ -45,7 +45,7 @@ export interface CalendarRoom {
   floor: string;
   status: string;
   baseRate: number;
-  /** Null when the room type has neither a published offer nor a legacy rate currency. */
+  /** The currency of `baseRate`; null for a room type without a legacy rate (VAY-2068). */
   currency: string | null;
   maxOccupancy: number;
   size: number;
@@ -468,7 +468,9 @@ function toCalendarData(
         floor: room.floor ?? "",
         status: room.status,
         baseRate: moneyAmount(roomTypesById.get(room.roomTypeId)?.baseRate),
-        currency: roomTypeCurrency(roomTypesById.get(room.roomTypeId)),
+        // The currency labels `baseRate`, so both come from the legacy rate. A room type from
+        // the room-facts flow has neither, and the calendar must not invent one (VAY-2068).
+        currency: roomTypesById.get(room.roomTypeId)?.baseRate.currency ?? null,
         maxOccupancy: maxOccupancy(roomTypesById.get(room.roomTypeId)),
         size: numericAttribute(roomTypesById.get(room.roomTypeId)?.attributes?.size),
         flexibleRatePlanId:
@@ -545,18 +547,6 @@ function splitGuestName(displayName: string): [string, string] {
   if (parts.length === 0) return ["", ""];
   const [firstName, ...rest] = parts;
   return [firstName, rest.join(" ")];
-}
-
-/**
- * The currency the calendar shows for a room type: the published offer's, else the legacy
- * rate's, else none. A room type from the room-facts flow has neither until prices are
- * published, and the calendar must not invent one (VAY-2068).
- */
-function roomTypeCurrency(roomType: PmsOperationsRoomType | undefined): string | null {
-  const published = roomType?.ratePlans?.find(
-    (plan) => plan.active && plan.pricingContractVersion === "pricing.v2",
-  );
-  return published?.baseRate.currency ?? roomType?.baseRate.currency ?? null;
 }
 
 function moneyAmount(money: PmsOperationsMoney | undefined): number {

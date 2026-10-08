@@ -355,9 +355,10 @@ describe("calendarService manual-booking rates", () => {
 });
 
 describe("calendarService room currency", () => {
-  // VAY-2068: a room shows its room type's currency: the published offer's, else the legacy
-  // rate's. A room type from the room-facts flow has neither, and the room must not invent EUR.
-  it("maps the room currency from the publication, else the legacy rate, else none", async () => {
+  // VAY-2068: a room's currency labels its legacy base rate, so both come from that rate. A
+  // room type from the room-facts flow has neither until prices are published, and the room
+  // must carry no currency rather than an invented EUR; its offers belong to the room type.
+  it("maps the room currency from the legacy rate, else none", async () => {
     vi.clearAllMocks();
     mocks.resolvePropertyId.mockResolvedValue("property-1");
     const roomType = (roomTypeId: string, baseRate: unknown, ratePlans: unknown[]) => ({
@@ -392,6 +393,9 @@ describe("calendarService room currency", () => {
               roomType("published", { amountDecimal: "100.00", currency: "EUR" }, [published]),
               roomType("legacy", { amountDecimal: "100.00", currency: "EUR" }, []),
               roomType("setup-created", { amountDecimal: null, currency: null }, []),
+              roomType("setup-created-published", { amountDecimal: null, currency: null }, [
+                published,
+              ]),
             ],
           }
         : route.endsWith("/rooms")
@@ -400,6 +404,8 @@ describe("calendarService room currency", () => {
                 room("room-published", "published"),
                 room("room-legacy", "legacy"),
                 room("room-setup-created", "setup-created"),
+                room("room-setup-created-published", "setup-created-published"),
+                room("room-orphan", "unknown-room-type"),
               ],
               orderVersion: "room-order-v1",
             }
@@ -409,9 +415,11 @@ describe("calendarService room currency", () => {
     const result = await calendarService.getCalendarData("2026-08-20", "2026-08-24");
 
     expect(result.rooms.map(({ id, currency, baseRate }) => [id, currency, baseRate])).toEqual([
-      ["room-published", "CHF", 100],
+      ["room-published", "EUR", 100],
       ["room-legacy", "EUR", 100],
       ["room-setup-created", null, 0],
+      ["room-setup-created-published", null, 0],
+      ["room-orphan", null, 0],
     ]);
   });
 });
