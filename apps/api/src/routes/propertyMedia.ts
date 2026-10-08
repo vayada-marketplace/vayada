@@ -29,46 +29,60 @@ export async function registerPropertyMediaRoutes(
   options: {
     repository: PropertyMediaCommandRepository;
     forwardLogo?: HotelSetupCommandForwarder;
+    /** Public API logo on the ordinary login (VAY-2056), behind the private service's
+     * Owner-only gates; replaces the forwarder. */
+    logoAssignments?: Pick<PropertyMediaCommandRepository, "assignLogo">;
     logoOnly?: boolean;
     propertyAccessRepository?: PropertyAccessRepository;
   },
 ): Promise<void> {
   const authorized = new WeakMap<FastifyRequest, AuthorizedRequest>();
-  const onRequest = async (request: FastifyRequest, reply: FastifyReply) => {
-    const access = authorizePropertyMediaRequest(request, reply, options.logoOnly);
-    if (!access) return;
-    if (options.logoOnly) {
-      if (!access.context.actor.providerIdentity.sessionId || !options.propertyAccessRepository)
-        throw new AuthorizationError();
-      const effective = await resolveEffectivePropertyAccess(
-        access.context,
-        options.propertyAccessRepository,
-      );
-      if (!effective?.propertyIds.includes(access.propertyId)) throw new AuthorizationError();
-    }
-    authorized.set(request, access);
-  };
+  const onRequestFor =
+    (ownerOnly: boolean) => async (request: FastifyRequest, reply: FastifyReply) => {
+      const access = authorizePropertyMediaRequest(request, reply, ownerOnly);
+      if (!access) return;
+      if (ownerOnly) {
+        if (
+          !access.context.actor.providerIdentity.sessionId ||
+          access.context.membership.roleKey !== "hotel_owner" ||
+          !options.propertyAccessRepository
+        )
+          throw new AuthorizationError();
+        const effective = await resolveEffectivePropertyAccess(
+          access.context,
+          options.propertyAccessRepository,
+        );
+        if (!effective?.propertyIds.includes(access.propertyId)) throw new AuthorizationError();
+      }
+      authorized.set(request, access);
+    };
+  const onRequest = onRequestFor(!!options.logoOnly);
+  const logoOnRequest = onRequestFor(!!options.logoOnly || !!options.logoAssignments);
 
-  app.put("/properties/:propertyId/media/logo", { onRequest }, async (request, reply) => {
-    const access = requireAuthorizedRequest(authorized, request);
-    const body = parseAssignPropertyLogoRequest(request.body);
-    if (!body) return invalidRequest(reply, "A valid logo assignment is required.");
-    const idempotencyKey = parseIdempotencyKey(request, reply);
-    if (!idempotencyKey) return reply;
-    if (options.forwardLogo)
-      return options.forwardLogo(request, reply, access.propertyId, "logo_assignment");
-    return sendResult(
-      reply,
-      await options.repository.assignLogo({
-        organizationId: access.context.selectedOrganization.organizationId,
-        propertyId: access.propertyId,
-        actorUserId: access.context.actor.internalUserId,
-        audit: access.context.audit,
-        idempotencyKey,
-        ...body,
-      }),
-    );
-  });
+  app.put(
+    "/properties/:propertyId/media/logo",
+    { onRequest: logoOnRequest },
+    async (request, reply) => {
+      const access = requireAuthorizedRequest(authorized, request);
+      const body = parseAssignPropertyLogoRequest(request.body);
+      if (!body) return invalidRequest(reply, "A valid logo assignment is required.");
+      const idempotencyKey = parseIdempotencyKey(request, reply);
+      if (!idempotencyKey) return reply;
+      if (options.forwardLogo && !options.logoAssignments)
+        return options.forwardLogo(request, reply, access.propertyId, "logo_assignment");
+      return sendResult(
+        reply,
+        await (options.logoAssignments ?? options.repository).assignLogo({
+          organizationId: access.context.selectedOrganization.organizationId,
+          propertyId: access.propertyId,
+          actorUserId: access.context.actor.internalUserId,
+          audit: access.context.audit,
+          idempotencyKey,
+          ...body,
+        }),
+      );
+    },
+  );
 
   if (options.logoOnly) return;
   app.put("/properties/:propertyId/media/presentation", { onRequest }, async (request, reply) => {
