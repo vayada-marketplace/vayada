@@ -54,8 +54,9 @@ reopen only after every live subscription is adopted or scheduled to end
 
 ## 1. Legacy freeze (`apps/pms-api`)
 
-`FIXED_PLAN_BILLING_MODE` is read once at startup like the other cutover
-switches. `frozen` means:
+`FIXED_PLAN_BILLING_MODE` is read from the environment once at startup like
+the other cutover switches, and consulted on every billing path. `frozen`
+means:
 
 - the five-minute billing scheduler is not started and `sync_*` helpers return
   without touching Stripe or the database; room and room-type writes no longer
@@ -71,8 +72,13 @@ switches. `frozen` means:
   on read. `POST /admin/billing/portal` keeps working so a hotel can still see
   invoices and update a card.
 
-Switching back to `legacy` restores today's behaviour. This removes billing
-from the runbook's "two in-process writers" caveat.
+`GET /admin/billing/subscription` also reports `frozen: true` so a client can
+hide the buttons. Switching back to `legacy` restores today's behaviour, but
+**only before any subscription was adopted**: the SQL dirty-flag triggers keep
+firing on room changes while frozen, and an unfrozen legacy would push a new
+price onto a subscription the target now owns. After the first adoption the
+only way back is the per-hotel reversal in section 3, never `legacy`. This
+removes billing from the runbook's "two in-process writers" caveat.
 
 ## 2. Target ignores unowned events (`apps/api`)
 
