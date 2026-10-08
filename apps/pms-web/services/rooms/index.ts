@@ -61,21 +61,6 @@ export interface RoomSeason {
   occupancyRates?: Record<string, string>;
 }
 
-export interface CanonicalRoomPricingSnapshot {
-  expectedRoomFactsRevision: number;
-  expectedPricingCurrencyRevision: number;
-  expectedFlexibleRatePlanRevision: number;
-  currency: string;
-  baseAmountDecimal: string;
-  mealPlan?: PmsMealPlan;
-  cancellationPolicy: string;
-  freeCancellationDeadlineDays: number;
-  flexibleCancellationType: "free" | "partial_refund";
-  partialRefundCancelWindowDays: number;
-  partialRefundAmountPercent: number;
-  partialRefundTiers: PartialRefundTier[];
-}
-
 export interface RoomType {
   id: string;
   version: string;
@@ -116,7 +101,6 @@ export interface RoomType {
   partialRefundCancelWindowDays: number;
   partialRefundAmountPercent: number;
   partialRefundTiers: PartialRefundTier[];
-  canonicalPricingSnapshot?: CanonicalRoomPricingSnapshot;
   nonRefundableEnabled: boolean;
   nonRefundableDiscount: number;
   nonRefundableCancellationPolicy: string;
@@ -176,9 +160,7 @@ export interface RoomTypeCreate {
   mealPlans?: MealPlan[];
 }
 
-export type RoomTypeUpdate = Partial<RoomTypeCreate> & {
-  canonicalPricingSnapshot?: CanonicalRoomPricingSnapshot;
-};
+export type RoomTypeUpdate = Partial<RoomTypeCreate>;
 
 export interface Room {
   roomUnitsRevision?: number;
@@ -244,19 +226,6 @@ export interface PmsOperationsRatePlan {
   baseRate: PmsOperationsMoney;
   cancellationPolicySnapshot?: Record<string, unknown>;
   active: boolean;
-}
-
-interface PmsPricingSourceResponse {
-  pricingCurrency: { currency: string; pricingCurrencyRevision: number };
-  flexibleRatePlans: Array<{
-    roomTypeId: string;
-    flexibleRatePlanId: string;
-    flexibleRatePlanRevision: number;
-    sourceRoomFactsRevision: number;
-    baseAmount: PmsOperationsMoney;
-    cancellationTerms: Record<string, unknown>;
-    mealPlan?: PmsMealPlan;
-  }>;
 }
 
 export interface PmsOperationsRateRulesSummary {
@@ -367,16 +336,11 @@ function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
 
-function cancellationPolicyFromRatePlans(
-  ratePlans: PmsOperationsRatePlan[],
-  canonicalTerms?: Record<string, unknown>,
-) {
+function cancellationPolicyFromRatePlans(ratePlans: PmsOperationsRatePlan[]) {
   const flexiblePlans = ratePlans.filter((plan) => plan.active && plan.rateType === "flexible");
   const snapshot =
-    canonicalTerms ??
     flexiblePlans.find((plan) => plan.pricingContractVersion === "pms-pricing.v1")
-      ?.cancellationPolicySnapshot ??
-    flexiblePlans[0]?.cancellationPolicySnapshot;
+      ?.cancellationPolicySnapshot ?? flexiblePlans[0]?.cancellationPolicySnapshot;
   const rawTiers = Array.isArray(snapshot?.partialRefundTiers) ? snapshot.partialRefundTiers : [];
   const partialRefundTiers = rawTiers.flatMap((tier) => {
     if (!tier || typeof tier !== "object" || Array.isArray(tier)) return [];
@@ -425,14 +389,7 @@ function toRoom(
   };
 }
 
-function toRoomType(
-  propertyId: string,
-  roomType: PmsOperationsRoomType,
-  pricingSource?: PmsPricingSourceResponse | null,
-): RoomType {
-  const sourcePlan = pricingSource?.flexibleRatePlans.find(
-    (plan) => plan.roomTypeId === roomType.roomTypeId,
-  );
+function toRoomType(propertyId: string, roomType: PmsOperationsRoomType): RoomType {
   // Published pricing-v2 offers belong to the pricing editor; linked ones carry no own rate.
   const ratePlans = roomType.ratePlans.filter(
     (plan) => plan.pricingContractVersion !== "pricing.v2",
@@ -443,9 +400,9 @@ function toRoomType(
       plan.rateType === "flexible" &&
       plan.pricingContractVersion === "pms-pricing.v1",
   );
-  const baseRateMoney = sourcePlan?.baseAmount ?? canonicalPlan?.baseRate ?? roomType.baseRate;
+  const baseRateMoney = canonicalPlan?.baseRate ?? roomType.baseRate;
   const baseRate = asNumber(baseRateMoney.amountDecimal);
-  const currency = pricingSource?.pricingCurrency.currency ?? baseRateMoney.currency;
+  const currency = baseRateMoney.currency;
   const maxAdults = roomType.occupancyLimits.adults ?? null;
   const maxChildren = roomType.occupancyLimits.children ?? null;
   const derivedOccupancy = (maxAdults ?? 0) + (maxChildren ?? 0);
@@ -457,12 +414,9 @@ function toRoomType(
   const nonRefundableRate = nonRefundablePlan
     ? asNumber(nonRefundablePlan.baseRate.amountDecimal)
     : null;
-  const flexibleCancellation = cancellationPolicyFromRatePlans(
-    ratePlans,
-    sourcePlan?.cancellationTerms,
-  );
+  const flexibleCancellation = cancellationPolicyFromRatePlans(ratePlans);
 
-  const room: RoomType = {
+  return {
     id: roomType.roomTypeId,
     version: roomType.version,
     hotelId: propertyId,
@@ -532,29 +486,11 @@ function toRoomType(
     minimumAdvanceDays: 0,
     ratePaymentMethods: null,
     rateDepositSettings: null,
-    mealPlan:
-      sourcePlan?.mealPlan ?? (canonicalPlan?.mealPlan === "breakfast" ? "breakfast" : "room_only"),
+    mealPlan: canonicalPlan?.mealPlan === "breakfast" ? "breakfast" : "room_only",
     mealPlans: [],
     createdAt: "",
     updatedAt: "",
   };
-  if (pricingSource !== undefined) {
-    room.canonicalPricingSnapshot = {
-      expectedRoomFactsRevision: roomTypeRevision(roomType.version),
-      expectedPricingCurrencyRevision: pricingSource?.pricingCurrency.pricingCurrencyRevision ?? 0,
-      expectedFlexibleRatePlanRevision: sourcePlan?.flexibleRatePlanRevision ?? 0,
-      currency,
-      baseAmountDecimal: baseRate.toFixed(2),
-      mealPlan: room.mealPlan,
-      cancellationPolicy: flexibleCancellation.cancellationPolicy,
-      freeCancellationDeadlineDays: flexibleCancellation.freeCancellationDeadlineDays,
-      flexibleCancellationType: flexibleCancellation.flexibleCancellationType,
-      partialRefundCancelWindowDays: flexibleCancellation.partialRefundCancelWindowDays,
-      partialRefundAmountPercent: flexibleCancellation.partialRefundAmountPercent,
-      partialRefundTiers: flexibleCancellation.partialRefundTiers,
-    };
-  }
-  return room;
 }
 
 export const individualRoomsService = {
@@ -621,7 +557,7 @@ async function manageIndividualRoom(
     expectedRevision: pending.expectedRevision,
     ...(action !== "retire" ? { changes } : {}),
   };
-  const options = canonicalPricingOptions(pending.key);
+  const options = idempotentRequestOptions(pending.key);
   try {
     if (action === "create") await pmsOperationsClient.post(path, body, options);
     else if (action === "update") await pmsOperationsClient.put(path, body, options);
@@ -657,7 +593,8 @@ export const roomsService = {
 
   get: async (id: string) => {
     const propertyId = await resolveSelectedPmsPropertyId("loading room type");
-    return loadCanonicalRoomType(propertyId, id);
+    const response = await pmsOperationsRoomsReadService.getRoomType(propertyId, id);
+    return toRoomType(response.propertyId, response.item);
   },
 
   create: async (data: RoomTypeCreate) => {
@@ -738,39 +675,16 @@ export const roomsService = {
   },
 
   update: async (id: string, data: RoomTypeUpdate) => {
-    validateMealInclusion(data);
     const propertyId = await resolveSelectedPmsPropertyId("updating room type");
-    validateCanonicalRoomPricing(data);
-    const pricingChanged = canonicalRoomPricingChanged(data);
-    const response = await pmsOperationsRoomsReadService.updateRoomType(
-      propertyId,
-      id,
-      data,
-      false,
-    );
+    const response = await pmsOperationsRoomsReadService.updateRoomType(propertyId, id, data);
     let updated = toRoomType(response.propertyId, response.item);
     await preparePhysicalRooms(propertyId, id, updated.name, data.totalRooms);
     if (Number.isInteger(data.totalRooms) && data.totalRooms! >= 1) {
       const refreshed = await pmsOperationsRoomsReadService.getRoomType(propertyId, id);
       updated = toRoomType(refreshed.propertyId, refreshed.item);
-      if (!data.canonicalPricingSnapshot) {
-        await ensureCanonicalFlexibleRatePlan(
-          propertyId,
-          refreshed.item,
-          roomTypeUpdateForm(updated),
-        );
-      }
     }
     if (data.images && !sameRoomImageOrder(data.images, updated.images)) {
       await replaceRoomTypeMedia(propertyId, updated, data.images);
-    }
-    const pricingCommands = pricingChanged
-      ? await saveCanonicalRoomPricing(propertyId, id, data)
-      : [];
-    if (data.canonicalPricingSnapshot) {
-      const refreshed = await loadCanonicalRoomType(propertyId, id);
-      pricingCommands.forEach((fingerprint) => pendingCanonicalPricingCommands.delete(fingerprint));
-      return refreshed;
     }
     if (data.images) {
       const refreshed = await pmsOperationsRoomsReadService.getRoomType(propertyId, id);
@@ -1046,11 +960,15 @@ async function ensureCanonicalFlexibleRatePlan(
 }
 
 function commandOptions(prefix: string) {
+  return idempotentRequestOptions(randomCommandId(prefix));
+}
+
+function idempotentRequestOptions(commandId: string): RequestInit {
   return {
     ...pmsOperationsRequestOptions,
     headers: {
       ...(pmsOperationsRequestOptions.headers as Record<string, string>),
-      "Idempotency-Key": randomCommandId(prefix),
+      "Idempotency-Key": commandId,
     },
   };
 }
@@ -1162,12 +1080,7 @@ export const pmsOperationsRoomsReadService = {
     );
   },
 
-  updateRoomType: (
-    propertyId: string,
-    roomTypeId: string,
-    data: RoomTypeUpdate,
-    includeCancellation = true,
-  ) => {
+  updateRoomType: (propertyId: string, roomTypeId: string, data: RoomTypeUpdate) => {
     assertPmsOperationsReadModelEnabled();
     const commandId = randomCommandId("pms-room-type-update");
     return pmsOperationsClient.patch<PmsOperationsCommandResponse<PmsOperationsRoomType>>(
@@ -1175,7 +1088,7 @@ export const pmsOperationsRoomsReadService = {
         roomTypeId,
       )}`,
       {
-        ...roomTypeUpdatePayload(data, includeCancellation),
+        ...roomTypeUpdatePayload(data),
         commandId,
         idempotencyKey: commandId,
       },
@@ -1339,259 +1252,6 @@ function linkedInventoryGroupsEndpoint(propertyId: string): string {
   return `/api/pms/properties/${encodeURIComponent(propertyId)}/linked-inventory-groups`;
 }
 
-const pendingCanonicalPricingCommands = new Map<string, string>();
-
-async function loadCanonicalRoomType(propertyId: string, roomTypeId: string): Promise<RoomType> {
-  const room = await pmsOperationsRoomsReadService.getRoomType(propertyId, roomTypeId);
-  let pricing: PmsPricingSourceResponse | null;
-  try {
-    pricing = await loadCanonicalPricing(propertyId);
-  } catch (error) {
-    throw new Error(
-      error instanceof Error
-        ? `Room pricing could not be loaded: ${error.message}`
-        : "Room pricing could not be loaded. Try again.",
-      { cause: error },
-    );
-  }
-  return toRoomType(room.propertyId, room.item, pricing);
-}
-
-async function loadCanonicalPricing(propertyId: string): Promise<PmsPricingSourceResponse | null> {
-  try {
-    return await pmsOperationsClient.get<PmsPricingSourceResponse>(
-      `/api/pms/properties/${encodeURIComponent(propertyId)}/pricing-source`,
-      pmsOperationsRequestOptions,
-    );
-  } catch (error) {
-    if (
-      error instanceof ApiErrorResponse &&
-      error.status === 404 &&
-      error.data.code === "pricing_currency_not_configured"
-    ) {
-      return null;
-    }
-    throw error;
-  }
-}
-
-function hasCanonicalPricingChanges(data: RoomTypeUpdate): boolean {
-  return [
-    "mealPlan",
-    "baseRate",
-    "currency",
-    "seasons",
-    "flexibleRateEnabled",
-    "cancellationPolicy",
-    "flexibleCancellationType",
-    "partialRefundCancelWindowDays",
-    "partialRefundAmountPercent",
-    "partialRefundTiers",
-  ].some((key) => Object.hasOwn(data, key));
-}
-
-async function saveCanonicalRoomPricing(
-  propertyId: string,
-  roomTypeId: string,
-  data: RoomTypeUpdate,
-): Promise<string[]> {
-  const completedCommands: string[] = [];
-  const snapshot = data.canonicalPricingSnapshot!;
-  let pricingCurrencyRevision = snapshot.expectedPricingCurrencyRevision;
-  if (pricingCurrencyRevision === 0) {
-    const body = {
-      expectedPricingCurrencyRevision: 0,
-      currency: (data.currency || snapshot.currency).toUpperCase(),
-    };
-    const response = await runCanonicalPricingCommand(
-      ["currency", propertyId, body],
-      "pms-pricing-currency",
-      (commandId) =>
-        pmsOperationsClient.put<{ pricingCurrency: PmsPricingSourceResponse["pricingCurrency"] }>(
-          `/api/pms/properties/${encodeURIComponent(propertyId)}/pricing-source/currency`,
-          body,
-          canonicalPricingOptions(commandId),
-        ),
-      completedCommands,
-    );
-    pricingCurrencyRevision = response.pricingCurrency.pricingCurrencyRevision;
-  }
-
-  const baseAmountDecimal = roomBaseAmount(data, snapshot.baseAmountDecimal);
-  const cancellationTerms = {
-    type: "free_until_days_before_arrival",
-    freeCancellationDeadlineDays: cancellationDeadlineDays(
-      data.cancellationPolicy,
-      snapshot.freeCancellationDeadlineDays,
-    ),
-    afterDeadlinePenalty: "full_booking_amount",
-    noShowPenalty: "full_booking_amount",
-    text: data.cancellationPolicy ?? snapshot.cancellationPolicy,
-    flexibleCancellationType: data.flexibleCancellationType ?? snapshot.flexibleCancellationType,
-    partialRefundCancelWindowDays:
-      data.partialRefundCancelWindowDays ?? snapshot.partialRefundCancelWindowDays,
-    partialRefundAmountPercent:
-      data.partialRefundAmountPercent ?? snapshot.partialRefundAmountPercent,
-    partialRefundTiers: data.partialRefundTiers ?? snapshot.partialRefundTiers,
-  };
-  const planBody = {
-    expectedRoomFactsRevision: snapshot.expectedRoomFactsRevision,
-    expectedPricingCurrencyRevision: pricingCurrencyRevision,
-    expectedFlexibleRatePlanRevision: snapshot.expectedFlexibleRatePlanRevision,
-    baseAmountDecimal,
-    ...(data.mealPlan === undefined ? {} : { mealPlan: data.mealPlan }),
-    cancellationTerms,
-  };
-  const planResponse = await runCanonicalPricingCommand(
-    ["plan", propertyId, roomTypeId, planBody],
-    "pms-flexible-rate-plan",
-    (commandId) =>
-      pmsOperationsClient.put<{
-        flexibleRatePlan: PmsPricingSourceResponse["flexibleRatePlans"][number];
-      }>(
-        `/api/pms/properties/${encodeURIComponent(propertyId)}/room-types/${encodeURIComponent(
-          roomTypeId,
-        )}/flexible-rate-plan`,
-        planBody,
-        canonicalPricingOptions(commandId),
-      ),
-    completedCommands,
-  );
-  if (planResponse.flexibleRatePlan.roomTypeId !== roomTypeId) {
-    throw new Error("The pricing service returned a different room. Refresh and try again.");
-  }
-  return completedCommands;
-}
-
-function validateMealInclusion(data: RoomTypeCreate | RoomTypeUpdate): void {
-  if (
-    Object.hasOwn(data, "mealPlan") &&
-    data.mealPlan !== "room_only" &&
-    data.mealPlan !== "breakfast"
-  ) {
-    throw new Error("Choose room only or breakfast included.");
-  }
-  if (data.mealPlans?.length) {
-    throw new Error(
-      "Meal surcharge packages are unsupported. Choose the included meal on the standard rate.",
-    );
-  }
-}
-
-function validateCanonicalRoomPricing(data: RoomTypeUpdate): void {
-  const seasons = data.seasons ?? [];
-  if (
-    Object.hasOwn(data, "seasons") &&
-    (seasons.length !== 1 || seasons[0]?.from !== "01-01" || seasons[0].to !== "12-31")
-  ) {
-    throw new Error(
-      "This editor supports one year-round rate. Manage seasonal schedules in property pricing.",
-    );
-  }
-  if (!hasCanonicalPricingChanges(data)) return;
-  const snapshot = data.canonicalPricingSnapshot;
-  if (!snapshot) {
-    throw new Error("Room pricing is out of date. Refresh the page and try again.");
-  }
-  if (data.flexibleRateEnabled === false) {
-    throw new Error("Flexible is the required standard rate plan for this room.");
-  }
-  if ((data.currency ?? snapshot.currency).toUpperCase() !== snapshot.currency) {
-    throw new Error("Change the property currency in property pricing before editing room rates.");
-  }
-  roomBaseAmount(data, snapshot.baseAmountDecimal);
-}
-
-function canonicalRoomPricingChanged(data: RoomTypeUpdate): boolean {
-  if (!hasCanonicalPricingChanges(data)) return false;
-  const snapshot = data.canonicalPricingSnapshot!;
-  if (
-    snapshot.expectedPricingCurrencyRevision === 0 ||
-    snapshot.expectedFlexibleRatePlanRevision === 0
-  ) {
-    return true;
-  }
-  const cancellationType = data.flexibleCancellationType ?? snapshot.flexibleCancellationType;
-  if (
-    (data.mealPlan !== undefined && data.mealPlan !== (snapshot.mealPlan ?? "room_only")) ||
-    roomBaseAmount(data, snapshot.baseAmountDecimal) !== snapshot.baseAmountDecimal ||
-    (data.cancellationPolicy ?? snapshot.cancellationPolicy) !== snapshot.cancellationPolicy ||
-    cancellationType !== snapshot.flexibleCancellationType
-  ) {
-    return true;
-  }
-  if (cancellationType === "free") return false;
-  const windowDays = data.partialRefundCancelWindowDays ?? snapshot.partialRefundCancelWindowDays;
-  const amountPercent = data.partialRefundAmountPercent ?? snapshot.partialRefundAmountPercent;
-  const effectiveTiers = (tiers: PartialRefundTier[]) =>
-    tiers.length > 0 ? tiers : [{ minDaysBeforeCheckIn: windowDays, refundPercent: amountPercent }];
-  return (
-    windowDays !== snapshot.partialRefundCancelWindowDays ||
-    amountPercent !== snapshot.partialRefundAmountPercent ||
-    JSON.stringify(effectiveTiers(data.partialRefundTiers ?? snapshot.partialRefundTiers)) !==
-      JSON.stringify(effectiveTiers(snapshot.partialRefundTiers))
-  );
-}
-
-function roomBaseAmount(data: RoomTypeUpdate, fallback: string): string {
-  const firstSeason = data.seasons?.[0]?.rate;
-  return moneyAmount(firstSeason ?? data.baseRate ?? fallback);
-}
-
-function moneyAmount(value: unknown): string {
-  const parsed = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new Error("Enter a room rate greater than zero before saving.");
-  }
-  return parsed.toFixed(2);
-}
-
-function roomTypeRevision(version: string): number {
-  const revision = Number(/^room-type-facts-v(\d+)$/.exec(version)?.[1]);
-  if (!Number.isSafeInteger(revision) || revision < 1) {
-    throw new Error("Room pricing is out of date. Refresh the page and try again.");
-  }
-  return revision;
-}
-
-function cancellationDeadlineDays(policy: string | undefined, fallback: number): number {
-  const value = Number(/Free until (\d+) days? before/i.exec(policy ?? "")?.[1]);
-  return Number.isSafeInteger(value) && value >= 0 ? value : fallback;
-}
-
-async function runCanonicalPricingCommand<T>(
-  fingerprintParts: unknown[],
-  prefix: string,
-  request: (commandId: string) => Promise<T>,
-  completedCommands: string[],
-): Promise<T> {
-  const fingerprint = JSON.stringify(fingerprintParts);
-  const commandId = pendingCanonicalPricingCommands.get(fingerprint) ?? randomCommandId(prefix);
-  pendingCanonicalPricingCommands.set(fingerprint, commandId);
-  let response: T;
-  try {
-    response = await request(commandId);
-  } catch (error) {
-    const message =
-      error instanceof ApiErrorResponse && error.data.code?.endsWith("_revision_conflict")
-        ? "Room pricing changed since this editor was opened. Reload the room and reapply your pricing changes."
-        : `Room pricing could not be saved. ${error instanceof Error ? error.message : ""} Try again.`;
-    throw new Error(message, { cause: error });
-  }
-  completedCommands.push(fingerprint);
-  return response;
-}
-
-function canonicalPricingOptions(commandId: string): RequestInit {
-  return {
-    ...pmsOperationsRequestOptions,
-    headers: {
-      ...(pmsOperationsRequestOptions.headers as Record<string, string>),
-      "Idempotency-Key": commandId,
-    },
-  };
-}
-
 async function replaceRoomTypeMedia(
   propertyId: string,
   roomType: RoomType,
@@ -1645,22 +1305,26 @@ function sameRoomImageOrder(left: RoomImageReference[], right: RoomImageReferenc
   return JSON.stringify(keys(left)) === JSON.stringify(keys(right));
 }
 
-function roomTypeUpdatePayload(data: RoomTypeUpdate, includeCancellation = true) {
+function validateMealInclusion(data: RoomTypeCreate | RoomTypeUpdate): void {
+  if (
+    Object.hasOwn(data, "mealPlan") &&
+    data.mealPlan !== "room_only" &&
+    data.mealPlan !== "breakfast"
+  ) {
+    throw new Error("Choose room only or breakfast included.");
+  }
+  if (data.mealPlans?.length) {
+    throw new Error(
+      "Meal surcharge packages are unsupported. Choose the included meal on the standard rate.",
+    );
+  }
+}
+
+function roomTypeUpdatePayload(data: RoomTypeUpdate) {
   const payload: RoomTypeUpdate = {};
   if (Object.hasOwn(data, "locationAddress")) payload.locationAddress = data.locationAddress;
   if (Object.hasOwn(data, "latitude")) payload.latitude = data.latitude ?? null;
   if (Object.hasOwn(data, "longitude")) payload.longitude = data.longitude ?? null;
-  if (includeCancellation) {
-    for (const key of [
-      "cancellationPolicy",
-      "flexibleCancellationType",
-      "partialRefundCancelWindowDays",
-      "partialRefundAmountPercent",
-      "partialRefundTiers",
-    ] as const) {
-      if (Object.hasOwn(data, key)) Object.assign(payload, { [key]: data[key] });
-    }
-  }
   return payload;
 }
 
@@ -1671,25 +1335,6 @@ export function roomTypeUpdateForm(r: RoomType): RoomTypeUpdate {
     bedrooms: r.bedrooms ?? 1,
     bathrooms: r.bathrooms ?? 1,
     locationAddress: r.locationAddress || "",
-    monthlyRates: r.monthlyRates || {},
-    dailyRates: r.dailyRates || {},
-    operatingPeriods: r.operatingPeriods || [],
-    seasons: r.seasons || [],
-    weekendSurcharge: r.weekendSurcharge || "+0%",
-    cancellationPolicy: r.cancellationPolicy || "Free until 7 days before",
-    flexibleRateEnabled: r.flexibleRateEnabled ?? true,
-    flexibleCancellationType: r.flexibleCancellationType ?? "free",
-    partialRefundCancelWindowDays: r.partialRefundCancelWindowDays ?? 30,
-    partialRefundAmountPercent: r.partialRefundAmountPercent ?? 50,
-    partialRefundTiers: r.partialRefundTiers ?? [],
-    nonRefundableEnabled: r.nonRefundableEnabled ?? false,
-    nonRefundableDiscount: r.nonRefundableDiscount ?? 5,
-    nonRefundableCancellationPolicy:
-      r.nonRefundableCancellationPolicy || "Non-refundable from booking",
-    minimumAdvanceDays: r.minimumAdvanceDays ?? 0,
-    ratePaymentMethods: r.ratePaymentMethods ?? null,
-    mealPlan: r.mealPlan ?? "room_only",
-    mealPlans: r.mealPlans ?? [],
   };
 }
 

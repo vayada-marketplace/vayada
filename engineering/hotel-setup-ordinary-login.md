@@ -413,6 +413,13 @@ first release.
 no longer a kill switch: `hotel-setup-release.yml state=blocked` changes nothing
 on the new image. Stopping the six operations means rolling the API image back.
 
+**Owner-off markers and row rewrites (runbook).** The Feature Hub Owner-off marker
+counts only while it equals the entitlement row's `xmin`. Anything that rewrites
+rows or changes `xmin` (`pg_repack`, `VACUUM FULL`/`CLUSTER`, logical-replication
+blue/green switchover, dump and restore) cancels every Owner-off marker; affected
+Owners then see Financials as not re-enableable, and an operator re-enables it on
+request.
+
 **Rollback window (review H4).** Rollback is redeploying the previous next-API
 image: it reads the still-installed admission variables and forwards to the
 still-running private services. This holds only while every object the native
