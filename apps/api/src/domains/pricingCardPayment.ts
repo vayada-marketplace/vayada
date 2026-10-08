@@ -171,7 +171,8 @@ export async function startPricingCardPayment(
     `UPDATE booking.guest_bookings SET active_card_payment_id=$3,
       booking_metadata=booking_metadata || $4::jsonb,updated_at=$5::timestamptz
     WHERE id=$1 AND property_id=$2 AND lifecycle_status='pending_payment' AND payment_status='unpaid'
-      AND expected_payment_method='card' AND active_card_payment_id IS NULL`,
+      AND expected_payment_method IS NULL AND booking_metadata->>'paymentMethod'='card'
+      AND active_card_payment_id IS NULL`,
     [
       input.bookingId,
       scope.propertyId,
@@ -209,7 +210,7 @@ export async function readPendingPricingCardPayment(
       JOIN finance.payment_provider_accounts account ON account.id=payment.provider_account_id
         AND account.property_id=payment.property_id
       WHERE booking.id=$1 AND booking.property_id=$2 AND booking.lifecycle_status='pending_payment'
-        AND booking.payment_status='unpaid' AND booking.expected_payment_method='card'
+        AND booking.payment_status='unpaid' AND booking.booking_metadata->>'paymentMethod'='card'
       FOR SHARE OF booking,payment`,
       [replay.bookingId, scope.propertyId],
     )
