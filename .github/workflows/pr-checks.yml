@@ -529,6 +529,8 @@ jobs:
           src/jobs/financeSubscriptions.integration.test.ts
           src/jobs/financeSubscriptions.test.ts
           src/domains/stripeFinanceSubscriptions.test.ts
+          src/domains/financeLegacySubscriptionAdoption.test.ts
+          src/domains/stripeLegacySubscriptionAdoption.test.ts
           src/platform/postgresRuntime.integration.test.ts
           src/platform/workosWebhooks.integration.test.ts
         env:
