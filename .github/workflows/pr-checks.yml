@@ -532,6 +532,43 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      # Pricing on the ordinary login (VAY-2057). Own database: these suites commit fixture
+      # properties and slugs that other PMS-shard suites would see. Only the public offer and
+      # quote cases of the offer-owner file: its restricted Channex login cases provision the
+      # Channex worker (cluster-wide EXECUTE revokes) and run in the platform shard.
+      - name: Run pricing PostgreSQL integration in an isolated database
+        if: matrix.shard == 'pms'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_pricing_test
+          TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_pricing_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL);
+            url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href });
+            await client.connect();
+            await client.query("CREATE DATABASE vayada_pricing_test");
+            await client.end();
+          '
+          npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism \
+            src/domains/bookingPricingAuthority.integration.test.ts \
+            src/domains/replacementPricingStore.integration.test.ts \
+            src/domains/replacementPricingCommands.integration.test.ts \
+            src/domains/pmsAcceptedPricingReservationWorker.integration.test.ts \
+            src/domains/preparePricingAcceptance.postgres.test.ts \
+            src/domains/storePricingAcceptance.postgres.test.ts \
+            src/domains/pricingAcceptanceWriter.postgres.test.ts \
+            src/domains/pricingAcceptanceNotifications.postgres.test.ts \
+            src/domains/pricingBookingDraft.postgres.test.ts \
+            src/domains/pricingBookingLifecycle.postgres.test.ts \
+            src/domains/pricingBookingRevenue.postgres.test.ts \
+            src/domains/pricingInventoryAdoption.postgres.test.ts
+          npm --workspace vayada-api run test -- --no-file-parallelism \
+            src/domains/replacementPricingOfferOwners.integration.test.ts \
+            -t '^(?!.*(Channex|ARI|receipt|upload|target|activation|provider|worker|job|nightly candidates)).*(public|quote|publication|publishes)'
+
       - name: Verify canonical setup payment readiness
         if: matrix.shard == 'hotel-setup'
         run: >-
