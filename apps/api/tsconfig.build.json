@@ -1,10 +1,4 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": [
-    "dist",
-    "node_modules",
-    "src/**/*.test.ts",
-    "src/cli/hotelSetupPreflight.testHelper.ts",
-    "src/hotelSetupAutomaticOwnerFlow.fixture.ts"
-  ]
+  "exclude": ["dist", "node_modules", "src/**/*.test.ts"]
 }
