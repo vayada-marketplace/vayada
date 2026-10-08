@@ -85,9 +85,12 @@ describe("PMS Channex management command store", () => {
       ok: false,
       code: "channex_historical_binding_required",
       message:
-        "This hotel's existing Channex connection must be restored before it can be enabled.",
+        "Channex can't be enabled for this imported hotel until its previous Channex setup has been reviewed.",
     });
-    expect(db.sql()).toContain("source_system <> 'platform'");
+    // The guard checks the binding itself, independent of the claim check order.
+    expect(db.sql()).toMatch(
+      /source_system <> 'platform'\s+AND NOT EXISTS \(SELECT 1 FROM pms\.channel_binding_claims/,
+    );
     expect(db.sql()).not.toContain("INSERT INTO platform.jobs");
     expect(db.calls.at(-1)?.text).toBe("ROLLBACK");
   });
@@ -170,6 +173,8 @@ class FakeDb {
   async query<T>(text: string, values?: unknown[]) {
     this.calls.push({ text, values });
     if (text.includes("FROM pms.channel_connections")) return rows<T>([]);
+    if (text.includes("FROM hotel_catalog.property_source_links"))
+      return rows<T>(this.mode === "imported" ? [{ "?column?": 1 }] : []);
     // A replayed enable already created its active claim; replay must still win.
     if (text.includes("FROM pms.channel_binding_claims"))
       return rows<T>(
@@ -179,8 +184,6 @@ class FakeDb {
             ? [{ active: true }]
             : [],
       );
-    if (text.includes("FROM hotel_catalog.property_source_links"))
-      return rows<T>(this.mode.startsWith("imported") ? [{ "?column?": 1 }] : []);
     if (text.includes("INSERT INTO platform.idempotency_keys")) {
       this.fingerprint = String(values?.[2]);
       return rows<T>(

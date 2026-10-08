@@ -69,6 +69,12 @@ describe.skipIf(!url)("VAY-1362 Channex enable guard for imported hotels", () =>
     );
   });
   afterAll(async () => {
+    // Keep the shared PMS-shard queue free of claimable enable jobs.
+    await db.query(
+      `UPDATE platform.jobs SET status='canceled',finished_at=now(),locked_at=NULL,locked_by=NULL
+       WHERE property_id=ANY($1::uuid[]) AND status IN ('pending','running')`,
+      [[native, provisioned, imported, bound]],
+    );
     await commands.close?.();
     await db.end();
   });
@@ -89,7 +95,7 @@ describe.skipIf(!url)("VAY-1362 Channex enable guard for imported hotels", () =>
       ok: false,
       code: "channex_historical_binding_required",
       message:
-        "This hotel's existing Channex connection must be restored before it can be enabled.",
+        "Channex can't be enabled for this imported hotel until its previous Channex setup has been reviewed.",
     });
     expect(await queued(imported)).toBe(0);
     const reserved = await db.query(
@@ -103,5 +109,13 @@ describe.skipIf(!url)("VAY-1362 Channex enable guard for imported hotels", () =>
     const result = await enable(bound);
     expect(result).toMatchObject({ ok: false, code: "channex_binding_exists" });
     expect(await queued(bound)).toBe(0);
+
+    // The refused hotel's retry is a fresh request once its binding exists.
+    await db.query(
+      `INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source)
+       VALUES($1,'channex',$2,'historical','migration')`,
+      [imported, randomUUID()],
+    );
+    expect(await enable(imported)).toMatchObject({ ok: false, code: "channex_binding_exists" });
   });
 });
