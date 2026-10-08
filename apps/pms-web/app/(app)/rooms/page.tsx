@@ -746,11 +746,11 @@ export default function RoomsPage() {
       </div>
 
       {importPropertyId && (
-        <AirbnbImportLink key={importPropertyId} propertyId={importPropertyId} />
+        <AirbnbImportLink key={`airbnb-${importPropertyId}`} propertyId={importPropertyId} />
       )}
       {importPropertyId && (
         <PreparedHotelImportPanel
-          key={importPropertyId}
+          key={`prepared-${importPropertyId}`}
           client={sharedSetupClient}
           propertyId={importPropertyId}
           roomsOnly
