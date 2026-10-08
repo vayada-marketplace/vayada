@@ -1430,8 +1430,6 @@ export type PgTargetBookingWebCheckoutAdapterConfig = {
   stripePaymentProvider?: StripeBookingPaymentProvider;
   max?: number;
   pool?: pg.Pool;
-  /** Separate pricing credential; absent fails public offers and quote issuance closed. */
-  pricingPool?: pg.Pool | null;
   now?: () => Date;
 };
 
@@ -1498,12 +1496,12 @@ export function createTargetBookingWebCheckoutAdapter(
       max: config.max,
     });
 
-  const pricingOffers = config.pricingPool && createPublicPricingOfferCatalog(config.pricingPool);
+  const pricingOffers = createPublicPricingOfferCatalog(pool);
   const pricingAddons = createPublicPricingAddonCatalog(pool);
   const guestDisclosure = createPublicQuoteGuestDisclosure(pool);
-  const issueReplacementQuote =
-    config.pricingPool &&
-    createReplacementBookingQuoteIssuer(createCurrentPricingQuoteStore(config.pricingPool, 300));
+  const issueReplacementQuote = createReplacementBookingQuoteIssuer(
+    createCurrentPricingQuoteStore(pool, 300),
+  );
   const serializeTargetChangeRequest = (row: TargetChangeRequestRow, enabled = false) =>
     serializeChangeRequest(
       row,
@@ -2104,7 +2102,6 @@ export function createTargetBookingWebCheckoutAdapter(
     async getPricingOffers(slug) {
       let offers;
       try {
-        if (!pricingOffers) throw new Error("Pricing pool unavailable.");
         offers = await pricingOffers.read(slug);
       } catch (error) {
         throw Object.assign(
@@ -2116,7 +2113,6 @@ export function createTargetBookingWebCheckoutAdapter(
       return offers;
     },
     async quoteBooking(slug, request, context) {
-      if (!issueReplacementQuote) throw createHttpError(503, "Quote temporarily unavailable.");
       return issueReplacementQuote(slug, request, context?.idempotencyKey);
     },
     async confirmAuthorization(slug, handle, context) {
