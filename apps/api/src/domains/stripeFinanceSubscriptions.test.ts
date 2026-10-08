@@ -435,6 +435,24 @@ describe("Stripe fixed-plan provider", () => {
   });
 
   it("verifies an adopted legacy subscription with its retained flat 30-day price", async () => {
+    const expanded = adoptedLegacySubscription();
+    const expandedItem = expanded.items.data[0]!;
+    const expandedProvider = createStripeFinanceSubscriptionProvider({
+      secretKey: "sk_test_secret",
+      fetch: async () =>
+        response({
+          ...expanded,
+          items: {
+            data: [
+              { ...expandedItem, price: { ...expandedItem.price, product: { id: "prod_legacy" } } },
+            ],
+          },
+        }),
+    });
+    await expect(expandedProvider.retrieveSubscription("sub_legacy")).resolves.toMatchObject({
+      retainedLegacyPrice: true,
+    });
+
     const provider = createStripeFinanceSubscriptionProvider({
       secretKey: "sk_test_secret",
       fetch: async () => response(adoptedLegacySubscription()),
@@ -459,10 +477,27 @@ describe("Stripe fixed-plan provider", () => {
       { metadata: { vayada_organization_id: undefined } },
       {
         items: {
-          data: [{ ...adoptedLegacySubscription().items.data[0], price: fixedPrice() }],
+          data: [
+            {
+              ...adoptedLegacySubscription().items.data[0],
+              // Tiered but not a catalog lookup key: neither shape verifies.
+              price: { ...fixedPrice(), lookup_key: "vayada_fixed_eur_other" },
+            },
+          ],
         },
       },
       { items: { data: [{ ...adoptedLegacySubscription().items.data[0], quantity: 2 }] } },
+      { metadata: { vayada_legacy_product: "prod_other" } },
+      { metadata: { vayada_legacy_product: undefined } },
+      ...[
+        { currency: "usd" },
+        { product: "prod_other" },
+        { recurring: { interval: "day", interval_count: 30, usage_type: "metered" } },
+        { recurring: { interval: "month", interval_count: 1, usage_type: "licensed" } },
+      ].map((price) => {
+        const legacyItem = adoptedLegacySubscription().items.data[0]!;
+        return { items: { data: [{ ...legacyItem, price: { ...legacyItem.price, ...price } }] } };
+      }),
       {
         items: {
           data: [
@@ -483,7 +518,10 @@ describe("Stripe fixed-plan provider", () => {
             metadata: { ...base.metadata, ...(override.metadata ?? {}) },
           }),
       });
-      await expect(provider.retrieveSubscription("sub_legacy")).resolves.toMatchObject({
+      await expect(
+        provider.retrieveSubscription("sub_legacy"),
+        JSON.stringify(override),
+      ).resolves.toMatchObject({
         fixedPlanVerified: false,
         retainedLegacyPrice: false,
         amountMinor: null,
@@ -626,6 +664,7 @@ function adoptedLegacySubscription() {
       vayada_property_id: "property-1",
       vayada_organization_id: "organization-1",
       vayada_legacy_adoption: "v1",
+      vayada_legacy_product: "prod_legacy",
     },
     items: {
       data: [
@@ -639,7 +678,8 @@ function adoptedLegacySubscription() {
             currency: "eur",
             billing_scheme: "per_unit",
             unit_amount: 3_500,
-            recurring: { interval: "day", interval_count: 30 },
+            product: "prod_legacy",
+            recurring: { interval: "day", interval_count: 30, usage_type: "licensed" },
             metadata: {},
           },
         },
