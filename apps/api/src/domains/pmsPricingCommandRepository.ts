@@ -2,7 +2,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { beginHotelSetupCommandScope } from "../hotelSetupCommandScope.js";
 import { lockHotelSetupCurrencyMembership } from "../hotelSetupCurrencyMembership.js";
 import { seedPendingHotelFinancialsCategories } from "./financeStarterCategories.js";
-import { completeOrdinaryHotelSetupFirstCurrency } from "./hotelSetupFirstCurrencyCompletion.js";
+import {
+  completeOrdinaryHotelSetupFirstCurrency,
+  HotelSetupFirstCurrencyIncompleteError,
+} from "./hotelSetupFirstCurrencyCompletion.js";
 import { lockHotelSetupOrdinaryPropertyScope } from "../hotelSetupOrdinaryScope.js";
 import { enqueueChannexMealChange } from "./pmsChannexMealChange.js";
 
@@ -277,6 +280,9 @@ export function createPgPmsPricingCommandRepository(
       return result;
     } catch (error) {
       await rollbackQuietly(client);
+      // A pending new-hotel Financials default whose prerequisites fail aborts the whole save,
+      // as the native trigger did; answer the scope code clients already handle, not a 500.
+      if (error instanceof HotelSetupFirstCurrencyIncompleteError) return spec.scopeFailure();
       throw error;
     } finally {
       client.release();

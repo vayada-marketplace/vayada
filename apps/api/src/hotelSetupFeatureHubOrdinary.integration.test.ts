@@ -34,7 +34,7 @@ describe.skipIf(!url)("ordinary Feature Hub Financials (VAY-2056)", () => {
     const row = async (propertyId = property) =>
       (
         await admin.query(
-          `SELECT status, COALESCE(metadata->'featureHubOwnerDisabled','null'::jsonb) AS "ownerOff"
+          `SELECT status, COALESCE(metadata->>'featureHubOwnerDisabled' = xmin::text, FALSE) AS "ownerOff"
            FROM identity.product_entitlements WHERE entitlement_key='module:financials' AND resource_id=$1`,
           [propertyId],
         )
@@ -109,23 +109,31 @@ describe.skipIf(!url)("ordinary Feature Hub Financials (VAY-2056)", () => {
         { action: "financials_module_deactivated", org, tx: true },
       ]);
 
-      // A suspension the Owner did not make is never re-activated by the Owner.
+      // A suspension the Owner did not make is never re-activated by the Owner: any later write
+      // to the row by anyone else cancels the Owner-off marker, which is tied to the row's xmin.
       await admin.query(
-        `UPDATE identity.product_entitlements SET metadata=metadata || '{"featureHubOwnerDisabled":false}'
-         WHERE entitlement_key='module:financials' AND resource_id=$1`,
+        `UPDATE identity.product_entitlements SET metadata=metadata || '{"suspendedBy":"operations"}',
+           updated_at=now() WHERE entitlement_key='module:financials' AND resource_id=$1`,
         [property],
       );
-      await expect(toggle(true)).rejects.toMatchObject(unavailable);
       expect(await row()).toEqual({ status: "suspended", ownerOff: false });
+      await expect(toggle(true)).rejects.toMatchObject(unavailable);
+      // Switching off a foreign suspension again does not hand the Owner a marker either.
+      await toggle(false);
+      expect(await row()).toEqual({ status: "suspended", ownerOff: false });
+      await expect(toggle(true)).rejects.toMatchObject(unavailable);
+      // After an operator re-enables it, the Owner's next switch-off is reversible again.
       await admin.query(
-        `UPDATE identity.product_entitlements SET metadata=metadata || '{"featureHubOwnerDisabled":true}'
-         WHERE entitlement_key='module:financials' AND resource_id=$1`,
+        "UPDATE identity.product_entitlements SET status='active' WHERE entitlement_key='module:financials' AND resource_id=$1",
         [property],
       );
+      await toggle(false);
+      expect(await row()).toEqual({ status: "suspended", ownerOff: true });
 
       // A default that never completed cannot be activated.
       await expect(toggle(true, pendingProperty)).rejects.toMatchObject(unavailable);
-      expect(await row(pendingProperty)).toEqual({ status: "suspended", ownerOff: null });
+      await expect(toggle(false, pendingProperty)).rejects.toMatchObject(unavailable);
+      expect(await row(pendingProperty)).toEqual({ status: "suspended", ownerOff: false });
 
       // Activation needs a supported currency, no other suspended PMS entitlement and an active base.
       for (const [block, unblock] of [
@@ -176,7 +184,7 @@ describe.skipIf(!url)("ordinary Feature Hub Financials (VAY-2056)", () => {
         await admin.query(restore, [id]);
       }
       expect(await toggle(true)).toMatchObject({ isActive: true });
-      expect(await audits()).toHaveLength(4);
+      expect(await audits()).toHaveLength(6);
     } finally {
       await pool.end();
       await fixture.drop();

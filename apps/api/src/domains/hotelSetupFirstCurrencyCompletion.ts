@@ -8,7 +8,7 @@ type Client = {
 };
 
 /** Same list as platform.complete_hotel_setup_first_currency (migration 0448). */
-const FIRST_CURRENCIES = [
+export const FIRST_CURRENCIES = [
   "AED",
   "AUD",
   "BGN",
@@ -38,7 +38,7 @@ const FIRST_CURRENCIES = [
   "TRY",
   "USD",
 ];
-const BASE_ENTITLEMENTS = ["property-management", "pms-core", "account_access"];
+export const BASE_ENTITLEMENTS = ["property-management", "pms-core", "account_access"];
 const STARTER_CATEGORIES = [
   "staff",
   "ota_commission",

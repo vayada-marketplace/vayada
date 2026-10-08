@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import { AuthorizationError } from "@vayada/backend-authorization";
 import { lockHotelSetupCurrencyMembership } from "./hotelSetupCurrencyMembership.js";
 import {
+  BASE_ENTITLEMENTS,
+  FIRST_CURRENCIES,
+} from "./domains/hotelSetupFirstCurrencyCompletion.js";
+import {
   withOrdinaryHotelSetupPropertyScope,
   type HotelSetupPropertyScopeRunner,
 } from "./hotelSetupOrdinaryScope.js";
@@ -9,39 +13,10 @@ import type { PmsModuleActivationRepository } from "./routes/pmsModuleActivation
 
 type ScopePool = Parameters<HotelSetupPropertyScopeRunner>[0];
 
-const FIRST_CURRENCIES = [
-  "AED",
-  "AUD",
-  "BGN",
-  "BRL",
-  "CAD",
-  "CHF",
-  "CNY",
-  "CZK",
-  "DKK",
-  "EUR",
-  "GBP",
-  "HKD",
-  "HRK",
-  "INR",
-  "LKR",
-  "MXN",
-  "MYR",
-  "NOK",
-  "NZD",
-  "PHP",
-  "PLN",
-  "RON",
-  "RUB",
-  "SEK",
-  "SGD",
-  "THB",
-  "TRY",
-  "USD",
-];
-const BASE_ENTITLEMENTS = ["property-management", "pms-core", "account_access"];
 /** The native receipt (0449) uses newHotelFinancialsOwnerDisabled, which its guard trigger strips
- * from every non-native write; the ordinary login records Owner-off under this key instead. */
+ * from every non-native write, so any later write by anyone cancels it. The ordinary login cannot
+ * write that key; it records Owner-off as the switch-off transaction id, which only counts while
+ * it equals the row's xmin: any later write to the row by anyone cancels it the same way. */
 const OWNER_OFF = "featureHubOwnerDisabled";
 
 export class HotelSetupFinancialsUnavailableError extends Error {
@@ -92,7 +67,7 @@ export function createOrdinaryHotelSetupFeatureHubCommands(
             `SELECT id::text, status,
              metadata->>'newHotelFinancialsDefault'='ready'
                AND metadata ? 'newHotelFinancialsActivationTransaction' AS ready,
-             COALESCE(metadata->'${OWNER_OFF}'='true'::jsonb, FALSE)
+             COALESCE(metadata->>'${OWNER_OFF}' = xmin::text, FALSE)
                OR COALESCE(metadata->'newHotelFinancialsOwnerDisabled'='true'::jsonb, FALSE) AS "ownerOff",
              (starts_at IS NULL OR starts_at<=clock_timestamp())
                AND (expires_at IS NULL OR expires_at>clock_timestamp()) AS window
@@ -107,6 +82,11 @@ export function createOrdinaryHotelSetupFeatureHubCommands(
               "Hotel setup Financials activation unavailable",
             );
           const entitlement = rows.rows[0]!;
+          // Only a completed new-hotel default is the Owner's to toggle, in either direction.
+          if (!entitlement.ready)
+            throw new HotelSetupFinancialsUnavailableError(
+              "Hotel setup Financials activation unavailable",
+            );
           await client.query(
             `SELECT id FROM identity.product_entitlements WHERE organization_id=$1::uuid AND product='pms'
              AND entitlement_key = ANY(array_append($3::text[], 'module:financials'))
@@ -138,7 +118,6 @@ export function createOrdinaryHotelSetupFeatureHubCommands(
               [organizationId, propertyId, entitlement.id, BASE_ENTITLEMENTS, FIRST_CURRENCIES],
             );
             if (
-              !entitlement.ready ||
               !entitlement.window ||
               (entitlement.status !== "active" &&
                 (entitlement.status !== "suspended" || !entitlement.ownerOff)) ||
@@ -151,7 +130,8 @@ export function createOrdinaryHotelSetupFeatureHubCommands(
           const ownerOff = !isActive && (entitlement.status === "active" || entitlement.ownerOff);
           await client.query(
             `UPDATE identity.product_entitlements SET status=$2, updated_at=clock_timestamp(),
-             metadata=metadata || jsonb_build_object('${OWNER_OFF}', $3::boolean)
+             metadata=metadata || jsonb_build_object('${OWNER_OFF}',
+               CASE WHEN $3::boolean THEN to_jsonb(pg_current_xact_id()::xid::text) ELSE 'false'::jsonb END)
            WHERE id=$1::uuid`,
             [entitlement.id, isActive ? "active" : "suspended", ownerOff],
           );
