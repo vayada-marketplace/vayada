@@ -36,6 +36,8 @@ export interface BookingStay {
   checkOut: string | null;
   adults: number | null;
   children: number | null;
+  /** Recorded child ages, when known; target-rate move quotes need them. */
+  childAgesAtCheckIn?: number[] | null;
   nightly: Array<{
     appliedAmount: number | null;
     currency: string | null;
@@ -330,6 +332,7 @@ type PmsOperationalReservation = {
     ratePlanId: string | null;
     /** Published pricing-v2 offer of a manual stay; rate_plan_id stays empty for those. */
     pricingOfferId?: string | null;
+    childAgesAtCheckIn?: number[] | null;
     stay?: { checkIn: string; checkOut: string; adults: number; children: number };
     nightly?: Array<{
       serviceDate: string;
@@ -1236,6 +1239,7 @@ function toBooking(
               checkOut: assignment.stay?.checkOut ?? null,
               adults: assignment.stay?.adults ?? null,
               children: assignment.stay?.children ?? null,
+              childAgesAtCheckIn: assignment.childAgesAtCheckIn ?? null,
               nightly: (assignment.nightly ?? []).map((night) => ({
                 appliedAmount: night.applied ? moneyAmount(night.applied) : null,
                 currency: night.applied?.currency ?? null,

@@ -255,7 +255,9 @@ the target manual writer can be accepted.
 - The stored assignment keeps `rate_plan_id` empty, because that column refers
   to legacy `pms.rate_plans`; the offer id, publication revision and child ages
   are kept in `assignment_payload.pricingOffer` instead (accepted
-  booking-engine quotes keep theirs under `pricingAcceptance`). The preview's
+  booking-engine quotes keep theirs under `pricingAcceptance`). Child ages are
+  also kept as a stay fact in `assignment_payload.childAgesAtCheckIn`, which
+  survives when a room-type change drops the offer link. The preview's
   `pricingRevision` is null when no stay names an offer.
 - Custom-only bookings need no publication. Their currency is the published
   currency when one exists, else the property's pricing currency; a property

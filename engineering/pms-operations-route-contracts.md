@@ -180,6 +180,7 @@ type PmsOperationalAssignment = {
   roomTypeId: string;
   ratePlanId: string | null;
   pricingOfferId?: string | null; // published pricing-v2 offer; rate_plan_id is empty for those (VAY-1422)
+  childAgesAtCheckIn?: number[] | null; // recorded child ages, when known (VAY-1422)
   roomId: string | null;
   roomNumber: string | null;
   position: number;
