@@ -23,7 +23,7 @@ for (const analytics of [true, false]) {
     });
     await page.goto("/?checkIn=2026-09-12&checkOut=2026-09-15");
     await page.getByRole("link", { name: "Choose rooms and get a price" }).click();
-    await expect(page).toHaveURL(/\/(en\/)?book\?checkIn=2026-09-12&checkOut=2026-09-15$/);
+    await expect(page).toHaveURL(/\/(en\/)?book\?checkIn=2026-09-12&checkOut=2026-09-15&adults=2$/);
     if (!analytics) {
       expect(events).toEqual([]);
       return;

@@ -213,6 +213,33 @@ export const PRICING_RETIRED = {
   },
 };
 
+/** A one-room catalogue so the room-and-price page renders its form. */
+export async function mockPricingCatalogue(page: Page) {
+  await page.route("**/pricing-offers", (route) =>
+    route.fulfill({
+      json: {
+        version: "public-pricing-offers.v1",
+        rooms: [
+          {
+            roomTypeId: "suite",
+            name: "Suite",
+            offers: [
+              {
+                publicOfferKey: `pricing-offer.v2:${"a".repeat(64)}`,
+                currency: "EUR",
+                mealPlan: "breakfast",
+              },
+            ],
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/pricing-addons", (route) =>
+    route.fulfill({ json: { version: "public-pricing-addons.v1", addons: [] } }),
+  );
+}
+
 export function legacyPricingRequests(page: Page): string[] {
   const urls: string[] = [];
   page.on("request", (request) => {
