@@ -105,7 +105,12 @@ function rows(): unknown[][] {
   ];
 }
 
-function client(resultSets = rows()) {
+/** Result sets with the publication probe after the rooms; no head keeps the legacy plans. */
+function legacyRows(sets = rows()) {
+  return [...sets.slice(0, 2), [], ...sets.slice(2)];
+}
+
+function client(resultSets = legacyRows()) {
   const queries: Array<{ text: string; values?: readonly unknown[] }> = [];
   let index = 0;
   const queryClient = {
@@ -158,12 +163,54 @@ describe("PMS mandatory-charge pricing-source snapshot loader", () => {
         .update(snapshot!.serializedPayload)
         .digest("hex"),
     ).toMatch(/^[0-9a-f]{64}$/);
-    expect(queries).toHaveLength(6);
+    expect(queries).toHaveLength(7);
     expect(queries.every(({ values }) => values?.[0] === propertyId)).toBe(true);
     expect(queries[1]!.text).toContain("room_type.active IS TRUE");
-    expect(queries[3]!.text).not.toMatch(/lifecycle\s*=/i);
+    expect(queries[2]!.text).toContain("pms.pricing_v2_heads");
+    expect(queries[4]!.text).not.toMatch(/lifecycle\s*=/i);
     expect(snapshot?.serializedPayload).toContain('"disabled"');
     expect(queries.map(({ text }) => text).join("\n")).not.toMatch(/\bBEGIN\b|pg_advisory/i);
+  });
+
+  it("binds the published flexible plans instead of retired legacy rows", async () => {
+    const sets = rows();
+    const legacyPlan = sets[2]![0] as Record<string, any>;
+    const published = {
+      roomTypeId,
+      currency: "EUR",
+      sourceRoomFactsRevision: "4",
+      pricingRevision: 6,
+      publishedAt: capturedAt,
+      offer: {
+        id: planId,
+        meal: { kind: "room_only" },
+        price: { kind: "independent", calendar: { base: { mode: "flat", amountMinor: "17500" } } },
+      },
+      terms: { cancellation: { kind: "flexible", terms: legacyPlan.cancellationTerms } },
+    };
+    // Rooms, then the head probe, closures and published offers replace the legacy plan read.
+    const { queryClient, queries } = client([
+      sets[0]!,
+      sets[1]!,
+      [{ "?column?": 1 }],
+      [],
+      [published],
+      ...sets.slice(3),
+    ]);
+    const snapshot = await loadPmsMandatoryChargePricingSourceSnapshot(
+      queryClient,
+      propertyId,
+      capturedAt,
+    );
+    expect(snapshot?.sourceRevisions.flexibleRatePlans).toEqual([
+      {
+        roomTypeId,
+        flexibleRatePlanId: planId,
+        flexibleRatePlanRevision: 6,
+        sourceRoomFactsRevision: 4,
+      },
+    ]);
+    expect(queries.map(({ text }) => text).join("\n")).not.toContain("FROM pms.rate_plans");
   });
 
   it("returns unconfigured without reading rooms or optional sources", async () => {
@@ -179,7 +226,7 @@ describe("PMS mandatory-charge pricing-source snapshot loader", () => {
     (configuredRows[0]![0] as Record<string, unknown>).optionalPricingAggregateRevision = "0";
     configuredRows[3] = [];
     configuredRows.splice(4);
-    const { queryClient, queries } = client(configuredRows);
+    const { queryClient, queries } = client(legacyRows(configuredRows));
     const snapshot = await loadPmsMandatoryChargePricingSourceSnapshot(
       queryClient,
       propertyId,
@@ -187,7 +234,7 @@ describe("PMS mandatory-charge pricing-source snapshot loader", () => {
     );
     expect(snapshot?.sourceRevisions.optionalPricingAggregateRevision).toBe(0);
     expect(snapshot?.sourceRevisions.recurringSources).toEqual([]);
-    expect(queries).toHaveLength(4);
+    expect(queries).toHaveLength(5);
   });
 
   it("fails closed on malformed scope, capture time, or owner rows", async () => {
@@ -202,7 +249,7 @@ describe("PMS mandatory-charge pricing-source snapshot loader", () => {
     const malformedRows = rows();
     (malformedRows[1]![0] as Record<string, unknown>).propertyId =
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const malformed = client(malformedRows);
+    const malformed = client(legacyRows(malformedRows));
     await expect(
       loadPmsMandatoryChargePricingSourceSnapshot(malformed.queryClient, propertyId, capturedAt),
     ).rejects.toThrow("active room escaped its property scope");

@@ -1,7 +1,14 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
-import type { ReplacementOfferTerms } from "@vayada/domain-booking";
-import type { PmsManualBookingCreateCommand } from "@vayada/domain-pms";
+import {
+  composeBookingPricingReadiness,
+  createBookingMandatoryChargeConfirmationEvidenceAdapter,
+  type ReplacementOfferTerms,
+} from "@vayada/domain-booking";
+import {
+  parseConfirmMandatoryChargesIncludedCommand,
+  type PmsManualBookingCreateCommand,
+} from "@vayada/domain-pms";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -28,7 +35,11 @@ import {
   createPmsManualBookingTransactionalPricingPort,
 } from "./pmsManualBookingTransactionalPricing.js";
 import { createTargetPmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
+import { createPgPmsMandatoryChargeConfirmationCommandRepository } from "./pmsMandatoryChargeConfirmationCommandRepository.js";
+import { createPgPmsMandatoryChargeConfirmationReadModel } from "./pmsMandatoryChargeConfirmationReadModel.js";
+import { loadPmsMandatoryChargePricingSourceSnapshot } from "./pmsMandatoryChargePricingSourceSnapshot.js";
 import { createPgPmsPricingReadModel } from "./pmsPricingReadModel.js";
+import { createPgPmsRecurringPricingReadModel } from "./pmsRecurringPricingReadModel.js";
 import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
 import { createPmsRoomAssignmentOptimizationTriggerPort } from "./pmsRoomAssignmentOptimizationTriggers.js";
 import {
@@ -246,6 +257,122 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
       ]);
       expect([first.total.amountDecimal, second.total.amountDecimal]).toEqual(["200.00", "180.00"]);
       expect(preview?.revision).toBe(1);
+    });
+
+    // VAY-1943 slice B.2: guest-policy pricing evidence of a property with only pricing-v2 data.
+    it("binds the pricing source and mandatory-charge confirmation to the publication", async () => {
+      const pricing = await createPgPmsPricingReadModel({
+        connectionString: url!,
+        pool,
+      }).getPricingSourceSnapshot(propertyId);
+      expect(pricing?.flexibleRatePlans).toEqual([
+        expect.objectContaining({
+          roomTypeId,
+          flexibleRatePlanId: flexId,
+          flexibleRatePlanRevision: 1,
+        }),
+      ]);
+      const recurringPricing = await createPgPmsRecurringPricingReadModel({
+        connectionString: url!,
+        pool,
+      }).getRecurringPricingBookingEvidence(propertyId);
+      const source = await loadPmsMandatoryChargePricingSourceSnapshot(
+        pool,
+        propertyId,
+        new Date(),
+      );
+      expect(source?.sourceRevisions.flexibleRatePlans).toEqual([
+        {
+          roomTypeId,
+          flexibleRatePlanId: flexId,
+          flexibleRatePlanRevision: 1,
+          sourceRoomFactsRevision: 1,
+        },
+      ]);
+      await pool.query(
+        `INSERT INTO identity.role_permission_grants(organization_kind,role_key,permission_key)
+         VALUES('hotel_group',$1,'pms.operations.manage')`,
+        [roleKey],
+      );
+      const fingerprint = createHash("sha256").update(source!.serializedPayload).digest("hex");
+      const confirmed = await createPgPmsMandatoryChargeConfirmationCommandRepository({
+        connectionString: url!,
+        pool,
+      }).confirmMandatoryChargesIncluded(
+        parseConfirmMandatoryChargesIncludedCommand({
+          organizationId,
+          propertyId,
+          expectedConfirmationRevision: 0,
+          claimedPricingSourceFingerprint: fingerprint,
+          expectedPricingSourceRevisions: source!.sourceRevisions,
+          idempotencyKey: randomUUID(),
+          audit: {
+            actor: { kind: "user", userId: actorUserId },
+            requestId: randomUUID(),
+            correlationId: randomUUID(),
+            requestedAt: new Date().toISOString(),
+          },
+        })!,
+      );
+      expect(confirmed).toMatchObject({ ok: true });
+      const confirmation = await createBookingMandatoryChargeConfirmationEvidenceAdapter(
+        createPgPmsMandatoryChargeConfirmationReadModel({ connectionString: url!, pool }),
+      ).getMandatoryChargeConfirmation({ organizationId, propertyId });
+
+      // The booking-side readiness recomputes the fingerprint from the same owner reads.
+      const room = (
+        await pool.query("SELECT room_facts_revision FROM pms.room_types WHERE id=$1", [roomTypeId])
+      ).rows[0];
+      const readiness = composeBookingPricingReadiness(
+        { organizationId, propertyId },
+        {
+          roomPublication: {
+            contractVersion: "pms-room-publication.v1",
+            propertyId,
+            status: "ready",
+            blockers: [],
+            sourceRevision: "room-publication:1",
+            rooms: [
+              {
+                propertyId,
+                roomTypeId,
+                activeUnitCount: 2,
+                media: [],
+                amenities: [],
+                sourceRevision: "room:1",
+                facts: {
+                  name: "Garden room",
+                  description: "",
+                  category: null,
+                  occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 0 },
+                  beds: [],
+                  bedrooms: null,
+                  bathrooms: null,
+                  bathroomType: "private",
+                  size: null,
+                },
+                sourceRevisions: {
+                  roomFactsRevision: Number(room.room_facts_revision),
+                  roomUnitsRevision: 1,
+                  roomMediaRevision: 1,
+                  roomAmenitiesRevision: 1,
+                },
+              },
+            ],
+          } as never,
+          pricing: pricing!,
+          recurringPricing: recurringPricing!,
+        },
+        confirmation,
+        null,
+      );
+      expect(readiness.flexibleRates).toEqual([
+        expect.objectContaining({ roomTypeId, status: "ready" }),
+      ]);
+      expect(readiness.mandatoryChargeConfirmation).toMatchObject({ status: "current" });
+      expect(readiness.blockers.map(({ code }) => code)).not.toEqual(
+        expect.arrayContaining(["flexible_rate_plan_missing"]),
+      );
     });
 
     it("keeps front-desk pricing when the booking engine is switched off", async () => {

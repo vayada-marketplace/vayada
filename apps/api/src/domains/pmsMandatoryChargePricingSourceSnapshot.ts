@@ -11,6 +11,7 @@ import type { QueryResult, QueryResultRow } from "pg";
 import {
   pmsFlexibleRatePlanSnapshotFromRow,
   pmsPricingCurrencySnapshotFromRow,
+  readSourcePublishedFlexibleRatePlans,
   type PmsFlexibleRatePlanRow,
   type PmsPricingCurrencyRow,
 } from "./pmsPricingReadModel.js";
@@ -61,7 +62,9 @@ export async function loadPmsMandatoryChargePricingSourceSnapshot(
   }
   const capturedAtIso = capturedAt.toISOString();
   const rooms = await queryActiveRooms(client, propertyId);
-  const flexibleRatePlans = await queryFlexiblePlans(client, propertyId);
+  const flexibleRatePlans =
+    (await readSourcePublishedFlexibleRatePlans(client, propertyId)) ??
+    (await queryFlexiblePlans(client, propertyId));
   const pricing = parsePmsPricingSourceSnapshot({
     contractVersion: PMS_PRICING_CONTRACT_VERSION,
     propertyId,

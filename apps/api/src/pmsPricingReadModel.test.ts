@@ -41,12 +41,26 @@ function planRow(overrides: Partial<{ amountDecimal: string; roomTypeId: string 
   };
 }
 
-function fakePool(overrides: { amountDecimal?: string } = {}) {
+function fakePool(
+  overrides: { amountDecimal?: string; published?: unknown[]; closedRoomIds?: string[] } = {},
+) {
   const calls: Array<{ sql: string; values?: readonly unknown[] }> = [];
   const rawQuery = async (sql: string, values?: readonly unknown[]) => {
     calls.push({ sql, values });
     if (sql.startsWith("BEGIN") || sql === "COMMIT" || sql === "ROLLBACK") {
       return { rows: [], rowCount: 0 };
+    }
+    if (sql.startsWith("SELECT 1 FROM pms.pricing_v2_heads")) {
+      const rows = overrides.published ? [{ "?column?": 1 }] : [];
+      return { rows, rowCount: rows.length };
+    }
+    if (sql.startsWith("SELECT room_type_id::text")) {
+      const rows = (overrides.closedRoomIds ?? []).map((id) => ({ roomTypeId: id }));
+      return { rows, rowCount: rows.length };
+    }
+    if (sql.includes("FROM pms.pricing_v2_heads head")) {
+      const rows = overrides.published ?? [];
+      return { rows, rowCount: rows.length };
     }
     if (sql.startsWith("WITH pricing_currency")) {
       return {
@@ -98,6 +112,44 @@ describe("PMS pricing read model", () => {
     });
     expect(calls[0]?.sql).toBe("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
     expect(calls.filter(({ sql }) => sql.includes("WITH pricing_currency"))).toHaveLength(1);
+    expect(calls.at(-1)?.sql).toBe("COMMIT");
+  });
+
+  it("reads flexible plans from the publication once the property has one", async () => {
+    const closedRoom = "40000000-0000-4000-8000-000000000002";
+    const published = (roomType: string) => ({
+      roomTypeId: roomType,
+      currency: "EUR",
+      sourceRoomFactsRevision: "4",
+      pricingRevision: 9,
+      publishedAt: now,
+      offer: {
+        id: planId,
+        meal: { kind: "room_only" },
+        price: { kind: "independent", calendar: { base: { mode: "flat", amountMinor: "16000" } } },
+      },
+      terms: { cancellation: { kind: "flexible", terms: planRow().cancellationTerms } },
+    });
+    const { pool, calls } = fakePool({
+      published: [published(roomTypeId), published(closedRoom)],
+      closedRoomIds: [closedRoom],
+    });
+    const read = createPgPmsPricingReadModel({
+      connectionString: "test",
+      pool,
+      now: () => new Date(now),
+    });
+
+    const snapshot = await read.getPricingSourceSnapshot(propertyId);
+    expect(snapshot?.flexibleRatePlans).toEqual([
+      expect.objectContaining({
+        roomTypeId,
+        flexibleRatePlanRevision: 9,
+        baseAmount: { amountDecimal: "160.00", currency: "EUR" },
+      }),
+    ]);
+    // Every read shares the snapshot's repeatable-read transaction.
+    expect(calls[0]?.sql).toBe("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
     expect(calls.at(-1)?.sql).toBe("COMMIT");
   });
 
