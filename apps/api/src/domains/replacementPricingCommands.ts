@@ -20,12 +20,11 @@ const fail = (code: "invalid" | "denied"): never => { throw new PricingStorageEr
 export function createReplacementPricingCommands(
   pool: Pool,
   context: RequestContext | null,
-  authorityPool: Pool | null,
 ) {
   const trustedContext = structuredClone(context);
   const store = createReplacementPricingStore(pool, createReplacementPricingStorageGuard(trustedContext));
   const booking = createBookingPricingOfferTermsStore(pool);
-  const authority = authorityPool && createBookingPricingAuthorityStore(authorityPool);
+  const authority = createBookingPricingAuthorityStore(pool);
   const charges = createReplacementChargeDeclarationStore(pool);
   function scope(propertyId: string): PricingStorageScope {
     if (!uuid(propertyId)) return fail("invalid");
@@ -35,11 +34,9 @@ export function createReplacementPricingCommands(
   }
   return {
     async readAuthority(propertyId: string) {
-      if (!authority) throw new Error("Pricing authority database unavailable");
       return authority.read(trustedContext, scope(propertyId));
     },
     async chooseAuthority(propertyId: string, input: unknown) {
-      if (!authority) throw new Error("Pricing authority database unavailable");
       return authority.save(trustedContext, scope(propertyId), input);
     },
     /** Read-only preparation. Returned evidence can become stale; saves revalidate it. */
