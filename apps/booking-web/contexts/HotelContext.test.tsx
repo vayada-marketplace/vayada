@@ -2,37 +2,29 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
-import { HotelProvider, useHotel, useRooms } from "./HotelContext";
+import { HotelProvider, useAddons, useHotel } from "./HotelContext";
 
-const { getHotel, getRooms, getAddons } = vi.hoisted(() => ({
+const { getHotel, getAddons } = vi.hoisted(() => ({
   getHotel: vi.fn(),
-  getRooms: vi.fn(),
   getAddons: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
 vi.mock("@/components/AffiliateClickTracker", () => ({ AffiliateClickTracker: () => null }));
-vi.mock("@/services/api/hotel", () => ({
-  hotelService: {
-    getHotel,
-    getRooms,
-    getAddons,
-  },
-}));
+vi.mock("@/services/api/hotel", () => ({ hotelService: { getHotel, getAddons } }));
 
-it("loads the hotel without the retired availability search", async () => {
+it("loads the hotel profile and its add-on catalogue", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   getHotel.mockResolvedValue({ slug: "pricing-test", name: "Pricing Test Hotel" });
-  getAddons.mockResolvedValue([]);
+  getAddons.mockResolvedValue([{ id: "breakfast", name: "Breakfast" }]);
   const container = document.createElement("div");
   const root = createRoot(container);
-  let result: { hotelName?: string; roomCount?: number; searchMessage?: string | null } = {};
+  let result: { hotelName?: string; addonIds?: string[] } = {};
 
   function Probe() {
     const { hotel } = useHotel();
-    const { rooms, searchMessage, refetchRooms } = useRooms();
-    void refetchRooms("2026-09-12", "2026-09-15", 2, 0);
-    result = { hotelName: hotel.name, roomCount: rooms.length, searchMessage };
+    const { addons } = useAddons();
+    result = { hotelName: hotel.name, addonIds: addons.map((addon) => addon.id) };
     return createElement("p", null, hotel.name);
   }
 
@@ -45,13 +37,8 @@ it("loads the hotel without the retired availability search", async () => {
       );
     });
 
-    expect(result).toEqual({
-      hotelName: "Pricing Test Hotel",
-      roomCount: 0,
-      searchMessage: null,
-    });
+    expect(result).toEqual({ hotelName: "Pricing Test Hotel", addonIds: ["breakfast"] });
     expect(container.textContent).toBe("Pricing Test Hotel");
-    expect(getRooms).not.toHaveBeenCalled();
   } finally {
     act(() => root.unmount());
     vi.unstubAllGlobals();

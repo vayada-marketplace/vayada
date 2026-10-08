@@ -2,8 +2,6 @@ import { expect, test } from "@playwright/test";
 
 import {
   getCanonicalHostRedirectUrl,
-  publicHotelPageHreflangUrls,
-  publicHotelPageUrl,
   publicHotelSitemapEntries,
   resolvePublicHotelUrls,
 } from "../../../apps/booking-web/lib/server/publicUrls";
@@ -120,19 +118,14 @@ test.describe("booking-web canonical URL policy", () => {
       customDomainUrl: null,
     });
 
-    expect(publicHotelPageUrl(policy, "/")).toBe(
-      "http://hotel-alpenrose.booking.localhost:3002/en",
-    );
-    expect(publicHotelPageUrl(policy, "/rooms")).toBe(
-      "http://hotel-alpenrose.booking.localhost:3002/en/rooms",
-    );
-    expect(publicHotelPageHreflangUrls(policy, "/rooms")).toEqual({
-      en: "http://hotel-alpenrose.booking.localhost:3002/en/rooms",
-      de: "http://hotel-alpenrose.booking.localhost:3002/de/rooms",
+    expect(policy.canonicalUrl).toBe("http://hotel-alpenrose.booking.localhost:3002/en");
+    expect(policy.hreflangUrls).toEqual({
+      en: "http://hotel-alpenrose.booking.localhost:3002/en",
+      de: "http://hotel-alpenrose.booking.localhost:3002/de",
     });
   });
 
-  test("exposes seeded hotel and room pages through sitemap entries only", () => {
+  test("exposes only the hotel page through sitemap entries", () => {
     const policy = resolvePublicHotelUrls({
       requestHost: "hotel-alpenrose.booking.localhost:3002",
       requestProtocol: "http",
@@ -150,27 +143,13 @@ test.describe("booking-web canonical URL policy", () => {
           de: "http://hotel-alpenrose.booking.localhost:3002/de",
         },
       },
-      {
-        url: "http://hotel-alpenrose.booking.localhost:3002/en/rooms",
-        alternates: {
-          en: "http://hotel-alpenrose.booking.localhost:3002/en/rooms",
-          de: "http://hotel-alpenrose.booking.localhost:3002/de/rooms",
-        },
-      },
     ]);
   });
 
   test("allows public hotel routes and excludes private booking flows from robots", () => {
     const locales = ["en", "de"];
 
-    expect(publicAllowRules(locales)).toEqual([
-      "/",
-      "/rooms",
-      "/en",
-      "/en/rooms",
-      "/de",
-      "/de/rooms",
-    ]);
+    expect(publicAllowRules(locales)).toEqual(["/", "/en", "/de"]);
     expect(privateDisallowRules(locales)).toEqual(
       expect.arrayContaining([
         "/book",
