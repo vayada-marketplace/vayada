@@ -44,7 +44,8 @@ const RESULT_KEY = "calendarAutoOpenResult";
 type Client = PmsInventoryMaterializationRepositoryClient;
 type Pool = { connect(): Promise<Client>; end(): Promise<void> };
 type PmsCalendarAutoOpenClaim =
-  PmsCalendarAutoOpenWorkerJob | Readonly<{ deadLetteredJobId: string }>;
+  | PmsCalendarAutoOpenWorkerJob
+  | Readonly<{ deadLetteredJobId: string }>;
 
 export type PmsCalendarAutoOpenJobPayload = Readonly<{
   propertyId: string;
@@ -642,14 +643,31 @@ async function loadCurrentSource(
      LIMIT 1`,
     [propertyId],
   );
+  // A pricing-v2 publication replaces the retired legacy plans: a room with a published offer
+  // has a rate. Same rule and order as the scheduler's candidate source.
+  const published = await client.query(
+    `SELECT 1 FROM pms.pricing_v2_heads WHERE property_id=$1::uuid FOR SHARE`,
+    [propertyId],
+  );
   const plans = await client.query<PlanRow>(
-    `SELECT room_type_id::text AS "roomTypeId",
-            flexible_rate_plan_revision AS "flexibleRatePlanRevision"
-     FROM pms.rate_plans plan
-     JOIN pms.room_types room ON room.id=plan.room_type_id AND room.property_id=plan.property_id
-     WHERE plan.property_id=$1::uuid AND room.active IS TRUE
-       AND plan.pricing_contract_version='pms-pricing.v1'
-     ORDER BY plan.room_type_id FOR SHARE OF plan`,
+    published.rows.length > 0
+      ? `SELECT room.room_type_id::text AS "roomTypeId",
+                head.revision AS "flexibleRatePlanRevision"
+         FROM pms.pricing_v2_heads head
+         JOIN pms.pricing_v2_rooms room
+           ON room.property_id=head.property_id AND room.revision=head.revision
+         JOIN pms.room_types room_type
+           ON room_type.id=room.room_type_id AND room_type.property_id=room.property_id
+         WHERE head.property_id=$1::uuid AND room_type.active IS TRUE
+           AND jsonb_array_length(room.configuration->'offers') > 0
+         ORDER BY room.room_type_id`
+      : `SELECT room_type_id::text AS "roomTypeId",
+                flexible_rate_plan_revision AS "flexibleRatePlanRevision"
+         FROM pms.rate_plans plan
+         JOIN pms.room_types room ON room.id=plan.room_type_id AND room.property_id=plan.property_id
+         WHERE plan.property_id=$1::uuid AND room.active IS TRUE
+           AND plan.pricing_contract_version='pms-pricing.v1'
+         ORDER BY plan.room_type_id FOR SHARE OF plan`,
     [propertyId],
   );
   if (rooms.rows.length === 0 || unverifiedLabels.rows.length > 0) return null;
