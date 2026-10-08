@@ -42,16 +42,7 @@ export async function lockBookingPricingAuthority(
 }
 
 /** Staff-only explicit choice. No publication/channel connection implicitly calls this command. */
-export type BookingPricingAuthorityRuntimeScopeGuard = (
-  client: PoolClient,
-  scope: PricingStorageScope,
-  operationClass: "owner_read" | "owner_manage",
-) => Promise<void>;
-
-export function createBookingPricingAuthorityStore(
-  pool: Pool,
-  options: { assertRuntimeScope?: BookingPricingAuthorityRuntimeScopeGuard } = {},
-) {
+export function createBookingPricingAuthorityStore(pool: Pool) {
   return {
     async read(context: RequestContext | null, scope: PricingStorageScope) {
       if (![scope.propertyId, scope.organizationId, scope.actorUserId].every(uuid))
@@ -59,7 +50,6 @@ export function createBookingPricingAuthorityStore(
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        await options.assertRuntimeScope?.(client, scope, "owner_read");
         if (!(await lockReplacementPricingAuthorization(client, context, scope, "read")))
           return fail("denied");
         const current = await lockBookingPricingAuthority(client, scope.propertyId);
@@ -100,7 +90,6 @@ export function createBookingPricingAuthorityStore(
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        await options.assertRuntimeScope?.(client, target, "owner_manage");
         if (!(await lockReplacementPricingAuthorization(client, trustedContext, target, "manage")))
           return fail("denied");
         const prior = (
