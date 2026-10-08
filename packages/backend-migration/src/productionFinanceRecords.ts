@@ -1000,9 +1000,9 @@ function payoutRecords(
       : null;
     payoutSettingExpected = Boolean(
       userId &&
-        sourceRows(context, "pms", "affiliate_payout_settings").some(
-          (settings) => settings.data["user_id"] === userId,
-        ),
+      sourceRows(context, "pms", "affiliate_payout_settings").some(
+        (settings) => settings.data["user_id"] === userId,
+      ),
     );
     payoutSettingId =
       candidatePayoutSettingId &&
@@ -1267,9 +1267,9 @@ function bookingHotelFinanceRecords(
       : integer(hps.data["stripe_billing_room_count"], "stripe_billing_room_count");
   const activeSubscriptionEvidence = Boolean(
     billingCustomerRef &&
-      billingSubscriptionRef &&
-      providerStatus &&
-      ["trialing", "active"].includes(providerStatus),
+    billingSubscriptionRef &&
+    providerStatus &&
+    ["trialing", "active"].includes(providerStatus),
   );
   const legacyBillingReferenceSha256 =
     billingCustomerRef || billingSubscriptionRef || billingCheckoutRef || providerStatus
