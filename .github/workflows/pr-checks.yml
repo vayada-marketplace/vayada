@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "fm/vay-1092-*"
+      - "fm/vay-1362-*"
       - "fix/vay-965-*"
       - "fm/vay-965-*"
       - flamurmaliqi2811/vay-2044-expense-worker-runtime
