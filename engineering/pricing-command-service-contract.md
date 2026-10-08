@@ -1,5 +1,7 @@
 # VAY-1543: private pricing command service
 
+> **Superseded** by [`pricing-ordinary-login-plan.md`](pricing-ordinary-login-plan.md) (VAY-2057): pricing runs on the ordinary API login; the private service, its per-property logins and the proof script are deleted. Kept as history until slice E.
+
 Reviewable integration contract, 2026-09-22, source `a745af2d6e`.
 Supersedes the open broker-versus-capability options in
 `pricing-property-boundary-proof.md`: propose a **private command service with
