@@ -1,147 +1,26 @@
 import { expect, test } from "@playwright/test";
-import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
+import { legacyPricingRequests, mockBookingApis } from "../support/bookingMocks";
 
+// The legacy availability search (GET /offers) is retired: the hotel page no longer
+// claims anything about capacity or availability. It hands the chosen stay to the
+// room-and-price page, which prices rooms and guests itself.
 for (const mobile of [false, true]) {
-  test(`explains guest count and recovers after a new search (${mobile ? "mobile" : "desktop"})`, async ({
+  test(`hands the chosen stay to the room-and-price page without the retired search (${mobile ? "mobile" : "desktop"})`, async ({
     page,
   }) => {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
     await mockBookingApis(page);
-    let reason = "occupancy_unavailable";
-    await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/offers**`, async (route) => {
-      if (reason === "bookable") return route.fallback();
-      await route.fulfill({
-        json: {
-          request: { nights: 1, rooms: 1 },
-          status: "unavailable",
-          unavailableReasons: [{ code: reason }],
-        },
-      });
-    });
-    await page.goto("/?adults=13");
-    await expect(page.getByRole("status")).toContainText("13 guests");
-    await page.screenshot({ path: test.info().outputPath("guest-capacity.png"), fullPage: true });
-    reason = "sold_out";
-    await page.getByRole("button", { name: "Check Availability", exact: true }).click();
-    await expect(page.getByRole("status")).toContainText(
-      "No accommodation is available for this search",
-    );
-    await expect(page.getByRole("status")).not.toContainText("13 guests");
-    reason = "bookable";
-    await page.getByRole("button").filter({ hasText: "13 adults" }).click();
-    for (let i = 0; i < 11; i++)
-      await page
-        .getByTestId("guest-selector")
-        .getByRole("button", { name: "-", exact: true })
-        .first()
-        .click();
-    await page.getByRole("button", { name: "Done", exact: true }).click();
-    await page.getByRole("button", { name: "Check Availability", exact: true }).click();
+    const legacyRequests = legacyPricingRequests(page);
+    await page.goto("/?adults=13&checkIn=2026-09-12&checkOut=2026-09-15");
+    await expect(page.getByRole("heading", { name: "Hotel Alpenrose", level: 1 })).toBeVisible();
+    await expect(page.getByRole("button").filter({ hasText: "13 adults" })).toBeVisible();
     await expect(page.getByRole("status")).toHaveCount(0);
-    await expect(page.getByText("Alpine Suite", { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Unable to Load Hotel" })).toHaveCount(0);
+    const entry = page.getByRole("link", { name: "Choose rooms and get a price" });
+    await expect(entry).toHaveAttribute("href", "/en/book?checkIn=2026-09-12&checkOut=2026-09-15");
+    await page.screenshot({ path: test.info().outputPath("guest-capacity.png"), fullPage: true });
+    await page.getByRole("button", { name: "Check Availability", exact: true }).click();
+    await expect(page).toHaveURL(/\/en\/book\?checkIn=2026-09-12&checkOut=2026-09-15$/);
+    expect(legacyRequests).toEqual([]);
   });
 }
-
-test("failed availability is an error, not a capacity claim", async ({ page }) => {
-  await mockBookingApis(page);
-  let fail = false;
-  await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/offers**`, (route) =>
-    fail ? route.fulfill({ status: 503, json: { message: "Unavailable" } }) : route.fallback(),
-  );
-  await page.goto("/");
-  await expect(page.getByText("Alpine Suite", { exact: true }).first()).toBeVisible();
-  fail = true;
-  await page.getByRole("button", { name: "Check Availability", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("We couldn’t check availability");
-});
-
-test("initial unavailable pricing keeps the hotel page usable", async ({ page }) => {
-  await mockBookingApis(page);
-  let releaseRetry: (() => void) | undefined;
-  const retryPending = new Promise<void>((resolve) => {
-    releaseRetry = resolve;
-  });
-  let markRetryStarted: (() => void) | undefined;
-  const retryStarted = new Promise<void>((resolve) => {
-    markRetryStarted = resolve;
-  });
-  let requestCount = 0;
-  await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/offers**`, async (route) => {
-    requestCount += 1;
-    if (requestCount > 1) {
-      markRetryStarted?.();
-      await retryPending;
-    }
-    await route.fulfill({
-      status: 503,
-      json: {
-        code: "PRICING_UNAVAILABLE",
-        message: "Pricing is unavailable while the TypeScript pricing system is rebuilt.",
-      },
-    });
-  });
-
-  await page.goto("/");
-
-  await expect(page.getByRole("heading", { name: "Hotel Alpenrose", level: 1 })).toBeVisible();
-  await retryStarted;
-  await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toHaveCount(0);
-  releaseRetry?.();
-  await expect(page.getByRole("status")).toContainText("We couldn’t check availability");
-  await expect(page.getByRole("heading", { name: "Unable to Load Hotel" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toBeVisible();
-});
-
-test("an older search cannot replace a newer result", async ({ page }) => {
-  await mockBookingApis(page);
-  let releaseOld: (() => void) | undefined;
-  const oldResponse = new Promise<void>((resolve) => {
-    releaseOld = resolve;
-  });
-  let oldStarted: (() => void) | undefined;
-  const oldRequest = new Promise<void>((resolve) => {
-    oldStarted = resolve;
-  });
-  await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/offers**`, async (route) => {
-    if (new URL(route.request().url()).searchParams.get("adults") !== "3") return route.fallback();
-    oldStarted?.();
-    await oldResponse;
-    await route.fulfill({
-      json: {
-        request: { nights: 1, rooms: 1 },
-        status: "unavailable",
-        unavailableReasons: [{ code: "occupancy_unavailable" }],
-      },
-    });
-  });
-  await page.goto("/");
-  await expect(page.getByText("Alpine Suite", { exact: true }).first()).toBeVisible();
-  await page.getByRole("button").filter({ hasText: "2 adults" }).click();
-  await page
-    .getByTestId("guest-selector")
-    .getByRole("button", { name: "+", exact: true })
-    .first()
-    .click();
-  await oldRequest;
-  const latest = page.waitForResponse(
-    (response) =>
-      response.url().includes("/offers?") &&
-      new URL(response.url()).searchParams.get("adults") === "2",
-  );
-  await page
-    .getByTestId("guest-selector")
-    .getByRole("button", { name: "-", exact: true })
-    .first()
-    .click();
-  await latest;
-  const oldFinished = page.waitForResponse(
-    (response) =>
-      response.url().includes("/offers?") &&
-      new URL(response.url()).searchParams.get("adults") === "3",
-  );
-  releaseOld?.();
-  await oldFinished;
-  await page.getByRole("button", { name: "Done", exact: true }).click();
-  await expect(page.getByRole("status")).toHaveCount(0);
-  await expect(page.getByText("Alpine Suite", { exact: true }).first()).toBeVisible();
-});

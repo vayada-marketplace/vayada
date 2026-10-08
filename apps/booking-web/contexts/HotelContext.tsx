@@ -1,20 +1,10 @@
 "use client";
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-  useRef,
-  ReactNode,
-  Suspense,
-} from "react";
+import { createContext, useContext, useEffect, useState, ReactNode, Suspense } from "react";
 import { usePathname } from "next/navigation";
 import { AffiliateClickTracker } from "@/components/AffiliateClickTracker";
 import { Hotel, RoomType, Addon } from "@/lib/types";
 import { hotelService } from "@/services/api/hotel";
-import { ApiError } from "@/services/api/client";
 import { generateColorPalette } from "@/lib/utils/colors";
 
 const FONT_PAIRINGS: Record<string, { heading: string; body: string; googleFamilies: string[] }> = {
@@ -48,8 +38,15 @@ const FONT_PAIRINGS: Record<string, { heading: string; body: string; googleFamil
   },
 };
 
+// The legacy availability search (GET /offers) is retired (VAY-1543 C.2): rooms are never
+// loaded here any more. The room fields keep their shape only for the retired checkout
+// pages that still compile against it; guests price rooms on /book instead.
+const NO_ROOMS: RoomType[] = [];
+const noRoomSearch = async () => {};
+
 interface HotelContextValue {
   hotel: Hotel | null;
+  /** Always empty: see NO_ROOMS. */
   rooms: RoomType[];
   addons: Addon[];
   loading: boolean;
@@ -77,7 +74,7 @@ const HotelContext = createContext<HotelContextValue>({
   error: null,
   locale: "en",
   slug: "",
-  refetchRooms: async () => {},
+  refetchRooms: noRoomSearch,
 });
 
 // Resolve the active hotel slug. In production the server layout has
@@ -136,12 +133,8 @@ export function HotelProvider({
   }, [slugProp]);
   const quoteEntry = /\/book\/?$/.test(usePathname());
   const [hotel, setHotel] = useState<Hotel | null>(null);
-  const [rooms, setRooms] = useState<RoomType[]>([]);
   const [addons, setAddons] = useState<Addon[]>([]);
   const [loading, setLoading] = useState(true);
-  const [roomsLoading, setRoomsLoading] = useState(false);
-  const [searchMessage, setSearchMessage] = useState<string | null>(null);
-  const searchVersion = useRef(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -159,32 +152,12 @@ export function HotelProvider({
     Promise.all([
       hotelService.getHotel(slug, locale),
       quoteEntry
-        ? Promise.resolve({ rooms: [] as RoomType[], searchMessage: null })
-        : hotelService
-            .getRooms(slug, undefined, undefined, undefined, undefined, locale)
-            .then((rooms) => ({ rooms, searchMessage: null }))
-            .catch((error: unknown) => {
-              if (
-                !(error instanceof ApiError) ||
-                error.status !== 503 ||
-                !error.detail ||
-                typeof error.detail !== "object" ||
-                !("code" in error.detail) ||
-                error.detail.code !== "PRICING_UNAVAILABLE"
-              ) {
-                throw error;
-              }
-              return { rooms: [] as RoomType[], searchMessage: "availabilityError" };
-            }),
-      quoteEntry
         ? Promise.resolve([] as Addon[])
         : hotelService.getAddons(slug).catch(() => [] as Addon[]),
     ])
-      .then(([hotelData, roomsResult, addonsData]) => {
+      .then(([hotelData, addonsData]) => {
         if (canceled) return;
         setHotel(hotelData);
-        setRooms(roomsResult.rooms);
-        setSearchMessage(roomsResult.searchMessage);
         setAddons(addonsData);
         setLoading(false);
         // VAY-394: API returned a different canonical slug than we
@@ -212,42 +185,6 @@ export function HotelProvider({
       canceled = true;
     };
   }, [locale, slug, slugResolved, quoteEntry]);
-
-  const refetchRooms = useCallback(
-    async (
-      checkIn?: string,
-      checkOut?: string,
-      adults?: number,
-      children?: number,
-      roomCount?: number,
-    ) => {
-      const version = ++searchVersion.current;
-      setRoomsLoading(true);
-      setSearchMessage(null);
-      try {
-        if (!slug) return;
-        const result = await hotelService.searchRooms(
-          slug,
-          checkIn,
-          checkOut,
-          adults,
-          children,
-          locale,
-          roomCount,
-        );
-        if (version !== searchVersion.current) return;
-        setRooms(result.rooms);
-        setSearchMessage(result.searchMessage);
-      } catch {
-        if (version !== searchVersion.current) return;
-        setRooms([]);
-        setSearchMessage("availabilityError");
-      } finally {
-        if (version === searchVersion.current) setRoomsLoading(false);
-      }
-    },
-    [locale, slug],
-  );
 
   // Apply branding colors as CSS variables
   useEffect(() => {
@@ -339,15 +276,15 @@ export function HotelProvider({
     <HotelContext.Provider
       value={{
         hotel,
-        rooms,
+        rooms: NO_ROOMS,
         addons,
         loading,
-        roomsLoading,
-        searchMessage,
+        roomsLoading: false,
+        searchMessage: null,
         error,
         locale,
         slug: slug ?? "",
-        refetchRooms,
+        refetchRooms: noRoomSearch,
       }}
     >
       {children}

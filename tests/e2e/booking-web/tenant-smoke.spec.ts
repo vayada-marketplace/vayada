@@ -1,42 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
-import publicBookabilityCases from "../../../engineering/fixtures/public-bookability/cases.json";
 import { mockBookingApis, publicOffers, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
 import { watchPageHealth } from "../support/pageHealth";
 
 test.describe("booking-web tenant smoke", () => {
-  test("shows canonical breakfast pricing when an older cheaper flexible offer comes first", async ({
-    page,
-  }) => {
-    await mockBookingApis(page);
-    const canonical = {
-      ...publicOffers.quote.offers[0],
-      offerId: "alpine-suite:onb15-flex-canonical",
-      ratePlanId: "canonical",
-      totals: { ...publicOffers.quote.offers[0].totals, roomTotal: 360, grandTotal: 360 },
-    };
-    const legacy = {
-      ...canonical,
-      offerId: "alpine-suite:flex",
-      ratePlanId: "legacy",
-      mealPlan: null,
-      totals: { ...canonical.totals, roomTotal: 300, grandTotal: 300 },
-    };
-    await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/offers**`, (route) =>
-      route.fulfill({
-        json: { ...publicOffers, quote: { ...publicOffers.quote, offers: [legacy, canonical] } },
-      }),
-    );
-    await page.goto("/");
-    const rate = page
-      .locator('[data-rate-type="flexible"]')
-      .filter({ hasText: "Breakfast included" });
-    await expect(rate).toBeVisible();
-    await expect(rate).toContainText("€120");
-    await expect(rate).not.toContainText("€100");
-    await page.getByRole("button", { name: /Select This Rate/i }).click();
-    await expect(page).toHaveURL(/rateType=flexible/);
-  });
-
   for (const width of [1280, 390]) {
     test(`hides retired public enrolment while preserving referral cookies at ${width}px`, async ({
       page,
@@ -68,14 +34,7 @@ test.describe("booking-web tenant smoke", () => {
     await expect(guestSelector.getByText("Ages 0-17", { exact: true })).toBeVisible();
     await guestSelector.getByRole("button", { name: "Done" }).click();
     await expect(page.getByRole("heading", { name: /Available Accommodations/i })).toBeVisible();
-    await expect(page.getByText("Alpine Suite")).toBeVisible();
-    await expect(
-      page.locator("[data-rate-type]").filter({ hasText: "Breakfast included" }).first(),
-    ).toBeVisible();
-    await expect(
-      page.locator('[data-rate-type="flexible"]').filter({ hasText: "Room only" }).first(),
-    ).toBeVisible();
-    await expect(page.getByRole("button", { name: /Select This Rate/i }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toBeVisible();
     const nav = page.locator("nav");
     await nav.getByRole("button", { name: "Contact", exact: true }).click();
     await expect(nav.getByText("Phone", { exact: true })).toBeVisible();
@@ -98,31 +57,8 @@ test.describe("booking-web tenant smoke", () => {
       "http://hotel-alpenrose.booking.localhost:3002/vayada-logo.png",
     );
 
-    const availableRoom = graph.find(
-      (node) => node["@type"] === "HotelRoom" && node.name === "Alpine Suite",
-    );
-    expect(availableRoom).toMatchObject({
-      "@type": "HotelRoom",
-      name: "Alpine Suite",
-      containedInPlace: { "@id": "http://hotel-alpenrose.booking.localhost:3002/en#hotel" },
-    });
-    expect(availableRoom?.offers).toBeUndefined();
-
-    const unavailableRoom = graph.find(
-      (node) => node["@type"] === "HotelRoom" && node.name === "Garden Room",
-    );
-    expect(unavailableRoom).toBeTruthy();
-    expect(unavailableRoom?.offers).toBeUndefined();
-
-    const quoteUnavailableCases = publicBookabilityCases.cases
-      .filter((fixture) => fixture.expected.offerCount === 0)
-      .map((fixture) => fixture.caseId);
-    expect(quoteUnavailableCases).toEqual(
-      expect.arrayContaining(["sold-out", "payment-disabled", "min-stay-not-met"]),
-    );
-    expect(
-      graph.filter((node) => node["@type"] === "HotelRoom").every((node) => !node.offers),
-    ).toBe(true);
+    // Rooms and offers are priced on /book; the hotel page publishes no HotelRoom nodes.
+    expect(graph.filter((node) => node["@type"] === "HotelRoom")).toEqual([]);
 
     await assertHealthy();
   });
@@ -146,62 +82,6 @@ test.describe("booking-web tenant smoke", () => {
       "href",
       "https://wa.me/41791234567",
     );
-  });
-
-  test.describe("mobile room detail modal", () => {
-    test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
-
-    test("keeps internal controls open for touch input", async ({ page }, testInfo) => {
-      const assertHealthy = watchPageHealth(page, testInfo);
-      await mockBookingApis(page);
-
-      await page.goto("/");
-      await page.getByRole("button", { name: "View Details", exact: true }).first().tap();
-
-      const modal = page.getByRole("dialog", { name: "Alpine Suite" });
-      await expect(modal).toBeVisible();
-
-      const roomImage = modal.getByAltText("Alpine Suite");
-      await roomImage.evaluate((image) => {
-        const start = new Touch({ identifier: 0, target: image, clientX: 300, clientY: 200 });
-        const end = new Touch({ identifier: 0, target: image, clientX: 100, clientY: 200 });
-        image.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, touches: [start] }));
-        image.dispatchEvent(new TouchEvent("touchend", { bubbles: true, changedTouches: [end] }));
-      });
-      await expect(modal).toBeVisible();
-
-      await modal.getByRole("button", { name: /View Full Amenities/i }).tap();
-      await expect(modal.getByText("Minibar", { exact: true })).toBeVisible();
-      await expect(modal).toBeVisible();
-
-      await modal.getByRole("button", { name: "Show less" }).tap();
-      await expect(modal.locator('[id^="room-amenities-"] > span')).toHaveCount(8);
-      await expect(modal).toBeVisible();
-
-      await modal.getByRole("button", { name: /Non-Refundable Rate/i }).tap();
-      await expect(modal).toBeVisible();
-
-      await modal.getByRole("button", { name: "Close room details" }).tap();
-      await expect(modal).toBeHidden();
-
-      await page.setViewportSize({ width: 1024, height: 900 });
-      await page.getByRole("button", { name: "View Details", exact: true }).first().tap();
-      await expect(modal).toBeVisible();
-      await page.touchscreen.tap(10, 10);
-      await expect(modal).toBeHidden();
-
-      await page.setViewportSize({ width: 390, height: 844 });
-      await page.getByRole("button", { name: "View Details", exact: true }).first().tap();
-      await expect(modal).toBeVisible();
-      await page.goBack();
-      await expect(modal).toBeHidden();
-      await page.getByRole("button", { name: "View Details", exact: true }).first().tap();
-      await modal.getByRole("button", { name: /Non-Refundable Rate/i }).tap();
-      await modal.getByRole("button", { name: /Select This Rate/i }).tap();
-      await expect(page).toHaveURL(/\/(addons|book)\?.*rateType=nonrefundable/);
-
-      await assertHealthy();
-    });
   });
 
   test("uses a constrained header logo without displacing mobile actions", async ({ page }) => {
@@ -261,87 +141,6 @@ test.describe("booking-web tenant smoke", () => {
     await expect(nav.getByRole("button", { name: "EUR", exact: true })).toHaveCount(0);
   });
 
-  test("previews eight room amenities before expanding the full list", async ({ page }) => {
-    await mockBookingApis(page);
-    await page.setViewportSize({ width: 800, height: 900 });
-    await page.goto("/");
-    await page.getByRole("button", { name: "View Details", exact: true }).first().click();
-
-    const dialog = page.getByRole("dialog", { name: "Alpine Suite" });
-    const amenityGrid = dialog.locator('[id^="room-amenities-"]');
-    await expect(amenityGrid.locator(":scope > span")).toHaveText([
-      "Wi-Fi",
-      "Air conditioning",
-      "Flat-screen TV",
-      "Balcony",
-      "Kitchen",
-      "Non-smoking",
-      "Safe",
-      "Coffee machine",
-    ]);
-    expect(
-      (
-        await amenityGrid.evaluate((element) => getComputedStyle(element).gridTemplateColumns)
-      ).split(" "),
-    ).toHaveLength(2);
-    await expect(dialog.getByText("Minibar", { exact: true })).toHaveCount(0);
-
-    const expand = dialog.getByRole("button", { name: "View Full Amenities (10)" });
-    await expect(expand).toHaveAttribute("aria-expanded", "false");
-    await expand.click();
-    await expect(dialog.getByText("Minibar", { exact: true })).toBeVisible();
-    const longAmenity = dialog.getByTitle("Laptop-friendly workspace");
-    expect(await longAmenity.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(
-      true,
-    );
-    await expect(dialog.getByRole("button", { name: "Show less" })).toHaveAttribute(
-      "aria-expanded",
-      "true",
-    );
-    await dialog.getByRole("button", { name: "Show less" }).click();
-    await expect(dialog.getByText("Minibar", { exact: true })).toHaveCount(0);
-
-    await page.setViewportSize({ width: 375, height: 812 });
-    expect(
-      (
-        await amenityGrid.evaluate((element) => getComputedStyle(element).gridTemplateColumns)
-      ).split(" "),
-    ).toHaveLength(1);
-  });
-
-  test("shows a short amenity list without an expand control", async ({ page }) => {
-    await mockBookingApis(page);
-    await page.goto("/");
-    await page.getByRole("button", { name: "View Details", exact: true }).nth(1).click();
-
-    const dialog = page.getByRole("dialog", { name: "Garden Room" });
-    await expect(dialog.locator('[id^="room-amenities-"] > span')).toHaveText(["Wi-Fi"]);
-    await expect(dialog.getByRole("button", { name: /Amenities|Show less/i })).toHaveCount(0);
-  });
-
-  test("shows exactly eight amenities without a toggle on desktop and mobile", async ({ page }) => {
-    const amenities = ["Wi-Fi", "Balcony", "Kitchen", "Safe", "Desk", "Shower", "TV", "Fan"];
-    await mockBookingApis(page, { gardenAmenities: amenities });
-    await page.goto("/");
-    await page.getByRole("button", { name: "View Details", exact: true }).nth(1).click();
-    const dialog = page.getByRole("dialog", { name: "Garden Room" });
-    for (const width of [1280, 375]) {
-      await page.setViewportSize({ width, height: 900 });
-      await expect(dialog.locator('[id^="room-amenities-"] > span')).toHaveText(amenities);
-      await expect(dialog.getByRole("button", { name: /Amenities|Show less/i })).toHaveCount(0);
-    }
-  });
-
-  test("hides reviewed-empty room amenities", async ({ page }) => {
-    await mockBookingApis(page, { gardenAmenities: [] });
-    await page.goto("/");
-    await page.getByRole("button", { name: "View Details", exact: true }).nth(1).click();
-
-    const dialog = page.getByRole("dialog", { name: "Garden Room" });
-    await expect(dialog.locator('[id^="room-amenities-"]')).toHaveCount(0);
-    await expect(dialog.getByText(/Amenities|Show less/i)).toHaveCount(0);
-  });
-
   test("hides children in the guest selector when the target profile disables them", async ({
     page,
   }, testInfo) => {
@@ -364,91 +163,23 @@ test.describe("booking-web tenant smoke", () => {
     await assertHealthy();
   });
 
-  test("shows pending feedback when selecting a rate", async ({ page }, testInfo) => {
-    const assertHealthy = watchPageHealth(page, testInfo);
-    await mockBookingApis(page);
-
-    await page.goto("/");
-
-    let releaseNavigation!: () => void;
-    await page.route("**/addons?**", async (route) => {
-      await new Promise<void>((resolve) => {
-        releaseNavigation = resolve;
-      });
-      await route.continue();
-    });
-
-    const selectButton = page.getByTestId("select-rate-alpine-suite");
-    await expect(selectButton).toBeVisible();
-    await selectButton.click({ noWaitAfter: true });
-
-    const pendingButton = page.getByTestId("select-rate-alpine-suite");
-    await expect(pendingButton).toBeVisible();
-    await expect(pendingButton).toBeDisabled();
-    await expect(pendingButton).toHaveAttribute("aria-busy", "true");
-    await expect(pendingButton).toContainText("Preparing checkout");
-    releaseNavigation();
-
-    await assertHealthy();
-  });
-
   test("keeps public structured data off checkout routes", async ({ page }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
     await mockBookingApis(page);
-
-    await page.goto(
-      "/book?room=alpine-suite&checkIn=2026-09-12&checkOut=2026-09-15&adults=2&children=0&rooms=1&rateType=flexible",
+    await page.route("**/pricing-offers", (route) =>
+      route.fulfill({ json: { version: "public-pricing-offers.v1", rooms: [] } }),
+    );
+    await page.route("**/pricing-addons", (route) =>
+      route.fulfill({ json: { version: "public-pricing-addons.v1", addons: [] } }),
     );
 
-    await expect(page).toHaveTitle(/Guest Details \| Book Your Stay/);
+    await page.goto("/book?checkIn=2026-09-12&checkOut=2026-09-15");
+
+    await expect(page).toHaveTitle(/Choose Rooms \| Price Your Stay/);
     await expect(
       page.locator('script[type="application/ld+json"]#booking-web-public-structured-data'),
     ).toHaveCount(0);
     await expect(page.locator('script[type="application/ld+json"]')).toHaveCount(0);
-
-    const nationality = page.getByRole("combobox", { name: "Country", exact: true });
-    await nationality.fill("Netherlands");
-    await expect(nationality).toHaveValue("Netherlands");
-    await expect(page.locator('datalist option[value="Netherlands"]')).toHaveCount(1);
-    await page.getByLabel("First Name").fill("Ada");
-    await page.getByLabel("Last Name").fill("Lovelace");
-    await page
-      .getByRole("textbox", { name: "Email Address *", exact: true })
-      .fill("ada@example.test");
-    await page.getByLabel("Phone Number").fill("1234567");
-    await page.getByRole("button", { name: "Continue to Payment" }).click();
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () => JSON.parse(sessionStorage.getItem("guestDetails") ?? "{}").guestCountry,
-        ),
-      )
-      .toBe("NL");
-
-    await assertHealthy();
-  });
-
-  test("requests card-sized room and add-on images", async ({ page }, testInfo) => {
-    const assertHealthy = watchPageHealth(page, testInfo);
-    await mockBookingApis(page);
-
-    await page.goto("/");
-    await expect(page.getByText("Alpine Suite")).toBeVisible();
-
-    const roomImageWidths = await optimizedImageWidths(page, 'img[alt="Alpine Suite"]');
-    if (roomImageWidths.length > 0) {
-      expect(Math.max(...roomImageWidths)).toBeLessThanOrEqual(640);
-    }
-
-    await page.goto(
-      "/addons?room=alpine-suite&checkIn=2026-09-12&checkOut=2026-09-15&adults=2&children=0&rooms=1&rateType=flexible",
-    );
-    await expect(page.getByText("Airport Transfer")).toBeVisible();
-
-    const addonImageWidths = await optimizedImageWidths(page, 'img[alt="Airport Transfer"]');
-    if (addonImageWidths.length > 0) {
-      expect(Math.max(...addonImageWidths)).toBeLessThanOrEqual(640);
-    }
 
     await assertHealthy();
   });
@@ -572,32 +303,4 @@ async function publicStructuredDataGraph(page: Page) {
   const structuredData = JSON.parse(rawStructuredData ?? "{}") as { "@graph"?: JsonLdNode[] };
   expect(structuredData["@graph"]).toBeTruthy();
   return structuredData["@graph"] ?? [];
-}
-
-async function optimizedImageWidths(page: Page, selector: string): Promise<number[]> {
-  await page.waitForFunction((imageSelector) => {
-    return Array.from(document.querySelectorAll(imageSelector)).every((image) => {
-      const img = image as HTMLImageElement;
-      return img.complete && Boolean(img.currentSrc);
-    });
-  }, selector);
-
-  const srcs = await page
-    .locator(selector)
-    .evaluateAll((images) =>
-      images.map((image) => (image as HTMLImageElement).currentSrc).filter(Boolean),
-    );
-  const widths = srcs
-    .map((src) => new URL(src, page.url()).searchParams.get("w"))
-    .filter((width): width is string => Boolean(width))
-    .map(Number);
-
-  if (widths.length === 0) {
-    // Development deliberately serves the trusted local media CDN directly.
-    // Production and other non-local deployments must keep using optimized widths.
-    expect(srcs.every((src) => new URL(src, page.url()).hostname.endsWith(".localhost"))).toBe(
-      true,
-    );
-  }
-  return widths;
 }
