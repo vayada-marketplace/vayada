@@ -152,6 +152,13 @@ def _subscription_id_from_invoice(data: dict) -> str | None:
     return None
 
 
+def _invoice_subscription_metadata(data: dict) -> dict:
+    details = (data.get("parent") or {}).get("subscription_details") or data.get(
+        "subscription_details"
+    )
+    return (details or {}).get("metadata") or {}
+
+
 def _subscription_id(value: object) -> str | None:
     if isinstance(value, str):
         return value
@@ -175,6 +182,13 @@ async def _fixed_plan_context(event_type: str, data: dict) -> tuple[str, str | N
     elif event_type.startswith("checkout.session."):
         subscription_id = _subscription_id(data.get("subscription"))
 
+    # Defence in depth (VAY-1362): a subscription the target adopted is never a
+    # legacy billing event, even when this service runs unfrozen.
+    if fixed_plan_billing.is_target_adopted(metadata) or fixed_plan_billing.is_target_adopted(
+        _invoice_subscription_metadata(data)
+    ):
+        return None
+
     if metadata.get("vayada_payment_kind") == "fixed_plan" and metadata.get("hotel_id"):
         return str(metadata["hotel_id"]), subscription_id
 
@@ -186,6 +200,8 @@ async def _fixed_plan_context(event_type: str, data: dict) -> tuple[str, str | N
             return str(payment_settings["hotel_id"]), subscription_id
         subscription = await stripe_service.retrieve_billing_subscription(subscription_id)
         subscription_metadata = subscription.get("metadata") or {}
+        if fixed_plan_billing.is_target_adopted(subscription_metadata):
+            return None
         if subscription_metadata.get(
             "vayada_payment_kind"
         ) == "fixed_plan" and subscription_metadata.get("hotel_id"):
