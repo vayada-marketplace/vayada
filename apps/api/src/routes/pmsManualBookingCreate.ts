@@ -94,6 +94,7 @@ const bodySchema = z.strictObject({
     .array(additionalGuest)
     .max(PMS_MANUAL_BOOKING_MAX_ADDITIONAL_GUESTS)
     .optional(),
+  expectedPricingRevision: z.number().int().positive().max(2_147_483_647).optional(),
   privateNote: nullableText(10_000),
   directSource: z.enum(PMS_MANUAL_BOOKING_DIRECT_SOURCES),
   stays: z.array(stay).min(1).max(20),

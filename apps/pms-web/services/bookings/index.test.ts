@@ -487,11 +487,15 @@ describe("PMS target booking projection", () => {
     // prettier-ignore
     const offerTypes = [{ ...roomTypes[0]!, ratePlans: [{ ratePlanId: "flex-offer", pricingContractVersion: "pricing.v2", name: "Flexible", rateType: "flexible", baseRate: { amountDecimal: "100.00", currency: "EUR" }, active: true }] }];
     // prettier-ignore
-    const offerReservation = { ...heterogeneousReservation, roomCount: 1, assignments: [{ ...assignments[0], ratePlanId: null, pricingOfferId: "flex-offer" }] };
+    const offerReservation = { ...heterogeneousReservation, roomCount: 1, assignments: [{ ...assignments[0], ratePlanId: null, pricingOfferId: "flex-offer", childAgesAtCheckIn: [6] }] };
     // prettier-ignore
     mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: offerTypes } : reservationPage(offerReservation));
     const result = (await bookingsService.list()).bookings[0]!;
-    expect(result.stays[0]).toMatchObject({ roomName: "Suite", ratePlanName: "Flexible" });
+    expect(result.stays[0]).toMatchObject({
+      roomName: "Suite",
+      ratePlanName: "Flexible",
+      childAgesAtCheckIn: [6],
+    });
   });
 
   it("maps exact and partial stay evidence without copying booking-wide values", async () => {

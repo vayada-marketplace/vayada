@@ -116,6 +116,9 @@ export function createPmsManualBookingTransactionalPricingPort(
               ? { ...stay, childAgesAtCheckIn: [...stay.childAgesAtCheckIn] }
               : { ...stay },
           ) as Parameters<typeof calculateManualBookingPreview>[1]["stays"],
+          ...(command.expectedPricingRevision !== undefined
+            ? { expectedPricingRevision: command.expectedPricingRevision }
+            : {}),
           addOns: command.addOns.map((selection) => ({
             ...selection,
             serviceUnits: [...selection.serviceUnits],

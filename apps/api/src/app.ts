@@ -336,11 +336,29 @@ export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolv
 };
 
 type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
-  hotelSetupCommandForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
-  hotelSetupLogoForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
-  hotelSetupCreationForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
-  /** Optional private property-profile destination; unset keeps the ordinary writer. */
-  hotelSetupProfileForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
+  /** Public API logo assignment on the ordinary login (Owner-only); unset keeps the shared writer. */
+  hotelSetupLogoAssignments?: Pick<
+    import("./domains/propertyMediaCommandRepository.js").PropertyMediaCommandRepository,
+    "assignLogo"
+  >;
+  /** Owner-only hotel-detail edits on the ordinary login; unset keeps the sparse writer. */
+  hotelSetupProfileCommand?: import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate;
+  /** Owner-only Feature Hub Financials on the ordinary login; unset keeps the shared repository. */
+  hotelSetupFeatureHubCommands?: Pick<
+    import("./routes/pmsModuleActivations.js").PmsModuleActivationRepository,
+    "updateFinancials"
+  >;
+  /** Self-serve hotel creation (Owner mode, ordinary login); unset keeps the shared repository. */
+  hotelSetupPropertyCreationRepository?: Pick<
+    import("./routes/sharedHotelSetupStatus.js").SharedHotelSetupStatusRepository,
+    "createPropertyProfile"
+  >;
+  /** Owner-only currency saves on the ordinary login; unset keeps the shared command port. */
+  hotelSetupCurrencyCommandPort?: import("./routes/pmsPricing.js").PmsPricingRoutesOptions["currencyCommandPort"];
+  /** Owner-only launch settings on the ordinary login; unset keeps the broad writer. */
+  hotelSetupLaunchSettingsCommand?: Parameters<
+    typeof import("./routes/sharedHotelSetupStatus.js").registerSharedHotelSetupLaunchSettings
+  >[1];
   auth?: ApiAuthOptions;
   authSession?: AuthSessionRouteOptions;
   browserAllowedOrigins?: string[];
@@ -793,9 +811,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       trackCommandRepository: options.hotelSetupTrackCommandRepository,
       propertyAccessRepository: options.auth?.propertyAccessRepository,
       launchSettingsRepository: options.propertyLaunchSettingsRepository,
-      propertyCreationForwarder: options.hotelSetupCreationForwarder,
-      launchSettingsForwarder: options.hotelSetupCommandForwarder,
-      profileForwarder: options.hotelSetupProfileForwarder,
+      propertyCreationRepository: options.hotelSetupPropertyCreationRepository,
+      launchSettingsCommand: options.hotelSetupLaunchSettingsCommand,
+      profileCommand: options.hotelSetupProfileCommand,
     });
   }
   if (options.propertySetupRouteStateReadPort) {
@@ -814,7 +832,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPropertyMediaRoutes, {
       prefix: "/api/hotel-setup",
       repository: options.propertyMediaCommandRepository,
-      forwardLogo: options.hotelSetupLogoForwarder,
+      logoAssignments: options.hotelSetupLogoAssignments,
+      propertyAccessRepository: options.auth?.propertyAccessRepository,
     });
     app.register(registerPlatformPropertyMediaRoutes, {
       prefix: "/api/platform/admin",
@@ -1025,7 +1044,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPmsPricingRoutes, {
       prefix: "/api/pms",
       ...options.pmsPricing,
-      currencyForward: options.hotelSetupCommandForwarder,
+      currencyCommandPort: options.hotelSetupCurrencyCommandPort,
+      propertyAccessRepository: options.auth?.propertyAccessRepository,
       inventoryPublicOfferProjector: options.pmsInventoryPublicOfferProjector,
     });
   }
@@ -1085,8 +1105,20 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   if (options.pmsModuleActivationRepository) {
     app.register(registerPmsModuleActivationRoutes, {
       prefix: "/api/pms",
-      repository: options.pmsModuleActivationRepository,
-      forward: options.hotelSetupCommandForwarder,
+      ...(options.hotelSetupFeatureHubCommands
+        ? {
+            // VAY-2056: the retired private service's Owner-only registration, on the ordinary login.
+            repository: {
+              ...options.pmsModuleActivationRepository,
+              updateFinancials: options.hotelSetupFeatureHubCommands.updateFinancials,
+            },
+            requireOwnerSession: true,
+            financialsSetupComplete:
+              options.pmsModuleActivationRepository.isFinancialsSetupComplete?.bind(
+                options.pmsModuleActivationRepository,
+              ),
+          }
+        : { repository: options.pmsModuleActivationRepository }),
       allowedOrigins: options.pmsOperationsAllowedOrigins,
       financialsActivationPropertyIds: options.financialsActivationPropertyIds,
       propertyAccessRepository: options.auth?.propertyAccessRepository,
