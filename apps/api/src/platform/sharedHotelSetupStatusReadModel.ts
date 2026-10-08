@@ -759,14 +759,17 @@ async function writePropertyProfile(
       const propertyId = created.rows[0]?.propertyId;
       if (!propertyId)
         throw new Error("Created shared property profile did not return a property id");
-      // Link only a property this transaction created, as hotel_setup_new_property_allowed
-      // enforced natively; the ordinary login's owner-link INSERT has no RLS guard (VAY-2056).
-      const fresh = await client.query(
-        "SELECT 1 FROM hotel_catalog.properties WHERE id=$1::uuid AND xmin=pg_current_xact_id()::xid",
-        [propertyId],
-      );
-      if (fresh.rows.length !== 1)
-        throw new Error("Created shared property is not from this transaction");
+      // Link only a property this transaction created. Native logins are held to this by RLS
+      // (hotel_setup_new_property_allowed) and lack table SELECT for the system column, so the
+      // check runs for the ordinary login only, whose owner-link INSERT has no RLS guard.
+      if (!nativeCreation) {
+        const fresh = await client.query(
+          "SELECT 1 FROM hotel_catalog.properties WHERE id=$1::uuid AND xmin=pg_current_xact_id()::xid",
+          [propertyId],
+        );
+        if (fresh.rows.length !== 1)
+          throw new Error("Created shared property is not from this transaction");
+      }
       // Native policies need parent links visible in a later statement's snapshot.
       // All stages stay on this client and roll back together.
       await client.query(createPropertyCatalogOwnerSql(), [input.organizationId, propertyId]);
