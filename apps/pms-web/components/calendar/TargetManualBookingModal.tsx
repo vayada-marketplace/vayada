@@ -38,6 +38,8 @@ type StayDraft = {
   checkOut: string;
   adults: number;
   children: number;
+  /** One entry per child, as typed; offers price children by age at check-in. */
+  childAges: string[];
   ratePlanId: string;
   nightlyRate: string;
 };
@@ -47,6 +49,11 @@ const inputClass = "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm f
 
 // prettier-ignore
 function addDay(value: string): string { if (!value) return ""; const date = new Date(`${value}T00:00:00Z`); date.setUTCDate(date.getUTCDate() + 1); return date.toISOString().slice(0, 10); }
+
+function childAge(value: string): number | null {
+  const parsed = Number(value);
+  return value.trim() && Number.isInteger(parsed) && parsed >= 0 && parsed <= 17 ? parsed : null;
+}
 
 function amount(value: string): string | null {
   const parsed = Number(value);
@@ -86,6 +93,7 @@ function stayDefaults(
     checkOut,
     adults: 1,
     children: 0,
+    childAges: [],
     ratePlanId: defaultRatePlanId(type),
     nightlyRate: "",
   };
@@ -109,16 +117,25 @@ function previewErrorDetails(
   retryable: boolean;
   stay?: { key: number; field: string; message: string };
 } {
+  if (error instanceof PmsManualBookingServiceError && error.code === "pricing_not_published")
+    return { message: t("calendar.targetManualBooking.pricingNotPublished"), retryable: false };
   if (
     error instanceof PmsManualBookingServiceError &&
-    ["rate_not_found", "rate_plan_not_found", "inactive_rate_plan"].includes(error.code)
+    ["rate_not_found", "rate_plan_not_found", "inactive_rate_plan", "rate_restricted"].includes(
+      error.code,
+    )
   ) {
     const stay = stays[error.stayPosition ? error.stayPosition - 1 : 0];
     const range = stay
       ? `${stay.checkIn} – ${stay.checkOut}`
       : t("calendar.targetManualBooking.selectedDates");
     return {
-      message: t("calendar.targetManualBooking.noRateFound", { range }),
+      message: t(
+        error.code === "rate_restricted"
+          ? "calendar.targetManualBooking.rateRestricted"
+          : "calendar.targetManualBooking.noRateFound",
+        { range },
+      ),
       retryable: false,
     };
   }
@@ -210,7 +227,15 @@ export default function TargetManualBookingModal({
         (stay.ratePlanId === "custom" && override === null)
       )
         return null;
-      const money = override ? { amountDecimal: override, currency: roomType.currency } : null;
+      // Offers price children by age; wait until every age is entered.
+      const ages = stay.ratePlanId === "custom" ? [] : stay.childAges.map(childAge);
+      if (ages.length !== (stay.ratePlanId === "custom" ? 0 : stay.children)) return null;
+      if (ages.some((age) => age === null)) return null;
+      // Only a custom rate sets the nightly amount; offers take the published price.
+      const money =
+        stay.ratePlanId === "custom" && override
+          ? { amountDecimal: override, currency: roomType.currency }
+          : null;
       return {
         position: index + 1,
         roomId: stay.roomId,
@@ -218,6 +243,7 @@ export default function TargetManualBookingModal({
         checkOut: stay.checkOut,
         adults: stay.adults,
         children: stay.children,
+        ...(ages.length ? { childAgesAtCheckIn: ages as number[] } : {}),
         ratePlanId: stay.ratePlanId === "custom" ? null : stay.ratePlanId,
         pricing:
           stay.ratePlanId === "custom"
@@ -644,9 +670,18 @@ export default function TargetManualBookingModal({
                             aria-describedby={
                               occupancyExceeded ? `stay-occupancy-${stay.key}` : undefined
                             }
-                            onChange={(event) =>
-                              updateStay(index, { children: Number(event.target.value) })
-                            }
+                            onChange={(event) => {
+                              const children = Number(event.target.value);
+                              updateStay(index, {
+                                children,
+                                childAges: Array.from(
+                                  {
+                                    length: Number.isInteger(children) ? Math.max(0, children) : 0,
+                                  },
+                                  (_, child) => stay.childAges[child] ?? "",
+                                ),
+                              });
+                            }}
                             className={inputClass}
                           />{" "}
                         </label>
@@ -685,36 +720,71 @@ export default function TargetManualBookingModal({
                             </option>{" "}
                           </select>{" "}
                         </label>{" "}
-                        <label className={labelClass}>
-                          {" "}
-                          {stay.ratePlanId === "custom"
-                            ? t("calendar.targetManualBooking.customNightlyRate")
-                            : t("calendar.targetManualBooking.nightlyOverride")}{" "}
-                          <input
-                            ref={(node) => {
-                              if (node) controls.current.set(`${stay.key}:nightlyRate`, node);
-                            }}
-                            aria-label={t("calendar.targetManualBooking.nightlyRateField", {
-                              number: index + 1,
-                            })}
-                            aria-invalid={serverError?.field === "nightlyRate"}
-                            aria-describedby={
-                              serverError?.field === "nightlyRate"
-                                ? `stay-server-${stay.key}`
-                                : undefined
-                            }
-                            type="number"
-                            min={0}
-                            step="0.01"
-                            value={stay.nightlyRate}
-                            onChange={(event) =>
-                              updateStay(index, { nightlyRate: event.target.value })
-                            }
-                            required={stay.ratePlanId === "custom"}
-                            className={inputClass}
-                          />{" "}
-                        </label>{" "}
+                        {stay.ratePlanId === "custom" && (
+                          <label className={labelClass}>
+                            {t("calendar.targetManualBooking.customNightlyRate")}{" "}
+                            <input
+                              ref={(node) => {
+                                if (node) controls.current.set(`${stay.key}:nightlyRate`, node);
+                              }}
+                              aria-label={t("calendar.targetManualBooking.nightlyRateField", {
+                                number: index + 1,
+                              })}
+                              aria-invalid={serverError?.field === "nightlyRate"}
+                              aria-describedby={
+                                serverError?.field === "nightlyRate"
+                                  ? `stay-server-${stay.key}`
+                                  : undefined
+                              }
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              value={stay.nightlyRate}
+                              onChange={(event) =>
+                                updateStay(index, { nightlyRate: event.target.value })
+                              }
+                              required
+                              className={inputClass}
+                            />
+                          </label>
+                        )}
                       </div>
+                      {stay.ratePlanId !== "custom" && stay.children > 0 && (
+                        <fieldset className="mt-3">
+                          <legend className="text-xs text-gray-600">
+                            {t("calendar.targetManualBooking.childAgesHint")}
+                          </legend>
+                          <div className="mt-1 grid grid-cols-3 gap-2 sm:grid-cols-6">
+                            {stay.childAges.map((age, child) => (
+                              <input
+                                key={child}
+                                aria-label={t("calendar.targetManualBooking.childAgeField", {
+                                  number: index + 1,
+                                  child: child + 1,
+                                })}
+                                aria-invalid={
+                                  serverError?.field === "childAgesAtCheckIn" ||
+                                  (age !== "" && childAge(age) === null)
+                                }
+                                type="number"
+                                min={0}
+                                max={17}
+                                step={1}
+                                value={age}
+                                onChange={(event) =>
+                                  updateStay(index, {
+                                    childAges: stay.childAges.map((value, position) =>
+                                      position === child ? event.target.value : value,
+                                    ),
+                                  })
+                                }
+                                className={inputClass}
+                                required
+                              />
+                            ))}
+                          </div>
+                        </fieldset>
+                      )}
                       {noPlanConfigured && (
                         <p id={`stay-no-plan-${stay.key}`} className="mt-2 text-xs text-gray-600">
                           {t("calendar.targetManualBooking.noRatePlanConfigured")}

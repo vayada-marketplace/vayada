@@ -256,8 +256,16 @@ describe("calendarService manual-booking rates", () => {
                   active: true,
                 },
                 {
-                  ratePlanId: "canonical-plan",
+                  ratePlanId: "retired-canonical-plan",
                   pricingContractVersion: "pms-pricing.v1",
+                  name: "Flexible",
+                  rateType: "flexible",
+                  baseRate: { amountDecimal: "120.00", currency: "EUR" },
+                  active: true,
+                },
+                {
+                  ratePlanId: "canonical-plan",
+                  pricingContractVersion: "pricing.v2",
                   name: "Flexible",
                   rateType: "flexible",
                   baseRate: { amountDecimal: "150.00", currency: "EUR" },
@@ -326,7 +334,7 @@ describe("calendarService manual-booking rates", () => {
     });
   });
 
-  it("offers only the canonical flexible plan", async () => {
+  it("offers only the published pricing-v2 offers", async () => {
     const result = await calendarService.getCalendarData("2026-08-20", "2026-08-24");
 
     expect(result.roomTypes[0]?.ratePlans).toEqual([

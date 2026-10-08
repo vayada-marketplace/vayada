@@ -83,7 +83,7 @@ describe("target manual booking fields", () => {
   });
 
   // prettier-ignore
-  it("submits independently priced heterogeneous stays in stable order", async () => { vi.spyOn(calendarService, "listAvailableAddons").mockResolvedValue([{ id: "00000000-0000-4000-8000-000000000001", name: "Breakfast", description: "", price: 10, currency: "EUR", category: "meal", perPerson: true, perNight: true }]); vi.spyOn(calendarService, "previewManualBooking").mockImplementation(async (input) => previewFor(input)); const onSubmit = vi.fn().mockResolvedValue({}); let view!: ReactTestRenderer; await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit, onClose: vi.fn() })); }); const button = (label: string) => view.root.findAllByType("button").find((item) => item.children.join("") === label)!, input = (label: string) => view.root.findByProps({ "aria-label": label }); await act(async () => button("+ Add another room").props.onClick()); await act(async () => input("Room 2 check-in").props.onChange({ target: { value: "2026-09-12" } })); await act(async () => input("Room 2 check-out").props.onChange({ target: { value: "2026-09-15" } })); await act(async () => input("Room 2 adults").props.onChange({ target: { value: "3" } })); await act(async () => input("Room 2 nightly rate").props.onChange({ target: { value: "275.50" } })); await act(async () => view.root.findAllByType("input").find((item) => item.props.type === "checkbox")!.props.onChange({ target: { checked: true } })); await settlePreview(); await act(async () => { await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() }); }); expect(onSubmit.mock.calls[0]![0].stays).toMatchObject([{ position: 1, roomId: "room-1", checkIn: "2026-09-10", adults: 1, ratePlanId: "plan-1" }, { position: 2, roomId: "room-2", checkIn: "2026-09-12", checkOut: "2026-09-15", adults: 3, ratePlanId: "plan-2", pricing: { kind: "rate_plan", manualOverride: { amountDecimal: "275.50", currency: "EUR" } } }]); expect(onSubmit.mock.calls[0]![0].addOns).toEqual([{ addonId: "00000000-0000-4000-8000-000000000001", packageCount: 1, serviceUnits: [{ serviceDate: "2026-09-10", guestCount: 1 }, { serviceDate: "2026-09-12", guestCount: 3 }, { serviceDate: "2026-09-13", guestCount: 3 }, { serviceDate: "2026-09-14", guestCount: 3 }] }]); expect(JSON.stringify(view.toJSON())).toContain("€20"); });
+  it("submits independently priced heterogeneous stays in stable order", async () => { vi.spyOn(calendarService, "listAvailableAddons").mockResolvedValue([{ id: "00000000-0000-4000-8000-000000000001", name: "Breakfast", description: "", price: 10, currency: "EUR", category: "meal", perPerson: true, perNight: true }]); vi.spyOn(calendarService, "previewManualBooking").mockImplementation(async (input) => previewFor(input)); const onSubmit = vi.fn().mockResolvedValue({}); let view!: ReactTestRenderer; await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit, onClose: vi.fn() })); }); const button = (label: string) => view.root.findAllByType("button").find((item) => item.children.join("") === label)!, input = (label: string) => view.root.findByProps({ "aria-label": label }); await act(async () => button("+ Add another room").props.onClick()); await act(async () => input("Room 2 check-in").props.onChange({ target: { value: "2026-09-12" } })); await act(async () => input("Room 2 check-out").props.onChange({ target: { value: "2026-09-15" } })); await act(async () => input("Room 2 adults").props.onChange({ target: { value: "3" } })); await act(async () => view.root.findAllByType("input").find((item) => item.props.type === "checkbox")!.props.onChange({ target: { checked: true } })); await settlePreview(); await act(async () => { await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() }); }); expect(onSubmit.mock.calls[0]![0].stays).toMatchObject([{ position: 1, roomId: "room-1", checkIn: "2026-09-10", adults: 1, ratePlanId: "plan-1" }, { position: 2, roomId: "room-2", checkIn: "2026-09-12", checkOut: "2026-09-15", adults: 3, ratePlanId: "plan-2", pricing: { kind: "rate_plan", manualOverride: null } }]); expect(view.root.findAllByProps({ "aria-label": "Room 2 nightly rate" })).toHaveLength(0); expect(onSubmit.mock.calls[0]![0].addOns).toEqual([{ addonId: "00000000-0000-4000-8000-000000000001", packageCount: 1, serviceUnits: [{ serviceDate: "2026-09-10", guestCount: 1 }, { serviceDate: "2026-09-12", guestCount: 3 }, { serviceDate: "2026-09-13", guestCount: 3 }, { serviceDate: "2026-09-14", guestCount: 3 }] }]); expect(JSON.stringify(view.toJSON())).toContain("€20"); });
 
   it("blocks overlapping reuse, then removes and renumbers stays", async () => {
     vi.spyOn(calendarService, "previewManualBooking").mockImplementation(async (input) =>
@@ -170,7 +170,7 @@ describe("target manual booking fields", () => {
     act(() => {
       vi.advanceTimersByTime(100);
     });
-    act(() => input("Room 1 nightly rate").props.onChange({ target: { value: "275.50" } }));
+    act(() => input("Room 1 adults").props.onChange({ target: { value: "2" } }));
     act(() => {
       vi.advanceTimersByTime(100);
     });
@@ -195,11 +195,10 @@ describe("target manual booking fields", () => {
           roomId: "room-2",
           checkIn: "2026-09-12",
           checkOut: "2026-09-15",
+          adults: 2,
           ratePlanId: "plan-2",
-          pricing: {
-            kind: "rate_plan",
-            manualOverride: { amountDecimal: "275.50", currency: "EUR" },
-          },
+          // Offers take the published price; only a custom rate sets the nightly amount.
+          pricing: { kind: "rate_plan", manualOverride: null },
         }),
       ],
       addOns: [expect.objectContaining({ addonId: "addon-1", packageCount: 1 })],
@@ -231,8 +230,8 @@ describe("target manual booking fields", () => {
     await settlePreview();
     act(() =>
       view.root
-        .findByProps({ "aria-label": "Room 1 nightly rate" })
-        .props.onChange({ target: { value: "150" } }),
+        .findByProps({ "aria-label": "Room 1 adults" })
+        .props.onChange({ target: { value: "2" } }),
     );
     await settlePreview();
     expect(pending).toHaveLength(2);
@@ -337,7 +336,7 @@ describe("target manual booking fields", () => {
     await settlePreview();
 
     expect(JSON.stringify(view.toJSON())).toContain(
-      "No rate found for 2026-09-10 – 2026-09-11. Set up a season in Rooms & Rates first.",
+      "No rate found for 2026-09-10 – 2026-09-11. Set the price in Pricing first.",
     );
     expect(
       view.root
@@ -371,7 +370,7 @@ describe("target manual booking fields", () => {
     expect(ratePlan.props.value).toBe("custom");
     expect(ratePlan.props["aria-describedby"]).toBe("stay-no-plan-1");
     const markup = JSON.stringify(view.toJSON());
-    expect(markup).toContain("No rate plan is configured for this room type.");
+    expect(markup).toContain("No rate plan is published for this room type.");
     expect(markup).toContain("Enter a custom nightly rate to calculate the total");
     expect(markup).not.toContain("No rate available");
     expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(true);
@@ -657,5 +656,50 @@ describe("target manual booking fields", () => {
       }),
     );
     expect(markup).toMatch(/<button[^>]*bg-primary-600[^>]*>Done<\/button>/);
+  });
+  it("asks for child ages before pricing an offer and sends them with the stay", async () => {
+    const request = vi
+      .spyOn(calendarService, "previewManualBooking")
+      .mockImplementation(async (input) => previewFor(input));
+    let view!: ReactTestRenderer;
+    // prettier-ignore
+    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit: vi.fn(), onClose: vi.fn() })); });
+    await settlePreview();
+    request.mockClear();
+    const input = (label: string) => view.root.findByProps({ "aria-label": label });
+    await act(async () => input("Room 1 children").props.onChange({ target: { value: "1" } }));
+    await settlePreview();
+    expect(request).not.toHaveBeenCalled();
+    await act(async () => input("Room 1 child 1 age").props.onChange({ target: { value: "18" } }));
+    await settlePreview();
+    expect(request).not.toHaveBeenCalled();
+    expect(input("Room 1 child 1 age").props["aria-invalid"]).toBe(true);
+    await act(async () => input("Room 1 child 1 age").props.onChange({ target: { value: "5" } }));
+    await settlePreview();
+    expect(request.mock.calls[0]![0].stays[0]).toMatchObject({
+      children: 1,
+      childAgesAtCheckIn: [5],
+      ratePlanId: "plan-1",
+      pricing: { kind: "rate_plan", manualOverride: null },
+    });
+  });
+
+  it("points to Pricing when the property has not published prices", async () => {
+    vi.spyOn(calendarService, "previewManualBooking").mockRejectedValue(
+      new PmsManualBookingServiceError(
+        "conflict",
+        "pricing_not_published",
+        409,
+        "pricing not published.",
+      ),
+    );
+    let view!: ReactTestRenderer;
+    // prettier-ignore
+    await act(async () => { view = create(createElement(TargetManualBookingModal, { roomTypes, rooms, initialCheckIn: "2026-09-10", initialCheckOut: "2026-09-11", onSubmit: vi.fn(), onClose: vi.fn() })); });
+    await settlePreview();
+    expect(JSON.stringify(view.toJSON())).toContain(
+      "Prices are not published yet. Publish them in Pricing, or choose a custom rate.",
+    );
+    expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(true);
   });
 });

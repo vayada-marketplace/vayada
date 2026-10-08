@@ -429,24 +429,29 @@ function toCalendarData(
   const roomsById = new Map(rooms.map((room) => [room.roomId, room]));
 
   return {
-    roomTypes: roomTypes.map((roomType) => ({
-      id: roomType.roomTypeId,
-      name: roomType.name,
-      category: roomType.category ?? "",
-      totalRooms: roomType.roomCount,
-      baseRate: moneyAmount(roomType.baseRate),
-      maxOccupancy: maxOccupancy(roomType),
-      currency: roomType.baseRate.currency,
-      ratePlans: (roomType.ratePlans ?? [])
-        .filter((plan) => plan.active && plan.pricingContractVersion === "pms-pricing.v1")
-        .map((plan) => ({
+    roomTypes: roomTypes.map((roomType) => {
+      // Manual bookings price only the published pricing-v2 offers (VAY-1422 slice A).
+      const published = (roomType.ratePlans ?? []).filter(
+        (plan) => plan.active && plan.pricingContractVersion === "pricing.v2",
+      );
+      return {
+        id: roomType.roomTypeId,
+        name: roomType.name,
+        category: roomType.category ?? "",
+        totalRooms: roomType.roomCount,
+        baseRate: moneyAmount(roomType.baseRate),
+        maxOccupancy: maxOccupancy(roomType),
+        // Room types from the room-facts flow carry no currency; the publication does.
+        currency: published[0]?.baseRate.currency ?? roomType.baseRate.currency,
+        ratePlans: published.map((plan) => ({
           id: plan.ratePlanId,
           name: plan.name,
           rateType: plan.rateType,
           baseRate: moneyAmount(plan.baseRate),
         })),
-      seasons: [],
-    })),
+        seasons: [],
+      };
+    }),
     rooms: orderRoomsByRoomType(
       rooms,
       roomTypes.map((roomType) => roomType.roomTypeId),
