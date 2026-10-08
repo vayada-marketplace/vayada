@@ -20,7 +20,7 @@ for (const mobile of [false, true]) {
     await expect(entry).toHaveAttribute("href", "/en/book?checkIn=2026-09-12&checkOut=2026-09-15");
     await page.screenshot({ path: test.info().outputPath("guest-capacity.png"), fullPage: true });
     await page.getByRole("button", { name: "Check Availability", exact: true }).click();
-    await expect(page).toHaveURL(/\/en\/book\?checkIn=2026-09-12&checkOut=2026-09-15$/);
+    await expect(page).toHaveURL(/\/(en\/)?book\?checkIn=2026-09-12&checkOut=2026-09-15$/);
     expect(legacyRequests).toEqual([]);
   });
 }

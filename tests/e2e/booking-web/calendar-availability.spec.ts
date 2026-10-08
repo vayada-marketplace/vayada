@@ -6,7 +6,7 @@ import { legacyPricingRequests, mockBookingApis } from "../support/bookingMocks"
 // picker no longer asks it anything, so future dates stay selectable and the stay is
 // priced on the room-and-price page.
 test("keeps future dates selectable without the retired calendar", async ({ page }) => {
-  await page.clock.setFixedTime(new Date("2028-03-01T12:00:00Z"));
+  await page.clock.setFixedTime(new Date("2028-03-05T12:00:00Z"));
   await mockBookingApis(page);
   const legacyRequests = legacyPricingRequests(page);
 
@@ -18,7 +18,7 @@ test("keeps future dates selectable without the retired calendar", async ({ page
     page.getByText("Availability is temporarily unavailable for these dates."),
   ).toHaveCount(0);
   await expect(page.locator('button[title="Availability unavailable"]')).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "2028-02-28", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "2028-03-04", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "2028-03-10", exact: true }).click();
   await page.getByRole("button", { name: "2028-03-13", exact: true }).click();
   await expect(page.getByText("Select your dates")).toBeHidden();
