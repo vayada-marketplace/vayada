@@ -565,6 +565,10 @@ Dependency order; each step is reversible until step 6.
 
    PostgreSQL 16+ gives a CREATEROLE role ADMIN OPTION on the roles it created,
    so `vayada_admin` can alter the logins it staged. Run the probe below first.
+   Platform #473 provides this as a reviewed workflow,
+   `retire-hotel-setup-database-roles.yml` (`step=disable`): a read-only
+   `inspect` prints a PLAN fingerprint, and `apply` with that fingerprint
+   revokes and verifies.
 
    **6b. Migration `0474_hotel_setup_native_objects_retire`.** One transaction:
    - It takes every affected table lock up front in one `LOCK TABLE`, with
@@ -622,6 +626,8 @@ Dependency order; each step is reversible until step 6.
    - `DROP ROLE` the per-hotel logins and the two readers, then the four
      parents.
 
+   The same workflow does this with `step=drop`, using `inspect` and then
+   `apply`. It refuses while any grant, dependency or text reference remains.
    Do not use `DROP OWNED BY`: it needs the target role's privileges. If
    `admin_option` is false, the RDS master user has to drop the roles. The
    original plan for this step (per-hotel logins for Animals Ahangama and Sri
