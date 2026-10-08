@@ -1,7 +1,9 @@
 # Automatic internal hotel setup — VAY-965
 
-> **Superseded by VAY-2056** ([ordinary login](hotel-setup-ordinary-login.md)): automatic provisioning is not needed; the parked PRs #2901–#2904 close unmerged at decommission.
-> This contract describes the private services, which stay until the decommission steps.
+> **Historical (VAY-2056).** The native hotel-setup code this contract describes was removed
+> from the app in decommission step 3 ([ordinary login](../hotel-setup-ordinary-login.md) §12);
+> the six Owner operations run on the ordinary API login. Kept for the record: file, line and
+> workflow references point to code that no longer exists.
 
 Implementation contract. This document grants no production authority. The
 Owners enter their real hotel details; credential provisioning is internal work.

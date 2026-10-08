@@ -1,5 +1,10 @@
 # New hotel Financials setup write boundary (VAY-1092)
 
+> **Historical (VAY-2056).** The native hotel-setup code this contract describes was removed
+> from the app in decommission step 3 ([ordinary login](../hotel-setup-ordinary-login.md) §12);
+> the six Owner operations run on the ordinary API login. Kept for the record: file, line and
+> workflow references point to code that no longer exists.
+
 _Review proposal, 2026-09-28. This document grants no privileges, maps no
 credential, and activates no hotel._
 
@@ -40,11 +45,11 @@ or UPDATE on `hotel_catalog.properties`,
 idempotency writes, and audit INSERT. No hotel data changed. This proves that
 the live login cannot complete the proposed path; it is not a full ACL audit.
 
-| Command | Intentional writes to inventory before granting |
-| --- | --- |
-| Create property | `hotel_catalog.properties`, locations, contacts, optional source link; `identity.organization_resource_links` and, only for a PMS-linked property, Financials pending entitlement; optional Marketplace profile and Booking settings; idempotency and audit |
-| Currency save | `pms.property_pricing_settings` INSERT or guarded UPDATE; first save also writes seven `finance.expense_categories` and only the pending property Financials entitlement; domain event/outbox, idempotency and audit |
-| Owner Feature Hub toggle | Only the selected property's Financials entitlement and audit |
+| Command                  | Intentional writes to inventory before granting                                                                                                                                                                                                             |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Create property          | `hotel_catalog.properties`, locations, contacts, optional source link; `identity.organization_resource_links` and, only for a PMS-linked property, Financials pending entitlement; optional Marketplace profile and Booking settings; idempotency and audit |
+| Currency save            | `pms.property_pricing_settings` INSERT or guarded UPDATE; first save also writes seven `finance.expense_categories` and only the pending property Financials entitlement; domain event/outbox, idempotency and audit                                        |
+| Owner Feature Hub toggle | Only the selected property's Financials entitlement and audit                                                                                                                                                                                               |
 
 The exact grants must be derived from the final route SQL, including optional
 branches and row locks. The current shared setup repository also serves reads

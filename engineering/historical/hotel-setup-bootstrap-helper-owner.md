@@ -1,5 +1,10 @@
 # VAY-965: separate fresh-role staging from helper ownership
 
+> **Historical (VAY-2056).** The native hotel-setup code this contract describes was removed
+> from the app in decommission step 3 ([ordinary login](../hotel-setup-ordinary-login.md) §12);
+> the six Owner operations run on the ordinary API login. Kept for the record: file, line and
+> workflow references point to code that no longer exists.
+
 Live protected inspection 37222554294 verified that the two helper functions are
 owned by vayada_target_prod_user (OID 28700). That owner cannot create roles and
 has no ADMIN membership on the setup scope role. Conversely the existing
