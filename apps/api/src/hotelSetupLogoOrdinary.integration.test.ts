@@ -45,7 +45,7 @@ describe.skipIf(!url)("ordinary logo runtime (VAY-2056)", () => {
     });
     const resolve = runtime.uploads.resolveRequestPersistence!;
     const suffix = randomUUID().replaceAll("-", "");
-    const [org, owner, property] = [1, 2, 3].map(() => randomUUID());
+    const [org, owner, property, stranger] = [1, 2, 3, 4].map(() => randomUUID());
     const context = (roleKey = "hotel_owner") =>
       ({
         actor: { internalUserId: owner, providerIdentity: { sessionId: "verified-session" } },
@@ -75,6 +75,10 @@ describe.skipIf(!url)("ordinary logo runtime (VAY-2056)", () => {
         "INSERT INTO identity.organization_memberships(organization_id,user_id,role_key,access_origin,property_access_mode) VALUES($1,$2,'hotel_owner','agency','all')",
         [org, owner],
       );
+      await admin.query("INSERT INTO identity.users(id,email) VALUES($1,$2)", [
+        stranger,
+        `x${suffix}@example.test`,
+      ]);
       await admin.query(
         "INSERT INTO hotel_catalog.properties(id,public_id,display_name,creation_organization_id) VALUES($1::uuid,$1::uuid::text,'Logo fixture',$2)",
         [property, org],
@@ -95,6 +99,31 @@ describe.skipIf(!url)("ordinary logo runtime (VAY-2056)", () => {
           sessionId: randomUUID(),
         }),
       ).toMatchObject({ repository: defaults.repository });
+      expect(
+        await resolve({ operation: "finalize", context: context(), sessionId: "not-a-uuid" }),
+      ).toMatchObject({ repository: defaults.repository });
+
+      // A logo session that is not this actor's fails closed instead of falling back to the
+      // shared media path, which would skip the Owner re-check.
+      const foreignSession = randomUUID();
+      await admin.query(
+        `INSERT INTO platform.media_upload_sessions(id,upload_session_key,requested_purpose,
+           requested_visibility,resource_product,resource_type,resource_id,staging_prefix,expires_at,
+           actor_user_id,owner_organization_id,property_id)
+         VALUES($1,$2,'property.logo','private','hotel_catalog','property',$3::uuid::text,$4,
+           now()+interval '15 minutes',$5,$6,$3)`,
+        [
+          foreignSession,
+          `media.upload_session:${foreignSession}`,
+          property,
+          `staging/${foreignSession}`,
+          stranger,
+          org,
+        ],
+      );
+      await expect(
+        resolve({ operation: "finalize", context: context(), sessionId: foreignSession }),
+      ).rejects.toBeInstanceOf(AuthorizationError);
 
       // The Owner gets request-bound logo persistence on the ordinary login.
       const persistence = await create("property.logo");
@@ -147,8 +176,8 @@ describe.skipIf(!url)("ordinary logo runtime (VAY-2056)", () => {
         Number(
           (
             await admin.query(
-              "SELECT count(*) AS n FROM platform.media_upload_sessions WHERE property_id=$1",
-              [property],
+              "SELECT count(*) AS n FROM platform.media_upload_sessions WHERE property_id=$1 AND id<>$2",
+              [property, foreignSession],
             )
           ).rows[0].n,
         ),

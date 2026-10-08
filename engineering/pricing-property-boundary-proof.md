@@ -1,5 +1,7 @@
 # VAY-1543: database property scope feasibility
 
+> **Superseded** by [`pricing-ordinary-login-plan.md`](pricing-ordinary-login-plan.md) (VAY-2057): pricing runs on the ordinary API login; the private service, its per-property logins and the proof script are deleted. Kept as history until slice E.
+
 Local proof, 2026-09-22. This is not a production migration or rollout approval.
 It continues the approved database-protection direction in
 `pricing-runtime-role-boundary.md`; existing app pool PRs #2548/#2551 are merged.
