@@ -1,5 +1,10 @@
 # Hotel setup launch-settings command (VAY-965)
 
+> **Superseded for the public API by VAY-2056** ([ordinary login](hotel-setup-ordinary-login.md)):
+> the public route runs the same narrow writer on the ordinary login behind
+> `withOrdinaryHotelSetupPropertyScope` (organization `FOR UPDATE`, catalog and PMS owner
+> links) and the Owner-session gates. The private service keeps this contract until decommission.
+
 Status: proposed implementation contract; no production grant or cutover authorization.
 Predecessor: composed source `3eeac573b0562f567833b2acafacd5df9c1d625d` and
 [credential lifecycle](hotel-setup-command-credential-lifecycle.md).

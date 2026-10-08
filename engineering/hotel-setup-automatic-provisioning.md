@@ -1,5 +1,8 @@
 # Automatic internal hotel setup — VAY-965
 
+> **Superseded by VAY-2056** ([ordinary login](hotel-setup-ordinary-login.md)): automatic provisioning is not needed; the parked PRs #2901–#2904 close unmerged at decommission.
+> This contract describes the private services, which stay until the decommission steps.
+
 Implementation contract. This document grants no production authority. The
 Owners enter their real hotel details; credential provisioning is internal work.
 Predecessors: [atomic first Save](hotel-setup-initial-settings.md),

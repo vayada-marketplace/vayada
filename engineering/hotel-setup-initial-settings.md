@@ -1,5 +1,8 @@
 # Atomic first hotel Save — VAY-965
 
+> **Superseded by VAY-2056** ([ordinary login](hotel-setup-ordinary-login.md)): the atomic first Save runs on the ordinary login with the Owner-mode creation repository.
+> This contract describes the private services, which stay until the decommission steps.
+
 Both reported Owners have no linked property. The wizard currently creates a
 property, then PUTs launch settings before reloading status. That second command
 requires a property-purpose credential which cannot be staged before the property

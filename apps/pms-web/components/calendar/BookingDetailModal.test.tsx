@@ -281,4 +281,31 @@ describe("cross-room-type move picker", () => {
     );
     view!.unmount();
   });
+  it("quotes the target price with the stay's recorded child ages", async () => {
+    mocks.get.mockResolvedValue({
+      ...booking,
+      stays: [
+        {
+          ...booking.stays[0],
+          children: 1,
+          childAgesAtCheckIn: [6],
+          nightly: [
+            { appliedAmount: 100, currency: "EUR", evidenceQuality: "exact" },
+            { appliedAmount: 100, currency: "EUR", evidenceQuality: "exact" },
+          ],
+        },
+      ],
+    });
+    let view: ReturnType<typeof create>;
+    await act(async () => {
+      // prettier-ignore
+      view = create(<BookingDetailModal bookingId="booking-1" sourceAssignmentSelector={{ assignmentId: "a-1" }} onClose={vi.fn()} onStatusChange={vi.fn()} rooms={rooms} bookings={bookings} />);
+    });
+    await selectCrossTypeRoom(view!);
+    expect(mocks.preview.mock.calls.at(-1)![0].stays[0]).toMatchObject({
+      children: 1,
+      childAgesAtCheckIn: [6],
+    });
+    view!.unmount();
+  });
 });

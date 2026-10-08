@@ -30,8 +30,9 @@ Explicit non-decisions (need a product decision, not an incident):
 - **No per-request RLS** (single login plus session-keyed policies). Separate
   decision later.
 - The per-service least-privilege split for the identity runtime
-  (`AUTH_DATABASE_URL`), the Finance workers, the Channex management worker,
-  the pricing command service and the migration owner is unchanged.
+  (`AUTH_DATABASE_URL`), the Finance workers, the Channex management worker
+  and the migration owner is unchanged. Pricing runs on this login too
+  (VAY-2057, `pricing-ordinary-login-plan.md`).
 
 ## Who connects as what
 
@@ -71,12 +72,15 @@ execution stay forbidden and are asserted by the preflight.
 
 ### Narrowings inside the product schemas
 
-| Relation                                                                                                                                                                                                                                                                   | Granted          | Why                                                                                                                                              |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `platform.product_audit_events`                                                                                                                                                                                                                                            | `SELECT, INSERT` | append-only audit sink; no code updates or deletes it                                                                                            |
-| `platform.domain_events`                                                                                                                                                                                                                                                   | `SELECT, INSERT` | append-only event log; no code updates or deletes it                                                                                             |
-| `hotel_catalog.properties`                                                                                                                                                                                                                                                 | no `DELETE`      | no code path deletes a property; deleting one is unrecoverable                                                                                   |
-| `booking.addon_revenue_evidence`, `pms.channex_offer_ari_receipts`, `pms.channex_offer_create_receipts`, `pms.channex_offer_target_versions`, `finance.commission_rate_changes`, `distribution.external_api_usage_events`, `finance.affiliate_percentage_policy_approvals` | `SELECT, INSERT` | insert-only evidence without database-enforced immutability (`finance.ota_commission_evidence` keeps `UPDATE` only because the API row-locks it) |
+| Relation                                                                                                                                                                                                                                                                   | Granted          | Why                                                                                                                                               |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `platform.product_audit_events`                                                                                                                                                                                                                                            | `SELECT, INSERT` | append-only audit sink; no code updates or deletes it                                                                                             |
+| `platform.domain_events`                                                                                                                                                                                                                                                   | `SELECT, INSERT` | append-only event log; no code updates or deletes it                                                                                              |
+| `hotel_catalog.properties`                                                                                                                                                                                                                                                 | no `DELETE`      | no code path deletes a property; deleting one is unrecoverable                                                                                    |
+| `booking.pricing_authority_heads`                                                                                                                                                                                                                                          | no `DELETE`      | the CAS pointer to the current authority revision; its composite FK keeps it on a revision of the same property                                   |
+| `booking.pricing_authority_revisions`                                                                                                                                                                                                                                      | no `DELETE`      | append-only history (trigger, 0306); `UPDATE` stays only because the API locks it `FOR SHARE` with the head, and the trigger rejects real updates |
+| `booking.pricing_quotes`                                                                                                                                                                                                                                                   | `SELECT, INSERT` | append-only quote ledger (trigger, 0309); no code path row-locks a quote                                                                          |
+| `booking.addon_revenue_evidence`, `pms.channex_offer_ari_receipts`, `pms.channex_offer_create_receipts`, `pms.channex_offer_target_versions`, `finance.commission_rate_changes`, `distribution.external_api_usage_events`, `finance.affiliate_percentage_policy_approvals` | `SELECT, INSERT` | insert-only evidence without database-enforced immutability (`finance.ota_commission_evidence` keeps `UPDATE` only because the API row-locks it)  |
 
 Default privileges are set by and for the executing migration owner, which the
 grant task requires to own every product schema and relation. A table created
@@ -106,7 +110,7 @@ either (table or column level, including PUBLIC or inherited grants).
 | `platform.pricing_runtime_property_scopes`, `platform.channex_management_worker_properties`                                                                                                                                           | yes                          | owner-managed credential scope tables                                                        |
 | `platform.legacy_owner_approval_records`, `platform.legacy_owner_approval_revocations`                                                                                                                                                | yes                          | approval registry                                                                            |
 | `platform.channex_adoption_*` (6), `platform.production_*` (12), `platform.source_extraction_*` (3)                                                                                                                                   | yes                          | cutover and migration evidence                                                               |
-| `booking.pricing_authority_heads`, `booking.pricing_authority_revisions`, `booking.pricing_quotes`, `booking.pricing_runtime_effective_*` (views)                                                                                     | yes                          | pricing authority and quote ledger, reserved for the pricing command service (VAY-1543)      |
+| `booking.pricing_runtime_effective_*` (views)                                                                                                                                                                                         | yes                          | per-property pricing login scope, dropped with the scope table in slice E of VAY-2057        |
 | `marketplace.affiliate_click_occurrences`, `booking.affiliate_click_contexts`, `booking.affiliate_click_admissions`, `booking.affiliate_original_booking_bindings`                                                                    | yes                          | affiliate evidence; written only through the guarded `SECURITY DEFINER` commands (0417–0419) |
 | `finance.expense_generation_dispatches`                                                                                                                                                                                               | yes                          | Finance worker discovery state, written by source-writer triggers and the worker             |
 | `pms.channex_room_availability_attempts`, `pms.channex_room_availability_receipts`, `pms.channex_room_availability_reconciliation_attestations`, `pms.channex_ari_schedule_sources`, `pms.channel_sync_status`                        | yes                          | Channex management worker-only state                                                         |
@@ -117,9 +121,9 @@ matching `^(production_|source_extraction_|legacy_|channex_adoption_|hotel_setup
 is write-protected, and `^(hotel_setup_|identity_migration_|legacy_historical_binding_)`
 or `^finance_.*_worker_properties$` is also read-protected (the Channex worker
 allowlist stays readable: the API reads it today). Outside `platform`,
-`^booking\.pricing_authority_`, `^pms\.channex_room_availability_`,
-`^pms\.channex_ari_schedule_`, `^(marketplace|booking)\.affiliate_click_` and
-`^finance\.expense_generation_` are write-protected. The grant task revokes by
+`^pms\.channex_room_availability_`, `^pms\.channex_ari_schedule_`,
+`^(marketplace|booking)\.affiliate_click_` and `^finance\.expense_generation_`
+are write-protected. The grant task revokes by
 list and pattern; the preflight asserts both.
 
 ## Identity: lock capability only
@@ -162,6 +166,14 @@ resource_id)` and `UPDATE (metadata)` for Financials module activation
   digests.
 
 ## What stays on SECURITY DEFINER functions
+
+**VAY-2056 update (2026-10-08).** Hotel creation, profile edits, launch
+settings, the first currency, Feature Hub Financials and the logo now run on this
+login ([hotel-setup-ordinary-login.md](hotel-setup-ordinary-login.md)) with **no
+new grant and no `SECURITY DEFINER` exception**: every hotel-setup definer function
+is bound to its native login, so the Owner re-check runs in application SQL inside
+each write transaction. The rule below is unchanged; the native hotel-setup
+logins in "Who connects as what" retire with the VAY-2056 decommission steps.
 
 Nothing moves. The role keeps **no** `EXECUTE` on any `SECURITY DEFINER`
 routine (preflight `runtime_security_definer_execute_forbidden`). The guarded

@@ -7,6 +7,8 @@ on:
       - "fm/vay-1092-*"
       - "fix/vay-965-*"
       - "fm/vay-965-*"
+      - "fm/vay-2056-*"
+      - "fm/vay-1543-*"
       - flamurmaliqi2811/vay-2044-expense-worker-runtime
       - fm/vay-2041-worker-permissions
       - fm/vay-2041-worker-source-permissions
@@ -418,14 +420,6 @@ jobs:
             await client.query("DROP DATABASE vay2045_worker_test WITH (FORCE)"); await client.end();
           '
 
-      - name: Verify pricing command native login scope
-        if: matrix.shard == 'platform'
-        run: >-
-          npm --workspace vayada-api run test -- --no-file-parallelism
-          src/pricingCommandServiceDatabaseScope.integration.test.ts
-        env:
-          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
-
       - name: Verify identity runtime row scope
         if: matrix.shard == 'platform'
         run: bash scripts/test-identity-runtime-row-scope.sh ${{ matrix.postgres }}
@@ -615,7 +609,7 @@ jobs:
         run: |
           node --input-type=module -e 'import pg from "pg"; const client=new pg.Client({connectionString:process.env.ADMIN_URL}); await client.connect(); await client.query("CREATE DATABASE vay1092_vay965_creation_test"); await client.end();'
           TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
-          npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupCreationPrivileges.integration.test.ts src/hotelSetupCreationScope.integration.test.ts src/hotelSetupCreationContacts.integration.test.ts src/hotelSetupCreationIdentity.integration.test.ts src/hotelSetupCreationProducts.integration.test.ts src/hotelSetupPropertyFinancialsScope.integration.test.ts src/hotelSetupLaunchSettingsScope.integration.test.ts src/hotelSetupProfileEdit.integration.test.ts
+          npm --workspace vayada-api run test -- --no-file-parallelism src/hotelSetupCreationPrivileges.integration.test.ts src/hotelSetupCreationScope.integration.test.ts src/hotelSetupCreationContacts.integration.test.ts src/hotelSetupCreationIdentity.integration.test.ts src/hotelSetupCreationProducts.integration.test.ts src/hotelSetupPropertyFinancialsScope.integration.test.ts src/hotelSetupLaunchSettingsScope.integration.test.ts src/hotelSetupProfileEdit.integration.test.ts src/hotelSetupOrdinaryLogin.integration.test.ts src/hotelSetupProfileOrdinary.integration.test.ts src/hotelSetupLaunchSettingsOrdinary.integration.test.ts src/hotelSetupCurrencyOrdinary.integration.test.ts src/hotelSetupCreationOrdinary.integration.test.ts src/hotelSetupFeatureHubOrdinary.integration.test.ts src/hotelSetupLogoOrdinary.integration.test.ts
         env:
           ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay1092_vay965_creation_test

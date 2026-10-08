@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { parsePublicPricingSelection, parseStoredPricingQuote } from "@vayada/domain-booking";
 import { pricingKeys, pricingObject } from "@vayada/domain-pms";
-import type { Pool, PoolClient } from "pg";
+import type { Pool } from "pg";
 import { lockCurrentPricingQuote } from "./currentPricingQuote.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { PricingStorageError } from "./replacementPricingStore.js";
@@ -32,15 +32,7 @@ export function decodeCurrentPricingQuoteRecord(payload: unknown, propertyId: st
     : null;
 }
 /** Internal historical price records; no route, acceptance or inventory authority. */
-export function createCurrentPricingQuoteStore(
-  pool: Pool,
-  lifetimeSeconds: number,
-  options: {
-    assertRuntimeScope?: (
-      client: PoolClient,
-    ) => Promise<{ propertyId: string; organizationId: string }>;
-  } = {},
-) {
+export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: number) {
   if (!Number.isInteger(lifetimeSeconds) || lifetimeSeconds < 1 || lifetimeSeconds > 900)
     return fail("invalid");
   return {
@@ -74,15 +66,8 @@ export function createCurrentPricingQuoteStore(
       try {
         if (signal?.aborted) throw new Error("Pricing command aborted");
         await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
-        const assigned = await options.assertRuntimeScope?.(client);
         const scope = await lockPublicPricingAuthority(client, slug);
-        if (
-          !scope ||
-          (assigned &&
-            (assigned.propertyId !== scope.propertyId ||
-              assigned.organizationId !== scope.organizationId))
-        )
-          return fail("denied");
+        if (!scope) return fail("denied");
         const prior = (
           await client.query(
             "SELECT id,organization_id,request_hash,payload FROM booking.pricing_quotes WHERE property_id=$1 AND request_id=$2",
@@ -94,14 +79,7 @@ export function createCurrentPricingQuoteStore(
           if (prior.request_hash !== requestHash) return fail("idempotency_conflict");
           const record = decodeCurrentPricingQuoteRecord(prior.payload, scope.propertyId, prior.id);
           if (!record) return fail("invalid");
-          const confirmed = await lockPublicPricingAuthority(client, slug);
-          if (
-            !confirmed ||
-            (assigned &&
-              (assigned.propertyId !== confirmed.propertyId ||
-                assigned.organizationId !== confirmed.organizationId))
-          )
-            return fail("denied");
+          if (!(await lockPublicPricingAuthority(client, slug))) return fail("denied");
           if (signal?.aborted) throw new Error("Pricing command aborted");
           await client.query("COMMIT");
           return { ...record, replayed: true };
@@ -148,29 +126,15 @@ export function createCurrentPricingQuoteStore(
       const client = await pool.connect();
       try {
         await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
-        const assigned = await options.assertRuntimeScope?.(client);
         const scope = await lockPublicPricingAuthority(client, slug);
-        if (
-          !scope ||
-          (assigned &&
-            (assigned.propertyId !== scope.propertyId ||
-              assigned.organizationId !== scope.organizationId))
-        )
-          return null;
+        if (!scope) return null;
         const row = (
           await client.query(
             "SELECT id,payload FROM booking.pricing_quotes WHERE id=$1 AND property_id=$2 AND organization_id=$3",
             [quoteId, scope.propertyId, scope.organizationId],
           )
         ).rows[0];
-        const confirmed = await lockPublicPricingAuthority(client, slug);
-        if (
-          !confirmed ||
-          (assigned &&
-            (assigned.propertyId !== confirmed.propertyId ||
-              assigned.organizationId !== confirmed.organizationId))
-        )
-          return null;
+        if (!(await lockPublicPricingAuthority(client, slug))) return null;
         return row ? decodeCurrentPricingQuoteRecord(row.payload, scope.propertyId, row.id) : null;
       } finally {
         await client.query("ROLLBACK");
