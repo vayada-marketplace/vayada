@@ -163,6 +163,14 @@ resource_id)` and `UPDATE (metadata)` for Financials module activation
 
 ## What stays on SECURITY DEFINER functions
 
+**VAY-2056 update (2026-10-08).** Hotel creation, profile edits, launch
+settings, the first currency, Feature Hub Financials and the logo now run on this
+login ([hotel-setup-ordinary-login.md](hotel-setup-ordinary-login.md)) with **no
+new grant and no `SECURITY DEFINER` exception**: every hotel-setup definer function
+is bound to its native login, so the Owner re-check runs in application SQL inside
+each write transaction. The rule below is unchanged; the native hotel-setup
+logins in "Who connects as what" retire with the VAY-2056 decommission steps.
+
 Nothing moves. The role keeps **no** `EXECUTE` on any `SECURITY DEFINER`
 routine (preflight `runtime_security_definer_execute_forbidden`). The guarded
 affiliate commands (`marketplace.capture_affiliate_click`,
