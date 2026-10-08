@@ -280,6 +280,12 @@ async def mark_payment_failed(subscription_id: str) -> dict | None:
     )
     if not payment_settings:
         return None
+    # An invoice finalized before adoption carries the old subscription
+    # metadata, so the webhook guard cannot see the marker: read it live.
+    subscription = await stripe_service.retrieve_billing_subscription(subscription_id)
+    if is_target_adopted(subscription.get("metadata")):
+        logger.warning("Skipping target-adopted Fixed-plan subscription %s", subscription_id)
+        return None
     await HotelPaymentSettingsRepository.upsert(
         str(payment_settings["hotel_id"]),
         {"stripe_billing_status": "past_due"},

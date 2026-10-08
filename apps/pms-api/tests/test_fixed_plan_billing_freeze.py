@@ -174,6 +174,8 @@ async def test_unfrozen_legacy_never_writes_a_target_adopted_subscription():
     ):
         await fixed_plan_billing.activate_subscription(HOTEL, "sub_fixed")
         assert await fixed_plan_billing.update_subscription_state("sub_fixed") is None
+        # No ops email either: the webhook only emails when settings come back.
+        assert await fixed_plan_billing.mark_payment_failed("sub_fixed") is None
 
     upsert.assert_not_awaited()
     set_plan.assert_not_awaited()

@@ -51,7 +51,7 @@ describe("Legacy fixed-plan subscription adoption", () => {
       propertyId: PROPERTY,
       organizationId: ORGANIZATION,
       productId: "prod_legacy",
-      idempotencyKey: `legacy-adoption:${PROPERTY}:sub_legacy:v1`,
+      idempotencyKey: `legacy-adoption:${PROPERTY}:sub_legacy:v2`,
     });
     // The entitlement is written from a fresh read, not the idempotent POST reply.
     expect(fixture.stripe.inspectLegacySubscription).toHaveBeenCalledTimes(2);
@@ -238,6 +238,25 @@ describe("Legacy fixed-plan subscription adoption", () => {
     expect(report.reasons).toContain("entitlement_bound_to_other_subscription");
     expect(fixture.store.adopt).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["became unpaid", { status: "unpaid" }],
+    ["renewed into the guard", { currentPeriodEnd: "2026-10-21T09:00:00.000Z" }],
+  ] as const)(
+    "does not write the entitlement when the re-read subscription %s",
+    async (_case, override) => {
+      const fixture = setup();
+      fixture.afterMark.snapshot = { ...adoptedSnapshot(), ...override };
+
+      await expect(
+        adoptLegacyFixedPlanSubscription(
+          { propertyId: PROPERTY, subscriptionId: "sub_legacy", apply: true },
+          fixture.dependencies,
+        ),
+      ).rejects.toThrow("entitlement unchanged");
+      expect(fixture.store.adopt).not.toHaveBeenCalled();
+    },
+  );
 
   it("does not write the entitlement when the marked subscription fails verification", async () => {
     const fixture = setup();
