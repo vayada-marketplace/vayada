@@ -1,0 +1,106 @@
+import type { firstPricingInput } from "@vayada/product-onboarding/FirstPricingSetup";
+import type {
+  createReplacementPricingClient,
+  PricingChargeReview,
+} from "@vayada/product-onboarding/replacementPricingClient";
+
+type Client = ReturnType<typeof createReplacementPricingClient>;
+export type FirstPricing = ReturnType<typeof firstPricingInput>;
+export type CurrentPublication = Awaited<ReturnType<Client["read"]>>;
+
+/** Completed stages of one publish attempt; a retry after a lost response resumes from here. */
+export type PublishProgress = {
+  draftId: string;
+  terms: Record<string, () => Promise<{ revision: string }>>;
+  termsRevisions: Record<string, string>;
+  prepared?: Awaited<ReturnType<Client["prepare"]>>;
+  draftRevision?: number;
+  review?: PricingChargeReview;
+  confirm?: ReturnType<Client["confirmationAction"]>;
+  chargesId?: string;
+  attachedRevision?: number;
+  publish?: ReturnType<Client["publicationAction"]>;
+};
+
+export const newPublishProgress = (): PublishProgress => ({
+  draftId: crypto.randomUUID(),
+  terms: {},
+  termsRevisions: {},
+});
+
+/**
+ * Adds the first offers of unpriced rooms to the active publication, as the PMS pricing editor
+ * does: stage each new offer's terms in a draft, prepare and save the draft, confirm that the
+ * prices include every mandatory charge, attach that confirmation and publish.
+ */
+export async function publishFirstPricing(
+  client: Client,
+  current: CurrentPublication,
+  added: readonly FirstPricing[],
+  progress: PublishProgress,
+): Promise<void> {
+  const baseRevision = current?.revision ?? 0;
+  const selected = { draftId: progress.draftId, baseRevision };
+  const currency = current?.currency ?? added[0]?.configuration.currency;
+  if (!currency || added.some(({ configuration }) => configuration.currency !== currency)) {
+    throw new Error("Every room must be priced in the hotel currency.");
+  }
+  for (const { terms } of added) {
+    const key = JSON.stringify([terms.roomTypeId, terms.offerId]);
+    progress.terms[key] ??= client.termsAction(terms, selected);
+    progress.termsRevisions[key] ??= (await progress.terms[key]!()).revision;
+  }
+  const rooms = [
+    ...(current?.rooms ?? []),
+    ...added.map(({ configuration, terms }) => ({
+      ...configuration,
+      offers: configuration.offers.map((offer) =>
+        offer.id === terms.offerId
+          ? {
+              ...offer,
+              termsRevision: progress.termsRevisions[JSON.stringify([terms.roomTypeId, offer.id])]!,
+            }
+          : offer,
+      ),
+    })),
+  ].map((room) => ({ ...room, revision: baseRevision + 1 }));
+
+  progress.prepared ??= await client.prepare({ currency, rooms }, selected);
+  progress.draftRevision ??= await client.saveDraft({
+    draftId: progress.draftId,
+    expectedDraftRevision: 0,
+    baseRevision,
+    ...progress.prepared,
+  });
+  if (!progress.review) {
+    const review = await client.reviewCharges(progress.draftId);
+    if (!review) throw new Error("The saved pricing draft is missing. Reload pricing.");
+    progress.review = review;
+  }
+  const review = progress.review;
+  progress.confirm ??= client.confirmationAction(review);
+  progress.chargesId ??= (await progress.confirm()).id;
+  const snapshot = {
+    ...review.snapshot,
+    ownerReferences: { ...review.snapshot.ownerReferences, charges: progress.chargesId },
+  };
+  const effective = review.effectiveSources ? { effectiveSources: review.effectiveSources } : {};
+  progress.attachedRevision ??= await client.saveDraft({
+    draftId: review.draftId,
+    expectedDraftRevision: review.revision,
+    baseRevision: review.baseRevision,
+    sources: review.sources,
+    ...effective,
+    snapshot,
+  });
+  progress.publish ??= client.publicationAction({
+    draftId: review.draftId,
+    snapshot,
+    revision: progress.attachedRevision,
+    baseRevision: review.baseRevision,
+    sources: review.sources,
+    ...effective,
+    stale: false,
+  });
+  await progress.publish();
+}
