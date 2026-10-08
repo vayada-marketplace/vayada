@@ -50,7 +50,10 @@ test.describe("adaptive pricing and calendar", () => {
     await primeBrowserState(page);
     await mockAuthSession(page);
     const api = await mockPricingCalendarApis(page);
-    const assertHealthy = watchPageHealth(page, testInfo);
+    // Before the first publication the pricing-v2 read answers 404 not_found.
+    const assertHealthy = watchPageHealth(page, testInfo, {
+      expectedMissingUrls: [new RegExp(`/properties/${propertyId}/pricing-v2$`)],
+    });
 
     await page.goto(setupUrl(baseURL, "pricing"));
     await expect(
@@ -243,6 +246,14 @@ async function mockPricingCalendarApis(page: Page) {
   const materializationWrites: Record<string, unknown>[] = [];
   const forbiddenCalls: string[] = [];
   const unexpectedCalls: string[] = [];
+
+  await page.route(
+    /\/api\/hotel-setup\/(?:imports\/prepared|properties\/[^/]+\/import)(?:\?|$)/,
+    async (route) => {
+      if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+      await route.fulfill({ headers: corsHeaders(route), json: { import: null } });
+    },
+  );
 
   page.on("request", (request) => {
     const pathname = new URL(request.url()).pathname;
