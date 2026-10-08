@@ -123,7 +123,8 @@ test.describe("adaptive pricing and calendar", () => {
         },
       ],
     });
-    expect(api.confirmationWrites).toHaveLength(1);
+    // The publication's charge declaration is the final-price confirmation: no legacy write.
+    expect(api.confirmationWrites).toEqual([]);
     expect(api.calendarWrites).toEqual([]);
 
     await page.getByRole("textbox", { name: "Available Garden Suite rooms" }).fill("2");
@@ -257,9 +258,14 @@ async function mockPricingCalendarApis(page: Page) {
 
   page.on("request", (request) => {
     const pathname = new URL(request.url()).pathname;
+    // The Guest experience step, opened after the calendar, reads its own booking rules.
+    const nextStepRead =
+      request.method() === "GET" &&
+      pathname === `/api/booking/properties/${propertyId}/guest-rules`;
     if (
-      /^\/api\/hotel-setup\/(?:tracks|handoffs)(?:\/|$)/.test(pathname) ||
-      /^\/api\/(?:booking|finance|distribution)\//.test(pathname)
+      !nextStepRead &&
+      (/^\/api\/hotel-setup\/(?:tracks|handoffs)(?:\/|$)/.test(pathname) ||
+        /^\/api\/(?:booking|finance|distribution)\//.test(pathname))
     ) {
       forbiddenCalls.push(`${request.method()} ${pathname}`);
     }
@@ -283,6 +289,7 @@ async function mockPricingCalendarApis(page: Page) {
             booking_design: "complete",
             rooms: "complete",
             payments: "complete",
+            ...(publication ? { pricing: "complete" as const } : {}),
           },
         });
         const model = {
