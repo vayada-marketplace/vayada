@@ -268,6 +268,7 @@ import {
 } from "./jobs/pmsCalendarAutoOpenWorker.js";
 import { createPmsChannexManagementTargetState } from "./jobs/pmsChannexManagementTargetState.js";
 import {
+  financeSubscriptionPaymentFailedEmail,
   runFinanceSubscriptionNotificationJobs,
   runFinanceSubscriptionWebhookJobs,
 } from "./jobs/financeSubscriptions.js";
@@ -2611,21 +2612,30 @@ app.addHook("onClose", async () => {
 });
 
 let activeFinanceSubscriptionBatch: Promise<void> | undefined;
+const financeOpsEmailDelivery =
+  config.bookingEmailDelivery && config.financeBillingOpsEmail
+    ? createResendBookingEmailDelivery(config.bookingEmailDelivery)
+    : undefined;
 const financeSubscriptionWebhooksEnabled = Boolean(
   stripeSubscriptionProvider &&
-  financeSubscriptionRoomInventory &&
-  stripeSubscriptionRuntimeEnabled(config),
+    financeSubscriptionRoomInventory &&
+    stripeSubscriptionRuntimeEnabled(config),
 );
 const financeSubscriptionJobsEnabled = config.financeSource === "target";
 const runFinanceSubscriptionJobs = () => {
   if (!config.backgroundWorkersEnabled) return;
   if (activeFinanceSubscriptionBatch || !financeSubscriptionJobsEnabled) return;
   const batches = [
-    runFinanceSubscriptionNotificationJobs(targetDatabaseUrl, (notification) => {
+    runFinanceSubscriptionNotificationJobs(targetDatabaseUrl, async (notification) => {
       app.log.error(
         notification,
         "Fixed Plan recurring payment failed; internal follow-up required",
       );
+      // VAY-1362: adopted legacy subscriptions keep the legacy ops email.
+      if (notification.legacyAdopted && financeOpsEmailDelivery && config.financeBillingOpsEmail) {
+        const email = financeSubscriptionPaymentFailedEmail(notification);
+        await financeOpsEmailDelivery.send({ to: config.financeBillingOpsEmail, ...email });
+      }
     }),
   ];
   if (

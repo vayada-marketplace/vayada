@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createPgFinanceSubscriptionWebhookStore,
+  financeSubscriptionPaymentFailedEmail,
   processFinanceSubscriptionWebhook,
   runFinanceSubscriptionNotificationJobs,
   runFinanceSubscriptionWebhookJobs,
@@ -244,6 +245,104 @@ describe("Finance subscription webhook lifecycle", () => {
     expect(values[2]?.[10]).toBe(4_500);
   });
 
+  it("reverts an adopted legacy subscription to Commission once dunning is exhausted", async () => {
+    const fixture = setup("fixed");
+    fixture.store.entitlement.legacyAdopted = true;
+    fixture.provider.snapshot.status = "unpaid";
+
+    await expect(
+      processFinanceSubscriptionWebhook(
+        payload("customer.subscription.updated", 61),
+        fixture.dependencies,
+      ),
+    ).resolves.toBe("applied");
+
+    expect(fixture.store.entitlement.planKey).toBe("commission");
+    expect(fixture.store.lastApply?.legacyAdopted).toBe(true);
+  });
+
+  it("keeps a native Fixed subscription on Fixed while it is unpaid", async () => {
+    const fixture = setup("fixed");
+    fixture.provider.snapshot.status = "unpaid";
+
+    await processFinanceSubscriptionWebhook(
+      payload("customer.subscription.updated", 62),
+      fixture.dependencies,
+    );
+
+    expect(fixture.store.entitlement.planKey).toBe("fixed");
+  });
+
+  it("writes the unpaid Commission marker only for adopted legacy entitlements", async () => {
+    const values: unknown[][] = [];
+    const store = createPgFinanceSubscriptionWebhookStore({
+      query: vi.fn(async (_sql: string, params?: readonly unknown[]) => {
+        values.push([...(params ?? [])]);
+        return { rows: [{ propertyId: "property-1", planKey: "commission" }] };
+      }),
+    } as never);
+    const unpaid = { ...verifiedSnapshot(), status: "unpaid" };
+
+    await store.applySubscriptionSnapshot({
+      payload: payload("customer.subscription.updated", 63),
+      snapshot: unpaid,
+      transition: "sync",
+      activeRoomCount: 2,
+      legacyAdopted: true,
+    });
+    await store.applySubscriptionSnapshot({
+      payload: payload("customer.subscription.updated", 64),
+      snapshot: unpaid,
+      transition: "sync",
+      activeRoomCount: 2,
+      legacyAdopted: false,
+    });
+
+    expect(values[0]?.[2]).toBe(true);
+    expect(JSON.parse(String(values[0]?.[13]))).toMatchObject({
+      planSelectedBy: "fixed-subscription-unpaid",
+    });
+    expect(values[1]?.[2]).toBe(false);
+    expect(JSON.parse(String(values[1]?.[13]))).not.toHaveProperty("planSelectedBy");
+  });
+
+  it("carries the adoption flag into the payment-failure notification and its email", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [{ id: "job-1" }] });
+    const store = createPgFinanceSubscriptionWebhookStore({ query } as never);
+    await store.enqueuePaymentFailureNotification({
+      payload: payload("invoice.payment_failed", 71),
+      entitlement: { ...setup("fixed").store.entitlement, legacyAdopted: true },
+      snapshot: { ...verifiedSnapshot(), status: "past_due" },
+    });
+    expect(JSON.parse(String(query.mock.calls[0]?.[1]?.[6]))).toMatchObject({
+      legacyAdopted: true,
+    });
+
+    const notifyInternal = vi.fn();
+    const notification = {
+      eventId: "evt_71",
+      propertyId: "property-1",
+      organizationId: "organization-1",
+      subscriptionId: "sub_fixed",
+      legacyAdopted: true,
+    };
+    const poolQuery = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ id: "job-1", payload: notification }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+    await runFinanceSubscriptionNotificationJobs("postgres://unused", notifyInternal, {
+      pool: { query: poolQuery } as never,
+    });
+    expect(notifyInternal).toHaveBeenCalledWith(notification);
+
+    const email = financeSubscriptionPaymentFailedEmail(notification);
+    expect(email.subject).toContain("property-1");
+    expect(email.text).toContain("Subscription: sub_fixed");
+    expect(email.text).toContain("reverts to Commission");
+    expect(email.idempotencyKey).toBe("finance-subscription-payment-failed:evt_71");
+  });
+
   it("rejects an invoice that is not linked to the entitlement subscription", async () => {
     const fixture = setup("fixed");
     fixture.store.entitlement.subscriptionRef = "sub_other";
@@ -331,6 +430,7 @@ describe("Finance subscription webhook lifecycle", () => {
         checkoutSessionRef: "cs_fixed",
         activeRoomCount: 2,
         lastProviderEventCreatedAt: null,
+        legacyAdopted: false,
       },
       snapshot: {
         subscriptionId: "sub_fixed",
@@ -371,7 +471,7 @@ describe("Finance subscription webhook lifecycle", () => {
         pool: { query: successQuery } as never,
       }),
     ).resolves.toEqual({ processed: 1, failed: 0 });
-    expect(notifyInternal).toHaveBeenCalledWith(notification);
+    expect(notifyInternal).toHaveBeenCalledWith({ ...notification, legacyAdopted: false });
     expect(String(successQuery.mock.calls[0]?.[0])).toContain("locked_at IS NULL");
     expect(String(successQuery.mock.calls[1]?.[0])).toContain("status = 'succeeded'");
 
@@ -447,6 +547,8 @@ function setup(planKey: "commission" | "fixed") {
 
 class MemoryStore implements FinanceSubscriptionWebhookStore {
   entitlement: FinanceSubscriptionWebhookEntitlement;
+  lastApply: Parameters<FinanceSubscriptionWebhookStore["applySubscriptionSnapshot"]>[0] | null =
+    null;
   private lastEventCreated = 0;
   private notificationEvents = new Set<string>();
 
@@ -463,6 +565,7 @@ class MemoryStore implements FinanceSubscriptionWebhookStore {
       checkoutSessionRef: "cs_fixed",
       activeRoomCount: 2,
       lastProviderEventCreatedAt: null,
+      legacyAdopted: false,
     };
   }
 
@@ -481,6 +584,7 @@ class MemoryStore implements FinanceSubscriptionWebhookStore {
   async applySubscriptionSnapshot(
     input: Parameters<FinanceSubscriptionWebhookStore["applySubscriptionSnapshot"]>[0],
   ) {
+    this.lastApply = input;
     const activatesFixed = input.transition === "paid" && input.snapshot.status === "active";
     if (!this.accept(input.payload) && !(activatesFixed && this.entitlement.planKey !== "fixed")) {
       return null;
@@ -489,8 +593,9 @@ class MemoryStore implements FinanceSubscriptionWebhookStore {
       this.entitlement.planKey = "fixed";
     }
     if (
-      input.transition === "deleted" &&
-      ["canceled", "incomplete_expired"].includes(input.snapshot.status)
+      (input.transition === "deleted" &&
+        ["canceled", "incomplete_expired"].includes(input.snapshot.status)) ||
+      (input.legacyAdopted === true && input.snapshot.status === "unpaid")
     ) {
       this.entitlement.planKey = "commission";
     }

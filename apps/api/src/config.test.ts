@@ -189,6 +189,13 @@ describe("api config", () => {
     );
   });
 
+  it("reads the optional ops mailbox for adopted legacy subscription payment failures", () => {
+    expect(loadConfig({}).financeBillingOpsEmail).toBeUndefined();
+    expect(
+      loadConfig({ FINANCE_BILLING_OPS_EMAIL: "ops@example.test" }).financeBillingOpsEmail,
+    ).toBe("ops@example.test");
+  });
+
   it("parses the Inbox-only sending control without changing Channex or Booking email", () => {
     expect(loadConfig({}).pmsInboxSendingEnabled).toBe(true);
     expect(loadConfig({ PMS_INBOX_SENDING_ENABLED: "true" }).pmsInboxSendingEnabled).toBe(true);

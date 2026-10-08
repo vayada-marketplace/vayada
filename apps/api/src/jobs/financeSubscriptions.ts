@@ -34,6 +34,8 @@ export type FinanceSubscriptionWebhookEntitlement = {
   checkoutSessionRef: string | null;
   activeRoomCount: number;
   lastProviderEventCreatedAt: string | null;
+  /** VAY-1362: the entitlement was adopted from a legacy subscription. */
+  legacyAdopted: boolean;
 };
 
 export type FinanceSubscriptionWebhookStore = {
@@ -50,6 +52,7 @@ export type FinanceSubscriptionWebhookStore = {
     snapshot: StripeSubscriptionSnapshot;
     transition: "paid" | "payment_failed" | "sync" | "deleted";
     activeRoomCount: number;
+    legacyAdopted?: boolean;
   }): Promise<FinanceSubscriptionWebhookEntitlement | null>;
   enqueuePaymentFailureNotification(input: {
     payload: FinanceSubscriptionWebhookPayload;
@@ -65,7 +68,29 @@ export type FinanceSubscriptionPaymentFailureNotification = {
   organizationId: string;
   subscriptionId: string;
   eventId: string;
+  legacyAdopted: boolean;
 };
+
+/** Ops email for a failed recurring payment on an adopted legacy subscription (VAY-1362). */
+export function financeSubscriptionPaymentFailedEmail(
+  notification: FinanceSubscriptionPaymentFailureNotification,
+): { subject: string; text: string; idempotencyKey: string } {
+  return {
+    subject: `Fixed Plan payment failed for property ${notification.propertyId}`,
+    text: [
+      "Stripe could not collect a recurring Fixed Plan payment.",
+      "",
+      `Property: ${notification.propertyId}`,
+      `Organization: ${notification.organizationId}`,
+      `Subscription: ${notification.subscriptionId}`,
+      `Stripe event: ${notification.eventId}`,
+      "",
+      "The property stays on the Fixed Plan while Stripe retries. When the retries are",
+      "exhausted and the subscription becomes unpaid, the property reverts to Commission.",
+    ].join("\n"),
+    idempotencyKey: `finance-subscription-payment-failed:${notification.eventId}`,
+  };
+}
 
 export async function processFinanceSubscriptionWebhook(
   payload: FinanceSubscriptionWebhookPayload,
@@ -149,6 +174,7 @@ export async function processFinanceSubscriptionWebhook(
     snapshot,
     transition,
     activeRoomCount,
+    legacyAdopted: existing.legacyAdopted,
   });
   if (!updated) return "ignored_stale";
 
@@ -303,7 +329,8 @@ export function createPgFinanceSubscriptionWebhookStore(
            entitlement.billing_subscription_ref AS "subscriptionRef",
            entitlement.checkout_session_ref AS "checkoutSessionRef",
            entitlement.active_room_count AS "activeRoomCount",
-           entitlement.last_provider_event_created_at::text AS "lastProviderEventCreatedAt"`,
+           entitlement.last_provider_event_created_at::text AS "lastProviderEventCreatedAt",
+           (entitlement.entitlement_metadata ? 'legacyAdoptedAt') AS "legacyAdopted"`,
         [
           payload.checkoutSessionId,
           snapshot.customerId,
@@ -323,10 +350,22 @@ export function createPgFinanceSubscriptionWebhookStore(
       return result.rows[0] ?? null;
     },
 
-    async applySubscriptionSnapshot({ payload, snapshot, transition, activeRoomCount }) {
+    async applySubscriptionSnapshot({
+      payload,
+      snapshot,
+      transition,
+      activeRoomCount,
+      legacyAdopted,
+    }) {
       const activatesFixed = transition === "paid" && snapshot.status === "active";
+      // VAY-1362: an adopted legacy subscription whose retries are exhausted
+      // (Stripe status unpaid) reverts to Commission, as legacy did. Native
+      // target subscriptions keep Fixed until Stripe deletes the subscription.
+      const dunningExhausted = legacyAdopted === true && snapshot.status === "unpaid";
       const endsFixed =
-        transition === "deleted" && ["canceled", "incomplete_expired"].includes(snapshot.status);
+        (transition === "deleted" &&
+          ["canceled", "incomplete_expired"].includes(snapshot.status)) ||
+        dunningExhausted;
       const result = await pool.query<FinanceSubscriptionWebhookEntitlement>(
         `UPDATE finance.billing_entitlements entitlement
          SET plan_key = CASE WHEN $2::boolean THEN 'fixed'
@@ -377,7 +416,8 @@ export function createPgFinanceSubscriptionWebhookStore(
            entitlement.billing_subscription_ref AS "subscriptionRef",
            entitlement.checkout_session_ref AS "checkoutSessionRef",
            entitlement.active_room_count AS "activeRoomCount",
-           entitlement.last_provider_event_created_at::text AS "lastProviderEventCreatedAt"`,
+           entitlement.last_provider_event_created_at::text AS "lastProviderEventCreatedAt",
+           (entitlement.entitlement_metadata ? 'legacyAdoptedAt') AS "legacyAdopted"`,
         [
           snapshot.subscriptionId,
           activatesFixed,
@@ -397,7 +437,9 @@ export function createPgFinanceSubscriptionWebhookStore(
             ...(endsFixed
               ? {
                   planSelectedAt: eventCreatedAt(payload),
-                  planSelectedBy: "fixed-subscription-ended",
+                  planSelectedBy: dunningExhausted
+                    ? "fixed-subscription-unpaid"
+                    : "fixed-subscription-ended",
                 }
               : {}),
           }),
@@ -435,6 +477,7 @@ export function createPgFinanceSubscriptionWebhookStore(
             organizationId: entitlement.organizationId,
             subscriptionId: snapshot.subscriptionId,
             providerStatus: snapshot.status,
+            legacyAdopted: entitlement.legacyAdopted,
           }),
         ],
       );
@@ -448,7 +491,8 @@ const ENTITLEMENT_SELECT = `SELECT entitlement.organization_id::text AS "organiz
   entitlement.billing_subscription_ref AS "subscriptionRef",
   entitlement.checkout_session_ref AS "checkoutSessionRef",
   COALESCE(entitlement.active_room_count, 0)::int AS "activeRoomCount",
-  entitlement.last_provider_event_created_at::text AS "lastProviderEventCreatedAt"
+  entitlement.last_provider_event_created_at::text AS "lastProviderEventCreatedAt",
+  (entitlement.entitlement_metadata ? 'legacyAdoptedAt') AS "legacyAdopted"
   FROM finance.billing_entitlements entitlement`;
 
 async function claimJob(pool: pg.Pool, workerId: string, queue: string, jobType: string) {
@@ -562,6 +606,7 @@ function parseNotificationPayload(
     propertyId: text(value.propertyId),
     organizationId: text(value.organizationId),
     subscriptionId: text(value.subscriptionId),
+    legacyAdopted: value.legacyAdopted === true,
   };
 }
 
@@ -574,10 +619,7 @@ function transitionFor(eventType: string): "paid" | "payment_failed" | "sync" | 
   throw new Error(`Unsupported Finance subscription event: ${eventType}`);
 }
 
-function billingAmountMinor(
-  snapshot: StripeSubscriptionSnapshot,
-  activeRoomCount: number,
-): number {
+function billingAmountMinor(snapshot: StripeSubscriptionSnapshot, activeRoomCount: number): number {
   // VAY-1362: a retained legacy price is whatever Stripe charges, not the catalog.
   if (snapshot.retainedLegacyPrice && typeof snapshot.amountMinor === "number") {
     return snapshot.amountMinor;
