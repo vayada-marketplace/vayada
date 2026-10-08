@@ -256,6 +256,16 @@ async function mockPricingCalendarApis(page: Page) {
     },
   );
 
+  // The Guest experience step opens after the calendar with no saved guest rules.
+  await page.route(
+    new RegExp(`/api/booking/properties/${propertyId}/guest-rules(?:\\?|$)`),
+    async (route) => {
+      if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+      if (route.request().method() !== "GET") return unexpected(route, unexpectedCalls);
+      await ok(route, { current: null });
+    },
+  );
+
   page.on("request", (request) => {
     const pathname = new URL(request.url()).pathname;
     // The Guest experience step, opened after the calendar, reads its own booking rules.
