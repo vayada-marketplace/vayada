@@ -832,7 +832,8 @@ function toSharedSetupTrackAccessError(error: unknown): SharedHotelSetupTrackAcc
   };
 }
 
-/** Shared input contract; private handler independently verifies the original session. */
+/** Shared input contract; with requireOwnerSession the Owner-only gates of the retired private
+ * service run here and the ordinary writer re-checks current authority in its transaction. */
 export function registerSharedHotelSetupLaunchSettings(
   app: FastifyInstance,
   update: (
@@ -921,7 +922,6 @@ export type HotelSetupPropertyProfileResult =
   | { status: "conflict"; currentRevision: number }
   | { status: "idempotency_conflict" }
   | { status: "private_contact_conflict" }
-  | { status: "not_provisioned" }
   | { status: "invalid"; fields: Record<string, string[]> };
 
 export type HotelSetupPropertyProfileUpdate = (
@@ -929,18 +929,6 @@ export type HotelSetupPropertyProfileUpdate = (
   propertyId: string,
   command: HotelSetupPropertyProfileCommand,
 ) => Promise<HotelSetupPropertyProfileResult>;
-
-/** Private property-command service. The public API uses the same handler (VAY-2056). */
-export function registerHotelSetupPropertyProfileUpdate(
-  app: FastifyInstance,
-  update: HotelSetupPropertyProfileUpdate,
-  options: { propertyAccessRepository: PropertyAccessRepository },
-): void {
-  app.put(
-    "/properties/:propertyId/profile",
-    hotelSetupPropertyProfileUpdateHandler(update, options),
-  );
-}
 
 function requirePropertyAccessRepository(repository: PropertyAccessRepository | undefined) {
   if (!repository) throw new Error("Hotel detail edits require the property access repository");
@@ -1015,14 +1003,6 @@ export function hotelSetupPropertyProfileUpdateHandler(
         code: "idempotency_key_conflict",
         detail: "These hotel details changed during the save. Review them and try again.",
       });
-    if (result.status === "not_provisioned") {
-      request.log.warn({ propertyId }, "Property profile credential is not provisioned");
-      return reply.status(409).send({
-        code: "profile_edit_not_provisioned",
-        detail:
-          "Editing hotel details isn't enabled for your account on this hotel yet. Please contact Vayada support.",
-      });
-    }
     if (result.status === "private_contact_conflict")
       return reply.status(409).send({
         code: "private_contact_conflict",
@@ -1043,7 +1023,7 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value) ?? "null";
 }
 
-/** Shared validation and policy for the public API and independently authenticated setup service. */
+/** Shared hotel-creation validation and policy; requireOwnerSession adds the Owner-only gate. */
 export function registerSharedHotelSetupPropertyCreation(
   app: FastifyInstance,
   repository: Pick<SharedHotelSetupStatusRepository, "createPropertyProfile">,

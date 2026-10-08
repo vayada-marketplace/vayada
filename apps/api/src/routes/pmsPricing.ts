@@ -44,7 +44,7 @@ export type PmsPricingRoutesOptions = {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-/** Shared currency adapter for the ordinary API and isolated setup service. */
+/** Currency adapter; with requireOwnerSession it applies the hotel-setup Owner-only gates. */
 export function registerPmsPricingCurrencyCommand(
   app: FastifyInstance,
   commandPort: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">,
