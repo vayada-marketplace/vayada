@@ -178,6 +178,19 @@ describe("target manual-booking create route", () => {
     expect(state.calls).toHaveLength(1);
   });
 
+  it("passes the preview's publication revision and rejects a malformed one", async () => {
+    const state: State = { calls: [] };
+    app = await testApp(state);
+    const payload = { ...(command("unpaid", "cash") as any), expectedPricingRevision: 3 };
+    expect((await request(app, payload)).statusCode).toBe(201);
+    expect(state.calls[0]?.expectedPricingRevision).toBe(3);
+    for (const expectedPricingRevision of [0, 1.5, "3"])
+      expect((await request(app, { ...payload, expectedPricingRevision })).json().code).toBe(
+        "invalid_body",
+      );
+    expect(state.calls).toHaveLength(1);
+  });
+
   it("passes trimmed additional guests in order and defaults an omitted list to none", async () => {
     const state: State = { calls: [] };
     app = await testApp(state);
