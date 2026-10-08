@@ -225,13 +225,26 @@ export async function adoptLegacyFixedPlanSubscription(
     propertyId: input.propertyId,
     organizationId: entitlement.organizationId,
     productId: inspection.productId!,
-    idempotencyKey: `legacy-adoption:${input.propertyId}:${input.subscriptionId}:v1`,
+    // v2: the request also pins vayada_legacy_product (VAY-1362 review).
+    idempotencyKey: `legacy-adoption:${input.propertyId}:${input.subscriptionId}:v2`,
   });
   // Stripe replays the cached reply of an idempotent POST for 24 hours, so a
   // repair run would store a stale status and period. Read the live state.
   const adopted = (await dependencies.stripe.inspectLegacySubscription(input.subscriptionId))
     .snapshot;
   const adoptedAt = (dependencies.now?.() ?? new Date()).toISOString();
+  // The subscription may have moved on since the first read (unpaid, canceled,
+  // renewed). Writing Fixed then would drop that transition's webhook as stale.
+  const adoptedPeriodEnd = adopted.currentPeriodEnd ? Date.parse(adopted.currentPeriodEnd) : NaN;
+  if (
+    !LEGACY_LIVE_STATUSES.has(adopted.status) ||
+    !Number.isFinite(adoptedPeriodEnd) ||
+    adoptedPeriodEnd - Date.parse(adoptedAt) < PERIOD_END_GUARD_MS
+  ) {
+    throw new Error(
+      `Stripe subscription is now ${adopted.status} or near its period end; entitlement unchanged. Re-run the dry run.`,
+    );
+  }
   if (
     !adopted.fixedPlanVerified ||
     !adopted.retainedLegacyPrice ||
