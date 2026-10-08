@@ -788,6 +788,21 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      # Its exact media, PII and cohort-scope counts need a database no other suite has written to.
+      - name: Verify production parity evidence reader
+        if: matrix.shard == 'pms'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay1362_parity_reader_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href }); await client.connect();
+            await client.query("CREATE DATABASE vay1362_parity_reader_test"); await client.end();
+          '
+          TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace @vayada/backend-migration run test -- src/productionParityReader.integration.test.ts
+
       - name: Verify Finance OTA commission migration
         if: matrix.shard == 'pms'
         run: >-
