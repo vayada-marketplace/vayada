@@ -137,8 +137,11 @@ function HomePageContent() {
   const { steps: STEPS } = useBookingSteps("rooms");
 
   // The legacy availability search is retired (VAY-1543 C.2): rooms, availability and
-  // prices for the chosen dates come from the room-and-price page.
-  const bookTarget = `/book?${new URLSearchParams({ checkIn, checkOut })}`;
+  // prices come from the room-and-price page, which starts from the stay chosen here.
+  const bookParams = new URLSearchParams({ checkIn, checkOut, adults: String(adults) });
+  if (effectiveChildren > 0) bookParams.set("children", String(effectiveChildren));
+  if (appliedPromo) bookParams.set("promoCode", appliedPromo.code);
+  const bookTarget = `/book?${bookParams}`;
 
   const heroImage = hotel.heroImage;
   const heroHeading = hotel.branding?.heroHeading || hotel.name;
@@ -441,7 +444,7 @@ function HomePageContent() {
           href={`/${locale}${bookTarget}`}
           className="inline-block mb-6 rounded-full bg-primary-600 px-6 py-3 font-semibold text-white"
         >
-          Choose rooms and get a price
+          {t("chooseRoomsAndPrice")}
         </a>
       </div>
 
