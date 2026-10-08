@@ -466,7 +466,7 @@ class MemoryStore implements FinanceSubscriptionWebhookStore {
     };
   }
 
-  async findEntitlement() {
+  async findEntitlement(): Promise<FinanceSubscriptionWebhookEntitlement | null> {
     return { ...this.entitlement };
   }
 
