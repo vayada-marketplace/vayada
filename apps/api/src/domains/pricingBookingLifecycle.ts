@@ -62,7 +62,7 @@ export async function stagePricingBookingLifecycle(
     booking.source_system !== "booking" ||
     booking.booking_channel !== "direct" ||
     booking.direct_booking_source !== "booking_engine" ||
-    booking.expected_payment_method !== quote.paymentMethod ||
+    booking.expected_payment_method !== (card ? null : "pay_at_property") ||
     booking.edit_revision !== 0 ||
     booking.check_in !== quote.stay.checkIn ||
     booking.check_out !== quote.stay.checkOut ||
