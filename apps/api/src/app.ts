@@ -338,6 +338,11 @@ export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolv
 type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   hotelSetupCommandForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
   hotelSetupLogoForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
+  /** Public API logo assignment on the ordinary login (Owner-only); replaces the forwarder. */
+  hotelSetupLogoAssignments?: Pick<
+    import("./domains/propertyMediaCommandRepository.js").PropertyMediaCommandRepository,
+    "assignLogo"
+  >;
   hotelSetupCreationForwarder?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
   /** Owner-only hotel-detail edits on the ordinary login; unset keeps the sparse writer. */
   hotelSetupProfileCommand?: import("./routes/sharedHotelSetupStatus.js").HotelSetupPropertyProfileUpdate;
@@ -351,9 +356,9 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
     import("./routes/sharedHotelSetupStatus.js").SharedHotelSetupStatusRepository,
     "createPropertyProfile"
   >;
-  /** Owner-only launch settings on the ordinary login; unset keeps the forwarder or broad writer. */
   /** Owner-only currency saves on the ordinary login; unset keeps the forwarder. */
   hotelSetupCurrencyCommandPort?: import("./routes/pmsPricing.js").PmsPricingRoutesOptions["currencyCommandPort"];
+  /** Owner-only launch settings on the ordinary login; unset keeps the forwarder or broad writer. */
   hotelSetupLaunchSettingsCommand?: Parameters<
     typeof import("./routes/sharedHotelSetupStatus.js").registerSharedHotelSetupLaunchSettings
   >[1];
@@ -833,6 +838,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api/hotel-setup",
       repository: options.propertyMediaCommandRepository,
       forwardLogo: options.hotelSetupLogoForwarder,
+      logoAssignments: options.hotelSetupLogoAssignments,
+      propertyAccessRepository: options.auth?.propertyAccessRepository,
     });
     app.register(registerPlatformPropertyMediaRoutes, {
       prefix: "/api/platform/admin",

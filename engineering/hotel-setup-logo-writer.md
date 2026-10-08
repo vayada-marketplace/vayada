@@ -1,5 +1,11 @@
 # Hotel setup logo writer (VAY-965)
 
+> **Superseded for the public API by VAY-2056** ([ordinary login](hotel-setup-ordinary-login.md) §5.2):
+> the public routes run the same request-bound logo protocol on the ordinary login
+> (`createOrdinaryHotelSetupLogoRuntime`), behind the private service's Owner-only gates and with
+> the parameterised Owner authority of `hotel_setup_logo_authority` re-locked in every write
+> transaction. The private service keeps this contract until decommission.
+
 Status: repair contract; production remains on the existing media path until the
 complete scoped writer and release proofs pass.
 

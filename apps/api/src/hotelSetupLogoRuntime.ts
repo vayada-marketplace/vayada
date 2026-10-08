@@ -1,3 +1,5 @@
+import type { RequestContext } from "@vayada/backend-auth";
+import { AuthorizationError } from "@vayada/backend-authorization";
 import pg from "pg";
 import {
   createHotelSetupLogoCredentialResolver,
@@ -9,6 +11,9 @@ import {
   createPgS3PropertyMediaCommandRepository,
   type PropertyMediaCommandRepository,
 } from "./domains/propertyMediaCommandRepository.js";
+import type { PropertyMediaReadModelSync } from "./domains/propertyMediaCommandStore.js";
+import { lockHotelSetupOwnerAuthority } from "./platform/hotelSetupProfileWriter.js";
+import { syncPropertyOfferReadModels } from "./routes/marketplaceAdmin.js";
 import { createPgPlatformMediaRepository } from "./platform/platformMediaRepository.js";
 import { createS3PlatformMediaAdapter } from "./platform/platformMediaS3.js";
 import type { PlatformMediaServingConfig } from "./platform/mediaServing.js";
@@ -18,6 +23,12 @@ import type {
   PlatformMediaRoutesOptions,
 } from "./routes/platformMedia.js";
 
+type LogoScope = { propertyId: string; organizationId: string; actorUserId: string };
+type LogoAuthorize = (client: Parameters<typeof assertHotelSetupLogoScope>[0]) => Promise<void>;
+type LogoConnection = { pool: pg.Pool; connectionString: string; authorize: LogoAuthorize };
+
+const LOGO_PERMISSIONS = ["hotel_catalog.setup.manage"];
+
 /** Native credentials and pools are selected per verified request, never cached or shared. */
 export function createHotelSetupLogoRuntime(
   options: HotelSetupCredentialOptions,
@@ -25,6 +36,85 @@ export function createHotelSetupLogoRuntime(
   allowedOrigins: string[] = [],
 ) {
   const resolve = createHotelSetupLogoCredentialResolver(options);
+  return buildHotelSetupLogoRuntime({
+    lookup: options.assignments,
+    serving,
+    allowedOrigins,
+    async connect(scope) {
+      const connectionString = await resolve(
+        scope.propertyId,
+        scope.organizationId,
+        scope.actorUserId,
+      );
+      return {
+        pool: new pg.Pool({ connectionString, max: 1 }),
+        connectionString,
+        async authorize(client) {
+          await assertHotelSetupLogoPrivileges(client);
+          await assertHotelSetupLogoScope(client, scope);
+        },
+      };
+    },
+    async syncReadModels(client, input) {
+      await client.query("SELECT platform.sync_hotel_setup_logo_read_models($1::uuid)", [
+        input.propertyId,
+      ]);
+    },
+  });
+}
+
+/** Public API logo on the ordinary login (VAY-2056): the same request-bound protocol as the
+ * private service, with a per-request pool on the API connection and the parameterised Owner
+ * authority of platform.hotel_setup_logo_authority (0468) re-locked in every write transaction.
+ * Mounted on the shared media routes, it claims only property.logo requests. */
+export function createOrdinaryHotelSetupLogoRuntime(input: {
+  connectionString: string;
+  lookup: Pick<pg.Pool, "query">;
+  serving: PlatformMediaServingConfig;
+  /** The shared routes' own persistence, returned unchanged for every non-logo request. */
+  defaults: Pick<PlatformMediaRoutesOptions, "repository" | "targetResolver" | "finalizer">;
+}) {
+  return buildHotelSetupLogoRuntime({
+    lookup: input.lookup,
+    serving: input.serving,
+    allowedOrigins: [],
+    shared: input.defaults,
+    async connect(scope) {
+      return {
+        pool: new pg.Pool({ connectionString: input.connectionString, max: 1 }),
+        connectionString: input.connectionString,
+        async authorize(client) {
+          if (!(await lockHotelSetupOwnerAuthority(client, scope, LOGO_PERMISSIONS)))
+            throw new AuthorizationError();
+        },
+      };
+    },
+    syncReadModels: syncPropertyOfferReadModels,
+  });
+}
+
+/** The private service's logo gate (hotelSetupCommandService.ts), for the shared public routes. */
+function assertLogoOwnerSession(context: RequestContext) {
+  if (
+    !context.actor.providerIdentity.sessionId ||
+    context.selectedOrganization.kind !== "hotel_group" ||
+    context.membership.roleKey !== "hotel_owner" ||
+    !context.membership.permissions.includes("hotel_catalog.setup.manage")
+  )
+    throw new AuthorizationError();
+}
+
+function buildHotelSetupLogoRuntime(input: {
+  lookup: Pick<pg.Pool, "query">;
+  serving: PlatformMediaServingConfig;
+  allowedOrigins: string[];
+  shared?: Pick<PlatformMediaRoutesOptions, "repository" | "targetResolver" | "finalizer">;
+  connect(scope: LogoScope): Promise<LogoConnection>;
+  syncReadModels: PropertyMediaReadModelSync;
+}) {
+  const { serving, allowedOrigins, shared } = input;
+  // Non-logo requests on the shared public routes keep the routes' default persistence.
+  const defaults = shared && { ...shared, close: async () => {} };
   const adapter = createS3PlatformMediaAdapter({
     bucketName: serving.bucketName,
     cdnBaseUrl: serving.cdnBaseUrl,
@@ -34,21 +124,8 @@ export function createHotelSetupLogoRuntime(
   const unavailable = async (): Promise<never> => {
     throw new Error("Private logo request persistence required");
   };
-  async function acquire(scope: {
-    propertyId: string;
-    organizationId: string;
-    actorUserId: string;
-  }) {
-    const connectionString = await resolve(
-      scope.propertyId,
-      scope.organizationId,
-      scope.actorUserId,
-    );
-    const pool = new pg.Pool({ connectionString, max: 1 });
-    const authorize = async (client: Parameters<typeof assertHotelSetupLogoScope>[0]) => {
-      await assertHotelSetupLogoPrivileges(client);
-      await assertHotelSetupLogoScope(client, scope);
-    };
+  async function acquire(scope: LogoScope) {
+    const { pool, connectionString, authorize } = await input.connect(scope);
     try {
       const client = await pool.connect();
       try {
@@ -87,14 +164,16 @@ export function createHotelSetupLogoRuntime(
     bucketName: serving.bucketName,
     mediaPathPrefix: serving.publicPathPrefix,
     allowedOrigins,
-    async resolveRequestPersistence(input) {
-      const organizationId = input.context.selectedOrganization.organizationId;
-      const actorUserId = input.context.actor.internalUserId;
+    async resolveRequestPersistence(request) {
+      const organizationId = request.context.selectedOrganization.organizationId;
+      const actorUserId = request.context.actor.internalUserId;
       let propertyId: string;
-      if (input.operation === "create") {
-        const resource = input.request.resource;
+      if (request.operation === "create") {
+        // On the shared public routes every other purpose keeps the default persistence.
+        if (defaults && request.request.purpose !== "property.logo") return defaults;
+        const resource = request.request.resource;
         if (
-          input.request.purpose !== "property.logo" ||
+          request.request.purpose !== "property.logo" ||
           resource.product !== "hotel_catalog" ||
           resource.resourceType !== "property" ||
           resource.targetResourceId ||
@@ -103,16 +182,18 @@ export function createHotelSetupLogoRuntime(
           throw new Error("Invalid logo target");
         propertyId = resource.resourceId;
       } else {
-        const result = await options.assignments.query<{ propertyId: string }>(
+        const result = await input.lookup.query<{ propertyId: string }>(
           `SELECT property_id::text AS "propertyId" FROM platform.media_upload_sessions
            WHERE id=$1::uuid AND actor_user_id=$2::uuid AND owner_organization_id=$3::uuid
              AND requested_purpose='property.logo' AND resource_product='hotel_catalog'
              AND resource_type='property' AND resource_id=property_id::text`,
-          [input.sessionId, actorUserId, organizationId],
+          [request.sessionId, actorUserId, organizationId],
         );
+        if (result.rows.length === 0 && defaults) return defaults;
         if (result.rows.length !== 1) throw new Error("Missing logo session");
         propertyId = result.rows[0]!.propertyId;
       }
+      if (shared) assertLogoOwnerSession(request.context);
       const native = await acquire({ propertyId, organizationId, actorUserId });
       try {
         const repository = createPgPlatformMediaRepository({
@@ -206,11 +287,7 @@ export function createHotelSetupLogoRuntime(
           ...native,
           serving,
           authorizeTransaction: native.authorize,
-          syncReadModels: async (client, input) => {
-            await client.query("SELECT platform.sync_hotel_setup_logo_read_models($1::uuid)", [
-              input.propertyId,
-            ]);
-          },
+          syncReadModels: input.syncReadModels,
         });
         return await repository.assignLogo(command);
       } finally {
