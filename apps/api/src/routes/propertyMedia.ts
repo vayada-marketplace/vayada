@@ -27,10 +27,9 @@ export async function registerPropertyMediaRoutes(
   app: FastifyInstance,
   options: {
     repository: PropertyMediaCommandRepository;
-    /** Public API logo on the ordinary login (VAY-2056), behind the private service's
+    /** Public API logo on the ordinary login (VAY-2056), behind the retired private service's
      * Owner-only gates; replaces the shared writer for logo assignment. */
     logoAssignments?: Pick<PropertyMediaCommandRepository, "assignLogo">;
-    logoOnly?: boolean;
     propertyAccessRepository?: PropertyAccessRepository;
   },
 ): Promise<void> {
@@ -54,8 +53,8 @@ export async function registerPropertyMediaRoutes(
       }
       authorized.set(request, access);
     };
-  const onRequest = onRequestFor(!!options.logoOnly);
-  const logoOnRequest = onRequestFor(!!options.logoOnly || !!options.logoAssignments);
+  const onRequest = onRequestFor(false);
+  const logoOnRequest = onRequestFor(!!options.logoAssignments);
 
   app.put(
     "/properties/:propertyId/media/logo",
@@ -80,7 +79,6 @@ export async function registerPropertyMediaRoutes(
     },
   );
 
-  if (options.logoOnly) return;
   app.put("/properties/:propertyId/media/presentation", { onRequest }, async (request, reply) => {
     const access = requireAuthorizedRequest(authorized, request);
     const body = parseReplacePropertyPresentationMediaRequest(request.body);

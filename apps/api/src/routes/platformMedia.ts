@@ -480,7 +480,6 @@ export type PlatformMediaPersistenceRequest =
   | { operation: "finalize"; context: RequestContext; sessionId: string };
 
 export type PlatformMediaRoutesOptions = {
-  logoOnly?: boolean;
   repository: PlatformMediaRepository;
   // A configured resolver must fail closed; it owns cleanup if acquisition fails.
   resolveRequestPersistence?(
@@ -850,18 +849,6 @@ export async function registerPlatformMediaRoutes(
       const validation = validateUploadSessionRequest(request.body);
       if (!validation.ok) return sendMediaError(reply, 400, validation.code, validation.message);
 
-      if (
-        options.logoOnly &&
-        (request.body.purpose !== "property.logo" ||
-          request.body.resource.product !== "hotel_catalog" ||
-          request.body.resource.resourceType !== "property")
-      )
-        return sendMediaError(
-          reply,
-          400,
-          "invalid_media_purpose",
-          "Only canonical property logos are supported.",
-        );
       const policy = policyForPurpose(request.body.purpose);
       const resourceError = validateResourceScope(request.body.resource, policy);
       if (resourceError) {
@@ -1190,18 +1177,6 @@ export async function registerPlatformMediaRoutes(
             "Upload session not found.",
           );
         }
-        if (
-          options.logoOnly &&
-          (session.purpose !== "property.logo" ||
-            session.resource.product !== "hotel_catalog" ||
-            session.resource.resourceType !== "property")
-        )
-          return sendMediaError(
-            reply,
-            404,
-            "upload_session_not_found",
-            "Upload session not found.",
-          );
         const policy = policyForSession(session);
         const resourceError = validateResourceScope(session.resource, policy);
         if (resourceError || !sessionVisibilityMatchesPolicy(session, policy)) {

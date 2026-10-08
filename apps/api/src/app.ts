@@ -1107,7 +1107,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api/pms",
       ...(options.hotelSetupFeatureHubCommands
         ? {
-            // VAY-2056: the private service's Owner-only registration, on the ordinary login.
+            // VAY-2056: the retired private service's Owner-only registration, on the ordinary login.
             repository: {
               ...options.pmsModuleActivationRepository,
               updateFinancials: options.hotelSetupFeatureHubCommands.updateFinancials,

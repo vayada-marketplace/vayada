@@ -71,7 +71,7 @@ export async function registerPmsModuleActivationRoutes(
   options: PmsModuleActivationRoutesOptions,
 ): Promise<void> {
   if (options.financialsSetupComplete && !options.requireOwnerSession)
-    throw new Error("Native Financials setup eligibility requires original-session verification");
+    throw new Error("Financials setup eligibility requires original-session verification");
   const { repository } = options;
   const financialsActivationPropertyIds = new Set(options.financialsActivationPropertyIds ?? []);
 
