@@ -476,7 +476,7 @@ ticket: make the editor's launch-settings call best-effort (ticket comment), and
 retire the `profile_edit_not_provisioned` copy from the clients once the code is
 gone from the API.
 
-## 12. Decommission list (separate PRs after the observation window)
+## 12. Decommission list (separate PRs, starting right after acceptance)
 
 Until step 2 below has run, the §9 rollback window rule applies: a migration
 that changes any native-pinned object (§4) either ships with re-released native
@@ -546,25 +546,74 @@ Dependency order; each step is reversible until step 6.
    `--recover-hotel-setup-logo-staged-role` plus their scripts and the
    `deployment/hotel-setup-*.json` inventories; `docs/hotel-setup-*.md` moved
    to a historical section. Requires step 4.
-6. **Migration PR (app): drop the native database objects** — revoke and drop
-   the per-hotel logins for Animals Ahangama and Sri Journeys (every
-   `vayada_next_hotel_setup_org_*`, `…_property_*`, `…_logo_*`, `…_profile_*`
-   login) and the parents `vayada_next_hotel_setup_scope`,
-   `…_property_scope`, `…_logo_scope`, `…_profile_scope`, the readers
-   `vayada_next_hotel_setup_reader` / `…_creation_reader`; drop the scope
-   tables (`platform.hotel_setup_creation_scopes`,
-   `hotel_setup_property_scopes`, `hotel_setup_linked_properties`,
-   `hotel_setup_reconciliation_cursors`, view
-   `hotel_catalog.hotel_setup_effective_creation_scopes`), the hotel-setup
-   policies, triggers and functions of `0436`–`0472` (keeping
-   `creation_organization_id`, the readiness columns' data and
-   `platform.tenant_scope_key` / `valid_tenant_scope` which other code uses),
-   and the identity lock-only policies the VAY-2054 note deferred (adding them
-   becomes possible in the same migration because nothing pins the digests any
-   more). Role drops need `vayada_admin` (the migration owner cannot drop
-   login roles), i.e. one last owner-checked task. Requires steps 3 and 5 and
-   an updated protected list in the platform preflight (`hotel_setup_` name
-   patterns can stay as a net).
+6. **Migration PR (app): drop the native database objects** — \_prepared as a
+   draft stacked on #2957: migration `0474_hotel_setup_native_objects_retire`.
+   As built:
+   - It carries every native Owner-off receipt (`newHotelFinancialsOwnerDisabled`)
+     over to the ordinary marker before dropping the trigger that guarded it.
+     The receipt stays valid until the next write to its row, as before. The
+     Feature Hub command no longer reads the native key.
+   - It drops the eleven hotel-setup triggers, every `hotel_setup_*` policy,
+     the view, every `platform` function with `hotel_setup` in its name, and
+     the four scope tables.
+   - It keeps the two triggers that apply to every writer:
+     `entitlement_routing_organization_lock` and
+     `hotel_setup_media_session_allocation_guard`.
+   - On the 15 tables where a hotel-setup migration had first turned RLS on,
+     and a hotel-setup policy was the only permissive one, it turns RLS off
+     again. That is what every caller saw before.
+   - It revokes every grant the migration owner gave a `vayada_next_hotel_setup_*`
+     role. In a fresh database nothing then depends on those roles (the
+     migration test checks `pg_shdepend`).
+   - It re-pins two digests, computed on PG16 and PG17: the Channex worker
+     catalog digest and the VAY-2017 policy digest.
+   - **Consequence:** every older next-API image fails the Channex boundary
+     at startup once 0474 has run, so there is no image rollback after it.
+     `lock_timeout` is 5 s; a timed-out run rolls back, the old tasks keep
+     serving, and the deploy can simply be retried.
+   - **Not in the migration:** - The deferred identity lock-only policies: a separate VAY-2054 follow-up. - Pruning the `hotel_setup_` names from the platform runtime preflight and
+     from `hotelSetupOrdinaryLogin.fixture.ts`. Prune both together, after
+     0474 is live. - The role drops, which are step 6b.
+     Original scope: revoke and drop
+     the per-hotel logins for Animals Ahangama and Sri Journeys (every
+     `vayada_next_hotel_setup_org_*`, `…_property_*`, `…_logo_*`, `…_profile_*`
+     login) and the parents `vayada_next_hotel_setup_scope`,
+     `…_property_scope`, `…_logo_scope`, `…_profile_scope`, the readers
+     `vayada_next_hotel_setup_reader` / `…_creation_reader`; drop the scope
+     tables (`platform.hotel_setup_creation_scopes`,
+     `hotel_setup_property_scopes`, `hotel_setup_linked_properties`,
+     `hotel_setup_reconciliation_cursors`, view
+     `hotel_catalog.hotel_setup_effective_creation_scopes`), the hotel-setup
+     policies, triggers and functions of `0436`–`0472` (keeping
+     `creation_organization_id`, the readiness columns' data and
+     `platform.tenant_scope_key` / `valid_tenant_scope` which other code uses),
+     and the identity lock-only policies the VAY-2054 note deferred (adding them
+     becomes possible in the same migration because nothing pins the digests any
+     more). Role drops need `vayada_admin` (the migration owner cannot drop
+     login roles), i.e. one last owner-checked task. Requires steps 3 and 5 and
+     an updated protected list in the platform preflight (`hotel_setup_` name
+     patterns can stay as a net).
+     6b. **Role drops (`vayada_admin`, after 0474 is live).** The migration owner has
+     no CREATEROLE. On PostgreSQL 16+ a CREATEROLE role also needs ADMIN OPTION
+     on each role it drops. The platform docs record no such edge for the scope
+     parents on RDS, so probe first. These three queries are read-only:
+   ```sql
+   SELECT version();
+   SELECT r.rolname, r.rolcanlogin,
+     pg_has_role('vayada_admin', r.oid, 'MEMBER WITH ADMIN OPTION') AS admin_option
+   FROM pg_roles r WHERE r.rolname ~ '^vayada_next_hotel_setup_' ORDER BY 1;
+   SELECT r.rolname, d.dbid, d.classid::regclass, d.deptype, count(*)
+   FROM pg_shdepend d JOIN pg_roles r ON r.oid = d.refobjid
+   WHERE r.rolname ~ '^vayada_next_hotel_setup_' GROUP BY 1, 2, 3, 4 ORDER BY 1;
+   ```
+   After the probe, as `vayada_admin`:
+   1. Revoke what `vayada_admin` granted, including
+      `REVOKE CONNECT ON DATABASE vayada_target_prod`, until `pg_shdepend` is
+      empty for each role.
+   2. `DROP ROLE` the per-hotel logins and the two readers.
+   3. `DROP ROLE` the four parents.
+      Do not use `DROP OWNED BY`: it needs the target role's privileges.
+      If `admin_option` is false, the RDS master user has to drop the roles.
 7. **Cleanup**: `engineering/hotel-setup-*.md` contracts archived under a
    historical heading, Linear VAY-965/VAY-1092 closed by the human.
 

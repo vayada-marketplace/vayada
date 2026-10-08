@@ -29,19 +29,8 @@ describe.skipIf(!url)("ordinary API login posture for hotel setup (VAY-2056)", (
       // Posture: no SECURITY DEFINER routine is executable, exactly as the platform preflight requires.
       expect(await listExecutableDefinerFunctions(pool)).toEqual([]);
       expect(await listOrdinaryPostureViolations(pool)).toEqual([]);
-      for (const signature of [
-        "platform.hotel_setup_update_property_profile(uuid,uuid,uuid,bigint,jsonb,text,text,text)",
-        "platform.hotel_setup_creation_assigned_organization()",
-        "platform.hotel_setup_property_operation_allowed(uuid,text)",
-      ])
-        expect(await can("has_function_privilege(current_user,$1,'EXECUTE')", [signature])).toBe(
-          false,
-        );
-      // Protected credential evidence stays unreadable; narrowings hold.
+      // Narrowings hold.
       for (const [relation, privilege, expected] of [
-        ["platform.hotel_setup_property_scopes", "SELECT", false],
-        ["platform.hotel_setup_creation_scopes", "SELECT", false],
-        ["platform.hotel_setup_linked_properties", "SELECT", false],
         ["hotel_catalog.properties", "INSERT", true],
         ["hotel_catalog.properties", "DELETE", false],
         ["platform.product_audit_events", "INSERT", true],
@@ -118,16 +107,6 @@ describe.skipIf(!url)("ordinary API login posture for hotel setup (VAY-2056)", (
           )
         ).rows,
       ).toEqual([{ display_name: "Renamed", profile_revision: "2" }]);
-      expect(
-        Number(
-          (
-            await admin.query(
-              "SELECT count(*) AS n FROM platform.hotel_setup_linked_properties WHERE property_id=$1",
-              [property],
-            )
-          ).rows[0].n,
-        ),
-      ).toBe(1);
     } finally {
       await pool.end();
       await admin.query(
