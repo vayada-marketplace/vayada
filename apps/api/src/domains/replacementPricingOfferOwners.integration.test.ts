@@ -5933,7 +5933,6 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           externalChanges: externalBookingChanges,
           connectionString: url!,
           pool: single,
-          pricingPool: single,
           inventoryReservationPort: createTargetPmsInventoryReservationPort(),
         }),
       });
@@ -6905,7 +6904,6 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         externalChanges: externalBookingChanges,
         connectionString: url!,
         pool,
-        pricingPool: pool,
         inventoryReservationPort: createTargetPmsInventoryReservationPort(),
       }),
     });
