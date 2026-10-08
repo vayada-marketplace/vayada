@@ -105,6 +105,93 @@ describe("PMS pricing command repository", () => {
     expect(queries.some((sql) => sql.includes("platform.idempotency_keys"))).toBe(false);
   });
 
+  it.each([1, 2])(
+    "rechecks the ordinary hotel-setup scope in preparation and write transactions (lost at %i)",
+    async (revokedAt) => {
+      const queries: string[] = [];
+      let scopeChecks = 0;
+      const release = vi.fn();
+      const client: PmsPricingCommandClient = {
+        async query(sql) {
+          queries.push(sql);
+          if (sql.includes("transaction_isolation"))
+            return { rows: [{ level: "read committed" }], rowCount: 1 } as never;
+          if (sql.includes("FROM identity.organizations") && sql.includes("FOR UPDATE"))
+            return { rows: [{ id: organizationId }], rowCount: 1 } as never;
+          // The active catalog and PMS Owner links (hotelSetupOrdinaryScope.ts).
+          if (sql.includes("FOR SHARE OF catalog_link")) {
+            scopeChecks++;
+            return (
+              scopeChecks < revokedAt ? { rows: [{}], rowCount: 1 } : { rows: [], rowCount: 0 }
+            ) as never;
+          }
+          if (sql.includes("FROM identity.organization_memberships"))
+            return {
+              rows: [
+                {
+                  id: propertyId,
+                  roleKey: "hotel_owner",
+                  mode: "all",
+                  accessOrigin: "agency",
+                  permissionOverrides: null,
+                  pms: true,
+                  booking: true,
+                  roleDefinitionId: null,
+                },
+              ],
+              rowCount: 1,
+            } as never;
+          if (sql.includes("FROM identity.role_permission_grants"))
+            return { rows: [{ permission: "pms.operations.manage" }], rowCount: 1 } as never;
+          if (sql.includes("FROM identity.product_entitlements"))
+            return {
+              rows: [
+                {
+                  key: "property-management",
+                  resourceId: null,
+                  status: "active",
+                  startsAt: null,
+                  expiresAt: null,
+                },
+              ],
+              rowCount: 1,
+            } as never;
+          if (sql.includes("FROM identity.users"))
+            return { rows: [{ id: actorUserId }], rowCount: 1 } as never;
+          if (sql.includes("clock_timestamp"))
+            return { rows: [{ at: new Date(acceptedAt) }], rowCount: 1 } as never;
+          return { rows: [], rowCount: 0 };
+        },
+        release,
+      };
+      const guard = vi.fn();
+      const repository = createPgPmsPricingCommandRepository({
+        connectionString: "test",
+        pool: { connect: async () => client, end: async () => {} },
+        now: () => new Date(acceptedAt),
+        hotelSetupOrdinaryOwner: true,
+        currencyChangeGuard: { runWithCurrencyChangeGuard: guard },
+      });
+      await expect(repository.upsertPropertyPricingCurrency(currencyCommand())).resolves.toEqual({
+        ok: false,
+        error: { code: "setup_scope_unavailable" },
+      });
+      expect(scopeChecks).toBe(revokedAt);
+      // Every transaction opens READ COMMITTED and takes the scope locks before anything else.
+      const begins = queries.flatMap((sql, index) => (sql.startsWith("BEGIN") ? [index] : []));
+      expect(begins).toHaveLength(revokedAt);
+      for (const index of begins) {
+        expect(queries[index]).toBe("BEGIN ISOLATION LEVEL READ COMMITTED");
+        expect(queries[index + 1]).toContain("transaction_isolation");
+        expect(queries[index + 2]).toContain("FROM identity.organizations");
+      }
+      expect(queries.at(-1)).toBe("ROLLBACK");
+      expect(queries.some((sql) => /^\s*(INSERT|UPDATE|COMMIT)\b/.test(sql))).toBe(false);
+      expect(release).toHaveBeenCalledTimes(revokedAt);
+      expect(guard).not.toHaveBeenCalled();
+    },
+  );
+
   it("aggregates every recurring source into the existing rate-rule blocker without lifecycle filters", async () => {
     const queries: string[] = [];
     const currentCurrencyRow = {

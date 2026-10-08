@@ -564,13 +564,16 @@ jobs:
           ADMIN_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2056_hotel_setup_test
 
-      - name: Verify hotel setup routes and logo media
+      - name: Verify hotel setup routes, currency and logo media
         if: matrix.shard == 'hotel-setup'
         run: >-
           npm --workspace vayada-api run test --
           src/sharedHotelSetupStatus.test.ts
           src/hotelSetupLaunchSettingsRepository.test.ts
           src/hotelSetupLogoRuntime.test.ts
+          src/pmsPricingCommandRepository.test.ts
+          src/financeStarterCategories.test.ts
+          src/platform/publicBookabilityPublication.test.ts
           src/platformMedia.test.ts
           src/propertyMedia.test.ts
           src/platform/platformMediaRepository.test.ts
