@@ -33,6 +33,8 @@ export type LegacySubscriptionInspection = {
   paymentKind: string | null;
   flatThirtyDayPrice: boolean;
   unitAmountMinor: number | null;
+  /** The Stripe product of the single item's price; pinned in metadata at adoption. */
+  productId: string | null;
   adoptionMarker: string | null;
 };
 
@@ -54,12 +56,14 @@ export type LegacyAdoptionStore = {
 
 export type LegacyAdoptionStripe = {
   inspectLegacySubscription(subscriptionId: string): Promise<LegacySubscriptionInspection>;
+  /** Metadata-only write. The caller re-reads the subscription afterwards. */
   markAdopted(input: {
     subscriptionId: string;
     propertyId: string;
     organizationId: string;
+    productId: string;
     idempotencyKey: string;
-  }): Promise<StripeSubscriptionSnapshot>;
+  }): Promise<void>;
   findLegacySubscriptionsForHotel(
     hotelId: string,
   ): Promise<Array<{ subscriptionId: string; status: string }>>;
@@ -146,11 +150,24 @@ export async function adoptLegacyFixedPlanSubscription(
     billingStatus: entitlement.billingStatus,
   };
   if (entitlement.organizationStatus !== "active") refuse("organization_not_active");
-  if (entitlement.planKey === "fixed" && entitlement.subscriptionRef === input.subscriptionId) {
+  // A webhook can bind the subscription between the Stripe write and the
+  // entitlement write of an earlier run; only a finished adoption record counts.
+  const adoptionRecorded =
+    typeof entitlement.metadata["legacyAdoptedAt"] === "string" &&
+    entitlement.metadata["providerReentryRequired"] !== true;
+  if (
+    entitlement.planKey === "fixed" &&
+    entitlement.subscriptionRef === input.subscriptionId &&
+    adoptionRecorded
+  ) {
     report.outcome = "already_adopted";
     if (input.apply) await refreshBookability(report, dependencies);
     return report;
   }
+  // Billing must be the only reason the hotel is suspended: the migration also
+  // suspends hotels whose owner link is inactive or whose booking fee is
+  // noncanonical, and those deactivate the Commission rule (VAY-1362 review #5).
+  if (!entitlement.commissionRuleActive) refuse("commission_rule_not_active");
   if (entitlement.subscriptionRef && entitlement.subscriptionRef !== input.subscriptionId) {
     refuse("entitlement_bound_to_other_subscription");
   }
@@ -168,6 +185,7 @@ export async function adoptLegacyFixedPlanSubscription(
   if (inspection.paymentKind !== "fixed_plan") refuse("stripe_payment_kind_mismatch");
   if (!LEGACY_LIVE_STATUSES.has(snapshot.status)) refuse(`stripe_status_${snapshot.status}`);
   if (!inspection.flatThirtyDayPrice) refuse("stripe_price_not_flat_30d");
+  if (!inspection.productId) refuse("stripe_product_missing");
   if (!snapshot.currency) refuse("stripe_currency_invalid");
   if (!snapshot.customerId) refuse("stripe_customer_missing");
   if (!snapshot.currentPeriodEnd) refuse("stripe_period_end_missing");
@@ -191,12 +209,18 @@ export async function adoptLegacyFixedPlanSubscription(
   }
 
   // Always written: the metadata POST is idempotent and repairs a partial earlier run.
-  const adopted = await dependencies.stripe.markAdopted({
+  await dependencies.stripe.markAdopted({
     subscriptionId: input.subscriptionId,
     propertyId: input.propertyId,
     organizationId: entitlement.organizationId,
+    productId: inspection.productId!,
     idempotencyKey: `legacy-adoption:${input.propertyId}:${input.subscriptionId}:v1`,
   });
+  // Stripe replays the cached reply of an idempotent POST for 24 hours, so a
+  // repair run would store a stale status and period. Read the live state.
+  const adopted = (await dependencies.stripe.inspectLegacySubscription(input.subscriptionId))
+    .snapshot;
+  const adoptedAt = (dependencies.now?.() ?? new Date()).toISOString();
   if (
     !adopted.fixedPlanVerified ||
     !adopted.retainedLegacyPrice ||
@@ -213,10 +237,16 @@ export async function adoptLegacyFixedPlanSubscription(
     organizationId: entitlement.organizationId,
     snapshot: adopted,
     activeRoomCount: inventory!.activeRoomCount,
-    adoptedAt: now.toISOString(),
+    adoptedAt,
   });
   if (!written) throw new Error("The billing entitlement changed before adoption was written.");
-  report.stripe.amountMinor = adopted.amountMinor;
+  report.stripe = {
+    status: adopted.status,
+    currency: adopted.currency,
+    amountMinor: adopted.amountMinor ?? null,
+    currentPeriodEnd: adopted.currentPeriodEnd,
+    cancelAtPeriodEnd: adopted.cancelAtPeriodEnd,
+  };
   report.outcome = "adopted";
   await refreshBookability(report, dependencies);
   return report;
@@ -341,7 +371,9 @@ export function createPgLegacyAdoptionStore(pool: Queryable): LegacyAdoptionStor
       const result = await pool.query(
         `UPDATE finance.billing_entitlements entitlement
          SET plan_key = 'fixed',
-             billing_status = CASE WHEN $3 = 'past_due' THEN 'past_due' ELSE 'active' END,
+             -- Stripe past_due stays visible in provider_subscription_status; the
+             -- hotel keeps working while Stripe retries, as on legacy (section 4).
+             billing_status = 'active',
              billing_provider = 'stripe',
              billing_customer_ref = $4,
              billing_subscription_ref = $5,

@@ -21,6 +21,7 @@ describe("Stripe legacy subscription adoption port", () => {
       paymentKind: "fixed_plan",
       flatThirtyDayPrice: true,
       unitAmountMinor: 3_500,
+      productId: "prod_legacy",
       adoptionMarker: null,
       snapshot: { fixedPlanVerified: false, retainedLegacyPrice: false, currency: "EUR" },
     });
@@ -29,7 +30,7 @@ describe("Stripe legacy subscription adoption port", () => {
     ]);
   });
 
-  it("marks adoption with metadata only and returns the verified snapshot", async () => {
+  it("marks adoption with metadata only, pinning the kept product", async () => {
     const calls: Array<{ url: string; body: string; headers: Record<string, string> }> = [];
     const port = createStripeLegacySubscriptionAdoption({
       secretKey: "sk_test_secret",
@@ -39,43 +40,53 @@ describe("Stripe legacy subscription adoption port", () => {
           body: String(init?.body ?? ""),
           headers: (init?.headers ?? {}) as Record<string, string>,
         });
-        return response({
-          ...legacySubscription(),
-          metadata: {
-            ...legacySubscription().metadata,
-            vayada_property_id: "property-1",
-            vayada_organization_id: "organization-1",
-            vayada_plan: "fixed",
-            vayada_legacy_adoption: "v1",
-          },
-        });
+        return response(legacySubscription());
       },
     });
 
-    const snapshot = await port.markAdopted({
-      subscriptionId: "sub_legacy",
-      propertyId: "property-1",
-      organizationId: "organization-1",
-      idempotencyKey: "legacy-adoption:property-1:sub_legacy:v1",
-    });
+    await expect(
+      port.markAdopted({
+        subscriptionId: "sub_legacy",
+        propertyId: "property-1",
+        organizationId: "organization-1",
+        productId: "prod_legacy",
+        idempotencyKey: "legacy-adoption:property-1:sub_legacy:v1",
+      }),
+    ).resolves.toBeUndefined();
 
-    expect(snapshot).toMatchObject({
+    expect(calls[0]?.url).toBe("https://api.stripe.com/v1/subscriptions/sub_legacy");
+    expect(calls[0]?.headers["Idempotency-Key"]).toBe("legacy-adoption:property-1:sub_legacy:v1");
+    const body = new URLSearchParams(calls[0]?.body);
+    expect([...body.keys()].sort()).toEqual([
+      "metadata[vayada_legacy_adoption]",
+      "metadata[vayada_legacy_product]",
+      "metadata[vayada_organization_id]",
+      "metadata[vayada_plan]",
+      "metadata[vayada_property_id]",
+    ]);
+    expect(body.get("metadata[vayada_legacy_adoption]")).toBe("v1");
+    expect(body.get("metadata[vayada_legacy_product]")).toBe("prod_legacy");
+  });
+
+  it("verifies the marked subscription as the retained legacy shape on a re-read", async () => {
+    const marked = {
+      ...legacySubscription(),
+      metadata: {
+        ...legacySubscription().metadata,
+        vayada_property_id: "property-1",
+        vayada_organization_id: "organization-1",
+        vayada_plan: "fixed",
+        vayada_legacy_adoption: "v1",
+        vayada_legacy_product: "prod_legacy",
+      },
+    };
+    expect(inspectLegacySubscription(marked).snapshot).toMatchObject({
       fixedPlanVerified: true,
       retainedLegacyPrice: true,
       amountMinor: 3_500,
       propertyId: "property-1",
       organizationId: "organization-1",
     });
-    expect(calls[0]?.url).toBe("https://api.stripe.com/v1/subscriptions/sub_legacy");
-    expect(calls[0]?.headers["Idempotency-Key"]).toBe("legacy-adoption:property-1:sub_legacy:v1");
-    const body = new URLSearchParams(calls[0]?.body);
-    expect([...body.keys()].sort()).toEqual([
-      "metadata[vayada_legacy_adoption]",
-      "metadata[vayada_organization_id]",
-      "metadata[vayada_plan]",
-      "metadata[vayada_property_id]",
-    ]);
-    expect(body.get("metadata[vayada_legacy_adoption]")).toBe("v1");
   });
 
   it("searches legacy subscriptions by hotel through every page", async () => {
@@ -119,6 +130,17 @@ describe("Stripe legacy subscription adoption port", () => {
       inspectLegacySubscription({ ...base, items: { data: [{ ...item, quantity: 2 }] } })
         .flatThirtyDayPrice,
     ).toBe(false);
+    for (const price of [
+      { currency: "usd" },
+      { recurring: { interval: "day", interval_count: 30, usage_type: "metered" } },
+    ]) {
+      expect(
+        inspectLegacySubscription({
+          ...base,
+          items: { data: [{ ...item, price: { ...item.price, ...price } }] },
+        }).flatThirtyDayPrice,
+      ).toBe(false);
+    }
     expect(
       inspectLegacySubscription({ ...base, items: { data: [item, { ...item, id: "si_2" }] } })
         .unitAmountMinor,
@@ -160,7 +182,8 @@ function legacySubscription() {
             currency: "eur",
             billing_scheme: "per_unit",
             unit_amount: 3_500,
-            recurring: { interval: "day", interval_count: 30 },
+            product: "prod_legacy",
+            recurring: { interval: "day", interval_count: 30, usage_type: "licensed" },
             metadata: {},
           },
         },
