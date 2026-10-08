@@ -70,6 +70,8 @@ describe("production parity arguments", () => {
         "2",
         "--report",
         "json",
+        "--cohort-sha256",
+        "d".repeat(64),
       ],
       "/migrations",
       {
@@ -86,6 +88,7 @@ describe("production parity arguments", () => {
       environment: "preprod",
       warningBudget: 2,
       report: "json",
+      cohortSha256: "d".repeat(64),
       migrationsDir: "/migrations",
       runtimeApplicationRelease: "b".repeat(40),
       targetMediaBucket: "platform-media-test",
@@ -178,5 +181,12 @@ describe("production parity arguments", () => {
         {},
       ),
     ).toThrow("non-negative integer");
+    expect(() =>
+      parseProductionParityArgs(
+        ["node", "parity", "--source-run-id", RUN_ID, "--cohort-sha256", "D".repeat(64)],
+        "/migrations",
+        {},
+      ),
+    ).toThrow("lowercase SHA-256");
   });
 });

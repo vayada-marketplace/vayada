@@ -250,6 +250,48 @@ describe("production migration parity", () => {
     expect(scoped.reportChecksumSha256).not.toBe(plain.reportChecksumSha256);
   });
 
+  it("gates GO on COHORT_SCOPE_VERIFIED only when a cohort applies to the run", async () => {
+    const evidence = baseEvidence();
+    const plain = await runProductionParity(config(), services());
+    evidence.cohortScope = null;
+    const unscoped = await runProductionParity(config(), services({ evidence }));
+    expect(unscoped).toEqual(plain);
+    expect(plain).not.toHaveProperty("cohortScope");
+    // Checksum of this fixture before VAY-1362 PR 5: the no-cohort report is byte-for-byte unchanged.
+    expect(plain.reportChecksumSha256).toBe(
+      "6910d38f192938ef9ec3e5adaf25790bfcccd17711e17e1f96676836e81e4fa4",
+    );
+    await expect(
+      runProductionParity({ ...config(), cohortSha256: "not-a-sha" }, services()),
+    ).rejects.toThrow("lowercase SHA-256");
+
+    evidence.cohortScope = {
+      cohortSha256: SHA,
+      approvalProofSha256: SHA,
+      cohortProperties: 1,
+      nonCohortProperties: 1,
+      violations: [],
+    };
+    const scoped = await runProductionParity(
+      { ...config(), cohortSha256: SHA },
+      services({ evidence }),
+    );
+    expect(scoped.decision).toBe("go");
+    expect(scoped.cohortScope).toMatchObject({ cohortProperties: 1, nonCohortProperties: 1 });
+
+    evidence.cohortScope.violations.push({ category: "verifiedDomain", subjectId: RUN_ID });
+    const violated = await runProductionParity(
+      { ...config(), cohortSha256: SHA },
+      services({ evidence }),
+    );
+    expect(violated.decision).toBe("no-go");
+    expect(violated.cohortScope?.violations.verifiedDomain).toBe(1);
+    expect(violated.reportChecksumSha256).not.toBe(scoped.reportChecksumSha256);
+    expect(await runProductionParity(config(), services({ evidence }))).toMatchObject({
+      decision: "no-go",
+    });
+  });
+
   it("hard-fails an active/future booking lifecycle swap even when totals match", async () => {
     const reports = domainReports();
     reports.booking.parity.activeFutureTargetBookings["booking-1"]!.lifecycleStatus =

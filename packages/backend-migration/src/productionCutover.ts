@@ -464,7 +464,12 @@ const defaultServices: ProductionCutoverServices = {
       migrationsDir: config.migrationsDir,
       targetMediaBucket: config.media.targetBucket,
       mediaCdnBaseUrl: config.media.cdnBaseUrl,
-      ...(config.cohort ? { cohortSha256: config.cohort.cohortSha256 } : {}),
+      ...(config.cohort
+        ? {
+            cohortSha256: config.cohort.cohortSha256,
+            cohortApprovalProofSha256: config.cohort.approvalProofSha256,
+          }
+        : {}),
     });
     if (report.decision !== "go")
       throw new ProductionCutoverError("PARITY_NOT_GO", "Migration parity did not return GO");
