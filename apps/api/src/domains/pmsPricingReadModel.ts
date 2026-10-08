@@ -187,7 +187,7 @@ export function createPgPmsPricingReadModel(config: {
          LEFT JOIN pms.pricing_v2_rooms room
            ON room.property_id = head.property_id AND room.revision = head.revision
           AND jsonb_array_length(room.configuration->'offers') > 0
-         WHERE head.property_id = $1::uuid`,
+         WHERE head.property_id = $1::uuid AND head.revision > 0`,
         [readUuid(propertyId)],
       );
       if (result.rows.length === 0) return null;
@@ -237,10 +237,11 @@ export async function readPublishedFlexibleRatePlans(
 }
 
 /** True once the property has a pricing-v2 publication; it then supersedes the retired legacy
- * flexible plans and recurring pricing in the PMS pricing source. */
+ * flexible plans and recurring pricing in the PMS pricing source. A saved draft alone creates a
+ * head at revision 0, which is not a publication. */
 export async function hasPricingPublication(queryable: Queryable, propertyId: string) {
   const head = await queryable.query(
-    "SELECT 1 FROM pms.pricing_v2_heads WHERE property_id = $1::uuid",
+    "SELECT 1 FROM pms.pricing_v2_heads WHERE property_id = $1::uuid AND revision > 0",
     [propertyId],
   );
   return head.rows.length > 0;

@@ -167,6 +167,8 @@ describe("PMS mandatory-charge pricing-source snapshot loader", () => {
     expect(queries.every(({ values }) => values?.[0] === propertyId)).toBe(true);
     expect(queries[1]!.text).toContain("room_type.active IS TRUE");
     expect(queries[2]!.text).toContain("pms.pricing_v2_heads");
+    // A draft-only head (revision 0) is not a publication.
+    expect(queries[2]!.text).toContain("revision > 0");
     expect(queries[4]!.text).not.toMatch(/lifecycle\s*=/i);
     expect(snapshot?.serializedPayload).toContain('"disabled"');
     expect(queries.map(({ text }) => text).join("\n")).not.toMatch(/\bBEGIN\b|pg_advisory/i);
