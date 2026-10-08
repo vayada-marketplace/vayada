@@ -32,9 +32,8 @@ type AuthorizedScope = {
 };
 
 export type PmsPricingRoutesOptions = {
-  currencyForward?: import("../hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
   /** Owner-only first-currency and currency saves on the ordinary login (VAY-2056); replaces
-   * the forwarder. Requires propertyAccessRepository. */
+   * commandPort for the currency route. Requires propertyAccessRepository. */
   currencyCommandPort?: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">;
   propertyAccessRepository?: PropertyAccessRepository;
   commandPort: PmsPricingCommandPort;
@@ -50,14 +49,12 @@ export function registerPmsPricingCurrencyCommand(
   app: FastifyInstance,
   commandPort: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">,
   options: {
-    forward?: import("../hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
     requireOwnerSession?: boolean;
     propertyAccessRepository?: PropertyAccessRepository;
   } = {},
 ): void {
   const authorized = new WeakMap<FastifyRequest, AuthorizedScope>();
   const authorize = async (request: FastifyRequest, reply: FastifyReply) => {
-    if (options.forward) return;
     const scope = await authorizeRequest(
       request,
       reply,
@@ -71,8 +68,6 @@ export function registerPmsPricingCurrencyCommand(
     "/properties/:propertyId/pricing-source/currency",
     { onRequest: authorize },
     async (request, reply) => {
-      if (options.forward)
-        return options.forward(request, reply, request.params.propertyId, "currency");
       const scope = requireAuthorizedScope(authorized, request);
       const idempotencyKey = readIdempotencyKey(request);
       if (!idempotencyKey) return invalidRequest(reply, "A single Idempotency-Key is required.");
@@ -123,10 +118,7 @@ export async function registerPmsPricingRoutes(
       requireOwnerSession: true,
       propertyAccessRepository: options.propertyAccessRepository,
     });
-  } else
-    registerPmsPricingCurrencyCommand(app, options.commandPort, {
-      forward: options.currencyForward,
-    });
+  } else registerPmsPricingCurrencyCommand(app, options.commandPort);
 
   app.put<{ Params: RoomTypeParams; Body: unknown }>(
     "/properties/:propertyId/room-types/:roomTypeId/flexible-rate-plan",

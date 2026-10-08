@@ -15,7 +15,6 @@ import {
   propertyMediaCommandResultStatus,
   type PropertyMediaCommandRepository,
 } from "../domains/propertyMediaCommandRepository.js";
-import type { HotelSetupCommandForwarder } from "../hotelSetupCommandForwarder.js";
 import { enforceRoutePolicy } from "./policy.js";
 
 type PropertyMediaParams = { propertyId?: string };
@@ -28,9 +27,8 @@ export async function registerPropertyMediaRoutes(
   app: FastifyInstance,
   options: {
     repository: PropertyMediaCommandRepository;
-    forwardLogo?: HotelSetupCommandForwarder;
     /** Public API logo on the ordinary login (VAY-2056), behind the private service's
-     * Owner-only gates; replaces the forwarder. */
+     * Owner-only gates; replaces the shared writer for logo assignment. */
     logoAssignments?: Pick<PropertyMediaCommandRepository, "assignLogo">;
     logoOnly?: boolean;
     propertyAccessRepository?: PropertyAccessRepository;
@@ -68,8 +66,6 @@ export async function registerPropertyMediaRoutes(
       if (!body) return invalidRequest(reply, "A valid logo assignment is required.");
       const idempotencyKey = parseIdempotencyKey(request, reply);
       if (!idempotencyKey) return reply;
-      if (options.forwardLogo && !options.logoAssignments)
-        return options.forwardLogo(request, reply, access.propertyId, "logo_assignment");
       return sendResult(
         reply,
         await (options.logoAssignments ?? options.repository).assignLogo({

@@ -749,7 +749,6 @@ jobs:
         run: >-
           npm --workspace vayada-api run test --
           src/sharedHotelSetupStatus.test.ts
-          src/hotelSetupCommandForwarder.test.ts
           src/hotelSetupCommandScope.test.ts
           src/hotelSetupCreationCommands.test.ts
           src/hotelSetupCreationCredentials.test.ts

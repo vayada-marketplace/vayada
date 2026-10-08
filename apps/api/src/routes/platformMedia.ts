@@ -26,7 +26,6 @@ import {
   normalizePlatformMediaPathPrefix,
   PROPERTY_MEDIA_PUBLIC_VARIANT_MAX_DIMENSIONS,
 } from "../platform/propertyMediaVariantContract.js";
-import type { HotelSetupCommandForwarder } from "../hotelSetupCommandForwarder.js";
 import { enforceRoutePolicy } from "./policy.js";
 import { sendPmsOperationsError, toPmsOperationsAccessError } from "./pmsOperations.js";
 
@@ -481,7 +480,6 @@ export type PlatformMediaPersistenceRequest =
   | { operation: "finalize"; context: RequestContext; sessionId: string };
 
 export type PlatformMediaRoutesOptions = {
-  forwardLogo?: HotelSetupCommandForwarder;
   logoOnly?: boolean;
   repository: PlatformMediaRepository;
   // A configured resolver must fail closed; it owns cleanup if acquisition fails.
@@ -943,19 +941,6 @@ export async function registerPlatformMediaRoutes(
         return sendMediaError(reply, 400, filePolicyError.code, filePolicyError.message);
       }
 
-      if (options.forwardLogo && policy.purpose === "property.logo") {
-        if (
-          request.body.resource.product !== "hotel_catalog" ||
-          request.body.resource.resourceType !== "property"
-        )
-          return sendMediaError(
-            reply,
-            400,
-            "invalid_resource_scope",
-            "Canonical property required.",
-          );
-        return options.forwardLogo(request, reply, request.body.resource.resourceId, "logo_upload");
-      }
       const createdAt = now().toISOString();
       const expiresAt = new Date(now().getTime() + 15 * 60 * 1000).toISOString();
       const idempotencyKey = request.body.idempotencyKey?.trim();
@@ -1258,12 +1243,6 @@ export async function registerPlatformMediaRoutes(
             "media_resource_forbidden",
             "Profile images can only be finalized by the signed-in user.",
           );
-        }
-        if (options.forwardLogo && session.purpose === "property.logo") {
-          const validation = validateFinalizeRequest(request.body, session);
-          if (!validation.ok)
-            return sendMediaError(reply, 400, validation.code, validation.message);
-          return await options.forwardLogo(request, reply, session.sessionId, "logo_finalize");
         }
         if (session.status === "completed") {
           await cleanupUploadedFiles({
