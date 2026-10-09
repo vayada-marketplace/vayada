@@ -6,6 +6,7 @@ import {
 } from "@vayada/domain-hotels";
 import {
   parsePmsRecurringMonthDay,
+  pricingAmountStep,
   type FlexibleRatePlanSnapshot,
   type PmsMandatoryChargeConfirmationEvidence,
   type PmsPricingCurrencyCapabilities,
@@ -305,14 +306,25 @@ export function validatePricingDraft(
   locale: string,
 ): PricingValidationErrors {
   const errors: PricingValidationErrors = {};
+  const step = /^[A-Z]{3}$/.test(state.currencyInput) ? pricingAmountStep(state.currencyInput) : 1;
+  // A valid decimal amount that is not a whole price step (a fractional rupiah) gets its own message.
+  const amountError = (input: string, allowZero: boolean, message: string) =>
+    normalizeMoneyInput(input, locale, allowZero, step)
+      ? null
+      : step > 1 && normalizeMoneyInput(input, locale, allowZero)
+        ? `Enter a whole amount without decimals: ${state.currencyInput} prices are whole units.`
+        : message;
   if (!/^[A-Z]{3}$/.test(state.currencyInput)) {
     errors.currency = "Enter a three-letter ISO currency code.";
   }
   if (state.rooms.length === 0) errors.rooms = "Complete at least one room before setting prices.";
   for (const room of state.rooms) {
-    if (!normalizeMoneyInput(room.baseAmountInput, locale, false)) {
-      errors[`base.${room.roomTypeId}`] = "Enter a positive amount with no more than two decimals.";
-    }
+    const baseError = amountError(
+      room.baseAmountInput,
+      false,
+      "Enter a positive amount with no more than two decimals.",
+    );
+    if (baseError) errors[`base.${room.roomTypeId}`] = baseError;
     if (room.additionalGuestEnabled) {
       if (room.maximumAdults <= 1) {
         errors[`included.${room.roomTypeId}`] =
@@ -323,9 +335,12 @@ export function validatePricingDraft(
       if (included === null) {
         errors[`included.${room.roomTypeId}`] = `Enter a whole number below ${room.maximumAdults}.`;
       }
-      if (!normalizeMoneyInput(room.additionalGuestAmountInput, locale, true)) {
-        errors[`additional.${room.roomTypeId}`] = "Enter zero or a positive amount.";
-      }
+      const additionalError = amountError(
+        room.additionalGuestAmountInput,
+        true,
+        "Enter zero or a positive amount.",
+      );
+      if (additionalError) errors[`additional.${room.roomTypeId}`] = additionalError;
     }
   }
   if (wholeNumber(state.freeCancellationDeadlineDaysInput, 0, 365) === null) {
@@ -350,9 +365,12 @@ export function validatePricingDraft(
       errors[`season.${index}.end`] = "Enter a valid end month and day.";
     }
     state.rooms.forEach((room) => {
-      if (!normalizeMoneyInput(season.roomPrices[room.roomTypeId] ?? "", locale, false)) {
-        errors[`season.${index}.${room.roomTypeId}`] = "Enter a positive seasonal price.";
-      }
+      const seasonError = amountError(
+        season.roomPrices[room.roomTypeId] ?? "",
+        false,
+        "Enter a positive seasonal price.",
+      );
+      if (seasonError) errors[`season.${index}.${room.roomTypeId}`] = seasonError;
     });
   });
   for (let left = 0; left < state.seasons.length; left += 1) {
@@ -365,9 +383,12 @@ export function validatePricingDraft(
   if (state.weekendEnabled) {
     if (state.weekendDays.length === 0) errors.weekendDays = "Choose at least one weekend night.";
     state.rooms.forEach((room) => {
-      if (!normalizeMoneyInput(state.weekendSurcharges[room.roomTypeId] ?? "", locale, true)) {
-        errors[`weekend.${room.roomTypeId}`] = "Enter zero or a positive surcharge.";
-      }
+      const weekendError = amountError(
+        state.weekendSurcharges[room.roomTypeId] ?? "",
+        true,
+        "Enter zero or a positive surcharge.",
+      );
+      if (weekendError) errors[`weekend.${room.roomTypeId}`] = weekendError;
     });
   }
   if (!state.mandatoryChargesAcknowledged) {
@@ -391,8 +412,9 @@ export function buildPricingDraftRequest(
   if (revision.baseRevisions === null) {
     throw new Error(PRICING_DRAFT_MANIFEST_UNAVAILABLE_MESSAGE);
   }
+  const step = /^[A-Z]{3}$/.test(state.currencyInput) ? pricingAmountStep(state.currencyInput) : 1;
   const amount = (input: string, allowZero = false) =>
-    normalizeMoneyInput(input, locale, allowZero);
+    normalizeMoneyInput(input, locale, allowZero, step);
   const payload = {
     "rate.currency": state.currencyInput || null,
     "rate.base_nightly_rate": Object.fromEntries(
@@ -462,10 +484,12 @@ export function buildPricingDraftRequest(
 }
 
 /** Converts a localized scale-2 input to canonical decimal text without floating-point money. */
+/** `step` is the currency's price step in minor units: 100 for IDR, whole rupiah (VAY-2085). */
 export function normalizeMoneyInput(
   input: string,
   locale: string,
   allowZero: boolean,
+  step = 1,
 ): string | null {
   const symbols = numberSymbols(locale);
   const value = input.trim().replace(/[\s\u00a0\u202f']/g, "");
@@ -474,7 +498,9 @@ export function normalizeMoneyInput(
   if (!normalized) return null;
   const match = /^(0|[1-9]\d{0,12})(?:\.(\d{1,2}))?$/.exec(normalized);
   if (!match) return null;
-  const canonical = `${match[1]}.${(match[2] ?? "").padEnd(2, "0")}`;
+  const fraction = (match[2] ?? "").padEnd(2, "0");
+  if (BigInt(`${match[1]}${fraction}`) % BigInt(step) !== BigInt(0)) return null;
+  const canonical = `${match[1]}.${fraction}`;
   return !allowZero && canonical === "0.00" ? null : canonical;
 }
 
@@ -520,17 +546,24 @@ function validGroupedInteger(value: string, group: string): boolean {
   );
 }
 
-export function discountedDecimal(amountDecimal: string, discountPercent: number): string {
+/** Half-up to the currency's price step, as the pricing calculator does (whole rupiah for IDR). */
+export function discountedDecimal(
+  amountDecimal: string,
+  discountPercent: number,
+  step = 1,
+): string {
   const minor = decimalToMinor(amountDecimal);
-  const result = (minor * BigInt(100 - discountPercent) + BigInt(50)) / BigInt(100);
+  const result =
+    ((minor * BigInt(100 - discountPercent) + BigInt(50 * step)) / BigInt(100 * step)) *
+    BigInt(step);
   return minorToDecimal(result);
 }
 
-export function formatDecimal(amountDecimal: string, locale: string): string {
+export function formatDecimal(amountDecimal: string, locale: string, wholeUnits = false): string {
   const symbols = numberSymbols(locale);
   const [integer, fraction = "00"] = amountDecimal.split(".");
   const grouped = integer!.replace(/\B(?=(\d{3})+(?!\d))/g, symbols.group || ",");
-  return `${grouped}${symbols.decimal}${fraction.padEnd(2, "0")}`;
+  return wholeUnits ? grouped : `${grouped}${symbols.decimal}${fraction.padEnd(2, "0")}`;
 }
 
 export const PRICING_DRAFT_MANIFEST_UNAVAILABLE_MESSAGE =

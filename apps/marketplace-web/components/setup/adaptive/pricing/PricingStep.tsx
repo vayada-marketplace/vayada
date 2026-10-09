@@ -16,6 +16,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { pricingAmountStep } from "@vayada/domain-pms";
 import type { AdaptiveSetupStepComponentProps } from "../AdaptiveSetupStepFormDispatcher";
 import {
   PRICING_WEEKDAYS,
@@ -1234,11 +1235,12 @@ function nonRefundablePreview(
   locale: string,
   currency: string | null,
 ): string {
-  const amount = normalizeMoneyInput(input, locale, false);
+  const step = currency && /^[A-Z]{3}$/.test(currency) ? pricingAmountStep(currency) : 1;
+  const amount = normalizeMoneyInput(input, locale, false, step);
   const discount = /^\d+$/.test(discountInput) ? Number(discountInput) : null;
   if (!amount || discount === null || discount < 1 || discount > 50)
     return "Complete the price and discount";
-  const result = formatDecimal(discountedDecimal(amount, discount), locale);
+  const result = formatDecimal(discountedDecimal(amount, discount, step), locale, step > 1);
   return currency ? `${currency} ${result}` : result;
 }
 

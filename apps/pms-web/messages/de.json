@@ -1705,6 +1705,7 @@
   "pricing.includedAdults.other": "{count} Erwachsene inklusive",
   "pricing.error.invalidPrice": "Geben Sie einen gültigen Preis mit Dezimalpunkt ein.",
   "pricing.error.priceZero": "Geben Sie einen Preis größer als null ein.",
+  "pricing.error.wholeUnitsOnly": "Geben Sie einen ganzen Betrag ohne Nachkommastellen ein: IDR-Preise sind ganze Rupiah.",
   "pricing.error.priceTooLarge": "Dieser Preis ist zu hoch.",
   "pricing.error.adjustmentInvalid": "Wählen Sie eine Anpassungsart und geben Sie einen gültigen Betrag mit Vorzeichen ein.",
   "pricing.error.paymentMethodRequired": "Wählen Sie mindestens eine akzeptierte Zahlungsmethode aus.",

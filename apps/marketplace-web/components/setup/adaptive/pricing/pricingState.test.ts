@@ -23,6 +23,10 @@ describe("pricing state", () => {
     expect(normalizeMoneyInput("1234.56", "de-DE", false)).toBe("1234.56");
     expect(normalizeMoneyInput("1,234.50", "en-US", false)).toBe("1234.50");
     expect(normalizeMoneyInput("1234,56", "en-US", false)).toBeNull();
+    // IDR: whole rupiah only (step 100); ".00" is still a whole amount.
+    expect(normalizeMoneyInput("1.500.000", "de-DE", false, 100)).toBe("1500000.00");
+    expect(normalizeMoneyInput("1500000.00", "en-US", false, 100)).toBe("1500000.00");
+    expect(normalizeMoneyInput("1500000.50", "en-US", false, 100)).toBeNull();
     expect(normalizeMoneyInput("1.234.56", "de-DE", false)).toBeNull();
     expect(normalizeMoneyInput("1,23.45", "en-US", false)).toBeNull();
     expect(normalizeMoneyInput("12,345", "de-DE", false)).toBeNull();
@@ -39,6 +43,10 @@ describe("pricing state", () => {
     expect(discountedDecimal("160.00", 10)).toBe("144.00");
     expect(discountedDecimal("0.05", 10)).toBe("0.05");
     expect(discountedDecimal("0.05", 50)).toBe("0.03");
+    // IDR (VAY-2085) rounds half-up to whole rupiah, like the pricing calculator.
+    expect(discountedDecimal("1001.00", 10, 100)).toBe("901.00");
+    expect(discountedDecimal("1005.00", 10, 100)).toBe("905.00");
+    expect(discountedDecimal("1004.00", 10, 100)).toBe("904.00");
   });
 
   it("validates complete recurring configuration and annual overlaps", () => {
@@ -50,6 +58,18 @@ describe("pricing state", () => {
     state.seasons[1]!.startMonthDay = "10-02";
     state.seasons[1]!.endMonthDay = "11-01";
     expect(validatePricingDraft(state, "de-DE")).toEqual({});
+  });
+
+  it("asks for whole rupiah when the pricing currency is IDR (VAY-2085)", () => {
+    const state = completeState();
+    state.currencyInput = "IDR";
+    const room = state.rooms[0]!;
+    room.baseAmountInput = "1500000,50";
+    expect(validatePricingDraft(state, "de-DE")[`base.${room.roomTypeId}`]).toMatch(
+      /whole amount without decimals: IDR/,
+    );
+    room.baseAmountInput = "1.500.000";
+    expect(validatePricingDraft(state, "de-DE")[`base.${room.roomTypeId}`]).toBeUndefined();
   });
 
   it("enforces the shared-draft and PMS intersection for seasons", () => {

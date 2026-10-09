@@ -1691,6 +1691,7 @@
   "pricing.includedAdults.other": "{count} adults included",
   "pricing.error.invalidPrice": "Enter a valid price using a decimal point.",
   "pricing.error.priceZero": "Enter a price greater than zero.",
+  "pricing.error.wholeUnitsOnly": "Enter a whole amount without decimals: IDR prices are whole rupiah.",
   "pricing.error.priceTooLarge": "This price is too large.",
   "pricing.error.adjustmentInvalid": "Choose an adjustment type and enter a valid signed amount.",
   "pricing.error.paymentMethodRequired": "Choose at least one accepted payment method.",
