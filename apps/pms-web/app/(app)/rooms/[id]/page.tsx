@@ -3,7 +3,7 @@
 import { useState, useEffect, use } from "react";
 import { ArrowLeftIcon, TrashIcon } from "@heroicons/react/24/outline";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   roomsService,
   roomTypeUpdateForm,
@@ -12,6 +12,7 @@ import {
   type PropertyPlan,
 } from "@/services/rooms";
 import RoomTypeForm from "@/components/rooms/RoomTypeForm";
+import { RoomPricesTab } from "@/components/pricing/RoomPricesTab";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useTranslation } from "@/lib/i18n";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
@@ -20,6 +21,7 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
   const { id } = use(params);
   const { t } = useTranslation();
   const router = useRouter();
+  const pricesFirst = useSearchParams().get("tab") === "prices";
   const [room, setRoom] = useState<RoomType | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<{ cause: unknown; message: string } | null>(null);
@@ -147,6 +149,8 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
         mode="edit"
         roomTypeId={id}
         propertyPlan={propertyPlan}
+        prices={<RoomPricesTab roomTypeId={id} />}
+        initialTab={pricesFirst ? "prices" : undefined}
       />
       {showDeleteConfirm && (
         <ConfirmDialog

@@ -160,9 +160,10 @@ const clampNumberInput = (raw: string, min: number, max?: number): number => {
   return n;
 };
 
-type RoomTab = "details" | "media";
+export type RoomTab = "details" | "prices" | "media";
 const ROOM_TABS: { key: RoomTab; labelKey: string }[] = [
   { key: "details", labelKey: "rooms.form.tabDetails" },
+  { key: "prices", labelKey: "rooms.form.tabPricing" },
   { key: "media", labelKey: "rooms.form.tabMedia" },
 ];
 
@@ -190,6 +191,10 @@ interface RoomTypeFormProps {
   mode?: "create" | "edit";
   roomTypeId?: string;
   propertyPlan: PropertyPlan | null;
+  // The Prices tab (an existing room only). It has its own save, so it sits outside this form and stays
+  // mounted once opened: switching tabs keeps unsaved prices.
+  prices?: React.ReactNode;
+  initialTab?: RoomTab;
 }
 
 function bedsToSummary(beds: { type: string; count: number }[]): string {
@@ -223,6 +228,8 @@ export default function RoomTypeForm({
   mode = "create",
   roomTypeId,
   propertyPlan,
+  prices,
+  initialTab,
 }: RoomTypeFormProps) {
   const { t } = useTranslation();
   const translateRoomOption = (value: string): string => {
@@ -230,7 +237,11 @@ export default function RoomTypeForm({
     const translated = t(key);
     return translated === key ? value : translated;
   };
-  const [activeTab, setActiveTab] = useState<RoomTab>("details");
+  const [activeTab, setActiveTab] = useState<RoomTab>(
+    prices && initialTab ? initialTab : "details",
+  );
+  const [pricesOpened, setPricesOpened] = useState(activeTab === "prices");
+  const tabs = ROOM_TABS.filter((tab) => tab.key !== "prices" || prices);
   const [sortOrderInput, setSortOrderInput] = useState<string>(String(form.sortOrder ?? 0));
   const [latitudeInput, setLatitudeInput] = useState<string>(
     form.latitude != null ? String(form.latitude) : "",
@@ -309,34 +320,39 @@ export default function RoomTypeForm({
     onChange(updated);
   };
 
-  return (
+  const roomForm = (
     <form onSubmit={onSubmit}>
-      {error && (
+      {error && activeTab !== "prices" && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 font-medium">
           {error}
         </div>
       )}
-      {success && (
+      {success && activeTab !== "prices" && (
         <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-[11px] text-green-700 font-medium">
           {success}
         </div>
       )}
 
-      <p className="mb-4 rounded-lg border border-gray-200 bg-white p-3 text-[11px] text-gray-600">
-        {t("rooms.form.pricingPointer")}{" "}
-        <Link href="/pricing" className="font-semibold text-primary-600 hover:text-primary-700">
-          {t("rooms.form.openPricing")}
-        </Link>
-      </p>
+      {!prices && (
+        <p className="mb-4 rounded-lg border border-gray-200 bg-white p-3 text-[11px] text-gray-600">
+          {t("rooms.form.pricingPointer")}{" "}
+          <Link href="/pricing" className="font-semibold text-primary-600 hover:text-primary-700">
+            {t("rooms.form.openPricing")}
+          </Link>
+        </p>
+      )}
 
       {/* Tabs */}
       <div className="relative border-b border-gray-200 mb-5 md:mb-6">
         <div className="flex gap-5 md:gap-6 overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
-          {ROOM_TABS.map((tab) => (
+          {tabs.map((tab) => (
             <button
               key={tab.key}
               type="button"
-              onClick={() => setActiveTab(tab.key)}
+              onClick={() => {
+                setActiveTab(tab.key);
+                if (tab.key === "prices") setPricesOpened(true);
+              }}
               className={`shrink-0 whitespace-nowrap pb-2.5 text-[12px] font-medium transition-colors relative ${
                 activeTab === tab.key ? "text-gray-900" : "text-gray-400 hover:text-gray-600"
               }`}
@@ -1472,31 +1488,39 @@ export default function RoomTypeForm({
       )}
 
       {/* Submit / Cancel — sticky on mobile, inline on desktop */}
-      <div className="mt-6 flex items-center justify-end gap-3 sticky bottom-0 -mx-4 md:mx-0 px-4 md:px-0 py-3 md:py-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:pb-0 bg-gray-50/95 md:bg-transparent backdrop-blur md:backdrop-blur-none border-t border-gray-200 md:border-t-0 z-10">
-        {onCancel ? (
+      {activeTab !== "prices" && (
+        <div className="mt-6 flex items-center justify-end gap-3 sticky bottom-0 -mx-4 md:mx-0 px-4 md:px-0 py-3 md:py-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:pb-0 bg-gray-50/95 md:bg-transparent backdrop-blur md:backdrop-blur-none border-t border-gray-200 md:border-t-0 z-10">
+          {onCancel ? (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="flex-1 md:flex-initial text-center px-4 py-2.5 md:py-2 text-[13px] md:text-[12px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 bg-white transition-colors"
+            >
+              {cancelLabel ?? t("common.cancel")}
+            </button>
+          ) : (
+            <Link
+              href={cancelHref}
+              className="flex-1 md:flex-initial text-center px-4 py-2.5 md:py-2 text-[13px] md:text-[12px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 bg-white transition-colors"
+            >
+              {cancelLabel ?? t("common.cancel")}
+            </Link>
+          )}
           <button
-            type="button"
-            onClick={onCancel}
-            className="flex-1 md:flex-initial text-center px-4 py-2.5 md:py-2 text-[13px] md:text-[12px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 bg-white transition-colors"
+            type="submit"
+            disabled={saving}
+            className="flex-1 md:flex-initial px-6 py-2.5 md:py-2 bg-primary-600 text-white text-[13px] md:text-[12px] font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
           >
-            {cancelLabel ?? t("common.cancel")}
+            {saving ? t("common.saving") : (submitLabel ?? t("common.save"))}
           </button>
-        ) : (
-          <Link
-            href={cancelHref}
-            className="flex-1 md:flex-initial text-center px-4 py-2.5 md:py-2 text-[13px] md:text-[12px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 bg-white transition-colors"
-          >
-            {cancelLabel ?? t("common.cancel")}
-          </Link>
-        )}
-        <button
-          type="submit"
-          disabled={saving}
-          className="flex-1 md:flex-initial px-6 py-2.5 md:py-2 bg-primary-600 text-white text-[13px] md:text-[12px] font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
-        >
-          {saving ? t("common.saving") : (submitLabel ?? t("common.save"))}
-        </button>
-      </div>
+        </div>
+      )}
     </form>
+  );
+  return (
+    <>
+      {roomForm}
+      {prices && pricesOpened && <div hidden={activeTab !== "prices"}>{prices}</div>}
+    </>
   );
 }

@@ -1,13 +1,15 @@
 "use client";
 
 import { useMemo } from "react";
-import { PricingEditor } from "@/components/pricing/PricingEditor";
-import { errorText } from "@/components/pricing/pricingAmounts";
-import { usePricingRooms } from "@/components/pricing/usePricingRooms";
 import { useTranslation } from "@/lib/i18n";
 import { createReplacementPricingClient } from "@/services/api/replacementPricingClient";
 
-export default function PricingPage() {
+import { PricingEditor } from "./PricingEditor";
+import { errorText } from "./pricingAmounts";
+import { usePricingRooms } from "./usePricingRooms";
+
+/** The room page's Prices tab: this room's rates. Saving publishes them with the property's other rooms unchanged. */
+export function RoomPricesTab({ roomTypeId }: { roomTypeId: string }) {
   const { rooms, error } = usePricingRooms();
   const { t } = useTranslation();
   const client = useMemo(
@@ -16,13 +18,13 @@ export default function PricingPage() {
   );
   if (error)
     return (
-      <p role="alert" className="p-8 text-red-700">
+      <p role="alert" className="text-sm text-red-700">
         {errorText(error, t, "pricing.page.loadFailed")}
       </p>
     );
   if (!rooms || !client)
     return (
-      <p role="status" className="p-8">
+      <p role="status" className="text-sm text-gray-600">
         {t("pricing.page.loading")}
       </p>
     );
@@ -32,6 +34,7 @@ export default function PricingPage() {
       client={client}
       roomNames={rooms.names}
       setup={{ propertyId: rooms.propertyId, rooms: rooms.setupRooms }}
+      roomTypeId={roomTypeId}
     />
   );
 }
