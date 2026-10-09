@@ -192,7 +192,7 @@ describe("production PMS cohort operating calendar", () => {
   });
 
   it("writes no calendar while an operating room type lacks native room facts", () => {
-    const source = [hotel(1), roomType(1, 1, 1, { bed_type: "1 Futon" }), ...rooms(1, 1, 1)];
+    const source = [hotel(1), roomType(1, 1, 1, { bed_type: "" }), ...rooms(1, 1, 1)];
     expect(tables(plan(source, target(1, [property(1)])))).toEqual([]);
   });
 
@@ -210,12 +210,13 @@ describe("production PMS cohort operating calendar", () => {
       defaultMinimumStayNights: 1,
       createdByUserId: OWNER,
       createdAt: AT,
+      // In the key order jsonb returns (shorter keys first).
       bindings: [
         {
           roomTypeId: `${ROOM_TYPE}1`,
+          physicalCapacityCount: 1,
           sourceRoomFactsRevision: 1,
           sourceRoomUnitsRevision: 1,
-          physicalCapacityCount: 1,
           startingSellableLimitCount: 1,
         },
       ],
@@ -229,13 +230,21 @@ describe("production PMS cohort operating calendar", () => {
     );
     expect(rerun.blockers).toEqual([]);
     expect(rerun.checksum).toBe(first.checksum);
-    const foreign = plan(
-      source,
-      target(1, [property(1, { storedCalendar: { ...stored, idempotencyKeyId: OWNER } })]),
-    );
-    expect(foreign.blockers).toContainEqual(
+    const rows = (result: typeof first) =>
+      JSON.stringify(
+        result.records.filter((record) => /calendar|idempotency/.test(record.targetTable)),
+      );
+    expect(rows(rerun)).toBe(rows(first));
+    const foreign = { ...stored, idempotencyKeyId: OWNER };
+    expect(plan(source, target(1, [property(1, { storedCalendar: foreign })])).blockers).toEqual([
       expect.objectContaining({ code: "COHORT_CALENDAR_CONFLICT" }),
+    ]);
+    // A native calendar where the import plans none (here: no time zone) is the owner's.
+    const owners = plan(
+      source,
+      target(1, [property(1, { storedCalendar: foreign, timeZone: null })]),
     );
+    expect([owners.blockers, tables(owners)]).toEqual([[], []]);
   });
 
   it("mirrors the native calendar insert columns and event keys", async () => {
