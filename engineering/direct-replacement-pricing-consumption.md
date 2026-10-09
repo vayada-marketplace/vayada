@@ -34,27 +34,24 @@ It rejects dangling heads, incomplete room sets and malformed sources; it does
 not authorize access. Callers must authorize the property, hold its inventory
 lock in the same transaction and check current owners separately. Channex job
 leases and channel connections must not become public guest authorization.
-No verified external-PMS pricing-authority adapter was found in these direct
-paths. Booking's `pricing_authority_revisions` and `pricing_authority_heads`
-record an explicit staff choice: `vayada`, `external` or `unconfigured`.
-Missing state is unconfigured; no backfill infers authority from rates or channels.
-Migration0202 stores immutable actor/organization/request history with a scoped
-head. The owner command uses live pricing-manage authorization, expected-head
-comparison and idempotency under the property inventory lock. Reads take that
-same lock inside the caller's authorized transaction. Public access, active
-ownership and provider readiness still require independent checks; only an
-explicit Vayada choice can enter the forthcoming local-price adapter. Bind its
-revision into the PMS source key, so changing authority invalidates quotes.
-External choices stay unavailable until an external adapter is verified. UI and
-route wiring must not silently select Vayada for existing properties.
+There is no direct-booking price-source choice (VAY-2079). The former
+`vayada`/`external`/`unconfigured` choice and its routes are removed; a current
+publication is what makes prices public. Its tables
+(`booking.pricing_authority_revisions`, `booking.pricing_authority_heads`) stay
+unread until the follow-up migration drops them. The owning organization is the
+single organization holding active owner/operator links to both the PMS property
+(`pms`/`pms_property`) and the catalog property (`hotel_catalog`/`property`);
+none or more than one fails closed. External-PMS prices need their own verified
+adapter before they can be offered.
 
 `publicPricingAuthority.ts` now implements the internal public-access gate in a
 caller-owned READ COMMITTED transaction. It re-resolves canonical identity after
-the inventory lock, locks the choosing organization, public catalog/profile rows,
+the inventory lock, derives the owning organization from its resource links,
+locks it, the public catalog/profile rows,
 current owner/operator links and entitlements, and checks expiry against the
 current clock. Only active, complete properties with fresh ready public profiles
-and explicit Vayada authority pass. It returns the authority revision for the
-subsequent source-identity adapter. It does not establish published-price freshness,
+and a single owning organization pass. It returns the property and that
+organization for the subsequent source-identity adapter. It does not establish published-price freshness,
 stay/calendar/inventory eligibility or executable payment readiness. Routes remain
 unavailable until those checks and composition/acceptance are connected.
 The gate targets locale-less canonical slugs, matching Distribution publication
@@ -66,10 +63,10 @@ publication and concrete PMS/Booking/Finance/charge owner ports. It rejects
 unknown source/owner keys, missing publications, stale complete sources, inactive
 rooms, changed offer policies, unavailable or mismatched Finance evidence and
 mismatched charge declarations. The complete offer set includes linked ancestors.
-Lock order is public authority/inventory/identity/catalog, room facts and rooms,
+Lock order is inventory/identity/catalog, room facts and rooms,
 Booking terms, Finance settings/account/evidence, then the immutable charge read.
 Public expiry is rechecked after owner reads. `booking.pms.publication.v2` binds
-property, organization, authority revision, published revision and all three
+property, organization, published revision and all three
 current source keys. The returned object is internal composition input, never a
 public response or permission to accept a stay. Routes remain unavailable.
 
@@ -119,7 +116,7 @@ Departure-date services remain possible when the add-on owner permits them.
 `pricing-offer.v2` keys, hashes of the current PMS source identity, room and offer.
 These keys are replacement-selection identities, not legacy Distribution offer
 aliases. Discovery must derive them from the same validated publication; any
-source/publication/authority change requires refreshing the selection. The
+source/publication/owner change requires refreshing the selection. The
 transaction adapter reuses the PMS calculator per physical room, preserving
 selected meal, linked ancestor terms and every night's exact component amounts.
 It returns `room_components` with evaluator version `booking.room-components.v1`,
@@ -160,9 +157,8 @@ owner's actual evidence identity rather than manufacturing placeholder strings.
 Recheck the public property, operating eligibility, same-day policy and
 property-local cutoff, materialized calendar, inventory and active ownership.
 A minimum advance of zero does not bypass same-day controls; auto-open settings
-are not a substitute for available materialized inventory. An external-authority
-or unknown-authority decision returns unavailable unless the corresponding
-verified adapter can provide current evidence. Never fall back to old room base
+are not a substitute for available materialized inventory. A property without a
+current publication or a single owning organization returns unavailable. Never fall back to old room base
 rates or Channex values when replacement evidence is missing.
 
 ## Composition, money and persistence
@@ -289,7 +285,7 @@ acceptance and lifecycle consumers support the same allocated evidence.
    reject missing child ages, unknown offers, malformed extras and unsafe amounts.
 2. Caller-transaction approved-publication owner read with real PostgreSQL tests:
    tenant/publication scope, no draft visibility, complete room/ancestor coverage,
-   stale owners, external/unknown authority and publication/closure concurrency.
+   stale owners, ambiguous ownership and publication/closure concurrency.
 3. Booking composition with concrete promotion/add-on/charge/Finance/FX owners.
    Cover independent windows, stack/nonstack, selected-person/date extras and
    executable full/deposit schedules; unsupported owner capabilities fail closed.
