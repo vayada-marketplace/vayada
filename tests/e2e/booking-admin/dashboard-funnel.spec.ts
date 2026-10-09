@@ -19,8 +19,7 @@ test("shows sequential percentages, card branch, payment split and recomputes al
         funnel: {
           steps: [
             ["page_visit", 100, 100, 100],
-            ["room_viewed", 90, 90, 90],
-            ["rate_selected", 80, 80, 88.9],
+            ["rate_selected", 80, 80, 80],
             ["details_completed", 80, 80, 100],
             ["complete_booking_clicked", 80, 80, 100],
             ["payment_authorized", 10, 10, 25],

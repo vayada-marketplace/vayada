@@ -511,7 +511,7 @@ function conversionFunnelSql(): string {
       AND event.property_id = scoped.property_id AND event.tenant_scope = 'property'
       AND event.source_system = 'distribution' AND event.resource_product = 'distribution'
       AND event.resource_type = 'booking_web_hotel'
-      AND event.event_type IN ('booking_web.page_visit', 'booking_web.room_viewed',
+      AND event.event_type IN ('booking_web.page_visit',
         'booking_web.rate_selected', 'booking_web.addons_step_passed', 'booking_web.details_completed',
         'booking_web.complete_booking_clicked', 'booking_web.payment_authorized', 'booking_web.booking_completed')
       AND event.event_status IN ('recorded', 'projected')

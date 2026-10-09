@@ -12,9 +12,12 @@ VAY-1284 and `typescript-backend-structure.md`. No legacy event backfill or forw
 - Count each session once at each stage, only after its preceding stage. All
   evidence must occur inside the inclusive property-local requested dates (at
   most 31 days). No inferred steps for deep links or historical partial sessions.
-- Stages: page_visit, room_viewed, rate_selected, addons_step_passed,
-  details_completed, complete_booking_clicked, payment_authorized, booking_completed.
+- Stages: page_visit, rate_selected, addons_step_passed, details_completed,
+  complete_booking_clicked, payment_authorized, booking_completed.
   Add-ons are shown only when enabled and active public add-ons exist.
+- room_viewed stays accepted and stored as funnel telemetry, but is not a stage
+  ([VAY-2074](https://linear.app/vayadacom/issue/VAY-2074)): guests can select a
+  rate from the room card without opening room details.
 - First valid Complete Booking click selects the session's payment branch.
   Matching subsequent authorization/completion evidence advances that branch;
   retries and repeated visits do not inflate counts. A changed payment method
