@@ -2213,10 +2213,11 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                   {t("settings.billing.paymentProviderDesc")}
                 </p>
 
-                {paymentError && (
+                {/* The page-level Save already shows its result in the banner at the top. */}
+                {paymentError && paymentError !== feedback?.message && (
                   <FeedbackAlert type="error" message={t(paymentError)} className="mb-3" />
                 )}
-                {paymentSuccess && (
+                {paymentSuccess && paymentSuccess !== feedback?.message && (
                   <FeedbackAlert type="success" message={t(paymentSuccess)} className="mb-3" />
                 )}
 
