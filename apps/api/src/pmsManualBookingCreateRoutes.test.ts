@@ -178,6 +178,36 @@ describe("target manual-booking create route", () => {
     expect(state.calls).toHaveLength(1);
   });
 
+  it("passes a custom rate without a currency through to the command (VAY-2065)", async () => {
+    const state: State = { calls: [] };
+    app = await testApp(state);
+    const payload = command("unpaid", "cash") as any;
+    payload.stays[0].pricing = { kind: "custom", nightlyAmount: { amountDecimal: "100.00" } };
+    expect((await request(app, payload)).statusCode).toBe(201);
+    expect(state.calls[0]?.stays[0]?.pricing).toEqual({
+      kind: "custom",
+      nightlyAmount: { amountDecimal: "100.00" },
+    });
+    payload.stays[0].pricing = {
+      kind: "custom",
+      nightlyAmount: { amountDecimal: "100.00", currency: "eur" },
+    };
+    expect((await request(app, payload)).json().code).toBe("invalid_body");
+  });
+
+  it("passes the preview's publication revision and rejects a malformed one", async () => {
+    const state: State = { calls: [] };
+    app = await testApp(state);
+    const payload = { ...(command("unpaid", "cash") as any), expectedPricingRevision: 3 };
+    expect((await request(app, payload)).statusCode).toBe(201);
+    expect(state.calls[0]?.expectedPricingRevision).toBe(3);
+    for (const expectedPricingRevision of [0, 1.5, "3"])
+      expect((await request(app, { ...payload, expectedPricingRevision })).json().code).toBe(
+        "invalid_body",
+      );
+    expect(state.calls).toHaveLength(1);
+  });
+
   it("passes trimmed additional guests in order and defaults an omitted list to none", async () => {
     const state: State = { calls: [] };
     app = await testApp(state);

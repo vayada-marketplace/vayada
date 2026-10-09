@@ -25,7 +25,6 @@ const fixture = () => {
 const scope = {
   propertyId: acceptanceFixture().property_id,
   organizationId: acceptanceFixture().organization_id,
-  authorityRevision: "authority:1",
 };
 beforeEach(() => {
   vi.resetAllMocks();

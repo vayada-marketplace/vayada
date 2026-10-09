@@ -18,6 +18,8 @@ export const PMS_MANUAL_BOOKING_PAYMENT_METHODS = [
 ] as const;
 
 export type PmsManualBookingMoney = Readonly<{ amountDecimal: string; currency: string }>;
+/** A custom nightly rate (v1 amendment, VAY-2065): without a currency the server prices it in the resolved pricing currency. */
+export type PmsManualBookingCustomAmount = Readonly<{ amountDecimal: string; currency?: string }>;
 export type PmsManualBookingDirectSource = (typeof PMS_MANUAL_BOOKING_DIRECT_SOURCES)[number];
 export type PmsManualBookingPaymentMethod = (typeof PMS_MANUAL_BOOKING_PAYMENT_METHODS)[number];
 
@@ -40,7 +42,7 @@ export type PmsManualBookingStay = PmsManualBookingStayBase &
       }>
     | Readonly<{
         ratePlanId: null;
-        pricing: Readonly<{ kind: "custom"; nightlyAmount: PmsManualBookingMoney }>;
+        pricing: Readonly<{ kind: "custom"; nightlyAmount: PmsManualBookingCustomAmount }>;
       }>
   );
 
@@ -80,6 +82,8 @@ export type PmsManualBookingCreateCommand = Readonly<{
   }>;
   /** Omitted means no additional guests. */
   additionalGuests?: readonly PmsManualBookingAdditionalGuest[];
+  /** Publication revision the client's preview showed; a different current one refuses the save. */
+  expectedPricingRevision?: number;
   privateNote: string | null;
   directSource: PmsManualBookingDirectSource;
   stays: readonly PmsManualBookingStay[];

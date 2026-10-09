@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   PMS_CALENDAR_AUTO_OPEN_CONTRACT_VERSION,
+  PMS_CALENDAR_AUTO_OPEN_DEFAULT_CONFIGURATION,
   PMS_CALENDAR_AUTO_OPEN_MAX_FIXED_MONTHS,
   PMS_CALENDAR_AUTO_OPEN_MAX_HORIZON_DAYS,
   calculatePmsCalendarAutoOpenHorizon,
@@ -85,6 +86,32 @@ describe("PMS calendar auto-open source", () => {
     expect(fingerprintPmsCalendarAutoOpenSource(source)).toBe(
       "613b3cff719ad4b744ecf0a049884f1115612a4b74de4ea44da07921b1e57ce5",
     );
+  });
+
+  it("accepts the virtual default setting revision and rejects negative revisions", () => {
+    const input = {
+      settingRevision: 0,
+      propertyProfileRevision: 1,
+      propertyTimeZone: "Etc/UTC",
+      operatingCalendarRevision: 1,
+      rooms: [{ roomTypeId: "room-a", roomFactsRevision: 1, roomUnitsRevision: 1 }],
+      pricing: {
+        pricingCurrencyRevision: 1,
+        flexibleRatePlans: [],
+        optionalPricingAggregateRevision: 0,
+      },
+    };
+
+    expect(createPmsCalendarAutoOpenSource(input).settingRevision).toBe(0);
+    expect(() => createPmsCalendarAutoOpenSource({ ...input, settingRevision: -1 })).toThrow(
+      "PMS calendar auto-open source is invalid",
+    );
+    expect(PMS_CALENDAR_AUTO_OPEN_DEFAULT_CONFIGURATION).toEqual({
+      enabled: true,
+      mode: "rolling",
+      rollingMonths: 12,
+      fixedEndMonth: null,
+    });
   });
 
   it("sorts room-owned sources without mutating the caller", () => {

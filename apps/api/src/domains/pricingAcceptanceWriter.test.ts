@@ -3,6 +3,7 @@ import { finishPricingAcceptance } from "./finishPricingAcceptance.js";
 import { preparePricingAcceptance } from "./preparePricingAcceptance.js";
 import { stagePricingAcceptanceNotifications } from "./pricingAcceptanceNotifications.js";
 import { writePricingAcceptance } from "./pricingAcceptanceWriter.js";
+import { readPricingCardReplay } from "./pricingCardPayment.js";
 import { stagePricingBookingDraft } from "./pricingBookingDraft.js";
 import { stagePricingBookingLifecycle } from "./pricingBookingLifecycle.js";
 import { stagePricingBookingRevenue } from "./pricingBookingRevenue.js";
@@ -21,6 +22,10 @@ vi.mock("./pricingPmsAcceptedReservationJob.js", () => ({
   stagePmsAcceptedPricingReservationJob: vi.fn(),
 }));
 vi.mock("./storePricingAcceptance.js", () => ({ storePricingAcceptance: vi.fn() }));
+vi.mock("./pricingCardPayment.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./pricingCardPayment.js")>()),
+  readPricingCardReplay: vi.fn(async () => null),
+}));
 
 const client = { query: vi.fn(), release: vi.fn() };
 const pool = { connect: vi.fn(async () => client) };
@@ -124,10 +129,28 @@ describe("pricing acceptance writer", () => {
       replayed: true,
     });
     expect(stagePricingBookingDraft).not.toHaveBeenCalled();
+    expect(readPricingCardReplay).toHaveBeenCalledWith(client, undefined, input.slug, {
+      kind: "replayed",
+      bookingId: "existing",
+      bookingReference: "VAY-EXISTING",
+      replayed: true,
+    });
     expect(client.query.mock.calls.map(([sql]) => sql)).toEqual([
       "BEGIN ISOLATION LEVEL READ COMMITTED",
       "COMMIT",
     ]);
+  });
+
+  it("answers a card replay with its pending payment instead of a plain acceptance", async () => {
+    vi.mocked(preparePricingAcceptance).mockResolvedValue({
+      kind: "replayed",
+      bookingId: "existing",
+      bookingReference: "VAY-EXISTING",
+      replayed: true,
+    });
+    const pending = { kind: "payment_required", bookingId: "existing" };
+    vi.mocked(readPricingCardReplay).mockResolvedValueOnce(pending as never);
+    await expect(writePricingAcceptance(pool as never, input)).resolves.toBe(pending);
   });
 
   it("passes a server-owned synthetic context only for a fresh booking", async () => {

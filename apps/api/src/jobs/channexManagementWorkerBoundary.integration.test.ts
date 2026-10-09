@@ -372,7 +372,7 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
       `GRANT UPDATE(idempotency_key_hash) ON platform.jobs TO ${role}`,
       `ALTER TABLE pms.channex_offer_targets DISABLE ROW LEVEL SECURITY`,
       `ALTER TABLE pms.channel_connections DISABLE TRIGGER channex_worker_connection_update`,
-      `ALTER TABLE identity.product_entitlements DISABLE TRIGGER hotel_setup_owner_off_receipt`,
+      `ALTER TABLE identity.product_entitlements DISABLE TRIGGER entitlement_routing_organization_lock`,
       `ALTER VIEW finance.online_card_readiness SET(security_invoker=false)`,
     ]) {
       await owner.query("BEGIN");

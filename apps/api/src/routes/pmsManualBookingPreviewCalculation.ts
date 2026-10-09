@@ -16,6 +16,8 @@ import type {
 import type { BookingAddonItem, BookingAddonItemsRepository } from "./bookingAddonItems.js";
 
 export type ManualBookingMoney = { amountDecimal: string; currency: string };
+/** A custom nightly rate; without a currency it is priced in the resolved pricing currency. */
+export type ManualBookingCustomAmount = { amountDecimal: string; currency?: string };
 type ManualBookingStayBase = {
   position: number;
   roomId: string;
@@ -33,7 +35,7 @@ export type ManualBookingStay = ManualBookingStayBase &
         ratePlanId: string;
         pricing: { kind: "rate_plan"; manualOverride: ManualBookingMoney | null };
       }
-    | { ratePlanId: null; pricing: { kind: "custom"; nightlyAmount: ManualBookingMoney } }
+    | { ratePlanId: null; pricing: { kind: "custom"; nightlyAmount: ManualBookingCustomAmount } }
   );
 type PricedManualBookingStay = ManualBookingStay & { dates: string[] };
 export type ManualBookingAddonSelection = {
@@ -45,6 +47,8 @@ export type ManualBookingPreviewCommand = {
   contractVersion: "pms-manual-booking.v1";
   stays: ManualBookingStay[];
   addOns: ManualBookingAddonSelection[];
+  /** Create only: the revision the client's preview showed. */
+  expectedPricingRevision?: number;
 };
 /** The active pricing-v2 publication; amounts are minor units of its currency's own scale. */
 export type ManualBookingPricingPublication = Readonly<{
@@ -89,6 +93,13 @@ export async function calculateManualBookingPreview(
   const available = await ports.pms.getPhysicalRoomAvailability(propertyId, pricedStays);
   if (!addonContext) fail(404, "property_not_found");
   if (needsPublication && !publication) fail(409, "pricing_not_published");
+  // Prices were republished after the staff saw them: refuse before any other price outcome.
+  if (
+    needsPublication &&
+    command.expectedPricingRevision !== undefined &&
+    publication!.revision !== command.expectedPricingRevision
+  )
+    fail(409, "pricing_changed", "expectedPricingRevision");
   const addons = addonContext.addonItems;
   let currency = pricingCurrency;
   let grand = 0n;
@@ -112,9 +123,13 @@ export async function calculateManualBookingPreview(
     if (!currency) fail(409, "pricing_not_published", "stays", stay.position);
     const standards =
       stay.ratePlanId !== null ? publishedNights(scope, stay, room.roomTypeId, publication!) : null;
+    // A custom rate without a currency takes the resolved one (v1 amendment, VAY-2065).
     const applied = stay.dates.map((_, position) =>
       stay.pricing.kind === "custom"
-        ? stay.pricing.nightlyAmount
+        ? {
+            ...stay.pricing.nightlyAmount,
+            currency: stay.pricing.nightlyAmount.currency ?? currency!,
+          }
         : (stay.pricing.manualOverride ?? money(standards![position]!, currency!)),
     );
     for (const value of applied) requireCurrency(value, currency, stay.position);
