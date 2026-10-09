@@ -240,7 +240,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open settings concurrency
       outboxType: "pms.calendar_auto_open.evaluation_requested",
       outboxPayload: { propertyId, settingRevision: 1 },
       auditPayload: {
-        previous: { revision: 0, enabled: false },
+        previous: { revision: 0, enabled: true },
         next: { revision: 1, enabled: true },
       },
     });

@@ -275,6 +275,8 @@ async function insertAssignments(
        'assigned', 'direct', 'manual',
        jsonb_strip_nulls(jsonb_build_object(
          'contractVersion', $4::text,
+         -- A stay fact: it outlives the offer link when the stay changes room type.
+         'childAgesAtCheckIn', item."childAgesAtCheckIn",
          'pricingOffer', CASE WHEN item."ratePlanId" IS NULL THEN NULL ELSE jsonb_build_object(
            'offerId', item."ratePlanId", 'pricingRevision', $6::int,
            'childAgesAtCheckIn', item."childAgesAtCheckIn") END

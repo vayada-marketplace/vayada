@@ -33,6 +33,8 @@ only writer that accepts them.
 | ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 2026-10-07 | VAY-1422 | Optional `additionalGuests`, approved by product as an additive v1 field rather than `pms-manual-booking.v2`                                           |
 | 2026-10-07 | VAY-1422 | Slice A of `pricing-ordinary-login-plan.md`: `ratePlanId` names a published pricing-v2 offer, optional `childAgesAtCheckIn`, preview `pricingRevision` |
+| 2026-10-08 | VAY-1422 | Optional create field `expectedPricingRevision`; `409 pricing_changed` when prices were republished after the preview                                  |
+| 2026-10-08 | VAY-2065 | A `custom` stay's `nightlyAmount.currency` is optional; omitted, the server prices it in the currency it resolves for custom-only bookings (below)     |
 
 The slice A row changes what `ratePlanId` refers to. It stays in v1 because the
 old meaning, a `pms.rate_plans` flexible plan, has had no working caller since
@@ -132,6 +134,7 @@ type Command = {
     firstName: string; lastName: string; email: string | null;
     phoneE164: string | null; countryCode: string | null;
   }>;
+  expectedPricingRevision?: number; // preview pricingRevision (v1 amendment, VAY-1422)
   privateNote: string | null;
   directSource: "call" | "email" | "whatsapp" | "walk_in" | "social_media" | "other";
   stays: Array<{
@@ -141,7 +144,7 @@ type Command = {
     childAgesAtCheckIn?: number[]; // one 0–17 age per child (slice A amendment)
     pricing:
       | { kind: "rate_plan"; manualOverride: Money | null }
-      | { kind: "custom"; nightlyAmount: Money };
+      | { kind: "custom"; nightlyAmount: { amountDecimal: Decimal; currency?: string } }; // currency optional (v1 amendment, VAY-2065)
   }>;
   addOns: Array<{
     addonId: string; packageCount: number;
@@ -191,7 +194,7 @@ Both endpoints return `{ code, message, field?, stayPosition? }` on failure:
 | `400` | `invalid_body`, `unknown_field`                                                                                                                         |
 | `403` | `forbidden`, `entitlement_required`; create also uses `paid_forbidden`                                                                                  |
 | `404` | `property_not_found`, `room_not_found`, `rate_plan_not_found`, `rate_not_found`, `addon_not_found`                                                      |
-| `409` | `room_unavailable`, `pricing_not_published`; create also uses `idempotency_conflict`                                                                    |
+| `409` | `room_unavailable`, `pricing_not_published`; create also uses `idempotency_conflict` and `pricing_changed`                                              |
 | `422` | `invalid_dates`, `occupancy_exceeded`, `currency_mismatch`, `inactive_rate_plan`, `invalid_addon_selection`, `invalid_source`, `invalid_payment_method` |
 | `422` | `child_ages_required`, `rate_restricted` (slice A amendment)                                                                                            |
 
@@ -217,6 +220,13 @@ the target manual writer can be accepted.
 - An empty or omitted `additionalGuests` list is left out of the request
   fingerprint, so requests sent before the VAY-1422 amendment replay unchanged.
   A non-empty list is part of the fingerprint.
+- `expectedPricingRevision` echoes the preview's `pricingRevision`. When the
+  booking names an offer and the active publication has another revision,
+  create returns `409 pricing_changed` before any other price outcome and
+  writes nothing, so staff never save room prices from a publication they did
+  not preview. Any republish counts, even one that leaves this stay's price
+  unchanged; add-on prices are not covered. It is ignored for custom-only
+  bookings, and it is part of the fingerprint only when sent.
 - A command contains 1 to 20 stays. Positions are unique and contiguous from 1.
 - Each room belongs to the authorized property. `rate_plan` pricing requires a
   non-null `ratePlanId` and `custom` pricing requires `ratePlanId: null`; any
@@ -237,7 +247,7 @@ the target manual writer can be accepted.
 - `rate_plan` pricing is resolved server-side for every service night from the
   active publication, read inside the caller's transaction, and then
   snapshotted. The read takes no row locks and is not gated by the booking
-  engine's pricing authority or online-payment readiness; route authorization
+  engine's online-payment readiness; route authorization
   already scopes the property. The standard night is the offer's room plus
   meal amount for the stay's adults and children. A manual override replaces
   each nightly amount but preserves the chosen offer and comparison evidence.
@@ -255,11 +265,17 @@ the target manual writer can be accepted.
 - The stored assignment keeps `rate_plan_id` empty, because that column refers
   to legacy `pms.rate_plans`; the offer id, publication revision and child ages
   are kept in `assignment_payload.pricingOffer` instead (accepted
-  booking-engine quotes keep theirs under `pricingAcceptance`). The preview's
+  booking-engine quotes keep theirs under `pricingAcceptance`). Child ages are
+  also kept as a stay fact in `assignment_payload.childAgesAtCheckIn`, which
+  survives when a room-type change drops the offer link. The preview's
   `pricingRevision` is null when no stay names an offer.
 - Custom-only bookings need no publication. Their currency is the published
-  currency when one exists, else the property's pricing currency; a property
-  with no pricing currency at all returns `pricing_not_published` (409).
+  currency when one exists, else the property's pricing currency, else the
+  legacy currency of the stay's room type; with none of these the stay returns
+  `pricing_not_published` (409).
+  A custom `nightlyAmount` may omit its `currency` (VAY-2065): the server then
+  prices it in that resolved currency, because a room type from the room-facts
+  flow carries none for the client to send. A sent currency must still match.
 - `custom` pricing requires an explicit nightly amount and has no rate-plan ID.
   There is no silent fallback to the current flexible/base rate.
 - Per-night evidence is `exact` for resolved plans and uniform manual amounts.
