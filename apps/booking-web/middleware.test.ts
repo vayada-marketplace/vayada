@@ -292,13 +292,13 @@ describe("Booking Web retired booking pages", () => {
     return middleware(new NextRequest(`https://${host}${path}`, { headers }));
   }
 
-  it("permanently redirects the retired pages to /book, keeping only what /book reads", async () => {
+  it("permanently redirects the retired pages to /book, keeping only what /book reads and the referral", async () => {
     const response = await visit(
-      "/en/rooms?checkIn=2026-11-12&checkOut=2026-11-14&adults=2&children=1&promoCode=SUMMER20&room=alpine&rateType=flexible",
+      "/en/rooms?checkIn=2026-11-12&checkOut=2026-11-14&adults=2&children=1&promoCode=SUMMER20&ref=FRIEND&room=alpine&rateType=flexible",
     );
     expect(response.status).toBe(308);
     expect(response.headers.get("location")).toBe(
-      `https://${host}/book?checkIn=2026-11-12&checkOut=2026-11-14&adults=2&children=1&promoCode=SUMMER20`,
+      `https://${host}/book?checkIn=2026-11-12&checkOut=2026-11-14&adults=2&children=1&promoCode=SUMMER20&ref=FRIEND`,
     );
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(bookingWebPublicApi.resolveHost).not.toHaveBeenCalled();
@@ -318,6 +318,44 @@ describe("Booking Web retired booking pages", () => {
     );
     expect(response.status).toBe(308);
     expect(response.headers.get("location")).toBe(`https://${host}/fr/book?checkIn=2026-11-12`);
+  });
+
+  it("never redirects to a forwarded host Booking does not serve", async () => {
+    const response = await middleware(
+      new NextRequest(`https://${host}/rooms?checkIn=2026-11-12`, {
+        headers: { host, "x-forwarded-host": "attacker.example" },
+      }),
+    );
+    expect(response.status).not.toBe(308);
+    expect(response.headers.get("location")).toBeNull();
+    expect(bookingWebPublicApi.resolveHost).toHaveBeenCalledWith("attacker.example", {
+      next: { revalidate: 60 },
+    });
+  });
+
+  it("redirects on a hotel's resolved custom domain", async () => {
+    vi.mocked(bookingWebPublicApi.resolveHost).mockResolvedValue({
+      slug: "hotel-alpenrose",
+      canonicalUrl: "https://book.alpenrose.example/en",
+      bookingBaseUrl: "https://book.alpenrose.example",
+      customDomainUrl: "https://book.alpenrose.example",
+      shouldRedirect: false,
+      redirectUrl: null,
+      redirectStatus: null,
+      hotel: {
+        slug: "hotel-alpenrose",
+        name: "Hotel Alpenrose",
+        defaultLocale: "en",
+        supportedLocales: ["en"],
+      },
+    });
+    const response = await middleware(
+      new NextRequest("https://book.alpenrose.example/payment", {
+        headers: { host: "book.alpenrose.example" },
+      }),
+    );
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe("https://book.alpenrose.example/book");
   });
 
   it("leaves other pages and unknown locales alone", async () => {
