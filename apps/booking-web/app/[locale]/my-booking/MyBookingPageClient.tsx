@@ -122,6 +122,14 @@ export default function MyBookingPageClient() {
       setCancelPreview(null);
     } catch (err: any) {
       setError(err.message || "Cancellation failed");
+      // The fee may have moved to another tier since the preview: show the current one here.
+      if (!isPending) {
+        try {
+          setCancelPreview(await bookingService.cancelPreview(slug, booking.id, email));
+        } catch {
+          // Keep the shown preview; the error explains why cancelling failed.
+        }
+      }
     } finally {
       setCancelling(false);
     }
@@ -130,6 +138,7 @@ export default function MyBookingPageClient() {
   const handleCloseDialog = () => {
     setShowConfirmDialog(false);
     setCancelPreview(null);
+    setError("");
   };
 
   const statusColor: Record<string, string> = {
@@ -376,6 +385,12 @@ export default function MyBookingPageClient() {
             </h3>
 
             {/* Refund info for confirmed bookings */}
+            {error && (
+              <p role="alert" className="mb-4 text-sm text-red-700">
+                {error}
+              </p>
+            )}
+
             {cancelPreview && !isPending && (
               <div className="mb-4 space-y-2">
                 <div

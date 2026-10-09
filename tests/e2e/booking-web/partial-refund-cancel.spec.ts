@@ -61,7 +61,7 @@ for (const [fee, message] of [
     await page.getByRole("button", { name: "Cancel Booking" }).click();
     const dialog = page.getByText("Cancel This Booking?").locator("..");
     await expect(dialog).toContainText(fee ? "Cancellation fee applies" : "Free cancellation");
-    await expect(dialog.locator("p.text-sm")).toHaveText(message);
+    await expect(dialog.locator("p.text-gray-700")).toHaveText(message);
     await expect(dialog).not.toContainText("You will receive");
     // The guest confirms exactly the fee they were shown.
     await page.getByRole("button", { name: "Yes, Cancel" }).click();
@@ -71,3 +71,43 @@ for (const [fee, message] of [
     ]);
   });
 }
+
+test("a fee that changed since the preview is shown in the dialog before cancelling", async ({
+  page,
+}) => {
+  await mockBookingApis(page);
+  await page.route("**/api/booking-web/hotels/*/bookings/lookup", (route) =>
+    route.fulfill({ json: booking }),
+  );
+  let previews = 0;
+  await page.route("**/api/booking-web/hotels/*/bookings/*/cancel-preview", (route) => {
+    const fee = ++previews === 1 ? 200 : 400;
+    return route.fulfill({
+      json: {
+        ...preview,
+        cancellationFeeAmount: fee,
+        bookedTermsOutcome: { retainedMinor: String(fee * 100) },
+      },
+    });
+  });
+  const sent: Array<{ expectedCancellationFeeMinor?: string }> = [];
+  await page.route("**/api/booking-web/hotels/*/bookings/*/cancel", (route) => {
+    sent.push(route.request().postDataJSON());
+    return sent.length === 1
+      ? route.fulfill({
+          status: 409,
+          json: { detail: "The cancellation fee has changed. Review it again before cancelling." },
+        })
+      : route.fulfill({ json: { status: "cancelled" } });
+  });
+  await page.goto("/en/my-booking?reference=VAY-2100&email=ada%40example.test");
+  await page.getByRole("button", { name: "Cancel Booking" }).click();
+  const dialog = page.getByText("Cancel This Booking?").locator("..");
+  await expect(dialog.locator("p.text-gray-700")).toHaveText(/cancellation fee of .*200/);
+  await page.getByRole("button", { name: "Yes, Cancel" }).click();
+  await expect(dialog.getByRole("alert")).toBeVisible();
+  await expect(dialog.locator("p.text-gray-700")).toHaveText(/cancellation fee of .*400/);
+  await page.getByRole("button", { name: "Yes, Cancel" }).click();
+  await expect(page.getByText("Your booking has been cancelled.")).toBeVisible();
+  expect(sent.map((body) => body.expectedCancellationFeeMinor)).toEqual(["20000", "40000"]);
+});
