@@ -117,6 +117,8 @@ export type PmsRoomBuild = {
   records: PmsTargetRecord[];
   flexiblePlanByRoomType: Map<string, string>;
   channelPlanByMapping: Map<string, string>;
+  /** VAY-1362: cohort room types stored in the native room-facts shape. */
+  nativeFactsRoomTypes?: Set<string>;
 };
 
 export type PmsAssignmentBuild = {
