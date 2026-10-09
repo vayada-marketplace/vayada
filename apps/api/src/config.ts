@@ -213,8 +213,8 @@ export type ApiConfig = {
   pmsOperationsAllowedOrigins: string[];
   financialsActivationPropertyIds: string[];
   bookingWebEventSink: BookingWebEventSink;
-  /** Kill switch for public quote acceptance; each hotel still needs the Vayada pricing
-   * authority and a current publication. */
+  /** Kill switch for public quote acceptance; each hotel still needs a current publication
+   * and a single owning organization. */
   replacementPricingAcceptanceEnabled: boolean;
   /** Card quotes in public acceptance (Stripe). Off until confirmation, webhook and expiry
    * handling for these bookings are live. */
