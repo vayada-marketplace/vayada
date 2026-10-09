@@ -95,6 +95,9 @@ export function HostBookingActions({
     }
   };
   const recorded = booking.cancellationOutcome;
+  // Only stays with recorded booked terms (pricing-v2) can apply them to a guest's request.
+  const hasBookedTerms =
+    booking.stays.length > 0 && booking.stays.every((stay) => stay.cancellation);
   if (booking.channel === "manual" || !["pending", "confirmed"].includes(booking.status))
     return notice || recorded ? (
       <div className="space-y-1 text-sm">
@@ -162,7 +165,7 @@ export function HostBookingActions({
                   </label>
                 </div>
               )}
-              {action === "cancel" && (
+              {action === "cancel" && hasBookedTerms && (
                 <fieldset className="space-y-2 text-sm">
                   <legend className="font-medium">{t("hostActions.cancellationKind")}</legend>
                   {(["property", "guest_request"] as const).map((kind) => (

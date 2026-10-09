@@ -190,6 +190,8 @@ test("a stale host cancellation preview can be refreshed before apply", async ({
   await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
   const section = page.getByRole("region", { name: "Booking actions" });
   await section.getByRole("button", { name: "Cancel booking", exact: true }).click();
+  // Without booked terms (not a pricing-v2 stay) there is nothing to apply to a guest's request.
+  await expect(section.getByText("Who asked to cancel?")).toHaveCount(0);
   await section
     .getByLabel("Internal reason (not sent to the guest)")
     .fill("Internal staffing issue");
@@ -221,13 +223,31 @@ test("a guest-requested cancel previews and records the booked-terms fee (VAY-21
     retainedMinor: "15000",
     rooms: [],
   };
+  // A pricing-v2 stay: the read carries its booked partial-refund terms.
+  const reservation = {
+    ...pmsWebReservation,
+    assignments: pmsWebReservation.assignments.map((assignment) => ({
+      ...assignment,
+      bookedCancellation: {
+        kind: "flexible",
+        terms: {
+          type: "free_until_days_before_arrival",
+          freeCancellationDeadlineDays: 365,
+          afterDeadlinePenalty: "full_booking_amount",
+          noShowPenalty: "full_booking_amount",
+          flexibleCancellationType: "partial_refund",
+          partialRefundTiers: [{ minDaysBeforeCheckIn: 14, refundPercent: 50 }],
+        },
+      },
+    })),
+  };
   let cancelled = false;
   await page.route(base, (route) =>
     route.fulfill({
       json: {
         item: cancelled
-          ? { ...pmsWebReservation, status: "canceled", cancellationOutcome: outcome }
-          : pmsWebReservation,
+          ? { ...reservation, status: "canceled", cancellationOutcome: outcome }
+          : reservation,
       },
     }),
   );
