@@ -23,6 +23,8 @@ import { lockFinancePricingAcceptanceTerms } from "./financePricingAcceptanceTer
 import { finishCurrentQuoteAcceptanceTime } from "./currentQuoteAcceptanceTime.js";
 import { pricingRoomRevenueProjection } from "./pricingRoomRevenueProjection.js";
 import { parseBookingQuoteAcceptanceInput } from "./bookingQuoteAcceptanceInput.js";
+import { createTargetPmsOperationsCommandRepository } from "./pmsOperationsCommandRepository.js";
+import type { PmsOperationsReadRepository } from "../routes/pmsOperations.js";
 
 vi.mock("./publicPricingAuthority.js", () => ({ lockPublicPricingAuthority: vi.fn() }));
 vi.mock("./currentQuoteInventory.js", () => ({ reserveRevalidatedQuoteInventory: vi.fn() }));
@@ -819,6 +821,115 @@ describe.skipIf(!url)("pricing acceptance writer requests (PostgreSQL)", () => {
         available: 2,
       });
     } finally {
+      await fixture.close();
+    }
+  });
+
+  it("lets the hotel accept a request once, before its deadline, with revenue, email and PMS job", async () => {
+    const fixture = await setupFixture((quote) =>
+      Object.assign(quote, { acceptanceMode: "request" }),
+    );
+    const pmsPool = new pg.Pool({ connectionString: url, max: 2 });
+    const pms = createTargetPmsOperationsCommandRepository({
+      connectionString: url!,
+      pool: pmsPool,
+      readRepository: {
+        findReservationByGuestBookingId: async () => ({}),
+      } as unknown as PmsOperationsReadRepository,
+    });
+    const accept = (bookingId: string) =>
+      pms.acceptBooking({
+        propertyId: fixture.propertyId,
+        guestBookingId: bookingId,
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+        audit: {
+          actor: { kind: "system", service: "apps/api" },
+          requestId: randomUUID(),
+          reason: "Request accepted",
+          requestedAt: new Date().toISOString(),
+        },
+      });
+    try {
+      mockOwners(fixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      const requested = await writePricingAcceptance(
+        fixture.pool,
+        fixture.input,
+        undefined,
+        undefined,
+        true,
+      );
+      // After the deadline the request is no longer the hotel's to accept.
+      await fixture.observer.query(
+        `UPDATE booking.guest_bookings SET booking_metadata=jsonb_set(booking_metadata,
+          '{hostResponseDeadlineAt}',to_jsonb((clock_timestamp()-interval '1 minute')::text)) WHERE id=$1`,
+        [requested.bookingId],
+      );
+      await expect(accept(requested.bookingId)).resolves.toMatchObject({
+        ok: false,
+        code: "invalid_status_transition",
+      });
+      await fixture.observer.query(
+        `UPDATE booking.guest_bookings SET booking_metadata=jsonb_set(booking_metadata,
+          '{hostResponseDeadlineAt}',to_jsonb((clock_timestamp()+interval '1 hour')::text)) WHERE id=$1`,
+        [requested.bookingId],
+      );
+
+      await expect(accept(requested.bookingId)).resolves.toMatchObject({ ok: true });
+      // Keep the shared adoption worker from claiming this fixture's job before cleanup.
+      await fixture.observer.query(
+        "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
+        [fixture.propertyId],
+      );
+      const state = (
+        await fixture.observer.query(
+          `SELECT b.lifecycle_status,b.payment_status,s.lifecycle_status AS summary,
+            (SELECT to_status FROM booking.booking_status_events
+              WHERE guest_booking_id=b.id AND event_type='guest_booking.accepted') AS accepted_event
+           FROM booking.guest_bookings b JOIN booking.direct_booking_summary_read_model s
+             ON s.guest_booking_id=b.id WHERE b.id=$1`,
+          [requested.bookingId],
+        )
+      ).rows[0];
+      expect(state).toEqual({
+        lifecycle_status: "confirmed",
+        payment_status: "unpaid",
+        summary: "confirmed",
+        accepted_event: "confirmed",
+      });
+      const nights = fixture.f.current.quote.rooms.reduce((n, r) => n + r.nights.length, 0);
+      await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({
+        bookings: 1,
+        acceptances: 1,
+        revenue: nights,
+        available: 2,
+        assigned: 1,
+      });
+      const jobs = (
+        await fixture.observer.query(
+          `SELECT job_type,payload->>'recipientRole' AS role FROM platform.jobs WHERE property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows;
+      expect(jobs).toContainEqual({ job_type: "email.booking-accepted", role: "guest" });
+      expect(jobs).toContainEqual({
+        job_type: "pms.reservation.accepted-pricing.create",
+        role: null,
+      });
+
+      await expect(accept(requested.bookingId)).resolves.toMatchObject({
+        ok: false,
+        code: "invalid_status_transition",
+      });
+      await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({
+        revenue: nights,
+        jobs: jobs.length,
+      });
+    } finally {
+      await pmsPool.end();
       await fixture.close();
     }
   });
