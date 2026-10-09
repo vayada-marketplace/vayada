@@ -19,6 +19,12 @@ import {
   readProductionPmsTargetState,
 } from "./productionPmsTargetReader.js";
 import { activateReadyCohortProperties } from "./productionPmsCohortActivation.js";
+import {
+  pmsCohortModuleBlockers,
+  readPmsCohortModules,
+  samePmsCohortModule,
+  writePmsCohortModule,
+} from "./productionPmsCohortModules.js";
 import { readCohortReadiness, readyForActivation } from "./productionPmsCohortReadiness.js";
 import type { PmsTargetRecord } from "./productionPmsTypes.js";
 import { writeProductionPmsRecords } from "./productionPmsWriter.js";
@@ -492,6 +498,181 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
           propertyIds: planned.cohortPropertyIds!,
         }),
       ).toMatchObject({ active: 1, activated: 0 });
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+
+  it("imports a Financials activation the way native onboarding activates it", async () => {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+    try {
+      await seedCalendar(client);
+      await client.query(
+        `INSERT INTO identity.product_entitlements
+           (organization_id, product, entitlement_key, status, resource_product, resource_type,
+            resource_id)
+         VALUES ($1, 'pms', 'property-management', 'active', 'pms', 'pms_property', $2),
+                ($1, 'pms', 'property-management', 'active', 'pms', 'pms_property', $3)`,
+        [ORGANIZATION, PROPERTY, NATIVE_PROPERTY],
+      );
+      // Native: hotel creation's pending default, the first currency with its starter categories
+      // and completion, then the Owner switches Financials off in the Feature Hub (Writer A).
+      const api = join(import.meta.dirname, "../../../apps/api/src");
+      const statement = async (file: string, pattern: RegExp) => {
+        const sql = pattern.exec(await readFile(join(api, file), "utf8"))?.[1];
+        expect(sql).toBeDefined();
+        return sql!.replaceAll("${OWNER_OFF}", "featureHubOwnerDisabled");
+      };
+      const creation = await readFile(
+        join(api, "platform/sharedHotelSetupStatusReadModel.ts"),
+        "utf8",
+      );
+      expect(creation.replace(/\s+/g, " ")).toContain(
+        `SELECT $1::uuid, 'pms', 'module:financials', 'suspended', 'pms', 'pms_property', ` +
+          `resource_id, '{"newHotelFinancialsDefault":"pending"}'::jsonb`,
+      );
+      const nativeId = (
+        await client.query<{ id: string }>(
+          `INSERT INTO identity.product_entitlements (organization_id, product, entitlement_key,
+             status, resource_product, resource_type, resource_id, metadata)
+           VALUES ($1, 'pms', 'module:financials', 'suspended', 'pms', 'pms_property', $2,
+                   '{"newHotelFinancialsDefault":"pending"}'::jsonb)
+           RETURNING id::text`,
+          [ORGANIZATION, NATIVE_PROPERTY],
+        )
+      ).rows[0]!.id;
+      await client.query(
+        await statement(
+          "domains/pmsPricingCommandRepository.ts",
+          /`(INSERT INTO pms\.property_pricing_settings[^`]*?VALUES \([^)]*\))/,
+        ),
+        [NATIVE_PROPERTY, "EUR", AT],
+      );
+      await client.query(
+        await statement(
+          "domains/financeStarterCategories.ts",
+          /`(INSERT INTO finance\.expense_categories[^`]*)`/,
+        ),
+        [NATIVE_PROPERTY],
+      );
+      await client.query(
+        await statement(
+          "domains/hotelSetupFirstCurrencyCompletion.ts",
+          /`(UPDATE identity\.product_entitlements SET status='active'[^`]*)`/,
+        ),
+        [nativeId],
+      );
+      await client.query(
+        await statement(
+          "hotelSetupFeatureHubOrdinary.ts",
+          /`(UPDATE identity\.product_entitlements SET status=\$2[^`]*)`/,
+        ),
+        [nativeId, "suspended", true],
+      );
+
+      // Import: legacy had Financials switched off for the same kind of hotel.
+      const prerequisites = await readProductionPmsPrerequisites(client, RUN);
+      const rows = sourceRows();
+      rows[0]!.data["user_id"] = OWNER;
+      const legacy = (isActive: boolean): IdentitySourceRow => ({
+        ...rows[0]!,
+        sourceTable: "property_module_activations",
+        data: { hotel_id: HOTEL, module_id: "financials", is_active: isActive },
+      });
+      const plan = async (records: PmsTargetRecord[] = [], active = false) =>
+        buildProductionPmsPlan({
+          sourceRunId: RUN,
+          snapshotAt: AT,
+          completedAt: AT,
+          rows,
+          cohort: { bookingHotelIds: [], pmsHotelIds: [HOTEL], marketplaceHotelIds: [] },
+          moduleActivations: [legacy(active)],
+          target: await readProductionPmsTargetState(client, records, prerequisites),
+        });
+      const planned = await plan((await plan()).records);
+      expect(planned.blockers).toEqual([]);
+      expect(planned.moduleActivations).toEqual([
+        {
+          organizationId: ORGANIZATION,
+          propertyId: PROPERTY,
+          entitlementKey: "module:financials",
+          active: false,
+          currency: "EUR",
+          legacy: "off",
+        },
+      ]);
+      await writeProductionPmsRecords(client, planned.writes);
+      for (const module of planned.moduleActivations!)
+        await writePmsCohortModule(client, { sourceRunId: RUN, completedAt: AT }, module);
+
+      const state = await client.query(
+        `SELECT entitlement.resource_id AS "propertyId", entitlement.status,
+                entitlement.starts_at IS NULL AND entitlement.expires_at IS NULL AS unbounded,
+                (SELECT array_agg(key ORDER BY key) FROM jsonb_object_keys(entitlement.metadata) key)
+                  AS "metadataKeys",
+                entitlement.metadata->>'newHotelFinancialsDefault' AS "default",
+                entitlement.metadata->>'newHotelFinancialsActivationTransaction'
+                  = pg_current_xact_id()::text AS "readyNow",
+                entitlement.metadata->>'featureHubOwnerDisabled' = entitlement.xmin::text
+                  AS "ownerOff",
+                (SELECT array_agg(category.system_key || ':' || category.name || ':'
+                         || category.color || ':' || category.sort_order ORDER BY category.system_key)
+                   FROM finance.expense_categories category
+                  WHERE category.property_id::text = entitlement.resource_id
+                    AND category.archived_at IS NULL) AS categories
+           FROM identity.product_entitlements entitlement
+          WHERE entitlement.entitlement_key = 'module:financials'
+            AND entitlement.resource_id = ANY($1::text[])
+          ORDER BY entitlement.resource_id`,
+        [[PROPERTY, NATIVE_PROPERTY]],
+      );
+      const [imported, native] = state.rows.map(({ propertyId: _id, ...rest }) => rest);
+      expect(imported).toEqual(native);
+      expect(imported).toMatchObject({
+        status: "suspended",
+        default: "ready",
+        readyNow: true,
+        ownerOff: true,
+        unbounded: true,
+        metadataKeys: [
+          "featureHubOwnerDisabled",
+          "newHotelFinancialsActivationTransaction",
+          "newHotelFinancialsDefault",
+        ],
+      });
+      expect(imported!["categories"]).toHaveLength(7);
+      // Never the 0449 hotel-setup marker. The audit rows of the completion and the switch-off,
+      // which the 0449 trigger would reject (and apply) as financials_module_deactivated here.
+      const audits = await client.query(
+        `SELECT action, redacted_payload AS payload, privacy_scope AS privacy
+           FROM platform.product_audit_events WHERE property_id = $1 AND product = 'pms'
+            AND action LIKE '%financials%' ORDER BY action`,
+        [PROPERTY],
+      );
+      expect(audits.rows).toEqual([
+        {
+          action: "pms.financials.default_activated",
+          payload: { propertyId: PROPERTY, currency: "EUR" },
+          privacy: "confidential",
+        },
+        {
+          action: "pms.financials.owner_off_imported",
+          payload: { moduleId: "financials", isActive: false },
+          privacy: "internal",
+        },
+      ]);
+      // The module reader agrees with the runtime, so a rerun plans no conflict and no write.
+      const stored = await readPmsCohortModules(client, planned.moduleActivations!);
+      expect(pmsCohortModuleBlockers(planned.moduleActivations!, stored)).toEqual([]);
+      expect(samePmsCohortModule(planned.moduleActivations![0]!, stored[0])).toBe(true);
+      // Legacy on now differs from the stored Owner-off module: it blocks instead of rewriting.
+      const switched = await plan(planned.records, true);
+      expect(
+        pmsCohortModuleBlockers(
+          switched.moduleActivations!,
+          await readPmsCohortModules(client, switched.moduleActivations!),
+        ),
+      ).toEqual([expect.objectContaining({ code: "COHORT_MODULE_ACTIVATION_CONFLICT" })]);
     } finally {
       await client.query("ROLLBACK");
     }

@@ -1,6 +1,7 @@
 import type pg from "pg";
 
-const DEFAULTS = [
+/** The seven native starter categories (apps/api financeStarterCategories.ts). */
+export const FINANCIALS_DEFAULT_CATEGORIES = [
   ["staff", "Staff", "#6366F1", 10],
   ["ota_commission", "OTA commission", "#F59E0B", 20],
   ["utilities", "Utilities", "#06B6D4", 30],
@@ -43,7 +44,7 @@ export async function seedFinancialsDefaultCategories(
             [
               propertyId,
               JSON.stringify(
-                DEFAULTS.map(([key, name, color, sort_order]) => ({
+                FINANCIALS_DEFAULT_CATEGORIES.map(([key, name, color, sort_order]) => ({
                   key,
                   name,
                   color,
@@ -77,12 +78,14 @@ async function categoryState(client: pg.Client, propertyId: string) {
     await client.query<{ system_key: string; archived_at: Date | null }>(
       `SELECT system_key,archived_at FROM finance.expense_categories
        WHERE property_id=$1::uuid AND system_key=ANY($2::text[])`,
-      [propertyId, DEFAULTS.map(([key]) => key)],
+      [propertyId, FINANCIALS_DEFAULT_CATEGORIES.map(([key]) => key)],
     )
   ).rows;
   const byKey = new Map(rows.map((row) => [row.system_key, row.archived_at]));
   return {
-    missing: DEFAULTS.map(([key]) => key).filter((key) => !byKey.has(key) || byKey.get(key)),
+    missing: FINANCIALS_DEFAULT_CATEGORIES.map(([key]) => key).filter(
+      (key) => !byKey.has(key) || byKey.get(key),
+    ),
     archived: rows
       .filter((row) => row.archived_at)
       .map((row) => row.system_key)

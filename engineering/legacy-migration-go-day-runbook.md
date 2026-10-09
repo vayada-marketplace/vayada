@@ -281,5 +281,8 @@ and legacy is not a fallback (decisions table).
 - The rehearsal on an isolated restore of legacy plus a copy of the live target.
 - Decided: the cutover activates cohort hotels with a complete profile that meet
   every readiness item (VAY-2066 a–g); the rest stay `provisioning`.
-- Open decision: legacy PMS module activations (for example financials) are
-  not mapped to the runtime's property-scoped `module:*` entitlements.
+- Legacy PMS module activations map to the runtime's property-scoped
+  `module:*` entitlements (financials only; see the cohort contract). Open
+  decision: a hotel without a legacy row imports Financials off (legacy reads it
+  as off), while a native new hotel starts with it on; the Owner can switch it
+  on in the Feature Hub.

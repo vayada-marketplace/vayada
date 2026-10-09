@@ -166,6 +166,22 @@ hotel that misses an item stays `provisioning`; suspended or retired ones are ne
 Parity fails an active carried cohort property that is not ready and a ready one that is still
 `provisioning`, and always reports the counts and what the provisioning ones miss.
 
+**PMS modules.** Legacy `pms.property_module_activations` of a carried cohort hotel map to the
+runtime's property-scoped `module:*` entitlements; only `financials` has one (`affiliates` is
+retired, and any other module is reported as unmapped). After the setup rows are verified and
+before activation, the import writes the module as native onboarding leaves it: the seven
+starter expense categories, the entitlement marked as the completed first-currency default
+(`newHotelFinancialsDefault = ready` with this transaction) and its
+`pms.financials.default_activated` audit row. A module legacy had off, or had no row for (legacy
+reads that as off), is then switched off as the Feature Hub does: `suspended` with the
+`featureHubOwnerDisabled` marker of this transaction (live while it equals the row's `xmin`), so
+the Owner can switch it on; never the 0449 hotel-setup marker. Its audit row is
+`pms.financials.owner_off_imported`, because the 0449 trigger rejects (or would apply)
+`financials_module_deactivated` from a migration session. A hotel gets no module without one owner
+organization holding an active, unsuspended base PMS entitlement and pricing settings in a first
+currency. A stored module that differs from the legacy state blocks the run
+(`COHORT_MODULE_ACTIVATION_CONFLICT`); it is never rewritten.
+
 ## Verification
 
 - A new parity invariant `COHORT_SCOPE_VERIFIED` fails (no-go) when any
