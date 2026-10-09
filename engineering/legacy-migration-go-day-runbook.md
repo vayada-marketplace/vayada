@@ -93,6 +93,33 @@ Details and commands: [`legacy-fixed-plan-billing-handover.md`](legacy-fixed-pla
 10. Every active room type of a cohort hotel has a bed type and consistent
     occupancy limits in legacy, or parity fails `cohortRoomFacts`: the runtime
     cannot read the room facts of that hotel otherwise.
+11. **Cohort (2026-10-09):** the cohort manifest names Haigha House as legacy
+    record `e41d252d-7b9d-4245-adc0-ca111543e1e8` (IDR, the record with
+    bookings). The duplicate candidate `6810de91-…` is non-cohort: quarantined,
+    with an explicit disabled auto-open row.
+12. **Hard prerequisite, IDR:** VAY-2085 (IDR in hotel setup's first-currency
+    list and its DB function, #3023, plus the whole-rupiah follow-up) is live.
+    The import's `NATIVE_PRICING_CURRENCIES` includes IDR in the same change. Five
+    of the eight cohort hotels price in IDR; the other three price in USD.
+13. **Hard prerequisites, card from day one** (Flamur, option A). Every cohort
+    hotel that took online card in legacy takes online card from go-day:
+    - the Finance-token staleness fix (Stripe `account.updated` no longer stales
+      card publications) is live, and existing card publications are republished;
+    - the K5 Stripe test-mode acceptance run has passed for an IDR connected
+      account (USD passed on 2026-10-09);
+    - the Stripe account refresh for migrated card hotels (step S.0a) is ready;
+    - `REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED=true` is set on next-api
+      through a platform PR, flipped only with Flamur's explicit go;
+    - the per-hotel card readiness check passes in the pricing gate.
+14. **Pricing conversion (VAY-2086):** the dry-run plan for every cohort hotel is
+    reviewed. Every finding is resolved or accepted. Quote parity against legacy
+    passes on the sample dates.
+    - The migration operator is Flamur's own platform account, under a reviewed
+      migration context.
+    - The `legacy_import` declaration path has passed an independent security
+      review and Flamur's sign-off.
+    - OTA-only rate plans (meal plans, markups) are closed on Channex before H.5;
+      "unbound" is not "closed".
 
 ## Window
 
@@ -249,6 +276,16 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
 
 ## Rollback
 
+**R0 — a single hotel fails its gate before reopen.** Suspend only that hotel
+and let the rest of the cohort open:
+
+1. Record the failing check and the hotel in the evidence folder.
+2. Keep its OTAs closed (Channex per-property `disable`; the OTA closeout stays
+   in place).
+3. Leave its imported data in place. Its catalog profile stays unpublished and
+   its lifecycle stays `provisioning`.
+4. Fix forward, re-run that hotel's gate, and reactivate it with its own go.
+
 **R1 — before reopen.**
 
 - `target:cutover:abort` only marks the run aborted: imported rows stay in the
@@ -277,6 +314,10 @@ and legacy is not a fallback (decisions table).
 - an error spike during the watch
 
 ## After the window
+
+- Watch for stale pricing publications (`--stale-count`) during the O.2 watch
+  and the following week. Any Finance, room-facts or terms change unpublishes a
+  hotel's offers until someone republishes them ("Save prices").
 
 - Day +1: Airbnb all-hotels (VAY-1551); review replies for the migrated hotels
   (VAY-1532/1533).
