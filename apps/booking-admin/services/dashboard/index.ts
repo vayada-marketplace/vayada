@@ -157,7 +157,7 @@ function shiftIsoDate(value: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-function rangeQuery(
+export function rangeQuery(
   range: TimeRange,
   timeZone: string,
 ): {

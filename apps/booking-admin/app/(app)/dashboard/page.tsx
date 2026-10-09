@@ -4,8 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "@/lib/i18n";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { settingsService, type PropertySettings } from "@/services/settings";
+import { ConversionFunnelCard } from "@/components/dashboard/ConversionFunnelCard";
 import {
   dashboardService,
+  rangeQuery,
   type DashboardStats,
   type BookingsBySource,
   type ConversionFunnel,
@@ -195,24 +197,38 @@ export default function DashboardPage() {
         ? t("dashboard.stats.vsLastWeek")
         : t("dashboard.stats.vsLast30Days");
 
-  const incompleteAmounts = Boolean(stats && (stats.unverified_bookings > 0 || stats.unverified_bookings_previous > 0));
-  const revenueDiff = stats && !incompleteAmounts
-    ? formatDiff(stats.revenue, stats.revenue_previous, locale, true, currency, t, vsLabel)
-    : null;
+  // Named after the property-local window the funnel shows; an unusable zone falls back to a plain name.
+  const funnelExportFileName = (() => {
+    try {
+      const { currentStart, currentEnd } = rangeQuery(timeRange, propertyTimeZone ?? "");
+      return `conversion-funnel-${currentStart}-to-${currentEnd}.csv`;
+    } catch {
+      return "conversion-funnel.csv";
+    }
+  })();
+
+  const incompleteAmounts = Boolean(
+    stats && (stats.unverified_bookings > 0 || stats.unverified_bookings_previous > 0),
+  );
+  const revenueDiff =
+    stats && !incompleteAmounts
+      ? formatDiff(stats.revenue, stats.revenue_previous, locale, true, currency, t, vsLabel)
+      : null;
   const bookingsDiff = stats
     ? formatDiff(stats.bookings, stats.bookings_previous, locale, false, "EUR", t, vsLabel)
     : null;
-  const rateDiff = stats && !incompleteAmounts
-    ? formatDiff(
-        stats.avg_nightly_rate,
-        stats.avg_nightly_rate_previous,
-        locale,
-        true,
-        currency,
-        t,
-        vsLabel,
-      )
-    : null;
+  const rateDiff =
+    stats && !incompleteAmounts
+      ? formatDiff(
+          stats.avg_nightly_rate,
+          stats.avg_nightly_rate_previous,
+          locale,
+          true,
+          currency,
+          t,
+          vsLabel,
+        )
+      : null;
   const viewsDiff = stats
     ? formatDiff(stats.page_views, stats.page_views_previous, locale, false, "EUR", t, vsLabel)
     : null;
@@ -246,7 +262,10 @@ export default function DashboardPage() {
       </div>
 
       {incompleteAmounts && (
-        <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+        <p
+          role="status"
+          className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"
+        >
           {t("dashboard.stats.incompleteAmounts")}
         </p>
       )}
@@ -518,65 +537,14 @@ export default function DashboardPage() {
             )}
         </div>
 
-        {/* Conversion Funnel */}
-        <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
-          <div className="flex items-center gap-2 mb-6">
-            <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-              {t("dashboard.conversionFunnel.title")} &middot;{" "}
-              {timeRange === "today"
-                ? t("dashboard.timeRange.today")
-                : timeRange === "week"
-                  ? t("dashboard.timeRange.week")
-                  : t("dashboard.timeRange.month")}
-            </h3>
-            <svg
-              className="w-4 h-4 text-gray-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.5}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"
-              />
-            </svg>
-          </div>
-
-          <div className="space-y-4" aria-busy={loading}>
-            {funnel && funnel.steps.some(step => step.count > 0) ? (
-              funnel.steps.map(({ stage, count, percentOfVisits, conversionPercent }) => (
-                <div key={stage} className={stage === "payment_authorized" ? "pl-3 border-l-2 border-gray-200" : ""}>
-                  <div className="flex flex-wrap items-center justify-between gap-1 mb-1">
-                    <span className="text-[13px] text-gray-700">{t(`dashboard.funnel.${stage}`)}</span>
-                    <span className="text-[13px] font-semibold text-gray-900">{formatNumber(count, locale)}</span>
-                  </div>
-                  <div className="flex flex-wrap gap-x-3 text-[11px] text-gray-500 mb-1">
-                    <span>{percentOfVisits === null ? "—" : `${formatNumber(percentOfVisits, locale)}%`} {t("dashboard.funnel.ofVisits")}</span>
-                    <span>{conversionPercent === null ? "—" : `${formatNumber(conversionPercent, locale)}%`} {t(stage === "payment_authorized" ? "dashboard.funnel.ofCardClicks" : stage === "booking_completed" ? "dashboard.funnel.ofEligibleSubmissions" : "dashboard.funnel.fromPrevious")}</span>
-                    {funnel.biggestDrop === stage && <span className="font-medium text-red-700">{t("dashboard.funnel.biggestDrop")}</span>}
-                  </div>
-                  <div className="w-full bg-gray-100 rounded-full h-4 overflow-hidden">
-                    <div className={`h-4 rounded-full transition-all ${funnel.biggestDrop === stage ? "bg-red-300" : "bg-primary-500"}`}
-                      style={{ width: `${Math.min(Math.max(percentOfVisits ?? 0, 0), 100)}%` }} />
-                  </div>
-                  {stage === "complete_booking_clicked" && (
-                    <div className="flex flex-wrap gap-x-3 text-xs text-gray-600 mt-2">
-                      {funnel.paymentMethods.map(({ method, count: methodCount }) => (
-                        <span key={method}>{t(`dashboard.funnel.method.${method}`)}: {formatNumber(methodCount, locale)} ({count ? formatNumber(Math.round(methodCount / count * 1000) / 10, locale) : 0}%)</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))
-            ) : (
-              <p className="text-[13px] text-gray-500 text-center py-8">
-                {loading ? t("common.loading") : funnelError ? t("dashboard.funnel.error") : t("dashboard.conversionFunnel.noData")}
-              </p>
-            )}
-          </div>
-        </div>
+        <ConversionFunnelCard
+          funnel={funnel}
+          loading={loading}
+          error={funnelError}
+          locale={locale}
+          t={t}
+          exportFileName={funnelExportFileName}
+        />
       </div>
     </div>
   );
