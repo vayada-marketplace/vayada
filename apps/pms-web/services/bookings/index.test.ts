@@ -482,6 +482,22 @@ describe("PMS target booking projection", () => {
     );
   });
 
+  it("names a published-offer stay from its stored offer when it has no legacy rate plan", async () => {
+    // Manual bookings priced from pricing-v2 offers keep rate_plan_id empty (VAY-1422).
+    // prettier-ignore
+    const offerTypes = [{ ...roomTypes[0]!, ratePlans: [{ ratePlanId: "flex-offer", pricingContractVersion: "pricing.v2", name: "Flexible", rateType: "flexible", baseRate: { amountDecimal: "100.00", currency: "EUR" }, active: true }] }];
+    // prettier-ignore
+    const offerReservation = { ...heterogeneousReservation, roomCount: 1, assignments: [{ ...assignments[0], ratePlanId: null, pricingOfferId: "flex-offer", childAgesAtCheckIn: [6] }] };
+    // prettier-ignore
+    mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: offerTypes } : reservationPage(offerReservation));
+    const result = (await bookingsService.list()).bookings[0]!;
+    expect(result.stays[0]).toMatchObject({
+      roomName: "Suite",
+      ratePlanName: "Flexible",
+      childAgesAtCheckIn: [6],
+    });
+  });
+
   it("maps exact and partial stay evidence without copying booking-wide values", async () => {
     // prettier-ignore
     mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: roomTypes } : reservationPage(heterogeneousReservation));

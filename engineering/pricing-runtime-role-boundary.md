@@ -1,5 +1,7 @@
 # Pricing runtime role and transaction boundary (VAY-1543)
 
+> **Superseded** by [`pricing-ordinary-login-plan.md`](pricing-ordinary-login-plan.md) (VAY-2057): pricing runs on the ordinary API login; the private service, its per-property logins and the proof script are deleted. Kept as history until slice E.
+
 _Review proposal only, 2026-09-20. No application wiring, grants, secrets, or deployment are changed by this document._
 
 ## Decision requested

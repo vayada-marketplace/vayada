@@ -8,8 +8,12 @@ const pricingScopeViews = new Set([
   "booking.pricing_runtime_effective_property_scopes",
   "booking.pricing_runtime_effective_authority_scopes",
 ]);
-const PRICING_SCOPE_VIEW_DIGEST =
-  "4719b0dcc4f7255410e6d5c993541ff106a8acbf09f521bc9d2819a5fdbb1797";
+// Both 0409 views, or only the property-scope view once VAY-2079 drops the authority
+// tables together with the authority-scope view.
+const PRICING_SCOPE_VIEW_DIGESTS = new Set([
+  "4719b0dcc4f7255410e6d5c993541ff106a8acbf09f521bc9d2819a5fdbb1797",
+  "20605c8ba80e1edcd5bb66e8498cdf6046153cff68ed53633e6a0fad0abed692",
+]);
 const PRICING_LOGIN_CHECK =
   "CHECK (((database_login)::text ~ '^vayada_next_pricing_[a-z0-9_]+$'::text))";
 // Exact grant contract. A column list never permits table-level authority.
@@ -114,8 +118,9 @@ export async function assertFinanceExpenseWorkerBoundary(
     )
   ).rows;
   if (
-    createHash("sha256").update(JSON.stringify(pricingViews)).digest("hex") !==
-    PRICING_SCOPE_VIEW_DIGEST
+    !PRICING_SCOPE_VIEW_DIGESTS.has(
+      createHash("sha256").update(JSON.stringify(pricingViews)).digest("hex"),
+    )
   )
     fail("pricing_view_drift");
   const pricingScope = (
@@ -217,7 +222,9 @@ export async function assertFinanceExpenseWorkerBoundary(
   }
   if (options.propertyId) {
     const rows = (
-      await client.query("SELECT property_id::pg_catalog.text FROM platform.finance_expense_worker_properties")
+      await client.query(
+        "SELECT property_id::pg_catalog.text FROM platform.finance_expense_worker_properties",
+      )
     ).rows;
     if (rows.length !== 1 || rows[0].property_id !== options.propertyId)
       fail("property_scope_mismatch");

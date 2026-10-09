@@ -10,6 +10,10 @@ import {
 
 const GARDEN_ROOM_TYPE_ID = "room_type_garden_studio";
 const GARDEN_ROOM_ID = "room_201";
+// VAY-2065: created through hotel setup on a property that has not published prices, so it
+// carries neither a legacy rate nor a currency.
+const LOFT_ROOM_TYPE_ID = "room_type_loft";
+const LOFT_ROOM_ID = "room_301";
 const manualBookingPath = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/manual-bookings`;
 
 function plan(ratePlanId: string, name: string, rateType: string, amountDecimal: string) {
@@ -26,6 +30,8 @@ function plan(ratePlanId: string, name: string, rateType: string, amountDecimal:
 // VAY-1422: the published offers are the rate plans; Flexible is preferred over Non-refundable
 // regardless of server order, children need ages before an offer is priced, a room type without
 // published offers falls back to Custom, and nationality submits as an ISO code.
+// VAY-2065: a setup-created room type without a currency sends its custom rate without one and
+// previews and saves in the currency the server answers with.
 test("defaults the rate plan, falls back to Custom, and submits nationality as ISO code", async ({
   page,
 }) => {
@@ -60,6 +66,14 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
             ratePlans: [],
             sortOrder: 1,
           },
+          {
+            ...pmsWebRoomType,
+            roomTypeId: LOFT_ROOM_TYPE_ID,
+            name: "Loft",
+            baseRate: { amountDecimal: null, currency: null },
+            ratePlans: [],
+            sortOrder: 2,
+          },
         ],
         sourceFreshness: {},
       },
@@ -89,6 +103,15 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
             sortOrder: 1,
             metadata: {},
           },
+          {
+            roomId: LOFT_ROOM_ID,
+            roomTypeId: LOFT_ROOM_TYPE_ID,
+            roomNumber: "301",
+            floor: "3",
+            status: "available",
+            sortOrder: 2,
+            metadata: {},
+          },
         ],
         sourceFreshness: {},
       },
@@ -102,35 +125,37 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
       json: { contractVersion: "pms-manual-booking.v1", canRecordPaidPayment: false },
     }),
   );
-  const previewBodies: Array<{ stays: Array<{ childAgesAtCheckIn?: number[] }> }> = [];
+  type PreviewStay = {
+    position: number;
+    roomId: string;
+    ratePlanId: string | null;
+    checkIn: string;
+    checkOut: string;
+    childAgesAtCheckIn?: number[];
+    pricing: { kind: string; nightlyAmount?: { amountDecimal: string; currency?: string } };
+  };
+  const previewBodies: Array<{ stays: PreviewStay[] }> = [];
   await page.route(`${manualBookingPath}/preview`, (route) => {
     const body = route.request().postDataJSON();
     previewBodies.push(body);
-    const stays = body.stays.map(
-      (stay: {
-        position: number;
-        roomId: string;
-        ratePlanId: string | null;
-        checkIn: string;
-        checkOut: string;
-        pricing: { kind: string; nightlyAmount?: { amountDecimal: string } };
-      }) => {
-        const nights = Math.round(
-          (Date.parse(stay.checkOut) - Date.parse(stay.checkIn)) / 86_400_000,
-        );
-        const custom = stay.pricing.kind === "custom";
-        const nightly = custom ? Number(stay.pricing.nightlyAmount!.amountDecimal) : 180;
-        const money = (amount: number) => ({ amountDecimal: amount.toFixed(2), currency: "EUR" });
-        return {
-          position: stay.position,
-          roomId: stay.roomId,
-          ratePlanId: stay.ratePlanId,
-          nightly: [],
-          standardTotal: custom ? null : money(180 * nights),
-          appliedTotal: money(nightly * nights),
-        };
-      },
-    );
+    // The property prices in EUR: a custom rate sent without a currency is answered in it.
+    const currency = "EUR";
+    const stays = body.stays.map((stay: PreviewStay) => {
+      const nights = Math.round(
+        (Date.parse(stay.checkOut) - Date.parse(stay.checkIn)) / 86_400_000,
+      );
+      const custom = stay.pricing.kind === "custom";
+      const nightly = custom ? Number(stay.pricing.nightlyAmount!.amountDecimal) : 180;
+      const money = (amount: number) => ({ amountDecimal: amount.toFixed(2), currency });
+      return {
+        position: stay.position,
+        roomId: stay.roomId,
+        ratePlanId: stay.ratePlanId,
+        nightly: [],
+        standardTotal: custom ? null : money(180 * nights),
+        appliedTotal: money(nightly * nights),
+      };
+    });
     const total = stays.reduce(
       (sum: number, stay: { appliedTotal: { amountDecimal: string } }) =>
         sum + Number(stay.appliedTotal.amountDecimal),
@@ -139,10 +164,10 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
     return route.fulfill({
       json: {
         contractVersion: "pms-manual-booking.v1",
-        currency: "EUR",
+        currency,
         stays,
         addOns: [],
-        grandTotal: { amountDecimal: total.toFixed(2), currency: "EUR" },
+        grandTotal: { amountDecimal: total.toFixed(2), currency },
       },
     });
   });
@@ -217,6 +242,22 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
   await expect(dialog.getByText("Standard:")).toHaveCount(0);
   await expect(page.getByText("Total €300")).toBeVisible();
   await expect(createBooking).toBeEnabled();
+  // The legacy room type still sends its own currency with the custom rate.
+  expect(previewBodies.at(-1)?.stays[0]?.pricing.nightlyAmount).toEqual({
+    amountDecimal: "150.00",
+    currency: "EUR",
+  });
+
+  // A setup-created room type has no currency yet: the custom rate goes without one and the
+  // total shows the property currency the server answers with (VAY-2065).
+  await dialog.getByLabel("Room 1 room").selectOption(LOFT_ROOM_ID);
+  await expect(ratePlan).toHaveValue("custom");
+  await dialog.getByLabel("Room 1 nightly rate").fill("150");
+  await expect(page.getByText("Total €300")).toBeVisible();
+  await expect(createBooking).toBeEnabled();
+  expect(previewBodies.at(-1)?.stays[0]?.pricing.nightlyAmount).toEqual({
+    amountDecimal: "150.00",
+  });
 
   // Nationality is a searchable country list that stores the ISO alpha-2 code.
   const nationality = dialog.getByLabel("Nationality");
@@ -264,10 +305,15 @@ test("defaults the rate plan, falls back to Custom, and submits nationality as I
     ],
     stays: [
       {
-        roomId: GARDEN_ROOM_ID,
+        roomId: LOFT_ROOM_ID,
         ratePlanId: null,
-        pricing: { kind: "custom", nightlyAmount: { amountDecimal: "150.00", currency: "EUR" } },
+        pricing: { kind: "custom", nightlyAmount: { amountDecimal: "150.00" } },
       },
     ],
   });
+  expect(createBody!["stays"]).toHaveLength(1);
+  expect(
+    (createBody!["stays"] as Array<{ pricing: { nightlyAmount: object } }>)[0]!.pricing
+      .nightlyAmount,
+  ).not.toHaveProperty("currency");
 });

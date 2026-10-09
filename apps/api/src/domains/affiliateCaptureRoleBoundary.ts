@@ -149,7 +149,7 @@ const affiliateCaptureReadRelations = [
 ] as const;
 
 // These security-barrier views are intentionally readable by every login and
-// return rows only for assigned pricing-prefixed session users.
+// return rows only for assigned pricing-prefixed session users. Either may be absent.
 const publicBaselineReadRelations = [
   "booking.pricing_runtime_effective_property_scopes",
   "booking.pricing_runtime_effective_authority_scopes",
@@ -442,6 +442,15 @@ export async function assertAffiliateCaptureRoleHasVisitReadCapabilities(
   if (policyFunctions.rows.some((row) => !row.execute || row.delegate))
     fail("policy_function_grants");
 
+  // Only the public baseline views may be absent (VAY-2079 drops the authority-scope view);
+  // a missing affiliate relation still fails the regclass cast below.
+  const baselineReads = (
+    await client.query(
+      `SELECT name FROM pg_catalog.unnest($1::pg_catalog.text[]) name
+       WHERE pg_catalog.to_regclass(name) IS NOT NULL`,
+      [[...publicBaselineReadRelations]],
+    )
+  ).rows.map((row) => row.name as string);
   const extraReads = await client.query(
     `SELECT 1 FROM pg_catalog.pg_class relation
      JOIN pg_catalog.pg_namespace namespace ON namespace.oid=relation.relnamespace
@@ -460,7 +469,7 @@ export async function assertAffiliateCaptureRoleHasVisitReadCapabilities(
        AND NOT (relation.oid=ANY($2::pg_catalog.regclass[]))
        AND attribute.attnum>0 AND NOT attribute.attisdropped
        AND pg_catalog.has_column_privilege($1,relation.oid,attribute.attname,'SELECT')`,
-    [role, [...affiliateCaptureReadRelations, ...publicBaselineReadRelations]],
+    [role, [...affiliateCaptureReadRelations, ...baselineReads]],
   );
   if (extraReads.rowCount) fail("read_allowlist");
 

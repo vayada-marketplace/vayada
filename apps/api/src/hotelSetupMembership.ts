@@ -5,11 +5,12 @@ import {
   type MembershipPropertyScope,
   type PropertyAccessContext,
 } from "@vayada/backend-authorization";
-import type { beginHotelSetupCommandScope } from "./hotelSetupCommandScope.js";
+import type { HotelSetupScopeQuery } from "./hotelSetupOrdinaryScope.js";
 
-/** Call after native scope locks; all permission authority is reread on this client. */
+/** Call after the scope locks (hotelSetupOrdinaryScope.ts); all permission authority is reread
+ * on this client. */
 export async function lockHotelSetupMembership(
-  client: Parameters<typeof beginHotelSetupCommandScope>[0],
+  client: HotelSetupScopeQuery,
   command: { organizationId: string; actorUserId: string; propertyId?: string },
 ) {
   const members = await client.query<{
@@ -64,7 +65,7 @@ export async function lockHotelSetupMembership(
       status: "active",
     },
     membership: { membershipId: member.id, roleKey: member.roleKey, status: "active" },
-    // The native scope has already locked and proved this property's canonical Owner link.
+    // The ordinary scope has already locked and proved this property's canonical Owner link.
     linkedResources: command.propertyId
       ? [
           {
@@ -110,7 +111,7 @@ export async function lockHotelSetupMembership(
 }
 
 export async function lockHotelSetupCreationPermissions(
-  client: Parameters<typeof beginHotelSetupCommandScope>[0],
+  client: HotelSetupScopeQuery,
   command: { organizationId: string; actorUserId: string },
 ): Promise<readonly PermissionKey[] | null> {
   const membership = await lockHotelSetupMembership(client, command);

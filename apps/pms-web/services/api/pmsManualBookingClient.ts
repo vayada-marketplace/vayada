@@ -5,6 +5,8 @@ import { pmsOperationsClient, pmsOperationsRequestOptions } from "./pmsOperation
 export const PMS_MANUAL_BOOKING_CONTRACT_VERSION = "pms-manual-booking.v1" as const;
 
 export type PmsManualBookingMoney = { amountDecimal: string; currency: string };
+/** v1 amendment (VAY-2065): omitted, the server prices the custom rate in the property currency. */
+export type PmsManualBookingCustomAmount = { amountDecimal: string; currency?: string };
 type PmsManualBookingStayBase = {
   position: number;
   roomId: string;
@@ -21,7 +23,7 @@ export type PmsManualBookingStay = PmsManualBookingStayBase &
         ratePlanId: string;
         pricing: { kind: "rate_plan"; manualOverride: PmsManualBookingMoney | null };
       }
-    | { ratePlanId: null; pricing: { kind: "custom"; nightlyAmount: PmsManualBookingMoney } }
+    | { ratePlanId: null; pricing: { kind: "custom"; nightlyAmount: PmsManualBookingCustomAmount } }
   );
 export type PmsManualBookingAddonSelection = {
   addonId: string;
@@ -55,6 +57,8 @@ export type PmsManualBookingCreateInput = PmsManualBookingPreviewInput & {
     phoneE164: string | null;
     countryCode: string | null;
   }>;
+  /** The preview's pricingRevision; a republish in between answers 409 pricing_changed. */
+  expectedPricingRevision?: number;
   privateNote: string | null;
   directSource: "call" | "email" | "whatsapp" | "walk_in" | "social_media" | "other";
   payment: {
@@ -129,6 +133,7 @@ export const PMS_MANUAL_BOOKING_ERROR_CODES = [
   "addon_not_found",
   "room_unavailable",
   "pricing_not_published",
+  "pricing_changed",
   "idempotency_conflict",
   "invalid_dates",
   "occupancy_exceeded",
