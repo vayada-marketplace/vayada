@@ -955,12 +955,15 @@ const BOOKED_OFFER_CANCELLATION_JOIN_SQL = `LEFT JOIN LATERAL (
   LEFT JOIN LATERAL (
     SELECT term.value->'cancellation' AS cancellation
     FROM booking.pricing_quote_acceptances acceptance
+    CROSS JOIN LATERAL jsonb_array_elements(acceptance.quote_snapshot->'stay'->'rooms') AS room(value)
     CROSS JOIN LATERAL jsonb_array_elements(acceptance.quote_snapshot->'evidence'->'terms') AS term(value)
     WHERE acceptance.property_id = assignment.property_id
       AND acceptance.guest_booking_id = assignment.guest_booking_id
       AND acceptance.id::text = assignment.assignment_payload->'pricingAcceptance'->>'acceptanceId'
-      AND term.value->>'roomTypeId' = assignment.room_type_id::text
-      AND term.value->>'offerId' = assignment.assignment_payload->'pricingAcceptance'->>'offerId'
+      -- Through the booked room selection, so moving the stay to another room type keeps its terms.
+      AND room.value->>'selectionId' = assignment.assignment_payload->'pricingAcceptance'->>'selectionId'
+      AND term.value->>'roomTypeId' = room.value->>'roomTypeId'
+      AND term.value->>'offerId' = room.value->>'offerId'
     LIMIT 1
   ) accepted_offer ON TRUE`;
 
@@ -969,7 +972,6 @@ const CANCELLATION_OUTCOME_SQL = `(
   FROM booking.booking_status_events event
   WHERE event.guest_booking_id = booking.id
     AND event.event_type = 'guest_booking.canceled'
-    AND event.event_payload ? 'cancellationOutcome'
   ORDER BY event.occurred_at DESC, event.id DESC
   LIMIT 1
 )`;
