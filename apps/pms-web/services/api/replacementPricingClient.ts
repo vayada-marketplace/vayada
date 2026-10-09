@@ -12,10 +12,11 @@ export type PricingSources = { room: string; terms: string; finance: string };
 export type PricingSnapshot = { currency: string; rooms: readonly PricingConfiguration[]; ownerReferences: { finance: string; charges?: string } };
 export type PricingDraft = { draftId: string; revision: number; baseRevision: number; sources: PricingSources; effectiveSources?: PricingSources; snapshot: PricingSnapshot; stale: boolean };
 export type PricingChargeReview = PricingDraft & { fingerprint: string; declaration: "all_mandatory_charges_included" };
-export type PricingAuthority = { authority: "unconfigured" | "vayada" | "external"; revision: string | null; organizationId: string | null };
 export class PricingResponseError extends Error { constructor() { super("Pricing data could not be verified. Reload before continuing."); } }
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => pricingObject(item)
   ? Object.fromEntries(Object.keys(item).sort().map((key) => [key, item[key]])) : item);
+/** Equal pricing data regardless of key order (the server re-reads drafts from jsonb, which reorders keys). */
+export const samePricingValue = (a: unknown, b: unknown) => canonical(a) === canonical(b);
 const bad = (): never => { throw new PricingResponseError(); };
 const uuid = (v: unknown): v is string => typeof v === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(v);
 const exact = (v: unknown, keys: string[]): v is Record<string, unknown> => pricingObject(v) && pricingKeys(v, keys);
@@ -75,25 +76,6 @@ export function createReplacementPricingClient(propertyId: string, http: Http = 
     catch (error) { if (error instanceof ApiErrorResponse && error.status === 404 && error.data.code === "not_found") return missing; throw error; }
   }
   return {
-    async readAuthority(): Promise<PricingAuthority> {
-      const value = await http.get<unknown>(`${base}/authority`, options());
-      if (!exact(value, ["authority", "revision", "organizationId"]) ||
-          !["unconfigured", "vayada", "external"].includes(value.authority as string) ||
-          !(value.revision === null || uuid(value.revision)) ||
-          !(value.organizationId === null || uuid(value.organizationId)) ||
-          (value.authority === "unconfigured" && value.revision === null && value.organizationId !== null) ||
-          (value.revision !== null && value.organizationId === null)) return bad();
-      return value as PricingAuthority;
-    },
-    authorityAction(expectedRevision: string | null, authority: PricingAuthority["authority"]) {
-      if (!(expectedRevision === null || uuid(expectedRevision)) || !["unconfigured", "vayada", "external"].includes(authority)) return bad();
-      const requestId = crypto.randomUUID();
-      return async () => {
-        const value = await http.put<unknown>(`${base}/authority`, { expectedRevision, authority }, options(requestId));
-        if (!exact(value, ["revision", "replayed"]) || !uuid(value.revision) || typeof value.replayed !== "boolean") return bad();
-        return { revision: value.revision as string, replayed: value.replayed as boolean };
-      };
-    },
     termsAction(input: PricingTermsInput, draftContext: PricingDraftContext) {
       const selected = context(draftContext);
       const sent = structuredClone(input);
@@ -145,9 +127,10 @@ export function createReplacementPricingClient(propertyId: string, http: Http = 
       if (!exact(value, ["revision"]) || value.revision !== body.expectedDraftRevision + 1) return bad();
       return value.revision as number;
     },
-    confirmationAction(input: PricingChargeReview) {
+    /** `save_prices`: the staff member declared by pressing "Save prices"; the server records it on the audit event. */
+    confirmationAction(input: PricingChargeReview, declaredVia?: "save_prices") {
       const reviewed = review(input, input.draftId), requestId = crypto.randomUUID();
-      const body = { draftId: reviewed.draftId, expectedDraftRevision: reviewed.revision, claimedFingerprint: reviewed.fingerprint, declaration: reviewed.declaration };
+      const body = { draftId: reviewed.draftId, expectedDraftRevision: reviewed.revision, claimedFingerprint: reviewed.fingerprint, declaration: reviewed.declaration, ...(declaredVia === "save_prices" ? { declaredVia } : {}) };
       return async () => {
         const value = await http.post<unknown>(`${base}/charges`, structuredClone(body), options(requestId));
         if (!exact(value, ["id", "fingerprint", "declaration"]) || !uuid(value.id) || value.fingerprint !== reviewed.fingerprint || value.declaration !== reviewed.declaration) return bad();

@@ -35,26 +35,37 @@ afterEach(async () => {
 });
 
 describe("property media assignment routes", () => {
-  it("forwards an authorized logo without falling back to the ambient writer", async () => {
-    const assignLogo = vi.fn(async () => successResponse());
-    const forwardLogo = vi.fn(async (_request, reply) =>
-      reply.code(503).send({ code: "hotel_setup_unavailable" }),
-    );
-    app = buildPropertyMediaApp({ repository: commandRepository({ assignLogo }), forwardLogo });
-    const response = await injectJson(app, {
-      method: "PUT",
+  it("assigns a logo through the ordinary hotel-setup runtime for the Owner only (VAY-2056)", async () => {
+    const ambient = vi.fn(async () => successResponse());
+    const ordinary = vi.fn(async () => successResponse());
+    const request = {
+      method: "PUT" as const,
       url: `/api/hotel-setup/properties/${propertyId}/media/logo`,
-      headers: { authorization: "Bearer valid-token", "idempotency-key": "logo-forward" },
+      headers: { authorization: "Bearer valid-token", "idempotency-key": "logo-ordinary" },
       payload: { expectedProfileRevision: 1, assignment: null },
-    });
-    expect(response.statusCode).toBe(503);
-    expect(forwardLogo).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      propertyId,
-      "logo_assignment",
+    };
+    const build = (options: { roleKey?: string; linkedResources?: LinkedResource[] } = {}) =>
+      buildPropertyMediaApp({
+        repository: commandRepository({ assignLogo: ambient }),
+        logoAssignments: { assignLogo: ordinary },
+        ...options,
+      });
+
+    app = build();
+    expect((await injectJson(app, request)).statusCode).toBe(200);
+    expect(ordinary).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId, propertyId, actorUserId: "user_property_owner" }),
     );
-    expect(assignLogo).not.toHaveBeenCalled();
+    for (const denied of [
+      { roleKey: "hotel_manager" },
+      { linkedResources: [propertyLink("operator", "active")] },
+    ]) {
+      await app.close();
+      app = build(denied);
+      expect((await injectJson(app, request)).statusCode).toBe(403);
+    }
+    expect(ordinary).toHaveBeenCalledTimes(1);
+    expect(ambient).not.toHaveBeenCalled();
   });
 
   it("assigns a logo for an actively linked hotel owner", async () => {
@@ -387,7 +398,8 @@ describe("Platform Admin property hero routes", () => {
 
 function buildPropertyMediaApp(options: {
   repository: PropertyMediaCommandRepository;
-  forwardLogo?: import("./hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
+  logoAssignments?: Pick<PropertyMediaCommandRepository, "assignLogo">;
+  roleKey?: string;
   permissions?: PermissionKey[];
   linkedResources?: LinkedResource[];
   organizationKind?: "hotel_group" | "creator_workspace" | "platform";
@@ -395,7 +407,7 @@ function buildPropertyMediaApp(options: {
   return buildApp({
     logger: false,
     propertyMediaCommandRepository: options.repository,
-    hotelSetupLogoForwarder: options.forwardLogo,
+    hotelSetupLogoAssignments: options.logoAssignments,
     auth: {
       verifier: createFakeVerifier(new Map([["valid-token", session]])),
       repository: identityRepository(options),
@@ -434,6 +446,7 @@ function commandRepository(
 }
 
 function identityRepository(options: {
+  roleKey?: string;
   linkedResources?: LinkedResource[];
   organizationKind?: "hotel_group" | "creator_workspace" | "platform";
 }): IdentityRepository {
@@ -453,7 +466,7 @@ function identityRepository(options: {
       return {
         membershipId: "membership_property_owner",
         status: "active",
-        roleKey: "hotel_owner",
+        roleKey: options.roleKey ?? "hotel_owner",
         workosMembershipId: "membership_workos",
         workosRoleSlugs: ["hotel_owner"],
       };

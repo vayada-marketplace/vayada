@@ -21,7 +21,7 @@ interface CalendarRoom {
   floor: string;
   status: string;
   baseRate: number;
-  currency: string;
+  currency: string | null;
   maxOccupancy: number;
   size: number;
   flexibleRatePlanId?: string | null;
@@ -340,7 +340,7 @@ export default function BookingDetailModal({
         ? t("calendar.bookingDetail.upToGuests", { count: room.maxOccupancy })
         : "",
       room.size > 0 ? `${room.size} m²` : "",
-      room.baseRate > 0
+      room.baseRate > 0 && room.currency
         ? t("calendar.bookingDetail.perNight", {
             amount: formatCurrency(room.baseRate, room.currency),
           })
@@ -409,6 +409,10 @@ export default function BookingDetailModal({
               checkOut: movingStay.checkOut,
               adults: movingStay.adults ?? 1,
               children: movingStay.children ?? 0,
+              // Offers price children by age; without recorded ages the quote stays unavailable.
+              ...(movingStay.children && movingStay.childAgesAtCheckIn?.length
+                ? { childAgesAtCheckIn: movingStay.childAgesAtCheckIn }
+                : {}),
               ratePlanId: selectedCandidate.room.flexibleRatePlanId,
               pricing: { kind: "rate_plan", manualOverride: null },
             },

@@ -66,7 +66,10 @@ import pg from "pg";
 import { createHmac } from "node:crypto";
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
-import { loadHotelSetupCommandForwarder } from "./hotelSetupCommandForwarder.js";
+import { createOrdinaryHotelSetupLogoRuntime } from "./hotelSetupLogoRuntime.js";
+import { createOrdinaryHotelSetupProfileCommand } from "./platform/hotelSetupProfileWriter.js";
+import { createOrdinaryHotelSetupLaunchSettingsCommand } from "./hotelSetupLaunchSettingsRepository.js";
+import { createOrdinaryHotelSetupFeatureHubCommands } from "./hotelSetupFeatureHubOrdinary.js";
 import {
   type ApiConfig,
   channexConnectionOnlyScope,
@@ -224,7 +227,10 @@ import {
 import { createPropertySetupFinanceStateProvider } from "./platform/propertySetupFinanceState.js";
 import { createPropertySetupReviewLifecycleStateProvider } from "./platform/propertySetupReviewLifecycleState.js";
 import { createPropertySetupRouteStateReadPort } from "./platform/propertySetupRouteState.js";
-import { runPlatformMediaCleanupJobs } from "./jobs/platformMediaCleanup.js";
+import {
+  platformMediaCleanupFailureLogEntries,
+  runPlatformMediaCleanupJobs,
+} from "./jobs/platformMediaCleanup.js";
 import { startPmsInboxAssignmentReconciliationWorker } from "./jobs/pmsInboxAssignmentReconciliation.js";
 import { startPmsInboxFollowUpReleaseWorker } from "./jobs/pmsInboxFollowUpRelease.js";
 import {
@@ -263,6 +269,10 @@ import {
   createPgPmsCalendarAutoOpenWorkerStore,
   runPmsCalendarAutoOpenWorkerOnce,
 } from "./jobs/pmsCalendarAutoOpenWorker.js";
+import {
+  createPgPmsCalendarAutoOpenSchedulerStore,
+  runPmsCalendarAutoOpenScheduler,
+} from "./jobs/pmsChannexScheduler.js";
 import { createPmsChannexManagementTargetState } from "./jobs/pmsChannexManagementTargetState.js";
 import {
   runFinanceSubscriptionNotificationJobs,
@@ -343,24 +353,8 @@ import {
 
 const postgresRuntime = installPostgresPoolRuntime(pg);
 const config = loadConfig();
-const hotelSetupCommandForwarder = loadHotelSetupCommandForwarder();
-const hotelSetupCreationForwarder = loadHotelSetupCommandForwarder({
-  HOTEL_SETUP_COMMAND_ADMISSION: process.env["HOTEL_SETUP_CREATION_COMMAND_ADMISSION"],
-  HOTEL_SETUP_COMMAND_ORIGIN: process.env["HOTEL_SETUP_CREATION_COMMAND_ORIGIN"],
-  HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: process.env["HOTEL_SETUP_CREATION_COMMAND_INTERNAL_TOKEN"],
-});
-
-const hotelSetupProfileForwarder = loadHotelSetupCommandForwarder({
-  HOTEL_SETUP_COMMAND_ADMISSION: process.env["HOTEL_SETUP_PROFILE_COMMAND_ADMISSION"],
-  HOTEL_SETUP_COMMAND_ORIGIN: process.env["HOTEL_SETUP_PROFILE_COMMAND_ORIGIN"],
-  HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: process.env["HOTEL_SETUP_PROFILE_COMMAND_INTERNAL_TOKEN"],
-});
-
-const hotelSetupLogoForwarder = loadHotelSetupCommandForwarder({
-  HOTEL_SETUP_COMMAND_ADMISSION: process.env["HOTEL_SETUP_LOGO_COMMAND_ADMISSION"] ?? "blocked",
-  HOTEL_SETUP_COMMAND_ORIGIN: process.env["HOTEL_SETUP_LOGO_COMMAND_ORIGIN"],
-  HOTEL_SETUP_COMMAND_INTERNAL_TOKEN: process.env["HOTEL_SETUP_LOGO_COMMAND_INTERNAL_TOKEN"],
-});
+// VAY-2056: hotel setup runs on the ordinary API login; the HOTEL_SETUP_*_COMMAND_* variables
+// installed on the task definition are no longer read and are not a kill switch.
 
 function buildAuthOptions(auth: ApiConfig["auth"]): ApiAuthOptions | undefined {
   if (!auth) {
@@ -504,13 +498,6 @@ const airbnbAlterationRuntime = createAirbnbAlterationRuntime({
   config,
   connectionString: targetDatabaseUrl,
 });
-const pricingRuntimePool = config.pricingDatabaseUrl
-  ? new pg.Pool({
-      connectionString: config.pricingDatabaseUrl,
-      connectionTimeoutMillis: 5_000,
-      max: 5,
-    })
-  : null;
 if (config.affiliateBookingBindingEnabled) {
   const client = new pg.Client({ connectionString: targetDatabaseUrl });
   try {
@@ -524,10 +511,10 @@ const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   airbnbAlterations: airbnbAlterationRuntime?.adapter,
   externalChanges: externalBookingChanges,
   mixedRoomSelectionsEnabled: true,
-  replacementPricingAcceptanceAllowedSlugs: config.replacementPricingAcceptanceAllowedSlugs,
+  replacementPricingAcceptanceEnabled: config.replacementPricingAcceptanceEnabled,
+  replacementPricingCardAcceptanceEnabled: config.replacementPricingCardAcceptanceEnabled,
   bankTransfers: bankTransferBookings,
   connectionString: targetDatabaseUrl,
-  pricingPool: pricingRuntimePool,
   inventoryReservationPort: createTargetPmsInventoryReservationPort(),
   billingConfigReadPortFactory: (executor) =>
     createTargetFinanceBillingConfigReadPort({
@@ -1067,6 +1054,45 @@ const propertySetupOwnerPool = new pg.Pool({
   connectionTimeoutMillis: 5_000,
   max: 5,
 });
+// VAY-2056: the six hotel-setup Owner operations run on the ordinary API login, only with
+// WorkOS auth configured (their routes need the property-access repository). Their own pool keeps
+// a burst of setup writes, each holding the organization row lock, off the shared setup pools.
+const hotelSetupOrdinaryPool = config.auth
+  ? new pg.Pool({ connectionString: targetDatabaseUrl, connectionTimeoutMillis: 5_000, max: 10 })
+  : undefined;
+const hotelSetupOrdinaryLogo =
+  hotelSetupOrdinaryPool && platformMediaRuntime && config.platformMediaServing
+    ? createOrdinaryHotelSetupLogoRuntime({
+        connectionString: targetDatabaseUrl,
+        lookup: hotelSetupOrdinaryPool,
+        serving: config.platformMediaServing,
+        defaults: platformMediaRuntime.routes,
+      })
+    : undefined;
+const hotelSetupOrdinaryOptions = hotelSetupOrdinaryPool
+  ? {
+      hotelSetupPropertyCreationRepository: createPgSharedHotelSetupStatusRepository({
+        connectionString: targetDatabaseUrl,
+        pool: hotelSetupOrdinaryPool,
+        hotelSetupOwnerCreation: true,
+      }),
+      hotelSetupProfileCommand: createOrdinaryHotelSetupProfileCommand(hotelSetupOrdinaryPool),
+      hotelSetupLaunchSettingsCommand:
+        createOrdinaryHotelSetupLaunchSettingsCommand(hotelSetupOrdinaryPool),
+      hotelSetupFeatureHubCommands:
+        createOrdinaryHotelSetupFeatureHubCommands(hotelSetupOrdinaryPool),
+      hotelSetupCurrencyCommandPort:
+        config.pmsOperationsSource === "target"
+          ? createPgPmsPricingCommandRepository({
+              connectionString: targetDatabaseUrl,
+              pool: hotelSetupOrdinaryPool,
+              currencyChangeGuard: PMS_PRICING_CURRENCY_CHANGE_FAIL_CLOSED_GUARD,
+              hotelSetupOrdinaryOwner: true,
+            })
+          : undefined,
+      hotelSetupLogoAssignments: hotelSetupOrdinaryLogo?.assignments,
+    }
+  : {};
 const financePaymentSetupRuntime = createFinancePaymentSetupRuntime({
   connectionString: targetDatabaseUrl,
   pricing: pmsPricingReadModel,
@@ -1280,6 +1306,11 @@ const pmsCalendarAutoOpenWorkerStore = pmsOperatingCalendarRuntime
       propertyProfileEvidence: propertySetupPmsRuntime.propertyProfileEvidence,
     })
   : undefined;
+// VAY-2066: the producer for the worker above. It only enqueues auto-open jobs; no Channex calls.
+const pmsCalendarAutoOpenSchedulerStore =
+  pmsOperatingCalendarRuntime && config.pmsCalendarAutoOpenSchedulerEnabled
+    ? createPgPmsCalendarAutoOpenSchedulerStore({ connectionString: targetDatabaseUrl })
+    : undefined;
 const pmsGuestPolicySetupCommands =
   config.pmsOperationsSource === "target"
     ? {
@@ -1809,8 +1840,7 @@ const app = buildApp({
   replacementPricing:
     config.pmsOperationsSource === "target"
       ? {
-          commands: (context) =>
-            createReplacementPricingCommands(propertySetupOwnerPool, context, pricingRuntimePool),
+          commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context),
         }
       : undefined,
   pmsPricing: pmsGuestPolicySetupCommands
@@ -1852,9 +1882,7 @@ const app = buildApp({
     ? { commandPort: pmsPhysicalRoomOperationalLabels }
     : undefined,
   pmsModuleActivationRepository,
-  hotelSetupCommandForwarder,
-  hotelSetupCreationForwarder,
-  hotelSetupProfileForwarder,
+  ...hotelSetupOrdinaryOptions,
   financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,
@@ -2189,9 +2217,11 @@ const app = buildApp({
   bookingWebAffiliateHotelResolver,
   bookingWebAffiliateRepository,
   platformMedia: platformMediaRuntime
-    ? { ...platformMediaRuntime.routes, forwardLogo: hotelSetupLogoForwarder }
+    ? {
+        ...platformMediaRuntime.routes,
+        resolveRequestPersistence: hotelSetupOrdinaryLogo?.uploads.resolveRequestPersistence,
+      }
     : undefined,
-  hotelSetupLogoForwarder,
 });
 app.addHook("onClose", async () => {
   await affiliateCaptureRuntime?.pool.end();
@@ -2450,7 +2480,7 @@ app.addHook("onClose", async () => {
     bookingSetupLifecycleStatusRepository.close(),
     bookingGuestPolicyRepository.close(),
     propertySetupOwnerPool.end(),
-    pricingRuntimePool?.end(),
+    hotelSetupOrdinaryPool?.end(),
     propertySetupDraftRepository.close(),
     ...propertySetupPmsRuntime.resources.map((resource) => resource.close?.()),
   ]);
@@ -2573,7 +2603,11 @@ const runCalendarAutoOpen = () => {
     workerId: `pms-calendar-auto-open:${process.pid}`,
   })
     .then((result) => {
-      if (result.outcome === "dead_lettered") {
+      if (result.outcome === "succeeded") {
+        app.log.info(result, "PMS calendar auto-open job applied");
+      } else if (result.outcome === "retry_scheduled") {
+        app.log.warn(result, "PMS calendar auto-open job will be retried");
+      } else if (result.outcome === "dead_lettered") {
         app.log.error(result, "PMS calendar auto-open job was dead-lettered");
       }
     })
@@ -2591,6 +2625,72 @@ app.addHook("onClose", async () => {
   if (calendarAutoOpenTimer) clearInterval(calendarAutoOpenTimer);
   await activeCalendarAutoOpenRun;
   await pmsCalendarAutoOpenWorkerStore?.close?.();
+});
+
+let activeCalendarAutoOpenSchedule: Promise<void> | undefined;
+const runCalendarAutoOpenSchedule = () => {
+  if (!config.backgroundWorkersEnabled) return;
+  const store = pmsCalendarAutoOpenSchedulerStore;
+  if (!store || activeCalendarAutoOpenSchedule) return;
+  const startedAt = Date.now();
+  activeCalendarAutoOpenSchedule = store
+    .withRunLock(async (session) => {
+      const run = await runPmsCalendarAutoOpenScheduler(session, {
+        workerId: `pms-calendar-auto-open-scheduler:${process.pid}`,
+      });
+      // The counts only explain the run; failing to read them must not hide its result.
+      const stats = await session.readSelectionStats().catch(() => null);
+      return { run, stats };
+    })
+    .then((outcome) => {
+      if (!outcome.ran) {
+        app.log.info({ skippedLocked: true }, "PMS calendar auto-open scheduler run");
+        return;
+      }
+      const { run, stats } = outcome.value;
+      if (run.autoOpenFailures.length > 0) {
+        app.log.warn(
+          {
+            failures: run.autoOpenFailures.length,
+            failedProperties: run.autoOpenFailures.slice(0, 10),
+          },
+          "PMS calendar auto-open scheduler skipped properties",
+        );
+      }
+      app.log.info(
+        {
+          enabledSettings: stats?.enabledSettings ?? null,
+          pausedNotReady: stats?.pausedNotReady ?? null,
+          skippedUnverifiedLabels: stats?.skippedUnverifiedLabels ?? null,
+          enqueued: run.enqueued,
+          reused: run.reused,
+          failures: run.autoOpenFailures.length,
+          durationMs: Date.now() - startedAt,
+        },
+        "PMS calendar auto-open scheduler run",
+      );
+    })
+    .catch((error: unknown) =>
+      app.log.warn({ err: error }, "PMS calendar auto-open scheduler failed"),
+    )
+    .finally(() => {
+      activeCalendarAutoOpenSchedule = undefined;
+    });
+};
+// Hourly; the first run waits a minute so it stays out of startup and deploy health checks.
+const calendarAutoOpenScheduleTimer = pmsCalendarAutoOpenSchedulerStore
+  ? setInterval(runCalendarAutoOpenSchedule, config.pmsCalendarAutoOpenSchedulerIntervalMs)
+  : undefined;
+calendarAutoOpenScheduleTimer?.unref();
+const calendarAutoOpenScheduleStart = pmsCalendarAutoOpenSchedulerStore
+  ? setTimeout(runCalendarAutoOpenSchedule, 60_000)
+  : undefined;
+calendarAutoOpenScheduleStart?.unref();
+app.addHook("onClose", async () => {
+  if (calendarAutoOpenScheduleTimer) clearInterval(calendarAutoOpenScheduleTimer);
+  if (calendarAutoOpenScheduleStart) clearTimeout(calendarAutoOpenScheduleStart);
+  await activeCalendarAutoOpenSchedule;
+  await pmsCalendarAutoOpenSchedulerStore?.close();
 });
 
 let activeFinanceSubscriptionBatch: Promise<void> | undefined;
@@ -2902,8 +3002,18 @@ if (platformMediaRuntime) {
     if (activeCleanup) return;
     activeCleanup = runPlatformMediaCleanupJobs(platformMediaRuntime.cleanupStore)
       .then((result) => {
-        if (result.failed > 0) {
-          app.log.warn({ failed: result.failed }, "Platform media cleanup completed with failures");
+        const failures = platformMediaCleanupFailureLogEntries(result);
+        const deadLettered = failures.filter((failure) => failure.deadLettered);
+        const retrying = failures.filter((failure) => !failure.deadLettered);
+        // A dead-lettered item is never selected again, so each one warns exactly once.
+        if (deadLettered.length > 0) {
+          app.log.warn(
+            { failures: deadLettered },
+            "Platform media cleanup dead-lettered items after retries",
+          );
+        }
+        if (retrying.length > 0) {
+          app.log.info({ failures: retrying }, "Platform media cleanup will retry failed items");
         }
       })
       .catch((error: unknown) => {

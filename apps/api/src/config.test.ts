@@ -56,42 +56,6 @@ describe("api config", () => {
     );
   });
 
-  it("does not reuse the general or auth database URL for pricing authority", () => {
-    const base = loadConfig(completeCreatorMarketplaceEnv);
-    expect(base.pricingDatabaseUrl).toBeUndefined();
-    expect(
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        PRICING_DATABASE_URL: "postgresql://pricing_runtime@pricing-db",
-      }).pricingDatabaseUrl,
-    ).toBe("postgresql://pricing_runtime@pricing-db");
-    expect(() =>
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        PRICING_DATABASE_URL: completeCreatorMarketplaceEnv.TARGET_DATABASE_URL,
-      }),
-    ).toThrow("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
-    expect(() =>
-      loadConfig({
-        ...completeCreatorMarketplaceEnv,
-        PRICING_DATABASE_URL: completeCreatorMarketplaceEnv.AUTH_DATABASE_URL,
-      }),
-    ).toThrow("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
-    expect(() =>
-      loadConfig({
-        TARGET_DATABASE_URL: "postgresql://general_runtime@target-db/vayada",
-        PRICING_DATABASE_URL:
-          "postgresql://general_runtime@target-db/vayada?application_name=pricing",
-      }),
-    ).toThrow("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
-    expect(() =>
-      loadConfig({
-        TARGET_DATABASE_URL: "postgresql://general_runtime@target-db/vayada",
-        PRICING_DATABASE_URL: "postgresql://pricing_runtime@target-db/vayada?user=general_runtime",
-      }),
-    ).toThrow("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
-  });
-
   it("keeps affiliate capture closed unless its isolated runtime is complete", () => {
     expect(loadConfig(completeCreatorMarketplaceEnv).affiliateCapture).toBeUndefined();
     expect(
@@ -124,10 +88,6 @@ describe("api config", () => {
       {
         AUTH_DATABASE_URL:
           "postgresql://auth_runtime@auth-db/app?user=vayada_next_affiliate_capture",
-      },
-      {
-        PRICING_DATABASE_URL:
-          "postgresql://pricing_runtime@pricing-db/app?user=vayada_next_affiliate_capture",
       },
     ]) {
       expect(() =>
@@ -936,21 +896,23 @@ describe("api config", () => {
     );
   });
 
-  it("loads a canonical replacement-pricing acceptance slug allowlist", () => {
+  it("enables replacement-pricing quote acceptance unless the kill switch is off", () => {
+    expect(loadConfig({}).replacementPricingAcceptanceEnabled).toBe(true);
     expect(
-      loadConfig({
-        REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS: "Test-Hotel, other-hotel,test-hotel",
-      }).replacementPricingAcceptanceAllowedSlugs,
-    ).toEqual(["test-hotel", "other-hotel"]);
-    expect(loadConfig({}).replacementPricingAcceptanceAllowedSlugs).toEqual([]);
+      loadConfig({ REPLACEMENT_PRICING_ACCEPTANCE_ENABLED: "false" })
+        .replacementPricingAcceptanceEnabled,
+    ).toBe(false);
+    expect(() => loadConfig({ REPLACEMENT_PRICING_ACCEPTANCE_ENABLED: "test-hotel" })).toThrow(
+      "REPLACEMENT_PRICING_ACCEPTANCE_ENABLED must be true or false",
+    );
   });
 
-  it("rejects malformed replacement-pricing acceptance slugs", () => {
-    expect(() =>
-      loadConfig({ REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS: "test-hotel,*.vayada.com" }),
-    ).toThrow(
-      "REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS requires up to 100 canonical lowercase slugs",
-    );
+  it("keeps card quote acceptance off unless explicitly enabled", () => {
+    expect(loadConfig({}).replacementPricingCardAcceptanceEnabled).toBe(false);
+    expect(
+      loadConfig({ REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED: "true" })
+        .replacementPricingCardAcceptanceEnabled,
+    ).toBe(true);
   });
 
   it("rejects next API runtime when source selectors would default to legacy or disabled", () => {
@@ -1350,6 +1312,31 @@ describe("api config", () => {
     });
     expect(() => loadConfig({ PLATFORM_MEDIA_CLEANUP_INTERVAL_MS: "0" })).toThrow(
       "PLATFORM_MEDIA_CLEANUP_INTERVAL_MS must be a positive integer",
+    );
+  });
+
+  it("runs the calendar auto-open scheduler hourly unless switched off", () => {
+    expect(loadConfig({})).toMatchObject({
+      pmsCalendarAutoOpenSchedulerEnabled: true,
+      pmsCalendarAutoOpenSchedulerIntervalMs: 60 * 60 * 1000,
+    });
+    expect(
+      loadConfig({
+        PMS_CALENDAR_AUTO_OPEN_SCHEDULER_ENABLED: "false",
+        PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS: "900000",
+      }),
+    ).toMatchObject({
+      pmsCalendarAutoOpenSchedulerEnabled: false,
+      pmsCalendarAutoOpenSchedulerIntervalMs: 900_000,
+    });
+    expect(() => loadConfig({ PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS: "0" })).toThrow(
+      "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS must be a positive integer",
+    );
+    expect(() =>
+      loadConfig({ PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS: "2147483648" }),
+    ).toThrow("PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS must not exceed 2147483647");
+    expect(() => loadConfig({ PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS: "59999" })).toThrow(
+      "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS must be at least 60000",
     );
   });
 

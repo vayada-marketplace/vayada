@@ -40,8 +40,7 @@ export async function lockPublicPricingChargeTotals(
   if (
     !scope ||
     scope.propertyId !== previous.propertyId ||
-    scope.organizationId !== previous.organizationId ||
-    scope.authorityRevision !== previous.authorityRevision
+    scope.organizationId !== previous.organizationId
   )
     return null;
   const date = (

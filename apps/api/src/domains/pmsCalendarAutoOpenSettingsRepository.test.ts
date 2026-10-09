@@ -8,18 +8,34 @@ const propertyId = "14330000-0000-4000-8000-000000000001";
 const virtual = row({ configured: false, revision: 0 });
 
 describe("PMS calendar auto-open settings repository", () => {
-  it("reads the virtual disabled default without inserting", async () => {
-    const pool = new TestPool([virtual]);
+  it("reads the virtual enabled default without inserting", async () => {
+    const pool = new TestPool([row({ configured: false, enabled: true, rollingMonths: 12 })]);
     const repository = createPgPmsCalendarAutoOpenSettingsRepository({ pool });
     await expect(repository.find(propertyId)).resolves.toMatchObject({
       revision: 0,
-      enabled: false,
+      enabled: true,
       mode: "rolling",
-      rollingMonths: 18,
+      rollingMonths: 12,
       fixedEndMonth: null,
       updatedAt: null,
     });
     expect(pool.sql).toHaveLength(1);
+    expect(pool.sql[0]).toContain("COALESCE(settings.enabled, $2::boolean)");
+  });
+
+  it("saves an explicit choice that equals the virtual default", async () => {
+    const saved = row({ configured: true, revision: 1, enabled: true, rollingMonths: 12 });
+    const pool = new TestPool(
+      [row({ configured: false, enabled: true, rollingMonths: 12 })],
+      [saved],
+    );
+    const repository = createPgPmsCalendarAutoOpenSettingsRepository({ pool });
+    await expect(repository.update(command({ rollingMonths: 12 }))).resolves.toMatchObject({
+      ok: true,
+      outcome: "created",
+      setting: { revision: 1, enabled: true, rollingMonths: 12 },
+    });
+    expect(pool.sql.join("\n")).toContain("INSERT INTO pms.calendar_auto_open_settings");
   });
 
   it("reads typed warnings from the latest canonical application result", async () => {

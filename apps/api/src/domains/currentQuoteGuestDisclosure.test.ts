@@ -92,7 +92,7 @@ function fixture() {
 }
 
 const client = {} as PoolClient;
-const scope = { propertyId: "hotel", organizationId: "org", authorityRevision: "authority:1" };
+const scope = { propertyId: "hotel", organizationId: "org" };
 const choices = {
   defaultGuestLanguage: "en" as const,
   childrenEnabled: true,
