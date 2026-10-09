@@ -101,6 +101,9 @@ jobs:
       - name: Booking Admin tests
         run: npm --workspace vayada-booking-engine-frontend-admin run test
 
+      - name: Settings UI package tests
+        run: npm --workspace @vayada/settings-ui run test
+
       - name: Booking Web tests
         run: npm --workspace vayada-booking-engine-frontend run test
 

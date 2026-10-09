@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import {
   PMS_WEB_PROPERTY_ID,
   mockPmsWebAuthenticatedSession,
@@ -7,6 +7,24 @@ import {
 } from "../support/pmsWebMocks";
 import { watchPageHealth } from "../support/pageHealth";
 
+async function openHelpFromProfileMenu(page: Page) {
+  const avatar = page.getByRole("banner").getByRole("button", { name: "PO", exact: true });
+  await avatar.click();
+  const currency = page.getByRole("button", { name: /^Currency/ });
+  const help = page.getByRole("button", { name: "Help", exact: true });
+  const signOut = page.getByRole("button", { name: "Sign Out", exact: true });
+  await expect(help).toBeVisible();
+  // VAY-2073: Help sits between Currency and Sign Out.
+  const [currencyBox, helpBox, signOutBox] = await Promise.all(
+    [currency, help, signOut].map((item) => item.boundingBox()),
+  );
+  expect(currencyBox!.y).toBeLessThan(helpBox!.y);
+  expect(helpBox!.y).toBeLessThan(signOutBox!.y);
+  await help.click();
+  await expect(help).toBeHidden();
+  return avatar;
+}
+
 for (const viewport of [
   { width: 320, height: 720 },
   { width: 390, height: 844 },
@@ -14,7 +32,7 @@ for (const viewport of [
   { width: 768, height: 900 },
   { width: 1440, height: 1000 },
 ]) {
-  test(`keeps Help clear of the Inbox composer at ${viewport.width}x${viewport.height}`, async ({
+  test(`opens Help from the profile menu over the Inbox composer at ${viewport.width}x${viewport.height}`, async ({
     page,
   }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
@@ -37,19 +55,10 @@ for (const viewport of [
     await page.getByRole("button", { name: /Ada Lovelace, Booking.com/ }).click();
     const reply = page.getByRole("textbox", { name: "Reply", exact: true });
     const send = page.getByRole("button", { name: "Send", exact: true });
-    const help = page.getByRole("button", { name: "Help / Report a bug", exact: true });
     await reply.fill("Draft preserved while asking for help.");
     await expect(send).toBeEnabled();
-    await expect(
-      page.getByRole("banner").getByRole("button", { name: "Help / Report a bug" }),
-    ).toBeVisible();
-    const helpBox = await help.boundingBox();
-    const replyBox = await reply.boundingBox();
-    expect(helpBox).not.toBeNull();
-    expect(replyBox).not.toBeNull();
-    expect(helpBox!.width).toBeGreaterThanOrEqual(44);
-    expect(helpBox!.height).toBeGreaterThanOrEqual(44);
-    expect(helpBox!.y + helpBox!.height).toBeLessThanOrEqual(replyBox!.y);
+    // The top bar no longer carries its own Help button.
+    await expect(page.getByRole("banner").getByRole("button", { name: /Help/ })).toHaveCount(0);
     await expect
       .poll(() =>
         page.evaluate(
@@ -62,18 +71,17 @@ for (const viewport of [
     const sendBox = await send.boundingBox();
     expect(sendBox).not.toBeNull();
     await send.click({ trial: true, position: { x: sendBox!.width / 2, y: sendBox!.height - 2 } });
-    await page.screenshot({ path: testInfo.outputPath("inbox-help-layout.png") });
 
-    await help.focus();
-    await page.keyboard.press("Enter");
+    const avatar = await openHelpFromProfileMenu(page);
     const dialog = page.getByRole("dialog", { name: "Help and bug reports" });
     await expect(dialog).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("inbox-help-dialog.png") });
     await page.keyboard.press("Escape");
     await expect(dialog).not.toBeVisible();
-    await expect(help).toBeFocused();
+    await expect(avatar).toBeFocused();
     await expect(reply).toHaveValue("Draft preserved while asking for help.");
 
-    await help.click();
+    await openHelpFromProfileMenu(page);
     await dialog.getByLabel("What do you need?").selectOption("bug");
     await dialog.getByLabel("Message", { exact: true }).fill("Synthetic mobile support test");
     await dialog.getByRole("button", { name: "Send request" }).click();
@@ -87,7 +95,7 @@ for (const viewport of [
   });
 }
 
-test("keeps mobile Help accessible while direct email sending is held", async ({ page }) => {
+test("keeps mobile Help reachable while direct email sending is held", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockPmsWebAuthenticatedSession(page);
   await mockPmsWebTargetRoutes(page);
@@ -123,11 +131,7 @@ test("keeps mobile Help accessible while direct email sending is held", async ({
   await reply.fill("Do not send this draft.");
   const send = page.getByRole("button", { name: "Send", exact: true });
   await expect(send).toBeDisabled();
-  const help = page.getByRole("button", { name: "Help / Report a bug", exact: true });
-  const helpBox = await help.boundingBox();
-  const sendBox = await send.boundingBox();
-  expect(helpBox!.y + helpBox!.height).toBeLessThanOrEqual(sendBox!.y);
-  await help.click();
+  await openHelpFromProfileMenu(page);
   await expect(page.getByRole("dialog", { name: "Help and bug reports" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(reply).toHaveValue("Do not send this draft.");
