@@ -28,7 +28,7 @@ import { createElement } from "react";
 import { create } from "react-test-renderer";
 import MobileCalendar, { calendarLaneTop } from "../../components/calendar/MobileCalendar";
 // prettier-ignore
-import BookingStaySummary, { bookingSettlementLabel, expectedPaymentMethodLabel } from "../../components/bookings/BookingStaySummary";
+import BookingStaySummary, { bookingSettlementLabel, expectedPaymentMethodLabel, stayRatePlanLabel } from "../../components/bookings/BookingStaySummary";
 
 const reservation = {
   guestBookingId: "booking-1",
@@ -325,7 +325,9 @@ describe("PMS target booking projection", () => {
       roomName: "Assigned Suite",
       roomId: "room-101",
       roomNumber: "101",
-      nightlyRate: 180,
+      // The recorded booking amount, not the room type's current base rate (VAY-2089).
+      nightlyRate: 155,
+      recordedRoomCharges: null,
     });
   });
 
@@ -496,6 +498,94 @@ describe("PMS target booking projection", () => {
       ratePlanName: "Flexible",
       childAgesAtCheckIn: [6],
     });
+  });
+
+  it("prices rooms from the recorded nights, not the room type's legacy base rate", async () => {
+    // Rooms priced in the pricing editor keep a 0 base rate (VAY-2089).
+    // prettier-ignore
+    const zeroBaseTypes = [{ ...roomTypes[0]!, baseRate: { amountDecimal: "0.00", currency: "EUR" }, ratePlans: [] }];
+    // prettier-ignore
+    const night = (serviceDate: string, amountDecimal: string) => ({ serviceDate, applied: { amountDecimal, currency: "EUR" }, evidenceQuality: "exact" });
+    // prettier-ignore
+    const manual = (nightly: object[]) => ({ ...reservation, source: "manual" as const, stay: { checkIn: "2026-11-16", checkOut: "2026-11-18", adults: 1, children: 0 }, pricing: { totalAmount: { amountDecimal: "200.00", currency: "EUR" }, balanceAmount: { amountDecimal: "200.00", currency: "EUR" } }, assignments: [{ ...assignments[0], ratePlanId: null, pricingOfferId: null, stay: { checkIn: "2026-11-16", checkOut: "2026-11-18", adults: 1, children: 0 }, nightly }] });
+    const read = async (item: object) => {
+      // prettier-ignore
+      mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: zeroBaseTypes } : reservationPage(item));
+      return (await bookingsService.list()).bookings[0]!;
+    };
+
+    const even = await read(manual([night("2026-11-16", "100.00"), night("2026-11-17", "100.00")]));
+    expect(even).toMatchObject({
+      nightlyRate: 100,
+      recordedRoomCharges: 200,
+      nightlyRateVaries: false,
+    });
+    expect(even.stays[0]).toMatchObject({ ratePlanName: null, customRate: true });
+    const t = (key: string) => key;
+    expect(stayRatePlanLabel(even.stays[0]!, t as never)).toBe(
+      "calendar.targetManualBooking.customRate",
+    );
+    // prettier-ignore
+    expect(stayRatePlanLabel({ ...even.stays[0]!, customRate: false }, t as never)).toBe("bookings.detail.ratePlanUnavailable");
+    expect(stayRatePlanLabel({ ...even.stays[0]!, ratePlanName: "Flexible" }, t as never)).toBe(
+      "Flexible",
+    );
+
+    const varied = await read(
+      manual([night("2026-11-16", "100.00"), night("2026-11-17", "150.00")]),
+    );
+    expect(varied).toMatchObject({
+      nightlyRate: 125,
+      recordedRoomCharges: 250,
+      nightlyRateVaries: true,
+    });
+
+    // A night without a recorded price leaves the booking total as the only evidence.
+    // Cancelling nets each night to 0 with a reversal; the booked total still prices the stay.
+    // prettier-ignore
+    const cancelled = await read({ ...manual([night("2026-11-16", "0.00"), night("2026-11-17", "0.00")]), status: "canceled" });
+    expect(cancelled).toMatchObject({
+      status: "cancelled",
+      nightlyRate: 100,
+      recordedRoomCharges: null,
+    });
+
+    const partial = await read(manual([night("2026-11-16", "100.00")]));
+    expect(partial).toMatchObject({
+      nightlyRate: 100,
+      recordedRoomCharges: null,
+      nightlyRateVaries: false,
+    });
+  });
+
+  it("maps the cancellation terms each stay was booked under", async () => {
+    // prettier-ignore
+    const read = async (bookedCancellation: object | null) => {
+      const item = { ...heterogeneousReservation, roomCount: 1, assignments: [{ ...assignments[0], bookedCancellation }] };
+      mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: roomTypes } : reservationPage(item));
+      return (await bookingsService.list()).bookings[0]!.stays[0]!.cancellation;
+    };
+    const flexible = {
+      type: "free_until_days_before_arrival",
+      freeCancellationDeadlineDays: 7,
+      afterDeadlinePenalty: "full_booking_amount",
+      noShowPenalty: "full_booking_amount",
+    };
+    expect(await read({ kind: "flexible", terms: flexible })).toEqual({
+      kind: "flexible",
+      freeCancellationDays: 7,
+      refundTiers: null,
+    });
+    // Partial-refund terms refund by notice period, longest first, as guests saw them.
+    // prettier-ignore
+    const tiers = [{ minDaysBeforeCheckIn: 7, refundPercent: 20 }, { minDaysBeforeCheckIn: 30, refundPercent: 50 }];
+    // prettier-ignore
+    expect(await read({ kind: "flexible", terms: { ...flexible, flexibleCancellationType: "partial_refund", partialRefundAmountPercent: 50, partialRefundTiers: tiers } })).toEqual({ kind: "flexible", freeCancellationDays: 7, refundTiers: [tiers[1], tiers[0]] });
+    // Older terms carry one window and percent instead of tiers.
+    // prettier-ignore
+    expect(await read({ kind: "flexible", terms: { ...flexible, flexibleCancellationType: "partial_refund", partialRefundCancelWindowDays: 14, partialRefundAmountPercent: 50 } })).toMatchObject({ refundTiers: [{ minDaysBeforeCheckIn: 14, refundPercent: 50 }] });
+    expect(await read({ kind: "non_refundable" })).toEqual({ kind: "non_refundable" });
+    expect(await read(null)).toBeNull();
   });
 
   it("maps exact and partial stay evidence without copying booking-wide values", async () => {

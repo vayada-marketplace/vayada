@@ -2,18 +2,12 @@ import { createHash } from "node:crypto";
 import type pg from "pg";
 
 export const FINANCE_EXPENSE_WORKER_ROLE = "vayada_next_finance_expense_worker";
-// Migration 0409 grants these views to PUBLIC, but their validated source-table
-// check excludes non-pricing logins and both security-barrier views return no rows.
-const pricingScopeViews = new Set([
-  "booking.pricing_runtime_effective_property_scopes",
-  "booking.pricing_runtime_effective_authority_scopes",
-]);
-// Both 0409 views, or only the property-scope view once VAY-2079 drops the authority
-// tables together with the authority-scope view.
-const PRICING_SCOPE_VIEW_DIGESTS = new Set([
-  "4719b0dcc4f7255410e6d5c993541ff106a8acbf09f521bc9d2819a5fdbb1797",
-  "20605c8ba80e1edcd5bb66e8498cdf6046153cff68ed53633e6a0fad0abed692",
-]);
+// Migration 0409 grants this view to PUBLIC, but its validated source-table check
+// excludes non-pricing logins and the security-barrier view returns no rows. Its
+// authority-scope sibling was dropped with the pricing authority (VAY-2079, 0475).
+const pricingScopeViews = new Set(["booking.pricing_runtime_effective_property_scopes"]);
+const PRICING_SCOPE_VIEW_DIGEST =
+  "20605c8ba80e1edcd5bb66e8498cdf6046153cff68ed53633e6a0fad0abed692";
 const PRICING_LOGIN_CHECK =
   "CHECK (((database_login)::text ~ '^vayada_next_pricing_[a-z0-9_]+$'::text))";
 // Exact grant contract. A column list never permits table-level authority.
@@ -118,9 +112,8 @@ export async function assertFinanceExpenseWorkerBoundary(
     )
   ).rows;
   if (
-    !PRICING_SCOPE_VIEW_DIGESTS.has(
-      createHash("sha256").update(JSON.stringify(pricingViews)).digest("hex"),
-    )
+    createHash("sha256").update(JSON.stringify(pricingViews)).digest("hex") !==
+    PRICING_SCOPE_VIEW_DIGEST
   )
     fail("pricing_view_drift");
   const pricingScope = (
