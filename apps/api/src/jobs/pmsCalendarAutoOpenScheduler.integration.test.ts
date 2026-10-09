@@ -8,6 +8,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort } from "../domains/hotelCatalogOperatingCalendarPropertyProfileEvidence.js";
+import { createPgPmsCalendarAutoOpenSettingsRepository } from "../domains/pmsCalendarAutoOpenSettingsRepository.js";
 import {
   createHotelSetupOrdinaryLoginFixture,
   type HotelSetupOrdinaryLoginFixture,
@@ -34,6 +35,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
   const admin = new pg.Pool({ connectionString: TEST_DATABASE_URL ?? "postgresql://disabled" });
   let fixture: HotelSetupOrdinaryLoginFixture;
   const closers: Array<() => Promise<void>> = [];
+  const actorUserIds: string[] = [];
   const schedulerStore = (): PgPmsCalendarAutoOpenSchedulerStore => {
     const store = createPgPmsCalendarAutoOpenSchedulerStore({
       connectionString: fixture.connectionString,
@@ -73,6 +75,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
       if (TEST_DATABASE_URL) {
         assertSafeTestDatabase(TEST_DATABASE_URL);
         await cleanupFixtures(admin);
+        await admin.query("DELETE FROM identity.users WHERE id = ANY($1::uuid[])", [actorUserIds]);
       }
     } finally {
       await admin.end();
@@ -233,6 +236,122 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
     expect(result.rows).toEqual([{ outcome: "unchanged", days: 0 }]);
   });
 
+  it("opens a ready property without a saved setting at the rolling-12 default", async () => {
+    const property = await seedProperty(admin, 5, { setting: "none" });
+    const store = schedulerStore();
+    const worker = workerStore();
+
+    const selection = await store.withRunLock((session) =>
+      session.findCalendarAutoOpenCandidates(now, 100),
+    );
+    expect(
+      selection.ran &&
+        selection.value.candidates.find(({ propertyId }) => propertyId === property.propertyId),
+    ).toMatchObject({
+      openFrom: "2026-09-03",
+      openThrough: "2027-09-30",
+      source: { settingRevision: 0 },
+    });
+    await store.withRunLock((session) =>
+      runPmsCalendarAutoOpenScheduler(session, { now, limit: 1, workerId: "vay-2066-test" }),
+    );
+    await drainUntilDone(worker, property.propertyId);
+
+    const applied = await admin.query(
+      `SELECT job.status,
+              (SELECT to_char(coverage_through, 'YYYY-MM-DD')
+               FROM pms.inventory_materialization_coverage coverage
+               WHERE coverage.property_id=job.property_id) AS through,
+              (SELECT count(*)::int FROM pms.calendar_auto_open_settings settings
+               WHERE settings.property_id=job.property_id) AS settings
+       FROM platform.jobs job WHERE job.property_id=$1::uuid AND job.queue_name=$2`,
+      [property.propertyId, PMS_CALENDAR_AUTO_OPEN_QUEUE],
+    );
+    // The default is applied without writing a settings row.
+    expect(applied.rows).toEqual([{ status: "succeeded", through: "2027-09-30", settings: 0 }]);
+  });
+
+  it("respects an explicit Off and pauses properties whose setup is not ready", async () => {
+    const off = await seedProperty(admin, 6, { setting: "disabled" });
+    const noCalendar = await seedProperty(admin, 7, { setting: "none", calendar: false });
+    const enabledNoCalendar = await seedProperty(admin, 10, { calendar: false });
+    const profileEdited = await seedProperty(admin, 8, { setting: "none" });
+    await admin.query(
+      `UPDATE hotel_catalog.properties SET profile_revision=profile_revision+1 WHERE id=$1::uuid`,
+      [profileEdited.propertyId],
+    );
+    const store = schedulerStore();
+
+    const selection = await store.withRunLock((session) =>
+      session.findCalendarAutoOpenCandidates(now, 100),
+    );
+    expect(selection.ran).toBe(true);
+    const ids = new Set([
+      off.propertyId,
+      noCalendar.propertyId,
+      enabledNoCalendar.propertyId,
+      profileEdited.propertyId,
+    ]);
+    expect(
+      selection.ran && [
+        ...selection.value.candidates.filter(({ propertyId }) => ids.has(propertyId)),
+        ...selection.value.failures.filter(({ propertyId }) => ids.has(propertyId)),
+      ],
+    ).toEqual([]);
+  });
+
+  it("turns a queued default job into a no-op when the owner saves Off", async () => {
+    const property = await seedProperty(admin, 9, { setting: "none" });
+    const store = schedulerStore();
+    const worker = workerStore();
+    const settings = createPgPmsCalendarAutoOpenSettingsRepository({
+      connectionString: fixture.connectionString,
+    });
+    closers.push(() => settings.close());
+    const actorUserId = randomUUID();
+    await admin.query("INSERT INTO identity.users (id, email) VALUES ($1::uuid, $2)", [
+      actorUserId,
+      `vay-2066-${actorUserId}@example.test`,
+    ]);
+    actorUserIds.push(actorUserId);
+
+    await store.withRunLock((session) =>
+      runPmsCalendarAutoOpenScheduler(session, { now, limit: 1, workerId: "vay-2066-test" }),
+    );
+    expect(await propertyJobs(admin, property.propertyId)).toMatchObject([{ status: "pending" }]);
+    await expect(
+      settings.update({
+        propertyId: property.propertyId,
+        expectedRevision: 0,
+        enabled: false,
+        mode: "rolling",
+        rollingMonths: 12,
+        fixedEndMonth: null,
+        idempotencyKey: `vay-2066-off-${property.propertyId}`,
+        audit: {
+          actorUserId,
+          requestId: "vay-2066-off",
+          correlationId: "vay-2066-off",
+          requestedAt: now.toISOString(),
+        },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      outcome: "created",
+      setting: { revision: 1, enabled: false },
+    });
+    await drainUntilDone(worker, property.propertyId);
+
+    const result = await admin.query(
+      `SELECT job.job_metadata #>> '{calendarAutoOpenResult,outcome}' AS outcome,
+              (SELECT count(*)::int FROM pms.inventory_days day
+               WHERE day.property_id=job.property_id) AS days
+       FROM platform.jobs job WHERE job.property_id=$1::uuid AND job.queue_name=$2`,
+      [property.propertyId, PMS_CALENDAR_AUTO_OPEN_QUEUE],
+    );
+    expect(result.rows).toEqual([{ outcome: "unchanged", days: 0 }]);
+  });
+
   it("lets one session scan at a time and frees the lock after a failed run", async () => {
     const first = schedulerStore();
     const second = schedulerStore();
@@ -305,6 +424,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
       ran: true,
       value: {
         enabledSettings: before.ran ? before.value.enabledSettings + 1 : NaN,
+        pausedNotReady: before.ran ? before.value.pausedNotReady : NaN,
         skippedUnverifiedLabels: before.ran ? before.value.skippedUnverifiedLabels + 1 : NaN,
       },
     });

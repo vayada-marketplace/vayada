@@ -227,7 +227,10 @@ import {
 import { createPropertySetupFinanceStateProvider } from "./platform/propertySetupFinanceState.js";
 import { createPropertySetupReviewLifecycleStateProvider } from "./platform/propertySetupReviewLifecycleState.js";
 import { createPropertySetupRouteStateReadPort } from "./platform/propertySetupRouteState.js";
-import { runPlatformMediaCleanupJobs } from "./jobs/platformMediaCleanup.js";
+import {
+  platformMediaCleanupFailureLogEntries,
+  runPlatformMediaCleanupJobs,
+} from "./jobs/platformMediaCleanup.js";
 import { startPmsInboxAssignmentReconciliationWorker } from "./jobs/pmsInboxAssignmentReconciliation.js";
 import { startPmsInboxFollowUpReleaseWorker } from "./jobs/pmsInboxFollowUpRelease.js";
 import {
@@ -1147,6 +1150,7 @@ const propertySetupPmsRuntime = (() => {
     provider: createPropertySetupPmsStateProvider({
       owner,
       pricing: pmsPricingReadModel,
+      publishedPricing: pmsPricingReadModel,
       recurringPricing,
       mandatoryCharges,
       operatingCalendar,
@@ -2657,6 +2661,7 @@ const runCalendarAutoOpenSchedule = () => {
       app.log.info(
         {
           enabledSettings: stats?.enabledSettings ?? null,
+          pausedNotReady: stats?.pausedNotReady ?? null,
           skippedUnverifiedLabels: stats?.skippedUnverifiedLabels ?? null,
           enqueued: run.enqueued,
           reused: run.reused,
@@ -2998,8 +3003,18 @@ if (platformMediaRuntime) {
     if (activeCleanup) return;
     activeCleanup = runPlatformMediaCleanupJobs(platformMediaRuntime.cleanupStore)
       .then((result) => {
-        if (result.failed > 0) {
-          app.log.warn({ failed: result.failed }, "Platform media cleanup completed with failures");
+        const failures = platformMediaCleanupFailureLogEntries(result);
+        const deadLettered = failures.filter((failure) => failure.deadLettered);
+        const retrying = failures.filter((failure) => !failure.deadLettered);
+        // A dead-lettered item is never selected again, so each one warns exactly once.
+        if (deadLettered.length > 0) {
+          app.log.warn(
+            { failures: deadLettered },
+            "Platform media cleanup dead-lettered items after retries",
+          );
+        }
+        if (retrying.length > 0) {
+          app.log.info({ failures: retrying }, "Platform media cleanup will retry failed items");
         }
       })
       .catch((error: unknown) => {

@@ -21,11 +21,6 @@ const SCHEMAS = [
 ];
 const RECEIPT = "platform.legacy_owner_bootstrap_receipts";
 const NO_READ = [
-  "platform.hotel_setup_property_scopes",
-  "platform.hotel_setup_creation_scopes",
-  "platform.hotel_setup_linked_properties",
-  "platform.hotel_setup_reconciliation_cursors",
-  "hotel_catalog.hotel_setup_effective_creation_scopes",
   "platform.identity_migration_provenance",
   "platform.legacy_historical_binding_transitions",
   "platform.finance_expense_worker_properties",
@@ -34,9 +29,8 @@ const NO_READ = [
   "pms.inventory_coverage_validation_queue",
 ];
 const NO_READ_PATTERNS = [
-  /^platform\.(hotel_setup_|identity_migration_|legacy_historical_binding_)/,
+  /^platform\.(identity_migration_|legacy_historical_binding_)/,
   /^platform\.finance_.*_worker_properties$/,
-  /^hotel_catalog\.hotel_setup_/,
 ];
 const NO_WRITE = [
   "platform.schema_migrations",
@@ -58,7 +52,7 @@ const NO_WRITE = [
   "booking.affiliate_referral_production_preflight_revocations",
 ];
 const NO_WRITE_PATTERNS = [
-  /^platform\.(production_|source_extraction_|legacy_|channex_adoption_|hotel_setup_|identity_migration_)/,
+  /^platform\.(production_|source_extraction_|legacy_|channex_adoption_|identity_migration_)/,
   /^pms\.channex_room_availability_/,
   /^pms\.channex_ari_schedule_/,
   /^(marketplace|booking)\.affiliate_click_/,

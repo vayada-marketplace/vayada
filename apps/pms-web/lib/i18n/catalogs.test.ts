@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { firstPricingSetupEnglish } from "@vayada/product-onboarding/firstPricingSetupMessages";
 import { describe, expect, it } from "vitest";
 
 import deMessages from "../../messages/de.json";
@@ -46,6 +47,13 @@ describe("PMS localization catalogs", () => {
     expect(deMessages["search.pageSettingsHint"]).toContain("Steuern");
     expect(deMessages["bookings.tableSource"]).toBe("Quelle");
     expect(deMessages["rooms.new.title"]).toBe("Neuer Zimmertyp");
+  });
+
+  it("translates the shared first pricing setup with its exact English text", () => {
+    for (const [key, text] of Object.entries(firstPricingSetupEnglish)) {
+      expect((enMessages as Record<string, string>)[key]).toBe(text);
+      expect(key in deMessages).toBe(true);
+    }
   });
 
   it("keeps translated room-option keys aligned", () => {
