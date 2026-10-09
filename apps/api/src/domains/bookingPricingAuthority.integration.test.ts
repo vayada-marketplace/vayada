@@ -301,14 +301,12 @@ describe.skipIf(!url)("Booking pricing authority PostgreSQL owner", () => {
     };
     return { ...f, readPublic };
   }
-  it("requires an explicit current local source and exact public canonical identity", async () => {
+  it("needs no authority choice and requires the exact public canonical identity", async () => {
     const f = await publicFixture();
-    expect(await f.readPublic()).toBeNull();
-    const first = await f.store.save(f.context, f.scope, f.command);
+    // VAY-2079: the single owning organization comes from the links, not an authority row.
     expect(await f.readPublic()).toEqual({
       propertyId: f.scope.propertyId,
       organizationId: f.scope.organizationId,
-      authorityRevision: first.revision,
     });
     for (const slug of [null, {}, "", " ", "x".repeat(201), randomUUID()])
       expect(await f.readPublic(slug)).toBeNull();
@@ -317,24 +315,9 @@ describe.skipIf(!url)("Booking pricing authority PostgreSQL owner", () => {
       [f.scope.propertyId, "alias-" + f.scope.propertyId],
     );
     expect(await f.readPublic("alias-" + f.scope.propertyId)).toBeNull();
-    const second = await f.store.save(f.context, f.scope, {
-      ...f.command,
-      requestId: randomUUID(),
-      expectedRevision: first.revision,
-      authority: "external",
-    });
-    expect(await f.readPublic()).toBeNull();
-    await f.store.save(f.context, f.scope, {
-      ...f.command,
-      requestId: randomUUID(),
-      expectedRevision: second.revision,
-      authority: "unconfigured",
-    });
-    expect(await f.readPublic()).toBeNull();
   });
   it("rejects hidden, stale, expired, incomplete and malformed public profiles", async () => {
     const f = await publicFixture();
-    await f.store.save(f.context, f.scope, f.command);
     const client = await pool.connect();
     try {
       for (const change of [
@@ -365,7 +348,6 @@ describe.skipIf(!url)("Booking pricing authority PostgreSQL owner", () => {
   });
   it("rejects lost ownership, inactive organizations and unavailable current entitlements", async () => {
     const f = await publicFixture();
-    await f.store.save(f.context, f.scope, f.command);
     const client = await pool.connect();
     try {
       for (const change of [
@@ -390,7 +372,6 @@ describe.skipIf(!url)("Booking pricing authority PostgreSQL owner", () => {
   });
   it("holds public visibility, ownership and entitlement decisions through the caller transaction", async () => {
     const f = await publicFixture();
-    await f.store.save(f.context, f.scope, f.command);
     const client = await pool.connect(),
       writer = await pool.connect();
     try {
@@ -421,7 +402,6 @@ describe.skipIf(!url)("Booking pricing authority PostgreSQL owner", () => {
   });
   it("evaluates profile expiry against the current clock, not transaction start", async () => {
     const f = await publicFixture();
-    await f.store.save(f.context, f.scope, f.command);
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -439,7 +419,6 @@ describe.skipIf(!url)("Booking pricing authority PostgreSQL owner", () => {
   it("uses the locale-less public slug namespace even when another catalog locale shares its text", async () => {
     const f = await publicFixture(),
       other = await fixture();
-    await f.store.save(f.context, f.scope, f.command);
     await pool.query(
       "INSERT INTO hotel_catalog.property_slugs(property_id,slug,locale,purpose) VALUES($1,$2,'de','canonical')",
       [other.scope.propertyId, f.scope.propertyId],

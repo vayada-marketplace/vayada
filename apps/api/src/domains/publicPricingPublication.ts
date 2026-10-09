@@ -13,8 +13,7 @@ export async function lockPublicPricingPublication(client: PoolClient, slug: unk
   if (
     !confirmed ||
     confirmed.propertyId !== current.scope.propertyId ||
-    confirmed.organizationId !== current.scope.organizationId ||
-    confirmed.authorityRevision !== current.scope.authorityRevision
+    confirmed.organizationId !== current.scope.organizationId
   )
     return null;
   return current;
