@@ -85,15 +85,15 @@ test.describe("adaptive pricing and calendar", () => {
     await page.getByRole("button", { name: "Add this rate" }).click();
 
     await expect(page.getByText("Ready to publish")).toBeVisible();
-    const priceConfirmation = page.getByRole("checkbox", {
-      name: /These are the final prices guests will see/,
-    });
-    await priceConfirmation.focus();
-    await page.keyboard.press("Space");
-    await expect(priceConfirmation).toBeChecked();
+    // Publishing is the mandatory-charges declaration (VAY-2079): no checkbox, one line.
+    await expect(page.getByRole("checkbox", { name: /final prices/ })).toHaveCount(0);
+    const publish = page.getByRole("button", { name: "Publish prices and continue" });
+    await expect(publish).toHaveAccessibleDescription(
+      "By publishing, you confirm these prices include all mandatory taxes and fees.",
+    );
     await expectNoSeriousAccessibilityViolations(page);
     await page.screenshot({ path: testInfo.outputPath("pricing-2-ready.png"), fullPage: true });
-    await page.getByRole("button", { name: "Publish prices and continue" }).click();
+    await publish.click();
 
     await expect(page.getByRole("heading", { name: "Open your calendar", level: 1 })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("pricing-3-published.png"), fullPage: true });
