@@ -158,9 +158,13 @@ Runs without a cohort, hotels outside it and quarantined hotels get none of this
 carried cohort property whose profile is `complete` and that meets every VAY-2066 readiness item
 (a–g, evaluated on the target) becomes `lifecycle_status = 'active'`, as the native lifecycle
 command activates one (lifecycle revision + 1, its idempotency key and audit row; `updated_at` is
-kept so the catalog reconciliation keeps comparing the migrated profile). The property rows are
-locked `FOR UPDATE` before any setup row is written. A hotel that misses an item stays
-`provisioning`; suspended or retired ones are never touched.
+kept so the catalog reconciliation keeps comparing the migrated profile). A complete profile is
+the native one: `complete` with no completeness reasons. The carried cohort property rows are
+locked `FOR NO KEY UPDATE` before their setup rows are written (other properties' rows rely on
+the table locks), which serializes with the native settings writers and lifecycle commands. A
+hotel that misses an item stays `provisioning`; suspended or retired ones are never touched.
+Parity fails an active carried cohort property that is not ready and a ready one that is still
+`provisioning`, and always reports the counts and what the provisioning ones miss.
 
 ## Verification
 

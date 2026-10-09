@@ -12,12 +12,14 @@ import {
 
 type QueryClient = Pick<pg.ClientBase, "query">;
 const OPERATION = "platform.property.lifecycle.status";
+/** PLATFORM_PROPERTY_LIFECYCLE_CONTRACT_VERSION (@vayada/domain-hotels). */
+export const LIFECYCLE_CONTRACT_VERSION = "platform-property-lifecycle.v1";
 
 export type CohortReadinessSummary = {
   cohortProperties: number;
   active: number;
   provisioning: number;
-  /** Carried cohort properties missing each criterion; a property can miss several. */
+  /** Provisioning cohort properties missing each criterion; one can miss several. */
   missing: Record<CohortReadinessCriterion, number>;
 };
 export type CohortActivationReport = CohortReadinessSummary & { activated: number };
@@ -51,15 +53,18 @@ export async function activateReadyCohortProperties(
   return { ...summarizeCohortReadiness(after), activated: ready.length };
 }
 
-/** The import's properties stay locked as the native settings writers lock them (persistSetting:
- * FOR UPDATE OF property) from before the setup rows are written until the commit. */
+/** The import's cohort properties stay locked from before their setup rows are written until
+ * the commit. FOR NO KEY UPDATE still serializes with the native settings writers (persistSetting:
+ * FOR UPDATE OF property) and lifecycle commands, but not with inserts that only reference a
+ * property (KEY SHARE). */
 export async function lockCohortProperties(
   client: QueryClient,
   propertyIds: string[],
 ): Promise<void> {
   if (!propertyIds.length) return;
   await client.query(
-    `SELECT id FROM hotel_catalog.properties WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
+    `SELECT id FROM hotel_catalog.properties WHERE id = ANY($1::uuid[]) ORDER BY id
+        FOR NO KEY UPDATE`,
     [propertyIds],
   );
 }
@@ -68,16 +73,17 @@ export async function lockCohortProperties(
 export function summarizeCohortReadiness(
   rows: Awaited<ReturnType<typeof readCohortReadiness>>,
 ): CohortReadinessSummary {
+  const provisioning = rows.filter((row) => row.lifecycleStatus === "provisioning");
   const missing = Object.fromEntries(
     COHORT_READINESS_CRITERIA.map((criterion) => [
       criterion,
-      rows.filter((row) => !row[criterion]).length,
+      provisioning.filter((row) => !row[criterion]).length,
     ]),
   ) as Record<CohortReadinessCriterion, number>;
   return {
     cohortProperties: rows.length,
     active: rows.filter((row) => row.lifecycleStatus === "active").length,
-    provisioning: rows.filter((row) => row.lifecycleStatus === "provisioning").length,
+    provisioning: provisioning.length,
     missing,
   };
 }
@@ -88,7 +94,12 @@ async function activate(
   propertyId: string,
 ): Promise<void> {
   const at = new Date(input.completedAt).toISOString();
-  const idempotencyId = deterministicUuid("production-pms", "cohort-activation", propertyId);
+  const idempotencyId = deterministicUuid(
+    "production-pms",
+    "cohort-activation",
+    input.sourceRunId,
+    propertyId,
+  );
   const updated = await client.query<{ lifecycleRevision: string }>(
     `UPDATE hotel_catalog.properties
         SET lifecycle_status = 'active', lifecycle_revision = lifecycle_revision + 1,
@@ -100,6 +111,7 @@ async function activate(
   );
   if (updated.rowCount !== 1) throw new Error("Cohort property activation lost its lock");
   const result = {
+    contractVersion: LIFECYCLE_CONTRACT_VERSION,
     propertyId,
     lifecycleStatus: "active",
     lifecycleRevision: Number(updated.rows[0]!.lifecycleRevision),
@@ -145,7 +157,11 @@ async function activate(
       input.sourceRunId,
       JSON.stringify({ status: "active", revision: result.lifecycleRevision }),
       JSON.stringify({ reason: "vay1362_cohort_ready" }),
-      JSON.stringify({ migrationRunId: input.sourceRunId, criteria: "vay2066-a-g" }),
+      JSON.stringify({
+        contractVersion: LIFECYCLE_CONTRACT_VERSION,
+        migrationRunId: input.sourceRunId,
+        criteria: "vay2066-a-g",
+      }),
     ],
   );
 }

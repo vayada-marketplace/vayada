@@ -400,7 +400,7 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
     }
   });
 
-  it("activates a complete cohort hotel that meets every readiness item, and only that one", async () => {
+  it("activates a complete cohort hotel that meets every readiness item, and no other", async () => {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
     try {
       await seedCalendar(client);
@@ -438,6 +438,35 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
         g: true,
         complete: true,
       });
+      // Missing any item keeps the hotel as it is, without aborting the import.
+      for (const [item, change] of [
+        [
+          "profile",
+          "UPDATE hotel_catalog.properties SET profile_status = 'incomplete' WHERE id = $1",
+        ],
+        [
+          "reasons",
+          "UPDATE hotel_catalog.properties SET completeness_reasons = '{city}' WHERE id = $1",
+        ],
+        [
+          "labels",
+          "UPDATE pms.rooms SET operational_label_status = 'unverified' WHERE property_id = $1",
+        ],
+        [
+          "lifecycle",
+          "UPDATE hotel_catalog.properties SET lifecycle_status = 'suspended' WHERE id = $1",
+        ],
+      ] as const) {
+        await client.query("SAVEPOINT missing_item");
+        await client.query(change, [PROPERTY]);
+        const skipped = await activateReadyCohortProperties(client, {
+          sourceRunId: RUN,
+          completedAt: AT,
+          propertyIds: planned.cohortPropertyIds!,
+        });
+        expect([item, skipped.activated, skipped.active]).toEqual([item, 0, 0]);
+        await client.query("ROLLBACK TO SAVEPOINT missing_item");
+      }
       const report = await activateReadyCohortProperties(client, {
         sourceRunId: RUN,
         completedAt: AT,
@@ -458,7 +487,7 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
         [PROPERTY],
       );
       expect(stored.rows).toEqual([{ lifecycleStatus: "active", revision: 2, audits: 1 }]);
-      // A rerun activates nothing more; a property missing an item stays provisioning.
+      // A rerun activates nothing more.
       expect(
         await activateReadyCohortProperties(client, {
           sourceRunId: RUN,

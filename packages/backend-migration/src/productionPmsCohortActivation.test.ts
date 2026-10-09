@@ -3,8 +3,13 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { summarizeCohortReadiness } from "./productionPmsCohortActivation.js";
+import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
+import {
+  LIFECYCLE_CONTRACT_VERSION,
+  summarizeCohortReadiness,
+} from "./productionPmsCohortActivation.js";
 import { runProductionPmsTransaction } from "./productionPmsMigration.js";
+import { buildProductionPmsPlan } from "./productionPmsPlan.js";
 import {
   COHORT_READINESS_SQL,
   readyForActivation,
@@ -27,19 +32,59 @@ describe("production PMS cohort activation", () => {
       expect(readyForActivation(ready("p1", "provisioning", [missing]))).toBe(false);
   });
 
-  it("counts active and provisioning cohort properties and what each misses", () => {
+  it("counts active and provisioning cohort properties and what provisioning ones miss", () => {
     expect(
       summarizeCohortReadiness([
-        ready("p1", "active"),
+        ready("p1", "active", ["b"]), // an owner switched auto-open off after go-live
         ready("p2", "provisioning", ["c", "f"]),
         ready("p3", "provisioning", ["c"]),
+        ready("p4", "suspended", ["a"]),
       ]),
     ).toEqual({
-      cohortProperties: 3,
+      cohortProperties: 4,
       active: 1,
       provisioning: 2,
       missing: { a: 0, b: 0, c: 2, d: 0, e: 0, f: 1, g: 0, complete: 0 },
     });
+  });
+
+  it("activates only carried cohort properties, and none without a cohort", () => {
+    const hotel = (index: number) => `10000000-0000-4000-a000-00000000000${index}`;
+    const row = (sourceTable: string, data: Record<string, unknown>): IdentitySourceRow => ({
+      sourceDatabase: "pms",
+      sourceTable,
+      rowOrdinal: 1,
+      data: { created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z", ...data },
+    });
+    const plan = (pmsHotelIds: string[] | null) =>
+      buildProductionPmsPlan({
+        sourceRunId: "run",
+        snapshotAt: "2026-10-09T00:00:00.000Z",
+        completedAt: "2026-10-09T00:00:00.000Z",
+        rows: [1, 2, 3].map((index) => row("hotels", { id: hotel(index), timezone: "UTC" })),
+        cohort: pmsHotelIds && { bookingHotelIds: [], pmsHotelIds, marketplaceHotelIds: [] },
+        target: {
+          // 1 cohort, 2 outside the cohort, 3 cohort in private quarantine.
+          propertyLinks: [1, 2, 3].map((index) => ({
+            sourceId: hotel(index),
+            propertyId: `20000000-0000-4000-a000-00000000000${index}`,
+            relationship: "operational_input",
+            status: "active",
+            migrationRunId: "run",
+            migrationDisposition: index === 3 ? "private_quarantine" : "canonical",
+            ownerStatus: "active",
+          })),
+          bookings: [],
+          userIds: [],
+          mediaIds: [],
+          records: [],
+          provenance: [],
+        },
+      });
+    expect(plan([hotel(1), hotel(3)]).cohortPropertyIds).toEqual([
+      "20000000-0000-4000-a000-000000000001",
+    ]);
+    expect(plan(null)).not.toHaveProperty("cohortPropertyIds");
   });
 
   it("locks cohort properties before writing and activates only after verification", async () => {
@@ -78,6 +123,7 @@ describe("production PMS cohort activation", () => {
         buildPlan: () => (++builds === 3 ? plan(false) : plan(true)) as never,
         writeRecords: async () => {
           calls.push("write");
+          sql.push("write");
           return { room_types: 1 };
         },
         writeProvenance: async () => 0,
@@ -94,7 +140,9 @@ describe("production PMS cohort activation", () => {
       },
     );
     expect(calls).toEqual(["write", "activate:p1"]);
-    expect(sql.findIndex((text) => text.includes("FOR UPDATE"))).toBeGreaterThan(0);
+    const lock = sql.findIndex((text) => text.includes("FOR NO KEY UPDATE"));
+    expect(lock).toBeGreaterThan(0);
+    expect(lock).toBeLessThan(sql.indexOf("write"));
     expect(report.activation).toMatchObject({ activated: 1 });
   });
 
@@ -115,6 +163,13 @@ describe("production PMS cohort activation", () => {
     );
     expect(COHORT_READINESS_SQL).toContain(
       "(room.operational_label_status <> 'verified' OR room.room_number IS NULL)",
+    );
+    const lifecycle = await readFile(
+      join(import.meta.dirname, "../../domain-hotels/src/platformPropertyLifecycle.ts"),
+      "utf8",
+    );
+    expect(lifecycle.replace(/\s+/g, " ")).toContain(
+      `PLATFORM_PROPERTY_LIFECYCLE_CONTRACT_VERSION = "${LIFECYCLE_CONTRACT_VERSION}"`,
     );
   });
 });

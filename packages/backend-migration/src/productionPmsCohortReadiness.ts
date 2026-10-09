@@ -11,8 +11,9 @@ export type CohortReadiness = {
 } & Record<CohortReadinessCriterion, boolean>;
 
 /**
- * vay2066-readiness-criteria.md, a-g, evaluated on the target exactly as written there. $1: the
- * property IDs. SELECT-only, so the PMS import, its dry run and parity share it.
+ * vay2066-readiness-criteria.md, a-g, evaluated on the target exactly as written there, and the
+ * native complete profile (status complete with no completeness reasons). $1: the property IDs.
+ * SELECT-only, so the PMS import's activation and parity share it.
  */
 export const COHORT_READINESS_SQL = `
   WITH candidate AS (SELECT DISTINCT unnest($1::uuid[]) AS property_id),
@@ -68,7 +69,8 @@ export const COHORT_READINESS_SQL = `
                     AND pricing.optional_pricing_aggregate_revision IS NOT NULL) AS f,
          EXISTS (SELECT 1 FROM pms.room_types room_type
                   WHERE room_type.property_id = property.id AND room_type.active) AS g,
-         property.profile_status = 'complete' AS complete
+         property.profile_status = 'complete'
+           AND cardinality(property.completeness_reasons) = 0 AS complete
     FROM candidate
     JOIN hotel_catalog.properties property ON property.id = candidate.property_id
     LEFT JOIN hotel_catalog.property_locations location ON location.property_id = property.id

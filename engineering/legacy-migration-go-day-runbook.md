@@ -152,8 +152,13 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
    contract). It then sets `lifecycle_status = 'active'` for each cohort hotel
    whose profile is `complete` and that meets every VAY-2066 readiness item
    (a–g). Parity reports how many cohort hotels are `active` and `provisioning`
-   and what the provisioning ones miss; fix them before reopen, or accept them
-   staying unbookable. The cutover does not write the following:
+   and what the provisioning ones miss, and fails an active one that is not
+   ready or a ready one still provisioning. The PMS step does not rerun after a
+   fix: for a hotel fixed before reopen, re-read its readiness (parity, or
+   `COHORT_READINESS_SQL`) and, only when every item holds, activate it with the
+   platform admin lifecycle command (`PATCH /properties/:propertyId/status`,
+   `active`), which does not check a–g itself. Otherwise accept it staying
+   unbookable. The cutover does not write the following:
    - `profile_status` is `complete` only for a hotel that was live in legacy,
      has a public-eligible owner and has country, city and timezone. Fix any
      `incomplete` cohort profile before reopen, or accept it staying unbookable.
@@ -171,8 +176,9 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
    on-by-default (rolling 12), which keeps its dates opening as legacy "off" did.
    Hotels outside the cohort get an explicit disabled row. The VAY-2066 producer
    selects a hotel only once its rooms are verified and it has an operating
-   calendar and pricing settings, which the import writes for complete cohort
-   hotels; check that it selects each of them.
+   calendar and pricing settings, which the import writes for every carried
+   cohort hotel that has their prerequisites; check that it selects each of
+   them.
 
    Then check that each cohort hotel passes the VAY-1543 public pricing rule:
    - exactly one active `hotel_group` organization holds both property links
@@ -236,6 +242,10 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
 - `target:cutover:abort` only marks the run aborted: imported rows stay in the
   target. They must stay unpublished, with no owner access. Defining that state
   (or a cleanup) is preparation work.
+- The PMS step has already set ready cohort hotels `active` (lifecycle revision
+  2), and no native transition leads back to `provisioning`. Suspend each of
+  them with the platform admin lifecycle command (`suspended`), which also
+  withdraws their public bookability, before handing back.
 - Hand the providers back in reverse order: undo apply 2, then turn the legacy
   scheduler, webhooks and manual syncs back on.
 - Lift the maintenance pages. Legacy remains the source of truth.
