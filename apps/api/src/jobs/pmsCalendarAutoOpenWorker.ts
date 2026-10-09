@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import {
   PMS_CALENDAR_AUTO_OPEN_CONTRACT_VERSION,
+  PMS_CALENDAR_AUTO_OPEN_DEFAULT_CONFIGURATION,
   PMS_CALENDAR_AUTO_OPEN_MAX_HORIZON_DAYS,
   PMS_INVENTORY_HORIZON_MAX_DAYS,
   PMS_INVENTORY_MATERIALIZATION_CONTRACT_VERSION,
@@ -38,6 +39,8 @@ import { lockPmsRoomFactsMutationScope } from "../domains/pmsRoomFactsMutationLo
 import { PMS_CALENDAR_AUTO_OPEN_QUEUE } from "./pmsChannexScheduler.js";
 
 const LEASE_MS = 5 * 60_000;
+// Suspended and retired hotels never get dates opened, whatever their setting says.
+const AUTO_OPEN_LIFECYCLE_STATUSES: ReadonlySet<string> = new Set(["provisioning", "active"]);
 const DAY_MS = 86_400_000;
 const RESULT_KEY = "calendarAutoOpenResult";
 
@@ -86,7 +89,10 @@ export type PmsCalendarAutoOpenWorkerResult =
   | Readonly<{
       outcome: "succeeded";
       jobId: string;
+      propertyId: string;
       applicationOutcome: PmsCalendarAutoOpenApplicationResult["outcome"];
+      changedDayCount: number;
+      warningCount: number;
     }>
   | Readonly<{ outcome: "retry_scheduled" | "dead_lettered"; jobId: string }>;
 
@@ -124,7 +130,14 @@ export async function runPmsCalendarAutoOpenWorkerOnce(input: {
   try {
     const result = await input.store.apply(job, { workerId: input.workerId, now: clock() });
     await input.store.succeed(job, result, { workerId: input.workerId, now: clock() });
-    return { outcome: "succeeded", jobId: job.jobId, applicationOutcome: result.outcome };
+    return {
+      outcome: "succeeded",
+      jobId: job.jobId,
+      propertyId: job.propertyId,
+      applicationOutcome: result.outcome,
+      changedDayCount: result.changedDayCount,
+      warningCount: result.warnings.length,
+    };
   } catch (error) {
     return {
       outcome: await input.store.fail(job, error, { workerId: input.workerId, now: clock() }),
@@ -238,6 +251,7 @@ async function claim(
 }
 
 type SourceRow = QueryResultRow & {
+  lifecycleStatus: string;
   enabled: boolean;
   mode: "rolling" | "fixed";
   rollingMonths: number | string | null;
@@ -576,23 +590,34 @@ async function loadCurrentSource(
   await client.query(`SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid FOR SHARE`, [
     propertyId,
   ]);
+  await client.query(
+    `SELECT property_id FROM pms.calendar_auto_open_settings WHERE property_id=$1::uuid FOR SHARE`,
+    [propertyId],
+  );
+  // No saved setting means the virtual default (revision 0). Saving the first setting locks the
+  // property FOR UPDATE, so it cannot interleave with this FOR SHARE read.
+  const defaults = PMS_CALENDAR_AUTO_OPEN_DEFAULT_CONFIGURATION;
   const root = (
     await client.query<SourceRow>(
-      `SELECT setting.enabled, setting.mode, setting.rolling_months AS "rollingMonths",
+      `SELECT property.lifecycle_status AS "lifecycleStatus",
+              COALESCE(setting.enabled, $2::boolean) AS enabled,
+              COALESCE(setting.mode, $3::text) AS mode,
+              CASE WHEN setting.property_id IS NULL THEN $4::smallint
+                   ELSE setting.rolling_months END AS "rollingMonths",
               setting.fixed_end_month AS "fixedEndMonth",
-              setting.revision AS "settingRevision",
+              COALESCE(setting.revision, 0) AS "settingRevision",
               property.profile_revision AS "propertyProfileRevision",
               calendar.organization_id::text AS "organizationId",
               calendar.calendar_revision AS "operatingCalendarRevision"
        FROM hotel_catalog.properties property
-       JOIN pms.calendar_auto_open_settings setting ON setting.property_id=property.id
+       LEFT JOIN pms.calendar_auto_open_settings setting ON setting.property_id=property.id
        LEFT JOIN LATERAL (
          SELECT organization_id, calendar_revision FROM pms.operating_calendar_revisions
          WHERE property_id=property.id ORDER BY calendar_revision DESC LIMIT 1
        ) calendar ON TRUE
        WHERE property.id=$1::uuid
-       FOR SHARE OF property, setting`,
-      [propertyId],
+       FOR SHARE OF property`,
+      [propertyId, defaults.enabled, defaults.mode, defaults.rollingMonths],
     )
   ).rows[0];
   const location = (
@@ -612,6 +637,7 @@ async function loadCurrentSource(
   ).rows[0];
   if (
     !root?.enabled ||
+    !AUTO_OPEN_LIFECYCLE_STATUSES.has(root.lifecycleStatus) ||
     !location?.propertyTimeZone ||
     !root.organizationId ||
     root.operatingCalendarRevision === null ||
@@ -673,7 +699,7 @@ async function loadCurrentSource(
     [propertyId],
   );
   if (rooms.rows.length === 0 || unverifiedLabels.rows.length > 0) return null;
-  const settingRevision = positive(root.settingRevision);
+  const settingRevision = nonNegative(root.settingRevision);
   const setting = Object.freeze({
     contractVersion: PMS_CALENDAR_AUTO_OPEN_CONTRACT_VERSION,
     propertyId,
@@ -1153,7 +1179,7 @@ function parseSource(value: unknown): PmsCalendarAutoOpenSource | null {
     const pricing = value["pricing"];
     if (!Array.isArray(pricing["flexibleRatePlans"])) return null;
     return createPmsCalendarAutoOpenSource({
-      settingRevision: positive(value["settingRevision"]),
+      settingRevision: nonNegative(value["settingRevision"]),
       propertyProfileRevision: positive(value["propertyProfileRevision"]),
       propertyTimeZone: text(value["propertyTimeZone"]),
       operatingCalendarRevision: positive(value["operatingCalendarRevision"]),
