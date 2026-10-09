@@ -7,13 +7,18 @@ import {
 import { createHash } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
+import { lockBookingPricingTermsSource } from "./bookingPricingOfferTerms.js";
+import { lockFinanceReplacementPricingSource } from "./financeReplacementPricingSource.js";
 import { loadPmsMandatoryChargePricingSourceSnapshot } from "./pmsMandatoryChargePricingSourceSnapshot.js";
+import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
 
 export type PmsMandatoryChargeConfirmationReadPool = {
   query<T extends QueryResultRow = QueryResultRow>(
     text: string,
     values?: readonly unknown[],
   ): Promise<Pick<QueryResult<T>, "rows" | "rowCount">>;
+  /** Needed to check that a pricing-v2 publication is still current (absent in query-only fakes). */
+  connect?(): Promise<pg.PoolClient>;
   end?(): Promise<void>;
 };
 
@@ -98,7 +103,8 @@ const PUBLISHED_CONFIRMATION_SQL = `SELECT
   $1::uuid::text AS "organizationId",
   head.property_id::text AS "propertyId",
   head.revision AS "confirmationRevision",
-  declaration.created_at AS "confirmedAt"
+  declaration.created_at AS "confirmedAt",
+  revision.source_revisions AS "sourceRevisions"
 FROM pms.pricing_v2_heads head
 JOIN pms.pricing_v2_revisions revision
   ON revision.property_id = head.property_id AND revision.revision = head.revision
@@ -129,13 +135,17 @@ export function createPgPmsMandatoryChargeConfirmationReadModel(config: {
       try {
         const scope = [request.organizationId, request.propertyId];
         const published = (
-          await pool.query<Omit<ConfirmationRow, "pricingSourceFingerprint">>(
-            PUBLISHED_CONFIRMATION_SQL,
-            scope,
-          )
+          await pool.query<
+            Omit<ConfirmationRow, "pricingSourceFingerprint"> & { sourceRevisions: unknown }
+          >(PUBLISHED_CONFIRMATION_SQL, scope)
         ).rows[0];
         let row: ConfirmationRow | undefined;
         if (published) {
+          // A stale publication (rooms, terms or payment settings changed since) is not offered
+          // to guests, so it no longer confirms final prices either.
+          if (!(await publicationIsCurrent(pool, request.propertyId, published.sourceRevisions))) {
+            return readResult({ ...request, outcome: "missing" });
+          }
           // Bound to the pricing source the published prices produce now.
           const source = await loadPmsMandatoryChargePricingSourceSnapshot(
             pool,
@@ -144,7 +154,10 @@ export function createPgPmsMandatoryChargeConfirmationReadModel(config: {
           );
           if (!source) return readResult({ ...request, outcome: "missing" });
           row = {
-            ...published,
+            organizationId: published.organizationId,
+            propertyId: published.propertyId,
+            confirmationRevision: published.confirmationRevision,
+            confirmedAt: published.confirmedAt,
             pricingSourceFingerprint: createHash("sha256")
               .update(source.serializedPayload)
               .digest("hex"),
@@ -181,6 +194,31 @@ export function createPgPmsMandatoryChargeConfirmationReadModel(config: {
       closed = true;
     },
   };
+}
+
+/** Compares the publication's stored sources with the current ones, computed and locked in the
+ * pricing store's order (room, terms, finance) as the pricing-v2 read does. */
+async function publicationIsCurrent(
+  pool: PmsMandatoryChargeConfirmationReadPool,
+  propertyId: string,
+  stored: unknown,
+): Promise<boolean> {
+  if (!pool.connect) return true;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const room = await lockPmsReplacementPricingRoomSource(client, propertyId);
+    const terms = await lockBookingPricingTermsSource(client, propertyId);
+    const finance = await lockFinanceReplacementPricingSource(client, propertyId);
+    await client.query("COMMIT");
+    const sources = stored as Record<string, unknown> | null;
+    return sources?.room === room && sources?.terms === terms && sources?.finance === finance;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 function readResult(value: unknown): PmsMandatoryChargeConfirmationReadResult {
