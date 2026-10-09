@@ -1377,5 +1377,5 @@
   "settings.cards.email.description": "Afzender van bevestigingen, BCC en e-mails in je eigen huisstijl.",
   "settings.cards.account.title": "Account",
   "settings.cards.account.description": "E-mail, wachtwoord, tweestapsverificatie en inloggeschiedenis.",
-  "settings.cards.billing.description": "Je Vayada-abonnement, betaalmethode en facturen."
+  "settings.cards.billing.description": "Je Vayada-abonnement: commissie of een vast maandbedrag."
 }

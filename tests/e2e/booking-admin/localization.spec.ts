@@ -156,7 +156,7 @@ test.describe("booking-admin localization settings cutover", () => {
     });
 
     await page.goto("/settings?section=localization");
-    await expect(page).toHaveURL(/\/settings\/general$/);
+    await expect(page).toHaveURL(/\/settings\/general#localization$/);
     await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
     await expect(
       page.getByRole("alert").filter({ hasText: "Localization settings failed to load." }),
@@ -234,19 +234,16 @@ test.describe("booking-admin localization settings cutover", () => {
 
     expectedFinanceCurrency = "USD";
     delayWrite = false;
-    const readsBeforeRelease = contractRequests.length;
+    // Payments re-reads the canonical currency once the write settles.
+    const reread = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname === BOOKING_ADMIN_LOCALIZATION_SETTINGS_PATH,
+    );
     releaseLocalizationWrite?.();
-    // Payments re-reads the canonical currency once the write settles; retry until it has.
-    await expect.poll(() => contractRequests.length).toBeGreaterThan(readsBeforeRelease);
-    await expect
-      .poll(async () => {
-        if (financeWrites.length < 2) {
-          await page.getByRole("button", { name: "Save Changes", exact: true }).click();
-        }
-        await page.waitForTimeout(250);
-        return financeWrites.length;
-      })
-      .toBe(2);
+    await reread;
+    await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+    await expect.poll(() => financeWrites.length).toBe(2);
     expect(financeWrites[1]).toMatchObject({
       paymentSettings: { defaultCurrency: "USD", supportedCurrencies: ["USD"] },
     });

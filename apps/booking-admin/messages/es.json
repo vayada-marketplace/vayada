@@ -1377,5 +1377,5 @@
   "settings.cards.email.description": "Remitente de las confirmaciones, CCO y correos con tu marca.",
   "settings.cards.account.title": "Cuenta",
   "settings.cards.account.description": "Correo, contraseña, autenticación en dos pasos e historial de inicios de sesión.",
-  "settings.cards.billing.description": "Tu plan de Vayada, método de pago y facturas."
+  "settings.cards.billing.description": "Tu plan de Vayada: comisión o una cuota mensual fija."
 }

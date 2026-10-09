@@ -33,5 +33,6 @@ export function legacySettingsPageUrl(search: string, hash = ""): string | null 
   if (!page) return null;
   params.delete("section");
   const query = params.toString();
-  return `/settings/${page}${query ? `?${query}` : ""}${hash}`;
+  const anchor = hash || (section === "localization" ? "#localization" : "");
+  return `/settings/${page}${query ? `?${query}` : ""}${anchor}`;
 }

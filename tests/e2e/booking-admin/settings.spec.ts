@@ -467,7 +467,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     for (const [legacy, target] of [
       ["?section=property", "/settings/general"],
-      ["?section=localization", "/settings/general"],
+      ["?section=localization", "/settings/general#localization"],
       ["?section=booking", "/settings/booking-rules"],
       ["?section=payments", "/settings/payments"],
       ["?section=billing", "/settings/billing"],

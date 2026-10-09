@@ -1377,5 +1377,5 @@
   "settings.cards.email.description": "Expéditeur des confirmations, CCI et e-mails à votre image.",
   "settings.cards.account.title": "Compte",
   "settings.cards.account.description": "E-mail, mot de passe, authentification à deux facteurs et historique de connexion.",
-  "settings.cards.billing.description": "Votre formule Vayada, votre moyen de paiement et vos factures."
+  "settings.cards.billing.description": "Votre formule Vayada : commission ou forfait mensuel fixe."
 }

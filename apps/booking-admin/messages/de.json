@@ -1377,5 +1377,5 @@
   "settings.cards.email.description": "Absender von Bestätigungen, BCC und E-Mails im eigenen Design.",
   "settings.cards.account.title": "Konto",
   "settings.cards.account.description": "E-Mail, Passwort, Zwei-Faktor-Authentifizierung und Anmeldeverlauf.",
-  "settings.cards.billing.description": "Ihr Vayada-Tarif, Ihre Zahlungsmethode und Rechnungen."
+  "settings.cards.billing.description": "Ihr Vayada-Tarif: Provision oder feste Monatsgebühr."
 }

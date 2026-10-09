@@ -1377,5 +1377,5 @@
   "settings.cards.email.description": "Pengirim konfirmasi, BCC, dan email bermerek.",
   "settings.cards.account.title": "Akun",
   "settings.cards.account.description": "Email, kata sandi, autentikasi dua faktor, dan riwayat masuk.",
-  "settings.cards.billing.description": "Paket Vayada, metode pembayaran, dan faktur Anda."
+  "settings.cards.billing.description": "Paket Vayada Anda: komisi atau biaya bulanan tetap."
 }

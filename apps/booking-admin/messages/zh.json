@@ -1377,5 +1377,5 @@
   "settings.cards.email.description": "确认邮件发件人、密送和品牌邮件。",
   "settings.cards.account.title": "账户",
   "settings.cards.account.description": "邮箱、密码、双重验证和登录记录。",
-  "settings.cards.billing.description": "您的 Vayada 套餐、付款方式和发票。"
+  "settings.cards.billing.description": "您的 Vayada 套餐：佣金制或每月固定费用。"
 }

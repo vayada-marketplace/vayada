@@ -1377,5 +1377,5 @@
   "settings.cards.email.description": "Отправитель подтверждений, скрытая копия и фирменные письма.",
   "settings.cards.account.title": "Аккаунт",
   "settings.cards.account.description": "Почта, пароль, двухфакторная аутентификация и история входов.",
-  "settings.cards.billing.description": "Ваш тариф Vayada, способ оплаты и счета."
+  "settings.cards.billing.description": "Ваш тариф Vayada: комиссия или фиксированная ежемесячная плата."
 }

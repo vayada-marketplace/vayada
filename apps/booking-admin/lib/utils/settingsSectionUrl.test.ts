@@ -14,7 +14,7 @@ describe("settings page URLs", () => {
 
   it.each([
     ["property", "/settings/general"],
-    ["localization", "/settings/general"],
+    ["localization", "/settings/general#localization"],
     ["booking", "/settings/booking-rules"],
     ["billing", "/settings/billing"],
     ["payments", "/settings/payments"],

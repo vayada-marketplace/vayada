@@ -997,9 +997,35 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     }
   };
 
+  useEffect(() => {
+    // Deep links such as /settings/general#localization arrive before the section renders.
+    if (window.location.hash.length > 1)
+      document.getElementById(window.location.hash.slice(1))?.scrollIntoView();
+  }, []);
+
   const updateSetting = <K extends keyof PropertySettings>(key: K, value: PropertySettings[K]) => {
     setSettings({ ...settings, [key]: value });
   };
+
+  // Payments saves the canonical currency, so it needs the same retry when localization fails.
+  const localizationRetryCard = (
+    <SettingsCard>
+      <div className="flex flex-wrap items-center justify-between gap-3" role="alert">
+        <p className="text-sm text-red-700">{t(localizationLoadError)}</p>
+        <button
+          type="button"
+          onClick={() => {
+            const hotelId = readBookingHotelId(settings);
+            if (hotelId) void loadLocalizationSettings(hotelId);
+          }}
+          disabled={!readBookingHotelId(settings)}
+          className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:border-gray-400 disabled:opacity-50"
+        >
+          {t("auth.chooseProperty.retry")}
+        </button>
+      </div>
+    </SettingsCard>
+  );
 
   return (
     <SettingsSubPage title={t(PAGE_TITLES[activeSection])}>
@@ -1320,22 +1346,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
               </p>
             </SettingsCard>
           ) : localizationLoadError ? (
-            <SettingsCard>
-              <div className="flex flex-wrap items-center justify-between gap-3" role="alert">
-                <p className="text-sm text-red-700">{t(localizationLoadError)}</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const hotelId = readBookingHotelId(settings);
-                    if (hotelId) void loadLocalizationSettings(hotelId);
-                  }}
-                  disabled={!readBookingHotelId(settings)}
-                  className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:border-gray-400 disabled:opacity-50"
-                >
-                  {t("auth.chooseProperty.retry")}
-                </button>
-              </div>
-            </SettingsCard>
+            localizationRetryCard
           ) : (
             <LocalizationTab
               defaultCurrency={defaultCurrency}
@@ -2181,6 +2192,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
           <p className="text-[13px] text-gray-500">
             {t("admin.howYourHotelCollectsPaymentsFromGuests")}
           </p>
+          {localizationLoadError && localizationRetryCard}
           {!stripeAccountId &&
           (stripeAccountCreationBlocked || !paymentSettingsLoaded) &&
           paymentError ? (

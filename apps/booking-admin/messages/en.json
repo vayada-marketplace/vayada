@@ -1377,5 +1377,5 @@
   "settings.cards.email.description": "Confirmation sender, BCC and branded emails.",
   "settings.cards.account.title": "Account",
   "settings.cards.account.description": "Email, password, two-factor authentication and login history.",
-  "settings.cards.billing.description": "Your Vayada plan, payment method and invoices."
+  "settings.cards.billing.description": "Your Vayada plan: commission or a fixed monthly fee."
 }

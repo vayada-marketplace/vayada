@@ -1377,5 +1377,5 @@
   "settings.cards.email.description": "Mittente delle conferme, CCN ed email con il tuo marchio.",
   "settings.cards.account.title": "Account",
   "settings.cards.account.description": "Email, password, autenticazione a due fattori e cronologia degli accessi.",
-  "settings.cards.billing.description": "Il tuo piano Vayada, il metodo di pagamento e le fatture."
+  "settings.cards.billing.description": "Il tuo piano Vayada: commissione o canone mensile fisso."
 }

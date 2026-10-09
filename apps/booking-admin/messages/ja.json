@@ -1377,5 +1377,5 @@
   "settings.cards.email.description": "確認メールの送信者、BCC、ブランドメール。",
   "settings.cards.account.title": "アカウント",
   "settings.cards.account.description": "メールアドレス、パスワード、二要素認証、ログイン履歴。",
-  "settings.cards.billing.description": "Vayadaのプラン、支払い方法、請求書。"
+  "settings.cards.billing.description": "Vayadaのプラン：手数料制または月額固定。"
 }
