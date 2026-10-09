@@ -238,6 +238,8 @@ export type ApiConfig = {
   /** Kill switch for the hourly published-pricing freshness check (VAY-2088); on by default. */
   pricingPublicationFreshnessCheckEnabled: boolean;
   pricingPublicationFreshnessIntervalMs: number;
+  /** Recipient of the at-most-daily stale-pricing email; unset sends none (log line only). */
+  pricingPublicationFreshnessAlertEmail?: string;
   creatorPlatformConnections?: CreatorPlatformConnectionsConfig;
   providerWebhooks: ProviderWebhookConfig;
   airbnbImport?: ReturnType<typeof loadAirbnbImportConfig>;
@@ -561,6 +563,21 @@ function readCalendarAutoOpenSchedulerIntervalEnv(env: NodeJS.ProcessEnv): numbe
   const key = "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS";
   const value = readTimerIntervalEnv(env, key, 60 * 60 * 1000);
   if (value < 60_000) throw new Error(`${key} must be at least 60000`);
+  return value;
+}
+
+// One recipient; the email goes through the booking email provider and sender.
+function readPricingPublicationFreshnessAlertEmail(
+  env: NodeJS.ProcessEnv,
+  emailConfigured: boolean,
+): string | undefined {
+  const key = "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL";
+  const value = readOptionalEnv(env, key);
+  if (!value) return undefined;
+  if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(value)) {
+    throw new Error(`${key} must be one email address`);
+  }
+  if (!emailConfigured) throw new Error(`${key} requires RESEND_API_KEY and BOOKING_EMAIL_FROM`);
   return value;
 }
 
@@ -1411,6 +1428,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       true,
     ),
     pricingPublicationFreshnessIntervalMs: readPricingPublicationFreshnessIntervalEnv(env),
+    pricingPublicationFreshnessAlertEmail: readPricingPublicationFreshnessAlertEmail(
+      env,
+      Boolean(bookingEmailDelivery),
+    ),
     creatorPlatformConnections,
     providerWebhooks: prospectiveConfig.providerWebhooks,
     channexManagement,
