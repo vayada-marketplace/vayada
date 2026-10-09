@@ -148,6 +148,32 @@ it("says nothing was booked when online booking is unavailable", async () => {
   );
 });
 
+it("stops a request the hotel cannot receive online yet, without inviting a retry", async () => {
+  act(() =>
+    root.render(
+      createElement(ReplacementBookingConfirmation, {
+        slug: "hotel",
+        quote: { ...quote, acceptanceMode: "request" } as PublicBookingQuote,
+        disclosure,
+        termsAccepted: true,
+      }),
+    ),
+  );
+  input("firstName").value = "Ada";
+  input("lastName").value = "Lovelace";
+  input("email").value = "ada@example.test";
+  input("phone").value = "+49";
+  vi.mocked(acceptPricingQuote).mockRejectedValueOnce(
+    new ApiError("hidden", 404, { code: "REQUEST_ACCEPTANCE_UNAVAILABLE" }),
+  );
+  await submit();
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+    "booking requests can’t be sent online yet",
+  );
+  expect(document.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
+  expect(document.body.textContent).not.toContain("may still have reached the hotel");
+});
+
 it("keeps an uncertain attempt retryable", async () => {
   render();
   input("firstName").value = "Ada";

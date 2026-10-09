@@ -147,7 +147,13 @@ it("rotates the exact key after a definite conflict", async () => {
 it("refuses stale, mismatched and unsupported evidence before sending", async () => {
   for (const [candidateQuote, candidateDisclosure] of [
     [
-      { ...quote, acceptanceMode: "request", paymentMethod: "card", dueNowMinor: "20600", dueLaterMinor: "0" },
+      {
+        ...quote,
+        acceptanceMode: "request",
+        paymentMethod: "card",
+        dueNowMinor: "20600",
+        dueLaterMinor: "0",
+      },
       disclosure,
     ],
     [{ ...quote, paymentMethod: "card" }, disclosure],
@@ -196,9 +202,7 @@ it("sends a pay-at-property request and returns the hotel's deadline", async () 
     hostResponseDeadlineAt: "2026-09-15T12:01:01.000Z",
   };
   fetcher.mockResolvedValueOnce(new Response(JSON.stringify(requested)));
-  await expect(acceptPricingQuote("hotel", request, disclosure, guest)).resolves.toEqual(
-    requested,
-  );
+  await expect(acceptPricingQuote("hotel", request, disclosure, guest)).resolves.toEqual(requested);
   expect(sent(0).body.quoteId).toBe(quote.quoteId);
   for (const invalid of [
     { ...requested, hostResponseDeadlineAt: fresh.acceptedAt },

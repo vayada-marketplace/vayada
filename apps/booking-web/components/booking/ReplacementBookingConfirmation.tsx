@@ -84,20 +84,24 @@ export default function ReplacementBookingConfirmation({
       // 404 on a first attempt: online booking is off or this hotel is not bookable, so nothing
       // was stored. A retry after an uncertain attempt keeps the uncertain message.
       const unavailable = failure instanceof ApiError && failure.status === 404 && !pending;
-      const cardUnavailable =
-        unavailable &&
-        (failure.detail as { code?: unknown } | null)?.code === "CARD_PAYMENT_UNAVAILABLE";
-      setRefreshRequired(conflict || cardUnavailable);
+      const code =
+        failure instanceof ApiError && (failure.detail as { code?: unknown } | null)?.code;
+      const cardUnavailable = unavailable && code === "CARD_PAYMENT_UNAVAILABLE";
+      // The hotel confirms each booking, but online requests are not switched on yet.
+      const requestUnavailable = unavailable && code === "REQUEST_ACCEPTANCE_UNAVAILABLE";
+      setRefreshRequired(conflict || cardUnavailable || requestUnavailable);
       setError(
         conflict
           ? "This price is no longer available. Get a new price and review its terms again."
-          : cardUnavailable
-            ? "Paying by card online isn’t available right now. Get a new price with “Pay at property”. No room was reserved and no payment was taken."
-            : unavailable
-              ? "Online booking is not available for this hotel right now. No room was reserved and no payment was taken."
-              : request
-                ? "We couldn’t confirm your request was sent. It may still have reached the hotel, so retry with the same details."
-                : "We couldn’t confirm your booking. Your room may still have been booked, so retry with the same details.",
+          : requestUnavailable
+            ? "This hotel confirms each booking itself, and booking requests can’t be sent online yet. No room was reserved and no payment was taken."
+            : cardUnavailable
+              ? "Paying by card online isn’t available right now. Get a new price with “Pay at property”. No room was reserved and no payment was taken."
+              : unavailable
+                ? "Online booking is not available for this hotel right now. No room was reserved and no payment was taken."
+                : request
+                  ? "We couldn’t confirm your request was sent. It may still have reached the hotel, so retry with the same details."
+                  : "We couldn’t confirm your booking. Your room may still have been booked, so retry with the same details.",
       );
     } finally {
       setLoading(false);
