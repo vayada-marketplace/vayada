@@ -59,7 +59,10 @@ describe("onboardingPricingClient", () => {
     owners({ currency: null });
     const first = await client.load(propertyId);
     calls.put.mockRejectedValue(
-      new ApiErrorResponse(409, { code: "pricing_currency_revision_conflict", currentRevision: 1 }),
+      new ApiErrorResponse(409, {
+        code: "pricing_currency_revision_conflict",
+        currentRevision: 1,
+      } as never),
     );
     const error = await client.saveCurrency(propertyId, "EUR", first).catch((e) => e);
     expect(error).toBeInstanceOf(PricingOwnerError);
