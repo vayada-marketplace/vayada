@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import { getTimezone } from "countries-and-timezones";
 import {
   PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
@@ -12,9 +10,10 @@ import {
 } from "@vayada/domain-pms";
 
 import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
-import { deterministicUuid, integer, optionalUuid, uuid } from "./productionBookingValues.js";
+import { integer, optionalUuid, uuid } from "./productionBookingValues.js";
 import { carriedCohortHotel } from "./productionPmsCohortSetup.js";
 import { addPmsBlocker } from "./productionPmsContext.js";
+import { nativeCommandRecords } from "./productionPmsNativeCommand.js";
 import type { PmsBuildContext, PmsTargetRecord } from "./productionPmsTypes.js";
 import { pmsRecord } from "./productionPmsValues.js";
 
@@ -153,28 +152,12 @@ export function buildPmsCohortCalendarRecords(
   calendars: PlannedCohortCalendar[],
 ): PmsTargetRecord[] {
   return calendars.flatMap(({ configuration, organizationId, hotel }) => {
-    const propertyId = configuration.propertyId;
-    const at = configuration.createdAt;
-    const id = (kind: string) =>
-      deterministicUuid("production-pms", "cohort-operating-calendar", kind, propertyId);
-    const keyHash = hex(
-      `vay1362-migration:${context.sourceRunId}:operating-calendar:${propertyId}`,
+    const { propertyId, createdAt: at } = configuration;
+    const bindings = configuration.sourceInputs.roomBindings;
+    const profileRevision = Number(
+      configuration.sourceInputs.propertyProfile.revision.slice("profile:".length),
     );
-    const correlationId = `vay1362-migration:${context.sourceRunId}`;
     const sourceRevision = configuration.source.revision;
-    const event = {
-      contractVersion: PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
-      eventType: "pms.operating_calendar.changed",
-      destination: PMS_OPERATING_CALENDAR_OUTBOX_DESTINATION,
-      metadata: PMS_OPERATING_CALENDAR_OUTBOX_METADATA,
-      propertyId,
-      calendarRevision: 1,
-      sourceRevision,
-    };
-    const eventMetadata = {
-      contractVersion: PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
-      ...PMS_OPERATING_CALENDAR_OUTBOX_METADATA,
-    };
     const result = {
       ok: true,
       response: {
@@ -184,179 +167,86 @@ export function buildPmsCohortCalendarRecords(
         acceptedAt: at,
       },
     };
-    const bindings = configuration.sourceInputs.roomBindings;
-    const record = (
-      table: string,
-      targetId: string,
-      row: Record<string, unknown>,
-      product: "pms" | "platform" = "platform",
-    ) =>
-      pmsRecord(hotel, table, targetId, at, false, row, { configuration, organizationId }, product);
-    return [
-      record("idempotency_keys", id("idempotency"), {
-        id: id("idempotency"),
-        operationScope: "pms",
-        operation: PMS_OPERATING_CALENDAR_IDEMPOTENCY.operation,
-        keyHash,
-        requestFingerprintHash: hex(
-          JSON.stringify({
-            organizationId,
-            propertyId,
-            expectedCalendarRevision: 0,
-            expectedPropertyProfileRevision: Number(
-              configuration.sourceInputs.propertyProfile.revision.slice("profile:".length),
-            ),
-            schedule: configuration.schedule,
-            defaultMinimumStayNights: configuration.defaultMinimumStayNights,
-            roomTypeLimits: bindings.map((binding) => ({
-              roomTypeId: binding.roomTypeId,
-              expectedRoomFactsRevision: binding.sourceRoomFactsRevision,
-              expectedRoomUnitsRevision: binding.sourceRoomUnitsRevision,
-              startingSellableLimitCount: binding.startingSellableLimitCount,
-            })),
-          }),
-        ),
-        status: "completed",
-        tenantScope: "property",
-        organizationId: null,
+    const checksumInput = { configuration, organizationId };
+    const command = nativeCommandRecords(context, {
+      source: hotel,
+      propertyId,
+      name: "operating-calendar",
+      at,
+      operation: PMS_OPERATING_CALENDAR_IDEMPOTENCY.operation,
+      fingerprint: JSON.stringify({
+        organizationId,
         propertyId,
-        responseStatusCode: 200,
-        responseBodyHash: hex(nativeStableJson(result)),
-        correlationId,
-        firstSeenAt: at,
-        lastSeenAt: at,
-        completedAt: at,
-        expiresAt: new Date(Date.parse(at) + 86_400_000).toISOString(),
-        idempotencyMetadata: { attempt: 1, resultJson: JSON.stringify(result) },
+        expectedCalendarRevision: 0,
+        expectedPropertyProfileRevision: profileRevision,
+        schedule: configuration.schedule,
+        defaultMinimumStayNights: configuration.defaultMinimumStayNights,
+        roomTypeLimits: bindings.map((binding) => ({
+          roomTypeId: binding.roomTypeId,
+          expectedRoomFactsRevision: binding.sourceRoomFactsRevision,
+          expectedRoomUnitsRevision: binding.sourceRoomUnitsRevision,
+          startingSellableLimitCount: binding.startingSellableLimitCount,
+        })),
       }),
-      record("domain_events", id("event"), {
-        id: id("event"),
-        sourceSystem: "pms",
-        eventKey: `pms.operating-calendar.changed.property.${propertyId}.key.${keyHash}.attempt.1.v1`,
+      result,
+      replay: { resultJson: JSON.stringify(result) },
+      eventType: "pms.operating_calendar.changed",
+      resourceType: "operating_calendar",
+      payload: {
+        contractVersion: PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
         eventType: "pms.operating_calendar.changed",
-        eventVersion: 1,
-        occurredAt: at,
-        tenantScope: "property",
-        organizationId: null,
-        propertyId,
-        resourceProduct: "pms",
-        resourceType: "operating_calendar",
-        resourceId: propertyId,
-        actorType: "migration",
-        actorUserId: null,
-        correlationId,
-        causationId: context.sourceRunId,
-        idempotencyKeyHash: keyHash,
-        payload: event,
-        eventMetadata,
-        privacyScope: "confidential",
-      }),
-      record("outbox_events", id("outbox"), {
-        id: id("outbox"),
-        domainEventId: id("event"),
-        outboxKey: `${PMS_OPERATING_CALENDAR_OUTBOX_DESTINATION}.pms.operating-calendar.changed.property.${propertyId}.key.${keyHash}.attempt.1.v1`,
         destination: PMS_OPERATING_CALENDAR_OUTBOX_DESTINATION,
-        eventType: "pms.operating_calendar.changed",
-        tenantScope: "property",
-        organizationId: null,
+        metadata: PMS_OPERATING_CALENDAR_OUTBOX_METADATA,
         propertyId,
-        resourceProduct: "pms",
-        resourceType: "operating_calendar",
-        resourceId: propertyId,
-        correlationId,
-        idempotencyKeyHash: keyHash,
-        payload: event,
-        outboxMetadata: eventMetadata,
+        calendarRevision: 1,
+        sourceRevision,
+      },
+      metadata: {
+        contractVersion: PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
+        ...PMS_OPERATING_CALENDAR_OUTBOX_METADATA,
+      },
+      destination: PMS_OPERATING_CALENDAR_OUTBOX_DESTINATION,
+      eventKey: (key) =>
+        `pms.operating-calendar.changed.property.${propertyId}.key.${key}.attempt.1.v1`,
+      outboxKey: (key) =>
+        `${PMS_OPERATING_CALENDAR_OUTBOX_DESTINATION}.pms.operating-calendar.changed.property.${propertyId}.key.${key}.attempt.1.v1`,
+      auditKey: (key) => `pms.operating-calendar.property.${propertyId}.key.${key}.attempt.1.v1`,
+      redactedPayload: { propertyId, outcome: "created", calendarRevision: 1, sourceRevision },
+      auditMetadata: {
+        actorOrganizationId: organizationId,
+        contractVersion: PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
+      },
+      checksumInput,
+    });
+    const record = (table: string, targetId: string, row: Record<string, unknown>) =>
+      pmsRecord(hotel, table, targetId, at, false, row, checksumInput);
+    return [
+      ...command.records,
+      record("operating_calendar_revisions", `${propertyId}:1`, {
+        organizationId,
+        propertyId,
+        calendarRevision: 1,
+        contractVersion: PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
+        propertyProfileRevision: profileRevision,
+        propertyTimeZone: configuration.sourceInputs.propertyTimeZone,
+        scheduleMode: configuration.schedule.mode,
+        recurringPeriodCount: configuration.schedule.periods.length,
+        roomBindingCount: bindings.length,
+        defaultMinimumStayNights: configuration.defaultMinimumStayNights,
+        idempotencyKeyId: command.ids.idempotency,
+        domainEventId: command.ids.event,
+        outboxEventId: command.ids.outbox,
+        createdByUserId: uuid(hotel.data["user_id"], "user_id"),
         createdAt: at,
+        updatedAt: at,
       }),
-      record(
-        "operating_calendar_revisions",
-        `${propertyId}:1`,
-        {
-          organizationId,
+      ...bindings.map((binding) =>
+        record("operating_calendar_room_bindings", `${propertyId}:1:${binding.roomTypeId}`, {
           propertyId,
           calendarRevision: 1,
-          contractVersion: PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
-          propertyProfileRevision: Number(
-            configuration.sourceInputs.propertyProfile.revision.slice("profile:".length),
-          ),
-          propertyTimeZone: configuration.sourceInputs.propertyTimeZone,
-          scheduleMode: configuration.schedule.mode,
-          recurringPeriodCount: configuration.schedule.periods.length,
-          roomBindingCount: bindings.length,
-          defaultMinimumStayNights: configuration.defaultMinimumStayNights,
-          idempotencyKeyId: id("idempotency"),
-          domainEventId: id("event"),
-          outboxEventId: id("outbox"),
-          createdByUserId: uuid(hotel.data["user_id"], "user_id"),
-          createdAt: at,
-          updatedAt: at,
-        },
-        "pms",
+          ...binding,
+        }),
       ),
-      ...bindings.map((binding) =>
-        record(
-          "operating_calendar_room_bindings",
-          `${propertyId}:1:${binding.roomTypeId}`,
-          { propertyId, calendarRevision: 1, ...binding },
-          "pms",
-        ),
-      ),
-      record("product_audit_events", id("audit"), {
-        id: id("audit"),
-        auditKey: `pms.operating-calendar.property.${propertyId}.key.${keyHash}.attempt.1.v1`,
-        product: "pms",
-        action: PMS_OPERATING_CALENDAR_IDEMPOTENCY.operation,
-        actionVersion: 1,
-        occurredAt: at,
-        recordedAt: at,
-        tenantScope: "property",
-        organizationId: null,
-        propertyId,
-        actorType: "migration",
-        actorUserId: null,
-        targetResourceProduct: "pms",
-        targetResourceType: "operating_calendar",
-        targetResourceId: propertyId,
-        secondaryResourceProduct: null,
-        secondaryResourceType: null,
-        secondaryResourceId: null,
-        domainEventId: id("event"),
-        externalWebhookEventId: null,
-        jobId: null,
-        idempotencyKeyId: id("idempotency"),
-        correlationId,
-        causationId: context.sourceRunId,
-        redactedPayload: { propertyId, outcome: "created", calendarRevision: 1, sourceRevision },
-        privatePayload: {},
-        auditMetadata: {
-          migrationRunId: context.sourceRunId,
-          actorOrganizationId: organizationId,
-          contractVersion: PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
-        },
-        retentionClass: "standard",
-        privacyScope: "confidential",
-        aiVisible: false,
-      }),
     ];
   });
-}
-
-function hex(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
-/** The native writers' key order (code units), so the response hash matches theirs. */
-function nativeStableJson(value: unknown): string {
-  const sort = (entry: unknown): unknown =>
-    Array.isArray(entry)
-      ? entry.map(sort)
-      : entry && typeof entry === "object"
-        ? Object.fromEntries(
-            Object.keys(entry)
-              .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
-              .map((key) => [key, sort((entry as Record<string, unknown>)[key])]),
-          )
-        : entry;
-  return JSON.stringify(sort(value));
 }
