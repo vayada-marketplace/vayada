@@ -13,8 +13,8 @@ const text = (v: unknown): v is string =>
  * and an eligible schedule. This is neither charge-owner evidence nor executable
  * Finance readiness. In particular it does not enable deposits in current Finance.
  * `currency` only selects the deposit rounding step (VAY-2085). */
-export function composeReplacementSettlementAmounts(input: unknown, currency?: string) {
-  const step = BigInt(currency === undefined ? 1 : pricingAmountStep(currency));
+export function composeReplacementSettlementAmounts(input: unknown, currency: string) {
+  const step = BigInt(pricingAmountStep(currency));
   if (
     !pricingObject(input) ||
     !pricingKeys(input, ["subtotalMinor", "charges", "payment"]) ||

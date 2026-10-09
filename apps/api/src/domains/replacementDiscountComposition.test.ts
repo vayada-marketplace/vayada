@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { composeReplacementDiscounts as compose } from "./replacementDiscountComposition.js";
+import { composeReplacementDiscounts } from "./replacementDiscountComposition.js";
+const compose = (input: unknown, currency = "EUR") => composeReplacementDiscounts(input, currency);
 const percent = (basisPoints: number) => ({ kind: "percentage", basisPoints });
 const fixed = (amountMinor: string) => ({ kind: "fixed", amountMinor });
 const room = (
@@ -49,7 +50,6 @@ describe("replacement Booking discount composition", () => {
       lastMinuteLines: [{ selectionId: "one", amountMinor: "100050" }],
       remainingRoomAndEligibleAddonMinor: "765383",
     });
-    expect(compose({ ...idr, stacking: true })).toEqual(compose({ ...idr, stacking: true }, "USD"));
     // A stray sub-rupiah base can round up past itself; the discount then stays at zero.
     expect(
       compose({ ...input(), rooms: [room("one", "60", percent(1))], code: null }, "IDR"),

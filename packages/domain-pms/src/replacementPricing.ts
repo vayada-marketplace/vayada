@@ -51,7 +51,7 @@ export function pricingCurrencyScale(currency: string): number | null {
 const wholeUnitSteps: Readonly<Record<string, number>> = Object.freeze({ IDR: 100 });
 /** Minor units per allowed price step: 100 for IDR (whole rupiah), otherwise 1. */
 export function pricingAmountStep(currency: string): number {
-  return wholeUnitSteps[currency] ?? 1;
+  return Object.hasOwn(wholeUnitSteps, currency) ? wholeUnitSteps[currency]! : 1;
 }
 export function isMinorAmount(value: unknown): value is string {
   return (

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { pricingAmountStep } from "./replacementPricing.js";
 import {
   parsePricingConfiguration,
   pricingDate,
@@ -134,6 +135,11 @@ describe("replacement configuration", () => {
     expect(valid(3, [8, 9])).toBe(false);
     expect(valid(0, [12])).toBe(false);
     expect(valid(1, [-1])).toBe(false);
+  });
+  it("steps IDR by whole rupiah and every other code by one minor unit (VAY-2085)", () => {
+    expect(pricingAmountStep("IDR")).toBe(100);
+    for (const code of ["EUR", "JPY", "KWD", "idr", "constructor", "__proto__", "toString"])
+      expect(pricingAmountStep(code)).toBe(1);
   });
   it("requires whole-rupiah amounts for IDR in every amount field (VAY-2085)", () => {
     const idr = (edit: (c: ReturnType<typeof configurationFixture>) => void = () => {}) => {

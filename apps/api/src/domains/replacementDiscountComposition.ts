@@ -38,8 +38,8 @@ function reduction(base: bigint, discount: Discount | null, step: bigint): bigin
  * Room amounts include PMS child/linked adjustments; meals and other charges are excluded.
  * Null discounts and zero eligible extras must be explicit owner results, never fallbacks.
  * `currency` only selects the rounding step for percentage discounts (VAY-2085). */
-export function composeReplacementDiscounts(input: unknown, currency?: string) {
-  const step = BigInt(currency === undefined ? 1 : pricingAmountStep(currency));
+export function composeReplacementDiscounts(input: unknown, currency: string) {
+  const step = BigInt(pricingAmountStep(currency));
   if (
     !pricingObject(input) ||
     !pricingKeys(input, ["rooms", "eligibleAddonMinor", "code", "stacking"]) ||

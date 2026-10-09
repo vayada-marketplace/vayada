@@ -3,7 +3,8 @@ import {
   calculateReplacementFixedCharges as calculate,
   parseFixedChargePolicy,
 } from "./replacementFixedCharges.js";
-import { composeReplacementSettlementAmounts as settle } from "./replacementSettlementAmounts.js";
+import { composeReplacementSettlementAmounts } from "./replacementSettlementAmounts.js";
+const settle = (input: unknown) => composeReplacementSettlementAmounts(input, "EUR");
 const stay = () => ({
   propertyId: "hotel",
   checkIn: "2026-10-01",

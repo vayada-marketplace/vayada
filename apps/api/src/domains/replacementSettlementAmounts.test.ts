@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { composeReplacementSettlementAmounts as compose } from "./replacementSettlementAmounts.js";
+import { composeReplacementSettlementAmounts } from "./replacementSettlementAmounts.js";
+const compose = (input: unknown, currency = "EUR") =>
+  composeReplacementSettlementAmounts(input, currency);
 const charge = (amountMinor = "6000", included = false, collect = "online") => ({
   id: "tax",
   amountMinor,
@@ -82,7 +84,6 @@ describe("resolved charge and settlement arithmetic", () => {
     const idr = { ...input(), subtotalMinor: "1234500", charges: [] };
     expect(compose(idr, "IDR")).toMatchObject({ dueNowMinor: "370400", dueLaterMinor: "864100" });
     expect(compose(idr, "USD")).toMatchObject({ dueNowMinor: "370350", dueLaterMinor: "864150" });
-    expect(compose(idr)).toEqual(compose(idr, "USD"));
   });
   it("requires explicit owner amounts and rejects malformed or ambiguous inputs", () => {
     for (const change of [
