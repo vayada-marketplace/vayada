@@ -17,6 +17,8 @@ import { captureDirectNightlyRevenueEvidence } from "./stripeBookingSettlement.j
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
 import { appendMissingAddonRevenueEvidence } from "./bookingAddonRevenueEvidence.js";
 import { publishAffiliateReservationLifecycle } from "./bookingAffiliateReservationLifecycle.js";
+import { loadPricingBookingCancellation } from "./pricingBookingCancellation.js";
+import type { BookedCancellationOutcome } from "@vayada/domain-booking";
 
 export type HostActionRequest = {
   action: HostBookingAction;
@@ -24,6 +26,8 @@ export type HostActionRequest = {
   checkOut?: string;
   reason: string;
   guestMessage?: string;
+  /** Cancel only. "guest_request" applies the booked terms (VAY-2100); default: property cancels, no fee. */
+  cancellationKind?: "property" | "guest_request";
 };
 export type HostActionScope = { propertyId: string; bookingId: string; actorUserId: string };
 export type HostActionImpact = {
@@ -39,6 +43,9 @@ export type HostActionImpact = {
   newPolicy: Record<string, unknown>;
   inventory: "release" | "replace";
   payment: "no_payment_received" | "authorization_void";
+  /** Guest-requested cancel of a pricing-v2 stay: what its booked terms keep today. Unpaid, so
+   * recorded only; no money moves and nothing is counted as revenue. */
+  cancellationOutcome?: BookedCancellationOutcome;
 };
 export type HostActionPreview = {
   previewId: string;
@@ -156,6 +163,25 @@ export function createBookingHostActions(config: {
         "unsupported_edit",
         "The booked cancellation terms cannot be previewed for a date change.",
       );
+    const cancellationOutcome =
+      request.action === "cancel" && request.cancellationKind === "guest_request"
+        ? await loadPricingBookingCancellation(client, {
+            propertyId: scope.propertyId,
+            guestBookingId: scope.bookingId,
+            stay: {
+              checkIn: booking.checkIn,
+              checkOut: booking.checkOut,
+              roomCount: booking.roomCount,
+              currency: booking.currency,
+            },
+            cancelledAt: at,
+          })
+        : undefined;
+    if (cancellationOutcome === null)
+      throw new HostActionError(
+        "unsupported_edit",
+        "The booked cancellation terms cannot be applied to this booking. Cancel it as the property.",
+      );
     const impact: HostActionImpact = {
       action: request.action,
       pricingFingerprint: hash(
@@ -181,6 +207,7 @@ export function createBookingHostActions(config: {
       newPolicy: offer["roomSelection"] ? object(newOffer["publicPolicy"]) : frozenPolicy,
       inventory: dates ? "replace" : "release",
       payment,
+      ...(cancellationOutcome ? { cancellationOutcome } : {}),
     };
     return { booking, property, reservation, dates, newOffer, impact, revision: hash(booking) };
   };
@@ -319,12 +346,12 @@ export function createBookingHostActions(config: {
           const status = preview.request.action === "reject" ? "declined" : "canceled";
           await client.query(
             `WITH updated AS (
-              UPDATE booking.guest_bookings SET lifecycle_status=$3,balance_amount=0,payment_status=CASE WHEN payment_status='authorized' THEN 'failed' ELSE payment_status END,cancellation_reason='property_cancellation',updated_at=$4::timestamptz
+              UPDATE booking.guest_bookings SET lifecycle_status=$3,balance_amount=0,payment_status=CASE WHEN payment_status='authorized' THEN 'failed' ELSE payment_status END,cancellation_reason=$9,updated_at=$4::timestamptz
               WHERE id=$1::uuid AND property_id=$2::uuid RETURNING id,payment_status
              ), event AS (
               INSERT INTO booking.booking_status_events
                 (guest_booking_id,event_type,from_status,to_status,actor_type,actor_user_id,public_visible,public_message,event_payload,occurred_at)
-              SELECT id,$5,$6,$3,'property_user',$7::uuid,true,'Booking updated.','{}'::jsonb,$4::timestamptz FROM updated
+              SELECT id,$5,$6,$3,'property_user',$7::uuid,true,'Booking updated.',$8::jsonb,$4::timestamptz FROM updated
              ) UPDATE booking.direct_booking_summary_read_model SET lifecycle_status=$3,payment_status=(SELECT payment_status FROM updated),amount_summary=jsonb_set(amount_summary,'{balanceAmount}','0'::jsonb),projected_at=$4::timestamptz
                WHERE guest_booking_id=(SELECT id FROM updated)`,
             [
@@ -335,6 +362,12 @@ export function createBookingHostActions(config: {
               `guest_booking.${status}`,
               state.booking.lifecycleStatus,
               scope.actorUserId,
+              JSON.stringify(
+                state.impact.cancellationOutcome
+                  ? { cancellationOutcome: state.impact.cancellationOutcome }
+                  : {},
+              ),
+              state.impact.cancellationOutcome ? "guest_request" : "property_cancellation",
             ],
           );
           updated = {
@@ -403,7 +436,7 @@ export function createBookingHostActions(config: {
               : `guest_booking.${updated.lifecycleStatus}`,
             fromStatus: state.booking.lifecycleStatus,
             toStatus: updated.lifecycleStatus,
-            reason: "property_cancellation",
+            reason: state.impact.cancellationOutcome ? "guest_request" : "property_cancellation",
           },
         });
         const body = { bookingId: scope.bookingId, lifecycleStatus: updated.lifecycleStatus };

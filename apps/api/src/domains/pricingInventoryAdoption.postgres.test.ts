@@ -13,6 +13,7 @@ import {
   cancelAcceptedPricingStay,
   loadPricingBookingCancellation,
 } from "./pricingBookingCancellation.js";
+import { createTargetPmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
 import {
   PMS_ACCEPTED_PRICING_JOB_TYPE,
   PMS_ACCEPTED_PRICING_JOB_VERSION,
@@ -668,6 +669,25 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           });
         if (scenario.endsWith("after-adoption")) {
           expect(await adopt()).toMatchObject({ outcome: "adopted" });
+          // Booking Detail reads the booked terms from the acceptance, and the recorded outcome.
+          const readReservation = () =>
+            createTargetPmsOperationsReadRepository({
+              connectionString: url!,
+              pool: db,
+            }).findReservationByGuestBookingId(propertyId, bookingId);
+          const booked = await readReservation();
+          expect(booked?.assignments.map((a) => a.bookedCancellation)).toEqual(
+            [1, 2, 3].map(() => quote.evidence.terms[0]!.cancellation),
+          );
+          expect(booked?.cancellationOutcome).toBeUndefined();
+          const recorded = await cancellation("2026-09-21T08:00:00Z");
+          await db.query(
+            `INSERT INTO booking.booking_status_events
+             (guest_booking_id,event_type,from_status,to_status,actor_type,public_visible,public_message,event_payload)
+             VALUES($1,'guest_booking.canceled','confirmed','canceled','guest',true,'Booking updated.',$2)`,
+            [bookingId, { requestId: "r", cancellationOutcome: recorded }],
+          );
+          expect((await readReservation())?.cancellationOutcome).toEqual(recorded);
           expect(await free()).toEqual({ released: 0, canceledAssignments: 3 });
           const assignments = await db.query(
             "SELECT assignment_status AS status FROM pms.operational_booking_assignments WHERE guest_booking_id=$1",
