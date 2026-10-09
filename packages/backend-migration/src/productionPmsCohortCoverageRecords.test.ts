@@ -316,7 +316,7 @@ describe("production PMS cohort inventory coverage", () => {
     ).toMatchObject({ status: "open", manualSellableLimitCount: 0, availableCount: 0 });
   });
 
-  it("plans no calendar whose inventory the native jobs could not carry", () => {
+  it("blocks a calendar whose inventory the native jobs could not carry", () => {
     const retired = "30000000-0000-4000-a000-000000000002";
     const base = [
       ...sourceRows({}, { operating_periods: [] }),
@@ -351,7 +351,12 @@ describe("production PMS cohort inventory coverage", () => {
       });
       const calendars = planPmsCohortCalendars(context, buildPmsRoomRecords(context));
       expect(calendars).toHaveLength(1);
-      return { context, calendars, carried: withCohortInventoryHorizons(context, calendars) };
+      const carried = withCohortInventoryHorizons(context, calendars);
+      const blocked = context.blockers.some(
+        (blocker) => blocker.code === "COHORT_INVENTORY_NOT_CARRIED" && blocker.sourceId === HOTEL,
+      );
+      expect(blocked).toBe(carried.length === 0);
+      return { context, calendars, carried: carried.length === 1 };
     };
     const booking = (status: string, roomTypeId = retired) =>
       consumer("bookings", roomTypeId, {
@@ -360,33 +365,45 @@ describe("production PMS cohort inventory coverage", () => {
         check_in: "2027-12-10",
         check_out: "2027-12-12",
       });
-    expect(horizons(base).carried).toHaveLength(1);
+    expect(horizons(base).carried).toBe(true);
     // The unbound room type still holds a booking, or stored days, in the coverage.
-    expect(horizons([...base, booking("confirmed")]).carried).toEqual([]);
-    expect(horizons([...base, booking("cancelled")]).carried).toHaveLength(1);
-    expect(horizons(base, { [retired]: "2027-10-01" }).carried).toEqual([]);
-    expect(horizons(base, { [retired]: "2026-10-08" }).carried).toHaveLength(1);
-    // A live booking extends the bound type's coverage; a cancelled one does not.
-    const extended = horizons([...base, booking("confirmed", ROOM_TYPE)]);
-    expect(cohortInventoryHorizon(extended.context, extended.calendars[0]!).through).toBe(
-      "2027-12-11",
+    expect(horizons([...base, booking("confirmed")]).carried).toBe(false);
+    expect(horizons([...base, booking("cancelled")]).carried).toBe(true);
+    expect(horizons(base, { [retired]: "2027-10-01" }).carried).toBe(false);
+    expect(horizons(base, { [retired]: "2026-10-08" }).carried).toBe(true);
+    // Stored days of a type no longer in legacy, or of a bound type past the coverage.
+    expect(horizons(base, { "30000000-0000-4000-a000-000000000009": "2027-01-01" }).carried).toBe(
+      false,
     );
+    expect(horizons(base, { [ROOM_TYPE]: "2027-10-09" }).carried).toBe(true);
+    expect(horizons(base, { [ROOM_TYPE]: "2027-10-10" }).carried).toBe(false);
+    // A live booking extends the bound type's coverage; a cancelled one or an expired draft not.
+    const through = (rows: IdentitySourceRow[]) => {
+      const { context, calendars } = horizons(rows);
+      return cohortInventoryHorizon(context, calendars[0]!).through;
+    };
+    expect(through([...base, booking("confirmed", ROOM_TYPE)])).toBe("2027-12-11");
+    expect(through([...base, booking("cancelled", ROOM_TYPE)])).toBe("2027-10-09");
+    const draft = consumer("booking_drafts", ROOM_TYPE, {
+      check_in: "2027-12-10",
+      check_out: "2027-12-12",
+      expires_at: "2026-10-01T00:00:00.000Z",
+      materialized_booking_id: null,
+    });
+    expect(through([...base, draft])).toBe("2027-10-09");
     // Past the auto-open worker's 762-day maximum: through 2028-11-19 is 773 days.
     const far = consumer("room_blocks", ROOM_TYPE, {
       start_date: "2028-11-10",
       end_date: "2028-11-20",
       blocked_count: 1,
     });
-    expect(horizons([...base, far]).carried).toEqual([]);
-    expect(
-      buildProductionPmsPlan(input([...base, far])).records.map((r) => r.targetTable),
-    ).not.toContain("operating_calendar_revisions");
-    // A stored calendar blocks instead of being dropped.
-    const stored = horizons([...base, far]);
-    stored.context.target.cohortProperties![0]!.storedCalendar = {} as never;
-    expect(withCohortInventoryHorizons(stored.context, stored.calendars)).toEqual([]);
-    expect(stored.context.blockers).toContainEqual(
-      expect.objectContaining({ code: "COHORT_INVENTORY_NOT_CARRIED", sourceId: HOTEL }),
+    expect(horizons([...base, far]).carried).toBe(false);
+    const blocked = buildProductionPmsPlan(input([...base, far]));
+    expect(blocked.blockers).toContainEqual(
+      expect.objectContaining({ code: "COHORT_INVENTORY_NOT_CARRIED" }),
+    );
+    expect(blocked.records.map((record) => record.targetTable)).not.toContain(
+      "operating_calendar_revisions",
     );
   });
 
