@@ -10,6 +10,10 @@ import {
 import { processNextPmsAcceptedPricingReservationJob } from "./pmsAcceptedPricingReservationWorker.js";
 import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
 import {
+  cancelAcceptedPricingStay,
+  loadPricingBookingCancellation,
+} from "./pricingBookingCancellation.js";
+import {
   PMS_ACCEPTED_PRICING_JOB_TYPE,
   PMS_ACCEPTED_PRICING_JOB_VERSION,
   PMS_ACCEPTED_PRICING_QUEUE,
@@ -49,6 +53,8 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
     "repository-missing-acceptance",
     "repository-suspended-entitlement",
     "worker-complete",
+    "repository-stay-cancel-before-adoption",
+    "repository-stay-cancel-after-adoption",
   ])("validates complete historical binding: %s", async (scenario) => {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
       throw new Error("test database required");
@@ -70,6 +76,24 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
       const selected = structuredClone(q.stay.rooms[0]!);
       const priced = structuredClone(q.rooms[0]!);
       const term = structuredClone(q.evidence.terms[0]!);
+      if (scenario.startsWith("repository-stay-cancel"))
+        Object.assign(term, {
+          cancellation: {
+            kind: "flexible",
+            terms: {
+              type: "free_until_days_before_arrival",
+              freeCancellationDeadlineDays: 365,
+              afterDeadlinePenalty: "full_booking_amount",
+              noShowPenalty: "full_booking_amount",
+              flexibleCancellationType: "partial_refund",
+              partialRefundTiers: [
+                { minDaysBeforeCheckIn: 30, refundPercent: 100 },
+                { minDaysBeforeCheckIn: 14, refundPercent: 50 },
+                { minDaysBeforeCheckIn: 7, refundPercent: 25 },
+              ],
+            },
+          },
+        });
       const selections = [types[0]!, types[1]!, types[0]!].map((roomTypeId, i) => ({
         ...selected,
         selectionId: `selection-${i}`,
@@ -592,6 +616,79 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
       ) {
         await expect(adopt()).rejects.toBeInstanceOf(PmsAcceptedPricingReservationConflict);
         expect(await snapshot()).toEqual(before);
+      } else if (scenario.startsWith("repository-stay-cancel")) {
+        // VAY-2100: booked tiers come from the acceptance; 10 days out meets the 7-day 25% tier.
+        // Days count in the frozen Europe/Berlin timezone.
+        const stay = {
+          checkIn: "2026-10-01",
+          checkOut: "2026-10-03",
+          roomCount: 3,
+          currency: "EUR",
+        };
+        const cancellation = (cancelledAt: string, changed: Partial<typeof stay> = {}) =>
+          loadPricingBookingCancellation(db, {
+            propertyId,
+            guestBookingId: bookingId,
+            stay: { ...stay, ...changed },
+            cancelledAt: new Date(cancelledAt),
+          });
+        expect(await cancellation("2026-09-21T08:00:00Z")).toMatchObject({
+          daysBeforeCheckIn: 10,
+          totalMinor: "108000",
+          refundMinor: "27000",
+          retainedMinor: "81000",
+          rooms: quote.stay.rooms.map(({ selectionId }) => ({
+            selectionId,
+            rule: "partial_refund",
+            refundPercent: 25,
+            matchedTierMinDays: 7,
+            baseMinor: "36000",
+          })),
+        });
+        expect((await cancellation("2026-08-31T08:00:00Z"))?.refundMinor).toBe("108000");
+        // 22:30 UTC is already the next day in Berlin: 13 days (25%), not 14 (50%).
+        expect(await cancellation("2026-09-17T22:30:00Z")).toMatchObject({
+          daysBeforeCheckIn: 13,
+          refundMinor: "27000",
+        });
+        for (const changed of [
+          { checkIn: "2026-10-02" },
+          { checkOut: "2026-10-04" },
+          { roomCount: 2 },
+          { currency: "USD" },
+        ])
+          expect(await cancellation("2026-09-21T08:00:00Z", changed)).toBeNull();
+        const free = () =>
+          cancelAcceptedPricingStay(db, createTargetPmsInventoryReservationPort(), {
+            propertyId,
+            guestBookingId: bookingId,
+            commandId: randomUUID(),
+            fingerprint: hash(scenario),
+            occurredAt: new Date("2026-09-21T08:00:00Z"),
+          });
+        if (scenario.endsWith("after-adoption")) {
+          expect(await adopt()).toMatchObject({ outcome: "adopted" });
+          expect(await free()).toEqual({ released: 0, canceledAssignments: 3 });
+          const assignments = await db.query(
+            "SELECT assignment_status AS status FROM pms.operational_booking_assignments WHERE guest_booking_id=$1",
+            [bookingId],
+          );
+          expect(assignments.rows).toEqual([1, 2, 3].map(() => ({ status: "canceled" })));
+        } else {
+          expect(await free()).toEqual({ released: 2, canceledAssignments: 0 });
+          await db.query("SAVEPOINT late_adoption");
+          await expect(adopt()).rejects.toBeInstanceOf(PmsAcceptedPricingReservationConflict);
+          await db.query("ROLLBACK TO SAVEPOINT late_adoption");
+        }
+        expect(await free()).toEqual({ released: 0, canceledAssignments: 0 });
+        const freed = await snapshot();
+        expect(freed.inventory.map(({ assigned_count }) => assigned_count)).toEqual([0, 0, 0, 0]);
+        expect(freed.inventory.map(({ available_count }) => available_count)).toEqual([3, 3, 3, 3]);
+        expect(freed.receipts.map(({ lifecycle_state }) => lifecycle_state)).toEqual(
+          scenario.endsWith("after-adoption")
+            ? ["handed_off", "handed_off"]
+            : ["released", "released"],
+        );
       } else if (scenario === "channel-without-room") {
         await adopt();
         expect(await snapshot()).toEqual(before);
