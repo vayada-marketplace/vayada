@@ -1,4 +1,10 @@
-export type PmsColumn = readonly [jsonKey: string, sqlName: string, type: string];
+/** insertDefault: SQL used on insert when a planned row omits the key. */
+export type PmsColumn = readonly [
+  jsonKey: string,
+  sqlName: string,
+  type: string,
+  insertDefault?: string,
+];
 export type PmsTableDefinition = {
   product: "pms" | "platform";
   table: string;
@@ -8,7 +14,8 @@ export type PmsTableDefinition = {
   columns: readonly PmsColumn[];
 };
 
-const c = (jsonKey: string, sqlName: string, type: string): PmsColumn => [jsonKey, sqlName, type];
+const c = (jsonKey: string, sqlName: string, type: string, insertDefault?: string): PmsColumn =>
+  insertDefault ? [jsonKey, sqlName, type, insertDefault] : [jsonKey, sqlName, type];
 const id = c("id", "id", "uuid");
 const property = c("propertyId", "property_id", "uuid");
 const created = c("createdAt", "created_at", "timestamptz");
@@ -21,6 +28,7 @@ export const PRODUCTION_PMS_WRITE_ORDER = [
   "rooms",
   "rate_plans",
   "rate_rules",
+  "property_pricing_settings",
   "operational_booking_assignments",
   "room_blocks",
   "inventory_days",
@@ -93,6 +101,8 @@ export const PRODUCTION_PMS_TABLES: Record<string, PmsTableDefinition> = {
     c("sourceSystem", "source_system", "text"),
     c("sourceRoomId", "source_room_id", "text"),
     c("roomNumber", "room_number", "text"),
+    // Stated by cohort runs only (VAY-1362); other rows keep the 0048 legacy default.
+    c("operationalLabelStatus", "operational_label_status", "text", "'unverified'"),
     c("floor", "floor", "text"),
     c("status", "status", "text"),
     c("sortOrder", "sort_order", "integer"),
@@ -136,6 +146,17 @@ export const PRODUCTION_PMS_TABLES: Record<string, PmsTableDefinition> = {
     created,
     updated,
   ]),
+  // optional_pricing_aggregate_revision keeps its default 0, as the native first-currency insert.
+  property_pricing_settings: {
+    ...table("pms.property_pricing_settings", true, [
+      property,
+      c("currency", "currency", "text"),
+      c("pricingCurrencyRevision", "pricing_currency_revision", "integer"),
+      created,
+      updated,
+    ]),
+    key: ["property_id"],
+  },
   operational_booking_assignments: table("pms.operational_booking_assignments", true, [
     id,
     property,

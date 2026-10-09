@@ -3,6 +3,7 @@ import { buildPmsAssignmentRecords } from "./productionPmsAssignmentRecords.js";
 import { buildPmsAuditRecords } from "./productionPmsAuditRecords.js";
 import { buildPmsCalendarAutoOpenRecords } from "./productionPmsCalendarAutoOpenRecords.js";
 import { buildPmsChannelRecords } from "./productionPmsChannelRecords.js";
+import { buildPmsPricingSettingsRecords } from "./productionPmsCohortSetup.js";
 import { createProductionPmsContext, propertyForHotel } from "./productionPmsContext.js";
 import { buildPmsGuestOperationsRecords } from "./productionPmsGuestOperationsRecords.js";
 import { buildPmsInventoryRecords } from "./productionPmsInventoryRecords.js";
@@ -33,6 +34,7 @@ export function buildProductionPmsPlan(input: {
   const assignments = buildPmsAssignmentRecords(context, rooms);
   const records = [
     ...rooms.records,
+    ...buildPmsPricingSettingsRecords(context),
     ...assignments.records,
     ...buildPmsInventoryRecords(context),
     ...buildPmsCalendarAutoOpenRecords(context),

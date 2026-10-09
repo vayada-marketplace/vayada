@@ -26,7 +26,11 @@ export async function writeProductionPmsRecords(
       .map(([jsonKey, , type]) => `"${jsonKey}" ${type}`)
       .join(", ");
     const names = definition.columns.map(([, sqlName]) => sqlName).join(", ");
-    const values = definition.columns.map(([jsonKey]) => `source."${jsonKey}"`).join(", ");
+    const values = definition.columns
+      .map(([jsonKey, , , insertDefault]) =>
+        insertDefault ? `COALESCE(source."${jsonKey}", ${insertDefault})` : `source."${jsonKey}"`,
+      )
+      .join(", ");
     const updates = definition.columns
       .filter(([, sqlName]) => !definition.key.includes(sqlName) && sqlName !== "created_at")
       .map(([, sqlName]) => `${sqlName} = EXCLUDED.${sqlName}`)

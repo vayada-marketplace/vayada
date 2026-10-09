@@ -410,7 +410,8 @@ async function readCollisionBatch(
        SELECT * FROM jsonb_to_recordset($1::jsonb) AS source(
          "targetTable" text, "targetId" text, "propertyId" uuid,
          "sourceSystem" text, "sourceRoomTypeId" text, "sourceRoomId" text,
-         name text, active boolean, "roomNumber" text, "roomTypeId" uuid, code text,
+         name text, active boolean, "roomNumber" text, "operationalLabelStatus" text,
+         "roomTypeId" uuid, code text,
          "guestBookingId" uuid, position integer, source text, "sourceThreadId" text,
          "threadId" uuid, "sourceMessageId" text, provider text, "connectionId" uuid,
          "externalPropertyId" text, "claimState" text,
@@ -438,6 +439,14 @@ async function readCollisionBatch(
       AND target.id::text <> requested."targetId" AND target.property_id = requested."propertyId"
       AND ((target.source_system = requested."sourceSystem" AND target.source_room_id = requested."sourceRoomId")
            OR target.room_number = requested."roomNumber")
+     UNION ALL
+     SELECT 'TARGET_UNIQUE_CONFLICT', 'pms.rooms', target.id::text,
+            'Another verified room owns this case-insensitive property room label'
+     FROM requested JOIN pms.rooms target ON requested."targetTable" = 'rooms'
+      AND target.id::text <> requested."targetId" AND target.property_id = requested."propertyId"
+      AND requested."operationalLabelStatus" = 'verified'
+      AND target.operational_label_status = 'verified'
+      AND lower(target.room_number) = lower(requested."roomNumber")
      UNION ALL
      SELECT 'TARGET_UNIQUE_CONFLICT', 'pms.rate_plans', target.id::text,
             'Another rate plan owns this property, room, and code'
