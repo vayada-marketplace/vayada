@@ -3,7 +3,23 @@ import pg from "pg";
 const GENERAL_POOL_MAX = 8;
 const SPECIALIZED_POOL_MAX = 1;
 const CONNECTION_TIMEOUT_MS = 3_000;
+// SQLSTATEs for a refused, dropped or shutting-down connection (classes 08 and 57P, plus 53300).
+const CONNECTION_FAILURE_STATES = new Set([
+  "08000",
+  "08001",
+  "08003",
+  "08004",
+  "08006",
+  "53300",
+  "57P01",
+  "57P02",
+  "57P03",
+]);
+// Errors raised by a runtime client's connection, which may carry generic socket codes.
+const connectionFailures = new WeakSet<object>();
 type PgModule = Pick<typeof pg, "Pool">;
+type ClientClass = typeof pg.Client;
+type ConnectCallback = Parameters<pg.Client["connect"]>[0];
 type PoolEntry = { pool: pg.Pool; references: number; closed: boolean };
 type OwnedListener = {
   event: string | symbol;
@@ -14,6 +30,7 @@ type Logger = {
   info(fields: object, message: string): void;
   warn(fields: object, message: string): void;
 };
+type ConnectionErrorReporter = (fields: { code: string | null; error: string }) => void;
 
 export type PostgresPoolSnapshot = Readonly<{
   physicalPoolCount: number;
@@ -30,7 +47,21 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
 } {
   const OriginalPool = postgres.Pool;
   const entries = new Map<string, PoolEntry>();
+  const clientClasses = new Map<ClientClass, ClientClass>();
   let unsharedPool = 0;
+  let reportConnectionError: ConnectionErrorReporter = (fields) =>
+    process.emitWarning("PostgreSQL client connection failed", {
+      code: "POSTGRES_CONNECTION_ERROR",
+      detail: JSON.stringify(fields),
+    });
+  const runtimeClient = (base: ClientClass): ClientClass => {
+    let client = clientClasses.get(base);
+    if (!client) {
+      client = createRuntimeClient(base, (fields) => reportConnectionError(fields));
+      clientClasses.set(base, client);
+    }
+    return client;
+  };
   const SharedPool = new Proxy(OriginalPool, {
     construct(target, args) {
       const requested = (args[0] ?? {}) as pg.PoolConfig;
@@ -48,7 +79,11 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
         : poolKey(bounded);
       let entry = entries.get(key);
       if (!entry) {
-        const pool = Reflect.construct(target, [bounded]) as pg.Pool;
+        const client = runtimeClient((requested.Client as ClientClass | undefined) ?? pg.Client);
+        const pool = Reflect.construct(target, [{ ...bounded, Client: client }]) as pg.Pool;
+        // pg-pool re-emits idle-client errors here after the client listener reported them, and
+        // an unhandled pool 'error' event would exit the process.
+        pool.on("error", () => undefined);
         entry = { pool, references: 0, closed: false };
         entries.set(key, entry);
       }
@@ -75,6 +110,8 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
   return {
     snapshot,
     startTelemetry(logger, intervalMs = 1_000) {
+      reportConnectionError = (fields) =>
+        logger.warn(fields, "PostgreSQL client connection failed");
       logger.info(
         {
           ...snapshot(),
@@ -108,11 +145,14 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
 export function isPostgresUnavailableError(error: unknown): boolean {
   let current = error;
   for (let depth = 0; depth < 3 && current && typeof current === "object"; depth += 1) {
+    if (connectionFailures.has(current)) return true;
     const candidate = current as { code?: unknown; message?: unknown; cause?: unknown };
-    if (candidate.code === "53300" || candidate.code === "57P03") return true;
+    if (typeof candidate.code === "string" && CONNECTION_FAILURE_STATES.has(candidate.code)) {
+      return true;
+    }
     if (
       typeof candidate.message === "string" &&
-      /^(?:timeout\b.*\btrying to connect|connection terminated\b.*\bconnection timeout)$/i.test(
+      /^(?:timeout\b.*\btrying to connect|connection terminated\b.*\bconnection timeout|connection terminated unexpectedly|client has encountered a connection error and is not queryable)$/i.test(
         candidate.message,
       )
     ) {
@@ -121,6 +161,37 @@ export function isPostgresUnavailableError(error: unknown): boolean {
     current = candidate.cause;
   }
   return false;
+}
+
+// pg-pool listens for client errors only while a client is idle, and pg emits 'error' when a
+// checked-out connection drops. Every runtime client therefore keeps its own listener, so a
+// terminated or unreachable database fails the affected queries instead of exiting the process.
+function createRuntimeClient(base: ClientClass, report: ConnectionErrorReporter): ClientClass {
+  return class RuntimePostgresClient extends base {
+    constructor(config?: string | pg.ClientConfig) {
+      super(config);
+      this.on("error", (error: Error & { code?: unknown }) => {
+        connectionFailures.add(error);
+        report({ code: typeof error.code === "string" ? error.code : null, error: error.message });
+      });
+    }
+
+    override connect(): Promise<pg.Client>;
+    override connect(callback: ConnectCallback): void;
+    override connect(callback?: ConnectCallback): Promise<pg.Client> | void {
+      if (!callback) {
+        return super.connect().catch((error: unknown) => {
+          if (error && typeof error === "object") connectionFailures.add(error);
+          throw error;
+        });
+      }
+      const forward = callback as (...outcome: unknown[]) => void;
+      super.connect(((...outcome: unknown[]) => {
+        if (outcome[0] && typeof outcome[0] === "object") connectionFailures.add(outcome[0]);
+        forward(...outcome);
+      }) as ConnectCallback);
+    }
+  };
 }
 
 function lease(entry: PoolEntry, key: string, entries: Map<string, PoolEntry>): pg.Pool {
