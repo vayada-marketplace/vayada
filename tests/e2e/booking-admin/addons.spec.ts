@@ -180,8 +180,9 @@ test.describe("booking-admin add-ons settings cutover", () => {
     await page.getByRole("button", { name: "New add-on" }).click();
     await page.getByLabel("Name").fill("Spa ritual");
     await page.getByLabel("Description").fill("Private treatment.");
-    await page.getByLabel("Price").fill("125.50");
-    await page.getByLabel("Category").selectOption("wellness");
+    await page.getByLabel(/^Price per/).fill("125.50");
+    await page.getByRole("radio", { name: "Wellness" }).check();
+    await page.getByText("More options", { exact: true }).click();
     await page.getByLabel("Duration").fill("90 min");
     await page.getByRole("radio", { name: "Per person", exact: true }).check();
     await page.getByLabel("Ownership").selectOption("partner");
@@ -392,7 +393,7 @@ test.describe("booking-admin add-ons settings cutover", () => {
     const breakfast = page.getByTestId("booking-addon-item-addon_breakfast");
     await expect(breakfast.getByText("2 photos")).toBeVisible();
     await expect(breakfast.getByText("Food & Beverage")).toBeVisible();
-    await expect(breakfast.getByText("Per person / night")).toBeVisible();
+    await expect(breakfast.getByText("Per person × night")).toBeVisible();
     await expect(breakfast.getByText("Max 6/booking")).toBeVisible();
     await expect(
       page.getByTestId("booking-addon-item-addon_massage").getByText("Hidden", { exact: true }),

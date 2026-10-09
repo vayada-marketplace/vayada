@@ -81,12 +81,21 @@ test("shared editor validates, uploads five photos, changes cover, removes and r
   await page.goto("/add-ons");
   await page.getByRole("button", { name: "New add-on" }).click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("button", { name: "Create Add-on", exact: true }).click();
+  await expect(dialog.getByRole("heading", { name: "New add-on" })).toBeVisible();
+  await expect(dialog.getByText("No photo yet")).toBeVisible();
+  await expect(dialog.getByText("Untitled add-on")).toBeVisible();
+  await dialog.getByRole("button", { name: "Create add-on", exact: true }).click();
   await expect(dialog.getByText("Name is required.")).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Create Add-on", exact: true })).toBeEnabled();
+  await expect(dialog.getByRole("button", { name: "Create add-on", exact: true })).toBeEnabled();
   await dialog.getByLabel(/^Name \*/).fill("Breakfast");
-  await dialog.getByLabel(/^Base price \(EUR\) \*/).fill("15.00");
-  await dialog.getByRole("radio", { name: /^Per person \/ night/ }).check();
+  await dialog.getByRole("radio", { name: "Food & Beverage" }).check();
+  await dialog.getByRole("radio", { name: /^Per person × night/ }).check();
+  await dialog.getByLabel(/^Price per guest per night \(EUR\) \*/).fill("15.00");
+  // 2 guests × 3 nights × €15.00 in the price example, and the preview follows the form.
+  await expect(dialog.getByText(/Example: 2 guests, 3 nights → €90\.00 total/)).toBeVisible();
+  await expect(dialog.getByText("per guest per night", { exact: true })).toBeVisible();
+  await expect(dialog.getByLabel("Max quantity", { exact: true })).toBeHidden();
+  await dialog.getByText("More options", { exact: true }).click();
   await dialog.getByLabel("Max quantity", { exact: true }).fill("2");
   await dialog.getByLabel("Lead time", { exact: true }).fill("24h before");
   await dialog.getByLabel("Add photos", { exact: true }).setInputFiles(
@@ -99,10 +108,11 @@ test("shared editor validates, uploads five photos, changes cover, removes and r
   await expect(dialog.getByLabel("Add photos", { exact: true })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Set photo 3 as cover", exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath("addon-editor-five-photos.png") });
-  await dialog.getByRole("button", { name: "Create Add-on", exact: true }).click();
+  await dialog.getByRole("button", { name: "Create add-on", exact: true }).click();
   await expect(dialog).not.toBeVisible();
   expect(uploads).toBe(5);
   expect(items[0]).toMatchObject({
+    category: "dining",
     currency: "EUR",
     pricingModel: "per_guest_night",
     maxQuantity: 2,

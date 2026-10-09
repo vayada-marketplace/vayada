@@ -91,6 +91,57 @@ describe("shared add-on editor", () => {
   });
 });
 
+it("picks a category chip, labels the price by pricing model and opens More options on errors", async () => {
+  const save = vi.fn();
+  let view: ReactTestRenderer;
+  await act(async () => {
+    view = create(
+      <AddonEditor
+        initialValues={{ ...emptyAddonValues("EUR"), name: "Breakfast", price: "15.00" }}
+        currency="EUR"
+        editing={false}
+        onSave={save}
+        onCancel={() => {}}
+      />,
+    );
+  });
+  const text = () => JSON.stringify(view!.toJSON());
+  expect(view!.root.findByType("details").props.open).toBe(false);
+  expect(view!.root.findAllByProps({ name: "addon-category" })).toHaveLength(5);
+  await act(async () => {
+    view!.root.findAllByProps({ name: "addon-category" })[0].props.onChange();
+    view!.root.findAllByProps({ name: "addon-pricing-model" })[3].props.onChange();
+  });
+  expect(
+    view!.root.findAllByProps({ "aria-label": "Price per guest per night (EUR) *" }),
+  ).toHaveLength(1);
+  expect(text()).toContain("90.00");
+  await act(async () => {
+    view!.root
+      .findByProps({ "aria-label": "Max quantity" })
+      .props.onChange({ target: { value: "0" } });
+  });
+  await act(async () => {
+    await view!.root.findByType("form").props.onSubmit({ preventDefault() {} });
+  });
+  expect(save).not.toHaveBeenCalled();
+  expect(view!.root.findByType("details").props.open).toBe(true);
+  await act(async () => {
+    view!.root
+      .findByProps({ "aria-label": "Max quantity" })
+      .props.onChange({ target: { value: "2" } });
+  });
+  await act(async () => {
+    await view!.root.findByType("form").props.onSubmit({ preventDefault() {} });
+  });
+  expect(save.mock.calls[0][0]).toMatchObject({
+    category: "dining",
+    perPerson: true,
+    perNight: true,
+    maxQuantity: "2",
+  });
+});
+
 it("onboarding retains managed media references in the same editor model", async () => {
   const setAddons = vi.fn();
   const upload = vi
@@ -117,14 +168,12 @@ it("onboarding retains managed media references in the same editor model", async
   });
   const file = new File(["image"], "photo.png", { type: "image/png" });
   await act(async () => {
-    await view!.root
-      .findByType(AddonEditor)
-      .props.onSave({
-        ...emptyAddonValues("EUR"),
-        name: "Breakfast",
-        price: "15.00",
-        photos: [{ file, imageUrl: "blob:preview", mediaObjectId: null, isCover: true }],
-      });
+    await view!.root.findByType(AddonEditor).props.onSave({
+      ...emptyAddonValues("EUR"),
+      name: "Breakfast",
+      price: "15.00",
+      photos: [{ file, imageUrl: "blob:preview", mediaObjectId: null, isCover: true }],
+    });
   });
   expect(upload).toHaveBeenCalledWith(file);
   expect(setAddons.mock.calls[0][0][0]).toMatchObject({
