@@ -80,6 +80,8 @@ export type PmsCohortPropertyState = {
   timeZone: string | null;
   /** Active hotel organizations holding both native property links. */
   organizationIds: string[];
+  /** The last stored inventory day of each room type, if any (stale-day check). */
+  inventoryThroughByRoomType?: Record<string, string> | null;
   /** Revision 1 of the operating calendar as stored, if any. */
   storedCalendar: {
     idempotencyKeyId: string;

@@ -272,7 +272,7 @@ describe("production PMS cohort operating calendar", () => {
       periods: [],
     });
     // Open April to October and over New Year, as legacy operatingOn reads them; adjacent
-    // periods merge and a 29 February end is the 28th.
+    // periods merge and a 29 February end closes on the 28th of a non-leap year.
     const seasons = [
       { from: "04-01", to: "06-30" },
       { from: "07-01", to: "10-31" },
@@ -290,7 +290,18 @@ describe("production PMS cohort operating calendar", () => {
       mode: "year_round",
       periods: [],
     });
-    expect(() => legacySchedule([periods([{ from: "13-01", to: "12-31" }])])).toThrow();
+    // Legacy compares the strings without validating them, and so does the import.
+    expect(legacySchedule([periods([{ from: "13-01", to: "12-31" }])])).toEqual({
+      mode: "year_round", // wraps: every day is <= "12-31"
+      periods: [],
+    });
+    expect(legacySchedule([periods([{ from: "2026-06-01", to: "2026-08-31" }])])).toBeNull();
+    // Only 29 February: no recurring day is open, so no calendar (not year-round).
+    expect(legacySchedule([periods([{ from: "02-29", to: "02-29" }])])).toBeNull();
+    expect(legacySchedule([periods([{ from: "06-01" }, { from: "07-01", to: "07-31" }])])).toEqual({
+      mode: "recurring",
+      periods: [{ startsOn: "07-01", endsOn: "07-31" }],
+    });
 
     const source = [hotel(1), roomType(1, 1, 1, periods(seasons)), ...rooms(1, 1, 1)];
     const result = plan(source, target(1, [property(1)]));

@@ -11,7 +11,10 @@ import { buildPmsCohortCoverageRecords } from "./productionPmsCohortCoverageReco
 import { buildPmsPricingSettingsRecords, carriedCohortHotel } from "./productionPmsCohortSetup.js";
 import { createProductionPmsContext, propertyForHotel } from "./productionPmsContext.js";
 import { buildPmsGuestOperationsRecords } from "./productionPmsGuestOperationsRecords.js";
-import { buildPmsInventoryRecords } from "./productionPmsInventoryRecords.js";
+import {
+  buildPmsInventoryRecords,
+  withCohortInventoryHorizons,
+} from "./productionPmsInventoryRecords.js";
 import { buildPmsMessagingRecords } from "./productionPmsMessagingRecords.js";
 import { buildPmsRoomRecords } from "./productionPmsRoomRecords.js";
 import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
@@ -37,7 +40,7 @@ export function buildProductionPmsPlan(input: {
   const context = createProductionPmsContext(input);
   const rooms = buildPmsRoomRecords(context);
   const assignments = buildPmsAssignmentRecords(context, rooms);
-  const calendars = planPmsCohortCalendars(context, rooms);
+  const calendars = withCohortInventoryHorizons(context, planPmsCohortCalendars(context, rooms));
   const records = [
     ...rooms.records,
     ...buildPmsPricingSettingsRecords(context),
