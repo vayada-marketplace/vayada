@@ -1,8 +1,8 @@
 import { expect, it } from "vitest";
+import { englishPricingSetup } from "@vayada/product-onboarding/firstPricingSetupMessages";
 import { firstPricingInput } from "./FirstPricingSetup";
-import { englishPricingSetup } from "./firstPricingSetupMessages";
 import { includedPrice } from "./IncludedPricing";
-import { parseMinorInput } from "./pricingSetupAmounts";
+import { parseMinorInput } from "./pricingAmounts";
 
 const id = "61000000-0000-4000-8000-000000000001";
 const room = { roomTypeId: id, name: "Double", capacity: { total: 2, adults: 2, children: 1 } };
