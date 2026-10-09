@@ -3,6 +3,8 @@ import pg from "pg";
 const GENERAL_POOL_MAX = 8;
 const SPECIALIZED_POOL_MAX = 1;
 const CONNECTION_TIMEOUT_MS = 3_000;
+const HEALTH_PROBE_TIMEOUT_MS = 2_000;
+const HEALTH_PROBE_CACHE_MS = 5_000;
 // SQLSTATEs for a refused, dropped or shutting-down connection (classes 08 and 57P, plus 53300).
 const CONNECTION_FAILURE_STATES = new Set([
   "08000",
@@ -32,6 +34,9 @@ type Logger = {
 };
 type ConnectionErrorReporter = (fields: { code: string | null; error: string }) => void;
 
+/** Resolves false while PostgreSQL does not answer; results are cached briefly. */
+export type DatabaseHealthCheck = () => Promise<boolean>;
+
 export type PostgresPoolSnapshot = Readonly<{
   physicalPoolCount: number;
   maxConnections: number;
@@ -43,11 +48,13 @@ export type PostgresPoolSnapshot = Readonly<{
 export function installPostgresPoolRuntime(postgres: PgModule = pg): {
   snapshot(): PostgresPoolSnapshot;
   startTelemetry(logger: Logger, intervalMs?: number): () => void;
+  healthCheck(connectionString: string): DatabaseHealthCheck;
   close(): Promise<void>;
 } {
   const OriginalPool = postgres.Pool;
   const entries = new Map<string, PoolEntry>();
   const clientClasses = new Map<ClientClass, ClientClass>();
+  const probePools: pg.Pool[] = [];
   let unsharedPool = 0;
   let reportConnectionError: ConnectionErrorReporter = (fields) =>
     process.emitWarning("PostgreSQL client connection failed", {
@@ -128,7 +135,23 @@ export function installPostgresPoolRuntime(postgres: PgModule = pg): {
       timer.unref();
       return () => clearInterval(timer);
     },
+    healthCheck(connectionString) {
+      // Its own connection, outside the shared pools, so a saturated pool can't fail the probe.
+      // pg-pool discards the client after any failed query, so the next probe reconnects.
+      const pool = new OriginalPool({
+        connectionString,
+        max: 1,
+        connectionTimeoutMillis: HEALTH_PROBE_TIMEOUT_MS,
+        query_timeout: HEALTH_PROBE_TIMEOUT_MS,
+        idleTimeoutMillis: 60_000,
+        Client: runtimeClient(pg.Client),
+      });
+      pool.on("error", () => undefined);
+      probePools.push(pool);
+      return cachedHealthCheck(() => pool.query("SELECT 1"), HEALTH_PROBE_CACHE_MS);
+    },
     async close() {
+      await Promise.all(probePools.splice(0).map((pool) => pool.end()));
       const pools = [...entries.values()];
       entries.clear();
       await Promise.all(
@@ -161,6 +184,32 @@ export function isPostgresUnavailableError(error: unknown): boolean {
     current = candidate.cause;
   }
   return false;
+}
+
+/** Shares one in-flight probe and reuses its result for cacheMs. */
+export function cachedHealthCheck(
+  probe: () => Promise<unknown>,
+  cacheMs: number,
+  now: () => number = Date.now,
+): DatabaseHealthCheck {
+  let checkedAt = Number.NEGATIVE_INFINITY;
+  let healthy = true;
+  let pending: Promise<boolean> | undefined;
+  return () => {
+    if (now() - checkedAt < cacheMs) return Promise.resolve(healthy);
+    pending ??= probe()
+      .then(
+        () => true,
+        () => false,
+      )
+      .then((result) => {
+        healthy = result;
+        checkedAt = now();
+        pending = undefined;
+        return result;
+      });
+    return pending;
+  };
 }
 
 // pg-pool listens for client errors only while a client is idle, and pg emits 'error' when a
