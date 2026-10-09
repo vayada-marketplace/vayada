@@ -87,6 +87,9 @@ jobs:
       - name: Finance domain contracts
         run: npm --workspace @vayada/domain-finance run test
 
+      - name: Feature Hub package tests
+        run: npm --workspace @vayada/feature-hub run test
+
       - name: Hotel domain and product onboarding tests
         run: |
           npm --workspace @vayada/domain-hotels run build
