@@ -176,7 +176,7 @@ it("keeps an uncertain attempt retryable", async () => {
 
 it.each([
   { paymentMethod: "card", dueNowMinor: "5000", dueLaterMinor: "15000" },
-  { acceptanceMode: "request" },
+  { acceptanceMode: "request", paymentMethod: "card", dueNowMinor: "20000", dueLaterMinor: "0" },
 ] as const)("does not offer unsupported request or payment modes (%o)", (change) => {
   act(() =>
     root.render(
@@ -192,6 +192,48 @@ it.each([
   expect(document.querySelector('[role="status"]')?.textContent).toContain(
     "not available for this payment option",
   );
+});
+
+it("sends a pay-at-property request and says the hotel still has to accept it", async () => {
+  const request = { ...quote, acceptanceMode: "request" } as PublicBookingQuote;
+  vi.mocked(acceptPricingQuote).mockResolvedValue({
+    ...result,
+    kind: "requested",
+    hostResponseDeadlineAt: "2026-09-15T12:01:01.000Z",
+  });
+  act(() =>
+    root.render(
+      createElement(ReplacementBookingConfirmation, {
+        slug: "hotel",
+        quote: request,
+        disclosure,
+        termsAccepted: true,
+      }),
+    ),
+  );
+  const send = document.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+  expect(send.disabled).toBe(false);
+  expect(send.textContent).toBe("Send booking request");
+  for (const [name, value] of [
+    ["firstName", "Ada"],
+    ["lastName", "Lovelace"],
+    ["email", "ada@example.test"],
+    ["phone", "+49 123"],
+  ])
+    input(name).value = value;
+  await submit();
+  expect(acceptPricingQuote).toHaveBeenCalledWith(
+    "hotel",
+    request,
+    disclosure,
+    expect.objectContaining({ email: "ada@example.test" }),
+    undefined,
+    "fresh",
+  );
+  expect(document.body.textContent).toContain("Booking request sent");
+  expect(document.body.textContent).toContain("Nothing has been charged");
+  expect(document.body.textContent).toContain(result.bookingReference);
+  expect(document.body.textContent).not.toContain("Booking confirmed");
 });
 
 it("hands a fully paid card quote to the card step, then shows the confirmation", async () => {
