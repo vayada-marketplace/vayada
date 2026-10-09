@@ -749,7 +749,11 @@ creates, which runtime tenancy (VAY-1543) and Channex adoption require: active
 organization holding its legacy links (`owner` unless those are all `operator`),
 and an active PMS `property-management` entitlement scoped to that `pms_property`.
 It inserts missing rows only. Zero or several such organizations block with
-`COHORT_PROPERTY_OWNER_UNRESOLVED`. Runs without a cohort write none.
+`COHORT_PROPERTY_OWNER_UNRESOLVED`; stored native links or PMS grants that would
+fail that rule (another organization's link, a non-active planned row, a current
+suspension) block with `COHORT_PROPERTY_ACCESS_CONFLICT`. Binding already refuses
+a cohort property without a verified hotel owner (`COHORT_OWNER_NOT_ACTIVE`).
+Runs without a cohort write none.
 
 Before a run, a database administrator must bind the target itself with durable
 evidence. The database-level settings path remains supported where available;

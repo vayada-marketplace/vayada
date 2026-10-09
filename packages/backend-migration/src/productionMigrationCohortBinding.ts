@@ -28,8 +28,9 @@ const COHORT_BLOCKERS = new Set(["COHORT_HOTEL_UNRESOLVED", "COHORT_MEMBERSHIP_M
  * VAY-1362: binds an approved cohort only after the catalog ownership planner resolves every
  * cohort hotel on the attested snapshot and the target's existing source links. The check runs
  * before the insert, so a refused cohort is never stored and the source run stays usable for a
- * corrected cohort. Identity has not run yet, so owners come from the source users; a missing
- * or ambiguous identity owner link still blocks at the catalog step, before catalog writes.
+ * corrected cohort. Identity has not run yet, so owners come from the source users, and every
+ * cohort property needs a verified hotel owner; a missing or ambiguous identity owner link
+ * still blocks at the catalog step, before catalog writes.
  * Runs inside the caller's transaction.
  */
 export async function bindProductionMigrationCohort(
@@ -47,12 +48,25 @@ export async function bindProductionMigrationCohort(
       "A different migration cohort is already bound to this source run",
     );
   assertCohortInSource(cohort, rows);
-  const blockers = planCatalogOwnership(
+  const ownership = planCatalogOwnership(
     rows,
     await readers.sourceLinks(client),
     undefined,
     cohort,
-  ).blockers.filter((blocker) => COHORT_BLOCKERS.has(blocker.code));
+  );
+  const blockers = [
+    ...ownership.blockers.filter((blocker) => COHORT_BLOCKERS.has(blocker.code)),
+    // Only a verified hotel owner gets an active organization, so the catalog step can give the
+    // property its native access instead of blocking (COHORT_PROPERTY_OWNER_UNRESOLVED).
+    ...ownership.properties
+      .filter((group) => group.migrationDisposition === "canonical")
+      .filter((group) => !group.primary.ownerPublicEligible)
+      .map((group) => ({
+        code: "COHORT_OWNER_NOT_ACTIVE",
+        source: "booking.booking_hotels",
+        sourceId: group.propertyId,
+      })),
+  ];
   if (blockers.length > 0)
     throw new ProductionMigrationCohortError(
       "COHORT_HOTEL_UNRESOLVED",

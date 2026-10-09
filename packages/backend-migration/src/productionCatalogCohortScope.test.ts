@@ -422,16 +422,21 @@ describe("unresolved cohort hotels (VAY-1362)", () => {
       migrationDisposition: "private_quarantine" as const,
       migrationDispositionReason: "missing_canonical_property" as const,
     };
-    const readers = (stored: unknown = null, links: (typeof stale)[] = []) => ({
-      snapshot: async () => ({ rows, cohort: stored as null }),
+    const readers = (stored: unknown = null, links: (typeof stale)[] = [], snapshot = rows) => ({
+      snapshot: async () => ({ rows: snapshot, cohort: stored as null }),
       sourceLinks: async () => links,
     });
+    // An unverified owner of cohort hotel A would get a suspended organization in identity.
+    const pending = rows.map((row) =>
+      row.data["id"] === UA ? { ...row, data: { ...row.data, status: "pending" } } : row,
+    );
     const cases: Array<[Partial<IdentityCohortScope>, string, ReturnType<typeof readers>]> = [
       [{ pmsHotelIds: [A, B] }, "COHORT_HOTEL_UNRESOLVED", readers()],
       [{ marketplaceHotelIds: [] }, "COHORT_HOTEL_UNRESOLVED", readers()],
       [{}, "COHORT_HOTEL_UNRESOLVED", readers(null, [stale])],
       [{}, "COHORT_CONFLICT", readers(approved({ pmsHotelIds: [] }))],
       [{ bookingHotelIds: [P] }, "COHORT_HOTEL_NOT_IN_SOURCE", readers()],
+      [{}, "COHORT_HOTEL_UNRESOLVED", readers(null, [], pending)],
     ];
     for (const [input, code, reader] of cases) {
       const error: unknown = await bindProductionMigrationCohort(
@@ -442,6 +447,9 @@ describe("unresolved cohort hotels (VAY-1362)", () => {
       expect(error).toMatchObject({ code });
       for (const id of [A, B, MA, MB, P]) expect((error as Error).message).not.toContain(id);
     }
+    await expect(
+      bindProductionMigrationCohort(client, approved({}), readers(null, [], pending)),
+    ).rejects.toThrow("COHORT_OWNER_NOT_ACTIVE");
     expect(client.query).not.toHaveBeenCalled();
   });
 });

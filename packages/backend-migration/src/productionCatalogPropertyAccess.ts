@@ -38,12 +38,13 @@ export type CatalogPropertyAccessWrites = {
   entitlements: CatalogPropertyAccessEntitlement[];
 };
 type StoredLink = Record<keyof CatalogPropertyAccessLink, string>;
-/** Stored PMS grants of the cohort properties. */
+/** Applicable PMS grants (VAY-1543 keys), organization-wide (resourceId null) or for a property. */
 type StoredEntitlement = {
   organizationId: string;
   entitlementKey: string;
   resourceId: string | null;
   status: string;
+  effective: boolean;
 };
 export type CatalogPropertyAccessTarget = {
   activeOrganizationIds: string[];
@@ -52,7 +53,8 @@ export type CatalogPropertyAccessTarget = {
 };
 
 /** Every canonical (cohort) property gets both native links and its entitlement in the one
- * active hotel organization that owns its legacy members; anything else blocks before writes. */
+ * active hotel organization that owns its legacy members. Anything else blocks before writes,
+ * as does stored state that would fail runtime tenancy or COHORT_SCOPE_VERIFIED after them. */
 export function planCatalogPropertyAccess(
   properties: CatalogPropertyGroup[],
   ownerLinks: CatalogOwnerLink[],
@@ -97,10 +99,37 @@ export function planCatalogPropertyAccess(
       relationship,
       status,
     }));
+    const keys = new Set(desired.map(linkKey));
+    const conflict =
+      target.links.some(
+        (row) =>
+          row.resourceId === group.propertyId &&
+          (keys.has(linkKey(row))
+            ? row.status !== "active"
+            : row.status === "active" && ["owner", "operator"].includes(row.relationship)),
+      ) ||
+      target.entitlements.some(
+        (row) =>
+          row.organizationId === organizationId &&
+          [null, group.propertyId].includes(row.resourceId) &&
+          ((row.status === "suspended" && row.effective) ||
+            (row.entitlementKey === ENTITLEMENT.entitlementKey &&
+              row.resourceId === group.propertyId &&
+              (row.status !== "active" || !row.effective))),
+      );
+    if (conflict) {
+      addBlocker(
+        blockers,
+        "COHORT_PROPERTY_ACCESS_CONFLICT",
+        "hotel_catalog.properties",
+        group.propertyId,
+        "Stored native links or PMS grants of the cohort property conflict with its access",
+      );
+      continue;
+    }
     writes.links.push(...desired);
     writes.entitlements.push({ ...base, ...ENTITLEMENT });
   }
-  // A stored row of any status is kept as it is, never reactivated.
   const storedLinks = new Set(target.links.map(linkKey));
   const storedEntitlements = new Set(
     target.entitlements
@@ -144,11 +173,13 @@ export async function readCatalogPropertyAccessTarget(
   );
   const entitlements = await client.query<StoredEntitlement>(
     `SELECT organization_id::text AS "organizationId", entitlement_key AS "entitlementKey",
-            resource_id AS "resourceId", status
+            resource_id AS "resourceId", status,
+            (starts_at IS NULL OR starts_at <= now()) AND (expires_at IS NULL OR expires_at > now())
+              AS effective
        FROM identity.product_entitlements
-      WHERE product = 'pms' AND entitlement_key = 'property-management'
-        AND resource_product = 'pms' AND resource_type = 'pms_property'
-        AND resource_id = ANY($1::text[])
+      WHERE product = 'pms' AND entitlement_key IN ('property-management', 'pms-core', 'account_access')
+        AND (resource_product IS NULL OR (resource_product = 'pms'
+          AND resource_type = 'pms_property' AND resource_id = ANY($1::text[])))
       ORDER BY organization_id, entitlement_key, resource_id`,
     [propertyIds],
   );
