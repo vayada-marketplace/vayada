@@ -2,7 +2,11 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { EyeIcon, XMarkIcon } from "@heroicons/react/24/outline";
-import { BOOKING_PAGE_FONT_STYLESHEET_URL, BookingPagePreview } from "@vayada/product-onboarding";
+import {
+  BOOKING_PAGE_FONT_STYLESHEET_URL,
+  BookingPagePreview,
+  hasHeaderSelectorChoice,
+} from "@vayada/product-onboarding";
 import { settingsService, type CustomDomainStatus } from "@/services/settings";
 import { requireSelectedBookingHotelId } from "@/services/api/bookingHotelScope";
 import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
@@ -760,8 +764,10 @@ export default function DesignStudioPage() {
                 referAGuestModuleEnabled={referAGuestModuleEnabled}
                 showLanguageSelector={showLanguageSelector}
                 setShowLanguageSelector={setShowLanguageSelector}
-                showCurrencySelector={showCurrencySelector}
-                setShowCurrencySelector={setShowCurrencySelector}
+                languageSelectorAvailable={hasHeaderSelectorChoice(
+                  defaultLanguage,
+                  supportedLanguages,
+                )}
                 resetContent={resetContent}
                 galleryImages={galleryImages}
                 galleryAtCapacity={
@@ -848,7 +854,9 @@ export default function DesignStudioPage() {
             showContactButton={showContactButton}
             showReferAGuestButton={Boolean(referAGuestModuleEnabled && showReferAGuestButton)}
             showLanguageSelector={showLanguageSelector}
-            showCurrencySelector={showCurrencySelector}
+            // Booking publications carry a single pricing currency, so guests never see a
+            // currency selector yet. The stored preference is kept for when that changes.
+            showCurrencySelector={false}
             supportedLanguages={supportedLanguages}
             supportedCurrencies={supportedCurrencies}
             heroHeading={heroHeading}

@@ -2,7 +2,7 @@ import { createRef } from "react";
 import { create } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 
-import { BookingPagePreview } from "./BookingPagePreview";
+import { BookingPagePreview, hasHeaderSelectorChoice } from "./BookingPagePreview";
 import BrandMediaStep from "./BrandMediaStep";
 import { BOOKING_PAGE_COLOR_PRESETS, BOOKING_PAGE_FONT_PAIRINGS } from "./bookingPageBranding";
 
@@ -91,6 +91,16 @@ describe("BookingPagePreview", () => {
     );
 
     expect(headerSelectors).toHaveLength(0);
+  });
+});
+
+describe("hasHeaderSelectorChoice", () => {
+  it("offers a selector only when a second option exists", () => {
+    expect(hasHeaderSelectorChoice("en", undefined)).toBe(true);
+    expect(hasHeaderSelectorChoice("en", ["en"])).toBe(false);
+    expect(hasHeaderSelectorChoice("en", [])).toBe(false);
+    expect(hasHeaderSelectorChoice("en", ["en", "de"])).toBe(true);
+    expect(hasHeaderSelectorChoice("", ["de"])).toBe(false);
   });
 });
 

@@ -986,7 +986,7 @@
   "admin.languageSelector": "Taalkiezer",
   "admin.hiddenAutomaticallyWhenOnlyOneLanguageIsConfigured": "Automatisch verborgen wanneer slechts één taal is geconfigureerd.",
   "admin.currencySelector": "Valutakiezer",
-  "admin.hiddenAutomaticallyWhenOnlyOneCurrencyIsConfigured": "Automatisch verborgen als er slechts één valuta is geconfigureerd.",
+  "admin.multiCurrencyIsNotAvailableYet": "Meerdere valuta's zijn nog niet beschikbaar.",
   "admin.heroHeading": "Held kop",
   "admin.publicDescription": "Openbare beschrijving",
   "admin.heroSubtext": "Held subtekst",
