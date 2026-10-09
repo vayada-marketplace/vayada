@@ -9,6 +9,7 @@ import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import { lockBookingPricingTermsSource } from "./bookingPricingOfferTerms.js";
 import { lockFinanceReplacementPricingSource } from "./financeReplacementPricingSource.js";
+import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import { loadPmsMandatoryChargePricingSourceSnapshot } from "./pmsMandatoryChargePricingSourceSnapshot.js";
 import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
 
@@ -196,8 +197,9 @@ export function createPgPmsMandatoryChargeConfirmationReadModel(config: {
   };
 }
 
-/** Compares the publication's stored sources with the current ones, computed and locked in the
- * pricing store's order (room, terms, finance) as the pricing-v2 read does. */
+/** Compares the publication's stored sources with the current ones, computed and locked as the
+ * pricing store's transaction does: inventory scope first, then room, terms and finance (writers
+ * take inventory before room facts, so the same order avoids deadlocks). */
 async function publicationIsCurrent(
   pool: PmsMandatoryChargeConfirmationReadPool,
   propertyId: string,
@@ -207,6 +209,7 @@ async function publicationIsCurrent(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await lockPmsInventoryMutationScope(client, propertyId);
     const room = await lockPmsReplacementPricingRoomSource(client, propertyId);
     const terms = await lockBookingPricingTermsSource(client, propertyId);
     const finance = await lockFinanceReplacementPricingSource(client, propertyId);
