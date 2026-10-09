@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import { beginHotelSetupCommandScope } from "../hotelSetupCommandScope.js";
 import { lockHotelSetupCurrencyMembership } from "../hotelSetupCurrencyMembership.js";
 import { seedPendingHotelFinancialsCategories } from "./financeStarterCategories.js";
 import {
@@ -49,11 +48,9 @@ export type PmsPricingCommandPool = {
 export type PmsPricingCommandRepositoryConfig = {
   connectionString: string;
   currencyChangeGuard: PmsPricingCurrencyChangeGuardPort;
-  /** Trusted private-service configuration; never read from the request DTO. */
-  hotelSetupCurrencyOperation?: "currency" | "currency_ready";
   /** Public API hotel setup on the ordinary login (VAY-2056): organization-first scope lock,
    * the strict Owner membership re-check and the first-currency Financials completion.
-   * Trusted configuration; mutually exclusive with hotelSetupCurrencyOperation. */
+   * Trusted configuration; never read from the request DTO. */
   hotelSetupOrdinaryOwner?: boolean;
   channexMealSyncEnabled?: boolean;
   channexMealSyncPropertyId?: string;
@@ -135,10 +132,7 @@ export function createPgPmsPricingCommandRepository(
   if (!config.currencyChangeGuard) {
     throw new Error("PMS pricing command repository requires a currency-change guard");
   }
-  if (config.hotelSetupOrdinaryOwner && config.hotelSetupCurrencyOperation) {
-    throw new Error("PMS pricing command repository has two hotel setup scopes");
-  }
-  const setupOwnerScope = !!config.hotelSetupCurrencyOperation || !!config.hotelSetupOrdinaryOwner;
+  const setupOwnerScope = !!config.hotelSetupOrdinaryOwner;
   const ownsPool = !config.pool;
   const pool: PmsPricingCommandPool =
     config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: config.max });
@@ -151,18 +145,11 @@ export function createPgPmsPricingCommandRepository(
     client: PmsPricingCommandClient,
     command: AnyCommand,
   ): Promise<boolean> {
-    if (config.hotelSetupCurrencyOperation) {
-      await beginHotelSetupCommandScope(client, {
-        propertyId: command.propertyId,
-        organizationId: command.organizationId,
-        operation: config.hotelSetupCurrencyOperation,
-      });
-    } else if (config.hotelSetupOrdinaryOwner) {
+    if (setupOwnerScope) {
       await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
       return lockHotelSetupOrdinaryPropertyScope(client, command);
-    } else {
-      await client.query("BEGIN");
     }
+    await client.query("BEGIN");
     return true;
   }
 
@@ -218,8 +205,7 @@ export function createPgPmsPricingCommandRepository(
         throw new Error("PMS pricing command change notification invariant failed");
       }
       const firstCurrency =
-        (config.hotelSetupCurrencyOperation === "currency_ready" ||
-          !!config.hotelSetupOrdinaryOwner) &&
+        setupOwnerScope &&
         spec.operation === CURRENCY_OPERATION &&
         result.ok &&
         result.response.outcome === "created";
@@ -261,9 +247,9 @@ export function createPgPmsPricingCommandRepository(
         result,
         domainEventId,
         acceptedAt,
-        firstCurrency && !!config.hotelSetupOrdinaryOwner,
+        firstCurrency,
       );
-      if (firstCurrency && config.hotelSetupOrdinaryOwner && command.audit.actor.kind === "user")
+      if (firstCurrency && command.audit.actor.kind === "user")
         await completeOrdinaryHotelSetupFirstCurrency(client, {
           propertyId: command.propertyId,
           organizationId: command.organizationId,
@@ -541,10 +527,10 @@ async function lockAuthorizedScope(
   client: PmsPricingCommandClient,
   command: AnyCommand,
   at: Date,
-  nativeSetup: boolean,
+  setupOwner: boolean,
 ): Promise<boolean> {
   if (command.audit.actor.kind !== "user") return false;
-  if (nativeSetup) return lockHotelSetupCurrencyMembership(client, command);
+  if (setupOwner) return lockHotelSetupCurrencyMembership(client, command);
   const scope = await client.query(
     `SELECT property.id
      FROM hotel_catalog.properties property
@@ -956,8 +942,8 @@ async function recordAudit(
   result: AnyResult,
   domainEventId: string | null,
   at: Date,
-  // Only the ordinary first-currency completion needs the id; native setup logins hold
-  // INSERT without SELECT on the audit table, so RETURNING would be denied (42501).
+  // Only the first-currency completion needs the id; every other caller keeps the plain insert,
+  // so a login with INSERT but no SELECT on the audit table is never denied (42501).
   returnId = false,
 ): Promise<{ id: string | undefined; auditKey: string }> {
   if (command.audit.actor.kind !== "user") throw new Error("PMS pricing audit requires user actor");

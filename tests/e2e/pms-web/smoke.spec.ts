@@ -745,6 +745,189 @@ test.describe("pms-web smoke", () => {
     await expect(page.getByRole("heading", { level: 2, name: "Ada Lovelace" })).toHaveCount(0);
   });
 
+  test("creates a room type through room facts without legacy prices", async ({
+    page,
+  }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    const assertNoLegacyCalls = watchNoLegacyCalls(page, testInfo, "pms-web-operations");
+    const createdRoomTypeId = "99999999-9999-4999-8999-000000000001";
+    const unitIds = [
+      "99999999-9999-4999-8999-000000000002",
+      "99999999-9999-4999-8999-000000000003",
+    ];
+    const createdAt = "2026-09-04T00:00:00.000Z";
+    const pricingCalls: string[] = [];
+    const labelWrites: Record<string, unknown>[] = [];
+    let factsBody: Record<string, unknown> | undefined;
+    let factsIdempotencyKey: string | undefined;
+    let amenitiesBody: Record<string, unknown> | undefined;
+
+    await mockPmsWebAuthenticatedSession(page);
+    await mockPmsWebTargetRoutes(page);
+    await mockManageSelfAccess(page);
+    await watchLegacyPricingCalls(page, pricingCalls);
+    // The Rooms list reads the prepared-import offer after the create redirects there.
+    await page.route(`**/api/hotel-setup/properties/${PMS_WEB_PROPERTY_ID}/import`, (route) =>
+      route.fulfill({
+        headers: {
+          "access-control-allow-origin": route.request().headers()["origin"] ?? "*",
+          "access-control-allow-credentials": "true",
+        },
+        json: { import: null },
+      }),
+    );
+    await page.route(`**/api/pms/setup/properties/${PMS_WEB_PROPERTY_ID}/room-types`, (route) => {
+      factsBody = route.request().postDataJSON() as Record<string, unknown>;
+      factsIdempotencyKey = route.request().headers()["idempotency-key"];
+      return route.fulfill({
+        status: 201,
+        json: {
+          contractVersion: "pms-room-facts.v1",
+          outcome: "created",
+          roomType: {
+            contractVersion: "pms-room-facts.v1",
+            propertyId: PMS_WEB_PROPERTY_ID,
+            roomTypeId: createdRoomTypeId,
+            roomFactsRevision: 1,
+            lifecycle: "active",
+            facts: factsBody.facts,
+            createdAt,
+            updatedAt: createdAt,
+          },
+          draftRoomBinding: {
+            propertyId: PMS_WEB_PROPERTY_ID,
+            draftRoomId: factsBody.draftRoomId,
+            roomTypeId: createdRoomTypeId,
+          },
+          acceptedAt: createdAt,
+        },
+      });
+    });
+    await page.route(
+      `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-types/${createdRoomTypeId}`,
+      (route) =>
+        route.fulfill({
+          json: {
+            contractVersion: "pms-operations.v1",
+            propertyId: PMS_WEB_PROPERTY_ID,
+            item: {
+              ...pmsWebRoomType,
+              roomTypeId: createdRoomTypeId,
+              version: "room-type-facts-v1",
+              name: "Castrop Suite",
+              baseRate: { amountDecimal: "0.00", currency: null },
+              roomCount: 2,
+            },
+          },
+        }),
+    );
+    await page.route(
+      `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-types/${createdRoomTypeId}/amenities`,
+      (route) => {
+        amenitiesBody = route.request().postDataJSON() as Record<string, unknown>;
+        return route.fulfill({
+          json: {
+            contractVersion: "pms-room-amenities.v1",
+            outcome: "confirmed",
+            roomAmenities: {
+              contractVersion: "pms-room-amenities.v1",
+              propertyId: PMS_WEB_PROPERTY_ID,
+              roomTypeId: createdRoomTypeId,
+              roomAmenitiesRevision: 2,
+              reviewed: true,
+              amenities: [],
+              reviewedAt: createdAt,
+            },
+            acceptedAt: createdAt,
+          },
+        });
+      },
+    );
+    await page.route(
+      `**/api/pms/setup/properties/${PMS_WEB_PROPERTY_ID}/room-types/${createdRoomTypeId}/capacity`,
+      (route) =>
+        route.fulfill({
+          json: {
+            contractVersion: "pms-room-facts.v1",
+            propertyId: PMS_WEB_PROPERTY_ID,
+            roomTypeId: createdRoomTypeId,
+            roomUnitsRevision: 1,
+            activeUnitCount: 2,
+            capturedAt: createdAt,
+          },
+        }),
+    );
+    await page.route(
+      `**/api/pms/setup/properties/${PMS_WEB_PROPERTY_ID}/room-types/${createdRoomTypeId}/units`,
+      (route) =>
+        route.fulfill({
+          json: {
+            items: unitIds.map((roomUnitId) => ({
+              contractVersion: "pms-room-facts.v1",
+              propertyId: PMS_WEB_PROPERTY_ID,
+              roomTypeId: createdRoomTypeId,
+              roomUnitId,
+              lifecycle: "active",
+              operationalLabel: null,
+              operationalLabelStatus: "unverified",
+            })),
+          },
+        }),
+    );
+    await page.route(
+      `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-types/${createdRoomTypeId}/physical-units/*/operational-label`,
+      (route) => {
+        const body = route.request().postDataJSON() as Record<string, unknown>;
+        labelWrites.push(body);
+        return route.fulfill({
+          json: {
+            contractVersion: "pms-room-facts.v1",
+            outcome: "updated",
+            propertyId: PMS_WEB_PROPERTY_ID,
+            roomTypeId: createdRoomTypeId,
+            roomUnitId: new URL(route.request().url()).pathname.split("/").at(-2),
+            roomUnitsRevision: Number(body.expectedRevision) + 1,
+            operationalLabel: body.operationalLabel,
+            operationalLabelStatus: "verified",
+            acceptedAt: createdAt,
+          },
+        });
+      },
+    );
+
+    await page.goto("/rooms/new");
+    await expect(page.getByRole("button", { name: "Pricing & Rates" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Open Pricing" })).toHaveAttribute(
+      "href",
+      "/pricing",
+    );
+    await page.getByPlaceholder("e.g. Two-Bedroom Villa").fill("Castrop Suite");
+    await page.getByPlaceholder("50").fill("32");
+    await page.getByRole("button", { name: "Create Room Type" }).click();
+
+    await expect(page).toHaveURL(/\/rooms$/);
+    expect(factsBody).toMatchObject({
+      draftRoomId: expect.stringMatching(/^pms-room-type-create-/),
+      expectedRevision: 0,
+      facts: {
+        name: "Castrop Suite",
+        occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 2 },
+        beds: [{ type: "king", quantity: 1 }],
+        bathroomType: "private",
+        size: { value: 32, unit: "sqm" },
+      },
+    });
+    expect(factsIdempotencyKey).toBe(factsBody?.draftRoomId);
+    expect(amenitiesBody).toEqual({ expectedRoomAmenitiesRevision: 1, amenities: [] });
+    expect(labelWrites).toEqual([
+      { expectedRevision: 1, operationalLabel: "Castrop Suite 1" },
+      { expectedRevision: 2, operationalLabel: "Castrop Suite 2" },
+    ]);
+    expect(pricingCalls).toEqual([]);
+    await assertNoLegacyCalls();
+    await assertHealthy();
+  });
+
   test("points the German room form to Pricing", async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem("admin_language", "de"));
     await mockPmsWebAuthenticatedSession(page);

@@ -3,11 +3,11 @@
 _Design note and implementation plan, 2026-10-07. Phase 1 deliverable; nothing in
 this document grants, deploys or decommissions anything. Predecessors:
 [API runtime database role](api-runtime-database-role.md) (VAY-2054),
-[credential lifecycle](hotel-setup-command-credential-lifecycle.md),
-[launch settings](hotel-setup-launch-settings-command.md),
-[logo writer](hotel-setup-logo-writer.md),
-[profile-edit writer](hotel-setup-profile-edit-writer.md),
-[automatic provisioning](hotel-setup-automatic-provisioning.md)._
+[credential lifecycle](historical/hotel-setup-command-credential-lifecycle.md),
+[launch settings](historical/hotel-setup-launch-settings-command.md),
+[logo writer](historical/hotel-setup-logo-writer.md),
+[profile-edit writer](historical/hotel-setup-profile-edit-writer.md),
+[automatic provisioning](historical/hotel-setup-automatic-provisioning.md)._
 
 ## Decision in one paragraph
 
@@ -180,7 +180,8 @@ Consequences:
 
 ## 4. Pinned-object impact
 
-The seven native preflights (`apps/api/src/hotelSetup{Creation,Currency,
+The seven native preflights (removed from the app by §12 step 3; formerly
+`apps/api/src/hotelSetup{Creation,Currency,
 LaunchSettings,Logo,Profile,FeatureHub,Reader}Privileges.ts`) pin md5 digests of
 policies, triggers, function bodies, view definitions and check constraints on
 the tables below and run at private-service startup and inside every native
@@ -317,7 +318,7 @@ operations. The installed `HOTEL_SETUP_*_COMMAND_*` task-definition variables
 become inert and stay installed until the decommission PR relaxes
 `assert-hotel-setup-caller-retained.py` (platform tf-apply gate). The forwarder
 module, the private service entry point and the native adapters stay in the
-tree for the rollback image and the decommission PRs.
+tree for the rollback image until decommission step 3 (§12) removes them.
 
 ## 6. What stays `SECURITY DEFINER`, and why
 
@@ -475,7 +476,7 @@ ticket: make the editor's launch-settings call best-effort (ticket comment), and
 retire the `profile_edit_not_provisioned` copy from the clients once the code is
 gone from the API.
 
-## 12. Decommission list (separate PRs after the observation window)
+## 12. Decommission list (separate PRs, starting right after acceptance)
 
 Until step 2 below has run, the §9 rollback window rule applies: a migration
 that changes any native-pinned object (§4) either ships with re-released native
@@ -494,7 +495,16 @@ Dependency order; each step is reversible until step 6.
    (`HOTEL_SETUP_AUTOMATIC_PROVISIONING_ENABLED` unset, environment
    `hotel-setup-automatic-provisioning`), parked PRs #2901–#2904 closed
    unmerged.
-3. **App PR: remove the native code paths** — `hotelSetupCommandServer.ts`,
+3. **App PR: remove the native code paths** — _prepared as stacked drafts on
+   #2950: #2955 (forwarder and its route options), #2956 (private service,
+   native adapters, preflights, provisioning and bootstrap tooling, native
+   tests and CI steps) and #2957 (docs: the VAY-965/VAY-1092 contracts moved
+   to [`historical/`](historical/)); merge only after steps 1 and 2.
+   As built: `hotelSetupLogoRuntime.ts` keeps its ordinary runtime (only the
+   native strategy goes), `hotelSetupLogoCleanup.ts` and its CLI go too (they
+   accept only a native logo scope row, so run any outstanding cleanup before
+   merging), and the `hotel-setup` CI shard keeps the ordinary suites on a
+   fresh database._ Original list: `hotelSetupCommandServer.ts`,
    `hotelSetupCommandService.ts`, the five `hotelSetup*Commands.ts`,
    `hotelSetupCommandCredentials.ts`, `hotelSetupNativeSecretReader.ts`,
    `hotelSetupCommandScope.ts`, the seven `hotelSetup*Privileges.ts`,
@@ -536,25 +546,94 @@ Dependency order; each step is reversible until step 6.
    `--recover-hotel-setup-logo-staged-role` plus their scripts and the
    `deployment/hotel-setup-*.json` inventories; `docs/hotel-setup-*.md` moved
    to a historical section. Requires step 4.
-6. **Migration PR (app): drop the native database objects** — revoke and drop
-   the per-hotel logins for Animals Ahangama and Sri Journeys (every
-   `vayada_next_hotel_setup_org_*`, `…_property_*`, `…_logo_*`, `…_profile_*`
-   login) and the parents `vayada_next_hotel_setup_scope`,
-   `…_property_scope`, `…_logo_scope`, `…_profile_scope`, the readers
-   `vayada_next_hotel_setup_reader` / `…_creation_reader`; drop the scope
-   tables (`platform.hotel_setup_creation_scopes`,
-   `hotel_setup_property_scopes`, `hotel_setup_linked_properties`,
-   `hotel_setup_reconciliation_cursors`, view
-   `hotel_catalog.hotel_setup_effective_creation_scopes`), the hotel-setup
-   policies, triggers and functions of `0436`–`0472` (keeping
-   `creation_organization_id`, the readiness columns' data and
-   `platform.tenant_scope_key` / `valid_tenant_scope` which other code uses),
-   and the identity lock-only policies the VAY-2054 note deferred (adding them
-   becomes possible in the same migration because nothing pins the digests any
-   more). Role drops need `vayada_admin` (the migration owner cannot drop
-   login roles), i.e. one last owner-checked task. Requires steps 3 and 5 and
-   an updated protected list in the platform preflight (`hotel_setup_` name
-   patterns can stay as a net).
+6. **Database clean-up (app migration 0474, draft #2964), in three parts.**
+   Requires steps 3 and 5. The migration also needs an image containing #2956
+   to be serving first, released on its own: #2956 lets the Channex boundary
+   accept both the old and the new trigger catalog, so an automatic rollback
+   from the 0474 release lands on an image that can still start. Every image
+   older than #2956 fails the Channex boundary once 0474 has run.
+
+   **6a. Before 0474 (`vayada_admin`): disable the leftover logins.** 0474
+   drops the restrictive guards and turns RLS off on 15 tables, and it can only
+   revoke grants the migration owner made. Grants that `vayada_admin` gave the
+   per-hotel logins directly survive until the roles go, for example column
+   writes and `DELETE` on `property_contact_channels` and `property_media`. So
+   first, for every `vayada_next_hotel_setup_*` login and both readers:
+   - `ALTER ROLE … NOLOGIN`;
+   - terminate their sessions (`pg_terminate_backend` over `pg_stat_activity`);
+   - revoke what `vayada_admin` granted them.
+
+   PostgreSQL 16+ gives a CREATEROLE role ADMIN OPTION on the roles it created,
+   so `vayada_admin` can alter the logins it staged. Run the probe below first.
+   Platform #473 provides this as a reviewed workflow,
+   `retire-hotel-setup-database-roles.yml` (`step=disable`): a read-only
+   `inspect` prints a PLAN fingerprint, and `apply` with that fingerprint
+   revokes and verifies.
+
+   **6b. Migration `0474_hotel_setup_native_objects_retire`.** One transaction:
+   - It takes every affected table lock up front in one `LOCK TABLE`, with
+     `lock_timeout` 5 s. A timed-out run changes nothing, the old tasks keep
+     serving, and the deploy can be retried.
+   - It carries every native Owner-off receipt
+     (`newHotelFinancialsOwnerDisabled`) over to the ordinary marker
+     `featureHubOwnerDisabled = xmin`, then drops the guard trigger. A receipt
+     stays valid until the next write to its row, as before. Like every
+     ordinary marker, it is also cancelled by row rewrites (§9 runbook). The
+     Feature Hub command no longer reads the native key.
+   - It drops the eleven hotel-setup triggers, every `hotel_setup_*` policy,
+     the creation-scope view, every `platform` function with `hotel_setup` in
+     its name, and the four scope tables.
+   - It keeps the two triggers that apply to every writer:
+     `entitlement_routing_organization_lock` and
+     `hotel_setup_media_session_allocation_guard`.
+   - On the 15 tables where a hotel-setup migration first turned RLS on, and a
+     hotel-setup policy was the only permissive one, it turns RLS off again.
+     That is what every caller saw. A final check fails the migration if any
+     table that had a hotel-setup policy is left with RLS on and no permissive
+     policy.
+   - It revokes every grant the migration owner gave a hotel-setup role, so in
+     a fresh database nothing depends on those roles any more.
+   - It re-pins the Channex worker catalog digest (as the second accepted
+     value) and the VAY-2017 policy digest. Both were computed on PG16 and
+     PG17.
+
+   Not in 0474:
+   - the identity lock-only policies the VAY-2054 note deferred (a separate
+     follow-up);
+   - pruning the `hotel_setup_` names from the platform runtime preflight and
+     `hotelSetupOrdinaryLogin.fixture.ts` (together, after 0474 is live);
+   - the role drops (6c).
+
+   **6c. After 0474 (`vayada_admin`): drop the roles.** The migration owner has
+   no CREATEROLE. On PostgreSQL 16+ a CREATEROLE role also needs ADMIN OPTION
+   on each role it drops. The platform docs record no such edge for the four
+   scope parents on RDS, so probe first. These queries are read-only:
+
+   ```sql
+   SELECT version();
+   SELECT r.rolname, r.rolcanlogin,
+     pg_has_role('vayada_admin', r.oid, 'MEMBER WITH ADMIN OPTION') AS admin_option
+   FROM pg_roles r WHERE r.rolname ~ '^vayada_next_hotel_setup_' ORDER BY 1;
+   SELECT r.rolname, d.dbid, d.classid::regclass, d.deptype, count(*)
+   FROM pg_shdepend d JOIN pg_roles r ON r.oid = d.refobjid
+   WHERE r.rolname ~ '^vayada_next_hotel_setup_' GROUP BY 1, 2, 3, 4 ORDER BY 1;
+   ```
+
+   Then, as `vayada_admin`:
+   - revoke the rest of its grants, including
+     `REVOKE CONNECT ON DATABASE vayada_target_prod`, until `pg_shdepend` is
+     empty for each role;
+   - `DROP ROLE` the per-hotel logins and the two readers, then the four
+     parents.
+
+   The same workflow does this with `step=drop`, using `inspect` and then
+   `apply`. It refuses while any grant, dependency or text reference remains.
+   Do not use `DROP OWNED BY`: it needs the target role's privileges. If
+   `admin_option` is false, the RDS master user has to drop the roles. The
+   original plan for this step (per-hotel logins for Animals Ahangama and Sri
+   Journeys, keeping `creation_organization_id` and
+   `tenant_scope_key`/`valid_tenant_scope`) is covered by 6a–6c.
+
 7. **Cleanup**: `engineering/hotel-setup-*.md` contracts archived under a
    historical heading, Linear VAY-965/VAY-1092 closed by the human.
 

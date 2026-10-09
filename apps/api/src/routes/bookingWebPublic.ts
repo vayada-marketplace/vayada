@@ -6,6 +6,10 @@ import {
   PricingAcceptanceError,
   writePricingAcceptance,
 } from "../domains/pricingAcceptanceWriter.js";
+import {
+  completePricingCardPayment,
+  PricingCardPaymentError,
+} from "../domains/pricingCardPaymentCompletion.js";
 import { admitAffiliateArrivalForCurrentHost } from "../domains/bookingAffiliateArrivalHost.js";
 import { readBookingAffiliateContextForQuote } from "../domains/bookingAffiliateContextForQuote.js";
 import {
@@ -52,6 +56,7 @@ import type { BankTransferBookingOperations } from "../domains/financeBankTransf
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
 import { releaseAbandonedBookingEdits } from "../jobs/pendingBookingEditCleanup.js";
 import { quoteTargetRoomSelection } from "./bookingWebMixedQuote.js";
+import { pricingRetiredError } from "./pricingRetired.js";
 import { reserveTargetMixedBooking } from "./bookingWebMixedReservation.js";
 import {
   allocateMixedQuoteDiscount,
@@ -260,6 +265,7 @@ export type BookingWebCheckoutAdapter = {
     request: BookingWebCheckoutRequest,
     affiliateContextCookie?: string,
   ): Promise<unknown>;
+  completePricingCardPayment?(slug: string, quoteId: string, requestId: string): Promise<unknown>;
   getCheckoutConfig(slug: string, context?: BookingWebCheckoutCommandContext): Promise<unknown>;
   quoteBooking(
     slug: string,
@@ -628,6 +634,32 @@ export async function registerBookingWebPublicRoutes(
             affiliateContextCookie,
           )
         : await checkoutAdapter.acceptPricingQuote(request.params.slug, body);
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-quote-acceptance");
+      return response;
+    },
+  );
+
+  app.post<{ Params: BookingWebHotelParams & { quoteId: string } }>(
+    "/hotels/:slug/bookings/quotes/:quoteId/accept/payment",
+    {
+      bodyLimit: 1024,
+      async onRequest(request, reply) {
+        reply.header("Cache-Control", "no-store");
+        reply.header("X-Robots-Tag", "noindex");
+        requirePublicQuoteKey(request);
+      },
+    },
+    async (request, reply) => {
+      const requestId = request.headers["idempotency-key"];
+      if (!checkoutAdapter.completePricingCardPayment)
+        throw createHttpError(404, "Card payment unavailable.");
+      if (typeof requestId !== "string" || !requestId.length)
+        throw createHttpError(400, "Invalid card payment request.");
+      const response = await checkoutAdapter.completePricingCardPayment(
+        request.params.slug,
+        request.params.quoteId,
+        requestId,
+      );
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-quote-acceptance");
       return response;
     },
@@ -1208,11 +1240,8 @@ export function createTargetBookingWebCalendarRepository(config: {
     });
 
   return {
-    async findCalendarByHotel(hotel, query) {
-      throw Object.assign(
-        new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
-        { statusCode: 503, code: "PRICING_UNAVAILABLE" },
-      );
+    async findCalendarByHotel() {
+      throw pricingRetiredError();
     },
     async close() {
       await pool.end();
@@ -1406,7 +1435,10 @@ type TargetChangeRequestRow = QueryResultRow & {
 
 export type PgTargetBookingWebCheckoutAdapterConfig = {
   /** Empty by default; use only for explicitly approved synthetic/public rollout slugs. */
-  replacementPricingAcceptanceAllowedSlugs?: readonly string[];
+  /** Kill switch; the acceptance writer still requires Vayada authority and a publication. */
+  replacementPricingAcceptanceEnabled?: boolean;
+  /** Card quotes in acceptance; requires stripePaymentProvider. */
+  replacementPricingCardAcceptanceEnabled?: boolean;
   externalChanges: ExternalChangePresentationPort;
   /** Register only with the reviewed provider runtime; absent keeps Airbnb actions disabled. */
   airbnbAlterations?: {
@@ -1652,8 +1684,8 @@ export function createTargetBookingWebCheckoutAdapter(
             result,
             Boolean(
               config.airbnbAlterations &&
-              (!config.airbnbAlterations.propertyIds ||
-                config.airbnbAlterations.propertyIds.includes(propertyId)),
+                (!config.airbnbAlterations.propertyIds ||
+                  config.airbnbAlterations.propertyIds.includes(propertyId)),
             ),
           )
         : null;
@@ -2050,7 +2082,7 @@ export function createTargetBookingWebCheckoutAdapter(
       return disclosure;
     },
     async acceptPricingQuote(slug, request, affiliateContextCookie) {
-      if (!config.replacementPricingAcceptanceAllowedSlugs?.includes(slug))
+      if (!config.replacementPricingAcceptanceEnabled)
         throw createHttpError(404, "Quote acceptance unavailable.");
       try {
         let contextId: string | null = null;
@@ -2065,14 +2097,21 @@ export function createTargetBookingWebCheckoutAdapter(
             // Context lookup must not block an otherwise valid booking.
           }
         }
-        return contextId
-          ? await writePricingAcceptance(
-              pool,
-              { slug, command: request },
-              { affiliateContextId: contextId },
-            )
-          : await writePricingAcceptance(pool, { slug, command: request });
+        const cardPayments =
+          config.replacementPricingCardAcceptanceEnabled && config.stripePaymentProvider
+            ? { provider: config.stripePaymentProvider }
+            : undefined;
+        return await writePricingAcceptance(
+          pool,
+          { slug, command: request },
+          contextId ? { affiliateContextId: contextId } : undefined,
+          cardPayments,
+        );
       } catch (error) {
+        if (error instanceof PricingAcceptanceError && error.code === "card_unavailable")
+          throw Object.assign(createHttpError(404, "Online card payment is unavailable."), {
+            code: "CARD_PAYMENT_UNAVAILABLE",
+          });
         const statusCode =
           error instanceof PricingAcceptanceError
             ? error.code === "conflict"
@@ -2086,6 +2125,38 @@ export function createTargetBookingWebCheckoutAdapter(
         });
       }
     },
+    ...(config.replacementPricingCardAcceptanceEnabled && config.stripePaymentProvider
+      ? {
+          async completePricingCardPayment(slug: string, quoteId: string, requestId: string) {
+            try {
+              return await completePricingCardPayment(pool, config.stripePaymentProvider!, {
+                slug,
+                quoteId,
+                requestId,
+              });
+            } catch (error) {
+              if (!(error instanceof PricingCardPaymentError))
+                throw Object.assign(
+                  new Error("Card payment temporarily unavailable.", { cause: error }),
+                  {
+                    statusCode: 503,
+                  },
+                );
+              if (error.code === "unavailable")
+                throw createHttpError(404, "Card payment unavailable.");
+              throw Object.assign(
+                createHttpError(
+                  409,
+                  error.code === "pending"
+                    ? "Card payment is not complete yet."
+                    : "Card payment does not match this booking.",
+                ),
+                { code: error.code === "pending" ? "PAYMENT_PENDING" : "PAYMENT_MISMATCH" },
+              );
+            }
+          },
+        }
+      : {}),
     async getPricingAddons(slug) {
       let addons;
       try {
@@ -2856,10 +2927,7 @@ export async function createTargetCheckoutQuote(
   },
   mixed?: Awaited<ReturnType<typeof quoteTargetRoomSelection>>,
 ): Promise<TargetCheckoutQuoteSnapshot> {
-  throw Object.assign(
-    new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
-    { statusCode: 503, code: "PRICING_UNAVAILABLE" },
-  );
+  throw pricingRetiredError();
 }
 
 export async function loadTargetCheckoutOffer(
@@ -2939,10 +3007,7 @@ export async function loadTargetCheckoutQuoteSnapshot(
   request: BookingWebCheckoutRequest,
   now: Date,
 ): Promise<TargetCheckoutQuoteSnapshot> {
-  throw Object.assign(
-    new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
-    { statusCode: 503, code: "PRICING_UNAVAILABLE" },
-  );
+  throw pricingRetiredError();
 }
 
 export function serializeTargetCheckoutQuote(

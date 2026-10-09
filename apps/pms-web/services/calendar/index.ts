@@ -18,7 +18,8 @@ export interface CalendarRoomType {
   totalRooms: number;
   baseRate: number;
   maxOccupancy: number;
-  currency: string;
+  /** Null until the hotel publishes prices or sets a legacy rate; the server then prices custom rates. */
+  currency: string | null;
   ratePlans: Array<{
     id: string;
     name: string;
@@ -44,7 +45,8 @@ export interface CalendarRoom {
   floor: string;
   status: string;
   baseRate: number;
-  currency: string;
+  /** The currency of `baseRate`; null for a room type without a legacy rate (VAY-2068). */
+  currency: string | null;
   maxOccupancy: number;
   size: number;
   /** The room type's published Flexible offer with its own price: what "target base" moves charge. */
@@ -135,7 +137,8 @@ type PmsOperationsRoomType = {
   category: string | null;
   occupancyLimits: Record<string, number>;
   attributes: Record<string, unknown>;
-  baseRate: PmsOperationsMoney;
+  /** Room types from the room-facts flow carry neither amount nor currency. */
+  baseRate: { amountDecimal: string | null; currency: string | null };
   roomCount: number;
   ratePlans: Array<{
     ratePlanId: string;
@@ -412,8 +415,9 @@ function toCalendarData(
         totalRooms: roomType.roomCount,
         baseRate: moneyAmount(roomType.baseRate),
         maxOccupancy: maxOccupancy(roomType),
-        // Room types from the room-facts flow carry no currency; the publication does.
-        currency: published[0]?.baseRate.currency ?? roomType.baseRate.currency,
+        // Room types from the room-facts flow carry no currency; the publication does. With
+        // neither, custom rates are sent without one and the server prices them (VAY-2065).
+        currency: published[0]?.baseRate.currency ?? roomType.baseRate.currency ?? null,
         ratePlans: published.map((plan) => ({
           id: plan.ratePlanId,
           name: plan.name,
@@ -436,7 +440,12 @@ function toCalendarData(
         floor: room.floor ?? "",
         status: room.status,
         baseRate: moneyAmount(roomTypesById.get(room.roomTypeId)?.baseRate),
-        currency: roomTypesById.get(room.roomTypeId)?.baseRate.currency ?? "EUR",
+        // The currency labels `baseRate`, so both come from the legacy rate. A room type from
+        // the room-facts flow has neither, and the calendar must not invent one (VAY-2068).
+        // No hotel-currency fallback is needed: the database stores amount and currency as a
+        // pair (chk_pms_room_types_price_currency_pair), and once the hotel has a pricing
+        // currency every room-type currency must equal it (migration 0050).
+        currency: roomTypesById.get(room.roomTypeId)?.baseRate.currency ?? null,
         maxOccupancy: maxOccupancy(roomTypesById.get(room.roomTypeId)),
         size: numericAttribute(roomTypesById.get(room.roomTypeId)?.attributes?.size),
         flexibleRatePlanId:
@@ -515,7 +524,7 @@ function splitGuestName(displayName: string): [string, string] {
   return [firstName, rest.join(" ")];
 }
 
-function moneyAmount(money: PmsOperationsMoney | undefined): number {
+function moneyAmount(money: { amountDecimal: string | null } | undefined): number {
   const amount = Number.parseFloat(money?.amountDecimal ?? "0");
   return Number.isFinite(amount) ? amount : 0;
 }

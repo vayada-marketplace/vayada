@@ -7,6 +7,7 @@ import { registerBookingWebPublicRoutes } from "../routes/bookingWebPublic.js";
 import { unusedBookingWebCheckoutAdapter } from "../routes/bookingWebPublic.fixtures.js";
 import {
   createTargetPublicBookabilityPublicationCommandPort,
+  ensureCanonicalPropertySlug,
   PROJECT_CANONICAL_PUBLIC_PROPERTY_PROFILE,
   PROJECT_PUBLIC_BOOKABILITY_PROFILE,
   slugify,
@@ -236,6 +237,33 @@ describe("target public bookability publication", () => {
 
   it("creates DNS-safe slugs", () => {
     expect(slugify(" Hôtel zur schönen Aussicht! ")).toBe("hotel-zur-schonen-aussicht");
+  });
+
+  it("tries at most two canonical slug candidates before refusing", async () => {
+    const candidates: string[] = [];
+    await expect(
+      ensureCanonicalPropertySlug(
+        {
+          query: async (sql: string, values?: readonly unknown[]) => {
+            if (sql.includes("SELECT\n    property.id"))
+              return {
+                rows: [
+                  {
+                    propertyId: "11111111-1111-4111-8111-111111111111",
+                    publicId: "Sri Journeys",
+                    displayName: "Hôtel Änimals!",
+                    canonicalSlug: null,
+                  },
+                ],
+              };
+            candidates.push(values![1] as string);
+            return { rows: [] };
+          },
+        } as Parameters<typeof ensureCanonicalPropertySlug>[0],
+        "11111111-1111-4111-8111-111111111111",
+      ),
+    ).rejects.toThrow("Unable to reserve");
+    expect(candidates).toEqual(["hotel-animals", "hotel-animals-sri-journeys"]);
   });
 });
 
