@@ -33,7 +33,7 @@ import {
   type AddonEconomicTerms,
   type BookedCancellationOutcome,
 } from "@vayada/domain-booking";
-import { pricingCurrencyScale } from "@vayada/domain-pms";
+import { pricingCurrencyScale } from "@vayada/domain-booking/replacement-pricing";
 import {
   assertPublicBookabilityPublicSafe,
   PUBLIC_BOOKABILITY_CONTRACT_VERSION,
