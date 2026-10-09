@@ -1340,6 +1340,25 @@ describe("api config", () => {
     );
   });
 
+  it("checks published pricing freshness hourly unless switched off", () => {
+    expect(loadConfig({})).toMatchObject({
+      pricingPublicationFreshnessCheckEnabled: true,
+      pricingPublicationFreshnessIntervalMs: 60 * 60 * 1000,
+    });
+    expect(
+      loadConfig({
+        PRICING_PUBLICATION_FRESHNESS_CHECK_ENABLED: "false",
+        PRICING_PUBLICATION_FRESHNESS_INTERVAL_MS: "1800000",
+      }),
+    ).toMatchObject({
+      pricingPublicationFreshnessCheckEnabled: false,
+      pricingPublicationFreshnessIntervalMs: 1_800_000,
+    });
+    expect(() => loadConfig({ PRICING_PUBLICATION_FRESHNESS_INTERVAL_MS: "599999" })).toThrow(
+      "PRICING_PUBLICATION_FRESHNESS_INTERVAL_MS must be at least 600000",
+    );
+  });
+
   it("configures and can disable property setup draft retention", () => {
     expect(loadConfig({})).toMatchObject({
       propertySetupDraftRetentionEnabled: true,

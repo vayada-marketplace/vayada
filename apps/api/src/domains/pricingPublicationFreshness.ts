@@ -58,3 +58,17 @@ export async function readPricingPublicationFreshness(
   }
   return report;
 }
+
+/** One log line per run; `problems` (stale plus unreadable publications) is what the platform alarms on. */
+export function summarizePricingPublicationFreshness(report: PricingPublicationFreshness[]) {
+  const stale = report.filter((row) => "stale" in row && row.stale.length > 0);
+  const errored = report.filter((row) => "error" in row);
+  return {
+    checked: report.length,
+    stale: stale.length,
+    errors: errored.length,
+    problems: stale.length + errored.length,
+    staleProperties: stale.slice(0, 20),
+    erroredProperties: errored.slice(0, 20),
+  };
+}
