@@ -7,7 +7,7 @@ import { FINANCIALS_DEFAULT_CATEGORIES } from "./financialsDefaultCategorySeed.j
 import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
 import {
   OWNER_OFF_IMPORTED,
-  pmsCohortModuleBlockers,
+  classifyPmsCohortModules,
   samePmsCohortModule,
   type PlannedModuleActivation,
 } from "./productionPmsCohortModules.js";
@@ -36,9 +36,12 @@ const legacy = (index: number, moduleId: string, active: unknown) =>
     is_active: active,
   });
 
-/** Five carried cohort hotels; the fifth's organization lacks an active base entitlement. */
+/**
+ * Seven carried cohort hotels: 1-3 ready for the module; 4 organization-wide Financials; 5 no
+ * active base entitlement; 6 an operator, not the owner; 7 an unsupported currency.
+ */
 function plan(moduleActivations: IdentitySourceRow[], cohort = true) {
-  const indexes = [1, 2, 3, 4, 5];
+  const indexes = [1, 2, 3, 4, 5, 6, 7];
   const target: ProductionPmsTargetState = {
     propertyLinks: indexes.map((index) => ({
       sourceId: `${HOTEL}${index}`,
@@ -54,7 +57,9 @@ function plan(moduleActivations: IdentitySourceRow[], cohort = true) {
       profileRevision: 1,
       timeZone: "Europe/Berlin",
       organizationIds: [ORGANIZATION],
+      financialsOwnerOrganizationIds: index === 6 ? [] : [ORGANIZATION],
       pmsBaseOrganizationIds: index === 5 ? [] : [ORGANIZATION],
+      organizationFinancialsIds: index === 4 ? [ORGANIZATION] : [],
       storedCalendar: null,
     })),
     bookings: [],
@@ -75,7 +80,7 @@ function plan(moduleActivations: IdentitySourceRow[], cohort = true) {
         name: "Room",
         total_rooms: 0,
         base_rate: "0",
-        currency: "EUR",
+        currency: index === 7 ? "IDR" : "EUR",
       }),
     ]),
     target,
@@ -105,15 +110,19 @@ const offStored = {
   ownerOff: true,
   unbounded: true,
   categories: 7,
+  archivedCategories: 0,
 };
 
 describe("production PMS cohort module activations", () => {
-  it("maps legacy financials on, off and absent, and reports modules the runtime lacks", () => {
+  it("maps legacy financials on, off and absent, and reports what it cannot carry", () => {
     const result = plan([
       legacy(1, "financials", true),
       legacy(2, "financials", false),
       legacy(2, "affiliates", true),
-      legacy(5, "financials", true), // no active base entitlement: no module
+      legacy(3, "affiliates", false), // inactive: nothing to report
+      legacy(4, "financials", true),
+      legacy(5, "financials", true),
+      legacy(6, "financials", false),
     ]);
     expect(result.blockers).toEqual([]);
     expect(result.moduleActivations).toEqual(
@@ -122,7 +131,6 @@ describe("production PMS cohort module activations", () => {
           [1, true, "on"],
           [2, false, "off"],
           [3, false, "absent"],
-          [4, false, "absent"],
         ] as const
       ).map(([index, active, state]) => ({
         organizationId: ORGANIZATION,
@@ -133,12 +141,19 @@ describe("production PMS cohort module activations", () => {
         legacy: state,
       })),
     );
+    expect(result.skippedModules).toEqual([
+      { propertyId: `${PROPERTY}4`, legacy: "on", reason: "organization_financials" },
+      { propertyId: `${PROPERTY}5`, legacy: "on", reason: "base_entitlement" },
+      { propertyId: `${PROPERTY}6`, legacy: "off", reason: "owner_organization" },
+      { propertyId: `${PROPERTY}7`, legacy: "absent", reason: "pricing_currency" },
+    ]);
     expect(result.unmappedModules).toEqual([`${HOTEL}2:affiliates`]);
     // An invalid legacy row blocks the run instead of aborting the plan.
     expect(plan([legacy(1, "financials", "yes")]).blockers).toEqual([
       expect.objectContaining({
         code: "INVALID_SOURCE_ROW",
-        source: "pms.property_module_activations",
+        source: "pms.hotels",
+        sourceId: `${HOTEL}1`,
       }),
     ]);
   });
@@ -153,24 +168,47 @@ describe("production PMS cohort module activations", () => {
     );
   });
 
-  it("blocks a stored module that differs, and keeps one that matches", () => {
+  it("never rewrites a stored module, and writes a missing one unless a category is archived", () => {
     expect(samePmsCohortModule(offModule, offStored)).toBe(true);
-    expect(pmsCohortModuleBlockers([offModule], [offStored])).toEqual([]);
-    // Suspended without a live Owner-off marker is a suspension the Owner cannot undo.
+    const onModule = {
+      ...offModule,
+      propertyId: `${PROPERTY}2`,
+      active: true,
+      legacy: "on" as const,
+    };
+    const missing = { ...offModule, propertyId: `${PROPERTY}3` };
+    const archived = { ...offModule, propertyId: `${PROPERTY}4` };
+    const none = { status: null, ready: false, ownerOff: false, unbounded: false, categories: 0 };
+    expect(
+      classifyPmsCohortModules(
+        [offModule, onModule, missing, archived],
+        [
+          offStored,
+          // The Owner switched it off after the import: newer on the target.
+          { ...offStored, propertyId: onModule.propertyId },
+          { ...none, propertyId: missing.propertyId, archivedCategories: 0 },
+          { ...none, propertyId: archived.propertyId, archivedCategories: 1 },
+        ],
+      ),
+    ).toEqual({
+      write: [missing],
+      unchanged: [offModule.propertyId],
+      preserved: [onModule.propertyId],
+      skipped: [
+        { propertyId: archived.propertyId, legacy: "off", reason: "archived_starter_category" },
+      ],
+    });
+    // Suspended without a live Owner-off marker, or incomplete, is not the planned module.
     for (const stored of [
       { ...offStored, ownerOff: false },
-      { ...offStored, status: "active", ownerOff: false },
       { ...offStored, categories: 6 },
       { ...offStored, ready: false },
     ])
-      expect(pmsCohortModuleBlockers([offModule], [stored])).toEqual([
-        expect.objectContaining({ code: "COHORT_MODULE_ACTIVATION_CONFLICT" }),
-      ]);
-    expect(pmsCohortModuleBlockers([offModule], [{ ...offStored, status: null }])).toEqual([]);
+      expect(samePmsCohortModule(offModule, stored)).toBe(false);
   });
 
-  it("writes missing modules after verification, verifies them, and blocks conflicts", async () => {
-    const run = async (stored: Array<Record<string, unknown>>) => {
+  it("writes missing modules after verification, verifies them, and keeps stored ones", async () => {
+    const run = async (stored: Array<Record<string, unknown>>, mode: "apply" | "dry-run") => {
       const steps: string[] = [];
       let reads = 0;
       const client = {
@@ -187,7 +225,7 @@ describe("production PMS cohort module activations", () => {
       let builds = 0;
       const report = await runProductionPmsTransaction(
         client as never,
-        { sourceRunId: RUN, mode: "apply" },
+        { sourceRunId: RUN, mode },
         {
           readSnapshot: async () => ({ rows: [], snapshotAt: AT, completedAt: AT, cohort: null }),
           readPrerequisites: async () => ({
@@ -202,6 +240,7 @@ describe("production PMS cohort module activations", () => {
               sourceRunId: RUN,
               checksum: "c".repeat(64),
               moduleActivations: [offModule],
+              skippedModules: [],
               unmappedModules: [],
               records: [],
               writes: ++builds === 3 ? [] : [{ targetTable: "room_types" }],
@@ -215,28 +254,34 @@ describe("production PMS cohort module activations", () => {
             return { room_types: 1 };
           },
           writeProvenance: async () => 0,
-          activateCohort: async () => {
-            steps.push("activate");
-            return {} as never;
-          },
         },
       );
       return { report, steps };
     };
-    const fresh = await run([{ ...offStored, status: null }]);
-    expect(fresh.steps).toEqual(["read-modules:1", "write", "module", "read-modules:2"]);
-    expect(fresh.report).toMatchObject({
-      applied: true,
-      modules: { planned: 1, written: 1, unchanged: 0, unmapped: [] },
+    const missing = { ...offStored, status: null, archivedCategories: 0 };
+    const preview = await run([missing], "dry-run");
+    expect(preview.steps).toEqual(["read-modules:1"]);
+    expect(preview.report.modules).toEqual({
+      planned: 1,
+      writes: 1,
+      unchanged: 0,
+      preserved: [],
+      skipped: [],
+      unmapped: [],
     });
-    const rerun = await run([offStored]);
-    expect(rerun.report.modules).toMatchObject({ written: 0, unchanged: 1 });
-    const conflict = await run([{ ...offStored, ownerOff: false }]);
-    expect(conflict.report).toMatchObject({ applied: false });
-    expect(conflict.report.blockers).toEqual([
-      expect.objectContaining({ code: "COHORT_MODULE_ACTIVATION_CONFLICT" }),
-    ]);
-    expect(conflict.steps).toEqual(["read-modules:1"]);
+    const fresh = await run([missing], "apply");
+    expect(fresh.steps).toEqual(["read-modules:1", "write", "module", "read-modules:2"]);
+    expect(fresh.report).toMatchObject({ applied: true, modules: { writes: 1 } });
+    const rerun = await run([offStored], "apply");
+    expect(rerun.report.modules).toMatchObject({ writes: 0, unchanged: 1 });
+    // An Owner change after the import is kept, not rewritten, and does not block.
+    const changed = await run([{ ...offStored, status: "active", ownerOff: false }], "apply");
+    expect(changed.report).toMatchObject({
+      applied: true,
+      blockers: [],
+      modules: { writes: 0, preserved: [offModule.propertyId] },
+    });
+    expect(changed.steps).toEqual(["read-modules:1", "write"]);
   });
 
   it("mirrors the native first currencies, base entitlements, categories, markers and audits", async () => {

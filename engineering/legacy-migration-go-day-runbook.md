@@ -148,8 +148,8 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
 0. **Make each cohort hotel bookable.** The cutover writes the catalog, the
    native property links, the property-scoped `property-management`
    entitlement and the setup rows native onboarding writes (pricing settings,
-   verified room labels, operating calendar, inventory coverage; see the cohort
-   contract). It then sets `lifecycle_status = 'active'` for each cohort hotel
+   verified room labels, operating calendar, inventory coverage, the Financials
+   module as legacy had it; see the cohort contract). It then sets `lifecycle_status = 'active'` for each cohort hotel
    whose profile is `complete` and that meets every VAY-2066 readiness item
    (a–g). Parity reports how many cohort hotels are `active` and `provisioning`
    and what the provisioning ones miss, and fails an active one that is not
@@ -187,6 +187,14 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
    - a location row and an active canonical slug
    - a bookability profile that is `public_safe`/public/fresh/ready with
      payment methods
+
+   Financials: the PMS report lists the cohort hotels whose legacy module was
+   skipped, with the reason. For each one imported with Financials on, run
+   `target:financials:readiness -- --property-id <id> --expect-active` and
+   resolve its findings before reopen. The VAY-1138 activation runbook's
+   per-property approval covers activating Financials in the target; these
+   hotels carry the activation they had in legacy (decision for the go-day
+   approver).
 
 1. For each cohort hotel, check:
    - rooms, rate plans and the availability calendar
@@ -285,6 +293,7 @@ and legacy is not a fallback (decisions table).
   every readiness item (VAY-2066 a–g); the rest stay `provisioning`.
 - Legacy PMS module activations map to the runtime's property-scoped
   `module:*` entitlements (financials only; see the cohort contract). Open
-  decision: a hotel without a legacy row imports Financials off (legacy reads it
+  decisions: a hotel without a legacy row imports Financials off (legacy reads it
   as off), while a native new hotel starts with it on; the Owner can switch it
-  on in the Feature Hub.
+  on in the Feature Hub. Legacy `affiliates` is not carried, although
+  booking-admin's Refer-a-guest setting still reads `module:affiliates`.

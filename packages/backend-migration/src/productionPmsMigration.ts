@@ -20,10 +20,11 @@ import {
   type CohortActivationReport,
 } from "./productionPmsCohortActivation.js";
 import {
-  pmsCohortModuleBlockers,
+  classifyPmsCohortModules,
   readPmsCohortModules,
   samePmsCohortModule,
   writePmsCohortModule,
+  type SkippedModuleActivation,
 } from "./productionPmsCohortModules.js";
 
 type QueryClient = Pick<pg.ClientBase, "query">;
@@ -38,12 +39,16 @@ export type ProductionPmsMigrationReport = {
   blockers: ProductionPmsPlan["blockers"];
   /** VAY-1362: cohort lifecycle activation after an apply; absent otherwise. */
   activation?: CohortActivationReport;
-  /** VAY-1362: legacy module activations carried into cohort hotels; absent without any. */
+  /** VAY-1362: legacy module activations carried into cohort hotels; absent without a cohort. */
   modules?: {
     planned: number;
-    written: number;
+    /** Missing modules written by an apply, or that a dry run would write. */
+    writes: number;
     unchanged: number;
-    /** Legacy modules without a runtime module, as hotelId:moduleId. */
+    /** Stored modules that differ from legacy, kept as they are (newer on the target). */
+    preserved: string[];
+    skipped: SkippedModuleActivation[];
+    /** Active legacy modules without a runtime module, as hotelId:moduleId. */
     unmapped: string[];
   };
 };
@@ -120,7 +125,7 @@ export async function runProductionPmsTransaction(
       target: emptyTarget,
     });
     const target = await services.readTarget(client, preliminary.records, prerequisites);
-    const built = services.buildPlan({
+    const plan = services.buildPlan({
       sourceRunId: input.sourceRunId,
       snapshotAt: snapshot.snapshotAt,
       completedAt: snapshot.completedAt,
@@ -129,17 +134,32 @@ export async function runProductionPmsTransaction(
       ...(snapshot.moduleActivations ? { moduleActivations: snapshot.moduleActivations } : {}),
       target,
     });
-    // VAY-1362: a stored module that differs from the legacy state blocks; it is never rewritten.
-    const modules = built.moduleActivations ?? [];
-    const storedModules = await readPmsCohortModules(client, modules);
-    const moduleBlockers = pmsCohortModuleBlockers(modules, storedModules);
-    const plan = moduleBlockers.length
-      ? { ...built, blockers: [...built.blockers, ...moduleBlockers] }
-      : built;
+    // VAY-1362: stored modules are never rewritten; missing ones are written after verification.
+    const modules = plan.moduleActivations ?? [];
+    const moduleActions = classifyPmsCohortModules(
+      modules,
+      await readPmsCohortModules(client, modules),
+    );
+    const moduleReport = (writes: number) =>
+      modules.length || plan.skippedModules?.length || plan.unmappedModules?.length
+        ? {
+            modules: {
+              planned: modules.length,
+              writes,
+              unchanged: moduleActions.unchanged.length,
+              preserved: moduleActions.preserved,
+              skipped: [...(plan.skippedModules ?? []), ...moduleActions.skipped],
+              unmapped: plan.unmappedModules ?? [],
+            },
+          }
+        : {};
     if (input.mode === "dry-run" || plan.blockers.length > 0) {
       await client.query("ROLLBACK");
       finished = true;
-      return report(input, plan, false);
+      return {
+        ...report(input, plan, false),
+        ...moduleReport(plan.blockers.length ? 0 : moduleActions.write.length),
+      };
     }
     const cohortPropertyIds = plan.cohortPropertyIds ?? [];
     await lockCohortProperties(client, cohortPropertyIds);
@@ -172,19 +192,16 @@ export async function runProductionPmsTransaction(
     if (verified.checksum !== plan.checksum || verified.writes.length > 0)
       throw new Error("Post-write PMS verification does not match the migration plan");
     // VAY-1362: missing module activations are written as native onboarding leaves them, then
-    // every planned one is verified as the runtime reads it.
-    const missingModules = modules.filter(
-      (module) => !storedModules.find((row) => row.propertyId === module.propertyId)?.status,
-    );
-    for (const module of missingModules)
+    // verified as the runtime reads them.
+    for (const module of moduleActions.write)
       await writePmsCohortModule(
         client,
         { sourceRunId: input.sourceRunId, completedAt: snapshot.completedAt },
         module,
       );
-    const writtenModules = await readPmsCohortModules(client, modules);
+    const writtenModules = await readPmsCohortModules(client, moduleActions.write);
     if (
-      modules.some(
+      moduleActions.write.some(
         (module) =>
           !samePmsCohortModule(
             module,
@@ -207,16 +224,7 @@ export async function runProductionPmsTransaction(
     return {
       ...report(input, plan, true),
       ...(activation ? { activation } : {}),
-      ...(modules.length || plan.unmappedModules?.length
-        ? {
-            modules: {
-              planned: modules.length,
-              written: missingModules.length,
-              unchanged: modules.length - missingModules.length,
-              unmapped: plan.unmappedModules ?? [],
-            },
-          }
-        : {}),
+      ...moduleReport(moduleActions.write.length),
     };
   } catch (error) {
     if (!finished) await client.query("ROLLBACK").catch(() => undefined);

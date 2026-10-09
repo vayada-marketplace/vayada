@@ -20,11 +20,11 @@ import {
 } from "./productionPmsTargetReader.js";
 import { activateReadyCohortProperties } from "./productionPmsCohortActivation.js";
 import {
-  pmsCohortModuleBlockers,
+  classifyPmsCohortModules,
   readPmsCohortModules,
-  samePmsCohortModule,
   writePmsCohortModule,
 } from "./productionPmsCohortModules.js";
+import { NATIVE_PRICING_CURRENCIES } from "./productionPmsCohortSetup.js";
 import { readCohortReadiness, readyForActivation } from "./productionPmsCohortReadiness.js";
 import type { PmsTargetRecord } from "./productionPmsTypes.js";
 import { writeProductionPmsRecords } from "./productionPmsWriter.js";
@@ -515,8 +515,6 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
                 ($1, 'pms', 'property-management', 'active', 'pms', 'pms_property', $3)`,
         [ORGANIZATION, PROPERTY, NATIVE_PROPERTY],
       );
-      // Native: hotel creation's pending default, the first currency with its starter categories
-      // and completion, then the Owner switches Financials off in the Feature Hub (Writer A).
       const api = join(import.meta.dirname, "../../../apps/api/src");
       const statement = async (file: string, pattern: RegExp) => {
         const sql = pattern.exec(await readFile(join(api, file), "utf8"))?.[1];
@@ -531,46 +529,43 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
         `SELECT $1::uuid, 'pms', 'module:financials', 'suspended', 'pms', 'pms_property', ` +
           `resource_id, '{"newHotelFinancialsDefault":"pending"}'::jsonb`,
       );
-      const nativeId = (
-        await client.query<{ id: string }>(
-          `INSERT INTO identity.product_entitlements (organization_id, product, entitlement_key,
-             status, resource_product, resource_type, resource_id, metadata)
-           VALUES ($1, 'pms', 'module:financials', 'suspended', 'pms', 'pms_property', $2,
-                   '{"newHotelFinancialsDefault":"pending"}'::jsonb)
-           RETURNING id::text`,
-          [ORGANIZATION, NATIVE_PROPERTY],
-        )
-      ).rows[0]!.id;
-      await client.query(
-        await statement(
-          "domains/pmsPricingCommandRepository.ts",
-          /`(INSERT INTO pms\.property_pricing_settings[^`]*?VALUES \([^)]*\))/,
-        ),
-        [NATIVE_PROPERTY, "EUR", AT],
-      );
-      await client.query(
-        await statement(
-          "domains/financeStarterCategories.ts",
-          /`(INSERT INTO finance\.expense_categories[^`]*)`/,
-        ),
-        [NATIVE_PROPERTY],
-      );
-      await client.query(
-        await statement(
-          "domains/hotelSetupFirstCurrencyCompletion.ts",
-          /`(UPDATE identity\.product_entitlements SET status='active'[^`]*)`/,
-        ),
-        [nativeId],
-      );
-      await client.query(
-        await statement(
-          "hotelSetupFeatureHubOrdinary.ts",
-          /`(UPDATE identity\.product_entitlements SET status=\$2[^`]*)`/,
-        ),
-        [nativeId, "suspended", true],
-      );
-
-      // Import: legacy had Financials switched off for the same kind of hotel.
+      // Native: hotel creation's pending default, then the first currency with its starter
+      // categories and completion (hotelSetupFirstCurrencyCompletion).
+      const nativeDefault = async () => {
+        const id = (
+          await client.query<{ id: string }>(
+            `INSERT INTO identity.product_entitlements (organization_id, product, entitlement_key,
+               status, resource_product, resource_type, resource_id, metadata)
+             VALUES ($1, 'pms', 'module:financials', 'suspended', 'pms', 'pms_property', $2,
+                     '{"newHotelFinancialsDefault":"pending"}'::jsonb)
+             RETURNING id::text`,
+            [ORGANIZATION, NATIVE_PROPERTY],
+          )
+        ).rows[0]!.id;
+        await client.query(
+          await statement(
+            "domains/pmsPricingCommandRepository.ts",
+            /`(INSERT INTO pms\.property_pricing_settings[^`]*?VALUES \([^)]*\))/,
+          ),
+          [NATIVE_PROPERTY, "EUR", AT],
+        );
+        await client.query(
+          await statement(
+            "domains/financeStarterCategories.ts",
+            /`(INSERT INTO finance\.expense_categories[^`]*)`/,
+          ),
+          [NATIVE_PROPERTY],
+        );
+        await client.query(
+          await statement(
+            "domains/hotelSetupFirstCurrencyCompletion.ts",
+            /`(UPDATE identity\.product_entitlements SET status='active'[^`]*)`/,
+          ),
+          [id],
+        );
+        return id;
+      };
+      // Import: the same hotel with legacy Financials on or off.
       const prerequisites = await readProductionPmsPrerequisites(client, RUN);
       const rows = sourceRows();
       rows[0]!.data["user_id"] = OWNER;
@@ -579,7 +574,7 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
         sourceTable: "property_module_activations",
         data: { hotel_id: HOTEL, module_id: "financials", is_active: isActive },
       });
-      const plan = async (records: PmsTargetRecord[] = [], active = false) =>
+      const plan = async (active: boolean, records: PmsTargetRecord[] = []) =>
         buildProductionPmsPlan({
           sourceRunId: RUN,
           snapshotAt: AT,
@@ -589,46 +584,80 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
           moduleActivations: [legacy(active)],
           target: await readProductionPmsTargetState(client, records, prerequisites),
         });
-      const planned = await plan((await plan()).records);
-      expect(planned.blockers).toEqual([]);
-      expect(planned.moduleActivations).toEqual([
-        {
-          organizationId: ORGANIZATION,
-          propertyId: PROPERTY,
-          entitlementKey: "module:financials",
-          active: false,
-          currency: "EUR",
-          legacy: "off",
-        },
-      ]);
-      await writeProductionPmsRecords(client, planned.writes);
-      for (const module of planned.moduleActivations!)
-        await writePmsCohortModule(client, { sourceRunId: RUN, completedAt: AT }, module);
+      const importModule = async (active: boolean) => {
+        const planned = await plan(active, (await plan(active)).records);
+        expect([planned.blockers, planned.skippedModules]).toEqual([[], []]);
+        expect(planned.moduleActivations).toEqual([
+          {
+            organizationId: ORGANIZATION,
+            propertyId: PROPERTY,
+            entitlementKey: "module:financials",
+            active,
+            currency: "EUR",
+            legacy: active ? "on" : "off",
+          },
+        ]);
+        await writeProductionPmsRecords(client, planned.writes);
+        for (const module of planned.moduleActivations!)
+          await writePmsCohortModule(client, { sourceRunId: RUN, completedAt: AT }, module);
+        return planned;
+      };
+      const state = async () => {
+        const result = await client.query(
+          `SELECT entitlement.resource_id AS "propertyId", entitlement.status,
+                  entitlement.starts_at IS NULL AND entitlement.expires_at IS NULL AS unbounded,
+                  (SELECT array_agg(key ORDER BY key)
+                     FROM jsonb_object_keys(entitlement.metadata) key) AS "metadataKeys",
+                  entitlement.metadata->>'newHotelFinancialsDefault' AS "default",
+                  entitlement.metadata->>'newHotelFinancialsActivationTransaction'
+                    = pg_current_xact_id()::text AS "readyNow",
+                  entitlement.metadata->>'featureHubOwnerDisabled' = entitlement.xmin::text
+                    AS "ownerOff",
+                  (SELECT array_agg(category.system_key || ':' || category.name || ':'
+                           || category.color || ':' || category.sort_order
+                           ORDER BY category.system_key)
+                     FROM finance.expense_categories category
+                    WHERE category.property_id::text = entitlement.resource_id
+                      AND category.archived_at IS NULL) AS categories
+             FROM identity.product_entitlements entitlement
+            WHERE entitlement.entitlement_key = 'module:financials'
+              AND entitlement.resource_id = ANY($1::text[])
+            ORDER BY entitlement.resource_id`,
+          [[PROPERTY, NATIVE_PROPERTY]],
+        );
+        const [imported, native] = result.rows.map(({ propertyId: _id, ...rest }) => rest);
+        expect(imported).toEqual(native);
+        expect(imported!["categories"]).toHaveLength(7);
+        return imported!;
+      };
 
-      const state = await client.query(
-        `SELECT entitlement.resource_id AS "propertyId", entitlement.status,
-                entitlement.starts_at IS NULL AND entitlement.expires_at IS NULL AS unbounded,
-                (SELECT array_agg(key ORDER BY key) FROM jsonb_object_keys(entitlement.metadata) key)
-                  AS "metadataKeys",
-                entitlement.metadata->>'newHotelFinancialsDefault' AS "default",
-                entitlement.metadata->>'newHotelFinancialsActivationTransaction'
-                  = pg_current_xact_id()::text AS "readyNow",
-                entitlement.metadata->>'featureHubOwnerDisabled' = entitlement.xmin::text
-                  AS "ownerOff",
-                (SELECT array_agg(category.system_key || ':' || category.name || ':'
-                         || category.color || ':' || category.sort_order ORDER BY category.system_key)
-                   FROM finance.expense_categories category
-                  WHERE category.property_id::text = entitlement.resource_id
-                    AND category.archived_at IS NULL) AS categories
-           FROM identity.product_entitlements entitlement
-          WHERE entitlement.entitlement_key = 'module:financials'
-            AND entitlement.resource_id = ANY($1::text[])
-          ORDER BY entitlement.resource_id`,
-        [[PROPERTY, NATIVE_PROPERTY]],
+      // Legacy on: the completed new-hotel default, active (in a savepoint, then undone).
+      await client.query("SAVEPOINT legacy_on");
+      await nativeDefault();
+      await importModule(true);
+      expect(await state()).toMatchObject({
+        status: "active",
+        default: "ready",
+        readyNow: true,
+        ownerOff: null,
+        metadataKeys: ["newHotelFinancialsActivationTransaction", "newHotelFinancialsDefault"],
+      });
+      await client.query("ROLLBACK TO SAVEPOINT legacy_on");
+      // Back in the top-level transaction: the Owner-off marker is this transaction's ID, live
+      // only on rows it writes itself (a savepoint writes under its own ID).
+      await client.query("RELEASE SAVEPOINT legacy_on");
+
+      // Legacy off: then switched off as the Owner does in the Feature Hub (Writer A).
+      const nativeId = await nativeDefault();
+      await client.query(
+        await statement(
+          "hotelSetupFeatureHubOrdinary.ts",
+          /`(UPDATE identity\.product_entitlements SET status=\$2[^`]*)`/,
+        ),
+        [nativeId, "suspended", true],
       );
-      const [imported, native] = state.rows.map(({ propertyId: _id, ...rest }) => rest);
-      expect(imported).toEqual(native);
-      expect(imported).toMatchObject({
+      const planned = await importModule(false);
+      expect(await state()).toMatchObject({
         status: "suspended",
         default: "ready",
         readyNow: true,
@@ -640,7 +669,6 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
           "newHotelFinancialsDefault",
         ],
       });
-      expect(imported!["categories"]).toHaveLength(7);
       // Never the 0449 hotel-setup marker. The audit rows of the completion and the switch-off,
       // which the 0449 trigger would reject (and apply) as financials_module_deactivated here.
       const audits = await client.query(
@@ -661,18 +689,83 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
           privacy: "internal",
         },
       ]);
-      // The module reader agrees with the runtime, so a rerun plans no conflict and no write.
-      const stored = await readPmsCohortModules(client, planned.moduleActivations!);
-      expect(pmsCohortModuleBlockers(planned.moduleActivations!, stored)).toEqual([]);
-      expect(samePmsCohortModule(planned.moduleActivations![0]!, stored[0])).toBe(true);
-      // Legacy on now differs from the stored Owner-off module: it blocks instead of rewriting.
-      const switched = await plan(planned.records, true);
+
+      // The runtime reads the imported module as the Owner's to switch on: the Feature Hub's own
+      // scope read and enable prerequisites, and the module route's setup and list reads.
+      const importedId = (
+        await client.query<{ id: string }>(
+          `SELECT id::text FROM identity.product_entitlements
+            WHERE resource_id = $1 AND entitlement_key = 'module:financials'`,
+          [PROPERTY],
+        )
+      ).rows[0]!.id;
       expect(
-        pmsCohortModuleBlockers(
+        (
+          await client.query(
+            await statement(
+              "hotelSetupFeatureHubOrdinary.ts",
+              /`(SELECT id::text, status,\s+metadata->>'newHotelFinancialsDefault'[^`]*FOR UPDATE)`/,
+            ),
+            [ORGANIZATION, PROPERTY],
+          )
+        ).rows,
+      ).toEqual([
+        { id: importedId, status: "suspended", ready: true, ownerOff: true, window: true },
+      ]);
+      expect(
+        (
+          await client.query(
+            await statement(
+              "hotelSetupFeatureHubOrdinary.ts",
+              /`(SELECT EXISTS \(SELECT 1 FROM pms\.property_pricing_settings[^`]*AS ok)`/,
+            ),
+            [
+              ORGANIZATION,
+              PROPERTY,
+              importedId,
+              ["property-management", "pms-core", "account_access"],
+              [...NATIVE_PRICING_CURRENCIES],
+            ],
+          )
+        ).rows,
+      ).toEqual([{ ok: true }]);
+      expect(
+        (
+          await client.query(
+            await statement(
+              "routes/pmsModuleActivations.ts",
+              /`(SELECT EXISTS \(\s+SELECT 1 FROM identity\.product_entitlements[^`]*AS ready)`/,
+            ),
+            [ORGANIZATION, PROPERTY],
+          )
+        ).rows,
+      ).toEqual([{ ready: true }]);
+      expect(
+        (
+          await client.query(
+            await statement(
+              "routes/pmsModuleActivations.ts",
+              /`(SELECT\s+entitlement_key AS "entitlementKey",[^`]*ORDER BY entitlement_key ASC)`/,
+            ),
+            [ORGANIZATION, PROPERTY, ["module:affiliates", "module:financials"]],
+          )
+        ).rows,
+      ).toMatchObject([{ entitlementKey: "module:financials", status: "suspended" }]);
+
+      // A rerun keeps it unchanged; legacy on now differs from the stored Owner-off module, which
+      // is kept as it is (newer on the target).
+      const stored = await readPmsCohortModules(client, planned.moduleActivations!);
+      expect(classifyPmsCohortModules(planned.moduleActivations!, stored)).toMatchObject({
+        write: [],
+        unchanged: [PROPERTY],
+      });
+      const switched = await plan(true, planned.records);
+      expect(
+        classifyPmsCohortModules(
           switched.moduleActivations!,
           await readPmsCohortModules(client, switched.moduleActivations!),
         ),
-      ).toEqual([expect.objectContaining({ code: "COHORT_MODULE_ACTIVATION_CONFLICT" })]);
+      ).toMatchObject({ write: [], preserved: [PROPERTY] });
     } finally {
       await client.query("ROLLBACK");
     }

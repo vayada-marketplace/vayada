@@ -175,20 +175,29 @@ Parity fails an active carried cohort property that is not ready and a ready one
 `provisioning`, and always reports the counts and what the provisioning ones miss.
 
 **PMS modules.** Legacy `pms.property_module_activations` of a carried cohort hotel map to the
-runtime's property-scoped `module:*` entitlements; only `financials` has one (`affiliates` is
-retired, and any other module is reported as unmapped). After the setup rows are verified and
-before activation, the import writes the module as native onboarding leaves it: the seven
-starter expense categories, the entitlement marked as the completed first-currency default
-(`newHotelFinancialsDefault = ready` with this transaction) and its
-`pms.financials.default_activated` audit row. A module legacy had off, or had no row for (legacy
-reads that as off), is then switched off as the Feature Hub does: `suspended` with the
-`featureHubOwnerDisabled` marker of this transaction (live while it equals the row's `xmin`), so
-the Owner can switch it on; never the 0449 hotel-setup marker. Its audit row is
-`pms.financials.owner_off_imported`, because the 0449 trigger rejects (or would apply)
-`financials_module_deactivated` from a migration session. A hotel gets no module without one owner
-organization holding an active, unsuspended base PMS entitlement and pricing settings in a first
-currency. A stored module that differs from the legacy state blocks the run
-(`COHORT_MODULE_ACTIVATION_CONFLICT`); it is never rewritten.
+runtime's property-scoped `module:*` entitlements; only `financials` has one. Active legacy
+modules without one are reported as unmapped, including `affiliates`: its changes are retired
+(410), but the module read and booking-admin's Refer-a-guest setting still read
+`module:affiliates`, so such hotels lose that setting (open decision). The identity import's
+legacy-shaped `financials` rows on `pms_hotel` stay as they are; the runtime does not read them.
+After the setup rows are verified and before activation, the import writes a missing module as
+native onboarding leaves it: the seven starter expense categories, the entitlement marked as the
+completed first-currency default (`newHotelFinancialsDefault = ready` with this transaction) and
+its `pms.financials.default_activated` audit row. A module legacy had off, or had no row for
+(legacy reads that as off), is then switched off as the Feature Hub does: `suspended` with the
+`featureHubOwnerDisabled` marker of this transaction, so the Owner can switch it on; never the
+0449 hotel-setup marker. The marker is live while it equals the row's `xmin`, as for native
+hotels: a logical restore, a blue/green switch or any later write of the row ends it, and the
+Owner can then no longer switch the module on. Its audit row is
+`pms.financials.owner_off_imported`, because the 0449 trigger rejects (or, in a hotel-setup
+session, applies) `financials_module_deactivated` from a superuser or hotel-setup role member.
+A hotel gets no module, and the PMS report lists it as skipped with the reason, without one
+active `hotel_group` owning both native links (the native default and the Feature Hub need the
+owner; an operator does not qualify), an active base PMS entitlement of that organization with
+no suspended one (`property-management`, `pms-core`, `account_access`), no organization-wide
+Financials entitlement, pricing settings in a first currency, or with an archived starter
+category. A stored module is never rewritten: one that differs from legacy (an Owner or
+operator change after the import) is kept and reported as preserved.
 
 ## Verification
 

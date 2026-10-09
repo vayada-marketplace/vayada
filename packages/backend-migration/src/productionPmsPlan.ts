@@ -61,8 +61,12 @@ export function buildProductionPmsPlan(input: {
   const modules = planPmsCohortModules(context, input.moduleActivations ?? [], records);
   // Only a cohort run with module activations carries them, so other plans keep their checksum.
   const extra =
-    modules.planned.length || modules.unmapped.length
-      ? { moduleActivations: modules.planned, unmappedModules: modules.unmapped }
+    modules.planned.length || modules.skipped.length || modules.unmapped.length
+      ? {
+          moduleActivations: modules.planned,
+          skippedModules: modules.skipped,
+          unmappedModules: modules.unmapped,
+        }
       : undefined;
   const plan = reconcileProductionPmsRecords(context, records, extra);
   return extra ? { ...plan, ...extra } : plan;
