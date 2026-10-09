@@ -90,6 +90,9 @@ Details and commands: [`legacy-fixed-plan-billing-handover.md`](legacy-fixed-pla
    producer runs and a property without a settings row is on by default (rolling
    12). Cohort hotels with legacy auto-open off get no row and rely on it;
    without it their calendar windows stop moving after go-day.
+10. Every active room type of a cohort hotel has a bed type and consistent
+    occupancy limits in legacy, or parity fails `cohortRoomFacts`: the runtime
+    cannot read the room facts of that hotel otherwise.
 
 ## Window
 

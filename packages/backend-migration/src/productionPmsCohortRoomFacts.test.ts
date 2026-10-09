@@ -67,7 +67,7 @@ function nativeRead(row: Record<string, unknown>) {
   });
 }
 
-function plan(cohort: boolean, roomType: Record<string, unknown> = legacy) {
+function plan(cohort: boolean | "outside", roomType: Record<string, unknown> = legacy) {
   const row = (sourceTable: string, data: Record<string, unknown>): IdentitySourceRow => ({
     sourceDatabase: "pms",
     sourceTable,
@@ -109,7 +109,11 @@ function plan(cohort: boolean, roomType: Record<string, unknown> = legacy) {
     ],
     target,
     cohort: cohort
-      ? { bookingHotelIds: [], pmsHotelIds: [`${HOTEL}1`], marketplaceHotelIds: [] }
+      ? {
+          bookingHotelIds: [],
+          pmsHotelIds: cohort === "outside" ? [] : [`${HOTEL}1`],
+          marketplaceHotelIds: [],
+        }
       : null,
   });
   expect(result.blockers).toEqual([]);
@@ -141,10 +145,25 @@ describe("production PMS cohort room facts", () => {
     });
   });
 
+  it("maps bed labels as the form and the native legacy read do, and 0 bathrooms as shared", () => {
+    const beds = (bedType: string) => cohortRoomFacts({ ...legacy, bed_type: bedType })?.facts.beds;
+    expect(beds("2 Single Beds")).toEqual([{ type: "single", quantity: 2 }]);
+    expect(beds("Queen")).toEqual([{ type: "queen", quantity: 1 }]);
+    expect(beds("1 Futon, King + Bunk")).toEqual([
+      { type: "futon", quantity: 1 },
+      { type: "king_bunk", quantity: 1 },
+    ]);
+    expect(cohortRoomFacts({ ...legacy, bathrooms: 0 })?.facts).toMatchObject({
+      bathrooms: null,
+      bathroomType: "shared",
+    });
+  });
+
   it.each([
     ["no bed", { bed_type: "" }],
-    ["a bed outside the native vocabulary", { bed_type: "1 Futon" }],
+    ["more than 20 beds of a type", { bed_type: "21 King Bed" }],
     ["more adults than guests", { max_adults: 4 }],
+    ["fewer adults and children than guests", { max_adults: 2, max_children: 0 }],
   ])("keeps the legacy shape for %s", (_, values) => {
     expect(cohortRoomFacts({ ...legacy, ...values })).toBeNull();
   });
@@ -153,11 +172,23 @@ describe("production PMS cohort room facts", () => {
     const record = plan(true);
     expect(record.row).toMatchObject({
       category: "deluxe",
-      occupancyLimits: { maxOccupancy: 3, total: 3, adults: 2, children: 3 },
-      roomAttributes: { bedType: "1 King Bed, 2 single bed", bathroomType: "private" },
+      // Only the native keys: native edits merge, and stale legacy keys would win in readers.
+      occupancyLimits: { total: 3, adults: 2, children: 3 },
+      roomAttributes: {
+        bathroomType: "private",
+        legacyRoomFacts: {
+          maxOccupancy: 3,
+          maxAdults: 2,
+          maxChildren: null,
+          bedType: "1 King Bed, 2 single bed",
+          size: 25,
+        },
+      },
     });
+    expect(record.row["occupancyLimits"]).not.toHaveProperty("maxOccupancy");
+    expect(record.row["roomAttributes"]).not.toHaveProperty("bedType");
     expect(nativeRead(record.row)).not.toBeNull();
-    // Without a cohort the row keeps exactly its legacy shape, which the native read refuses.
+    // Without a cohort, or outside it, the row keeps exactly its legacy shape and checksum.
     const legacyRecord = plan(false);
     expect(legacyRecord.row["occupancyLimits"]).toEqual({
       maxOccupancy: 3,
@@ -167,6 +198,9 @@ describe("production PMS cohort room facts", () => {
     expect(legacyRecord.row["category"]).toBe("Deluxe");
     expect(nativeRead(legacyRecord.row)).toBeNull();
     expect(legacyRecord.sourceChecksum).not.toBe(record.sourceChecksum);
+    const outside = plan("outside");
+    expect(outside.row).toEqual(legacyRecord.row);
+    expect(outside.sourceChecksum).toBe(legacyRecord.sourceChecksum);
   });
 
   it("mirrors the native read, vocabulary and form labels", async () => {
