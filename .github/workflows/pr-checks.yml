@@ -9,6 +9,7 @@ on:
       - "fm/vay-965-*"
       - "fm/vay-2056-*"
       - "fm/vay-1543-*"
+      - "fm/vay-2066-*"
       - flamurmaliqi2811/vay-2044-expense-worker-runtime
       - fm/vay-2041-worker-permissions
       - fm/vay-2041-worker-source-permissions
@@ -487,6 +488,7 @@ jobs:
           src/domains/pmsRoomPublicationCommandRepository.integration.test.ts
           src/domains/pmsCalendarAutoOpenSettingsRepository.integration.test.ts
           src/jobs/pmsChannexScheduler.integration.test.ts
+          src/jobs/pmsCalendarAutoOpenScheduler.integration.test.ts
           src/domains/pmsInboxProviderActionCommand.integration.test.ts
           src/domains/channexOperationalAlerts.integration.test.ts
           src/pmsChannexManagementRoutes.test.ts

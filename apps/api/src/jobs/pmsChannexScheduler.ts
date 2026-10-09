@@ -200,6 +200,26 @@ export type PgPmsChannexSchedulerStoreConfig = {
   fullAriDaysAhead?: number;
 };
 
+/** The auto-open half of the scheduler store. It has no ARI methods, so no Channex path. */
+export type PmsCalendarAutoOpenSchedulerStore = Pick<
+  PmsChannexSchedulerStore,
+  "findCalendarAutoOpenCandidates" | "enqueueCalendarAutoOpenJob"
+>;
+
+export type PgPmsCalendarAutoOpenSchedulerStore = PmsCalendarAutoOpenSchedulerStore & {
+  /**
+   * Runs `run` while holding a cluster-wide session advisory lock, so overlapping API tasks
+   * (for example during a rolling deploy) never scan at the same time. Returns
+   * `{ ran: false }` without running when another session holds the lock.
+   */
+  withRunLock<T>(run: () => Promise<T>): Promise<{ ran: true; value: T } | { ran: false }>;
+  /** Enabled settings the candidate selection skips because an active room's label is unverified. */
+  countUnverifiedLabelSkips(): Promise<number>;
+  close(): Promise<void>;
+};
+
+export const PMS_CALENDAR_AUTO_OPEN_SCHEDULER_LOCK = "pms.calendar-auto-open.scheduler";
+
 type Queryable = Pick<pg.Pool | pg.PoolClient, "query">;
 
 type AriCandidateRow = {
@@ -352,6 +372,95 @@ export function createPgPmsChannexSchedulerStore(
       await pool.end();
     },
   };
+}
+
+export function createPgPmsCalendarAutoOpenSchedulerStore(config: {
+  connectionString: string;
+  max?: number;
+}): PgPmsCalendarAutoOpenSchedulerStore {
+  const max = config.max ?? 2;
+  // withRunLock keeps one client for the lock while the run queries through the pool.
+  if (!Number.isSafeInteger(max) || max < 2) {
+    throw new Error("PMS calendar auto-open scheduler pool needs at least 2 connections");
+  }
+  const pool = new pg.Pool({ connectionString: config.connectionString, max });
+
+  return {
+    findCalendarAutoOpenCandidates: (now, limit) =>
+      selectCalendarAutoOpenCandidates(pool, now, limit),
+    enqueueCalendarAutoOpenJob: (candidate, context) =>
+      enqueuePgCalendarAutoOpenJob(pool, candidate, context),
+    async withRunLock(run) {
+      const client = await pool.connect();
+      let mayHoldLock = true;
+      try {
+        const locked = await client.query<{ locked: boolean }>(
+          "SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked",
+          [PMS_CALENDAR_AUTO_OPEN_SCHEDULER_LOCK],
+        );
+        if (locked.rows[0]?.locked !== true) {
+          mayHoldLock = false;
+          return { ran: false };
+        }
+        try {
+          return { ran: true, value: await run() };
+        } finally {
+          await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [
+            PMS_CALENDAR_AUTO_OPEN_SCHEDULER_LOCK,
+          ]);
+          mayHoldLock = false;
+        }
+      } finally {
+        // A session that may still hold the lock is discarded, which releases the lock.
+        client.release(mayHoldLock);
+      }
+    },
+    async countUnverifiedLabelSkips() {
+      const result = await pool.query<{ skipped: number }>(
+        `SELECT count(*)::int AS skipped
+         FROM pms.calendar_auto_open_settings setting
+         WHERE setting.enabled IS TRUE
+           AND EXISTS (
+             SELECT 1
+             FROM pms.rooms physical_room
+             JOIN pms.room_types room_type
+               ON room_type.property_id=physical_room.property_id
+              AND room_type.id=physical_room.room_type_id
+              AND room_type.active IS TRUE
+             WHERE physical_room.property_id=setting.property_id
+               AND physical_room.status<>'retired'
+               AND (
+                 physical_room.operational_label_status<>'verified'
+                 OR physical_room.room_number IS NULL
+               )
+           )`,
+      );
+      return result.rows[0]?.skipped ?? 0;
+    },
+    async close() {
+      await pool.end();
+    },
+  };
+}
+
+/**
+ * Enqueues calendar auto-open jobs and nothing else. Unlike runPmsChannexSchedulerJobs it takes
+ * no Channex provider, so it cannot push ARI.
+ */
+export async function runPmsCalendarAutoOpenScheduler(
+  store: PmsCalendarAutoOpenSchedulerStore,
+  options: Omit<PmsChannexSchedulerOptions, "run"> = {},
+): Promise<PmsChannexSchedulerRunResult> {
+  const now = options.now ?? new Date();
+  return runCalendarAutoOpen(store, {
+    now,
+    context: {
+      now,
+      workerId: options.workerId ?? "pms-calendar-auto-open-scheduler",
+      correlationId: `pms.calendar-auto-open.scheduler:${now.toISOString()}`,
+    },
+    limit: options.limit ?? DEFAULT_PMS_CHANNEX_LIMIT,
+  });
 }
 
 export async function runPmsChannexSchedulerJobs(
@@ -1217,7 +1326,7 @@ async function enqueuePgCalendarAutoOpenJob(
 }
 
 async function runCalendarAutoOpen(
-  store: PmsChannexSchedulerStore,
+  store: PmsCalendarAutoOpenSchedulerStore,
   input: {
     now: Date;
     context: PmsChannexSchedulerContext;
