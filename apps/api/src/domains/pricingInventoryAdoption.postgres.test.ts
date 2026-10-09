@@ -62,6 +62,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
     "repository-stay-cancel-after-adoption",
     "repository-stay-cancel-guest-route",
     "repository-stay-cancel-host-guest-request",
+    "repository-stay-cancel-host-reject",
   ])("validates complete historical binding: %s", async (scenario) => {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
       throw new Error("test database required");
@@ -771,6 +772,64 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           pool: db,
         }).findReservationByGuestBookingId(propertyId, bookingId);
         expect(read?.cancellationOutcome).toMatchObject({ retainedMinor: "81000" });
+        // Nothing consumes pms.reservation.*; no PMS handoff is staged for a v2 stay.
+        const jobs = await db.query(
+          "SELECT job_type FROM platform.jobs WHERE resource_id=$1 AND job_type LIKE 'pms.%'",
+          [bookingId],
+        );
+        expect(jobs.rows).toEqual([]);
+      } else if (scenario === "repository-stay-cancel-host-reject") {
+        // A v2 request the PMS never adopted: rejecting it releases the hold, with no handoff.
+        await db.query(
+          `UPDATE booking.guest_bookings SET lifecycle_status='pending_payment',
+           booking_metadata=booking_metadata || '{"paymentMethod":"pay_at_property","acceptanceMode":"request"}'
+           WHERE id=$1`,
+          [bookingId],
+        );
+        const actorUserId = randomUUID();
+        await db.query("INSERT INTO identity.users(id,email,status) VALUES($1,$2,'active')", [
+          actorUserId,
+          `${actorUserId}@example.test`,
+        ]);
+        const nested = {
+          query: (text: string, values?: unknown[]) =>
+            db.query(
+              (
+                {
+                  BEGIN: "SAVEPOINT host_reject",
+                  COMMIT: "RELEASE SAVEPOINT host_reject",
+                  ROLLBACK: "ROLLBACK TO SAVEPOINT host_reject",
+                } as Record<string, string>
+              )[text] ?? text,
+              values,
+            ),
+        };
+        const actions = createBookingHostActions({
+          pool: nested as unknown as pg.Pool,
+          inventory: createTargetPmsInventoryReservationPort(),
+          guards: targetBookingHostActionGuards,
+          now: () => new Date("2026-09-21T08:00:00Z"),
+        });
+        const hostScope = { propertyId, bookingId, actorUserId };
+        const hostPreview = await actions.preview(hostScope, {
+          action: "reject",
+          reason: "No rooms that night",
+        });
+        await actions.apply(hostScope, hostPreview.previewId, "host-reject");
+        const rejected = await db.query(
+          "SELECT lifecycle_status AS status FROM booking.guest_bookings WHERE id=$1",
+          [bookingId],
+        );
+        expect(rejected.rows).toEqual([{ status: "declined" }]);
+        expect((await snapshot()).receipts.map(({ lifecycle_state }) => lifecycle_state)).toEqual([
+          "released",
+          "released",
+        ]);
+        const jobs = await db.query(
+          "SELECT job_type FROM platform.jobs WHERE resource_id=$1 AND job_type LIKE 'pms.%'",
+          [bookingId],
+        );
+        expect(jobs.rows).toEqual([]);
       } else if (scenario.startsWith("repository-stay-cancel")) {
         // VAY-2100: booked tiers come from the acceptance; 10 days out meets the 7-day 25% tier.
         // Days count in the frozen Europe/Berlin timezone.
