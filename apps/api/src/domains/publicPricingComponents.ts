@@ -79,8 +79,7 @@ export async function lockPublicPricingComponents(
   if (
     !scope ||
     scope.propertyId !== room.owner.scope.propertyId ||
-    scope.organizationId !== room.owner.scope.organizationId ||
-    scope.authorityRevision !== room.owner.scope.authorityRevision
+    scope.organizationId !== room.owner.scope.organizationId
   )
     return null;
   const date = (
