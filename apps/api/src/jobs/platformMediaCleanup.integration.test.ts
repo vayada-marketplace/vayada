@@ -13,7 +13,8 @@ const SESSION = "20820000-0000-4000-8000-000000000001";
 const LEGACY_SESSION = "20820000-0000-4000-8000-000000000002";
 const MEDIA = "20820000-0000-4000-8000-000000000003";
 const IDS = [SESSION, LEGACY_SESSION, MEDIA].map((id) => `'${id}'`).join(",");
-// Long before any other suite's sessions, so this run only ever selects its own rows.
+// Dated long before any other suite's rows, so these runs select only their own. A cleanup run
+// from another suite at a later "now" would select these rows, so CI runs this file on its own.
 const EXPIRES_AT = "2001-01-01T00:00:00.000Z";
 const NOW = new Date("2001-01-01T00:15:00.000Z");
 const minutesAfterNow = (minutes: number) => new Date(NOW.getTime() + minutes * 60_000);
