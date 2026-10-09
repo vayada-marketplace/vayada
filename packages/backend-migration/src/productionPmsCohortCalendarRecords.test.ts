@@ -88,7 +88,17 @@ const plan = (rows: IdentitySourceRow[], state: ProductionPmsTargetState, cohort
   });
 const tables = (result: ReturnType<typeof plan>) =>
   result.records
-    .filter((record) => /calendar|idempotency|domain_events|outbox|audit/.test(record.targetTable))
+    .filter(
+      (record) =>
+        record.targetTable.startsWith("operating_calendar") ||
+        [
+          record.row["resourceType"],
+          record.row["targetResourceType"],
+          record.row["operation"],
+        ].some(
+          (value) => value === "operating_calendar" || value === "pms.operating_calendar.upsert",
+        ),
+    )
     .map((record) => record.targetTable)
     .sort();
 
@@ -142,7 +152,12 @@ describe("production PMS cohort operating calendar", () => {
       })),
     );
     const byTable = (table: string) =>
-      result.records.find((record) => record.targetTable === table)!.row;
+      result.records.find(
+        (record) =>
+          record.targetTable === table &&
+          (record.row["resourceType"] === "operating_calendar" ||
+            record.row["operation"] === "pms.operating_calendar.upsert"),
+      )!.row;
     expect(byTable("outbox_events")).toMatchObject({
       domainEventId: byTable("domain_events")["id"],
       destination: "pms.inventory-source",

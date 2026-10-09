@@ -12,11 +12,21 @@ import {
   uuid,
 } from "./productionBookingValues.js";
 import { dateOverlaps, dates, jsonArray, jsonMap, pmsRecord } from "./productionPmsValues.js";
+import type { PlannedCohortCalendar } from "./productionPmsCohortCalendarRecords.js";
+import type { PmsOperatingCalendarRoomBinding } from "@vayada/domain-pms";
 
 const INVENTORY_STATUSES = new Set(["pending", "confirmed", "checked_in", "in_house"]);
 
-export function buildPmsInventoryRecords(context: PmsBuildContext): PmsTargetRecord[] {
+export function buildPmsInventoryRecords(
+  context: PmsBuildContext,
+  calendars: PlannedCohortCalendar[] = [],
+): PmsTargetRecord[] {
   const records: PmsTargetRecord[] = [];
+  const bindings = new Map(
+    calendars.flatMap(({ configuration }) =>
+      configuration.sourceInputs.roomBindings.map((binding) => [binding.roomTypeId, binding]),
+    ),
+  );
   blockActiveDrafts(context);
   const existingInventory = new Map(
     context.target.records
@@ -28,8 +38,9 @@ export function buildPmsInventoryRecords(context: PmsBuildContext): PmsTargetRec
       const facts = inventoryFacts(context, source);
       const bounded = propertyHorizon(context.snapshotAt, facts.hotel);
       const stayDates = dates(bounded.from, bounded.through);
+      const binding = bindings.get(facts.roomTypeId);
       for (const stayDate of stayDates)
-        records.push(inventoryDay(context, source, facts, stayDate, existingInventory));
+        records.push(inventoryDay(context, source, facts, stayDate, existingInventory, binding));
     } catch (error) {
       addPmsBlocker(
         context,
@@ -112,6 +123,7 @@ function inventoryDay(
   facts: InventoryFacts,
   stayDate: string,
   existingInventory: Map<string, PmsBuildContext["target"]["records"][number]>,
+  binding?: PmsOperatingCalendarRoomBinding,
 ): PmsTargetRecord {
   const assignedCount = facts.bookings
     .filter((row) => activeBooking(context, row, stayDate))
@@ -149,6 +161,22 @@ function inventoryDay(
     existingInventory.get(targetId),
     linkedStopSell,
   );
+  // VAY-1362: a cohort room type bound by the migrated operating calendar takes the canonical
+  // shape native materialization writes at calendar revision 1 (newDay), so the materializer and
+  // the VAY-2066 auto-open job adopt it. Legacy closed dates and stop-sells survive their rewrite
+  // of generated counts as a manual limit of 0. A rolling auto-open window is not one: the
+  // producer moves it with the same month-end rule.
+  const canonical = binding
+    ? canonicalCounts(binding, {
+        assignedCount,
+        blockedCount: migratedBlockedCount,
+        linkedStopSell,
+        closed:
+          overCapacity ||
+          !facts.effectiveRoomTypeActive ||
+          !sellableAtSnapshot(context, source, facts.hotel, stayDate, true),
+      })
+    : null;
   return pmsRecord(
     source,
     "inventory_days",
@@ -197,9 +225,39 @@ function inventoryDay(
       bookingSourceRevision: null,
       linkedStopSell,
       linkedSourceRevision,
+      ...canonical,
     },
-    { inventory: facts.checksumInput, stayDate },
+    canonical
+      ? { inventory: facts.checksumInput, stayDate, binding }
+      : { inventory: facts.checksumInput, stayDate },
   );
+}
+
+function canonicalCounts(
+  binding: PmsOperatingCalendarRoomBinding,
+  day: { assignedCount: number; blockedCount: number; linkedStopSell: boolean; closed: boolean },
+): Record<string, unknown> {
+  const generated = binding.startingSellableLimitCount;
+  const manual = day.closed ? 0 : null;
+  const effective = manual ?? generated;
+  return {
+    totalCount: binding.physicalCapacityCount,
+    availableCount: day.linkedStopSell
+      ? 0
+      : Math.max(0, effective - day.assignedCount - day.blockedCount),
+    status: "open", // the migrated calendar is year-round
+    calendarRevision: 1,
+    inventoryRevision: 1,
+    generatedSellableLimitCount: generated,
+    channelSellableLimitCount: null,
+    manualSellableLimitCount: manual,
+    effectiveSellableLimitCount: effective,
+    generatedSourceRevision: 1,
+    channelSourceRevision: 0,
+    manualSourceRevision: manual === null ? 0 : 1,
+    blockSourceRevision: day.blockedCount > 0 ? 1 : 0,
+    bookingSourceRevision: day.assignedCount > 0 ? 1 : 0,
+  };
 }
 
 function nextLinkedSourceRevision(
@@ -323,6 +381,7 @@ function sellableAtSnapshot(
   source: IdentitySourceRow,
   hotel: IdentitySourceRow,
   stayDate: string,
+  ignoreRollingWindow = false,
 ): boolean {
   if (!bool(source.data["is_active"], "is_active", true)) return false;
   const clock = propertyClock(context.snapshotAt, hotel.data["timezone"]);
@@ -332,7 +391,12 @@ function sellableAtSnapshot(
     (Date.parse(`${stayDate}T00:00:00Z`) - Date.parse(`${clock.today}T00:00:00Z`)) / 86_400_000;
   if (daysAhead < minimum) return false;
   if (!operatingOn(source, stayDate)) return false;
-  if (bool(hotel.data["calendar_auto_open_enabled"], "calendar_auto_open_enabled", false)) {
+  const rolling =
+    (optionalText(hotel.data["calendar_auto_open_mode"], "mode") ?? "rolling") !== "fixed";
+  if (
+    bool(hotel.data["calendar_auto_open_enabled"], "calendar_auto_open_enabled", false) &&
+    !(ignoreRollingWindow && rolling)
+  ) {
     const openThrough = optionalDate(
       hotel.data["calendar_auto_open_through"],
       "calendar_auto_open_through",
@@ -342,7 +406,7 @@ function sellableAtSnapshot(
   return resolvedRate(source, stayDate) > 0;
 }
 
-function propertyHorizon(
+export function propertyHorizon(
   snapshotAt: string,
   hotel: IdentitySourceRow,
 ): { from: string; through: string } {
