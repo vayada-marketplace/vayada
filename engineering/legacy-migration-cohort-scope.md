@@ -131,14 +131,19 @@ Runs without a cohort, hotels outside it and quarantined hotels get none of this
   operating room type has no native room facts, no rooms, or rooms that differ from its inventory
   total. A rerun keeps the stored migrated revision 1 as it is, also after later native revisions;
   a revision 1 the migration did not write blocks where the import would plan one.
-- **Inventory coverage**: for a hotel with that calendar, the 366 imported days of each bound
-  room type take the canonical shape native materialization writes at calendar revision 1, and
-  `pms.inventory_materialization_coverage` covers them, with its idempotency key, projection
-  refresh event and outbox row, and audit row. Legacy closed dates and stop-sells (outside the
-  room type's operating periods, priced at 0, inside the minimum advance or past the same-day
-  cutoff, past a fixed auto-open month, over capacity) become a manual sellable limit of 0, which
-  the VAY-2066 job keeps when it rewrites generated counts and the rate gate. A rolling auto-open
-  window is not a closure: the producer moves it by the same month-end rule.
+- **Inventory coverage**: for a hotel with that calendar, the imported days of each bound room
+  type take the canonical shape native materialization writes at calendar revision 1, in the
+  calendar's time zone, and `pms.inventory_materialization_coverage` covers them, with its
+  idempotency key, projection refresh event and outbox row, and audit row. They run from the
+  snapshot day for a year (only to a fixed auto-open window's month end), and always through the
+  last day a legacy booking, draft or block holds, so later extensions never meet a day without
+  its consumers. The status follows the calendar's schedule; other legacy closed dates and
+  stop-sells (priced at 0, inside the minimum advance or past the same-day cutoff, past a fixed
+  window, over capacity) become a manual sellable limit of 0, which the VAY-2066 job keeps when
+  it rewrites generated counts and the rate gate. A rolling auto-open window is not a closure:
+  the producer moves it by the same month-end rule. Unbound (inactive) room types of such a
+  hotel keep no imported days, and parity expects each bound type's coverage, or more days once
+  the native jobs extend it.
 
 A hotel that misses an item stays `provisioning`.
 

@@ -164,10 +164,16 @@ describe("production PMS cohort inventory coverage", () => {
     expect(native).toMatchObject({ ok: true, outcome: "unchanged", changedDays: [] });
   });
 
-  it("keeps legacy closed dates as manual limits through the auto-open rate gate", () => {
-    const { calendar, days } = migrated(sourceRows());
+  it("keeps closed seasons by schedule and other closed dates as manual limits", () => {
+    // Priced at 0 on Christmas Eve: a legacy stop-sell that only a manual limit can keep.
+    const { calendar, days } = migrated(sourceRows({}, { daily_rates: { "2026-12-24": 0 } }));
     const day = (date: string) => days.find((record) => record.row["stayDate"] === date)!.row;
     expect(day("2027-01-15")).toMatchObject({
+      status: "closed",
+      manualSellableLimitCount: null,
+      availableCount: 0,
+    });
+    expect(day("2026-12-24")).toMatchObject({
       status: "open",
       manualSellableLimitCount: 0,
       manualSourceRevision: 1,
@@ -181,43 +187,94 @@ describe("production PMS cohort inventory coverage", () => {
       availableCount: 1,
     });
     // The VAY-2066 job rewrites generated counts (0 without a pms-pricing.v1 plan, else the
-    // binding): a legacy closed date stays closed either way.
-    const stayDates = days.map((record) => String(record.row["stayDate"])).sort();
-    for (const count of [0, 2]) {
-      const rewritten = planPmsInventoryMaterialization({
+    // binding) and extends the horizon: closed days stay closed, also next year.
+    const extend = (count: number | null) => {
+      const extended = planPmsInventoryMaterialization({
         propertyId: PROPERTY,
         configurationSource: calendar.source,
         configuration: calendar,
-        horizon: { from: stayDates[0]!, through: stayDates.at(-1)! },
-        currentDays: days.map(snapshot),
-        generatedSellableLimitOverrides: stayDates.map((stayDate) => ({
-          roomTypeId: ROOM_TYPE,
-          stayDate,
-          count,
-        })),
+        horizon: { from: "2027-06-01", through: "2028-05-31" },
+        currentDays: days.map(snapshot).filter((record) => record.stayDate >= "2027-06-01"),
+        generatedSellableLimitOverrides:
+          count === null ? [] : [{ roomTypeId: ROOM_TYPE, stayDate: "2027-07-01", count }],
       });
-      if (!rewritten.ok) throw new Error(rewritten.error.code);
-      expect(
-        rewritten.days.find((record) => record.stayDate === "2027-01-15")?.availableCount,
-      ).toBe(0);
-    }
+      if (!extended.ok) throw new Error(extended.error.code);
+      const available = (date: string) =>
+        extended.days.find((record) => record.stayDate === date)?.availableCount;
+      return [available("2028-01-15"), available("2027-07-01")];
+    };
+    expect(extend(null)).toEqual([0, 2]);
+    expect(extend(0)).toEqual([0, 0]);
+    const rewritten = planPmsInventoryMaterialization({
+      propertyId: PROPERTY,
+      configurationSource: calendar.source,
+      configuration: calendar,
+      horizon: { from: "2026-10-09", through: "2027-10-09" },
+      currentDays: days.map(snapshot),
+      generatedSellableLimitOverrides: [
+        { roomTypeId: ROOM_TYPE, stayDate: "2026-12-24", count: 2 },
+      ],
+    });
+    if (!rewritten.ok) throw new Error(rewritten.error.code);
+    expect(rewritten.days.find((record) => record.stayDate === "2026-12-24")?.availableCount).toBe(
+      0,
+    );
   });
 
-  it("does not treat a rolling auto-open window as a closed date, but does a fixed one", () => {
+  it("covers a fixed auto-open window to its month end, and a rolling one for a year", () => {
+    const last = (hotel: Record<string, unknown>) =>
+      String(migrated(sourceRows(hotel, { operating_periods: [] })).days.at(-1)!.row["stayDate"]);
     const rolling = { calendar_auto_open_enabled: true, calendar_auto_open_through: "2027-01-31" };
-    const last = (rows: IdentitySourceRow[]) =>
-      migrated(rows).days.find((record) => record.row["stayDate"] === "2027-10-01")!.row;
-    expect(last(sourceRows(rolling, { operating_periods: [] }))).toMatchObject({
-      manualSellableLimitCount: null,
-    });
-    const fixed = {
-      ...rolling,
-      calendar_auto_open_mode: "fixed",
-      calendar_auto_open_fixed_month: "2027-01-15",
-    };
-    expect(last(sourceRows(fixed, { operating_periods: [] }))).toMatchObject({
-      manualSellableLimitCount: 0,
-    });
+    expect(last(rolling)).toBe("2027-10-09");
+    expect(
+      last({
+        ...rolling,
+        calendar_auto_open_mode: "fixed",
+        calendar_auto_open_fixed_month: "2027-01-15",
+      }),
+    ).toBe("2027-01-31");
+  });
+
+  it("extends coverage through the last legacy booking or block and skips unbound types", () => {
+    const rows = sourceRows({}, { operating_periods: [] });
+    rows.push(
+      row("room_blocks", {
+        id: "70000000-0000-4000-a000-000000000002",
+        hotel_id: HOTEL,
+        room_type_id: ROOM_TYPE,
+        start_date: "2027-11-01",
+        end_date: "2027-11-05",
+        blocked_count: 1,
+        reason: "renovation",
+      }),
+      row("room_types", {
+        id: "30000000-0000-4000-a000-000000000002",
+        hotel_id: HOTEL,
+        name: "Retired",
+        total_rooms: 0,
+        base_rate: "100",
+        currency: "EUR",
+        is_active: false,
+      }),
+    );
+    const { plan, days } = migrated(rows);
+    expect(days.at(-1)!.row).toMatchObject({ stayDate: "2027-11-04", blockedCount: 1 });
+    expect(days.every((record) => record.row["roomTypeId"] === ROOM_TYPE)).toBe(true);
+    expect(plan.parity.expectedInventoryDaysByRoomType).toEqual({ [ROOM_TYPE]: days.length });
+    expect(
+      plan.records.find((record) => record.targetTable === "inventory_materialization_coverage")
+        ?.row,
+    ).toMatchObject({ coverageThrough: "2027-11-04", expectedDayCount: days.length });
+  });
+
+  it("counts the horizon in the calendar's time zone", () => {
+    // 22:00 UTC on 8 October is already 9 October in Berlin, while legacy has no time zone.
+    const rows = sourceRows({ timezone: null }, { operating_periods: [] });
+    const plan = buildProductionPmsPlan({ ...input(rows), snapshotAt: "2026-10-08T22:00:00.000Z" });
+    expect(
+      plan.records.find((record) => record.targetTable === "inventory_materialization_coverage")
+        ?.row,
+    ).toMatchObject({ coverageFrom: "2026-10-09", coverageThrough: "2027-10-09" });
   });
 
   it("keeps the legacy inventory shape without a cohort", () => {

@@ -273,7 +273,28 @@ function summarizeParity(
         ];
       }),
   );
+  // VAY-1362: a calendared cohort room type's days follow its coverage, not the 366-day horizon.
+  const coverageDays = new Map(
+    records
+      .filter((record) => record.targetTable === "inventory_materialization_coverage")
+      .map((record) => [
+        String(record.row["propertyId"]),
+        Number(record.row["expectedDayCount"]) / Number(record.row["roomTypeCount"]),
+      ]),
+  );
+  const expectedInventoryDaysByRoomType = Object.fromEntries(
+    records
+      .filter((record) => record.targetTable === "operating_calendar_room_bindings")
+      .map((record) => [
+        String(record.row["roomTypeId"]),
+        coverageDays.get(String(record.row["propertyId"])) ?? 366,
+      ])
+      .sort(([left], [right]) => String(left).localeCompare(String(right))),
+  );
   return {
+    ...(Object.keys(expectedInventoryDaysByRoomType).length
+      ? { expectedInventoryDaysByRoomType }
+      : {}),
     sourceTableCounts: countBy(context.rows, (row) => `pms.${row.sourceTable}`),
     targetTableCounts: countBy(
       records,

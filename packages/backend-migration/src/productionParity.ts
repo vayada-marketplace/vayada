@@ -1105,10 +1105,12 @@ function addDomainInvariantFindings(
         );
     }
     for (const [roomTypeId, inventory] of Object.entries(parity.futureInventoryByRoomType))
+      // Native jobs may extend a calendared cohort hotel's coverage after the import.
       if (
-        inventory.rows !== 366 ||
-        inventory.distinctDays !== 366 ||
-        daysBetween(inventory.firstStayDate, inventory.lastStayDate) !== 365
+        inventory.rows !== inventory.distinctDays ||
+        inventory.distinctDays < (parity.expectedInventoryDaysByRoomType?.[roomTypeId] ?? 366) ||
+        (!parity.expectedInventoryDaysByRoomType?.[roomTypeId] && inventory.distinctDays !== 366) ||
+        daysBetween(inventory.firstStayDate, inventory.lastStayDate) !== inventory.distinctDays - 1
       )
         findings.push(
           finding(
@@ -1117,7 +1119,9 @@ function addDomainInvariantFindings(
             domain,
             `pms.inventory_days:${inventory.propertyId}:${roomTypeId}`,
             "Each active room type must have exactly one row for each day in a 366-day horizon",
-            "366 rows, 366 distinct days, 365-day span",
+            parity.expectedInventoryDaysByRoomType?.[roomTypeId]
+              ? `${parity.expectedInventoryDaysByRoomType[roomTypeId]}+ contiguous days (calendar coverage)`
+              : "366 rows, 366 distinct days, 365-day span",
             `${inventory.rows} rows, ${inventory.distinctDays} distinct days, ${daysBetween(inventory.firstStayDate, inventory.lastStayDate)}-day span`,
           ),
         );

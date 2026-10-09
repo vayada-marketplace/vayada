@@ -163,6 +163,8 @@ export type ProductionPmsPlan = {
   provenance: ProductionMigrationSourceLink[];
   blockers: IdentityMigrationBlocker[];
   parity: {
+    /** VAY-1362: days each calendared cohort room type must cover (else 366). */
+    expectedInventoryDaysByRoomType?: Record<string, number>;
     sourceTableCounts: Record<string, number>;
     targetTableCounts: Record<string, number>;
     sourceCountsByProperty: Record<string, Record<string, number>>;

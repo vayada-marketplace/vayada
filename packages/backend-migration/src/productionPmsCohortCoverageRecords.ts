@@ -5,7 +5,7 @@ import {
 } from "@vayada/domain-pms";
 
 import type { PlannedCohortCalendar } from "./productionPmsCohortCalendarRecords.js";
-import { propertyHorizon } from "./productionPmsInventoryRecords.js";
+import { cohortInventoryHorizon } from "./productionPmsInventoryRecords.js";
 import { nativeCommandRecords, nativeStableJson } from "./productionPmsNativeCommand.js";
 import type { PmsBuildContext, PmsTargetRecord } from "./productionPmsTypes.js";
 import { pmsRecord } from "./productionPmsValues.js";
@@ -26,9 +26,10 @@ export function buildPmsCohortCoverageRecords(
   context: PmsBuildContext,
   calendars: PlannedCohortCalendar[],
 ): PmsTargetRecord[] {
-  return calendars.flatMap(({ configuration, organizationId, hotel }) => {
+  return calendars.flatMap((calendar) => {
+    const { configuration, organizationId, hotel } = calendar;
     const { propertyId, createdAt: at, source: configurationSource } = configuration;
-    const horizon = propertyHorizon(context.snapshotAt, hotel);
+    const horizon = cohortInventoryHorizon(context, calendar);
     const roomTypeIds = configuration.sourceInputs.roomBindings.map(({ roomTypeId }) => roomTypeId);
     const days = (Date.parse(horizon.through) - Date.parse(horizon.from)) / 86_400_000 + 1;
     const dayCount = roomTypeIds.length * days;
@@ -66,7 +67,7 @@ export function buildPmsCohortCoverageRecords(
       organizationId,
       propertyId,
       configurationSource,
-      expectedMaterializedRevision: 0,
+      expectedMaterializedRevision: 1,
       horizon,
     };
     const metadata = {

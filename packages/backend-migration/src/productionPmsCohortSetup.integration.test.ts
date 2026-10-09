@@ -301,7 +301,7 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
                 outbox.destination, outbox.event_type AS "eventType",
                 (SELECT count(*)::int FROM pms.inventory_days day
                   WHERE day.property_id = coverage.property_id
-                    AND day.manual_sellable_limit_count = 0) AS "closedDays"
+                    AND day.status = 'closed') AS "closedDays"
            FROM pms.inventory_materialization_coverage coverage
            JOIN platform.outbox_events outbox
              ON outbox.id = coverage.last_changed_materialization_outbox_event_id
@@ -315,7 +315,7 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
           through: "2027-09-04",
           destination: "distribution.inventory-projection",
           eventType: "pms.inventory.projection_refresh_requested",
-          closedDays: 31, // the legacy January closure, kept as a manual limit
+          closedDays: 31, // the legacy January closure, closed by the calendar's schedule
         },
       ]);
 
