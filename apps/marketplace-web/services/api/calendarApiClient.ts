@@ -117,10 +117,15 @@ export function createCalendarApiClient(
         if (
           !capacity ||
           capacity.propertyId !== normalizedPropertyId ||
-          capacity.roomTypeId !== snapshot.roomTypeId ||
-          capacity.activeUnitCount < 1
+          capacity.roomTypeId !== snapshot.roomTypeId
         ) {
           throw invalidOwnerContract("room capacity");
+        }
+        // A room type without rooms (e.g. a fresh PMS duplicate) is an owner task, not bad data.
+        if (capacity.activeUnitCount < 1) {
+          throw new Error(
+            `Add at least one ${snapshot.facts.name} room in the Rooms setup step before opening the calendar.`,
+          );
         }
         const units = parsePhysicalRoomUnits(unitsValue, normalizedPropertyId, snapshot.roomTypeId);
         if (
