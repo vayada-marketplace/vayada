@@ -127,12 +127,14 @@ Runs without a cohort, hotels outside it and quarantined hotels get none of this
   physical capacity. Room types with different operating periods get no calendar: the schedule is
   the property's. Periods are read day by day as legacy reads them (unvalidated `MM-DD` strings);
   a recurring schedule has no 29 February of its own, so a period open only then gives no
-  calendar, and other leap-day differences stay closed where legacy closes them. The import also writes the idempotency key, domain event and outbox row its
+  calendar; inside the imported coverage 29 February stays closed where legacy closes it, and
+  later native days follow the schedule. The import also writes the idempotency key, domain event and outbox row its
   foreign keys require, and its audit row, with the migration as actor. A hotel gets no calendar
   without one owner organization, a canonical time zone or a known legacy owner user, or when an
   operating room type has no native room facts, no rooms, or rooms that differ from its inventory
-  total. A rerun keeps the stored migrated revision 1 as it is, also after later native revisions;
-  a revision 1 the migration did not write blocks where the import would plan one.
+  total. A rerun keeps the stored migrated revision 1 as it is, also after later native revisions,
+  and blocks when it no longer carries it; a revision 1 the migration did not write blocks where
+  the import would plan one.
 
 A hotel that misses an item stays `provisioning`.
 

@@ -238,6 +238,13 @@ describe("production PMS cohort operating calendar", () => {
         result.records.filter((record) => /calendar|idempotency/.test(record.targetTable)),
       );
     expect(rows(rerun)).toBe(rows(first));
+    // A stored migrated calendar this run cannot carry blocks; a run without a cohort ignores it.
+    const unreadable = { ...stored, scheduleMode: "recurring", periods: [] };
+    const carried = target(1, [property(1, { storedCalendar: unreadable })]);
+    expect(plan(source, carried).blockers).toEqual([
+      expect.objectContaining({ code: "COHORT_CALENDAR_CONFLICT", sourceId: `${HOTEL}1` }),
+    ]);
+    expect(plan(source, carried, false).blockers).toEqual([]);
     const foreign = { ...stored, idempotencyKeyId: OWNER };
     expect(plan(source, target(1, [property(1, { storedCalendar: foreign })])).blockers).toEqual([
       expect.objectContaining({ code: "COHORT_CALENDAR_CONFLICT" }),
