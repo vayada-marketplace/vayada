@@ -1,13 +1,9 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslation } from "@/lib/i18n";
-import {
-  HomeIcon,
-  SparklesIcon,
-  CheckBadgeIcon,
-  ClipboardDocumentListIcon,
-} from "@heroicons/react/24/outline";
+import { HomeIcon, SparklesIcon, ClipboardDocumentListIcon } from "@heroicons/react/24/outline";
 import { settingsService, type AddonItem, type AddonSettings } from "@/services/settings";
 import {
   getBookingAddonSettings,
@@ -25,10 +21,6 @@ import {
   type CreateBookingAddonItemBody,
 } from "@/services/api/bookingAddonItemsClient";
 import {
-  getBookingBenefitsSettings,
-  type BookingBenefitsSettings,
-} from "@/services/api/bookingBenefitsSettingsClient";
-import {
   getBookingGuestFormSettings,
   type BookingGuestFormSettings,
 } from "@/services/api/bookingGuestFormSettingsClient";
@@ -40,7 +32,6 @@ import {
 } from "@/services/api/bookingRoomFilterSettingsClient";
 import {
   loadBookingFlowSetting,
-  normalizeBookingBenefitsSettings,
   normalizeBookingRoomFilterSettings,
 } from "@/services/api/bookingFlowSettingsLoader";
 import { apiClient } from "@/services/api/client";
@@ -50,14 +41,10 @@ import { SettingsLayout, type SettingsNavSection } from "@vayada/settings-ui";
 
 import RoomsTab from "@/components/booking-flow/RoomsTab";
 import AddonsTab, { type AddonItemFormValues } from "@/components/booking-flow/AddonsTab";
-import BenefitsTab from "@/components/booking-flow/BenefitsTab";
 import GuestFormTab from "@/components/booking-flow/GuestFormTab";
-import {
-  useBenefitsSettingsTab,
-  useGuestFormSettingsTab,
-} from "@/components/booking-flow/useBookingFlowSettingsTabs";
+import { useGuestFormSettingsTab } from "@/components/booking-flow/useBookingFlowSettingsTabs";
 
-type Tab = "rooms" | "addons" | "benefits" | "guest-form" | "last-minute";
+type Tab = "rooms" | "addons" | "guest-form" | "last-minute";
 
 type PmsRoomsResponse = {
   items?: {
@@ -88,10 +75,6 @@ const DEFAULT_GUEST_FORM_SETTINGS: BookingGuestFormSettings = {
   phoneRequired: true,
   adultAgeThreshold: 18,
   childrenEnabled: true,
-};
-
-const DEFAULT_BENEFITS_SETTINGS: BookingBenefitsSettings = {
-  benefits: [],
 };
 
 const DEFAULT_ROOM_FILTER_SETTINGS: BookingRoomFilterSettings = {
@@ -224,10 +207,13 @@ function moveAddon(addons: AddonItem[], sourceAddonId: string, targetAddonId: st
 
 export default function BookingFlowPage() {
   const [activeTab, setActiveTab] = useState<Tab>("rooms");
+  const router = useRouter();
   useEffect(() => {
     const tab = new URLSearchParams(window.location.search).get("tab");
-    if (["rooms", "addons", "benefits", "guest-form"].includes(tab ?? "")) setActiveTab(tab as Tab);
-  }, []);
+    // Book Direct Benefits moved to Settings (VAY-2072).
+    if (tab === "benefits") router.replace("/settings/book-direct-benefits");
+    if (["rooms", "addons", "guest-form"].includes(tab ?? "")) setActiveTab(tab as Tab);
+  }, [router]);
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(
     null,
@@ -267,14 +253,6 @@ export default function BookingFlowPage() {
     return hotelId;
   };
 
-  const {
-    benefits,
-    setBenefits,
-    benefitInput,
-    setBenefitInput,
-    savingBenefits,
-    handleSaveBenefits,
-  } = useBenefitsSettingsTab({ getBookingHotelIdForSave, showFeedback });
   const {
     specialRequestsEnabled,
     setSpecialRequestsEnabled,
@@ -326,10 +304,6 @@ export default function BookingFlowPage() {
       (hotelId) => getBookingGuestFormSettings({ hotelId }),
       DEFAULT_GUEST_FORM_SETTINGS,
     );
-    const benefitsSettingsPromise = loadTypedSetting(
-      (hotelId) => getBookingBenefitsSettings({ hotelId }),
-      DEFAULT_BENEFITS_SETTINGS,
-    );
     const localizationSettingsPromise = loadTypedSetting(
       (hotelId) =>
         getBookingLocalizationSettings({ hotelId }).then((settings) => settings.defaultCurrency),
@@ -343,7 +317,6 @@ export default function BookingFlowPage() {
     Promise.all([
       addonSettingsPromise,
       addonItemsPromise,
-      benefitsSettingsPromise,
       guestFormSettingsPromise,
       localizationSettingsPromise,
       roomFilterSettingsPromise,
@@ -353,7 +326,6 @@ export default function BookingFlowPage() {
         ([
           settings,
           addonContext,
-          benefitsRes,
           guestFormSettings,
           localizationCurrency,
           roomFilterSettings,
@@ -365,9 +337,6 @@ export default function BookingFlowPage() {
           setAddons(orderAddons(addonContext.addonItems));
           setPropertyPlan(addonContext.propertyPlan);
           setAddonCurrency(addonContext.propertyCurrency ?? "");
-          setBenefits(
-            normalizeBookingBenefitsSettings(benefitsRes, DEFAULT_BENEFITS_SETTINGS).benefits,
-          );
           applyGuestFormSettings(guestFormSettings);
           setDefaultCurrency(localizationCurrency);
           const normalizedRoomFilterSettings = normalizeBookingRoomFilterSettings(
@@ -396,7 +365,7 @@ export default function BookingFlowPage() {
         },
       )
       .finally(() => setLoading(false));
-  }, [applyGuestFormSettings, setBenefits]);
+  }, [applyGuestFormSettings]);
 
   const handleToggleAddonSetting = async (key: keyof AddonSettings) => {
     const previous = addonSettingsRef.current;
@@ -581,7 +550,6 @@ export default function BookingFlowPage() {
   const sections: SettingsNavSection[] = [
     { id: "rooms", label: t("bookingFlow.tabs.filters"), icon: HomeIcon },
     { id: "addons", label: t("bookingFlow.tabs.addons"), icon: SparklesIcon },
-    { id: "benefits", label: t("bookingFlow.tabs.benefits"), icon: CheckBadgeIcon },
     {
       id: "guest-form",
       label: t("bookingFlow.tabs.guestForm"),
@@ -639,17 +607,6 @@ export default function BookingFlowPage() {
             onUpdateAddon={handleUpdateAddon}
             onDeleteAddon={handleDeleteAddon}
             onReorderAddon={handleReorderAddon}
-          />
-        )}
-
-        {activeTab === "benefits" && (
-          <BenefitsTab
-            benefits={benefits}
-            setBenefits={setBenefits}
-            benefitInput={benefitInput}
-            setBenefitInput={setBenefitInput}
-            saveBenefits={handleSaveBenefits}
-            savingBenefits={savingBenefits}
           />
         )}
 

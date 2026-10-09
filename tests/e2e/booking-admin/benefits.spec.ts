@@ -40,11 +40,15 @@ test.describe("booking-admin benefits settings cutover", () => {
       await route.fulfill({ json: { benefits: typedBenefits } });
     });
 
-    await page.goto("/booking-flow");
-    await page.getByRole("button", { name: /^Benefits$/ }).click();
-
+    // Benefits moved from Booking Flow to Settings (VAY-2072); old tab links still land there.
+    await page.goto("/booking-flow?tab=benefits");
+    await expect(page).toHaveURL(/\/settings\/book-direct-benefits$/);
     await expect(page.getByRole("heading", { name: "Book Direct Benefits" })).toBeVisible();
     await expect(page.getByText("Complimentary sunset cocktail")).toBeVisible();
+    await testInfo.attach("settings-book-direct-benefits", {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
 
     await page.getByRole("button", { name: /^Save Benefits$/ }).click();
 
@@ -53,6 +57,16 @@ test.describe("booking-admin benefits settings cutover", () => {
     expect(contractRequests.length).toBeGreaterThan(0);
     expect(new URL(contractRequests[0]!).pathname).toBe(BOOKING_ADMIN_BENEFITS_SETTINGS_PATH);
     expect(typedWrites).toEqual([{ benefits: typedBenefits }]);
+    await expect(page.getByRole("status").filter({ hasText: "Benefits saved" })).toBeVisible();
+
+    await page.goto("/settings");
+    await page
+      .getByRole("main")
+      .getByRole("link", { name: /^Book Direct Benefits/ })
+      .click();
+    await expect(page).toHaveURL(/\/settings\/book-direct-benefits$/);
+    await page.goto("/booking-flow");
+    await expect(page.getByRole("button", { name: /^Benefits$/ })).toHaveCount(0);
 
     await assertNoLegacyCalls();
     await assertHealthy();
