@@ -124,6 +124,11 @@ test.describe("adaptive pricing and calendar", () => {
       ],
     });
     // The publication's charge declaration is the final-price confirmation: no legacy write.
+    // Pressing "Publish prices" is the declaration, recorded like the PMS "Save prices" (VAY-2079).
+    expect(api.pricingV2Writes[3]!.body).toMatchObject({
+      declaration: "all_mandatory_charges_included",
+      declaredVia: "save_prices",
+    });
     expect(api.confirmationWrites).toEqual([]);
     expect(api.calendarWrites).toEqual([]);
 
