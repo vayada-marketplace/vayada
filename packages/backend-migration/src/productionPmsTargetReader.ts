@@ -125,14 +125,13 @@ export async function readProductionPmsPrerequisites(
                 FROM identity.organization_resource_links catalog
                 JOIN identity.organization_resource_links pms
                   ON pms.organization_id = catalog.organization_id AND pms.product = 'pms'
-                 AND pms.resource_type = 'pms_property'
-                 AND lower(pms.resource_id) = property.id::text
+                 AND pms.resource_type = 'pms_property' AND pms.resource_id = catalog.resource_id
                  AND pms.relationship = 'owner' AND pms.status = 'active'
                 JOIN identity.organizations organization
                   ON organization.id = catalog.organization_id
                  AND organization.kind = 'hotel_group' AND organization.status = 'active'
                WHERE catalog.product = 'hotel_catalog' AND catalog.resource_type = 'property'
-                 AND lower(catalog.resource_id) = property.id::text AND catalog.status = 'active'
+                 AND catalog.resource_id = property.id::text AND catalog.status = 'active'
                  AND catalog.relationship = 'owner'
                ORDER BY 1
             ) AS "financialsOwnerOrganizationIds",

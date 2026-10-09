@@ -24,6 +24,7 @@ import {
   readPmsCohortModules,
   samePmsCohortModule,
   writePmsCohortModule,
+  type PreservedModuleActivation,
   type SkippedModuleActivation,
 } from "./productionPmsCohortModules.js";
 
@@ -46,7 +47,7 @@ export type ProductionPmsMigrationReport = {
     writes: number;
     unchanged: number;
     /** Stored modules that differ from legacy, kept as they are (newer on the target). */
-    preserved: string[];
+    preserved: PreservedModuleActivation[];
     skipped: SkippedModuleActivation[];
     /** Active legacy modules without a runtime module, as hotelId:moduleId. */
     unmapped: string[];
@@ -144,7 +145,7 @@ export async function runProductionPmsTransaction(
       modules.length || plan.skippedModules?.length || plan.unmappedModules?.length
         ? {
             modules: {
-              planned: modules.length,
+              planned: modules.length - moduleActions.skipped.length,
               writes,
               unchanged: moduleActions.unchanged.length,
               preserved: moduleActions.preserved,

@@ -188,13 +188,17 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
    - a bookability profile that is `public_safe`/public/fresh/ready with
      payment methods
 
-   Financials: the PMS report lists the cohort hotels whose legacy module was
-   skipped, with the reason. For each one imported with Financials on, run
+   Financials: parity's `COHORT_MODULES_REPORTED` finding lists (hashed) the
+   cohort hotels whose legacy module was skipped, with the reason and legacy
+   state, and the stored modules kept as they were. For each hotel imported
+   with Financials on, run
    `target:financials:readiness -- --property-id <id> --expect-active` and
    resolve its findings before reopen. The VAY-1138 activation runbook's
    per-property approval covers activating Financials in the target; these
    hotels carry the activation they had in legacy (decision for the go-day
-   approver).
+   approver). A skipped hotel that had Financials on stays without it: decide
+   per hotel whether to make its organization the owner or to activate it
+   later through the VAY-1138 operator path.
 
 1. For each cohort hotel, check:
    - rooms, rate plans and the availability calendar
@@ -297,3 +301,6 @@ and legacy is not a fallback (decisions table).
   as off), while a native new hotel starts with it on; the Owner can switch it
   on in the Feature Hub. Legacy `affiliates` is not carried, although
   booking-admin's Refer-a-guest setting still reads `module:affiliates`.
+  PMS-only legacy hotels get `operator` native links unless a booking or
+  marketplace link makes the organization the owner, so their Financials is
+  skipped (`owner_organization`), as native setup requires the owner.

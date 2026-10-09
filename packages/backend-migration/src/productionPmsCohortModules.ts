@@ -145,7 +145,9 @@ export async function readPmsCohortModules(
                 AND entitlement.metadata ? 'newHotelFinancialsActivationTransaction', FALSE)
                 AS ready,
               coalesce(entitlement.metadata->>'featureHubOwnerDisabled' = entitlement.xmin::text,
-                FALSE) AS "ownerOff",
+                FALSE)
+                OR coalesce(entitlement.metadata->'newHotelFinancialsOwnerDisabled' = 'true'::jsonb,
+                  FALSE) AS "ownerOff",
               coalesce(entitlement.starts_at IS NULL AND entitlement.expires_at IS NULL, FALSE)
                 AS unbounded,
               (SELECT count(*)::int FROM finance.expense_categories category
@@ -190,27 +192,40 @@ export function samePmsCohortModule(
  * the runtime reads it as planned, else preserved. A missing one is written, unless an archived
  * starter category would leave the default incomplete (native completion refuses it too).
  */
+export type PreservedModuleActivation = Pick<
+  StoredModuleState,
+  "propertyId" | "status" | "ready" | "ownerOff"
+> & { legacy: LegacyModuleState };
+
 export function classifyPmsCohortModules(
   planned: PlannedModuleActivation[],
   stored: StoredModuleState[],
 ): {
   write: PlannedModuleActivation[];
   unchanged: string[];
-  preserved: string[];
+  preserved: PreservedModuleActivation[];
   skipped: SkippedModuleActivation[];
 } {
   const result = {
     write: [] as PlannedModuleActivation[],
     unchanged: [] as string[],
-    preserved: [] as string[],
+    preserved: [] as PreservedModuleActivation[],
     skipped: [] as SkippedModuleActivation[],
   };
   for (const module of planned) {
     const current = stored.find((row) => row.propertyId === module.propertyId);
-    if (current?.status)
-      (samePmsCohortModule(module, current) ? result.unchanged : result.preserved).push(
-        module.propertyId,
-      );
+    // Kept with what the runtime reads, so a row the Owner can no longer switch (no ready
+    // default, or a lost Owner-off marker) is visible next to an Owner's own change.
+    if (current?.status && samePmsCohortModule(module, current))
+      result.unchanged.push(module.propertyId);
+    else if (current?.status)
+      result.preserved.push({
+        propertyId: module.propertyId,
+        legacy: module.legacy,
+        status: current.status,
+        ready: current.ready,
+        ownerOff: current.ownerOff,
+      });
     else if (current?.archivedCategories)
       result.skipped.push({
         propertyId: module.propertyId,
@@ -244,8 +259,20 @@ export async function writePmsCohortModule(
   module: PlannedModuleActivation,
 ): Promise<void> {
   const at = new Date(input.completedAt).toISOString();
-  // The rows native completion locks before it decides (FOR SHARE): a concurrent change since
-  // this transaction's snapshot then fails it instead of being missed.
+  // The rows native completion and the Feature Hub scope lock before they decide: a concurrent
+  // suspension, link archival or entitlement change since this transaction's snapshot then
+  // fails it instead of being missed.
+  await client.query(
+    `SELECT organization.id FROM identity.organizations organization
+       JOIN identity.organization_resource_links link
+         ON link.organization_id = organization.id AND link.resource_id = $2
+        AND link.relationship = 'owner' AND link.status = 'active'
+        AND ((link.product = 'hotel_catalog' AND link.resource_type = 'property')
+          OR (link.product = 'pms' AND link.resource_type = 'pms_property'))
+      WHERE organization.id = $1::uuid
+     FOR SHARE OF organization, link`,
+    [module.organizationId, module.propertyId],
+  );
   await client.query(
     `SELECT id FROM identity.product_entitlements
       WHERE organization_id = $1::uuid AND product = 'pms' AND entitlement_key = ANY($3::text[])

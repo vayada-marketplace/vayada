@@ -765,7 +765,80 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
           switched.moduleActivations!,
           await readPmsCohortModules(client, switched.moduleActivations!),
         ),
-      ).toMatchObject({ write: [], preserved: [PROPERTY] });
+      ).toMatchObject({ write: [], preserved: [{ propertyId: PROPERTY, legacy: "on" }] });
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+
+  it("reads the native Financials prerequisites of the owner organization", async () => {
+    await client.query("BEGIN");
+    try {
+      await seedCalendar(client);
+      const read = async () => {
+        const property = (await readProductionPmsPrerequisites(client, RUN)).cohortProperties?.find(
+          (row) => row.propertyId === PROPERTY,
+        );
+        return [
+          property?.financialsOwnerOrganizationIds,
+          property?.pmsBaseOrganizationIds,
+          property?.organizationFinancialsIds,
+        ];
+      };
+      const entitlement = (key: string, status: string, propertyScoped: boolean) =>
+        client.query(
+          `INSERT INTO identity.product_entitlements (organization_id, product, entitlement_key,
+             status, resource_product, resource_type, resource_id)
+           VALUES ($1, 'pms', $2, $3, $4, $5, $6)`,
+          propertyScoped
+            ? [ORGANIZATION, key, status, "pms", "pms_property", PROPERTY]
+            : [ORGANIZATION, key, status, null, null, null],
+        );
+      expect(await read()).toEqual([[ORGANIZATION], [], []]); // no base entitlement yet
+      await entitlement("property-management", "active", true);
+      expect(await read()).toEqual([[ORGANIZATION], [ORGANIZATION], []]);
+      for (const [change, expected] of [
+        [() => entitlement("pms-core", "suspended", false), [[ORGANIZATION], [], []]],
+        [
+          () => entitlement("module:financials", "active", false),
+          [[ORGANIZATION], [ORGANIZATION], [ORGANIZATION]],
+        ],
+        [
+          () =>
+            client.query(
+              `UPDATE identity.organization_resource_links SET relationship = 'operator'
+                WHERE organization_id = $1 AND product = 'pms'`,
+              [ORGANIZATION],
+            ),
+          [[], [ORGANIZATION], []],
+        ],
+      ] as const) {
+        await client.query("SAVEPOINT prerequisite");
+        await change();
+        expect(await read()).toEqual(expected);
+        await client.query("ROLLBACK TO SAVEPOINT prerequisite");
+      }
+      // An archived starter category leaves the native default incomplete.
+      const module = {
+        organizationId: ORGANIZATION,
+        propertyId: PROPERTY,
+        entitlementKey: "module:financials",
+        active: true,
+        currency: "EUR",
+        legacy: "on" as const,
+      };
+      await client.query(
+        `INSERT INTO finance.expense_categories
+           (property_id, system_key, name, color, sort_order, archived_at)
+         VALUES ($1, 'staff', 'Staff', '#6366F1', 10, now())`,
+        [PROPERTY],
+      );
+      expect(
+        classifyPmsCohortModules([module], await readPmsCohortModules(client, [module])),
+      ).toMatchObject({
+        write: [],
+        skipped: [{ propertyId: PROPERTY, reason: "archived_starter_category" }],
+      });
     } finally {
       await client.query("ROLLBACK");
     }

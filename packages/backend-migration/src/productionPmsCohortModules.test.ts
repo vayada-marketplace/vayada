@@ -193,7 +193,15 @@ describe("production PMS cohort module activations", () => {
     ).toEqual({
       write: [missing],
       unchanged: [offModule.propertyId],
-      preserved: [onModule.propertyId],
+      preserved: [
+        {
+          propertyId: onModule.propertyId,
+          legacy: "on",
+          status: "suspended",
+          ready: true,
+          ownerOff: true,
+        },
+      ],
       skipped: [
         { propertyId: archived.propertyId, legacy: "off", reason: "archived_starter_category" },
       ],
@@ -279,7 +287,18 @@ describe("production PMS cohort module activations", () => {
     expect(changed.report).toMatchObject({
       applied: true,
       blockers: [],
-      modules: { writes: 0, preserved: [offModule.propertyId] },
+      modules: {
+        writes: 0,
+        preserved: [
+          {
+            propertyId: offModule.propertyId,
+            legacy: "off",
+            status: "active",
+            ready: true,
+            ownerOff: false,
+          },
+        ],
+      },
     });
     expect(changed.steps).toEqual(["read-modules:1", "write"]);
   });

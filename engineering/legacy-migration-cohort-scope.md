@@ -191,13 +191,15 @@ hotels: a logical restore, a blue/green switch or any later write of the row end
 Owner can then no longer switch the module on. Its audit row is
 `pms.financials.owner_off_imported`, because the 0449 trigger rejects (or, in a hotel-setup
 session, applies) `financials_module_deactivated` from a superuser or hotel-setup role member.
-A hotel gets no module, and the PMS report lists it as skipped with the reason, without one
+A hotel gets no module, and the PMS report and parity (`COHORT_MODULES_REPORTED`) list it as
+skipped with the reason, without one
 active `hotel_group` owning both native links (the native default and the Feature Hub need the
 owner; an operator does not qualify), an active base PMS entitlement of that organization with
 no suspended one (`property-management`, `pms-core`, `account_access`), no organization-wide
 Financials entitlement, pricing settings in a first currency, or with an archived starter
 category. A stored module is never rewritten: one that differs from legacy (an Owner or
-operator change after the import) is kept and reported as preserved.
+operator change after the import, or a row the Owner can no longer switch) is kept and reported
+as preserved with its status, ready default and Owner-off state.
 
 ## Verification
 
