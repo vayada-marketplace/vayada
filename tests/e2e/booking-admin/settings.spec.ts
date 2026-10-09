@@ -152,7 +152,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await page
       .getByPlaceholder("https://www.tiktok.com/@yourhotel")
       .fill("https://tiktok.com/@alpenrose-hotel");
-    await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+    await page.getByRole("button", { name: "Save property details", exact: true }).click();
 
     await expect.poll(() => writes.length).toBe(1);
     expect(writes[0]).toMatchObject({

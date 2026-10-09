@@ -1195,10 +1195,10 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                 </div>
               </div>
 
-              {/* Save button */}
+              {/* General also has the languages/currency Save, so name what this one saves. */}
               <div className="flex justify-end">
                 <SaveButton onClick={handleSave} saving={saving}>
-                  {t("common.save")}
+                  {t("settings.general.savePropertyDetails")}
                 </SaveButton>
               </div>
             </>

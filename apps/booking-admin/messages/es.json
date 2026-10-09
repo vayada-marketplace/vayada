@@ -1358,6 +1358,7 @@
   "admin.mediaAndImages": "Medios e imágenes",
   "admin.themesAndColors": "Temas y colores",
   "support.help": "Ayuda",
+  "settings.general.savePropertyDetails": "Guardar datos del alojamiento",
   "settings.index.title": "Configuración del motor de reservas",
   "settings.index.open": "Abrir",
   "settings.index.comingSoon": "Próximamente",
