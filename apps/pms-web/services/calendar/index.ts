@@ -19,7 +19,8 @@ export interface CalendarRoomType {
   totalRooms: number;
   baseRate: number;
   maxOccupancy: number;
-  currency: string;
+  /** Null until the hotel publishes prices or sets a legacy rate; the server then prices custom rates. */
+  currency: string | null;
   ratePlans: Array<{
     id: string;
     name: string;
@@ -136,7 +137,8 @@ type PmsOperationsRoomType = {
   category: string | null;
   occupancyLimits: Record<string, number>;
   attributes: Record<string, unknown>;
-  baseRate: PmsOperationsMoney;
+  /** Room types from the room-facts flow carry neither amount nor currency. */
+  baseRate: { amountDecimal: string | null; currency: string | null };
   roomCount: number;
   ratePlans: Array<{
     ratePlanId: string;
@@ -443,8 +445,9 @@ function toCalendarData(
         totalRooms: roomType.roomCount,
         baseRate: moneyAmount(roomType.baseRate),
         maxOccupancy: maxOccupancy(roomType),
-        // Room types from the room-facts flow carry no currency; the publication does.
-        currency: published[0]?.baseRate.currency ?? roomType.baseRate.currency,
+        // Room types from the room-facts flow carry no currency; the publication does. With
+        // neither, custom rates are sent without one and the server prices them (VAY-2065).
+        currency: published[0]?.baseRate.currency ?? roomType.baseRate.currency ?? null,
         ratePlans: published.map((plan) => ({
           id: plan.ratePlanId,
           name: plan.name,
@@ -546,7 +549,7 @@ function splitGuestName(displayName: string): [string, string] {
   return [firstName, rest.join(" ")];
 }
 
-function moneyAmount(money: PmsOperationsMoney | undefined): number {
+function moneyAmount(money: { amountDecimal: string | null } | undefined): number {
   const amount = Number.parseFloat(money?.amountDecimal ?? "0");
   return Number.isFinite(amount) ? amount : 0;
 }

@@ -360,7 +360,7 @@ export default function NewBookingModal({
               <>
                 <span className="text-gray-500">{t("bookings.tableTotal")}</span>{" "}
                 <span className="font-semibold text-gray-900 text-sm">
-                  {formatCurrency(total, selectedRoomType.currency)}
+                  {formatCurrency(total, selectedRoomType.currency ?? "")}
                 </span>
                 <span className="text-gray-400">
                   {" · "}
@@ -459,7 +459,10 @@ export default function NewBookingModal({
                 <p className="mt-1.5 text-xs text-gray-500">
                   {t("calendar.newBookingModal.roomSummary", {
                     occupancy: selectedRoomType.maxOccupancy,
-                    rate: formatCurrency(selectedRoomType.baseRate, selectedRoomType.currency),
+                    rate: formatCurrency(
+                      selectedRoomType.baseRate,
+                      selectedRoomType.currency ?? "",
+                    ),
                   })}
                 </p>
               )}
@@ -654,7 +657,7 @@ export default function NewBookingModal({
                   <span className="text-gray-500">
                     {t("calendar.newBookingModal.engineQuote")}{" "}
                     <span className="font-medium text-gray-700">
-                      {formatCurrency(resolvedRate, selectedRoomType.currency)}
+                      {formatCurrency(resolvedRate, selectedRoomType.currency ?? "")}
                     </span>
                   </span>
                   {!rateMatchesResolved && rateNum !== null && (
