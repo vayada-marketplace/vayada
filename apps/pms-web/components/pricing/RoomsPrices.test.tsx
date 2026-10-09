@@ -189,9 +189,8 @@ it("resumes an uncertain republish with the same steps, and reloads after a refu
 });
 it("explains a Finance denial without reloading so it can be saved again after fixing payments", async () => {
   await mount(props());
-  client.prepare.mockRejectedValueOnce(
-    new ApiErrorResponse(403, { code: "denied", reason: "payments_disabled" }),
-  );
+  const denied = { code: "denied", reason: "payments_disabled" };
+  client.prepare.mockRejectedValueOnce(new ApiErrorResponse(403, denied));
   await act(async () => button("Save prices again")!.props.onClick());
   expect(text()).toContain("Payments are switched off for this property");
   expect(reload).not.toHaveBeenCalled();
