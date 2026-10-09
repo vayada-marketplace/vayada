@@ -39,6 +39,20 @@ run.
 - **No cohort row for a run** means behaviour is exactly as today. This keeps
   staging rehearsals and existing tests valid.
 
+**Phased waves** (Flamur, 2026-10-10). The migration runs in waves; each wave
+is one source run whose cohort is that wave's hotels. A run has three classes
+of hotel:
+
+- **cohort:** the wave's hotels, migrated as above;
+- **earlier waves' hotels:** already migrated by an earlier run. The run must
+  leave them untouched: no re-quarantine and no disabled auto-open row
+  (later-wave design, below);
+- **non-cohort:** every other legacy hotel, including the later waves'
+  hotels. They import as non-cohort while they keep trading on legacy.
+
+The non-cohort state above is the target's copy only: stopping legacy for a
+wave's hotels is the runbook's per-hotel legacy freeze.
+
 ## Input
 
 A new insert-only target table, written once per source run by the
@@ -94,8 +108,9 @@ platform.production_migration_cohorts(
     entitlement as well.
   - The Booking and Finance owner maps respect the disposition, not only the
     owner-link status. This mirrors PMS's archived context.
-  - Legacy `scheduled` and `processing` payouts of non-cohort hotels are retired,
-    not kept actionable.
+  - Legacy `scheduled` and `processing` payouts of non-cohort hotels are retired
+    in the target, not kept actionable. Legacy keeps paying out the hotels still
+    on legacy, and finishes payouts it already started for a migrated hotel.
   - Channex adoption ignores `outside_migration_cohort` quarantine. It no longer
     treats it as a warning that blocks all adoption.
 
@@ -228,7 +243,18 @@ as preserved with its status, ready default and Owner-off state.
 ## Related constraints
 
 - The VAY-2017 owner bootstrap planner currently requires exactly eight owners
-  (`legacyOwnerBootstrapPlan.ts`). It must take the approved cohort instead.
+  (`legacyOwnerBootstrapPlan.ts`). It must take the approved cohort of each
+  wave instead; wave 1 has three hotels, so this is a wave-1 prerequisite.
+- **Later waves.** A later wave's hotels were imported as non-cohort (private
+  quarantine) by every earlier run. The import refuses to change an existing
+  disposition (`CATALOG_SOURCE_DISPOSITION_CONFLICT`), and the identity import
+  refuses earlier users and quarantined resources (`USER_EQUAL_TIME_CONFLICT`,
+  `QUARANTINE_RESOURCE_CONFLICT`), by design. Wave 2 therefore needs a reviewed
+  later-wave path: promote those hotels to cohort (catalog disposition, owner
+  group, links, entitlements), refresh their rows from the new source run,
+  handle a hotel that was a cohort hotel once and was handed back to legacy,
+  and leave earlier waves' hotels untouched. It is a wave-2 prerequisite, not
+  a wave-1 one.
 - Historical binding claims are written only for cohort hotels. A
   legacy-sourced property without a binding cannot enable Channex (VAY-1362 6c guard).
 - No RLS policies or triggers are added on identity or catalog tables. The
