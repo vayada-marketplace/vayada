@@ -207,3 +207,78 @@ test("a stale host cancellation preview can be refreshed before apply", async ({
   await expect(section.getByRole("button", { name: "Apply previewed action" })).toBeEnabled();
   expect(previews).toBe(2);
 });
+
+test("a guest-requested cancel previews and records the booked-terms fee (VAY-2100)", async ({
+  page,
+}) => {
+  await mockPmsWebAuthenticatedSession(page);
+  await mockPmsWebTargetRoutes(page);
+  const base = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}`;
+  const outcome = {
+    daysBeforeCheckIn: 10,
+    totalMinor: "20000",
+    refundMinor: "5000",
+    retainedMinor: "15000",
+    rooms: [],
+  };
+  let cancelled = false;
+  await page.route(base, (route) =>
+    route.fulfill({
+      json: {
+        item: cancelled
+          ? { ...pmsWebReservation, status: "canceled", cancellationOutcome: outcome }
+          : pmsWebReservation,
+      },
+    }),
+  );
+  for (const suffix of ["notes", "additional-guests"])
+    await page.route(`${base}/${suffix}`, (route) => route.fulfill({ json: { items: [] } }));
+  const previews: Array<Record<string, unknown>> = [];
+  await page.route(`${base}/host-actions/preview`, (route) => {
+    const body = route.request().postDataJSON();
+    previews.push(body);
+    return route.fulfill({
+      json: {
+        previewId: `preview-${previews.length}`,
+        expiresAt: "2099-01-01T12:10:00Z",
+        impact: {
+          checkIn: "2026-10-12",
+          checkOut: "2026-10-14",
+          totalAmount: "200.00",
+          newTotalAmount: "200.00",
+          currency: "EUR",
+          inventory: "release",
+          payment: "no_payment_received",
+          ...(body.cancellationKind === "guest_request" ? { cancellationOutcome: outcome } : {}),
+        },
+      },
+    });
+  });
+  await page.route(`${base}/host-actions/apply`, (route) => {
+    cancelled = true;
+    return route.fulfill({
+      json: { bookingId: PMS_WEB_RESERVATION_ID, lifecycleStatus: "canceled" },
+    });
+  });
+  await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
+  const section = page.getByRole("region", { name: "Booking actions" });
+  await section.getByRole("button", { name: "Cancel booking", exact: true }).click();
+  await expect(section.getByLabel("The property cancels: no cancellation fee")).toBeChecked();
+  await section.getByLabel("Internal reason (not sent to the guest)").fill("Guest emailed");
+  await section.getByRole("button", { name: "Preview impact" }).click();
+  await expect(section.getByText(/does not issue a refund or retain/)).toBeVisible();
+  await section.getByRole("button", { name: "Review changes again" }).click();
+  await section.getByLabel("The guest asked: apply the booked cancellation terms").check();
+  await section.getByRole("button", { name: "Preview impact" }).click();
+  await expect(
+    section.getByText(
+      "Fee under the booked terms (10 days before check-in): 150.00 EUR of 200.00 EUR",
+    ),
+  ).toBeVisible();
+  await expect(section.getByText(/nothing is refunded/)).toBeVisible();
+  expect(previews.map((body) => body.cancellationKind)).toEqual(["property", "guest_request"]);
+  await section.getByRole("button", { name: "Apply previewed action" }).click();
+  await expect(
+    page.getByText(/Recorded at cancellation, 10 days before check-in: 150\.00 EUR of 200\.00 EUR/),
+  ).toBeVisible();
+});
