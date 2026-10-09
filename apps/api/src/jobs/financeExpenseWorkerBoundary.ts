@@ -4,7 +4,7 @@ import type pg from "pg";
 export const FINANCE_EXPENSE_WORKER_ROLE = "vayada_next_finance_expense_worker";
 // Migration 0409 grants this view to PUBLIC, but its validated source-table check
 // excludes non-pricing logins and the security-barrier view returns no rows. Its
-// authority-scope sibling was dropped with the pricing authority (VAY-2079, 0476).
+// authority-scope sibling was dropped with the pricing authority (VAY-2079, 0475).
 const pricingScopeViews = new Set(["booking.pricing_runtime_effective_property_scopes"]);
 const PRICING_SCOPE_VIEW_DIGEST =
   "20605c8ba80e1edcd5bb66e8498cdf6046153cff68ed53633e6a0fad0abed692";

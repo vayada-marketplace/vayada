@@ -36,7 +36,7 @@ lock in the same transaction and check current owners separately. Channex job
 leases and channel connections must not become public guest authorization.
 There is no direct-booking price-source choice (VAY-2079). The former
 `vayada`/`external`/`unconfigured` choice and its routes are removed; a current
-publication is what makes prices public. Migration 0476 dropped its tables
+publication is what makes prices public. Migration 0475 dropped its tables
 (`booking.pricing_authority_revisions`, `booking.pricing_authority_heads`) and the
 authority-scope view. The owning organization is the
 single organization holding active owner/operator links to both the PMS property

@@ -1,7 +1,7 @@
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 const url = process.env["TEST_DATABASE_URL"];
-// VAY-2079 R2 (0476): the direct-booking pricing authority is gone; its neighbours stay.
+// VAY-2079 R2 (0475): the direct-booking pricing authority is gone; its neighbours stay.
 describe.skipIf(!url)("pricing authority drop", () => {
   const pool = new pg.Pool({ connectionString: url });
   afterAll(() => pool.end());
