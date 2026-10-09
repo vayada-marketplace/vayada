@@ -120,6 +120,62 @@ export async function readProductionPmsPrerequisites(
                FROM (SELECT room_type_id, max(stay_date)::text AS last FROM pms.inventory_days
                       WHERE property_id = property.id GROUP BY room_type_id) day
             ) AS "inventoryThroughByRoomType",
+            ARRAY(
+              SELECT DISTINCT catalog.organization_id::text
+                FROM identity.organization_resource_links catalog
+                JOIN identity.organization_resource_links pms
+                  ON pms.organization_id = catalog.organization_id AND pms.product = 'pms'
+                 AND pms.resource_type = 'pms_property' AND pms.resource_id = catalog.resource_id
+                 AND pms.relationship = 'owner' AND pms.status = 'active'
+                JOIN identity.organizations organization
+                  ON organization.id = catalog.organization_id
+                 AND organization.kind = 'hotel_group' AND organization.status = 'active'
+               WHERE catalog.product = 'hotel_catalog' AND catalog.resource_type = 'property'
+                 AND catalog.resource_id = property.id::text AND catalog.status = 'active'
+                 AND catalog.relationship = 'owner'
+               ORDER BY 1
+            ) AS "financialsOwnerOrganizationIds",
+            ARRAY(
+              SELECT DISTINCT module.organization_id::text
+                FROM identity.organization_resource_links catalog
+                JOIN identity.product_entitlements module
+                  ON module.organization_id = catalog.organization_id AND module.product = 'pms'
+                 AND module.entitlement_key = 'module:financials'
+                 AND module.resource_product IS NULL
+                 AND module.status IN ('active', 'suspended')
+                 AND (module.starts_at IS NULL OR module.starts_at <= now())
+                 AND (module.expires_at IS NULL OR module.expires_at > now())
+               WHERE catalog.product = 'hotel_catalog' AND catalog.resource_type = 'property'
+                 AND catalog.resource_id = property.id::text AND catalog.status = 'active'
+               ORDER BY 1
+            ) AS "organizationFinancialsIds",
+            ARRAY(
+              SELECT DISTINCT base.organization_id::text
+                FROM identity.organization_resource_links catalog
+                JOIN identity.product_entitlements base
+                  ON base.organization_id = catalog.organization_id AND base.product = 'pms'
+                 AND base.entitlement_key IN ('property-management', 'pms-core', 'account_access')
+                 AND base.status = 'active'
+                 AND (base.starts_at IS NULL OR base.starts_at <= now())
+                 AND (base.expires_at IS NULL OR base.expires_at > now())
+                 AND (base.resource_product IS NULL OR (base.resource_product = 'pms'
+                   AND base.resource_type = 'pms_property'
+                   AND lower(base.resource_id) = property.id::text))
+               WHERE catalog.product = 'hotel_catalog' AND catalog.resource_type = 'property'
+                 AND catalog.resource_id = property.id::text AND catalog.status = 'active'
+                 AND NOT EXISTS (
+                   SELECT 1 FROM identity.product_entitlements suspended
+                    WHERE suspended.organization_id = catalog.organization_id
+                      AND suspended.product = 'pms' AND suspended.status = 'suspended'
+                      AND suspended.entitlement_key IN
+                        ('property-management', 'pms-core', 'account_access')
+                      AND (suspended.starts_at IS NULL OR suspended.starts_at <= now())
+                      AND (suspended.expires_at IS NULL OR suspended.expires_at > now())
+                      AND (suspended.resource_product IS NULL OR (suspended.resource_product = 'pms'
+                        AND suspended.resource_type = 'pms_property'
+                        AND lower(suspended.resource_id) = property.id::text)))
+               ORDER BY 1
+            ) AS "pmsBaseOrganizationIds",
             (SELECT jsonb_build_object(
                 'idempotencyKeyId', calendar.idempotency_key_id::text,
                 'organizationId', calendar.organization_id::text,

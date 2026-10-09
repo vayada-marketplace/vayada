@@ -33,6 +33,9 @@ export type ProductionPmsSnapshot = {
   completedAt: string;
   /** VAY-1362 cohort loaded by the same validated run read; null means none. */
   cohort?: ProductionMigrationCohort | null;
+  /** VAY-1362: the validated legacy module activations (pms.property_module_activations), with
+   * a cohort only. */
+  moduleActivations?: IdentitySourceRow[];
 };
 
 export const PRODUCTION_PMS_SOURCE_TABLES = [
@@ -73,7 +76,7 @@ export async function readProductionPmsSnapshot(
   },
 ): Promise<ProductionPmsSnapshot> {
   const validated = (await services.validateRun(client, runId)) as
-    | { cohort?: ProductionMigrationCohort | null }
+    | { cohort?: ProductionMigrationCohort | null; rows?: IdentitySourceRow[] }
     | undefined;
   const run = await client.query<{ completedAt: string | null }>(
     `SELECT finished_at::text AS "completedAt"
@@ -166,5 +169,13 @@ export async function readProductionPmsSnapshot(
     snapshotAt: snapshotAt.toISOString(),
     completedAt: new Date(run.rows[0].completedAt).toISOString(),
     cohort: validated?.cohort ?? null,
+    ...(validated?.cohort
+      ? {
+          moduleActivations: (validated.rows ?? []).filter(
+            (row) =>
+              row.sourceDatabase === "pms" && row.sourceTable === "property_module_activations",
+          ),
+        }
+      : {}),
   };
 }

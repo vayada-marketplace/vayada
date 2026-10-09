@@ -8,6 +8,7 @@ import {
   planPmsCohortCalendars,
 } from "./productionPmsCohortCalendarRecords.js";
 import { buildPmsCohortCoverageRecords } from "./productionPmsCohortCoverageRecords.js";
+import { planPmsCohortModules } from "./productionPmsCohortModules.js";
 import { buildPmsPricingSettingsRecords, carriedCohortHotel } from "./productionPmsCohortSetup.js";
 import { createProductionPmsContext, propertyForHotel } from "./productionPmsContext.js";
 import { buildPmsGuestOperationsRecords } from "./productionPmsGuestOperationsRecords.js";
@@ -36,6 +37,8 @@ export function buildProductionPmsPlan(input: {
   rows: IdentitySourceRow[];
   target: ProductionPmsTargetState;
   cohort?: IdentityCohortScope | null;
+  /** VAY-1362: legacy module activations (pms.property_module_activations), with a cohort. */
+  moduleActivations?: IdentitySourceRow[];
 }): ProductionPmsPlan {
   const context = createProductionPmsContext(input);
   const rooms = buildPmsRoomRecords(context);
@@ -55,7 +58,18 @@ export function buildProductionPmsPlan(input: {
     ...buildPmsAuditRecords(context),
   ].sort((left, right) => recordKey(left).localeCompare(recordKey(right)));
   enforceSourceCoverage(context, records);
-  return reconcileProductionPmsRecords(context, records);
+  const modules = planPmsCohortModules(context, input.moduleActivations ?? [], records);
+  // Only a cohort run with module activations carries them, so other plans keep their checksum.
+  const extra =
+    modules.planned.length || modules.skipped.length || modules.unmapped.length
+      ? {
+          moduleActivations: modules.planned,
+          skippedModules: modules.skipped,
+          unmappedModules: modules.unmapped,
+        }
+      : undefined;
+  const plan = reconcileProductionPmsRecords(context, records, extra);
+  return extra ? { ...plan, ...extra } : plan;
 }
 
 function enforceSourceCoverage(context: PmsBuildContext, records: PmsTargetRecord[]): void {
@@ -106,6 +120,7 @@ function enforceSourceCoverage(context: PmsBuildContext, records: PmsTargetRecor
 export function reconcileProductionPmsRecords(
   context: PmsBuildContext,
   candidates: PmsTargetRecord[],
+  checksumExtra?: Record<string, unknown>,
 ): ProductionPmsPlan {
   const existing = new Map(context.target.records.map((row) => [targetKey(row), row]));
   const provenance = new Map(context.target.provenance.map((row) => [provenanceKey(row), row]));
@@ -188,6 +203,7 @@ export function reconcileProductionPmsRecords(
       })),
       blockers,
       parity: stableParity,
+      ...checksumExtra,
     }),
     records: accepted,
     writes,
