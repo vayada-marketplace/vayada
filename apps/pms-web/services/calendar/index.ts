@@ -5,7 +5,6 @@ import {
   resolveSelectedPmsPropertyId,
 } from "../api/pmsPropertyClient";
 import { pmsManualBookingClient } from "../api/pmsManualBookingClient";
-import { unsupportedPmsNextStackFeature } from "../api/unsupported";
 import { BookingAddon } from "../bookings";
 import { orderRoomsByRoomType } from "../../lib/roomOrdering";
 
@@ -234,23 +233,6 @@ type PmsOperationsCalendarResponse = {
   sourceFreshness: Record<string, string | number | boolean | null>;
 };
 
-export interface CreateAdminBookingPayload {
-  roomId: string;
-  guestFirstName: string;
-  guestLastName: string;
-  guestEmail: string;
-  guestPhone: string;
-  specialRequests: string;
-  checkIn: string;
-  checkOut: string;
-  adults: number;
-  children: number;
-  nightlyRate: number | null;
-  channel: string;
-  addonIds?: string[];
-  addonQuantities?: Record<string, number>;
-}
-
 export const calendarService = {
   getCalendarData: (start: string, end: string) =>
     pmsOperationsCalendarReadService.getCalendarData(start, end),
@@ -322,9 +304,6 @@ export const calendarService = {
     );
   },
 
-  createAdminBooking: (_data: CreateAdminBookingPayload) =>
-    unsupportedPmsNextStackFeature("Manual booking creation"),
-
   listAvailableAddons: async (_roomId: string): Promise<BookingAddon[]> => {
     const propertyId = await resolveSelectedPmsPropertyId("loading booking add-ons");
     const response = await pmsOperationsClient.get<ManualAddonApi>(
@@ -342,16 +321,6 @@ export const calendarService = {
       perNight: addon.pricingModel === "per_night" || addon.pricingModel === "per_guest_night",
     }));
   },
-
-  // Booking-engine-equivalent nightly rate for the given room type and check-in
-  // date — used by the New Booking modal so the pre-filled rate matches what
-  // the guest would have been quoted (seasons / daily overrides / weekend
-  // surcharge), instead of just the raw base_rate which can be 0 when the
-  // property prices entirely via seasons.
-  getResolvedRate: (_roomTypeId: string, _checkIn: string) =>
-    unsupportedPmsNextStackFeature<{ nightlyRate: number; currency: string }>(
-      "Resolved room rates",
-    ),
 
   reorderRooms: async (orderedRoomIds: string[], expectedVersion: string): Promise<string> => {
     const propertyId = await resolveSelectedPmsPropertyId("reordering rooms");
