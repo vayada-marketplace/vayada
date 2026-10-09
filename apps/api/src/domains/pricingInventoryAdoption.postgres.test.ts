@@ -628,8 +628,8 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         // VAY-2100: the guest cancels an adopted v2 stay online, end to end on real PostgreSQL.
         expect(await adopt()).toMatchObject({ outcome: "adopted" });
         await db.query(
-          "INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose) VALUES($1,$1::text,'canonical')",
-          [propertyId],
+          "INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose) VALUES($1,$2,'canonical')",
+          [propertyId, propertyId],
         );
         await db.query(
           `INSERT INTO booking.booking_guests(guest_booking_id,guest_role,first_name,last_name,email)
