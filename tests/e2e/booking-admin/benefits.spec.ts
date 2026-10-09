@@ -27,6 +27,7 @@ test.describe("booking-admin benefits settings cutover", () => {
     const typedBenefits = ["Welcome Drink on Arrival", "Complimentary sunset cocktail"];
     const contractRequests: string[] = [];
     const typedWrites: unknown[] = [];
+    let failFirstRead = true;
     await page.route(`**${BOOKING_ADMIN_BENEFITS_SETTINGS_PATH}*`, async (route) => {
       if (route.request().method() === "PUT") {
         const body = route.request().postDataJSON();
@@ -37,6 +38,11 @@ test.describe("booking-admin benefits settings cutover", () => {
 
       contractRequests.push(route.request().url());
       expect(route.request().method()).toBe("GET");
+      if (failFirstRead) {
+        failFirstRead = false;
+        await route.fulfill({ status: 503, json: { message: "Benefits unavailable." } });
+        return;
+      }
       await route.fulfill({ json: { benefits: typedBenefits } });
     });
 
@@ -44,6 +50,12 @@ test.describe("booking-admin benefits settings cutover", () => {
     await page.goto("/booking-flow?tab=benefits");
     await expect(page).toHaveURL(/\/settings\/book-direct-benefits$/);
     await expect(page.getByRole("heading", { name: "Book Direct Benefits" })).toBeVisible();
+    // A failed read shows Retry, never an empty list that a Save would write over the perks.
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Failed to load settings" }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Save Benefits$/ })).toHaveCount(0);
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
     await expect(page.getByText("Complimentary sunset cocktail")).toBeVisible();
     await testInfo.attach("settings-book-direct-benefits", {
       body: await page.screenshot({ fullPage: true }),
