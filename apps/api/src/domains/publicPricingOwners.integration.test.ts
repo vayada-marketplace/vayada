@@ -466,19 +466,22 @@ describe.skipIf(!url)("Public pricing access and booking pricing owners PostgreS
     expect((await f.readLastMinute(200))?.rooms[0].lastMinute?.basisPoints).toBe(1000);
     const price = async () => {
       const policy = (await f.readLastMinute())!;
-      return composeReplacementDiscounts({
-        rooms: [
-          {
-            selectionId: "one",
-            roomMinor: "10000",
-            lastMinute: policy.rooms[0].lastMinute,
-            codeEligible: true,
-          },
-        ],
-        eligibleAddonMinor: "0",
-        code: { kind: "percentage", basisPoints: 1000 },
-        stacking: policy.stacking,
-      });
+      return composeReplacementDiscounts(
+        {
+          rooms: [
+            {
+              selectionId: "one",
+              roomMinor: "10000",
+              lastMinute: policy.rooms[0].lastMinute,
+              codeEligible: true,
+            },
+          ],
+          eligibleAddonMinor: "0",
+          code: { kind: "percentage", basisPoints: 1000 },
+          stacking: policy.stacking,
+        },
+        "EUR",
+      );
     };
     expect((await price())?.remainingRoomAndEligibleAddonMinor).toBe("7200");
     await pool.query(

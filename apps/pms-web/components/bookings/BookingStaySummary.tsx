@@ -49,6 +49,14 @@ export const bookingSettlementLabel = (
         t,
       );
 
+export const stayRatePlanLabel = (stay: BookingStay, t: Translate) =>
+  stay.ratePlanName ||
+  t(
+    stay.customRate
+      ? "calendar.targetManualBooking.customRate"
+      : "bookings.detail.ratePlanUnavailable",
+  );
+
 function guestsLabel(stay: BookingStay, t: Translate): string {
   if (stay.adults == null || stay.children == null) {
     return t("bookings.detail.guestCountUnavailable");
@@ -130,10 +138,7 @@ export default function BookingStaySummary({
               }
             />
             <Fact label={t("bookings.detail.guests")} value={guestsLabel(stay, t)} />
-            <Fact
-              label={t("bookings.detail.ratePlan")}
-              value={stay.ratePlanName || t("bookings.detail.ratePlanUnavailable")}
-            />
+            <Fact label={t("bookings.detail.ratePlan")} value={stayRatePlanLabel(stay, t)} />
             <Fact
               label={t("bookings.detail.appliedPricing")}
               value={
