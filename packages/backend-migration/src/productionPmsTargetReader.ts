@@ -4,6 +4,7 @@ import type { IdentityMigrationBlocker } from "./productionIdentityDisposition.j
 import type { ProductionMigrationSourceLink } from "./productionBookingTypes.js";
 import type {
   ExistingPmsTargetRecord,
+  PmsCohortPropertyState,
   PmsPropertyLink,
   PmsMediaQuarantine,
   PmsMediaReference,
@@ -97,8 +98,38 @@ export async function readProductionPmsPrerequisites(
         AND source_row_id IS NOT NULL
       ORDER BY source_row_id`,
   );
+  const cohortProperties = await client.query<PmsCohortPropertyState>(
+    `SELECT property.id::text AS "propertyId", property.profile_revision::int AS "profileRevision",
+            location.timezone AS "timeZone",
+            ARRAY(
+              SELECT DISTINCT catalog.organization_id::text
+                FROM identity.organization_resource_links catalog
+                JOIN identity.organization_resource_links pms
+                  ON pms.organization_id = catalog.organization_id AND pms.product = 'pms'
+                 AND pms.resource_type = 'pms_property' AND pms.resource_id = catalog.resource_id
+                 AND pms.status = 'active' AND pms.relationship IN ('owner', 'operator')
+                JOIN identity.organizations organization
+                  ON organization.id = catalog.organization_id
+                 AND organization.kind = 'hotel_group' AND organization.status = 'active'
+               WHERE catalog.product = 'hotel_catalog' AND catalog.resource_type = 'property'
+                 AND catalog.resource_id = property.id::text AND catalog.status = 'active'
+                 AND catalog.relationship IN ('owner', 'operator')
+               ORDER BY 1
+            ) AS "organizationIds",
+            (SELECT max(calendar_revision) FROM pms.operating_calendar_revisions calendar
+              WHERE calendar.property_id = property.id) AS "latestCalendarRevision"
+       FROM hotel_catalog.properties property
+       LEFT JOIN hotel_catalog.property_locations location ON location.property_id = property.id
+      WHERE property.id IN (
+        SELECT property_id FROM hotel_catalog.property_source_links
+         WHERE source_system = 'pms' AND source_table = 'hotels'
+           AND metadata ->> 'migrationRunId' = $1)
+      ORDER BY property.id`,
+    [sourceRunId],
+  );
   return {
     propertyLinks: links.rows,
+    cohortProperties: cohortProperties.rows,
     bookings: bookings.rows.map((booking) => ({
       ...booking,
       updatedAt: normalizeTimestamp(booking.updatedAt, "booking.guest_bookings.updated_at"),

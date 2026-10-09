@@ -73,8 +73,19 @@ export type PmsMediaQuarantine = {
   reasonCode: "INVALID_HTTPS_URL" | "INVALID_STRING_ARRAY";
 };
 
+/** VAY-1362: catalog and tenancy facts of the run's PMS properties for setup completeness. */
+export type PmsCohortPropertyState = {
+  propertyId: string;
+  profileRevision: number;
+  timeZone: string | null;
+  /** Active hotel organizations holding both native property links. */
+  organizationIds: string[];
+  latestCalendarRevision: number | null;
+};
+
 export type ProductionPmsTargetState = {
   propertyLinks: PmsPropertyLink[];
+  cohortProperties?: PmsCohortPropertyState[];
   bookings: PmsTargetBooking[];
   userIds: string[];
   media?: PmsMediaReference[];

@@ -25,6 +25,7 @@ const HOTEL = "13620000-0000-4000-8000-0000000000a3";
 const ROOM_TYPE = "13620000-0000-4000-8000-0000000000a4";
 const ROOM_A = "13620000-0000-4000-8000-0000000000a5";
 const ROOM_B = "13620000-0000-4000-8000-0000000000a6";
+const OWNER = "13620000-0000-4000-8000-0000000000a7";
 
 describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", () => {
   let client: pg.Client;
@@ -110,6 +111,97 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
           message: "Another verified room owns this case-insensitive property room label",
         }),
       );
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+  it("gives a cohort hotel the native operating calendar its readiness checks expect", async () => {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+    try {
+      await seed(client);
+      await client.query(
+        `INSERT INTO identity.users (id, email) VALUES ($1, 'cohort-owner@example.invalid')`,
+        [OWNER],
+      );
+      await client.query(
+        `INSERT INTO hotel_catalog.property_locations (property_id, timezone)
+         VALUES ($1, 'Europe/Berlin')`,
+        [PROPERTY],
+      );
+      await client.query(`UPDATE hotel_catalog.properties SET profile_revision = 4 WHERE id = $1`, [
+        PROPERTY,
+      ]);
+      await client.query(
+        `INSERT INTO identity.organization_resource_links
+           (organization_id, product, resource_type, resource_id, relationship, status)
+         VALUES ($1, 'hotel_catalog', 'property', $2, 'owner', 'active'),
+                ($1, 'pms', 'pms_property', $2, 'owner', 'active')`,
+        [ORGANIZATION, PROPERTY],
+      );
+      const prerequisites = await readProductionPmsPrerequisites(client, RUN);
+      const rows = sourceRows();
+      rows[0]!.data["user_id"] = OWNER;
+      const plan = async (records: PmsTargetRecord[] = []) =>
+        buildProductionPmsPlan({
+          sourceRunId: RUN,
+          snapshotAt: AT,
+          completedAt: AT,
+          rows,
+          cohort: { bookingHotelIds: [], pmsHotelIds: [HOTEL], marketplaceHotelIds: [] },
+          target: await readProductionPmsTargetState(client, records, prerequisites),
+        });
+      const planned = await plan((await plan()).records);
+      expect(planned.blockers).toEqual([]);
+      const written = await writeProductionPmsRecords(client, planned.writes);
+      expect(written).toMatchObject({
+        idempotency_keys: 1,
+        domain_events: 1,
+        outbox_events: 1,
+        operating_calendar_revisions: 1,
+        operating_calendar_room_bindings: 1,
+        product_audit_events: 1,
+      });
+      await writeProductionMigrationProvenance(client, planned.provenance, RUN);
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE"); // the deferred manifest trigger
+      const verified = await plan(planned.records);
+      expect([verified.blockers, verified.writes, verified.checksum]).toEqual([
+        [],
+        [],
+        planned.checksum,
+      ]);
+
+      // Readiness criteria d and e (VAY-2066), as the producer reads them.
+      const criteria = await client.query(
+        `WITH latest AS (
+           SELECT * FROM pms.operating_calendar_revisions WHERE property_id = $1
+            ORDER BY calendar_revision DESC LIMIT 1)
+         SELECT latest.organization_id IS NOT NULL
+                  AND latest.property_profile_revision = property.profile_revision
+                  AND latest.property_time_zone = location.timezone AS d,
+                (SELECT count(*) FROM pms.room_types room_type WHERE room_type.property_id = $1
+                    AND room_type.active AND EXISTS (
+                      SELECT 1 FROM pms.operating_calendar_room_bindings binding
+                       WHERE binding.property_id = $1
+                         AND binding.calendar_revision = latest.calendar_revision
+                         AND binding.room_type_id = room_type.id
+                         AND binding.source_room_facts_revision = room_type.room_facts_revision
+                         AND binding.source_room_units_revision = room_type.room_units_revision))
+                = (SELECT count(*) FROM pms.operating_calendar_room_bindings binding
+                    WHERE binding.property_id = $1
+                      AND binding.calendar_revision = latest.calendar_revision) AS e,
+                (SELECT status FROM platform.idempotency_keys WHERE id = latest.idempotency_key_id)
+                  AS idempotency,
+                (SELECT destination FROM platform.outbox_events
+                  WHERE id = latest.outbox_event_id AND domain_event_id = latest.domain_event_id)
+                  AS outbox
+           FROM latest
+           JOIN hotel_catalog.properties property ON property.id = latest.property_id
+           JOIN hotel_catalog.property_locations location ON location.property_id = property.id`,
+        [PROPERTY],
+      );
+      expect(criteria.rows).toEqual([
+        { d: true, e: true, idempotency: "completed", outbox: "pms.inventory-source" },
+      ]);
     } finally {
       await client.query("ROLLBACK");
     }

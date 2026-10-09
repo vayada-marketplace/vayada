@@ -112,6 +112,14 @@ Runs without a cohort, hotels outside it and quarantined hotels get none of this
   operating rooms whose printable-ASCII label is unique case-insensitively in the property. This
   replaces the 0048 rule that migrated labels stay unverified, for cohort hotels only. A twin stays
   unverified, so the property stays in setup.
+- **Operating calendar** (criteria d and e): revision 1 of `pms.operating_calendar_revisions`, as
+  the native calendar save writes it: year-round, minimum stay 1, the owner organization, the
+  catalog profile revision and canonical time zone, and one binding per operating room type at its
+  physical capacity. The import also writes the idempotency key, domain event and outbox row its
+  foreign keys require, and its audit row, with the migration as actor. A hotel without one owner
+  organization, a canonical time zone, a known legacy owner user, or with an operating room type
+  whose rooms are missing or differ from its inventory total gets no calendar. A later calendar
+  revision on the target blocks.
 
 A hotel that misses an item stays `provisioning`.
 
