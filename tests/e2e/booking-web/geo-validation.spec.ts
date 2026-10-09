@@ -158,26 +158,20 @@ test.describe("booking-web robots / indexability GEO contract", () => {
     await assertHealthy();
   });
 
-  test("payment page is excluded from indexing", async ({ page }, testInfo) => {
+  test("retired payment page redirects to the noindex booking page", async ({ page }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
     await mockBookingApis(page);
 
+    // The retired step answers a server redirect (no indexable page of its own) ...
+    const redirect = await page.request.get("/en/payment", { maxRedirects: 0 });
+    expect(redirect.status(), "Payment must answer a server redirect").toBe(308);
+    expect(new URL(redirect.headers()["location"]!).pathname).toBe("/book");
+
+    // ... to the room-and-price page, which must not be indexed either.
     const response = await page.goto("/en/payment");
-
-    const status = response?.status() ?? 0;
-
-    // The payment step must return 200 with a noindex directive.
-    // A redirect without noindex on the final destination is a GEO regression.
-    expect(status, "Payment page must return 200 (with noindex), not a redirect or error").toBe(
-      200,
-    );
-
-    const contentType = response?.headers()["content-type"] ?? "";
-    expect(contentType, "Payment 200 response must be HTML").toContain("text/html");
-
+    expect(response?.status() ?? 0, "Redirect target must return 200").toBe(200);
     const robots = await getMetaRobots(page);
-    expect(robots, "Payment page must have noindex robots meta").not.toBeNull();
-    expect(robots, "Payment page robots meta must contain noindex").toContain("noindex");
+    expect(robots, "Redirect target must have noindex robots meta").toContain("noindex");
 
     await assertHealthy();
   });
@@ -218,23 +212,20 @@ test.describe("booking-web robots / indexability GEO contract", () => {
     expect(noindexPaths.some((p) => p.includes("addons"))).toBe(true);
   });
 
-  test("addons page is excluded from indexing", async ({ page }, testInfo) => {
+  test("retired addons page redirects to the noindex booking page", async ({ page }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
     await mockBookingApis(page);
 
+    // The retired step answers a server redirect (no indexable page of its own) ...
+    const redirect = await page.request.get("/en/addons", { maxRedirects: 0 });
+    expect(redirect.status(), "Addons must answer a server redirect").toBe(308);
+    expect(new URL(redirect.headers()["location"]!).pathname).toBe("/book");
+
+    // ... to the room-and-price page, which must not be indexed either.
     const response = await page.goto("/en/addons");
-
-    const status = response?.status() ?? 0;
-
-    // The add-ons selection step must return 200 with a noindex directive.
-    expect(status, "Addons page must return 200 (with noindex), not a redirect or error").toBe(200);
-
-    const contentType = response?.headers()["content-type"] ?? "";
-    expect(contentType, "Addons 200 response must be HTML").toContain("text/html");
-
+    expect(response?.status() ?? 0, "Redirect target must return 200").toBe(200);
     const robots = await getMetaRobots(page);
-    expect(robots, "Addons page must have noindex robots meta").not.toBeNull();
-    expect(robots, "Addons page robots meta must contain noindex").toContain("noindex");
+    expect(robots, "Redirect target must have noindex robots meta").toContain("noindex");
 
     await assertHealthy();
   });

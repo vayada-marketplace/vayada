@@ -961,6 +961,78 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
     ).resolves.toMatchObject({ rows: [{ status: "succeeded", days: 0 }] });
   });
 
+  // VAY-1943 slice B: a hotel priced only on pricing-v2 must become sellable.
+  it("opens the rate gate for rooms with a published pricing-v2 offer", async () => {
+    const property = await seedProperty(admin, 23, {
+      mode: "rolling",
+      rollingMonths: 12,
+      fixedEndMonth: null,
+    });
+    await seedPublication(admin, property, 2);
+
+    const page = await store.findCalendarAutoOpenCandidates(now, 100);
+    const candidate = page.candidates.find(({ propertyId }) => propertyId === property.propertyId);
+    // Publication revision 2, constant plan revision: price edits do not re-run auto-open.
+    expect(candidate?.source.pricing.flexibleRatePlans).toEqual([
+      { roomTypeId: property.roomTypeId, flexibleRatePlanRevision: 1 },
+    ]);
+    await store.enqueueCalendarAutoOpenJob(candidate!, context());
+    await expect(
+      runPmsCalendarAutoOpenWorkerOnce({
+        store: worker,
+        workerId: "vay-1943-published-rate-test",
+        now: () => now,
+      }),
+    ).resolves.toMatchObject({ outcome: "succeeded", applicationOutcome: "applied" });
+    expect(
+      (
+        await admin.query(
+          `SELECT bool_and(rate_gate_open) AS "rateGateOpen",
+                  min(available_count)::int AS "minimumAvailable"
+           FROM pms.inventory_days WHERE property_id=$1::uuid`,
+          [property.propertyId],
+        )
+      ).rows[0],
+    ).toEqual({ rateGateOpen: true, minimumAvailable: 2 });
+  });
+
+  it("keeps legacy plans while pricing-v2 has only a draft head", async () => {
+    const property = await seedProperty(admin, 24, {
+      mode: "rolling",
+      rollingMonths: 12,
+      fixedEndMonth: null,
+    });
+    await admin.query(
+      `INSERT INTO pms.rate_plans(
+         id,property_id,room_type_id,code,name,rate_type,base_rate_amount,currency,active,
+         cancellation_policy_snapshot,pricing_contract_version,flexible_rate_plan_revision,
+         source_room_facts_revision,source_pricing_currency_revision)
+       VALUES($1::uuid,$2::uuid,$3::uuid,'flexible','Flexible','flexible',100,'EUR',TRUE,
+         '{"type":"free_until_days_before_arrival","freeCancellationDeadlineDays":1,
+           "afterDeadlinePenalty":"full_booking_amount","noShowPenalty":"full_booking_amount"}'::jsonb,
+         'pms-pricing.v1',3,1,1)`,
+      [randomUUID(), property.propertyId, property.roomTypeId],
+    );
+    // Saving a pricing-v2 draft creates the head at revision 0; nothing is published yet.
+    await admin.query("INSERT INTO pms.pricing_v2_heads (property_id) VALUES ($1::uuid)", [
+      property.propertyId,
+    ]);
+    const page = await store.findCalendarAutoOpenCandidates(now, 100);
+    const candidate = page.candidates.find(({ propertyId }) => propertyId === property.propertyId);
+    expect(candidate?.source.pricing.flexibleRatePlans).toEqual([
+      { roomTypeId: property.roomTypeId, flexibleRatePlanRevision: 3 },
+    ]);
+    await store.enqueueCalendarAutoOpenJob(candidate!, context());
+    // The worker reads the same source, so the job applies instead of dead-lettering.
+    await expect(
+      runPmsCalendarAutoOpenWorkerOnce({
+        store: worker,
+        workerId: "vay-1943-draft-head-test",
+        now: () => now,
+      }),
+    ).resolves.toMatchObject({ outcome: "succeeded", applicationOutcome: "applied" });
+  });
+
   it("rejects untrusted job horizons and generated coverage without inventory", async () => {
     const property = await seedProperty(admin, 19, {
       mode: "fixed",
@@ -1186,6 +1258,9 @@ async function cleanupSchedulerFixtures(pool: pg.Pool): Promise<void> {
       [ids],
     );
     for (const table of [
+      "pms.pricing_v2_rooms",
+      "pms.pricing_v2_revisions",
+      "pms.pricing_v2_heads",
       "platform.dead_letter_events",
       "platform.product_audit_events",
       "platform.outbox_events",
@@ -1318,6 +1393,54 @@ async function seedProperty(
     client.release();
   }
   return { propertyId, roomTypeId, organizationId };
+}
+
+/** A minimal active publication with one offer for the property's room. */
+async function seedPublication(
+  admin: pg.Pool,
+  property: SeededProperty,
+  revision: number,
+): Promise<void> {
+  const client = await admin.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL session_replication_role = replica");
+    await client.query(
+      "INSERT INTO pms.pricing_v2_heads (property_id, revision) VALUES ($1::uuid, $2)",
+      [property.propertyId, revision],
+    );
+    await client.query(
+      `INSERT INTO pms.pricing_v2_revisions
+         (property_id, revision, room_count, currency, source_revisions, owner_references,
+          request_id, request_hash, actor_user_id)
+       VALUES ($1::uuid, $2, 1, 'EUR', '{}', '{}', $3, $4, $5::uuid)`,
+      [property.propertyId, revision, randomUUID(), "a".repeat(64), randomUUID()],
+    );
+    await client.query(
+      `INSERT INTO pms.pricing_v2_rooms (property_id, revision, room_type_id, currency, configuration)
+       VALUES ($1::uuid, $2, $3::uuid, 'EUR', $4::jsonb)`,
+      [
+        property.propertyId,
+        revision,
+        property.roomTypeId,
+        JSON.stringify({
+          version: "pricing.v2",
+          propertyId: property.propertyId,
+          roomTypeId: property.roomTypeId,
+          currency: "EUR",
+          revision,
+          capacity: { total: 2, adults: 2, children: 0 },
+          offers: [{ id: "flex" }],
+        }),
+      ],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function seedSparseInventoryDay(
