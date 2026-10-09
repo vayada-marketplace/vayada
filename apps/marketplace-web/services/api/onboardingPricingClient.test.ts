@@ -59,11 +59,15 @@ describe("onboardingPricingClient", () => {
     owners({ currency: null });
     const first = await client.load(propertyId);
     calls.put.mockRejectedValue(
-      new ApiErrorResponse(409, { code: "pricing_currency_revision_conflict" }),
+      new ApiErrorResponse(409, { code: "pricing_currency_revision_conflict", currentRevision: 1 }),
     );
     const error = await client.saveCurrency(propertyId, "EUR", first).catch((e) => e);
     expect(error).toBeInstanceOf(PricingOwnerError);
     expect(error).toMatchObject({ requiresRefresh: true });
+    // An Owner-only gate refusal is not a command error and keeps its status and body.
+    const forbidden = new ApiErrorResponse(403, { code: "forbidden" });
+    calls.put.mockRejectedValue(forbidden);
+    await expect(client.saveCurrency(propertyId, "EUR", first)).rejects.toBe(forbidden);
   });
 });
 
