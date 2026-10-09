@@ -1315,6 +1315,31 @@ describe("api config", () => {
     );
   });
 
+  it("runs the calendar auto-open scheduler hourly unless switched off", () => {
+    expect(loadConfig({})).toMatchObject({
+      pmsCalendarAutoOpenSchedulerEnabled: true,
+      pmsCalendarAutoOpenSchedulerIntervalMs: 60 * 60 * 1000,
+    });
+    expect(
+      loadConfig({
+        PMS_CALENDAR_AUTO_OPEN_SCHEDULER_ENABLED: "false",
+        PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS: "900000",
+      }),
+    ).toMatchObject({
+      pmsCalendarAutoOpenSchedulerEnabled: false,
+      pmsCalendarAutoOpenSchedulerIntervalMs: 900_000,
+    });
+    expect(() => loadConfig({ PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS: "0" })).toThrow(
+      "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS must be a positive integer",
+    );
+    expect(() =>
+      loadConfig({ PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS: "2147483648" }),
+    ).toThrow("PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS must not exceed 2147483647");
+    expect(() => loadConfig({ PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS: "59999" })).toThrow(
+      "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS must be at least 60000",
+    );
+  });
+
   it("configures and can disable property setup draft retention", () => {
     expect(loadConfig({})).toMatchObject({
       propertySetupDraftRetentionEnabled: true,

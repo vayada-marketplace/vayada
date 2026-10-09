@@ -21,7 +21,7 @@ interface CalendarRoom {
   floor: string;
   status: string;
   baseRate: number;
-  currency: string;
+  currency: string | null;
   maxOccupancy: number;
   size: number;
   flexibleRatePlanId?: string | null;
@@ -340,7 +340,7 @@ export default function BookingDetailModal({
         ? t("calendar.bookingDetail.upToGuests", { count: room.maxOccupancy })
         : "",
       room.size > 0 ? `${room.size} m²` : "",
-      room.baseRate > 0
+      room.baseRate > 0 && room.currency
         ? t("calendar.bookingDetail.perNight", {
             amount: formatCurrency(room.baseRate, room.currency),
           })
