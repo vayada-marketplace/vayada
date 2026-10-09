@@ -13,6 +13,7 @@ on:
       - "fm/vay-2066-*"
       - "fm/vay-2079-*"
       - "fm/vay-2082-*"
+      - "fm/vay-2078-*"
       - flamurmaliqi2811/vay-2044-expense-worker-runtime
       - fm/vay-2041-worker-permissions
       - fm/vay-2041-worker-source-permissions
@@ -345,6 +346,12 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      - name: Verify PMS navigation module migration backfill
+        if: matrix.shard == 'pms'
+        run: npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/pmsNavigationModules.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Apply target migrations
         run: npm --workspace @vayada/backend-migration run target:migrate -- --env local
         env:
@@ -490,6 +497,8 @@ jobs:
           src/domains/pmsPhysicalRoomManagementRepository.integration.test.ts
           src/domains/pmsRoomPublicationCommandRepository.integration.test.ts
           src/domains/pmsCalendarAutoOpenSettingsRepository.integration.test.ts
+          src/pmsNavigationModules.integration.test.ts
+          src/pmsNavigationModules.test.ts
           src/jobs/pmsChannexScheduler.integration.test.ts
           src/jobs/pmsCalendarAutoOpenScheduler.integration.test.ts
           src/domains/pmsInboxProviderActionCommand.integration.test.ts

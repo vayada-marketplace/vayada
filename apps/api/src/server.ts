@@ -311,6 +311,7 @@ import {
   createXenditBankValidator,
 } from "./routes/finance.js";
 import { createPgPmsModuleActivationRepository } from "./routes/pmsModuleActivations.js";
+import { createPgPmsNavigationModuleRepository } from "./routes/pmsNavigationModules.js";
 import { createPgGuestReviewCommands } from "./domains/pmsGuestReviews.js";
 import { createChannexGuestReviews } from "./integrations/channexGuestReviews.js";
 import { createPgReviewReplyCommands } from "./domains/pmsReviewReplies.js";
@@ -613,6 +614,9 @@ const pmsModuleActivationRepository = config.auth
   ? createPgPmsModuleActivationRepository({
       connectionString: targetDatabaseUrl,
     })
+  : undefined;
+const pmsNavigationModuleRepository = config.auth
+  ? createPgPmsNavigationModuleRepository({ connectionString: targetDatabaseUrl })
   : undefined;
 
 const stripeConnectProvider = config.stripeSubscriptions.secretKey
@@ -1883,6 +1887,7 @@ const app = buildApp({
     ? { commandPort: pmsPhysicalRoomOperationalLabels }
     : undefined,
   pmsModuleActivationRepository,
+  pmsNavigationModuleRepository,
   ...hotelSetupOrdinaryOptions,
   financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({

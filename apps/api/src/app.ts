@@ -269,6 +269,10 @@ import {
   type PmsInboxAttachmentMediaRoutesOptions,
 } from "./routes/pmsInboxAttachmentMedia.js";
 import { registerPmsCalendarAutoOpenRoutes } from "./routes/pmsCalendarAutoOpen.js";
+import {
+  registerPmsNavigationModuleRoutes,
+  type PmsNavigationModuleRepository,
+} from "./routes/pmsNavigationModules.js";
 import type { PmsLinkedInventoryGroupCommandRepository } from "./domains/pmsLinkedInventoryGroupRepository.js";
 import {
   registerPmsManualBookingPreviewRoutes,
@@ -386,6 +390,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   pmsManualBookingPreview?: PmsManualBookingPreviewRoutesOptions;
   pmsManualBookingCreate?: PmsManualBookingCreateRoutesOptions;
   pmsModuleActivationRepository?: PmsModuleActivationRepository;
+  pmsNavigationModuleRepository?: PmsNavigationModuleRepository;
   financialsActivationPropertyIds?: readonly string[];
   pmsReviewRepository?: PmsReviewRepository;
   pmsChannexManagement?: PmsChannexManagementRoutesOptions;
@@ -1122,6 +1127,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       allowedOrigins: options.pmsOperationsAllowedOrigins,
       financialsActivationPropertyIds: options.financialsActivationPropertyIds,
       propertyAccessRepository: options.auth?.propertyAccessRepository,
+    });
+  }
+  if (options.pmsNavigationModuleRepository && options.auth) {
+    app.register(registerPmsNavigationModuleRoutes, {
+      prefix: "/api/pms",
+      repository: options.pmsNavigationModuleRepository,
+      propertyAccessRepository: options.auth.propertyAccessRepository,
+      allowedOrigins: options.pmsOperationsAllowedOrigins,
     });
   }
   if (options.pmsReviewRepository) {
