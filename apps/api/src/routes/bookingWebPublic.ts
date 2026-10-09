@@ -3869,11 +3869,21 @@ async function withGuestLifecycleMutation(
     assertLifecycleMutationAllowed(booking, mutation.action);
     let bookedOutcome: BookedCancellationOutcome | null = null;
     if (mutation.action === "cancel") {
+      if (objectValue(booking.bookingMetadata)["targetSource"] === "pricing_quote_draft") {
+        // Booking row, then inventory, as PMS host actions take them. NO KEY UPDATE stays
+        // compatible with PMS adoption, which holds inventory while it references the booking.
+        await client.query(
+          "SELECT 1 FROM booking.guest_bookings WHERE id=$1::uuid AND property_id=$2::uuid FOR NO KEY UPDATE",
+          [booking.guestBookingId, property.propertyId],
+        );
+        await lockPmsInventoryMutationScope(client, property.propertyId);
+      }
       bookedOutcome = await loadBookedCancellationOutcome(
         client,
         property.propertyId,
         booking,
         context.occurredAt,
+        true,
       );
       resolveTargetCancellationPreview(
         booking,
@@ -3888,8 +3898,6 @@ async function withGuestLifecycleMutation(
             409,
             "The cancellation fee has changed. Review it again before cancelling.",
           );
-        // Inventory before the booking row, as PMS adoption takes them.
-        await lockPmsInventoryMutationScope(client, property.propertyId);
       }
     }
     const result = await client.query<TargetBookingRow>(
@@ -4016,7 +4024,10 @@ async function withGuestLifecycleMutation(
         fingerprint: context.fingerprint,
         occurredAt: context.occurredAt,
       });
-    await enqueuePmsReservationHandoff(client, property.propertyId, updated, context, "cancel");
+    // Nothing consumes pms.reservation.cancel for pricing-v2 stays; cancelAcceptedPricingStay frees
+    // a cancelled one, and withdrawals (VAY-2099) free theirs the same way.
+    if (objectValue(updated.bookingMetadata)["targetSource"] !== "pricing_quote_draft")
+      await enqueuePmsReservationHandoff(client, property.propertyId, updated, context, "cancel");
     const body = serializeTargetBookingStatus(updated);
     await recordTargetCheckoutCommand(client, {
       propertyId: property.propertyId,
@@ -6323,14 +6334,20 @@ async function loadBookedCancellationOutcome(
   propertyId: string,
   booking: TargetBookingRow,
   occurredAt: Date,
+  lockAssignments = false,
 ): Promise<BookedCancellationOutcome | null> {
   if (objectValue(booking.bookingMetadata)["targetSource"] !== "pricing_quote_draft") return null;
-  const started = await db.query(
-    `SELECT 1 FROM pms.operational_booking_assignments WHERE property_id=$1::uuid
-       AND guest_booking_id=$2::uuid AND assignment_status IN ('checked_in','in_house','checked_out')`,
+  // Locked on cancel, so a check-in cannot commit between this check and the cancellation.
+  const assignments = await db.query<{ status: string }>(
+    `SELECT assignment_status AS status FROM pms.operational_booking_assignments
+     WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid${lockAssignments ? " FOR UPDATE" : ""}`,
     [propertyId, booking.guestBookingId],
   );
-  if (started.rows.length)
+  if (
+    assignments.rows.some(({ status }) =>
+      ["checked_in", "in_house", "checked_out"].includes(status),
+    )
+  )
     throw createHttpError(409, "This stay has already started. Contact the property.");
   return loadPricingBookingCancellation(db, {
     propertyId,
