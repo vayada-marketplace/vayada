@@ -3,6 +3,7 @@ import {
   projectBookingRoomSelection,
 } from "./bookingRoomSelectionProjection.js";
 import type { PropertyPlanReadModel } from "@vayada/domain-finance";
+import { parseFlexibleCancellationTerms, type FlexibleCancellationTerms } from "@vayada/domain-pms";
 import pg from "pg";
 
 import {
@@ -155,6 +156,10 @@ export type PmsOperationalNight = {
   evidenceQuality: "exact" | "inferred" | "missing";
 };
 
+export type PmsBookedCancellation =
+  | { kind: "non_refundable" }
+  | { kind: "flexible"; terms: FlexibleCancellationTerms };
+
 export type PmsOperationalAssignment = {
   assignmentId: string;
   roomTypeId: string;
@@ -163,6 +168,8 @@ export type PmsOperationalAssignment = {
   pricingOfferId?: string | null;
   /** Child ages recorded for the stay, when known; offers price children by age. */
   childAgesAtCheckIn?: number[] | null;
+  /** Cancellation terms of the offer a manual stay was booked on, at the stored publication. */
+  bookedCancellation?: PmsBookedCancellation | null;
   roomId: string | null;
   roomNumber: string | null;
   position: number;
@@ -779,7 +786,7 @@ export function createTargetPmsOperationsReadRepository(config: {
 
     async findReservationByGuestBookingId(propertyId, guestBookingId, canReadGuestContact = false) {
       const result = await pool.query<TargetPmsOperationalReservationRow>(
-        `${pmsOperationalReservationSelectSql(canReadGuestContact)}
+        `${pmsOperationalReservationSelectSql(canReadGuestContact, { bookedCancellation: true })}
          WHERE booking.property_id = $1
            AND booking.id = $2`,
         [propertyId, guestBookingId],
@@ -922,7 +929,30 @@ const PMS_OPERATIONAL_RESERVATION_SOURCE_SQL = `COALESCE(
   END
 )`;
 
-function pmsOperationalReservationSelectSql(canReadGuestContact: boolean): string {
+// The terms a manual stay was booked under: its stored offer in the stored publication revision,
+// both immutable, so republishing never rewrites them (VAY-2089).
+const BOOKED_OFFER_CANCELLATION_JOIN_SQL = `LEFT JOIN LATERAL (
+    SELECT terms.terms->'cancellation' AS cancellation
+    FROM pms.pricing_v2_rooms price_room
+    CROSS JOIN LATERAL jsonb_array_elements(price_room.configuration->'offers') AS offer(value)
+    JOIN booking.pricing_v2_offer_terms terms
+      ON terms.property_id = price_room.property_id AND terms.room_type_id = price_room.room_type_id
+     AND terms.offer_id = offer.value->>'id' AND terms.revision::text = offer.value->>'termsRevision'
+    WHERE price_room.property_id = assignment.property_id
+      AND price_room.room_type_id = assignment.room_type_id
+      AND price_room.revision = CASE
+        WHEN assignment.assignment_payload->'pricingOffer'->>'pricingRevision' ~ '^[0-9]{1,9}$'
+        THEN (assignment.assignment_payload->'pricingOffer'->>'pricingRevision')::integer END
+      AND offer.value->>'id' = assignment.assignment_payload->'pricingOffer'->>'offerId'
+    LIMIT 1
+  ) booked_offer ON TRUE`;
+
+/** `bookedCancellation` reads each stay's booked offer terms; only Booking Detail needs them, so
+ * list and calendar reads skip the join. */
+function pmsOperationalReservationSelectSql(
+  canReadGuestContact: boolean,
+  { bookedCancellation = false }: { bookedCancellation?: boolean } = {},
+): string {
   return `SELECT
   booking.id::text AS "guestBookingId",
   booking.public_reference AS "bookingReference",
@@ -1048,6 +1078,7 @@ LEFT JOIN LATERAL (
              'childAgesAtCheckIn', COALESCE(assignment.assignment_payload->'childAgesAtCheckIn',
                assignment.assignment_payload->'pricingOffer'->'childAgesAtCheckIn',
                assignment.assignment_payload->'pricingAcceptance'->'childAgesAtCheckIn'),
+             'bookedCancellation', ${bookedCancellation ? "booked_offer.cancellation" : "NULL"},
              'roomId', assignment.room_id::text,
              'roomNumber', room.room_number,
              'position', assignment.position,
@@ -1070,6 +1101,7 @@ LEFT JOIN LATERAL (
   LEFT JOIN pms.rooms room
     ON room.id = assignment.room_id
    AND room.property_id = assignment.property_id
+  ${bookedCancellation ? BOOKED_OFFER_CANCELLATION_JOIN_SQL : ""}
   LEFT JOIN LATERAL (
     SELECT jsonb_agg(
              jsonb_build_object(
@@ -1531,6 +1563,14 @@ function toRoomBlockKind(value: unknown): PmsRoomBlockKind {
   return value === "linked_booking" || value === "linked_manual_block" ? value : "manual";
 }
 
+function toBookedCancellation(value: unknown): PmsBookedCancellation | null {
+  const cancellation = record(value);
+  if (cancellation?.kind === "non_refundable") return { kind: "non_refundable" };
+  const terms =
+    cancellation?.kind === "flexible" ? parseFlexibleCancellationTerms(cancellation.terms) : null;
+  return terms ? { kind: "flexible", terms } : null;
+}
+
 function toOperationalAssignments(value: unknown): PmsOperationalAssignment[] {
   return toRecordArray(value)
     .map((item) => {
@@ -1540,6 +1580,7 @@ function toOperationalAssignments(value: unknown): PmsOperationalAssignment[] {
         roomTypeId: String(item.roomTypeId ?? ""),
         ratePlanId: typeof item.ratePlanId === "string" ? item.ratePlanId : null,
         pricingOfferId: typeof item.pricingOfferId === "string" ? item.pricingOfferId : null,
+        bookedCancellation: toBookedCancellation(item.bookedCancellation),
         childAgesAtCheckIn:
           Array.isArray(item.childAgesAtCheckIn) &&
           item.childAgesAtCheckIn.every((age) => Number.isInteger(age))
