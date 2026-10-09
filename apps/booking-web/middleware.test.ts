@@ -282,3 +282,49 @@ describe("Booking Web affiliate reference prelaunch guard", () => {
     expect(bookingWebPublicApi.admitAffiliateArrival).not.toHaveBeenCalled();
   });
 });
+
+describe("Booking Web retired booking pages", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  const host = "hotel-alpenrose.next-booking.vayada.com";
+
+  async function visit(path: string, headers: Record<string, string> = { host }) {
+    return middleware(new NextRequest(`https://${host}${path}`, { headers }));
+  }
+
+  it("permanently redirects the retired pages to /book, keeping only what /book reads", async () => {
+    const response = await visit(
+      "/en/rooms?checkIn=2026-11-12&checkOut=2026-11-14&adults=2&children=1&promoCode=SUMMER20&room=alpine&rateType=flexible",
+    );
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe(
+      `https://${host}/book?checkIn=2026-11-12&checkOut=2026-11-14&adults=2&children=1&promoCode=SUMMER20`,
+    );
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(bookingWebPublicApi.resolveHost).not.toHaveBeenCalled();
+  });
+
+  it("keeps a non-default locale and accepts unprefixed and trailing-slash paths", async () => {
+    expect((await visit("/de/payment")).headers.get("location")).toBe(`https://${host}/de/book`);
+    expect((await visit("/addons/")).headers.get("location")).toBe(`https://${host}/book`);
+    expect((await visit("/payment?checkIn=")).headers.get("location")).toBe(`https://${host}/book`);
+  });
+
+  it("redirects on the browser-facing host when the proxy reports an internal origin", async () => {
+    const response = await middleware(
+      new NextRequest("http://10.0.4.12:3000/fr/addons?checkIn=2026-11-12", {
+        headers: { host: "10.0.4.12:3000", "x-forwarded-host": host, "x-forwarded-proto": "http" },
+      }),
+    );
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe(`https://${host}/fr/book?checkIn=2026-11-12`);
+  });
+
+  it("leaves other pages and unknown locales alone", async () => {
+    for (const path of ["/en/book", "/en/roomsx", "/xx/rooms", "/en/rooms/alpine", "/"]) {
+      const response = await visit(path);
+      expect(response.status, path).not.toBe(308);
+      expect(response.headers.get("location"), path).toBeNull();
+    }
+  });
+});

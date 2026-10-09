@@ -50,6 +50,46 @@ function isLocalHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
+// The room list, add-on and payment pages of the retired booking flow (VAY-1543 C.2)
+// answer a real permanent redirect to the room-and-price page, so crawlers and other
+// clients without JavaScript see it too. Only what /book reads carries over.
+const retiredBookingPagePath = /^(?:\/([^/]+))?\/(?:rooms|addons|payment)\/?$/;
+const bookPageParams = ["checkIn", "checkOut", "adults", "children", "promoCode"];
+
+function retiredBookingPageRedirect(request: NextRequest): NextResponse | null {
+  const match = retiredBookingPagePath.exec(request.nextUrl.pathname);
+  if (!match) return null;
+  const locale = match[1];
+  if (locale !== undefined && !routing.locales.includes(locale as (typeof routing.locales)[number]))
+    return null;
+  const target = new URL(
+    locale && locale !== routing.defaultLocale ? `/${locale}/book` : "/book",
+    publicOrigin(request),
+  );
+  for (const key of bookPageParams) {
+    const value = request.nextUrl.searchParams.get(key);
+    if (value) target.searchParams.set(key, value);
+  }
+  const redirect = NextResponse.redirect(target, 308);
+  // The target follows the request's own host; never let a shared cache keep it.
+  redirect.headers.set("Cache-Control", "no-store");
+  return redirect;
+}
+
+/** The browser-facing origin, by the same rule as the reference guard below. */
+function publicOrigin(request: NextRequest): string {
+  const publicHost = getRequestHost(request.headers) || request.nextUrl.host;
+  const hostname = normalizeHost(publicHost);
+  const local = isLocalHost(hostname) || hostname.endsWith(".localhost");
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",", 1)[0]?.trim();
+  const protocol = !local
+    ? "https:"
+    : forwardedProto === "https" || forwardedProto === "http"
+      ? `${forwardedProto}:`
+      : request.nextUrl.protocol;
+  return `${protocol}//${publicHost}`;
+}
+
 export default async function middleware(request: NextRequest) {
   // Until first-party admission is live, never forward an opaque click reference
   // through a cached or changed canonical-host redirect.
@@ -124,6 +164,9 @@ export default async function middleware(request: NextRequest) {
     }
     return redirect;
   }
+
+  const retiredPageRedirect = retiredBookingPageRedirect(request);
+  if (retiredPageRedirect) return retiredPageRedirect;
 
   const response = intlMiddleware(request);
 
