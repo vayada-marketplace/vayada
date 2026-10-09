@@ -4,6 +4,7 @@ import type { IdentityMigrationBlocker } from "./productionIdentityDisposition.j
 import type { ProductionMigrationSourceLink } from "./productionBookingTypes.js";
 import type {
   ExistingPmsTargetRecord,
+  PmsCohortPropertyState,
   PmsPropertyLink,
   PmsMediaQuarantine,
   PmsMediaReference,
@@ -97,8 +98,70 @@ export async function readProductionPmsPrerequisites(
         AND source_row_id IS NOT NULL
       ORDER BY source_row_id`,
   );
+  const cohortProperties = await client.query<PmsCohortPropertyState>(
+    `SELECT property.id::text AS "propertyId", property.profile_revision::int AS "profileRevision",
+            location.timezone AS "timeZone",
+            ARRAY(
+              SELECT DISTINCT catalog.organization_id::text
+                FROM identity.organization_resource_links catalog
+                JOIN identity.organization_resource_links pms
+                  ON pms.organization_id = catalog.organization_id AND pms.product = 'pms'
+                 AND pms.resource_type = 'pms_property' AND pms.resource_id = catalog.resource_id
+                 AND pms.status = 'active' AND pms.relationship IN ('owner', 'operator')
+                JOIN identity.organizations organization
+                  ON organization.id = catalog.organization_id
+                 AND organization.kind = 'hotel_group' AND organization.status = 'active'
+               WHERE catalog.product = 'hotel_catalog' AND catalog.resource_type = 'property'
+                 AND catalog.resource_id = property.id::text AND catalog.status = 'active'
+                 AND catalog.relationship IN ('owner', 'operator')
+               ORDER BY 1
+            ) AS "organizationIds",
+            (SELECT jsonb_build_object(
+                'idempotencyKeyId', calendar.idempotency_key_id::text,
+                'organizationId', calendar.organization_id::text,
+                'profileRevision', calendar.property_profile_revision,
+                'timeZone', calendar.property_time_zone,
+                'scheduleMode', calendar.schedule_mode,
+                'periods', (
+                  SELECT coalesce(jsonb_agg(jsonb_build_object(
+                      'startsOn', lpad(period.start_month::text, 2, '0') || '-'
+                                  || lpad(period.start_day::text, 2, '0'),
+                      'endsOn', lpad(period.end_month::text, 2, '0') || '-'
+                                || lpad(period.end_day::text, 2, '0'))
+                    ORDER BY period.period_index), '[]'::jsonb)
+                    FROM pms.operating_calendar_recurring_periods period
+                   WHERE period.property_id = calendar.property_id
+                     AND period.calendar_revision = calendar.calendar_revision),
+                'defaultMinimumStayNights', calendar.default_minimum_stay_nights,
+                'createdByUserId', calendar.created_by_user_id::text,
+                'createdAt', to_char(calendar.created_at AT TIME ZONE 'UTC',
+                                     'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+                'bindings', (
+                  SELECT coalesce(jsonb_agg(jsonb_build_object(
+                      'roomTypeId', binding.room_type_id::text,
+                      'sourceRoomFactsRevision', binding.source_room_facts_revision,
+                      'sourceRoomUnitsRevision', binding.source_room_units_revision,
+                      'physicalCapacityCount', binding.physical_capacity_count,
+                      'startingSellableLimitCount', binding.starting_sellable_limit_count)
+                    ORDER BY binding.room_type_id), '[]'::jsonb)
+                    FROM pms.operating_calendar_room_bindings binding
+                   WHERE binding.property_id = calendar.property_id
+                     AND binding.calendar_revision = calendar.calendar_revision))
+               FROM pms.operating_calendar_revisions calendar
+              WHERE calendar.property_id = property.id AND calendar.calendar_revision = 1)
+              AS "storedCalendar"
+       FROM hotel_catalog.properties property
+       LEFT JOIN hotel_catalog.property_locations location ON location.property_id = property.id
+      WHERE property.id IN (
+        SELECT property_id FROM hotel_catalog.property_source_links
+         WHERE source_system = 'pms' AND source_table = 'hotels'
+           AND metadata ->> 'migrationRunId' = $1)
+      ORDER BY property.id`,
+    [sourceRunId],
+  );
   return {
     propertyLinks: links.rows,
+    cohortProperties: cohortProperties.rows,
     bookings: bookings.rows.map((booking) => ({
       ...booking,
       updatedAt: normalizeTimestamp(booking.updatedAt, "booking.guest_bookings.updated_at"),
