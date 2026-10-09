@@ -391,13 +391,32 @@ describe("replacement room-night calculator", () => {
     expect(total({ ...c, offers: [c.offers[0], overridden, third] }, r).totalMinor).toBe("12600");
   });
   it("keeps currency units exact and enforces arrival closure and occupied-night stop-sell", () => {
-    for (const currency of ["JPY", "KWD", "IDR"]) {
+    for (const currency of ["JPY", "KWD"]) {
       const c = calendar({ base: { mode: "flat", amountMinor: "1001" } });
       expect(total({ ...c, currency }, request(1, "nr"))).toMatchObject({
         currency,
         totalMinor: "901",
       });
     }
+    // IDR (VAY-2085) prices in whole rupiah: percentages round half-up to 100 minor units, and a
+    // configuration with a fractional rupiah amount is invalid.
+    for (const [base, nr] of [
+      ["100100", "90100"], // 1,001 − 10% = 900.9 → 901
+      ["100500", "90500"], // 1,005 − 10% = 904.5 → 905 (half-up)
+      ["100400", "90400"], // 1,004 − 10% = 903.6 → 904
+    ]) {
+      const c = calendar({ base: { mode: "flat", amountMinor: base } });
+      expect(total({ ...c, currency: "IDR" }, request(1, "nr"))).toMatchObject({
+        currency: "IDR",
+        totalMinor: nr,
+      });
+    }
+    expect(
+      calculateReplacementRoomStay(
+        { ...calendar({ base: { mode: "flat", amountMinor: "1001" } }), currency: "IDR" },
+        request(1, "nr"),
+      ),
+    ).toMatchObject({ kind: "unavailable", reason: "invalid_configuration" });
     const c = fixture(),
       policy = own();
     if (policy.kind !== "own") throw new Error("fixture");
