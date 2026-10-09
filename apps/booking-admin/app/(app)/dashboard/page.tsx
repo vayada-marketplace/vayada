@@ -5,6 +5,8 @@ import { useTranslation } from "@/lib/i18n";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { settingsService, type PropertySettings } from "@/services/settings";
 import { ConversionFunnelCard } from "@/components/dashboard/ConversionFunnelCard";
+import { SummaryCard } from "@/components/dashboard/SummaryCard";
+import { compareSummary, type SummaryChange } from "@/lib/utils/dashboardSummary";
 import {
   dashboardService,
   rangeQuery,
@@ -32,32 +34,6 @@ const SOURCE_LABELS: Record<string, string> = {
   google: "Google Hotels",
 };
 
-function formatDiff(
-  current: number,
-  previous: number,
-  locale: string,
-  isCurrency = false,
-  currencyCode = "EUR",
-  t?: (key: string) => string,
-  vsLabel?: string,
-): { text: string; positive: boolean | null } {
-  const diff = current - previous;
-  if (diff === 0 && current === 0)
-    return { text: t ? t("dashboard.stats.noDataYet") : "No data yet", positive: null };
-  if (diff === 0)
-    return {
-      text: t ? t("dashboard.stats.samePeriod") : "Same as previous period",
-      positive: null,
-    };
-  const absDiff = Math.abs(diff);
-  const formatted = isCurrency
-    ? formatCurrency(absDiff, currencyCode, locale)
-    : formatNumber(absDiff, locale);
-  const vsPrevious = vsLabel ?? (t ? t("dashboard.stats.vsPrevious") : "vs previous");
-  if (diff > 0) return { text: `\u2191 +${formatted} ${vsPrevious}`, positive: true };
-  return { text: `\u2193 -${formatted} ${vsPrevious}`, positive: false };
-}
-
 // ISO date strings come from the backend already aligned to the property
 // timezone; `parseIsoDate` builds a Date at local midnight so Intl
 // formatting doesn't shift the day backwards on negative-UTC clients.
@@ -69,6 +45,23 @@ function parseIsoDate(iso: string): Date {
 function formatShortDate(iso: string, locale: string): string {
   return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }).format(
     parseIsoDate(iso),
+  );
+}
+
+function statIcon(...paths: string[]) {
+  return (
+    <svg
+      className="w-4 h-4"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      aria-hidden="true"
+    >
+      {paths.map((d) => (
+        <path key={d} strokeLinecap="round" strokeLinejoin="round" d={d} />
+      ))}
+    </svg>
   );
 }
 
@@ -161,22 +154,6 @@ export default function DashboardPage() {
         })()
       : "conic-gradient(#e5e7eb 0% 100%)";
 
-  // mt-auto pins the sparkline to the card bottom so optional subtitle lines don't shift the baseline.
-  const renderSparkline = (data: number[], color = "bg-primary-200") => {
-    const max = Math.max(...data, 1);
-    return (
-      <div className="flex items-end gap-1 mt-auto pt-2 h-5">
-        {data.map((v, i) => (
-          <div
-            key={i}
-            className={`flex-1 ${color} rounded-sm`}
-            style={{ height: `${Math.max((v / max) * 100, 4)}%` }}
-          />
-        ))}
-      </div>
-    );
-  };
-
   // Tiers retuned for the smaller inner circle introduced when the dashboard
   // was tightened — long strings like "IDR 1,234,567,890" (17 chars) must
   // still fit inside the inner circle without overlapping the colored ring.
@@ -188,11 +165,10 @@ export default function DashboardPage() {
     return "text-[9px] md:text-[10px]";
   };
 
-  // The previous-period comparison was a vague "vs previous"; spell out
-  // the actual comparison window so hotel managers can read the delta.
+  // Spell out the comparison window; Today compares with the same weekday last week.
   const vsLabel =
     timeRange === "today"
-      ? t("dashboard.stats.vsYesterday")
+      ? t("dashboard.stats.vsSameDayLastWeek")
       : timeRange === "week"
         ? t("dashboard.stats.vsLastWeek")
         : t("dashboard.stats.vsLast30Days");
@@ -210,28 +186,13 @@ export default function DashboardPage() {
   const incompleteAmounts = Boolean(
     stats && (stats.unverified_bookings > 0 || stats.unverified_bookings_previous > 0),
   );
-  const revenueDiff =
-    stats && !incompleteAmounts
-      ? formatDiff(stats.revenue, stats.revenue_previous, locale, true, currency, t, vsLabel)
-      : null;
-  const bookingsDiff = stats
-    ? formatDiff(stats.bookings, stats.bookings_previous, locale, false, "EUR", t, vsLabel)
-    : null;
-  const rateDiff =
-    stats && !incompleteAmounts
-      ? formatDiff(
-          stats.avg_nightly_rate,
-          stats.avg_nightly_rate_previous,
-          locale,
-          true,
-          currency,
-          t,
-          vsLabel,
-        )
-      : null;
-  const viewsDiff = stats
-    ? formatDiff(stats.page_views, stats.page_views_previous, locale, false, "EUR", t, vsLabel)
-    : null;
+  const money = (value: number) => formatCurrency(value, currency, locale);
+  const count = ({ amount }: SummaryChange) => formatNumber(amount, locale);
+  // Revenue reads as a percentage; after an empty previous period the amount is shown instead.
+  const revenueChange = ({ amount, percent }: SummaryChange) =>
+    percent === null
+      ? money(amount)
+      : `${formatNumber(percent, locale, { maximumFractionDigits: percent < 10 ? 1 : 0 })}%`;
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-3 md:space-y-4">
@@ -273,176 +234,66 @@ export default function DashboardPage() {
       <div
         className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 ${loading ? "opacity-60" : ""}`}
       >
-        {/* Revenue */}
-        <div className="bg-white border border-gray-200 rounded-xl p-3 md:p-4 flex flex-col">
-          <div className="flex items-start justify-between">
-            <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-              {t("dashboard.stats.revenue")}{" "}
-              {timeRange === "today"
-                ? t("dashboard.timeRange.today")
-                : timeRange === "week"
-                  ? t("dashboard.timeRange.week")
-                  : t("dashboard.timeRange.month")}
-            </span>
-            <svg
-              className="w-5 h-5 text-gray-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.5}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
-              />
-            </svg>
-          </div>
-          <p className="text-xl md:text-2xl font-bold text-gray-900 mt-2 truncate">
-            {stats ? formatCurrency(stats.revenue, currency, locale) : "--"}
-          </p>
-          {revenueDiff && (
-            <p
-              className={`text-[13px] mt-1 ${revenueDiff.positive === true ? "text-green-600" : revenueDiff.positive === false ? "text-red-500" : "text-gray-500"}`}
-            >
-              {revenueDiff.text}
-            </p>
+        <SummaryCard
+          icon={statIcon(
+            "M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
           )}
-          {/* Empty subtitle slot keeps this card the same shape as cards with next-arrival / booking-rate. */}
-          <p className="text-[11px] text-gray-500 mt-1">{" "}</p>
-          {sparklines && renderSparkline(sparklines.revenue)}
-        </div>
-
-        {/* New Bookings */}
-        <div className="bg-white border border-gray-200 rounded-xl p-3 md:p-4 flex flex-col">
-          <div className="flex items-start justify-between">
-            <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-              {t("dashboard.stats.newBookings")}{" "}
-              {timeRange === "today"
-                ? t("dashboard.timeRange.today")
-                : timeRange === "week"
-                  ? t("dashboard.timeRange.week")
-                  : t("dashboard.timeRange.month")}
-            </span>
-            <svg
-              className="w-5 h-5 text-gray-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.5}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"
-              />
-            </svg>
-          </div>
-          <p className="text-xl md:text-2xl font-bold text-gray-900 mt-2 truncate">
-            {stats ? formatNumber(stats.bookings, locale) : "--"}
-          </p>
-          {bookingsDiff && (
-            <p
-              className={`text-[13px] mt-1 ${bookingsDiff.positive === true ? "text-green-600" : bookingsDiff.positive === false ? "text-red-500" : "text-gray-500"}`}
-            >
-              {bookingsDiff.text}
-            </p>
+          label={t("dashboard.stats.revenue")}
+          value={stats ? money(stats.revenue) : "--"}
+          comparison={
+            stats && !incompleteAmounts
+              ? compareSummary(stats.revenue, stats.revenue_previous)
+              : null
+          }
+          formatChange={revenueChange}
+          vsLabel={vsLabel}
+          t={t}
+          sparkline={sparklines?.revenue ?? []}
+        />
+        <SummaryCard
+          icon={statIcon(
+            "M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5",
           )}
-          <p className="text-[11px] text-gray-500 mt-1">
-            {stats?.next_arrival
-              ? `${t("dashboard.stats.nextArrival")} ${new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }).format(new Date(stats.next_arrival))}`
-              : " "}
-          </p>
-          {sparklines && renderSparkline(sparklines.bookings)}
-        </div>
-
-        {/* Avg. Nightly Rate */}
-        <div className="bg-white border border-gray-200 rounded-xl p-3 md:p-4 flex flex-col">
-          <div className="flex items-start justify-between">
-            <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-              {t("dashboard.stats.avgNightlyRate")}
-            </span>
-            <svg
-              className="w-5 h-5 text-gray-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.5}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z"
-              />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6Z" />
-            </svg>
-          </div>
-          <p className="text-xl md:text-2xl font-bold text-gray-900 mt-2 truncate">
-            {stats ? formatCurrency(stats.avg_nightly_rate, currency, locale) : "--"}
-          </p>
-          {rateDiff && (
-            <p
-              className={`text-[13px] mt-1 ${rateDiff.positive === true ? "text-green-600" : rateDiff.positive === false ? "text-red-500" : "text-gray-500"}`}
-            >
-              {rateDiff.text}
-            </p>
+          label={t("dashboard.stats.bookings")}
+          value={stats ? formatNumber(stats.bookings, locale) : "--"}
+          comparison={stats ? compareSummary(stats.bookings, stats.bookings_previous) : null}
+          formatChange={count}
+          vsLabel={vsLabel}
+          t={t}
+          sparkline={sparklines?.bookings ?? []}
+        />
+        <SummaryCard
+          icon={statIcon(
+            "M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z",
+            "M6 6h.008v.008H6V6Z",
           )}
-          <p className="text-[11px] text-gray-500 mt-1"> </p>
-          {sparklines && renderSparkline(sparklines.avg_rate)}
-        </div>
-
-        {/* Page Views */}
-        <button
-          type="button"
+          label={t("dashboard.stats.avgNightlyRate")}
+          value={stats ? money(stats.avg_nightly_rate) : "--"}
+          comparison={
+            stats && !incompleteAmounts
+              ? compareSummary(stats.avg_nightly_rate, stats.avg_nightly_rate_previous)
+              : null
+          }
+          formatChange={({ amount }) => money(amount)}
+          vsLabel={vsLabel}
+          t={t}
+          sparkline={sparklines?.avg_rate ?? []}
+        />
+        <SummaryCard
+          icon={statIcon(
+            "M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z",
+            "M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z",
+          )}
+          label={t("dashboard.stats.pageViews")}
+          value={stats ? formatNumber(stats.page_views, locale) : "--"}
+          comparison={stats ? compareSummary(stats.page_views, stats.page_views_previous) : null}
+          formatChange={count}
+          vsLabel={vsLabel}
+          t={t}
+          sparkline={sparklines?.page_views ?? []}
           onClick={() => setPageViewsModalOpen(true)}
-          className="bg-white border border-gray-200 rounded-xl p-3 md:p-4 flex flex-col text-left hover:border-gray-300 hover:shadow-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary-300"
-          aria-label={t("dashboard.pageViewsModal.openLabel")}
-        >
-          <div className="flex items-start justify-between w-full">
-            <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-              {t("dashboard.stats.pageViews")}{" "}
-              {timeRange === "today"
-                ? t("dashboard.timeRange.today")
-                : timeRange === "week"
-                  ? t("dashboard.timeRange.week")
-                  : t("dashboard.timeRange.month")}
-            </span>
-            <svg
-              className="w-5 h-5 text-gray-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.5}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"
-              />
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"
-              />
-            </svg>
-          </div>
-          <p className="text-xl md:text-2xl font-bold text-gray-900 mt-2 truncate w-full">
-            {stats ? formatNumber(stats.page_views, locale) : "--"}
-          </p>
-          {viewsDiff && (
-            <p
-              className={`text-[13px] mt-1 ${viewsDiff.positive === null ? "text-gray-500" : viewsDiff.positive ? "text-green-600" : "text-red-500"}`}
-            >
-              {viewsDiff.text}
-            </p>
-          )}
-          <p className="text-[11px] text-gray-500 mt-1">
-            {stats && stats.bookings > 0 && stats.page_views > 0
-              ? `${formatNumber((stats.bookings / stats.page_views) * 100, locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}% ${t("dashboard.stats.bookingRate")}`
-              : " "}
-          </p>
-          {sparklines && renderSparkline(sparklines.page_views, "bg-gray-200")}
-        </button>
+          ariaLabel={t("dashboard.pageViewsModal.openLabel")}
+        />
       </div>
 
       {pageViewsModalOpen && (
