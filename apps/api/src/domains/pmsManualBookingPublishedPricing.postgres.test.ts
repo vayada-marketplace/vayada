@@ -463,6 +463,17 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
       );
       expect(created.total.amountDecimal).toBe("200.00");
     });
+
+    // VAY-1943: the payment settings changed after publishing, so the publication is stale and no
+    // longer confirms final prices (setup Pricing reopens; guest policy blocks until republished).
+    it("stops confirming final prices once the publication is stale", async () => {
+      expect(
+        await createPgPmsMandatoryChargeConfirmationReadModel({
+          connectionString: url!,
+          pool,
+        }).getMandatoryChargeConfirmation({ organizationId, propertyId }),
+      ).toMatchObject({ outcome: "missing" });
+    });
   });
 
   function ownerContext(): RequestContext {
