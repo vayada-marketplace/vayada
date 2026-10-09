@@ -68,6 +68,7 @@ function fakePool(options: { amount?: string; roots?: readonly unknown[] } = {})
     if (sql.startsWith("BEGIN") || sql === "COMMIT" || sql === "ROLLBACK") {
       return { rows: [], rowCount: 0 };
     }
+    if (sql.startsWith("SELECT 1 FROM pms.pricing_v2_heads")) return { rows: [], rowCount: 0 };
     if (sql.includes("FROM pms.property_pricing_settings")) {
       return {
         rows: [
@@ -246,6 +247,7 @@ describe("PMS recurring pricing read model", () => {
       if (sql.startsWith("BEGIN") || sql === "COMMIT" || sql === "ROLLBACK") {
         return { rows: [], rowCount: 0 };
       }
+      if (sql.startsWith("SELECT 1 FROM pms.pricing_v2_heads")) return { rows: [], rowCount: 0 };
       if (sql.includes("property_pricing_settings")) {
         return {
           rows: [

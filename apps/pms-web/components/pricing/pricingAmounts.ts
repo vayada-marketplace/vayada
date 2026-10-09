@@ -9,6 +9,13 @@ import {
   PricingResponseError,
   type PricingSnapshot,
 } from "@/services/api/replacementPricingClient";
+import {
+  decimalAmount,
+  parseMinorInput,
+  PricingError as SetupPricingError,
+} from "@vayada/product-onboarding/pricingSetupAmounts";
+
+export { decimalAmount, parseMinorInput };
 
 export type MessageKey = keyof typeof en & keyof typeof import("@/messages/de.json");
 export type Translate = (key: string, params?: Record<string, string | number>) => string;
@@ -19,14 +26,14 @@ export const english: Translate = (key, params = {}) =>
     (en as Record<string, string>)[key] ?? key,
   );
 /** Keeps the English message for logs and tests; the pricing UI shows `key` in the selected language. */
-export class PricingError extends Error {
-  constructor(readonly key: MessageKey) {
-    super(english(key));
+export class PricingError extends SetupPricingError {
+  constructor(override readonly key: MessageKey) {
+    super(key, english(key));
   }
 }
 /** Translates pricing errors raised in the frontend; other messages, such as API errors, pass through unchanged. */
 export const errorText = (cause: unknown, t: Translate, fallback: MessageKey) =>
-  cause instanceof PricingError
+  cause instanceof SetupPricingError
     ? t(cause.key)
     : cause instanceof PricingResponseError
       ? t("pricing.error.unverified")
@@ -56,10 +63,6 @@ export function baseAmounts(base: Base, t: Translate = english): [string, string
       ],
     ];
   return [[t("pricing.perRoom"), base.amountMinor]];
-}
-export function decimalAmount(minor: string, scale: number) {
-  const digits = minor.padStart(scale + 1, "0");
-  return scale ? `${digits.slice(0, -scale)}.${digits.slice(-scale)}` : digits;
 }
 export function editedSnapshot(
   snapshot: PricingSnapshot,
@@ -97,23 +100,6 @@ export function editedSnapshot(
       }),
     })),
   };
-}
-
-/** `step` is the currency's price step in minor units (`pricingAmountStep`): 100 for IDR, which is
- * priced in whole rupiah (VAY-2085), so a fractional rupiah is refused here, not on save. */
-export function parseMinorInput(value: string, scale: number, allowZero = false, step = 1) {
-  if (
-    !new RegExp(`^\\d+(?:\\.\\d{1,${scale || 1}})?$`).test(value) ||
-    (!scale && value.includes("."))
-  )
-    throw new PricingError("pricing.error.invalidPrice");
-  const [whole, fraction = ""] = value.split("."),
-    minor = `${whole}${fraction.padEnd(scale, "0")}`.replace(/^0+(?=\d)/, "");
-  if (!allowZero && minor === "0") throw new PricingError("pricing.error.priceZero");
-  if (minor.length > 18) throw new PricingError("pricing.error.priceTooLarge");
-  if (BigInt(minor) % BigInt(step) !== BigInt(0))
-    throw new PricingError("pricing.error.wholeUnitsOnly");
-  return minor;
 }
 
 export function parseAdjustmentInput(input: { kind: string; value: string }, currency: string) {
