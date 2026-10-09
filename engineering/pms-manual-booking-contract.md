@@ -246,7 +246,7 @@ the target manual writer can be accepted.
 - `rate_plan` pricing is resolved server-side for every service night from the
   active publication, read inside the caller's transaction, and then
   snapshotted. The read takes no row locks and is not gated by the booking
-  engine's pricing authority or online-payment readiness; route authorization
+  engine's online-payment readiness; route authorization
   already scopes the property. The standard night is the offer's room plus
   meal amount for the stay's adults and children. A manual override replaces
   each nightly amount but preserves the chosen offer and comparison evidence.

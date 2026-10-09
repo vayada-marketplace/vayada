@@ -28,7 +28,6 @@ import { PricingLinkedAdjustment } from "./PricingLinkedAdjustment";
 import { PricingDates } from "./PricingDates";
 import { PricingRules } from "./PricingRules";
 import { PricingStayPreview } from "./PricingStayPreview";
-import { PricingAuthorityControl } from "./PricingAuthorityControl";
 
 type Client = ReturnType<typeof createReplacementPricingClient>;
 const noPreviewEdits = {};
@@ -47,7 +46,7 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
   const [current, setCurrent] = useState<PricingSnapshot | null>(null), [baseRevision, setBaseRevision] = useState(0);
   const [draft, setDraft] = useState<PricingDraft | null>(null), [review, setReview] = useState<PricingChargeReview | null>(null);
   const [inputs, setInputs] = useState<Record<string, string>>({}), [dirty, setDirty] = useState(false), [ack, setAck] = useState(false);
-  const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [authorityActive, setAuthorityActive] = useState(false), [error, setError] = useState<unknown>(null), [notice, setNotice] = useState<MessageKey | "">("");
+  const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState<unknown>(null), [notice, setNotice] = useState<MessageKey | "">("");
   const [needsReload, setNeedsReload] = useState(false), [done, setDone] = useState(false), [retry, setRetry] = useState(false);
   const retainFailure = useRef<(() => boolean) | null>(null);
   const action = useRef<(() => Promise<void>) | null>(null), locked = useRef(false), alive = useRef(true);
@@ -71,7 +70,7 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
     finally { if (alive.current) setLoading(false); }
   }, [client]);
   useEffect(() => { alive.current = true; void load(); return () => { alive.current = false; }; }, [load]); // Client is property-bound; parent keys this component by property.
-  const leaveRisk = authorityActive || hasPendingEntries || dirty || retry || busy || (!!draft && !done);
+  const leaveRisk = hasPendingEntries || dirty || retry || busy || (!!draft && !done);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => { if (leaveRisk && !leaving.current) { event.preventDefault(); event.returnValue = ""; } };
     // Pricing is entered and left through document navigation so browser history also runs beforeunload.
@@ -105,7 +104,7 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
     } finally { locked.current = false; if (alive.current) setBusy(false); }
   }
   function createInitial(input: ReturnType<typeof firstPricingInput>, addToRoom = false) {
-    if (locked.current || busy || authorityActive || retry || needsReload || done || review) return;
+    if (locked.current || busy || retry || needsReload || done || review) return;
     if (!addToRoom && current && (!addingRoom || current.currency !== input.configuration.currency || current.rooms.some((room) => room.roomTypeId === input.configuration.roomTypeId) ||
         !setup?.rooms.some((room) => room.roomTypeId === input.configuration.roomTypeId) || setup.propertyId !== input.configuration.propertyId)) {
       setError(new PricingError("pricing.editor.errorUnconfiguredRoom")); return;
@@ -168,15 +167,14 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
       if (alive.current) { setDone(true); setDirty(false); setReview(null); setNotice("pricing.editor.noticeApproved"); }
     });
   }
-  const disabled = busy || authorityActive || retry || needsReload || done, display = review?.snapshot ?? current;
+  const disabled = busy || retry || needsReload || done, display = review?.snapshot ?? current;
   const unconfiguredRooms = setup?.rooms.filter((room) => !display?.rooms.some((value) => value.roomTypeId === room.roomTypeId)) ?? [];
   const scale = display ? pricingCurrencyScale(display.currency)! : 2;
   return <section className="mx-auto max-w-5xl space-y-6 p-4 sm:p-8">
     <header className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-2xl font-semibold text-gray-950">{t("pricing.editor.title")}</h1><p className="mt-1 text-sm text-gray-600">{t("pricing.editor.subtitle")}</p></div>
-      <button className="rounded-lg border px-4 py-2 text-sm disabled:opacity-50" disabled={loading || busy || authorityActive || retry} onClick={() => { if (leaveRisk) setReloading(true); else void load(); }}>{t("pricing.editor.reload")}</button></header>
+      <button className="rounded-lg border px-4 py-2 text-sm disabled:opacity-50" disabled={loading || busy || retry} onClick={() => { if (leaveRisk) setReloading(true); else void load(); }}>{t("pricing.editor.reload")}</button></header>
     {reloading && <ConfirmDialog title={t("pricing.reloadTitle")} message={t("pricing.reloadMessage")} confirmLabel={t("pricing.reloadConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { setReloading(false); void load(); }} onCancel={() => setReloading(false)} />}
     {leave && <ConfirmDialog title={t("pricing.leaveTitle")} message={t("pricing.leaveMessage")} confirmLabel={t("pricing.leaveConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { leaving.current = true; setLeave(null); leave(); }} onCancel={() => setLeave(null)} />}
-    <PricingAuthorityControl client={client} blocked={loading || hasPendingEntries || dirty || retry || busy || (!!draft && !done)} onActivityChange={setAuthorityActive} />
     {error !== null && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">{message(error, t)}{retry && <p className="mt-2">{t("pricing.editor.retryHint")}</p>}</div>}
     {notice && <p role="status" className="rounded-lg bg-emerald-50 p-4 text-emerald-900">{t(notice)}</p>}
     {loading ? <p role="status">{t("pricing.editor.loading")}</p> : !display && !empty ? null : !display ? <div className="rounded-xl border bg-white p-8"><h2 className="font-semibold">{t("pricing.editor.notConfigured")}</h2>{setup ? <FirstPricingSetup propertyId={setup.propertyId} rooms={setup.rooms} disabled={disabled} onDirty={() => setDirty(true)} onCreate={createInitial} /> : <p className="mt-2 text-sm text-gray-600">{t("pricing.editor.setupUnavailable")}</p>}
