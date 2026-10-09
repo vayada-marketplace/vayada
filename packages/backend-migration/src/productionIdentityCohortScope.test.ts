@@ -91,6 +91,13 @@ describe("production identity cohort scope (VAY-1362)", () => {
     expect(ended.map((row) => [row.resourceId, row.status]).sort()).toEqual(
       outside.map((id) => [id, "expired"]).sort(),
     );
+    // VAY-1543: the mixed owner's active organization gets no suspended or organization-wide
+    // grant from the quarantine that could block its cohort properties.
+    expect(
+      plan.entitlements
+        .filter((row) => row.organizationId === mixedOrg)
+        .map((row) => [row.status, row.resourceType, row.resourceId]),
+    ).toEqual([["active", "booking_hotel", COHORT_BOOKING]]);
 
     expect(
       buildProductionIdentityPlan([...rows()].reverse(), undefined, undefined, COHORT),

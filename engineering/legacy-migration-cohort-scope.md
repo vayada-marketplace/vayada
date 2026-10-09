@@ -108,7 +108,9 @@ platform.production_migration_cohorts(
   - an enabled provider account
   - public media, offers or add-ons
   - a verified domain
-- It also fails when a cohort property is unexpectedly quarantined.
+- It also fails when a cohort property is unexpectedly quarantined, or lacks
+  exactly one active hotel organization holding both native links with an
+  active, unsuspended PMS entitlement.
 - Unit tests per domain cover cohort, non-cohort and no-cohort behaviour.
   PostgreSQL integration tests cover the cohort table, the snapshot load and
   the parity invariant.
