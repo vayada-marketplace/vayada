@@ -128,6 +128,31 @@ describe.skipIf(!URL)("PostgreSQL platform media cleanup", () => {
           deadLettered: index === 4,
         });
         expect(await deadLetters()).toBe(index === 4 ? 1 : 0);
+        if (index === 0 || index === 4) {
+          // A second API task that selected the item before this attempt was recorded.
+          const late = await failing.recordCleanupFailure(
+            {
+              mediaObjectId: MEDIA,
+              resourceProduct: "marketplace",
+              resourceType: "collaboration",
+              resourceId: "collaboration-vay2082",
+              lifecycleStatus: "active",
+              retainedUntil: EXPIRES_AT,
+            },
+            {
+              action: "delete-private-attachment-after-retention",
+              runName: "privateAttachmentRetention",
+              jobType: "platform.media.cleanup.private-attachment-retention",
+              eventType: "platform_media.private_attachment.deleted_after_retention",
+              auditAction: "platform_media.cleanup.private_attachment_deleted_after_retention",
+              deadlineOrWindow: EXPIRES_AT,
+            },
+            denied,
+            { now, correlationId: "vay2082-late-runner", workerId: "late-runner" },
+          );
+          expect(late).toMatchObject({ attempt: index + 1, deadLettered: false });
+          expect(await deadLetters()).toBe(index === 4 ? 1 : 0);
+        }
       }
       const muchLater = await runAt(minutesAfterNow(100 * 24 * 60));
 

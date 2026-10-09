@@ -82,6 +82,7 @@ export type PlatformMediaCleanupFailureResult = {
   errorCode: string;
   errorMessage: string;
   attempt: number;
+  // True only for the failure that dead-lettered the item.
   deadLettered: boolean;
 };
 
@@ -923,13 +924,39 @@ async function insertCleanupFailureRows(
   const keyHash = sha256Key(cleanupKey);
   const errorInfo = errorDetails(error);
   const errorCode = safeErrorCode(error);
-  const previous = await client.query<{ attemptsCount: number }>(
-    `SELECT attempts_count AS "attemptsCount"
+  const failureResult = (
+    attempt: number,
+    deadLettered: boolean,
+  ): PlatformMediaCleanupFailureResult => ({
+    action: mutation.action,
+    resourceId,
+    cleanupKey,
+    jobKey,
+    reasonCode: failureReasonCode(error),
+    errorType: errorInfo.type,
+    errorCode,
+    errorMessage: errorInfo.message,
+    attempt,
+    deadLettered,
+  });
+  const previous = await client.query<{ attemptsCount: number; held: boolean | null }>(
+    `SELECT attempts_count AS "attemptsCount",
+            job_metadata ->> 'retryPolicy' = $3
+              AND (status = 'dead_lettered' OR (status = 'failed' AND run_after > $4::timestamptz))
+              AS held
      FROM platform.jobs
      WHERE queue_name = $1 AND job_key = $2
      FOR UPDATE`,
-    [PLATFORM_MEDIA_CLEANUP_QUEUE, jobKey],
+    [
+      PLATFORM_MEDIA_CLEANUP_QUEUE,
+      jobKey,
+      PLATFORM_MEDIA_CLEANUP_RETRY_POLICY,
+      context.now.toISOString(),
+    ],
   );
+  // An overlapping run (another API task) already recorded this attempt: report the failure
+  // without counting it again, so the attempt cap and the single warning still hold.
+  if (previous.rows[0]?.held) return failureResult(previous.rows[0].attemptsCount, false);
   const attempt = (previous.rows[0]?.attemptsCount ?? 0) + 1;
   const retry = platformMediaCleanupRetry(attempt, context.now);
   const jobId = await upsertFailedCleanupJob(client, {
@@ -952,18 +979,7 @@ async function insertCleanupFailureRows(
     context,
     errorInfo,
   );
-  const failure: PlatformMediaCleanupFailureResult = {
-    action: mutation.action,
-    resourceId,
-    cleanupKey,
-    jobKey,
-    reasonCode: failureReasonCode(error),
-    errorType: errorInfo.type,
-    errorCode,
-    errorMessage: errorInfo.message,
-    attempt,
-    deadLettered: retry.deadLettered,
-  };
+  const failure = failureResult(attempt, retry.deadLettered);
   if (!retry.deadLettered) return failure;
   await client.query(
     `INSERT INTO platform.dead_letter_events
