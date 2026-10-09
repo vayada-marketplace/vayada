@@ -105,109 +105,90 @@ describe("PMS pricing command repository", () => {
     expect(queries.some((sql) => sql.includes("platform.idempotency_keys"))).toBe(false);
   });
 
-  it.each(["currency", "currency_ready"] as const)(
-    "rechecks native %s scope in preparation and write transactions before replay",
-    async (operation) => {
-      for (const revokedAt of [1, 2]) {
-        const queries: { sql: string; values?: readonly unknown[] }[] = [];
-        let scopeChecks = 0;
-        const release = vi.fn();
-        const client: PmsPricingCommandClient = {
-          async query(sql, values) {
-            queries.push({ sql, values });
-            if (sql.includes("platform.hotel_setup_property_operation_allowed")) {
-              scopeChecks++;
-              return {
-                rows: [
-                  {
-                    sessionUser: "vayada_next_hotel_setup_property_currency_test",
-                    currentUser: "vayada_next_hotel_setup_property_currency_test",
-                    allowed: scopeChecks < revokedAt,
-                    organizationAllowed: true,
-                    safeRole: true,
-                  },
-                ],
-                rowCount: 1,
-              } as never;
-            }
-            if (sql.includes("FROM hotel_catalog.properties property"))
-              return { rows: [{ id: propertyId }], rowCount: 1 } as never;
-            if (sql.includes("FROM identity.organization_memberships"))
-              return {
-                rows: [
-                  {
-                    id: propertyId,
-                    roleKey: "hotel_owner",
-                    mode: "all",
-                    accessOrigin: "agency",
-                    permissionOverrides: null,
-                    pms: true,
-                    booking: true,
-                    roleDefinitionId: null,
-                  },
-                ],
-                rowCount: 1,
-              } as never;
-            if (sql.includes("FROM identity.role_permission_grants"))
-              return { rows: [{ permission: "pms.operations.manage" }], rowCount: 1 } as never;
-            if (sql.includes("FROM identity.product_entitlements"))
-              return {
-                rows: [
-                  {
-                    key: "property-management",
-                    resourceId: null,
-                    status: "active",
-                    startsAt: null,
-                    expiresAt: null,
-                  },
-                ],
-                rowCount: 1,
-              } as never;
-            if (sql.includes("FROM identity.users"))
-              return { rows: [{ id: actorUserId }], rowCount: 1 } as never;
-            if (sql.includes("clock_timestamp"))
-              return { rows: [{ at: new Date(acceptedAt) }], rowCount: 1 } as never;
-            return { rows: [], rowCount: 0 };
-          },
-          release,
-        };
-        const guard = vi.fn();
-        const repository = createPgPmsPricingCommandRepository({
-          connectionString: "test",
-          pool: { connect: async () => client, end: async () => {} },
-          now: () => new Date(acceptedAt),
-          hotelSetupCurrencyOperation: operation,
-          currencyChangeGuard: { runWithCurrencyChangeGuard: guard },
-        });
-        await expect(repository.upsertPropertyPricingCurrency(currencyCommand())).rejects.toThrow(
-          "Hotel setup command scope preflight failed",
-        );
-        expect(scopeChecks).toBe(revokedAt);
-        const checks = queries.filter(({ sql }) =>
-          sql.includes("platform.hotel_setup_property_operation_allowed"),
-        );
-        expect(
-          checks.every(
-            ({ values }) =>
-              JSON.stringify(values) === JSON.stringify([propertyId, organizationId, operation]),
-          ),
-        ).toBe(true);
-        for (const [index, query] of queries.entries()) {
-          if (query.sql === "BEGIN")
-            expect(queries[index + 1]?.sql).toContain(
-              "platform.hotel_setup_property_operation_allowed",
-            );
-        }
-        const lastBegin = queries.findLastIndex(({ sql }) => sql === "BEGIN");
-        expect(queries.slice(lastBegin).map(({ sql }) => sql)).toEqual([
-          "BEGIN",
-          expect.stringContaining("platform.hotel_setup_property_operation_allowed"),
-          "ROLLBACK",
-        ]);
-        expect(queries.some(({ sql }) => /^\s*(INSERT|UPDATE|COMMIT)\b/.test(sql))).toBe(false);
-        expect(release).toHaveBeenCalledTimes(revokedAt);
-        expect(guard).not.toHaveBeenCalled();
+  it.each([1, 2])(
+    "rechecks the ordinary hotel-setup scope in preparation and write transactions (lost at %i)",
+    async (revokedAt) => {
+      const queries: string[] = [];
+      let scopeChecks = 0;
+      const release = vi.fn();
+      const client: PmsPricingCommandClient = {
+        async query(sql) {
+          queries.push(sql);
+          if (sql.includes("transaction_isolation"))
+            return { rows: [{ level: "read committed" }], rowCount: 1 } as never;
+          if (sql.includes("FROM identity.organizations") && sql.includes("FOR UPDATE"))
+            return { rows: [{ id: organizationId }], rowCount: 1 } as never;
+          // The active catalog and PMS Owner links (hotelSetupOrdinaryScope.ts).
+          if (sql.includes("FOR SHARE OF catalog_link")) {
+            scopeChecks++;
+            return (
+              scopeChecks < revokedAt ? { rows: [{}], rowCount: 1 } : { rows: [], rowCount: 0 }
+            ) as never;
+          }
+          if (sql.includes("FROM identity.organization_memberships"))
+            return {
+              rows: [
+                {
+                  id: propertyId,
+                  roleKey: "hotel_owner",
+                  mode: "all",
+                  accessOrigin: "agency",
+                  permissionOverrides: null,
+                  pms: true,
+                  booking: true,
+                  roleDefinitionId: null,
+                },
+              ],
+              rowCount: 1,
+            } as never;
+          if (sql.includes("FROM identity.role_permission_grants"))
+            return { rows: [{ permission: "pms.operations.manage" }], rowCount: 1 } as never;
+          if (sql.includes("FROM identity.product_entitlements"))
+            return {
+              rows: [
+                {
+                  key: "property-management",
+                  resourceId: null,
+                  status: "active",
+                  startsAt: null,
+                  expiresAt: null,
+                },
+              ],
+              rowCount: 1,
+            } as never;
+          if (sql.includes("FROM identity.users"))
+            return { rows: [{ id: actorUserId }], rowCount: 1 } as never;
+          if (sql.includes("clock_timestamp"))
+            return { rows: [{ at: new Date(acceptedAt) }], rowCount: 1 } as never;
+          return { rows: [], rowCount: 0 };
+        },
+        release,
+      };
+      const guard = vi.fn();
+      const repository = createPgPmsPricingCommandRepository({
+        connectionString: "test",
+        pool: { connect: async () => client, end: async () => {} },
+        now: () => new Date(acceptedAt),
+        hotelSetupOrdinaryOwner: true,
+        currencyChangeGuard: { runWithCurrencyChangeGuard: guard },
+      });
+      await expect(repository.upsertPropertyPricingCurrency(currencyCommand())).resolves.toEqual({
+        ok: false,
+        error: { code: "setup_scope_unavailable" },
+      });
+      expect(scopeChecks).toBe(revokedAt);
+      // Every transaction opens READ COMMITTED and takes the scope locks before anything else.
+      const begins = queries.flatMap((sql, index) => (sql.startsWith("BEGIN") ? [index] : []));
+      expect(begins).toHaveLength(revokedAt);
+      for (const index of begins) {
+        expect(queries[index]).toBe("BEGIN ISOLATION LEVEL READ COMMITTED");
+        expect(queries[index + 1]).toContain("transaction_isolation");
+        expect(queries[index + 2]).toContain("FROM identity.organizations");
       }
+      expect(queries.at(-1)).toBe("ROLLBACK");
+      expect(queries.some((sql) => /^\s*(INSERT|UPDATE|COMMIT)\b/.test(sql))).toBe(false);
+      expect(release).toHaveBeenCalledTimes(revokedAt);
+      expect(guard).not.toHaveBeenCalled();
     },
   );
 

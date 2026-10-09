@@ -193,7 +193,6 @@ export type ApiConfig = {
   auth?: ApiAuthConfig;
   authSession?: ApiAuthSessionConfig;
   targetDatabaseUrl?: string;
-  pricingDatabaseUrl?: string;
   publicHotelProfileSource: PublicHotelProfileSource;
   marketplaceAdminSource: MarketplaceAdminSource;
   marketplaceAdminLegacySuperadminFallbackEnabled: boolean;
@@ -218,7 +217,12 @@ export type ApiConfig = {
   pmsOperationsAllowedOrigins: string[];
   financialsActivationPropertyIds: string[];
   bookingWebEventSink: BookingWebEventSink;
-  replacementPricingAcceptanceAllowedSlugs: string[];
+  /** Kill switch for public quote acceptance; each hotel still needs a current publication
+   * and a single owning organization. */
+  replacementPricingAcceptanceEnabled: boolean;
+  /** Card quotes in public acceptance (Stripe). Off until confirmation, webhook and expiry
+   * handling for these bookings are live. */
+  replacementPricingCardAcceptanceEnabled: boolean;
   bookingHostBase?: string;
   platformMediaServing?: PlatformMediaServingConfig;
   platformMediaCleanupEnabled: boolean;
@@ -228,6 +232,9 @@ export type ApiConfig = {
   propertySetupDraftRetentionBatchSize: number;
   pmsInventoryPublicOfferRetryEnabled: boolean;
   pmsInventoryPublicOfferRetryIntervalMs: number;
+  /** Kill switch for the hourly calendar auto-open producer (VAY-2066); on by default. */
+  pmsCalendarAutoOpenSchedulerEnabled: boolean;
+  pmsCalendarAutoOpenSchedulerIntervalMs: number;
   creatorPlatformConnections?: CreatorPlatformConnectionsConfig;
   providerWebhooks: ProviderWebhookConfig;
   airbnbImport?: ReturnType<typeof loadAirbnbImportConfig>;
@@ -366,14 +373,6 @@ function readOptionalCsvEnv(
         .map((entry) => entry.trim())
         .filter(Boolean)
     : defaultValue;
-}
-
-function readSlugAllowlistEnv(env: NodeJS.ProcessEnv, key: string): string[] {
-  const slugs = [...new Set(readOptionalCsvEnv(env, key).map((slug) => slug.toLowerCase()))];
-  if (slugs.length > 100 || slugs.some((slug) => !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug))) {
-    throw new Error(`${key} requires up to 100 canonical lowercase slugs`);
-  }
-  return slugs;
 }
 
 function readPropertyIdAllowlistEnv(env: NodeJS.ProcessEnv, key: string): string[] {
@@ -551,6 +550,14 @@ function readTimerIntervalEnv(env: NodeJS.ProcessEnv, key: string, defaultValue:
   if (value > 2_147_483_647) {
     throw new Error(`${key} must not exceed 2147483647`);
   }
+  return value;
+}
+
+// Each run scans every enabled property, so it never repeats more often than once a minute.
+function readCalendarAutoOpenSchedulerIntervalEnv(env: NodeJS.ProcessEnv): number {
+  const key = "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS";
+  const value = readTimerIntervalEnv(env, key, 60 * 60 * 1000);
+  if (value < 60_000) throw new Error(`${key} must be at least 60000`);
   return value;
 }
 
@@ -1043,7 +1050,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   });
   const apiRuntime = readSourceEnv(env, "API_RUNTIME", ["legacy", "next"], "legacy");
   const targetDatabaseUrl = readOptionalPgConnectionEnv(env, "TARGET_DATABASE_URL");
-  const pricingDatabaseUrl = readOptionalPgConnectionEnv(env, "PRICING_DATABASE_URL");
   const publicHotelProfileSource = readSourceEnv(
     env,
     "PUBLIC_HOTEL_PROFILE_SOURCE",
@@ -1074,22 +1080,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     "disabled",
   );
   const auth = loadAuthConfig(env);
-  const pricingDatabaseUser = pricingDatabaseUrl
-    ? new pg.Client({ connectionString: pricingDatabaseUrl }).user
-    : undefined;
-  if (
-    pricingDatabaseUrl &&
-    [targetDatabaseUrl, auth?.databaseUrl].some(
-      (url) => url && new pg.Client({ connectionString: url }).user === pricingDatabaseUser,
-    )
-  ) {
-    throw new Error("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
-  }
-  const affiliateCapture = loadAffiliateCaptureConfig(env, [
-    targetDatabaseUrl,
-    auth?.databaseUrl,
-    pricingDatabaseUrl,
-  ]);
+  const affiliateCapture = loadAffiliateCaptureConfig(env, [targetDatabaseUrl, auth?.databaseUrl]);
   const affiliatePublicRedirectEnabled = readBooleanEnv(
     env,
     "AFFILIATE_PUBLIC_REDIRECT_ENABLED",
@@ -1323,7 +1314,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     auth,
     authSession,
     targetDatabaseUrl,
-    pricingDatabaseUrl,
     publicHotelProfileSource,
     marketplaceAdminSource,
     marketplaceAdminLegacySuperadminFallbackEnabled: readBooleanEnv(
@@ -1356,9 +1346,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "PMS_FINANCIALS_ACTIVATION_PROPERTY_IDS",
     ),
     bookingWebEventSink,
-    replacementPricingAcceptanceAllowedSlugs: readSlugAllowlistEnv(
+    replacementPricingAcceptanceEnabled: readBooleanEnv(
       env,
-      "REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS",
+      "REPLACEMENT_PRICING_ACCEPTANCE_ENABLED",
+      true,
+    ),
+    replacementPricingCardAcceptanceEnabled: readBooleanEnv(
+      env,
+      "REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED",
     ),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
     platformMediaServing,
@@ -1393,6 +1388,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "PMS_INVENTORY_PUBLIC_OFFER_RETRY_INTERVAL_MS",
       30_000,
     ),
+    pmsCalendarAutoOpenSchedulerEnabled: readBooleanEnv(
+      env,
+      "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_ENABLED",
+      true,
+    ),
+    pmsCalendarAutoOpenSchedulerIntervalMs: readCalendarAutoOpenSchedulerIntervalEnv(env),
     creatorPlatformConnections,
     providerWebhooks: prospectiveConfig.providerWebhooks,
     channexManagement,

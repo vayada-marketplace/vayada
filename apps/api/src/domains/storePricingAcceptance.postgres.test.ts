@@ -65,6 +65,7 @@ describe.skipIf(!url)("pricing acceptance persistence PostgreSQL", () => {
         bookingId,
         lifecycleStatus: "confirmed",
         hostResponseDeadlineAt: null,
+        paymentDeadlineAt: null,
         occurredAt: now.toISOString(),
         inventoryReservation: bundle,
       };
@@ -191,6 +192,7 @@ describe.skipIf(!url)("pricing acceptance persistence PostgreSQL", () => {
         void fingerprint;
         expect(await replayPricingAcceptance(client, "hotel", input)).toEqual({
           bookingId,
+          bookingReference: `VAY-${bookingId.replaceAll("-", "").toUpperCase()}`,
           replayed: true,
         });
         await expect(run()).rejects.toThrow("unavailable");

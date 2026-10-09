@@ -48,10 +48,13 @@ export function createReplacementChargeDeclarationStore(pool: Pool) {
   return {
     async confirm(context: RequestContext | null, scope: PricingStorageScope, input: {
       draftId: string; expectedDraftRevision: number; claimedFingerprint: string; declaration: typeof declaration; requestId: string;
+      /** The staff member declared by pressing "Save prices" (no separate checkbox); recorded on the audit event. */
+      declaredVia?: "save_prices";
     }): Promise<ReplacementChargeDeclaration> {
       if (!uuid(input.draftId) || !pricingInteger(input.expectedDraftRevision, 1) || input.expectedDraftRevision > 2147483647 ||
           !hashPattern.test(input.claimedFingerprint) || input.declaration !== declaration || typeof input.requestId !== "string" ||
-          input.requestId.length < 1 || input.requestId.length > 200 || input.requestId.trim() !== input.requestId) return fail("invalid");
+          input.requestId.length < 1 || input.requestId.length > 200 || input.requestId.trim() !== input.requestId ||
+          (input.declaredVia !== undefined && input.declaredVia !== "save_prices")) return fail("invalid");
       scope = { propertyId: scope.propertyId.toLowerCase(), organizationId: scope.organizationId.toLowerCase(), actorUserId: scope.actorUserId.toLowerCase() };
       const command = structuredClone({ ...input, draftId: input.draftId.toLowerCase() }), requestHash = hash({ scope, command });
       const client = await pool.connect();
@@ -91,8 +94,9 @@ export function createReplacementChargeDeclarationStore(pool: Pool) {
           VALUES('pms',$1,'pricing.v2.charges.confirmed',now(),'property',$2,'pms','mandatory_charge_confirmation',$3,'user',$4,$5) RETURNING id`,
         [key, scope.propertyId, id, scope.actorUserId, canonical({ id, fingerprint })])).rows[0].id;
         await client.query(`INSERT INTO platform.product_audit_events
-          (audit_key,product,action,occurred_at,tenant_scope,property_id,actor_type,actor_user_id,target_resource_product,target_resource_type,target_resource_id,domain_event_id)
-          VALUES($1,'pms','pricing.v2.charges.confirmed',now(),'property',$2,'user',$3,'pms','mandatory_charge_confirmation',$4,$5)`, [key, scope.propertyId, scope.actorUserId, id, event]);
+          (audit_key,product,action,occurred_at,tenant_scope,property_id,actor_type,actor_user_id,target_resource_product,target_resource_type,target_resource_id,domain_event_id,audit_metadata)
+          VALUES($1,'pms','pricing.v2.charges.confirmed',now(),'property',$2,'user',$3,'pms','mandatory_charge_confirmation',$4,$5,$6::jsonb)`,
+        [key, scope.propertyId, scope.actorUserId, id, event, command.declaredVia ? { declaredVia: command.declaredVia } : {}]);
         await client.query(`INSERT INTO platform.outbox_events
           (domain_event_id,outbox_key,destination,event_type,tenant_scope,property_id,resource_product,resource_type,resource_id,payload)
           VALUES($1,$2,'pricing.v2','pricing.v2.charges.confirmed','property',$3,'pms','mandatory_charge_confirmation',$4,$5)`, [event, key, scope.propertyId, id, canonical({ id, fingerprint })]);

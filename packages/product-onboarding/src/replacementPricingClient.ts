@@ -47,11 +47,6 @@ export type PricingChargeReview = PricingDraft & {
   fingerprint: string;
   declaration: "all_mandatory_charges_included";
 };
-export type PricingAuthority = {
-  authority: "unconfigured" | "vayada" | "external";
-  revision: string | null;
-  organizationId: string | null;
-};
 export class PricingResponseError extends Error {
   constructor() {
     super("Pricing data could not be verified. Reload before continuing.");
@@ -67,6 +62,8 @@ const canonical = (value: unknown): string =>
         )
       : item,
   );
+/** Equal pricing data regardless of key order (the server re-reads drafts from jsonb, which reorders keys). */
+export const samePricingValue = (a: unknown, b: unknown) => canonical(a) === canonical(b);
 const bad = (): never => {
   throw new PricingResponseError();
 };
@@ -242,43 +239,6 @@ export function createReplacementPricingClient(
     }
   }
   return {
-    async readAuthority(): Promise<PricingAuthority> {
-      const value = await http.get<unknown>(`${base}/authority`, options());
-      if (
-        !exact(value, ["authority", "revision", "organizationId"]) ||
-        !["unconfigured", "vayada", "external"].includes(value.authority as string) ||
-        !(value.revision === null || uuid(value.revision)) ||
-        !(value.organizationId === null || uuid(value.organizationId)) ||
-        (value.authority === "unconfigured" &&
-          value.revision === null &&
-          value.organizationId !== null) ||
-        (value.revision !== null && value.organizationId === null)
-      )
-        return bad();
-      return value as PricingAuthority;
-    },
-    authorityAction(expectedRevision: string | null, authority: PricingAuthority["authority"]) {
-      if (
-        !(expectedRevision === null || uuid(expectedRevision)) ||
-        !["unconfigured", "vayada", "external"].includes(authority)
-      )
-        return bad();
-      const requestId = crypto.randomUUID();
-      return async () => {
-        const value = await http.put<unknown>(
-          `${base}/authority`,
-          { expectedRevision, authority },
-          options(requestId),
-        );
-        if (
-          !exact(value, ["revision", "replayed"]) ||
-          !uuid(value.revision) ||
-          typeof value.replayed !== "boolean"
-        )
-          return bad();
-        return { revision: value.revision as string, replayed: value.replayed as boolean };
-      };
-    },
     termsAction(input: PricingTermsInput, draftContext: PricingDraftContext) {
       const selected = context(draftContext);
       const sent = structuredClone(input);
@@ -422,7 +382,9 @@ export function createReplacementPricingClient(
         return bad();
       return value.revision as number;
     },
-    confirmationAction(input: PricingChargeReview) {
+    /** `save_prices`: the declaration was made by pressing the save/publish button; the server
+     * records it on the audit event. */
+    confirmationAction(input: PricingChargeReview, declaredVia?: "save_prices") {
       const reviewed = review(input, input.draftId),
         requestId = crypto.randomUUID();
       const body = {
@@ -430,6 +392,7 @@ export function createReplacementPricingClient(
         expectedDraftRevision: reviewed.revision,
         claimedFingerprint: reviewed.fingerprint,
         declaration: reviewed.declaration,
+        ...(declaredVia === "save_prices" ? { declaredVia } : {}),
       };
       return async () => {
         const value = await http.post<unknown>(

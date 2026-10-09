@@ -7,19 +7,22 @@ import { replayPricingAcceptance } from "./pricingAcceptanceReplay.js";
 import type { preparePricingAcceptance } from "./preparePricingAcceptance.js";
 import type { stagePricingBookingLifecycle } from "./pricingBookingLifecycle.js";
 import type { stagePricingBookingRevenue } from "./pricingBookingRevenue.js";
+import { pricingCardQuoteSupported } from "./pricingCardPayment.js";
 
 type Prepared = Extract<Awaited<ReturnType<typeof preparePricingAcceptance>>, { kind: "fresh" }>;
 /** After draft/lifecycle/revenue staging, using their unchanged results on the
  * SAME retained READ COMMITTED transaction. Completes the receipt and appends
  * immutable acceptance; no commit. Caller must stage remaining outbox writes and
  * run finishPricingAcceptance after ALL blocking work, or roll back everything.
- * Completed command replay belongs before all fresh preparation and mutation. */
+ * Completed command replay belongs before all fresh preparation and mutation.
+ * A card acceptance is stored while its booking is `pending_payment`, without revenue;
+ * revenue, notifications and the PMS job follow the confirmed Stripe payment. */
 export async function storePricingAcceptance(
   client: PoolClient,
   slug: unknown,
   prepared: Prepared,
   lifecycle: Awaited<ReturnType<typeof stagePricingBookingLifecycle>>,
-  revenue: Awaited<ReturnType<typeof stagePricingBookingRevenue>>,
+  revenue: Awaited<ReturnType<typeof stagePricingBookingRevenue>> | null,
 ) {
   const fail = (): never => {
     throw new Error("Booking acceptance unavailable");
@@ -27,6 +30,8 @@ export async function storePricingAcceptance(
   const { current, disclosure, command, finance, commandReceiptId } = prepared;
   const scope = await lockPublicPricingAuthority(client, slug);
   const quote = current.quote;
+  const card = quote.paymentMethod === "card";
+  const expectedStatus = card ? "pending_payment" : "confirmed";
   if (
     !scope ||
     !isDeepStrictEqual(scope, current.scope) ||
@@ -34,11 +39,14 @@ export async function storePricingAcceptance(
     prepared.kind !== "fresh" ||
     !isDeepStrictEqual(quote, disclosure.quote) ||
     quote.acceptanceMode !== "instant" ||
-    quote.paymentMethod !== "pay_at_property" ||
-    lifecycle.lifecycleStatus !== "confirmed" ||
+    (card ? !pricingCardQuoteSupported(quote) : quote.paymentMethod !== "pay_at_property") ||
+    lifecycle.lifecycleStatus !== expectedStatus ||
     lifecycle.hostResponseDeadlineAt !== null ||
-    revenue.bookingId !== lifecycle.bookingId ||
-    revenue.roomNights !== quote.rooms.reduce((n, r) => n + r.nights.length, 0)
+    (card
+      ? revenue !== null || typeof lifecycle.paymentDeadlineAt !== "string"
+      : !revenue ||
+        revenue.bookingId !== lifecycle.bookingId ||
+        revenue.roomNights !== quote.rooms.reduce((n, r) => n + r.nights.length, 0))
   )
     return fail();
   const booking = (
@@ -54,7 +62,7 @@ export async function storePricingAcceptance(
   const metadata = booking?.booking_metadata;
   if (
     !booking ||
-    booking.lifecycle_status !== "confirmed" ||
+    booking.lifecycle_status !== expectedStatus ||
     booking.payment_status !== "unpaid" ||
     booking.edit_revision !== 0 ||
     metadata?.targetSource !== "pricing_quote_draft" ||
