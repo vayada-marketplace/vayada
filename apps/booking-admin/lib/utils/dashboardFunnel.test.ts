@@ -51,11 +51,28 @@ describe("dashboard funnel rows", () => {
       paymentMethods: [],
       biggestDrop: null,
     });
-    expect(funnelCsv(rows, ["Step", "Visitors", "%", "Lost", "Lost %"], (s) => `"${s}"`)).toBe(
+    expect(
+      funnelCsv(rows, "en", ["Step", "Visitors", "%", "Lost", "Lost %"], (s) => `"${s}"`),
+    ).toBe(
       [
         '"Step","Visitors","%","Lost","Lost %"',
         '"""page_visit""","2","100","",""',
         '"""rate_selected""","1","50","1","50"',
+      ].join("\r\n"),
+    );
+  });
+
+  it("uses semicolons and comma decimals where spreadsheets expect them", () => {
+    const rows = funnelRows({
+      steps: [step("page_visit", 3, 3, 100), step("rate_selected", 1, 3, 33.3)],
+      paymentMethods: [],
+      biggestDrop: null,
+    });
+    expect(funnelCsv(rows, "de", ["Schritt", "Besucher", "%", "Verloren", "%"], (s) => s)).toBe(
+      [
+        '"Schritt";"Besucher";"%";"Verloren";"%"',
+        '"page_visit";"3";"100";"";""',
+        '"rate_selected";"1";"33,3";"2";"66,7"',
       ].join("\r\n"),
     );
   });
