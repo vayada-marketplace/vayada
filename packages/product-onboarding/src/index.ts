@@ -1,6 +1,6 @@
 export { default as AddonsStep, createEmptyAddon, type SetupAddon } from "./AddonsStep";
 export { default as BrandMediaStep } from "./BrandMediaStep";
-export { BookingPagePreview, hasHeaderSelectorChoice } from "./BookingPagePreview";
+export { BookingPagePreview } from "./BookingPagePreview";
 export {
   BOOKING_PAGE_COLOR_PRESETS,
   BOOKING_PAGE_FONT_PAIRINGS,

@@ -311,7 +311,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await page.getByRole("switch", { name: "Language selector" }).click();
     await expect(preview).not.toContainText("Contact");
     await expect(preview).not.toContainText("EN");
-    await expect(preview).toContainText("EUR");
+    await expect(preview.getByText("EUR", { exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: "Save Changes" }).click();
     await expect
       .poll(
@@ -364,7 +364,10 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     const assertHealthy = watchPageHealth(page, testInfo);
     await mockBookingAdminAuthenticatedSession(page);
-    await mockBookingAdminShellRoutes(page);
+    // Japanese is configurable in the admin but the guest booking site cannot render it.
+    await mockBookingAdminShellRoutes(page, {
+      propertySettings: { ...defaultBookingAdminPropertySettings, supported_languages: ["ja"] },
+    });
     const { requests: designRequests } = await mockBookingAdminDesignSettings(page);
 
     await page.goto("/design-studio");

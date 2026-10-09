@@ -986,7 +986,7 @@
   "admin.languageSelector": "Selector de idioma",
   "admin.hiddenAutomaticallyWhenOnlyOneLanguageIsConfigured": "Oculto automáticamente cuando solo se configura un idioma.",
   "admin.currencySelector": "Selector de moneda",
-  "admin.multiCurrencyIsNotAvailableYet": "Las monedas múltiples aún no están disponibles.",
+  "admin.multiCurrencyIsNotAvailableYet": "La multidivisa aún no está disponible.",
   "admin.heroHeading": "Título del héroe",
   "admin.publicDescription": "Descripción pública",
   "admin.heroSubtext": "Subtexto del héroe",

@@ -5,14 +5,6 @@ import type { ReactNode } from "react";
 
 import type { FontPairing } from "./bookingPageBranding";
 
-/** Guest headers only show a language or currency selector when there is a second option. */
-export function hasHeaderSelectorChoice(
-  defaultValue: string,
-  supportedValues: readonly string[] | undefined,
-): boolean {
-  return !supportedValues || new Set([defaultValue, ...supportedValues].filter(Boolean)).size > 1;
-}
-
 export function BookingPagePreview({
   translate,
   bookingUrl = "yourhotel.vayada.com",
@@ -62,6 +54,12 @@ export function BookingPagePreview({
     });
   const accent = /^#[0-9a-f]{6}$/i.test(primaryColor) ? primaryColor : "#4F46E5";
   const tint = `${accent}18`;
+  const languageCount = supportedLanguages
+    ? new Set([defaultLanguage, ...supportedLanguages].filter(Boolean)).size
+    : 2;
+  const currencyCount = supportedCurrencies
+    ? new Set([currency, ...supportedCurrencies].filter(Boolean)).size
+    : 2;
 
   return (
     <div
@@ -120,13 +118,12 @@ export function BookingPagePreview({
                   <span className="hidden sm:inline">{t("bookingPreview.referAGuest")}</span>
                 </span>
               )}
-              {showLanguageSelector &&
-                hasHeaderSelectorChoice(defaultLanguage, supportedLanguages) && (
-                  <span className="rounded-full border border-white/60 px-2 py-1 text-[9px] font-semibold text-white">
-                    {(defaultLanguage || "en").toUpperCase()}
-                  </span>
-                )}
-              {showCurrencySelector && hasHeaderSelectorChoice(currency, supportedCurrencies) && (
+              {showLanguageSelector && languageCount > 1 && (
+                <span className="rounded-full border border-white/60 px-2 py-1 text-[9px] font-semibold text-white">
+                  {(defaultLanguage || "en").toUpperCase()}
+                </span>
+              )}
+              {showCurrencySelector && currencyCount > 1 && (
                 <span className="rounded-full border border-white/60 px-2 py-1 text-[9px] font-semibold text-white">
                   {currency || "EUR"}
                 </span>
