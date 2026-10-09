@@ -126,6 +126,13 @@ describe("PricingStep", () => {
     mocks.publish.mockRejectedValueOnce(new ApiErrorResponse(403, { code: "denied" }));
     await act(async () => button(view.root, "Publish prices and continue").props.onClick());
     expect(text(view.root)).toContain("Check that Payments is complete");
+    // A Finance reason names what to fix; the rates stay and "Try again" resumes.
+    mocks.publish.mockRejectedValueOnce(
+      new ApiErrorResponse(403, { code: "denied", reason: "method_unavailable" } as never),
+    );
+    await act(async () => button(view.root, "Try again").props.onClick());
+    expect(text(view.root)).toContain("Accept pay at property or finish card setup");
+    expect(text(view.root)).toContain("Ready to publish");
     mocks.publish.mockRejectedValueOnce(new ApiErrorResponse(409, { code: "stale" }));
     await act(async () => button(view.root, "Try again").props.onClick());
     expect(text(view.root)).toContain("Pricing changed in another session");
