@@ -1,43 +1,53 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  buildSettingsSectionUrl,
-  readSettingsSection,
-  SETTINGS_SECTIONS,
-} from "./settingsSectionUrl";
+import { isSettingsPage, legacySettingsPageUrl, SETTINGS_PAGES } from "./settingsSectionUrl";
 
-describe("settings section URLs", () => {
-  it.each(SETTINGS_SECTIONS)("opens the %s section directly", (section) => {
-    expect(readSettingsSection(`?section=${section}`)).toBe(section);
+describe("settings page URLs", () => {
+  it.each(SETTINGS_PAGES)("recognises the %s page", (page) => {
+    expect(isSettingsPage(page)).toBe(true);
   });
 
-  it("falls back to property for a missing or invalid section", () => {
-    expect(readSettingsSection("")).toBe("property");
-    expect(readSettingsSection("?section=unknown")).toBe("property");
-    expect(readSettingsSection("?section=account")).toBe("property");
-    expect(readSettingsSection("?section=location")).toBe("property");
-    expect(readSettingsSection("?section=notifications")).toBe("property");
+  it("rejects pages that do not exist", () => {
+    for (const page of ["property", "account", "email-notifications", "constructor", ""])
+      expect(isSettingsPage(page)).toBe(false);
   });
 
-  it("keeps legacy billing return URLs opening billing", () => {
-    expect(readSettingsSection("?billing=success")).toBe("billing");
-    expect(readSettingsSection("?billing=canceled")).toBe("billing");
+  it.each([
+    ["property", "/settings/general"],
+    ["localization", "/settings/general"],
+    ["booking", "/settings/booking-rules"],
+    ["billing", "/settings/billing"],
+    ["payments", "/settings/payments"],
+  ])("redirects the legacy %s section to %s", (section, url) => {
+    expect(legacySettingsPageUrl(`?section=${section}`)).toBe(url);
   });
 
-  it("prefers an explicit section over a billing return parameter", () => {
-    expect(readSettingsSection("?billing=success&section=payments")).toBe("payments");
+  it.each(["return", "refresh"])("keeps a Stripe Connect %s on Payments", (stripe) => {
+    expect(legacySettingsPageUrl(`?section=payments&stripe=${stripe}`)).toBe(
+      `/settings/payments?stripe=${stripe}`,
+    );
+    expect(legacySettingsPageUrl(`?stripe=${stripe}`)).toBe(`/settings/payments?stripe=${stripe}`);
   });
 
-  it.each(["return", "refresh"])("opens Payments after a Stripe %s", (stripe) => {
-    expect(readSettingsSection(`?section=payments&stripe=${stripe}`)).toBe("payments");
+  it.each(["success", "canceled", "manage"])("keeps a Stripe billing %s on Billing", (billing) => {
+    expect(legacySettingsPageUrl(`?billing=${billing}`)).toBe(
+      `/settings/billing?billing=${billing}`,
+    );
   });
 
-  it("changes only the section query parameter", () => {
+  it("prefers an explicit section and keeps every other parameter and the hash", () => {
     expect(
-      buildSettingsSectionUrl(
-        "https://admin.booking.example/settings?billing=success&source=email#details",
-        "payments",
-      ),
-    ).toBe("/settings?billing=success&source=email&section=payments#details");
+      legacySettingsPageUrl("?billing=success&source=email&section=payments", "#details"),
+    ).toBe("/settings/payments?billing=success&source=email#details");
+    expect(legacySettingsPageUrl("?section=unknown&billing=canceled")).toBe(
+      "/settings/billing?billing=canceled",
+    );
+  });
+
+  it("leaves the card grid alone without a legacy section", () => {
+    expect(legacySettingsPageUrl("")).toBeNull();
+    expect(legacySettingsPageUrl("?source=email")).toBeNull();
+    expect(legacySettingsPageUrl("?section=account")).toBeNull();
+    expect(legacySettingsPageUrl("?section=constructor")).toBeNull();
   });
 });

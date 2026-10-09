@@ -239,7 +239,7 @@ export default function AddonsTab({
             <p>{addonLimitMessage}</p>
             {propertyPlan.plan === "commission" && (
               <Link
-                href="/settings?section=billing"
+                href="/settings/billing"
                 className="mt-1 inline-block font-semibold underline underline-offset-2"
               >
                 {t("admin.upgradeToOfferUpTo9AddOnsAndIncrease")}

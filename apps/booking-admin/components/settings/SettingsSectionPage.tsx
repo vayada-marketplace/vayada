@@ -29,10 +29,8 @@ import {
   switchToCommissionPlan,
   type FinancePlanStatus,
 } from "@/services/api/financeSubscriptionsClient";
+import Link from "next/link";
 import {
-  CalendarDaysIcon,
-  CreditCardIcon,
-  BanknotesIcon,
   GlobeAltIcon,
   PhoneIcon,
   ChatBubbleLeftIcon,
@@ -40,7 +38,6 @@ import {
   MapPinIcon,
   ArrowTopRightOnSquareIcon,
 } from "@heroicons/react/24/outline";
-import { HotelIcon } from "@vayada/product-onboarding";
 import {
   settingsService,
   type BookingAcceptanceMode,
@@ -51,22 +48,17 @@ import {
 import { ToggleSwitch, FeedbackAlert, SaveButton } from "@/components/ui";
 import { CountrySelect } from "@/components/settings/CountrySelect";
 import LocalizationTab from "@/components/booking-flow/LocalizationTab";
-import { useLocalizationSettingsTab } from "@/components/booking-flow/useBookingFlowSettingsTabs";
+import {
+  localizationWriteSettled,
+  useLocalizationSettingsTab,
+} from "@/components/booking-flow/useBookingFlowSettingsTabs";
 import { getBookingLocalizationSettings } from "@/services/api/bookingLocalizationSettingsClient";
 import { getSelectedBookingHotelId } from "@/services/api/bookingHotelScope";
-import {
-  SettingsLayout,
-  SettingsSection,
-  SettingsCard,
-  type SettingsNavSection,
-} from "@vayada/settings-ui";
+import { SettingsSection, SettingsCard } from "@vayada/settings-ui";
 import { SameDayBookingCard } from "@/components/settings/SameDayBookingCard";
 import { useTranslation } from "@/lib/i18n";
-import {
-  buildSettingsSectionUrl,
-  readSettingsSection,
-  type SettingsSectionId,
-} from "@/lib/utils/settingsSectionUrl";
+import { SettingsSubPage } from "@/components/settings/SettingsSubPage";
+import type { SettingsPageId } from "@/lib/utils/settingsSectionUrl";
 import { continueStripeAfterSavingSettings } from "@/lib/utils/stripeOnboarding";
 import {
   coordinateStripeRefresh,
@@ -75,10 +67,16 @@ import {
   watchStripeOnboardingRefresh,
 } from "@/lib/utils/stripeOnboardingRefresh";
 
-// Audit-driven section IDs (VAY-400):
-// - "payments" separates Stripe Connect + Xendit from billing (billing = what
-//   the hotel pays Vayada; payments = how the hotel collects from guests).
-type Section = SettingsSectionId;
+// Billing = what the hotel pays Vayada; payments = how the hotel collects from guests (VAY-400).
+type Section = SettingsPageId;
+
+const PAGE_TITLES: Record<Section, string> = {
+  general: "settings.cards.general.title",
+  "booking-rules": "settings.cards.bookingRules.title",
+  policies: "settings.cards.policies.title",
+  payments: "admin.payments",
+  billing: "settings.tabs.billing",
+};
 
 const BILLING_SETTINGS_UNAVAILABLE = "admin.billingSettingsAreNotAvailableOnNextApiYet";
 const STRIPE_DASHBOARD_ERROR = "admin.couldnTOpenYourStripeDashboardRightNowPleaseTry";
@@ -189,7 +187,7 @@ function buildTargetSettingsUpdate(
   section: Section,
   settings: PropertySettings,
 ): TargetSettingsUpdate {
-  if (section === "property") {
+  if (section === "general") {
     return {
       ok: true,
       data: {
@@ -208,7 +206,7 @@ function buildTargetSettingsUpdate(
     };
   }
 
-  if (section === "booking") {
+  if (section === "policies") {
     return {
       ok: true,
       data: {
@@ -228,22 +226,8 @@ function buildTargetSettingsUpdate(
   return { ok: false, message: "admin.thisSettingsSectionIsNotSavedByPropertySettings" };
 }
 
-export default function SettingsPage() {
+export default function SettingsSectionPage({ section: activeSection }: { section: Section }) {
   const { t, locale } = useTranslation();
-  const [activeSection, setActiveSection] = useState<Section>("property");
-  const selectSection = useCallback((section: Section) => {
-    setActiveSection(section);
-    const nextUrl = buildSettingsSectionUrl(window.location.href, section);
-    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    if (nextUrl !== currentUrl) window.history.pushState(null, "", nextUrl);
-  }, []);
-
-  useEffect(() => {
-    const syncSectionFromUrl = () => setActiveSection(readSettingsSection(window.location.search));
-    syncSectionFromUrl();
-    window.addEventListener("popstate", syncSectionFromUrl);
-    return () => window.removeEventListener("popstate", syncSectionFromUrl);
-  }, []);
   const [settings, setSettings] = useState<PropertySettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -375,6 +359,8 @@ export default function SettingsPage() {
       setLocalizationLoadError("");
       setCanonicalDefaultCurrency(null);
       try {
+        await localizationWriteSettled();
+        if (!isCurrentLoad()) return;
         const localization = await getBookingLocalizationSettings({ hotelId });
         if (!isCurrentLoad()) return;
         applyLocalizationSettings(localization);
@@ -612,13 +598,12 @@ export default function SettingsPage() {
     const stripeReturn = search.get("stripe");
     const isStripeReturn = stripeReturn === "return" || stripeReturn === "refresh";
     if (isStripeReturn) {
-      setActiveSection("payments");
       search.delete("stripe");
-      search.set("section", "payments");
+      const query = search.toString();
       window.history.replaceState(
         null,
         "",
-        `${window.location.pathname}?${search.toString()}${window.location.hash}`,
+        `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`,
       );
     }
     const stopWatching = watchStripeOnboardingRefresh({
@@ -1016,22 +1001,8 @@ export default function SettingsPage() {
     setSettings({ ...settings, [key]: value });
   };
 
-  const sections: SettingsNavSection[] = [
-    { id: "property", label: t("settings.tabs.property"), icon: HotelIcon },
-    { id: "booking", label: t("settings.tabs.booking"), icon: CalendarDaysIcon },
-    { id: "localization", label: t("bookingFlow.tabs.localization"), icon: GlobeAltIcon },
-    { id: "billing", label: t("settings.tabs.billing"), icon: CreditCardIcon },
-    { id: "payments", label: t("admin.payments"), icon: BanknotesIcon },
-  ];
-
   return (
-    <SettingsLayout
-      title={t("settings.title")}
-      description={t("settings.subtitle")}
-      sections={sections}
-      activeId={activeSection}
-      onSelect={(id) => selectSection(id as Section)}
-    >
+    <SettingsSubPage title={t(PAGE_TITLES[activeSection])}>
       {stripeDashboardToast && (
         <div className="fixed right-4 top-4 z-50 w-[min(24rem,calc(100vw-2rem))]" role="alert">
           <FeedbackAlert type="error" message={t(stripeDashboardToast)} />
@@ -1041,15 +1012,20 @@ export default function SettingsPage() {
       {/* Feedback banner */}
       {feedback && (
         <div role={feedback.type === "error" ? "alert" : "status"} aria-live="polite">
-          <FeedbackAlert type={feedback.type} message={t(feedback.message)} className="mb-4" />
+          <FeedbackAlert type={feedback.type} message={t(feedback.message)} className="mt-4" />
         </div>
       )}
 
-      {/* Property tab */}
-      {activeSection === "property" && (
+      {activeSection === "general" && (
         <div className="mt-5 space-y-4">
-          <a href="/settings/location" className="block rounded-lg border border-gray-200 bg-white p-4 text-sm font-medium text-blue-700">
-            Location &amp; surroundings <span className="ml-2 font-normal text-gray-500">Address, nearby places and guest preview</span>
+          <a
+            href="/settings/location"
+            className="block rounded-lg border border-gray-200 bg-white p-4 text-sm font-medium text-blue-700"
+          >
+            Location &amp; surroundings{" "}
+            <span className="ml-2 font-normal text-gray-500">
+              Address, nearby places and guest preview
+            </span>
           </a>
           {loading ? (
             <div className="flex items-center justify-center py-10">
@@ -1230,8 +1206,7 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Booking tab */}
-      {activeSection === "booking" && (
+      {activeSection === "booking-rules" && (
         <div className="mt-5 space-y-4">
           <div
             className="rounded-lg border border-gray-200 bg-white p-4 md:p-5"
@@ -1283,8 +1258,11 @@ export default function SettingsPage() {
             onSave={(enabled, cutoffLocalTime) => void saveSameDayBooking(enabled, cutoffLocalTime)}
             onRetry={retrySameDayBooking}
           />
+        </div>
+      )}
 
-          {/* Booking Policies */}
+      {activeSection === "policies" && (
+        <div className="mt-5 space-y-4">
           <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
             <h2 className="text-sm font-semibold text-gray-900">
               {t("settings.booking.policiesTitle")}
@@ -1329,7 +1307,7 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {activeSection === "localization" && (
+      {activeSection === "general" && (
         <SettingsSection
           id="localization"
           title={t("bookingFlow.tabs.localization")}
@@ -2198,14 +2176,11 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Payments tab — how the hotel collects from guests (VAY-400 audit:
-          extracted from Billing where it was nested under online_card_payment). */}
       {activeSection === "payments" && (
-        <SettingsSection
-          id="payments"
-          title={t("admin.payments")}
-          description={t("admin.howYourHotelCollectsPaymentsFromGuests")}
-        >
+        <section className="mt-4 space-y-4">
+          <p className="text-[13px] text-gray-500">
+            {t("admin.howYourHotelCollectsPaymentsFromGuests")}
+          </p>
           {!stripeAccountId &&
           (stripeAccountCreationBlocked || !paymentSettingsLoaded) &&
           paymentError ? (
@@ -2230,13 +2205,9 @@ export default function SettingsPage() {
             <SettingsCard>
               <p className="text-sm text-gray-700">
                 {t("admin.enableOnlineCardPaymentInBillingPaymentMethodsFirstTo")}{" "}
-                <button
-                  type="button"
-                  onClick={() => selectSection("billing")}
-                  className="text-primary-600 hover:underline"
-                >
+                <Link href="/settings/billing" className="text-primary-600 hover:underline">
                   {t("admin.billingPaymentMethods")}
-                </button>
+                </Link>
               </p>
             </SettingsCard>
           ) : (
@@ -2547,8 +2518,8 @@ export default function SettingsPage() {
               </div>
             </>
           )}
-        </SettingsSection>
+        </section>
       )}
-    </SettingsLayout>
+    </SettingsSubPage>
   );
 }
