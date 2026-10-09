@@ -55,7 +55,6 @@ export function PricingStep({
   const [reload, setReload] = useState(0);
   const [currencyChoice, setCurrencyChoice] = useState("");
   const [added, setAdded] = useState<FirstPricing[]>([]);
-  const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ message: string; reload: boolean } | null>(null);
   const progress = useRef(newPublishProgress());
@@ -168,7 +167,6 @@ export function PricingStep({
   };
   const startOver = async () => {
     setAdded([]);
-    setConfirmed(false);
     setError(null);
     await refreshRoute();
     setReload((value) => value + 1);
@@ -318,36 +316,12 @@ export function PricingStep({
               onCreate={(input) => {
                 setAdded((items) => [...items, input]);
                 progress.current = newPublishProgress();
-                setConfirmed(false);
               }}
               t={t}
             />
           </div>
         )}
       </section>
-
-      {added.length > 0 && (
-        <section className="border-t border-gray-200 pt-8">
-          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-300 bg-white p-4">
-            <input
-              type="checkbox"
-              checked={confirmed}
-              disabled={busy}
-              onChange={(event) => setConfirmed(event.target.checked)}
-              className="mt-1 h-5 w-5 rounded border-gray-300 text-primary-600 focus:ring-primary-600"
-            />
-            <span>
-              <span className="block text-sm font-semibold text-gray-950">
-                These are the final prices guests will see, including predictable mandatory charges.
-              </span>
-              <span className="mt-1 block text-sm leading-6 text-gray-600">
-                The hotel remains responsible for taxes, invoices, and legally required reporting.
-                Optional guest-selected add-ons and promotions remain separate.
-              </span>
-            </span>
-          </label>
-        </section>
-      )}
 
       {allPriced && added.length === 0 && !complete && (
         <Panel
@@ -369,14 +343,21 @@ export function PricingStep({
             Continue
           </button>
         ) : (
-          <button
-            type="button"
-            disabled={busy || !allPriced || added.length === 0 || !confirmed || currencyMismatch}
-            className={primaryButton}
-            onClick={() => void run(finish)}
-          >
-            {busy ? "Publishing prices..." : "Publish prices and continue"}
-          </button>
+          <>
+            <button
+              type="button"
+              disabled={busy || !allPriced || added.length === 0 || currencyMismatch}
+              aria-describedby="publish-prices-declaration"
+              className={primaryButton}
+              onClick={() => void run(finish)}
+            >
+              {busy ? "Publishing prices..." : "Publish prices and continue"}
+            </button>
+            {/* Publishing records the "all mandatory charges included" declaration (VAY-2079). */}
+            <p id="publish-prices-declaration" className="text-sm text-gray-600">
+              By publishing, you confirm these prices include all mandatory taxes and fees.
+            </p>
+          </>
         )}
       </div>
     </div>

@@ -64,15 +64,19 @@ describe("PricingStep", () => {
     view.unmount();
   });
 
-  it("publishes the first rate of every room, confirms final prices and continues", async () => {
+  it("publishes the first rate of every room as the final-price declaration and continues", async () => {
     const context = props();
     const view = await render(context);
     const publishButton = () => button(view.root, "Publish prices and continue");
     await act(async () => view.root.findByType(FirstPricingSetup).props.onCreate(firstRate()));
     expect(text(view.root)).toContain("Ready to publish");
     expect(view.root.findAllByType(FirstPricingSetup)).toHaveLength(0);
-    expect(publishButton().props.disabled).toBe(true);
-    await act(async () => checkbox(view.root).props.onChange({ target: { checked: true } }));
+    // Publishing is the mandatory-charges declaration: no checkbox, one visible line (VAY-2079).
+    expect(view.root.findAll((node) => node.props.type === "checkbox")).toHaveLength(0);
+    expect(publishButton().props.disabled).toBe(false);
+    expect(text(view.root)).toContain(
+      "By publishing, you confirm these prices include all mandatory taxes and fees.",
+    );
     mocks.read.mockResolvedValue(publication());
     // A double click starts one publish.
     await act(async () => {
@@ -107,7 +111,6 @@ describe("PricingStep", () => {
   it("resumes the same publish attempt after a lost response", async () => {
     const view = await render();
     await act(async () => view.root.findByType(FirstPricingSetup).props.onCreate(firstRate()));
-    await act(async () => checkbox(view.root).props.onChange({ target: { checked: true } }));
     mocks.publish.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     await act(async () => button(view.root, "Publish prices and continue").props.onClick());
     expect(text(view.root)).toContain("Pricing was not saved");
@@ -120,7 +123,6 @@ describe("PricingStep", () => {
   it("explains a refused preparation and asks for a reload after a conflict", async () => {
     const view = await render();
     await act(async () => view.root.findByType(FirstPricingSetup).props.onCreate(firstRate()));
-    await act(async () => checkbox(view.root).props.onChange({ target: { checked: true } }));
     mocks.publish.mockRejectedValueOnce(new ApiErrorResponse(403, { code: "denied" }));
     await act(async () => button(view.root, "Publish prices and continue").props.onClick());
     expect(text(view.root)).toContain("Check that Payments is complete");
@@ -243,16 +245,6 @@ async function render(context = props()): Promise<ReactTestRenderer> {
 
 function button(root: ReactTestInstance, label: string): ReactTestInstance {
   return root.find((node) => node.type === "button" && text(node) === label);
-}
-
-function checkbox(root: ReactTestInstance): ReactTestInstance {
-  return root.find(
-    (node) =>
-      node.type === "input" &&
-      node.props.type === "checkbox" &&
-      node.props.checked !== undefined &&
-      !node.props["aria-label"],
-  );
 }
 
 function text(node: ReactTestInstance): string {
