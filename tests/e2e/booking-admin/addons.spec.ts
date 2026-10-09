@@ -79,10 +79,16 @@ test.describe("booking-admin add-ons settings cutover", () => {
         updatedAt: "2026-06-01T10:02:00.000Z",
       },
     ];
+    let failFirstItemsRead = true;
     await page.route(`**${BOOKING_ADMIN_ADDON_ITEMS_PATH}**`, async (route) => {
       const request = route.request();
       const pathname = new URL(request.url()).pathname;
       itemContractRequests.push({ method: request.method(), pathname });
+      if (request.method() === "GET" && failFirstItemsRead) {
+        failFirstItemsRead = false;
+        await route.fulfill({ status: 503, json: { message: "Add-ons unavailable." } });
+        return;
+      }
 
       if (request.method() === "POST") {
         const body = request.postDataJSON();
@@ -156,6 +162,11 @@ test.describe("booking-admin add-ons settings cutover", () => {
     // Add-ons left Booking Flow for its own page (VAY-2077); old tab links still land there.
     await page.goto("/booking-flow?tab=addons");
     await expect(page).toHaveURL(/\/add-ons$/);
+    // A failed read shows Retry instead of an empty list and default display settings.
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Failed to load settings" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
 
     const addonNames = page.getByTestId("booking-addon-item-name");
     await expect(addonNames).toHaveText(["Airport transfer", "Breakfast basket"]);

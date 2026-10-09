@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useCallback, useState, useEffect, useRef } from "react";
 import { useTranslation } from "@/lib/i18n";
 import { settingsService, type AddonItem, type AddonSettings } from "@/services/settings";
 import {
@@ -18,7 +18,6 @@ import {
   type BookingPropertyPlan,
   type CreateBookingAddonItemBody,
 } from "@/services/api/bookingAddonItemsClient";
-import { loadBookingFlowSetting } from "@/services/api/bookingFlowSettingsLoader";
 import { FeedbackAlert } from "@/components/ui";
 import { uploadSingleImageWithMediaReference } from "@/lib/utils/uploadImage";
 import AddonsTab, { type AddonItemFormValues } from "@/components/booking-flow/AddonsTab";
@@ -158,6 +157,7 @@ function moveAddon(addons: AddonItem[], sourceAddonId: string, targetAddonId: st
 // Add-ons is a top-level page; it used to be a Booking Flow tab (VAY-2077).
 export default function AddonsPage() {
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(
     null,
   );
@@ -186,48 +186,35 @@ export default function AddonsPage() {
     return hotelId;
   };
 
-  useEffect(() => {
-    const selectedHotelId = getSelectedBookingHotelId();
-    const propertyPromise = settingsService.getPropertySettings().catch(() => null);
-    const loadTypedSetting = <TSettings,>(
-      read: (hotelId: string) => Promise<TSettings>,
-      defaultValue: TSettings,
-    ) =>
-      loadBookingFlowSetting({
-        selectedHotelId,
-        propertyPromise,
-        read,
-        defaultValue,
-      });
-    const addonSettingsPromise = loadTypedSetting(
-      (hotelId) => getBookingAddonSettings({ hotelId }),
-      DEFAULT_ADDON_SETTINGS,
-    );
-    const addonItemsPromise = loadTypedSetting(
-      (hotelId) =>
-        getBookingAddonItemsContext({ hotelId }).then((context) => ({
-          addonItems: context.addonItems.map(toSettingsAddonItem),
-          propertyPlan: context.propertyPlan,
-          propertyCurrency: context.propertyCurrency,
-        })),
-      {
-        addonItems: [] as AddonItem[],
-        propertyPlan: DEFAULT_PROPERTY_PLAN,
-        propertyCurrency: undefined as string | undefined,
-      },
-    );
-
-    Promise.all([addonSettingsPromise, addonItemsPromise, propertyPromise])
-      .then(([settings, addonContext, property]) => {
-        setBookingHotelId(selectedHotelId || property?.id || null);
-        addonSettingsRef.current = settings;
-        setAddonSettings(settings);
-        setAddons(orderAddons(addonContext.addonItems));
-        setPropertyPlan(addonContext.propertyPlan);
-        setAddonCurrency(addonContext.propertyCurrency ?? "");
-      })
-      .finally(() => setLoading(false));
+  // A failed read shows Retry rather than defaults: toggling a display setting would otherwise
+  // save defaults over the stored ones, and an empty list hides the real add-ons.
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadFailed(false);
+    try {
+      const selectedHotelId = getSelectedBookingHotelId();
+      const hotelId = selectedHotelId || (await settingsService.getPropertySettings()).id || null;
+      if (!hotelId) throw new Error("No booking hotel selected");
+      const [settings, context] = await Promise.all([
+        getBookingAddonSettings({ hotelId }),
+        getBookingAddonItemsContext({ hotelId }),
+      ]);
+      setBookingHotelId(hotelId);
+      addonSettingsRef.current = settings;
+      setAddonSettings(settings);
+      setAddons(orderAddons(context.addonItems.map(toSettingsAddonItem)));
+      setPropertyPlan(context.propertyPlan);
+      setAddonCurrency(context.propertyCurrency ?? "");
+    } catch {
+      setLoadFailed(true);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const handleToggleAddonSetting = async (key: keyof AddonSettings) => {
     const previous = addonSettingsRef.current;
@@ -360,6 +347,26 @@ export default function AddonsPage() {
     return (
       <div className="p-4 md:p-6 h-full flex items-center justify-center">
         <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (loadFailed) {
+    return (
+      <div className="mx-auto max-w-5xl px-4 py-6 md:px-6 lg:px-8">
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-white p-5"
+        >
+          <p className="text-sm text-red-700">{t("settings.feedback.loadError")}</p>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:border-gray-400"
+          >
+            {t("auth.chooseProperty.retry")}
+          </button>
+        </div>
       </div>
     );
   }
