@@ -1,6 +1,7 @@
+import { createServer, type Server } from "node:net";
 import { describe, expect, it } from "vitest";
 
-import { isTransientDatabaseError, waitForDatabase } from "./waitForDatabase.js";
+import { errorCode, isTransientDatabaseError, waitForDatabase } from "./waitForDatabase.js";
 
 const failure = (code: string) => Object.assign(new Error(code), { code });
 
@@ -92,7 +93,32 @@ describe("waitForDatabase", () => {
     expect(Date.now() - startedAt).toBeLessThan(5_000);
   });
 
+  it("retries a server that accepts connections but never answers", async () => {
+    // pg's own connect timeout carries no code; a silently dropping host fails this way.
+    const sockets = new Set<import("node:net").Socket>();
+    const server: Server = createServer((socket) => sockets.add(socket));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as { port: number };
+    try {
+      const error = await waitForDatabase({
+        connectionString: `postgresql://vayada@127.0.0.1:${port}/target`,
+        timeoutMs: 1_500,
+        log: () => undefined,
+      }).then(
+        () => undefined,
+        (failed: unknown) => failed,
+      );
+      expect(error).toMatchObject({ message: "timeout expired" });
+      expect(isTransientDatabaseError(error)).toBe(true);
+      expect(errorCode(error)).toBe("timeout expired");
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it.each([
+    [new Error("timeout expired"), true],
     [failure("ECONNREFUSED"), true],
     [failure("57P01"), true],
     [new Error("Connection terminated unexpectedly"), true],

@@ -17,7 +17,21 @@ const CONNECTION_FAILURE_STATES = new Set([
   "57P02",
   "57P03",
 ]);
-// Errors raised by a runtime client's connection, which may carry generic socket codes.
+// Socket failures while reaching or holding a connection; only trusted from a runtime client.
+const SOCKET_FAILURE_CODES = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ETIMEDOUT",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "EPIPE",
+]);
+// pg and pg-pool messages for a connection that timed out or dropped.
+const CONNECTION_FAILURE_MESSAGE =
+  /^(?:timeout\b.*\btrying to connect|connection terminated\b.*\bconnection timeout|connection terminated unexpectedly|client has encountered a connection error and is not queryable|timeout expired)$/i;
+// Connection failures raised by a runtime client, which may carry generic socket codes.
 const connectionFailures = new WeakSet<object>();
 type PgModule = Pick<typeof pg, "Pool">;
 type ClientClass = typeof pg.Client;
@@ -175,9 +189,7 @@ export function isPostgresUnavailableError(error: unknown): boolean {
     }
     if (
       typeof candidate.message === "string" &&
-      /^(?:timeout\b.*\btrying to connect|connection terminated\b.*\bconnection timeout|connection terminated unexpectedly|client has encountered a connection error and is not queryable)$/i.test(
-        candidate.message,
-      )
+      CONNECTION_FAILURE_MESSAGE.test(candidate.message)
     ) {
       return true;
     }
@@ -212,6 +224,18 @@ export function cachedHealthCheck(
   };
 }
 
+// Transient connect failures only: a rejected password, a missing database or a TLS mismatch
+// stays a server error instead of reading as a temporary outage.
+function isTransientConnectFailure(error: unknown): error is object {
+  if (!error || typeof error !== "object") return false;
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  return (
+    (typeof code === "string" &&
+      (CONNECTION_FAILURE_STATES.has(code) || SOCKET_FAILURE_CODES.has(code))) ||
+    (typeof message === "string" && CONNECTION_FAILURE_MESSAGE.test(message))
+  );
+}
+
 // pg-pool listens for client errors only while a client is idle, and pg emits 'error' when a
 // checked-out connection drops. Every runtime client therefore keeps its own listener, so a
 // terminated or unreachable database fails the affected queries instead of exiting the process.
@@ -219,9 +243,17 @@ function createRuntimeClient(base: ClientClass, report: ConnectionErrorReporter)
   return class RuntimePostgresClient extends base {
     constructor(config?: string | pg.ClientConfig) {
       super(config);
-      this.on("error", (error: Error & { code?: unknown }) => {
+      // pg emits 'error' only for connection-level failures, after which the client is unusable.
+      this.on("error", (error: unknown) => {
+        if (!error || typeof error !== "object") return;
         connectionFailures.add(error);
-        report({ code: typeof error.code === "string" ? error.code : null, error: error.message });
+        const { code, message } = error as { code?: unknown; message?: unknown };
+        const socketCode = typeof code === "string" && SOCKET_FAILURE_CODES.has(code);
+        // Socket error messages carry the database address, so those log only their code.
+        report({
+          code: typeof code === "string" ? code : null,
+          error: socketCode ? String(code) : String(message),
+        });
       });
     }
 
@@ -230,13 +262,13 @@ function createRuntimeClient(base: ClientClass, report: ConnectionErrorReporter)
     override connect(callback?: ConnectCallback): Promise<pg.Client> | void {
       if (!callback) {
         return super.connect().catch((error: unknown) => {
-          if (error && typeof error === "object") connectionFailures.add(error);
+          if (isTransientConnectFailure(error)) connectionFailures.add(error);
           throw error;
         });
       }
       const forward = callback as (...outcome: unknown[]) => void;
       super.connect(((...outcome: unknown[]) => {
-        if (outcome[0] && typeof outcome[0] === "object") connectionFailures.add(outcome[0]);
+        if (isTransientConnectFailure(outcome[0])) connectionFailures.add(outcome[0]);
         forward(...outcome);
       }) as ConnectCallback);
     }
