@@ -507,6 +507,11 @@ Target PMS runtime registers these routes under
 | POST `/charges`        | draftId, expectedDraftRevision, claimedFingerprint, declaration | Immutable charge declaration                         |
 | POST `/publish`        | expectedRevision, sources, snapshot, draft `{ id, revision }`   | `{ revision, replayed }`                             |
 
+`/charges` also accepts an optional `declaredVia: "save_prices"` (VAY-2079): the
+staff member declared by pressing "Save prices" rather than ticking a box. It is
+part of the idempotent request and is stored as `audit_metadata.declaredVia` on
+the `pricing.v2.charges.confirmed` audit event; the declaration itself is unchanged.
+
 Charges/publication require exactly one nonblank `Idempotency-Key` header (maximum
 200 characters; comma-joined values are rejected). Body fields are exact; no request identity or requestId is accepted.
 Reads require `pms.rooms_rates.read`; all other routes require
@@ -516,7 +521,11 @@ commands independently recheck live database authorization, including retries.
 
 Responses: malformed input400, unauthenticated401, permission/owner denial403,
 missing read404, stale/idempotency/currency conflict409, unexpected backend failure
-503 with no internal error detail. Preparation does not approve publication or
+503 with no internal error detail. When `/prepare` is denied because Finance is not
+ready, the 403 body also carries Finance's `reason` (`settings_missing`,
+`payments_disabled`, `currency_mismatch`, `method_unavailable`,
+`deposit_execution_unavailable` or `invalid`) so the editor can say what
+to fix; it is only sent after live manage authorization. Preparation does not approve publication or
 confirm charges. Currency changes remain blocked. Local HTTP/database tests use
 synthetic identities; no editor, deployed/provider or public-booking evidence is
 implied. Route registration does not schedule a publication/outbox consumer.
