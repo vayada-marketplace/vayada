@@ -168,6 +168,7 @@ export default function TargetManualBookingModal({
   const [previewMessage, setPreviewMessage] = useState("");
   const [previewCanRetry, setPreviewCanRetry] = useState(false);
   const [previewRetry, setPreviewRetry] = useState(0);
+  const [pricingNotice, setPricingNotice] = useState("");
   const attempt = useRef<PmsManualBookingCreateInput | null>(null);
   const attemptLocked = useRef(false);
   const nextKey = useRef(2),
@@ -231,10 +232,14 @@ export default function TargetManualBookingModal({
       const ages = stay.ratePlanId === "custom" ? [] : stay.childAges.map(childAge);
       if (ages.length !== (stay.ratePlanId === "custom" ? 0 : stay.children)) return null;
       if (ages.some((age) => age === null)) return null;
-      // Only a custom rate sets the nightly amount; offers take the published price.
+      // Only a custom rate sets the nightly amount; offers take the published price. A room
+      // type without a currency sends none: the server prices it in the property currency.
       const money =
         stay.ratePlanId === "custom" && override
-          ? { amountDecimal: override, currency: roomType.currency }
+          ? {
+              amountDecimal: override,
+              ...(roomType.currency ? { currency: roomType.currency } : {}),
+            }
           : null;
       return {
         position: index + 1,
@@ -365,6 +370,7 @@ export default function TargetManualBookingModal({
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setMessage("");
+    setPricingNotice("");
     setStayError(null);
     const retry = retryLocked && attempt.current;
     const phoneE164 = phoneToE164(phoneCountry, phone);
@@ -388,7 +394,7 @@ export default function TargetManualBookingModal({
     if (!retry && settlement === "paid" && !canRecordPaidPayment)
       return setMessage(t("calendar.targetManualBooking.paidPermissionRequired"));
     // prettier-ignore
-    attempt.current ??= { commandId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID(), ...previewInput!, guest: { firstName: firstName.trim(), lastName: lastName.trim(), email: email.trim(), phoneE164: phoneE164 || null, countryCode: isoCountry || null, specialRequests: specialRequests.trim() || null }, ...(additionalGuests.length ? { additionalGuests: additionalGuests.map((guest) => ({ firstName: guest.firstName.trim(), lastName: guest.lastName.trim(), email: guest.email.trim() || null, phoneE164: phoneToE164(guest.phoneCountry, guest.phone) || null, countryCode: guest.countryCode || null })) } : {}), privateNote: privateNote.trim() || null, directSource: source, payment: { expectedMethod: method, settlement: settlement === "paid" ? { status: "paid", reference: null } : { status: "unpaid" } } };
+    attempt.current ??= { commandId: crypto.randomUUID(), idempotencyKey: crypto.randomUUID(), ...previewInput!, guest: { firstName: firstName.trim(), lastName: lastName.trim(), email: email.trim(), phoneE164: phoneE164 || null, countryCode: isoCountry || null, specialRequests: specialRequests.trim() || null }, ...(preview?.pricingRevision ? { expectedPricingRevision: preview.pricingRevision } : {}), ...(additionalGuests.length ? { additionalGuests: additionalGuests.map((guest) => ({ firstName: guest.firstName.trim(), lastName: guest.lastName.trim(), email: guest.email.trim() || null, phoneE164: phoneToE164(guest.phoneCountry, guest.phone) || null, countryCode: guest.countryCode || null })) } : {}), privateNote: privateNote.trim() || null, directSource: source, payment: { expectedMethod: method, settlement: settlement === "paid" ? { status: "paid", reference: null } : { status: "unpaid" } } };
     attemptLocked.current = true;
     setRetryLocked(true);
     setSubmitting(true);
@@ -401,6 +407,13 @@ export default function TargetManualBookingModal({
         attempt.current = null;
         attemptLocked.current = false;
         setRetryLocked(false);
+      }
+      // Prices were republished after this preview: show the new total before saving again.
+      // Kept apart from `message`, which a successful re-price clears.
+      if (error instanceof PmsManualBookingServiceError && error.code === "pricing_changed") {
+        setPricingNotice(t("calendar.targetManualBooking.pricingChanged"));
+        setPreviewRetry((value) => value + 1);
+        return;
       }
       const detail = errorDetails(error, t("calendar.targetManualBooking.createFailure"), stays);
       setStayError(detail.stay ?? null);
@@ -1163,6 +1176,14 @@ export default function TargetManualBookingModal({
                 </button>
               )}{" "}
             </div>
+          )}
+          {pricingNotice && (
+            <p
+              role="alert"
+              className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+            >
+              {pricingNotice}
+            </p>
           )}
           {message && (
             <p

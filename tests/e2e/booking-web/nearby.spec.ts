@@ -191,7 +191,7 @@ test("map failure keeps readable recommendations and room selection", async ({ p
   await expect(
     page.getByRole("heading", { name: "Our favorite beach", exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: /Select This Rate/i }).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toBeVisible();
 });
 test("hidden location never mounts Google or exposes directions", async ({ page }) => {
   await setup(page, "hidden");
@@ -209,7 +209,7 @@ test("public API failure leaves booking usable", async ({ page }) => {
   await expect(
     page.getByText("Surroundings are unavailable right now. You can still choose a room."),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: /Select This Rate/i }).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toBeVisible();
 });
 for (const mode of ["invalid-null", "invalid-category"])
   test(`${mode} public API data leaves booking usable`, async ({ page }) => {
@@ -218,7 +218,7 @@ for (const mode of ["invalid-null", "invalid-category"])
     await expect(
       page.getByText("Surroundings are unavailable right now. You can still choose a room."),
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: /Select This Rate/i }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toBeVisible();
   });
 test("a pending refresh can be checked without reloading the booking page", async ({ page }) => {
   await setup(page);

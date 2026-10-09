@@ -17,8 +17,7 @@ export async function finishPricingAcceptance(
   if (
     !finance ||
     finance.scope.propertyId !== current.scope.propertyId ||
-    finance.scope.organizationId !== current.scope.organizationId ||
-    finance.scope.authorityRevision !== current.scope.authorityRevision
+    finance.scope.organizationId !== current.scope.organizationId
   )
     return fail();
   const captured = Date.parse(finance.financeTermsCapturedAt);

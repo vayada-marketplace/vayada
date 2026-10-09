@@ -32,7 +32,10 @@ type AuthorizedScope = {
 };
 
 export type PmsPricingRoutesOptions = {
-  currencyForward?: import("../hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
+  /** Owner-only first-currency and currency saves on the ordinary login (VAY-2056); replaces
+   * commandPort for the currency route. Requires propertyAccessRepository. */
+  currencyCommandPort?: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">;
+  propertyAccessRepository?: PropertyAccessRepository;
   commandPort: PmsPricingCommandPort;
   readPort: PmsPricingReadPort;
   currencyCapabilitiesReadPort: PmsPricingCurrencyCapabilitiesReadPort;
@@ -41,19 +44,17 @@ export type PmsPricingRoutesOptions = {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-/** Shared currency adapter for the ordinary API and isolated setup service. */
+/** Currency adapter; with requireOwnerSession it applies the hotel-setup Owner-only gates. */
 export function registerPmsPricingCurrencyCommand(
   app: FastifyInstance,
   commandPort: Pick<PmsPricingCommandPort, "upsertPropertyPricingCurrency">,
   options: {
-    forward?: import("../hotelSetupCommandForwarder.js").HotelSetupCommandForwarder;
     requireOwnerSession?: boolean;
     propertyAccessRepository?: PropertyAccessRepository;
   } = {},
 ): void {
   const authorized = new WeakMap<FastifyRequest, AuthorizedScope>();
   const authorize = async (request: FastifyRequest, reply: FastifyReply) => {
-    if (options.forward) return;
     const scope = await authorizeRequest(
       request,
       reply,
@@ -67,8 +68,6 @@ export function registerPmsPricingCurrencyCommand(
     "/properties/:propertyId/pricing-source/currency",
     { onRequest: authorize },
     async (request, reply) => {
-      if (options.forward)
-        return options.forward(request, reply, request.params.propertyId, "currency");
       const scope = requireAuthorizedScope(authorized, request);
       const idempotencyKey = readIdempotencyKey(request);
       if (!idempotencyKey) return invalidRequest(reply, "A single Idempotency-Key is required.");
@@ -112,7 +111,14 @@ export async function registerPmsPricingRoutes(
     if (scope) authorized.set(request, scope);
   };
 
-  registerPmsPricingCurrencyCommand(app, options.commandPort, { forward: options.currencyForward });
+  if (options.currencyCommandPort) {
+    if (!options.propertyAccessRepository)
+      throw new Error("Currency saves require property access");
+    registerPmsPricingCurrencyCommand(app, options.currencyCommandPort, {
+      requireOwnerSession: true,
+      propertyAccessRepository: options.propertyAccessRepository,
+    });
+  } else registerPmsPricingCurrencyCommand(app, options.commandPort);
 
   app.put<{ Params: RoomTypeParams; Body: unknown }>(
     "/properties/:propertyId/room-types/:roomTypeId/flexible-rate-plan",

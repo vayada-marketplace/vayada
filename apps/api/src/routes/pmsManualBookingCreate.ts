@@ -30,6 +30,8 @@ const money = z.strictObject({
   amountDecimal: z.string().refine((value) => roundBookingPriceDecimalToMinorUnits(value) !== null),
   currency: z.string().regex(/^[A-Z]{3}$/),
 });
+// v1 amendment (VAY-2065): a custom rate may omit the currency (see the preview schema).
+const customAmount = money.extend({ currency: money.shape.currency.optional() });
 const stay = z.strictObject({
   position: z.number().int().positive(),
   roomId: id,
@@ -47,7 +49,7 @@ const stay = z.strictObject({
   childAgesAtCheckIn: z.array(z.number().int().min(0).max(17)).max(20).optional(),
   pricing: z.discriminatedUnion("kind", [
     z.strictObject({ kind: z.literal("rate_plan"), manualOverride: money.nullable() }),
-    z.strictObject({ kind: z.literal("custom"), nightlyAmount: money }),
+    z.strictObject({ kind: z.literal("custom"), nightlyAmount: customAmount }),
   ]),
 });
 const addon = z.strictObject({
@@ -94,6 +96,7 @@ const bodySchema = z.strictObject({
     .array(additionalGuest)
     .max(PMS_MANUAL_BOOKING_MAX_ADDITIONAL_GUESTS)
     .optional(),
+  expectedPricingRevision: z.number().int().positive().max(2_147_483_647).optional(),
   privateNote: nullableText(10_000),
   directSource: z.enum(PMS_MANUAL_BOOKING_DIRECT_SOURCES),
   stays: z.array(stay).min(1).max(20),
