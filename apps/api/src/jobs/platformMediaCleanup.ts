@@ -71,8 +71,16 @@ export type PlatformMediaCleanupFailureResult = {
   jobKey: string;
   reasonCode: "media_storage_delete_failed" | "media_cleanup_apply_failed";
   errorType: string;
+  errorCode: string;
   errorMessage: string;
   deadLettered: boolean;
+};
+
+export type PlatformMediaCleanupFailureLogEntry = {
+  id: string;
+  action: PlatformMediaCleanupAction;
+  stage: "storage_delete" | "apply";
+  code: string;
 };
 
 export type PlatformMediaCleanupRunResult = {
@@ -133,7 +141,6 @@ type PgPlatformMediaCleanupStoreConfig = {
 
 export type PlatformMediaObjectDeleter = {
   deleteObject(input: { bucket: string; storageKey: string }): Promise<void>;
-  deletePrefix(input: { bucket?: string | null; prefix: string }): Promise<void>;
 };
 
 type Queryable = Pick<pg.Pool | pg.PoolClient, "query">;
@@ -285,6 +292,20 @@ export function buildPlatformMediaCleanupJobKey(input: {
   deadlineOrWindow: string;
 }): string {
   return `platform.media.cleanup:job:${input.resourceId}:${input.action}:${input.deadlineOrWindow}:v1`;
+}
+
+// Log-safe per-item failure details: ids, stage and error code only, never messages, keys or URLs.
+export function platformMediaCleanupFailureLogEntries(
+  result: PlatformMediaCleanupSchedulerResult,
+): PlatformMediaCleanupFailureLogEntry[] {
+  return result.runs.flatMap((run) =>
+    run.failures.map((failure) => ({
+      id: failure.resourceId,
+      action: failure.action,
+      stage: failure.reasonCode === "media_storage_delete_failed" ? "storage_delete" : "apply",
+      code: failure.errorCode,
+    })),
+  );
 }
 
 async function runPlatformMediaCleanupJob(
@@ -511,7 +532,7 @@ async function applyPgCleanupMutation(
     await client.query("BEGIN");
     const result =
       mutation.action === "abandoned-staging-upload"
-        ? await expireUploadSession(client, objectDeleter, candidate, mutation, context)
+        ? await expireUploadSession(client, candidate, mutation, context)
         : await updateMediaObjectLifecycle(client, objectDeleter, candidate, mutation, context);
     await client.query("COMMIT");
     return result;
@@ -525,14 +546,12 @@ async function applyPgCleanupMutation(
 
 async function expireUploadSession(
   client: pg.PoolClient,
-  objectDeleter: PlatformMediaObjectDeleter,
   candidate: PlatformMediaCleanupCandidate,
   mutation: PlatformMediaCleanupMutation,
   context: PlatformMediaCleanupContext,
 ): Promise<PlatformMediaCleanupMutationResult> {
-  if (candidate.stagingPrefix) {
-    await deleteStoragePrefixForCandidate(objectDeleter, candidate, candidate.stagingPrefix);
-  }
+  // Staged bytes are left to the media bucket's staging/ lifecycle rule (one day, vayada-platform
+  // infra/media.tf). The API role has no s3:ListBucket, so listing the prefix failed (VAY-2082).
   const updated = await client.query<{ resourceId: string }>(
     `UPDATE platform.media_upload_sessions
         SET session_status = 'expired',
@@ -917,6 +936,7 @@ async function insertCleanupFailureRows(
     jobKey,
     reasonCode: failureReasonCode(error),
     errorType: errorInfo.type,
+    errorCode: safeErrorCode(error),
     errorMessage: errorInfo.message,
     deadLettered: true,
   };
@@ -1503,18 +1523,6 @@ async function deleteStorageObjectForCandidate(
   }
 }
 
-async function deleteStoragePrefixForCandidate(
-  objectDeleter: PlatformMediaObjectDeleter,
-  candidate: PlatformMediaCleanupCandidate,
-  prefix: string,
-): Promise<void> {
-  try {
-    await objectDeleter.deletePrefix({ bucket: candidate.bucket, prefix });
-  } catch (error) {
-    throw new PlatformMediaStorageDeleteError(cleanupResourceId(candidate), error);
-  }
-}
-
 function tenantScope(
   candidate: PlatformMediaCleanupCandidate,
 ): "platform" | "organization" | "property" {
@@ -1539,6 +1547,14 @@ function errorDetails(error: unknown): { type: string; message: string } {
     return { type: error.name, message: error.message };
   }
   return { type: "UnknownError", message: String(error) };
+}
+
+// AWS SDK errors carry their S3 code in name; pg and Node errors carry SQLSTATE / errno in code.
+function safeErrorCode(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown";
+  const code = (error as { code?: unknown }).code;
+  const value = typeof code === "string" ? code : error.name;
+  return /^[A-Za-z0-9_.-]{1,64}$/.test(value) ? value : "unknown";
 }
 
 function failureReasonCode(
@@ -1579,9 +1595,12 @@ function sumBy<T extends Record<K, number>, K extends keyof T>(items: T[], key: 
 }
 
 class PlatformMediaStorageDeleteError extends Error {
+  readonly code: string;
+
   constructor(resourceId: string, cause: unknown) {
     const message = cause instanceof Error ? cause.message : String(cause);
     super(`Failed to delete media storage for ${resourceId}: ${message}`);
     this.name = "PlatformMediaStorageDeleteError";
+    this.code = safeErrorCode(cause);
   }
 }

@@ -9,6 +9,7 @@ import {
   buildPlatformMediaCleanupKey,
   createPgPlatformMediaCleanupStore,
   distinctPlatformMediaStorageKeys,
+  platformMediaCleanupFailureLogEntries,
   runPlatformMediaCleanupJobs,
   type PlatformMediaCleanupAction,
   type PlatformMediaCleanupCandidate,
@@ -113,11 +114,6 @@ describe("platform media cleanup jobs", () => {
     expect(store.deadLetterEvents).toHaveLength(0);
     expect(store.storageDeletes).toEqual([
       {
-        kind: "prefix",
-        bucket: null,
-        key: "staging/00000000-0000-0000-0000-000000000101",
-      },
-      {
         kind: "object",
         bucket: "vayada-media-local",
         key: "public/properties/property_alpenrose/00000000-0000-0000-0000-000000000201/original_safe.jpg",
@@ -210,7 +206,6 @@ describe("platform media cleanup jobs", () => {
     const end = vi.spyOn(pg.Pool.prototype, "end").mockResolvedValue(undefined);
     const objectDeleter = {
       deleteObject: vi.fn(async () => undefined),
-      deletePrefix: vi.fn(async () => undefined),
     };
     const store = createPgPlatformMediaCleanupStore({
       connectionString: "postgresql://cleanup-race.invalid/vayada",
@@ -295,6 +290,174 @@ describe("platform media cleanup jobs", () => {
       reasonCode: "media_storage_delete_failed",
       recoveryStatus: "open",
     });
+  });
+
+  it("logs failed items by id, stage and code without the error message", async () => {
+    const replaced = contractCase("replaced-public-image-deletes-after-request");
+    const store = new MemoryPlatformMediaCleanupStore([replaced.candidate], {
+      failResourceIds: [cleanupResourceId(replaced.candidate)],
+    });
+
+    const result = await runPlatformMediaCleanupJobs(store, {
+      now: new Date("2026-06-13T12:00:00.000Z"),
+      run: ["replacedPublicImages"],
+    });
+    const entries = platformMediaCleanupFailureLogEntries(result);
+
+    expect(entries).toEqual([
+      {
+        id: cleanupResourceId(replaced.candidate),
+        action: "delete-replaced-public-image",
+        stage: "storage_delete",
+        code: "Error",
+      },
+    ]);
+    expect(JSON.stringify(entries)).not.toContain("object storage delete failed");
+  });
+
+  it("expires an abandoned upload session without touching storage", async () => {
+    const uploadSessionId = "00000000-0000-0000-0000-000000000111";
+    const expiresAt = "2026-06-13T11:00:00.000Z";
+    const statements: string[] = [];
+    const query = vi.fn(async (statement: string) => {
+      statements.push(statement);
+      return { rows: [{ id: uploadSessionId, resourceId: uploadSessionId }] };
+    });
+    const connect = vi
+      .spyOn(pg.Pool.prototype, "connect")
+      .mockResolvedValue({ query, release: vi.fn() } as never);
+    const end = vi.spyOn(pg.Pool.prototype, "end").mockResolvedValue(undefined);
+    const objectDeleter = { deleteObject: vi.fn(async () => undefined) };
+    const store = createPgPlatformMediaCleanupStore({
+      connectionString: "postgresql://cleanup-staging.invalid/vayada",
+      objectDeleter,
+    });
+
+    try {
+      const result = await store.applyCleanupMutation(
+        {
+          uploadSessionId,
+          resourceProduct: "hotel_catalog",
+          resourceType: "property",
+          resourceId: uploadSessionId,
+          purpose: "property.logo",
+          visibility: "private",
+          lifecycleStatus: "signed",
+          stagingPrefix: `staging/${uploadSessionId}`,
+          expiresAt,
+        },
+        {
+          action: "abandoned-staging-upload",
+          runName: "abandonedStagingUploads",
+          jobType: "platform.media.cleanup.abandoned-staging-upload",
+          eventType: "platform_media.upload_session.expired",
+          auditAction: "platform_media.cleanup.abandoned_staging_upload",
+          deadlineOrWindow: expiresAt,
+        },
+        {
+          now: new Date("2026-06-13T12:00:00.000Z"),
+          correlationId: "cleanup-staging-regression",
+          workerId: "cleanup-test",
+        },
+      );
+
+      expect(result.applied).toBe(true);
+      expect(objectDeleter.deleteObject).not.toHaveBeenCalled();
+      expect(
+        statements.some((statement) => statement.includes("SET session_status = 'expired'")),
+      ).toBe(true);
+      expect(statements.at(-1)).toBe("COMMIT");
+    } finally {
+      await store.close();
+      connect.mockRestore();
+      end.mockRestore();
+    }
+  });
+
+  it.each([
+    {
+      name: "an S3 access denial",
+      error: Object.assign(new Error("User arn:aws:sts::1:assumed-role/x is not authorized"), {
+        name: "AccessDenied",
+      }),
+      failOn: "delete" as const,
+      reasonCode: "media_storage_delete_failed",
+      errorCode: "AccessDenied",
+    },
+    {
+      name: "a PostgreSQL permission error",
+      error: Object.assign(new Error("permission denied for table jobs"), { code: "42501" }),
+      failOn: "update" as const,
+      reasonCode: "media_cleanup_apply_failed",
+      errorCode: "42501",
+    },
+  ])("records a safe error code for $name", async ({ error, failOn, reasonCode, errorCode }) => {
+    const mediaObjectId = "00000000-0000-0000-0000-000000000305";
+    const retainedUntil = "2026-06-20T00:00:00.000Z";
+    const query = vi.fn(async (statement: string) => {
+      if (statement.includes("FOR UPDATE")) {
+        return {
+          rows: [
+            {
+              bucket: "vayada-media-local",
+              storageKey: "private/chat/x.webp",
+              variantStorageKeys: [],
+            },
+          ],
+        };
+      }
+      if (failOn === "update" && statement.includes("SET lifecycle_status = 'deleted'"))
+        throw error;
+      return { rows: [{ id: mediaObjectId }] };
+    });
+    const connect = vi
+      .spyOn(pg.Pool.prototype, "connect")
+      .mockResolvedValue({ query, release: vi.fn() } as never);
+    const end = vi.spyOn(pg.Pool.prototype, "end").mockResolvedValue(undefined);
+    const store = createPgPlatformMediaCleanupStore({
+      connectionString: "postgresql://cleanup-codes.invalid/vayada",
+      objectDeleter: {
+        deleteObject: vi.fn(async () => {
+          if (failOn === "delete") throw error;
+        }),
+      },
+    });
+    const candidate: PlatformMediaCleanupCandidate = {
+      mediaObjectId,
+      resourceProduct: "marketplace",
+      resourceType: "collaboration",
+      resourceId: "collaboration_failing_cleanup",
+      purpose: "marketplace.collaboration_chat.attachment",
+      visibility: "private",
+      lifecycleStatus: "active",
+      bucket: "vayada-media-local",
+      storageKey: "private/chat/x.webp",
+      retainedUntil,
+    };
+    const mutation: PlatformMediaCleanupMutation = {
+      action: "delete-private-attachment-after-retention",
+      runName: "privateAttachmentRetention",
+      jobType: "platform.media.cleanup.private-attachment-retention",
+      eventType: "platform_media.private_attachment.deleted_after_retention",
+      auditAction: "platform_media.cleanup.private_attachment_deleted_after_retention",
+      deadlineOrWindow: retainedUntil,
+    };
+    const context = {
+      now: new Date(retainedUntil),
+      correlationId: "cleanup-codes",
+      workerId: "cleanup-test",
+    };
+
+    try {
+      const thrown = await store.applyCleanupMutation(candidate, mutation, context).catch((e) => e);
+      const failure = await store.recordCleanupFailure(candidate, mutation, thrown, context);
+
+      expect(failure).toMatchObject({ reasonCode, errorCode });
+    } finally {
+      await store.close();
+      connect.mockRestore();
+      end.mockRestore();
+    }
   });
 
   it("uses the stable media cleanup key format", () => {
@@ -384,7 +547,7 @@ class MemoryPlatformMediaCleanupStore implements PlatformMediaCleanupStore {
     errorMessage: string;
   }> = [];
   readonly storageDeletes: Array<{
-    kind: "object" | "prefix";
+    kind: "object";
     bucket: string | null;
     key: string;
   }> = [];
@@ -504,13 +667,6 @@ class MemoryPlatformMediaCleanupStore implements PlatformMediaCleanupStore {
 
     if (mutation.action === "abandoned-staging-upload") {
       resource.lifecycleStatus = "expired";
-      if (resource.stagingPrefix) {
-        this.storageDeletes.push({
-          kind: "prefix",
-          bucket: resource.bucket ?? null,
-          key: resource.stagingPrefix,
-        });
-      }
     } else if (mutation.action === "cleanup-rollback-window-object") {
       resource.rollbackCleanupStatus = "completed";
       if (resource.rollbackStorageKey) {
@@ -606,6 +762,7 @@ class MemoryPlatformMediaCleanupStore implements PlatformMediaCleanupStore {
       jobKey,
       reasonCode: "media_storage_delete_failed",
       errorType: errorInfo.name,
+      errorCode: errorInfo.name,
       errorMessage: errorInfo.message,
       deadLettered: true,
     };

@@ -227,7 +227,10 @@ import {
 import { createPropertySetupFinanceStateProvider } from "./platform/propertySetupFinanceState.js";
 import { createPropertySetupReviewLifecycleStateProvider } from "./platform/propertySetupReviewLifecycleState.js";
 import { createPropertySetupRouteStateReadPort } from "./platform/propertySetupRouteState.js";
-import { runPlatformMediaCleanupJobs } from "./jobs/platformMediaCleanup.js";
+import {
+  platformMediaCleanupFailureLogEntries,
+  runPlatformMediaCleanupJobs,
+} from "./jobs/platformMediaCleanup.js";
 import { startPmsInboxAssignmentReconciliationWorker } from "./jobs/pmsInboxAssignmentReconciliation.js";
 import { startPmsInboxFollowUpReleaseWorker } from "./jobs/pmsInboxFollowUpRelease.js";
 import {
@@ -2999,7 +3002,10 @@ if (platformMediaRuntime) {
     activeCleanup = runPlatformMediaCleanupJobs(platformMediaRuntime.cleanupStore)
       .then((result) => {
         if (result.failed > 0) {
-          app.log.warn({ failed: result.failed }, "Platform media cleanup completed with failures");
+          app.log.warn(
+            { failed: result.failed, failures: platformMediaCleanupFailureLogEntries(result) },
+            "Platform media cleanup completed with failures",
+          );
         }
       })
       .catch((error: unknown) => {
