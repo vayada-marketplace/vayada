@@ -1,7 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { PMS_ROOM_FACTS_CONTRACT_VERSION, parseRoomTypeFactsSnapshot } from "@vayada/domain-pms";
+import {
+  PMS_ROOM_FACTS_CONTRACT_VERSION,
+  createPmsOperatingCalendarSourceRevision,
+  parsePmsOperatingCalendarConfigurationSnapshot,
+  parseRoomTypeFactsSnapshot,
+} from "@vayada/domain-pms";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -155,26 +160,7 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
   it("gives a cohort hotel the native operating calendar its readiness checks expect", async () => {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
     try {
-      await seed(client);
-      await client.query(
-        `INSERT INTO identity.users (id, email) VALUES ($1, 'cohort-owner@example.invalid')`,
-        [OWNER],
-      );
-      await client.query(
-        `INSERT INTO hotel_catalog.property_locations (property_id, timezone)
-         VALUES ($1, 'Europe/Berlin')`,
-        [PROPERTY],
-      );
-      await client.query(`UPDATE hotel_catalog.properties SET profile_revision = 4 WHERE id = $1`, [
-        PROPERTY,
-      ]);
-      await client.query(
-        `INSERT INTO identity.organization_resource_links
-           (organization_id, product, resource_type, resource_id, relationship, status)
-         VALUES ($1, 'hotel_catalog', 'property', $2, 'owner', 'active'),
-                ($1, 'pms', 'pms_property', $2, 'owner', 'active')`,
-        [ORGANIZATION, PROPERTY],
-      );
+      await seedCalendar(client);
       const prerequisites = await readProductionPmsPrerequisites(client, RUN);
       const rows = sourceRows();
       rows[0]!.data["user_id"] = OWNER;
@@ -225,6 +211,11 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
                          AND binding.source_room_units_revision = room_type.room_units_revision))
                 = (SELECT count(*) FROM pms.operating_calendar_room_bindings binding
                     WHERE binding.property_id = $1
+                      AND binding.calendar_revision = latest.calendar_revision)
+                AND (SELECT count(*) FROM pms.room_types room_type
+                      WHERE room_type.property_id = $1 AND room_type.active)
+                = (SELECT count(*) FROM pms.operating_calendar_room_bindings binding
+                    WHERE binding.property_id = $1
                       AND binding.calendar_revision = latest.calendar_revision) AS e,
                 (SELECT status FROM platform.idempotency_keys WHERE id = latest.idempotency_key_id)
                   AS idempotency,
@@ -239,6 +230,89 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
       expect(criteria.rows).toEqual([
         { d: true, e: true, idempotency: "completed", outbox: "pms.inventory-source" },
       ]);
+
+      // The configuration the runtime loads from these rows (pmsOperatingCalendarReadModel).
+      const root = (
+        await client.query(
+          `SELECT calendar_revision AS "calendarRevision", property_profile_revision AS profile,
+                  property_time_zone AS "timeZone", default_minimum_stay_nights AS "minimumStay",
+                  to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS at
+             FROM pms.operating_calendar_revisions WHERE property_id = $1`,
+          [PROPERTY],
+        )
+      ).rows[0];
+      const bindings = await client.query(
+        `SELECT room_type_id::text AS "roomTypeId",
+                source_room_facts_revision AS "sourceRoomFactsRevision",
+                source_room_units_revision AS "sourceRoomUnitsRevision",
+                physical_capacity_count AS "physicalCapacityCount",
+                starting_sellable_limit_count AS "startingSellableLimitCount"
+           FROM pms.operating_calendar_room_bindings WHERE property_id = $1 ORDER BY room_type_id`,
+        [PROPERTY],
+      );
+      expect(
+        parsePmsOperatingCalendarConfigurationSnapshot(
+          {
+            contractVersion: "pms-operating-calendar.v1",
+            propertyId: PROPERTY,
+            calendarRevision: root.calendarRevision,
+            source: createPmsOperatingCalendarSourceRevision(PROPERTY, root.calendarRevision),
+            sourceInputs: {
+              propertyProfile: {
+                ownerDomain: "hotel_catalog",
+                entityType: "property_profile",
+                entityId: PROPERTY,
+                revision: `profile:${root.profile}`,
+              },
+              propertyTimeZone: root.timeZone,
+              roomBindings: bindings.rows,
+            },
+            schedule: { mode: "year_round", periods: [] },
+            defaultMinimumStayNights: root.minimumStay,
+            createdAt: root.at,
+            updatedAt: root.at,
+          },
+          {
+            ownerDomain: "hotel_catalog",
+            registryVersion: "test",
+            isCanonicalIanaTimeZone: (zone) => zone === "Europe/Berlin",
+          },
+        ),
+      ).not.toBeNull();
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+
+  it("reads one owner organization only where runtime tenancy finds one", async () => {
+    await client.query("BEGIN");
+    try {
+      await seedCalendar(client);
+      const organizations = async () =>
+        (await readProductionPmsPrerequisites(client, RUN)).cohortProperties?.find(
+          (row) => row.propertyId === PROPERTY,
+        )?.organizationIds;
+      expect(await organizations()).toEqual([ORGANIZATION]);
+      for (const [change, undo] of [
+        [
+          "UPDATE identity.organizations SET status = 'archived' WHERE id = $1",
+          "UPDATE identity.organizations SET status = 'active' WHERE id = $1",
+        ],
+        [
+          `UPDATE identity.organization_resource_links SET status = 'archived'
+            WHERE organization_id = $1 AND resource_type = 'pms_property'`,
+          `UPDATE identity.organization_resource_links SET status = 'active'
+            WHERE organization_id = $1 AND resource_type = 'pms_property'`,
+        ],
+        [
+          "UPDATE identity.organizations SET kind = 'creator_workspace' WHERE id = $1",
+          "UPDATE identity.organizations SET kind = 'hotel_group' WHERE id = $1",
+        ],
+      ]) {
+        await client.query(change!, [ORGANIZATION]);
+        expect(await organizations()).toEqual([]);
+        await client.query(undo!, [ORGANIZATION]);
+      }
     } finally {
       await client.query("ROLLBACK");
     }
@@ -296,4 +370,27 @@ function sourceRows(): IdentitySourceRow[] {
     room(ROOM_A, "A-101"),
     room(ROOM_B, "A-102"),
   ];
+}
+
+async function seedCalendar(client: pg.Client): Promise<void> {
+  await seed(client);
+  await client.query(
+    `INSERT INTO identity.users (id, email) VALUES ($1, 'cohort-owner@example.invalid')`,
+    [OWNER],
+  );
+  await client.query(
+    `INSERT INTO hotel_catalog.property_locations (property_id, timezone)
+     VALUES ($1, 'Europe/Berlin')`,
+    [PROPERTY],
+  );
+  await client.query(`UPDATE hotel_catalog.properties SET profile_revision = 4 WHERE id = $1`, [
+    PROPERTY,
+  ]);
+  await client.query(
+    `INSERT INTO identity.organization_resource_links
+       (organization_id, product, resource_type, resource_id, relationship, status)
+     VALUES ($1, 'hotel_catalog', 'property', $2, 'owner', 'active'),
+            ($1, 'pms', 'pms_property', $2, 'owner', 'active')`,
+    [ORGANIZATION, PROPERTY],
+  );
 }

@@ -80,7 +80,23 @@ export type PmsCohortPropertyState = {
   timeZone: string | null;
   /** Active hotel organizations holding both native property links. */
   organizationIds: string[];
-  latestCalendarRevision: number | null;
+  /** Revision 1 of the operating calendar as stored, if any. */
+  storedCalendar: {
+    idempotencyKeyId: string;
+    organizationId: string;
+    profileRevision: number;
+    timeZone: string;
+    defaultMinimumStayNights: number;
+    createdByUserId: string;
+    createdAt: string;
+    bindings: Array<{
+      roomTypeId: string;
+      sourceRoomFactsRevision: number;
+      sourceRoomUnitsRevision: number;
+      physicalCapacityCount: number;
+      startingSellableLimitCount: number;
+    }>;
+  } | null;
 };
 
 export type ProductionPmsTargetState = {

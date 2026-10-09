@@ -39,7 +39,7 @@ export function buildProductionPmsPlan(input: {
   const records = [
     ...rooms.records,
     ...buildPmsPricingSettingsRecords(context),
-    ...buildPmsCohortCalendarRecords(context, planPmsCohortCalendars(context, rooms.records)),
+    ...buildPmsCohortCalendarRecords(context, planPmsCohortCalendars(context, rooms)),
     ...assignments.records,
     ...buildPmsInventoryRecords(context),
     ...buildPmsCalendarAutoOpenRecords(context),

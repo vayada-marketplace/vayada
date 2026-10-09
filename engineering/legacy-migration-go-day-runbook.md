@@ -151,6 +151,10 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
    - `profile_status` is `complete` only for a hotel that was live in legacy,
      has a public-eligible owner and has country, city and timezone. Fix any
      `incomplete` cohort profile before reopen, or accept it staying unbookable.
+     A profile edit after the import raises the profile revision, so the
+     migrated operating calendar no longer matches it (VAY-2066 criterion d) and
+     the auto-open job refuses it: re-save that hotel's operating calendar in
+     the PMS afterwards.
    - The public bookability profile
      (`distribution.public_hotel_bookability_profiles`) is not written by the
      cutover. Publish it per cohort hotel, through the normal booking-profile

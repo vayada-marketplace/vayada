@@ -116,8 +116,29 @@ export async function readProductionPmsPrerequisites(
                  AND catalog.relationship IN ('owner', 'operator')
                ORDER BY 1
             ) AS "organizationIds",
-            (SELECT max(calendar_revision) FROM pms.operating_calendar_revisions calendar
-              WHERE calendar.property_id = property.id) AS "latestCalendarRevision"
+            (SELECT jsonb_build_object(
+                'idempotencyKeyId', calendar.idempotency_key_id::text,
+                'organizationId', calendar.organization_id::text,
+                'profileRevision', calendar.property_profile_revision,
+                'timeZone', calendar.property_time_zone,
+                'defaultMinimumStayNights', calendar.default_minimum_stay_nights,
+                'createdByUserId', calendar.created_by_user_id::text,
+                'createdAt', to_char(calendar.created_at AT TIME ZONE 'UTC',
+                                     'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+                'bindings', (
+                  SELECT coalesce(jsonb_agg(jsonb_build_object(
+                      'roomTypeId', binding.room_type_id::text,
+                      'sourceRoomFactsRevision', binding.source_room_facts_revision,
+                      'sourceRoomUnitsRevision', binding.source_room_units_revision,
+                      'physicalCapacityCount', binding.physical_capacity_count,
+                      'startingSellableLimitCount', binding.starting_sellable_limit_count)
+                    ORDER BY binding.room_type_id), '[]'::jsonb)
+                    FROM pms.operating_calendar_room_bindings binding
+                   WHERE binding.property_id = calendar.property_id
+                     AND binding.calendar_revision = calendar.calendar_revision))
+               FROM pms.operating_calendar_revisions calendar
+              WHERE calendar.property_id = property.id AND calendar.calendar_revision = 1)
+              AS "storedCalendar"
        FROM hotel_catalog.properties property
        LEFT JOIN hotel_catalog.property_locations location ON location.property_id = property.id
       WHERE property.id IN (

@@ -32,6 +32,7 @@ const roomType = (index: number, hotelIndex: number, rooms: number, extra = {}) 
     total_rooms: rooms,
     base_rate: "100",
     currency: "EUR",
+    bed_type: "1 Double Bed",
     ...extra,
   });
 let roomIndex = 0;
@@ -50,7 +51,7 @@ const property = (index: number, values: Partial<PmsCohortPropertyState> = {}) =
   profileRevision: 3,
   timeZone: "Europe/Berlin",
   organizationIds: [ORGANIZATION],
-  latestCalendarRevision: null,
+  storedCalendar: null,
   ...values,
 });
 
@@ -176,12 +177,63 @@ describe("production PMS cohort operating calendar", () => {
     expect(tables(result)).toEqual([]);
   });
 
-  it("writes nothing without a cohort, for an unknown owner, and blocks a later revision", () => {
+  it("writes nothing without a cohort, for an unknown owner, or outside the cohort", () => {
     const source = [hotel(1), roomType(1, 1, 1), ...rooms(1, 1, 1)];
     expect(tables(plan(source, target(1, [property(1)]), false))).toEqual([]);
     expect(tables(plan(source, { ...target(1, [property(1)]), userIds: [] }))).toEqual([]);
-    const later = plan(source, target(1, [property(1, { latestCalendarRevision: 2 })]));
-    expect(later.blockers).toContainEqual(
+    // Hotel 2 is in the run but outside the cohort.
+    const mixed = [...source, hotel(2), roomType(2, 2, 1), ...rooms(2, 2, 1)];
+    const result = plan(mixed, target(2, [property(1), property(2)]));
+    expect(
+      result.records
+        .filter((record) => record.targetTable === "operating_calendar_revisions")
+        .map((record) => record.row["propertyId"]),
+    ).toEqual([`${PROPERTY}1`]);
+  });
+
+  it("writes no calendar while an operating room type lacks native room facts", () => {
+    const source = [hotel(1), roomType(1, 1, 1, { bed_type: "1 Futon" }), ...rooms(1, 1, 1)];
+    expect(tables(plan(source, target(1, [property(1)])))).toEqual([]);
+  });
+
+  it("keeps a stored migrated calendar on a rerun and blocks a foreign one", () => {
+    const source = [hotel(1), roomType(1, 1, 1), ...rooms(1, 1, 1)];
+    const first = plan(source, target(1, [property(1)]));
+    const revision = first.records.find(
+      (record) => record.targetTable === "operating_calendar_revisions",
+    )!.row;
+    const stored = {
+      idempotencyKeyId: String(revision["idempotencyKeyId"]),
+      organizationId: ORGANIZATION,
+      profileRevision: 3,
+      timeZone: "Europe/Berlin",
+      defaultMinimumStayNights: 1,
+      createdByUserId: OWNER,
+      createdAt: AT,
+      bindings: [
+        {
+          roomTypeId: `${ROOM_TYPE}1`,
+          sourceRoomFactsRevision: 1,
+          sourceRoomUnitsRevision: 1,
+          physicalCapacityCount: 1,
+          startingSellableLimitCount: 1,
+        },
+      ],
+    };
+    // A later native profile edit (revision 4) and a new organization change nothing.
+    const rerun = plan(
+      source,
+      target(1, [
+        property(1, { profileRevision: 4, organizationIds: [OWNER], storedCalendar: stored }),
+      ]),
+    );
+    expect(rerun.blockers).toEqual([]);
+    expect(rerun.checksum).toBe(first.checksum);
+    const foreign = plan(
+      source,
+      target(1, [property(1, { storedCalendar: { ...stored, idempotencyKeyId: OWNER } })]),
+    );
+    expect(foreign.blockers).toContainEqual(
       expect.objectContaining({ code: "COHORT_CALENDAR_CONFLICT" }),
     );
   });
@@ -206,5 +258,14 @@ describe("production PMS cohort operating calendar", () => {
     expect(native).toContain(
       "`pms.operating-calendar.property.${command.propertyId}.key.${keyHash}.attempt.${reservation.attempt}.v1`",
     );
+    const registry = await readFile(
+      join(
+        import.meta.dirname,
+        "../../../apps/api/src/domains/hotelCatalogOperatingCalendarPropertyProfileEvidence.ts",
+      ),
+      "utf8",
+    );
+    expect(registry).toContain('"countries-and-timezones@3.9.0" as const');
+    expect(registry).toContain("timezone.name === value && timezone.aliasOf === null");
   });
 });

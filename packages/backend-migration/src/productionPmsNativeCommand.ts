@@ -43,8 +43,7 @@ export function nativeCommandRecords(
   command: NativeCommand,
 ): { ids: { idempotency: string; event: string; outbox: string }; records: PmsTargetRecord[] } {
   const { propertyId, at } = command;
-  const id = (kind: string) =>
-    deterministicUuid("production-pms", "native-command", command.name, kind, propertyId);
+  const id = (kind: string) => nativeCommandId(command.name, kind, propertyId);
   const ids = { idempotency: id("idempotency"), event: id("event"), outbox: id("outbox") };
   const keyHash = sha256Hex(
     `vay1362-migration:${context.sourceRunId}:${command.name}:${propertyId}`,
@@ -144,6 +143,11 @@ export function nativeCommandRecords(
       }),
     ],
   };
+}
+
+/** The deterministic row ID of one native command's row (kind: idempotency, event, ...). */
+export function nativeCommandId(name: string, kind: string, propertyId: string): string {
+  return deterministicUuid("production-pms", "native-command", name, kind, propertyId);
 }
 
 function sha256Hex(value: string): string {

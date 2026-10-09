@@ -7,14 +7,15 @@ import {
   createPmsOperatingCalendarSourceRevision,
   parsePmsOperatingCalendarConfigurationSnapshot,
   type PmsOperatingCalendarConfigurationSnapshot,
+  type PmsOperatingCalendarRoomBinding,
 } from "@vayada/domain-pms";
 
 import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
 import { integer, optionalUuid, uuid } from "./productionBookingValues.js";
 import { carriedCohortHotel } from "./productionPmsCohortSetup.js";
-import { addPmsBlocker } from "./productionPmsContext.js";
-import { nativeCommandRecords } from "./productionPmsNativeCommand.js";
-import type { PmsBuildContext, PmsTargetRecord } from "./productionPmsTypes.js";
+import { addPmsBlocker, safePmsSourceId } from "./productionPmsContext.js";
+import { nativeCommandId, nativeCommandRecords } from "./productionPmsNativeCommand.js";
+import type { PmsBuildContext, PmsRoomBuild, PmsTargetRecord } from "./productionPmsTypes.js";
 import { pmsRecord } from "./productionPmsValues.js";
 
 // VAY-1362 setup completeness: the operating calendar native hotel setup saves
@@ -39,111 +40,179 @@ const TIME_ZONE_REGISTRY = Object.freeze({
 export type PlannedCohortCalendar = {
   configuration: PmsOperatingCalendarConfigurationSnapshot;
   organizationId: string;
+  createdByUserId: string;
   hotel: IdentitySourceRow;
 };
 
-/** Calendars for carried cohort hotels whose rooms can be bound as native setup binds them. A
- * hotel that cannot (no operating room type, a room type without rooms or whose inventory total
- * differs from its rooms, no owner organization, owner or canonical time zone) gets none and
- * stays in setup. */
+const COMMAND = "operating-calendar";
+type CohortProperty = NonNullable<PmsBuildContext["target"]["cohortProperties"]>[number];
+
+/**
+ * Calendars for carried cohort hotels whose rooms can be bound as native setup binds them. A
+ * hotel that cannot (an operating room type without native room facts, without rooms or whose
+ * inventory total differs from its rooms; no owner organization, legacy owner user or canonical
+ * time zone) gets none and stays in setup. A rerun plans the migrated revision 1 as stored, so
+ * later native edits and revisions neither change nor block it; a revision 1 the migration did
+ * not write blocks.
+ */
 export function planPmsCohortCalendars(
   context: PmsBuildContext,
-  roomRecords: PmsTargetRecord[],
+  rooms: Pick<PmsRoomBuild, "records" | "nativeFactsRoomTypes">,
 ): PlannedCohortCalendar[] {
   if (!context.cohort) return [];
   const properties = new Map(
     (context.target.cohortProperties ?? []).map((row) => [row.propertyId, row]),
   );
+  const calendars: PlannedCohortCalendar[] = [];
+  for (const hotel of context.rowsByTable.get("hotels") ?? [])
+    try {
+      const hotelId = uuid(hotel.data["id"], "id");
+      const propertyId = context.propertyByHotel.get(hotelId);
+      const property = propertyId ? properties.get(propertyId) : undefined;
+      if (!property || !carriedCohortHotel(context, hotelId)) continue;
+      const planned = property.storedCalendar
+        ? storedCalendar(context, hotel, hotelId, property)
+        : newCalendar(context, rooms, hotel, property);
+      if (planned) calendars.push(planned);
+    } catch (error) {
+      addPmsBlocker(
+        context,
+        "INVALID_SOURCE_ROW",
+        "pms.hotels",
+        safePmsSourceId(hotel),
+        error instanceof Error ? error.message : "Invalid operating calendar source",
+      );
+    }
+  return calendars;
+}
+
+function storedCalendar(
+  context: PmsBuildContext,
+  hotel: IdentitySourceRow,
+  hotelId: string,
+  property: CohortProperty,
+): PlannedCohortCalendar | null {
+  const stored = property.storedCalendar!;
+  if (stored.idempotencyKeyId !== nativeCommandId(COMMAND, "idempotency", property.propertyId)) {
+    addPmsBlocker(
+      context,
+      "COHORT_CALENDAR_CONFLICT",
+      "pms.hotels",
+      hotelId,
+      "The target property has an operating calendar the migration did not write",
+    );
+    return null;
+  }
+  return calendar(hotel, property.propertyId, stored.organizationId, stored.createdByUserId, {
+    ...stored,
+    at: new Date(stored.createdAt).toISOString(),
+  });
+}
+
+function newCalendar(
+  context: PmsBuildContext,
+  rooms: Pick<PmsRoomBuild, "records" | "nativeFactsRoomTypes">,
+  hotel: IdentitySourceRow,
+  property: CohortProperty,
+): PlannedCohortCalendar | null {
   const existingRoomTypes = new Map(
     context.target.records
       .filter((record) => record.targetTable === "room_types")
       .map((record) => [record.targetId, record.row]),
   );
-  const at = new Date(context.completedAt).toISOString();
-  const calendars: PlannedCohortCalendar[] = [];
-  for (const hotel of context.rowsByTable.get("hotels") ?? []) {
-    const hotelId = String(hotel.data["id"] ?? "").toLowerCase();
-    const propertyId = context.propertyByHotel.get(hotelId);
-    if (!propertyId || !carriedCohortHotel(context, hotelId)) continue;
-    const property = properties.get(propertyId);
-    const roomTypes = roomRecords.filter(
-      (record) =>
-        record.targetTable === "room_types" &&
-        record.row["propertyId"] === propertyId &&
-        record.row["active"] === true,
-    );
-    const bindings = roomTypes
-      .map((roomType) => {
-        const source = context.roomTypeById.get(roomType.targetId);
-        const capacity = roomRecords.filter(
-          (record) =>
-            record.targetTable === "rooms" &&
-            record.row["roomTypeId"] === roomType.targetId &&
-            record.row["status"] !== "retired",
-        ).length;
-        const current = existingRoomTypes.get(roomType.targetId);
-        return {
-          roomTypeId: roomType.targetId,
-          sourceRoomFactsRevision: Number(current?.["roomFactsRevision"] ?? 1),
-          sourceRoomUnitsRevision: Number(current?.["roomUnitsRevision"] ?? 1),
-          physicalCapacityCount: capacity,
-          startingSellableLimitCount: capacity,
-          inventoryTotal: integer(source?.data["total_rooms"], "total_rooms", 0),
-        };
-      })
-      .sort((left, right) => (left.roomTypeId < right.roomTypeId ? -1 : 1));
-    const creator = optionalUuid(hotel.data["user_id"], "user_id");
-    if (
-      !property ||
-      property.organizationIds.length !== 1 ||
-      !creator ||
-      !context.userIds.has(creator) ||
-      !bindings.length ||
-      bindings.some(
-        (binding) =>
-          binding.physicalCapacityCount < 1 ||
-          binding.physicalCapacityCount > 500 ||
-          binding.inventoryTotal !== binding.physicalCapacityCount,
-      )
+  const roomTypes = rooms.records.filter(
+    (record) =>
+      record.targetTable === "room_types" &&
+      record.row["propertyId"] === property.propertyId &&
+      record.row["active"] === true,
+  );
+  if (roomTypes.some((roomType) => !rooms.nativeFactsRoomTypes?.has(roomType.targetId)))
+    return null;
+  const bindings = roomTypes
+    .map((roomType) => {
+      const capacity = rooms.records.filter(
+        (record) =>
+          record.targetTable === "rooms" &&
+          record.row["roomTypeId"] === roomType.targetId &&
+          record.row["status"] !== "retired",
+      ).length;
+      const current = existingRoomTypes.get(roomType.targetId);
+      return {
+        roomTypeId: roomType.targetId,
+        sourceRoomFactsRevision: Number(current?.["roomFactsRevision"] ?? 1),
+        sourceRoomUnitsRevision: Number(current?.["roomUnitsRevision"] ?? 1),
+        physicalCapacityCount: capacity,
+        startingSellableLimitCount: capacity,
+        inventoryTotal: integer(
+          context.roomTypeById.get(roomType.targetId)?.data["total_rooms"],
+          "total_rooms",
+          0,
+        ),
+      };
+    })
+    .sort((left, right) => (left.roomTypeId < right.roomTypeId ? -1 : 1));
+  const creator = optionalUuid(hotel.data["user_id"], "user_id");
+  if (
+    property.organizationIds.length !== 1 ||
+    !property.timeZone ||
+    !creator ||
+    !context.userIds.has(creator) ||
+    !bindings.length ||
+    bindings.some(
+      (binding) =>
+        binding.physicalCapacityCount < 1 ||
+        binding.physicalCapacityCount > 500 ||
+        binding.inventoryTotal !== binding.physicalCapacityCount,
     )
-      continue;
-    if (property.latestCalendarRevision !== null && property.latestCalendarRevision > 1) {
-      addPmsBlocker(
-        context,
-        "COHORT_CALENDAR_CONFLICT",
-        "pms.hotels",
-        hotelId,
-        "The target property already has a later operating calendar revision",
-      );
-      continue;
-    }
-    const configuration = parsePmsOperatingCalendarConfigurationSnapshot(
-      {
-        contractVersion: PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
-        propertyId,
-        calendarRevision: 1,
-        source: createPmsOperatingCalendarSourceRevision(propertyId, 1),
-        sourceInputs: {
-          propertyProfile: {
-            ownerDomain: "hotel_catalog",
-            entityType: "property_profile",
-            entityId: propertyId,
-            revision: `profile:${property.profileRevision}`,
-          },
-          propertyTimeZone: property.timeZone,
-          roomBindings: bindings.map(({ inventoryTotal: _total, ...binding }) => binding),
+  )
+    return null;
+  return calendar(hotel, property.propertyId, property.organizationIds[0]!, creator, {
+    profileRevision: property.profileRevision,
+    timeZone: property.timeZone,
+    defaultMinimumStayNights: 1,
+    bindings: bindings.map(({ inventoryTotal: _total, ...binding }) => binding),
+    at: new Date(context.completedAt).toISOString(),
+  });
+}
+
+function calendar(
+  hotel: IdentitySourceRow,
+  propertyId: string,
+  organizationId: string,
+  createdByUserId: string,
+  input: {
+    profileRevision: number;
+    timeZone: string;
+    defaultMinimumStayNights: number;
+    bindings: PmsOperatingCalendarRoomBinding[];
+    at: string;
+  },
+): PlannedCohortCalendar | null {
+  const configuration = parsePmsOperatingCalendarConfigurationSnapshot(
+    {
+      contractVersion: PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
+      propertyId,
+      calendarRevision: 1,
+      source: createPmsOperatingCalendarSourceRevision(propertyId, 1),
+      sourceInputs: {
+        propertyProfile: {
+          ownerDomain: "hotel_catalog",
+          entityType: "property_profile",
+          entityId: propertyId,
+          revision: `profile:${input.profileRevision}`,
         },
-        schedule: { mode: "year_round", periods: [] },
-        defaultMinimumStayNights: 1,
-        createdAt: at,
-        updatedAt: at,
+        propertyTimeZone: input.timeZone,
+        roomBindings: input.bindings,
       },
-      TIME_ZONE_REGISTRY,
-    );
-    if (!configuration) continue; // no canonical time zone: native setup refuses it too
-    calendars.push({ configuration, organizationId: property.organizationIds[0]!, hotel });
-  }
-  return calendars;
+      schedule: { mode: "year_round", periods: [] },
+      defaultMinimumStayNights: input.defaultMinimumStayNights,
+      createdAt: input.at,
+      updatedAt: input.at,
+    },
+    TIME_ZONE_REGISTRY,
+  );
+  // No canonical time zone: native setup refuses it too.
+  return configuration ? { configuration, organizationId, createdByUserId, hotel } : null;
 }
 
 /** The rows one native calendar save writes, keyed so reruns plan the same rows. */
@@ -151,7 +220,7 @@ export function buildPmsCohortCalendarRecords(
   context: PmsBuildContext,
   calendars: PlannedCohortCalendar[],
 ): PmsTargetRecord[] {
-  return calendars.flatMap(({ configuration, organizationId, hotel }) => {
+  return calendars.flatMap(({ configuration, organizationId, createdByUserId, hotel }) => {
     const { propertyId, createdAt: at } = configuration;
     const bindings = configuration.sourceInputs.roomBindings;
     const profileRevision = Number(
@@ -171,7 +240,7 @@ export function buildPmsCohortCalendarRecords(
     const command = nativeCommandRecords(context, {
       source: hotel,
       propertyId,
-      name: "operating-calendar",
+      name: COMMAND,
       at,
       operation: PMS_OPERATING_CALENDAR_IDEMPOTENCY.operation,
       fingerprint: JSON.stringify({
@@ -236,7 +305,7 @@ export function buildPmsCohortCalendarRecords(
         idempotencyKeyId: command.ids.idempotency,
         domainEventId: command.ids.event,
         outboxEventId: command.ids.outbox,
-        createdByUserId: uuid(hotel.data["user_id"], "user_id"),
+        createdByUserId,
         createdAt: at,
         updatedAt: at,
       }),
