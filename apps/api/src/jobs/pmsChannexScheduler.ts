@@ -445,9 +445,11 @@ export function createPgPmsCalendarAutoOpenSchedulerStore(config: {
 
 /**
  * Properties whose effective auto-open setting is enabled: an enabled saved setting, or no saved
- * setting (the virtual default, revision 0) once calendar and room setup are ready, using the
- * same readiness rules as the settings read model. A property that is not ready yet is paused,
- * not a failure. Placeholders `$first` to `$first + 2` bind effectiveCalendarAutoOpenDefaultParams.
+ * setting (the virtual default, revision 0) once calendar and room setup are ready: the settings
+ * read model's checks plus a current calendar for the profile and timezone and no closed room
+ * type, so the worker can apply the job. A property that is not ready yet is paused, not a
+ * failure. Suspended and retired hotels are never selected. Placeholders `$first` to
+ * `$first + 2` bind effectiveCalendarAutoOpenDefaultParams.
  */
 function effectiveCalendarAutoOpenSettingsSql(first: number): string {
   const [mode, rollingMonths, enabled] = [first, first + 1, first + 2].map((n) => `$${n}`);
@@ -461,6 +463,7 @@ function effectiveCalendarAutoOpenSettingsSql(first: number): string {
      FROM hotel_catalog.properties property
      LEFT JOIN pms.calendar_auto_open_settings stored ON stored.property_id = property.id
      WHERE COALESCE(stored.enabled, ${enabled}::boolean) IS TRUE
+       AND property.lifecycle_status IN ('provisioning', 'active')
        AND (
          stored.property_id IS NOT NULL
          OR (
@@ -479,8 +482,29 @@ function effectiveCalendarAutoOpenSettingsSql(first: number): string {
              WHERE room.property_id = property.id AND room.active IS TRUE
            )
            AND EXISTS (
-             SELECT 1 FROM pms.operating_calendar_revisions revision
-             WHERE revision.property_id = property.id
+             -- The current calendar was saved against the current profile and timezone;
+             -- after a profile edit the calendar needs a re-save (a stale-source conflict).
+             SELECT 1
+             FROM pms.operating_calendar_revisions latest
+             JOIN hotel_catalog.property_locations location
+               ON location.property_id = latest.property_id
+             WHERE latest.property_id = property.id
+               AND latest.calendar_revision = (
+                 SELECT max(revision.calendar_revision) FROM pms.operating_calendar_revisions revision
+                 WHERE revision.property_id = property.id
+               )
+               AND latest.property_profile_revision = property.profile_revision
+               AND latest.property_time_zone = location.timezone
+           )
+           AND NOT EXISTS (
+             -- A closed room type stays active but leaves the calendar's room bindings.
+             SELECT 1
+             FROM pms.room_type_closures closure
+             JOIN pms.room_types room
+               ON room.property_id = closure.property_id
+              AND room.id = closure.room_type_id
+              AND room.active IS TRUE
+             WHERE closure.property_id = property.id
            )
            AND NOT EXISTS (
              SELECT 1

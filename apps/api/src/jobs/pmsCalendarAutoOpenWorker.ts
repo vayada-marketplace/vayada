@@ -39,6 +39,8 @@ import { lockPmsRoomFactsMutationScope } from "../domains/pmsRoomFactsMutationLo
 import { PMS_CALENDAR_AUTO_OPEN_QUEUE } from "./pmsChannexScheduler.js";
 
 const LEASE_MS = 5 * 60_000;
+// Suspended and retired hotels never get dates opened, whatever their setting says.
+const AUTO_OPEN_LIFECYCLE_STATUSES: ReadonlySet<string> = new Set(["provisioning", "active"]);
 const DAY_MS = 86_400_000;
 const RESULT_KEY = "calendarAutoOpenResult";
 
@@ -249,6 +251,7 @@ async function claim(
 }
 
 type SourceRow = QueryResultRow & {
+  lifecycleStatus: string;
   enabled: boolean;
   mode: "rolling" | "fixed";
   rollingMonths: number | string | null;
@@ -596,7 +599,8 @@ async function loadCurrentSource(
   const defaults = PMS_CALENDAR_AUTO_OPEN_DEFAULT_CONFIGURATION;
   const root = (
     await client.query<SourceRow>(
-      `SELECT COALESCE(setting.enabled, $2::boolean) AS enabled,
+      `SELECT property.lifecycle_status AS "lifecycleStatus",
+              COALESCE(setting.enabled, $2::boolean) AS enabled,
               COALESCE(setting.mode, $3::text) AS mode,
               CASE WHEN setting.property_id IS NULL THEN $4::smallint
                    ELSE setting.rolling_months END AS "rollingMonths",
@@ -633,6 +637,7 @@ async function loadCurrentSource(
   ).rows[0];
   if (
     !root?.enabled ||
+    !AUTO_OPEN_LIFECYCLE_STATUSES.has(root.lifecycleStatus) ||
     !location?.propertyTimeZone ||
     !root.organizationId ||
     root.operatingCalendarRevision === null ||

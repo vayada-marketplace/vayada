@@ -79,7 +79,9 @@ export type PmsCalendarAutoOpenSource = Readonly<{
 
 /**
  * The virtual setting (revision 0) of a property with no saved choice. Since VAY-2066 auto-open
- * is on by default; an explicit saved choice, including Off, always replaces it.
+ * is on by default; an explicit saved choice, including Off, always replaces it. The source
+ * fingerprint carries only the revision, so a later change of this default reaches existing
+ * properties through the new `openThrough` in the job key, not through the fingerprint.
  */
 export const PMS_CALENDAR_AUTO_OPEN_DEFAULT_CONFIGURATION = Object.freeze({
   enabled: true,
