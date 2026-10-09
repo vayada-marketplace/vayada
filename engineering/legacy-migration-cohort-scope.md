@@ -125,7 +125,9 @@ Runs without a cohort, hotels outside it and quarantined hotels get none of this
   recurring schedule (year-round without periods), minimum stay 1, the owner organization, the
   catalog profile revision and canonical time zone, and one binding per operating room type at its
   physical capacity. Room types with different operating periods get no calendar: the schedule is
-  the property's. The import also writes the idempotency key, domain event and outbox row its
+  the property's. Periods are read day by day as legacy reads them (unvalidated `MM-DD` strings);
+  a recurring schedule has no 29 February of its own, so a period open only then gives no
+  calendar, and other leap-day differences stay closed where legacy closes them. The import also writes the idempotency key, domain event and outbox row its
   foreign keys require, and its audit row, with the migration as actor. A hotel gets no calendar
   without one owner organization, a canonical time zone or a known legacy owner user, or when an
   operating room type has no native room facts, no rooms, or rooms that differ from its inventory
