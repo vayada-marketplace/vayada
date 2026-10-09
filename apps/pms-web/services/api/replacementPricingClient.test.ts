@@ -74,6 +74,9 @@ describe("replacement pricing browser workflow", () => {
     expect(first[1]).toEqual({ draftId, expectedDraftRevision: 1, claimedFingerprint: token, declaration: review.declaration });
     expect(new Headers(first[2].headers).get("Idempotency-Key")).toBe(new Headers(second[2].headers).get("Idempotency-Key"));
     expect(http.put).not.toHaveBeenCalled();
+    http.post.mockResolvedValue({ id, fingerprint: token, declaration: review.declaration });
+    await client().confirmationAction(structuredClone(review), "save_prices")();
+    expect(http.post.mock.calls[2][1]).toEqual({ draftId, expectedDraftRevision: 1, claimedFingerprint: token, declaration: review.declaration, declaredVia: "save_prices" });
   });
   it("requires a confirmed saved draft and retains exact publication inputs on retry", async () => {
     expect(() => client().publicationAction(draft)).toThrow(PricingResponseError);

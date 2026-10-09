@@ -15,6 +15,8 @@ export type PricingChargeReview = PricingDraft & { fingerprint: string; declarat
 export class PricingResponseError extends Error { constructor() { super("Pricing data could not be verified. Reload before continuing."); } }
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => pricingObject(item)
   ? Object.fromEntries(Object.keys(item).sort().map((key) => [key, item[key]])) : item);
+/** Equal pricing data regardless of key order (the server re-reads drafts from jsonb, which reorders keys). */
+export const samePricingValue = (a: unknown, b: unknown) => canonical(a) === canonical(b);
 const bad = (): never => { throw new PricingResponseError(); };
 const uuid = (v: unknown): v is string => typeof v === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(v);
 const exact = (v: unknown, keys: string[]): v is Record<string, unknown> => pricingObject(v) && pricingKeys(v, keys);
@@ -125,9 +127,10 @@ export function createReplacementPricingClient(propertyId: string, http: Http = 
       if (!exact(value, ["revision"]) || value.revision !== body.expectedDraftRevision + 1) return bad();
       return value.revision as number;
     },
-    confirmationAction(input: PricingChargeReview) {
+    /** `save_prices`: the staff member declared by pressing "Save prices"; the server records it on the audit event. */
+    confirmationAction(input: PricingChargeReview, declaredVia?: "save_prices") {
       const reviewed = review(input, input.draftId), requestId = crypto.randomUUID();
-      const body = { draftId: reviewed.draftId, expectedDraftRevision: reviewed.revision, claimedFingerprint: reviewed.fingerprint, declaration: reviewed.declaration };
+      const body = { draftId: reviewed.draftId, expectedDraftRevision: reviewed.revision, claimedFingerprint: reviewed.fingerprint, declaration: reviewed.declaration, ...(declaredVia === "save_prices" ? { declaredVia } : {}) };
       return async () => {
         const value = await http.post<unknown>(`${base}/charges`, structuredClone(body), options(requestId));
         if (!exact(value, ["id", "fingerprint", "declaration"]) || !uuid(value.id) || value.fingerprint !== reviewed.fingerprint || value.declaration !== reviewed.declaration) return bad();
