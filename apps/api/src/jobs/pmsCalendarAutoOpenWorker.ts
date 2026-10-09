@@ -44,7 +44,8 @@ const RESULT_KEY = "calendarAutoOpenResult";
 type Client = PmsInventoryMaterializationRepositoryClient;
 type Pool = { connect(): Promise<Client>; end(): Promise<void> };
 type PmsCalendarAutoOpenClaim =
-  PmsCalendarAutoOpenWorkerJob | Readonly<{ deadLetteredJobId: string }>;
+  | PmsCalendarAutoOpenWorkerJob
+  | Readonly<{ deadLetteredJobId: string }>;
 
 export type PmsCalendarAutoOpenJobPayload = Readonly<{
   propertyId: string;
@@ -85,7 +86,10 @@ export type PmsCalendarAutoOpenWorkerResult =
   | Readonly<{
       outcome: "succeeded";
       jobId: string;
+      propertyId: string;
       applicationOutcome: PmsCalendarAutoOpenApplicationResult["outcome"];
+      changedDayCount: number;
+      warningCount: number;
     }>
   | Readonly<{ outcome: "retry_scheduled" | "dead_lettered"; jobId: string }>;
 
@@ -123,7 +127,14 @@ export async function runPmsCalendarAutoOpenWorkerOnce(input: {
   try {
     const result = await input.store.apply(job, { workerId: input.workerId, now: clock() });
     await input.store.succeed(job, result, { workerId: input.workerId, now: clock() });
-    return { outcome: "succeeded", jobId: job.jobId, applicationOutcome: result.outcome };
+    return {
+      outcome: "succeeded",
+      jobId: job.jobId,
+      propertyId: job.propertyId,
+      applicationOutcome: result.outcome,
+      changedDayCount: result.changedDayCount,
+      warningCount: result.warnings.length,
+    };
   } catch (error) {
     return {
       outcome: await input.store.fail(job, error, { workerId: input.workerId, now: clock() }),

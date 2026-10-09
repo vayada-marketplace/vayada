@@ -266,6 +266,10 @@ import {
   createPgPmsCalendarAutoOpenWorkerStore,
   runPmsCalendarAutoOpenWorkerOnce,
 } from "./jobs/pmsCalendarAutoOpenWorker.js";
+import {
+  createPgPmsCalendarAutoOpenSchedulerStore,
+  runPmsCalendarAutoOpenScheduler,
+} from "./jobs/pmsChannexScheduler.js";
 import { createPmsChannexManagementTargetState } from "./jobs/pmsChannexManagementTargetState.js";
 import {
   runFinanceSubscriptionNotificationJobs,
@@ -1299,6 +1303,11 @@ const pmsCalendarAutoOpenWorkerStore = pmsOperatingCalendarRuntime
       propertyProfileEvidence: propertySetupPmsRuntime.propertyProfileEvidence,
     })
   : undefined;
+// VAY-2066: the producer for the worker above. It only enqueues auto-open jobs; no Channex calls.
+const pmsCalendarAutoOpenSchedulerStore =
+  pmsOperatingCalendarRuntime && config.pmsCalendarAutoOpenSchedulerEnabled
+    ? createPgPmsCalendarAutoOpenSchedulerStore({ connectionString: targetDatabaseUrl })
+    : undefined;
 const pmsGuestPolicySetupCommands =
   config.pmsOperationsSource === "target"
     ? {
@@ -2591,7 +2600,11 @@ const runCalendarAutoOpen = () => {
     workerId: `pms-calendar-auto-open:${process.pid}`,
   })
     .then((result) => {
-      if (result.outcome === "dead_lettered") {
+      if (result.outcome === "succeeded") {
+        app.log.info(result, "PMS calendar auto-open job applied");
+      } else if (result.outcome === "retry_scheduled") {
+        app.log.warn(result, "PMS calendar auto-open job will be retried");
+      } else if (result.outcome === "dead_lettered") {
         app.log.error(result, "PMS calendar auto-open job was dead-lettered");
       }
     })
@@ -2609,6 +2622,63 @@ app.addHook("onClose", async () => {
   if (calendarAutoOpenTimer) clearInterval(calendarAutoOpenTimer);
   await activeCalendarAutoOpenRun;
   await pmsCalendarAutoOpenWorkerStore?.close?.();
+});
+
+let activeCalendarAutoOpenSchedule: Promise<void> | undefined;
+const runCalendarAutoOpenSchedule = () => {
+  if (!config.backgroundWorkersEnabled) return;
+  const store = pmsCalendarAutoOpenSchedulerStore;
+  if (!store || activeCalendarAutoOpenSchedule) return;
+  const startedAt = Date.now();
+  activeCalendarAutoOpenSchedule = store
+    .withRunLock(async () => ({
+      run: await runPmsCalendarAutoOpenScheduler(store, {
+        workerId: `pms-calendar-auto-open-scheduler:${process.pid}`,
+      }),
+      skippedUnverifiedLabels: await store.countUnverifiedLabelSkips(),
+    }))
+    .then((outcome) => {
+      if (!outcome.ran) {
+        app.log.info({ skippedLocked: true }, "PMS calendar auto-open scheduler run");
+        return;
+      }
+      const { run, skippedUnverifiedLabels } = outcome.value;
+      for (const failure of run.autoOpenFailures) {
+        app.log.warn(failure, "PMS calendar auto-open scheduler skipped a property");
+      }
+      app.log.info(
+        {
+          scanned: run.scanned,
+          enqueued: run.enqueued,
+          reused: run.reused,
+          failures: run.autoOpenFailures.length,
+          skippedUnverifiedLabels,
+          durationMs: Date.now() - startedAt,
+        },
+        "PMS calendar auto-open scheduler run",
+      );
+    })
+    .catch((error: unknown) =>
+      app.log.warn({ err: error }, "PMS calendar auto-open scheduler failed"),
+    )
+    .finally(() => {
+      activeCalendarAutoOpenSchedule = undefined;
+    });
+};
+// Hourly; the first run waits a minute so it stays out of startup and deploy health checks.
+const calendarAutoOpenScheduleTimer = pmsCalendarAutoOpenSchedulerStore
+  ? setInterval(runCalendarAutoOpenSchedule, config.pmsCalendarAutoOpenSchedulerIntervalMs)
+  : undefined;
+calendarAutoOpenScheduleTimer?.unref();
+const calendarAutoOpenScheduleStart = pmsCalendarAutoOpenSchedulerStore
+  ? setTimeout(runCalendarAutoOpenSchedule, 60_000)
+  : undefined;
+calendarAutoOpenScheduleStart?.unref();
+app.addHook("onClose", async () => {
+  if (calendarAutoOpenScheduleTimer) clearInterval(calendarAutoOpenScheduleTimer);
+  if (calendarAutoOpenScheduleStart) clearTimeout(calendarAutoOpenScheduleStart);
+  await activeCalendarAutoOpenSchedule;
+  await pmsCalendarAutoOpenSchedulerStore?.close();
 });
 
 let activeFinanceSubscriptionBatch: Promise<void> | undefined;

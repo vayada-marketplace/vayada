@@ -17,7 +17,11 @@ export type ApiAuthConfig = {
 };
 
 export type ApiAuthSurface =
-  "platform-admin" | "booking-admin" | "pms-web" | "affiliate-dashboard" | "marketplace-web";
+  | "platform-admin"
+  | "booking-admin"
+  | "pms-web"
+  | "affiliate-dashboard"
+  | "marketplace-web";
 
 export type ApiAuthSessionConfig = {
   workosClientId: string;
@@ -228,6 +232,9 @@ export type ApiConfig = {
   propertySetupDraftRetentionBatchSize: number;
   pmsInventoryPublicOfferRetryEnabled: boolean;
   pmsInventoryPublicOfferRetryIntervalMs: number;
+  /** Kill switch for the hourly calendar auto-open producer (VAY-2066); on by default. */
+  pmsCalendarAutoOpenSchedulerEnabled: boolean;
+  pmsCalendarAutoOpenSchedulerIntervalMs: number;
   creatorPlatformConnections?: CreatorPlatformConnectionsConfig;
   providerWebhooks: ProviderWebhookConfig;
   airbnbImport?: ReturnType<typeof loadAirbnbImportConfig>;
@@ -1372,6 +1379,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       env,
       "PMS_INVENTORY_PUBLIC_OFFER_RETRY_INTERVAL_MS",
       30_000,
+    ),
+    pmsCalendarAutoOpenSchedulerEnabled: readBooleanEnv(
+      env,
+      "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_ENABLED",
+      true,
+    ),
+    pmsCalendarAutoOpenSchedulerIntervalMs: readTimerIntervalEnv(
+      env,
+      "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS",
+      60 * 60 * 1000,
     ),
     creatorPlatformConnections,
     providerWebhooks: prospectiveConfig.providerWebhooks,
