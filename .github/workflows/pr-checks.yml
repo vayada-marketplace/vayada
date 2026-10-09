@@ -14,6 +14,7 @@ on:
       - "fm/vay-2079-*"
       - "fm/vay-2082-*"
       - "fm/vay-2089-*"
+      - "fm/vay-2099-*"
       - flamurmaliqi2811/vay-2044-expense-worker-runtime
       - fm/vay-2041-worker-permissions
       - fm/vay-2041-worker-source-permissions
@@ -572,7 +573,8 @@ jobs:
             src/domains/pricingBookingDraft.postgres.test.ts \
             src/domains/pricingBookingLifecycle.postgres.test.ts \
             src/domains/pricingBookingRevenue.postgres.test.ts \
-            src/domains/pricingInventoryAdoption.postgres.test.ts
+            src/domains/pricingInventoryAdoption.postgres.test.ts \
+            src/domains/pricingRevenueClear.postgres.test.ts
           npm --workspace @vayada/backend-migration run test -- \
             src/bookingPricingAuthorityDrop.integration.test.ts
           npm --workspace vayada-api run test -- --no-file-parallelism \
