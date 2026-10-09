@@ -25,6 +25,10 @@ import { pricingRoomRevenueProjection } from "./pricingRoomRevenueProjection.js"
 import { parseBookingQuoteAcceptanceInput } from "./bookingQuoteAcceptanceInput.js";
 import { createTargetPmsOperationsCommandRepository } from "./pmsOperationsCommandRepository.js";
 import type { PmsOperationsReadRepository } from "../routes/pmsOperations.js";
+import {
+  createPgBookingLifecycleStore,
+  runBookingLifecycleSchedulerJobs,
+} from "../jobs/bookingLifecycle.js";
 
 vi.mock("./publicPricingAuthority.js", () => ({ lockPublicPricingAuthority: vi.fn() }));
 vi.mock("./currentQuoteInventory.js", () => ({ reserveRevalidatedQuoteInventory: vi.fn() }));
@@ -930,6 +934,95 @@ describe.skipIf(!url)("pricing acceptance writer requests (PostgreSQL)", () => {
       });
     } finally {
       await pmsPool.end();
+      await fixture.close();
+    }
+  });
+
+  it("expires an unanswered request: rooms released, guest and hotel told", async () => {
+    const fixture = await setupFixture((quote) =>
+      Object.assign(quote, { acceptanceMode: "request" }),
+    );
+    const sweepPool = new pg.Pool({ connectionString: url, max: 2 });
+    const released: unknown[] = [];
+    const store = createPgBookingLifecycleStore({
+      connectionString: url!,
+      pool: sweepPool,
+      inventoryReservationPort: {
+        reserve: async () => null,
+        async release({ reservation }) {
+          released.push(reservation);
+        },
+      },
+    });
+    try {
+      mockOwners(fixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      await fixture.observer.query(
+        `INSERT INTO hotel_catalog.property_contact_channels
+          (property_id,channel_type,value,source_system,purpose)
+         VALUES($1,'email','ops@writer.example.test','platform','operations')`,
+        [fixture.propertyId],
+      );
+      // The sweep dates revenue corrections in the hotel's timezone.
+      await fixture.observer.query(
+        "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Rome')",
+        [fixture.propertyId],
+      );
+      const requested = await writePricingAcceptance(
+        fixture.pool,
+        fixture.input,
+        undefined,
+        undefined,
+        true,
+      );
+      if (requested.kind !== "requested") throw new Error(`unexpected ${requested.kind}`);
+      const deadline = new Date(requested.hostResponseDeadlineAt!);
+      const sweep = (now: Date) =>
+        runBookingLifecycleSchedulerJobs(store, { now, run: ["pendingBookingExpiry"] });
+      await sweep(new Date(deadline.getTime() - 60_000));
+      const status = async () =>
+        (
+          await fixture.observer.query(
+            `SELECT b.lifecycle_status,s.lifecycle_status AS summary FROM booking.guest_bookings b
+             JOIN booking.direct_booking_summary_read_model s ON s.guest_booking_id=b.id WHERE b.id=$1`,
+            [requested.bookingId],
+          )
+        ).rows[0];
+      expect(await status()).toEqual({
+        lifecycle_status: "pending_payment",
+        summary: "pending_payment",
+      });
+      expect(released).toEqual([]);
+
+      const expiredRun = await sweep(new Date(deadline.getTime() + 1_000));
+      expect(expiredRun.failed).toBe(0);
+      expect((await status()).lifecycle_status).toBe("expired");
+      expect(released).toEqual([
+        parsePmsInventoryReservationBundle(acceptanceFixture().inventory_reservation_bundle),
+      ]);
+      const jobs = (
+        await fixture.observer.query(
+          `SELECT job_type,payload->>'recipientRole' AS role,payload->>'to' AS recipient
+           FROM platform.jobs WHERE property_id=$1 AND queue_name='platform.email'`,
+          [fixture.propertyId],
+        )
+      ).rows;
+      expect(jobs).toContainEqual(
+        expect.objectContaining({ job_type: "email.booking-expired", role: "guest" }),
+      );
+      expect(jobs).toContainEqual({
+        job_type: "email.booking-host-request-expired",
+        role: "host",
+        recipient: "ops@writer.example.test",
+      });
+      await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({ revenue: 0 });
+      await sweep(new Date(deadline.getTime() + 120_000));
+      expect(released).toHaveLength(1);
+    } finally {
+      await store.close();
+      await sweepPool.end().catch(() => undefined);
       await fixture.close();
     }
   });
