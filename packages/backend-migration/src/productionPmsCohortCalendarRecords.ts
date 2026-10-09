@@ -21,8 +21,8 @@ import type { PmsBuildContext, PmsRoomBuild, PmsTargetRecord } from "./productio
 import { jsonArray, pmsRecord } from "./productionPmsValues.js";
 
 // VAY-1362 setup completeness: the operating calendar native hotel setup saves
-// (pmsOperatingCalendarCommandRepository): revision 1, year-round, one binding per operating room
-// type at its physical capacity, with the idempotency key, domain event and outbox row its foreign
+// (pmsOperatingCalendarCommandRepository): revision 1, the legacy operating periods as its
+// schedule, one binding per operating room type at its physical capacity, with the idempotency key, domain event and outbox row its foreign
 // keys require, and its audit row. The migration is the actor of the event and the audit.
 
 /** Native time zone registry (hotelCatalogOperatingCalendarPropertyProfileEvidence.ts). */
@@ -147,11 +147,6 @@ function newCalendar(
   );
   if (roomTypes.some((roomType) => !rooms.nativeFactsRoomTypes?.has(roomType.targetId)))
     return null;
-  // Legacy operating periods belong to room types; the calendar's schedule is the property's.
-  const schedule = legacySchedule(
-    roomTypes.map((roomType) => context.roomTypeById.get(roomType.targetId)?.data ?? {}),
-  );
-  if (!schedule) return null;
   const bindings = roomTypes
     .map((roomType) => {
       const capacity = rooms.records.filter(
@@ -190,6 +185,11 @@ function newCalendar(
     )
   )
     return null;
+  // Legacy operating periods belong to room types; the calendar's schedule is the property's.
+  const schedule = legacySchedule(
+    roomTypes.map((roomType) => context.roomTypeById.get(roomType.targetId)?.data ?? {}),
+  );
+  if (!schedule) return null;
   return calendar(hotel, property.propertyId, property.organizationIds[0]!, creator, {
     profileRevision: property.profileRevision,
     timeZone: property.timeZone,
@@ -358,50 +358,51 @@ export function buildPmsCohortCalendarRecords(
 }
 
 const MONTH_LENGTHS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+/** The days of a non-leap year as MM-DD, the form legacy operatingOn compares. */
+const YEAR_DAYS = MONTH_LENGTHS.flatMap((length, month) =>
+  Array.from(
+    { length },
+    (_, day) => `${String(month + 1).padStart(2, "0")}-${String(day + 1).padStart(2, "0")}`,
+  ),
+);
 
 /**
- * The recurring schedule the legacy operating periods of the bound room types express
- * (inventory operatingOn: open on a period's days, wrapping over the year end; no periods means
- * open all year), canonicalized by the native parser. Null when the room types disagree, the
- * year has no open day, or the native contract refuses the periods (more than 24): the property
- * schedule cannot carry them, so the hotel gets no calendar.
+ * The recurring schedule the legacy operating periods of the bound room types express, read on
+ * each day of a non-leap year exactly as legacy inventory operatingOn reads them (string order
+ * of MM-DD, wrapping when from > to, a period without both days ignored, no periods meaning open
+ * all year), canonicalized by the native parser. Null when the room types disagree, the year has
+ * no open day, or the native contract refuses the periods (more than 24): the property schedule
+ * cannot carry them, so the hotel gets no calendar. 29 February has no recurring day of its own;
+ * inventory keeps it closed where legacy does (manual 0 on a schedule-open day).
  */
 export function legacySchedule(roomTypes: Record<string, unknown>[]): PmsOperatingSchedule | null {
-  const index = (value: string, end: boolean) => {
-    // A non-leap year: 29 February ends on the 28th or starts on 1 March.
-    const monthDay = value === "02-29" ? (end ? "02-28" : "03-01") : value;
-    const match = /^(\d{2})-(\d{2})$/.exec(monthDay);
-    const month = Number(match?.[1]);
-    const day = Number(match?.[2]);
-    if (!match || month < 1 || month > 12 || day < 1 || day > MONTH_LENGTHS[month - 1]!)
-      throw new Error(`operating period day ${value} is invalid`);
-    return MONTH_LENGTHS.slice(0, month - 1).reduce((sum, length) => sum + length, 0) + day - 1;
-  };
   const years = roomTypes.map((data) => {
-    const periods = jsonArray(data["operating_periods"], "operating_periods");
-    const open = Array<boolean>(365).fill(!periods.length);
-    for (const period of periods) {
-      const value = (period ?? {}) as Record<string, unknown>;
-      const from = optionalText(value["from"], "period.from");
-      const to = optionalText(value["to"], "period.to");
-      if (!from || !to) continue; // legacy ignores a period without both days
-      const end = index(to, true);
-      for (let day = index(from, false); ; day = (day + 1) % 365) {
-        open[day] = true;
-        if (day === end) break;
-      }
-    }
-    return open;
+    const periods = jsonArray(data["operating_periods"], "operating_periods").map(
+      (period, index) => {
+        if (!period || typeof period !== "object" || Array.isArray(period))
+          throw new Error(`operating_periods[${index}] must be an object`);
+        const value = period as Record<string, unknown>;
+        return {
+          from: optionalText(value["from"], "period.from"),
+          to: optionalText(value["to"], "period.to"),
+        };
+      },
+    );
+    if (!periods.length) return YEAR_DAYS.map(() => true);
+    return YEAR_DAYS.map((monthDay) =>
+      periods.some(({ from, to }) =>
+        !from || !to
+          ? false
+          : from > to
+            ? monthDay >= from || monthDay <= to
+            : monthDay >= from && monthDay <= to,
+      ),
+    );
   });
   const [year] = years;
   if (!year || years.some((other) => other.join() !== year.join()) || !year.includes(true))
     return null;
   if (!year.includes(false)) return parsePmsOperatingSchedule({ mode: "year_round", periods: [] });
-  const monthDay = (day: number) => {
-    let month = 0;
-    while (day >= MONTH_LENGTHS[month]!) day -= MONTH_LENGTHS[month++]!;
-    return `${String(month + 1).padStart(2, "0")}-${String(day + 1).padStart(2, "0")}`;
-  };
   const periods: { startsOn: string; endsOn: string }[] = [];
   const firstClosed = year.indexOf(false);
   let start: number | null = null;
@@ -409,7 +410,7 @@ export function legacySchedule(roomTypes: Record<string, unknown>[]): PmsOperati
     const day = (firstClosed + offset) % 365;
     if (year[day] && start === null) start = day;
     if (start !== null && !year[(day + 1) % 365]) {
-      periods.push({ startsOn: monthDay(start), endsOn: monthDay(day) });
+      periods.push({ startsOn: YEAR_DAYS[start]!, endsOn: YEAR_DAYS[day]! });
       start = null;
     }
   }
