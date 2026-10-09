@@ -298,6 +298,7 @@
     "partialRefund": "Anda akan menerima pengembalian dana sebagian sebesar {amount} ({percentage}%).",
     "noRefund": "Tidak ada pengembalian dana untuk pembatalan ini.",
     "noPaymentToRefund": "Belum ada pembayaran yang ditagihkan, jadi tidak ada yang perlu dikembalikan.",
+    "unpaidCancellationFee": "Belum ada pembayaran yang ditagihkan, jadi tidak ada yang perlu dikembalikan. Sesuai ketentuan pemesanan Anda, properti dapat mengenakan biaya pembatalan sebesar {amount}.",
     "freeCancellation": "Pembatalan gratis",
     "cancellationFeeApplies": "Biaya pembatalan berlaku",
     "confirmCancel": "Ya, Batalkan",
