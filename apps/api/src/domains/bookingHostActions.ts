@@ -412,14 +412,17 @@ export function createBookingHostActions(config: {
           recognizedOn: bookingOwner.propertyDate(state.property.timezone, at),
           required: true,
         });
-        await bookingOwner.handoff(
-          client,
-          scope.propertyId,
-          updated,
-          context,
-          state.dates ? "update" : "cancel",
-          { revision: previewId, actorType: "property_user" },
-        );
+        // Nothing consumes pms.reservation.* handoffs for pricing-v2 stays; a cancel or reject
+        // frees their inventory and assignments above (VAY-2100).
+        if (object(state.booking.bookingMetadata)["targetSource"] !== "pricing_quote_draft")
+          await bookingOwner.handoff(
+            client,
+            scope.propertyId,
+            updated,
+            context,
+            state.dates ? "update" : "cancel",
+            { revision: previewId, actorType: "property_user" },
+          );
         await enqueueBookingTransitionNotifications(client, {
           propertyId: scope.propertyId,
           guestBookingId: scope.bookingId,
