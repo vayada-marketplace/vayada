@@ -153,8 +153,9 @@ test.describe("booking-admin add-ons settings cutover", () => {
       });
     });
 
-    await page.goto("/booking-flow");
-    await page.getByRole("button", { name: /^Add-ons$/ }).click();
+    // Add-ons left Booking Flow for its own page (VAY-2077); old tab links still land there.
+    await page.goto("/booking-flow?tab=addons");
+    await expect(page).toHaveURL(/\/add-ons$/);
 
     const addonNames = page.getByTestId("booking-addon-item-name");
     await expect(addonNames).toHaveText(["Airport transfer", "Breakfast basket"]);

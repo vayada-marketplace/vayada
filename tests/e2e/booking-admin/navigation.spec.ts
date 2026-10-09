@@ -8,6 +8,7 @@ const NAV_LABELS = [
   "Dashboard",
   "Design Studio",
   "Booking Flow",
+  "Add-ons",
   "Promos",
   "Settings",
   "Feature Hub",
@@ -27,10 +28,10 @@ test.describe("booking-admin navigation", () => {
     await expect(navigation.getByRole("link", { name: "Reservations" })).toHaveCount(0);
 
     await page.getByRole("button", { name: "Collapse" }).click();
-    await expect(navigation.getByRole("link")).toHaveCount(5);
+    await expect(navigation.getByRole("link")).toHaveCount(NAV_LABELS.length);
     expect(
       await navigation.locator("a").evaluateAll((links) => links.map((link) => link.title)),
-    ).toEqual(NAV_LABELS.slice(0, -1));
+    ).toEqual(NAV_LABELS);
   });
 
   test("shows the same order in the mobile drawer", async ({ page }) => {

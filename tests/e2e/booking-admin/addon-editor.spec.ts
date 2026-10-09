@@ -78,8 +78,7 @@ test("shared editor validates, uploads five photos, changes cover, removes and r
     ];
     await route.fulfill({ status: method === "POST" ? 201 : 200, json: items[0] });
   });
-  await page.goto("/booking-flow");
-  await page.getByRole("button", { name: /^Add-ons$/ }).click();
+  await page.goto("/add-ons");
   await page.getByRole("button", { name: "Add Experience" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: "Create Add-on", exact: true }).click();
@@ -90,15 +89,13 @@ test("shared editor validates, uploads five photos, changes cover, removes and r
   await dialog.getByRole("radio", { name: /^Per person \/ night/ }).check();
   await dialog.getByLabel("Max quantity", { exact: true }).fill("2");
   await dialog.getByLabel("Lead time", { exact: true }).fill("24h before");
-  await dialog
-    .getByLabel("Add photos", { exact: true })
-    .setInputFiles(
-      Array.from({ length: 5 }, (_, i) => ({
-        name: `photo-${i}.png`,
-        mimeType: "image/png",
-        buffer: png,
-      })),
-    );
+  await dialog.getByLabel("Add photos", { exact: true }).setInputFiles(
+    Array.from({ length: 5 }, (_, i) => ({
+      name: `photo-${i}.png`,
+      mimeType: "image/png",
+      buffer: png,
+    })),
+  );
   await expect(dialog.getByLabel("Add photos", { exact: true })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Set photo 3 as cover", exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath("addon-editor-five-photos.png") });
