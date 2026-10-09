@@ -22,6 +22,7 @@ const PMS_SUPPORTED_PRICING_CURRENCY_CODE_STRINGS_V1 = [
   "GBP",
   "HKD",
   "HRK",
+  "IDR",
   "INR",
   "LKR",
   "MXN",
@@ -42,6 +43,8 @@ const PMS_SUPPORTED_PRICING_CURRENCY_CODE_STRINGS_V1 = [
 /**
  * PMS-owned V1 scope: current product currency vocabulary intersected with the
  * scale-2 PMS/Booking money model and the checked-in Node/browser ICU runtime.
+ * IDR (VAY-2085) keeps ISO 4217 scale 2 in the money model, like
+ * `pricingCurrencyScale`, although current ICU formats it in whole rupiah.
  */
 export const PMS_SUPPORTED_PRICING_CURRENCY_CODES_V1: readonly PmsPricingCurrency[] = Object.freeze(
   PMS_SUPPORTED_PRICING_CURRENCY_CODE_STRINGS_V1.map((value) => {
