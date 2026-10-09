@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { runMigrations, type MigrationEnvironment } from "../runner.js";
+import { errorCode, waitForDatabase } from "../waitForDatabase.js";
 import { assertValidEnvironment } from "./utils.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -13,12 +14,14 @@ function parseArgs(argv: string[]): {
   connectionString: string;
   migrationsDir: string;
   gitSha: string | null;
+  waitForDatabaseSeconds: number;
 } {
   const args = argv.slice(2);
   let env: MigrationEnvironment = "local";
   let connectionString = process.env["TARGET_DATABASE_URL"] ?? "";
   let migrationsDir = DEFAULT_MIGRATIONS_DIR;
   let gitSha = process.env["APPLICATION_RELEASE"] ?? process.env["GIT_SHA"] ?? null;
+  let waitForDatabaseSeconds = 0;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--env" && args[i + 1]) {
@@ -29,13 +32,22 @@ function parseArgs(argv: string[]): {
       migrationsDir = args[++i];
     } else if (args[i] === "--git-sha" && args[i + 1]) {
       gitSha = args[++i];
+    } else if (args[i] === "--wait-for-database-seconds" && args[i + 1]) {
+      const value = args[++i];
+      if (!/^\d+$/.test(value) || Number(value) > 600) {
+        console.error("Error: --wait-for-database-seconds must be a whole number from 0 to 600.");
+        process.exit(1);
+      }
+      waitForDatabaseSeconds = Number(value);
     }
   }
 
-  return { env, connectionString, migrationsDir, gitSha };
+  return { env, connectionString, migrationsDir, gitSha, waitForDatabaseSeconds };
 }
 
-const { env, connectionString, migrationsDir, gitSha } = parseArgs(process.argv);
+const { env, connectionString, migrationsDir, gitSha, waitForDatabaseSeconds } = parseArgs(
+  process.argv,
+);
 
 if (!connectionString) {
   console.error("Error: TARGET_DATABASE_URL or --connection-string is required.");
@@ -43,6 +55,19 @@ if (!connectionString) {
 }
 
 console.log(`Migration release: ${gitSha ?? "unversioned"}; environment: ${env}`);
+
+// A database that is restarting (resize, failover) gets a bounded wait before any migration
+// starts; nothing is locked or applied until it answers.
+if (waitForDatabaseSeconds > 0) {
+  try {
+    await waitForDatabase({ connectionString, timeoutMs: waitForDatabaseSeconds * 1_000 });
+  } catch (error) {
+    console.error(
+      `Error: database unavailable after waiting up to ${waitForDatabaseSeconds}s (${errorCode(error)}).`,
+    );
+    process.exit(1);
+  }
+}
 
 const result = await runMigrations({
   connectionString,
