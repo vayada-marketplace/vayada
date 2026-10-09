@@ -5,6 +5,10 @@ import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
 import { planPmsCohortCalendars } from "./productionPmsCohortCalendarRecords.js";
 import { createProductionPmsContext } from "./productionPmsContext.js";
 import { buildProductionPmsPlan } from "./productionPmsPlan.js";
+import {
+  cohortInventoryHorizon,
+  withCohortInventoryHorizons,
+} from "./productionPmsInventoryRecords.js";
 import { buildPmsRoomRecords } from "./productionPmsRoomRecords.js";
 import type { PmsTargetRecord, ProductionPmsTargetState } from "./productionPmsTypes.js";
 
@@ -265,6 +269,144 @@ describe("production PMS cohort inventory coverage", () => {
       plan.records.find((record) => record.targetTable === "inventory_materialization_coverage")
         ?.row,
     ).toMatchObject({ coverageThrough: "2027-11-04", expectedDayCount: days.length });
+  });
+
+  it("closes days legacy does not sell as manual limits: past its window, and leap days", () => {
+    const block = row("room_blocks", {
+      id: "70000000-0000-4000-a000-000000000002",
+      hotel_id: HOTEL,
+      room_type_id: ROOM_TYPE,
+      start_date: "2027-11-01",
+      end_date: "2027-11-05",
+      blocked_count: 1,
+      reason: "renovation",
+    });
+    const manual = (hotel: Record<string, unknown>) =>
+      migrated([...sourceRows(hotel, { operating_periods: [] }), block]).days.find(
+        (record) => record.row["stayDate"] === "2027-10-20",
+      )!.row["manualSellableLimitCount"];
+    // 2027-10-20 is only covered for the block: legacy sells it only within its window.
+    const rolling = { calendar_auto_open_enabled: true, calendar_auto_open_through: "2027-01-31" };
+    expect(manual(rolling)).toBe(0);
+    expect(manual({ ...rolling, calendar_auto_open_through: "2027-12-31" })).toBeNull();
+    expect(manual({})).toBeNull();
+    expect(
+      manual({
+        ...rolling,
+        calendar_auto_open_mode: "fixed",
+        calendar_auto_open_fixed_month: "2027-01-15",
+      }),
+    ).toBe(0);
+
+    // Year-round as a recurring schedule, but legacy never opens 29 February.
+    const rows = sourceRows(
+      {},
+      {
+        operating_periods: [
+          { from: "01-01", to: "02-28" },
+          { from: "03-01", to: "12-31" },
+        ],
+      },
+    ).filter((source) => source.sourceTable !== "room_blocks");
+    const at = "2027-10-09T08:00:00.000Z";
+    const plan = buildProductionPmsPlan({ ...input(rows), snapshotAt: at, completedAt: at });
+    expect(plan.blockers).toEqual([]);
+    expect(
+      plan.records.find((record) => record.row["stayDate"] === "2028-02-29")?.row,
+    ).toMatchObject({ status: "open", manualSellableLimitCount: 0, availableCount: 0 });
+  });
+
+  it("plans no calendar whose inventory the native jobs could not carry", () => {
+    const retired = "30000000-0000-4000-a000-000000000002";
+    const base = [
+      ...sourceRows({}, { operating_periods: [] }),
+      row("room_types", {
+        id: retired,
+        hotel_id: HOTEL,
+        name: "Retired",
+        total_rooms: 1,
+        base_rate: "100",
+        currency: "EUR",
+        is_active: false,
+      }),
+    ];
+    const consumer = (table: string, roomTypeId: string, values: Record<string, unknown>) =>
+      row(table, {
+        id: "80000000-0000-4000-a000-000000000001",
+        hotel_id: HOTEL,
+        room_type_id: roomTypeId,
+        number_of_rooms: 1,
+        created_at: AT,
+        ...values,
+      });
+    const horizons = (rows: IdentitySourceRow[], stored: Record<string, string> | null = null) => {
+      const context = createProductionPmsContext({
+        ...input(rows),
+        target: {
+          ...target(),
+          cohortProperties: [
+            { ...target().cohortProperties![0]!, inventoryThroughByRoomType: stored },
+          ],
+        },
+      });
+      const calendars = planPmsCohortCalendars(context, buildPmsRoomRecords(context));
+      expect(calendars).toHaveLength(1);
+      return { context, calendars, carried: withCohortInventoryHorizons(context, calendars) };
+    };
+    const booking = (status: string, roomTypeId = retired) =>
+      consumer("bookings", roomTypeId, {
+        status,
+        payment_status: "paid",
+        check_in: "2027-12-10",
+        check_out: "2027-12-12",
+      });
+    expect(horizons(base).carried).toHaveLength(1);
+    // The unbound room type still holds a booking, or stored days, in the coverage.
+    expect(horizons([...base, booking("confirmed")]).carried).toEqual([]);
+    expect(horizons([...base, booking("cancelled")]).carried).toHaveLength(1);
+    expect(horizons(base, { [retired]: "2027-10-01" }).carried).toEqual([]);
+    expect(horizons(base, { [retired]: "2026-10-08" }).carried).toHaveLength(1);
+    // A live booking extends the bound type's coverage; a cancelled one does not.
+    const extended = horizons([...base, booking("confirmed", ROOM_TYPE)]);
+    expect(cohortInventoryHorizon(extended.context, extended.calendars[0]!).through).toBe(
+      "2027-12-11",
+    );
+    // Past the auto-open worker's 762-day maximum: through 2028-11-19 is 773 days.
+    const far = consumer("room_blocks", ROOM_TYPE, {
+      start_date: "2028-11-10",
+      end_date: "2028-11-20",
+      blocked_count: 1,
+    });
+    expect(horizons([...base, far]).carried).toEqual([]);
+    expect(
+      buildProductionPmsPlan(input([...base, far])).records.map((r) => r.targetTable),
+    ).not.toContain("operating_calendar_revisions");
+    // A stored calendar blocks instead of being dropped.
+    const stored = horizons([...base, far]);
+    stored.context.target.cohortProperties![0]!.storedCalendar = {} as never;
+    expect(withCohortInventoryHorizons(stored.context, stored.calendars)).toEqual([]);
+    expect(stored.context.blockers).toContainEqual(
+      expect.objectContaining({ code: "COHORT_INVENTORY_NOT_CARRIED", sourceId: HOTEL }),
+    );
+  });
+
+  it("blocks a live draft past the year only for a calendared hotel", () => {
+    const draft = row("booking_drafts", {
+      id: "90000000-0000-4000-a000-000000000001",
+      hotel_id: HOTEL,
+      room_type_id: ROOM_TYPE,
+      check_in: "2027-12-01",
+      check_out: "2027-12-03",
+      number_of_rooms: 1,
+      expires_at: "2026-10-10T00:00:00.000Z",
+      materialized_booking_id: null,
+    });
+    const codes = (cohort: boolean) =>
+      buildProductionPmsPlan(input([...sourceRows(), draft], cohort)).blockers.map(
+        (blocker) => blocker.code,
+      );
+    expect(codes(true)).toContain("ACTIVE_BOOKING_DRAFT");
+    expect(codes(false)).not.toContain("ACTIVE_BOOKING_DRAFT");
   });
 
   it("counts the horizon in the calendar's time zone", () => {

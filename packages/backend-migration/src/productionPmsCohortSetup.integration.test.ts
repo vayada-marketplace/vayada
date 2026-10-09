@@ -167,6 +167,22 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
       rows[0]!.data["user_id"] = OWNER;
       // Open February to December: the calendar takes the legacy season as its schedule.
       Object.assign(rows[1]!.data, { operating_periods: [{ from: "02-01", to: "12-31" }] });
+      // A legacy block past the year extends the coverage to its last night (396 days).
+      rows.push({
+        ...rows[1]!,
+        sourceTable: "room_blocks",
+        data: {
+          id: "13620000-0000-4000-8000-0000000000a8",
+          hotel_id: HOTEL,
+          room_type_id: ROOM_TYPE,
+          start_date: "2027-10-01",
+          end_date: "2027-10-05",
+          blocked_count: 1,
+          reason: "renovation",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-08-29T00:00:00Z",
+        },
+      });
       const plan = async (records: PmsTargetRecord[] = []) =>
         buildProductionPmsPlan({
           sourceRunId: RUN,
@@ -268,6 +284,22 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
       const rows = sourceRows();
       rows[0]!.data["user_id"] = OWNER;
       Object.assign(rows[1]!.data, { operating_periods: [{ from: "02-01", to: "12-31" }] });
+      // A legacy block past the year extends the coverage to its last night (396 days).
+      rows.push({
+        ...rows[1]!,
+        sourceTable: "room_blocks",
+        data: {
+          id: "13620000-0000-4000-8000-0000000000a8",
+          hotel_id: HOTEL,
+          room_type_id: ROOM_TYPE,
+          start_date: "2027-10-01",
+          end_date: "2027-10-05",
+          blocked_count: 1,
+          reason: "renovation",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-08-29T00:00:00Z",
+        },
+      });
       const plan = async (records: PmsTargetRecord[] = []) =>
         buildProductionPmsPlan({
           sourceRunId: RUN,
@@ -283,7 +315,8 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
         idempotency_keys: 2,
         domain_events: 2,
         outbox_events: 2,
-        inventory_days: 366,
+        inventory_days: 396,
+        room_blocks: 1,
         inventory_materialization_coverage: 1,
         product_audit_events: 2,
       });
@@ -312,7 +345,7 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
         {
           calendarRevision: 1,
           from: "2026-09-04",
-          through: "2027-09-04",
+          through: "2027-10-04",
           destination: "distribution.inventory-projection",
           eventType: "pms.inventory.projection_refresh_requested",
           closedDays: 31, // the legacy January closure, closed by the calendar's schedule
@@ -338,17 +371,28 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
         [PROPERTY],
       );
       const configuration = (await readCalendar(client))!;
-      const native = planPmsInventoryMaterialization({
-        propertyId: PROPERTY,
-        configurationSource: configuration.source,
-        configuration,
-        horizon: { from: "2026-09-04", through: "2027-09-04" },
-        currentDays: days.rows.map(({ generated, channel, manual, block, booking, ...day }) => ({
+      const currentDays = days.rows.map(
+        ({ generated, channel, manual, block, booking, ...day }) => ({
           ...day,
           sourceRevisions: { generated, channel, manual, block, booking },
-        })) as never,
-      });
-      expect(native).toMatchObject({ ok: true, outcome: "unchanged", changedDays: [] });
+        }),
+      );
+      // In batches of at most 366 days, as the native jobs plan a longer coverage.
+      for (const [from, through] of [
+        ["2026-09-04", "2027-09-04"],
+        ["2027-09-05", "2027-10-04"],
+      ] as const) {
+        const native = planPmsInventoryMaterialization({
+          propertyId: PROPERTY,
+          configurationSource: configuration.source,
+          configuration,
+          horizon: { from, through },
+          currentDays: currentDays.filter(
+            (day) => String(day.stayDate) >= from && String(day.stayDate) <= through,
+          ) as never,
+        });
+        expect(native).toMatchObject({ ok: true, outcome: "unchanged", changedDays: [] });
+      }
     } finally {
       await client.query("ROLLBACK");
     }

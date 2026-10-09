@@ -139,13 +139,20 @@ Runs without a cohort, hotels outside it and quarantined hotels get none of this
   idempotency key, projection refresh event and outbox row, and audit row. They run from the
   snapshot day for a year (only to a fixed auto-open window's month end), and always through the
   last day a legacy booking, draft or block holds, so later extensions never meet a day without
-  its consumers. The status follows the calendar's schedule; other legacy closed dates and
-  stop-sells (priced at 0, inside the minimum advance or past the same-day cutoff, past a fixed
-  window, over capacity) become a manual sellable limit of 0, which the VAY-2066 job keeps when
-  it rewrites generated counts and the rate gate. A rolling auto-open window is not a closure:
-  the producer moves it by the same month-end rule. Unbound (inactive) room types of such a
+  its consumers. The status follows the calendar's schedule; other days legacy does not sell at
+  the snapshot (priced at 0, inside the minimum advance or past the same-day cutoff on the
+  calendar's clock, closed by legacy operating periods on a day the schedule opens such as 29
+  February, over capacity, or past the legacy auto-open window) become a manual sellable limit of
+  0, which the VAY-2066 job keeps when it rewrites generated counts and the rate gate. Within the
+  year a rolling window is not a closure (the producer moves it by the same month-end rule); a
+  day covered only for a booking or block past both the year and the legacy window stays closed
+  until someone lifts the manual limit, in both modes. Unbound (inactive) room types of such a
   hotel keep no imported days, and parity expects each bound type's coverage, or more days once
-  the native jobs extend it.
+  the native jobs extend it. A hotel gets no calendar when its coverage would pass the auto-open
+  worker's 762-day maximum (a legacy block or booking far out), or when an unbound room type
+  still holds a live booking, draft, block or stored inventory day in it; a stored migrated
+  calendar then blocks the run (`COHORT_INVENTORY_NOT_CARRIED`). A live booking draft anywhere in
+  a calendared hotel's coverage blocks as before (`ACTIVE_BOOKING_DRAFT`).
 
 A hotel that misses an item stays `provisioning`.
 
