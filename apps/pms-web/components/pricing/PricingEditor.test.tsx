@@ -1237,3 +1237,77 @@ it("disables the stay preview for unapplied calendar edits", async () => {
   await act(async () => view.root.findByProps({ "aria-label": "Month for Room 1 Offer 1" }).props.onChange({ target: { value: "9" } }));
   expect(view.root.findByType(PricingStayPreview).props.disabled).toBe(true);
 });
+
+const familyId = "61000000-0000-4000-8000-000000000004", family = { ...snapshot.rooms[0], roomTypeId: familyId };
+const familySetup = { roomTypeId: familyId, name: "Family", capacity: family.capacity };
+const published = (rooms: PricingSnapshot["rooms"] = [snapshot.rooms[0], family], revision = 1) => ({ ...snapshot, rooms, revision, sources, stale: false });
+const mountRoom = async (rooms = [{ roomTypeId: "room", name: "Existing", capacity: snapshot.rooms[0].capacity }, familySetup]) => {
+  await act(async () => { view = create(<PricingEditor client={client as ReturnType<typeof createReplacementPricingClient>} roomNames={{ room: "Existing", [familyId]: "Family" }} setup={{ propertyId: "property", rooms }} roomTypeId={familyId} />); });
+};
+const familyInput = (base: string) => firstPricingInput("property", familySetup, familyId, { mode: "flat", occupancy: [], included: { adults: "", adjustments: [] }, methods: ["pay_at_property"], room: familyId, currency: "EUR", base, adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "non_refundable", freeDays: "", payment: "full" });
+it("on a room page, edits only that room, publishes every other room exactly as read and continues from the new publication (VAY-2093)", async () => {
+  client.read.mockResolvedValue(published()); await mountRoom();
+  expect(view.root.findAllByProps({ inputMode: "decimal" }).filter((node) => node.type === "input")).toHaveLength(1);
+  expect(input().props["aria-label"]).toContain("Family"); expect(button("Add another room")).toBeUndefined();
+  expect(view.root.findByProps({ "aria-label": "Preview room and offer" }).findAllByType("option").map((node) => node.children.join(""))).toEqual(["Family · Offer 1 · breakfast"]);
+  await act(async () => input().props.onChange({ target: { value: "123.45" } })); await click("Save prices");
+  expect(saved.baseRevision).toBe(1); expect(saved.snapshot.rooms[0]).toEqual({ ...snapshot.rooms[0], revision: 2 });
+  expect(saved.snapshot.rooms[1]).toMatchObject({ roomTypeId: familyId, revision: 2, offers: [{ price: { calendar: { base: { amountMinor: "12345" } } } }] });
+  expect(client.confirmationAction).toHaveBeenCalledWith(expect.anything(), "save_prices"); expect(client.publicationAction.mock.calls[0][0]).toMatchObject({ baseRevision: 1 });
+  expect(client.read).toHaveBeenCalledTimes(2); expect(JSON.stringify(view.toJSON())).toContain("Prices saved");
+  expect(input().props.disabled).toBe(false); expect(button("Save prices").props.disabled).toBe(true);
+});
+it("keeps this room's edits over the reload after a refused save when only another room changed, and declares again", async () => {
+  client.read.mockResolvedValueOnce(published()); await mountRoom();
+  await act(async () => input().props.onChange({ target: { value: "123.45" } }));
+  publish.mockRejectedValueOnce(new ApiErrorResponse(409, { code: "stale" })); await click("Save prices");
+  expect(JSON.stringify(view.toJSON())).toContain("Your changes to this room are kept if nobody else changed this room"); expect(button("Save prices").props.disabled).toBe(true);
+  const changed = { ...snapshot.rooms[0], children: { ...snapshot.rooms[0].children, adultFromAge: 16 } };
+  client.read.mockResolvedValueOnce(published([changed, family], 2)); await click("Reload pricing");
+  expect(button("Discard and reload")).toBeUndefined(); expect(input().props.value).toBe("123.45");
+  expect(JSON.stringify(view.toJSON())).toContain("your changes to this room are kept"); expect(button("Save prices").props.disabled).toBe(false);
+  await click("Save prices");
+  expect(saved.baseRevision).toBe(2); expect(saved.snapshot.rooms[0]).toEqual({ ...changed, revision: 3 });
+  expect(saved.snapshot.rooms[1].offers[0].price).toMatchObject({ calendar: { base: { amountMinor: "12345" } } });
+  expect(confirm).toHaveBeenCalledTimes(2); expect(publish).toHaveBeenCalledTimes(2);
+});
+it("drops this room's edits when someone else changed the room, so a later save cannot overwrite their change", async () => {
+  client.read.mockResolvedValueOnce(published()); await mountRoom();
+  await act(async () => input().props.onChange({ target: { value: "123.45" } }));
+  client.prepare.mockRejectedValueOnce(new ApiErrorResponse(409, {})); await click("Save prices");
+  client.read.mockResolvedValueOnce(published([snapshot.rooms[0], { ...family, offers: [{ ...family.offers[0], termsRevision: "terms-2" }] }], 2)); await click("Reload pricing");
+  expect(input().props.value).toBe("100.00"); expect(JSON.stringify(view.toJSON())).toContain("Someone else changed this room"); expect(button("Save prices").props.disabled).toBe(true);
+});
+it("starts an unpriced room with the first setup in the property currency and publishes it next to the other rooms", async () => {
+  client.read.mockResolvedValue({ ...snapshot, revision: 3, sources, stale: false });
+  const policy = vi.fn().mockResolvedValue({ revision: familyId }); client.termsAction.mockReturnValue(policy);
+  await mountRoom();
+  expect(view.root.findByType(FirstPricingSetup).props).toMatchObject({ rooms: [familySetup], fixedCurrency: "EUR" });
+  expect(button("Save prices")).toBeUndefined(); expect(view.root.findAllByType(PricingStayPreview)).toHaveLength(0);
+  await act(async () => view.root.findByType(FirstPricingSetup).props.onCreate(familyInput("90"))); await click("Save prices");
+  expect(saved.baseRevision).toBe(3); expect(saved.snapshot.rooms.map((room) => [room.roomTypeId, room.revision])).toEqual([["room", 4], [familyId, 4]]);
+  expect(saved.snapshot.rooms[0]).toEqual({ ...snapshot.rooms[0], revision: 4 }); expect(policy).toHaveBeenCalledOnce();
+});
+it("on a room page, offers only that room for the first setup and asks to finish room details when it cannot have prices", async () => {
+  client.read.mockResolvedValueOnce(null); await mountRoom();
+  expect(view.root.findByType(FirstPricingSetup).props.rooms).toEqual([familySetup]); expect(view.root.findByType(FirstPricingSetup).props.fixedCurrency).toBeUndefined();
+  act(() => view.unmount());
+  client.read.mockResolvedValueOnce(null); await mountRoom([]);
+  expect(JSON.stringify(view.toJSON())).toContain("Finish this room's details first"); expect(view.root.findAllByType(FirstPricingSetup)).toHaveLength(0);
+  client.read.mockResolvedValueOnce({ ...snapshot, revision: 1, sources, stale: false }); await click("Reload pricing");
+  expect(JSON.stringify(view.toJSON())).toContain("Finish this room's details first"); expect(button("Save prices")).toBeUndefined();
+});
+it("on a room page, lets links navigate in the app until there are unsaved prices, then asks before leaving", async () => {
+  class FakeElement { constructor(readonly link: unknown) {} closest() { return this.link; } }
+  class FakeAnchor { href = "http://localhost/rooms"; target = ""; }
+  const assign = vi.fn();
+  vi.stubGlobal("Element", FakeElement); vi.stubGlobal("HTMLAnchorElement", FakeAnchor);
+  vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn(), location: { assign } });
+  client.read.mockResolvedValue(published()); await mountRoom();
+  const listener = () => vi.mocked(document.addEventListener).mock.calls.filter(([name]) => name === "click").at(-1)![1] as (event: unknown) => void;
+  const linkClick = () => ({ target: new FakeElement(new FakeAnchor()), preventDefault: vi.fn(), stopPropagation: vi.fn() });
+  const free = linkClick(); listener()(free); expect(free.preventDefault).not.toHaveBeenCalled();
+  await act(async () => input().props.onChange({ target: { value: "120" } }));
+  const held = linkClick(); await act(async () => listener()(held)); expect(held.preventDefault).toHaveBeenCalled(); expect(assign).not.toHaveBeenCalled();
+  await click("Leave"); expect(assign).toHaveBeenCalledWith("http://localhost/rooms");
+});
