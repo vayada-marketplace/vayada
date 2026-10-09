@@ -1,10 +1,5 @@
-/** insertDefault: SQL used on insert when a planned row omits the key. */
-export type PmsColumn = readonly [
-  jsonKey: string,
-  sqlName: string,
-  type: string,
-  insertDefault?: string,
-];
+/** optional: written only when the planned rows carry the key, so other runs' SQL is unchanged. */
+export type PmsColumn = readonly [jsonKey: string, sqlName: string, type: string, optional?: true];
 export type PmsTableDefinition = {
   product: "pms" | "platform";
   table: string;
@@ -14,8 +9,7 @@ export type PmsTableDefinition = {
   columns: readonly PmsColumn[];
 };
 
-const c = (jsonKey: string, sqlName: string, type: string, insertDefault?: string): PmsColumn =>
-  insertDefault ? [jsonKey, sqlName, type, insertDefault] : [jsonKey, sqlName, type];
+const c = (jsonKey: string, sqlName: string, type: string): PmsColumn => [jsonKey, sqlName, type];
 const id = c("id", "id", "uuid");
 const property = c("propertyId", "property_id", "uuid");
 const created = c("createdAt", "created_at", "timestamptz");
@@ -101,8 +95,8 @@ export const PRODUCTION_PMS_TABLES: Record<string, PmsTableDefinition> = {
     c("sourceSystem", "source_system", "text"),
     c("sourceRoomId", "source_room_id", "text"),
     c("roomNumber", "room_number", "text"),
-    // Stated by cohort runs only (VAY-1362); other rows keep the 0048 legacy default.
-    c("operationalLabelStatus", "operational_label_status", "text", "'unverified'"),
+    // Stated by cohort runs only (VAY-1362); other runs leave the column to its 0048 default.
+    ["operationalLabelStatus", "operational_label_status", "text", true],
     c("floor", "floor", "text"),
     c("status", "status", "text"),
     c("sortOrder", "sort_order", "integer"),

@@ -54,6 +54,8 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
       const written = await writeProductionPmsRecords(client, planned.writes);
       expect([written["property_pricing_settings"], written["rooms"]]).toEqual([1, 2]);
       await writeProductionMigrationProvenance(client, planned.provenance, RUN);
+      // Fire the deferred triggers (0448 first-currency completion) as a commit would.
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
       const verified = await plan(planned.records);
       expect([verified.blockers, verified.writes, verified.checksum]).toEqual([
         [],

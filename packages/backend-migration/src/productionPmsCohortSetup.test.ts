@@ -7,6 +7,7 @@ import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
 import { NATIVE_PRICING_CURRENCIES } from "./productionPmsCohortSetup.js";
 import { buildProductionPmsPlan } from "./productionPmsPlan.js";
 import { PRODUCTION_PMS_TABLES } from "./productionPmsTables.js";
+import { writeProductionPmsRecords } from "./productionPmsWriter.js";
 import type { ExistingPmsTargetRecord, ProductionPmsTargetState } from "./productionPmsTypes.js";
 
 const HOTEL = "10000000-0000-4000-a000-00000000000";
@@ -77,12 +78,12 @@ const plan = (
   });
 const rows = (plan: ReturnType<typeof buildProductionPmsPlan>, table: string) =>
   plan.records.filter((record) => record.targetTable === table).map((record) => record.row);
-const settings = (index: number, currency: string, revision = 1, updatedAt = AT) => ({
+const settings = (index: number, currency: string) => ({
   propertyId: `${PROPERTY}${index}`,
   currency,
-  pricingCurrencyRevision: revision,
+  pricingCurrencyRevision: 1,
   createdAt: AT,
-  updatedAt,
+  updatedAt: AT,
 });
 
 describe("production PMS cohort pricing settings and room labels", () => {
@@ -138,23 +139,52 @@ describe("production PMS cohort pricing settings and room labels", () => {
     expect(rows(result, "rooms").every((value) => !("operationalLabelStatus" in value))).toBe(true);
   });
 
-  it("keeps an unchanged currency and revises a changed one as the native writer", () => {
+  it("keeps an existing currency row and blocks a changed currency", () => {
     const existing = (currency: string): ExistingPmsTargetRecord => ({
       targetProduct: "pms",
       targetTable: "property_pricing_settings",
       targetId: `${PROPERTY}1`,
       updatedAt: AT,
-      row: settings(1, currency),
+      row: { ...settings(1, currency), pricingCurrencyRevision: 3 },
     });
-    const unchanged = plan([hotel(1), roomType(1, 1)], [`${HOTEL}1`], target(1, [existing("EUR")]));
-    expect(rows(unchanged, "property_pricing_settings")).toEqual([settings(1, "EUR")]);
-    const changed = plan(
-      [hotel(1), roomType(1, 1)],
-      [`${HOTEL}1`],
-      target(1, [existing("USD")]),
-      LATER,
+    const source = [hotel(1), roomType(1, 1)];
+    const unchanged = plan(source, [`${HOTEL}1`], target(1, [existing("EUR")]), LATER);
+    expect(rows(unchanged, "property_pricing_settings")).toEqual([
+      { ...settings(1, "EUR"), pricingCurrencyRevision: 3 },
+    ]);
+    const changed = plan(source, [`${HOTEL}1`], target(1, [existing("USD")]), LATER);
+    expect(rows(changed, "property_pricing_settings")).toEqual([]);
+    expect(changed.blockers).toContainEqual(
+      expect.objectContaining({ code: "PRICING_CURRENCY_CHANGE_REQUIRES_REVIEW" }),
     );
-    expect(rows(changed, "property_pricing_settings")).toEqual([settings(1, "EUR", 2, LATER)]);
+  });
+
+  it("verifies printable ASCII labels only", () => {
+    const result = plan([hotel(1), roomType(1, 1), room(1, 1, 1, "İ1")], [`${HOTEL}1`], target(1));
+    expect(rows(result, "rooms")[0]?.["operationalLabelStatus"]).toBe("unverified");
+  });
+
+  it("writes the label column only for rows that state it", async () => {
+    const statements: string[] = [];
+    const client = {
+      async query(sql: string, values?: unknown[]) {
+        statements.push(sql);
+        return { rowCount: JSON.parse(String(values?.[0])).length };
+      },
+    };
+    const rooms = (cohort: string[] | null) =>
+      plan([hotel(1), roomType(1, 1), room(1, 1, 1, "101")], cohort, target(1)).records.filter(
+        (record) => record.targetTable === "rooms",
+      );
+    await writeProductionPmsRecords(client as never, rooms(null));
+    await writeProductionPmsRecords(client as never, rooms([`${HOTEL}1`]));
+    expect(statements.map((sql) => sql.includes("operational_label_status"))).toEqual([
+      false,
+      true,
+    ]);
+    await expect(
+      writeProductionPmsRecords(client as never, [...rooms(null), ...rooms([`${HOTEL}1`])]),
+    ).rejects.toThrow("disagree on writing operationalLabelStatus");
   });
 
   it("mirrors the native first-currency insert, room label writer and currency list", async () => {

@@ -32,8 +32,10 @@ export function carriedCohortHotel(context: PmsBuildContext, hotelId: string): b
  * Rooms whose legacy number becomes a verified operational label, as the native room writer
  * stores one (pmsPhysicalRoomManagementRepository: room_number plus 'verified'). Only operating
  * rooms of carried cohort hotels qualify, and only when no other operating room of the property
- * shares the label case-insensitively (uq_pms_rooms_property_verified_label_ci). Call after the
- * room-type dispositions have set the effective activity.
+ * shares the label case-insensitively (uq_pms_rooms_property_verified_label_ci). Labels must be
+ * printable ASCII, where JavaScript and PostgreSQL lower() agree. Call after the room-type
+ * dispositions have set the effective activity. Not reproduced: the native room_units_revision
+ * bump, inventory refresh and audit row of a label edit; migrated room types start at revision 1.
  */
 export function verifiedCohortRoomIds(context: PmsBuildContext): Set<string> {
   const byLabel = new Map<string, string[]>();
@@ -48,7 +50,7 @@ export function verifiedCohortRoomIds(context: PmsBuildContext): Set<string> {
         context.effectiveRoomTypeActiveById.get(parentId) ??
         bool(parent.data["is_active"], "is_active", true);
       const label = requiredText(room.data["room_number"], "room_number");
-      if (!operating || label.length > 200) continue;
+      if (!operating || label.length > 200 || !/^[\x20-\x7e]+$/.test(label)) continue;
       const key = `${propertyId}:${label.toLowerCase()}`;
       byLabel.set(key, [...(byLabel.get(key) ?? []), uuid(room.data["id"], "id")]);
     } catch {
@@ -61,8 +63,12 @@ export function verifiedCohortRoomIds(context: PmsBuildContext): Set<string> {
  * pms.property_pricing_settings in the native first-currency shape (pmsPricingCommandRepository:
  * revision 1, created_at = updated_at, optional_pricing_aggregate_revision left to its default 0).
  * The currency is the one the property's operating room types (else all its room types) carry,
- * which legacy keeps equal to the Booking currency. An ambiguous or unsupported currency writes
- * no row, as the native command refuses it, so the property stays in setup.
+ * which legacy sets from the Booking currency; like the 0137 currency triggers, inactive room types
+ * do not count. An ambiguous currency, or one the native command refuses as unsupported, writes no
+ * row, so the property stays in setup. A stored row with another currency blocks: the native
+ * writer refuses a currency change once room types are priced, and so do the 0137 triggers.
+ * Not reproduced: the native idempotency key, pms.pricing_source.changed event, its two outbox
+ * rows (booking.pricing-source, finance.pricing-source; nothing consumes them) and audit row.
  */
 export function buildPmsPricingSettingsRecords(context: PmsBuildContext): PmsTargetRecord[] {
   if (!context.cohort) return [];
@@ -79,7 +85,18 @@ export function buildPmsPricingSettingsRecords(context: PmsBuildContext): PmsTar
       if (!propertyId || !carriedCohortHotel(context, hotelId)) continue;
       const pricingCurrency = propertyCurrency(context, hotelId);
       if (!pricingCurrency) continue;
-      records.push(pricingRecord(context, hotel, propertyId, pricingCurrency, existing));
+      const current = existing.get(propertyId);
+      if (current && current.row["currency"] !== pricingCurrency) {
+        addPmsBlocker(
+          context,
+          "PRICING_CURRENCY_CHANGE_REQUIRES_REVIEW",
+          "pms.hotels",
+          hotelId,
+          "The target pricing currency differs from the legacy room-type currency",
+        );
+        continue;
+      }
+      records.push(pricingRecord(context, hotel, propertyId, pricingCurrency, current));
     } catch (error) {
       addPmsBlocker(
         context,
@@ -113,14 +130,11 @@ function pricingRecord(
   hotel: IdentitySourceRow,
   propertyId: string,
   pricingCurrency: string,
-  existing: Map<string, PmsBuildContext["target"]["records"][number]>,
+  current: PmsBuildContext["target"]["records"][number] | undefined,
 ): PmsTargetRecord {
-  const current = existing.get(propertyId);
   const migratedAt = new Date(context.completedAt).toISOString();
-  const same = current?.row["currency"] === pricingCurrency;
-  // As the native writer: revision 1 on create and +1 per currency change. An unchanged currency
-  // keeps its revision and times, so reruns and the post-write verification plan nothing.
-  const revision = current ? Number(current.row["pricingCurrencyRevision"]) + (same ? 0 : 1) : 1;
+  // An existing row keeps its revision and times, so reruns and the post-write verification plan
+  // nothing; a native later currency revision is kept as well.
   return pmsRecord(
     hotel,
     "property_pricing_settings",
@@ -130,9 +144,9 @@ function pricingRecord(
     {
       propertyId,
       currency: pricingCurrency,
-      pricingCurrencyRevision: revision,
+      pricingCurrencyRevision: current ? Number(current.row["pricingCurrencyRevision"]) : 1,
       createdAt: current ? iso(current.row["createdAt"], "created_at") : migratedAt,
-      updatedAt: (current && same && current.updatedAt) || migratedAt,
+      updatedAt: current?.updatedAt ?? migratedAt,
     },
     { id: hotel.data["id"], currency: pricingCurrency },
   );

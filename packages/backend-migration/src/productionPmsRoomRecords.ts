@@ -554,27 +554,37 @@ function room(
     context.effectiveRoomTypeActiveById.get(roomTypeId) ??
     bool(parent.data["is_active"], "room_type.is_active", true);
   const effectiveStatus = roomTypeActive ? status : "retired";
+  // VAY-1362: only cohort runs state the label status, so no-cohort rows are unchanged. The status
+  // also depends on other rooms, so it joins the checksum.
+  const labelStatus = context.cohort
+    ? { operationalLabelStatus: verifiedRooms.has(id) ? "verified" : "unverified" }
+    : {};
   return [
-    pmsRecord(source, "rooms", id, updatedAt, true, {
+    pmsRecord(
+      source,
+      "rooms",
       id,
-      propertyId,
-      roomTypeId,
-      sourceSystem: "pms",
-      sourceRoomId: id,
-      roomNumber: requiredText(data["room_number"], "room_number"),
-      // VAY-1362: only cohort runs state the label status, so no-cohort rows are unchanged.
-      ...(context.cohort
-        ? { operationalLabelStatus: verifiedRooms.has(id) ? "verified" : "unverified" }
-        : {}),
-      floor: optionalText(data["floor"], "floor"),
-      status: effectiveStatus,
-      sortOrder: integer(data["sort_order"], "sort_order", 0),
-      roomMetadata: roomTypeActive
-        ? {}
-        : { legacySourceStatus: status, reasonCode: "parent_room_type_inactive" },
-      createdAt,
       updatedAt,
-    }),
+      true,
+      {
+        id,
+        propertyId,
+        roomTypeId,
+        sourceSystem: "pms",
+        sourceRoomId: id,
+        roomNumber: requiredText(data["room_number"], "room_number"),
+        ...labelStatus,
+        floor: optionalText(data["floor"], "floor"),
+        status: effectiveStatus,
+        sortOrder: integer(data["sort_order"], "sort_order", 0),
+        roomMetadata: roomTypeActive
+          ? {}
+          : { legacySourceStatus: status, reasonCode: "parent_room_type_inactive" },
+        createdAt,
+        updatedAt,
+      },
+      context.cohort ? { row: data, ...labelStatus } : data,
+    ),
   ];
 }
 
