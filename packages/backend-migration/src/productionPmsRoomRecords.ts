@@ -423,8 +423,8 @@ function roomType(
         }
       : {}),
   };
-  // VAY-1362: a carried cohort room type also takes the native room-facts columns, so the
-  // runtime's room-facts reads (rooms, operating calendar, inventory) accept it.
+  // VAY-1362: a carried cohort room type takes the native room-facts columns, so the runtime's
+  // room-facts reads (rooms, operating calendar, inventory) accept it.
   const native = carriedCohortHotel(context, uuid(data["hotel_id"], "hotel_id"))
     ? cohortRoomFacts(data)
     : null;
@@ -477,7 +477,7 @@ function roomType(
       row: data,
       linkedGroupId,
       duplicateNameDisposition,
-      ...(context.cohort ? { nativeFacts: Boolean(native) } : {}),
+      ...(native ? { nativeFacts: true } : {}),
     },
   );
   const flexiblePlanId = deterministicUuid("production-pms", "rate-plan", id, "flexible");
