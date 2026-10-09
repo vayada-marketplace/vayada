@@ -44,7 +44,6 @@ const NO_WRITE = [
   "platform.channex_management_worker_properties",
   "platform.legacy_owner_approval_records",
   "platform.legacy_owner_approval_revocations",
-  "booking.pricing_runtime_effective_authority_scopes",
   "booking.pricing_runtime_effective_property_scopes",
   "marketplace.affiliate_click_occurrences",
   "booking.affiliate_click_contexts",
@@ -77,13 +76,7 @@ const APPEND_ONLY = [
   "finance.affiliate_percentage_policy_approvals",
   "booking.pricing_quotes",
 ];
-// Pricing authority (VAY-2057, platform #461): revisions keep UPDATE only for the FOR SHARE lock
-// taken with the head; the append-only trigger rejects real updates.
-const NO_DELETE = [
-  "hotel_catalog.properties",
-  "booking.pricing_authority_heads",
-  "booking.pricing_authority_revisions",
-];
+const NO_DELETE = ["hotel_catalog.properties"];
 const RUNTIME_EXECUTABLE_FUNCTIONS = [
   "pms.enqueue_restriction_ari(uuid,text)",
   "pms.claim_channex_external_rate(uuid,text,text,uuid,jsonb)",

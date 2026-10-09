@@ -569,6 +569,8 @@ jobs:
             src/domains/pricingBookingLifecycle.postgres.test.ts \
             src/domains/pricingBookingRevenue.postgres.test.ts \
             src/domains/pricingInventoryAdoption.postgres.test.ts
+          npm --workspace @vayada/backend-migration run test -- \
+            src/bookingPricingAuthorityDrop.integration.test.ts
           npm --workspace vayada-api run test -- --no-file-parallelism \
             src/domains/replacementPricingOfferOwners.integration.test.ts \
             -t '^(?!.*(Channex|ARI|receipt|upload|target|activation|provider|worker|job|nightly candidates)).*(public|quote|publication|publishes)'
