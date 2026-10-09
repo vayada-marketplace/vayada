@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
+import { legacySchedule } from "./productionPmsCohortCalendarRecords.js";
 import { buildProductionPmsPlan } from "./productionPmsPlan.js";
 import { PRODUCTION_PMS_TABLES } from "./productionPmsTables.js";
 import type { PmsCohortPropertyState, ProductionPmsTargetState } from "./productionPmsTypes.js";
@@ -222,6 +223,8 @@ describe("production PMS cohort operating calendar", () => {
       organizationId: ORGANIZATION,
       profileRevision: 3,
       timeZone: "Europe/Berlin",
+      scheduleMode: "year_round",
+      periods: [],
       defaultMinimumStayNights: 1,
       createdByUserId: OWNER,
       createdAt: AT,
@@ -262,6 +265,48 @@ describe("production PMS cohort operating calendar", () => {
     expect([owners.blockers, tables(owners)]).toEqual([[], []]);
   });
 
+  it("carries shared legacy operating periods as the native recurring schedule", () => {
+    const periods = (value: unknown) => ({ operating_periods: value });
+    expect(legacySchedule([periods([]), periods(null)])).toEqual({
+      mode: "year_round",
+      periods: [],
+    });
+    // Open April to October and over New Year, as legacy operatingOn reads them; adjacent
+    // periods merge and a 29 February end is the 28th.
+    const seasons = [
+      { from: "04-01", to: "06-30" },
+      { from: "07-01", to: "10-31" },
+      { from: "12-20", to: "02-29" },
+    ];
+    expect(legacySchedule([periods(seasons), periods([...seasons].reverse())])).toEqual({
+      mode: "recurring",
+      periods: [
+        { startsOn: "04-01", endsOn: "10-31" },
+        { startsOn: "12-20", endsOn: "02-28" },
+      ],
+    });
+    expect(legacySchedule([periods(seasons), periods([])])).toBeNull(); // room types differ
+    expect(legacySchedule([periods([{ from: "01-01", to: "12-31" }])])).toEqual({
+      mode: "year_round",
+      periods: [],
+    });
+    expect(() => legacySchedule([periods([{ from: "13-01", to: "12-31" }])])).toThrow();
+
+    const source = [hotel(1), roomType(1, 1, 1, periods(seasons)), ...rooms(1, 1, 1)];
+    const result = plan(source, target(1, [property(1)]));
+    expect(
+      result.records
+        .filter((record) => record.targetTable === "operating_calendar_recurring_periods")
+        .map((record) => record.row),
+    ).toEqual([
+      expect.objectContaining({ periodIndex: 0, startMonth: 4, startDay: 1, endMonth: 10 }),
+      expect.objectContaining({ periodIndex: 1, startMonth: 12, startDay: 20, endMonth: 2 }),
+    ]);
+    expect(
+      result.records.find((record) => record.targetTable === "operating_calendar_revisions")?.row,
+    ).toMatchObject({ scheduleMode: "recurring", recurringPeriodCount: 2 });
+  });
+
   it("mirrors the native calendar insert columns and event keys", async () => {
     const native = await readFile(
       join(
@@ -270,7 +315,11 @@ describe("production PMS cohort operating calendar", () => {
       ),
       "utf8",
     );
-    for (const table of ["operating_calendar_revisions", "operating_calendar_room_bindings"]) {
+    for (const table of [
+      "operating_calendar_revisions",
+      "operating_calendar_recurring_periods",
+      "operating_calendar_room_bindings",
+    ]) {
       const columns = new RegExp(`INSERT INTO pms\\.${table} \\(([^)]*)\\)`).exec(native)?.[1];
       expect(columns?.split(",").map((column) => column.trim())).toEqual(
         PRODUCTION_PMS_TABLES[table]!.columns.map(([, sql]) => sql),

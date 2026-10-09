@@ -162,7 +162,8 @@ async function lockPmsTargets(client: QueryClient): Promise<void> {
   await client.query(
     `LOCK TABLE pms.linked_inventory_groups, pms.room_types, pms.room_type_media, pms.rooms,
                 pms.rate_plans, pms.rate_rules, pms.property_pricing_settings,
-                pms.operating_calendar_revisions, pms.operating_calendar_room_bindings,
+                pms.operating_calendar_revisions, pms.operating_calendar_recurring_periods,
+                pms.operating_calendar_room_bindings,
                 pms.operational_booking_assignments,
                 pms.room_blocks, pms.inventory_days, pms.inventory_materialization_coverage,
                 pms.checkin_checklist_templates,

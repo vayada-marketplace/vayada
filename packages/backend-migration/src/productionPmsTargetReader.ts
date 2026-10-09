@@ -121,6 +121,17 @@ export async function readProductionPmsPrerequisites(
                 'organizationId', calendar.organization_id::text,
                 'profileRevision', calendar.property_profile_revision,
                 'timeZone', calendar.property_time_zone,
+                'scheduleMode', calendar.schedule_mode,
+                'periods', (
+                  SELECT coalesce(jsonb_agg(jsonb_build_object(
+                      'startsOn', lpad(period.start_month::text, 2, '0') || '-'
+                                  || lpad(period.start_day::text, 2, '0'),
+                      'endsOn', lpad(period.end_month::text, 2, '0') || '-'
+                                || lpad(period.end_day::text, 2, '0'))
+                    ORDER BY period.period_index), '[]'::jsonb)
+                    FROM pms.operating_calendar_recurring_periods period
+                   WHERE period.property_id = calendar.property_id
+                     AND period.calendar_revision = calendar.calendar_revision),
                 'defaultMinimumStayNights', calendar.default_minimum_stay_nights,
                 'createdByUserId', calendar.created_by_user_id::text,
                 'createdAt', to_char(calendar.created_at AT TIME ZONE 'UTC',

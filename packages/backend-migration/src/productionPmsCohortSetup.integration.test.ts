@@ -165,6 +165,8 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
       const prerequisites = await readProductionPmsPrerequisites(client, RUN);
       const rows = sourceRows();
       rows[0]!.data["user_id"] = OWNER;
+      // Open February to December: the calendar takes the legacy season as its schedule.
+      Object.assign(rows[1]!.data, { operating_periods: [{ from: "02-01", to: "12-31" }] });
       const plan = async (records: PmsTargetRecord[] = []) =>
         buildProductionPmsPlan({
           sourceRunId: RUN,
@@ -183,6 +185,7 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
         domain_events: 2,
         outbox_events: 2,
         operating_calendar_revisions: 1,
+        operating_calendar_recurring_periods: 1,
         operating_calendar_room_bindings: 1,
         product_audit_events: 2,
       });
@@ -249,7 +252,9 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
       ]);
 
       // The configuration the runtime loads from these rows (pmsOperatingCalendarReadModel).
-      expect(await readCalendar(client)).not.toBeNull();
+      expect(await readCalendar(client)).toMatchObject({
+        schedule: { mode: "recurring", periods: [{ startsOn: "02-01", endsOn: "12-31" }] },
+      });
     } finally {
       await client.query("ROLLBACK");
     }
@@ -466,6 +471,7 @@ async function readCalendar(client: pg.Client) {
     await client.query(
       `SELECT calendar_revision AS "calendarRevision", property_profile_revision AS profile,
               property_time_zone AS "timeZone", default_minimum_stay_nights AS "minimumStay",
+              schedule_mode AS "scheduleMode",
               to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS at
          FROM pms.operating_calendar_revisions WHERE property_id = $1`,
       [PROPERTY],
@@ -496,7 +502,19 @@ async function readCalendar(client: pg.Client) {
         propertyTimeZone: root.timeZone,
         roomBindings: bindings.rows,
       },
-      schedule: { mode: "year_round", periods: [] },
+      schedule: {
+        mode: root.scheduleMode,
+        periods: (
+          await client.query(
+            `SELECT lpad(start_month::text, 2, '0') || '-' || lpad(start_day::text, 2, '0')
+                      AS "startsOn",
+                    lpad(end_month::text, 2, '0') || '-' || lpad(end_day::text, 2, '0') AS "endsOn"
+               FROM pms.operating_calendar_recurring_periods
+              WHERE property_id = $1 ORDER BY period_index`,
+            [PROPERTY],
+          )
+        ).rows,
+      },
       defaultMinimumStayNights: root.minimumStay,
       createdAt: root.at,
       updatedAt: root.at,

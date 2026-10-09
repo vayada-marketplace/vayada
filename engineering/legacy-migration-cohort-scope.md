@@ -121,9 +121,11 @@ Runs without a cohort, hotels outside it and quarantined hotels get none of this
   type or with limits the native contract refuses keeps the legacy shape; parity fails for an
   active one (`cohortRoomFacts`), so fix it in legacy before the extraction.
 - **Operating calendar** (criteria d and e): revision 1 of `pms.operating_calendar_revisions`, as
-  the native calendar save writes it: year-round, minimum stay 1, the owner organization, the
+  the native calendar save writes it: the legacy operating periods its room types share as the
+  recurring schedule (year-round without periods), minimum stay 1, the owner organization, the
   catalog profile revision and canonical time zone, and one binding per operating room type at its
-  physical capacity. The import also writes the idempotency key, domain event and outbox row its
+  physical capacity. Room types with different operating periods get no calendar: the schedule is
+  the property's. The import also writes the idempotency key, domain event and outbox row its
   foreign keys require, and its audit row, with the migration as actor. A hotel gets no calendar
   without one owner organization, a canonical time zone or a known legacy owner user, or when an
   operating room type has no native room facts, no rooms, or rooms that differ from its inventory
