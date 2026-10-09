@@ -113,7 +113,8 @@ platform.production_migration_cohorts(
   active, unsuspended PMS entitlement.
 - It also fails when a cohort PMS property lacks a calendar auto-open settings
   row matching its legacy choice (enabled or disabled), or a non-cohort one
-  lacks an explicitly disabled row. Auto-open is on by default without a row.
+  lacks an explicitly disabled row. The rows are explicit because auto-open is
+  on by default for a hotel without an explicit choice.
 - Unit tests per domain cover cohort, non-cohort and no-cohort behaviour.
   PostgreSQL integration tests cover the cohort table, the snapshot load and
   the parity invariant.

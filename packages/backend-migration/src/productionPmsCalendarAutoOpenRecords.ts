@@ -1,6 +1,10 @@
 import { addPmsBlocker, safePmsSourceId } from "./productionPmsContext.js";
 import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
-import type { PmsBuildContext, PmsTargetRecord } from "./productionPmsTypes.js";
+import type {
+  ExistingPmsTargetRecord,
+  PmsBuildContext,
+  PmsTargetRecord,
+} from "./productionPmsTypes.js";
 import { bool, integer, optionalDate, optionalText, uuid } from "./productionBookingValues.js";
 import { outsideCohortSource } from "./productionMigrationCohort.js";
 import { propertyClock } from "./productionPmsInventoryRecords.js";
@@ -12,14 +16,20 @@ const SETTING_KEYS = ["enabled", "mode", "rollingMonths", "fixedEndMonth"] as co
  * VAY-1362: in a cohort run every resolved PMS hotel gets an explicit
  * pms.calendar_auto_open_settings row in the native settings writer's shape, because auto-open
  * is on by default (rolling 12) for a property without an explicit choice. A canonical cohort
- * hotel carries its legacy choice, enabled or disabled: the VAY-2066 producer keeps an enabled
- * window moving once the legacy scheduler is frozen, and a legacy "off" stays off. A hotel
+ * hotel carries its legacy choice, enabled or disabled: a legacy "off" stays off, and the
+ * VAY-2066 producer can keep an enabled window moving once the legacy scheduler is frozen (it
+ * still needs verified rooms, an operating calendar and pricing settings). A hotel
  * outside the cohort or in private quarantine gets the row disabled, so it stays inert. A run
  * without a cohort plans nothing here, so its plan and checksum are unchanged.
  */
 export function buildPmsCalendarAutoOpenRecords(context: PmsBuildContext): PmsTargetRecord[] {
   if (!context.cohort) return [];
   const records: PmsTargetRecord[] = [];
+  const existing = new Map(
+    context.target.records
+      .filter((record) => record.targetTable === "calendar_auto_open_settings")
+      .map((record) => [record.targetId, record]),
+  );
   for (const hotel of context.rowsByTable.get("hotels") ?? [])
     try {
       const hotelId = uuid(hotel.data["id"], "id");
@@ -33,7 +43,8 @@ export function buildPmsCalendarAutoOpenRecords(context: PmsBuildContext): PmsTa
             link.sourceId.toLowerCase() === hotelId &&
             link.migrationDisposition === "private_quarantine",
         );
-      records.push(settingRecord(context, hotel, hotelId, propertyId, carried));
+      const current = existing.get(propertyId);
+      records.push(settingRecord(context, hotel, hotelId, propertyId, carried, current));
     } catch (error) {
       addPmsBlocker(
         context,
@@ -52,6 +63,7 @@ function settingRecord(
   hotelId: string,
   propertyId: string,
   carried: boolean,
+  existing: ExistingPmsTargetRecord | undefined,
 ): PmsTargetRecord {
   const data = hotel.data;
   const enabled =
@@ -85,10 +97,6 @@ function settingRecord(
   const setting = fixedEndMonth
     ? { enabled, mode: "fixed", rollingMonths: null, fixedEndMonth }
     : { enabled, mode: "rolling", rollingMonths: months, fixedEndMonth: null };
-  const existing = context.target.records.find(
-    (record) =>
-      record.targetTable === "calendar_auto_open_settings" && record.targetId === propertyId,
-  );
   const same = SETTING_KEYS.every((key) => (existing?.row[key] ?? null) === setting[key]);
   // As the native writer: revision 1 on create and +1 per change. An unchanged setting keeps its
   // revision and time, so reruns and the post-write verification plan nothing.

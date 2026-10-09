@@ -699,6 +699,24 @@ describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
         [IN_HOTEL_ID],
       );
       expect(await autoOpen()).toEqual([]);
+
+      // A legacy "off" needs an explicit disabled row: enabled or missing both fail.
+      const inViolation = [{ category: "cohortAutoOpen", subjectId: IN_HOTEL_ID }];
+      await client.query(
+        `UPDATE migration_source_pms.snapshot_rows
+            SET row_data = row_data || '{"calendar_auto_open_enabled": false}' WHERE run_id = $1`,
+        [run],
+      );
+      expect(await autoOpen()).toEqual(inViolation);
+      await client.query(
+        "UPDATE pms.calendar_auto_open_settings SET enabled = FALSE WHERE property_id = $1",
+        [IN_HOTEL_ID],
+      );
+      expect(await autoOpen()).toEqual([]);
+      await client.query("DELETE FROM pms.calendar_auto_open_settings WHERE property_id = $1", [
+        IN_HOTEL_ID,
+      ]);
+      expect(await autoOpen()).toEqual(inViolation);
     } finally {
       await client.query("DELETE FROM migration_source_pms.snapshot_rows WHERE run_id = $1", [run]);
       await client.query("DELETE FROM platform.source_extraction_runs WHERE run_id = $1", [run]);
