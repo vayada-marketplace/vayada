@@ -158,6 +158,8 @@ export type PmsAssignmentBuild = {
 export type ProductionPmsPlan = {
   sourceRunId: string;
   checksum: string;
+  /** VAY-1362: the carried cohort properties, which the apply locks and may activate. */
+  cohortPropertyIds?: string[];
   records: PmsTargetRecord[];
   writes: PmsTargetRecord[];
   provenance: ProductionMigrationSourceLink[];

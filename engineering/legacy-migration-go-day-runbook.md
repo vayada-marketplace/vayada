@@ -146,11 +146,14 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
 ### S — Smoke (~30 min)
 
 0. **Make each cohort hotel bookable.** The cutover writes the catalog, the
-   native property links and the property-scoped `property-management`
-   entitlement, but not the following:
-   - `hotel_catalog.properties.lifecycle_status` stays `provisioning`. Public
-     pricing and nearby search need `active`. How migrated hotels become
-     `active` is an open decision (see below).
+   native property links, the property-scoped `property-management`
+   entitlement and the setup rows native onboarding writes (pricing settings,
+   verified room labels, operating calendar, inventory coverage; see the cohort
+   contract). It then sets `lifecycle_status = 'active'` for each cohort hotel
+   whose profile is `complete` and that meets every VAY-2066 readiness item
+   (a–g). Parity reports how many cohort hotels are `active` and `provisioning`
+   and what the provisioning ones miss; fix them before reopen, or accept them
+   staying unbookable. The cutover does not write the following:
    - `profile_status` is `complete` only for a hotel that was live in legacy,
      has a public-eligible owner and has country, city and timezone. Fix any
      `incomplete` cohort profile before reopen, or accept it staying unbookable.
@@ -168,7 +171,8 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
    on-by-default (rolling 12), which keeps its dates opening as legacy "off" did.
    Hotels outside the cohort get an explicit disabled row. The VAY-2066 producer
    selects a hotel only once its rooms are verified and it has an operating
-   calendar and pricing settings, so check that it selects each cohort hotel.
+   calendar and pricing settings, which the import writes for complete cohort
+   hotels; check that it selects each of them.
 
    Then check that each cohort hotel passes the VAY-1543 public pricing rule:
    - exactly one active `hotel_group` organization holds both property links
@@ -265,8 +269,7 @@ and legacy is not a fallback (decisions table).
   properties outside the cohort. The import writes none for them, so parity relies
   on the native writers being paused (Freeze step 3).
 - The rehearsal on an isolated restore of legacy plus a copy of the live target.
-- Open decision: how migrated cohort hotels become `lifecycle_status='active'`.
-  Options: the cutover sets it for complete cohort profiles, an operator step
-  sets it after smoke, or owners finish the hotel-setup Review step.
+- Decided: the cutover activates cohort hotels with a complete profile that meet
+  every readiness item (VAY-2066 a–g); the rest stay `provisioning`.
 - Open decision: legacy PMS module activations (for example financials) are
   not mapped to the runtime's property-scoped `module:*` entitlements.

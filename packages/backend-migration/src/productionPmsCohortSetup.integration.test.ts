@@ -18,6 +18,8 @@ import {
   readProductionPmsPrerequisites,
   readProductionPmsTargetState,
 } from "./productionPmsTargetReader.js";
+import { activateReadyCohortProperties } from "./productionPmsCohortActivation.js";
+import { readCohortReadiness, readyForActivation } from "./productionPmsCohortReadiness.js";
 import type { PmsTargetRecord } from "./productionPmsTypes.js";
 import { writeProductionPmsRecords } from "./productionPmsWriter.js";
 import { assertSafeTestDatabase } from "./testUtils.js";
@@ -349,6 +351,77 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
         })) as never,
       });
       expect(native).toMatchObject({ ok: true, outcome: "unchanged", changedDays: [] });
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+
+  it("activates a complete cohort hotel that meets every readiness item, and only that one", async () => {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+    try {
+      await seedCalendar(client);
+      await client.query(
+        `UPDATE hotel_catalog.properties SET profile_status = 'complete', completeness_reasons = '{}'
+          WHERE id = $1`,
+        [PROPERTY],
+      );
+      const prerequisites = await readProductionPmsPrerequisites(client, RUN);
+      const rows = sourceRows();
+      rows[0]!.data["user_id"] = OWNER;
+      const plan = async (records: PmsTargetRecord[] = []) =>
+        buildProductionPmsPlan({
+          sourceRunId: RUN,
+          snapshotAt: AT,
+          completedAt: AT,
+          rows,
+          cohort: { bookingHotelIds: [], pmsHotelIds: [HOTEL], marketplaceHotelIds: [] },
+          target: await readProductionPmsTargetState(client, records, prerequisites),
+        });
+      const planned = await plan((await plan()).records);
+      expect(planned.cohortPropertyIds).toEqual([PROPERTY]);
+      const readiness = async () => (await readCohortReadiness(client, [PROPERTY]))[0];
+      expect(readyForActivation((await readiness())!)).toBe(false); // nothing written yet
+      await writeProductionPmsRecords(client, planned.writes);
+      await writeProductionMigrationProvenance(client, planned.provenance, RUN);
+      expect(await readiness()).toMatchObject({
+        lifecycleStatus: "provisioning",
+        a: true,
+        b: true,
+        c: true,
+        d: true,
+        e: true,
+        f: true,
+        g: true,
+        complete: true,
+      });
+      const report = await activateReadyCohortProperties(client, {
+        sourceRunId: RUN,
+        completedAt: AT,
+        propertyIds: planned.cohortPropertyIds!,
+      });
+      expect(report).toMatchObject({
+        cohortProperties: 1,
+        active: 1,
+        provisioning: 0,
+        activated: 1,
+      });
+      const stored = await client.query(
+        `SELECT lifecycle_status AS "lifecycleStatus", lifecycle_revision::int AS revision,
+                (SELECT count(*)::int FROM platform.product_audit_events audit
+                  WHERE audit.property_id = property.id
+                    AND audit.action = 'platform.property.lifecycle.status') AS audits
+           FROM hotel_catalog.properties property WHERE id = $1`,
+        [PROPERTY],
+      );
+      expect(stored.rows).toEqual([{ lifecycleStatus: "active", revision: 2, audits: 1 }]);
+      // A rerun activates nothing more; a property missing an item stays provisioning.
+      expect(
+        await activateReadyCohortProperties(client, {
+          sourceRunId: RUN,
+          completedAt: AT,
+          propertyIds: planned.cohortPropertyIds!,
+        }),
+      ).toMatchObject({ active: 1, activated: 0 });
     } finally {
       await client.query("ROLLBACK");
     }

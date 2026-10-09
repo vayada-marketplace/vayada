@@ -37,6 +37,7 @@ const COHORT_PASS_RUN_ID = `vay1351-${"7".repeat(24)}`;
 const COHORT_FAIL_RUN_ID = `vay1351-${"6".repeat(24)}`;
 const COHORT_AUTO_OPEN_RUN_ID = `vay1351-${"5".repeat(24)}`;
 const COHORT_ROOM_FACTS_RUN_ID = `vay1351-${"4".repeat(24)}`;
+const COHORT_ACTIVATION_RUN_ID = `vay1351-${"3".repeat(24)}`;
 const IN_HOTEL_ID = "13620000-0000-4000-8000-000000000001";
 const OUT_HOTEL_ID = "13620000-0000-4000-8000-000000000002";
 const OUT_PMS_HOTEL_ID = "13620000-0000-4000-8000-000000000003";
@@ -760,6 +761,45 @@ describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
         [IN_HOTEL_ID],
       );
       expect(await roomFacts()).toEqual([]);
+    } finally {
+      await cleanupCohort(client);
+      await client.end();
+    }
+  });
+
+  it("counts active and provisioning cohort hotels and fails an active one that is not ready", async () => {
+    assertSafeTestDatabase(URL!);
+    const client = new pg.Client({ connectionString: URL });
+    await client.connect();
+    const run = COHORT_ACTIVATION_RUN_ID;
+    try {
+      await storeCohort(client, run, [IN_HOTEL_ID], [IN_PMS_HOTEL_ID]);
+      await insertCohortProperties(client, "canonical");
+      await client.query(
+        `INSERT INTO hotel_catalog.property_source_links
+           (property_id, source_system, source_table, source_id, relationship)
+         VALUES ($1, 'pms', 'hotels', $2, 'operational_input')`,
+        [IN_HOTEL_ID, IN_PMS_HOTEL_ID],
+      );
+      const scope = async () =>
+        (await readProductionParityEvidence({ ...config(), sourceRunId: run })).cohortScope!;
+      // Nothing written for the hotel yet: provisioning, missing every setup item.
+      const before = await scope();
+      expect(before.readiness).toMatchObject({ cohortProperties: 1, active: 0, provisioning: 1 });
+      expect(before.readiness!.missing).toMatchObject({ c: 0, d: 1, e: 1, f: 1, g: 1 });
+      expect(before.violations.filter((row) => row.category === "cohortActiveNotReady")).toEqual(
+        [],
+      );
+      // Active without its setup rows fails the hard check.
+      await client.query(
+        "UPDATE hotel_catalog.properties SET lifecycle_status = 'active' WHERE id = $1",
+        [IN_HOTEL_ID],
+      );
+      const after = await scope();
+      expect(after.readiness).toMatchObject({ active: 1, provisioning: 0 });
+      expect(after.violations.filter((row) => row.category === "cohortActiveNotReady")).toEqual([
+        { category: "cohortActiveNotReady", subjectId: IN_HOTEL_ID },
+      ]);
     } finally {
       await cleanupCohort(client);
       await client.end();

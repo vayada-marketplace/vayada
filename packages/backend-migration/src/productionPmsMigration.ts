@@ -14,6 +14,11 @@ import type {
   ProductionPmsTargetState,
 } from "./productionPmsTypes.js";
 import { writeProductionPmsRecords } from "./productionPmsWriter.js";
+import {
+  activateReadyCohortProperties,
+  lockCohortProperties,
+  type CohortActivationReport,
+} from "./productionPmsCohortActivation.js";
 
 type QueryClient = Pick<pg.ClientBase, "query">;
 export type ProductionPmsMigrationMode = "dry-run" | "apply";
@@ -25,6 +30,8 @@ export type ProductionPmsMigrationReport = {
   counts: ProductionPmsPlan["counts"];
   parity: ProductionPmsPlan["parity"];
   blockers: ProductionPmsPlan["blockers"];
+  /** VAY-1362: cohort lifecycle activation after an apply; absent otherwise. */
+  activation?: CohortActivationReport;
 };
 export type ProductionPmsMigrationServices = {
   readSnapshot: typeof readProductionPmsSnapshot;
@@ -33,6 +40,7 @@ export type ProductionPmsMigrationServices = {
   buildPlan: typeof buildProductionPmsPlan;
   writeRecords: typeof writeProductionPmsRecords;
   writeProvenance: typeof writeProductionMigrationProvenance;
+  activateCohort?: typeof activateReadyCohortProperties;
 };
 
 const productionServices: ProductionPmsMigrationServices = {
@@ -42,6 +50,7 @@ const productionServices: ProductionPmsMigrationServices = {
   buildPlan: buildProductionPmsPlan,
   writeRecords: writeProductionPmsRecords,
   writeProvenance: writeProductionMigrationProvenance,
+  activateCohort: activateReadyCohortProperties,
 };
 
 export async function runProductionPmsMigration(config: {
@@ -110,6 +119,8 @@ export async function runProductionPmsTransaction(
       finished = true;
       return report(input, plan, false);
     }
+    const cohortPropertyIds = plan.cohortPropertyIds ?? [];
+    await lockCohortProperties(client, cohortPropertyIds);
     const written = await services.writeRecords(client, plan.writes);
     assertWriteCounts(plan.writes, written);
     const provenanceCount = await services.writeProvenance(
@@ -137,9 +148,18 @@ export async function runProductionPmsTransaction(
     }
     if (verified.checksum !== plan.checksum || verified.writes.length > 0)
       throw new Error("Post-write PMS verification does not match the migration plan");
+    // VAY-1362: once every setup row is written and verified, ready cohort hotels go active.
+    const activation =
+      cohortPropertyIds.length && services.activateCohort
+        ? await services.activateCohort(client, {
+            sourceRunId: input.sourceRunId,
+            completedAt: snapshot.completedAt,
+            propertyIds: cohortPropertyIds,
+          })
+        : undefined;
     await client.query("COMMIT");
     finished = true;
-    return report(input, plan, true);
+    return { ...report(input, plan, true), ...(activation ? { activation } : {}) };
   } catch (error) {
     if (!finished) await client.query("ROLLBACK").catch(() => undefined);
     throw error;
