@@ -114,6 +114,24 @@ describe("publishFirstPricing", () => {
     expect(client.confirmationAction).not.toHaveBeenCalled();
   });
 
+  it("does not declare charges when the reviewed snapshot differs from the saved one", async () => {
+    const { client } = fakeClient();
+    client.reviewCharges.mockImplementationOnce(async (draftId: string) => ({
+      draftId,
+      revision: 1,
+      baseRevision: 0,
+      sources: { room: "r", terms: "t", finance: "f" },
+      snapshot: { currency: "CHF", rooms: [], ownerReferences: { finance: "finance" } },
+      stale: false,
+      fingerprint: "f",
+      declaration: "all_mandatory_charges_included",
+    }));
+    await expect(
+      publishFirstPricing(client as never, null, [added()], newPublishProgress()),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(client.confirmationAction).not.toHaveBeenCalled();
+  });
+
   it("refuses rooms priced in different currencies", async () => {
     const { client } = fakeClient();
     const current = { currency: "CHF", revision: 1, rooms: [] };

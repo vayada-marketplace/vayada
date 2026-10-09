@@ -131,7 +131,7 @@ describe("PricingStep", () => {
       new ApiErrorResponse(403, { code: "denied", reason: "method_unavailable" } as never),
     );
     await act(async () => button(view.root, "Try again").props.onClick());
-    expect(text(view.root)).toContain("Accept pay at property or finish card setup");
+    expect(text(view.root)).toContain("Change the rate to accept pay at property");
     expect(text(view.root)).toContain("Ready to publish");
     mocks.publish.mockRejectedValueOnce(new ApiErrorResponse(409, { code: "stale" }));
     await act(async () => button(view.root, "Try again").props.onClick());
@@ -162,6 +162,26 @@ describe("PricingStep", () => {
     expect(button(view.root, "Publish prices and continue").props.disabled).toBe(true);
     await act(async () => button(view.root, "Reload pricing").props.onClick());
     expect(mocks.load).toHaveBeenCalledTimes(2);
+    view.unmount();
+  });
+
+  it("publishes a stale publication again before continuing", async () => {
+    mocks.read.mockResolvedValue({ ...publication(), stale: true });
+    const context = props("complete", "complete");
+    const view = await render(context);
+    expect(text(view.root)).toContain("Publish the prices again to confirm them.");
+    expect(
+      view.root.findAll((node) => node.type === "button" && text(node) === "Continue"),
+    ).toHaveLength(0);
+    mocks.read.mockResolvedValue(publication());
+    await act(async () => button(view.root, "Publish prices and continue").props.onClick());
+    expect(mocks.publish).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ stale: true }),
+      [],
+      expect.anything(),
+    );
+    expect(context.saveAndContinue).toHaveBeenCalledOnce();
     view.unmount();
   });
 

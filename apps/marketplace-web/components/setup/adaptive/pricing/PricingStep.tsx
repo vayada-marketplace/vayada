@@ -151,11 +151,14 @@ export function PricingStep({
   const payments = route.steps.find(({ stepId }) => stepId === "payments");
   const paymentsPending = !!payments && payments.state !== "complete";
   const allPriced = owners.rooms.length > 0 && unpriced.length === 0;
+  // Rooms, terms or payment settings changed after publishing: guests see no prices until the
+  // current prices are published again (the PMS editor allows the same re-save).
+  const stale = !!publication?.stale;
   // The server completes the step: every operating room published and prices confirmed final.
-  const complete = allPriced && added.length === 0 && step.state === "complete";
+  const complete = allPriced && added.length === 0 && !stale && step.state === "complete";
 
   const finish = async () => {
-    if (added.length > 0) {
+    if (added.length > 0 || stale) {
       await publishFirstPricing(pricingClient, publication, added, progress.current);
       const published = await pricingClient.read();
       if (!mounted.current) return;
@@ -323,7 +326,17 @@ export function PricingStep({
         )}
       </section>
 
-      {allPriced && added.length === 0 && !complete && (
+      {allPriced && added.length === 0 && stale && (
+        <p
+          role="status"
+          className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+        >
+          Rooms, rate terms or payment settings changed since these prices were published, so guests
+          cannot book them yet. Publish the prices again to confirm them.
+        </p>
+      )}
+
+      {allPriced && added.length === 0 && !stale && !complete && (
         <Panel
           title="Pricing is not complete yet"
           message="Every room has a published rate, but setup has not confirmed it. Reload pricing; if this stays, check the room rates in the PMS under Pricing."
@@ -346,7 +359,7 @@ export function PricingStep({
           <>
             <button
               type="button"
-              disabled={busy || !allPriced || added.length === 0 || currencyMismatch}
+              disabled={busy || !allPriced || (added.length === 0 && !stale) || currencyMismatch}
               aria-describedby="publish-prices-declaration"
               className={primaryButton}
               onClick={() => void run(finish)}
@@ -364,18 +377,19 @@ export function PricingStep({
   );
 }
 
-/** Prepare's 403 reasons when Finance is not ready (as the PMS editor shows them); rates are kept. */
+/** Prepare's 403 reasons when Finance is not ready, as the PMS editor shows them. Rates entered
+ * here are lost when the owner leaves the step, so the copy promises nothing about them. */
 const financeReasons: Record<string, string> = {
   settings_missing:
-    "Set up payments for this hotel in the Payments step, then publish again. Your rates are kept.",
+    "Payments are not set up for this hotel yet. Complete the Payments step, then come back to publish the rates.",
   payments_disabled:
-    "Payments are switched off for this hotel. Turn them on in the Payments step, then publish again. Your rates are kept.",
+    "Payments are switched off for this hotel. Turn them on in the Payments step, then come back to publish the rates.",
   currency_mismatch:
     "These prices use a different currency from the hotel's payment settings. Fix the payment currency, then publish again.",
   method_unavailable:
-    "A payment method chosen for these rates is not ready. Accept pay at property or finish card setup, then publish again. Your rates are kept.",
+    "A payment method chosen for these rates is not ready. Change the rate to accept pay at property, or finish card setup, then publish again.",
   deposit_execution_unavailable:
-    "Deposit payment terms cannot be saved yet. Choose full payment for each rate, then publish again.",
+    "Deposit payment terms cannot be saved yet. Change the rate to full payment, then publish again.",
 };
 
 function publishErrorMessage(cause: unknown): string {
@@ -383,6 +397,8 @@ function publishErrorMessage(cause: unknown): string {
     const reason = (cause.data as { reason?: unknown }).reason;
     if (typeof reason === "string" && Object.hasOwn(financeReasons, reason))
       return financeReasons[reason]!;
+    if (cause.data.code === "forbidden")
+      return "You no longer have access to pricing for this hotel.";
     return "Prices could not be prepared. Check that Payments is complete and accepts the payment methods chosen for these rates.";
   }
   if (cause instanceof ApiErrorResponse && cause.status === 409) {
