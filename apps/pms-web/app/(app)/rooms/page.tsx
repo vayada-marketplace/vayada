@@ -22,7 +22,12 @@ import {
 } from "@/services/rooms";
 import { ApiErrorResponse } from "@/services/api/client";
 import ConfirmDialog from "@/components/ConfirmDialog";
-import { formatCurrency } from "@/lib/formatCurrency";
+import {
+  RoomPriceSummary,
+  RoomsPricesStrip,
+  usePropertyPrices,
+  type PropertyPrices,
+} from "@/components/pricing/RoomsPrices";
 import { useTranslation } from "@/lib/i18n";
 import { imageReferenceUrl } from "@/services/upload";
 import LinkedInventoryGroupsPanel from "./LinkedInventoryGroupsPanel";
@@ -51,74 +56,6 @@ function getCategoryLabel(name: string): string {
   return cat.charAt(0).toUpperCase() + cat.slice(1);
 }
 
-interface RateOverview {
-  flexMin: number;
-  flexMax: number;
-  nrMin: number | null;
-  nrMax: number | null;
-  seasonCount: number;
-  discountPct: number;
-}
-
-function getRateOverview(room: RoomType): RateOverview | null {
-  const seasonRates = (room.seasons || [])
-    .map((s) => parseFloat(s.rate))
-    .filter((n) => Number.isFinite(n) && n > 0);
-  const monthlyBaseRates = Object.values(room.monthlyRates || {})
-    .map((m) => (typeof m?.baseRate === "number" ? m.baseRate : null))
-    .filter((n): n is number => n != null && n > 0);
-  const dailyRateValues = Object.values(room.dailyRates || {}).filter(
-    (n): n is number => typeof n === "number" && n > 0,
-  );
-
-  const hasBaseRate = typeof room.baseRate === "number" && room.baseRate > 0;
-  const flexValues = [
-    ...(hasBaseRate ? [room.baseRate] : []),
-    ...seasonRates,
-    ...monthlyBaseRates,
-    ...dailyRateValues,
-  ];
-  if (flexValues.length === 0) return null;
-
-  const flexMin = Math.min(...flexValues);
-  const flexMax = Math.max(...flexValues);
-  const referenceRate = hasBaseRate
-    ? room.baseRate
-    : (seasonRates[0] ?? monthlyBaseRates[0] ?? dailyRateValues[0]);
-
-  let nrMin: number | null = null;
-  let nrMax: number | null = null;
-  let discountPct = 0;
-
-  if (room.nonRefundableEnabled !== false) {
-    if (room.nonRefundableDiscount && room.nonRefundableDiscount > 0) {
-      const factor = 1 - room.nonRefundableDiscount / 100;
-      discountPct = Math.round(room.nonRefundableDiscount);
-      nrMin = Math.round(flexMin * factor);
-      nrMax = Math.round(flexMax * factor);
-    } else if (room.nonRefundableRate && room.nonRefundableRate > 0 && referenceRate > 0) {
-      const factor = room.nonRefundableRate / referenceRate;
-      discountPct = Math.round((1 - factor) * 100);
-      nrMin = Math.round(flexMin * factor);
-      nrMax = Math.round(flexMax * factor);
-    }
-  }
-
-  return {
-    flexMin,
-    flexMax,
-    nrMin,
-    nrMax,
-    seasonCount: seasonRates.length,
-    discountPct,
-  };
-}
-
-function formatRateRange(min: number, max: number, currency: string): string {
-  if (min === max) return formatCurrency(min, currency);
-  return `${formatCurrency(min, currency)}–${formatCurrency(max, currency).replace(/^[^0-9]+/, "")}`;
-}
-
 function isDuplicateRoomNumberError(error: unknown): boolean {
   return (
     error instanceof ApiErrorResponse &&
@@ -134,6 +71,7 @@ function RoomTypeCard({
   onDuplicate,
   duplicating,
   linkedGroup,
+  prices,
 }: {
   room: RoomType;
   rooms: Room[];
@@ -141,6 +79,8 @@ function RoomTypeCard({
   onDuplicate: (id: string) => Promise<void>;
   duplicating: boolean;
   linkedGroup?: LinkedInventoryGroup;
+  /** The property's published prices; null until read. */
+  prices: PropertyPrices["prices"];
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -158,7 +98,6 @@ function RoomTypeCard({
 
   const typeRooms = rooms.filter((r) => r.roomTypeId === room.id);
   const available = typeRooms.filter((r) => r.status === "available").length;
-  const rateOverview = getRateOverview(room);
   const thumbnailUrl = imageReferenceUrl(room.images?.[0]);
 
   const handleAddRoom = async () => {
@@ -331,34 +270,10 @@ function RoomTypeCard({
           </p>
         </div>
 
-        {/* Rate overview (md+) */}
-        {rateOverview && (
-          <div className="hidden md:flex flex-col gap-1 shrink-0 mr-2 text-[12px]">
-            <div className="flex items-center gap-2">
-              <span className="text-gray-500">{t("rooms.flexRate")}</span>
-              <span className="font-medium text-gray-800 tabular-nums">
-                {formatRateRange(rateOverview.flexMin, rateOverview.flexMax, room.currency)}
-              </span>
-              {rateOverview.seasonCount > 0 && (
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-50 border border-gray-200 text-gray-600">
-                  {rateOverview.seasonCount}{" "}
-                  {rateOverview.seasonCount === 1 ? t("rooms.season") : t("rooms.seasons")}
-                </span>
-              )}
-            </div>
-            {rateOverview.nrMin != null && rateOverview.nrMax != null && (
-              <div className="flex items-center gap-2">
-                <span className="text-gray-500">{t("rooms.nonRefundableShort")}</span>
-                <span className="font-medium text-gray-800 tabular-nums">
-                  {formatRateRange(rateOverview.nrMin, rateOverview.nrMax, room.currency)}
-                </span>
-                {rateOverview.discountPct > 0 && (
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-50 border border-green-200 text-green-700">
-                    -{rateOverview.discountPct}%
-                  </span>
-                )}
-              </div>
-            )}
+        {/* Published prices (md+) */}
+        {prices && (
+          <div className="hidden md:flex flex-col items-end gap-1 shrink-0 mr-2 text-[12px]">
+            <RoomPriceSummary roomTypeId={room.id} publication={prices.publication} />
           </div>
         )}
 
@@ -397,34 +312,10 @@ function RoomTypeCard({
       {/* Expanded: Derived Rates + Individual Rooms */}
       {expanded && (
         <div className="pl-5 md:pl-16 pr-3 md:pr-5 pb-4">
-          {/* Mobile rate overview (header version is hidden < md) */}
-          {rateOverview && (
-            <div className="md:hidden flex flex-col gap-1 mb-3 text-[12px]">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-gray-500">{t("rooms.flexRate")}</span>
-                <span className="font-medium text-gray-800 tabular-nums">
-                  {formatRateRange(rateOverview.flexMin, rateOverview.flexMax, room.currency)}
-                </span>
-                {rateOverview.seasonCount > 0 && (
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-50 border border-gray-200 text-gray-600">
-                    {rateOverview.seasonCount}{" "}
-                    {rateOverview.seasonCount === 1 ? t("rooms.season") : t("rooms.seasons")}
-                  </span>
-                )}
-              </div>
-              {rateOverview.nrMin != null && rateOverview.nrMax != null && (
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-gray-500">{t("rooms.nonRefundableShort")}</span>
-                  <span className="font-medium text-gray-800 tabular-nums">
-                    {formatRateRange(rateOverview.nrMin, rateOverview.nrMax, room.currency)}
-                  </span>
-                  {rateOverview.discountPct > 0 && (
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-50 border border-green-200 text-green-700">
-                      -{rateOverview.discountPct}%
-                    </span>
-                  )}
-                </div>
-              )}
+          {/* Mobile published prices (header version is hidden < md) */}
+          {prices && (
+            <div className="md:hidden flex flex-wrap items-center gap-2 mb-3 text-[12px]">
+              <RoomPriceSummary roomTypeId={room.id} publication={prices.publication} />
             </div>
           )}
 
@@ -665,6 +556,7 @@ export default function RoomsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [duplicatingRoomTypeIds, setDuplicatingRoomTypeIds] = useState<Set<string>>(new Set());
   const [duplicateError, setDuplicateError] = useState("");
+  const propertyPrices = usePropertyPrices();
 
   const loadData = () => {
     const revision = ++loadRevision.current;
@@ -744,6 +636,8 @@ export default function RoomsPage() {
           </Link>
         </div>
       </div>
+
+      <RoomsPricesStrip {...propertyPrices} />
 
       {importPropertyId && (
         <AirbnbImportLink key={`airbnb-${importPropertyId}`} propertyId={importPropertyId} />
@@ -852,6 +746,7 @@ export default function RoomsPage() {
               onDuplicate={handleDuplicate}
               duplicating={duplicatingRoomTypeIds.has(room.id)}
               linkedGroup={linkedGroups?.find((group) => group.memberRoomTypeIds.includes(room.id))}
+              prices={propertyPrices.prices}
             />
           ))}
         </div>
