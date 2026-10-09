@@ -1,4 +1,5 @@
 import type { QueryResultRow } from "pg";
+import { PMS_SUPPORTED_PRICING_CURRENCY_CODES_V1 } from "./pmsPricingCurrencyCapabilities.js";
 
 type Client = {
   query<T extends QueryResultRow = QueryResultRow>(
@@ -7,37 +8,9 @@ type Client = {
   ): Promise<{ rows: T[] }>;
 };
 
-/** Same list as platform.complete_hotel_setup_first_currency (migration 0448). */
-export const FIRST_CURRENCIES = [
-  "AED",
-  "AUD",
-  "BGN",
-  "BRL",
-  "CAD",
-  "CHF",
-  "CNY",
-  "CZK",
-  "DKK",
-  "EUR",
-  "GBP",
-  "HKD",
-  "HRK",
-  "INR",
-  "LKR",
-  "MXN",
-  "MYR",
-  "NOK",
-  "NZD",
-  "PHP",
-  "PLN",
-  "RON",
-  "RUB",
-  "SEK",
-  "SGD",
-  "THB",
-  "TRY",
-  "USD",
-];
+/** The PMS pricing currencies (V1). Migration 0448 kept a SQL copy of this list for the native
+ * first-currency trigger; 0474 dropped it, so this is the only list (VAY-2085 added IDR). */
+export const FIRST_CURRENCIES: readonly string[] = [...PMS_SUPPORTED_PRICING_CURRENCY_CODES_V1];
 export const BASE_ENTITLEMENTS = ["property-management", "pms-core", "account_access"];
 const STARTER_CATEGORIES = [
   "staff",
