@@ -113,6 +113,12 @@ describe("PropertyGallery", () => {
     expect(document.querySelector("img")?.getAttribute("src")).toBe(
       "https://cdn.vayada.com/gallery-2.webp",
     );
+
+    act(() => button("Close our photo gallery").click());
+    act(() => button("View photos (2)").click());
+    expect(document.querySelector("img")?.getAttribute("src")).toBe(
+      "https://cdn.vayada.com/gallery-1.webp",
+    );
   });
 
   function renderInteractiveGallery() {

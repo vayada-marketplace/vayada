@@ -85,6 +85,7 @@ export default function PropertyGallery({ hotelName, images }: PropertyGalleryPr
         type="button"
         onClick={() => {
           setIndex(0);
+          setFailedImages(new Set());
           setOpen(true);
         }}
         className="absolute bottom-14 right-4 z-20 inline-flex min-h-11 items-center gap-2 rounded-full border border-white/25 bg-gray-950/70 px-4 py-2.5 text-sm font-semibold text-white shadow-lg backdrop-blur-md transition hover:bg-gray-950/85 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-transparent md:right-8"
@@ -149,6 +150,7 @@ export default function PropertyGallery({ hotelName, images }: PropertyGalleryPr
                   </div>
                 ) : (
                   <Image
+                    key={currentImage}
                     src={currentImage}
                     alt={currentAlt}
                     fill
