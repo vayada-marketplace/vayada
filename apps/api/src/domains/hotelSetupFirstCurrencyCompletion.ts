@@ -10,7 +10,7 @@ type Client = {
 
 /** The PMS pricing currencies (V1). Migration 0448 kept a SQL copy of this list for the native
  * first-currency trigger; 0474 dropped it, so this is the only list (VAY-2085 added IDR). */
-export const FIRST_CURRENCIES: readonly string[] = [...PMS_SUPPORTED_PRICING_CURRENCY_CODES_V1];
+export const FIRST_CURRENCIES: readonly string[] = PMS_SUPPORTED_PRICING_CURRENCY_CODES_V1;
 export const BASE_ENTITLEMENTS = ["property-management", "pms-core", "account_access"];
 const STARTER_CATEGORIES = [
   "staff",
