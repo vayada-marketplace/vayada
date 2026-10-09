@@ -94,6 +94,27 @@ describe("PropertyGallery", () => {
     expect(document.activeElement).not.toBe(document.querySelector("#behind"));
   });
 
+  it("shows a placeholder card instead of alt text when a photo fails to load", () => {
+    renderInteractiveGallery();
+    act(() => button("View photos (2)").click());
+
+    const photo = document.querySelector("img");
+    expect(photo?.getAttribute("src")).toBe("https://cdn.vayada.com/gallery-1.webp");
+    act(() => {
+      photo?.dispatchEvent(new Event("error"));
+    });
+
+    expect(document.querySelector("img")).toBeNull();
+    expect(
+      document.querySelector('[role="img"][aria-label="Our photo 1 of Hotel Alpenrose"]'),
+    ).not.toBeNull();
+
+    act(() => button("Next photo of our property").click());
+    expect(document.querySelector("img")?.getAttribute("src")).toBe(
+      "https://cdn.vayada.com/gallery-2.webp",
+    );
+  });
+
   function renderInteractiveGallery() {
     const container = document.querySelector("#root");
     if (!(container instanceof HTMLElement)) throw new Error("Missing test root");

@@ -3,6 +3,7 @@
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
+  PhotoIcon,
   Squares2X2Icon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
@@ -26,6 +27,7 @@ export default function PropertyGallery({ hotelName, images }: PropertyGalleryPr
   );
   const [open, setOpen] = useState(false);
   const [index, setIndex] = useState(0);
+  const [failedImages, setFailedImages] = useState<ReadonlySet<string>>(() => new Set());
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -72,6 +74,9 @@ export default function PropertyGallery({ hotelName, images }: PropertyGalleryPr
   }, [close, next, open, previous]);
 
   if (galleryImages.length === 0) return null;
+
+  const currentImage = galleryImages[index]!;
+  const currentAlt = t("photoAlt", { hotelName, index: index + 1 });
 
   return (
     <>
@@ -131,16 +136,30 @@ export default function PropertyGallery({ hotelName, images }: PropertyGalleryPr
                   touchStartX.current = null;
                 }}
               >
-                <Image
-                  src={galleryImages[index]!}
-                  alt={t("photoAlt", { hotelName, index: index + 1 })}
-                  fill
-                  className="select-none object-contain"
-                  quality={90}
-                  sizes="100vw"
-                  priority={index === 0}
-                  onClick={keepContainedImageClickOpen}
-                />
+                {failedImages.has(currentImage) ? (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div
+                      role="img"
+                      aria-label={currentAlt}
+                      className="flex aspect-[4/3] w-full max-w-md items-center justify-center rounded-2xl bg-gray-800 text-gray-500"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <PhotoIcon className="h-12 w-12" aria-hidden="true" />
+                    </div>
+                  </div>
+                ) : (
+                  <Image
+                    src={currentImage}
+                    alt={currentAlt}
+                    fill
+                    className="select-none object-contain"
+                    quality={90}
+                    sizes="100vw"
+                    priority={index === 0}
+                    onClick={keepContainedImageClickOpen}
+                    onError={() => setFailedImages((failed) => new Set(failed).add(currentImage))}
+                  />
+                )}
               </div>
 
               {hasMultipleImages && (
