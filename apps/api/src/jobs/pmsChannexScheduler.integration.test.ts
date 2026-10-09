@@ -103,13 +103,11 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
     await seedSparseInventoryDay(admin, sparse, "2027-09-30");
 
     const firstPage = await store.findCalendarAutoOpenCandidates(now, 1);
-    expect(firstPage.failures).toEqual([
-      {
-        propertyId: incompletePropertyId,
-        stage: "selection",
-        message: "PMS calendar auto-open property source is incomplete",
-      },
-    ]);
+    // VAY-2066: an enabled setting whose calendar setup is incomplete is paused, not a failure.
+    expect(firstPage.failures).toEqual([]);
+    expect(firstPage.candidates.map(({ propertyId }) => propertyId)).not.toContain(
+      incompletePropertyId,
+    );
     expect(firstPage.candidates).toHaveLength(1);
     expect(firstPage.candidates[0]).toMatchObject({
       propertyId: first.propertyId,

@@ -2657,6 +2657,7 @@ const runCalendarAutoOpenSchedule = () => {
       app.log.info(
         {
           enabledSettings: stats?.enabledSettings ?? null,
+          pausedNotReady: stats?.pausedNotReady ?? null,
           skippedUnverifiedLabels: stats?.skippedUnverifiedLabels ?? null,
           enqueued: run.enqueued,
           reused: run.reused,

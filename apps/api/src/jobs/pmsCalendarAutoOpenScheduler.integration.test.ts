@@ -274,6 +274,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
   it("respects an explicit Off and pauses properties whose setup is not ready", async () => {
     const off = await seedProperty(admin, 6, { setting: "disabled" });
     const noCalendar = await seedProperty(admin, 7, { setting: "none", calendar: false });
+    const enabledNoCalendar = await seedProperty(admin, 10, { calendar: false });
     const profileEdited = await seedProperty(admin, 8, { setting: "none" });
     await admin.query(
       `UPDATE hotel_catalog.properties SET profile_revision=profile_revision+1 WHERE id=$1::uuid`,
@@ -285,7 +286,12 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
       session.findCalendarAutoOpenCandidates(now, 100),
     );
     expect(selection.ran).toBe(true);
-    const ids = new Set([off.propertyId, noCalendar.propertyId, profileEdited.propertyId]);
+    const ids = new Set([
+      off.propertyId,
+      noCalendar.propertyId,
+      enabledNoCalendar.propertyId,
+      profileEdited.propertyId,
+    ]);
     expect(
       selection.ran && [
         ...selection.value.candidates.filter(({ propertyId }) => ids.has(propertyId)),
@@ -418,6 +424,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
       ran: true,
       value: {
         enabledSettings: before.ran ? before.value.enabledSettings + 1 : NaN,
+        pausedNotReady: before.ran ? before.value.pausedNotReady : NaN,
         skippedUnverifiedLabels: before.ran ? before.value.skippedUnverifiedLabels + 1 : NaN,
       },
     });
