@@ -16,6 +16,10 @@ import {
 } from "./productionCatalogOwnership.js";
 import { planProductionCatalogPresentation } from "./productionCatalogPresentationPlan.js";
 import {
+  planCatalogPropertyAccess,
+  type CatalogPropertyAccessWrites,
+} from "./productionCatalogPropertyAccess.js";
+import {
   reconcileProductionCatalog,
   type PreservedCatalogTarget,
   type ReconciledCatalogWrites,
@@ -36,12 +40,17 @@ export type ProductionCatalogCounts = {
   media: number;
   writes: number;
   preservedTarget: number;
+  /** Present only when the run has a VAY-1362 cohort. */
+  propertyAccessLinks?: number;
+  propertyAccessEntitlements?: number;
 };
 export type ProductionCatalogPlan = {
   sourceLinks: PlannedCatalogSourceLink[];
   quarantinedSources: CatalogQuarantinedSource[];
   propertyIds: string[];
   writes: ReconciledCatalogWrites;
+  /** Pending native property links and entitlements; empty without a cohort. */
+  propertyAccess: CatalogPropertyAccessWrites;
   preservedTarget: PreservedCatalogTarget[];
   blockers: IdentityMigrationBlocker[];
   counts: ProductionCatalogCounts;
@@ -71,7 +80,11 @@ export function buildProductionCatalogPlan(
     mediaQuarantines: target.mediaQuarantines ?? [],
   });
   const reconciliation = reconcileProductionCatalog(core, content, presentation, target);
-  const blockers = [...reconciliation.blockers];
+  // A run without a cohort keeps its plan and checksum: only cohort properties get access here.
+  const access = cohort
+    ? planCatalogPropertyAccess(ownership.properties, target.ownerLinks, target.propertyAccess)
+    : null;
+  const blockers = [...reconciliation.blockers, ...(access?.blockers ?? [])];
   if (ownership.properties.length === 0)
     addBlocker(
       blockers,
@@ -92,13 +105,22 @@ export function buildProductionCatalogPlan(
     contacts: content.contacts,
     policies: content.policies,
     media: presentation.media,
+    ...(access
+      ? { propertyAccess: { links: access.links, entitlements: access.entitlements } }
+      : {}),
   };
   const counts = countPlan(desired, reconciliation.writes, reconciliation.preservedTarget.length);
+  if (access) {
+    counts.propertyAccessLinks = access.links.length;
+    counts.propertyAccessEntitlements = access.entitlements.length;
+    counts.writes += access.pending.links.length + access.pending.entitlements.length;
+  }
   return {
     sourceLinks: ownership.sourceLinks,
     quarantinedSources: ownership.quarantinedSources,
     propertyIds: ownership.properties.map((row) => row.propertyId),
     writes: reconciliation.writes,
+    propertyAccess: access?.pending ?? { links: [], entitlements: [] },
     preservedTarget: reconciliation.preservedTarget,
     blockers: sortedBy(blockers, (row) => `${row.code}:${row.source}:${row.sourceId}`),
     counts,

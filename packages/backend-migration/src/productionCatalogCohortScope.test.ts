@@ -124,14 +124,26 @@ describe("catalog cohort scope (VAY-1362)", () => {
     expect(before.checksum).toBe(
       "24c2103bf0c88c26f6978585647f2d59282db6119d3aaf1b574ea2a828ccec30",
     );
-    expect(buildProductionCatalogPlan(rows, target, full).checksum).toBe(before.checksum);
+    expect(before.propertyAccess).toEqual({ links: [], entitlements: [] });
+    expect(before.counts).not.toHaveProperty("propertyAccessLinks");
+    // A cohort run also gives its properties native access, so even a cohort of every hotel
+    // differs from a run without one, by those rows only.
+    expect(buildProductionCatalogPlan(rows, target, full).writes).toEqual(before.writes);
     const scoped = buildProductionCatalogPlan(rows, target, cohort);
     expect(scoped.blockers).toEqual([]);
     expect(scoped.checksum).not.toBe(before.checksum);
-    // Computed on fm/vay-1362-cohort-parity-gate: the COHORT_HOTEL_UNRESOLVED check adds no writes.
+    // Recomputed on fm/vay-1362-cohort-property-links: adds A's native property access.
     expect(scoped.checksum).toBe(
-      "d27bf72af7e80652e4b640df9d6bca75ce3e398275edd9640ac6e5f5f462c4e2",
+      "661748fd3c1ee23a18f5bb8fdbe96f11c88c375bd00c383652fcfea467f2fc56",
     );
+    expect(scoped.propertyAccess).toMatchObject({
+      links: [
+        { organizationId: UA, product: "hotel_catalog", resourceId: A, relationship: "owner" },
+        { organizationId: UA, product: "pms", resourceId: A, relationship: "owner" },
+      ],
+      entitlements: [{ organizationId: UA, resourceType: "pms_property", resourceId: A }],
+    });
+    expect(scoped.counts).toMatchObject({ propertyAccessLinks: 2, propertyAccessEntitlements: 1 });
   });
 
   it("keeps a non-cohort anchor's ID and attaches its PMS and Marketplace rows privately", () => {
@@ -466,5 +478,6 @@ function emptyTarget(): ProductionCatalogTargetState {
     media: [],
     mediaObjects: [heroImage(A), heroImage(B)],
     ownerRevisions: [],
+    propertyAccess: { activeOrganizationIds: [UA], links: [], entitlements: [] },
   };
 }
