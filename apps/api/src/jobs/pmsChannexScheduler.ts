@@ -465,6 +465,9 @@ async function readCalendarAutoOpenSelectionStats(
          )
        )::int AS "skippedUnverifiedLabels"
      FROM pms.calendar_auto_open_settings setting
+     JOIN hotel_catalog.properties lifecycle_property
+       ON lifecycle_property.id = setting.property_id
+      AND lifecycle_property.lifecycle_status IN ('provisioning', 'active')
      WHERE setting.enabled IS TRUE`,
   );
   return result.rows[0] ?? { enabledSettings: 0, skippedUnverifiedLabels: 0 };
@@ -803,6 +806,9 @@ async function selectCalendarAutoOpenCandidates(
       `WITH candidate_properties AS (
          SELECT setting.property_id
          FROM pms.calendar_auto_open_settings setting
+         JOIN hotel_catalog.properties lifecycle_property
+           ON lifecycle_property.id = setting.property_id
+          AND lifecycle_property.lifecycle_status IN ('provisioning', 'active')
          WHERE setting.enabled IS TRUE
            AND NOT EXISTS (
              SELECT 1

@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
 
+import {
+  createPmsCalendarAutoOpenSource,
+  fingerprintPmsCalendarAutoOpenSource,
+} from "@vayada/domain-pms";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -18,6 +22,7 @@ import {
   createPgPmsCalendarAutoOpenSchedulerStore,
   runPmsCalendarAutoOpenScheduler,
   type PgPmsCalendarAutoOpenSchedulerStore,
+  type PmsCalendarAutoOpenCandidate,
 } from "./pmsChannexScheduler.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
@@ -35,6 +40,22 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
     });
     closers.push(() => store.close());
     return store;
+  };
+
+  const workerStore = () => {
+    const propertyProfileEvidence =
+      createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort({
+        connectionString: fixture.connectionString,
+      });
+    const worker = createPgPmsCalendarAutoOpenWorkerStore({
+      connectionString: fixture.connectionString,
+      propertyProfileEvidence,
+    });
+    closers.push(async () => {
+      await worker.close?.();
+      await propertyProfileEvidence.close();
+    });
+    return worker;
   };
 
   beforeAll(async () => {
@@ -58,21 +79,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
   it("enqueues and applies one rolling window without permission or RLS failures", async () => {
     const property = await seedProperty(admin, 1);
     const store = schedulerStore();
-    const propertyProfileEvidence =
-      createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort({
-        connectionString: fixture.connectionString,
-      });
-    const worker = createPgPmsCalendarAutoOpenWorkerStore({
-      connectionString: fixture.connectionString,
-      propertyProfileEvidence,
-    });
-    closers.push(async () => {
-      await worker.close?.();
-      await propertyProfileEvidence.close();
-    });
+    const worker = workerStore();
 
     const scheduled = await store.withRunLock((session) =>
-      runPmsCalendarAutoOpenScheduler(session, { now, workerId: "vay-2066-test" }),
+      runPmsCalendarAutoOpenScheduler(session, { now, limit: 1, workerId: "vay-2066-test" }),
     );
     expect(scheduled.ran).toBe(true);
     // Other suites share this database, so only this property's outcome is asserted.
@@ -93,17 +103,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
       },
     ]);
 
-    // Other suites may leave jobs behind; drain the queue until this property's job is done.
-    for (let attempt = 0; attempt < 200; attempt += 1) {
-      const [job] = await propertyJobs(admin, property.propertyId);
-      if (job?.status !== "pending" && job?.status !== "running") break;
-      const result = await runPmsCalendarAutoOpenWorkerOnce({
-        store: worker,
-        workerId: "vay-2066-test",
-        now: () => now,
-      });
-      if (result.outcome === "idle") break;
-    }
+    await drainUntilDone(worker, property.propertyId);
 
     expect(await propertyJobs(admin, property.propertyId)).toEqual([
       { status: "succeeded", jobKey: expect.any(String) },
@@ -129,11 +129,105 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
       ariJobs: 1,
     });
 
+    // Once applied, the same source and horizon are reflected and the property is not reselected.
     const rerun = await store.withRunLock((session) =>
-      runPmsCalendarAutoOpenScheduler(session, { now, workerId: "vay-2066-test" }),
+      session.findCalendarAutoOpenCandidates(now, 100),
     );
-    expect(rerun).toMatchObject({ ran: true });
+    expect(
+      rerun.ran &&
+        rerun.value.candidates.some(({ propertyId }) => propertyId === property.propertyId),
+    ).toBe(false);
     expect(await propertyJobs(admin, property.propertyId)).toHaveLength(1);
+  });
+
+  it("applies a default job from the next release's producer (setting revision 0)", async () => {
+    // A rolling deploy can hand jobs from the next release's producer to this consumer.
+    const property = await seedProperty(admin, 3, { setting: "none" });
+    const store = schedulerStore();
+    const worker = workerStore();
+    const source = createPmsCalendarAutoOpenSource({
+      settingRevision: 0,
+      propertyProfileRevision: 1,
+      propertyTimeZone: "Europe/Berlin",
+      operatingCalendarRevision: 1,
+      rooms: [{ roomTypeId: property.roomTypeId, roomFactsRevision: 1, roomUnitsRevision: 1 }],
+      pricing: {
+        pricingCurrencyRevision: 1,
+        flexibleRatePlans: [{ roomTypeId: property.roomTypeId, flexibleRatePlanRevision: 1 }],
+        optionalPricingAggregateRevision: 0,
+      },
+    });
+
+    await store.withRunLock((session) =>
+      session.enqueueCalendarAutoOpenJob(
+        {
+          propertyId: property.propertyId,
+          organizationId: property.organizationId,
+          openFrom: "2026-09-03",
+          openThrough: "2027-09-30",
+          roomTypeIds: [property.roomTypeId],
+          generatedCoverageThrough: null,
+          source,
+          sourceFingerprint: fingerprintPmsCalendarAutoOpenSource(source),
+        },
+        { now, workerId: "vay-2066-test", correlationId: "vay-2066-test" },
+      ),
+    );
+    await drainUntilDone(worker, property.propertyId);
+
+    const applied = await admin.query(
+      `SELECT job.job_metadata #>> '{calendarAutoOpenResult,outcome}' AS outcome,
+              (SELECT to_char(coverage_through, 'YYYY-MM-DD')
+               FROM pms.inventory_materialization_coverage coverage
+               WHERE coverage.property_id=job.property_id) AS through,
+              (SELECT count(*)::int FROM pms.calendar_auto_open_settings settings
+               WHERE settings.property_id=job.property_id) AS settings
+       FROM platform.jobs job WHERE job.property_id=$1::uuid AND job.queue_name=$2`,
+      [property.propertyId, PMS_CALENDAR_AUTO_OPEN_QUEUE],
+    );
+    expect(applied.rows).toEqual([{ outcome: "applied", through: "2027-09-30", settings: 0 }]);
+  });
+
+  it("never opens dates for a suspended hotel", async () => {
+    const property = await seedProperty(admin, 4);
+    const store = schedulerStore();
+    const worker = workerStore();
+    const before = await store.withRunLock((session) =>
+      session.findCalendarAutoOpenCandidates(now, 100),
+    );
+    const candidate =
+      before.ran &&
+      before.value.candidates.find(({ propertyId }) => propertyId === property.propertyId);
+    expect(candidate).toBeTruthy();
+    await store.withRunLock((session) =>
+      session.enqueueCalendarAutoOpenJob(candidate as PmsCalendarAutoOpenCandidate, {
+        now,
+        workerId: "vay-2066-test",
+        correlationId: "vay-2066-test",
+      }),
+    );
+
+    await admin.query(
+      `UPDATE hotel_catalog.properties SET lifecycle_status='suspended' WHERE id=$1::uuid`,
+      [property.propertyId],
+    );
+    const after = await store.withRunLock((session) =>
+      session.findCalendarAutoOpenCandidates(now, 100),
+    );
+    expect(
+      after.ran &&
+        after.value.candidates.some(({ propertyId }) => propertyId === property.propertyId),
+    ).toBe(false);
+    await drainUntilDone(worker, property.propertyId);
+
+    const result = await admin.query(
+      `SELECT job.job_metadata #>> '{calendarAutoOpenResult,outcome}' AS outcome,
+              (SELECT count(*)::int FROM pms.inventory_days day
+               WHERE day.property_id=job.property_id) AS days
+       FROM platform.jobs job WHERE job.property_id=$1::uuid AND job.queue_name=$2`,
+      [property.propertyId, PMS_CALENDAR_AUTO_OPEN_QUEUE],
+    );
+    expect(result.rows).toEqual([{ outcome: "unchanged", days: 0 }]);
   });
 
   it("lets one session scan at a time and frees the lock after a failed run", async () => {
@@ -216,7 +310,11 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
 
 type SeededProperty = { propertyId: string; roomTypeId: string; organizationId: string };
 
-async function seedProperty(admin: pg.Pool, order: number): Promise<SeededProperty> {
+async function seedProperty(
+  admin: pg.Pool,
+  order: number,
+  options: { setting?: "enabled" | "disabled" | "none"; calendar?: boolean } = {},
+): Promise<SeededProperty> {
   const propertyId = `${order.toString(16).padStart(8, "0")}-0000-4000-8000-${randomUUID().replaceAll("-", "").slice(-12)}`;
   const roomTypeId = randomUUID();
   const organizationId = randomUUID();
@@ -249,12 +347,14 @@ async function seedProperty(admin: pg.Pool, order: number): Promise<SeededProper
        'pms-pricing.v1',1,1,1)`,
     [randomUUID(), propertyId, roomTypeId],
   );
-  await admin.query(
-    `INSERT INTO pms.calendar_auto_open_settings
-       (property_id, revision, enabled, mode, rolling_months, fixed_end_month)
-     VALUES ($1::uuid, 1, TRUE, 'rolling', 12, NULL)`,
-    [propertyId],
-  );
+  if (options.setting !== "none") {
+    await admin.query(
+      `INSERT INTO pms.calendar_auto_open_settings
+         (property_id, revision, enabled, mode, rolling_months, fixed_end_month)
+       VALUES ($1::uuid, 1, $2, 'rolling', 12, NULL)`,
+      [propertyId, options.setting !== "disabled"],
+    );
+  }
   await admin.query(
     `INSERT INTO pms.channel_binding_claims
        (property_id, provider, external_property_id, claim_state, claim_source)
@@ -268,6 +368,7 @@ async function seedProperty(admin: pg.Pool, order: number): Promise<SeededProper
        jsonb_build_object('organizationId', $4::text))`,
     [randomUUID(), propertyId, `vay-2066-${propertyId}`, organizationId],
   );
+  if (options.calendar === false) return { propertyId, roomTypeId, organizationId };
 
   const client = await admin.connect();
   try {
@@ -300,6 +401,28 @@ async function seedProperty(admin: pg.Pool, order: number): Promise<SeededProper
     client.release();
   }
   return { propertyId, roomTypeId, organizationId };
+}
+
+// Other suites may leave jobs behind; drain the queue until this property's job is done.
+async function drainUntilDone(
+  worker: ReturnType<typeof createPgPmsCalendarAutoOpenWorkerStore>,
+  propertyId: string,
+): Promise<void> {
+  const admin = new pg.Pool({ connectionString: TEST_DATABASE_URL!, max: 1 });
+  try {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const [job] = await propertyJobs(admin, propertyId);
+      if (job?.status !== "pending" && job?.status !== "running") return;
+      const result = await runPmsCalendarAutoOpenWorkerOnce({
+        store: worker,
+        workerId: "vay-2066-test",
+        now: () => now,
+      });
+      if (result.outcome === "idle") return;
+    }
+  } finally {
+    await admin.end();
+  }
 }
 
 async function propertyJobs(admin: pg.Pool, propertyId: string) {
