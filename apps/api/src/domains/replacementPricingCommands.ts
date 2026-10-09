@@ -134,7 +134,8 @@ export function createReplacementPricingCommands(pool: Pool, context: RequestCon
           pricingRevision: revision,
           terms,
         });
-        if (finance.kind !== "ready") return fail("denied");
+        // Staff-only (manage authorization passed above): say what to fix in payment settings.
+        if (finance.kind !== "ready") throw new PricingStorageError("denied", finance.reason);
         const snapshot: PricingStorageSnapshot = {
           currency,
           rooms,

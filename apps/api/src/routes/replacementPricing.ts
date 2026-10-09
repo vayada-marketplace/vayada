@@ -138,7 +138,7 @@ export async function registerReplacementPricingRoutes(
           if (error instanceof PricingStorageError)
             return reply
               .code(error.code === "invalid" ? 400 : error.code === "denied" ? 403 : 409)
-              .send({ code: error.code });
+              .send({ code: error.code, ...(error.reason ? { reason: error.reason } : {}) });
           return reply.code(503).send({ code: "pricing_unavailable" });
         }
       },
@@ -264,7 +264,17 @@ export async function registerReplacementPricingRoutes(
     const requestId = key(request),
       body = request.body;
     if (
-      !exact(body, ["draftId", "expectedDraftRevision", "claimedFingerprint", "declaration"]) ||
+      !(
+        exact(body, ["draftId", "expectedDraftRevision", "claimedFingerprint", "declaration"]) ||
+        exact(body, [
+          "draftId",
+          "expectedDraftRevision",
+          "claimedFingerprint",
+          "declaration",
+          "declaredVia",
+        ])
+      ) ||
+      (Object.hasOwn(body, "declaredVia") && body.declaredVia !== "save_prices") ||
       !uuid(body.draftId) ||
       !revision(body.expectedDraftRevision) ||
       body.expectedDraftRevision === 0 ||
@@ -278,6 +288,7 @@ export async function registerReplacementPricingRoutes(
       expectedDraftRevision: body.expectedDraftRevision as number,
       claimedFingerprint: body.claimedFingerprint,
       declaration: body.declaration,
+      ...(body.declaredVia === "save_prices" ? { declaredVia: "save_prices" as const } : {}),
       requestId,
     });
   });
