@@ -109,3 +109,84 @@ test("shows no balance due on a cancelled booking in the reservations list", asy
   await expect(row).toContainText("—");
   await expect(row).not.toContainText("Due");
 });
+
+const flexibleTerms = {
+  type: "free_until_days_before_arrival",
+  freeCancellationDeadlineDays: 7,
+  afterDeadlinePenalty: "full_booking_amount",
+  noShowPenalty: "full_booking_amount",
+};
+
+test("shows the cancellation terms a manual stay was booked under", async ({ page }) => {
+  await mockBooking(
+    page,
+    manualBooking({
+      ratePlanId: null,
+      pricingOfferId: "offer-flex",
+      bookedCancellation: { kind: "flexible", terms: flexibleTerms },
+    }),
+    [
+      {
+        ratePlanId: "offer-flex",
+        pricingContractVersion: "pricing.v2",
+        code: "offer-flex",
+        name: "Flexible",
+        rateType: "flexible",
+        mealPlan: "room_only",
+        baseRate: euros("100.00"),
+        active: true,
+      },
+    ],
+  );
+  await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
+
+  const main = page.locator("main");
+  await expect(main.getByText("Cancellation policy · Flexible", { exact: true })).toBeVisible();
+  await expect(main.getByText("Free cancellation", { exact: true })).toBeVisible();
+  await expect(main.getByText(/7 days before check-in/)).toBeVisible();
+  await expect(main.getByText("Full stay", { exact: true })).toBeVisible();
+  await expect(main.getByText("Cancelling here records no cancellation charge.")).toBeVisible();
+  await expect(main.getByText("Non-refundable")).toHaveCount(0);
+});
+
+test("states that a custom rate has no recorded cancellation terms", async ({ page }) => {
+  await mockBooking(page, manualBooking({ ratePlanId: null, pricingOfferId: null }));
+  await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
+
+  const main = page.locator("main");
+  await expect(main.getByText("Cancellation policy · Custom rate", { exact: true })).toBeVisible();
+  await expect(main.getByText("No cancellation terms are recorded for this rate.")).toBeVisible();
+  await expect(main.getByText("Cancelling here records no cancellation charge.")).toBeVisible();
+  await expect(main.getByText(/Non-refundable|full charge/)).toHaveCount(0);
+});
+
+test("lists the refund steps of partial-refund terms instead of a free window", async ({
+  page,
+}) => {
+  const partialRefund = {
+    ...flexibleTerms,
+    flexibleCancellationType: "partial_refund",
+    partialRefundTiers: [
+      { minDaysBeforeCheckIn: 30, refundPercent: 50 },
+      { minDaysBeforeCheckIn: 7, refundPercent: 20 },
+    ],
+  };
+  await mockBooking(
+    page,
+    manualBooking({
+      ratePlanId: null,
+      // An offer no longer in the publication: its booked terms still show.
+      pricingOfferId: "offer-retired",
+      bookedCancellation: { kind: "flexible", terms: partialRefund },
+    }),
+  );
+  await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
+
+  const main = page.locator("main");
+  await expect(main.getByText("50% refund", { exact: true }).first()).toBeVisible();
+  await expect(main.getByText(/30 days before check-in/)).toBeVisible();
+  await expect(main.getByText("20% refund", { exact: true }).first()).toBeVisible();
+  await expect(main.getByText(/Within 7 days of check-in/)).toBeVisible();
+  await expect(main.getByText("Free cancellation", { exact: true })).toHaveCount(0);
+  await expect(main.getByText("Cancellation policy", { exact: true })).toBeVisible();
+});
