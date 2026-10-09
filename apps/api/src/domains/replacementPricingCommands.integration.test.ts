@@ -212,14 +212,6 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
       )
     ).rows[0];
   }
-  it("reads the owner authority on the ordinary pool", async () => {
-    const f = await fixture();
-    expect(await f.commands.readAuthority(f.scope.propertyId)).toEqual({
-      authority: "unconfigured",
-      revision: null,
-      organizationId: null,
-    });
-  });
   it("prepares without writes and runs the complete draft/confirmation/publication flow", async () => {
     const f = await fixture(),
       id = f.scope.propertyId;

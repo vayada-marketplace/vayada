@@ -554,7 +554,7 @@ jobs:
           '
           npm --workspace @vayada/backend-migration run target:migrate -- --env local
           npm --workspace vayada-api run test -- --no-file-parallelism \
-            src/domains/bookingPricingAuthority.integration.test.ts \
+            src/domains/publicPricingOwners.integration.test.ts \
             src/domains/replacementPricingStore.integration.test.ts \
             src/domains/replacementPricingCommands.integration.test.ts \
             src/domains/pmsAcceptedPricingReservationWorker.integration.test.ts \
