@@ -8,7 +8,12 @@ const ignoredConsoleErrorPatterns = [
   /WebSocket connection .* failed/i,
 ];
 
-export function watchPageHealth(page: Page, testInfo: TestInfo) {
+/** `expectedMissingUrls`: resources whose 404 is a documented "not configured yet" answer. */
+export function watchPageHealth(
+  page: Page,
+  testInfo: TestInfo,
+  { expectedMissingUrls = [] }: { expectedMissingUrls?: RegExp[] } = {},
+) {
   const failures: string[] = [];
 
   page.on("pageerror", (error) => {
@@ -19,6 +24,11 @@ export function watchPageHealth(page: Page, testInfo: TestInfo) {
     if (message.type() !== "error") return;
     const text = message.text();
     if (ignoredConsoleErrorPatterns.some((pattern) => pattern.test(text))) return;
+    if (
+      /status of 404/.test(text) &&
+      expectedMissingUrls.some((pattern) => pattern.test(message.location().url))
+    )
+      return;
     failures.push(`console.error: ${text}`);
   });
 
