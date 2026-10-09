@@ -738,13 +738,30 @@ async function selectCalendarAutoOpenCandidates(
            ) ORDER BY plan.room_type_id),
            '[]'::json
          ) AS plans
-         FROM pms.rate_plans plan
+         FROM (
+           -- A pricing-v2 publication replaces the retired legacy plans (same rule as the
+           -- auto-open worker): a room with a published offer has a rate, at a constant
+           -- revision so price edits do not re-run auto-open.
+           SELECT legacy.room_type_id, legacy.flexible_rate_plan_revision
+           FROM pms.rate_plans legacy
+           WHERE legacy.property_id = setting.property_id
+             AND legacy.pricing_contract_version = 'pms-pricing.v1'
+             AND NOT EXISTS (
+               SELECT 1 FROM pms.pricing_v2_heads head
+               WHERE head.property_id = setting.property_id AND head.revision > 0
+             )
+           UNION ALL
+           SELECT published.room_type_id, 1
+           FROM pms.pricing_v2_heads head
+           JOIN pms.pricing_v2_rooms published
+             ON published.property_id = head.property_id AND published.revision = head.revision
+           WHERE head.property_id = setting.property_id
+             AND jsonb_array_length(published.configuration->'offers') > 0
+         ) plan
          JOIN pms.room_types room_type
            ON room_type.id = plan.room_type_id
-          AND room_type.property_id = plan.property_id
+          AND room_type.property_id = setting.property_id
           AND room_type.active IS TRUE
-         WHERE plan.property_id = setting.property_id
-           AND plan.pricing_contract_version = 'pms-pricing.v1'
        ) plan_source ON TRUE
        LEFT JOIN pms.inventory_materialization_coverage coverage
          ON coverage.property_id = setting.property_id
