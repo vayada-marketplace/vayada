@@ -49,6 +49,16 @@ describe("explicit fixed charge calculation", () => {
       }),
     ).toMatchObject({ totalMinor: "31800", dueNowMinor: "30000", dueLaterMinor: "1800" });
   });
+  it("accepts only whole-rupiah IDR fees (VAY-2085)", () => {
+    const idr = (amountMinor: string) => ({
+      ...policy(),
+      currency: "IDR",
+      charges: [{ ...rule(), amountMinor }],
+    });
+    expect(parseFixedChargePolicy(idr("1500000"))).not.toBeNull();
+    expect(parseFixedChargePolicy(idr("1500050"))).toBeNull();
+    expect(parseFixedChargePolicy({ ...idr("1500050"), currency: "EUR" })).not.toBeNull();
+  });
   it("uses configured child ages at check-in and counts separate rooms", () => {
     for (const [minimumAge, total] of [
       [0, "3600"],

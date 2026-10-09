@@ -1,6 +1,7 @@
 import {
   isMinorAmount,
   isPositiveMinor,
+  pricingAmountStep,
   pricingInteger,
   pricingKeys,
   pricingObject,
@@ -10,8 +11,10 @@ const text = (v: unknown): v is string =>
   typeof v === "string" && v.length > 0 && v.length <= 512 && v === v.trim();
 /** Pure money only: caller supplies resolved same-currency, disjoint charge amounts
  * and an eligible schedule. This is neither charge-owner evidence nor executable
- * Finance readiness. In particular it does not enable deposits in current Finance. */
-export function composeReplacementSettlementAmounts(input: unknown) {
+ * Finance readiness. In particular it does not enable deposits in current Finance.
+ * `currency` only selects the deposit rounding step (VAY-2085). */
+export function composeReplacementSettlementAmounts(input: unknown, currency?: string) {
+  const step = BigInt(currency === undefined ? 1 : pricingAmountStep(currency));
   if (
     !pricingObject(input) ||
     !pricingKeys(input, ["subtotalMinor", "charges", "payment"]) ||
@@ -74,7 +77,7 @@ export function composeReplacementSettlementAmounts(input: unknown) {
       ? 0n
       : payment.kind === "full"
         ? online
-        : (total * BigInt(payment.basisPoints as number) + 5000n) / 10000n;
+        : ((total * BigInt(payment.basisPoints as number) + 5000n * step) / (10000n * step)) * step;
   // Never redirect a property-collected fee into an online deposit or cap the agreed schedule.
   if (online < 0n || dueNow > online) return null;
   return {

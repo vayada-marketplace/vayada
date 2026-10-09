@@ -93,7 +93,12 @@ export function changeDatePrice(
                 date,
                 price: {
                   mode: "flat" as const,
-                  amountMinor: parseMinorInput(amount, pricingCurrencyScale(room.currency)!),
+                  amountMinor: parseMinorInput(
+                    amount,
+                    pricingCurrencyScale(room.currency)!,
+                    false,
+                    pricingAmountStep(room.currency),
+                  ),
                 },
               },
             ];

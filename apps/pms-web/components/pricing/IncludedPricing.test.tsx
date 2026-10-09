@@ -79,6 +79,23 @@ it("rejects missing rows, invalid counts, nonpositive rounded prices and overflo
       0,
     ),
   ).toThrow("range");
+  // IDR rounds to whole rupiah like the calculator (VAY-2085): 49% off Rp 1 leaves Rp 0.51 -> Rp 1, 51% off leaves Rp 0.
+  const idr = (value: string) =>
+    includedPrice(
+      {
+        adults: "1",
+        adjustments: [
+          { kind: "fixed", value: "0" },
+          { kind: "percentage", value },
+        ],
+      },
+      "1",
+      2,
+      2,
+      100,
+    );
+  expect(idr("-49").adjustments[1]).toEqual({ kind: "percentage", basisPoints: -4900 });
+  expect(() => idr("-51")).toThrow("positive");
   expect(
     includedPrice(
       { ...fixed, adjustments: [{ kind: "fixed", value: "-0" }, ...fixed.adjustments.slice(1)] },

@@ -660,6 +660,13 @@ it("adds and clears an independent date price without changing fallback or other
     expect(() => changeDatePrice(room, "flex", date, amount)).toThrow();
   expect(() => changeDatePrice(added, "flex", "2028-02-29", "200")).toThrow("Clear the existing");
 });
+it("keeps IDR date prices in whole rupiah (VAY-2085)", () => {
+  const room = { ...snapshot.rooms[0], currency: "IDR" };
+  expect(() => changeDatePrice(room, "flex", "2028-02-29", "150000.25")).toThrow("whole rupiah");
+  expect(changeDatePrice(room, "flex", "2028-02-29", "150000").offers[0].price).toMatchObject({
+    calendar: { dates: [{ date: "2028-02-29", price: { mode: "flat", amountMinor: "15000000" } }] },
+  });
+});
 it("preserves linked adjustments, other dates and parents when clearing an override", () => {
   const room = snapshot.rooms[0],
     child = {

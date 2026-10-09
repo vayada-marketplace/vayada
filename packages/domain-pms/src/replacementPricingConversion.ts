@@ -1,4 +1,5 @@
 import {
+  pricingAmountStep,
   pricingCurrencyScale,
   pricingInteger,
   pricingKeys,
@@ -74,11 +75,13 @@ export function convertPricingConfigurationCurrency(
     return null;
   const numerator = BigInt(rate.numerator),
     denominator = BigInt(rate.denominator);
+  // Half-up to the target price step: whole rupiah for IDR (VAY-2085), else one minor unit.
+  const step = BigInt(pricingAmountStep(rate.to));
   let lostPositiveTariff = false;
   const amount = (text: string, signedAdjustment = false): string => {
     const value = BigInt(text),
       magnitude = (value < 0n ? -value : value) * numerator;
-    const rounded = (magnitude * 2n + denominator) / (denominator * 2n);
+    const rounded = ((magnitude * 2n + denominator * step) / (denominator * 2n * step)) * step;
     if (!signedAdjustment && value > 0n && rounded === 0n) lostPositiveTariff = true;
     return (value < 0n ? -rounded : rounded).toString();
   };

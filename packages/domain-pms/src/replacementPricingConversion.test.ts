@@ -194,6 +194,11 @@ describe("complete PMS pricing currency conversion", () => {
       convert(kwd, { ...fx, from: "KWD", to: "IDR", numerator: "5000", denominator: "1" }, now)
         ?.children.bands[0].nightlyMinor,
     ).toBe("5005000");
+    // IDR is priced in whole rupiah (VAY-2085): 1,001 KWD minor x 50 = 500.50 rupiah rounds half-up to 501.
+    expect(
+      convert(kwd, { ...fx, from: "KWD", to: "IDR", numerator: "50", denominator: "1" }, now)
+        ?.children.bands[0].nightlyMinor,
+    ).toBe("50100");
     expect(convert(source, { ...fx, numerator: "1", denominator: "1" }, now)?.currency).toBe("JPY");
     const large = {
       ...source,

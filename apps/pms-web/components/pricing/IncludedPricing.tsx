@@ -34,7 +34,10 @@ export function includedPrice(
     const amount =
       row.kind === "fixed"
         ? BigInt(baseMinor) + signed
-        : (BigInt(baseMinor) * (BigInt("10000") + signed) + BigInt("5000")) / BigInt("10000");
+        : // Same half-up rounding to the price step as the calculator (whole rupiah for IDR).
+          ((BigInt(baseMinor) * (BigInt("10000") + signed) + BigInt("5000") * BigInt(step)) /
+            (BigInt("10000") * BigInt(step))) *
+          BigInt(step);
     if (amount <= BigInt("0") || amount > BigInt("999999999999999999"))
       throw new PricingError("pricing.included.errorRange");
     if (

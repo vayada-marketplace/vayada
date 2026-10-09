@@ -1,7 +1,12 @@
 import { pricingDecimalMinor } from "./pricingDecimalMinor.js";
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
-import { isMinorAmount, pricingCurrencyScale, pricingDate } from "@vayada/domain-pms";
+import {
+  isMinorAmount,
+  pricingAmountStep,
+  pricingCurrencyScale,
+  pricingDate,
+} from "@vayada/domain-pms";
 import { lockPmsPricingRoomScope } from "./pmsPricingRoomScope.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 
@@ -124,7 +129,10 @@ export async function lockReplacementPromoCode(
   if (
     amount === null ||
     amount === "0" ||
-    (policy.discount_type === "percentage" && BigInt(amount) > 10000n)
+    (policy.discount_type === "percentage" && BigInt(amount) > 10000n) ||
+    // A fixed amount off is money: whole rupiah for IDR (VAY-2085). The minimum is only a threshold.
+    (policy.discount_type !== "percentage" &&
+      BigInt(amount) % BigInt(pricingAmountStep(request.currency)) !== 0n)
   )
     return null;
   const discount =
