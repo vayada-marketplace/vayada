@@ -1,8 +1,11 @@
 import type { firstPricingInput } from "@vayada/product-onboarding/FirstPricingSetup";
-import type {
-  createReplacementPricingClient,
-  PricingChargeReview,
+import {
+  samePricingValue,
+  type createReplacementPricingClient,
+  type PricingChargeReview,
 } from "@vayada/product-onboarding/replacementPricingClient";
+
+import { ApiErrorResponse } from "@/services/api/client";
 
 type Client = ReturnType<typeof createReplacementPricingClient>;
 export type FirstPricing = ReturnType<typeof firstPricingInput>;
@@ -96,11 +99,19 @@ export async function publishFirstPricing(
   );
   if (!progress.review) {
     const review = await client.reviewCharges(progress.draftId);
-    if (!review) throw new Error("The saved pricing draft is missing. Reload pricing.");
+    // Declare only for exactly what this attempt saved; another save in between means start again.
+    if (
+      !review ||
+      review.revision !== progress.draftRevision ||
+      !samePricingValue(review.snapshot, prepared.snapshot)
+    ) {
+      throw new ApiErrorResponse(409, { message: "The saved prices changed. Reload pricing." });
+    }
     progress.review = review;
   }
   const review = progress.review;
-  progress.confirm ??= client.confirmationAction(review);
+  // Pressing "Publish prices" is the mandatory-charges declaration, as "Save prices" in the PMS.
+  progress.confirm ??= client.confirmationAction(review, "save_prices");
   progress.chargesId ??= (await progress.confirm()).id;
   const snapshot = {
     ...review.snapshot,

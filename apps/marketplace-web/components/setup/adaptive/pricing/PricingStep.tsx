@@ -364,8 +364,25 @@ export function PricingStep({
   );
 }
 
+/** Prepare's 403 reasons when Finance is not ready (as the PMS editor shows them); rates are kept. */
+const financeReasons: Record<string, string> = {
+  settings_missing:
+    "Set up payments for this hotel in the Payments step, then publish again. Your rates are kept.",
+  payments_disabled:
+    "Payments are switched off for this hotel. Turn them on in the Payments step, then publish again. Your rates are kept.",
+  currency_mismatch:
+    "These prices use a different currency from the hotel's payment settings. Fix the payment currency, then publish again.",
+  method_unavailable:
+    "A payment method chosen for these rates is not ready. Accept pay at property or finish card setup, then publish again. Your rates are kept.",
+  deposit_execution_unavailable:
+    "Deposit payment terms cannot be saved yet. Choose full payment for each rate, then publish again.",
+};
+
 function publishErrorMessage(cause: unknown): string {
   if (cause instanceof ApiErrorResponse && cause.status === 403) {
+    const reason = (cause.data as { reason?: unknown }).reason;
+    if (typeof reason === "string" && Object.hasOwn(financeReasons, reason))
+      return financeReasons[reason]!;
     return "Prices could not be prepared. Check that Payments is complete and accepts the payment methods chosen for these rates.";
   }
   if (cause instanceof ApiErrorResponse && cause.status === 409) {

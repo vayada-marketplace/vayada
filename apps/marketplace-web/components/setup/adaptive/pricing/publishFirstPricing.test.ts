@@ -38,6 +38,8 @@ describe("publishFirstPricing", () => {
       expectedDraftRevision: 1,
       snapshot: { ownerReferences: { finance: "finance", charges: "charges-1" } },
     });
+    // Publishing is the declaration, recorded as made by the save/publish button.
+    expect(client.confirmationAction).toHaveBeenCalledWith(expect.anything(), "save_prices");
     expect(client.publicationAction.mock.calls[0]![0]).toMatchObject({
       revision: 2,
       baseRevision: 2,
@@ -92,6 +94,24 @@ describe("publishFirstPricing", () => {
       "publish",
     ]);
     expect(client.readDraft).toHaveBeenCalledOnce();
+  });
+
+  it("does not declare charges for a draft that changed after this attempt saved it", async () => {
+    const { client } = fakeClient();
+    client.reviewCharges.mockImplementationOnce(async (draftId: string) => ({
+      draftId,
+      revision: 2,
+      baseRevision: 2,
+      sources: { room: "r", terms: "t", finance: "f" },
+      snapshot: { currency: "EUR", rooms: [], ownerReferences: { finance: "finance" } },
+      stale: false,
+      fingerprint: "f",
+      declaration: "all_mandatory_charges_included",
+    }));
+    await expect(
+      publishFirstPricing(client as never, null, [added()], newPublishProgress()),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(client.confirmationAction).not.toHaveBeenCalled();
   });
 
   it("refuses rooms priced in different currencies", async () => {
