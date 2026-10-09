@@ -47,6 +47,30 @@ describe("publishFirstPricing", () => {
     });
   });
 
+  it("republishes a stale publication with no new rooms", async () => {
+    const { client, calls } = fakeClient();
+    const current = {
+      currency: "EUR",
+      revision: 2,
+      rooms: [room(otherRoomId, "kept", 2)],
+      stale: true,
+    };
+    await publishFirstPricing(client as never, current as never, [], newPublishProgress());
+
+    // No terms to stage: the published rooms are prepared again at the next revision.
+    expect(calls).toEqual(["prepare", "saveDraft", "review", "confirm", "saveDraft", "publish"]);
+    expect(client.prepare.mock.calls[0]![0]).toEqual({
+      currency: "EUR",
+      rooms: [
+        expect.objectContaining({
+          roomTypeId: otherRoomId,
+          revision: 3,
+          offers: [expect.objectContaining({ termsRevision: "kept" })],
+        }),
+      ],
+    });
+  });
+
   it("resumes after a lost response without repeating finished stages", async () => {
     const { client, calls } = fakeClient();
     client.confirm.mockRejectedValueOnce(new TypeError("Failed to fetch"));
