@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { PMS_ROOM_FACTS_CONTRACT_VERSION, parseRoomTypeFactsSnapshot } from "@vayada/domain-pms";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -63,6 +64,42 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
         [],
         planned.checksum,
       ]);
+
+      // The native room-facts read (pmsRoomFactsSnapshotFromRow) accepts the stored room type.
+      const roomType = (
+        await client.query<{ row: Record<string, unknown> }>(
+          `SELECT to_jsonb(room_type) AS row FROM pms.room_types room_type WHERE id = $1`,
+          [ROOM_TYPE],
+        )
+      ).rows[0]!.row;
+      const occupancy = roomType["occupancy_limits"] as Record<string, unknown>;
+      const attributes = roomType["room_attributes"] as Record<string, unknown>;
+      expect(
+        parseRoomTypeFactsSnapshot({
+          contractVersion: PMS_ROOM_FACTS_CONTRACT_VERSION,
+          propertyId: PROPERTY,
+          roomTypeId: ROOM_TYPE,
+          roomFactsRevision: roomType["room_facts_revision"],
+          lifecycle: "active",
+          facts: {
+            name: roomType["name"],
+            description: roomType["description"],
+            category: roomType["category"],
+            occupancy: {
+              maxGuests: occupancy["total"],
+              maxAdults: occupancy["adults"],
+              maxChildren: occupancy["children"],
+            },
+            beds: attributes["beds"],
+            bedrooms: attributes["bedrooms"],
+            bathrooms: attributes["bathrooms"],
+            bathroomType: attributes["bathroomType"],
+            size: attributes["size"],
+          },
+          createdAt: AT,
+          updatedAt: AT,
+        }),
+      ).toMatchObject({ facts: { category: "standard", size: { value: 18, unit: "sqm" } } });
 
       // The same row the native first-currency insert writes, run from its own source text.
       const source = await readFile(
@@ -252,6 +289,9 @@ function sourceRows(): IdentitySourceRow[] {
       base_rate: "100.00",
       currency: "EUR",
       is_active: true,
+      category: "Standard",
+      bed_type: "1 Double Bed",
+      size: 18,
     }),
     room(ROOM_A, "A-101"),
     room(ROOM_B, "A-102"),
