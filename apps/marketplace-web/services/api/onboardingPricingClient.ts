@@ -182,7 +182,9 @@ async function ownerPut(
       ok: false,
       error: error.data as unknown,
     });
-    if (!result || result.ok) throw invalidOwnerContract("currency command error");
+    // Gate responses (authentication, Owner-only access, request validation) are not command
+    // errors: pass them through unchanged instead of reporting invalid data.
+    if (!result || result.ok) throw error;
     const code = result.error.code;
     throw new PricingOwnerError(
       messages[code] ?? "Pricing could not be saved. Try again.",
