@@ -53,6 +53,31 @@ test("summary cards show short labels, sparklines, per-metric comparisons and a 
     });
   });
 
+  // A filled funnel keeps the screenshots representative of the whole dashboard.
+  await page.route("**/dashboard/conversion-funnel?**", (route) =>
+    route.fulfill({
+      json: {
+        funnel: {
+          steps: [
+            ["page_visit", 82, 82, 100],
+            ["rate_selected", 41, 82, 50],
+            ["details_completed", 12, 41, 14.6],
+            ["complete_booking_clicked", 9, 12, 11],
+            ["booking_completed", 4, 9, 4.9],
+          ].map(([stage, count, previousCount, percentOfVisits]) => ({
+            stage,
+            count: empty ? 0 : count,
+            previousCount: empty ? 0 : previousCount,
+            percentOfVisits,
+            conversionPercent: null,
+          })),
+          paymentMethods: [{ method: "bank_transfer", count: 9 }],
+          biggestDrop: "details_completed",
+        },
+      },
+    }),
+  );
+
   await page.goto("/dashboard");
   for (const label of ["Revenue", "Bookings", "Avg. Nightly Rate", "Page Views"]) {
     await expect(page.getByText(label, { exact: true })).toBeVisible();
@@ -90,7 +115,10 @@ test("summary cards show short labels, sparklines, per-metric comparisons and a 
   await page.getByRole("button", { name: "This week", exact: true }).click();
   await expect(page.locator('svg path[stroke="#16A34A"]')).toHaveCount(4);
   await page.setViewportSize({ width: 390, height: 1400 });
-  await page.screenshot({ path: testInfo.outputPath("summary-cards-mobile.png"), fullPage: true });
+  await page
+    .getByText("Revenue", { exact: true })
+    .locator("xpath=ancestor::div[contains(@class, 'grid')][1]")
+    .screenshot({ path: testInfo.outputPath("summary-cards-mobile.png") });
   // Page content scrolls inside <main>, so check it rather than the document.
   const main = page.locator("main");
   expect(await main.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
