@@ -541,10 +541,18 @@ terms still does not approve Finance deposit execution.
 
 GET `/drafts/:draftId/charge-review` returns the exact saved snapshot/sources,
 draft/base revisions, a server-calculated fingerprint and the explicit
-`all_mandatory_charges_included` declaration. Missing drafts return404; stale source
-or base returns409. Reading never confirms charges. The editor must present this
-saved data and send its revision/fingerprint for explicit confirmation; any later
-edit is still rejected by the existing owner fingerprint/version checks.
+`all_mandatory_charges_included` declaration. Missing drafts return404; stale
+source or base returns409. Reading never confirms charges. The editor must present
+this saved data and send its revision/fingerprint for explicit confirmation; any
+later edit is still rejected by the existing owner fingerprint/version checks.
+Since VAY-2079 the PMS editor has one "Save prices" action, with the declaration
+shown under the button: pressing it is the explicit confirmation (sent with
+`declaredVia: "save_prices"`). It chains offer terms, prepare, draft save, charge
+review, confirmation, draft attach and publication, keeps every finished step for
+an exact retry, and declares only when the reviewed draft is the one it just saved
+(same revision and data, ignoring key order). A Finance denial on prepare leaves
+the edits editable; saving again (after fixing the payment settings) starts a
+fresh draft.
 
 For every new charge confirmation, the charge owner now locks current PMS room,
 Booking terms and Finance sources and compares them with saved draft sources in
