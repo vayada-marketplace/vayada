@@ -4,12 +4,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   PLATFORM_MEDIA_CLEANUP_CONTRACT_VERSION,
+  PLATFORM_MEDIA_CLEANUP_MAX_ATTEMPTS,
   PLATFORM_MEDIA_CLEANUP_QUEUE,
   buildPlatformMediaCleanupJobKey,
   buildPlatformMediaCleanupKey,
   createPgPlatformMediaCleanupStore,
   distinctPlatformMediaStorageKeys,
   platformMediaCleanupFailureLogEntries,
+  platformMediaCleanupRetry,
   runPlatformMediaCleanupJobs,
   type PlatformMediaCleanupAction,
   type PlatformMediaCleanupCandidate,
@@ -251,25 +253,30 @@ describe("platform media cleanup jobs", () => {
     }
   });
 
-  it("records failure visibility without deleting the candidate and without duplicate dead letters", async () => {
+  it("retries a failing item up to the attempt cap and dead-letters it once", async () => {
     const replaced = contractCase("replaced-public-image-deletes-after-request");
     const store = new MemoryPlatformMediaCleanupStore([replaced.candidate], {
       failResourceIds: [cleanupResourceId(replaced.candidate)],
     });
+    const failures: PlatformMediaCleanupFailureResult[] = [];
 
-    const firstRun = await runPlatformMediaCleanupJobs(store, {
-      now: new Date("2026-06-13T12:00:00.000Z"),
-      workerId: "worker_media_cleanup",
-      run: ["replacedPublicImages"],
-    });
-    const rerun = await runPlatformMediaCleanupJobs(store, {
-      now: new Date("2026-06-13T12:00:00.000Z"),
-      workerId: "worker_media_cleanup",
-      run: ["replacedPublicImages"],
-    });
+    for (let run = 0; run < PLATFORM_MEDIA_CLEANUP_MAX_ATTEMPTS; run += 1) {
+      const result = await runPlatformMediaCleanupJobs(store, {
+        now: new Date("2026-06-13T12:00:00.000Z"),
+        workerId: "worker_media_cleanup",
+        run: ["replacedPublicImages"],
+      });
+      expect(result).toMatchObject({ scanned: 1, applied: 0, failed: 1 });
+      failures.push(...result.runs[0]!.failures);
+    }
 
-    expect(firstRun).toMatchObject({ scanned: 1, applied: 0, failed: 1 });
-    expect(rerun).toMatchObject({ scanned: 1, applied: 0, failed: 1 });
+    expect(failures.map(({ attempt, deadLettered }) => ({ attempt, deadLettered }))).toEqual([
+      { attempt: 1, deadLettered: false },
+      { attempt: 2, deadLettered: false },
+      { attempt: 3, deadLettered: false },
+      { attempt: 4, deadLettered: false },
+      { attempt: 5, deadLettered: true },
+    ]);
     expect(store.media(replaced.candidate.mediaObjectId!)?.lifecycleStatus).toBe(
       "delete_requested",
     );
@@ -279,7 +286,7 @@ describe("platform media cleanup jobs", () => {
       jobType: replaced.expected.jobType,
       status: "dead_lettered",
     });
-    expect(store.jobAttempts).toHaveLength(1);
+    expect(store.jobAttempts).toHaveLength(PLATFORM_MEDIA_CLEANUP_MAX_ATTEMPTS);
     expect(store.jobAttempts[0]).toMatchObject({
       status: "failed",
       errorType: "Error",
@@ -290,6 +297,18 @@ describe("platform media cleanup jobs", () => {
       reasonCode: "media_storage_delete_failed",
       recoveryStatus: "open",
     });
+  });
+
+  it("backs off 15 minutes, 1 hour, 4 hours and 24 hours, then dead-letters", () => {
+    const now = new Date("2026-06-13T12:00:00.000Z");
+    const retries = [1, 2, 3, 4].map((attempt) => platformMediaCleanupRetry(attempt, now));
+
+    expect(retries.map(({ runAfter }) => (runAfter.getTime() - now.getTime()) / 60_000)).toEqual([
+      15, 60, 240, 1440,
+    ]);
+    expect(retries.every(({ deadLettered }) => !deadLettered)).toBe(true);
+    expect(platformMediaCleanupRetry(5, now)).toEqual({ deadLettered: true, runAfter: now });
+    expect(platformMediaCleanupRetry(6, now).deadLettered).toBe(true);
   });
 
   it("logs failed items by id, stage and code without the error message", async () => {
@@ -310,6 +329,8 @@ describe("platform media cleanup jobs", () => {
         action: "delete-replaced-public-image",
         stage: "storage_delete",
         code: "Error",
+        attempt: 1,
+        deadLettered: false,
       },
     ]);
     expect(JSON.stringify(entries)).not.toContain("object storage delete failed");
@@ -395,7 +416,7 @@ describe("platform media cleanup jobs", () => {
     const mediaObjectId = "00000000-0000-0000-0000-000000000305";
     const retainedUntil = "2026-06-20T00:00:00.000Z";
     const query = vi.fn(async (statement: string) => {
-      if (statement.includes("FOR UPDATE")) {
+      if (statement.includes("FROM platform.media_objects media")) {
         return {
           rows: [
             {
@@ -452,7 +473,7 @@ describe("platform media cleanup jobs", () => {
       const thrown = await store.applyCleanupMutation(candidate, mutation, context).catch((e) => e);
       const failure = await store.recordCleanupFailure(candidate, mutation, thrown, context);
 
-      expect(failure).toMatchObject({ reasonCode, errorCode });
+      expect(failure).toMatchObject({ reasonCode, errorCode, attempt: 1, deadLettered: false });
     } finally {
       await store.close();
       connect.mockRestore();
@@ -508,7 +529,8 @@ type FixtureJob = {
   jobKey: string;
   jobType: string;
   queueName: string;
-  status: "succeeded" | "dead_lettered";
+  status: "succeeded" | "failed" | "dead_lettered";
+  attemptsCount: number;
   payload: Record<string, unknown>;
 };
 
@@ -701,6 +723,7 @@ class MemoryPlatformMediaCleanupStore implements PlatformMediaCleanupStore {
       jobType: mutation.jobType,
       queueName: PLATFORM_MEDIA_CLEANUP_QUEUE,
       status: "succeeded",
+      attemptsCount: 1,
       payload,
     });
     this.jobAttempts.push({ jobKey, attemptNumber: 1, status: "succeeded" });
@@ -717,7 +740,7 @@ class MemoryPlatformMediaCleanupStore implements PlatformMediaCleanupStore {
     candidate: PlatformMediaCleanupCandidate,
     mutation: PlatformMediaCleanupMutation,
     error: unknown,
-    _context: PlatformMediaCleanupContext,
+    context: PlatformMediaCleanupContext,
   ): Promise<PlatformMediaCleanupFailureResult> {
     const resourceId = cleanupResourceId(candidate);
     const cleanupKey = buildPlatformMediaCleanupKey({
@@ -731,22 +754,29 @@ class MemoryPlatformMediaCleanupStore implements PlatformMediaCleanupStore {
       deadlineOrWindow: mutation.deadlineOrWindow,
     });
     const errorInfo = error instanceof Error ? error : new Error(String(error));
-
-    if (!this.jobs.some((job) => job.jobKey === jobKey)) {
-      this.jobs.push({
+    let job = this.jobs.find((existing) => existing.jobKey === jobKey);
+    if (!job) {
+      job = {
         jobKey,
         jobType: mutation.jobType,
         queueName: PLATFORM_MEDIA_CLEANUP_QUEUE,
-        status: "dead_lettered",
-        payload: { action: mutation.action, resourceId },
-      });
-      this.jobAttempts.push({
-        jobKey,
-        attemptNumber: 1,
         status: "failed",
-        errorType: errorInfo.name,
-        errorMessage: errorInfo.message,
-      });
+        attemptsCount: 0,
+        payload: { action: mutation.action, resourceId },
+      };
+      this.jobs.push(job);
+    }
+    job.attemptsCount += 1;
+    const { deadLettered } = platformMediaCleanupRetry(job.attemptsCount, context.now);
+    job.status = deadLettered ? "dead_lettered" : "failed";
+    this.jobAttempts.push({
+      jobKey,
+      attemptNumber: job.attemptsCount,
+      status: "failed",
+      errorType: errorInfo.name,
+      errorMessage: errorInfo.message,
+    });
+    if (deadLettered) {
       this.deadLetterEvents.push({
         jobKey,
         reasonCode: "media_storage_delete_failed",
@@ -764,7 +794,8 @@ class MemoryPlatformMediaCleanupStore implements PlatformMediaCleanupStore {
       errorType: errorInfo.name,
       errorCode: errorInfo.name,
       errorMessage: errorInfo.message,
-      deadLettered: true,
+      attempt: job.attemptsCount,
+      deadLettered,
     };
   }
 }

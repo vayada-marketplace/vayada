@@ -3001,11 +3001,18 @@ if (platformMediaRuntime) {
     if (activeCleanup) return;
     activeCleanup = runPlatformMediaCleanupJobs(platformMediaRuntime.cleanupStore)
       .then((result) => {
-        if (result.failed > 0) {
+        const failures = platformMediaCleanupFailureLogEntries(result);
+        const deadLettered = failures.filter((failure) => failure.deadLettered);
+        const retrying = failures.filter((failure) => !failure.deadLettered);
+        // A dead-lettered item is never selected again, so each one warns exactly once.
+        if (deadLettered.length > 0) {
           app.log.warn(
-            { failed: result.failed, failures: platformMediaCleanupFailureLogEntries(result) },
-            "Platform media cleanup completed with failures",
+            { failures: deadLettered },
+            "Platform media cleanup dead-lettered items after retries",
           );
+        }
+        if (retrying.length > 0) {
+          app.log.info({ failures: retrying }, "Platform media cleanup will retry failed items");
         }
       })
       .catch((error: unknown) => {
