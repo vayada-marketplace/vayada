@@ -206,15 +206,27 @@ export type PmsCalendarAutoOpenSchedulerStore = Pick<
   "findCalendarAutoOpenCandidates" | "enqueueCalendarAutoOpenJob"
 >;
 
-export type PgPmsCalendarAutoOpenSchedulerStore = PmsCalendarAutoOpenSchedulerStore & {
+/** One scheduler run's database session; every query runs on the connection holding the lock. */
+export type PmsCalendarAutoOpenSchedulerSession = PmsCalendarAutoOpenSchedulerStore & {
+  readSelectionStats(): Promise<PmsCalendarAutoOpenSelectionStats>;
+};
+
+export type PmsCalendarAutoOpenSelectionStats = Readonly<{
+  /** Properties with an enabled auto-open setting. */
+  enabledSettings: number;
+  /** Of those, the ones the selection skips because an active room's label is unverified. */
+  skippedUnverifiedLabels: number;
+}>;
+
+export type PgPmsCalendarAutoOpenSchedulerStore = {
   /**
-   * Runs `run` while holding a cluster-wide session advisory lock, so overlapping API tasks
-   * (for example during a rolling deploy) never scan at the same time. Returns
-   * `{ ran: false }` without running when another session holds the lock.
+   * Runs `run` on one connection that holds a database-wide session advisory lock, so
+   * overlapping API tasks (for example during a rolling deploy) never scan at the same time.
+   * Returns `{ ran: false }` without running when another session holds the lock.
    */
-  withRunLock<T>(run: () => Promise<T>): Promise<{ ran: true; value: T } | { ran: false }>;
-  /** Enabled settings the candidate selection skips because an active room's label is unverified. */
-  countUnverifiedLabelSkips(): Promise<number>;
+  withRunLock<T>(
+    run: (session: PmsCalendarAutoOpenSchedulerSession) => Promise<T>,
+  ): Promise<{ ran: true; value: T } | { ran: false }>;
   close(): Promise<void>;
 };
 
@@ -376,71 +388,86 @@ export function createPgPmsChannexSchedulerStore(
 
 export function createPgPmsCalendarAutoOpenSchedulerStore(config: {
   connectionString: string;
-  max?: number;
 }): PgPmsCalendarAutoOpenSchedulerStore {
-  const max = config.max ?? 2;
-  // withRunLock keeps one client for the lock while the run queries through the pool.
-  if (!Number.isSafeInteger(max) || max < 2) {
-    throw new Error("PMS calendar auto-open scheduler pool needs at least 2 connections");
-  }
-  const pool = new pg.Pool({ connectionString: config.connectionString, max });
+  // Pools are shared and sized by the API's Postgres runtime; a run needs one connection.
+  const pool = new pg.Pool({ connectionString: config.connectionString });
 
   return {
-    findCalendarAutoOpenCandidates: (now, limit) =>
-      selectCalendarAutoOpenCandidates(pool, now, limit),
-    enqueueCalendarAutoOpenJob: (candidate, context) =>
-      enqueuePgCalendarAutoOpenJob(pool, candidate, context),
     async withRunLock(run) {
       const client = await pool.connect();
-      let mayHoldLock = true;
+      // A checked-out client whose connection drops while idle emits "error"; unhandled, that
+      // would crash the API. Such a client is discarded instead of returned to the pool.
+      let discard = true;
+      const onError = () => {
+        discard = true;
+      };
+      client.on("error", onError);
+      let holdsLock = false;
       try {
         const locked = await client.query<{ locked: boolean }>(
           "SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked",
           [PMS_CALENDAR_AUTO_OPEN_SCHEDULER_LOCK],
         );
-        if (locked.rows[0]?.locked !== true) {
-          mayHoldLock = false;
-          return { ran: false };
-        }
-        try {
-          return { ran: true, value: await run() };
-        } finally {
-          await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [
-            PMS_CALENDAR_AUTO_OPEN_SCHEDULER_LOCK,
-          ]);
-          mayHoldLock = false;
-        }
+        discard = false;
+        holdsLock = locked.rows[0]?.locked === true;
+        if (!holdsLock) return { ran: false };
+        return {
+          ran: true,
+          value: await run({
+            findCalendarAutoOpenCandidates: (now, limit) =>
+              selectCalendarAutoOpenCandidates(client, now, limit),
+            enqueueCalendarAutoOpenJob: (candidate, context) =>
+              enqueueCalendarAutoOpenJobOnClient(client, candidate, context),
+            readSelectionStats: () => readCalendarAutoOpenSelectionStats(client),
+          }),
+        };
       } finally {
-        // A session that may still hold the lock is discarded, which releases the lock.
-        client.release(mayHoldLock);
+        if (holdsLock) {
+          try {
+            await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [
+              PMS_CALENDAR_AUTO_OPEN_SCHEDULER_LOCK,
+            ]);
+          } catch {
+            // Keep the run's own result or error; ending the session releases the lock.
+            discard = true;
+          }
+        }
+        client.removeListener("error", onError);
+        client.release(discard);
       }
-    },
-    async countUnverifiedLabelSkips() {
-      const result = await pool.query<{ skipped: number }>(
-        `SELECT count(*)::int AS skipped
-         FROM pms.calendar_auto_open_settings setting
-         WHERE setting.enabled IS TRUE
-           AND EXISTS (
-             SELECT 1
-             FROM pms.rooms physical_room
-             JOIN pms.room_types room_type
-               ON room_type.property_id=physical_room.property_id
-              AND room_type.id=physical_room.room_type_id
-              AND room_type.active IS TRUE
-             WHERE physical_room.property_id=setting.property_id
-               AND physical_room.status<>'retired'
-               AND (
-                 physical_room.operational_label_status<>'verified'
-                 OR physical_room.room_number IS NULL
-               )
-           )`,
-      );
-      return result.rows[0]?.skipped ?? 0;
     },
     async close() {
       await pool.end();
     },
   };
+}
+
+async function readCalendarAutoOpenSelectionStats(
+  queryable: Queryable,
+): Promise<PmsCalendarAutoOpenSelectionStats> {
+  const result = await queryable.query<PmsCalendarAutoOpenSelectionStats>(
+    `SELECT
+       count(*)::int AS "enabledSettings",
+       count(*) FILTER (
+         WHERE EXISTS (
+           SELECT 1
+           FROM pms.rooms physical_room
+           JOIN pms.room_types room_type
+             ON room_type.property_id=physical_room.property_id
+            AND room_type.id=physical_room.room_type_id
+            AND room_type.active IS TRUE
+           WHERE physical_room.property_id=setting.property_id
+             AND physical_room.status<>'retired'
+             AND (
+               physical_room.operational_label_status<>'verified'
+               OR physical_room.room_number IS NULL
+             )
+         )
+       )::int AS "skippedUnverifiedLabels"
+     FROM pms.calendar_auto_open_settings setting
+     WHERE setting.enabled IS TRUE`,
+  );
+  return result.rows[0] ?? { enabledSettings: 0, skippedUnverifiedLabels: 0 };
 }
 
 /**
@@ -1223,6 +1250,18 @@ async function enqueuePgCalendarAutoOpenJob(
   context: PmsChannexSchedulerContext,
 ): Promise<PmsCalendarAutoOpenResult> {
   const client = await pool.connect();
+  try {
+    return await enqueueCalendarAutoOpenJobOnClient(client, candidate, context);
+  } finally {
+    client.release();
+  }
+}
+
+async function enqueueCalendarAutoOpenJobOnClient(
+  client: pg.PoolClient,
+  candidate: PmsCalendarAutoOpenCandidate,
+  context: PmsChannexSchedulerContext,
+): Promise<PmsCalendarAutoOpenResult> {
   const eventKey = buildCalendarAutoOpenEventKey(candidate);
   const jobKey = buildCalendarAutoOpenJobKey(candidate);
   const keyHash = sha256Key(jobKey);
@@ -1320,8 +1359,6 @@ async function enqueuePgCalendarAutoOpenJob(
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
-  } finally {
-    client.release();
   }
 }
 
