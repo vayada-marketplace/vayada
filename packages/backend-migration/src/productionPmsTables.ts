@@ -26,6 +26,7 @@ export const PRODUCTION_PMS_WRITE_ORDER = [
   "inventory_days",
   "checkin_checklist_templates",
   "checkout_inspection_templates",
+  "calendar_auto_open_settings",
   "booking_checkin_records",
   "booking_checkout_charges",
   "booking_checkout_records",
@@ -209,6 +210,18 @@ export const PRODUCTION_PMS_TABLES: Record<string, PmsTableDefinition> = {
   },
   checkin_checklist_templates: propertyTable("pms.checkin_checklist_templates"),
   checkout_inspection_templates: propertyTable("pms.checkout_inspection_templates"),
+  calendar_auto_open_settings: {
+    ...table("pms.calendar_auto_open_settings", true, [
+      property,
+      c("revision", "revision", "integer"),
+      c("enabled", "enabled", "boolean"),
+      c("mode", "mode", "text"),
+      c("rollingMonths", "rolling_months", "smallint"),
+      c("fixedEndMonth", "fixed_end_month", "date"),
+      updated,
+    ]),
+    key: ["property_id"],
+  },
   booking_checkin_records: table(
     "pms.booking_checkin_records",
     false,

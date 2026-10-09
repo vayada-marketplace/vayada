@@ -720,6 +720,70 @@ describe.skipIf(!URL)("production PMS writers (PostgreSQL)", () => {
       await client.query("ROLLBACK");
     }
   });
+
+  it("carries a cohort hotel's auto-open setting and keeps a newer native edit", async () => {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+    try {
+      await seedPrerequisites(client);
+      const prerequisites = await readProductionPmsPrerequisites(client, RUN);
+      const source = { id: HOTEL, calendar_auto_open_enabled: true, calendar_auto_open_months: 24 };
+      const plan = async (records: PmsTargetRecord[] = []) =>
+        buildProductionPmsPlan({
+          sourceRunId: RUN,
+          snapshotAt: "2026-09-04T00:00:00Z",
+          completedAt: "2026-09-04T00:00:00Z",
+          rows: [row("hotels", source)],
+          cohort: { bookingHotelIds: [], pmsHotelIds: [HOTEL], marketplaceHotelIds: [] },
+          target: await readProductionPmsTargetState(client, records, prerequisites),
+        });
+      const planned = await plan((await plan()).records);
+      expect(planned.blockers).toEqual([]);
+      expect(await writeProductionPmsRecords(client, planned.writes)).toEqual({
+        calendar_auto_open_settings: 1,
+      });
+      await writeProductionMigrationProvenance(client, planned.provenance, RUN);
+      const verified = await plan(planned.records);
+      expect([verified.blockers, verified.writes, verified.checksum]).toEqual([
+        [],
+        [],
+        planned.checksum,
+      ]);
+      const read = `SELECT revision, enabled, mode, rolling_months AS "rollingMonths",
+                           fixed_end_month AS "fixedEndMonth"
+                      FROM pms.effective_calendar_auto_open_settings WHERE property_id = $1`;
+      expect((await client.query(read, [PROPERTY])).rows).toEqual([
+        { revision: 1, enabled: true, mode: "rolling", rollingMonths: 24, fixedEndMonth: null },
+      ]);
+      // The import leaves evaluation to the VAY-2066 producer: no setting-change outbox row.
+      const outbox = await client.query(
+        `SELECT 1 FROM platform.outbox_events
+          WHERE property_id = $1 AND event_type LIKE 'pms.calendar_auto_open.%'`,
+        [PROPERTY],
+      );
+      expect(outbox.rows).toEqual([]);
+
+      // A later staff edit wins over an unchanged rerun and over a changed legacy value.
+      await client.query(
+        `UPDATE pms.calendar_auto_open_settings SET revision = 2, rolling_months = 12,
+                updated_at = now() + interval '1 minute' WHERE property_id = $1`,
+        [PROPERTY],
+      );
+      expect((await plan(planned.records)).blockers).toEqual([]);
+      source.calendar_auto_open_months = 18;
+      const rerun = await plan(planned.records);
+      expect([rerun.blockers, rerun.writes, rerun.counts.preservedNewerTarget]).toEqual([
+        [],
+        [],
+        1,
+      ]);
+      expect((await client.query(read, [PROPERTY])).rows[0]).toMatchObject({
+        revision: 2,
+        rollingMonths: 12,
+      });
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
 });
 
 async function seedPrerequisites(client: pg.Client): Promise<void> {

@@ -151,6 +151,9 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
      (`distribution.public_hotel_bookability_profiles`) is not written by the
      cutover. Publish it per cohort hotel, through the normal booking-profile
      publish or `target:booking-public-bookability:backfill`.
+   - Calendar auto-open settings are carried across as explicit rows (enabled or
+     disabled), so the new on-by-default does not flip a legacy "off". The VAY-2066
+     producer must be live before go-day, or migrated windows stop moving.
 
    Then check that each cohort hotel passes the VAY-1543 public pricing rule:
    - exactly one active `hotel_group` organization holds both property links
