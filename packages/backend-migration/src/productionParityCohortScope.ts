@@ -15,7 +15,7 @@ const MESSAGES = {
   cohortPropertyEntitlement:
     "A cohort property's organization lacks an active, unsuspended PMS property entitlement",
   cohortAutoOpen:
-    "A cohort property lacks a calendar auto-open setting row matching its legacy choice",
+    "A cohort property's auto-open row differs from its legacy choice (on: matching; off: none)",
   profileNotPrivate: "A property outside the cohort has a non-private profile",
   verifiedDomain: "A property outside the cohort has a verified custom domain",
   publicMedia: "A property outside the cohort has public media",
@@ -144,7 +144,8 @@ const SCOPE_VIOLATION_QUERY = `${SCOPE_CTES}
      GROUP BY owner.property_id, owner.organization_id
     HAVING NOT coalesce(bool_or(entitlement.status = 'active'), FALSE)
         OR coalesce(bool_or(entitlement.status = 'suspended'), FALSE)
-    -- productionPmsCalendarAutoOpenRecords: on-by-default needs an explicit row for every hotel.
+    -- productionPmsCalendarAutoOpenRecords. Without a row auto-open is on by default (VAY-2066
+    -- R2): a cohort hotel with legacy auto-open off must have none, one with it on a match.
     UNION ALL SELECT 'cohortAutoOpen', link.property_id::text FROM legacy_link link
       JOIN migration_source_pms.snapshot_rows hotel
         ON hotel.run_id = $4 AND hotel.source_schema = 'public' AND hotel.source_table = 'hotels'
@@ -152,15 +153,16 @@ const SCOPE_VIOLATION_QUERY = `${SCOPE_CTES}
       LEFT JOIN pms.calendar_auto_open_settings setting ON setting.property_id = link.property_id
      WHERE link.inside AND link.source_system = 'pms'
        AND link.disposition IS DISTINCT FROM 'private_quarantine'
-       AND NOT coalesce(setting.enabled
-             = coalesce((hotel.row_data ->> 'calendar_auto_open_enabled')::boolean, FALSE)
-         AND CASE WHEN hotel.row_data ->> 'calendar_auto_open_mode' = 'fixed'
-                   AND hotel.row_data ->> 'calendar_auto_open_fixed_month' IS NOT NULL
-           THEN setting.mode = 'fixed' AND setting.fixed_end_month
-             = date_trunc('month', (hotel.row_data ->> 'calendar_auto_open_fixed_month')::date)::date
-           ELSE setting.mode = 'rolling' AND setting.rolling_months
-             = coalesce((hotel.row_data ->> 'calendar_auto_open_months')::int, 18)
-         END, FALSE)
+       AND NOT CASE
+         WHEN NOT coalesce((hotel.row_data ->> 'calendar_auto_open_enabled')::boolean, FALSE)
+           THEN setting.property_id IS NULL
+         WHEN hotel.row_data ->> 'calendar_auto_open_mode' = 'fixed'
+           THEN coalesce(setting.enabled AND setting.mode = 'fixed' AND setting.fixed_end_month
+             = date_trunc('month', (hotel.row_data ->> 'calendar_auto_open_fixed_month')::date)::date,
+             FALSE)
+         ELSE coalesce(setting.enabled AND setting.mode = 'rolling' AND setting.rolling_months
+             = coalesce((hotel.row_data ->> 'calendar_auto_open_months')::int, 18), FALSE)
+       END
     UNION ALL SELECT 'autoOpenNotDisabled', link.property_id::text FROM legacy_link link
       LEFT JOIN pms.calendar_auto_open_settings setting ON setting.property_id = link.property_id
      WHERE NOT link.inside AND link.source_system = 'pms' AND setting.enabled IS NOT FALSE

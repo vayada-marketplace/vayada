@@ -644,7 +644,7 @@ describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
     }
   });
 
-  it("requires an explicit calendar auto-open row matching each legacy choice", async () => {
+  it("checks the calendar auto-open rows against each legacy choice", async () => {
     assertSafeTestDatabase(URL!);
     const client = new pg.Client({ connectionString: URL });
     await client.connect();
@@ -700,7 +700,7 @@ describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
       );
       expect(await autoOpen()).toEqual([]);
 
-      // A legacy "off" needs an explicit disabled row: enabled or missing both fail.
+      // A legacy "off" takes the on-by-default: any row, enabled or disabled, fails.
       const inViolation = [{ category: "cohortAutoOpen", subjectId: IN_HOTEL_ID }];
       await client.query(
         `UPDATE migration_source_pms.snapshot_rows
@@ -712,11 +712,11 @@ describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
         "UPDATE pms.calendar_auto_open_settings SET enabled = FALSE WHERE property_id = $1",
         [IN_HOTEL_ID],
       );
-      expect(await autoOpen()).toEqual([]);
+      expect(await autoOpen()).toEqual(inViolation);
       await client.query("DELETE FROM pms.calendar_auto_open_settings WHERE property_id = $1", [
         IN_HOTEL_ID,
       ]);
-      expect(await autoOpen()).toEqual(inViolation);
+      expect(await autoOpen()).toEqual([]);
     } finally {
       await client.query("DELETE FROM migration_source_pms.snapshot_rows WHERE run_id = $1", [run]);
       await client.query("DELETE FROM platform.source_extraction_runs WHERE run_id = $1", [run]);

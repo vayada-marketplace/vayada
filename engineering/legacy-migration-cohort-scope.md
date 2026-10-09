@@ -111,10 +111,10 @@ platform.production_migration_cohorts(
 - It also fails when a cohort property is unexpectedly quarantined, or lacks
   exactly one active hotel organization holding both native links with an
   active, unsuspended PMS entitlement.
-- It also fails when a cohort PMS property lacks a calendar auto-open settings
-  row matching its legacy choice (enabled or disabled), or a non-cohort one
-  lacks an explicitly disabled row. The rows are explicit because auto-open is
-  on by default for a hotel without an explicit choice.
+- It also checks calendar auto-open rows, given that a property without one is
+  on by default (VAY-2066 R2). A cohort PMS property whose legacy auto-open is on
+  needs a matching enabled row, one whose legacy auto-open is off needs none,
+  and a non-cohort one needs an explicitly disabled row.
 - Unit tests per domain cover cohort, non-cohort and no-cohort behaviour.
   PostgreSQL integration tests cover the cohort table, the snapshot load and
   the parity invariant.

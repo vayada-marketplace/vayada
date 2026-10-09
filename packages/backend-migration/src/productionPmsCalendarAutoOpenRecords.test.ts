@@ -70,20 +70,22 @@ const setting = (index: number, ...[enabled, mode, rollingMonths, fixedEndMonth]
 });
 
 describe("production PMS calendar auto-open settings", () => {
-  it("carries cohort choices and writes inert hotels an explicit disabled row", () => {
-    const state = target(5);
+  it("carries enabled cohort choices and writes inert hotels an explicit disabled row", () => {
+    const state = target(7);
     state.propertyLinks[3]!.migrationDisposition = "private_quarantine";
+    state.propertyLinks.splice(5, 1); // hotel 6 stays unresolved
     const { records, blockers } = build(
       [
         hotel(1, { ...enabled, calendar_auto_open_months: 24, calendar_auto_open_through: "x" }),
         // Mid-month in the last month the native writer accepts.
         hotel(2, { ...enabled, ...fixed, calendar_auto_open_fixed_month: "2028-10-15" }),
-        hotel(3, { ...fixed, calendar_auto_open_enabled: false }),
+        hotel(3, { ...fixed, calendar_auto_open_enabled: false }), // legacy off: on by default
         hotel(4, { ...enabled, calendar_auto_open_months: 12 }), // private quarantine
         hotel(5, { ...enabled, ...fixed }), // outside the cohort
+        hotel(7, { calendar_auto_open_enabled: null }), // legacy empty: on by default
         hotel(6, enabled), // unresolved: source coverage reports it
       ],
-      cohort(1, 2, 3, 4, 6),
+      cohort(1, 2, 3, 4, 6, 7),
       state,
     );
 
@@ -91,9 +93,8 @@ describe("production PMS calendar auto-open settings", () => {
     expect(records.map((record) => record.row)).toEqual([
       setting(1, true, "rolling", 24, null),
       setting(2, true, "fixed", null, "2028-10-01"),
-      // A disabled fixed mode without a month cannot be stored, so it stays rolling.
-      setting(3, false, "rolling", 18, null),
       setting(4, false, "rolling", 12, null),
+      // A disabled fixed mode without a month cannot be stored, so it stays rolling.
       setting(5, false, "rolling", 18, null),
     ]);
     expect(records[0]).toMatchObject({ sourceTable: "hotels", sourceId: `${HOTEL}1` });

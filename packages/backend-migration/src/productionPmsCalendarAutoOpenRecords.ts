@@ -13,14 +13,15 @@ import { pmsRecord } from "./productionPmsValues.js";
 const SETTING_KEYS = ["enabled", "mode", "rollingMonths", "fixedEndMonth"] as const;
 
 /**
- * VAY-1362: in a cohort run every resolved PMS hotel gets an explicit
- * pms.calendar_auto_open_settings row in the native settings writer's shape, because auto-open
- * is on by default (rolling 12) for a property without an explicit choice. A canonical cohort
- * hotel carries its legacy choice, enabled or disabled: a legacy "off" stays off, and the
- * VAY-2066 producer can keep an enabled window moving once the legacy scheduler is frozen (it
- * still needs verified rooms, an operating calendar and pricing settings). A hotel
- * outside the cohort or in private quarantine gets the row disabled, so it stays inert. A run
- * without a cohort plans nothing here, so its plan and checksum are unchanged.
+ * VAY-1362: carries the legacy calendar auto-open choice into pms.calendar_auto_open_settings, in
+ * the native settings writer's shape, given that auto-open is on by default (rolling 12) for a
+ * property without a row (VAY-2066 R2):
+ * - a canonical cohort hotel with legacy auto-open on keeps an explicit enabled row with its
+ *   mode, so the VAY-2066 producer moves its window once the legacy scheduler is frozen;
+ * - one with legacy auto-open off gets no row: legacy "off" kept every rated date sellable, which
+ *   the on-by-default preserves best;
+ * - a hotel outside the cohort or in private quarantine gets a disabled row, so it stays inert.
+ * A run without a cohort plans nothing here, so its plan and checksum are unchanged.
  */
 export function buildPmsCalendarAutoOpenRecords(context: PmsBuildContext): PmsTargetRecord[] {
   if (!context.cohort) return [];
@@ -43,8 +44,15 @@ export function buildPmsCalendarAutoOpenRecords(context: PmsBuildContext): PmsTa
             link.sourceId.toLowerCase() === hotelId &&
             link.migrationDisposition === "private_quarantine",
         );
+      const legacyOn = bool(
+        hotel.data["calendar_auto_open_enabled"],
+        "calendar_auto_open_enabled",
+        false,
+      );
+      if (carried && !legacyOn) continue; // takes the on-by-default
+      const enabled = carried && legacyOn;
       const current = existing.get(propertyId);
-      records.push(settingRecord(context, hotel, hotelId, propertyId, carried, current));
+      records.push(settingRecord(context, hotel, hotelId, propertyId, enabled, current));
     } catch (error) {
       addPmsBlocker(
         context,
@@ -62,12 +70,10 @@ function settingRecord(
   hotel: IdentitySourceRow,
   hotelId: string,
   propertyId: string,
-  carried: boolean,
+  enabled: boolean,
   existing: ExistingPmsTargetRecord | undefined,
 ): PmsTargetRecord {
   const data = hotel.data;
-  const enabled =
-    bool(data["calendar_auto_open_enabled"], "calendar_auto_open_enabled", false) && carried;
   const mode =
     optionalText(data["calendar_auto_open_mode"], "calendar_auto_open_mode") ?? "rolling";
   const months = integer(data["calendar_auto_open_months"], "calendar_auto_open_months", 18);
