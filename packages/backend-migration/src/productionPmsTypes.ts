@@ -86,6 +86,8 @@ export type PmsCohortPropertyState = {
     organizationId: string;
     profileRevision: number;
     timeZone: string;
+    scheduleMode: string;
+    periods: Array<{ startsOn: string; endsOn: string }>;
     defaultMinimumStayNights: number;
     createdByUserId: string;
     createdAt: string;

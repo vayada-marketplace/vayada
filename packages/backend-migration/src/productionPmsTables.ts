@@ -27,6 +27,7 @@ export const PRODUCTION_PMS_WRITE_ORDER = [
   "domain_events",
   "outbox_events",
   "operating_calendar_revisions",
+  "operating_calendar_recurring_periods",
   "operating_calendar_room_bindings",
   "operational_booking_assignments",
   "room_blocks",
@@ -237,6 +238,23 @@ export const PRODUCTION_PMS_TABLES: Record<string, PmsTableDefinition> = {
       updated,
     ]),
     key: ["property_id", "calendar_revision"],
+  },
+  operating_calendar_recurring_periods: {
+    ...table(
+      "pms.operating_calendar_recurring_periods",
+      false,
+      [
+        property,
+        c("calendarRevision", "calendar_revision", "integer"),
+        c("periodIndex", "period_index", "smallint"),
+        c("startMonth", "start_month", "smallint"),
+        c("startDay", "start_day", "smallint"),
+        c("endMonth", "end_month", "smallint"),
+        c("endDay", "end_day", "smallint"),
+      ],
+      "NULL",
+    ),
+    key: ["property_id", "calendar_revision", "period_index"],
   },
   operating_calendar_room_bindings: {
     ...table(

@@ -6,17 +6,19 @@ import {
   PMS_OPERATING_CALENDAR_OUTBOX_METADATA,
   createPmsOperatingCalendarSourceRevision,
   parsePmsOperatingCalendarConfigurationSnapshot,
+  parsePmsOperatingSchedule,
   type PmsOperatingCalendarConfigurationSnapshot,
   type PmsOperatingCalendarRoomBinding,
+  type PmsOperatingSchedule,
 } from "@vayada/domain-pms";
 
 import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
-import { integer, optionalUuid, uuid } from "./productionBookingValues.js";
+import { integer, optionalText, optionalUuid, uuid } from "./productionBookingValues.js";
 import { carriedCohortHotel } from "./productionPmsCohortSetup.js";
 import { addPmsBlocker, safePmsSourceId } from "./productionPmsContext.js";
 import { nativeCommandId, nativeCommandRecords } from "./productionPmsNativeCommand.js";
 import type { PmsBuildContext, PmsRoomBuild, PmsTargetRecord } from "./productionPmsTypes.js";
-import { pmsRecord } from "./productionPmsValues.js";
+import { jsonArray, pmsRecord } from "./productionPmsValues.js";
 
 // VAY-1362 setup completeness: the operating calendar native hotel setup saves
 // (pmsOperatingCalendarCommandRepository): revision 1, year-round, one binding per operating room
@@ -106,8 +108,14 @@ function storedCalendar(
       );
     return null;
   }
+  const schedule = parsePmsOperatingSchedule({
+    mode: stored.scheduleMode,
+    periods: stored.periods,
+  });
+  if (!schedule) return null;
   return calendar(hotel, property.propertyId, stored.organizationId, stored.createdByUserId, {
     ...stored,
+    schedule,
     // jsonb reorders object keys; rebuild them in the order the first run planned.
     bindings: stored.bindings.map((binding) => ({
       roomTypeId: binding.roomTypeId,
@@ -139,6 +147,11 @@ function newCalendar(
   );
   if (roomTypes.some((roomType) => !rooms.nativeFactsRoomTypes?.has(roomType.targetId)))
     return null;
+  // Legacy operating periods belong to room types; the calendar's schedule is the property's.
+  const schedule = legacySchedule(
+    roomTypes.map((roomType) => context.roomTypeById.get(roomType.targetId)?.data ?? {}),
+  );
+  if (!schedule) return null;
   const bindings = roomTypes
     .map((roomType) => {
       const capacity = rooms.records.filter(
@@ -180,6 +193,7 @@ function newCalendar(
   return calendar(hotel, property.propertyId, property.organizationIds[0]!, creator, {
     profileRevision: property.profileRevision,
     timeZone: property.timeZone,
+    schedule,
     defaultMinimumStayNights: 1,
     bindings: bindings.map(({ inventoryTotal: _total, ...binding }) => binding),
     at: new Date(context.completedAt).toISOString(),
@@ -194,6 +208,7 @@ function calendar(
   input: {
     profileRevision: number;
     timeZone: string;
+    schedule: PmsOperatingSchedule;
     defaultMinimumStayNights: number;
     bindings: PmsOperatingCalendarRoomBinding[];
     at: string;
@@ -215,7 +230,7 @@ function calendar(
         propertyTimeZone: input.timeZone,
         roomBindings: input.bindings,
       },
-      schedule: { mode: "year_round", periods: [] },
+      schedule: input.schedule,
       defaultMinimumStayNights: input.defaultMinimumStayNights,
       createdAt: input.at,
       updatedAt: input.at,
@@ -320,6 +335,17 @@ export function buildPmsCohortCalendarRecords(
         createdAt: at,
         updatedAt: at,
       }),
+      ...configuration.schedule.periods.map((period, index) =>
+        record("operating_calendar_recurring_periods", `${propertyId}:1:${index}`, {
+          propertyId,
+          calendarRevision: 1,
+          periodIndex: index,
+          startMonth: Number(period.startsOn.slice(0, 2)),
+          startDay: Number(period.startsOn.slice(3, 5)),
+          endMonth: Number(period.endsOn.slice(0, 2)),
+          endDay: Number(period.endsOn.slice(3, 5)),
+        }),
+      ),
       ...bindings.map((binding) =>
         record("operating_calendar_room_bindings", `${propertyId}:1:${binding.roomTypeId}`, {
           propertyId,
@@ -329,4 +355,63 @@ export function buildPmsCohortCalendarRecords(
       ),
     ];
   });
+}
+
+const MONTH_LENGTHS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+/**
+ * The recurring schedule the legacy operating periods of the bound room types express
+ * (inventory operatingOn: open on a period's days, wrapping over the year end; no periods means
+ * open all year), canonicalized by the native parser. Null when the room types disagree, the
+ * year has no open day, or the native contract refuses the periods (more than 24): the property
+ * schedule cannot carry them, so the hotel gets no calendar.
+ */
+export function legacySchedule(roomTypes: Record<string, unknown>[]): PmsOperatingSchedule | null {
+  const index = (value: string, end: boolean) => {
+    // A non-leap year: 29 February ends on the 28th or starts on 1 March.
+    const monthDay = value === "02-29" ? (end ? "02-28" : "03-01") : value;
+    const match = /^(\d{2})-(\d{2})$/.exec(monthDay);
+    const month = Number(match?.[1]);
+    const day = Number(match?.[2]);
+    if (!match || month < 1 || month > 12 || day < 1 || day > MONTH_LENGTHS[month - 1]!)
+      throw new Error(`operating period day ${value} is invalid`);
+    return MONTH_LENGTHS.slice(0, month - 1).reduce((sum, length) => sum + length, 0) + day - 1;
+  };
+  const years = roomTypes.map((data) => {
+    const periods = jsonArray(data["operating_periods"], "operating_periods");
+    const open = Array<boolean>(365).fill(!periods.length);
+    for (const period of periods) {
+      const value = (period ?? {}) as Record<string, unknown>;
+      const from = optionalText(value["from"], "period.from");
+      const to = optionalText(value["to"], "period.to");
+      if (!from || !to) continue; // legacy ignores a period without both days
+      const end = index(to, true);
+      for (let day = index(from, false); ; day = (day + 1) % 365) {
+        open[day] = true;
+        if (day === end) break;
+      }
+    }
+    return open;
+  });
+  const [year] = years;
+  if (!year || years.some((other) => other.join() !== year.join()) || !year.includes(true))
+    return null;
+  if (!year.includes(false)) return parsePmsOperatingSchedule({ mode: "year_round", periods: [] });
+  const monthDay = (day: number) => {
+    let month = 0;
+    while (day >= MONTH_LENGTHS[month]!) day -= MONTH_LENGTHS[month++]!;
+    return `${String(month + 1).padStart(2, "0")}-${String(day + 1).padStart(2, "0")}`;
+  };
+  const periods: { startsOn: string; endsOn: string }[] = [];
+  const firstClosed = year.indexOf(false);
+  let start: number | null = null;
+  for (let offset = 1; offset <= 365; offset += 1) {
+    const day = (firstClosed + offset) % 365;
+    if (year[day] && start === null) start = day;
+    if (start !== null && !year[(day + 1) % 365]) {
+      periods.push({ startsOn: monthDay(start), endsOn: monthDay(day) });
+      start = null;
+    }
+  }
+  return parsePmsOperatingSchedule({ mode: "recurring", periods });
 }
