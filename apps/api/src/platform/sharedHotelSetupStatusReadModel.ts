@@ -11,8 +11,6 @@ import type {
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import { lockHotelSetupOrganization } from "../domains/hotelSetupTrackCommandRepository.js";
-import { assertHotelSetupCreationScope } from "../hotelSetupCommandScope.js";
-import { assertHotelSetupCreationPrivileges } from "../hotelSetupCreationPrivileges.js";
 import { lockHotelSetupCreationPermissions } from "../hotelSetupMembership.js";
 import { hasPublishedPropertySurface } from "../routes/sharedHotelSetupStatus.js";
 import { BookingContactPublicationConflictError } from "../routes/bookingSettings.js";
@@ -179,7 +177,6 @@ export function createPgSharedHotelSetupStatusRepository(config: {
   connectionString: string;
   max?: number;
   pool?: SharedHotelSetupStatusPool;
-  hotelSetupNativeCreation?: boolean;
   /** Self-serve hotel creation on the ordinary login (VAY-2056): the creating Owner's current
    * authority is re-locked in the creation transaction. Never set on the instance that serves
    * platform-admin provisioning (its actor is not a member of the hotel's organization). */
@@ -236,7 +233,6 @@ export function createPgSharedHotelSetupStatusRepository(config: {
           ...input,
           mode: "create",
         },
-        config.hotelSetupNativeCreation === true,
         config.hotelSetupOwnerCreation === true,
       );
       if (!propertyId) {
@@ -633,7 +629,6 @@ async function writePropertyProfile(
         expectedProfileRevision: number;
         profile: SharedPropertyProfileInput;
       },
-  nativeCreation = false,
   ownerCreation = false,
 ): Promise<string | null> {
   const payload = propertyProfileWritePayload(input.profile);
@@ -657,23 +652,21 @@ async function writePropertyProfile(
     );
     try {
       await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
-      const ownerAuthority = nativeCreation || ownerCreation;
       if (
-        ownerAuthority &&
+        ownerCreation &&
         (!input.audit ||
           input.targetAccountUserId !== undefined ||
           input.provisioningReference !== undefined ||
           input.audit.reason !== undefined)
       )
         throw new AuthorizationError();
-      if (nativeCreation) await assertHotelSetupCreationPrivileges(client);
       // Match the track command's advisory-lock order before taking organization row locks.
       await lockHotelSetupOrganization(
         client,
         input.organizationId,
         input.targetAccountUserId ?? null,
       );
-      // The native scope locks the organization FOR UPDATE; the ordinary Owner path does the same.
+      // The Owner path locks the organization FOR UPDATE so a suspension waits for the command.
       if (ownerCreation) {
         const organization = await client.query(
           "SELECT id FROM identity.organizations WHERE id=$1::uuid AND kind='hotel_group' AND status='active' FOR UPDATE",
@@ -681,8 +674,7 @@ async function writePropertyProfile(
         );
         if (organization.rows.length !== 1) throw new AuthorizationError();
       }
-      if (nativeCreation) await assertHotelSetupCreationScope(client, input.organizationId);
-      if (ownerAuthority) {
+      if (ownerCreation) {
         const permissions = await lockHotelSetupCreationPermissions(client, {
           organizationId: input.organizationId,
           actorUserId: input.audit!.actorUserId,
@@ -759,18 +751,13 @@ async function writePropertyProfile(
       const propertyId = created.rows[0]?.propertyId;
       if (!propertyId)
         throw new Error("Created shared property profile did not return a property id");
-      // Link only a property this transaction created. Native logins are held to this by RLS
-      // (hotel_setup_new_property_allowed) and lack table SELECT for the system column, so the
-      // check runs for the ordinary login only, whose owner-link INSERT has no RLS guard.
-      if (!nativeCreation) {
-        const fresh = await client.query(
-          "SELECT 1 FROM hotel_catalog.properties WHERE id=$1::uuid AND xmin=pg_current_xact_id()::xid",
-          [propertyId],
-        );
-        if (fresh.rows.length !== 1)
-          throw new Error("Created shared property is not from this transaction");
-      }
-      // Native policies need parent links visible in a later statement's snapshot.
+      // Link only a property this transaction created: the owner-link INSERT has no RLS guard.
+      const fresh = await client.query(
+        "SELECT 1 FROM hotel_catalog.properties WHERE id=$1::uuid AND xmin=pg_current_xact_id()::xid",
+        [propertyId],
+      );
+      if (fresh.rows.length !== 1)
+        throw new Error("Created shared property is not from this transaction");
       // All stages stay on this client and roll back together.
       await client.query(createPropertyCatalogOwnerSql(), [input.organizationId, propertyId]);
       const result = await client.query<PropertyProfileWriteRow>(createPropertyProfileSql(), [

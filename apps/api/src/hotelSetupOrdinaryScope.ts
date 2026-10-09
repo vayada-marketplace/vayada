@@ -1,10 +1,10 @@
 import { AuthorizationError } from "@vayada/backend-authorization";
 import type { QueryResultRow } from "pg";
 
-type ScopeQuery = {
+export type HotelSetupScopeQuery = {
   query<T extends QueryResultRow>(sql: string, values?: readonly unknown[]): Promise<{ rows: T[] }>;
 };
-type ScopeClient = ScopeQuery & { release(): void };
+type ScopeClient = HotelSetupScopeQuery & { release(): void };
 type ScopePool = { connect(): Promise<ScopeClient> };
 
 export type HotelSetupPropertyScope = { propertyId: string; organizationId: string };
@@ -21,7 +21,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * suspension or revocation waits for this command, and the active catalog and PMS owner links
  * FOR SHARE. Call first inside the write transaction; membership checks follow on the same client. */
 export async function lockHotelSetupOrdinaryPropertyScope(
-  client: ScopeQuery,
+  client: HotelSetupScopeQuery,
   scope: HotelSetupPropertyScope,
 ): Promise<boolean> {
   if (!UUID.test(scope.propertyId) || !UUID.test(scope.organizationId)) return false;
@@ -50,8 +50,8 @@ export async function lockHotelSetupOrdinaryPropertyScope(
   return links.rows.length > 0;
 }
 
-/** Same contract as withHotelSetupCommandScope for the ordinary API login: the scope locks
- * are held through the command's commit. Denial throws AuthorizationError before any work. */
+/** Runs work inside the ordinary property scope: the scope locks are held through the
+ * command's commit. Denial throws AuthorizationError before any work. */
 export const withOrdinaryHotelSetupPropertyScope: HotelSetupPropertyScopeRunner = async (
   pool,
   scope,

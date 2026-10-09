@@ -1,33 +1,24 @@
 import { randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import { AuthorizationError, resolveEffectivePropertyAccess } from "@vayada/backend-authorization";
-import { withHotelSetupCommandScope } from "./hotelSetupCommandScope.js";
 import {
-  withOrdinaryHotelSetupPropertyScope,
+  withOrdinaryHotelSetupPropertyScope as runScope,
   type HotelSetupPropertyScopeRunner,
 } from "./hotelSetupOrdinaryScope.js";
 import { lockHotelSetupMembership } from "./hotelSetupMembership.js";
-import { assertHotelSetupLaunchSettingsPrivileges } from "./hotelSetupLaunchSettingsPrivileges.js";
 import { BookingContactPublicationConflictError } from "./routes/bookingSettings.js";
 import type { SharedPropertyLaunchSettings } from "./routes/sharedHotelSetupStatus.js";
 
-const nativeScope: HotelSetupPropertyScopeRunner = (pool, scope, work) =>
-  withHotelSetupCommandScope(
-    pool,
-    { ...scope, operation: "launch_settings" },
-    work,
-    assertHotelSetupLaunchSettingsPrivileges,
-  );
+type ScopePool = Parameters<HotelSetupPropertyScopeRunner>[0];
 
-/** The narrow launch-settings write (eight fields, no profile revision). The private service
- * runs it on its native login; the public API passes withOrdinaryHotelSetupPropertyScope
- * (VAY-2056). Input uses the shared route parser. */
+/** The narrow launch-settings write (eight fields, no profile revision) on the ordinary API
+ * login (VAY-2056), inside withOrdinaryHotelSetupPropertyScope. Input uses the shared route
+ * parser. */
 export async function writeHotelSetupLaunchSettings(
-  pool: Parameters<typeof withHotelSetupCommandScope>[0],
+  pool: ScopePool,
   context: RequestContext,
   propertyId: string,
   settings: SharedPropertyLaunchSettings,
-  runScope: HotelSetupPropertyScopeRunner = nativeScope,
 ): Promise<SharedPropertyLaunchSettings | null> {
   if (!context.actor.providerIdentity.sessionId) throw new AuthorizationError();
   const organizationId = context.selectedOrganization.organizationId;
@@ -136,7 +127,7 @@ export async function writeHotelSetupLaunchSettings(
         context.audit.correlationId ?? context.audit.requestId,
       ],
     );
-    // Read authoritative values while the transaction and native owner locks remain held.
+    // Read authoritative values while the transaction and scope locks remain held.
     const saved = await client.query<SharedPropertyLaunchSettings>(
       `SELECT settings.default_currency::text AS "defaultCurrency",
           settings.supported_currencies AS "supportedCurrencies",
@@ -159,15 +150,7 @@ export async function writeHotelSetupLaunchSettings(
 }
 
 /** Public route adapter on the ordinary API login (VAY-2056). */
-export function createOrdinaryHotelSetupLaunchSettingsCommand(
-  pool: Parameters<typeof withHotelSetupCommandScope>[0],
-) {
+export function createOrdinaryHotelSetupLaunchSettingsCommand(pool: ScopePool) {
   return (context: RequestContext, propertyId: string, settings: SharedPropertyLaunchSettings) =>
-    writeHotelSetupLaunchSettings(
-      pool,
-      context,
-      propertyId,
-      settings,
-      withOrdinaryHotelSetupPropertyScope,
-    );
+    writeHotelSetupLaunchSettings(pool, context, propertyId, settings);
 }

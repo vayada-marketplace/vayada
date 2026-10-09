@@ -896,21 +896,23 @@ describe("api config", () => {
     );
   });
 
-  it("loads a canonical replacement-pricing acceptance slug allowlist", () => {
+  it("enables replacement-pricing quote acceptance unless the kill switch is off", () => {
+    expect(loadConfig({}).replacementPricingAcceptanceEnabled).toBe(true);
     expect(
-      loadConfig({
-        REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS: "Test-Hotel, other-hotel,test-hotel",
-      }).replacementPricingAcceptanceAllowedSlugs,
-    ).toEqual(["test-hotel", "other-hotel"]);
-    expect(loadConfig({}).replacementPricingAcceptanceAllowedSlugs).toEqual([]);
+      loadConfig({ REPLACEMENT_PRICING_ACCEPTANCE_ENABLED: "false" })
+        .replacementPricingAcceptanceEnabled,
+    ).toBe(false);
+    expect(() => loadConfig({ REPLACEMENT_PRICING_ACCEPTANCE_ENABLED: "test-hotel" })).toThrow(
+      "REPLACEMENT_PRICING_ACCEPTANCE_ENABLED must be true or false",
+    );
   });
 
-  it("rejects malformed replacement-pricing acceptance slugs", () => {
-    expect(() =>
-      loadConfig({ REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS: "test-hotel,*.vayada.com" }),
-    ).toThrow(
-      "REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS requires up to 100 canonical lowercase slugs",
-    );
+  it("keeps card quote acceptance off unless explicitly enabled", () => {
+    expect(loadConfig({}).replacementPricingCardAcceptanceEnabled).toBe(false);
+    expect(
+      loadConfig({ REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED: "true" })
+        .replacementPricingCardAcceptanceEnabled,
+    ).toBe(true);
   });
 
   it("rejects next API runtime when source selectors would default to legacy or disabled", () => {

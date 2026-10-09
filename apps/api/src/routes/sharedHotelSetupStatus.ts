@@ -1,4 +1,3 @@
-import type { HotelSetupCommandForwarder } from "../hotelSetupCommandForwarder.js";
 import { createHash } from "node:crypto";
 
 import { UnauthorizedError, type PermissionKey } from "@vayada/backend-auth";
@@ -130,13 +129,11 @@ export type SharedHotelSetupStatusRepository = {
 type SharedHotelSetupStatusRoutesOptions = {
   repository: SharedHotelSetupStatusRepository;
   trackCommandRepository: HotelSetupTrackCommandRepository;
-  propertyCreationForwarder?: HotelSetupCommandForwarder;
   /** Self-serve hotel creation on the ordinary login (VAY-2056), an Owner-mode repository
-   * separate from the one serving platform-admin provisioning; replaces the forwarder. */
+   * separate from the one serving platform-admin provisioning. */
   propertyCreationRepository?: Pick<SharedHotelSetupStatusRepository, "createPropertyProfile">;
-  launchSettingsForwarder?: HotelSetupCommandForwarder;
   /** Owner-only narrow launch-settings write on the ordinary login (VAY-2056); replaces the
-   * forwarder and the broad Booking settings writer. Requires propertyAccessRepository. */
+   * broad Booking settings writer. Requires propertyAccessRepository. */
   launchSettingsCommand?: Parameters<typeof registerSharedHotelSetupLaunchSettings>[1];
   /** Owner-only hotel-detail edits on the ordinary login (VAY-2056); unset keeps the
    * pre-cutover sparse writer used by local stacks and tests. Requires propertyAccessRepository. */
@@ -316,10 +313,7 @@ export async function registerSharedHotelSetupStatusRoutes(
     registerSharedHotelSetupPropertyCreation(app, options.propertyCreationRepository, {
       requireOwnerSession: true,
     });
-  else
-    registerSharedHotelSetupPropertyCreation(app, repository, {
-      forward: options.propertyCreationForwarder,
-    });
+  else registerSharedHotelSetupPropertyCreation(app, repository);
 
   const profileCommand =
     options.profileCommand &&
@@ -438,7 +432,7 @@ export async function registerSharedHotelSetupStatusRoutes(
               options.propertyAccessRepository,
             ),
           }
-        : { forward: options.launchSettingsForwarder },
+        : {},
     );
   }
 
@@ -838,7 +832,8 @@ function toSharedSetupTrackAccessError(error: unknown): SharedHotelSetupTrackAcc
   };
 }
 
-/** Shared input contract; private handler independently verifies the original session. */
+/** Shared input contract; with requireOwnerSession the Owner-only gates of the retired private
+ * service run here and the ordinary writer re-checks current authority in its transaction. */
 export function registerSharedHotelSetupLaunchSettings(
   app: FastifyInstance,
   update: (
@@ -848,7 +843,6 @@ export function registerSharedHotelSetupLaunchSettings(
   ) => Promise<SharedPropertyLaunchSettings | null>,
   options: {
     requireOwnerSession?: boolean;
-    forward?: HotelSetupCommandForwarder;
     propertyAccessRepository?: PropertyAccessRepository;
   } = {},
 ): void {
@@ -890,8 +884,6 @@ export function registerSharedHotelSetupLaunchSettings(
     const settings = parsePropertyLaunchSettings(request.body, reply);
     if (settings === false) return reply;
 
-    if (options.forward) return options.forward(request, reply, propertyId, "launch_settings");
-
     let stored: SharedPropertyLaunchSettings | null;
     try {
       stored = await update(access.context, propertyId, settings);
@@ -930,7 +922,6 @@ export type HotelSetupPropertyProfileResult =
   | { status: "conflict"; currentRevision: number }
   | { status: "idempotency_conflict" }
   | { status: "private_contact_conflict" }
-  | { status: "not_provisioned" }
   | { status: "invalid"; fields: Record<string, string[]> };
 
 export type HotelSetupPropertyProfileUpdate = (
@@ -938,18 +929,6 @@ export type HotelSetupPropertyProfileUpdate = (
   propertyId: string,
   command: HotelSetupPropertyProfileCommand,
 ) => Promise<HotelSetupPropertyProfileResult>;
-
-/** Private property-command service. The public API uses the same handler (VAY-2056). */
-export function registerHotelSetupPropertyProfileUpdate(
-  app: FastifyInstance,
-  update: HotelSetupPropertyProfileUpdate,
-  options: { propertyAccessRepository: PropertyAccessRepository },
-): void {
-  app.put(
-    "/properties/:propertyId/profile",
-    hotelSetupPropertyProfileUpdateHandler(update, options),
-  );
-}
 
 function requirePropertyAccessRepository(repository: PropertyAccessRepository | undefined) {
   if (!repository) throw new Error("Hotel detail edits require the property access repository");
@@ -1024,14 +1003,6 @@ export function hotelSetupPropertyProfileUpdateHandler(
         code: "idempotency_key_conflict",
         detail: "These hotel details changed during the save. Review them and try again.",
       });
-    if (result.status === "not_provisioned") {
-      request.log.warn({ propertyId }, "Property profile credential is not provisioned");
-      return reply.status(409).send({
-        code: "profile_edit_not_provisioned",
-        detail:
-          "Editing hotel details isn't enabled for your account on this hotel yet. Please contact Vayada support.",
-      });
-    }
     if (result.status === "private_contact_conflict")
       return reply.status(409).send({
         code: "private_contact_conflict",
@@ -1052,14 +1023,13 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value) ?? "null";
 }
 
-/** Shared validation and policy for the public API and independently authenticated setup service. */
+/** Shared hotel-creation validation and policy; requireOwnerSession adds the Owner-only gate. */
 export function registerSharedHotelSetupPropertyCreation(
   app: FastifyInstance,
   repository: Pick<SharedHotelSetupStatusRepository, "createPropertyProfile">,
-  options: { requireOwnerSession?: boolean; forward?: HotelSetupCommandForwarder } = {},
+  options: { requireOwnerSession?: boolean } = {},
 ): void {
   app.post("/properties", async (request, reply) => {
-    if (options.forward) return options.forward(request, reply, null, "property_creation");
     const access = resolveSharedSetupAccess(request, reply, null, "hotel_catalog.setup.manage");
     if (!access) return reply;
     if (options.requireOwnerSession && !access.context.actor.providerIdentity.sessionId)

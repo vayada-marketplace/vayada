@@ -16,27 +16,20 @@ describe("first-currency starter categories", () => {
     expect(query.mock.calls[0]?.[1]).toEqual([organizationId, propertyId]);
   });
 
-  it.each([undefined, "currency", "currency_ready"] as const)(
-    "only seeds the native readiness path (%s), before audit and commit; failures roll back",
-    async (operation) => {
+  it.each([false, true])(
+    "seeds only on the hotel-setup Owner path (%s), before audit and commit; failures roll back",
+    async (ownerPath) => {
       for (const failure of [null, "categories", "audit"] as const) {
         const queries: string[] = [];
         const release = vi.fn();
         const query = vi.fn(async (sql: string) => {
           queries.push(sql);
-          if (sql.includes("platform.hotel_setup_property_operation_allowed"))
-            return {
-              rows: [
-                {
-                  sessionUser: "vayada_next_hotel_setup_property_test",
-                  currentUser: "vayada_next_hotel_setup_property_test",
-                  allowed: true,
-                  organizationAllowed: true,
-                  safeRole: true,
-                },
-              ],
-              rowCount: 1,
-            };
+          // The ordinary hotel-setup scope (hotelSetupOrdinaryScope.ts).
+          if (sql.includes("transaction_isolation"))
+            return { rows: [{ level: "read committed" }], rowCount: 1 };
+          if (sql.includes("FROM identity.organizations") && sql.includes("FOR UPDATE"))
+            return { rows: [{ id: organizationId }], rowCount: 1 };
+          if (sql.includes("FOR SHARE OF catalog_link")) return { rows: [{}], rowCount: 1 };
           if (sql.includes("FROM hotel_catalog.properties property"))
             return { rows: [{ id: propertyId }], rowCount: 1 };
           if (sql.includes("FROM identity.organization_memberships"))
@@ -100,7 +93,7 @@ describe("first-currency starter categories", () => {
         });
         const repository = createPgPmsPricingCommandRepository({
           connectionString: "test",
-          hotelSetupCurrencyOperation: operation,
+          hotelSetupOrdinaryOwner: ownerPath,
           pool: { connect: async () => ({ query: query as never, release }), end: async () => {} },
           now: () => new Date(at),
           currencyChangeGuard: {
@@ -124,7 +117,7 @@ describe("first-currency starter categories", () => {
         });
         if (!command) throw new Error("invalid command fixture");
         const run = repository.upsertPropertyPricingCurrency(command);
-        const categoryFailure = operation === "currency_ready" && failure === "categories";
+        const categoryFailure = ownerPath && failure === "categories";
         if (categoryFailure || failure === "audit") {
           await expect(run).rejects.toThrow(
             categoryFailure ? "categories incomplete" : "audit unavailable",
@@ -138,7 +131,7 @@ describe("first-currency starter categories", () => {
         const categoryIndex = queries.findIndex((sql) =>
           sql.includes("INSERT INTO finance.expense_categories"),
         );
-        expect(categoryIndex >= 0).toBe(operation === "currency_ready");
+        expect(categoryIndex >= 0).toBe(ownerPath);
         if (categoryIndex >= 0) {
           expect(categoryIndex).toBeGreaterThan(
             queries.findIndex((sql) => sql.includes("INSERT INTO pms.property_pricing_settings")),

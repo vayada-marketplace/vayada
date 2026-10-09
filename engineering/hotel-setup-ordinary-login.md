@@ -3,11 +3,11 @@
 _Design note and implementation plan, 2026-10-07. Phase 1 deliverable; nothing in
 this document grants, deploys or decommissions anything. Predecessors:
 [API runtime database role](api-runtime-database-role.md) (VAY-2054),
-[credential lifecycle](hotel-setup-command-credential-lifecycle.md),
-[launch settings](hotel-setup-launch-settings-command.md),
-[logo writer](hotel-setup-logo-writer.md),
-[profile-edit writer](hotel-setup-profile-edit-writer.md),
-[automatic provisioning](hotel-setup-automatic-provisioning.md)._
+[credential lifecycle](historical/hotel-setup-command-credential-lifecycle.md),
+[launch settings](historical/hotel-setup-launch-settings-command.md),
+[logo writer](historical/hotel-setup-logo-writer.md),
+[profile-edit writer](historical/hotel-setup-profile-edit-writer.md),
+[automatic provisioning](historical/hotel-setup-automatic-provisioning.md)._
 
 ## Decision in one paragraph
 
@@ -180,7 +180,8 @@ Consequences:
 
 ## 4. Pinned-object impact
 
-The seven native preflights (`apps/api/src/hotelSetup{Creation,Currency,
+The seven native preflights (removed from the app by §12 step 3; formerly
+`apps/api/src/hotelSetup{Creation,Currency,
 LaunchSettings,Logo,Profile,FeatureHub,Reader}Privileges.ts`) pin md5 digests of
 policies, triggers, function bodies, view definitions and check constraints on
 the tables below and run at private-service startup and inside every native
@@ -317,7 +318,7 @@ operations. The installed `HOTEL_SETUP_*_COMMAND_*` task-definition variables
 become inert and stay installed until the decommission PR relaxes
 `assert-hotel-setup-caller-retained.py` (platform tf-apply gate). The forwarder
 module, the private service entry point and the native adapters stay in the
-tree for the rollback image and the decommission PRs.
+tree for the rollback image until decommission step 3 (§12) removes them.
 
 ## 6. What stays `SECURITY DEFINER`, and why
 
@@ -494,7 +495,16 @@ Dependency order; each step is reversible until step 6.
    (`HOTEL_SETUP_AUTOMATIC_PROVISIONING_ENABLED` unset, environment
    `hotel-setup-automatic-provisioning`), parked PRs #2901–#2904 closed
    unmerged.
-3. **App PR: remove the native code paths** — `hotelSetupCommandServer.ts`,
+3. **App PR: remove the native code paths** — _prepared as stacked drafts on
+   #2950: #2955 (forwarder and its route options), #2956 (private service,
+   native adapters, preflights, provisioning and bootstrap tooling, native
+   tests and CI steps) and #2957 (docs: the VAY-965/VAY-1092 contracts moved
+   to [`historical/`](historical/)); merge only after steps 1 and 2.
+   As built: `hotelSetupLogoRuntime.ts` keeps its ordinary runtime (only the
+   native strategy goes), `hotelSetupLogoCleanup.ts` and its CLI go too (they
+   accept only a native logo scope row, so run any outstanding cleanup before
+   merging), and the `hotel-setup` CI shard keeps the ordinary suites on a
+   fresh database._ Original list: `hotelSetupCommandServer.ts`,
    `hotelSetupCommandService.ts`, the five `hotelSetup*Commands.ts`,
    `hotelSetupCommandCredentials.ts`, `hotelSetupNativeSecretReader.ts`,
    `hotelSetupCommandScope.ts`, the seven `hotelSetup*Privileges.ts`,

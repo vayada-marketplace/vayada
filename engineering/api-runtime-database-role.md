@@ -148,7 +148,9 @@ PostgreSQL requires an `UPDATE` privilege on at least one column for that.
   policy or trigger would stop the live creation, logo and profile purposes
   until every pinned image is re-released, which is the protected-workflow
   churn this decision ends. Adding the policy stays possible together with the
-  next hotel-setup digest re-pin.
+  next hotel-setup digest re-pin. VAY-2056 decommission step 3 removes those
+  preflights from the app, so the step-6 migration can add it
+  ([hotel-setup-ordinary-login.md](hotel-setup-ordinary-login.md) §12).
 - `identity.product_entitlements` and `identity.organization_resource_links`
   are product-link tables, not users, memberships or roles. They keep the
   VAY-965 setup-track column matrix and, in the product DML posture only, gain
