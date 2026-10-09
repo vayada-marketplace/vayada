@@ -9,6 +9,8 @@ import {
 } from "./pmsAcceptedPricingReservationRepository.js";
 import { processNextPmsAcceptedPricingReservationJob } from "./pmsAcceptedPricingReservationWorker.js";
 import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
+import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
+import { createTargetBookingWebCheckoutAdapter } from "../routes/bookingWebPublic.js";
 import {
   cancelAcceptedPricingStay,
   loadPricingBookingCancellation,
@@ -56,6 +58,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
     "worker-complete",
     "repository-stay-cancel-before-adoption",
     "repository-stay-cancel-after-adoption",
+    "repository-stay-cancel-guest-route",
   ])("validates complete historical binding: %s", async (scenario) => {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
       throw new Error("test database required");
@@ -617,6 +620,92 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
       ) {
         await expect(adopt()).rejects.toBeInstanceOf(PmsAcceptedPricingReservationConflict);
         expect(await snapshot()).toEqual(before);
+      } else if (scenario === "repository-stay-cancel-guest-route") {
+        // VAY-2100: the guest cancels an adopted v2 stay online, end to end on real PostgreSQL.
+        expect(await adopt()).toMatchObject({ outcome: "adopted" });
+        await db.query(
+          "INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose) VALUES($1,$1::text,'canonical')",
+          [propertyId],
+        );
+        await db.query(
+          `INSERT INTO booking.booking_guests(guest_booking_id,guest_role,first_name,last_name,email)
+           VALUES($1,'booker','Jane','Guest','jane@example.test')`,
+          [bookingId],
+        );
+        // The adapter's own transaction becomes a savepoint inside this test's transaction.
+        const nested = {
+          query: (text: string, values?: unknown[]) =>
+            db.query(
+              (
+                {
+                  BEGIN: "SAVEPOINT guest_cancel",
+                  COMMIT: "RELEASE SAVEPOINT guest_cancel",
+                  ROLLBACK: "ROLLBACK TO SAVEPOINT guest_cancel",
+                } as Record<string, string>
+              )[text] ?? text,
+              values,
+            ),
+        };
+        const adapter = createTargetBookingWebCheckoutAdapter({
+          pool: nested as unknown as pg.Pool,
+          connectionString: url!,
+          externalChanges: externalBookingChanges,
+          inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+        });
+        const context = (key: string) => ({
+          operation: "booking-cancel",
+          requestId: `request-${key}`,
+          correlationId: `correlation-${key}`,
+          idempotencyKey: key,
+          fingerprint: hash(key),
+          occurredAt: new Date("2026-09-21T08:00:00Z"),
+        });
+        const guest = { guest_email: "jane@example.test" };
+        expect(
+          await adapter.cancelPreview(propertyId, bookingId, guest, context("p")),
+        ).toMatchObject({
+          amountPaid: 0,
+          refundAmount: 0,
+          refundPercentage: 0,
+          cancellationFeeAmount: 810,
+          bookedTermsOutcome: { retainedMinor: "81000", refundMinor: "27000" },
+        });
+        await expect(
+          adapter.cancel(
+            propertyId,
+            bookingId,
+            { ...guest, expected_cancellation_fee_minor: "0" },
+            context("stale"),
+          ),
+        ).rejects.toMatchObject({ statusCode: 409 });
+        await adapter.cancel(
+          propertyId,
+          bookingId,
+          { ...guest, expected_cancellation_fee_minor: "81000" },
+          context("c"),
+        );
+        const event = await db.query(
+          `SELECT booking.lifecycle_status AS status, event.event_payload->'cancellationOutcome'->>'retainedMinor' AS fee
+           FROM booking.guest_bookings booking JOIN booking.booking_status_events event
+             ON event.guest_booking_id=booking.id AND event.event_type='guest_booking.canceled'
+           WHERE booking.id=$1`,
+          [bookingId],
+        );
+        expect(event.rows).toEqual([{ status: "canceled", fee: "81000" }]);
+        const assignments = await db.query(
+          "SELECT DISTINCT assignment_status AS status FROM pms.operational_booking_assignments WHERE guest_booking_id=$1",
+          [bookingId],
+        );
+        expect(assignments.rows).toEqual([{ status: "canceled" }]);
+        const freed = await snapshot();
+        expect(freed.inventory.map(({ assigned_count }) => assigned_count)).toEqual([0, 0, 0, 0]);
+        expect(freed.inventory.map(({ available_count }) => available_count)).toEqual([3, 3, 3, 3]);
+        // Nothing consumes pms.reservation.cancel; no PMS handoff is staged for a v2 stay.
+        const jobs = await db.query(
+          "SELECT job_type FROM platform.jobs WHERE resource_id=$1 AND job_type LIKE 'pms.%'",
+          [bookingId],
+        );
+        expect(jobs.rows).toEqual([]);
       } else if (scenario.startsWith("repository-stay-cancel")) {
         // VAY-2100: booked tiers come from the acceptance; 10 days out meets the 7-day 25% tier.
         // Days count in the frozen Europe/Berlin timezone.
