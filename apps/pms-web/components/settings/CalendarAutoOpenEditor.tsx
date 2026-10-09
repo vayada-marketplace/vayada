@@ -192,7 +192,7 @@ export function CalendarAutoOpenEditor() {
                 onChange={() =>
                   setDraft(
                     mode === "rolling"
-                      ? { ...draft, mode, rollingMonths: 18, fixedEndMonth: null }
+                      ? { ...draft, mode, rollingMonths: 12, fixedEndMonth: null }
                       : {
                           ...draft,
                           mode,

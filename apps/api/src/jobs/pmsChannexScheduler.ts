@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 
 import {
   PMS_CALENDAR_AUTO_OPEN_CONTRACT_VERSION,
+  PMS_CALENDAR_AUTO_OPEN_DEFAULT_CONFIGURATION,
   calculatePmsCalendarAutoOpenHorizon,
   createPmsCalendarAutoOpenSource,
   fingerprintPmsCalendarAutoOpenSource,
@@ -212,7 +213,7 @@ export type PmsCalendarAutoOpenSchedulerSession = PmsCalendarAutoOpenSchedulerSt
 };
 
 export type PmsCalendarAutoOpenSelectionStats = Readonly<{
-  /** Properties with an enabled auto-open setting. */
+  /** Properties whose effective setting is enabled (saved, or the ready virtual default). */
   enabledSettings: number;
   /** Of those, the ones the selection skips because an active room's label is unverified. */
   skippedUnverifiedLabels: number;
@@ -442,11 +443,99 @@ export function createPgPmsCalendarAutoOpenSchedulerStore(config: {
   };
 }
 
+/**
+ * Properties whose effective auto-open setting is enabled: an enabled saved setting, or no saved
+ * setting (the virtual default, revision 0) once calendar and room setup are ready, using the
+ * same readiness rules as the settings read model. A property that is not ready yet is paused,
+ * not a failure. Placeholders `$first` to `$first + 2` bind effectiveCalendarAutoOpenDefaultParams.
+ */
+function effectiveCalendarAutoOpenSettingsSql(first: number): string {
+  const [mode, rollingMonths, enabled] = [first, first + 1, first + 2].map((n) => `$${n}`);
+  return `SELECT
+       property.id AS property_id,
+       COALESCE(stored.revision, 0) AS revision,
+       COALESCE(stored.mode, ${mode}::text) AS mode,
+       CASE WHEN stored.property_id IS NULL THEN ${rollingMonths}::smallint
+            ELSE stored.rolling_months END AS rolling_months,
+       stored.fixed_end_month
+     FROM hotel_catalog.properties property
+     LEFT JOIN pms.calendar_auto_open_settings stored ON stored.property_id = property.id
+     WHERE COALESCE(stored.enabled, ${enabled}::boolean) IS TRUE
+       AND (
+         stored.property_id IS NOT NULL
+         OR (
+           EXISTS (
+             SELECT 1 FROM hotel_catalog.property_locations location
+             WHERE location.property_id = property.id AND location.timezone IS NOT NULL
+           )
+           AND EXISTS (
+             SELECT 1 FROM pms.property_pricing_settings pricing
+             WHERE pricing.property_id = property.id
+               AND pricing.pricing_currency_revision IS NOT NULL
+               AND pricing.optional_pricing_aggregate_revision IS NOT NULL
+           )
+           AND EXISTS (
+             SELECT 1 FROM pms.room_types room
+             WHERE room.property_id = property.id AND room.active IS TRUE
+           )
+           AND EXISTS (
+             SELECT 1 FROM pms.operating_calendar_revisions revision
+             WHERE revision.property_id = property.id
+           )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM pms.room_types room
+             LEFT JOIN pms.operating_calendar_room_bindings binding
+               ON binding.property_id = room.property_id
+              AND binding.room_type_id = room.id
+              AND binding.calendar_revision = (
+                SELECT max(revision.calendar_revision) FROM pms.operating_calendar_revisions revision
+                WHERE revision.property_id = property.id
+              )
+             WHERE room.property_id = property.id AND room.active IS TRUE
+               AND NOT EXISTS (
+                 SELECT 1 FROM pms.room_type_closures closure
+                 WHERE closure.property_id = room.property_id AND closure.room_type_id = room.id
+               )
+               AND (
+                 binding.room_type_id IS NULL
+                 OR binding.source_room_facts_revision IS DISTINCT FROM room.room_facts_revision
+                 OR binding.source_room_units_revision IS DISTINCT FROM room.room_units_revision
+               )
+           )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM pms.operating_calendar_room_bindings binding
+             LEFT JOIN pms.room_types room
+               ON room.property_id = binding.property_id
+              AND room.id = binding.room_type_id
+              AND room.active IS TRUE
+              AND NOT EXISTS (
+                SELECT 1 FROM pms.room_type_closures closure
+                WHERE closure.property_id = room.property_id AND closure.room_type_id = room.id
+              )
+             WHERE binding.property_id = property.id
+               AND binding.calendar_revision = (
+                 SELECT max(revision.calendar_revision) FROM pms.operating_calendar_revisions revision
+                 WHERE revision.property_id = property.id
+               )
+               AND room.id IS NULL
+           )
+         )
+       )`;
+}
+
+function effectiveCalendarAutoOpenDefaultParams(): [string, number | null, boolean] {
+  const defaults = PMS_CALENDAR_AUTO_OPEN_DEFAULT_CONFIGURATION;
+  return [defaults.mode, defaults.rollingMonths, defaults.enabled];
+}
+
 async function readCalendarAutoOpenSelectionStats(
   queryable: Queryable,
 ): Promise<PmsCalendarAutoOpenSelectionStats> {
   const result = await queryable.query<PmsCalendarAutoOpenSelectionStats>(
-    `SELECT
+    `WITH effective AS (${effectiveCalendarAutoOpenSettingsSql(1)})
+     SELECT
        count(*)::int AS "enabledSettings",
        count(*) FILTER (
          WHERE EXISTS (
@@ -456,7 +545,7 @@ async function readCalendarAutoOpenSelectionStats(
              ON room_type.property_id=physical_room.property_id
             AND room_type.id=physical_room.room_type_id
             AND room_type.active IS TRUE
-           WHERE physical_room.property_id=setting.property_id
+           WHERE physical_room.property_id=effective.property_id
              AND physical_room.status<>'retired'
              AND (
                physical_room.operational_label_status<>'verified'
@@ -464,8 +553,8 @@ async function readCalendarAutoOpenSelectionStats(
              )
          )
        )::int AS "skippedUnverifiedLabels"
-     FROM pms.calendar_auto_open_settings setting
-     WHERE setting.enabled IS TRUE`,
+     FROM effective`,
+    effectiveCalendarAutoOpenDefaultParams(),
   );
   return result.rows[0] ?? { enabledSettings: 0, skippedUnverifiedLabels: 0 };
 }
@@ -800,26 +889,26 @@ async function selectCalendarAutoOpenCandidates(
 
   while (selected.length < limit) {
     const page: { rows: CalendarSourceRow[] } = await queryable.query<CalendarSourceRow>(
-      `WITH candidate_properties AS (
-         SELECT setting.property_id
-         FROM pms.calendar_auto_open_settings setting
-         WHERE setting.enabled IS TRUE
-           AND NOT EXISTS (
+      `WITH effective AS (${effectiveCalendarAutoOpenSettingsSql(3)}),
+       candidate_properties AS (
+         SELECT effective.*
+         FROM effective
+         WHERE NOT EXISTS (
              SELECT 1
              FROM pms.rooms physical_room
              JOIN pms.room_types room_type
                ON room_type.property_id=physical_room.property_id
               AND room_type.id=physical_room.room_type_id
               AND room_type.active IS TRUE
-             WHERE physical_room.property_id=setting.property_id
+             WHERE physical_room.property_id=effective.property_id
                AND physical_room.status<>'retired'
                AND (
                  physical_room.operational_label_status<>'verified'
                  OR physical_room.room_number IS NULL
                )
            )
-           AND ($1::uuid IS NULL OR setting.property_id > $1::uuid)
-         ORDER BY setting.property_id
+           AND ($1::uuid IS NULL OR effective.property_id > $1::uuid)
+         ORDER BY effective.property_id
          LIMIT $2
        )
        SELECT
@@ -839,9 +928,7 @@ async function selectCalendarAutoOpenCandidates(
          coverage.coverage_from AS "generatedCoverageFrom",
          coverage.coverage_through AS "generatedCoverageThrough",
          successful_application.applications AS "successfulApplications"
-       FROM candidate_properties candidate
-       JOIN pms.calendar_auto_open_settings setting
-         ON setting.property_id = candidate.property_id
+       FROM candidate_properties setting
        JOIN hotel_catalog.properties property ON property.id = setting.property_id
        LEFT JOIN hotel_catalog.property_locations location
          ON location.property_id = setting.property_id
@@ -903,7 +990,7 @@ async function selectCalendarAutoOpenCandidates(
            AND job.resource_id = setting.property_id::text
        ) successful_application ON TRUE
        ORDER BY setting.property_id`,
-      [afterPropertyId, limit],
+      [afterPropertyId, limit, ...effectiveCalendarAutoOpenDefaultParams()],
     );
     if (page.rows.length === 0) break;
     afterPropertyId = page.rows.at(-1)!.propertyId;
@@ -1625,7 +1712,9 @@ function calendarCandidateFromSourceRow(
   if (!row.organizationId || !row.propertyTimeZone) {
     throw new Error("PMS calendar auto-open property source is incomplete");
   }
-  const revision = positiveDatabaseInteger(row.settingRevision);
+  // Revision 0 is the virtual default of a property with no saved setting.
+  const revision =
+    Number(row.settingRevision) === 0 ? 0 : positiveDatabaseInteger(row.settingRevision);
   const rollingMonths =
     row.rollingMonths === null ? null : positiveDatabaseInteger(row.rollingMonths);
   const fixedEndMonth = row.fixedEndMonth === null ? null : dateOnly(row.fixedEndMonth).slice(0, 7);
