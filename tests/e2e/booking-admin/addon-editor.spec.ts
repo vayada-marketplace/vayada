@@ -79,7 +79,7 @@ test("shared editor validates, uploads five photos, changes cover, removes and r
     await route.fulfill({ status: method === "POST" ? 201 : 200, json: items[0] });
   });
   await page.goto("/add-ons");
-  await page.getByRole("button", { name: "Add Experience" }).click();
+  await page.getByRole("button", { name: "New add-on" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: "Create Add-on", exact: true }).click();
   await expect(dialog.getByText("Name is required.")).toBeVisible();
