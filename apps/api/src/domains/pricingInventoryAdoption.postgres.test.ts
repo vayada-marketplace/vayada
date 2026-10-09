@@ -11,6 +11,8 @@ import { processNextPmsAcceptedPricingReservationJob } from "./pmsAcceptedPricin
 import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
 import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import { createTargetBookingWebCheckoutAdapter } from "../routes/bookingWebPublic.js";
+import { createBookingHostActions } from "./bookingHostActions.js";
+import { targetBookingHostActionGuards } from "./bookingHostActionGuards.js";
 import {
   cancelAcceptedPricingStay,
   loadPricingBookingCancellation,
@@ -59,6 +61,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
     "repository-stay-cancel-before-adoption",
     "repository-stay-cancel-after-adoption",
     "repository-stay-cancel-guest-route",
+    "repository-stay-cancel-host-guest-request",
   ])("validates complete historical binding: %s", async (scenario) => {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
       throw new Error("test database required");
@@ -706,6 +709,68 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           [bookingId],
         );
         expect(jobs.rows).toEqual([]);
+      } else if (scenario === "repository-stay-cancel-host-guest-request") {
+        // VAY-2100: PMS staff cancel an adopted v2 stay because the guest asked.
+        expect(await adopt()).toMatchObject({ outcome: "adopted" });
+        await db.query(
+          `UPDATE booking.guest_bookings
+           SET booking_metadata=booking_metadata || '{"paymentMethod":"pay_at_property"}' WHERE id=$1`,
+          [bookingId],
+        );
+        const actorUserId = randomUUID();
+        await db.query("INSERT INTO identity.users(id,email,status) VALUES($1,$2,'active')", [
+          actorUserId,
+          `${actorUserId}@example.test`,
+        ]);
+        const nested = {
+          query: (text: string, values?: unknown[]) =>
+            db.query(
+              (
+                {
+                  BEGIN: "SAVEPOINT host_cancel",
+                  COMMIT: "RELEASE SAVEPOINT host_cancel",
+                  ROLLBACK: "ROLLBACK TO SAVEPOINT host_cancel",
+                } as Record<string, string>
+              )[text] ?? text,
+              values,
+            ),
+        };
+        const actions = createBookingHostActions({
+          pool: nested as unknown as pg.Pool,
+          inventory: createTargetPmsInventoryReservationPort(),
+          guards: targetBookingHostActionGuards,
+          now: () => new Date("2026-09-21T08:00:00Z"),
+        });
+        const hostScope = { propertyId, bookingId, actorUserId };
+        const hostPreview = await actions.preview(hostScope, {
+          action: "cancel",
+          reason: "Guest emailed",
+          cancellationKind: "guest_request",
+        });
+        expect(hostPreview.impact.cancellationOutcome).toMatchObject({
+          daysBeforeCheckIn: 10,
+          retainedMinor: "81000",
+        });
+        await actions.apply(hostScope, hostPreview.previewId, "host-guest-request");
+        const cancelled = await db.query(
+          `SELECT booking.cancellation_reason AS reason,
+             event.event_payload->'cancellationOutcome'->>'retainedMinor' AS fee
+           FROM booking.guest_bookings booking JOIN booking.booking_status_events event
+             ON event.guest_booking_id=booking.id AND event.event_type='guest_booking.canceled'
+           WHERE booking.id=$1`,
+          [bookingId],
+        );
+        expect(cancelled.rows).toEqual([{ reason: "guest_request", fee: "81000" }]);
+        const assignments = await db.query(
+          "SELECT DISTINCT assignment_status AS status FROM pms.operational_booking_assignments WHERE guest_booking_id=$1",
+          [bookingId],
+        );
+        expect(assignments.rows).toEqual([{ status: "canceled" }]);
+        const read = await createTargetPmsOperationsReadRepository({
+          connectionString: url!,
+          pool: db,
+        }).findReservationByGuestBookingId(propertyId, bookingId);
+        expect(read?.cancellationOutcome).toMatchObject({ retainedMinor: "81000" });
       } else if (scenario.startsWith("repository-stay-cancel")) {
         // VAY-2100: booked tiers come from the acceptance; 10 days out meets the 7-day 25% tier.
         // Days count in the frozen Europe/Berlin timezone.
