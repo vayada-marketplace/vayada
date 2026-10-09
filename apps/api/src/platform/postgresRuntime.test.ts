@@ -72,6 +72,7 @@ describe("PostgreSQL runtime capacity", () => {
       code: "57P01",
     }),
     new Error("Client has encountered a connection error and is not queryable"),
+    new Error("timeout expired"),
     new Error("timeout exceeded when trying to connect"),
     new Error("Connection terminated due to connection timeout"),
   ])("recognizes bounded connection acquisition failures", (error) => {
@@ -155,6 +156,35 @@ describe("PostgreSQL runtime capacity", () => {
       expect(
         isPostgresUnavailableError(Object.assign(new Error("refused"), { code: "ECONNREFUSED" })),
       ).toBe(false);
+    } finally {
+      await pool.end();
+    }
+  });
+  it("keeps permanent connect failures out of the unavailable classification", async () => {
+    class RejectingClient extends pg.Client {
+      override connect(): Promise<pg.Client>;
+      override connect(callback: (error: Error) => void): void;
+      override connect(callback?: (error: Error) => void): Promise<pg.Client> | void {
+        const failure = Object.assign(new Error("password authentication failed"), {
+          code: "28P01",
+        });
+        if (!callback) return Promise.reject(failure);
+        callback(failure);
+      }
+    }
+    const postgres = { Pool: pg.Pool };
+    installPostgresPoolRuntime(postgres);
+    const pool = new postgres.Pool({
+      connectionString: "postgresql://example/target",
+      Client: RejectingClient,
+    });
+    try {
+      const error = await pool.query("SELECT 1").then(
+        () => undefined,
+        (failure: unknown) => failure,
+      );
+      expect(error).toMatchObject({ code: "28P01" });
+      expect(isPostgresUnavailableError(error)).toBe(false);
     } finally {
       await pool.end();
     }
