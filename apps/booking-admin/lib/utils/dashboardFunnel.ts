@@ -27,8 +27,22 @@ export function funnelRows(funnel: ConversionFunnel): FunnelRow[] {
   });
 }
 
-export function funnelCsv(rows: FunnelRow[], header: string[], label: (stage: string) => string) {
-  const cell = (value: string | number | null) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+/**
+ * Spreadsheet apps in comma-decimal locales (de, fr, it, es, nl, ru, id) split columns on
+ * ";", so those exports use ";" and comma decimals; others use "," and dot decimals.
+ */
+export function funnelCsv(
+  rows: FunnelRow[],
+  locale: string,
+  header: string[],
+  label: (stage: string) => string,
+) {
+  const decimal =
+    new Intl.NumberFormat(locale).formatToParts(1.5).find((part) => part.type === "decimal")
+      ?.value ?? ".";
+  const separator = decimal === "," ? ";" : ",";
+  const cell = (value: string | number | null) =>
+    `"${(typeof value === "number" ? String(value).replace(".", decimal) : (value ?? "")).replaceAll('"', '""')}"`;
   return [
     header,
     ...rows.map((row) => [
@@ -39,6 +53,6 @@ export function funnelCsv(rows: FunnelRow[], header: string[], label: (stage: st
       row.dropPercent,
     ]),
   ]
-    .map((line) => line.map(cell).join(","))
+    .map((line) => line.map(cell).join(separator))
     .join("\r\n");
 }

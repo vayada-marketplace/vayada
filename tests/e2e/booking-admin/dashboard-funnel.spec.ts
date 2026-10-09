@@ -51,20 +51,25 @@ test("shows inline drop-offs, the card branch, CSV export and recomputes all tim
   await expect(card.getByText("−20 (20%)")).toBeVisible();
   await expect(card.getByText("Authorized payment (card only) · 10")).toBeVisible();
   await expect(card.getByText("−30 (75%)")).toBeVisible();
-  await expect(card.getByText("0 (0%)", { exact: true })).toHaveCount(3);
+  await expect(card.getByText(/^0 \(0%\)/)).toHaveCount(3);
   await expect(card.getByText("Card: 40 (50%)")).toBeVisible();
   await expect(card.getByText("Biggest drop")).toHaveCount(0);
   await expect(card.getByText("Viewed a room")).toHaveCount(0);
   await expect(card.getByText("Added add-ons / skipped")).toHaveCount(0);
 
+  await page.screenshot({ path: testInfo.outputPath("conversion-funnel.png"), fullPage: true });
   await card.getByRole("button", { name: "About the conversion funnel" }).hover();
   await expect(card.getByRole("tooltip")).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("conversion-funnel.png"), fullPage: true });
+  await card.screenshot({
+    path: testInfo.outputPath("conversion-funnel-tooltip.png"),
+    animations: "disabled",
+  });
+  await page.mouse.move(0, 0);
 
   await card.getByRole("button", { name: "Funnel options" }).click();
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    card.getByRole("menuitem", { name: "Export CSV" }).click(),
+    card.getByRole("button", { name: "Export CSV" }).click(),
   ]);
   expect(download.suggestedFilename()).toMatch(
     /^conversion-funnel-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv$/,
@@ -72,12 +77,19 @@ test("shows inline drop-offs, the card branch, CSV export and recomputes all tim
   const csv = await readFile(await download.path(), "utf8");
   expect(csv).toContain('"Step","Visitors","% of visits"');
   expect(csv).toContain('"Authorized payment (card only)","10","10","30","75"');
-  await expect(card.getByRole("menu")).toHaveCount(0);
+  await expect(card.getByRole("button", { name: "Export CSV" })).toHaveCount(0);
 
   await page.setViewportSize({ width: 390, height: 1400 });
   await card.scrollIntoViewIfNeeded();
-  await card.screenshot({ path: testInfo.outputPath("conversion-funnel-mobile.png") });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await card.getByRole("button", { name: "About the conversion funnel" }).focus();
+  await card.screenshot({
+    path: testInfo.outputPath("conversion-funnel-mobile.png"),
+    animations: "disabled",
+  });
+  // Page content scrolls inside <main>, so check it rather than the document.
+  const main = page.locator("main");
+  expect(await main.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+  await page.keyboard.press("Tab");
   await page.setViewportSize({ width: 1280, height: 1200 });
 
   await page.getByRole("button", { name: "Today", exact: true }).click();

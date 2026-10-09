@@ -25,11 +25,17 @@ VAY-1284 and `typescript-backend-structure.md`. No legacy event backfill or forw
 - Authorization is a card-only branch row: count actual authorizations and divide
   by card clicks. Non-card methods bypass this row. Completion divides by the
   reunited eligible cohort (authorized cards plus submitted non-card sessions).
-  The UI labels these denominators explicitly rather than calling non-card guests
-  authorized or displaying a misleading all-method authorization percentage.
+  The UI never calls non-card guests authorized or shows an all-method
+  authorization percentage.
 - Every row includes percent of visits and conversion from its eligible previous
-  stage; an empty denominator returns null, displayed as an em dash. Highlight
-  the single largest proportional loss with a nonzero denominator (earliest tie).
+  stage; an empty denominator returns null, displayed as an em dash. The API still
+  reports the single largest proportional loss with a nonzero denominator
+  (earliest tie) as `biggestDrop`.
+- Dashboard card ([VAY-2075](https://linear.app/vayadacom/issue/VAY-2075)): one row
+  per stage with its count, percent of visits and the drop from the eligible
+  previous stage as `−count (percent)` in red, so no separate biggest-drop tag.
+  The authorization and completion rows name their base (card clicks; authorized
+  cards plus non-card submissions) in a hover title and screen-reader text.
 - Payment method counts are unique sessions at Complete Booking, displayed as a
   split, not another stage. Support the target's card, bank_transfer,
   pay_at_property, xendit and paypal methods.

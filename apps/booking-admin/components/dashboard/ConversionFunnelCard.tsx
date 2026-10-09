@@ -24,6 +24,7 @@ export function ConversionFunnelCard({ funnel, loading, error, locale, t, export
   const tooltipId = useId();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const rows = funnel?.steps.some((step) => step.count > 0) ? funnelRows(funnel) : null;
 
   useEffect(() => {
@@ -32,7 +33,9 @@ export function ConversionFunnelCard({ funnel, loading, error, locale, t, export
       if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMenuOpen(false);
+      if (event.key !== "Escape") return;
+      setMenuOpen(false);
+      menuButtonRef.current?.focus();
     };
     document.addEventListener("mousedown", onMouseDown);
     document.addEventListener("keydown", onKeyDown);
@@ -47,6 +50,7 @@ export function ConversionFunnelCard({ funnel, loading, error, locale, t, export
     if (!funnel) return;
     const csv = funnelCsv(
       funnelRows(funnel),
+      locale,
       [
         t("dashboard.conversionFunnel.csvStep"),
         t("dashboard.conversionFunnel.csvVisitors"),
@@ -57,14 +61,15 @@ export function ConversionFunnelCard({ funnel, loading, error, locale, t, export
       (stage) => t(`dashboard.funnel.${stage}`),
     );
     // The byte-order mark lets spreadsheet apps read non-Latin step names as UTF-8.
-    const url = URL.createObjectURL(new Blob(["﻿", csv], { type: "text/csv;charset=utf-8" }));
+    const url = URL.createObjectURL(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url;
     link.download = exportFileName;
     document.body.append(link);
     link.click();
     link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+    // Safari can fail a download whose object URL is revoked right after the click.
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
   };
 
   const percent = (value: number | null) =>
@@ -77,45 +82,44 @@ export function ConversionFunnelCard({ funnel, loading, error, locale, t, export
           <h3 className="text-base font-semibold text-gray-900">
             {t("dashboard.conversionFunnel.title")}
           </h3>
-          <div className="mt-0.5 flex items-center gap-1.5 text-[13px] text-gray-500">
+          <div className="group relative mt-0.5 flex items-center gap-1.5 text-[13px] text-gray-500">
             <span>{t("dashboard.conversionFunnel.subtitle")}</span>
-            <span className="group relative inline-flex">
-              <button
-                type="button"
-                aria-label={t("dashboard.conversionFunnel.infoLabel")}
-                aria-describedby={tooltipId}
-                className="rounded-full text-gray-400 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300"
+            <button
+              type="button"
+              aria-label={t("dashboard.conversionFunnel.infoLabel")}
+              aria-describedby={tooltipId}
+              className="rounded-full text-gray-400 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300"
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.5}
+                aria-hidden="true"
               >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={1.5}
-                  aria-hidden="true"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"
-                  />
-                </svg>
-              </button>
-              <span
-                id={tooltipId}
-                role="tooltip"
-                className="pointer-events-none invisible absolute left-1/2 top-full z-10 mt-2 w-64 -translate-x-1/2 rounded-lg bg-gray-900 px-3 py-2 text-xs leading-relaxed text-white opacity-0 shadow-lg transition-opacity group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100"
-              >
-                {t("dashboard.conversionFunnel.info")}
-              </span>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"
+                />
+              </svg>
+            </button>
+            {/* Anchored to the row start, not the icon, so long subtitles cannot push it off-card. */}
+            <span
+              id={tooltipId}
+              role="tooltip"
+              className="pointer-events-none invisible absolute left-0 top-full z-10 mt-2 w-72 max-w-[calc(100vw-4rem)] rounded-lg bg-gray-900 px-3 py-2 text-xs leading-relaxed text-white opacity-0 shadow-lg transition-opacity group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100"
+            >
+              {t("dashboard.conversionFunnel.info")}
             </span>
           </div>
         </div>
         <div ref={menuRef} className="relative">
           <button
+            ref={menuButtonRef}
             type="button"
             aria-label={t("dashboard.conversionFunnel.options")}
-            aria-haspopup="menu"
             aria-expanded={menuOpen}
             onClick={() => setMenuOpen((open) => !open)}
             className="rounded-md p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300"
@@ -127,13 +131,9 @@ export function ConversionFunnelCard({ funnel, loading, error, locale, t, export
             </svg>
           </button>
           {menuOpen && (
-            <div
-              role="menu"
-              className="absolute right-0 top-full z-10 mt-1 min-w-36 rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
-            >
+            <div className="absolute right-0 top-full z-10 mt-1 min-w-36 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
               <button
                 type="button"
-                role="menuitem"
                 disabled={!funnel}
                 onClick={exportCsv}
                 className="block w-full px-3 py-1.5 text-left text-[13px] text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-400"
@@ -164,8 +164,9 @@ export function ConversionFunnelCard({ funnel, loading, error, locale, t, export
                       className={`text-xs ${drop > 0 ? "text-red-600" : "text-gray-400"}`}
                       title={DROP_BASE[stage] ? t(DROP_BASE[stage]) : undefined}
                     >
-                      {drop > 0 ? "−" : ""}
+                      {drop > 0 ? "\u2212" : ""}
                       {formatNumber(drop, locale)} ({percent(dropPercent)})
+                      {DROP_BASE[stage] && <span className="sr-only"> {t(DROP_BASE[stage])}</span>}
                     </span>
                   )}
                 </span>
