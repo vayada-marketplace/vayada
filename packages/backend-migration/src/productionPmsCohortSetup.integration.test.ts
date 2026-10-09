@@ -371,12 +371,6 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
         [PROPERTY],
       );
       const configuration = (await readCalendar(client))!;
-      const currentDays = days.rows.map(
-        ({ generated, channel, manual, block, booking, ...day }) => ({
-          ...day,
-          sourceRevisions: { generated, channel, manual, block, booking },
-        }),
-      );
       // In batches of at most 366 days, as the native jobs plan a longer coverage.
       for (const [from, through] of [
         ["2026-09-04", "2027-09-04"],
@@ -387,9 +381,12 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
           configurationSource: configuration.source,
           configuration,
           horizon: { from, through },
-          currentDays: currentDays.filter(
-            (day) => String(day.stayDate) >= from && String(day.stayDate) <= through,
-          ) as never,
+          currentDays: days.rows
+            .filter((day) => String(day["stayDate"]) >= from && String(day["stayDate"]) <= through)
+            .map(({ generated, channel, manual, block, booking, ...day }) => ({
+              ...day,
+              sourceRevisions: { generated, channel, manual, block, booking },
+            })) as never,
         });
         expect(native).toMatchObject({ ok: true, outcome: "unchanged", changedDays: [] });
       }
