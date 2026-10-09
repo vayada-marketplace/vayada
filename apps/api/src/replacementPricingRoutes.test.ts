@@ -308,6 +308,20 @@ describe("replacement pricing HTTP boundary", () => {
     expect(f.commands.readDraftTerms).not.toHaveBeenCalled();
     expect(f.commands.publish).not.toHaveBeenCalled();
   });
+  it("records a charge declaration made by pressing Save prices, and nothing else", async () => {
+    const f = await fixture();
+    expect((await f.inject(4, { ...endpoints[4][2], declaredVia: "save_prices" })).statusCode).toBe(
+      200,
+    );
+    expect(f.commands.confirmCharges).toHaveBeenLastCalledWith(id, {
+      ...endpoints[4][2],
+      declaredVia: "save_prices",
+      requestId: "request-1",
+    });
+    for (const declaredVia of ["checkbox", null, ""])
+      expect((await f.inject(4, { ...endpoints[4][2], declaredVia })).statusCode).toBe(400);
+    expect(f.commands.confirmCharges).toHaveBeenCalledTimes(1);
+  });
   it("maps domain failures and sanitizes unexpected failures", async () => {
     const f = await fixture();
     for (const [code, status] of [
@@ -322,6 +336,10 @@ describe("replacement pricing HTTP boundary", () => {
       expect(response.statusCode).toBe(status);
       expect(response.json()).toEqual({ code });
     }
+    f.commands.prepare.mockRejectedValue(new PricingStorageError("denied", "payments_disabled"));
+    const denied = await f.inject(2);
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json()).toEqual({ code: "denied", reason: "payments_disabled" });
     f.commands.publish.mockRejectedValue(new Error("secret database detail"));
     const response = await f.inject(5);
     expect(response.statusCode).toBe(503);
