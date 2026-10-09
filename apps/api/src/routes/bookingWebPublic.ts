@@ -1434,8 +1434,7 @@ type TargetChangeRequestRow = QueryResultRow & {
 };
 
 export type PgTargetBookingWebCheckoutAdapterConfig = {
-  /** Empty by default; use only for explicitly approved synthetic/public rollout slugs. */
-  /** Kill switch; the acceptance writer still requires Vayada authority and a publication. */
+  /** Kill switch; the acceptance writer still requires a current publication. */
   replacementPricingAcceptanceEnabled?: boolean;
   /** Card quotes in acceptance; requires stripePaymentProvider. */
   replacementPricingCardAcceptanceEnabled?: boolean;

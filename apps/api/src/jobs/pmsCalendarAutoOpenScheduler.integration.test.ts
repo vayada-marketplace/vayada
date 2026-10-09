@@ -66,7 +66,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
   afterAll(async () => {
     try {
       for (const close of closers) await close();
-      await fixture?.drop();
+      if (fixture) {
+        await waitForSessionsToEnd(admin, fixture.login);
+        await fixture.drop();
+      }
       if (TEST_DATABASE_URL) {
         assertSafeTestDatabase(TEST_DATABASE_URL);
         await cleanupFixtures(admin);
@@ -481,6 +484,23 @@ async function cleanupFixtures(pool: pg.Pool): Promise<void> {
   } finally {
     client.release();
   }
+}
+
+// pg-pool resolves end() before its clients have closed. Dropping the login terminates any such
+// session, and the pool then emits an "error" nothing listens to, which fails the whole run.
+// If sessions are still open after 5 seconds, fail here with a clear message instead.
+async function waitForSessionsToEnd(admin: pg.Pool, login: string): Promise<void> {
+  let sessions = 0;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const result = await admin.query<{ sessions: number }>(
+      "SELECT count(*)::int AS sessions FROM pg_stat_activity WHERE usename=$1",
+      [login],
+    );
+    sessions = result.rows[0]?.sessions ?? 0;
+    if (sessions === 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`${sessions} test login session(s) still open after 5s; not dropping the login`);
 }
 
 function assertSafeTestDatabase(url: string): void {

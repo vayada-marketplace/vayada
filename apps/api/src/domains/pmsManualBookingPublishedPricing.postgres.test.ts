@@ -7,7 +7,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createBookingPmsManualAttributionOwner } from "./bookingPmsManualAttribution.js";
 import { createBookingPmsManualNightlyRevenueEvidenceOwner } from "./bookingPmsManualNightlyRevenueEvidence.js";
-import { createBookingPricingAuthorityStore } from "./bookingPricingAuthority.js";
 import {
   createBookingPricingOfferTermsStore,
   lockBookingPricingTermsSource,
@@ -275,18 +274,6 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
     });
 
     it("keeps front-desk pricing when the booking engine is switched off", async () => {
-      const context = ownerContext();
-      const current = (
-        await pool.query(
-          "SELECT revision FROM booking.pricing_authority_heads WHERE property_id=$1",
-          [propertyId],
-        )
-      ).rows[0].revision;
-      await createBookingPricingAuthorityStore(pool).save(context, scope, {
-        requestId: randomUUID(),
-        expectedRevision: current,
-        authority: "external",
-      });
       await pool.query(
         "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
         [propertyId],
@@ -342,7 +329,7 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
     };
   }
 
-  /** Terms, owner sources, charge declaration and authority through their real stores, then publish. */
+  /** Terms, owner sources and charge declaration through their real stores, then publish. */
   async function publish(context: RequestContext) {
     const terms: ReplacementOfferTerms[] = [];
     const flexible = {
@@ -459,11 +446,6 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
       claimedFingerprint: replacementChargeFingerprint(propertyId, snapshot, sources)!,
       declaration: "all_mandatory_charges_included",
       requestId: randomUUID(),
-    });
-    await createBookingPricingAuthorityStore(pool).save(context, scope, {
-      requestId: randomUUID(),
-      expectedRevision: null,
-      authority: "vayada",
     });
     await createReplacementPricingStore(pool, createReplacementPricingStorageGuard(context)).save(
       scope,

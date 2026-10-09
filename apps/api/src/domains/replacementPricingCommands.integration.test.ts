@@ -212,14 +212,6 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
       )
     ).rows[0];
   }
-  it("reads the owner authority on the ordinary pool", async () => {
-    const f = await fixture();
-    expect(await f.commands.readAuthority(f.scope.propertyId)).toEqual({
-      authority: "unconfigured",
-      revision: null,
-      organizationId: null,
-    });
-  });
   it("prepares without writes and runs the complete draft/confirmation/publication flow", async () => {
     const f = await fixture(),
       id = f.scope.propertyId;
@@ -399,7 +391,52 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
       "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
       [id],
     );
-    await expect(f.commands.prepare(id, f.proposed)).rejects.toMatchObject({ code: "denied" });
+    await expect(f.commands.prepare(id, f.proposed)).rejects.toMatchObject({
+      code: "denied",
+      reason: "payments_disabled",
+    });
+  });
+  it("records on the audit event that the declaration was made by pressing Save prices", async () => {
+    const f = await fixture(),
+      id = f.scope.propertyId;
+    expect(await f.commands.saveDraft(id, f.draft)).toBe(1);
+    const confirmation = {
+      draftId: f.draft.draftId,
+      expectedDraftRevision: 1,
+      claimedFingerprint: replacementChargeFingerprint(
+        id,
+        f.prepared.snapshot,
+        f.prepared.effectiveSources ?? f.prepared.sources,
+      )!,
+      declaration: "all_mandatory_charges_included" as const,
+      requestId: randomUUID(),
+    };
+    const viaSave = await f.commands.confirmCharges(id, {
+      ...confirmation,
+      declaredVia: "save_prices",
+    });
+    await expect(f.commands.confirmCharges(id, confirmation)).rejects.toMatchObject({
+      code: "idempotency_conflict",
+    });
+    const plain = await f.commands.confirmCharges(id, { ...confirmation, requestId: randomUUID() });
+    await expect(
+      f.commands.confirmCharges(id, {
+        ...confirmation,
+        requestId: randomUUID(),
+        declaredVia: "checkbox" as "save_prices",
+      }),
+    ).rejects.toMatchObject({ code: "invalid" });
+    const audit = (
+      await pool.query(
+        `SELECT target_resource_id::text AS id,audit_metadata FROM platform.product_audit_events
+        WHERE property_id=$1 AND action='pricing.v2.charges.confirmed'`,
+        [id],
+      )
+    ).rows;
+    expect(Object.fromEntries(audit.map((row) => [row.id, row.audit_metadata]))).toEqual({
+      [viaSave.id]: { declaredVia: "save_prices" },
+      [plain.id]: {},
+    });
   });
   it("rejects malformed, foreign, inactive and stale-term proposals and untrusted identity", async () => {
     const f = await fixture(),
