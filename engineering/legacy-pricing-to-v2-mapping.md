@@ -34,9 +34,13 @@ Rules:
   below). Anything v2 cannot represent gets the nearest safe equivalent,
   flagged per hotel by the dry run.
 
-- **The go-day gate is per hotel.** It checks quote parity on sample stays
-  within the rounding rules, and Finance and Stripe card readiness for the
-  hotel's currency.
+- **Phased waves** (Flamur, 2026-10-10). A hotel moves only once it can take
+  v2 bookings as it does today. The card hotels need their own Stripe Connect
+  account, and every hotel needs instant booking. Wave 1 is Aether B,
+  Dolcemare and Haigha (see "Cohort outcome and waves").
+- **The gate is per hotel.** It checks quote parity on sample stays within the
+  rounding rules, and Finance and Stripe card readiness for the hotel's
+  currency.
 
 **Ownership.**
 
@@ -54,7 +58,9 @@ Rules:
 - no cohort hotel collects taxes or fees on arrival, so the charges
   declaration is true;
 - a hotel that fails the gate is suspended on its own;
-- the operator is Flamur's own platform account (D1).
+- the operator is Flamur's own platform account (D1);
+- Feb-29 seasons follow option (a), mirroring today (U15);
+- phased waves, with no platform-account card in v2 (2026-10-10).
 
 ## Go-day prerequisites
 
@@ -69,9 +75,17 @@ Rules:
 | g   | Implement D1 (the migration context) after an independent security review                                                                                    | VAY-1362, Flamur sign-off |
 | h   | Implement `declaredVia: "legacy_import"`                                                                                                                     | pricing stream            |
 
-The card scope on go-day is instant booking only and full prepayment only.
-There is no request-mode card, no automatic refund, and no online cancellation
-of a paid booking ([card acceptance](pricing-card-acceptance.md)).
+**Which prerequisites apply in wave 1:**
+
+- **a–e (card):** Aether B only.
+- **f (IDR):** Dolcemare and Haigha.
+- **g and h:** every wave.
+- **Request mode:** Dolcemare and Haigha are in request mode, which v2 cannot
+  accept. Wave 1 needs decision 1 in "Cohort outcome and waves".
+
+The card scope is instant booking only and full prepayment only. There is no
+request-mode card, no automatic refund, and no online cancellation of a paid
+booking ([card acceptance](pricing-card-acceptance.md)).
 
 ## Cohort and currency
 
@@ -126,32 +140,117 @@ criterion f.
 card-eligible (`0119`). Stripe's IDR behavior on a connected account is
 prerequisite b.
 
+## Cohort outcome and waves (production read, 2026-10-10)
+
+The input is the reviewed counts-only read of legacy PMS and Booking (plan
+`34cdea9d`). Blocks 4 and 5, the overlap pre-checks, were not run; the T-2 dry
+run checks overlaps exactly.
+
+**The migration is phased** (Flamur, 2026-10-10).
+
+- **Wave 1:** Aether B, Dolcemare and Haigha.
+- **Later waves:** the other hotels stay on legacy until each has its **own**
+  Stripe Connect account and **instant** booking. No platform-account card goes
+  to v2.
+- For a later-wave hotel, U2 and U12 only mean "not in a wave yet".
+- The coordinator is rewriting the runbook for per-hotel waves (legacy freeze,
+  Channex and Stripe handover per property). The steps in "Go-day placement"
+  apply to each wave's hotels.
+
+**Common to all 8 hotels:**
+
+- **Cancellation.** There are no `cancellation_policies` rows, so legacy
+  enforces 7 free days and then the full amount. That maps exactly to
+  `flexible` with deadline 7.
+- **Nothing else to carry.** No deposits, room-level Channex-only stay rules,
+  minimum advance days, occupancy prices, sub-cent amounts or zero occupancy
+  prices.
+- **More than 12 seasons is not a finding.** v2 has no season cap; only
+  overlaps matter.
+- **Payment-method mix pending.** `rate_payment_methods` is a dict keyed by
+  rate option. The per-hotel mix waits on the platform helper's follow-up
+  read: null, `{}`, missing keys, empty arrays, and option × method.
+  - The first read's `rooms_with_empty_rate_method_list = 0` was a false zero
+    (the lax jsonpath could not match), so treat it as unknown.
+  - The per-hotel check "an empty option means nothing is bookable" is
+    pending that read.
+  - The card, `pay_at_property` and `xendit` counts were correct.
+
+**Gate column:** **block** stops publication or reopen; **review** needs an
+approved decision in the plan digest; **pass** needs only the listed
+prerequisites.
+
+| Hotel (cur.)             | Wave  | Legacy payment and mode                                            | Findings                                                                                                                                                                        | Gate          | What it needs                                                                                                                                 |
+| ------------------------ | ----- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Aether B `29f39aae` USD  | 1     | Card on its own onboarded Stripe account; instant                  | U15 Feb-29 seasons on 5/5 rooms (approved choice (a)). U9 markup: 10% on one channel                                                                                            | review → pass | Card prerequisites a–e (wave 1 card applies only here). The native Channex markup in the handover, plus the H.5 markup smoke                  |
+| Dolcemare `7d3f6dcc` IDR | 1     | Pay at property only; **request** mode                             | **U12: request mode. v2 accepts instant bookings only, for pay at property too.**                                                                                               | **block**     | Switch to instant booking, or v2 request-mode acceptance for pay at property ships first (decision 1). IDR prerequisite f                     |
+| Haigha `e41d252d` IDR    | 1     | Pay at property only; **request** mode                             | **U12** as Dolcemare. U15 Feb-29 on 3/3 rooms (approved (a)). U11 partial-refund tiers on 1 room                                                                                | **block**     | Decision 1 as Dolcemare. The hotel accepts manual cancellation handling (decision 2). IDR prerequisite f                                      |
+| Aether A `26e9e98f` USD  | later | Card on its own onboarded Stripe account; request mode             | U12 (not in a wave). U15 Feb-29 on 5/5 rooms (approved (a)). Base 0 on 2 rooms becomes the lowest season rate (exact). U9 markup 10%                                            | not in a wave | Instant booking. Then card prerequisites, the native markup and the H.5 markup smoke                                                          |
+| Animals `6aca326e` USD   | later | Platform card plus pay at property; request mode                   | U2 and U12 (not in a wave)                                                                                                                                                      | not in a wave | Its own onboarded Stripe Connect account and instant booking                                                                                  |
+| Tiga `8f5919ed` IDR      | later | Platform card plus pay at property; instant                        | U2 (not in a wave). Base 0 on 3 rooms (exact). U9: OTA meal plan on 1 room (close at handover) and markup 10%                                                                   | not in a wave | Its own Stripe Connect account in IDR (with the IDR K5 run, prerequisite b). Then the native markup, the closed meal plan, and prerequisite f |
+| Nirvana `b8efb175` IDR   | later | Platform card plus bank transfer, no pay at property; request mode | U2 and U12 (not in a wave). U4 bank transfer is dropped (review at its wave). Base 0 on 11 rooms (exact). Hotel last-minute is on with no tiers, which becomes the 0% catch-all | not in a wave | Its own Stripe account and instant booking (without card it has no v2 method). Accept the bank-transfer drop. Prerequisite f                  |
+| Miliways `c8efd685` IDR  | later | Platform card plus bank transfer, no pay at property; request mode | U2 and U12 (not in a wave). U4 (review at its wave). Non-refundable only on all 3 rooms (exact)                                                                                 | not in a wave | Same as Nirvana                                                                                                                               |
+
+**Decisions still needed from Flamur:**
+
+1. **Dolcemare and Haigha are in request mode.**
+   - They confirm bookings by hand in legacy. v2 only accepts instant
+     bookings, for pay at property as well as card
+     (`storePricingAcceptance.ts:41`; the import maps legacy
+     `instant_book = false` to `request`).
+   - As wave 1 stands, neither could take a v2 direct booking. Choose one:
+     - switch both to instant booking at go-day;
+     - have the pricing stream build v2 request-mode acceptance for pay at
+       property before wave 1;
+     - move them to a later wave, which leaves wave 1 as Aether B alone.
+2. **Haigha's partial refunds (U11).** Accept that these cancellations are
+   handled by hand on v2: guests are asked to contact the property, and staff
+   refund manually.
+
+**Decided:**
+
+- Feb-29 seasons follow option (a), mirroring today (U15).
+- The phased waves.
+- Markups go through native Channex (U9); no decision needed.
+
 ## Legacy model: what guests saw
 
 Source: `apps/pms-api` (Python). Prices are per room per night in **major
 units**, computed live with `float` and `round(x, 2)`.
 
-| Legacy input (`pms.room_types` unless noted)                                                                  | Meaning in the direct booking engine                                                                                                                                                                                                                                             |
-| ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `base_rate`                                                                                                   | Night price when no season matches. If it is 0, the lowest positive season `rate` over **all** seasons (including those missing a bound).                                                                                                                                        |
-| `seasons[]` `{name, tier, from, to, rate, minStay, maxStay, occupancyRates}`                                  | Yearly ranges (`2024-MM-DD` or `MM-DD`) that may wrap New Year. The first covering season with a truthy `rate` wins. `occupancyRates["<adults>"]` replaces it; a `""` value falls through to the base price.                                                                     |
-| `daily_rates{"YYYY-MM-DD": amount}`                                                                           | Final night price, with no weekend surcharge or occupancy.                                                                                                                                                                                                                       |
-| `weekend_surcharge` (`"+15%"`)                                                                                | Percent on Friday and Saturday nights (Python `weekday()` 4 and 5). Negative or unparseable values count as 0.                                                                                                                                                                   |
-| `flexible_rate_enabled`, `non_refundable_enabled`, `non_refundable_discount`, `non_refundable_rate`           | NR night = flexible × (1 − d%) when d > 0, else the static NR rate when > 0, else flexible. With flexible disabled, NR = flexible.                                                                                                                                               |
-| `monthly_rates`                                                                                               | **Dead.** Removed from the lookup in `42a678b84`.                                                                                                                                                                                                                                |
-| `hotels.last_minute_discount`, room `last_minute_discount`                                                    | `int(pct)` off the room total, by days before arrival. The hotel switch is the master; a non-empty room tier list replaces the hotel's; a room can opt out.                                                                                                                      |
-| season `minStay` / `maxStay`                                                                                  | Enforced for direct bookings.                                                                                                                                                                                                                                                    |
-| room `min_stay`, `max_stay`, CTA, CTD                                                                         | **Channex only.**                                                                                                                                                                                                                                                                |
-| `minimum_advance_days`                                                                                        | Rejects check-in sooner than N days away.                                                                                                                                                                                                                                        |
-| `cancellation_policies` (hotel; 7 free days if no row), room `flexible_cancellation_type`, `partial_refund_*` | Server refund rules (mapping below).                                                                                                                                                                                                                                             |
-| `rate_payment_methods`, `hotel_payment_settings`, booking-engine flags                                        | **Server-enforced** (`booking_service.py:450-460`): the method must be in the rate's list (when set) **and** enabled for the hotel. Methods are `card` (own Stripe Connect account or the `vayada` platform account), `xendit`, `pay_at_property`, `bank_transfer` and `paypal`. |
-| `rate_deposit_settings`                                                                                       | Deposit = round(total × p%, 2), paid online at booking; the balance is paid at the property, and pay at property is refused. A paid cancellation keeps `max(deposit, penalty)`.                                                                                                  |
-| `instant_book`                                                                                                | Request mode holds card bookings for manual capture.                                                                                                                                                                                                                             |
-| `meal_plans[]`, `channex_channel_markups`                                                                     | **OTA only**, applied on the Channex push.                                                                                                                                                                                                                                       |
-| `max_occupancy`, `max_adults`, `max_children`                                                                 | Capacity only. Children never change the price. Legacy has no child-age policy.                                                                                                                                                                                                  |
+| Legacy input (`pms.room_types` unless noted)                                                                  | Meaning in the direct booking engine                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `base_rate`                                                                                                   | Night price when no season matches. If it is 0, the lowest positive season `rate` over **all** seasons (including those missing a bound).                                                                                                                                                                                                                                                                                                                                                                   |
+| `seasons[]` `{name, tier, from, to, rate, minStay, maxStay, occupancyRates}`                                  | Yearly ranges (`2024-MM-DD` or `MM-DD`) that may wrap New Year. The first covering season with a truthy `rate` wins. `occupancyRates["<adults>"]` replaces it; a `""` value falls through to the base price. A season with a `02-29` bound matches **nothing** in non-leap years (below).                                                                                                                                                                                                                   |
+| `daily_rates{"YYYY-MM-DD": amount}`                                                                           | Final night price, with no weekend surcharge or occupancy.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `weekend_surcharge` (`"+15%"`)                                                                                | Percent on Friday and Saturday nights (Python `weekday()` 4 and 5). Negative or unparseable values count as 0.                                                                                                                                                                                                                                                                                                                                                                                              |
+| `flexible_rate_enabled`, `non_refundable_enabled`, `non_refundable_discount`, `non_refundable_rate`           | NR night = flexible × (1 − d%) when d > 0, else the static NR rate when > 0, else flexible. With flexible disabled, NR = flexible.                                                                                                                                                                                                                                                                                                                                                                          |
+| `monthly_rates`                                                                                               | **Dead.** Removed from the lookup in `42a678b84`.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `hotels.last_minute_discount`, room `last_minute_discount`                                                    | `int(pct)` off the room total, by days before arrival. The hotel switch is the master; a non-empty room tier list replaces the hotel's; a room can opt out.                                                                                                                                                                                                                                                                                                                                                 |
+| season `minStay` / `maxStay`                                                                                  | Enforced for direct bookings.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| room `min_stay`, `max_stay`, CTA, CTD                                                                         | **Channex only.**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `minimum_advance_days`                                                                                        | Rejects check-in sooner than N days away.                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `cancellation_policies` (hotel; 7 free days if no row), room `flexible_cancellation_type`, `partial_refund_*` | Server refund rules (mapping below).                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `rate_payment_methods`, `hotel_payment_settings`, booking-engine flags                                        | **Server-enforced** (`booking_service.py:450-460`). `rate_payment_methods` is a dict keyed by rate option, `{"flexible":[…],"nonrefundable":[…]}`. A null dict or a missing key means the hotel's methods; an empty array means nothing is bookable for that option. A method must be in the option's list **and** enabled for the hotel. Values (the last legacy room form): `card` (own Stripe Connect account or the `vayada` platform account), `pay_at_property`, `bank_transfer`, `xendit`, `paypal`. |
+| `rate_deposit_settings`                                                                                       | Deposit = round(total × p%, 2), paid online at booking; the balance is paid at the property, and pay at property is refused. A paid cancellation keeps `max(deposit, penalty)`.                                                                                                                                                                                                                                                                                                                             |
+| PMS `hotels.instant_book`                                                                                     | `false` means request mode: the host confirms each booking (card bookings are held for manual capture). The import maps it to target `acceptance_mode = 'request'`.                                                                                                                                                                                                                                                                                                                                         |
+| `meal_plans[]`, `channex_channel_markups`                                                                     | **OTA only**, applied on the Channex push.                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `max_occupancy`, `max_adults`, `max_children`                                                                 | Capacity only. Children never change the price. Legacy has no child-age policy.                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 Legacy has no taxes, fees or extra-guest charges. Add-ons and promo codes are
 Booking-owned and outside this ticket.
+
+**Feb-29 bounds, verified with the real legacy code.**
+
+- `_season_covers_date` (`room_type_repo.py:236-256`) moves both bounds into
+  the stay's year with `.replace(year=…)`. A `02-29` bound raises in a
+  non-leap year and the function returns `False`. In 2025–2027 such a season
+  therefore matches **no** date, not just Feb 29, and its `minStay`/`maxStay`
+  are unused.
+- Running the extracted functions on a "Nov 1 – Feb 29" season gives:
+  - 2026-12-15, 2027-01-20 and 2027-02-28 are priced at base;
+  - 2028-01-20 and 2028-02-29 get the season price.
+- `_get_lowest_season_rate` still counts that season's `rate` when the base is 0.
 
 **Authoritative legacy quote.** `POST /{slug}/bookings/quote` and booking
 creation both run:
@@ -223,28 +322,29 @@ Fidelity is one of:
 
 ### Rooms, offers and price calendar
 
-| Legacy                                                                                   | pricing-v2                                                                                                                                                                       | Fidelity                                                      |
-| ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| Active room type with a bookable option                                                  | One configuration. `roomTypeId` is the legacy ID (preserved by the import); capacity comes from the imported room facts                                                          | exact                                                         |
-| No bookable option, or no positive price                                                 | Omitted (unpriced, as in legacy)                                                                                                                                                 | exact                                                         |
-| Amount `x`                                                                               | `Decimal(str(x)) × 100` must be an integer                                                                                                                                       | exact; otherwise **block**                                    |
-| Children                                                                                 | `adultFromAge` = the hotel's own child-policy age, else 18. Neither the legacy nor the target schema has one today, so 18 for all. One band with `"0"`, counted toward capacity. | exact for price; U14                                          |
-| Flexible option                                                                          | `legacy-flexible`: independent, `room_only`, charge `"0"`                                                                                                                        | exact                                                         |
-| NR via discount d                                                                        | `legacy-non-refundable`, linked at −d×100 basis points, restrictions `inherit`                                                                                                   | exact within rounding; **block** if d ≥ 100                   |
-| NR via static rate                                                                       | Independent offer with a flat base, no seasons or weekdays; own copy of the restrictions                                                                                         | exact                                                         |
-| NR only                                                                                  | One independent offer with the full calendar                                                                                                                                     | exact                                                         |
-| `base_rate` (0 → the lowest positive `rate` over all seasons)                            | `calendar.base`                                                                                                                                                                  | exact                                                         |
-| Season with a positive `rate` and both bounds                                            | `calendar.seasons[]`                                                                                                                                                             | exact                                                         |
-| Season without a `rate` or a bound                                                       | No price season; its stay rules still map                                                                                                                                        | exact                                                         |
-| `occupancyRates`                                                                         | `occupancy` mode with arrays for 1..adults. A missing key takes the season `rate`; `""` takes the base; everything else repeats its flat amount                                  | exact for single rooms; **block** on a 0 value                |
-| Overlapping seasons (including New-Year-wrap cases the validator missed), `02-29` bounds | n/a                                                                                                                                                                              | **block** (U10)                                               |
-| Future `daily_rates` with value > 0                                                      | `calendar.dates[]`, flat                                                                                                                                                         | exact                                                         |
-| `daily_rates` with value ≤ 0                                                             | Restriction date with `stopSell`                                                                                                                                                 | exact                                                         |
-| Past `daily_rates`                                                                       | Dropped                                                                                                                                                                          | drop                                                          |
-| `weekend_surcharge` +p%                                                                  | Weekdays 4 and 5 at p×100 basis points (none when p ≤ 0)                                                                                                                         | exact within rounding; **block** for non-integer basis points |
-| `monthly_rates`                                                                          | Not mapped                                                                                                                                                                       | drop (dead in legacy)                                         |
-| `meal_plans`, channel markups                                                            | Not mapped                                                                                                                                                                       | drop (U9)                                                     |
-| Last-minute discounts                                                                    | Not carried before go-day                                                                                                                                                        | drop (U13)                                                    |
+| Legacy                                                                   | pricing-v2                                                                                                                                                                                                                                                 | Fidelity                                                      |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Active room type with a bookable option                                  | One configuration. `roomTypeId` is the legacy ID (preserved by the import); capacity comes from the imported room facts                                                                                                                                    | exact                                                         |
+| No bookable option, or no positive price                                 | Omitted (unpriced, as in legacy)                                                                                                                                                                                                                           | exact                                                         |
+| Amount `x`                                                               | `Decimal(str(x)) × 100` must be an integer                                                                                                                                                                                                                 | exact; otherwise **block**                                    |
+| Children                                                                 | `adultFromAge` = the hotel's own child-policy age, else 18. Neither the legacy nor the target schema has one today, so 18 for all. One band with `"0"`, counted toward capacity.                                                                           | exact for price; U14                                          |
+| Flexible option                                                          | `legacy-flexible`: independent, `room_only`, charge `"0"`                                                                                                                                                                                                  | exact                                                         |
+| NR via discount d                                                        | `legacy-non-refundable`, linked at −d×100 basis points, restrictions `inherit`                                                                                                                                                                             | exact within rounding; **block** if d ≥ 100                   |
+| NR via static rate                                                       | Independent offer with a flat base, no seasons or weekdays; own copy of the restrictions                                                                                                                                                                   | exact                                                         |
+| NR only                                                                  | One independent offer with the full calendar                                                                                                                                                                                                               | exact                                                         |
+| `base_rate` (0 → the lowest positive `rate` over all seasons)            | `calendar.base`                                                                                                                                                                                                                                            | exact                                                         |
+| Season with a positive `rate` and both bounds                            | `calendar.seasons[]`                                                                                                                                                                                                                                       | exact                                                         |
+| Season without a `rate` or a bound                                       | No price season; its stay rules still map                                                                                                                                                                                                                  | exact                                                         |
+| `occupancyRates`                                                         | `occupancy` mode with arrays for 1..adults. A missing key takes the season `rate`; `""` takes the base; everything else repeats its flat amount                                                                                                            | exact for single rooms; **block** on a 0 value                |
+| Overlapping seasons (including New-Year-wrap cases the validator missed) | n/a                                                                                                                                                                                                                                                        | **block** (U10), checked at T-2                               |
+| Season with a `02-29` bound                                              | **No** v2 price season and **no** restriction season (legacy cannot build it in non-leap years). Its `rate` still counts for the base-0 lowest-season fallback. Never pass `02-29` as a v2 bound: the `MM-DD` string comparison would wrongly cover Feb 28 | exact for 2025–2027 (U15, decided option (a))                 |
+| Future `daily_rates` with value > 0                                      | `calendar.dates[]`, flat                                                                                                                                                                                                                                   | exact                                                         |
+| `daily_rates` with value ≤ 0                                             | Restriction date with `stopSell`                                                                                                                                                                                                                           | exact                                                         |
+| Past `daily_rates`                                                       | Dropped                                                                                                                                                                                                                                                    | drop                                                          |
+| `weekend_surcharge` +p%                                                  | Weekdays 4 and 5 at p×100 basis points (none when p ≤ 0)                                                                                                                                                                                                   | exact within rounding; **block** for non-integer basis points |
+| `monthly_rates`                                                          | Not mapped                                                                                                                                                                                                                                                 | drop (dead in legacy)                                         |
+| `meal_plans`, channel markups                                            | Not mapped                                                                                                                                                                                                                                                 | drop (U9)                                                     |
+| Last-minute discounts                                                    | Not carried before go-day                                                                                                                                                                                                                                  | drop (U13)                                                    |
 
 ### Stay rules
 
@@ -275,43 +375,46 @@ window-field percent of 0 or 100 fails, so the mapping never emits those.
 
 ### Booking terms: payment
 
-Effective legacy methods are the rate's list (or the hotel's methods when the
-list is null), intersected with the hotel-enabled methods. Pay at property is
+Effective legacy methods per rate option are the option's list, or the
+hotel's methods when the dict is null or the key is missing, intersected with
+the hotel-enabled methods. An empty array means nothing is bookable for that
+option; that per-hotel check is pending the follow-up read. Pay at property is
 removed when there is a deposit. v2 is always `{kind:"full",
 acceptedMethods}`.
 
-| Legacy effective method or rule    | v2                                                           | Fidelity                                                     |
-| ---------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| `pay_at_property`                  | `pay_at_property`                                            | exact                                                        |
-| `card`, own Stripe Connect account | `card`                                                       | exact. If G3 fails, the hotel is suspended, never downgraded |
-| `card`, `vayada` platform account  | `card` once a property Stripe account is ready               | **block** (U2)                                               |
-| `xendit`                           | `card` if a property Stripe account is ready in the currency | **safe** (U3), else **block**                                |
-| `bank_transfer`, `paypal`          | Dropped                                                      | **safe** if another method remains, else **block** (U4)      |
-| No effective method                | Offer omitted (legacy could not book it)                     | exact                                                        |
-| Deposit p%, including 100%         | `[card]`, full prepayment                                    | **safe** U1 (decided)                                        |
-| Card with `instant_book = false`   | n/a: v2 card is instant only                                 | **block** (U12)                                              |
+| Legacy effective method or rule                       | v2                                                                                                   | Fidelity                                                                                    |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `pay_at_property`                                     | `pay_at_property`                                                                                    | exact                                                                                       |
+| `card`, own Stripe Connect account                    | `card`                                                                                               | exact. If G3 fails, the hotel is suspended, never downgraded                                |
+| `card`, `vayada` platform account                     | None: no platform-account card in v2                                                                 | the hotel waits for a later wave until it has its own onboarded Stripe Connect account (U2) |
+| `xendit`                                              | `card` if a property Stripe account is ready in the currency                                         | **safe** (U3), else **block**                                                               |
+| `bank_transfer`, `paypal`                             | Dropped                                                                                              | **safe** if another method remains, else **block** (U4)                                     |
+| No effective method                                   | Offer omitted (legacy could not book it)                                                             | exact                                                                                       |
+| Deposit p%, including 100%                            | `[card]`, full prepayment                                                                            | **safe** U1 (decided)                                                                       |
+| Request mode (`instant_book = false`), **any** method | n/a: v2 accepts instant bookings only, for card and pay at property (`storePricingAcceptance.ts:41`) | **block** (U12)                                                                             |
 
 ## Unrepresentable and lossy (dry-run finding codes)
 
 - `review`: allowed only with an approved plan digest that lists it.
 - `block`: no publication.
 
-| Code | Legacy behavior                                                                                               | Nearest safe v2 equivalent                                                                                                                                                                                                                              | Severity                 |
-| ---- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| U1   | Deposit p% online, balance at the property; a paid cancellation keeps `max(deposit, penalty)`                 | Full card prepayment (decided). Same total; the hotel never collects less upfront. The retention minimum is lost                                                                                                                                        | review                   |
-| U2   | Card on the `vayada` platform account                                                                         | None until a property Stripe account is ready                                                                                                                                                                                                           | block                    |
-| U3   | Xendit                                                                                                        | Stripe card if it is ready in the currency                                                                                                                                                                                                              | review, else block       |
-| U4   | Bank transfer, PayPal                                                                                         | Dropped when another method remains                                                                                                                                                                                                                     | review, or block if sole |
-| U5   | Room-level stay rules on OTAs only                                                                            | Applied to both channels (decided). CTA or CTD true, or max < min, blocks                                                                                                                                                                               | review / block           |
-| U6   | `minimum_advance_days`                                                                                        | None (same-day cutoff covers N ≤ 1)                                                                                                                                                                                                                     | review                   |
-| U7   | Multi-room bookings price occupancy by the party's **total** adults                                           | v2 prices each room by its own guests. Covered by one listed multi-room gate sample                                                                                                                                                                     | info                     |
-| U8   | Float `round(x, 2)` per step                                                                                  | Integer half-up, within the tolerance                                                                                                                                                                                                                   | info                     |
-| U9   | OTA meal-plan rate plans and channel markups                                                                  | Dropped at import. Those OTA rate plans are **closed or deactivated** in the Channex handover before H.5. "Not bound" is not "closed": an unbound OTA rate plan may keep its last-pushed ARI and keep selling. Verify each is closed                    | review                   |
-| U10  | Source defects: `02-29` bounds, overlapping seasons, occupancy 0, sub-cent amounts, more than 10 refund tiers | None. Fix in legacy before the freeze                                                                                                                                                                                                                   | block                    |
-| U11  | Partial refunds, applied automatically and including no-shows                                                 | `partial_refund` terms as mapped above. On v2, cancellation of these bookings is manual (guests are told to contact the property; staff refund by hand), and the no-show penalty is the full amount. The hotel must accept manual cancellation handling | review                   |
-| U12  | Card in request mode                                                                                          | None. Switch the hotel to instant before go-day                                                                                                                                                                                                         | block                    |
-| U13  | Active last-minute discounts                                                                                  | Not carried before go-day; owners re-add them afterwards (no new Booking command). A counts-only read per hotel comes next. Last-minute gate samples are listed divergences                                                                             | review                   |
-| U14  | Teens entered as children or adults freely; `max_children` limits only the child count                        | v2 asks child ages (≤ 17 are children). Rooms with `max_children` 0 or low may reject families with teens                                                                                                                                               | review                   |
+| Code | Legacy behavior                                                                               | Nearest safe v2 equivalent                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Severity                                      |
+| ---- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| U1   | Deposit p% online, balance at the property; a paid cancellation keeps `max(deposit, penalty)` | Full card prepayment (decided). Same total; the hotel never collects less upfront. The retention minimum is lost                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | review                                        |
+| U2   | Card on the `vayada` platform account                                                         | None: no platform-account card in v2. The hotel stays on legacy until it has its own Stripe Connect account                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | not in a wave                                 |
+| U3   | Xendit                                                                                        | Stripe card if it is ready in the currency                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | review, else block                            |
+| U4   | Bank transfer, PayPal                                                                         | Dropped when another method remains                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | review, or block if sole                      |
+| U5   | Room-level stay rules on OTAs only                                                            | Applied to both channels (decided). CTA or CTD true, or max < min, blocks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | review / block                                |
+| U6   | `minimum_advance_days`                                                                        | None (same-day cutoff covers N ≤ 1)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | review                                        |
+| U7   | Multi-room bookings price occupancy by the party's **total** adults                           | v2 prices each room by its own guests. Covered by one listed multi-room gate sample                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | info                                          |
+| U8   | Float `round(x, 2)` per step                                                                  | Integer half-up, within the tolerance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | info                                          |
+| U9   | OTA meal-plan rate plans, and per-channel markups on the Channex push                         | **Meal plans:** dropped at import, and the OTA rate plans are **closed or deactivated** in that hotel's Channex handover before H.5 ("not bound" is not "closed": an unbound rate plan may keep its last-pushed ARI). **Markups:** a handover step, not dropped. The v2 published-offer target sends the inclusive total with **no** channel markup by design ("Amount ownership and dispatch" in [offer targets](channex-published-offer-targets.md)). `PMS_CHANNEX_MARKUPS_MODE` and `update_markups` only write the old target's `pms.channel_rate_plan_mappings.markup_percent`. The owner is the native Channex channel-level price adjustment, configured once per hotel and channel in the Channex handover, never alongside an old-target markup. Markups stay out of v2 offers, so direct prices stay the legacy prices. An H.5 smoke checks it (G5) | review (meal plans); handover step (markups)  |
+| U10  | Source defects: overlapping seasons, occupancy 0, sub-cent amounts, more than 10 refund tiers | None; the hotel's source is fixed before its wave's freeze. More than 12 seasons is **not** a defect: v2 has no season cap                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | block                                         |
+| U11  | Partial refunds, applied automatically and including no-shows                                 | `partial_refund` terms as mapped above. On v2, cancellation of these bookings is manual (guests are told to contact the property; staff refund by hand), and the no-show penalty is the full amount. The hotel must accept manual cancellation handling                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | review                                        |
+| U12  | Request mode (the host confirms each booking), with any payment method                        | None: v2 acceptance is instant-only. The hotel switches to instant booking, or v2 request-mode acceptance ships first; otherwise it waits for a later wave                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | block (wave 1: decision 1) / not in a wave    |
+| U13  | Active last-minute discounts                                                                  | Not carried before go-day; owners re-add them afterwards (no new Booking command). Read result: no cohort hotel has active tiers. Nirvana's hotel switch is on with no tiers, which maps to the 0% catch-all with no price effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | review if a hotel gains tiers before its wave |
+| U14  | Teens entered as children or adults freely; `max_children` limits only the child count        | v2 asks child ages (≤ 17 are children). Rooms with `max_children` 0 or low may reject families with teens                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | review                                        |
+| U15  | Season with a `02-29` bound, which legacy never applies in non-leap years                     | No v2 season (price or restriction), mirroring today (Flamur 2026-10-10, option (a)). Per-hotel finding: "approved parity choice: Feb-29 seasons unused (Flamur 2026-10-10)", listing the seasons. G2 needs no divergence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | review (approved)                             |
 
 Promo codes, add-ons and existing bookings' frozen price evidence are
 untouched.
@@ -457,9 +560,15 @@ Input for the coordinator's runbook update.
 - **After H.2–H.4, before H.5.** Re-run the gate. Until prerequisite a
   ships, G1 can flap here, because each `account.updated` stales card
   hotels; the tool republishes its own plan.
+- **Channex handover, before H.5.**
+  - Close or deactivate the hotel's U9 OTA meal-plan rate plans.
+  - For a hotel with legacy markups, configure the native Channex
+    channel-level price adjustment once per marked-up channel (10% on one
+    channel for Aether A, Aether B and Tiga). Never combine it with an
+    old-target markup.
 - **H.5.** Its ARI push reads the published offers. ARI is not mutating
   before then, so the `pricing.v2.revised` outbox makes no provider writes.
-  The U9 OTA rate plans must already be closed.
+  Run G5 right after it.
 - **Immediately before O.1.** Final gate. Only GO hotels reopen.
 - **O.2 watch, and daily for the first week after the window.** Run
   `--stale-count`. Any non-zero count is investigated. "Save prices" by the
@@ -567,15 +676,24 @@ priced/rejected disagreement, is **NO-GO**.
   checkbox).
 - A legacy online-card hotel without card readiness is NO-GO, which leads to
   the per-hotel suspend.
+- **Acceptance mode is `instant`** in the target booking settings. v2 rejects
+  request-mode bookings for every payment method (U12).
 
 **G4. Findings.** No `block` findings, and every `review` finding is in the
 approved digest.
 
+**G5. H.5 markup smoke (marked-up hotels only: Aether B in wave 1; Aether A and
+Tiga in their waves).** On one sample date, the rate the OTA shows for the
+marked-up channel equals the v2 published total × 1.10. A missing or doubled
+adjustment is NO-GO for that hotel's OTA reopen.
+
 ## Phase 2 slices (after review)
 
-1. Pricing stream: the converter with fixtures for every row and finding
-   (including the parser fixtures above), and `declaredVia: "legacy_import"`
-   with tests.
+1. Pricing stream: the converter with fixtures for every row and finding,
+   including the parser fixtures above and the U15 Feb-29 rule (no v2 price or
+   restriction season; the season still counts for the base-0 fallback; an
+   approved-parity finding). Also `declaredVia: "legacy_import"` with tests.
+   If decision 1 chooses it: v2 request-mode acceptance for pay at property.
 2. Pricing stream: the Finance-token staleness fix and republish
    (prerequisite a), and the K5 IDR run (prerequisite b).
 3. D1: the migration context builder (independent security review, then
@@ -590,17 +708,26 @@ approved digest.
 
 ## Open questions
 
-1. **Last-minute (U13).** The counts per cohort hotel are pending; they decide
-   how many hotels carry U13.
-2. **Payment mix.** Which cohort hotels use the platform card, Xendit, bank
-   transfer, PayPal, request mode, deposits or partial refunds? The counts
-   read answers this. Each U2, U3, U4 and U12 hotel needs a fix or a decision
-   before go-day.
-3. **U9 owner.** Who closes the OTA meal-plan and markup rate plans in the
-   Channex handover, and how is "closed" verified rather than "unbound"?
-4. **Suspended hotels on Channex.** Does the per-property Channex `disable`
+1. **Wave 1 request mode** (decision 1 in "Cohort outcome and waves").
+   Dolcemare and Haigha need one of these:
+   - switch to instant booking;
+   - v2 request-mode acceptance for pay at property;
+   - move to a later wave.
+2. **Haigha U11.** The hotel must accept manual cancellation handling
+   (decision 2).
+3. **Payment-method mix.** The per-option empty, missing and method counts
+   are pending the follow-up read. The "empty option means nothing bookable"
+   check waits on it.
+4. **Native Channex markup.** Confirm that the marked-up channel supports a
+   native channel-level percentage adjustment, on the staging Channex pair,
+   before Aether B's handover. If it does not, the choice is between closing
+   that channel's rate plan and accepting a 10% lower OTA price.
+5. **U9 meal plans (later waves).** Who closes them in Tiga's handover, and how
+   is "closed" (not merely "unbound") verified?
+6. **Suspended hotels on Channex.** Does the per-property Channex `disable`
    leave OTAs on their last ARI? The closeout must stay until reactivation.
-5. **Republishing after reopen.** Who republishes migrated hotels that go
-   stale (owners via "Save prices", or ops), and who watches `--stale-count`?
-6. **Child age.** Confirm that 18 applies to every hotel: no source holds a
+7. **Republishing after go-live.** Who republishes migrated hotels whose
+   pricing goes stale (owners via "Save prices", or ops), and who watches
+   `--stale-count`?
+8. **Child age.** Confirm that 18 applies to every hotel: no source holds a
    hotel child-age policy today.
