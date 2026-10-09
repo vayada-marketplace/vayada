@@ -5,7 +5,7 @@ import {
   channexManagementWorkerPrivileges,
 } from "./channexManagementWorkerPrivileges.js";
 
-// Worker policy catalog through 0473; shared trigger catalog through 0473, checked on PG17.
+// Worker policy catalog through 0473, checked on PG17.
 const POLICY_DIGEST = "c0c08b5d01df4b8fa3c1bed72e7a1fcdbfd77731383e63bd986f3d938ec26323";
 // Shared trigger catalog: through 0473, and after 0474 drops the native hotel-setup triggers
 // (VAY-2056 step 6, PG16 and PG17). Accepting both lets this image start on either side of

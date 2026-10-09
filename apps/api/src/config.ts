@@ -17,7 +17,11 @@ export type ApiAuthConfig = {
 };
 
 export type ApiAuthSurface =
-  "platform-admin" | "booking-admin" | "pms-web" | "affiliate-dashboard" | "marketplace-web";
+  | "platform-admin"
+  | "booking-admin"
+  | "pms-web"
+  | "affiliate-dashboard"
+  | "marketplace-web";
 
 export type ApiAuthSessionConfig = {
   workosClientId: string;
@@ -228,6 +232,9 @@ export type ApiConfig = {
   propertySetupDraftRetentionBatchSize: number;
   pmsInventoryPublicOfferRetryEnabled: boolean;
   pmsInventoryPublicOfferRetryIntervalMs: number;
+  /** Kill switch for the hourly calendar auto-open producer (VAY-2066); on by default. */
+  pmsCalendarAutoOpenSchedulerEnabled: boolean;
+  pmsCalendarAutoOpenSchedulerIntervalMs: number;
   creatorPlatformConnections?: CreatorPlatformConnectionsConfig;
   providerWebhooks: ProviderWebhookConfig;
   airbnbImport?: ReturnType<typeof loadAirbnbImportConfig>;
@@ -543,6 +550,14 @@ function readTimerIntervalEnv(env: NodeJS.ProcessEnv, key: string, defaultValue:
   if (value > 2_147_483_647) {
     throw new Error(`${key} must not exceed 2147483647`);
   }
+  return value;
+}
+
+// Each run scans every enabled property, so it never repeats more often than once a minute.
+function readCalendarAutoOpenSchedulerIntervalEnv(env: NodeJS.ProcessEnv): number {
+  const key = "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS";
+  const value = readTimerIntervalEnv(env, key, 60 * 60 * 1000);
+  if (value < 60_000) throw new Error(`${key} must be at least 60000`);
   return value;
 }
 
@@ -1373,6 +1388,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "PMS_INVENTORY_PUBLIC_OFFER_RETRY_INTERVAL_MS",
       30_000,
     ),
+    pmsCalendarAutoOpenSchedulerEnabled: readBooleanEnv(
+      env,
+      "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_ENABLED",
+      true,
+    ),
+    pmsCalendarAutoOpenSchedulerIntervalMs: readCalendarAutoOpenSchedulerIntervalEnv(env),
     creatorPlatformConnections,
     providerWebhooks: prospectiveConfig.providerWebhooks,
     channexManagement,
