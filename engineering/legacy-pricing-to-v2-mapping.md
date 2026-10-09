@@ -10,44 +10,72 @@ Flamur, 2026-10-09: on go-day, after the cohort import and **before reopen**,
 each migrated cohort hotel's legacy prices are converted to pricing-v2 and
 **published**, so the hotel keeps selling; owners adjust later.
 
-Without this step, a cohort hotel has no `pricing_v2` head and no
-`pms-pricing.v1` plan (the imported `LEGACY-FLEX`/`LEGACY-NRF` plans keep a NULL
-contract version). The VAY-2066 auto-open job then marks every room
+Without this step, a cohort hotel has no published `pricing_v2` revision and
+no `pms-pricing.v1` plan (the imported `LEGACY-FLEX`/`LEGACY-NRF` plans keep a
+NULL contract version). The VAY-2066 auto-open job then marks every room
 `missing_rate` with a sellable count of 0
 ([auto-open contract](pms-calendar-auto-open-contract.md)).
 
-Rules this design follows:
+Rules:
 
 - **Command path only.** Publication goes through
   `createReplacementPricingCommands(pool, context)`
-  (`apps/api/src/domains/replacementPricingCommands.ts`). This is the same
-  chain as `PricingEditor.save()` and VAY-1943's `publishFirstPricing`: stage
-  terms → prepare → save draft → review charges → confirm charges → save draft
-  with the declaration → publish. There are no raw inserts into
-  `pms.pricing_v2_*` or `booking.pricing_v2_*`.
-- **Payment terms copy each hotel's current legacy setting** (Flamur, via the
-  VAY-965 coordinator). There is no single global rule:
+  (`apps/api/src/domains/replacementPricingCommands.ts`). It is the same chain
+  as `PricingEditor.save()` and VAY-1943's `publishFirstPricing`: stage terms →
+  prepare → save draft → review charges → confirm charges → save draft with the
+  declaration → publish. There are no raw inserts.
+- **Payment terms copy each hotel's current legacy setting** (Flamur):
   - pay at property stays pay at property;
-  - online card payment stays online;
-  - a deposit or prepayment rule carries over as closely as v2 allows.
+  - **online card stays online card from go-day** (option A);
+  - a deposit or prepayment becomes full card prepayment.
 
-  Anything v2 cannot represent exactly gets the nearest **safe** equivalent
-  listed below. The dry run flags it per hotel for review before go-day.
+  There is no pay-at-property fallback for an online hotel. A hotel whose card
+  readiness fails the gate is suspended instead (the per-hotel suspend steps
+  below). Anything v2 cannot represent gets the nearest safe equivalent,
+  flagged per hotel by the dry run.
 
-- **Go-day gate per hotel:**
-  - legacy and new quote parity on sample stays, within the rounding rules
-    below;
-  - for online payment, Finance and Stripe readiness for that hotel's
-    currency.
+- **The go-day gate is per hotel.** It checks quote parity on sample stays
+  within the rounding rules, and Finance and Stripe card readiness for the
+  hotel's currency.
 
-**Ownership.** The pricing stream (the VAY-1543/2079 worker) owns the mapping
-and the converter. VAY-1362 owns the go-day integration and the gate. Releases
-go through the VAY-965 coordinator.
+**Ownership.**
 
-## Cohort and currency facts
+- The pricing stream (the VAY-1543/2079 worker) owns the converter and the
+  `declaredVia: "legacy_import"` widening (phase-2 slice 1).
+- VAY-1362 owns the go-day integration, the gate, and the runbook. The
+  coordinator updates the runbook on the cohort stack.
+- Releases go through the VAY-965 coordinator.
 
-The initial cohort is 8 hotels. The manifest of record stays outside the repo
-(runbook).
+**Decided** (Flamur and the coordinator, 2026-10-09):
+
+- deposits become full card prepayment;
+- stricter stay rules for direct bookings are accepted;
+- children stay free with `adultFromAge` 18 when the hotel has no own policy;
+- no cohort hotel collects taxes or fees on arrival, so the charges
+  declaration is true;
+- a hotel that fails the gate is suspended on its own;
+- the operator is Flamur's own platform account (D1).
+
+## Go-day prerequisites
+
+| #   | Prerequisite                                                                                                                                                 | Owner                     |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- |
+| a   | Fix the Finance-token staleness bug, then republish existing card hotels (see "Staleness" below)                                                             | pricing stream            |
+| b   | Run K5 with a Stripe test-mode **IDR** connected account. USD-path K5 passed 10/10 on 2026-10-09 (`evidence/vay1543-slice0-20261008/k5-stripe-test-mode.md`) | pricing stream            |
+| c   | Refresh the Stripe account and record execution evidence per card hotel (runbook S.0a)                                                                       | VAY-1362 / Finance        |
+| d   | A platform PR setting `REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED=true`, flipped with Flamur's explicit go before go-day. K1–K4 are already merged and dark | platform + Flamur         |
+| e   | Per-hotel card readiness in the gate (G3)                                                                                                                    | VAY-1362                  |
+| f   | Deploy VAY-2085 (#3023) and add IDR to the import's currency copy (see "Currency")                                                                           | VAY-2085 / VAY-1362       |
+| g   | Implement D1 (the migration context) after an independent security review                                                                                    | VAY-1362, Flamur sign-off |
+| h   | Implement `declaredVia: "legacy_import"`                                                                                                                     | pricing stream            |
+
+The card scope on go-day is instant booking only and full prepayment only.
+There is no request-mode card, no automatic refund, and no online cancellation
+of a paid booking ([card acceptance](pricing-card-acceptance.md)).
+
+## Cohort and currency
+
+The initial cohort is 8 hotels. The manifest of record stays outside the repo.
 
 | Currency | Hotels (legacy hotel ID prefix)                                                                                        |
 | -------- | ---------------------------------------------------------------------------------------------------------------------- |
@@ -56,305 +84,267 @@ The initial cohort is 8 hotels. The manifest of record stays outside the repo
 
 Haigha House replaces `6810de91` (USD), which is now outside the cohort.
 
-A read-only production count over the 8 candidates plus the 24 expansion
-hotels (taken before that swap) found:
+A count over the candidates plus 24 expansion hotels (32 hotels, before the
+Haigha swap) found:
 
-- **Currencies.** 25 hotels price in IDR and 7 in USD; none in EUR.
-- **One currency per hotel.** Each hotel has exactly one room-type currency,
-  and it equals `booking_hotels.currency`.
-- **IDs.** `booking_hotels.id` equals the PMS `hotels.id`.
+- 25 hotels price in IDR, 7 in USD, and none in EUR;
+- each hotel has exactly one room-type currency, equal to
+  `booking_hotels.currency`;
+- `booking_hotels.id` equals the PMS `hotels.id`.
 
-The converter still asserts both facts per hotel and blocks when either fails.
+The converter asserts all of these per hotel and blocks on a mismatch.
 
-- **Minor units.** IDR and USD are both scale 2: IDR minor = rupiah × 100 and
-  USD minor = cents (`replacementPricing.ts`, ISO accounting scales). Legacy
-  charged Stripe `ceil(amount × 100)` in every currency, IDR included
-  (`booking_service.py:710`), so v2 minor amounts use the same convention.
-  Legacy prices can contain fractional rupiah (`round(x, 2)` after a
-  percentage), and the converter keeps them exactly.
-- **Whole rupiah is a separate decision.** VAY-2085 item 2 decides whole-rupiah
-  prices separately. It must not change stored amounts before go-day,
-  otherwise the parity tolerance below no longer holds.
-- **One currency everywhere.** These must all equal the pricing currency, and
-  any mismatch **blocks**:
-  - `finance.payment_settings.default_currency` (the import copies the
-    legacy booking currency);
-  - `pms.property_pricing_settings.currency`;
-  - every room currency.
+**Minor units.**
 
-  The pricing currency **cannot change after the first publication** (the
-  storage guard's `allowCurrencyChange` is `false`), so every check runs
-  before publishing.
+- IDR and USD are both scale 2: IDR minor = rupiah × 100 and USD minor = cents.
+- Legacy charged Stripe `ceil(amount × 100)` in every currency
+  (`booking_service.py:710`), so the conventions match.
+- Fractional rupiah from percentage arithmetic are carried exactly.
+  Whole-rupiah rounding (VAY-2085 item 2) must not change stored amounts
+  before go-day.
 
-- **IDR prerequisite (VAY-2085, #3023).** This PR adds IDR to the apps/api PMS
-  pricing currencies and to the hotel-setup `FIRST_CURRENCIES`. The import
-  writes `property_pricing_settings` itself, but only for its own copy of that
-  list (`NATIVE_PRICING_CURRENCIES` in `productionPmsCohortSetup.ts`, stack),
-  which has no IDR today. That copy must gain IDR in step with #3023.
-  Otherwise the 5 IDR cohort hotels get no pricing-settings row. They then stay
-  `provisioning`, cannot pass readiness criterion f, and are invisible to the
-  public quote that G2 uses.
-- **Card eligibility in Finance.** Finance treats every currency except BHD,
-  JOD, KWD, OMR and TND as card-eligible (`0119`), so IDR and USD pass that
-  rule. Stripe's handling of IDR on a connected account is a separate fact.
-  The card-acceptance Stripe test-mode run (K5) must prove it with one IDR and
-  one USD account.
+**Currency checks.** Every check blocks before publishing, because the pricing
+currency cannot change after the first publication (`allowCurrencyChange` is
+`false`). These must all equal the pricing currency:
+
+- `finance.payment_settings.default_currency` (the import copies the legacy
+  booking currency);
+- `pms.property_pricing_settings.currency`;
+- every room currency.
+
+Since #2941, a published plan in a currency other than the property's counts as
+a missing plan.
+
+**IDR.** VAY-2085 (#3023) adds IDR to the apps/api PMS pricing currencies and to
+the hotel-setup `FIRST_CURRENCIES`. The import writes `property_pricing_settings`
+itself, but only for its own copy (`NATIVE_PRICING_CURRENCIES`,
+`productionPmsCohortSetup.ts`, stack), and that copy has no IDR yet. Without it,
+the 5 IDR hotels get no row, stay `provisioning`, and cannot pass readiness
+criterion f.
+
+**Card.** Finance treats every currency except BHD, JOD, KWD, OMR and TND as
+card-eligible (`0119`). Stripe's IDR behavior on a connected account is
+prerequisite b.
 
 ## Legacy model: what guests saw
 
 Source: `apps/pms-api` (Python). Prices are per room per night in **major
-units** of the room's currency (`NUMERIC(15,2)` columns and JSONB numbers or
-strings). They are computed live with `float` and `round(x, 2)`.
+units**, computed live with `float` and `round(x, 2)`.
 
-| Legacy input (`pms.room_types` unless noted)                                                                | Meaning in the direct booking engine                                                                                                                                                                                                                               |
-| ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `base_rate`                                                                                                 | Night price when no season matches. If it is 0, legacy uses the lowest positive season `rate` instead, counting every season, even one with a missing bound.                                                                                                       |
-| `seasons[]` `{name, tier, from, to, rate, minStay, maxStay, occupancyRates}`                                | Yearly ranges (`2024-MM-DD` or `MM-DD`) that may wrap New Year. The first season in array order that covers the night and has a truthy `rate` wins. `occupancyRates["<adults>"]` replaces its `rate`.                                                              |
-| `daily_rates{"YYYY-MM-DD": amount}`                                                                         | Final price for that night, with no weekend surcharge and no occupancy pricing.                                                                                                                                                                                    |
-| `weekend_surcharge` (`"+15%"`)                                                                              | Percent added on Friday and Saturday nights (Python `weekday()` 4 and 5), on top of the season, occupancy or base price. Negative or unparseable values count as 0.                                                                                                |
-| `flexible_rate_enabled`, `non_refundable_enabled`                                                           | Which of the two rate options the room offers.                                                                                                                                                                                                                     |
-| `non_refundable_discount` (int %), `non_refundable_rate`                                                    | NR night = flexible night × (1 − d%) when d > 0. Otherwise the static `non_refundable_rate` when > 0, otherwise the flexible night. With flexible disabled, NR = flexible with no discount.                                                                        |
-| `monthly_rates`                                                                                             | **Dead.** Removed from the price lookup in `42a678b84`.                                                                                                                                                                                                            |
-| `hotels.last_minute_discount`, `room_types.last_minute_discount`                                            | Tiered `int(pct)` discount on the room total, by days before arrival (property-local today). The hotel switch is the master. A non-empty room tier list replaces the hotel's, and a room can opt out. Tiers at 0% or below are skipped.                            |
-| season `minStay` / `maxStay`                                                                                | Enforced for direct bookings: minimum stay is read at arrival; maximum is the tightest across the stay.                                                                                                                                                            |
-| room `min_stay`, `max_stay`, `closed_to_arrival`, `closed_to_departure`                                     | **Channex only** (room-wide defaults behind the season values). Not enforced for direct bookings.                                                                                                                                                                  |
-| `minimum_advance_days`                                                                                      | Rejects check-in sooner than N days away.                                                                                                                                                                                                                          |
-| `cancellation_policies` (hotel; default 7 free days), room `flexible_cancellation_type`, `partial_refund_*` | Server refund rules (see the mapping below). The room's `cancellation_policy` text was only displayed.                                                                                                                                                             |
-| `rate_payment_methods{flexible,nonrefundable}`, `hotel_payment_settings`, booking-engine flags              | **Server-enforced** (`booking_service.py:450-460`): a method must be in the rate's list (when set) **and** enabled for the hotel. Methods are `card` (Stripe Connect or the `vayada` platform account), `xendit`, `pay_at_property`, `bank_transfer` and `paypal`. |
-| `rate_deposit_settings{option}` `{enabled, percentage}`                                                     | Deposit = round(total × p%, 2), charged online at booking; the balance is paid at the property. Pay at property is refused for that rate. On a paid cancellation, legacy keeps `max(deposit, penalty)`.                                                            |
-| `instant_book` (booking engine)                                                                             | Request mode keeps card bookings as manual capture (deposits are captured immediately).                                                                                                                                                                            |
-| `meal_plans[]`, `channex_channel_markups`                                                                   | **OTA only.** A meal surcharge and channel markup applied on the Channex push.                                                                                                                                                                                     |
-| `max_occupancy`, `max_adults`, `max_children`                                                               | Capacity only; children never change the price.                                                                                                                                                                                                                    |
+| Legacy input (`pms.room_types` unless noted)                                                                  | Meaning in the direct booking engine                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `base_rate`                                                                                                   | Night price when no season matches. If it is 0, the lowest positive season `rate` over **all** seasons (including those missing a bound).                                                                                                                                        |
+| `seasons[]` `{name, tier, from, to, rate, minStay, maxStay, occupancyRates}`                                  | Yearly ranges (`2024-MM-DD` or `MM-DD`) that may wrap New Year. The first covering season with a truthy `rate` wins. `occupancyRates["<adults>"]` replaces it; a `""` value falls through to the base price.                                                                     |
+| `daily_rates{"YYYY-MM-DD": amount}`                                                                           | Final night price, with no weekend surcharge or occupancy.                                                                                                                                                                                                                       |
+| `weekend_surcharge` (`"+15%"`)                                                                                | Percent on Friday and Saturday nights (Python `weekday()` 4 and 5). Negative or unparseable values count as 0.                                                                                                                                                                   |
+| `flexible_rate_enabled`, `non_refundable_enabled`, `non_refundable_discount`, `non_refundable_rate`           | NR night = flexible × (1 − d%) when d > 0, else the static NR rate when > 0, else flexible. With flexible disabled, NR = flexible.                                                                                                                                               |
+| `monthly_rates`                                                                                               | **Dead.** Removed from the lookup in `42a678b84`.                                                                                                                                                                                                                                |
+| `hotels.last_minute_discount`, room `last_minute_discount`                                                    | `int(pct)` off the room total, by days before arrival. The hotel switch is the master; a non-empty room tier list replaces the hotel's; a room can opt out.                                                                                                                      |
+| season `minStay` / `maxStay`                                                                                  | Enforced for direct bookings.                                                                                                                                                                                                                                                    |
+| room `min_stay`, `max_stay`, CTA, CTD                                                                         | **Channex only.**                                                                                                                                                                                                                                                                |
+| `minimum_advance_days`                                                                                        | Rejects check-in sooner than N days away.                                                                                                                                                                                                                                        |
+| `cancellation_policies` (hotel; 7 free days if no row), room `flexible_cancellation_type`, `partial_refund_*` | Server refund rules (mapping below).                                                                                                                                                                                                                                             |
+| `rate_payment_methods`, `hotel_payment_settings`, booking-engine flags                                        | **Server-enforced** (`booking_service.py:450-460`): the method must be in the rate's list (when set) **and** enabled for the hotel. Methods are `card` (own Stripe Connect account or the `vayada` platform account), `xendit`, `pay_at_property`, `bank_transfer` and `paypal`. |
+| `rate_deposit_settings`                                                                                       | Deposit = round(total × p%, 2), paid online at booking; the balance is paid at the property, and pay at property is refused. A paid cancellation keeps `max(deposit, penalty)`.                                                                                                  |
+| `instant_book`                                                                                                | Request mode holds card bookings for manual capture.                                                                                                                                                                                                                             |
+| `meal_plans[]`, `channex_channel_markups`                                                                     | **OTA only**, applied on the Channex push.                                                                                                                                                                                                                                       |
+| `max_occupancy`, `max_adults`, `max_children`                                                                 | Capacity only. Children never change the price. Legacy has no child-age policy.                                                                                                                                                                                                  |
 
-Legacy pricing has no taxes, fees or extra-guest charges. Add-ons and promo
-codes are Booking-owned and outside this ticket.
+Legacy has no taxes, fees or extra-guest charges. Add-ons and promo codes are
+Booking-owned and outside this ticket.
 
-**Authoritative legacy quote.** Both `POST /{slug}/bookings/quote` and booking
-creation run:
+**Authoritative legacy quote.** `POST /{slug}/bookings/quote` and booking
+creation both run:
 
-1. **Rules.** `_prepare_booking_context` (`booking_service.py:380-459`) checks
-   season minimum and maximum stay, sellability, minimum advance days, guest
-   mix, and the method rules above.
-2. **Price.** `_compute_booking_pricing` computes:
-   - per night, `resolve_rate` (`room_type_repo.py:368`), then the NR rule,
-     each step rounded with `round(…, 2)`;
-   - `room_total = round(round(Σ nights, 2) × rooms, 2)`;
-   - last-minute as `round(room_total × int(pct)/100, 2)`, subtracted once;
-   - add-ons and promo codes, which are outside the samples.
-
-The legacy room listing applied last-minute per night. The quote is what
-bookings charged, so the gate compares against the quote.
+1. `_prepare_booking_context` (`booking_service.py:380-459`): stay rules,
+   sellability, minimum advance days, guest mix and methods.
+2. `_compute_booking_pricing`:
+   - per night `resolve_rate`, then the NR rule, each rounded `round(…, 2)`;
+   - `round(round(Σ, 2) × rooms, 2)`;
+   - last-minute `round(total × int(pct)/100, 2)`;
+   - then add-ons and promo.
 
 ## Pricing-v2 target
 
-There is one `PricingConfiguration` (`version "pricing.v2"`) per room type. They
-are published as a whole-property snapshot `{currency, rooms[],
-ownerReferences:{finance, charges}}`
-(`packages/domain-pms/src/replacementPricingConfiguration.ts`).
+There is one `PricingConfiguration` per room type, published as a
+whole-property snapshot `{currency, rooms[], ownerReferences:{finance,
+charges}}`.
 
-- **Amounts and modes.**
-  - Amounts are integer minor-unit strings; calendar prices must be positive.
-  - Each offer has one price mode across base, months and seasons. Date
-    overrides may flatten it.
-- **Price per night.**
-  - Precedence is date override > season > month > base, then the weekday
-    adjustment (ISO Monday = 0). A date override skips that offer's own
-    adjustments.
-  - A linked offer applies its fixed or basis-point adjustment to its parent's
-    room component, including the parent's date override. Every step rounds
-    half-up.
+- **Money and modes.** Amounts are integer minor-unit strings, and calendar
+  prices must be positive. Each offer uses one price mode; date overrides may
+  flatten it.
+- **Price per night.** Date override > season > month > base, then the
+  weekday adjustment (ISO Monday = 0); a date override skips its own offer's
+  adjustments. A linked offer adjusts its parent's room component, including
+  a parent override. Every step rounds half-up.
 - **Seasons and restrictions.**
-  - Price seasons and restriction seasons are separate lists. Both are
-    recurring `MM-DD` ranges compared as strings, may wrap New Year, and must
-    not overlap.
-  - Restrictions consist of own base rules, seasons and exact dates. Minimum
-    stay and CTA are read at arrival, CTD at departure, and maximum stay and
-    stop-sell on every night. A rule must have `max ≥ min`.
+  - Price seasons and restriction seasons are separate lists of recurring
+    `MM-DD` ranges, compared as strings and never overlapping.
+  - Restrictions read minimum stay and CTA at arrival, CTD at departure, and
+    maximum stay and stop-sell on every night. Each rule needs `max ≥ min`.
 - **Booking terms per offer.**
   - Cancellation is `non_refundable`, or `flexible` with
-    `free_until_days_before_arrival` and a required
-    `freeCancellationDeadlineDays`. The partial-refund type also requires
-    tiers. No v2 refund execution reads the tiers today; they are display
-    only.
+    `free_until_days_before_arrival`, a required
+    `freeCancellationDeadlineDays`, and optional `partial_refund` tiers.
   - Payment is `full` or `deposit`, with `acceptedMethods` ⊆
     `{card, pay_at_property}`.
-- **Finance readiness.** `lockFinanceReplacementPricingReadiness` refuses:
-  - any `deposit` term;
-  - a currency different from `default_currency`;
-  - a property with no executable method.
-
-  It does **not** compare each offer's `acceptedMethods` with the methods it
-  finds ready. Public payment then needs both the Finance method and the
-  offer's own list (`publicPricingPaymentAmounts.ts`).
-
-- **Card.** It is executable only with a property-scoped, fully onboarded
-  Stripe account: details submitted, `card_payments` active, eligible for the
-  currency, and carrying unrevoked execution evidence. Acceptance is also
-  behind `REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED` (default `false`) and
-  covers instant booking only ([card acceptance](pricing-card-acceptance.md)).
-- **Freshness.** A publication serves public quotes only while the PMS room,
-  Booking terms and Finance source tokens it recorded are unchanged
-  (`currentPricingPublication.ts`). Any later write to Finance settings, the
-  Stripe account row, execution evidence or room facts makes those quotes
-  unavailable until a republish.
-- **Last-minute** is Booking-owned: `booking_settings.last_minute_discount`
-  plus room heads. The public quote applies it. The import leaves it at the
-  default `{enabled:false}`. An enabled hotel with no tiers makes every quote
-  unavailable.
+- **Cancellation at runtime.** v2 has no automatic refunds. The online guest
+  cancellation refuses `partial_refund` and paid bookings ("contact the
+  property"), and staff refund by hand (`financeManualBookingRefund.ts`).
+- **Finance readiness.** `lockFinanceReplacementPricingReadiness` refuses a
+  deposit term, a currency other than `default_currency`, and a property with
+  no executable method. It does not compare each offer's `acceptedMethods`;
+  public payment needs both.
+- **Card.**
+  - It needs a property-scoped Stripe account: details submitted,
+    `card_payments` active, eligible for the currency, with unrevoked
+    execution evidence.
+  - It also needs the acceptance flag, and covers instant booking only.
+- **Staleness.** A publication serves quotes only while its three source
+  tokens (rooms, terms, finance) are current (`currentPricingPublication.ts`).
+  - Any change makes its offers unavailable until a republish ("Save prices"
+    republishes), and no alert fires.
+  - **Bug** (pricing stream follow-up): every Stripe `account.updated` webhook
+    writes `lastStripeEventId` and reorders capabilities, which stales every
+    card hotel. That is prerequisite a.
+- **Readiness since #2941.** With a publication, the property's PMS pricing
+  source and mandatory-charge confirmation come from the publication and its
+  charge declaration.
 
 ## Field mapping
 
-Fidelity is one of four values:
+Fidelity is one of:
 
 - **exact**;
 - **safe**: the nearest safe equivalent, recorded as a `review` finding;
-- **drop**: not carried, with the reason;
-- **block**: the hotel cannot publish until the source is fixed or a decision
-  is recorded.
+- **drop**: not carried;
+- **block**: no publication until the source is fixed or a decision is
+  recorded.
 
 ### Rooms, offers and price calendar
 
-| Legacy                                                                            | pricing-v2                                                                                                                                                                                                                                        | Fidelity                                                    |
-| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| Active room type with a bookable rate option                                      | One configuration; `roomTypeId` = the legacy ID (the import preserves IDs); capacity from the imported room facts                                                                                                                                 | exact                                                       |
-| Room with no bookable option, or no positive price                                | Omitted; it stays unpriced, as in legacy                                                                                                                                                                                                          | exact                                                       |
-| Amount `x` (major units)                                                          | `Decimal(str(x)) × 100` must be an integer                                                                                                                                                                                                        | exact; otherwise **block** (no silent rounding)             |
-| Children never priced                                                             | `adultFromAge: 18`, one band 0–17 with `nightlyMinor "0"`, counted toward capacity                                                                                                                                                                | exact for price (Q9)                                        |
-| Flexible option                                                                   | Offer `legacy-flexible`: independent, meal `room_only` with a `"0"` charge                                                                                                                                                                        | exact                                                       |
-| NR via discount d                                                                 | `legacy-non-refundable` linked to flexible at −d×100 basis points, restrictions `inherit`. Matches legacy on weekend and override nights.                                                                                                         | exact within rounding; **block** if d ≥ 100                 |
-| NR via static `non_refundable_rate`                                               | Independent offer with a flat base and no seasons or weekdays; own copy of flexible's restrictions                                                                                                                                                | exact                                                       |
-| NR only (flexible disabled)                                                       | One independent offer with the full calendar, without a discount                                                                                                                                                                                  | exact                                                       |
-| `base_rate > 0`                                                                   | `calendar.base`                                                                                                                                                                                                                                   | exact                                                       |
-| `base_rate = 0` with seasons                                                      | `calendar.base` = the lowest positive `rate` over **all** seasons, including those missing a bound                                                                                                                                                | exact                                                       |
-| Season with a positive `rate` and both bounds                                     | `calendar.seasons[]` with `{name, tier, from, through}`                                                                                                                                                                                           | exact                                                       |
-| Season without a `rate` or without a bound                                        | No price season; its stay rules still map (restriction seasons are a separate list)                                                                                                                                                               | exact                                                       |
-| `occupancyRates` on any season                                                    | The offer becomes `occupancy` mode with arrays for 1..adults. A missing key takes the season `rate`. A key set to `""` takes the **base** price, because legacy's `float("")` falls through. Other seasons and the base repeat their flat amount. | exact for single-room stays; **block** on a 0 value         |
-| Overlapping seasons, including New-Year-wrap overlaps the legacy validator missed | n/a: v2 rejects overlaps                                                                                                                                                                                                                          | **block**: fix in legacy before freeze                      |
-| Season bound on `02-29`                                                           | n/a: legacy matches nothing in non-leap years; v2 would match                                                                                                                                                                                     | **block**: move the bound before freeze                     |
-| Future `daily_rates` with value > 0                                               | `calendar.dates[]` with a flat price                                                                                                                                                                                                              | exact                                                       |
-| `daily_rates` with value ≤ 0                                                      | Restriction date with `stopSell: true`                                                                                                                                                                                                            | exact (unsellable on both sides)                            |
-| Past `daily_rates`                                                                | Dropped                                                                                                                                                                                                                                           | drop                                                        |
-| `weekend_surcharge` of +p%, p > 0                                                 | `weekdays` days 4 and 5 with p×100 basis points                                                                                                                                                                                                   | exact within rounding; **block** if p×100 is not an integer |
-| `weekend_surcharge` ≤ 0 or unparseable                                            | No weekday rows                                                                                                                                                                                                                                   | exact (legacy ignored it)                                   |
-| `monthly_rates`                                                                   | Not mapped                                                                                                                                                                                                                                        | drop: dead in legacy, and mapping it would change prices    |
-| `meal_plans`, `channex_channel_markups`                                           | Not mapped                                                                                                                                                                                                                                        | drop for direct booking (U9)                                |
+| Legacy                                                                                   | pricing-v2                                                                                                                                                                       | Fidelity                                                      |
+| ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Active room type with a bookable option                                                  | One configuration. `roomTypeId` is the legacy ID (preserved by the import); capacity comes from the imported room facts                                                          | exact                                                         |
+| No bookable option, or no positive price                                                 | Omitted (unpriced, as in legacy)                                                                                                                                                 | exact                                                         |
+| Amount `x`                                                                               | `Decimal(str(x)) × 100` must be an integer                                                                                                                                       | exact; otherwise **block**                                    |
+| Children                                                                                 | `adultFromAge` = the hotel's own child-policy age, else 18. Neither the legacy nor the target schema has one today, so 18 for all. One band with `"0"`, counted toward capacity. | exact for price; U14                                          |
+| Flexible option                                                                          | `legacy-flexible`: independent, `room_only`, charge `"0"`                                                                                                                        | exact                                                         |
+| NR via discount d                                                                        | `legacy-non-refundable`, linked at −d×100 basis points, restrictions `inherit`                                                                                                   | exact within rounding; **block** if d ≥ 100                   |
+| NR via static rate                                                                       | Independent offer with a flat base, no seasons or weekdays; own copy of the restrictions                                                                                         | exact                                                         |
+| NR only                                                                                  | One independent offer with the full calendar                                                                                                                                     | exact                                                         |
+| `base_rate` (0 → the lowest positive `rate` over all seasons)                            | `calendar.base`                                                                                                                                                                  | exact                                                         |
+| Season with a positive `rate` and both bounds                                            | `calendar.seasons[]`                                                                                                                                                             | exact                                                         |
+| Season without a `rate` or a bound                                                       | No price season; its stay rules still map                                                                                                                                        | exact                                                         |
+| `occupancyRates`                                                                         | `occupancy` mode with arrays for 1..adults. A missing key takes the season `rate`; `""` takes the base; everything else repeats its flat amount                                  | exact for single rooms; **block** on a 0 value                |
+| Overlapping seasons (including New-Year-wrap cases the validator missed), `02-29` bounds | n/a                                                                                                                                                                              | **block** (U10)                                               |
+| Future `daily_rates` with value > 0                                                      | `calendar.dates[]`, flat                                                                                                                                                         | exact                                                         |
+| `daily_rates` with value ≤ 0                                                             | Restriction date with `stopSell`                                                                                                                                                 | exact                                                         |
+| Past `daily_rates`                                                                       | Dropped                                                                                                                                                                          | drop                                                          |
+| `weekend_surcharge` +p%                                                                  | Weekdays 4 and 5 at p×100 basis points (none when p ≤ 0)                                                                                                                         | exact within rounding; **block** for non-integer basis points |
+| `monthly_rates`                                                                          | Not mapped                                                                                                                                                                       | drop (dead in legacy)                                         |
+| `meal_plans`, channel markups                                                            | Not mapped                                                                                                                                                                       | drop (U9)                                                     |
+| Last-minute discounts                                                                    | Not carried before go-day                                                                                                                                                        | drop (U13)                                                    |
 
 ### Stay rules
 
-Flexible owns the rules. NR inherits them, or copies them when it is
-independent.
+Flexible owns the rules; NR inherits or copies them.
 
-| Legacy                                      | pricing-v2                                                                       | Fidelity                                                                                      |
-| ------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Season `minStay` / `maxStay`                | `restrictions.seasons[]`                                                         | exact                                                                                         |
-| Room `min_stay` / `max_stay` (Channex only) | Base rules, and the fallback for seasons that have no value (Channex precedence) | **safe** U5: now enforced for direct bookings too; **block** if a combined rule has max < min |
-| Room CTA / CTD (Channex only)               | Base rules                                                                       | **block** if true: it would close direct sales (U5)                                           |
-| `minimum_advance_days > 0`                  | None                                                                             | **safe** U6                                                                                   |
-| Operating periods                           | Not pricing: the cohort operating-calendar import owns them                      | n/a                                                                                           |
+| Legacy                       | pricing-v2                                                 | Fidelity                                                   |
+| ---------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------- |
+| Season `minStay` / `maxStay` | `restrictions.seasons[]`                                   | exact                                                      |
+| Room `min_stay` / `max_stay` | Base rules and the season fallback, as in the Channex push | **safe** U5 (decided); **block** when a combined max < min |
+| Room CTA / CTD               | Base rules                                                 | **block** if true (it would close direct sales)            |
+| `minimum_advance_days > 0`   | None                                                       | **safe** U6                                                |
+| Operating periods            | Not pricing: the cohort operating calendar owns them       | n/a                                                        |
 
 ### Booking terms: cancellation
 
-| Legacy (enforced server rule)                                                                           | v2 terms                                                                                          | Fidelity                                                                  |
-| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| NR option                                                                                               | `{kind:"non_refundable"}`                                                                         | exact                                                                     |
-| Flexible: hotel `free_cancellation_days` d (7 when no row), no partial refund                           | `flexible` with `freeCancellationDeadlineDays: d`                                                 | exact                                                                     |
-| Flexible: hotel partial refund p > 0 after the deadline                                                 | `partial_refund` with tiers `[{d,100},{0,p}]`                                                     | **block** pending Q7 (tiers are display only in v2; no-show differs, U11) |
-| Room `partial_refund` with tiers                                                                        | The same tiers                                                                                    | **block** pending Q7                                                      |
-| Room `partial_refund` without tiers: `percent or 50` when ≥ `window or 30` days out, else 0, never 100% | Tiers `[{window, pct}]`. v2 rejects the type without tiers and still needs a full-refund deadline | **block** pending Q7                                                      |
-| Displayed `cancellation_policy` text                                                                    | Not copied; the enforced numbers win                                                              | **safe**: flagged when its "N days" differs                               |
+Checked against the real `parseFlexibleCancellationTerms`. Every mapped shape
+passes. A `partial_refund` without tiers, more than 10 tiers, or a
+window-field percent of 0 or 100 fails, so the mapping never emits those.
 
-### Booking terms: payment (copy each hotel's current setting)
+| Legacy (enforced server rule)                                                                     | v2 terms                                                                                                                                      | Fidelity                                      |
+| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| NR option                                                                                         | `non_refundable`                                                                                                                              | exact                                         |
+| Hotel: `free_cancellation_days` d, no partial refund                                              | `flexible`, deadline d                                                                                                                        | exact                                         |
+| Hotel: d plus partial refund p > 0 after the deadline                                             | `partial_refund`, deadline d, tiers `[{d,100},{0,p}]` (passes)                                                                                | **safe** U11                                  |
+| Room `partial_refund` with tiers (≤ 10)                                                           | `partial_refund` with the same tiers. Deadline = the largest day count among the 100% tiers, else 365                                         | **safe** U11; **block** if more than 10 tiers |
+| Room `partial_refund` window only: `pct or 50` when ≥ `window or 30` days out, else 0, never 100% | `partial_refund`, tiers `[{window, pct}]` plus the window fields when pct is 1–99 (passes). Deadline 365, so no free cancellation is promised | **safe** U11                                  |
+| Displayed `cancellation_policy` text                                                              | Not copied; the enforced numbers win                                                                                                          | **safe**: flagged when its "N days" differs   |
 
-The effective legacy methods per rate option are the rate's list (or the
-hotel's methods when the list is null), intersected with the hotel-enabled
-methods. Pay at property is removed when the rate takes a deposit. v2 payment
-is always `{kind:"full", acceptedMethods}`.
+### Booking terms: payment
 
-| Legacy effective method or rule             | v2                                                              | Fidelity                                                                       |
-| ------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `pay_at_property`                           | `pay_at_property`                                               | exact                                                                          |
-| `card` on a property Stripe Connect account | `card`                                                          | exact if G3 holds; otherwise NO-GO (never downgraded)                          |
-| `card` on the `vayada` platform account     | `card` only once a property Stripe account is ready             | **block** (U2)                                                                 |
-| `xendit`                                    | `card`, when a property Stripe account is ready in the currency | **safe** (U3), otherwise **block**                                             |
-| `bank_transfer`, `paypal`                   | Dropped                                                         | **safe** if another method remains; **block** if none (U4)                     |
-| No effective method (for example `[]`)      | Offer omitted, because legacy could not book it                 | exact                                                                          |
-| Deposit of p% (including 100%)              | `full` with `[card]`: the guest prepays 100% online             | **safe** (U1); the paid-cancellation `max(deposit, penalty)` retention is lost |
-| Card while `instant_book = false`           | v2 card acceptance is instant-only                              | **block** (U12)                                                                |
+Effective legacy methods are the rate's list (or the hotel's methods when the
+list is null), intersected with the hotel-enabled methods. Pay at property is
+removed when there is a deposit. v2 is always `{kind:"full",
+acceptedMethods}`.
 
-### Last-minute (Booking-owned)
-
-- **Percent.** Each tier gets `int(pct)` (the legacy truncation); a negative
-  value becomes 0.
-- **Zero tiers are kept.** v2 accepts 0%. A room whose tier list is all 0%
-  still replaces the hotel's tiers.
-- **Hotel switch off.** `{enabled:false, …}` becomes `{enabled:false,
-stackWithPromo:false, tiers:[]}`.
-- **Hotel enabled with no tiers.** Add a 0% catch-all tier `{0, null, 0}`.
-  This behaves the same as legacy and keeps v2 from refusing every quote.
-- **Rooms.** A room that opted out gets a head `{enabled:false}`. A room with
-  no tiers gets no head (it inherits).
-- **Overlapping tiers block.** v2 rejects them, and legacy's first-match order
-  cannot be kept.
-
-The hotel-level writer is currently a repository call inside a route, so it
-cannot take an operator context. Phase 2 needs a small Booking command, or the
-VAY-1362 import carries it (Q3).
+| Legacy effective method or rule    | v2                                                           | Fidelity                                                     |
+| ---------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| `pay_at_property`                  | `pay_at_property`                                            | exact                                                        |
+| `card`, own Stripe Connect account | `card`                                                       | exact. If G3 fails, the hotel is suspended, never downgraded |
+| `card`, `vayada` platform account  | `card` once a property Stripe account is ready               | **block** (U2)                                               |
+| `xendit`                           | `card` if a property Stripe account is ready in the currency | **safe** (U3), else **block**                                |
+| `bank_transfer`, `paypal`          | Dropped                                                      | **safe** if another method remains, else **block** (U4)      |
+| No effective method                | Offer omitted (legacy could not book it)                     | exact                                                        |
+| Deposit p%, including 100%         | `[card]`, full prepayment                                    | **safe** U1 (decided)                                        |
+| Card with `instant_book = false`   | n/a: v2 card is instant only                                 | **block** (U12)                                              |
 
 ## Unrepresentable and lossy (dry-run finding codes)
 
-- `review`: publish only with an approved plan digest that lists the finding.
+- `review`: allowed only with an approved plan digest that lists it.
 - `block`: no publication.
 
-| Code | Legacy behavior                                                                                                                                   | Nearest safe v2 equivalent                                                                                                                                                                           | Severity                                             |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| U1   | Deposit p% online, balance at property; a paid cancellation keeps `max(deposit, penalty)`                                                         | Full card prepayment. Same total price, and the hotel never collects less upfront. Pay at property would drop the guarantee, so it is not the default. The retention minimum is lost.                | review (Q1)                                          |
-| U2   | Card through the `vayada` platform account                                                                                                        | None until the hotel has a ready property Stripe account                                                                                                                                             | block                                                |
-| U3   | Xendit online                                                                                                                                     | Stripe card, if it is ready in the currency                                                                                                                                                          | review, else block                                   |
-| U4   | Bank transfer, PayPal (manual)                                                                                                                    | Dropped when another method remains                                                                                                                                                                  | review, or block if sole                             |
-| U5   | Room-level min/max stay, CTA and CTD on OTAs only                                                                                                 | Applied to both channels, so direct booking gets stricter. CTA or CTD true, or a combined max < min, blocks.                                                                                         | review / block                                       |
-| U6   | `minimum_advance_days` rejects near-term arrivals                                                                                                 | None: v2 has no rolling lead-time rule (same-day cutoff covers N ≤ 1)                                                                                                                                | review                                               |
-| U7   | Multi-room bookings look up occupancy by the party's **total** adults                                                                             | v2 prices each room by its own guests; samples are single-room                                                                                                                                       | info                                                 |
-| U8   | Float `round(x, 2)` per step                                                                                                                      | Integer half-up per step, within the tolerance below                                                                                                                                                 | info                                                 |
-| U9   | OTA meal-plan rate plans and per-channel markups on the Channex push                                                                              | None in this step. A meal offer would also appear in direct booking, and Channex must bind rates explicitly ([offer targets](channex-published-offer-targets.md)). Hand off to the Channex handover. | review (any hotel with meal mappings **or** markups) |
-| U10  | Source defects: `02-29` bounds, overlapping seasons, occupancy price 0, non-integer basis points, sub-cent amounts, overlapping last-minute tiers | None. Fix in legacy before freeze                                                                                                                                                                    | block                                                |
-| U11  | Partial refunds (hotel after the deadline; room window or tiers), which also apply to a no-show                                                   | v2 tiers are display only, and the no-show penalty is the full amount                                                                                                                                | block pending Q7                                     |
-| U12  | Card bookings in request mode                                                                                                                     | None until request-mode card acceptance exists                                                                                                                                                       | block (or the hotel switches to instant)             |
+| Code | Legacy behavior                                                                                               | Nearest safe v2 equivalent                                                                                                                                                                                                                              | Severity                 |
+| ---- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| U1   | Deposit p% online, balance at the property; a paid cancellation keeps `max(deposit, penalty)`                 | Full card prepayment (decided). Same total; the hotel never collects less upfront. The retention minimum is lost                                                                                                                                        | review                   |
+| U2   | Card on the `vayada` platform account                                                                         | None until a property Stripe account is ready                                                                                                                                                                                                           | block                    |
+| U3   | Xendit                                                                                                        | Stripe card if it is ready in the currency                                                                                                                                                                                                              | review, else block       |
+| U4   | Bank transfer, PayPal                                                                                         | Dropped when another method remains                                                                                                                                                                                                                     | review, or block if sole |
+| U5   | Room-level stay rules on OTAs only                                                                            | Applied to both channels (decided). CTA or CTD true, or max < min, blocks                                                                                                                                                                               | review / block           |
+| U6   | `minimum_advance_days`                                                                                        | None (same-day cutoff covers N ≤ 1)                                                                                                                                                                                                                     | review                   |
+| U7   | Multi-room bookings price occupancy by the party's **total** adults                                           | v2 prices each room by its own guests. Covered by one listed multi-room gate sample                                                                                                                                                                     | info                     |
+| U8   | Float `round(x, 2)` per step                                                                                  | Integer half-up, within the tolerance                                                                                                                                                                                                                   | info                     |
+| U9   | OTA meal-plan rate plans and channel markups                                                                  | Dropped at import. Those OTA rate plans are **closed or deactivated** in the Channex handover before H.5. "Not bound" is not "closed": an unbound OTA rate plan may keep its last-pushed ARI and keep selling. Verify each is closed                    | review                   |
+| U10  | Source defects: `02-29` bounds, overlapping seasons, occupancy 0, sub-cent amounts, more than 10 refund tiers | None. Fix in legacy before the freeze                                                                                                                                                                                                                   | block                    |
+| U11  | Partial refunds, applied automatically and including no-shows                                                 | `partial_refund` terms as mapped above. On v2, cancellation of these bookings is manual (guests are told to contact the property; staff refund by hand), and the no-show penalty is the full amount. The hotel must accept manual cancellation handling | review                   |
+| U12  | Card in request mode                                                                                          | None. Switch the hotel to instant before go-day                                                                                                                                                                                                         | block                    |
+| U13  | Active last-minute discounts                                                                                  | Not carried before go-day; owners re-add them afterwards (no new Booking command). A counts-only read per hotel comes next. Last-minute gate samples are listed divergences                                                                             | review                   |
+| U14  | Teens entered as children or adults freely; `max_children` limits only the child count                        | v2 asks child ages (≤ 17 are children). Rooms with `max_children` 0 or low may reject families with teens                                                                                                                                               | review                   |
 
-Promo codes, add-ons, OTA inbound pricing and existing bookings' frozen price
-evidence are untouched.
+Promo codes, add-ons and existing bookings' frozen price evidence are
+untouched.
 
 ## Execution design
 
-### Source rows: attested migration source, not the imported projection
+### Source rows
 
 The converter reads the cutover source run's attested rows:
 
 - `migration_source_pms.snapshot_rows`: `room_types`, `hotels`,
   `cancellation_policies` and `hotel_payment_settings`;
-- `migration_source_booking.snapshot_rows`: `booking_hotels` and the payment
-  flags.
+- `migration_source_booking.snapshot_rows`: `booking_hotels` and the
+  payment flags.
 
-It re-verifies each row's checksum the way `productionPmsSnapshotReader` does.
-Why not the imported target rows:
+It re-verifies checksums the way `productionPmsSnapshotReader` does.
 
-- **Same source on both sides.** The attested rows are the freeze-proofed copy
-  of what legacy served, and they are what the parity reference reads.
-- **The import is lossy.** The imported rows store `daily_rate` as a delta,
-  drop seasons that lack a bound, ignore `flexible_rate_enabled` for NR, and
-  keep `occupancyRates` only in raw form.
-- **The import is mutable.** Those runtime tables can change after reopen.
+Why not the imported rows:
+
+- they are lossy: deltas, dropped unbounded seasons, NR ignoring
+  `flexible_rate_enabled`, raw occupancy;
+- they are mutable after reopen;
+- the parity reference reads the attested rows.
 
 A drift check compares the fields the imported `room_attributes.legacyPricing`
-snapshot carries; a mismatch blocks. That snapshot omits base, NR and currency,
-so those come only from the source rows. Hotels join on
-`booking_hotels.id = hotels.id`; target IDs come from the IDs the import
-preserves and from `propertyForHotel`.
+carries, and blocks on a mismatch. Hotels join on `booking_hotels.id =
+hotels.id`.
 
 ### CLI
 
-The tool lives in `apps/api/src/cli/`, because it needs the apps/api commands.
-It follows the pattern of `financeOtaCommissionPreactivation.ts`: one hotel per
-run, `TARGET_DATABASE_URL`, and a dry run by default.
+The tool lives in `apps/api/src/cli/` and follows the
+`financeOtaCommissionPreactivation.ts` pattern: per hotel,
+`TARGET_DATABASE_URL`, dry run by default.
 
 ```bash
 npm --workspace vayada-api run pms:legacy-pricing:publish -- \
@@ -362,293 +352,255 @@ npm --workspace vayada-api run pms:legacy-pricing:publish -- \
   [--apply-for-property <uuid> --approved-plan-sha256 <sha>]
 npm --workspace vayada-api run pms:legacy-pricing:parity -- \
   --source-run <sourceRunId> --property-id <uuid>
+npm --workspace vayada-api run pms:legacy-pricing:parity -- --stale-count
 ```
 
-- **Dry run** writes nothing and prints `legacy-pricing-plan.v1`. The plan
-  contains the proposed snapshot, the terms per offer, last-minute, the
-  findings, the samples and `planSha256`.
-  - Finance readiness comes from calling
-    `lockFinanceReplacementPricingReadiness` with the plan's terms inside a
-    transaction that is always rolled back. It cannot use `prepare`: without
-    a draft, a never-published hotel has no term heads and is `denied`, and
-    staging terms would be a write.
-  - That result also feeds the per-offer method check (G3).
-- **`planSha256` is stable across days.** It covers only date-independent
-  content: the normalized legacy pricing fields (not whole rows or
-  `updated_at`), the converter version, the mapped output with every daily
-  override, and the findings. The go-day filtering of past dates and the
-  dated samples are outside the digest. That keeps a T-2 approval valid on
-  go-day unless prices really changed.
-- **Apply** needs:
-  - `--apply-for-property` equal to `--property-id`;
-  - the reviewed digest;
-  - no `block` findings.
+- **Dry run.** Writes nothing and prints `legacy-pricing-plan.v1`: snapshot,
+  terms, findings, samples and `planSha256`.
+  - Finance readiness comes from `lockFinanceReplacementPricingReadiness`
+    with the plan's terms, in an always-rolled-back transaction. `prepare`
+    would be `denied` without term heads.
+  - The digest covers only date-independent content (normalized legacy
+    pricing fields, the converter version, the mapped output and the
+    findings), so a T-2 approval holds on go-day unless prices change.
+- **Apply.** Needs `--apply-for-property` equal to the property, the
+  reviewed digest, and no `block` findings. It runs the command chain and
+  verifies that the head equals the plan.
+- **`--stale-count`** is the monitoring check (see Staleness). The source
+  tokens are computed in TypeScript, so this is a counts-only CLI mode
+  rather than plain SQL. It reads every property with a published revision,
+  recomputes the three tokens with the existing source readers in an
+  always-rolled-back transaction, and prints counts only:
+  `{published, staleRooms, staleTerms, staleFinance}`.
 
-  It runs the command chain and verifies that the head equals the plan.
+### Operator actor (D1, approved in principle)
 
-- **The pure converter** lives in `packages/domain-pms` with fixtures, owned
-  by the pricing stream.
+The operator is **Flamur's own admin/platform account**. The commands need a
+trusted `RequestContext`, which is rechecked live. That needs:
 
-### Operator actor (blocking decision D1) and the declaration
-
-The commands need a trusted `RequestContext`, and access is rechecked live
-(`replacementPricingAuthorization.ts`). That check needs:
-
-- an active `identity.users` row;
-- an active `agency` membership in the hotel's `hotel_group` organization,
-  with a role granting `pms.rooms_rates.manage`, plus an assignment row when
-  the membership is `assigned`;
+- an active user;
+- an `agency` membership in the hotel's organization, with a role granting
+  `pms.rooms_rates.manage` and its assignment row;
 - an owner or operator property link;
 - the PMS entitlement.
 
-There is no legitimate way for a CLI to build that context today:
+`resolveRequestContext` only works from a WorkOS session, the
+[command-service contract](pricing-command-service-contract.md) forbids a
+serialized context, and `identity.access.grant` writes the wrong rows. So:
 
-- **WorkOS only.** `resolveRequestContext` works only from a WorkOS session
-  (`packages/backend-auth/src/resolve.ts`).
-- **No serialized context.** The [command-service contract](pricing-command-service-contract.md)
-  forbids a serialized `RequestContext` and any identity that does not come
-  from WorkOS.
-- **`identity.access.grant` cannot set this up.** It writes no assignment row.
-  It overwrites the organization's name, slug, status and kind. Passing
-  `permissionKeys` inserts global grants that `revoke` never removes. If the
-  user is already a member, it overwrites that membership.
+- **The membership.** The VAY-1362 identity import writes Flamur's **real**
+  operator membership per cohort property, as a migration action. It uses a
+  dedicated `migration_operator` role preset (rooms/rates read and manage)
+  plus the assignment row, with no `permissionKeys` and no organization-field
+  writes.
+- **The context builder.** A narrow, reviewed builder in apps/api reads that
+  membership from the database the way the database stage of
+  `resolveRequestContext` does, and sets `audit.source = "migration"`. It
+  refuses any property outside the run's bound cohort and an aborted run.
+- **The window.** Reopen is not a flag, so the window ends when the tool
+  removes the membership with `identity.staff.remove` after the final gate.
+- **Attribution.** Every `legacy_import` declaration, and every revision,
+  draft, terms and audit row, is recorded under Flamur's user.
+- **Security review.** The PR that builds this context needs an independent
+  security review before Flamur signs off. The CLI principal already holds
+  target write credentials, so the builder adds attribution, not privilege.
 
-The decision, needed before phase 2:
+**Declaration** (the pricing stream, phase-2 slice 1). `declaredVia` is a
+TypeScript literal with no consumer and no DB CHECK; it is stored in
+`audit_metadata`. The change:
 
-- **D1-a (proposed): a reviewed migration context.**
-  - A narrow builder in apps/api reads the operator's **real**
-    staff membership from the database the same way the database stage of
-    `resolveRequestContext` does, and sets `audit.source = "migration"`.
-  - The VAY-1362 identity import writes that membership per cohort property,
-    as a migration action. It uses a dedicated `migration_operator` role
-    preset (rooms/rates read and manage, plus last-minute manage) and its
-    assignment row, with no `permissionKeys`, and does not touch organization
-    fields.
-  - The builder refuses any property outside the run's bound cohort, and an
-    aborted run.
-  - Reopen is a runbook step, not a flag, so the builder cannot check it. The
-    window ends instead when the tool removes the membership with
-    `identity.staff.remove` after the final gate.
-  - Why this adds no privilege: the CLI principal already holds target
-    write credentials, so the builder only adds attribution. It still needs
-    a security sign-off.
-- **D1-b: the operator's real WorkOS session against the HTTP API.** This does
-  not fit the window:
-  - cohort organizations only exist after M;
-  - invitations need email acceptance;
-  - F.3 keeps the PMS write routes in maintenance.
-- **Rejected:**
-  - acting as the legacy owner (it is not their declaration, and the context
-    problem is the same);
-  - a bypass in the authorization helper.
+- widen the union to `"save_prices" | "legacy_import"`, plus the store check;
+- `legacy_import` requires `legacyImport: {sourceRunId, planSha256}`;
+- store a fixed note in `audit_metadata`: _"Declared by Vayada operations on
+  the hotel's behalf during the VAY-1362 migration: these are the prices
+  guests already saw in legacy, which showed no separate mandatory charges."_
+- add tests;
+- the HTTP route stays `save_prices` only.
 
-The operator recorded as actor is a named Vayada ops user. It appears on
-revisions, drafts, terms and the charge declaration.
-
-**Declaration.** `confirmCharges` gets `declaredVia: "legacy_import"`. Today
-`declaredVia` is a TypeScript literal, `"save_prices"`, checked in
-`replacementChargeDeclarations.ts` and in the route. There is **no DB CHECK or
-enum**: the value is stored in `product_audit_events.audit_metadata` (JSONB).
-The minimal extension:
-
-- **Union.** Widen it to `"save_prices" | "legacy_import"`.
-- **Reference.** `legacy_import` requires `legacyImport: {sourceRunId,
-planSha256}`.
-- **Audit note.** It stores a fixed server-side note:
-  _"Declared by Vayada operations on the hotel's behalf during the VAY-1362
-  migration: these are the prices guests already saw in legacy, which showed
-  no separate mandatory charges."_
-- **HTTP route.** It keeps accepting only `"save_prices"`.
+Flamur confirmed that no cohort hotel collects taxes or fees on arrival, so the
+declaration is true.
 
 ### Idempotency and re-runs
 
-- **Deterministic IDs.**
-  - The draft ID and the request IDs derive from `vay2086:`, `planSha256`,
-    the property, the base revision and the operator.
-  - Request hashes include the actor, so a retry by another operator gets
-    fresh IDs instead of `idempotency_conflict`.
-  - Lost responses replay through the existing receipts and the draft CAS.
-    Resuming reads the draft, as `publishFirstPricing` does.
-- **What a run does, by head state:**
-  - **Head 0:** run the full chain.
-  - **Head is this tool's, same plan, publication current:** no-op.
-  - **Head is this tool's, but stale or a different plan** (for example a
-    Finance write after publishing, or R1 then a retried go-day): publish a
-    new revision. This is allowed only while every revision is the tool's
-    own (`vay2086:` request IDs).
-  - **Head published by anyone else:** refuse with `published_elsewhere`.
-    The tool never overwrites owner prices.
-  - **`stale` mid-chain:** abort this hotel. A re-run starts a new draft with
-    an attempt suffix.
+- **Deterministic IDs.** Request and draft IDs derive from `vay2086:`,
+  `planSha256`, the property, the base revision and the operator. Lost
+  responses replay through the existing receipts and the draft CAS.
+- **Head 0:** run the full chain.
+- **The tool's own revision, same plan, current:** no-op.
+- **The tool's own revision, but stale or a different plan:** publish a new
+  revision. This is allowed only while every revision is the tool's own.
+- **Anyone else's revision:** refuse with `published_elsewhere`. The tool
+  never overwrites owner prices.
+- **`stale` mid-chain:** abort this hotel; a re-run starts a new draft.
 
 ### Go-day placement
 
-These steps go into the go-day runbook
-(`engineering/legacy-migration-go-day-runbook.md`, stack).
+Input for the coordinator's runbook update.
 
-**Prerequisites:**
+- **T-2.** Run the dry run on the `target:cutover:dry-run` target. Approve
+  each digest. Fix `block` sources in legacy before the freeze.
+- **S.0, with one change.** Card hotels publish their bookability profile
+  through the normal profile publish, not the
+  `target:booking-public-bookability:backfill`. On conflict, the backfill
+  resets `accepted_methods` to pay at property (stack).
+- **S.0a, card hotels (prerequisite c).** Refresh the Stripe account and
+  record online-card execution evidence through Finance's readiness path.
+  The import writes neither. This comes before publishing, because publishing
+  binds the Finance source.
+- **S.0b, publish.** Dry run, compare digests, apply, then G1–G4.
+  - It runs after `AWAITING_SMOKE`. Resume-from-smoke only validates the
+    smoke report, so parity is unaffected.
+  - F.3 still holds: the tool uses commands over a direct pool, after the
+    imports.
+  - Auto-open then re-plans the rooms that gained offers.
+- **S.1–S.4.** The smoke sees the published rates.
+- **After H.2–H.4, before H.5.** Re-run the gate. Until prerequisite a
+  ships, G1 can flap here, because each `account.updated` stales card
+  hotels; the tool republishes its own plan.
+- **H.5.** Its ARI push reads the published offers. ARI is not mutating
+  before then, so the `pricing.v2.revised` outbox makes no provider writes.
+  The U9 OTA rate plans must already be closed.
+- **Immediately before O.1.** Final gate. Only GO hotels reopen.
+- **O.2 watch, and daily for the first week after the window.** Run
+  `--stale-count`. Any non-zero count is investigated. "Save prices" by the
+  owner, or the tool for its own revision, republishes.
 
-- VAY-2085 (#3023) is deployed, and the import's currency copy includes IDR.
-- D1 is implemented.
-- For any hotel keeping online card payment: card acceptance K1–K5 and the
-  flag, plus the Stripe test-mode run with an IDR and a USD account.
-- **T-2:** run the dry run on the `target:cutover:dry-run` target, approve
-  each digest, and fix `block` sources in legacy before the freeze.
+### Per-hotel suspend and rollback (gate NO-GO)
 
-**On the day:**
+Only the failing hotel is suspended; the rest of the cohort continues.
+Legacy is frozen globally, so that hotel does not sell anywhere until it is
+fixed. There is no pay-at-property fallback.
 
-1. **S.0 as today, with one change.** Card hotels must publish their
-   bookability profile through the normal profile publish, not
-   `target:booking-public-bookability:backfill`. On conflict, the backfill
-   resets `accepted_methods` to pay at property (stack).
-2. **S.0a, card hotels.**
-   - Refresh the migrated Stripe account and record online-card execution
-     evidence through Finance's existing readiness path. The import writes
-     neither, so card readiness cannot hold without this step.
-   - It comes before publishing, because publishing binds the Finance
-     source.
-3. **S.0b, publish.** Dry run, compare digests, apply, then G1–G4.
-   - It runs after `AWAITING_SMOKE`. Resume-from-smoke only validates the
-     smoke report, so parity evidence is unaffected.
-   - The F.3 pause holds: the tool uses commands over a direct pool, after
-     the imports.
-   - The next auto-open run re-plans the hotels whose rooms gained offers.
-4. **S.1–S.4.** The smoke covers the published rates on the public page.
-5. **After H.2–H.4, before H.5.** Re-run the gate. Stripe `account.updated`
-   events after the endpoint moves, or any Finance write, can make the
-   publication stale; the tool then republishes its own plan. H.5's first ARI
-   push reads the published offers. ARI is not mutating before then, so the
-   `pricing.v2.revised` outbox causes no provider writes.
-6. **Immediately before O.1.** Final gate run. Only GO hotels reopen.
+1. **Record.** Keep the NO-GO report (hashed property) and the finding in the
+   evidence folder. Tell the go-day approver and the owner.
+2. **Keep OTAs closed.** Before H.5:
+   - leave the hotel's OTA closeout from the window in place;
+   - disable its Channex connection with the per-property `disable` command
+     (`POST /api/pms/properties/:propertyId/channex/commands`);
+   - confirm in the H.5 ARI dry run that it has no outgoing ARI.
+3. **Suspend.** Use the platform admin lifecycle command
+   `PATCH /properties/:propertyId/status` with `suspended`. This withdraws
+   public bookability. O.1 skips the hotel: its legacy URL and custom domain
+   keep the maintenance page, or redirect to an unavailable page.
+4. **Leave the data.** Revisions are immutable and not public while the hotel
+   is suspended. Existing reservations stay in the target PMS for the owner
+   and staff.
+5. **Fix forward.**
+   - Price or terms cause: corrected converter → the tool republishes its
+     own revision. Or the owner uses "Save prices", after which the tool
+     stops.
+   - Card cause: S.0a or the Finance fix.
+
+   Then re-run the gate until it returns GO.
+
+6. **Reactivate.**
+   - Re-read readiness (parity or `COHORT_READINESS_SQL`).
+   - `PATCH …/status` with `active`.
+   - Re-enable Channex, run its ARI dry run, then lift its OTA closeout and
+     the domain redirect.
+   - Remove the operator membership.
 
 ## Go-day gate (per hotel)
 
-`pms:legacy-pricing:parity` is read-only. Any transaction it opens is always
-rolled back. It returns GO, NO-GO or REVIEW, and exits 0, 2 or 3 like
-`target:parity`.
+`pms:legacy-pricing:parity` is read-only; any transaction it opens is always
+rolled back. It returns GO, NO-GO or REVIEW and exits 0, 2 or 3.
 
-**G1. Publication is current and equals the plan.**
-
-- The head is the tool's revision, and its rooms and terms equal the approved
-  plan.
-- The current-publication reader returns it, meaning all three source tokens
-  are still current.
+**G1. Publication is current and equals the plan.** The head is the tool's
+revision, matches the approved plan, and is served by the current-publication
+reader (all three tokens current).
 
 **G2. Quote parity.**
 
-**Samples**, generated deterministically:
+Samples, generated deterministically:
 
 - every room × offer;
 - every priced season, on a weekday and on a Friday or Saturday;
-- base-gap nights and up to 20 overrides;
+- base gaps and up to 20 overrides;
 - stays crossing a season, a weekend and the New Year;
 - 1, 3 and 7 nights;
-- adults 1..capacity for occupancy rooms, plus one stay with a child;
-- last-minute arrivals at each tier's minimum and maximum day;
-- one date about 11 months out.
+- adults 1..capacity for occupancy rooms;
+- one stay with a child younger than `adultFromAge`;
+- one date about 11 months out;
+- single-room samples, with no add-ons or promo, inside the open window;
+- **one multi-room occupancy sample** (expected divergence U7).
 
-All samples are single-room, inside the open window, and use no add-ons or
-promo codes.
+**Legacy side.** The real legacy Python: a read-only `apps/pms-api` script runs
+the `_prepare_booking_context` rule checks (inventory counts excluded) and the
+`_compute_booking_pricing` arithmetic on the exported source rows, at the
+gate's property-local date. It returns `priced` or `rejected(reason)`.
 
-**Legacy side: the real legacy Python.** A read-only `apps/pms-api` script runs
-the rule checks of `_prepare_booking_context` (stay rules, sellability, minimum
-advance days, guest mix; inventory counts excluded) and the
-`_compute_booking_pricing` arithmetic. It runs on the exported source rows, at
-the gate's property-local date, and returns `priced` or `rejected(reason)`.
+**New side.** The public quote's amount composition, in an always-rolled-back
+transaction (it takes row locks, so it cannot be `READ ONLY`).
+`calculateReplacementRoomStay` nightly lines localize mismatches.
 
-- A TypeScript port would share the converter's assumptions.
-- A pre-freeze API capture would miss later edits.
+**Expected divergences.** Each counts only if the hotel's approved digest lists
+the finding:
 
-**New side.** The public quote's amount composition (room components with
-last-minute, then charges), in an always-rolled-back transaction, so no quote
-record is written. It cannot be `READ ONLY` because the owner readers take row
-locks. Nightly lines from `calculateReplacementRoomStay` localize any
-mismatch.
+- U5: legacy priced, v2 rejects for a room-level rule;
+- U6: legacy rejects for minimum advance, v2 prices;
+- U7: the multi-room sample;
+- U13: last-minute arrivals, where legacy is cheaper.
 
-**Expected divergences.** A sample counts as one only when the hotel's approved
-digest lists the finding:
+**Rounding.** Legacy converts exactly (`Decimal(str(x)) × 100`). Let k be the
+percentage steps applied to a night (weekend, NR), so 0–2.
 
-- U5: legacy priced, v2 rejects for a room-level restriction;
-- U6: legacy rejects for minimum advance, v2 prices.
+- Per night: |Δ| ≤ k minor units; fixed-amount nights match exactly.
+- Stay total: |Δ| ≤ Σk.
 
-**Rounding.** Legacy amounts convert exactly (`Decimal(str(x)) × 100`). Let k
-be the number of percentage steps legacy applied to a night: weekend
-surcharge and NR discount, so 0–2.
+One minor unit is 0.01 rupiah or one cent. A larger difference, or any other
+priced/rejected disagreement, is **NO-GO**.
 
-- **Per night:** |Δ| ≤ k minor units. Fixed-amount nights match exactly.
-- **Stay total before last-minute:** |Δ| ≤ Σk.
-- **After last-minute:** |Δ| ≤ Σk + 1.
+**G3. Finance and Stripe card readiness, per currency (IDR, USD).**
 
-For IDR, one minor unit is 0.01 rupiah; for USD it is one cent. Any larger
-difference, or any other priced/rejected disagreement, is **NO-GO**.
-
-**G3. Finance and Stripe readiness, per currency (IDR, USD).**
-
-- **Settings.** `finance.payment_settings` exists with `payments_enabled`.
-- **Currency.** `default_currency` equals the pricing currency, the
+- `finance.payment_settings` exists with `payments_enabled`.
+- `default_currency` equals the pricing currency, the
   `property_pricing_settings` currency, the room currency and
   `booking_hotels.currency`.
-- **Methods.** Every published offer's `acceptedMethods` is a subset of the
-  methods Finance reports ready. No offer has deposit terms.
-- **Card readiness.** Each offer with `card` has Finance online-card readiness
-  `ready` for its currency: a property-scoped Stripe account with details
-  submitted, charges and payouts enabled, `card_payments` active,
-  currency-eligible, and unrevoked execution evidence.
-- **Flag.** `REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED=true` on next-api.
-  This is a human checkbox; the CLI cannot read that environment.
-- **Online stays online.** No legacy online method ended up offline. A hotel
-  whose online payment cannot stay online is NO-GO, never silently pay at
-  property.
+- Every offer's `acceptedMethods` is a subset of Finance's ready methods, and
+  no offer has deposit terms.
+- Each `card` offer has online-card readiness `ready` for its currency:
+  - a property-scoped Stripe account with details submitted;
+  - charges and payouts enabled, and `card_payments` active;
+  - eligible for the currency;
+  - unrevoked execution evidence.
+- `REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED=true` on next-api (a human
+  checkbox).
+- A legacy online-card hotel without card readiness is NO-GO, which leads to
+  the per-hotel suspend.
 
 **G4. Findings.** No `block` findings, and every `review` finding is in the
 approved digest.
 
-A NO-GO hotel does not reopen. The approver runs R1, or suspends that hotel with
-the platform admin lifecycle command and fixes forward (Q10).
-
 ## Phase 2 slices (after review)
 
-1. **Pricing stream:** the converter with fixtures for every row and finding,
-   and `declaredVia: "legacy_import"`.
-2. **D1:** the migration context builder (with a security review) and the
-   operator membership in the identity import.
-3. **VAY-1362:** the source reader, the plan, and the dry-run CLI, with
-   seeded-target tests.
-4. **VAY-1362:** apply, the re-run rules, and the last-minute carry-over (a
-   Booking command or the import).
-5. **VAY-1362:** the Python reference and the gate, with a CI test that pins
-   the reference against `quote_booking_request`.
-6. **VAY-1362:** runbook steps S.0a, S.0b and the gate re-runs; the rehearsal
-   on the isolated restore.
+1. Pricing stream: the converter with fixtures for every row and finding
+   (including the parser fixtures above), and `declaredVia: "legacy_import"`
+   with tests.
+2. Pricing stream: the Finance-token staleness fix and republish
+   (prerequisite a), and the K5 IDR run (prerequisite b).
+3. D1: the migration context builder (independent security review, then
+   Flamur's sign-off) and Flamur's operator membership in the identity
+   import.
+4. VAY-1362: the source reader, the plan and the dry-run CLI.
+5. VAY-1362: apply, the re-run rules and `--stale-count`.
+6. VAY-1362: the Python reference and the gate, with CI pinning against
+   `quote_booking_request`.
+7. Coordinator: runbook steps S.0, S.0a, S.0b, the gate re-runs, the
+   per-hotel suspend steps and the O.2 watch; then the rehearsal.
 
 ## Open questions
 
-1. **Deposits (U1).** Full card prepayment (proposed), or pay at property per
-   hotel?
-2. **D1 actor.** Should we use the migration context builder (proposed), and
-   who signs off on security?
-3. **Last-minute carry-over owner.** A new Booking command used by this tool,
-   or the VAY-1362 booking import?
-4. **Card go-live.** Will card acceptance (K1–K5 plus the flag) and the S.0a
-   Stripe refresh be ready for the 3 USD and 5 IDR hotels? If not, every hotel
-   whose legacy payment is online fails G3.
-5. **No v2 method (U2–U4, U12).** Which cohort hotels use the `vayada`
-   platform card, Xendit, bank transfer, PayPal or request mode? Do they
-   switch before go-day, or get a decision per hotel?
-6. **U9.** OTA meal plans and channel markups: adopt them as v2 offers, which
-   also appear in direct booking, or close them on Channex before H.5?
-7. **Partial refunds.** What do `freeCancellationDeadlineDays` and the
-   `partial_refund` tiers mean in v2? Today the tiers are display only, and
-   that blocks every hotel with partial refunds.
-8. **U5 and U6.** Accept stricter direct-booking stay rules, and decide on
-   minimum advance days.
-9. **Child age.** `adultFromAge` 18 (price-neutral), or the hotel's published
-   child policy?
-10. **Per-hotel NO-GO.** Run R1 for the whole cohort, or suspend only that
-    hotel?
-11. **Declaration.** For hotels that collect taxes at the property, is "all
-    mandatory charges included" still accurate, or do they need a fixed-charge
-    policy after reopen?
-12. **Staleness after reopen.** Any Finance or room-facts write silently
-    unpublishes pricing until someone republishes. Is that intended, and who
-    republishes for migrated hotels?
+1. **Last-minute (U13).** The counts per cohort hotel are pending; they decide
+   how many hotels carry U13.
+2. **Payment mix.** Which cohort hotels use the platform card, Xendit, bank
+   transfer, PayPal, request mode, deposits or partial refunds? The counts
+   read answers this. Each U2, U3, U4 and U12 hotel needs a fix or a decision
+   before go-day.
+3. **U9 owner.** Who closes the OTA meal-plan and markup rate plans in the
+   Channex handover, and how is "closed" verified rather than "unbound"?
+4. **Suspended hotels on Channex.** Does the per-property Channex `disable`
+   leave OTAs on their last ARI? The closeout must stay until reactivation.
+5. **Republishing after reopen.** Who republishes migrated hotels that go
+   stale (owners via "Save prices", or ops), and who watches `--stale-count`?
+6. **Child age.** Confirm that 18 applies to every hotel: no source holds a
+   hotel child-age policy today.
