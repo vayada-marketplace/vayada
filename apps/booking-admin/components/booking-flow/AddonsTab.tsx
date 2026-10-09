@@ -97,7 +97,7 @@ interface AddonsTabProps {
     limits: { maxAddons: number };
   };
   handleToggleAddonSetting: (key: keyof AddonSettings) => void;
-  onCreateAddon: (values: AddonItemFormValues) => Promise<void>;
+  onCreateAddon: (values: AddonItemFormValues, options?: { hidden?: boolean }) => Promise<void>;
   onUpdateAddon: (addonId: string, values: AddonItemFormValues) => Promise<void>;
   onDeleteAddon: (addonId: string) => Promise<void>;
   onReorderAddon: (sourceAddonId: string, targetAddonId: string) => Promise<void>;
@@ -198,17 +198,24 @@ export default function AddonsTab({
     );
   };
 
-  // Imported photos without a media object can't be attached to a new add-on, so the copy
-  // keeps only the uploaded ones.
+  // The copy starts hidden so guests never see it before the host edits it. Imported photos
+  // without a media object can't be attached to a new add-on, so it keeps only uploaded ones.
   const handleDuplicate = (addon: AddonItem) => {
     const values = toDraft(addon, propertyCurrency);
     const photos = values.photos.filter((photo) => photo.mediaObjectId);
+    const keepsCover = photos.some((photo) => photo.isCover);
     void runRowAction(addon, () =>
-      onCreateAddon({
-        ...values,
-        name: t("addons.list.copyName", { name: addon.name }),
-        photos: photos.map((photo, index) => ({ ...photo, isCover: index === 0 })),
-      }).catch(() => undefined),
+      onCreateAddon(
+        {
+          ...values,
+          name: t("addons.list.copyName", { name: addon.name }),
+          photos: photos.map((photo, index) => ({
+            ...photo,
+            isCover: keepsCover ? photo.isCover : index === 0,
+          })),
+        },
+        { hidden: true },
+      ).catch(() => undefined),
     );
   };
 

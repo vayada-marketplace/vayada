@@ -436,6 +436,13 @@ test.describe("booking-admin add-ons settings cutover", () => {
       "In-villa massage",
       "Balinese breakfast (copy)",
     ]);
+    // The copy stays off the booking engine until the host edits and shows it.
+    await expect(
+      page.getByTestId("booking-addon-item-addon_copy").getByText("Hidden", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("3 add-ons · 1 live on your booking engine · prices in EUR"),
+    ).toBeVisible();
     expect(writes.slice(0, 2)).toEqual([
       {
         method: "PATCH",
@@ -457,7 +464,7 @@ test.describe("booking-admin add-ons settings cutover", () => {
         pricingModel: "per_guest_night",
         maxQuantity: 6,
         duration: "90 min",
-        publicVisible: true,
+        publicVisible: false,
         // Imported photos without a media object can't be copied to a new add-on.
         photos: [
           { mediaObjectId: "media-1", imageUrl: "https://cdn.example/1.jpg", isCover: true },

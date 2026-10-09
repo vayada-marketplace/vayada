@@ -248,13 +248,14 @@ export default function AddonsPage() {
     }
   };
 
-  const handleCreateAddon = async (values: AddonItemFormValues) => {
+  const handleCreateAddon = async (values: AddonItemFormValues, { hidden = false } = {}) => {
     try {
       const hotelId = getBookingHotelIdForSave();
       const saved = await createBookingAddonItem({
         hotelId,
         body: {
           ...toAddonCreateBody(values, nextAddonSortOrder(addons)),
+          ...(hidden && { publicVisible: false }),
           photos: await addonPhotos(values, hotelId),
         },
       });
