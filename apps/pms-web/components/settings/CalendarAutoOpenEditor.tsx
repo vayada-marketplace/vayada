@@ -96,6 +96,9 @@ export function CalendarAutoOpenEditor() {
           code === "physical_room_labels_unverified"
         ) {
           setRead((current) => current && { ...current, setupError: { code } });
+          // Nothing was saved: show the stored setting again, not the refused draft, so a refused
+          // "On" does not read as "On, but paused".
+          if (read) setDraft(read.setting);
         }
         setSaveError(setupMessage ?? t("settings.autoOpen.saveError"));
       } else {
