@@ -87,7 +87,11 @@ export function planCatalogPropertyAccess(
       );
       continue;
     }
-    const relationship = links.some((link) => link.relationship === "owner") ? "owner" : "operator";
+    const relationship: CatalogPropertyAccessLink["relationship"] = links.some(
+      (link) => link.relationship === "owner",
+    )
+      ? "owner"
+      : "operator";
     const base = { organizationId: organizationId!, resourceId: group.propertyId };
     const status = "active" as const;
     const desired = LINK_TYPES.map(([product, resourceType]) => ({
