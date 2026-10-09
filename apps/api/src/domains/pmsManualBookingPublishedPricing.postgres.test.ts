@@ -213,6 +213,13 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
     expect(pricing?.flexibleRatePlans).toEqual([
       expect.objectContaining({ roomTypeId: legacyRoomTypeId, flexibleRatePlanId: legacyPlanId }),
     ]);
+    // The setup pricing step keeps the legacy completion rule too.
+    expect(
+      await createPgPmsPricingReadModel({
+        connectionString: url!,
+        pool,
+      }).listPublishedOfferRoomTypeIds(legacyPropertyId),
+    ).toBeNull();
   });
 
   describe("once published", () => {
@@ -328,6 +335,12 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
       ]);
       expect([first.total.amountDecimal, second.total.amountDecimal]).toEqual(["200.00", "180.00"]);
       expect(preview?.revision).toBe(1);
+    });
+
+    it("lists the room types the publication offers for the setup pricing step", async () => {
+      const pricing = createPgPmsPricingReadModel({ connectionString: url!, pool });
+      expect(await pricing.listPublishedOfferRoomTypeIds(propertyId)).toEqual([roomTypeId]);
+      expect(await pricing.listPublishedOfferRoomTypeIds(randomUUID())).toBeNull();
     });
 
     // VAY-1943 slice B.2: guest-policy pricing evidence of a property with only pricing-v2 data.
