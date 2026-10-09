@@ -615,6 +615,12 @@ test.describe("booking-admin settings no-legacy guard", () => {
     );
 
     await page.goto("/settings/billing");
+    // Billing is only the Vayada plan; guest payment methods live on Payments.
+    await expect(page.getByRole("heading", { name: "Payment Methods" })).toHaveCount(0);
+    await testInfo.attach("settings-billing", {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
     await page.getByRole("button", { name: "Switch to Fixed Plan" }).click();
     const fixedDialog = page.getByRole("dialog");
     await expect(fixedDialog).toContainText(
@@ -1069,7 +1075,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
 test("saves direct-only transfers while retaining an existing hosted provider", async ({
   page,
-}) => {
+}, testInfo) => {
   await mockBookingAdminAuthenticatedSession(page);
   await mockBookingAdminShellRoutes(page);
   await page.route(
@@ -1116,22 +1122,29 @@ test("saves direct-only transfers while retaining an existing hosted provider", 
       },
     });
   });
-  await page.goto("/settings?section=billing");
+  await page.goto("/settings/payments");
   const transfer = page
     .getByRole("heading", { name: "Direct guest bank transfers" })
     .locator("..")
     .locator("..");
   await expect(page.getByText(/Saved account: •••• 3000/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Payment Methods" })).toBeVisible();
+  await testInfo.attach("settings-payments", {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
   const response = page.waitForResponse(
     (response) =>
       response.request().method() === "PATCH" && response.url().endsWith("/payment-settings"),
   );
-  await transfer.getByRole("button", { name: "Save Changes", exact: true }).click();
+  // One Save covers payment methods, bank details and the provider.
+  const savePayments = page.getByRole("button", { name: "Save Changes", exact: true });
+  await savePayments.click();
   await response;
   expect(write).toMatchObject({ paymentSettings: { acceptedMethods: ["bank_transfer"] } });
   expect(write?.paymentSettings).not.toHaveProperty("paymentProvider");
   await transfer.getByPlaceholder("e.g. HSBC Bank").fill("Partial replacement");
-  await transfer.getByRole("button", { name: "Save Changes", exact: true }).click();
+  await savePayments.click();
   await expect(
     page.getByText(
       "Enter the complete bank details, or leave all fields empty to keep the saved account.",

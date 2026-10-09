@@ -832,7 +832,6 @@
   "admin.checkingStripe": "Checking Stripe...",
   "admin.checkStripeStatus": "Check Stripe status",
   "admin.enable": "Enable",
-  "admin.billingPaymentMethods": "Billing → Payment methods",
   "admin.comingSoon": "Coming soon",
   "admin.vayadaPaymentsIsNotAvailableInTargetCheckoutYet": "vayada Payments is not available in target checkout yet.",
   "admin.openingStripe": "Opening Stripe...",
@@ -1160,7 +1159,6 @@
   "featureHub.copy.bookings": "Bookings",
   "featureHub.copy.revenue": "Revenue",
   "featureHub.copy.commission": "Commission",
-  "admin.billingSettingsAreNotAvailableOnNextApiYet": "Billing settings are not available on next-api yet.",
   "admin.couldnTOpenYourStripeDashboardRightNowPleaseTry": "Couldn't open your Stripe Dashboard right now. Please try again in a moment.",
   "admin.yourStripeAccountIsnTConnectedConnectStripeInYour": "Your Stripe account isn't connected. Connect Stripe in your payment settings to access the dashboard.",
   "admin.thisSettingsSectionIsNotSavedByPropertySettings": "This settings section is not saved by property settings.",
@@ -1170,7 +1168,6 @@
   "admin.providerIsComingSoon": "{provider} is coming soon.",
   "admin.enterTheCompleteBankDetailsOrLeaveAllFieldsEmpty": "Enter the complete bank details, or leave all fields empty to keep the saved account.",
   "admin.yourFixedPlanIsPaidThroughDateCommissionWillApply": "Your Fixed Plan is paid through {date}. Commission will apply to bookings created after that date.",
-  "admin.enableOnlineCardPaymentInBillingPaymentMethodsFirstTo": "Enable Online card payment in Billing → Payment methods first to set up your payment provider.",
   "admin.yourRoleCannotManageAffiliatesForThisProperty": "Your role cannot manage affiliates for this property.",
   "admin.affiliateManagementRequiresActiveBookingOrFinanceAccess": "Affiliate management requires active Booking or Finance access.",
   "admin.youDoNotHaveAccessToThisProperty": "You do not have access to this property.",
@@ -1377,5 +1374,6 @@
   "settings.cards.email.description": "Confirmation sender, BCC and branded emails.",
   "settings.cards.account.title": "Account",
   "settings.cards.account.description": "Email, password, two-factor authentication and login history.",
-  "settings.cards.billing.description": "Your Vayada plan: commission or a fixed monthly fee."
+  "settings.cards.billing.description": "Your Vayada plan: commission or a fixed monthly fee.",
+  "admin.turnOnOnlineCardPaymentAboveToChooseYourPaymentProvider": "Turn on Online card payment above to choose your payment provider."
 }

@@ -832,7 +832,6 @@
   "admin.checkingStripe": "Comprobando raya...",
   "admin.checkStripeStatus": "Verificar el estado de la raya",
   "admin.enable": "Habilitar",
-  "admin.billingPaymentMethods": "Facturación → Métodos de pago",
   "admin.comingSoon": "Próximamente",
   "admin.vayadaPaymentsIsNotAvailableInTargetCheckoutYet": "Vayada Payments aún no está disponible en el proceso de pago objetivo.",
   "admin.openingStripe": "Raya de apertura...",
@@ -1160,7 +1159,6 @@
   "featureHub.copy.bookings": "Reservas",
   "featureHub.copy.revenue": "Ingresos",
   "featureHub.copy.commission": "Comisión",
-  "admin.billingSettingsAreNotAvailableOnNextApiYet": "La configuración de facturación aún no está disponible.",
   "admin.couldnTOpenYourStripeDashboardRightNowPleaseTry": "No se pudo abrir tu panel de Stripe. Inténtalo de nuevo en un momento.",
   "admin.yourStripeAccountIsnTConnectedConnectStripeInYour": "Tu cuenta de Stripe no está conectada. Conecta Stripe en los ajustes de pago para acceder al panel.",
   "admin.thisSettingsSectionIsNotSavedByPropertySettings": "Esta sección no se guarda mediante los ajustes del alojamiento.",
@@ -1170,7 +1168,6 @@
   "admin.providerIsComingSoon": "{provider} estará disponible próximamente.",
   "admin.enterTheCompleteBankDetailsOrLeaveAllFieldsEmpty": "Introduce todos los datos bancarios o deja todos los campos vacíos para mantener la cuenta guardada.",
   "admin.yourFixedPlanIsPaidThroughDateCommissionWillApply": "Tu plan fijo está pagado hasta {date}. Se aplicará comisión a las reservas creadas después de esa fecha.",
-  "admin.enableOnlineCardPaymentInBillingPaymentMethodsFirstTo": "Activa primero Pago con tarjeta en línea en Facturación → Métodos de pago para configurar tu proveedor de pagos.",
   "admin.yourRoleCannotManageAffiliatesForThisProperty": "Tu rol no permite gestionar afiliados para este alojamiento.",
   "admin.affiliateManagementRequiresActiveBookingOrFinanceAccess": "La gestión de afiliados requiere acceso activo a Reservas o Finanzas.",
   "admin.youDoNotHaveAccessToThisProperty": "No tienes acceso a este alojamiento.",
@@ -1377,5 +1374,6 @@
   "settings.cards.email.description": "Remitente de las confirmaciones, CCO y correos con tu marca.",
   "settings.cards.account.title": "Cuenta",
   "settings.cards.account.description": "Correo, contraseña, autenticación en dos pasos e historial de inicios de sesión.",
-  "settings.cards.billing.description": "Tu plan de Vayada: comisión o una cuota mensual fija."
+  "settings.cards.billing.description": "Tu plan de Vayada: comisión o una cuota mensual fija.",
+  "admin.turnOnOnlineCardPaymentAboveToChooseYourPaymentProvider": "Activa arriba el pago con tarjeta en línea para elegir tu proveedor de pagos."
 }

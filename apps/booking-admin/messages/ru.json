@@ -832,7 +832,6 @@
   "admin.checkingStripe": "Проверка полосы...",
   "admin.checkStripeStatus": "Проверить статус полосы",
   "admin.enable": "Включить",
-  "admin.billingPaymentMethods": "Биллинг → Способы оплаты",
   "admin.comingSoon": "Скоро",
   "admin.vayadaPaymentsIsNotAvailableInTargetCheckoutYet": "Платежи Vayada пока недоступны в целевой кассе.",
   "admin.openingStripe": "Открытие полосы...",
@@ -1160,7 +1159,6 @@
   "featureHub.copy.bookings": "Бронирования",
   "featureHub.copy.revenue": "Доход",
   "featureHub.copy.commission": "Комиссия",
-  "admin.billingSettingsAreNotAvailableOnNextApiYet": "Настройки выставления счетов пока недоступны.",
   "admin.couldnTOpenYourStripeDashboardRightNowPleaseTry": "Не удалось открыть панель Stripe. Повторите попытку чуть позже.",
   "admin.yourStripeAccountIsnTConnectedConnectStripeInYour": "Ваш аккаунт Stripe не подключён. Подключите Stripe в настройках платежей для доступа к панели.",
   "admin.thisSettingsSectionIsNotSavedByPropertySettings": "Этот раздел не сохраняется через настройки объекта.",
@@ -1170,7 +1168,6 @@
   "admin.providerIsComingSoon": "{provider} скоро появится.",
   "admin.enterTheCompleteBankDetailsOrLeaveAllFieldsEmpty": "Введите полные банковские реквизиты или оставьте все поля пустыми, чтобы сохранить текущий счёт.",
   "admin.yourFixedPlanIsPaidThroughDateCommissionWillApply": "Ваш фиксированный тариф оплачен до {date}. Комиссия будет применяться к бронированиям, созданным после этой даты.",
-  "admin.enableOnlineCardPaymentInBillingPaymentMethodsFirstTo": "Чтобы настроить платёжного провайдера, сначала включите онлайн-оплату картой в разделе «Оплата тарифа → Способы оплаты».",
   "admin.yourRoleCannotManageAffiliatesForThisProperty": "Ваша роль не позволяет управлять партнёрами этого объекта.",
   "admin.affiliateManagementRequiresActiveBookingOrFinanceAccess": "Для управления партнёрами нужен активный доступ к бронированиям или финансам.",
   "admin.youDoNotHaveAccessToThisProperty": "У вас нет доступа к этому объекту.",
@@ -1377,5 +1374,6 @@
   "settings.cards.email.description": "Отправитель подтверждений, скрытая копия и фирменные письма.",
   "settings.cards.account.title": "Аккаунт",
   "settings.cards.account.description": "Почта, пароль, двухфакторная аутентификация и история входов.",
-  "settings.cards.billing.description": "Ваш тариф Vayada: комиссия или фиксированная ежемесячная плата."
+  "settings.cards.billing.description": "Ваш тариф Vayada: комиссия или фиксированная ежемесячная плата.",
+  "admin.turnOnOnlineCardPaymentAboveToChooseYourPaymentProvider": "Включите выше онлайн-оплату картой, чтобы выбрать платёжного провайдера."
 }

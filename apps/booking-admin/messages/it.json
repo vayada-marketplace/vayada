@@ -832,7 +832,6 @@
   "admin.checkingStripe": "Controllo della striscia...",
   "admin.checkStripeStatus": "Controlla lo stato di Stripe",
   "admin.enable": "Abilita",
-  "admin.billingPaymentMethods": "Fatturazione → Modalità di pagamento",
   "admin.comingSoon": "Prossimamente",
   "admin.vayadaPaymentsIsNotAvailableInTargetCheckoutYet": "Vayada Payments non è ancora disponibile nel checkout di destinazione.",
   "admin.openingStripe": "Striscia di apertura...",
@@ -1160,7 +1159,6 @@
   "featureHub.copy.bookings": "Prenotazioni",
   "featureHub.copy.revenue": "Ricavi",
   "featureHub.copy.commission": "Commissione",
-  "admin.billingSettingsAreNotAvailableOnNextApiYet": "Le impostazioni di fatturazione non sono ancora disponibili.",
   "admin.couldnTOpenYourStripeDashboardRightNowPleaseTry": "Impossibile aprire la dashboard Stripe. Riprova tra poco.",
   "admin.yourStripeAccountIsnTConnectedConnectStripeInYour": "Il tuo account Stripe non è collegato. Collega Stripe nelle impostazioni di pagamento per accedere alla dashboard.",
   "admin.thisSettingsSectionIsNotSavedByPropertySettings": "Questa sezione non viene salvata tramite le impostazioni della struttura.",
@@ -1170,7 +1168,6 @@
   "admin.providerIsComingSoon": "{provider} sarà disponibile a breve.",
   "admin.enterTheCompleteBankDetailsOrLeaveAllFieldsEmpty": "Inserisci le coordinate bancarie complete o lascia tutti i campi vuoti per mantenere il conto salvato.",
   "admin.yourFixedPlanIsPaidThroughDateCommissionWillApply": "Il tuo piano fisso è pagato fino al {date}. La commissione si applicherà alle prenotazioni create dopo tale data.",
-  "admin.enableOnlineCardPaymentInBillingPaymentMethodsFirstTo": "Per configurare il fornitore di pagamenti, attiva prima il pagamento con carta online in Fatturazione → Metodi di pagamento.",
   "admin.yourRoleCannotManageAffiliatesForThisProperty": "Il tuo ruolo non consente di gestire gli affiliati di questa struttura.",
   "admin.affiliateManagementRequiresActiveBookingOrFinanceAccess": "La gestione degli affiliati richiede un accesso attivo a Prenotazioni o Finanze.",
   "admin.youDoNotHaveAccessToThisProperty": "Non hai accesso a questa struttura.",
@@ -1377,5 +1374,6 @@
   "settings.cards.email.description": "Mittente delle conferme, CCN ed email con il tuo marchio.",
   "settings.cards.account.title": "Account",
   "settings.cards.account.description": "Email, password, autenticazione a due fattori e cronologia degli accessi.",
-  "settings.cards.billing.description": "Il tuo piano Vayada: commissione o canone mensile fisso."
+  "settings.cards.billing.description": "Il tuo piano Vayada: commissione o canone mensile fisso.",
+  "admin.turnOnOnlineCardPaymentAboveToChooseYourPaymentProvider": "Attiva sopra il pagamento con carta online per scegliere il tuo fornitore di pagamenti."
 }

@@ -832,7 +832,6 @@
   "admin.checkingStripe": "Streep controleren...",
   "admin.checkStripeStatus": "Controleer de Stripe-status",
   "admin.enable": "Inschakelen",
-  "admin.billingPaymentMethods": "Facturering → Betaalmethoden",
   "admin.comingSoon": "Binnenkort beschikbaar",
   "admin.vayadaPaymentsIsNotAvailableInTargetCheckoutYet": "vayada Payments is nog niet beschikbaar in de target-checkout.",
   "admin.openingStripe": "Openingsstreep...",
@@ -1160,7 +1159,6 @@
   "featureHub.copy.bookings": "Boekingen",
   "featureHub.copy.revenue": "Omzet",
   "featureHub.copy.commission": "Commissie",
-  "admin.billingSettingsAreNotAvailableOnNextApiYet": "Factureringsinstellingen zijn nog niet beschikbaar.",
   "admin.couldnTOpenYourStripeDashboardRightNowPleaseTry": "Je Stripe-dashboard kon niet worden geopend. Probeer het zo opnieuw.",
   "admin.yourStripeAccountIsnTConnectedConnectStripeInYour": "Je Stripe-account is niet gekoppeld. Koppel Stripe in je betalingsinstellingen om het dashboard te openen.",
   "admin.thisSettingsSectionIsNotSavedByPropertySettings": "Deze sectie wordt niet via de accommodatie-instellingen opgeslagen.",
@@ -1170,7 +1168,6 @@
   "admin.providerIsComingSoon": "{provider} is binnenkort beschikbaar.",
   "admin.enterTheCompleteBankDetailsOrLeaveAllFieldsEmpty": "Vul de volledige bankgegevens in of laat alle velden leeg om de opgeslagen rekening te behouden.",
   "admin.yourFixedPlanIsPaidThroughDateCommissionWillApply": "Je vaste abonnement is betaald tot {date}. Voor boekingen die na die datum worden aangemaakt, geldt commissie.",
-  "admin.enableOnlineCardPaymentInBillingPaymentMethodsFirstTo": "Schakel eerst Online kaartbetaling in onder Facturering → Betaalmethoden om je betalingsprovider in te stellen.",
   "admin.yourRoleCannotManageAffiliatesForThisProperty": "Je rol kan geen affiliates voor deze accommodatie beheren.",
   "admin.affiliateManagementRequiresActiveBookingOrFinanceAccess": "Affiliatebeheer vereist actieve toegang tot Boekingen of Financiën.",
   "admin.youDoNotHaveAccessToThisProperty": "Je hebt geen toegang tot deze accommodatie.",
@@ -1377,5 +1374,6 @@
   "settings.cards.email.description": "Afzender van bevestigingen, BCC en e-mails in je eigen huisstijl.",
   "settings.cards.account.title": "Account",
   "settings.cards.account.description": "E-mail, wachtwoord, tweestapsverificatie en inloggeschiedenis.",
-  "settings.cards.billing.description": "Je Vayada-abonnement: commissie of een vast maandbedrag."
+  "settings.cards.billing.description": "Je Vayada-abonnement: commissie of een vast maandbedrag.",
+  "admin.turnOnOnlineCardPaymentAboveToChooseYourPaymentProvider": "Zet hierboven online kaartbetaling aan om je betalingsaanbieder te kiezen."
 }

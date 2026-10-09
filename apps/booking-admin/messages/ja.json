@@ -832,7 +832,6 @@
   "admin.checkingStripe": "ストライプをチェック中...",
   "admin.checkStripeStatus": "ストライプのステータスを確認する",
   "admin.enable": "有効にする",
-  "admin.billingPaymentMethods": "請求 → 支払い方法",
   "admin.comingSoon": "近日公開予定",
   "admin.vayadaPaymentsIsNotAvailableInTargetCheckoutYet": "vayada Payments はターゲット チェックアウトではまだ利用できません。",
   "admin.openingStripe": "ストライプを開く...",
@@ -1160,7 +1159,6 @@
   "featureHub.copy.bookings": "予約数",
   "featureHub.copy.revenue": "収益",
   "featureHub.copy.commission": "コミッション",
-  "admin.billingSettingsAreNotAvailableOnNextApiYet": "請求設定はまだ利用できません。",
   "admin.couldnTOpenYourStripeDashboardRightNowPleaseTry": "Stripeダッシュボードを開けませんでした。しばらくしてから再試行してください。",
   "admin.yourStripeAccountIsnTConnectedConnectStripeInYour": "Stripeアカウントが接続されていません。支払い設定でStripeを接続すると、ダッシュボードにアクセスできます。",
   "admin.thisSettingsSectionIsNotSavedByPropertySettings": "このセクションは施設設定から保存できません。",
@@ -1170,7 +1168,6 @@
   "admin.providerIsComingSoon": "{provider}は近日公開予定です。",
   "admin.enterTheCompleteBankDetailsOrLeaveAllFieldsEmpty": "銀行情報をすべて入力するか、保存済みの口座を維持する場合はすべての欄を空欄にしてください。",
   "admin.yourFixedPlanIsPaidThroughDateCommissionWillApply": "固定料金プランは{date}まで支払い済みです。その日以降に作成された予約に手数料が適用されます。",
-  "admin.enableOnlineCardPaymentInBillingPaymentMethodsFirstTo": "決済サービスを設定するには、まず「請求 → 支払い方法」でオンラインカード決済を有効にしてください。",
   "admin.yourRoleCannotManageAffiliatesForThisProperty": "現在の役割では、この施設のアフィリエイトを管理できません。",
   "admin.affiliateManagementRequiresActiveBookingOrFinanceAccess": "アフィリエイト管理には、予約または財務への有効なアクセス権が必要です。",
   "admin.youDoNotHaveAccessToThisProperty": "この施設へのアクセス権がありません。",
@@ -1377,5 +1374,6 @@
   "settings.cards.email.description": "確認メールの送信者、BCC、ブランドメール。",
   "settings.cards.account.title": "アカウント",
   "settings.cards.account.description": "メールアドレス、パスワード、二要素認証、ログイン履歴。",
-  "settings.cards.billing.description": "Vayadaのプラン：手数料制または月額固定。"
+  "settings.cards.billing.description": "Vayadaのプラン：手数料制または月額固定。",
+  "admin.turnOnOnlineCardPaymentAboveToChooseYourPaymentProvider": "決済プロバイダーを選ぶには、上のオンラインカード決済をオンにしてください。"
 }

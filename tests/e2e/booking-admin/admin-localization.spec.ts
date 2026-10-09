@@ -28,7 +28,6 @@ for (const locale of ["de", "fr", "es", "id", "ja", "zh", "ru", "it", "nl"]) {
     await expect(
       page.getByText(messages["admin.howYourHotelCollectsPaymentsFromGuests"], { exact: true }),
     ).toBeVisible();
-    await page.goto("/settings?section=billing");
     await expect(
       page.getByRole("heading", { name: messages["settings.billing.paymentMethods"], exact: true }),
     ).toBeVisible();

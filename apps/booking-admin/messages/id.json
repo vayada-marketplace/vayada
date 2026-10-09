@@ -832,7 +832,6 @@
   "admin.checkingStripe": "Memeriksa Garis...",
   "admin.checkStripeStatus": "Periksa status Garis",
   "admin.enable": "Aktifkan",
-  "admin.billingPaymentMethods": "Penagihan → Metode pembayaran",
   "admin.comingSoon": "Segera hadir",
   "admin.vayadaPaymentsIsNotAvailableInTargetCheckoutYet": "Pembayaran vayada belum tersedia di checkout target.",
   "admin.openingStripe": "Membuka Garis...",
@@ -1160,7 +1159,6 @@
   "featureHub.copy.bookings": "Pemesanan",
   "featureHub.copy.revenue": "Pendapatan",
   "featureHub.copy.commission": "Komisi",
-  "admin.billingSettingsAreNotAvailableOnNextApiYet": "Pengaturan penagihan belum tersedia.",
   "admin.couldnTOpenYourStripeDashboardRightNowPleaseTry": "Dasbor Stripe tidak dapat dibuka. Coba lagi sebentar lagi.",
   "admin.yourStripeAccountIsnTConnectedConnectStripeInYour": "Akun Stripe belum terhubung. Hubungkan Stripe di pengaturan pembayaran untuk mengakses dasbor.",
   "admin.thisSettingsSectionIsNotSavedByPropertySettings": "Bagian ini tidak disimpan melalui pengaturan properti.",
@@ -1170,7 +1168,6 @@
   "admin.providerIsComingSoon": "{provider} segera tersedia.",
   "admin.enterTheCompleteBankDetailsOrLeaveAllFieldsEmpty": "Masukkan detail bank lengkap atau kosongkan semua kolom untuk mempertahankan rekening tersimpan.",
   "admin.yourFixedPlanIsPaidThroughDateCommissionWillApply": "Paket Tetap Anda telah dibayar hingga {date}. Komisi berlaku untuk pemesanan yang dibuat setelah tanggal tersebut.",
-  "admin.enableOnlineCardPaymentInBillingPaymentMethodsFirstTo": "Aktifkan Pembayaran kartu online di Penagihan → Metode pembayaran terlebih dahulu untuk menyiapkan penyedia pembayaran.",
   "admin.yourRoleCannotManageAffiliatesForThisProperty": "Peran Anda tidak dapat mengelola afiliasi untuk properti ini.",
   "admin.affiliateManagementRequiresActiveBookingOrFinanceAccess": "Pengelolaan afiliasi memerlukan akses Pemesanan atau Keuangan yang aktif.",
   "admin.youDoNotHaveAccessToThisProperty": "Anda tidak memiliki akses ke properti ini.",
@@ -1377,5 +1374,6 @@
   "settings.cards.email.description": "Pengirim konfirmasi, BCC, dan email bermerek.",
   "settings.cards.account.title": "Akun",
   "settings.cards.account.description": "Email, kata sandi, autentikasi dua faktor, dan riwayat masuk.",
-  "settings.cards.billing.description": "Paket Vayada Anda: komisi atau biaya bulanan tetap."
+  "settings.cards.billing.description": "Paket Vayada Anda: komisi atau biaya bulanan tetap.",
+  "admin.turnOnOnlineCardPaymentAboveToChooseYourPaymentProvider": "Aktifkan pembayaran kartu online di atas untuk memilih penyedia pembayaran Anda."
 }

@@ -29,7 +29,6 @@ import {
   switchToCommissionPlan,
   type FinancePlanStatus,
 } from "@/services/api/financeSubscriptionsClient";
-import Link from "next/link";
 import {
   GlobeAltIcon,
   PhoneIcon,
@@ -78,7 +77,6 @@ const PAGE_TITLES: Record<Section, string> = {
   billing: "settings.tabs.billing",
 };
 
-const BILLING_SETTINGS_UNAVAILABLE = "admin.billingSettingsAreNotAvailableOnNextApiYet";
 const STRIPE_DASHBOARD_ERROR = "admin.couldnTOpenYourStripeDashboardRightNowPleaseTry";
 const STRIPE_NOT_CONNECTED = "admin.yourStripeAccountIsnTConnectedConnectStripeInYour";
 
@@ -213,13 +211,6 @@ function buildTargetSettingsUpdate(
         terms_text: settings.terms_text,
         cancellation_policy_text: settings.cancellation_policy_text,
       },
-    };
-  }
-
-  if (section === "billing") {
-    return {
-      ok: false,
-      message: BILLING_SETTINGS_UNAVAILABLE,
     };
   }
 
@@ -910,7 +901,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   };
 
   const handleSave = async () => {
-    if (activeSection === "billing") {
+    if (activeSection === "payments") {
       setFeedback(null);
       setSaving(true);
       try {
@@ -1575,7 +1566,15 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
               </div>
             </div>
           )}
+        </div>
+      )}
 
+      {activeSection === "payments" && (
+        <div className="mt-4 space-y-4">
+          <p className="text-[13px] text-gray-500">
+            {t("admin.howYourHotelCollectsPaymentsFromGuests")}
+          </p>
+          {localizationLoadError && localizationRetryCard}
           {/* Payment Methods */}
           <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
             <h2 className="text-sm font-semibold text-gray-900">
@@ -2051,11 +2050,6 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                 </div>
               </button>
             </div>
-            <div className="flex justify-end pt-4">
-              <SaveButton onClick={handleSave} saving={saving}>
-                {t("common.save")}
-              </SaveButton>
-            </div>
           </div>
 
           {settings.bank_transfer && bankDestination?.maskedAccount && (
@@ -2176,12 +2170,6 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                   />
                 </div>
               </div>
-
-              <div className="flex justify-end pt-2">
-                <SaveButton onClick={handleSave} saving={saving}>
-                  {t("common.save")}
-                </SaveButton>
-              </div>
             </div>
           )}
         </div>
@@ -2189,10 +2177,6 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
 
       {activeSection === "payments" && (
         <section className="mt-4 space-y-4">
-          <p className="text-[13px] text-gray-500">
-            {t("admin.howYourHotelCollectsPaymentsFromGuests")}
-          </p>
-          {localizationLoadError && localizationRetryCard}
           {!stripeAccountId &&
           (stripeAccountCreationBlocked || !paymentSettingsLoaded) &&
           paymentError ? (
@@ -2216,10 +2200,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
           ) : !settings.online_card_payment ? (
             <SettingsCard>
               <p className="text-sm text-gray-700">
-                {t("admin.enableOnlineCardPaymentInBillingPaymentMethodsFirstTo")}{" "}
-                <Link href="/settings/billing" className="text-primary-600 hover:underline">
-                  {t("admin.billingPaymentMethods")}
-                </Link>
+                {t("admin.turnOnOnlineCardPaymentAboveToChooseYourPaymentProvider")}
               </p>
             </SettingsCard>
           ) : (
@@ -2409,11 +2390,6 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                         className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500"
                       />
                     </div>
-                    <div className="flex justify-end pt-2">
-                      <SaveButton onClick={savePaymentProviderSettings} saving={savingPayment}>
-                        {t("common.save")}
-                      </SaveButton>
-                    </div>
                   </div>
                 ) : stripeAccountId ? (
                   <div className="space-y-3">
@@ -2473,11 +2449,6 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                         {t("admin.checkYourPayoutsBalanceAndPaymentHistoryOrUpdateYour")}
                       </p>
                     </div>
-                    <div className="flex justify-end pt-2">
-                      <SaveButton onClick={savePaymentProviderSettings} saving={savingPayment}>
-                        {t("common.save")}
-                      </SaveButton>
-                    </div>
                   </div>
                 ) : stripeAccountCreationBlocked || !paymentSettingsLoaded ? (
                   <div className="space-y-3">
@@ -2530,6 +2501,11 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
               </div>
             </>
           )}
+          <div className="flex justify-end">
+            <SaveButton onClick={handleSave} saving={saving || savingPayment}>
+              {t("common.save")}
+            </SaveButton>
+          </div>
         </section>
       )}
     </SettingsSubPage>

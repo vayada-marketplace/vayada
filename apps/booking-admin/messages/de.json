@@ -832,7 +832,6 @@
   "admin.checkingStripe": "Streifen prüfen...",
   "admin.checkStripeStatus": "Überprüfen Sie den Stripe-Status",
   "admin.enable": "Aktivieren",
-  "admin.billingPaymentMethods": "Abrechnung → Zahlungsmethoden",
   "admin.comingSoon": "Kommt bald",
   "admin.vayadaPaymentsIsNotAvailableInTargetCheckoutYet": "vayada Payments ist im Ziel-Checkout noch nicht verfügbar.",
   "admin.openingStripe": "Öffnungsstreifen...",
@@ -1160,7 +1159,6 @@
   "featureHub.copy.bookings": "Buchungen",
   "featureHub.copy.revenue": "Umsatz",
   "featureHub.copy.commission": "Provision",
-  "admin.billingSettingsAreNotAvailableOnNextApiYet": "Abrechnungseinstellungen sind derzeit noch nicht verfügbar.",
   "admin.couldnTOpenYourStripeDashboardRightNowPleaseTry": "Ihr Stripe-Dashboard konnte nicht geöffnet werden. Bitte versuchen Sie es gleich erneut.",
   "admin.yourStripeAccountIsnTConnectedConnectStripeInYour": "Ihr Stripe-Konto ist nicht verbunden. Verbinden Sie Stripe in den Zahlungseinstellungen, um auf das Dashboard zuzugreifen.",
   "admin.thisSettingsSectionIsNotSavedByPropertySettings": "Dieser Bereich wird nicht über die Unterkunftseinstellungen gespeichert.",
@@ -1170,7 +1168,6 @@
   "admin.providerIsComingSoon": "{provider} ist bald verfügbar.",
   "admin.enterTheCompleteBankDetailsOrLeaveAllFieldsEmpty": "Geben Sie die vollständigen Bankdaten ein oder lassen Sie alle Felder leer, um das gespeicherte Konto beizubehalten.",
   "admin.yourFixedPlanIsPaidThroughDateCommissionWillApply": "Ihr Festpreistarif ist bis zum {date} bezahlt. Für danach erstellte Buchungen fällt eine Provision an.",
-  "admin.enableOnlineCardPaymentInBillingPaymentMethodsFirstTo": "Aktivieren Sie zuerst „Online-Kartenzahlung“ unter „Abrechnung → Zahlungsmethoden“, um Ihren Zahlungsanbieter einzurichten.",
   "admin.yourRoleCannotManageAffiliatesForThisProperty": "Ihre Rolle kann keine Partner für diese Unterkunft verwalten.",
   "admin.affiliateManagementRequiresActiveBookingOrFinanceAccess": "Für die Partnerverwaltung ist ein aktiver Zugang zu Buchungen oder Finanzen erforderlich.",
   "admin.youDoNotHaveAccessToThisProperty": "Sie haben keinen Zugriff auf diese Unterkunft.",
@@ -1377,5 +1374,6 @@
   "settings.cards.email.description": "Absender von Bestätigungen, BCC und E-Mails im eigenen Design.",
   "settings.cards.account.title": "Konto",
   "settings.cards.account.description": "E-Mail, Passwort, Zwei-Faktor-Authentifizierung und Anmeldeverlauf.",
-  "settings.cards.billing.description": "Ihr Vayada-Tarif: Provision oder feste Monatsgebühr."
+  "settings.cards.billing.description": "Ihr Vayada-Tarif: Provision oder feste Monatsgebühr.",
+  "admin.turnOnOnlineCardPaymentAboveToChooseYourPaymentProvider": "Aktivieren Sie oben die Online-Kartenzahlung, um Ihren Zahlungsanbieter auszuwählen."
 }

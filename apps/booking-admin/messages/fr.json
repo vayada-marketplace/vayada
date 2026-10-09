@@ -832,7 +832,6 @@
   "admin.checkingStripe": "Vérification de Stripe...",
   "admin.checkStripeStatus": "Vérifier l'état de Stripe",
   "admin.enable": "Activer",
-  "admin.billingPaymentMethods": "Facturation → Modes de paiement",
   "admin.comingSoon": "Bientôt disponible",
   "admin.vayadaPaymentsIsNotAvailableInTargetCheckoutYet": "vayada Payments n'est pas encore disponible dans la caisse cible.",
   "admin.openingStripe": "Bande d'ouverture...",
@@ -1160,7 +1159,6 @@
   "featureHub.copy.bookings": "Réservations",
   "featureHub.copy.revenue": "Revenus",
   "featureHub.copy.commission": "Commissions",
-  "admin.billingSettingsAreNotAvailableOnNextApiYet": "Les paramètres de facturation ne sont pas encore disponibles.",
   "admin.couldnTOpenYourStripeDashboardRightNowPleaseTry": "Impossible d’ouvrir votre tableau de bord Stripe. Réessayez dans un instant.",
   "admin.yourStripeAccountIsnTConnectedConnectStripeInYour": "Votre compte Stripe n’est pas connecté. Connectez Stripe dans les paramètres de paiement pour accéder au tableau de bord.",
   "admin.thisSettingsSectionIsNotSavedByPropertySettings": "Cette section ne s’enregistre pas via les paramètres de l’établissement.",
@@ -1170,7 +1168,6 @@
   "admin.providerIsComingSoon": "{provider} sera bientôt disponible.",
   "admin.enterTheCompleteBankDetailsOrLeaveAllFieldsEmpty": "Saisissez les coordonnées bancaires complètes ou laissez tous les champs vides pour conserver le compte enregistré.",
   "admin.yourFixedPlanIsPaidThroughDateCommissionWillApply": "Votre forfait fixe est payé jusqu’au {date}. La commission s’appliquera aux réservations créées après cette date.",
-  "admin.enableOnlineCardPaymentInBillingPaymentMethodsFirstTo": "Activez d’abord le paiement par carte en ligne dans Facturation → Moyens de paiement pour configurer votre prestataire de paiement.",
   "admin.yourRoleCannotManageAffiliatesForThisProperty": "Votre rôle ne permet pas de gérer les affiliés de cet établissement.",
   "admin.affiliateManagementRequiresActiveBookingOrFinanceAccess": "La gestion des affiliés nécessite un accès actif aux réservations ou aux finances.",
   "admin.youDoNotHaveAccessToThisProperty": "Vous n’avez pas accès à cet établissement.",
@@ -1377,5 +1374,6 @@
   "settings.cards.email.description": "Expéditeur des confirmations, CCI et e-mails à votre image.",
   "settings.cards.account.title": "Compte",
   "settings.cards.account.description": "E-mail, mot de passe, authentification à deux facteurs et historique de connexion.",
-  "settings.cards.billing.description": "Votre formule Vayada : commission ou forfait mensuel fixe."
+  "settings.cards.billing.description": "Votre formule Vayada : commission ou forfait mensuel fixe.",
+  "admin.turnOnOnlineCardPaymentAboveToChooseYourPaymentProvider": "Activez le paiement par carte en ligne ci-dessus pour choisir votre fournisseur de paiement."
 }
