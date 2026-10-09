@@ -14,6 +14,16 @@ export function compareSummary(current: number, previous: number): SummaryCompar
   };
 }
 
+/** A period without bookings has no nightly rate rather than a rate of 0. */
+export function compareRate(
+  current: { rate: number; bookings: number },
+  previous: { rate: number; bookings: number },
+): SummaryComparison | null {
+  if (current.bookings === 0) return { kind: "noData" };
+  if (previous.bookings === 0) return null;
+  return compareSummary(Math.round(current.rate), Math.round(previous.rate));
+}
+
 export type SparklineShape = { line: string; area: string } | null;
 
 /**

@@ -6,7 +6,7 @@ import { formatCurrency, formatNumber } from "@/lib/utils";
 import { settingsService, type PropertySettings } from "@/services/settings";
 import { ConversionFunnelCard } from "@/components/dashboard/ConversionFunnelCard";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
-import { compareSummary, type SummaryChange } from "@/lib/utils/dashboardSummary";
+import { compareRate, compareSummary, type SummaryChange } from "@/lib/utils/dashboardSummary";
 import {
   dashboardService,
   rangeQuery,
@@ -188,11 +188,28 @@ export default function DashboardPage() {
   );
   const money = (value: number) => formatCurrency(value, currency, locale);
   const count = ({ amount }: SummaryChange) => formatNumber(amount, locale);
-  // Revenue reads as a percentage; after an empty previous period the amount is shown instead.
+  // Revenue reads as a percentage; after an empty previous period, or when the percentage
+  // would round to 0, the amount is shown instead.
   const revenueChange = ({ amount, percent }: SummaryChange) =>
-    percent === null
+    percent === null || percent < 0.05
       ? money(amount)
       : `${formatNumber(percent, locale, { maximumFractionDigits: percent < 10 ? 1 : 0 })}%`;
+  // Amounts display without decimals, so compare them that way: no "+€0" changes.
+  const revenueComparison =
+    stats && !incompleteAmounts
+      ? compareSummary(Math.round(stats.revenue), Math.round(stats.revenue_previous))
+      : null;
+  const rateComparison =
+    stats && !incompleteAmounts
+      ? compareRate(
+          { rate: stats.avg_nightly_rate, bookings: stats.bookings },
+          { rate: stats.avg_nightly_rate_previous, bookings: stats.bookings_previous },
+        )
+      : null;
+  // Days without bookings have no rate; leave them out of the trend instead of dipping to 0.
+  const rateTrend = sparklines
+    ? sparklines.avg_rate.filter((_, index) => (sparklines.bookings[index] ?? 0) > 0)
+    : [];
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-3 md:space-y-4">
@@ -240,11 +257,7 @@ export default function DashboardPage() {
           )}
           label={t("dashboard.stats.revenue")}
           value={stats ? money(stats.revenue) : "--"}
-          comparison={
-            stats && !incompleteAmounts
-              ? compareSummary(stats.revenue, stats.revenue_previous)
-              : null
-          }
+          comparison={revenueComparison}
           formatChange={revenueChange}
           vsLabel={vsLabel}
           t={t}
@@ -269,15 +282,11 @@ export default function DashboardPage() {
           )}
           label={t("dashboard.stats.avgNightlyRate")}
           value={stats ? money(stats.avg_nightly_rate) : "--"}
-          comparison={
-            stats && !incompleteAmounts
-              ? compareSummary(stats.avg_nightly_rate, stats.avg_nightly_rate_previous)
-              : null
-          }
+          comparison={rateComparison}
           formatChange={({ amount }) => money(amount)}
           vsLabel={vsLabel}
           t={t}
-          sparkline={sparklines?.avg_rate ?? []}
+          sparkline={rateTrend}
         />
         <SummaryCard
           icon={statIcon(

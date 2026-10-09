@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareSummary, sparklineShape } from "./dashboardSummary";
+import { compareRate, compareSummary, sparklineShape } from "./dashboardSummary";
 
 describe("dashboard summary comparison", () => {
   it("reports no data, no change, and signed changes with a percent only from a nonzero base", () => {
@@ -13,6 +13,23 @@ describe("dashboard summary comparison", () => {
       up: true,
       amount: 1240,
       percent: null,
+    });
+  });
+});
+
+describe("dashboard nightly rate comparison", () => {
+  it("has no rate without bookings and compares whole amounts otherwise", () => {
+    expect(compareRate({ rate: 0, bookings: 0 }, { rate: 288, bookings: 3 })).toEqual({
+      kind: "noData",
+    });
+    expect(compareRate({ rate: 310, bookings: 4 }, { rate: 0, bookings: 0 })).toBeNull();
+    expect(compareRate({ rate: 100.4, bookings: 1 }, { rate: 100.1, bookings: 1 })).toEqual({
+      kind: "unchanged",
+    });
+    expect(compareRate({ rate: 310, bookings: 4 }, { rate: 288, bookings: 3 })).toMatchObject({
+      kind: "change",
+      up: true,
+      amount: 22,
     });
   });
 });

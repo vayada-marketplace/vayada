@@ -91,5 +91,7 @@ test("summary cards show short labels, sparklines, per-metric comparisons and a 
   await expect(page.locator('svg path[stroke="#16A34A"]')).toHaveCount(4);
   await page.setViewportSize({ width: 390, height: 1400 });
   await page.screenshot({ path: testInfo.outputPath("summary-cards-mobile.png"), fullPage: true });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  // Page content scrolls inside <main>, so check it rather than the document.
+  const main = page.locator("main");
+  expect(await main.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
 });
