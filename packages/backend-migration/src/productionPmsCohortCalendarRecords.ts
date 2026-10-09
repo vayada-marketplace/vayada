@@ -71,7 +71,7 @@ export function planPmsCohortCalendars(
       const property = propertyId ? properties.get(propertyId) : undefined;
       if (!property || !carriedCohortHotel(context, hotelId)) continue;
       const planned = property.storedCalendar
-        ? storedCalendar(context, hotel, hotelId, property)
+        ? storedCalendar(context, rooms, hotel, hotelId, property)
         : newCalendar(context, rooms, hotel, property);
       if (planned) calendars.push(planned);
     } catch (error) {
@@ -88,23 +88,34 @@ export function planPmsCohortCalendars(
 
 function storedCalendar(
   context: PmsBuildContext,
+  rooms: Pick<PmsRoomBuild, "records" | "nativeFactsRoomTypes">,
   hotel: IdentitySourceRow,
   hotelId: string,
   property: CohortProperty,
 ): PlannedCohortCalendar | null {
   const stored = property.storedCalendar!;
   if (stored.idempotencyKeyId !== nativeCommandId(COMMAND, "idempotency", property.propertyId)) {
-    addPmsBlocker(
-      context,
-      "COHORT_CALENDAR_CONFLICT",
-      "pms.hotels",
-      hotelId,
-      "The target property has an operating calendar the migration did not write",
-    );
+    // A calendar saved natively where the import would not plan one is the owner's.
+    if (newCalendar(context, rooms, hotel, property))
+      addPmsBlocker(
+        context,
+        "COHORT_CALENDAR_CONFLICT",
+        "pms.hotels",
+        hotelId,
+        "The target property has an operating calendar the migration did not write",
+      );
     return null;
   }
   return calendar(hotel, property.propertyId, stored.organizationId, stored.createdByUserId, {
     ...stored,
+    // jsonb reorders object keys; rebuild them in the order the first run planned.
+    bindings: stored.bindings.map((binding) => ({
+      roomTypeId: binding.roomTypeId,
+      sourceRoomFactsRevision: binding.sourceRoomFactsRevision,
+      sourceRoomUnitsRevision: binding.sourceRoomUnitsRevision,
+      physicalCapacityCount: binding.physicalCapacityCount,
+      startingSellableLimitCount: binding.startingSellableLimitCount,
+    })),
     at: new Date(stored.createdAt).toISOString(),
   });
 }

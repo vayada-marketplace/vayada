@@ -195,6 +195,21 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
         planned.checksum,
       ]);
 
+      // A later run (parity's dry run, a resume) reads the stored calendar and plans the same.
+      const later = buildProductionPmsPlan({
+        sourceRunId: RUN,
+        snapshotAt: AT,
+        completedAt: AT,
+        rows,
+        cohort: { bookingHotelIds: [], pmsHotelIds: [HOTEL], marketplaceHotelIds: [] },
+        target: await readProductionPmsTargetState(
+          client,
+          planned.records,
+          await readProductionPmsPrerequisites(client, RUN),
+        ),
+      });
+      expect([later.blockers, later.writes, later.checksum]).toEqual([[], [], planned.checksum]);
+
       // Readiness criteria d and e (VAY-2066), as the producer reads them.
       const criteria = await client.query(
         `WITH latest AS (

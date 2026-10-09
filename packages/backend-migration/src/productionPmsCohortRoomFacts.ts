@@ -24,13 +24,25 @@ const BED_KEYS = new Map([
   ...[...NATIVE_BED_TYPES].map((key) => [key, key] as const),
 ]);
 
+/** A bed label as a key: the form's label or vocabulary key (also plural), else the native
+ * legacy read's slug (pmsRoomFactsReadModel legacyBeds), which an owner can then correct. */
+function bedKey(label: string): string {
+  const text = label.trim().toLowerCase();
+  return (
+    BED_KEYS.get(text) ??
+    BED_KEYS.get(text.replace(/s$/, "")) ??
+    text.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")
+  );
+}
+
 /**
  * VAY-1362: a legacy room type's facts in the native room-facts contract, mapped as the PMS room
  * form maps its fields (apps/pms-web roomTypeFactsFromForm): blank adult and child limits mean
- * the total, the category and bed labels map to the native vocabulary, a size of 0 is none, and
- * the bathroom is private (the form's default; legacy records no bathroom type). Null when the
- * legacy row cannot be expressed without guessing (an unknown bed label, no bed, limits the
- * contract refuses); the room type then keeps its legacy shape and its hotel stays in setup.
+ * the total, the category and bed labels map to the native vocabulary (an unknown bed label to
+ * the native legacy read's slug), a size of 0 is none, and the bathroom is private as the form's
+ * default, or shared without a bathroom count (legacy records no bathroom type). Null when the
+ * legacy row cannot be expressed without guessing (no bed, limits the contract refuses); the
+ * room type then keeps its legacy shape, which parity reports (COHORT_SCOPE_VERIFIED).
  */
 export function cohortRoomFacts(data: Record<string, unknown>): {
   facts: RoomTypeFacts;
@@ -51,8 +63,7 @@ export function cohortRoomFacts(data: Record<string, unknown>): {
     const text = part.trim();
     if (!text) continue;
     const match = /^(\d+)\s+(.+)$/.exec(text);
-    const key = BED_KEYS.get((match ? match[2]! : text).trim().toLowerCase());
-    if (!key) return null;
+    const key = bedKey(match ? match[2]! : text);
     beds.set(key, (beds.get(key) ?? 0) + (match ? Number(match[1]) : 1));
   }
   const bathrooms = integer(data["bathrooms"], "bathrooms", 1);
@@ -69,34 +80,50 @@ export function cohortRoomFacts(data: Record<string, unknown>): {
     beds: [...beds].map(([type, quantity]) => ({ type, quantity })),
     bedrooms: integer(data["bedrooms"], "bedrooms", 1),
     bathrooms: bathrooms > 0 ? bathrooms : null,
-    bathroomType: "private",
+    bathroomType: bathrooms > 0 ? "private" : "shared",
     size: Number.isFinite(size) && size > 0 ? { value: size, unit: "sqm" } : null,
   });
   return facts ? { facts, legacyCategory: category ? null : categoryText } : null;
 }
 
-/** The stored columns the native room-facts writer sets (pmsRoomFactsCommandRepository). */
+/**
+ * The stored columns the native room-facts writer sets (pmsRoomFactsCommandRepository
+ * occupancyPayload and roomAttributesPayload). The legacy copies of the same facts move under
+ * legacyRoomFacts: native edits merge new keys in, and readers that prefer the legacy keys
+ * (maxOccupancy, bedType) would otherwise keep showing stale values.
+ */
 export function nativeRoomFactColumns(
   facts: RoomTypeFacts,
   legacy: { occupancyLimits: Record<string, unknown>; roomAttributes: Record<string, unknown> },
   legacyCategory: string | null,
 ) {
+  const {
+    bedType,
+    size,
+    bedrooms: _bedrooms,
+    bathrooms: _bathrooms,
+    ...attributes
+  } = legacy.roomAttributes;
   return {
     category: facts.category,
     occupancyLimits: {
-      ...legacy.occupancyLimits,
       total: facts.occupancy.maxGuests,
       adults: facts.occupancy.maxAdults,
       children: facts.occupancy.maxChildren,
     },
     roomAttributes: {
-      ...legacy.roomAttributes,
+      ...attributes,
       beds: facts.beds,
       bedrooms: facts.bedrooms,
       bathrooms: facts.bathrooms,
       bathroomType: facts.bathroomType,
       size: facts.size,
-      ...(legacyCategory ? { legacyCategory } : {}),
+      legacyRoomFacts: {
+        ...legacy.occupancyLimits,
+        bedType,
+        size,
+        ...(legacyCategory ? { category: legacyCategory } : {}),
+      },
     },
   };
 }

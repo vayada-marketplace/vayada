@@ -16,6 +16,8 @@ const MESSAGES = {
     "A cohort property's organization lacks an active, unsuspended PMS property entitlement",
   cohortAutoOpen:
     "A cohort property's auto-open row differs from its legacy choice (on: matching; off: none)",
+  cohortRoomFacts:
+    "A cohort property has an active room type without native room facts, so runtime room reads fail",
   profileNotPrivate: "A property outside the cohort has a non-private profile",
   verifiedDomain: "A property outside the cohort has a verified custom domain",
   publicMedia: "A property outside the cohort has public media",
@@ -166,6 +168,13 @@ const SCOPE_VIOLATION_QUERY = `${SCOPE_CTES}
     UNION ALL SELECT 'autoOpenNotDisabled', link.property_id::text FROM legacy_link link
       LEFT JOIN pms.calendar_auto_open_settings setting ON setting.property_id = link.property_id
      WHERE NOT link.inside AND link.source_system = 'pms' AND setting.enabled IS NOT FALSE
+    -- productionPmsCohortRoomFacts: the runtime's room-facts read needs these keys.
+    UNION ALL SELECT 'cohortRoomFacts', link.property_id::text FROM legacy_link link
+      JOIN pms.room_types room_type ON room_type.property_id = link.property_id AND room_type.active
+     WHERE link.inside AND link.source_system = 'pms'
+       AND link.disposition IS DISTINCT FROM 'private_quarantine'
+       AND NOT (room_type.occupancy_limits ? 'total' AND room_type.room_attributes ? 'beds'
+                AND room_type.room_attributes ? 'bathroomType')
     UNION ALL SELECT 'profileNotPrivate', property.id::text FROM hotel_catalog.properties property
       JOIN outside ON outside.property_id = property.id WHERE property.profile_status <> 'private'
     UNION ALL SELECT 'profileNotPrivate', profile.property_id::text
