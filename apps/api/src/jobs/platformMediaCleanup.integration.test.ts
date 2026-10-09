@@ -9,7 +9,8 @@ import {
 
 const URL = process.env["TEST_DATABASE_URL"];
 const SESSION = "20820000-0000-4000-8000-000000000001";
-// Long before any other suite's sessions, so this run only ever selects its own rows.
+// Dated long before any other suite's rows, so these runs select only their own. A cleanup run
+// from another suite at a later "now" would select these rows, so CI runs this file on its own.
 const EXPIRES_AT = "2001-01-01T00:00:00.000Z";
 const NOW = new Date("2001-01-01T00:15:00.000Z");
 if (URL && !/(^|[_-])(test|verify)([_-]|$)/i.test(new globalThis.URL(URL).pathname))
