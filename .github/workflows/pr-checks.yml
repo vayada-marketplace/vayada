@@ -7,6 +7,7 @@ on:
       - "fm/vay-1092-*"
       - "fix/vay-965-*"
       - "fm/vay-965-*"
+      - "fm/vay-1943-*"
       - "fm/vay-2056-*"
       - "fm/vay-1543-*"
       - "fm/vay-2066-*"
@@ -501,6 +502,7 @@ jobs:
           src/domains/pmsOperatingCalendarImpact.integration.test.ts
           src/domains/pmsManualBookingCommandRepository.integration.test.ts
           src/domains/pmsManualBookingPublishedPricing.postgres.test.ts
+          src/domains/pmsMandatoryChargeConfirmationCommandRepository.integration.test.ts
           src/domains/pmsCrossRoomTypeMove.integration.test.ts
           src/domains/pmsManualBookingCommandRepository.test.ts
           src/pmsManualBookingPreviewRoutes.test.ts

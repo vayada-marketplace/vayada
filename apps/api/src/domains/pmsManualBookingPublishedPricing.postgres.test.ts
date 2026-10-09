@@ -1,6 +1,10 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
-import type { ReplacementOfferTerms } from "@vayada/domain-booking";
+import {
+  composeBookingPricingReadiness,
+  createBookingMandatoryChargeConfirmationEvidenceAdapter,
+  type ReplacementOfferTerms,
+} from "@vayada/domain-booking";
 import type { PmsManualBookingCreateCommand } from "@vayada/domain-pms";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -27,7 +31,10 @@ import {
   createPmsManualBookingTransactionalPricingPort,
 } from "./pmsManualBookingTransactionalPricing.js";
 import { createTargetPmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
+import { createPgPmsMandatoryChargeConfirmationReadModel } from "./pmsMandatoryChargeConfirmationReadModel.js";
+import { loadPmsMandatoryChargePricingSourceSnapshot } from "./pmsMandatoryChargePricingSourceSnapshot.js";
 import { createPgPmsPricingReadModel } from "./pmsPricingReadModel.js";
+import { createPgPmsRecurringPricingReadModel } from "./pmsRecurringPricingReadModel.js";
 import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
 import { createPmsRoomAssignmentOptimizationTriggerPort } from "./pmsRoomAssignmentOptimizationTriggers.js";
 import {
@@ -158,6 +165,63 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
     expect(payload.pricingOffer).toBeUndefined();
   });
 
+  it("keeps legacy plans while pricing-v2 has only a draft head", async () => {
+    const legacyPropertyId = randomUUID(),
+      legacyRoomTypeId = randomUUID(),
+      legacyPlanId = randomUUID();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL session_replication_role = replica");
+      await client.query(
+        `INSERT INTO hotel_catalog.properties(id,public_id,display_name)
+         VALUES($1::uuid,$1::text,'Legacy pricing')`,
+        [legacyPropertyId],
+      );
+      await client.query(
+        `INSERT INTO pms.room_types(id,property_id,name,occupancy_limits)
+         VALUES($1,$2,'Legacy room','{"total":2,"adults":2,"children":0}'::jsonb)`,
+        [legacyRoomTypeId, legacyPropertyId],
+      );
+      await client.query(
+        "INSERT INTO pms.property_pricing_settings(property_id,currency) VALUES($1,'EUR')",
+        [legacyPropertyId],
+      );
+      await client.query(
+        `INSERT INTO pms.rate_plans(
+           id,property_id,room_type_id,code,name,rate_type,base_rate_amount,currency,active,
+           cancellation_policy_snapshot,pricing_contract_version,flexible_rate_plan_revision,
+           source_room_facts_revision,source_pricing_currency_revision)
+         VALUES($1,$2,$3,'flexible','Flexible','flexible',100,'EUR',TRUE,
+           '{"type":"free_until_days_before_arrival","freeCancellationDeadlineDays":1,
+             "afterDeadlinePenalty":"full_booking_amount","noShowPenalty":"full_booking_amount"}'::jsonb,
+           'pms-pricing.v1',1,1,1)`,
+        [legacyPlanId, legacyPropertyId, legacyRoomTypeId],
+      );
+      // Saving a pricing-v2 draft creates the head at revision 0; nothing is published yet.
+      await client.query("INSERT INTO pms.pricing_v2_heads(property_id) VALUES($1)", [
+        legacyPropertyId,
+      ]);
+      await client.query("COMMIT");
+    } finally {
+      client.release();
+    }
+    const pricing = await createPgPmsPricingReadModel({
+      connectionString: url!,
+      pool,
+    }).getPricingSourceSnapshot(legacyPropertyId);
+    expect(pricing?.flexibleRatePlans).toEqual([
+      expect.objectContaining({ roomTypeId: legacyRoomTypeId, flexibleRatePlanId: legacyPlanId }),
+    ]);
+    // The setup pricing step keeps the legacy completion rule too.
+    expect(
+      await createPgPmsPricingReadModel({
+        connectionString: url!,
+        pool,
+      }).listPublishedOfferRoomTypeIds(legacyPropertyId),
+    ).toBeNull();
+  });
+
   describe("once published", () => {
     beforeAll(() => publish(ownerContext()));
 
@@ -273,6 +337,123 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
       expect(preview?.revision).toBe(1);
     });
 
+    it("lists the room types the publication offers for the setup pricing step", async () => {
+      const pricing = createPgPmsPricingReadModel({ connectionString: url!, pool });
+      expect(await pricing.listPublishedOfferRoomTypeIds(propertyId)).toEqual([roomTypeId]);
+      expect(await pricing.listPublishedOfferRoomTypeIds(randomUUID())).toBeNull();
+    });
+
+    // VAY-1943 slice B.2: guest-policy pricing evidence of a property with only pricing-v2 data.
+    it("binds the pricing source and mandatory-charge confirmation to the publication", async () => {
+      const pricing = await createPgPmsPricingReadModel({
+        connectionString: url!,
+        pool,
+      }).getPricingSourceSnapshot(propertyId);
+      expect(pricing?.flexibleRatePlans).toEqual([
+        expect.objectContaining({
+          roomTypeId,
+          flexibleRatePlanId: flexId,
+          flexibleRatePlanRevision: 1,
+        }),
+      ]);
+      const recurringPricing = await createPgPmsRecurringPricingReadModel({
+        connectionString: url!,
+        pool,
+      }).getRecurringPricingBookingEvidence(propertyId);
+      const source = await loadPmsMandatoryChargePricingSourceSnapshot(
+        pool,
+        propertyId,
+        new Date(),
+      );
+      expect(source?.sourceRevisions.flexibleRatePlans).toEqual([
+        {
+          roomTypeId,
+          flexibleRatePlanId: flexId,
+          flexibleRatePlanRevision: 1,
+          sourceRoomFactsRevision: 1,
+        },
+      ]);
+      expect(recurringPricing).toMatchObject({ optionalPricingAggregateRevision: 0, sources: [] });
+      // The publication's charge declaration is the final-price confirmation: no legacy write.
+      const read = await createPgPmsMandatoryChargeConfirmationReadModel({
+        connectionString: url!,
+        pool,
+      }).getMandatoryChargeConfirmation({ organizationId, propertyId });
+      expect(read).toMatchObject({
+        outcome: "available",
+        evidence: {
+          pricingSourceFingerprint: createHash("sha256")
+            .update(source!.serializedPayload)
+            .digest("hex"),
+          confirmationRevision: 1,
+        },
+      });
+      expect(
+        await createPgPmsMandatoryChargeConfirmationReadModel({
+          connectionString: url!,
+          pool,
+        }).getMandatoryChargeConfirmation({ organizationId: randomUUID(), propertyId }),
+      ).toMatchObject({ outcome: "missing" });
+      const confirmation = await createBookingMandatoryChargeConfirmationEvidenceAdapter(
+        createPgPmsMandatoryChargeConfirmationReadModel({ connectionString: url!, pool }),
+      ).getMandatoryChargeConfirmation({ organizationId, propertyId });
+
+      // The booking-side readiness recomputes the fingerprint from the same owner reads.
+      const room = (
+        await pool.query("SELECT room_facts_revision FROM pms.room_types WHERE id=$1", [roomTypeId])
+      ).rows[0];
+      const readiness = composeBookingPricingReadiness(
+        { organizationId, propertyId },
+        {
+          roomPublication: {
+            contractVersion: "pms-room-publication.v1",
+            propertyId,
+            status: "ready",
+            blockers: [],
+            sourceRevision: "room-publication:1",
+            rooms: [
+              {
+                propertyId,
+                roomTypeId,
+                activeUnitCount: 2,
+                media: [],
+                amenities: [],
+                sourceRevision: "room:1",
+                facts: {
+                  name: "Garden room",
+                  description: "",
+                  category: null,
+                  occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 0 },
+                  beds: [],
+                  bedrooms: null,
+                  bathrooms: null,
+                  bathroomType: "private",
+                  size: null,
+                },
+                sourceRevisions: {
+                  roomFactsRevision: Number(room.room_facts_revision),
+                  roomUnitsRevision: 1,
+                  roomMediaRevision: 1,
+                  roomAmenitiesRevision: 1,
+                },
+              },
+            ],
+          } as never,
+          pricing: pricing!,
+          recurringPricing: recurringPricing!,
+        },
+        confirmation,
+        null,
+      );
+      expect(readiness.flexibleRates).toEqual([
+        expect.objectContaining({ roomTypeId, status: "ready" }),
+      ]);
+      expect(readiness.mandatoryChargeConfirmation).toMatchObject({ status: "current" });
+      expect(readiness.blockers.map(({ code }) => code)).not.toEqual(
+        expect.arrayContaining(["flexible_rate_plan_missing"]),
+      );
+    });
+
     it("keeps front-desk pricing when the booking engine is switched off", async () => {
       await pool.query(
         "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
@@ -294,6 +475,17 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
         command(flexId, { roomId: roomIds[1]!, checkIn: "2027-06-01" }),
       );
       expect(created.total.amountDecimal).toBe("200.00");
+    });
+
+    // VAY-1943: the payment settings changed after publishing, so the publication is stale and no
+    // longer confirms final prices (setup Pricing reopens; guest policy blocks until republished).
+    it("stops confirming final prices once the publication is stale", async () => {
+      expect(
+        await createPgPmsMandatoryChargeConfirmationReadModel({
+          connectionString: url!,
+          pool,
+        }).getMandatoryChargeConfirmation({ organizationId, propertyId }),
+      ).toMatchObject({ outcome: "missing" });
     });
   });
 

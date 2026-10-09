@@ -1150,6 +1150,7 @@ const propertySetupPmsRuntime = (() => {
     provider: createPropertySetupPmsStateProvider({
       owner,
       pricing: pmsPricingReadModel,
+      publishedPricing: pmsPricingReadModel,
       recurringPricing,
       mandatoryCharges,
       operatingCalendar,

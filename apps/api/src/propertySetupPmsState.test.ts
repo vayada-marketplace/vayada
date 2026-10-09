@@ -197,6 +197,67 @@ describe("property setup PMS owner state", () => {
     });
   });
 
+  it("completes pricing from published offers for every operating room", async () => {
+    // A publication whose only offer is non-refundable has no flexible plan.
+    const pricing = { ...pricingSnapshot(), flexibleRatePlans: [] };
+    const recurring = recurringPricingSnapshot();
+    const room = completeRoom();
+    const fingerprint = parsePmsMandatoryChargePricingSourceFingerprint(
+      createHash("sha256")
+        .update(
+          createPmsMandatoryChargePricingSourceSnapshot({
+            rooms: [
+              {
+                roomTypeId: room.roomTypeId,
+                roomFactsRevision: room.roomFactsRevision,
+                occupancy: room.facts.occupancy,
+              },
+            ],
+            pricing,
+            recurringPricing: recurring,
+          }).serializedPayload,
+        )
+        .digest("hex"),
+    )!;
+    const state = async (publishedRoomIds: string[]) => {
+      const provider = createPropertySetupPmsStateProvider(
+        options({
+          owner: {
+            getRoomOwnerSnapshot: vi.fn(async (_input) => ({ ...emptyRooms(), rooms: [room] })),
+            getInventoryOwnerSnapshot: vi.fn(async (_input) => null),
+          },
+          pricing: { getPricingSourceSnapshot: vi.fn(async () => pricing) },
+          publishedPricing: { listPublishedOfferRoomTypeIds: vi.fn(async () => publishedRoomIds) },
+          recurringPricing: { getRecurringPricingBookingEvidence: vi.fn(async () => recurring) },
+          mandatoryCharges: {
+            getMandatoryChargeConfirmation: vi.fn(async () => ({
+              outcome: "available" as const,
+              organizationId,
+              propertyId,
+              evidence: {
+                organizationId,
+                propertyId,
+                pricingSourceFingerprint: fingerprint,
+                confirmationRevision: 1,
+                confirmedAt: "2026-08-05T12:00:00.000Z",
+              },
+            })),
+          },
+        }),
+      );
+      const result = await provider.getOwnerState(request());
+      return result.outcome === "found"
+        ? result.facts.find(({ stepId }) => stepId === "pricing")
+        : undefined;
+    };
+
+    expect(await state([room.roomTypeId])).toMatchObject({ state: "complete" });
+    // A publication that does not cover the room leaves the step saved.
+    const uncovered = await state([]);
+    expect(uncovered).toMatchObject({ state: "saved" });
+    expect(uncovered?.sourceRevision).not.toBe((await state([room.roomTypeId]))?.sourceRevision);
+  });
+
   it("bridges exact current PMS guest-policy keys and rejects revision races", async () => {
     const owner = {
       getRoomOwnerSnapshot: vi.fn(async () => emptyRooms()),
@@ -249,6 +310,7 @@ function options(
       getInventoryOwnerSnapshot: vi.fn(async (_input) => null),
     },
     pricing: { getPricingSourceSnapshot: vi.fn(async () => null) },
+    publishedPricing: { listPublishedOfferRoomTypeIds: vi.fn(async () => null) },
     recurringPricing: { getRecurringPricingBookingEvidence: vi.fn(async () => null) },
     mandatoryCharges: {
       getMandatoryChargeConfirmation: vi.fn(async () => ({
