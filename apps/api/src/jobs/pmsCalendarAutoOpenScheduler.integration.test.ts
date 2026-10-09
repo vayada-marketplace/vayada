@@ -14,6 +14,7 @@ import {
 } from "./pmsCalendarAutoOpenWorker.js";
 import {
   PMS_CALENDAR_AUTO_OPEN_QUEUE,
+  PMS_CALENDAR_AUTO_OPEN_SCHEDULER_LOCK,
   createPgPmsCalendarAutoOpenSchedulerStore,
   runPmsCalendarAutoOpenScheduler,
   type PgPmsCalendarAutoOpenSchedulerStore,
@@ -70,10 +71,17 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
       await propertyProfileEvidence.close();
     });
 
-    const scheduled = await store.withRunLock(() =>
-      runPmsCalendarAutoOpenScheduler(store, { now, workerId: "vay-2066-test" }),
+    const scheduled = await store.withRunLock((session) =>
+      runPmsCalendarAutoOpenScheduler(session, { now, workerId: "vay-2066-test" }),
     );
-    expect(scheduled).toMatchObject({ ran: true, value: { autoOpenFailures: [] } });
+    expect(scheduled.ran).toBe(true);
+    // Other suites share this database, so only this property's outcome is asserted.
+    expect(
+      scheduled.ran &&
+        scheduled.value.autoOpenFailures.filter(
+          ({ propertyId }) => propertyId === property.propertyId,
+        ),
+    ).toEqual([]);
     expect(await propertyJobs(admin, property.propertyId)).toEqual([
       {
         status: "pending",
@@ -86,7 +94,9 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
     ]);
 
     // Other suites may leave jobs behind; drain the queue until this property's job is done.
-    for (let attempt = 0; attempt < 10; attempt += 1) {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const [job] = await propertyJobs(admin, property.propertyId);
+      if (job?.status !== "pending" && job?.status !== "running") break;
       const result = await runPmsCalendarAutoOpenWorkerOnce({
         store: worker,
         workerId: "vay-2066-test",
@@ -119,8 +129,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
       ariJobs: 1,
     });
 
-    const rerun = await store.withRunLock(() =>
-      runPmsCalendarAutoOpenScheduler(store, { now, workerId: "vay-2066-test" }),
+    const rerun = await store.withRunLock((session) =>
+      runPmsCalendarAutoOpenScheduler(session, { now, workerId: "vay-2066-test" }),
     );
     expect(rerun).toMatchObject({ ran: true });
     expect(await propertyJobs(admin, property.propertyId)).toHaveLength(1);
@@ -155,9 +165,35 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
     });
   });
 
+  it("survives losing the lock connection mid-run and frees the lock", async () => {
+    const dropped = schedulerStore();
+    const next = schedulerStore();
+    const run = dropped.withRunLock(async (session) => {
+      // The session is idle here; ending its backend makes pg emit "error" on the client.
+      await admin.query(
+        `WITH lock_key AS (SELECT hashtextextended($1, 0) AS value)
+         SELECT pg_terminate_backend(lock.pid)
+         FROM pg_locks lock, lock_key
+         WHERE lock.locktype='advisory' AND lock.granted AND lock.objsubid=1
+           AND lock.classid::bigint=((lock_key.value >> 32) & 4294967295)
+           AND lock.objid::bigint=(lock_key.value & 4294967295)`,
+        [PMS_CALENDAR_AUTO_OPEN_SCHEDULER_LOCK],
+      );
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      return session.findCalendarAutoOpenCandidates(now, 1);
+    });
+
+    await expect(run).rejects.toThrow();
+    await expect(next.withRunLock(async () => "after")).resolves.toEqual({
+      ran: true,
+      value: "after",
+    });
+  });
+
   it("counts enabled settings skipped for unverified room labels", async () => {
     const store = schedulerStore();
-    const before = await store.countUnverifiedLabelSkips();
+    const stats = () => store.withRunLock((session) => session.readSelectionStats());
+    const before = await stats();
     const property = await seedProperty(admin, 2);
     await admin.query(
       `INSERT INTO pms.rooms (
@@ -166,7 +202,15 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
       [randomUUID(), property.propertyId, property.roomTypeId],
     );
 
-    expect(await store.countUnverifiedLabelSkips()).toBe(before + 1);
+    expect(before.ran).toBe(true);
+    const after = await stats();
+    expect(after).toEqual({
+      ran: true,
+      value: {
+        enabledSettings: before.ran ? before.value.enabledSettings + 1 : NaN,
+        skippedUnverifiedLabels: before.ran ? before.value.skippedUnverifiedLabels + 1 : NaN,
+      },
+    });
   });
 });
 
