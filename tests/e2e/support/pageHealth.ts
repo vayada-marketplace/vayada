@@ -8,6 +8,9 @@ const ignoredConsoleErrorPatterns = [
   /WebSocket connection .* failed/i,
 ];
 
+/** Before a property's first price publication the pricing-v2 read answers 404 ("no prices yet"). */
+const expectedMissingByDefault = [/\/api\/pms\/properties\/[^/]+\/pricing-v2$/];
+
 /** `expectedMissingUrls`: resources whose 404 is a documented "not configured yet" answer. */
 export function watchPageHealth(
   page: Page,
@@ -26,7 +29,9 @@ export function watchPageHealth(
     if (ignoredConsoleErrorPatterns.some((pattern) => pattern.test(text))) return;
     if (
       /status of 404/.test(text) &&
-      expectedMissingUrls.some((pattern) => pattern.test(message.location().url))
+      [...expectedMissingByDefault, ...expectedMissingUrls].some((pattern) =>
+        pattern.test(message.location().url),
+      )
     )
       return;
     failures.push(`console.error: ${text}`);
