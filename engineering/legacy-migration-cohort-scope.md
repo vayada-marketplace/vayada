@@ -127,12 +127,14 @@ Runs without a cohort, hotels outside it and quarantined hotels get none of this
   physical capacity. Room types with different operating periods get no calendar: the schedule is
   the property's. Periods are read day by day as legacy reads them (unvalidated `MM-DD` strings);
   a recurring schedule has no 29 February of its own, so a period open only then gives no
-  calendar, and other leap-day differences stay closed where legacy closes them. The import also writes the idempotency key, domain event and outbox row its
-  foreign keys require, and its audit row, with the migration as actor. A hotel gets no calendar
+  calendar; inside the imported coverage 29 February stays closed where legacy closes it, and
+  later native days follow the schedule. The import also writes the idempotency key, domain event
+  and outbox row its foreign keys require, and its audit row, with the migration as actor. A hotel gets no calendar
   without one owner organization, a canonical time zone or a known legacy owner user, or when an
   operating room type has no native room facts, no rooms, or rooms that differ from its inventory
-  total. A rerun keeps the stored migrated revision 1 as it is, also after later native revisions;
-  a revision 1 the migration did not write blocks where the import would plan one.
+  total. A rerun keeps the stored migrated revision 1 as it is, also after later native revisions,
+  and blocks when it no longer carries it; a revision 1 the migration did not write blocks where
+  the import would plan one.
 - **Inventory coverage**: for a hotel with that calendar, the imported days of each bound room
   type take the canonical shape native materialization writes at calendar revision 1, in the
   calendar's time zone, and `pms.inventory_materialization_coverage` covers them, with its
@@ -148,13 +150,17 @@ Runs without a cohort, hotels outside it and quarantined hotels get none of this
   day covered only for a booking or block past both the year and the legacy window stays closed
   until someone lifts the manual limit, in both modes. Unbound (inactive) room types of such a
   hotel keep no imported days, and parity expects each bound type's coverage, or more days once
-  the native jobs extend it. A hotel gets no calendar when its coverage would pass the auto-open
-  worker's 762-day maximum (a legacy block or booking far out), or when an unbound room type
-  still holds a live booking, draft, block or stored inventory day in it; a stored migrated
-  calendar then blocks the run (`COHORT_INVENTORY_NOT_CARRIED`). A live booking draft anywhere in
-  a calendared hotel's coverage blocks as before (`ACTIVE_BOOKING_DRAFT`).
+  the native jobs extend it. A hotel blocks the run (`COHORT_INVENTORY_NOT_CARRIED`) when its
+  coverage would pass the auto-open worker's 762-day maximum (a live legacy booking, draft or
+  block far out), when an unbound room type still holds a live booking, draft, block or stored
+  inventory day in it, or when a bound room type has stored days past it: native setup could not
+  replace such legacy-shaped days later, so fix the legacy data before the extraction. A live
+  booking draft anywhere in a calendared hotel's coverage blocks as before
+  (`ACTIVE_BOOKING_DRAFT`).
 
-A hotel that misses an item stays `provisioning`.
+A hotel that misses an item stays `provisioning`. One without a calendar keeps legacy-shaped
+inventory days, which the native calendar save and materializer refuse to adopt, so fix its
+calendar prerequisites before the extraction rather than after the import.
 
 ## Verification
 
