@@ -470,6 +470,9 @@ function toCalendarData(
         baseRate: moneyAmount(roomTypesById.get(room.roomTypeId)?.baseRate),
         // The currency labels `baseRate`, so both come from the legacy rate. A room type from
         // the room-facts flow has neither, and the calendar must not invent one (VAY-2068).
+        // No hotel-currency fallback is needed: the database stores amount and currency as a
+        // pair (chk_pms_room_types_price_currency_pair), and once the hotel has a pricing
+        // currency every room-type currency must equal it (migration 0050).
         currency: roomTypesById.get(room.roomTypeId)?.baseRate.currency ?? null,
         maxOccupancy: maxOccupancy(roomTypesById.get(room.roomTypeId)),
         size: numericAttribute(roomTypesById.get(room.roomTypeId)?.attributes?.size),
