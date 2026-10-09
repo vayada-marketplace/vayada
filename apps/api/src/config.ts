@@ -553,6 +553,14 @@ function readTimerIntervalEnv(env: NodeJS.ProcessEnv, key: string, defaultValue:
   return value;
 }
 
+// Each run scans every enabled property, so it never repeats more often than once a minute.
+function readCalendarAutoOpenSchedulerIntervalEnv(env: NodeJS.ProcessEnv): number {
+  const key = "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS";
+  const value = readTimerIntervalEnv(env, key, 60 * 60 * 1000);
+  if (value < 60_000) throw new Error(`${key} must be at least 60000`);
+  return value;
+}
+
 function readSourceEnv<T extends string>(
   env: NodeJS.ProcessEnv,
   key: string,
@@ -1385,11 +1393,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_ENABLED",
       true,
     ),
-    pmsCalendarAutoOpenSchedulerIntervalMs: readTimerIntervalEnv(
-      env,
-      "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS",
-      60 * 60 * 1000,
-    ),
+    pmsCalendarAutoOpenSchedulerIntervalMs: readCalendarAutoOpenSchedulerIntervalEnv(env),
     creatorPlatformConnections,
     providerWebhooks: prospectiveConfig.providerWebhooks,
     channexManagement,

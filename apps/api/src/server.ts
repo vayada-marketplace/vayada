@@ -2631,28 +2631,36 @@ const runCalendarAutoOpenSchedule = () => {
   if (!store || activeCalendarAutoOpenSchedule) return;
   const startedAt = Date.now();
   activeCalendarAutoOpenSchedule = store
-    .withRunLock(async () => ({
-      run: await runPmsCalendarAutoOpenScheduler(store, {
+    .withRunLock(async (session) => {
+      const run = await runPmsCalendarAutoOpenScheduler(session, {
         workerId: `pms-calendar-auto-open-scheduler:${process.pid}`,
-      }),
-      skippedUnverifiedLabels: await store.countUnverifiedLabelSkips(),
-    }))
+      });
+      // The counts only explain the run; failing to read them must not hide its result.
+      const stats = await session.readSelectionStats().catch(() => null);
+      return { run, stats };
+    })
     .then((outcome) => {
       if (!outcome.ran) {
         app.log.info({ skippedLocked: true }, "PMS calendar auto-open scheduler run");
         return;
       }
-      const { run, skippedUnverifiedLabels } = outcome.value;
-      for (const failure of run.autoOpenFailures) {
-        app.log.warn(failure, "PMS calendar auto-open scheduler skipped a property");
+      const { run, stats } = outcome.value;
+      if (run.autoOpenFailures.length > 0) {
+        app.log.warn(
+          {
+            failures: run.autoOpenFailures.length,
+            failedProperties: run.autoOpenFailures.slice(0, 10),
+          },
+          "PMS calendar auto-open scheduler skipped properties",
+        );
       }
       app.log.info(
         {
-          scanned: run.scanned,
+          enabledSettings: stats?.enabledSettings ?? null,
+          skippedUnverifiedLabels: stats?.skippedUnverifiedLabels ?? null,
           enqueued: run.enqueued,
           reused: run.reused,
           failures: run.autoOpenFailures.length,
-          skippedUnverifiedLabels,
           durationMs: Date.now() - startedAt,
         },
         "PMS calendar auto-open scheduler run",

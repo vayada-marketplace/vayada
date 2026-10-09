@@ -1335,6 +1335,9 @@ describe("api config", () => {
     expect(() =>
       loadConfig({ PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS: "2147483648" }),
     ).toThrow("PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS must not exceed 2147483647");
+    expect(() => loadConfig({ PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS: "59999" })).toThrow(
+      "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS must be at least 60000",
+    );
   });
 
   it("configures and can disable property setup draft retention", () => {
