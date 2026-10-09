@@ -38,6 +38,8 @@ export interface BookingStay {
   children: number | null;
   /** Recorded child ages, when known; target-rate move quotes need them. */
   childAgesAtCheckIn?: number[] | null;
+  /** A manual stay priced with a custom nightly rate: no rate plan and no published offer. */
+  customRate?: boolean;
   nightly: Array<{
     appliedAmount: number | null;
     currency: string | null;
@@ -70,6 +72,10 @@ export interface Booking {
   adults: number;
   children: number;
   nightlyRate: number;
+  /** Sum of the recorded nightly room prices of every stay; null when a night has none. */
+  recordedRoomCharges?: number | null;
+  /** The recorded nightly prices differ, so `nightlyRate` is only their average. */
+  nightlyRateVaries?: boolean;
   numberOfRooms: number;
   amountStatus?: "recorded" | "unverified";
   totalAmount: number;
@@ -1138,6 +1144,52 @@ function appendQueryParam(
   query.set(key, String(value));
 }
 
+function toBookingStays(
+  reservation: PmsOperationalReservation,
+  roomTypesById: Map<string, PmsOperationsRoomType>,
+): BookingStay[] {
+  return !reservation.assignments.length && reservation.roomLines?.length
+    ? reservation.roomLines
+        .flatMap((line) =>
+          line.guests.map((guest) => ({
+            roomName: line.roomName,
+            ratePlanName:
+              typeof line.rateSummary["name"] === "string" ? line.rateSummary["name"] : null,
+            roomNumber: null,
+            checkIn: reservation.stay.checkIn,
+            checkOut: reservation.stay.checkOut,
+            adults: guest.adults,
+            children: guest.children,
+            nightly: [],
+          })),
+        )
+        .map((stay, position) => ({ ...stay, position }))
+    : reservation.assignments.map((assignment) => {
+        const assignmentRoomType = roomTypesById.get(assignment.roomTypeId);
+        const ratePlan = assignmentRoomType?.ratePlans?.find(
+          (plan) => plan.ratePlanId === (assignment.ratePlanId ?? assignment.pricingOfferId),
+        );
+        return {
+          position: Math.max(assignment.position - 1, 0),
+          roomName: assignmentRoomType?.name ?? "",
+          ratePlanName: ratePlan?.name ?? null,
+          customRate:
+            reservation.source === "manual" && !assignment.ratePlanId && !assignment.pricingOfferId,
+          roomNumber: assignment.roomNumber,
+          checkIn: assignment.stay?.checkIn ?? null,
+          checkOut: assignment.stay?.checkOut ?? null,
+          adults: assignment.stay?.adults ?? null,
+          children: assignment.stay?.children ?? null,
+          childAgesAtCheckIn: assignment.childAgesAtCheckIn ?? null,
+          nightly: (assignment.nightly ?? []).map((night) => ({
+            appliedAmount: night.applied ? moneyAmount(night.applied) : null,
+            currency: night.applied?.currency ?? null,
+            evidenceQuality: night.evidenceQuality,
+          })),
+        };
+      });
+}
+
 function toBooking(
   reservation: PmsOperationalReservation,
   roomTypesById: Map<string, PmsOperationsRoomType>,
@@ -1151,7 +1203,30 @@ function toBooking(
   const totalAmount = reservation.pricing
     ? moneyAmount(reservation.pricing.totalAmount)
     : baseRate * Math.max(nights, 1) * numberOfRooms;
-  const nightlyRate = roomType ? baseRate : totalAmount / Math.max(nights, 1) / numberOfRooms;
+  const stays = toBookingStays(reservation, roomTypesById);
+  // Room charges come from the recorded nightly prices, never the room type's legacy base rate:
+  // rooms priced in the pricing editor keep that at 0 (VAY-2089).
+  const recordedNights = stays.flatMap((stay) => stay.nightly.map((night) => night.appliedAmount));
+  const status = toBookingStatus(reservation.status);
+  // Only a price for every night of every room adds up to the room charges. Cancellations and
+  // no-shows add reversal entries that net each night to 0, so those keep the booked total.
+  const recordedRoomCharges =
+    !["cancelled", "declined", "expired", "no_show"].includes(status) &&
+    stays.length === numberOfRooms &&
+    stays.every(
+      (stay) =>
+        stay.checkIn !== null &&
+        stay.checkOut !== null &&
+        stay.nightly.length === daysBetweenDateOnly(stay.checkIn, stay.checkOut),
+    ) &&
+    recordedNights.length > 0 &&
+    recordedNights.every((amount) => amount !== null)
+      ? recordedNights.reduce<number>((sum, amount) => sum + (amount ?? 0), 0)
+      : null;
+  const nightlyRate =
+    recordedRoomCharges === null
+      ? totalAmount / Math.max(nights, 1) / numberOfRooms
+      : recordedRoomCharges / recordedNights.length;
   const [guestFirstName, guestLastName] = splitGuestName(reservation.primaryGuest.displayName);
   const addOns = reservation.addOns ?? [];
   // prettier-ignore
@@ -1188,6 +1263,8 @@ function toBooking(
     adults: reservation.stay.adults,
     children: reservation.stay.children,
     nightlyRate,
+    recordedRoomCharges,
+    nightlyRateVaries: recordedRoomCharges !== null && new Set(recordedNights).size > 1,
     numberOfRooms,
     totalAmount,
     amountStatus: reservation.pricing?.amountStatus,
@@ -1198,7 +1275,7 @@ function toBooking(
       ? moneyAmount(reservation.pricing.balanceAmount)
       : totalAmount,
     currency: reservation.pricing?.totalAmount.currency ?? roomType?.baseRate.currency ?? "EUR",
-    status: toBookingStatus(reservation.status),
+    status,
     roomId: primaryAssignment?.roomId ?? null,
     roomNumber: primaryAssignment?.roomNumber ?? null,
     assignedRooms: reservation.assignments.map((assignment) => ({
@@ -1208,45 +1285,7 @@ function toBooking(
       position: Math.max(assignment.position - 1, 0),
       roomTypeId: assignment.roomTypeId,
     })),
-    stays:
-      !reservation.assignments.length && reservation.roomLines?.length
-        ? reservation.roomLines
-            .flatMap((line) =>
-              line.guests.map((guest) => ({
-                roomName: line.roomName,
-                ratePlanName:
-                  typeof line.rateSummary["name"] === "string" ? line.rateSummary["name"] : null,
-                roomNumber: null,
-                checkIn: reservation.stay.checkIn,
-                checkOut: reservation.stay.checkOut,
-                adults: guest.adults,
-                children: guest.children,
-                nightly: [],
-              })),
-            )
-            .map((stay, position) => ({ ...stay, position }))
-        : reservation.assignments.map((assignment) => {
-            const assignmentRoomType = roomTypesById.get(assignment.roomTypeId);
-            const ratePlan = assignmentRoomType?.ratePlans?.find(
-              (plan) => plan.ratePlanId === (assignment.ratePlanId ?? assignment.pricingOfferId),
-            );
-            return {
-              position: Math.max(assignment.position - 1, 0),
-              roomName: assignmentRoomType?.name ?? "",
-              ratePlanName: ratePlan?.name ?? null,
-              roomNumber: assignment.roomNumber,
-              checkIn: assignment.stay?.checkIn ?? null,
-              checkOut: assignment.stay?.checkOut ?? null,
-              adults: assignment.stay?.adults ?? null,
-              children: assignment.stay?.children ?? null,
-              childAgesAtCheckIn: assignment.childAgesAtCheckIn ?? null,
-              nightly: (assignment.nightly ?? []).map((night) => ({
-                appliedAmount: night.applied ? moneyAmount(night.applied) : null,
-                currency: night.applied?.currency ?? null,
-                evidenceQuality: night.evidenceQuality,
-              })),
-            };
-          }),
+    stays,
     channel:
       reservation.source === "manual"
         ? "manual"

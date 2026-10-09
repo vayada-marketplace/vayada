@@ -43,6 +43,7 @@ import {
 } from "@/components/bookings/AddOnListPicker";
 import BookingStaySummary, {
   expectedPaymentMethodLabel,
+  stayRatePlanLabel,
 } from "@/components/bookings/BookingStaySummary";
 import {
   BOOKING_STATUS_STYLES,
@@ -1691,10 +1692,13 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   // ── Pricing math (ticket §2: must reconcile) ───────────────────────
   const pricingBreakdown = useMemo(() => {
     if (!booking || booking.amountStatus === "unverified") return null;
-    const roomsCost = booking.nightlyRate * booking.nights * booking.numberOfRooms;
+    const roomsCost =
+      booking.recordedRoomCharges ?? booking.nightlyRate * booking.nights * booking.numberOfRooms;
     const addonsCost = booking.addonTotal || 0;
     const computed = roomsCost + addonsCost;
-    const mismatch = Math.abs(computed - booking.totalAmount) > 0.01;
+    // The booking read carries no add-on prices, so a booking with add-ons can't be reconciled.
+    const addonPricesUnknown = booking.addonIds.length > 0 && !booking.addonTotal;
+    const mismatch = !addonPricesUnknown && Math.abs(computed - booking.totalAmount) > 0.01;
     return { roomsCost, addonsCost, computed, mismatch };
   }, [booking]);
 
@@ -2250,8 +2254,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                         {roomRows.length}{" "}
                         {t(roomRows.length === 1 ? "common.room" : "common.rooms")} ×{" "}
                         {booking.nights}{" "}
-                        {t(booking.nights === 1 ? "common.night" : "common.nights")} ×{" "}
-                        {formatCurrency(booking.nightlyRate, booking.currency)}
+                        {t(booking.nights === 1 ? "common.night" : "common.nights")}
+                        {!booking.nightlyRateVaries &&
+                          ` × ${formatCurrency(booking.nightlyRate, booking.currency)}`}
                       </span>
                       <span className="font-medium text-gray-900">
                         {formatCurrency(pricingBreakdown?.roomsCost ?? 0, booking.currency)}
@@ -2338,7 +2343,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               {!hasHeterogeneousStays && (
                 <div>
                   <p className="text-xs text-gray-500">{t("bookings.detail.ratePlan")}</p>
-                  <p className="font-medium text-gray-900">{rateType}</p>
+                  <p className="font-medium text-gray-900">
+                    {booking.stays[0] ? stayRatePlanLabel(booking.stays[0], t) : "—"}
+                  </p>
                 </div>
               )}
               <div>
