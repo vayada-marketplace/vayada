@@ -22,8 +22,10 @@ const TRANSIENT_CODES = new Set([
   "57P02",
   "57P03",
 ]);
+// pg reports its own connect timeout as "timeout expired" with no code: a host that silently
+// drops packets (failover, security group) fails this way rather than with a socket error.
 const TRANSIENT_MESSAGE =
-  /^(?:connection terminated unexpectedly|connection terminated due to connection timeout|query read timeout)$/i;
+  /^(?:connection terminated unexpectedly|connection terminated due to connection timeout|query read timeout|timeout expired)$/i;
 const MAX_ATTEMPT_TIMEOUT_MS = 5_000;
 const MAX_BACKOFF_MS = 10_000;
 
@@ -86,7 +88,9 @@ async function probeDatabase(connectionString: string, timeoutMs: number): Promi
   }
 }
 
+/** The error code, or a known address-free pg message; never the raw message. */
 export function errorCode(error: unknown): string {
-  const code = (error as { code?: unknown } | null)?.code;
-  return typeof code === "string" ? code : "unknown";
+  const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown };
+  if (typeof code === "string") return code;
+  return typeof message === "string" && TRANSIENT_MESSAGE.test(message) ? message : "unknown";
 }

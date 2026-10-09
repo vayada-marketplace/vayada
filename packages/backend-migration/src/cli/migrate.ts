@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { runMigrations, type MigrationEnvironment } from "../runner.js";
-import { errorCode, waitForDatabase } from "../waitForDatabase.js";
+import { errorCode, isTransientDatabaseError, waitForDatabase } from "../waitForDatabase.js";
 import { assertValidEnvironment } from "./utils.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -63,7 +63,9 @@ if (waitForDatabaseSeconds > 0) {
     await waitForDatabase({ connectionString, timeoutMs: waitForDatabaseSeconds * 1_000 });
   } catch (error) {
     console.error(
-      `Error: database unavailable after waiting up to ${waitForDatabaseSeconds}s (${errorCode(error)}).`,
+      isTransientDatabaseError(error)
+        ? `Error: database still unavailable after waiting up to ${waitForDatabaseSeconds}s (${errorCode(error)}).`
+        : `Error: database connection failed (${errorCode(error)}); not retrying.`,
     );
     process.exit(1);
   }
