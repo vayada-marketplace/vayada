@@ -309,7 +309,7 @@ export async function readProductionParityCohortScope(
 export function cohortActivationViolations(
   readiness: CohortReadiness[],
 ): ProductionParityCohortScopeEvidence["violations"] {
-  return readiness.flatMap((row) =>
+  return readiness.flatMap((row): ProductionParityCohortScopeEvidence["violations"] =>
     row.lifecycleStatus === "active" && !readyForActivation(row)
       ? [{ category: "cohortActiveNotReady" as const, subjectId: row.propertyId }]
       : row.lifecycleStatus === "provisioning" && readyForActivation(row)
