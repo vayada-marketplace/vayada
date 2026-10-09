@@ -63,38 +63,32 @@ Rules:
 - Feb-29 seasons follow option (a), mirroring today (U15);
 - phased waves, with no platform-account card in v2 (2026-10-10).
 
-## Go-day prerequisites
+## Wave prerequisites (runbook #3042 labels)
 
-| #   | Prerequisite                                                                                                                                                                                                                         | Owner                     |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- |
-| a   | Fix the Finance-token staleness bug, then republish existing card hotels (see "Staleness" below)                                                                                                                                     | pricing stream            |
-| b   | Run K5 with a Stripe test-mode **IDR** connected account. USD-path K5 passed 10/10 on 2026-10-09 (`evidence/vay1543-slice0-20261008/k5-stripe-test-mode.md`)                                                                         | pricing stream            |
-| c   | Refresh the Stripe account and record execution evidence per card hotel (runbook S.0a)                                                                                                                                               | VAY-1362 / Finance        |
-| d   | A platform PR setting `REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED=true`, flipped with Flamur's explicit go before go-day. K1–K4 are already merged and dark                                                                         | platform + Flamur         |
-| e   | Per-hotel card readiness in the gate (G3)                                                                                                                                                                                            | VAY-1362                  |
-| f   | Deploy VAY-2085 (#3023) and add IDR to the import's currency copy (see "Currency")                                                                                                                                                   | VAY-2085 / VAY-1362       |
-| g   | Implement D1 (the migration context) after an independent security review                                                                                                                                                            | VAY-1362, Flamur sign-off |
-| h   | Implement `declaredVia: "legacy_import"`                                                                                                                                                                                             | pricing stream            |
-| i   | **VAY-2099**: v2 request-mode acceptance (workspace "VAY-2099 request mode bookings"). **Slice 1:** pay at property (wave 1). **Slice 2:** card (authorise, host confirms, then capture or void). Legacy request mode maps to it 1:1 | VAY-2099                  |
-| j   | **VAY-2100**: v2 partial-refund tiers executed automatically (workspace "VAY-2100 partial refund tiers"). Legacy tiers map to it 1:1                                                                                                 | VAY-2100                  |
+The phased-waves runbook owns the full list, P1–P21
+(`engineering/legacy-migration-go-day-runbook.md` on
+`fm/vay-1362-runbook-phased-waves`, #3042). This design depends on the
+following:
 
-**Which prerequisites apply in wave 1:**
+| Runbook       | What                                                                                                                                                                                                                                                                                             | Wave-1 hotels                 |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------- |
+| P4            | VAY-2086 itself: the converter and `declaredVia: "legacy_import"` (pricing stream), the D1 migration context (independent security review, then Flamur's sign-off), the publish and parity CLIs, and the gate G1–G5                                                                              | all 3                         |
+| P7            | VAY-2085 IDR (#3023), plus IDR in the import's `NATIVE_PRICING_CURRENCIES`                                                                                                                                                                                                                       | Dolcemare, Haigha             |
+| P8            | VAY-2099 slice 1: pay-at-property request mode, mapped 1:1. Its flag `REPLACEMENT_PRICING_REQUEST_ACCEPTANCE_ENABLED` (default off) is turned on with Flamur's go at S.0b. Slice 2 (card request mode: authorise, host confirms, then capture or void) is for later waves (W2.3)                 | Dolcemare, Haigha             |
+| P9            | VAY-2100. **PR2** fixes the v2 online guest-cancel preview, which answers `409` today; all three wave-1 hotels need it. **PR1–PR3** (the rule, the guest-cancel fix, the wording) are needed for Haigha's partial-refund tiers                                                                   | all 3 (PR2); Haigha (PR1–PR3) |
+| P10           | Card: (a) the Finance-token staleness fix VAY-2088 (#3027) plus a republish; (c) the S.0a Stripe refresh; (d) `REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED=true`, only with Flamur's go; (e) per-hotel card readiness in G3. (b) The K5 IDR run is for the later IDR card hotels                 | Aether B                      |
+| P12, P16, P17 | The per-property Channex ownership gate, production Channex capability on next-api, and the target booking intake trigger. Any OTA handover needs all three, and none is built yet                                                                                                               | Aether B                      |
+| P13           | Native Channex channel-level markup, confirmed on the staging Channex pair                                                                                                                                                                                                                       | Aether B                      |
+| F.3           | **Zero legacy pending requests per wave hotel at the freeze** (a counts-only read). A migrated `pending` request would become `pending_payment` with no acceptance mode or deadline. The target's stale-unpaid sweep cancels such bookings because imported rows keep their legacy creation time | all 3                         |
 
-- **a–e (card):** Aether B only.
-- **f (IDR):** Dolcemare and Haigha.
-- **g and h:** every wave.
-- **i (VAY-2099 slice 1, pay at property):** Dolcemare and Haigha, which keep
-  request mode. Slice 2 (card) is for later waves only.
-- **j (VAY-2100):** Haigha, for its partial-refund tiers.
+Earlier revisions of this doc used letters: a–e map to P10, f to P7, g and h
+to P4, i to P8 and j to P9.
 
 Today the card scope is instant booking only and full prepayment only. There
 is no request-mode card, no automatic refund, and no online cancellation of a
-paid booking ([card acceptance](pricing-card-acceptance.md)).
-
-- **VAY-2099 slice 1:** request mode for pay at property.
-- **VAY-2099 slice 2:** request mode for card (authorise, host confirms, then
-  capture or void).
-- **VAY-2100:** automatic partial-refund tiers.
+paid booking ([card acceptance](pricing-card-acceptance.md)). VAY-2099 slice 1
+adds pay-at-property request mode, slice 2 card request mode, and VAY-2100
+automatic partial-refund tiers.
 
 ## Cohort and currency
 
@@ -146,8 +140,7 @@ the 5 IDR hotels get no row, stay `provisioning`, and cannot pass readiness
 criterion f.
 
 **Card.** Finance treats every currency except BHD, JOD, KWD, OMR and TND as
-card-eligible (`0119`). Stripe's IDR behavior on a connected account is
-prerequisite b.
+card-eligible (`0119`). Stripe's IDR behavior on a connected account is P10 b.
 
 ## Cohort outcome and waves (production read, 2026-10-10)
 
@@ -190,16 +183,28 @@ run checks overlaps exactly.
 approved decision in the plan digest; **pass** needs only the listed
 prerequisites.
 
-| Hotel (cur.)             | Wave  | Legacy payment and mode                                                   | Findings                                                                                                                                                                                                                         | Gate                                          | What it needs                                                                                                                                 |
-| ------------------------ | ----- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Aether B `29f39aae` USD  | 1     | Card on its own onboarded Stripe account; instant                         | U15 Feb-29 seasons on 5/5 rooms (approved choice (a)). U9 markup: 10% on one channel                                                                                                                                             | review → pass                                 | Card prerequisites a–e (wave 1 card applies only here). The native Channex markup in the handover, plus the H.5 markup smoke                  |
-| Dolcemare `7d3f6dcc` IDR | 1     | Pay at property only; **request** mode (kept)                             | U12: request mode maps 1:1 to v2 pay-at-property request mode                                                                                                                                                                    | **block** until VAY-2099 slice 1              | VAY-2099 slice 1 (prerequisite i) and IDR (prerequisite f)                                                                                    |
-| Haigha `e41d252d` IDR    | 1     | Pay at property only; **request** mode (kept)                             | U12 as Dolcemare. U11: partial-refund tiers on 1 room map 1:1 to automatic v2 tiers. U15 Feb-29 on 3/3 rooms (approved (a)). More than 12 seasons on 3 rooms is not a finding                                                    | **block** until VAY-2099 slice 1 and VAY-2100 | VAY-2099 slice 1 (i), VAY-2100 (j) and IDR (f)                                                                                                |
-| Aether A `26e9e98f` USD  | later | Card on its own onboarded Stripe account; request mode (kept)             | U12: blocked on VAY-2099 slice 2. U15 Feb-29 on 5/5 rooms (approved (a)). Base 0 on 2 rooms becomes the lowest season rate (exact). U9 markup 10%                                                                                | not in a wave                                 | VAY-2099 slice 2 (it already has its own Stripe account). Then the card prerequisites, the native markup and the H.5 markup smoke             |
-| Animals `6aca326e` USD   | later | Platform card plus pay at property; request mode (kept)                   | U2 and U12: blocked on VAY-2099 slice 2 plus its own Stripe Connect account                                                                                                                                                      | not in a wave                                 | VAY-2099 slice 2 and its own onboarded Stripe Connect account                                                                                 |
-| Tiga `8f5919ed` IDR      | later | Platform card plus pay at property; instant                               | U2 (not in a wave). Base 0 on 3 rooms (exact). U9: OTA meal plan on 1 room (closed in its wave's handover) and markup 10%                                                                                                        | not in a wave                                 | Its own Stripe Connect account in IDR (with the IDR K5 run, prerequisite b). Then the native markup, the closed meal plan, and prerequisite f |
-| Nirvana `b8efb175` IDR   | later | Platform card plus bank transfer, no pay at property; request mode (kept) | U2 and U12: blocked on VAY-2099 slice 2 plus its own Stripe Connect account. U4 bank transfer is dropped (review at its wave). Base 0 on 11 rooms (exact). Hotel last-minute is on with no tiers, which becomes the 0% catch-all | not in a wave                                 | VAY-2099 slice 2 and its own Stripe Connect account in IDR (without card it has no v2 method). Accept the bank-transfer drop. Prerequisite f  |
-| Miliways `c8efd685` IDR  | later | Platform card plus bank transfer, no pay at property; request mode (kept) | U2 and U12: blocked on VAY-2099 slice 2 plus its own Stripe Connect account. U4 (review at its wave). Non-refundable only on all 3 rooms (exact)                                                                                 | not in a wave                                 | Same as Nirvana                                                                                                                               |
+| Hotel (cur.)             | Wave  | Legacy payment and mode                                                                           | Findings                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Gate                              | What it needs                                                                                                              |
+| ------------------------ | ----- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Aether B `29f39aae` USD  | 1     | Card on its own onboarded Stripe account; instant                                                 | U15 Feb-29 seasons on 5/5 rooms (approved (a)). U9 markup: 10% on one channel (native Channex adjustment at H.6.1, G5 at H.6.2)                                                                                                                                                                                                                                                                                                                                                                                                                             | review → pass                     | P10 (a, c, d, e), P9 PR2, F.3. Its OTA handover needs P12, P16 and P17, plus P13 (see the note below the table)            |
+| Dolcemare `7d3f6dcc` IDR | 1     | Pay at property only; **request** mode (kept); no Channex handover in wave 1                      | U12: request mode maps 1:1 to v2 pay-at-property request mode                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | **block** until P8                | P8 (VAY-2099 slice 1 and its flag), P9 PR2, P7, F.3                                                                        |
+| Haigha `e41d252d` IDR    | 1     | Pay at property only; **request** mode (kept); **direct booking only** (Option N, pending Flamur) | U12 as Dolcemare. U11: the partial-refund room maps 1:1 as `partial_refund` with tiers `[{26,100}]`, deadline 26 (decided for parity). Its 2 other rooms have flexible disabled (non-refundable only, per the read), so their legacy 7-day free default only applies if flexible is re-enabled. U15 Feb-29 on 3/3 rooms (approved (a)). Option N: no Channex handover and no OTA terms push. Its legacy Channex connection sits on the non-cohort record `6810de91` and stays untouched on legacy; the daily count of new legacy bookings there must stay 0 | **block** until P8 and P9 PR1–PR3 | P8, P9 PR1–PR3, P7, F.3                                                                                                    |
+| Aether A `26e9e98f` USD  | later | Card on its own onboarded Stripe account; request mode (kept)                                     | U12: blocked on VAY-2099 slice 2. U15 Feb-29 on 5/5 rooms (approved (a)). Base 0 on 2 rooms becomes the lowest season rate (exact). U9 markup 10%                                                                                                                                                                                                                                                                                                                                                                                                           | not in a wave                     | W2.3 (slice 2), P10, P12, P16, P17, P13                                                                                    |
+| Animals `6aca326e` USD   | later | Platform card plus pay at property; request mode (kept)                                           | U2 and U12: blocked on VAY-2099 slice 2 plus its own Stripe Connect account                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | not in a wave                     | VAY-2099 slice 2 and its own onboarded Stripe Connect account                                                              |
+| Tiga `8f5919ed` IDR      | later | Platform card plus pay at property; instant                                                       | U2 (not in a wave). Base 0 on 3 rooms (exact). U9: OTA meal plan on 1 room (closed at its H.5) and markup 10%                                                                                                                                                                                                                                                                                                                                                                                                                                               | not in a wave                     | Its own Stripe Connect account in IDR (W2.3), P10 including b (the K5 IDR run), P7, P12, P16, P17, P13                     |
+| Nirvana `b8efb175` IDR   | later | Platform card plus bank transfer, no pay at property; request mode (kept)                         | U2 and U12: blocked on VAY-2099 slice 2 plus its own Stripe Connect account. U4 bank transfer is dropped (review at its wave). Base 0 on 11 rooms (exact). Hotel last-minute is on with no tiers, which becomes the 0% catch-all                                                                                                                                                                                                                                                                                                                            | not in a wave                     | W2.3 (its own Stripe account in IDR and slice 2); without card it has no v2 method. Accept the bank-transfer drop. P7, P10 |
+| Miliways `c8efd685` IDR  | later | Platform card plus bank transfer, no pay at property; request mode (kept)                         | U2 and U12: blocked on VAY-2099 slice 2 plus its own Stripe Connect account. U4 (review at its wave). Non-refundable only on all 3 rooms (exact)                                                                                                                                                                                                                                                                                                                                                                                                            | not in a wave                     | Same as Nirvana                                                                                                            |
+
+**Aether B's OTA handover** (H.2–H.6) depends on P12, P16 and P17, none of
+which is built yet.
+
+- **Coordinator's fallback if they are not ready:** Aether B moves direct-only
+  and its OTAs stay on legacy.
+- **This conflicts with runbook #3042, open decision 7.** Direct-only with OTAs
+  on legacy puts one inventory in two systems. v2 would take the direct
+  bookings and legacy the OTA bookings, neither would see the other's, so
+  rooms can be double-booked.
+- The runbook's options are to keep Aether B for a later wave or to hold wave
+  1. Flamur decides (open question 3).
 
 **Decided** (Flamur, 2026-10-10):
 
@@ -317,7 +322,7 @@ charges}}`.
     republishes), and no alert fires.
   - **Bug** (pricing stream follow-up): every Stripe `account.updated` webhook
     writes `lastStripeEventId` and reorders capabilities, which stales every
-    card hotel. That is prerequisite a.
+    card hotel. VAY-2088 (#3027, P10 a) fixes it.
 - **Readiness since #2941.** With a publication, the property's PMS pricing
   source and mandatory-charge confirmation come from the publication and its
   charge declaration.
@@ -410,23 +415,23 @@ acceptedMethods}`.
 - `review`: allowed only with an approved plan digest that lists it.
 - `block`: no publication.
 
-| Code | Legacy behavior                                                                               | Nearest safe v2 equivalent                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Severity                                      |
-| ---- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| U1   | Deposit p% online, balance at the property; a paid cancellation keeps `max(deposit, penalty)` | Full card prepayment (decided). Same total; the hotel never collects less upfront. The retention minimum is lost                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | review                                        |
-| U2   | Card on the `vayada` platform account                                                         | None: no platform-account card in v2. The hotel stays on legacy until it has its own Stripe Connect account                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | not in a wave                                 |
-| U3   | Xendit                                                                                        | Stripe card if it is ready in the currency                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | review, else block                            |
-| U4   | Bank transfer, PayPal                                                                         | Dropped when another method remains                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | review, or block if sole                      |
-| U5   | Room-level stay rules on OTAs only                                                            | Applied to both channels (decided). CTA or CTD true, or max < min, blocks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | review / block                                |
-| U6   | `minimum_advance_days`                                                                        | None (same-day cutoff covers N ≤ 1)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | review                                        |
-| U7   | Multi-room bookings price occupancy by the party's **total** adults                           | v2 prices each room by its own guests. Covered by one listed multi-room gate sample                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | info                                          |
-| U8   | Float `round(x, 2)` per step                                                                  | Integer half-up, within the tolerance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | info                                          |
-| U9   | OTA meal-plan rate plans, and per-channel markups on the Channex push                         | **Meal plans:** dropped at import, and the OTA rate plans are **closed or deactivated** in that hotel's Channex handover before H.5 ("not bound" is not "closed": an unbound rate plan may keep its last-pushed ARI). **Markups:** a handover step, not dropped. The v2 published-offer target sends the inclusive total with **no** channel markup by design ("Amount ownership and dispatch" in [offer targets](channex-published-offer-targets.md)). `PMS_CHANNEX_MARKUPS_MODE` and `update_markups` only write the old target's `pms.channel_rate_plan_mappings.markup_percent`. The owner is the native Channex channel-level price adjustment, configured once per hotel and channel in the Channex handover, never alongside an old-target markup. Markups stay out of v2 offers, so direct prices stay the legacy prices. An H.5 smoke checks it (G5) | review (meal plans); handover step (markups)  |
-| U10  | Source defects: overlapping seasons, occupancy 0, sub-cent amounts, more than 10 refund tiers | None; the hotel's source is fixed before its wave's freeze. More than 12 seasons is **not** a defect: v2 has no season cap                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | block                                         |
-| U11  | Partial-refund tiers (Haigha: room tiers on 1 room)                                           | `partial_refund` terms with the legacy tiers 1:1, executed automatically by VAY-2100. Until VAY-2100 ships, v2 handles these cancellations by hand. No-show: legacy room tiers refund nothing after check-in, the same as v2's full no-show penalty; only a hotel-level partial refund (no cohort hotel has one) would differ                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | block until VAY-2100 (wave-1 prerequisite j)  |
-| U12  | Request mode (the host confirms each booking), with any payment method                        | v2 request-mode acceptance, 1:1. Wave 1 (Dolcemare, Haigha, pay at property): blocked on VAY-2099 slice 1, prerequisite i. Later-wave card hotels (Aether A, Animals, Nirvana, Miliways): blocked on VAY-2099 slice 2, plus their own Stripe Connect account                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | block until the matching VAY-2099 slice       |
-| U13  | Active last-minute discounts                                                                  | Not carried before go-day; owners re-add them afterwards (no new Booking command). Read result: no cohort hotel has active tiers. Nirvana's hotel switch is on with no tiers, which maps to the 0% catch-all with no price effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | review if a hotel gains tiers before its wave |
-| U14  | Teens entered as children or adults freely; `max_children` limits only the child count        | v2 asks child ages (≤ 17 are children). Rooms with `max_children` 0 or low may reject families with teens                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | review                                        |
-| U15  | Season with a `02-29` bound, which legacy never applies in non-leap years                     | No v2 season (price or restriction), mirroring today (Flamur 2026-10-10, option (a)). Per-hotel finding: "approved parity choice: Feb-29 seasons unused (Flamur 2026-10-10)", listing the seasons. G2 needs no divergence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | review (approved)                             |
+| Code | Legacy behavior                                                                               | Nearest safe v2 equivalent                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Severity                                      |
+| ---- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| U1   | Deposit p% online, balance at the property; a paid cancellation keeps `max(deposit, penalty)` | Full card prepayment (decided). Same total; the hotel never collects less upfront. The retention minimum is lost                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | review                                        |
+| U2   | Card on the `vayada` platform account                                                         | None: no platform-account card in v2. The hotel stays on legacy until it has its own Stripe Connect account                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | not in a wave                                 |
+| U3   | Xendit                                                                                        | Stripe card if it is ready in the currency                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | review, else block                            |
+| U4   | Bank transfer, PayPal                                                                         | Dropped when another method remains                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | review, or block if sole                      |
+| U5   | Room-level stay rules on OTAs only                                                            | Applied to both channels (decided). CTA or CTD true, or max < min, blocks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | review / block                                |
+| U6   | `minimum_advance_days`                                                                        | None (same-day cutoff covers N ≤ 1)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | review                                        |
+| U7   | Multi-room bookings price occupancy by the party's **total** adults                           | v2 prices each room by its own guests. Covered by one listed multi-room gate sample                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | info                                          |
+| U8   | Float `round(x, 2)` per step                                                                  | Integer half-up, within the tolerance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | info                                          |
+| U9   | OTA meal-plan rate plans, and per-channel markups on the Channex push                         | **Meal plans:** dropped at import, and the OTA rate plans are **closed or deactivated** at that hotel's H.5, before the first push ("not bound" is not "closed": an unbound rate plan may keep its last-pushed ARI). **Markups:** a handover step, not dropped. The v2 published-offer target sends the inclusive total with **no** channel markup by design ("Amount ownership and dispatch" in [offer targets](channex-published-offer-targets.md)). `PMS_CHANNEX_MARKUPS_MODE` and `update_markups` only write the old target's `pms.channel_rate_plan_mappings.markup_percent`. The owner is the native Channex channel-level price adjustment, configured once per hotel and channel at H.6.1, while the first push's stop-sell holds, never alongside an old-target markup. Markups stay out of v2 offers, so direct prices stay the legacy prices. G5 checks it at H.6.2 | review (meal plans); handover step (markups)  |
+| U10  | Source defects: overlapping seasons, occupancy 0, sub-cent amounts, more than 10 refund tiers | None; the hotel's source is fixed before its wave's freeze. More than 12 seasons is **not** a defect: v2 has no season cap                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | block                                         |
+| U11  | Partial-refund tiers (Haigha: 1 room)                                                         | `partial_refund` terms with the legacy tiers 1:1, executed automatically by VAY-2100. Haigha's room is `[{26,100}]` with deadline 26 (decided for parity). VAY-2100 PR1–PR3 (P9) are wave-1 prerequisites for Haigha. PR2, the fix for the v2 online cancel preview that answers `409` today, is needed by all three wave-1 hotels. No-show: legacy room tiers refund nothing after check-in, the same as v2's full no-show penalty                                                                                                                                                                                                                                                                                                                                                                                                                                             | block until P9 (Haigha)                       |
+| U12  | Request mode (the host confirms each booking), with any payment method                        | v2 request-mode acceptance, 1:1. Wave 1 (Dolcemare, Haigha, pay at property): blocked on VAY-2099 slice 1 and its flag (P8). Later-wave card hotels (Aether A, Animals, Nirvana, Miliways): blocked on slice 2 plus their own Stripe Connect account (W2.3)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | block until the matching slice                |
+| U13  | Active last-minute discounts                                                                  | Not carried before go-day; owners re-add them afterwards (no new Booking command). Read result: no cohort hotel has active tiers. Nirvana's hotel switch is on with no tiers, which maps to the 0% catch-all with no price effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | review if a hotel gains tiers before its wave |
+| U14  | Teens entered as children or adults freely; `max_children` limits only the child count        | v2 asks child ages (≤ 17 are children). Rooms with `max_children` 0 or low may reject families with teens                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | review                                        |
+| U15  | Season with a `02-29` bound, which legacy never applies in non-leap years                     | No v2 season (price or restriction), mirroring today (Flamur 2026-10-10, option (a)). Per-hotel finding: "approved parity choice: Feb-29 seasons unused (Flamur 2026-10-10)", listing the seasons. G2 needs no divergence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | review (approved)                             |
 
 Promo codes, add-ons and existing bookings' frozen price evidence are
 untouched.
@@ -548,78 +553,87 @@ declaration is true.
   never overwrites owner prices.
 - **`stale` mid-chain:** abort this hotel; a re-run starts a new draft.
 
-### Go-day placement
+### Go-day placement (runbook #3042 steps)
 
-Input for the coordinator's runbook update.
+The runbook is the authority on order. This design's steps map onto it as
+follows.
 
-- **T-2.** Run the dry run on the `target:cutover:dry-run` target. Approve
-  each digest. Fix `block` sources in legacy before the freeze.
-- **S.0, with one change.** Card hotels publish their bookability profile
-  through the normal profile publish, not the
-  `target:booking-public-bookability:backfill`. On conflict, the backfill
-  resets `accepted_methods` to pay at property (stack).
-- **S.0a, card hotels (prerequisite c).** Refresh the Stripe account and
-  record online-card execution evidence through Finance's readiness path.
-  The import writes neither. This comes before publishing, because publishing
-  binds the Finance source.
-- **S.0b, publish.** Dry run, compare digests, apply, then G1–G4.
-  - It runs after `AWAITING_SMOKE`. Resume-from-smoke only validates the
-    smoke report, so parity is unaffected.
-  - F.3 still holds: the tool uses commands over a direct pool, after the
-    imports.
-  - Auto-open then re-plans the rooms that gained offers.
-- **S.1–S.4.** The smoke sees the published rates.
-- **After H.2–H.4, before H.5.** Re-run the gate. Until prerequisite a
-  ships, G1 can flap here, because each `account.updated` stales card
-  hotels; the tool republishes its own plan.
-- **Channex handover, before H.5.**
-  - Close or deactivate the hotel's U9 OTA meal-plan rate plans.
-  - For a hotel with legacy markups, configure the native Channex
-    channel-level price adjustment once per marked-up channel (10% on one
-    channel for Aether A, Aether B and Tiga). Never combine it with an
+- **T-2 readiness.** Run the dry run on the dry-run target, approve each
+  hotel's digest, and fix `block` sources in legacy before the freeze.
+- **F.1** (was F.3): the target's writers and the P18 jobs are paused. The
+  tool runs after the imports, through commands over a direct pool.
+- **F.3.** The counts-only read must show zero legacy pending requests per
+  wave hotel.
+- **S.0a → S.0 → S.0b → S.1–S.4:**
+  - **S.0a, card hotels only (Aether B):** the Stripe refresh and the
+    online-card execution evidence. It runs before S.0 and S.0b: publishing
+    binds the Finance source, and a profile projected before card readiness
+    does not list card.
+  - **S.0:** card hotels use the normal booking-profile publish, never the
+    backfill. On conflict, the backfill resets `accepted_methods` to pay at
+    property.
+  - **S.0b:** first **[GO]** the card acceptance flag (P10 d) and **[GO]**
+    the request acceptance flag (P8), each read back. Then, per hotel: dry
+    run, digest compare, apply, and G1–G4. A NO-GO means R0 for that hotel.
+  - **S.1:** the smoke covers the published prices, the acceptance mode
+    (request for Dolcemare and Haigha) and Haigha's tiers.
+- **H, per hotel.** In wave 1 the Channex steps apply to Aether B only.
+  Dolcemare has no Channex handover in wave 1, and Haigha is direct-only
+  (Option N).
+  - **H.2:** the per-property Channex takeover (P12, P16, P17). Never enable,
+    delete, disable or re-create the Channex property.
+  - **H.5:**
+    1. Re-run G1–G4. VAY-2088 is live (P10 a), so `account.updated` no longer
+       stales the publication.
+    2. Close the hotel's OTA-only rate plans (U9 meal plans; none in wave 1).
+    3. Run the diff/dry-run.
+    4. The first v2 push is `stop_sell=true`; verify its readback for the
+       whole horizon.
+  - **H.6.1:** configure the native Channex markup now, while the stop-sell
+    holds. Legacy's last push already carries the markup, so setting the
+    adjustment earlier would sell at about 1.21×. Never combine it with an
     old-target markup.
-- **H.5.** Its ARI push reads the published offers. ARI is not mutating
-  before then, so the `pricing.v2.revised` outbox makes no provider writes.
-  Run G5 right after it.
-- **Immediately before O.1.** Final gate. Only GO hotels reopen.
-- **O.2 watch, and daily for the first week after the window.** Run
-  `--stale-count`. Any non-zero count is investigated. "Save prices" by the
-  owner, or the tool for its own revision, republishes.
+  - **H.6.2:** run G5. **H.6.3:** activate the published offer target (P16).
+- **O.1.** The final gate: G1–G4, G5 where it applies, and the request
+  acceptance flag on for request-mode hotels. Then remove the operator
+  membership.
+- **O.2 watch, and daily for the first week.** Run `--stale-count` (runbook
+  "Stale pricing publications"). Vayada ops own it during the waves; the
+  `pms:pricing:publication-freshness` alert is still to be built.
 
-### Per-hotel suspend and rollback (gate NO-GO)
+### Per-hotel rollback: R1 or R0 (runbook #3042)
 
-Only the failing hotel is suspended; the rest of the cohort continues.
-Legacy is frozen globally, so that hotel does not sell anywhere until it is
-fixed. There is no pay-at-property fallback.
-
-1. **Record.** Keep the NO-GO report (hashed property) and the finding in the
-   evidence folder. Tell the go-day approver and the owner.
-2. **Keep OTAs closed.** Before H.5:
-   - leave the hotel's OTA closeout from the window in place;
-   - disable its Channex connection with the per-property `disable` command
-     (`POST /api/pms/properties/:propertyId/channex/commands`);
-   - confirm in the H.5 ARI dry run that it has no outgoing ARI.
-3. **Suspend.** Use the platform admin lifecycle command
-   `PATCH /properties/:propertyId/status` with `suspended`. This withdraws
-   public bookability. O.1 skips the hotel: its legacy URL and custom domain
-   keep the maintenance page, or redirect to an unavailable page.
-4. **Leave the data.** Revisions are immutable and not public while the hotel
-   is suspended. Existing reservations stay in the target PMS for the owner
-   and staff.
-5. **Fix forward.**
-   - Price or terms cause: corrected converter → the tool republishes its
-     own revision. Or the owner uses "Save prices", after which the tool
-     stops.
-   - Card cause: S.0a or the Finance fix.
-
-   Then re-run the gate until it returns GO.
-
-6. **Reactivate.**
-   - Re-read readiness (parity or `COHORT_READINESS_SQL`).
-   - `PATCH …/status` with `active`.
-   - Re-enable Channex, run its ARI dry run, then lift its OTA closeout and
-     the domain redirect.
-   - Remove the operator membership.
+- **R1, hand back to legacy.** Available before the hotel's H.2. Choosing
+  between R1 and R0 is runbook open decision 1.
+- **R0, suspend in the target.** Only the failing hotel is suspended, and
+  there is no pay-at-property fallback. The steps:
+  1. **Record** the NO-GO report (hashed property) and the failing check.
+     Tell the approver and the owner.
+  2. **Close its OTAs with a stop-sell or zero availability, with readback.**
+     - If its H.5 ran, the first v2 push was `stop_sell=true`; do not
+       activate.
+     - Otherwise push a stop-sell (or 0 availability) for the whole horizon:
+       through H.5's first push without activation, or as a manual Channex
+       stop-sell by the cutover commander.
+     - Verify the readback.
+     - **Never** close a hotel by deleting, disabling or disconnecting its
+       Channex property.
+     - Keep its booking intake running. OTA bookings made during the freeze
+       are only in the feed.
+  3. **Suspend:** `PATCH /properties/:propertyId/status` with `suspended`,
+     which withdraws public bookability.
+  4. **Leave the data.** Revisions stay immutable and are not public;
+     reservations stay in the target PMS.
+  5. **Fix forward.** For price or terms, the corrected converter republishes
+     the tool's own revision (or the owner uses "Save prices", after which the
+     tool stops). For card, S.0a or the Finance fix. Re-run the gate until it
+     returns GO.
+  6. **Reactivate:**
+     - re-read readiness;
+     - set `active`;
+     - ARI dry run, then activate (H.6);
+     - serve the booking page from the target (O.1);
+     - remove the operator membership.
 
 ## Go-day gate (per hotel)
 
@@ -688,18 +702,25 @@ priced/rejected disagreement, is **NO-GO**.
   checkbox).
 - A legacy online-card hotel without card readiness is NO-GO, which leads to
   the per-hotel suspend.
-- **Acceptance mode maps 1:1.** The target booking settings' acceptance mode
-  equals legacy's: instant, or request once the matching VAY-2099 slice is
-  live (slice 1 for pay at property, slice 2 for card). A request-mode hotel
-  before its slice is NO-GO (U12).
+- **Acceptance mode maps 1:1.** The target acceptance mode equals legacy's.
+  G3 **allows request mode**:
+  - for pay-at-property hotels once VAY-2099 slice 1 is live **and**
+    `REPLACEMENT_PRICING_REQUEST_ACCEPTANCE_ENABLED` is on (a wave-1 **[GO]**
+    at S.0b, read back);
+  - for card hotels once slice 2 is live.
+
+  A request-mode hotel without its slice and flag is NO-GO (U12).
 
 **G4. Findings.** No `block` findings, and every `review` finding is in the
 approved digest.
 
-**G5. H.5 markup smoke (marked-up hotels only: Aether B in wave 1; Aether A and
-Tiga in their waves).** On one sample date, the rate the OTA shows for the
-marked-up channel equals the v2 published total × 1.10. A missing or doubled
-adjustment is NO-GO for that hotel's OTA reopen.
+**G5. Markup smoke at H.6.2, while the first push's stop-sell holds**
+(marked-up hotels only: Aether B in wave 1, Aether A and Tiga in their
+waves). On one sample date, the rate the marked-up channel shows equals the v2
+published total × 1.10. A missing or doubled adjustment is NO-GO for that
+hotel's OTA reopen. If the rate cannot be read while the stop-sell holds,
+record that as an explicit accepted risk with the go, and check right after
+activation with a stop-sell push ready.
 
 ## Phase 2 slices (after review)
 
@@ -710,7 +731,7 @@ adjustment is NO-GO for that hotel's OTA reopen.
    The wave-1 prerequisites VAY-2099 (request mode) and VAY-2100 (automatic
    partial-refund tiers) are separate tickets with their own workspaces.
 2. Pricing stream: the Finance-token staleness fix and republish
-   (prerequisite a), and the K5 IDR run (prerequisite b).
+   (VAY-2088, P10 a), and the K5 IDR run for the later IDR card hotels (P10 b).
 3. D1: the migration context builder (independent security review, then
    Flamur's sign-off) and Flamur's operator membership in the identity
    import.
@@ -718,22 +739,28 @@ adjustment is NO-GO for that hotel's OTA reopen.
 5. VAY-1362: apply, the re-run rules and `--stale-count`.
 6. VAY-1362: the Python reference and the gate, with CI pinning against
    `quote_booking_request`.
-7. Coordinator: runbook steps S.0, S.0a, S.0b, the gate re-runs, the
-   per-hotel suspend steps and the O.2 watch; then the rehearsal.
+7. Runbook #3042 (coordinator) owns the steps and the P15 rehearsal; this
+   design supplies their inputs.
 
 ## Open questions
 
 1. **Payment-method mix.** The per-option empty, missing and method counts
    are pending the follow-up read. The "empty option means nothing bookable"
    check waits on it.
-2. **Native Channex markup.** Confirm that the marked-up channel supports a
-   native channel-level percentage adjustment, on the staging Channex pair,
-   before Aether B's handover. If it does not, the choice is between closing
-   that channel's rate plan and accepting a 10% lower OTA price.
-3. **Suspended hotels on Channex.** Does the per-property `disable` leave OTAs
-   on their last-pushed prices? Owner: vay-1543-pricing-single-login-65. The
-   closeout stays until reactivation.
-4. **Stale publications after go-live.** Who republishes them, and who
-   watches `--stale-count`? Owner: vay-1543-pricing-single-login-65.
-5. **Child age.** Confirm that 18 applies to every hotel: no source holds a
+2. **P13 native markup.** Confirm it on the staging Channex pair. If it fails,
+   runbook open decision 2 chooses between closing that channel's rate plan
+   and accepting a 10% lower OTA price.
+3. **Aether B without P12, P16 or P17.** The coordinator's fallback is
+   direct-only with OTAs on legacy. Runbook open decision 7 says that cannot
+   work (one inventory in two systems) and offers a later wave or holding wave
+   1. Flamur decides.
+4. **Haigha Option N** (runbook open decision 6, pending Flamur): direct-only,
+   with `6810de91`'s legacy Channex connection untouched and watched daily.
+5. **Haigha's two non-refundable-only rooms.** Confirm that flexible stays
+   disabled. If the owner meant them to be flexible, they get legacy's 7-day
+   free default.
+6. **Stale publications.** Vayada ops watch them during the waves. The
+   freshness alert and the cause fixes are owned by
+   vay-1543-pricing-single-login-65.
+7. **Child age.** Confirm that 18 applies to every hotel: no source holds a
    hotel child-age policy today.
