@@ -16,7 +16,9 @@ type Prepared = Extract<Awaited<ReturnType<typeof preparePricingAcceptance>>, { 
  * run finishPricingAcceptance after ALL blocking work, or roll back everything.
  * Completed command replay belongs before all fresh preparation and mutation.
  * A card acceptance is stored while its booking is `pending_payment`, without revenue;
- * revenue, notifications and the PMS job follow the confirmed Stripe payment. */
+ * revenue, notifications and the PMS job follow the confirmed Stripe payment.
+ * A request is stored while `pending_payment` with its host deadline, without revenue;
+ * revenue and the PMS job follow the hotel's acceptance. */
 export async function storePricingAcceptance(
   client: PoolClient,
   slug: unknown,
@@ -31,22 +33,29 @@ export async function storePricingAcceptance(
   const scope = await lockPublicPricingAuthority(client, slug);
   const quote = current.quote;
   const card = quote.paymentMethod === "card";
-  const expectedStatus = card ? "pending_payment" : "confirmed";
+  const request = quote.acceptanceMode === "request";
+  const expectedStatus = card || request ? "pending_payment" : "confirmed";
   if (
     !scope ||
     !isDeepStrictEqual(scope, current.scope) ||
     !isDeepStrictEqual(scope, finance.scope) ||
     prepared.kind !== "fresh" ||
     !isDeepStrictEqual(quote, disclosure.quote) ||
-    quote.acceptanceMode !== "instant" ||
-    (card ? !pricingCardQuoteSupported(quote) : quote.paymentMethod !== "pay_at_property") ||
+    (card
+      ? !pricingCardQuoteSupported(quote)
+      : quote.paymentMethod !== "pay_at_property" ||
+        (quote.acceptanceMode !== "instant" && !request)) ||
     lifecycle.lifecycleStatus !== expectedStatus ||
-    lifecycle.hostResponseDeadlineAt !== null ||
+    (request
+      ? typeof lifecycle.hostResponseDeadlineAt !== "string"
+      : lifecycle.hostResponseDeadlineAt !== null) ||
     (card
       ? revenue !== null || typeof lifecycle.paymentDeadlineAt !== "string"
-      : !revenue ||
-        revenue.bookingId !== lifecycle.bookingId ||
-        revenue.roomNights !== quote.rooms.reduce((n, r) => n + r.nights.length, 0))
+      : request
+        ? revenue !== null || lifecycle.paymentDeadlineAt !== null
+        : !revenue ||
+          revenue.bookingId !== lifecycle.bookingId ||
+          revenue.roomNights !== quote.rooms.reduce((n, r) => n + r.nights.length, 0))
   )
     return fail();
   const booking = (

@@ -1438,6 +1438,8 @@ export type PgTargetBookingWebCheckoutAdapterConfig = {
   replacementPricingAcceptanceEnabled?: boolean;
   /** Card quotes in acceptance; requires stripePaymentProvider. */
   replacementPricingCardAcceptanceEnabled?: boolean;
+  /** Request-mode pay-at-property quotes in acceptance; the hotel confirms each booking. */
+  replacementPricingRequestAcceptanceEnabled?: boolean;
   externalChanges: ExternalChangePresentationPort;
   /** Register only with the reviewed provider runtime; absent keeps Airbnb actions disabled. */
   airbnbAlterations?: {
@@ -2105,11 +2107,16 @@ export function createTargetBookingWebCheckoutAdapter(
           { slug, command: request },
           contextId ? { affiliateContextId: contextId } : undefined,
           cardPayments,
+          config.replacementPricingRequestAcceptanceEnabled === true,
         );
       } catch (error) {
         if (error instanceof PricingAcceptanceError && error.code === "card_unavailable")
           throw Object.assign(createHttpError(404, "Online card payment is unavailable."), {
             code: "CARD_PAYMENT_UNAVAILABLE",
+          });
+        if (error instanceof PricingAcceptanceError && error.code === "request_unavailable")
+          throw Object.assign(createHttpError(404, "Online booking requests are unavailable."), {
+            code: "REQUEST_ACCEPTANCE_UNAVAILABLE",
           });
         const statusCode =
           error instanceof PricingAcceptanceError

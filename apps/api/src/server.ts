@@ -513,6 +513,7 @@ const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   mixedRoomSelectionsEnabled: true,
   replacementPricingAcceptanceEnabled: config.replacementPricingAcceptanceEnabled,
   replacementPricingCardAcceptanceEnabled: config.replacementPricingCardAcceptanceEnabled,
+  replacementPricingRequestAcceptanceEnabled: config.replacementPricingRequestAcceptanceEnabled,
   bankTransfers: bankTransferBookings,
   connectionString: targetDatabaseUrl,
   inventoryReservationPort: createTargetPmsInventoryReservationPort(),

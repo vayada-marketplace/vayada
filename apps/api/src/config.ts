@@ -223,6 +223,9 @@ export type ApiConfig = {
   /** Card quotes in public acceptance (Stripe). Off until confirmation, webhook and expiry
    * handling for these bookings are live. */
   replacementPricingCardAcceptanceEnabled: boolean;
+  /** Request-mode pay-at-property quotes in public acceptance: the hotel confirms each booking.
+   * Off until host accept, decline and expiry handle these bookings. */
+  replacementPricingRequestAcceptanceEnabled: boolean;
   bookingHostBase?: string;
   platformMediaServing?: PlatformMediaServingConfig;
   platformMediaCleanupEnabled: boolean;
@@ -1354,6 +1357,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     replacementPricingCardAcceptanceEnabled: readBooleanEnv(
       env,
       "REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED",
+    ),
+    replacementPricingRequestAcceptanceEnabled: readBooleanEnv(
+      env,
+      "REPLACEMENT_PRICING_REQUEST_ACCEPTANCE_ENABLED",
     ),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
     platformMediaServing,

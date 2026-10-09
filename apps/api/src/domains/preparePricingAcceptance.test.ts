@@ -86,3 +86,17 @@ it.each([
   if (!["receipt-conflict", "authority"].includes(scenario))
     expect(query.mock.calls.some(([sql]) => sql.startsWith("INSERT"))).toBe(false);
 });
+it("reserves a pay-at-property request only while hotel-confirmed acceptance is on", async () => {
+  f = preparationFixture((quote) => Object.assign(quote, { acceptanceMode: "request" }));
+  vi.mocked(lockPublicPricingAuthority).mockResolvedValue(f.current.scope);
+  vi.mocked(lockCurrentQuoteRevalidation).mockResolvedValue(f.current);
+  vi.mocked(lockCurrentQuoteGuestDisclosure).mockResolvedValue(f.disclosure);
+  vi.mocked(lockFinancePricingAcceptanceTerms).mockResolvedValue(f.finance);
+  await expect(preparePricingAcceptance(db, "hotel", f.input)).rejects.toThrow(
+    "Request acceptance unavailable",
+  );
+  expect(query.mock.calls.some(([sql]) => sql.startsWith("INSERT"))).toBe(false);
+  await expect(
+    preparePricingAcceptance(db, "hotel", f.input, { request: true }),
+  ).resolves.toMatchObject({ kind: "fresh", commandReceiptId: "receipt" });
+});

@@ -21,7 +21,7 @@ export async function preparePricingAcceptance(
   client: PoolClient,
   slug: unknown,
   input: unknown,
-  options: { card?: boolean } = {},
+  options: { card?: boolean; request?: boolean } = {},
 ) {
   const fail = (): never => {
     throw new Error("Booking acceptance unavailable");
@@ -56,8 +56,9 @@ export async function preparePricingAcceptance(
     return fail();
   const command = parseBookingQuoteAcceptanceInput(input, current.quote, disclosure.policy);
   // Match the currently implemented lifecycle/revenue composition before effects.
+  const mode = current.quote.acceptanceMode;
   const payAtProperty =
-    current.quote.acceptanceMode === "instant" &&
+    (mode === "instant" || (mode === "request" && options.request === true)) &&
     current.quote.paymentMethod === "pay_at_property" &&
     current.quote.evidence.dueNowMinor === "0" &&
     current.quote.evidence.dueLaterMinor === current.quote.evidence.totalMinor;
@@ -65,6 +66,9 @@ export async function preparePricingAcceptance(
   // A card quote while online card acceptance is off is unavailable, not a stale price.
   if (command && !card && current.quote.paymentMethod === "card")
     throw new Error("Card acceptance unavailable");
+  // Likewise a request while hotel-confirmed acceptance is off.
+  if (command && !payAtProperty && mode === "request" && options.request !== true)
+    throw new Error("Request acceptance unavailable");
   if (
     !command ||
     !(payAtProperty || card) ||

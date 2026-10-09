@@ -46,6 +46,8 @@ export async function stagePricingAcceptanceNotifications(
       scope.organizationId,
     );
   const scale = history ? pricingCurrencyScale(history.quote.stay.currency) : null;
+  // A request waits for the hotel: the guest hears it was received, the hotel is asked to review.
+  const request = history?.quote.acceptanceMode === "request";
   if (
     !history ||
     scale === null ||
@@ -53,9 +55,9 @@ export async function stagePricingAcceptanceNotifications(
     pricingDecimalMinor(row.total_amount, scale) !== history.quote.evidence.totalMinor ||
     pricingDecimalMinor(row.balance_amount, scale) !== history.quote.evidence.totalMinor ||
     history.acceptedAt !== accepted.acceptedAt ||
-    history.quote.acceptanceMode !== "instant" ||
+    (history.quote.acceptanceMode !== "instant" && !request) ||
     history.quote.paymentMethod !== "pay_at_property" ||
-    row.lifecycle_status !== "confirmed" ||
+    row.lifecycle_status !== (request ? "pending_payment" : "confirmed") ||
     row.payment_status !== "unpaid" ||
     row.edit_revision !== 0 ||
     row.booking_metadata?.targetSource !== "pricing_quote_draft" ||
@@ -74,7 +76,7 @@ export async function stagePricingAcceptanceNotifications(
     transition: {
       eventType: "guest_booking.created",
       fromStatus: "draft",
-      toStatus: "confirmed",
+      toStatus: request ? "pending_payment" : "confirmed",
       revision: history.id,
     },
   });
@@ -90,7 +92,8 @@ export async function stagePricingAcceptanceNotifications(
   if (
     guestJobs.length !== 1 ||
     guestJobs[0].payload.to !== history.command.guest.email ||
-    guestJobs[0].payload.notificationType !== "final_confirmation" ||
+    guestJobs[0].payload.notificationType !==
+      (request ? "request_received" : "final_confirmation") ||
     !isDeepStrictEqual(await lockPublicPricingAuthority(client, slug), scope)
   )
     return fail();

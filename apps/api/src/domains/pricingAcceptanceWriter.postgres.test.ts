@@ -727,6 +727,103 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
   });
 });
 
+describe.skipIf(!url)("pricing acceptance writer requests (PostgreSQL)", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it("holds the rooms for a pay-at-property request and asks the hotel, without revenue or PMS job", async () => {
+    const fixture = await setupFixture((quote) =>
+      Object.assign(quote, { acceptanceMode: "request" }),
+    );
+    try {
+      mockOwners(fixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      await expect(writePricingAcceptance(fixture.pool, fixture.input)).rejects.toMatchObject({
+        code: "request_unavailable",
+      });
+      await expect(snapshot(fixture.observer, fixture)).resolves.toEqual({
+        bookings: 0,
+        acceptances: 0,
+        jobs: 0,
+        revenue: 0,
+        available: 3,
+        assigned: 0,
+      });
+
+      const requested = await writePricingAcceptance(
+        fixture.pool,
+        fixture.input,
+        undefined,
+        undefined,
+        true,
+      );
+      if (requested.kind !== "requested") throw new Error(`unexpected ${requested.kind}`);
+      expect(requested.bookingReference).toMatch(/^VAY-[A-Z0-9]{32}$/);
+      const window =
+        Date.parse(requested.hostResponseDeadlineAt!) - Date.parse(requested.acceptedAt);
+      expect(window).toBeGreaterThan(24 * 3600_000 - 60_000);
+      expect(window).toBeLessThanOrEqual(24 * 3600_000);
+      await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({
+        bookings: 1,
+        acceptances: 1,
+        revenue: 0,
+        available: 2,
+        assigned: 1,
+      });
+      const booking = (
+        await fixture.observer.query(
+          `SELECT b.lifecycle_status,b.payment_status,b.expected_payment_method,
+            b.booking_metadata->>'hostResponseDeadlineAt' AS deadline,
+            b.booking_metadata ? 'pendingExpiresAt' AS payment_deadline,
+            s.lifecycle_status AS summary,e.to_status AS event,e.public_message AS message
+           FROM booking.guest_bookings b
+           JOIN booking.direct_booking_summary_read_model s ON s.guest_booking_id=b.id
+           JOIN booking.booking_status_events e ON e.guest_booking_id=b.id
+           WHERE b.property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows;
+      expect(booking).toEqual([
+        {
+          lifecycle_status: "pending_payment",
+          payment_status: "unpaid",
+          expected_payment_method: "pay_at_property",
+          deadline: requested.hostResponseDeadlineAt,
+          payment_deadline: false,
+          summary: "pending_payment",
+          event: "pending_payment",
+          message: "We have received your booking request.",
+        },
+      ]);
+      const jobs = (
+        await fixture.observer.query(
+          `SELECT job_type,payload->>'recipientRole' AS role FROM platform.jobs
+           WHERE property_id=$1 ORDER BY job_type`,
+          [fixture.propertyId],
+        )
+      ).rows;
+      expect(jobs).toContainEqual({ job_type: "email.booking-request-received", role: "guest" });
+      expect(jobs.map((job) => job.job_type)).not.toContain(
+        "pms.reservation.accepted-pricing.create",
+      );
+      expect(jobs.map((job) => job.job_type)).not.toContain("email.booking-final-confirmation");
+
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, undefined, true),
+      ).resolves.toMatchObject({ kind: "replayed", bookingId: requested.bookingId });
+      await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({
+        bookings: 1,
+        acceptances: 1,
+        jobs: jobs.length,
+        available: 2,
+      });
+    } finally {
+      await fixture.close();
+    }
+  });
+});
+
 // K5 in another currency (STRIPE_TEST_CURRENCY): the same quote with every minor amount scaled, so the
 // card amount clears Stripe's minimum charge (EUR 360.00 becomes IDR 3,600,000.00).
 const CURRENCY_SCALE: Record<string, bigint> = { EUR: 1n, USD: 1n, IDR: 10000n };
