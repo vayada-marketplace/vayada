@@ -243,9 +243,11 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
   target. They must stay unpublished, with no owner access. Defining that state
   (or a cleanup) is preparation work.
 - The PMS step has already set ready cohort hotels `active` (lifecycle revision
-  2), and no native transition leads back to `provisioning`. Suspend each of
+  +1), and no native transition leads back to `provisioning`. Suspend each of
   them with the platform admin lifecycle command (`suspended`), which also
-  withdraws their public bookability, before handing back.
+  withdraws their public bookability, before handing back. A retried go-day
+  does not touch suspended hotels and parity does not count them: reactivate
+  each one with the same command once its readiness holds again.
 - Hand the providers back in reverse order: undo apply 2, then turn the legacy
   scheduler, webhooks and manual syncs back on.
 - Lift the maintenance pages. Legacy remains the source of truth.

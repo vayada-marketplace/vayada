@@ -29,11 +29,12 @@ export type CohortInventoryHorizon = {
 export type HorizonedCohortCalendar = PlannedCohortCalendar & { horizon: CohortInventoryHorizon };
 
 /**
- * VAY-1362: the planned calendars whose canonical inventory the native jobs can carry, with their
- * horizon. A new calendar is dropped (the hotel stays in setup) when its coverage would pass the
- * auto-open worker's 24-month maximum, which stops the hotel's auto-open, or when a room type it
- * does not bind still holds bookings, drafts, blocks or stored days in the coverage, which the
- * native calendar cannot carry; a stored calendar blocks instead.
+ * VAY-1362: the planned calendars with their horizon. A calendar whose inventory the native jobs
+ * could not carry blocks the run (the legacy data must be fixed before the extraction): coverage
+ * past the auto-open worker's 24-month maximum stops the hotel's auto-open, and a room type the
+ * calendar does not bind that holds bookings, drafts, blocks or stored days in the coverage, or a
+ * bound one with stored days past it, leaves legacy-shaped days the native calendar save and
+ * materializer refuse.
  */
 export function withCohortInventoryHorizons(
   context: PmsBuildContext,
@@ -48,14 +49,16 @@ export function withCohortInventoryHorizons(
     try {
       const horizon = cohortInventoryHorizon(context, calendar);
       const bound = new Set(sourceInputs.roomBindings.map(({ roomTypeId }) => roomTypeId));
-      const property = properties.get(propertyId);
-      const unboundInventory = (context.rowsByTable.get("room_types") ?? []).some((roomType) => {
+      const stored = Object.entries(
+        properties.get(propertyId)?.inventoryThroughByRoomType ?? {},
+      ).some(([roomTypeId, last]) =>
+        bound.has(roomTypeId) ? last > horizon.through : last >= horizon.from,
+      );
+      const consumed = (context.rowsByTable.get("room_types") ?? []).some((roomType) => {
         const roomTypeId = String(roomType.data["id"]).toLowerCase();
-        if (String(roomType.data["hotel_id"]).toLowerCase() !== hotelId || bound.has(roomTypeId))
-          return false;
-        const stored = property?.inventoryThroughByRoomType?.[roomTypeId];
         return (
-          (!!stored && stored >= horizon.from) ||
+          String(roomType.data["hotel_id"]).toLowerCase() === hotelId &&
+          !bound.has(roomTypeId) &&
           (["bookings", "booking_drafts", "room_blocks"] as const).some((table) =>
             rowsForRoomType(context, table, roomTypeId).some((row) =>
               consumesRange(context, row, horizon),
@@ -64,18 +67,17 @@ export function withCohortInventoryHorizons(
         );
       });
       const days = (Date.parse(horizon.through) - Date.parse(horizon.from)) / 86_400_000 + 1;
-      if (days <= PMS_CALENDAR_AUTO_OPEN_MAX_HORIZON_DAYS && !unboundInventory)
+      if (days <= PMS_CALENDAR_AUTO_OPEN_MAX_HORIZON_DAYS && !stored && !consumed)
         return [{ ...calendar, horizon }];
-      if (property?.storedCalendar)
-        addPmsBlocker(
-          context,
-          "COHORT_INVENTORY_NOT_CARRIED",
-          "pms.hotels",
-          hotelId,
-          unboundInventory
-            ? "A room type the migrated calendar does not bind holds inventory in its coverage"
-            : `Inventory coverage exceeds ${PMS_CALENDAR_AUTO_OPEN_MAX_HORIZON_DAYS} days`,
-        );
+      addPmsBlocker(
+        context,
+        "COHORT_INVENTORY_NOT_CARRIED",
+        "pms.hotels",
+        hotelId,
+        stored || consumed
+          ? "Inventory outside the migrated calendar's bindings or coverage cannot be carried"
+          : `Inventory coverage exceeds ${PMS_CALENDAR_AUTO_OPEN_MAX_HORIZON_DAYS} days`,
+      );
       return [];
     } catch (error) {
       addPmsBlocker(
@@ -103,7 +105,9 @@ export function buildPmsInventoryRecords(
       ),
     ),
   );
-  const calendared = new Set(calendars.map(({ configuration }) => configuration.propertyId));
+  const calendared = new Map(
+    calendars.map(({ configuration, horizon }) => [configuration.propertyId, horizon]),
+  );
   blockActiveDrafts(context, calendared);
   const existingInventory = new Map(
     context.target.records
@@ -374,7 +378,10 @@ function nextLinkedSourceRevision(
   return revision + 1;
 }
 
-function blockActiveDrafts(context: PmsBuildContext, calendared: Set<string>): void {
+function blockActiveDrafts(
+  context: PmsBuildContext,
+  calendared: Map<string, CohortInventoryHorizon>,
+): void {
   for (const draft of context.rowsByTable.get("booking_drafts") ?? []) {
     try {
       if (
@@ -387,12 +394,12 @@ function blockActiveDrafts(context: PmsBuildContext, calendared: Set<string>): v
       const hotelId = uuid(draft.data["hotel_id"], "hotel_id");
       const hotel = context.hotelById.get(hotelId);
       if (!hotel) throw new Error(`hotels ${hotelId} source is missing`);
-      const bounded = propertyHorizon(context.snapshotAt, hotel);
+      // A calendared cohort hotel's coverage (its calendar's clock) reaches every live hold.
+      const coverage = calendared.get(context.propertyByHotel.get(hotelId) ?? "");
+      const bounded = coverage ?? propertyHorizon(context.snapshotAt, hotel);
       const checkIn = date(draft.data["check_in"], "check_in");
       const checkOut = date(draft.data["check_out"], "check_out");
-      // A calendared cohort hotel's coverage reaches every live hold, however far out.
-      const unbounded = calendared.has(context.propertyByHotel.get(hotelId) ?? "");
-      if (checkOut <= bounded.from || (!unbounded && checkIn > bounded.through)) continue;
+      if (checkOut <= bounded.from || (!coverage && checkIn > bounded.through)) continue;
       addPmsBlocker(
         context,
         "ACTIVE_BOOKING_DRAFT",
@@ -598,14 +605,11 @@ export function cohortInventoryHorizon(
   for (const table of ["bookings", "booking_drafts", "room_blocks"])
     for (const row of context.rowsByTable.get(table) ?? []) {
       if (String(row.data["hotel_id"] ?? "").toLowerCase() !== hotelId) continue;
-      const active =
+      const live =
         table === "room_blocks" ||
-        (table === "bookings"
-          ? INVENTORY_STATUSES.has(String(row.data["status"] ?? "").toLowerCase())
-          : row.data["materialized_booking_id"] === null ||
-            row.data["materialized_booking_id"] === undefined);
+        (table === "bookings" ? liveBooking(context, row) : liveDraft(context, row));
       const end = optionalDate(row.data[table === "room_blocks" ? "end_date" : "check_out"], "end");
-      if (active && end && shift(end, -1) > through) through = shift(end, -1);
+      if (live && end && shift(end, -1) > through) through = shift(end, -1);
     }
   return { from, through, windowThrough };
 }

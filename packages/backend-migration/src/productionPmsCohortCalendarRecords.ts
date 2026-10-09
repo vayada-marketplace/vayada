@@ -71,11 +71,25 @@ export function planPmsCohortCalendars(
       const hotelId = uuid(hotel.data["id"], "id");
       const propertyId = context.propertyByHotel.get(hotelId);
       const property = propertyId ? properties.get(propertyId) : undefined;
-      if (!property || !carriedCohortHotel(context, hotelId)) continue;
-      const planned = property.storedCalendar
-        ? storedCalendar(context, rooms, hotel, hotelId, property)
-        : newCalendar(context, rooms, hotel, property);
+      if (!property) continue;
+      const planned = !carriedCohortHotel(context, hotelId)
+        ? null
+        : property.storedCalendar
+          ? storedCalendar(context, rooms, hotel, hotelId, property)
+          : newCalendar(context, rooms, hotel, property);
       if (planned) calendars.push(planned);
+      // Without its migrated calendar, the import would plan legacy days over canonical ones.
+      else if (
+        property.storedCalendar?.idempotencyKeyId ===
+        nativeCommandId(COMMAND, "idempotency", property.propertyId)
+      )
+        addPmsBlocker(
+          context,
+          "COHORT_CALENDAR_CONFLICT",
+          "pms.hotels",
+          hotelId,
+          "The stored migrated operating calendar is not carried by this run",
+        );
     } catch (error) {
       addPmsBlocker(
         context,
