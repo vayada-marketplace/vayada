@@ -65,9 +65,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Legacy fixed-plan adoption PostgreSQL", () 
       await pool.query(
         `INSERT INTO finance.billing_entitlements
            (organization_id, property_id, product, entitlement_key, billing_status,
-            plan_key, billing_provider, source_system, entitlement_metadata)
+            plan_key, billing_provider, source_system, starts_at, entitlement_metadata)
          VALUES ($1::uuid, $2::uuid, 'booking', 'direct-booking-finance', 'suspended',
-           'commission', 'manual', 'finance',
+           'commission', 'manual', 'finance', '2026-01-01T00:00:00Z',
            '{"legacyPlan":"fixed","providerReentryRequired":true}'::jsonb)`,
         [ORGANIZATION, propertyId],
       );
