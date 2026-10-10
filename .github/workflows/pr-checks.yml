@@ -184,9 +184,10 @@ jobs:
           E2E_FIRST_PARTY_AUTH_ONLY: "1"
           E2E_START_SERVERS: "1"
 
-  # Every unit suite under apps/api and the backend packages, with no database: files that need
-  # PostgreSQL skip themselves here and run in api_postgres. Main pushes and a nightly run repeat
-  # this job (main-unit-suites.yml) to catch two green PRs that break each other.
+  # Every unit suite under apps/api and the backend packages, with no database. Files that need
+  # PostgreSQL skip themselves here; api_postgres runs only the integration files it names (full
+  # integration coverage is VAY-2111). Main pushes and a nightly run repeat this job
+  # (main-unit-suites.yml) to catch two green PRs that break each other.
   api_unit:
     name: TypeScript API and Package Unit Suites
     runs-on: ubuntu-latest
