@@ -103,6 +103,33 @@ test("publication window uses GitHub run creation, and dispatch rejects insuffic
       });
       assert.equal(result.status === 0, valid, `${expiry}: ${result.stderr}`);
     }
+    // The artifact lookup retries while a fresh upload is not yet visible, and fails closed after six tries.
+    for (const [failures, valid] of [
+      [2, true],
+      [6, false],
+    ]) {
+      const result = spawnSync(
+        "bash",
+        [
+          "-c",
+          // gh runs inside $(...), so the attempt counter lives in a file.
+          `rm -f gh-calls\ngh() { echo >> gh-calls; if [ "$(wc -l < gh-calls)" -le ${failures} ]; then echo "gh: Not Found (HTTP 404)" >&2; return 1; fi; printf '%s' "$ARTIFACT_JSON"; }\nsleep() { :; }\n${step}`,
+        ],
+        {
+          cwd: directory,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            MODE: "publish",
+            NEW_ARTIFACT_ID: "1",
+            GITHUB_REPOSITORY: "owner/repo",
+            GITHUB_OUTPUT: join(directory, "output"),
+            ARTIFACT_JSON: JSON.stringify({ expired: false, expires_at: "2026-12-19T10:31:42Z" }),
+          },
+        },
+      );
+      assert.equal(result.status === 0, valid, `${failures} failures: ${result.stderr}`);
+    }
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

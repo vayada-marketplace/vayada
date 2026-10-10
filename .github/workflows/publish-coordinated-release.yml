@@ -200,7 +200,12 @@ jobs:
             artifact_id="$EXISTING_ARTIFACT_ID"
           fi
           [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]]
-          artifact_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}")"
+          # A just-uploaded artifact can briefly answer 404 before the API sees it.
+          for attempt in 1 2 3 4 5 6; do
+            artifact_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}")" && break
+            test "$attempt" -lt 6
+            sleep "$((attempt * 5))"
+          done
           test "$(jq -r '.expired' <<< "$artifact_json")" = false
           node --input-type=module - "$artifact_json" <<'NODE'
           import { readFileSync } from "node:fs";

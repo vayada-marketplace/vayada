@@ -1,12 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ReplacementOfferTerms } from "@vayada/domain-booking/replacement-pricing";
 import { pricingCurrencyScale, parsePricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useTranslation } from "@/lib/i18n";
 import { ApiErrorResponse } from "@/services/api/client";
-import { type createReplacementPricingClient, type PricingSnapshot, type PricingDraft, type PricingChargeReview, type PricingTermsInput } from "@/services/api/replacementPricingClient";
+import { samePricingValue, type createReplacementPricingClient, type PricingSnapshot, type PricingDraft, type PricingChargeReview, type PricingTermsInput } from "@/services/api/replacementPricingClient";
 
 import { baseAmounts, decimalAmount, editedSnapshot, errorText, type MessageKey, PricingError, type Translate } from "./pricingAmounts";
 import { FirstPricingSetup, type SetupRoom, type firstPricingInput } from "./FirstPricingSetup";
@@ -28,12 +27,9 @@ import { PricingLinkedAdjustment } from "./PricingLinkedAdjustment";
 import { PricingDates } from "./PricingDates";
 import { PricingRules } from "./PricingRules";
 import { PricingStayPreview } from "./PricingStayPreview";
-import { PricingAuthorityControl } from "./PricingAuthorityControl";
 
 type Client = ReturnType<typeof createReplacementPricingClient>;
-const noPreviewEdits = {};
 export function PricingEditor({ client, roomNames = {}, setup }: { client: Client; roomNames?: Record<string, string>; setup?: { propertyId: string; rooms: readonly SetupRoom[] } }) {
-  const [reviewPolicies, setReviewPolicies] = useState<Record<string, ReplacementOfferTerms>>({});
   const [policyEdits, setPolicyEdits] = useState<Record<string, PricingTermsInput>>({});
   const policyBases = useRef<Record<string, string | null>>({});
   const policyKey = (room: string, offer: string) => JSON.stringify([room, offer]);
@@ -44,14 +40,13 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
   const exclusiveEditPending = addingRoom || addingOfferRoom !== null || Object.entries(pendingEntries).some(([key, pending]) => (key.startsWith("ownership:") || key.startsWith("mealPlan:") || key.startsWith("parent:") || key.startsWith("included:") || key.startsWith("policy:")) && pending);
   const hasPendingEntries = addingRoom || addingOfferRoom !== null || Object.values(pendingEntries).some(Boolean);
   const [empty, setEmpty] = useState(false);
-  const [current, setCurrent] = useState<PricingSnapshot | null>(null), [baseRevision, setBaseRevision] = useState(0);
-  const [draft, setDraft] = useState<PricingDraft | null>(null), [review, setReview] = useState<PricingChargeReview | null>(null);
-  const [inputs, setInputs] = useState<Record<string, string>>({}), [dirty, setDirty] = useState(false), [ack, setAck] = useState(false);
-  const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [authorityActive, setAuthorityActive] = useState(false), [error, setError] = useState<unknown>(null), [notice, setNotice] = useState<MessageKey | "">("");
+  const [current, setCurrent] = useState<PricingSnapshot | null>(null), [baseRevision, setBaseRevision] = useState(0), [stale, setStale] = useState(false);
+  const [inputs, setInputs] = useState<Record<string, string>>({}), [dirty, setDirty] = useState(false);
+  const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState<unknown>(null), [notice, setNotice] = useState<MessageKey | "">("");
   const [needsReload, setNeedsReload] = useState(false), [done, setDone] = useState(false), [retry, setRetry] = useState(false);
-  const retainFailure = useRef<(() => boolean) | null>(null);
+  const editableFailure = useRef<((error: unknown) => boolean) | null>(null);
   const action = useRef<(() => Promise<void>) | null>(null), locked = useRef(false), alive = useRef(true);
-  const pendingDraftId = useRef(crypto.randomUUID()), leaving = useRef(false);
+  const leaving = useRef(false);
   const [leave, setLeave] = useState<(() => void) | null>(null), [reloading, setReloading] = useState(false);
   const { t } = useTranslation();
   const roomName = (roomTypeId: string, ri: number) => roomNames[roomTypeId] ?? t("pricing.roomNumber", { number: ri + 1 });
@@ -64,14 +59,13 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
       policyBases.current = Object.fromEntries((saved?.rooms ?? []).flatMap((r) => r.offers.map((o) => [policyKey(r.roomTypeId, o.id), o.termsRevision])));
       setCurrent(saved ? { currency: saved.currency, ownerReferences: { finance: saved.ownerReferences.finance },
         rooms: saved.rooms.map((room) => ({ ...room, revision: saved.revision + 1 })) } : null);
-      setAddingOfferRoom(null); setAddingRoom(false); setPendingEntries({}); setBaseRevision(saved?.revision ?? 0); setInputs({}); setDraft(null); setReview(null); setDirty(false); setAck(false); setNeedsReload(false); setDone(false);
-      pendingDraftId.current = crypto.randomUUID();
+      setAddingOfferRoom(null); setAddingRoom(false); setPendingEntries({}); setBaseRevision(saved?.revision ?? 0); setStale(!!saved?.stale); setInputs({}); setDirty(false); setNeedsReload(false); setDone(false);
       setNotice(saved?.stale ? "pricing.editor.noticeStale" : "");
     } catch (e) { if (alive.current) setError(e); }
     finally { if (alive.current) setLoading(false); }
   }, [client]);
   useEffect(() => { alive.current = true; void load(); return () => { alive.current = false; }; }, [load]); // Client is property-bound; parent keys this component by property.
-  const leaveRisk = authorityActive || hasPendingEntries || dirty || retry || busy || (!!draft && !done);
+  const leaveRisk = hasPendingEntries || dirty || retry || busy;
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => { if (leaveRisk && !leaving.current) { event.preventDefault(); event.returnValue = ""; } };
     // Pricing is entered and left through document navigation so browser history also runs beforeunload.
@@ -90,22 +84,24 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
     window.addEventListener("pms:before-property-change", switchProperty);
     return () => { window.removeEventListener("beforeunload", warn); document.removeEventListener("click", navigate, true); window.removeEventListener("pms:before-property-change", switchProperty); };
   }, [leaveRisk]);
-  async function run(next?: () => Promise<void>, keepFailure?: () => boolean) {
+  async function run(next?: () => Promise<void>, stopEditable?: (error: unknown) => boolean) {
     if (locked.current) return;
-    if (next) { action.current = next; retainFailure.current = keepFailure ?? null; }
+    if (next) { action.current = next; editableFailure.current = stopEditable ?? null; }
     if (!action.current) return;
     locked.current = true; setBusy(true); setError(null);
     try { await action.current(); action.current = null; if (alive.current) setRetry(false); }
     catch (e) {
       if (alive.current) {
         setError(e);
-        const definitive = e instanceof ApiErrorResponse && [400, 403, 409].includes(e.status) && !retainFailure.current?.();
-        if (definitive) { action.current = null; setNeedsReload(true); setRetry(false); } else setRetry(true);
+        // A failure the staff member can fix (e.g. payment settings) ends the action but keeps the edits editable.
+        const definitive = e instanceof ApiErrorResponse && [400, 403, 409].includes(e.status);
+        if (editableFailure.current?.(e)) { action.current = null; setRetry(false); }
+        else if (definitive) { action.current = null; setNeedsReload(true); setRetry(false); } else setRetry(true);
       }
     } finally { locked.current = false; if (alive.current) setBusy(false); }
   }
   function createInitial(input: ReturnType<typeof firstPricingInput>, addToRoom = false) {
-    if (locked.current || busy || authorityActive || retry || needsReload || done || review) return;
+    if (locked.current || busy || retry || needsReload || done) return;
     if (!addToRoom && current && (!addingRoom || current.currency !== input.configuration.currency || current.rooms.some((room) => room.roomTypeId === input.configuration.roomTypeId) ||
         !setup?.rooms.some((room) => room.roomTypeId === input.configuration.roomTypeId) || setup.propertyId !== input.configuration.propertyId)) {
       setError(new PricingError("pricing.editor.errorUnconfiguredRoom")); return;
@@ -128,18 +124,23 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
     policyBases.current[key] = input.terms.expectedRevision;
     setPolicyEdits((previous) => ({ ...previous, [key]: input.terms }));
     setCurrent({ currency: room.currency, rooms, ownerReferences: existing?.ownerReferences ?? { finance: "" } });
-    setInputs({}); setAddingRoom(false); setAddingOfferRoom(null); setDirty(true); setReview(null); setAck(false);
+    setInputs({}); setAddingRoom(false); setAddingOfferRoom(null); setDirty(true);
     setNotice("pricing.editor.noticeSetupAdded");
   }
 
+  /** One "Save prices" action: stage edited policies, prepare, save the draft, read its server charge
+   * fingerprint, declare (the button press is the mandatory-charges declaration), attach and publish.
+   * Every finished step is kept, so "Retry last action" resumes with the same idempotency keys; each new
+   * press starts a fresh draft. */
   function save() {
-    if (!current || hasPendingEntries) return;
+    if (!current || hasPendingEntries || done || !(dirty || stale)) return;
     let edited: PricingSnapshot;
     try { edited = editedSnapshot(current, inputs); } catch (e) { setError(e); return; }
-    const expected = draft?.revision ?? 0, id = draft?.draftId ?? pendingDraftId.current;
-    const selected = { draftId: id, baseRevision };
+    const id = crypto.randomUUID(), selected = { draftId: id, baseRevision };
     const stages = Object.values(policyEdits).map((input) => ({ input, action: client.termsAction(input, selected), saved: null as Awaited<ReturnType<ReturnType<Client["termsAction"]>>> | null }));
-    let prepared: Awaited<ReturnType<Client["prepare"]>> | null = null;
+    let prepared: Awaited<ReturnType<Client["prepare"]>> | null = null, saved: PricingDraft | null = null, reviewed: PricingChargeReview | null = null;
+    let confirm: ReturnType<Client["confirmationAction"]> | null = null, confirmed: Awaited<ReturnType<ReturnType<Client["confirmationAction"]>>> | null = null;
+    let attached: PricingDraft | null = null, publish: ReturnType<Client["publicationAction"]> | null = null;
     void run(async () => {
       for (const stage of stages) stage.saved ??= await stage.action();
       const rooms = edited.rooms.map((r) => ({ ...r, offers: r.offers.map((o) => {
@@ -147,106 +148,101 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
         return stage ? { ...o, termsRevision: stage.saved!.revision } : o;
       }) }));
       prepared ??= await client.prepare({ currency: edited.currency, rooms }, selected);
-      const revision = await client.saveDraft({ draftId: id, expectedDraftRevision: expected, baseRevision, ...prepared });
-      if (alive.current) { setDraft({ draftId: id, revision, baseRevision, ...prepared, stale: false }); setCurrent(prepared.snapshot); setInputs({}); setPolicyEdits({}); setDirty(false); setNotice("pricing.editor.noticeDraftSaved"); }
-    });
-  }
-  function approve() {
-    if (!review || !ack) return;
-    const saved = review, confirm = client.confirmationAction(saved);
-    let confirmed: Awaited<ReturnType<typeof confirm>> | null = null, attached: PricingDraft | null = null;
-    let publish: ReturnType<Client["publicationAction"]> | null = null;
-    void run(async () => {
-      confirmed ??= await confirm();
-      const snapshot = { ...saved.snapshot, ownerReferences: { ...saved.snapshot.ownerReferences, charges: confirmed.id } };
-      if (!attached) {
-        const revision = await client.saveDraft({ draftId: saved.draftId, expectedDraftRevision: saved.revision, baseRevision: saved.baseRevision, sources: saved.sources, ...(saved.effectiveSources ? { effectiveSources: saved.effectiveSources } : {}), snapshot });
-        attached = { ...saved, snapshot, revision };
+      if (!saved) saved = { draftId: id, revision: await client.saveDraft({ draftId: id, expectedDraftRevision: 0, baseRevision, ...prepared }), baseRevision, ...prepared, stale: false };
+      if (!reviewed) {
+        const next = await client.reviewCharges(id);
+        // Declare only for exactly what this action saved; another save in between means start again.
+        if (!next || next.revision !== saved.revision || !samePricingValue(next.snapshot, saved.snapshot)) throw new ApiErrorResponse(409, { message: "The saved prices changed. Reload pricing." });
+        reviewed = next;
       }
-      publish ??= client.publicationAction({ draftId: attached.draftId, snapshot: attached.snapshot, revision: attached.revision, baseRevision: attached.baseRevision, sources: attached.sources, ...(attached.effectiveSources ? { effectiveSources: attached.effectiveSources } : {}), stale: false });
+      confirm ??= client.confirmationAction(reviewed, "save_prices");
+      confirmed ??= await confirm();
+      if (!attached) {
+        const snapshot = { ...reviewed.snapshot, ownerReferences: { ...reviewed.snapshot.ownerReferences, charges: confirmed.id } };
+        const evidence = { baseRevision: reviewed.baseRevision, sources: reviewed.sources, ...(reviewed.effectiveSources ? { effectiveSources: reviewed.effectiveSources } : {}), snapshot };
+        attached = { draftId: reviewed.draftId, ...evidence, revision: await client.saveDraft({ draftId: reviewed.draftId, expectedDraftRevision: reviewed.revision, ...evidence }), stale: false };
+      }
+      publish ??= client.publicationAction(attached);
       await publish();
-      if (alive.current) { setDone(true); setDirty(false); setReview(null); setNotice("pricing.editor.noticeApproved"); }
-    });
+      if (alive.current) { setCurrent(attached.snapshot); setDone(true); setDirty(false); setInputs({}); setPolicyEdits({}); setNotice("pricing.editor.noticeSaved"); }
+    }, financeNotReady);
   }
-  const disabled = busy || authorityActive || retry || needsReload || done, display = review?.snapshot ?? current;
+  const disabled = busy || retry || needsReload || done, display = current;
   const unconfiguredRooms = setup?.rooms.filter((room) => !display?.rooms.some((value) => value.roomTypeId === room.roomTypeId)) ?? [];
   const scale = display ? pricingCurrencyScale(display.currency)! : 2;
   return <section className="mx-auto max-w-5xl space-y-6 p-4 sm:p-8">
     <header className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-2xl font-semibold text-gray-950">{t("pricing.editor.title")}</h1><p className="mt-1 text-sm text-gray-600">{t("pricing.editor.subtitle")}</p></div>
-      <button className="rounded-lg border px-4 py-2 text-sm disabled:opacity-50" disabled={loading || busy || authorityActive || retry} onClick={() => { if (leaveRisk) setReloading(true); else void load(); }}>{t("pricing.editor.reload")}</button></header>
+      <button className="rounded-lg border px-4 py-2 text-sm disabled:opacity-50" disabled={loading || busy || retry} onClick={() => { if (leaveRisk) setReloading(true); else void load(); }}>{t("pricing.editor.reload")}</button></header>
     {reloading && <ConfirmDialog title={t("pricing.reloadTitle")} message={t("pricing.reloadMessage")} confirmLabel={t("pricing.reloadConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { setReloading(false); void load(); }} onCancel={() => setReloading(false)} />}
     {leave && <ConfirmDialog title={t("pricing.leaveTitle")} message={t("pricing.leaveMessage")} confirmLabel={t("pricing.leaveConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { leaving.current = true; setLeave(null); leave(); }} onCancel={() => setLeave(null)} />}
-    <PricingAuthorityControl client={client} blocked={loading || hasPendingEntries || dirty || retry || busy || (!!draft && !done)} onActivityChange={setAuthorityActive} />
     {error !== null && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">{message(error, t)}{retry && <p className="mt-2">{t("pricing.editor.retryHint")}</p>}</div>}
     {notice && <p role="status" className="rounded-lg bg-emerald-50 p-4 text-emerald-900">{t(notice)}</p>}
     {loading ? <p role="status">{t("pricing.editor.loading")}</p> : !display && !empty ? null : !display ? <div className="rounded-xl border bg-white p-8"><h2 className="font-semibold">{t("pricing.editor.notConfigured")}</h2>{setup ? <FirstPricingSetup propertyId={setup.propertyId} rooms={setup.rooms} disabled={disabled} onDirty={() => setDirty(true)} onCreate={createInitial} /> : <p className="mt-2 text-sm text-gray-600">{t("pricing.editor.setupUnavailable")}</p>}
       {retry && <button disabled={busy} className="mt-4 rounded-lg border px-4 py-2" onClick={() => void run()}>{t("pricing.editor.retry")}</button>}</div> : <>
-      <div className="flex justify-between text-sm"><strong>{t("pricing.editor.baseNightlyPrices", { currency: display.currency })}</strong><span>{t(done ? "pricing.editor.statusApproved" : review ? "pricing.editor.statusReview" : dirty ? "pricing.editor.statusUnsaved" : draft ? "pricing.editor.statusDraftSaved" : "pricing.editor.statusCurrent")}</span></div>
+      <div className="flex justify-between text-sm"><strong>{t("pricing.editor.baseNightlyPrices", { currency: display.currency })}</strong><span>{t(done ? "pricing.editor.statusSaved" : dirty ? "pricing.editor.statusUnsaved" : "pricing.editor.statusCurrent")}</span></div>
       {setup && (addingRoom ? <div className="rounded-xl border bg-white p-5">
         <FirstPricingSetup propertyId={setup.propertyId} rooms={unconfiguredRooms} fixedCurrency={display.currency} disabled={disabled} onDirty={() => {}} onCreate={createInitial} />
         <button type="button" className="mt-3 rounded border px-3 py-2 disabled:opacity-50" disabled={disabled} onClick={() => { if (!disabled) { setAddingRoom(false); setError(null); } }}>{t("pricing.editor.cancelRoomSetup")}</button>
-      </div> : unconfiguredRooms.length > 0 ? <button type="button" className="rounded-lg border px-4 py-2 disabled:opacity-50" disabled={disabled || !!review || hasPendingEntries} onClick={() => { if (!disabled && !review && !hasPendingEntries) { setAddingRoom(true); setError(null); } }}>{t("pricing.editor.addRoom")}</button> : <p className="text-sm text-gray-600">{t("pricing.editor.allRoomsConfigured")}</p>)}
+      </div> : unconfiguredRooms.length > 0 ? <button type="button" className="rounded-lg border px-4 py-2 disabled:opacity-50" disabled={disabled || hasPendingEntries} onClick={() => { if (!disabled && !hasPendingEntries) { setAddingRoom(true); setError(null); } }}>{t("pricing.editor.addRoom")}</button> : <p className="text-sm text-gray-600">{t("pricing.editor.allRoomsConfigured")}</p>)}
       {display.rooms.map((room, ri) => <div key={room.roomTypeId} className="overflow-hidden rounded-xl border bg-white">
         <h2 className="border-b bg-gray-50 px-5 py-3 font-semibold">{roomName(room.roomTypeId, ri)}</h2>
         {addingOfferRoom === room.roomTypeId ? <div className="border-b p-5">
           {independentOffer ? <FirstPricingSetup propertyId={room.propertyId} rooms={[{ roomTypeId: room.roomTypeId, name: roomName(room.roomTypeId, ri), capacity: room.capacity }]} existingRoom={room} fixedCurrency={room.currency} disabled={disabled} onDirty={() => {}} onCreate={(input) => createInitial(input, true)} /> : <NewLinkedOffer room={room} disabled={disabled} onCreate={(input) => createInitial(input, true)} />}
           <button type="button" className="mt-3 rounded border px-3 py-2 disabled:opacity-50" disabled={disabled} onClick={() => { if (!disabled) { setAddingOfferRoom(null); setError(null); } }}>{t("pricing.editor.cancelOffer")}</button>
-        </div> : <div className="flex gap-3 p-5">{[false, true].map((independent) => <button key={String(independent)} type="button" className="rounded border px-3 py-2 disabled:opacity-50" disabled={disabled || !!review || hasPendingEntries} onClick={() => { if (!disabled && !review && !hasPendingEntries) { setIndependentOffer(independent); setAddingOfferRoom(room.roomTypeId); setError(null); } }}>{t(independent ? "pricing.editor.addIndependentOffer" : "pricing.editor.addLinkedOffer")}</button>)}</div>}
-        <PricingChildCharges room={room} label={roomName(room.roomTypeId, ri)} disabled={disabled || !!review || exclusiveEditPending}
+        </div> : <div className="flex gap-3 p-5">{[false, true].map((independent) => <button key={String(independent)} type="button" className="rounded border px-3 py-2 disabled:opacity-50" disabled={disabled || hasPendingEntries} onClick={() => { if (!disabled && !hasPendingEntries) { setIndependentOffer(independent); setAddingOfferRoom(room.roomTypeId); setError(null); } }}>{t(independent ? "pricing.editor.addIndependentOffer" : "pricing.editor.addLinkedOffer")}</button>)}</div>}
+        <PricingChildCharges room={room} label={roomName(room.roomTypeId, ri)} disabled={disabled || exclusiveEditPending}
           onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`children:${ri}`]: pending }))}
-          onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
+          onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); }} />
         {room.offers.map((offer, oi) => <div key={offer.id} className="grid gap-4 border-b p-5 last:border-0 sm:grid-cols-[1fr_2fr]">
           <div><h3 className="font-medium">{t("pricing.offerNumber", { number: oi + 1 })}</h3><p className="text-sm text-gray-500">{t(offer.price.kind === "linked" ? "pricing.editor.linkedRate" : "pricing.editor.independentRate")}</p></div>
-          <div className="flex flex-wrap gap-3">{offer.price.kind === "independent" && baseAmounts(offer.price.calendar.base, t).map(([label, minor], ai) => <label key={ai} className="text-sm text-gray-600">{label}<input aria-label={`${offerLabel(room.roomTypeId, ri, oi)} ${label}`} inputMode="decimal" className="mt-1 block w-36 rounded-lg border px-3 py-2 text-gray-950 disabled:bg-gray-50" disabled={disabled || !!review || exclusiveEditPending}
-            value={review ? decimalAmount(minor, scale) : inputs[`${ri}:${oi}:${ai}`] ?? decimalAmount(minor, scale)} onChange={(event) => { setInputs({ ...inputs, [`${ri}:${oi}:${ai}`]: event.target.value }); setDirty(true); setReview(null); setAck(false); setNotice(""); }} /></label>)}
+          <div className="flex flex-wrap gap-3">{offer.price.kind === "independent" && baseAmounts(offer.price.calendar.base, t).map(([label, minor], ai) => <label key={ai} className="text-sm text-gray-600">{label}<input aria-label={`${offerLabel(room.roomTypeId, ri, oi)} ${label}`} inputMode="decimal" className="mt-1 block w-36 rounded-lg border px-3 py-2 text-gray-950 disabled:bg-gray-50" disabled={disabled || exclusiveEditPending}
+            value={inputs[`${ri}:${oi}:${ai}`] ?? decimalAmount(minor, scale)} onChange={(event) => { setInputs({ ...inputs, [`${ri}:${oi}:${ai}`]: event.target.value }); setDirty(true); setNotice(""); }} /></label>)}
             {offer.price.kind === "independent" && !offer.price.calendar.base && <p className="text-sm text-gray-500">{t("pricing.editor.calendarOnly")}</p>}</div>
           <div className="sm:col-span-2"><PricingTerms propertyId={room.propertyId} client={client} roomTypeId={room.roomTypeId} offerId={offer.id} revision={offer.termsRevision}
-            savedDraft={done ? undefined : review ? { draftId: review.draftId, revision: review.revision } : draft ? { draftId: draft.draftId, revision: draft.revision } : undefined}
-            verified={review ? reviewPolicies[policyKey(room.roomTypeId, offer.id)] : undefined}
-            local={review ? undefined : policyEdits[policyKey(room.roomTypeId, offer.id)]} disabled={disabled || !!review} blocked={hasPendingEntries} expanded={!!review}
+            local={policyEdits[policyKey(room.roomTypeId, offer.id)]} disabled={disabled} blocked={hasPendingEntries}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`policy:${ri}:${oi}`]: pending }))}
             onApply={(terms) => { const key = policyKey(room.roomTypeId, offer.id); setPolicyEdits((previous) => ({ ...previous, [key]: {
               roomTypeId: room.roomTypeId, offerId: offer.id, expectedRevision: policyBases.current[key], cancellation: terms.cancellation, payment: terms.payment,
-            } })); setDirty(true); setReview(null); setAck(false); setNotice(""); }} /></div>
-          <PricingIncludedAdjustments room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} baseValue={review ? undefined : inputs[`${ri}:${oi}:0`]} disabled={disabled || !!review} blocked={hasPendingEntries}
+            } })); setDirty(true); setNotice(""); }} /></div>
+          <PricingIncludedAdjustments room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} baseValue={inputs[`${ri}:${oi}:0`]} disabled={disabled} blocked={hasPendingEntries}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`included:${ri}:${oi}`]: pending }))}
-            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
-          <PricingDates room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || !!review || exclusiveEditPending}
+            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); }} />
+          <PricingDates room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || exclusiveEditPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`date:${ri}:${oi}`]: pending }))}
-            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
-          <PricingWeekdays room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || !!review || exclusiveEditPending}
+            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); }} />
+          <PricingWeekdays room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || exclusiveEditPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`weekday:${ri}:${oi}`]: pending }))}
-            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
-          <PricingMonths room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || !!review || exclusiveEditPending}
+            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); }} />
+          <PricingMonths room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || exclusiveEditPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`month:${ri}:${oi}`]: pending }))}
-            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
-          <PricingSeasons room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || !!review || exclusiveEditPending}
+            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); }} />
+          <PricingSeasons room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || exclusiveEditPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`season:${ri}:${oi}`]: pending }))}
-            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
-          <PricingMealPlan room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || !!review} blocked={hasPendingEntries}
+            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); }} />
+          <PricingMealPlan room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled} blocked={hasPendingEntries}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`mealPlan:${ri}:${oi}`]: pending }))}
-            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
-          <PricingMealCharges room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || !!review || exclusiveEditPending}
+            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); }} />
+          <PricingMealCharges room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || exclusiveEditPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`meal:${ri}:${oi}`]: pending }))}
-            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
-          <PricingLinkedParent room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || !!review} blocked={hasPendingEntries}
+            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); }} />
+          <PricingLinkedParent room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled} blocked={hasPendingEntries}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`parent:${ri}:${oi}`]: pending }))}
-            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
-          <PricingLinkedAdjustment room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || !!review || exclusiveEditPending}
+            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); }} />
+          <PricingLinkedAdjustment room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || exclusiveEditPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`linked:${ri}:${oi}`]: pending }))}
-            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
-          <PricingStayOwnership room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || !!review} blocked={hasPendingEntries}
+            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); }} />
+          <PricingStayOwnership room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled} blocked={hasPendingEntries}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`ownership:${ri}:${oi}`]: pending }))}
-            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
-          <PricingStayRules room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || !!review || exclusiveEditPending}
+            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); }} />
+          <PricingStayRules room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || exclusiveEditPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`stay:${ri}:${oi}`]: pending }))}
-            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
-          <PricingStayDates room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || !!review || exclusiveEditPending}
+            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); }} />
+          <PricingStayDates room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || exclusiveEditPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`stayDate:${ri}:${oi}`]: pending }))}
-            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
-          <PricingStaySeasons room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || !!review || exclusiveEditPending}
+            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); }} />
+          <PricingStaySeasons room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || exclusiveEditPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`staySeason:${ri}:${oi}`]: pending }))}
-            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
+            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); }} />
         </div>)}
         <details className="border-t px-5 py-3 text-sm text-gray-600"><summary className="cursor-pointer">{t("pricing.editor.retainedRules")}</summary>
           <p className="mt-2">{t("pricing.editor.adultAge", { age: room.children.adultFromAge })}</p>
@@ -261,26 +257,32 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
           </div>)}
         </details>
       </div>)}
-      <PricingStayPreview snapshot={display} inputs={review ? noPreviewEdits : inputs} disabled={disabled || hasPendingEntries} saved={!!review} roomNames={roomNames} />
-      {review && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5"><h2 className="font-semibold">{t("pricing.editor.confirmTitle")}</h2><p className="mt-2 text-sm">{t("pricing.editor.confirmBody")}</p>
-        <label className="mt-4 flex gap-3 text-sm"><input type="checkbox" checked={ack} disabled={disabled} onChange={(e) => setAck(e.target.checked)} />{t("pricing.editor.confirmAck")}</label></div>}
-      <footer className="flex flex-wrap gap-3 border-t pt-5">
-        {retry ? <button className="rounded-lg bg-emerald-700 px-5 py-2 text-white disabled:opacity-50" disabled={busy} onClick={() => void run()}>{t("pricing.editor.retry")}</button> : review ? <>
-          <button disabled={disabled} className="rounded-lg border px-5 py-2 disabled:opacity-50" onClick={() => { setReview(null); setAck(false); }}>{t("pricing.editor.backToEditing")}</button>
-          <button disabled={disabled || !ack} className="rounded-lg bg-emerald-700 px-5 py-2 text-white disabled:opacity-50" onClick={approve}>{t("pricing.editor.approve")}</button></> : <>
-          <button disabled={disabled || hasPendingEntries} className="rounded-lg border px-5 py-2 disabled:opacity-50" onClick={save}>{t("pricing.editor.saveDraft")}</button>
-          <button disabled={disabled || hasPendingEntries || dirty || !draft} className="rounded-lg bg-emerald-700 px-5 py-2 text-white disabled:opacity-50" onClick={() => void run(async () => { const next = await client.reviewCharges(draft!.draftId); if (!next) throw new ApiErrorResponse(409, { message: "The saved draft is missing. Reload pricing." }); const policies = await Promise.all(next.snapshot.rooms.flatMap((room) => room.offers.map(async (offer) => {
-              const terms = await client.readTerms(room.roomTypeId, offer.id, offer.termsRevision, { draftId: next.draftId, revision: next.revision });
-              if (!terms) throw new ApiErrorResponse(409, { message: "Saved policies are missing. Reload pricing." });
-              return [policyKey(room.roomTypeId, offer.id), terms] as const;
-            })));
-            if (alive.current) { setReviewPolicies(Object.fromEntries(policies)); setReview(next); setAck(false); } })}>{t("pricing.editor.reviewCharges")}</button></>}
+      <PricingStayPreview snapshot={display} inputs={inputs} disabled={disabled || hasPendingEntries} saved={false} roomNames={roomNames} />
+      <footer className="space-y-2 border-t pt-5">
+        {retry ? <button className="rounded-lg bg-emerald-700 px-5 py-2 text-white disabled:opacity-50" disabled={busy} onClick={() => void run()}>{t("pricing.editor.retry")}</button>
+          : <button disabled={disabled || hasPendingEntries || !(dirty || stale)} className="rounded-lg bg-emerald-700 px-5 py-2 text-white disabled:opacity-50" onClick={save}>{t(busy ? "pricing.editor.saving" : "pricing.editor.save")}</button>}
+        <p className="text-sm text-gray-600">{t("pricing.editor.saveDeclaration")}</p>
       </footer>
       <p className="text-xs text-gray-500">{t("pricing.editor.keepOpen")}</p>
     </>}
   </section>;
 }
+const financeReasons = {
+  settings_missing: "pricing.editor.financeSettingsMissing",
+  payments_disabled: "pricing.editor.financePaymentsDisabled",
+  currency_mismatch: "pricing.editor.financeCurrencyMismatch",
+  method_unavailable: "pricing.editor.financeMethodUnavailable",
+  deposit_execution_unavailable: "pricing.editor.financeDepositUnavailable",
+} as const satisfies Record<string, MessageKey>;
+/** Prepare's denial when Finance is not ready: fixable in payment settings without losing edits. */
+function financeReason(error: unknown) {
+  const reason = error instanceof ApiErrorResponse && error.status === 403 ? (error.data as { reason?: unknown }).reason : undefined;
+  return typeof reason === "string" && Object.hasOwn(financeReasons, reason) ? financeReasons[reason as keyof typeof financeReasons] : null;
+}
+const financeNotReady = (error: unknown) => financeReason(error) !== null;
 function message(error: unknown, t: Translate) {
+  const finance = financeReason(error);
+  if (finance) return t(finance);
   if (error instanceof ApiErrorResponse && error.status === 409) return t("pricing.editor.errorChanged");
   if (error instanceof ApiErrorResponse && error.status === 403) return t("pricing.editor.errorForbidden");
   return errorText(error, t, "pricing.editor.errorSaveFailed");

@@ -70,7 +70,7 @@ export default function MonthView({
 
   const today = new Date();
   // prettier-ignore
-  const displayedRooms = unassignedBookings.length ? [...rooms, { id: "", roomTypeId: "", roomTypeName: "Unassigned", roomNumber: "—", floor: "", status: "unassigned", baseRate: 0, currency: "EUR", maxOccupancy: 0, size: 0 }] : rooms;
+  const displayedRooms = unassignedBookings.length ? [...rooms, { id: "", roomTypeId: "", roomTypeName: "Unassigned", roomNumber: "—", floor: "", status: "unassigned", baseRate: 0, currency: null, maxOccupancy: 0, size: 0 }] : rooms;
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl overflow-hidden flex-1 overflow-y-auto">
