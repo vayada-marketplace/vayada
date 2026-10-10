@@ -900,11 +900,10 @@ test.describe("pms-web smoke", () => {
     );
 
     await page.goto("/rooms/new");
-    await expect(page.getByRole("button", { name: "Pricing & Rates" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Open Pricing" })).toHaveAttribute(
-      "href",
-      "/pricing",
-    );
+    await expect(page.getByRole("button", { name: "Prices", exact: true })).toHaveCount(0);
+    await expect(
+      page.getByText("Save the room type first, then set its prices in its Prices tab."),
+    ).toBeVisible();
     await page.getByPlaceholder("e.g. Two-Bedroom Villa").fill("Castrop Suite");
     await page.getByPlaceholder("50").fill("32");
     await page.getByRole("button", { name: "Create Room Type" }).click();
@@ -932,18 +931,20 @@ test.describe("pms-web smoke", () => {
     await assertHealthy();
   });
 
-  test("points the German room form to Pricing", async ({ page }) => {
+  test("points the German new-room form to the room's Prices tab", async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem("admin_language", "de"));
     await mockPmsWebAuthenticatedSession(page);
     await mockPmsWebTargetRoutes(page);
     await mockManageSelfAccess(page);
 
     await page.goto("/rooms/new");
-    await expect(page.getByRole("button", { name: "Preise & Tarife" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Preise öffnen" })).toHaveAttribute(
-      "href",
-      "/pricing",
-    );
+    await expect(page.getByRole("button", { name: "Preise", exact: true })).toHaveCount(0);
+    await expect(
+      page.getByText(
+        "Speichern Sie zuerst den Zimmertyp und legen Sie dann im Tab „Preise“ seine Preise fest.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByRole("link", { name: "Preise öffnen" })).toHaveCount(0);
   });
 
   test("edits a room type without the legacy pricing tab", async ({ page }, testInfo) => {
@@ -1009,18 +1010,14 @@ test.describe("pms-web smoke", () => {
 
     await page.goto(`/rooms/${roomTypeId}`);
     await expect(page.getByRole("button", { name: "Room Details" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Pricing & Rates" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Open Pricing" })).toHaveAttribute(
-      "href",
-      "/pricing",
-    );
+    // Prices have their own tab (opened on demand) and save; the room form never touches pricing.
+    await expect(page.getByRole("button", { name: "Prices", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Open Pricing" })).toHaveCount(0);
     await page.getByRole("button", { name: "Save Changes" }).click();
     await expect(page.getByText("Room type updated successfully")).toBeVisible();
     // An unchanged save writes nothing, so published prices stay valid.
     expect(roomTypeWrite).toBeUndefined();
-    await expect(page.getByText("Publish prices again so guests can book this room.")).toHaveCount(
-      0,
-    );
+    await expect(page.getByText("Prices need to be saved again")).toHaveCount(0);
     expect(pricingCalls).toEqual([]);
     await assertNoLegacyCalls();
     await assertHealthy();
@@ -1159,7 +1156,7 @@ async function mockManageSelfAccess(page: Page) {
   );
 }
 
-// Room prices are published from PMS → Pricing; the room form must not touch the retired writes.
+// Room prices are published from the room's Prices tab; the room form must not touch the retired writes.
 async function watchLegacyPricingCalls(page: Page, calls: string[]) {
   await page.route(/\/pricing-source|\/flexible-rate-plan/, (route) => {
     calls.push(`${route.request().method()} ${route.request().url()}`);

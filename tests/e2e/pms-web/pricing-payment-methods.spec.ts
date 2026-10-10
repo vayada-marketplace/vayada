@@ -1,8 +1,10 @@
 import { expect, test } from "@playwright/test";
 import {
   PMS_WEB_PROPERTY_ID,
+  PMS_WEB_ROOM_TYPE_ID,
   mockPmsWebAuthenticatedSession,
   mockPmsWebTargetRoutes,
+  pmsWebRoomType,
 } from "../support/pmsWebMocks";
 
 test("first pricing setup starts without a payment method and lets staff select one", async ({
@@ -22,8 +24,20 @@ test("first pricing setup starts without a payment method and lets staff select 
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2`, (route) =>
     route.fulfill({ status: 404, json: { code: "not_found" } }),
   );
+  await page.route(
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-types/${PMS_WEB_ROOM_TYPE_ID}`,
+    (route) =>
+      route.fulfill({
+        json: {
+          contractVersion: "pms-operations.v1",
+          propertyId: PMS_WEB_PROPERTY_ID,
+          item: pmsWebRoomType,
+          sourceFreshness: {},
+        },
+      }),
+  );
 
-  await page.goto("/pricing");
+  await page.goto(`/rooms/${PMS_WEB_ROOM_TYPE_ID}?tab=prices`);
   await expect(page.getByRole("heading", { name: "Create your first room price" })).toBeVisible();
   const card = page.getByRole("checkbox", { name: "Card online" });
   const atProperty = page.getByRole("checkbox", { name: "Pay at property" });

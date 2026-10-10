@@ -457,6 +457,13 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-types*`, (route) =>
     route.fulfill({ json: targetList([pmsWebRoomType]) }),
   );
+  // No prices yet (the Rooms list reads the publication). A context route, so a spec's own page.route for
+  // pricing-v2 wins whatever order it was registered in.
+  await page
+    .context()
+    .route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2`, (route) =>
+      route.fulfill({ status: 404, json: { code: "not_found" } }),
+    );
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/plan-limits`, (route) =>
     route.fulfill({
       json: {
