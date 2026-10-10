@@ -65,7 +65,7 @@ describe.skipIf(!url)("pricing-v2 revenue clearing (PostgreSQL)", () => {
         `SELECT room_type_id::text AS room,stay_date::text AS date,sum(occupied_room_nights)::int AS occupied,
            sum(gross_room_amount)::text AS amount,count(*)::int AS rows
          FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1
-         GROUP BY room_type_id,stay_date ORDER BY stay_date,amount`,
+         GROUP BY room_type_id,stay_date ORDER BY stay_date,room_type_id`,
         [scope.bookingId],
       )
     ).rows;
@@ -124,7 +124,7 @@ describe.skipIf(!url)("pricing-v2 revenue clearing (PostgreSQL)", () => {
     await clear();
     expect(await nights()).toEqual(
       ["2026-09-12", "2026-09-13"].flatMap((date) =>
-        [roomTypes[1], roomTypes[0]].map((room) => ({
+        [...roomTypes].sort().map((room) => ({
           room,
           date,
           occupied: 0,
