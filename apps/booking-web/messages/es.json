@@ -298,6 +298,7 @@
     "partialRefund": "Recibirás un reembolso parcial de {amount} ({percentage}%).",
     "noRefund": "No se emitirá reembolso por esta cancelación.",
     "noPaymentToRefund": "No se cobró ningún pago, por lo que no hay nada que reembolsar.",
+    "unpaidCancellationFee": "No se cobró ningún pago, por lo que no hay nada que reembolsar. Según las condiciones de tu reserva, el alojamiento puede cobrar un cargo por cancelación de {amount}.",
     "freeCancellation": "Cancelación gratuita",
     "cancellationFeeApplies": "Se aplican cargos por cancelación",
     "confirmCancel": "Sí, cancelar",

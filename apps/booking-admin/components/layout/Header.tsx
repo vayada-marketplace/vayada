@@ -1,6 +1,6 @@
 "use client";
 
-import { SupportButton } from "@vayada/settings-ui";
+import { isSupportAvailable, SupportDialog, type SupportDialogHandle } from "@vayada/settings-ui";
 import { apiClient } from "@/services/api/client";
 
 import { useState, useRef, useEffect } from "react";
@@ -50,6 +50,8 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const notificationsRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
+  const supportDialog = useRef<SupportDialogHandle>(null);
+  const profileButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -260,14 +262,6 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
 
       <NavigationSearch hotelId={selectedHotel?.id} />
 
-      <SupportButton
-        placement="header"
-        translate={t}
-        product="booking"
-        submit={(request) =>
-          apiClient.post("/api/support", request, { signal: AbortSignal.timeout(20000) })
-        }
-      />
       {/* Right section: Preview + Notifications + Profile */}
       <div className="flex items-center gap-2">
         {/* Preview Button */}
@@ -315,6 +309,7 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
         {/* Profile Avatar + Dropdown */}
         <div className="relative" ref={profileRef}>
           <button
+            ref={profileButtonRef}
             onClick={() => setProfileOpen(!profileOpen)}
             className="w-7 h-7 bg-primary-600 rounded-full flex items-center justify-center text-white text-[10px] font-semibold hover:bg-primary-700 transition-colors"
           >
@@ -441,6 +436,19 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                     </div>
                   )}
                 </div>
+                {isSupportAvailable() && (
+                  <button
+                    onClick={() => {
+                      setProfileOpen(false);
+                      // The closing menu removes this item; return focus to the avatar instead.
+                      profileButtonRef.current?.focus();
+                      supportDialog.current?.open();
+                    }}
+                    className="w-full text-left px-3.5 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    {t("support.help")}
+                  </button>
+                )}
               </div>
               <div className="border-t border-gray-100" />
               {/* Sign out */}
@@ -457,6 +465,14 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
         </div>
       </div>
 
+      <SupportDialog
+        ref={supportDialog}
+        translate={t}
+        product="booking"
+        submit={(request) =>
+          apiClient.post("/api/support", request, { signal: AbortSignal.timeout(20000) })
+        }
+      />
       <ManagePropertiesModal
         open={manageOpen}
         onClose={() => setManageOpen(false)}

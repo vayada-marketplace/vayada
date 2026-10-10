@@ -238,6 +238,11 @@ export type ApiConfig = {
   /** Kill switch for the hourly calendar auto-open producer (VAY-2066); on by default. */
   pmsCalendarAutoOpenSchedulerEnabled: boolean;
   pmsCalendarAutoOpenSchedulerIntervalMs: number;
+  /** Kill switch for the hourly published-pricing freshness check (VAY-2088); on by default. */
+  pricingPublicationFreshnessCheckEnabled: boolean;
+  pricingPublicationFreshnessIntervalMs: number;
+  /** Recipient of the at-most-daily stale-pricing email; unset sends none (log line only). */
+  pricingPublicationFreshnessAlertEmail?: string;
   creatorPlatformConnections?: CreatorPlatformConnectionsConfig;
   providerWebhooks: ProviderWebhookConfig;
   airbnbImport?: ReturnType<typeof loadAirbnbImportConfig>;
@@ -561,6 +566,29 @@ function readCalendarAutoOpenSchedulerIntervalEnv(env: NodeJS.ProcessEnv): numbe
   const key = "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS";
   const value = readTimerIntervalEnv(env, key, 60 * 60 * 1000);
   if (value < 60_000) throw new Error(`${key} must be at least 60000`);
+  return value;
+}
+
+// One recipient; the email goes through the booking email provider and sender.
+function readPricingPublicationFreshnessAlertEmail(
+  env: NodeJS.ProcessEnv,
+  emailConfigured: boolean,
+): string | undefined {
+  const key = "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL";
+  const value = readOptionalEnv(env, key);
+  if (!value) return undefined;
+  if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(value)) {
+    throw new Error(`${key} must be one email address`);
+  }
+  if (!emailConfigured) throw new Error(`${key} requires RESEND_API_KEY and BOOKING_EMAIL_FROM`);
+  return value;
+}
+
+// Each run briefly locks every published property in turn, so it never repeats within ten minutes.
+function readPricingPublicationFreshnessIntervalEnv(env: NodeJS.ProcessEnv): number {
+  const key = "PRICING_PUBLICATION_FRESHNESS_INTERVAL_MS";
+  const value = readTimerIntervalEnv(env, key, 60 * 60 * 1000);
+  if (value < 600_000) throw new Error(`${key} must be at least 600000`);
   return value;
 }
 
@@ -1401,6 +1429,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       true,
     ),
     pmsCalendarAutoOpenSchedulerIntervalMs: readCalendarAutoOpenSchedulerIntervalEnv(env),
+    pricingPublicationFreshnessCheckEnabled: readBooleanEnv(
+      env,
+      "PRICING_PUBLICATION_FRESHNESS_CHECK_ENABLED",
+      true,
+    ),
+    pricingPublicationFreshnessIntervalMs: readPricingPublicationFreshnessIntervalEnv(env),
+    pricingPublicationFreshnessAlertEmail: readPricingPublicationFreshnessAlertEmail(
+      env,
+      Boolean(bookingEmailDelivery),
+    ),
     creatorPlatformConnections,
     providerWebhooks: prospectiveConfig.providerWebhooks,
     channexManagement,
