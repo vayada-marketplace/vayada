@@ -808,6 +808,7 @@
   "rooms.edit.title": "Edit: {name}",
   "rooms.edit.submitLabel": "Save Changes",
   "rooms.edit.success": "Room type updated successfully",
+  "rooms.edit.publishPricesAgain": "Publish prices again so guests can book this room.",
   "rooms.edit.failedToUpdate": "Failed to update",
   "rooms.edit.deleteConfirm": "Are you sure you want to delete this room type?",
   "rooms.edit.cannotDelete": "Cannot delete - room type may have bookings",
