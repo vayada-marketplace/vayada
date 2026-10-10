@@ -52,7 +52,7 @@ test("hydrates the selected property on direct booking navigation without a relo
     (route) => route.fulfill({ json: { items: [] } }),
   );
   await page.route(
-    `**/api/booking/hotels/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}/change-request`,
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}/change-request`,
     (route) => route.fulfill({ json: null }),
   );
 
@@ -116,7 +116,7 @@ test("shows the exact connected-account payment breakdown to the host", async ({
     (route) => route.fulfill({ json: { items: [] } }),
   );
   await page.route(
-    `**/api/booking/hotels/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}/change-request`,
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}/change-request`,
     (route) => route.fulfill({ json: null }),
   );
 
@@ -300,7 +300,7 @@ test("gates legacy booking writes while keeping supported hotel actions active",
     },
   );
   await page.route(
-    `**/api/booking/hotels/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}/change-request**`,
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}/change-request**`,
     (route) => {
       if (route.request().url().endsWith("/accept")) {
         approvals += 1;
