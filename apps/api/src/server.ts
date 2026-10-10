@@ -308,6 +308,7 @@ import { createPgTargetBookingAddonItemsRepository } from "./routes/bookingAddon
 import { createPgTargetBookingPromoCodesRepository } from "./routes/bookingPromoCodes.js";
 import { promotePulledChannexBookingRevision } from "./routes/providerWebhooks.js";
 import { createTargetBookingWebCheckoutAdapter } from "./routes/bookingWebPublic.js";
+import { createBookingWebDisplayRates } from "./routes/bookingWebExchangeRates.js";
 import { createPgTargetBookingSettingsRepository } from "./routes/bookingSettings.js";
 import { createTargetBookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
 import {
@@ -2209,6 +2210,7 @@ const app = buildApp({
   publicHotelQuoteRepository,
   bookingWebCalendarRepository,
   bookingWebCheckoutAdapter,
+  bookingWebDisplayRates: createBookingWebDisplayRates(),
   bookingWebAffiliateArrival: affiliateCaptureRuntime,
   marketplaceAffiliatePublicLink:
     config.affiliatePublicRedirectEnabled && affiliateCaptureRuntime

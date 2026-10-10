@@ -44,38 +44,61 @@ export function emptyAddonValues(currency: string): AddonEditorValues {
     partnerCommissionRate: "",
   };
 }
+// [label, description, perPerson, perNight, price label, preview unit]
 const models = [
   [
     "addons.editor.flatFee",
     "addons.editor.fixedPricePerBooking",
-    "addons.editor.airportTransfer",
     false,
     false,
+    "addons.editor.pricePerBooking",
+    "addons.editor.unitPerBooking",
   ],
   [
     "addons.editor.perPerson",
     "addons.editor.baseNumberOfGuests",
-    "addons.editor.surfLesson",
     true,
     false,
+    "addons.editor.pricePerGuest",
+    "addons.editor.unitPerGuest",
   ],
   [
     "addons.editor.perNight",
     "addons.editor.baseNumberOfNights",
-    "addons.editor.parkingBabyCot",
     false,
     true,
+    "addons.editor.pricePerNight",
+    "addons.editor.unitPerNight",
   ],
   [
     "addons.editor.perPersonNight",
     "addons.editor.baseGuestsNights",
-    "addons.editor.breakfast",
     true,
     true,
+    "addons.editor.pricePerGuestNight",
+    "addons.editor.unitPerGuestNight",
   ],
+] as const;
+const categories = ["dining", "transport", "wellness", "experience", "other"] as const;
+// Fields under "More options"; opened when they hold values or have errors.
+const optionalFields = [
+  "maxQuantity",
+  "duration",
+  "leadTime",
+  "location",
+  "maxGuests",
+  "partnerCommissionRate",
 ] as const;
 const inputClass =
   "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500";
+
+function formatPrice(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(amount);
+  } catch {
+    return `${currency} ${amount.toFixed(2)}`;
+  }
+}
 
 export function AddonEditor({
   translate,
@@ -103,12 +126,25 @@ export function AddonEditor({
   const [values, setValues] = useState(initialValues);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(
+    initialValues.ownershipKind === "partner" ||
+      ["duration", "leadTime", "location", "maxGuests"].some(
+        (key) => initialValues[key as keyof AddonEditorValues],
+      ) ||
+      initialValues.maxQuantity !== "1",
+  );
   const dialog = useRef<HTMLDialogElement>(null);
   const previews = useRef<string[]>([]);
   useEffect(() => {
     dialog.current?.showModal();
     return () => previews.current.forEach(URL.revokeObjectURL);
   }, []);
+  const model =
+    models.find(
+      ([, , perPerson, perNight]) => values.perPerson === perPerson && values.perNight === perNight,
+    ) ?? models[0];
+  const price = /^\d+(?:\.\d{1,2})?$/.test(values.price) ? Number(values.price) : 0;
+  const cover = values.photos.find((photo) => photo.isCover) ?? values.photos[0];
   function field(key: keyof AddonEditorValues, label: string, type = "text", placeholder = "") {
     return (
       <label className="block text-xs font-medium text-gray-800">
@@ -159,6 +195,7 @@ export function AddonEditor({
       next.partnerCommissionRate = "addons.editor.enterACommissionFrom0To100WithUpTo";
     if (!currency) next.save = "addons.editor.propertyCurrencyIsUnavailablePleaseReload";
     setErrors(next);
+    if (optionalFields.some((key) => next[key])) setMoreOpen(true);
     if (Object.keys(next).length) return;
     setSaving(true);
     try {
@@ -179,31 +216,29 @@ export function AddonEditor({
         event.preventDefault();
         if (!saving) onCancel();
       }}
-      className="m-auto max-h-[90vh] w-[calc(100%-2rem)] max-w-4xl overflow-hidden rounded-2xl bg-white p-0 text-gray-900 shadow-2xl backdrop:bg-black/40"
+      className="m-auto max-h-[90vh] w-[calc(100%-2rem)] max-w-5xl overflow-hidden rounded-2xl bg-white p-0 text-gray-900 shadow-2xl backdrop:bg-black/40"
     >
       <form onSubmit={save} noValidate className="flex max-h-[90vh] flex-col">
-        <header className="flex shrink-0 items-start justify-between border-b border-gray-200 p-6">
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-200 px-6 py-5">
           <div>
             <h2 id="addon-editor-title" className="text-lg font-semibold">
-              {editing ? t("addons.editor.editAddOn") : t("addons.editor.createAddOn")}
+              {editing ? t("addons.editor.editAddOn") : t("addons.editor.newAddOn")}
             </h2>
-            <p className="mt-1 text-sm text-gray-500">
-              {t("addons.editor.upsellsShownDuringTheBookingFlow")}
-            </p>
+            <p className="mt-1 text-sm text-gray-500">{t("addons.editor.essentialsHint")}</p>
           </div>
           <button
             type="button"
             aria-label={t("addons.editor.closeAddOnEditor")}
             onClick={() => !saving && onCancel()}
-            className="rounded-lg border px-2 py-1"
+            className="rounded-lg p-1.5 text-xl leading-none text-gray-500 hover:bg-gray-100 hover:text-gray-900"
           >
             ×
           </button>
         </header>
-        <div className="grid min-h-0 overflow-y-auto md:grid-cols-2">
-          <section className="space-y-4 p-6 md:border-r md:border-gray-200">
+        <div className="grid min-h-0 overflow-y-auto md:grid-cols-[minmax(0,1fr)_20rem]">
+          <section className="space-y-5 p-6">
             <h3 className="text-xs font-semibold tracking-widest text-gray-500">
-              {t("addons.editor.what")}
+              {t("addons.editor.essentials")}
             </h3>
             {field(
               "name",
@@ -211,7 +246,29 @@ export function AddonEditor({
               "text",
               t("addons.editor.eGAirportTransferDailyBreakfast"),
             )}
-            <label className="block text-xs font-medium">
+            <fieldset>
+              <legend className="mb-2 text-xs font-medium text-gray-800">
+                {t("addons.editor.category")}
+              </legend>
+              <div className="flex flex-wrap gap-2">
+                {categories.map((category) => (
+                  <label
+                    key={category}
+                    className={`relative cursor-pointer rounded-full border px-3.5 py-1.5 text-sm focus-within:ring-2 focus-within:ring-primary-500 ${values.category === category ? "border-primary-500 bg-primary-50 text-primary-700" : "border-gray-200 text-gray-700 hover:border-gray-300"}`}
+                  >
+                    <input
+                      type="radio"
+                      name="addon-category"
+                      className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                      checked={values.category === category}
+                      onChange={() => setValues((v) => ({ ...v, category }))}
+                    />
+                    {t(`addons.category.${category}`)}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <label className="block text-xs font-medium text-gray-800">
               {t("addons.editor.description")}
               <textarea
                 value={values.description}
@@ -221,38 +278,19 @@ export function AddonEditor({
                 onChange={(e) => setValues((v) => ({ ...v, description: e.target.value }))}
               />
             </label>
-            <label className="block text-xs font-medium">
-              {t("addons.editor.category")}
-              <select
-                value={values.category}
-                className={inputClass}
-                onChange={(e) =>
-                  setValues((v) => ({
-                    ...v,
-                    category: e.target.value as AddonEditorValues["category"],
-                  }))
-                }
-              >
-                {["experience", "dining", "wellness", "transport", "other"].map((c) => (
-                  <option key={c} value={c}>
-                    {t(`addons.category.${c}`)}
-                  </option>
-                ))}
-              </select>
-            </label>
             <div>
-              <p className="mb-2 text-xs font-medium">
+              <p className="mb-2 text-xs font-medium text-gray-800">
                 {t("addons.editor.photos")}{" "}
                 <span className="font-normal text-gray-500">{t("addons.editor.upTo5")}</span>
               </p>
               <div className="flex flex-wrap gap-2">
                 {values.photos.map((photo, index) => (
-                  <div key={photo.imageUrl} className="relative h-20 w-24">
+                  <div key={photo.imageUrl} className="relative h-24 w-32">
                     <button
                       type="button"
                       aria-label={t("admin.setPhotoNumberAsCover", { number: index + 1 })}
                       aria-pressed={photo.isCover}
-                      className="h-full w-full overflow-hidden rounded-lg border"
+                      className="h-full w-full overflow-hidden rounded-xl border"
                       onClick={() =>
                         setValues((v) => ({
                           ...v,
@@ -289,8 +327,11 @@ export function AddonEditor({
                   </div>
                 ))}
                 {values.photos.length < 5 && (
-                  <label className="flex h-20 w-24 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed text-xs text-gray-500">
-                    +<span>{t("addons.editor.add")}</span>
+                  <label className="flex h-24 w-32 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-gray-300 text-xs text-gray-500 hover:border-gray-400">
+                    <span aria-hidden="true" className="text-lg leading-none">
+                      +
+                    </span>
+                    <span>{t("addons.editor.addPhoto")}</span>
                     <input
                       type="file"
                       multiple
@@ -334,45 +375,22 @@ export function AddonEditor({
                   </label>
                 )}
               </div>
+              <p className="mt-2 text-xs text-gray-500">{t("addons.editor.photoHint")}</p>
               {errors.photos && (
                 <p role="alert" className="mt-1 text-xs text-red-600">
                   {t(errors.photos)}
                 </p>
               )}
             </div>
-            <h3 className="pt-2 text-xs font-semibold tracking-widest text-gray-500">
-              {t("addons.editor.details")}
-            </h3>
-            <div className="grid grid-cols-2 gap-3">
-              {field("duration", t("addons.editor.duration"), "text", t("addons.editor.eG2Hours"))}
-              {field(
-                "location",
-                t("addons.editor.location"),
-                "text",
-                t("addons.editor.eGHotelLobby"),
-              )}
-              {field("maxGuests", t("addons.editor.maxGuests"), "number", t("addons.editor.eG6"))}
-              {field(
-                "leadTime",
-                t("addons.editor.leadTime"),
-                "text",
-                t("addons.editor.eG24hBefore"),
-              )}
-            </div>
-          </section>
-          <section className="space-y-4 p-6">
-            <h3 className="text-xs font-semibold tracking-widest text-gray-500">
-              {t("addons.editor.pricing")}
-            </h3>
             <fieldset>
-              <legend className="mb-2 text-xs font-medium">
-                {t("addons.editor.pricingModel")}
+              <legend className="mb-2 text-xs font-medium text-gray-800">
+                {t("addons.editor.howIsItPriced")}
               </legend>
-              <div className="grid grid-cols-2 gap-2">
-                {models.map(([label, description, example, perPerson, perNight]) => (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {models.map(([label, description, perPerson, perNight]) => (
                   <label
                     key={label}
-                    className={`relative cursor-pointer rounded-lg border p-3 text-xs focus-within:ring-2 focus-within:ring-primary-500 ${values.perPerson === perPerson && values.perNight === perNight ? "border-primary-500 bg-primary-50" : "border-gray-200"}`}
+                    className={`relative cursor-pointer rounded-xl border p-3.5 text-sm focus-within:ring-2 focus-within:ring-primary-500 ${values.perPerson === perPerson && values.perNight === perNight ? "border-primary-500 bg-primary-50" : "border-gray-200 hover:border-gray-300"}`}
                   >
                     <input
                       type="radio"
@@ -382,58 +400,140 @@ export function AddonEditor({
                       checked={values.perPerson === perPerson && values.perNight === perNight}
                       onChange={() => setValues((v) => ({ ...v, perPerson, perNight }))}
                     />
-                    <span className="block font-semibold">{t(label)}</span>
-                    <span className="mt-1 block text-gray-500">{t(description)}</span>
-                    <span className="mt-1 block italic text-gray-400">{t(example)}</span>
+                    <span className="block font-medium text-gray-900">{t(label)}</span>
+                    <span className="mt-1 block text-xs text-gray-500">{t(description)}</span>
                   </label>
                 ))}
               </div>
             </fieldset>
-            <div className="grid grid-cols-2 gap-3">
-              {field("price", t("admin.basePriceCurrency", { currency }), "text", "0.00")}
-              {field("maxQuantity", t("addons.editor.maxQuantity"), "number")}
+            <div className="grid items-end gap-3 sm:grid-cols-2">
+              {field("price", t(model[4], { currency }), "text", "0.00")}
+              <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                {t("addons.editor.priceExample", {
+                  total: formatPrice(
+                    price * (values.perPerson ? 2 : 1) * (values.perNight ? 3 : 1),
+                    currency,
+                  ),
+                })}
+              </p>
             </div>
-            <p className="text-xs text-gray-500">
-              {t("addons.editor.maxQuantityIsTheNumberOfPackagesPerBooking")}
-            </p>
-            <label className="block text-xs font-medium">
-              {t("addons.editor.ownership")}
-              <select
-                value={values.ownershipKind}
-                className={inputClass}
-                onChange={(e) =>
-                  setValues((v) => ({
-                    ...v,
-                    ownershipKind: e.target.value as "property" | "partner",
-                  }))
-                }
-              >
-                <option value="property">{t("addons.editor.own")}</option>
-                <option value="partner">{t("addons.editor.partner")}</option>
-              </select>
-            </label>
-            {values.ownershipKind === "partner" &&
-              field("partnerCommissionRate", t("addons.editor.partnerCommission"))}
+            <details
+              open={moreOpen}
+              onToggle={(event) => setMoreOpen(event.currentTarget.open)}
+              className="rounded-xl border border-gray-200"
+            >
+              <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-gray-800">
+                {t("addons.editor.moreOptions")}
+              </summary>
+              <div className="space-y-4 border-t border-gray-200 p-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {field("maxQuantity", t("addons.editor.maxQuantity"), "number")}
+                  {field(
+                    "duration",
+                    t("addons.editor.duration"),
+                    "text",
+                    t("addons.editor.eG2Hours"),
+                  )}
+                  {field(
+                    "leadTime",
+                    t("addons.editor.leadTime"),
+                    "text",
+                    t("addons.editor.eG24hBefore"),
+                  )}
+                  {field(
+                    "location",
+                    t("addons.editor.location"),
+                    "text",
+                    t("addons.editor.eGHotelLobby"),
+                  )}
+                  {field(
+                    "maxGuests",
+                    t("addons.editor.maxGuests"),
+                    "number",
+                    t("addons.editor.eG6"),
+                  )}
+                </div>
+                <p className="text-xs text-gray-500">
+                  {t("addons.editor.maxQuantityIsTheNumberOfPackagesPerBooking")}
+                </p>
+                <label className="block text-xs font-medium text-gray-800">
+                  {t("addons.editor.ownership")}
+                  <select
+                    value={values.ownershipKind}
+                    className={inputClass}
+                    onChange={(e) =>
+                      setValues((v) => ({
+                        ...v,
+                        ownershipKind: e.target.value as "property" | "partner",
+                      }))
+                    }
+                  >
+                    <option value="property">{t("addons.editor.own")}</option>
+                    <option value="partner">{t("addons.editor.partner")}</option>
+                  </select>
+                </label>
+                {values.ownershipKind === "partner" &&
+                  field("partnerCommissionRate", t("addons.editor.partnerCommission"))}
+              </div>
+            </details>
           </section>
+          <aside className="border-t border-gray-200 bg-gray-50 p-6 md:border-l md:border-t-0">
+            {/* Keep the preview in view while the form scrolls. */}
+            <div className="md:sticky md:top-0">
+              <h3 className="text-xs font-semibold tracking-widest text-gray-500">
+                {t("addons.editor.checkoutPreview")}
+              </h3>
+              <div
+                aria-hidden="true"
+                className="mt-3 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+              >
+                {cover ? (
+                  <img src={cover.imageUrl} alt="" className="h-36 w-full object-cover" />
+                ) : (
+                  <div className="flex h-36 items-center justify-center bg-primary-50 text-sm text-gray-500">
+                    {t("addons.editor.noPhotoYet")}
+                  </div>
+                )}
+                <div className="space-y-2 p-4">
+                  <p className="font-semibold text-gray-900">
+                    {values.name.trim() || t("addons.editor.untitledAddOn")}
+                  </p>
+                  <p className="line-clamp-3 text-sm text-gray-600">
+                    {values.description.trim() || t("addons.editor.previewDescription")}
+                  </p>
+                  <div className="flex items-end justify-between gap-2 pt-1">
+                    <div>
+                      <p className="font-semibold text-gray-900">{formatPrice(price, currency)}</p>
+                      <p className="text-xs text-gray-500">{t(model[5])}</p>
+                    </div>
+                    <span className="rounded-lg bg-primary-600 px-3 py-1.5 text-sm font-medium text-white">
+                      {t("addons.editor.add")}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <p className="mt-3 text-xs text-gray-500">{t("addons.editor.previewHint")}</p>
+            </div>
+          </aside>
         </div>
-        <footer className="shrink-0 border-t border-gray-200 p-6">
+        <footer className="shrink-0 border-t border-gray-200 px-6 py-4">
           {errors.save && (
             <p role="alert" className="mb-3 text-sm text-red-600">
               {t(errors.save)}
             </p>
           )}
-          <div className="flex justify-between">
+          <div className="flex justify-end gap-2">
             <button
               type="button"
               onClick={() => !saving && onCancel()}
-              className="rounded-lg border px-4 py-2 text-sm"
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm"
             >
               {t("addons.editor.cancel")}
             </button>
             <button
               type="submit"
               aria-busy={saving}
-              className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white"
+              className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700"
             >
               {saving
                 ? t("addons.editor.saving")
@@ -454,24 +554,19 @@ export const AddonEditorMessages = {
   "addons.category.other": "Other",
   "addons.category.transport": "Transport",
   "addons.category.wellness": "Wellness",
-  "addons.category.dining": "Dining",
-  "addons.category.experience": "Experience",
-  "admin.basePriceCurrency": "Base price ({currency}) *",
+  "addons.category.dining": "Food & Beverage",
+  "addons.category.experience": "Experiences",
   "admin.removePhotoNumber": "Remove photo {number}",
   "admin.addOnPhotoNumber": "Add-on photo {number}",
   "admin.setPhotoNumberAsCover": "Set photo {number} as cover",
-  "addons.editor.flatFee": "Flat fee",
-  "addons.editor.fixedPricePerBooking": "Fixed price per booking",
-  "addons.editor.airportTransfer": "Airport transfer",
+  "addons.editor.flatFee": "Flat price",
+  "addons.editor.fixedPricePerBooking": "One price per booking, no matter the stay.",
   "addons.editor.perPerson": "Per person",
-  "addons.editor.baseNumberOfGuests": "Base × number of guests",
-  "addons.editor.surfLesson": "Surf lesson",
+  "addons.editor.baseNumberOfGuests": "Price × number of guests.",
   "addons.editor.perNight": "Per night",
-  "addons.editor.baseNumberOfNights": "Base × number of nights",
-  "addons.editor.parkingBabyCot": "Parking, baby cot",
-  "addons.editor.perPersonNight": "Per person / night",
-  "addons.editor.baseGuestsNights": "Base × guests × nights",
-  "addons.editor.breakfast": "Breakfast",
+  "addons.editor.baseNumberOfNights": "Price × number of nights.",
+  "addons.editor.perPersonNight": "Per person × night",
+  "addons.editor.baseGuestsNights": "Price × guests × nights.",
   "addons.editor.nameIsRequired": "Name is required.",
   "addons.editor.enterANonNegativeBasePriceWithUpToTwo":
     "Enter a non-negative base price with up to two decimals.",
@@ -481,11 +576,9 @@ export const AddonEditorMessages = {
   "addons.editor.propertyCurrencyIsUnavailablePleaseReload":
     "Property currency is unavailable. Please reload.",
   "addons.editor.couldNotSaveAddOnPleaseRetry": "Could not save add-on. Please retry.",
-  "addons.editor.editAddOn": "Edit Add-on",
-  "addons.editor.createAddOn": "Create Add-on",
-  "addons.editor.upsellsShownDuringTheBookingFlow": "Upsells shown during the booking flow.",
+  "addons.editor.editAddOn": "Edit add-on",
+  "addons.editor.createAddOn": "Create add-on",
   "addons.editor.closeAddOnEditor": "Close add-on editor",
-  "addons.editor.what": "WHAT",
   "addons.editor.name": "Name *",
   "addons.editor.eGAirportTransferDailyBreakfast": "e.g., Airport Transfer, Daily Breakfast",
   "addons.editor.description": "Description",
@@ -496,7 +589,6 @@ export const AddonEditorMessages = {
   "addons.editor.cover": "COVER",
   "addons.editor.add": "Add",
   "addons.editor.addPhotos": "Add photos",
-  "addons.editor.details": "DETAILS",
   "addons.editor.duration": "Duration",
   "addons.editor.eG2Hours": "e.g., 2 hours",
   "addons.editor.location": "Location",
@@ -505,8 +597,6 @@ export const AddonEditorMessages = {
   "addons.editor.eG6": "e.g., 6",
   "addons.editor.leadTime": "Lead time",
   "addons.editor.eG24hBefore": "e.g., 24h before",
-  "addons.editor.pricing": "PRICING",
-  "addons.editor.pricingModel": "Pricing model *",
   "addons.editor.maxQuantity": "Max quantity",
   "addons.editor.maxQuantityIsTheNumberOfPackagesPerBooking":
     "Max quantity is the number of packages per booking.",
@@ -517,4 +607,27 @@ export const AddonEditorMessages = {
   "addons.editor.cancel": "Cancel",
   "addons.editor.saving": "Saving...",
   "addons.editor.save": "Save",
+  "addons.editor.newAddOn": "New add-on",
+  "addons.editor.essentialsHint":
+    "Fill in the essentials — everything else is optional and collapsed.",
+  "addons.editor.essentials": "ESSENTIALS",
+  "addons.editor.addPhoto": "Add photo",
+  "addons.editor.photoHint":
+    "Landscape photos work best. The cover photo is shown in the checkout list.",
+  "addons.editor.howIsItPriced": "How is it priced?",
+  "addons.editor.pricePerBooking": "Price per booking ({currency}) *",
+  "addons.editor.pricePerGuest": "Price per guest ({currency}) *",
+  "addons.editor.pricePerNight": "Price per night ({currency}) *",
+  "addons.editor.pricePerGuestNight": "Price per guest per night ({currency}) *",
+  "addons.editor.priceExample": "Example: 2 guests, 3 nights → {total} total",
+  "addons.editor.moreOptions": "More options",
+  "addons.editor.checkoutPreview": "CHECKOUT PREVIEW",
+  "addons.editor.noPhotoYet": "No photo yet",
+  "addons.editor.untitledAddOn": "Untitled add-on",
+  "addons.editor.previewDescription": "Add a description so guests know what they get.",
+  "addons.editor.unitPerBooking": "per booking",
+  "addons.editor.unitPerGuest": "per guest",
+  "addons.editor.unitPerNight": "per night",
+  "addons.editor.unitPerGuestNight": "per guest per night",
+  "addons.editor.previewHint": "A preview of how this add-on appears in the booking flow.",
 };

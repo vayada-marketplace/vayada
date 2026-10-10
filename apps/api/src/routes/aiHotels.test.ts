@@ -410,6 +410,36 @@ describe("target public hotel profile security", () => {
     await app.close();
   });
 
+  it("publishes Booking's additional currencies as display only, pricing currency first", async () => {
+    const { repository, queries } = targetRepository(
+      targetProfileRow({ bookingDisplayCurrencies: ["USD", "EUR", "usd", "GBP", "USD", " "] }),
+    );
+    const app = Fastify({ logger: false });
+    await app.register(registerAiHotelRoutes, { prefix: "/api/ai", repository });
+
+    const response = await app.inject({ method: "GET", url: "/api/ai/hotels/hotel-alpenrose" });
+    const hotel = response.json().hotel;
+
+    expect(hotel.branding.displayCurrencies).toEqual(["EUR", "USD", "GBP"]);
+    expect(hotel.supportedCurrencies).toEqual(["EUR"]);
+    expect(hotel.supportedQuoteParameters.supportedCurrencies).toEqual(["EUR"]);
+    expect(queries[0]?.text).toContain(
+      'booking_branding.supported_currencies AS "bookingDisplayCurrencies"',
+    );
+    await app.close();
+  });
+
+  it.each([[[]], [["EUR"]], [null]])(
+    "omits display currencies when Booking offers only the pricing currency (%j)",
+    async (bookingDisplayCurrencies) => {
+      const { repository } = targetRepository(targetProfileRow({ bookingDisplayCurrencies }));
+
+      const profile = await repository.findProfileBySlug("hotel-alpenrose");
+
+      expect(profile?.hotel.branding).not.toHaveProperty("displayCurrencies");
+    },
+  );
+
   it("serializes only supported public Catalog contacts", async () => {
     const { repository, queries } = targetRepository(
       targetProfileRow({

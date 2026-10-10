@@ -47,7 +47,7 @@ it("hides inaccessible destinations independently and fails closed on read error
   const visible = SEARCH_ENTRIES.filter((entry) => access.has(entry[3]));
   expect(visible.some((entry) => entry[0] === "Dashboard")).toBe(true);
   expect(visible.some((entry) => entry[0] === "Domain Settings")).toBe(true);
-  expect(visible.some((entry) => entry[1].startsWith("/settings?"))).toBe(false);
+  expect(visible.some((entry) => entry[2] === "Settings")).toBe(false);
   expect(reads.settings).toHaveBeenCalledWith("hotel-1");
   expect(reads.payments).toHaveBeenCalledWith({ propertyId: "property-1" });
 });
