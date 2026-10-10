@@ -1,6 +1,6 @@
 import { parseRoomTypeFacts, type RoomTypeFacts } from "@vayada/domain-pms";
 
-import type { RoomTypeCreate } from ".";
+import type { RoomTypeCreate, RoomTypeUpdate } from ".";
 
 // The room form's bed and amenity labels, keyed to the canonical room-facts and room-amenity
 // vocabularies (apps/api/src/domains/pmsRoomFactsVocabulary.ts, pmsRoomAmenityVocabulary.ts).
@@ -80,7 +80,7 @@ export function roomTypeFactsFromForm(data: RoomTypeCreate): RoomTypeFacts {
   const facts = parseRoomTypeFacts({
     name: data.name.trim(),
     description: data.description ?? "",
-    category: data.category ? data.category.toLowerCase() : null,
+    category: roomCategoryKey(data.category),
     occupancy: { maxGuests, maxAdults, maxChildren },
     beds: bedsFromSummary(data.bedType ?? ""),
     bedrooms: data.bedrooms ?? null,
@@ -90,10 +90,43 @@ export function roomTypeFactsFromForm(data: RoomTypeCreate): RoomTypeFacts {
   });
   if (!facts) {
     throw new Error(
-      "Check the room details: a name of up to 200 characters, a description of up to 5,000 characters, whole bed and bedroom counts, and at least one bathroom.",
+      "Check the room details: a name of up to 200 characters, a description of up to 5,000 characters, a bed type and category from the lists, whole bed and bedroom counts, and at least one bathroom.",
     );
   }
   return facts;
+}
+
+// Saving room facts moves the room's revision, which published prices pin, so an edit
+// only writes them when a value the command stores actually changed.
+export function roomFactInputsChanged(next: RoomTypeUpdate, saved: RoomTypeUpdate): boolean {
+  return roomFactInputs(next) !== roomFactInputs(saved);
+}
+
+function roomFactInputs(data: RoomTypeUpdate): string {
+  // A blank adult or child limit means "any", stored as the total occupancy.
+  return JSON.stringify([
+    (data.name ?? "").trim(),
+    data.description ?? "",
+    roomCategoryKey(data.category),
+    data.maxOccupancy ?? null,
+    data.maxAdults ?? data.maxOccupancy ?? null,
+    data.maxChildren ?? data.maxOccupancy ?? null,
+    bedsFromSummary(data.bedType ?? ""),
+    data.bedrooms ?? null,
+    data.bathroomType === "shared" ? null : (data.bathrooms ?? null),
+    data.bathroomType ?? "private",
+    data.size && data.size > 0 ? data.size : null,
+  ]);
+}
+
+// The private-bathroom label is the bathroomType fact, not an amenity.
+export function roomAmenityInputsChanged(
+  next: readonly string[],
+  saved: readonly string[],
+): boolean {
+  const amenities = (labels: readonly string[]) =>
+    JSON.stringify(labels.filter((label) => label !== PRIVATE_BATHROOM_LABEL).sort());
+  return amenities(next) !== amenities(saved);
 }
 
 export function roomAmenityKeys(labels: readonly string[]): string[] {
@@ -117,6 +150,15 @@ export function bedSummaryFromFacts(beds: unknown): string | undefined {
     .join(", ");
 }
 
+// Room facts store category keys ("junior_suite"); older rows hold labels ("Junior Suite").
+function roomCategoryKey(category: string | undefined): string | null {
+  const key = (category ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  return key || null;
+}
+
 // Room facts store lowercase category keys and the size as { value, unit }; older rows do not.
 export function roomCategoryLabel(category: string | null): string {
   return category ? `${category.charAt(0).toUpperCase()}${category.slice(1)}` : "";
@@ -136,7 +178,8 @@ function bedsFromSummary(summary: string): { type: string; quantity: number }[] 
     if (!part) continue;
     const match = /^(\d+)\s+(.+)$/.exec(part);
     const label = match ? match[2]! : part;
-    const type = BED_TYPE_KEYS[label] ?? label;
+    // Older rooms store plural labels such as "2 Queen Beds".
+    const type = BED_TYPE_KEYS[label] ?? BED_TYPE_KEYS[label.replace(/s$/, "")] ?? label;
     quantities.set(type, (quantities.get(type) ?? 0) + (match ? Number(match[1]) : 1));
   }
   return Array.from(quantities, ([type, quantity]) => ({ type, quantity }));
