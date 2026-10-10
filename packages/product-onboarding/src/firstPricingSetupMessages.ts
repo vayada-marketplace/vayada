@@ -8,6 +8,8 @@ export const firstPricingSetupEnglish = {
   "pricing.error.priceTooLarge": "This price is too large.",
   "pricing.error.priceZero": "Enter a price greater than zero.",
   "pricing.error.unverified": "Pricing data could not be verified. Reload before continuing.",
+  "pricing.error.wholeUnitsOnly":
+    "Enter a whole amount without decimals: IDR prices are whole rupiah.",
   "pricing.freeCancellationDays": "Free cancellation until days before arrival (0–365)",
   "pricing.freeCancellationUntilDeadline": "Free cancellation until a deadline",
   "pricing.fullPayment": "Full payment",
