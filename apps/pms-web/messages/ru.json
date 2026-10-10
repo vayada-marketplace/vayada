@@ -7,6 +7,7 @@
   "layout.header.user": "Пользователь",
   "layout.header.language": "Язык",
   "layout.header.currency": "Валюта",
+  "layout.header.help": "Помощь",
   "layout.sidebar.propertyManagerDescription": "Операции и инвентарь",
   "layout.sidebar.creatorMarketplace": "Маркетплейс vayada",
   "layout.sidebar.creatorMarketplaceDescription": "Авторы и коллаборации",
