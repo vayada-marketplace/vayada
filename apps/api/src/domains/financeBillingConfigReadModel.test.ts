@@ -36,6 +36,9 @@ describe("target Finance billing config read port", () => {
     expect(sql).toContain("billing_status IN ('trialing', 'active')");
     expect(sql).toContain("entitlement_metadata ->> 'planSelectedAt'");
     expect(sql).toContain("provider_subscription_status IN ('trialing', 'active')");
+    // VAY-1362: only an adopted legacy subscription keeps Fixed terms while past_due.
+    expect(sql).toContain("provider_subscription_status = 'past_due'");
+    expect(sql).toContain("entitlement_metadata ->> 'legacyAdoptedAt'");
     expect(sql).toContain("source_rule_id = 'onboarding-booking:' || property.id::text");
     expect(sql).toContain("commission_type = 'percentage'");
     expect(sql).toContain("percentage_rate = 5");
