@@ -351,6 +351,55 @@ describe("closed Channex offer configuration", () => {
       },
     });
   });
+  it("accepts children that never change the price, with adults-only options", () => {
+    const neutral = (
+      meal: PricingConfiguration["offers"][number]["meal"],
+      adultFromAge = 18,
+    ): PricingConfiguration => {
+      const c = fixture();
+      return {
+        ...c,
+        children: {
+          adultFromAge,
+          bands: [
+            {
+              fromAge: 0,
+              throughAge: adultFromAge - 1,
+              nightlyMinor: "0",
+              countsTowardCapacity: true,
+            },
+          ],
+        },
+        offers: [{ ...c.offers[0]!, meal }],
+      };
+    };
+    const roomMeal = { kind: "room_only", charge: { kind: "room", amountMinor: "0" } } as const;
+    expect(planChannexOfferConfiguration(neutral(roomMeal), "flex", 1)).toMatchObject({
+      kind: "planned",
+      configuration: {
+        options: [
+          { occupancy: 1, is_primary: true },
+          { occupancy: 2, is_primary: false },
+          { occupancy: 3, is_primary: false },
+        ],
+      },
+    });
+    const freeChildMeal = {
+      kind: "breakfast",
+      charge: { kind: "person", adultMinor: "1000", childBandAmountsMinor: ["0"] },
+    } as const;
+    expect(planChannexOfferConfiguration(neutral(freeChildMeal), "flex", 1)).toMatchObject({
+      kind: "planned",
+    });
+    const pricedChildMeal = {
+      kind: "breakfast",
+      charge: { kind: "person", adultMinor: "1000", childBandAmountsMinor: ["500"] },
+    } as const;
+    const refused = { kind: "unavailable", reason: "child_representation_unavailable" };
+    expect(planChannexOfferConfiguration(neutral(pricedChildMeal), "flex", 1)).toEqual(refused);
+    // A 14-year-old is priced as an adult when adults start at 12; an OTA may call them a child.
+    expect(planChannexOfferConfiguration(neutral(roomMeal, 12), "flex", 1)).toEqual(refused);
+  });
   it("rejects unsupported children, invalid selection and oversized plans without partial output", () => {
     expect(planChannexOfferConfiguration(fixture(), "flex", 1)).toEqual({
       kind: "unavailable",
@@ -731,6 +780,42 @@ describe("Channex published adult room preflight", () => {
     const { room, response, request } = setup();
     (response.data.attributes as Record<string, unknown>)[key as string] = value;
     await expect(verifyChannexOfferRoom(room, identity, request)).rejects.toThrow();
+  });
+  it("accepts a room with price-neutral children, also on a legacy all-adult room type", async () => {
+    const { response, request } = setup();
+    const base = fixture();
+    const family = {
+      ...base,
+      capacity: { total: 4, adults: 3, children: 1 },
+      children: {
+        adultFromAge: 18,
+        bands: [{ fromAge: 0, throughAge: 17, nightlyMinor: "0", countsTowardCapacity: true }],
+      },
+    };
+    const expected = { ...identity, adults: 3, children: 0, infants: 0, roomKind: "room" };
+    expect(await verifyChannexOfferRoom(family, identity, request)).toEqual(expected);
+    // Legacy created Channex room types with occ_adults = max_occupancy (every guest an adult).
+    response.data.attributes.occ_adults = 4;
+    expect(await verifyChannexOfferRoom(family, identity, request)).toEqual(expected);
+    for (const [key, value] of [
+      ["occ_adults", 5],
+      ["occ_adults", 2],
+      ["occ_children", 1],
+    ] as const) {
+      const { response: other, request: otherRequest } = setup();
+      (other.data.attributes as Record<string, unknown>)[key] = value;
+      await expect(verifyChannexOfferRoom(family, identity, otherRequest)).rejects.toThrow();
+    }
+    const priced = {
+      ...family,
+      children: {
+        ...family.children,
+        bands: [{ ...family.children.bands[0]!, nightlyMinor: "500" }],
+      },
+    };
+    await expect(verifyChannexOfferRoom(priced, identity, request)).rejects.toThrow(
+      "Channex adult room configuration unavailable",
+    );
   });
   it("rejects wrong resource identity and malformed responses", async () => {
     const { room, response } = setup();

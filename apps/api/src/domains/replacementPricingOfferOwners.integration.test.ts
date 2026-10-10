@@ -103,6 +103,7 @@ import {
   claimPublishedChannexOfferCreate,
   recordPublishedChannexOfferCreate as recordCreation,
   activatePublishedChannexOffers,
+  readChannexOfferDesiredAri,
 } from "./replacementPricingOfferOwners.js";
 import {
   createReplacementChargeDeclarationStore,
@@ -7929,4 +7930,78 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     },
     20000,
   );
+  // VAY-2108 D2b: desired ongoing ARI for one target, inside the caller's transaction.
+  async function readDesired(
+    f: Awaited<ReturnType<typeof initialAriFixture>>,
+    window?: { from?: string; through?: string },
+    targetId = f.claim.targetId,
+  ) {
+    const client = await pool.connect();
+    try {
+      // As D3: the property authority requires a serializable transaction.
+      await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+      return await readChannexOfferDesiredAri(client, { ...f.input, targetId }, window);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+  }
+  it("reads desired ongoing ARI for a current active offer, closed until its sales open", async () => {
+    const f = await initialAriFixture();
+    await seedCurrentAvailability(f);
+    await seedCompletedInitialAri(f);
+    expect(await activatePublishedChannexOffers(pool, f.input)).toMatchObject({
+      kind: "all_targets_active",
+    });
+    const today = new Date().toISOString().slice(0, 10); // the fixture hotel is on Etc/UTC
+    const next = new Date(`${today}T00:00:00.000Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    const window = { from: today, through: next.toISOString().slice(0, 10) };
+    const closed = await readDesired(f, window);
+    if (closed.kind !== "desired") throw new Error(closed.reason);
+    expect(closed).toMatchObject({
+      targetId: f.claim.targetId,
+      salesState: "closed",
+      publicationRevision: 1,
+      from: today,
+      through: window.through,
+    });
+    expect(closed.values.map(({ date, value }) => [date, value.stop_sell])).toEqual([
+      [today, true],
+      [window.through, true],
+    ]);
+    expect(closed.values[0]!.value).toMatchObject({
+      property_id: closed.externalPropertyId,
+      rate_plan_id: closed.externalRatePlanId,
+    });
+    const first = closed.values[0]!.value;
+    expect("rates" in first && first.rates[0]).toEqual({ occupancy: 1, rate: "100.00" });
+    await pool.query(
+      "UPDATE pms.channex_offer_targets SET sales_state='open',sales_state_changed_at=now() WHERE id=$1",
+      [f.claim.targetId],
+    );
+    const open = await readDesired(f, window);
+    if (open.kind !== "desired") throw new Error(open.reason);
+    expect(open.values.map(({ value }) => value.stop_sell)).toEqual([false, false]);
+    expect(open.values[0]!.valueSha256).not.toBe(closed.values[0]!.valueSha256);
+    const horizon = await readDesired(f);
+    expect(horizon.kind === "desired" && horizon.values.length).toBe(500);
+  });
+  it("classifies a target that is not active, unknown or no longer current", async () => {
+    const f = await initialAriFixture();
+    await seedCurrentAvailability(f);
+    await seedCompletedInitialAri(f);
+    const unavailable = (reason: string) => ({ kind: "unavailable", reason });
+    expect(await readDesired(f)).toEqual(unavailable("target_unavailable"));
+    await activatePublishedChannexOffers(pool, f.input);
+    expect(await readDesired(f, undefined, randomUUID())).toEqual(
+      unavailable("target_unavailable"),
+    );
+    expect(await readDesired(f, undefined, "target")).toEqual(unavailable("invalid_target"));
+    await pool.query(
+      "UPDATE pms.channel_room_type_mappings SET external_room_type_id=$2 WHERE property_id=$1 AND room_type_id=$3",
+      [f.scope.propertyId, randomUUID(), f.selection.roomTypeId],
+    );
+    expect(await readDesired(f)).toEqual(unavailable("active_offer_binding_changed"));
+  });
 });

@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateReplacementRoomStay,
+  projectParsedReplacementRoomNight,
   projectReplacementRoomNight,
   type RoomNightProjectionRequest,
   type RoomStayPricingRequest,
 } from "./replacementPricingCalculator.js";
 import {
+  parsePricingConfiguration,
   type PricingConfiguration,
   type PricingOffer,
   type PricingCalendar,
@@ -688,6 +690,19 @@ describe("nightly projection independent of Booking eligibility", () => {
     expect(projectReplacementRoomNight(config, { ...r, date: "2026-08-01" })).toMatchObject({
       reason: "missing_price",
     });
+  });
+  it("projects a parsed configuration exactly like the raw one", () => {
+    const r = nightRequest(request(2, "nr"));
+    const parsed = parsePricingConfiguration(fixture())!;
+    for (const patch of [
+      {},
+      { date: "2026-08-01" },
+      { expectedRevision: 2 },
+      { guests: { adults: 4, childAgesAtCheckIn: [] } },
+    ])
+      expect(projectParsedReplacementRoomNight(parsed, { ...r, ...patch })).toEqual(
+        projectReplacementRoomNight(fixture(), { ...r, ...patch }),
+      );
   });
   it("rejects malformed, scoped, stale, missing-term and overflow inputs without fallback", () => {
     const r = nightRequest(request(2, "nr"));

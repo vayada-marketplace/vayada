@@ -11,6 +11,10 @@ import {
   selectNextChannexInitialAriDate,
 } from "./channexInitialAriDate.js";
 import { prepareChannexAdultNightPrices } from "../integrations/channexNightlyPrices.js";
+import {
+  buildChannexOfferAriValue,
+  computeChannexOfferDesiredAri,
+} from "./channexOfferDesiredAri.js";
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -471,6 +475,152 @@ export async function activatePublishedChannexOffers(
     completed.active === completed.total
     ? { kind: "all_targets_active" as const, count: completed.total }
     : { kind: "unavailable" as const, reason: "target_activation_pending" };
+}
+
+/** Desired ongoing ARI for one active offer target (VAY-2108 D2b), inside the caller's (D3)
+ * SERIALIZABLE transaction (the property authority requires it) after its job lease and
+ * inventory lock. Reads in the publication reader's owner
+ * order: authority, publication, owner sources, room capacity, then the target. Only a current
+ * active target gets values (D5: same provider configuration, binding, Channex property and
+ * room); the others are classified so the caller can skip and alert per target. */
+export async function readChannexOfferDesiredAri(
+  client: PoolClient,
+  input: ChannexPricingJobLeaseInput & { targetId: string },
+  window?: Readonly<{ from?: string; through?: string }>,
+) {
+  const unavailable = (reason: string) => ({ kind: "unavailable" as const, reason });
+  if (
+    typeof input.targetId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.targetId)
+  )
+    return unavailable("invalid_target");
+  const authority = await lockChannexPricingPropertyAuthority(client, {
+    jobId: input.jobId,
+    workerId: input.workerId,
+    attemptNumber: input.attemptNumber,
+  });
+  if (authority.kind !== "authorized") return authority;
+  const propertyId = authority.lease.propertyId;
+  const snapshot = await readCurrentPricingSnapshot(client, propertyId);
+  if (!snapshot) return unavailable("publication_missing");
+  if (
+    Object.keys(snapshot.sources).length !== 3 ||
+    !["room", "terms", "finance"].every((key) => typeof snapshot.sources[key] === "string") ||
+    Object.keys(snapshot.ownerReferences).length !== 2 ||
+    !["finance", "charges"].every((key) => typeof snapshot.ownerReferences[key] === "string")
+  )
+    return unavailable("publication_invalid");
+  const owners = await lockOwnerSources(
+    client,
+    authority.lease,
+    {
+      currency: snapshot.currency,
+      rooms: snapshot.rooms,
+      ownerReferences: snapshot.ownerReferences,
+    },
+    snapshot.sources,
+    "publish",
+  );
+  if (owners.kind !== "verified")
+    return unavailable(
+      owners.kind === "unavailable" && owners.reason.endsWith("_source_stale")
+        ? "sources_stale"
+        : "owner_unavailable",
+    );
+  for (const room of snapshot.rooms)
+    if (!(await lockPmsPricingRoomCapacity(client, propertyId, room.roomTypeId, room.capacity)))
+      return unavailable("owner_unavailable");
+  const target = (
+    await client.query<{
+      roomTypeId: string;
+      offerId: string;
+      salesState: "open" | "closed";
+      bindingGeneration: string;
+      externalPropertyId: string;
+      externalRatePlanId: string;
+      configuration: unknown;
+      primaryOccupancy: number;
+      bound: boolean;
+    }>(
+      `SELECT t.room_type_id::text AS "roomTypeId",t.offer_id AS "offerId",t.sales_state AS "salesState",
+         v.binding_generation::text AS "bindingGeneration",v.external_property_id AS "externalPropertyId",
+         v.external_rate_plan_id AS "externalRatePlanId",v.configuration,
+         (i.proposal->>'primaryOccupancy')::int AS "primaryOccupancy",
+         (v.binding_generation=c.binding_generation AND v.external_property_id=$3
+           AND EXISTS (SELECT 1 FROM pms.channel_room_type_mappings mapping
+             WHERE mapping.property_id=t.property_id AND mapping.connection_id=t.connection_id
+               AND mapping.room_type_id=t.room_type_id AND mapping.status='active'
+               AND mapping.external_room_type_id=v.external_room_type_id)) AS bound
+       FROM pms.channex_offer_targets t
+       JOIN pms.channel_connections c ON c.id=t.connection_id
+       JOIN pms.channex_offer_target_versions v ON v.target_id=t.id AND v.version=t.active_version
+       JOIN pms.channex_offer_target_intents i ON i.id=v.intent_id
+       WHERE t.id=$1 AND t.property_id=$2 AND t.connection_id=$4
+       FOR SHARE OF t NOWAIT`,
+      [input.targetId, propertyId, authority.externalPropertyId, authority.connectionId],
+    )
+  ).rows[0];
+  if (!target) return unavailable("target_unavailable");
+  if (!target.bound) return unavailable("active_offer_binding_changed");
+  const room = snapshot.rooms.find((r) => r.roomTypeId === target.roomTypeId);
+  if (!room || !room.offers.some((offer) => offer.id === target.offerId))
+    return unavailable("selection_unavailable");
+  const plan = planChannexOfferConfiguration(room, target.offerId, target.primaryOccupancy);
+  if (!channexConfigurationMatches(plan, target.configuration))
+    return unavailable("active_offer_configuration_changed");
+  const location = (
+    await client.query<{ timeZone: unknown; now: Date }>(
+      `SELECT timezone AS "timeZone",clock_timestamp() AS now
+       FROM hotel_catalog.property_locations WHERE property_id=$1 FOR SHARE NOWAIT`,
+      [propertyId],
+    )
+  ).rows[0];
+  if (!location) return unavailable("property_timezone_unavailable");
+  const desired = computeChannexOfferDesiredAri({
+    room,
+    propertyId,
+    roomTypeId: target.roomTypeId,
+    offerId: target.offerId,
+    identity: {
+      externalPropertyId: target.externalPropertyId,
+      externalRatePlanId: target.externalRatePlanId,
+    },
+    expectedRevision: snapshot.revision,
+    expectedTermsRevisions: Object.fromEntries(
+      owners.terms
+        .filter((terms) => terms.roomTypeId === target.roomTypeId)
+        .map((terms) => [terms.offerId, terms.revision]),
+    ),
+    salesState: target.salesState,
+    timeZone: location.timeZone,
+    now: location.now,
+    ...(window ? { window } : {}),
+  });
+  if (desired.kind !== "desired") return desired;
+  return {
+    kind: "desired" as const,
+    targetId: input.targetId,
+    bindingGeneration: target.bindingGeneration,
+    externalPropertyId: target.externalPropertyId,
+    externalRatePlanId: target.externalRatePlanId,
+    publicationRevision: snapshot.revision,
+    salesState: target.salesState,
+    from: desired.from,
+    through: desired.through,
+    values: desired.values,
+  };
+}
+
+/** Stored configurations are JSONB: compare the plan as JSON so an undefined optional key in the
+ * plan can never differ from a JSONB comparison of the same values. */
+function channexConfigurationMatches(
+  plan: ReturnType<typeof planChannexOfferConfiguration>,
+  stored: unknown,
+): boolean {
+  return (
+    plan.kind === "planned" &&
+    isDeepStrictEqual(JSON.parse(JSON.stringify(plan.configuration)), stored)
+  );
 }
 
 /** Records identity only; fresh authority still applies to late provider observations. */
@@ -1637,23 +1787,13 @@ async function withPublishedChannexPricing(
                 ),
               });
               if (prepared.kind !== "prepared") return prepared;
-              // Channex requires strictly positive rates; never export a partial occupancy set.
-              if (prepared.candidates.some((c) => BigInt(c.projection.night.totalMinor) <= 0n))
-                return unavailable("provider_rate_unavailable");
-              const request = {
-                values: [
-                  {
-                    property_id: configurationIdentity.externalPropertyId,
-                    rate_plan_id: configurationIdentity.externalRatePlanId,
-                    date: prepared.candidates[0].projection.night.date,
-                    rates: prepared.candidates.map(({ occupancy, rate }) => ({ occupancy, rate })),
-                    ...prepared.candidates[0].restrictionCandidate,
-                    // Pending rates must remain closed regardless of the desired sell state.
-                    // Opening sales is a separate activation operation, never initial ARI.
-                    stop_sell: true,
-                  },
-                ],
-              };
+              // Pending rates must remain closed regardless of the desired sell state.
+              // Opening sales is a separate activation operation, never initial ARI.
+              const built = buildChannexOfferAriValue(prepared, configurationIdentity, {
+                forceStopSell: true,
+              });
+              if (built.kind !== "value") return unavailable(built.reason);
+              const request = { values: [built.value] };
               if (prior.rows.some((row) => row.date === work.date))
                 return unavailable("ari_date_already_reconciled");
               if (work.kind === "ari_dispatch") {
