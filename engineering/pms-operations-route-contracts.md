@@ -181,6 +181,14 @@ type PmsOperationalAssignment = {
   ratePlanId: string | null;
   pricingOfferId?: string | null; // published pricing-v2 offer; rate_plan_id is empty for those (VAY-1422)
   childAgesAtCheckIn?: number[] | null; // recorded child ages, when known (VAY-1422)
+  // Cancellation terms the stay was booked on: a manual stay's offer at its stored publication
+  // revision (VAY-2089), or a booking-engine stay's offer in its stored quote acceptance (VAY-2100);
+  // null for custom rates and other sources. Only the single-reservation read fills it; list and
+  // calendar reads return null.
+  bookedCancellation?:
+    | { kind: "non_refundable" }
+    | { kind: "flexible"; terms: FlexibleCancellationTerms }
+    | null;
   roomId: string | null;
   roomNumber: string | null;
   position: number;
@@ -214,6 +222,16 @@ type PmsOperationalReservation = {
   checkout: { completedAt: PmsUtcDateTime | null; pendingFlags: string[] };
   privateNoteCount: number;
   additionalGuestCount: number;
+  // What the booked terms kept when a pricing-v2 stay was cancelled at the guest's request, as
+  // recorded on the latest guest_booking.canceled status event; single-reservation read only
+  // (VAY-2100). Minor units; unpaid stays, so recorded only, never charged or counted as revenue.
+  cancellationOutcome?: {
+    daysBeforeCheckIn: number;
+    totalMinor: string;
+    refundMinor: string;
+    retainedMinor: string;
+    rooms: unknown[];
+  } | null;
   // Present on reservation detail when the Booking guest PII port is wired.
   additionalGuests?: BookingGuestPii[];
 };

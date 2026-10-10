@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 import { parseAddonEconomicTerms, type AddonEconomicTerms } from "@vayada/domain-booking";
-import { pricingCurrencyScale, pricingObject } from "@vayada/domain-pms";
+import { pricingAmountStep, pricingCurrencyScale, pricingObject } from "@vayada/domain-pms";
 import { pricingDecimalMinor } from "./pricingDecimalMinor.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 
@@ -86,6 +86,8 @@ export async function lockReplacementAddons(
     const leadTime = row.metadata.leadTime === undefined ? null : row.metadata.leadTime;
     if (
       amountMinor === null ||
+      // Whole rupiah for IDR (VAY-2085); other currencies step by one minor unit.
+      BigInt(amountMinor) % BigInt(pricingAmountStep(currency)) !== 0n ||
       !terms ||
       !limit(maxQuantity) ||
       (maxGuests !== null && !limit(maxGuests)) ||

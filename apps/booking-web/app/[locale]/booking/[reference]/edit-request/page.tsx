@@ -9,7 +9,7 @@ import { Link, useRouter } from "@/i18n/navigation";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
 import StripeProvider from "@/components/StripeProvider";
-import { useAddons, useHotel, useRooms, useSlug } from "@/contexts/HotelContext";
+import { useAddons, useHotel, useSlug } from "@/contexts/HotelContext";
 import {
   bookingService,
   type BookingCreateRequest,
@@ -37,7 +37,6 @@ export default function EditRequestPage({
   const { token = "", payment_intent: returnedIntent } = use(searchParams);
   const { slug } = useSlug();
   const { hotel } = useHotel();
-  const { rooms, refetchRooms } = useRooms();
   const { addons } = useAddons();
   const router = useRouter();
   const [details, setDetails] = useState<PendingEditDetails | null>(null);
@@ -68,12 +67,6 @@ export default function EditRequestPage({
         setDetails(loaded);
         setInput(loaded.input);
         setSettings(paymentSettings);
-        void refetchRooms(
-          loaded.input.checkIn,
-          loaded.input.checkOut,
-          loaded.input.adults,
-          loaded.input.children,
-        );
       })
       .catch((e) => {
         if (!canceled) setError(e instanceof Error ? e.message : "Unable to open this request.");
@@ -81,15 +74,7 @@ export default function EditRequestPage({
     return () => {
       canceled = true;
     };
-  }, [slug, reference, token, refetchRooms]);
-
-  useEffect(() => {
-    if (!input?.checkIn || !input.checkOut || input.checkIn >= input.checkOut) return;
-    const timer = setTimeout(() => {
-      void refetchRooms(input.checkIn, input.checkOut, input.adults, input.children);
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [input?.checkIn, input?.checkOut, input?.adults, input?.children, refetchRooms]);
+  }, [slug, reference, token]);
 
   const save = useCallback(
     async (prepared: PendingEditAttempt, revision = details?.revision) => {
@@ -166,7 +151,6 @@ export default function EditRequestPage({
         crypto.randomUUID(),
       );
       setQuote(priced);
-      void refetchRooms(input.checkIn, input.checkOut, input.adults, input.children);
     } catch (e) {
       setError(e instanceof Error ? e.message : "The requested stay is unavailable.");
     } finally {
@@ -211,12 +195,8 @@ export default function EditRequestPage({
     }
   }
 
-  const selectedRoom = rooms.find((room) =>
-    sameRoomSelection(room.combination?.roomSelection, input?.roomSelection),
-  );
   const selectedLines =
     quote?.roomLines ??
-    selectedRoom?.combination?.roomLines ??
     (sameRoomSelection(input?.roomSelection, details?.input.roomSelection)
       ? details?.booking.roomLines
       : undefined);
@@ -254,7 +234,7 @@ export default function EditRequestPage({
             {selectedLines && (
               <RoomSelectionSummary
                 lines={selectedLines}
-                currency={quote?.currency ?? selectedRoom?.currency ?? details.booking.currency}
+                currency={quote?.currency ?? details.booking.currency}
                 checkIn={input.checkIn}
                 timezone={hotel.timezone}
               />
@@ -263,7 +243,6 @@ export default function EditRequestPage({
               input={input}
               details={details}
               settings={settings}
-              rooms={rooms}
               addons={addons}
               disabled={busy || Boolean(attempt?.clientSecret)}
               change={change}

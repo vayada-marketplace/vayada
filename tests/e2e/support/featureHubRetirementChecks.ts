@@ -10,6 +10,20 @@ export function featureHubRetirementChecks(
     }) => {
       await page.setViewportSize({ width: active ? 390 : 1280, height: 900 });
       await setup(page);
+      // Only the retired affiliates entry is under test; the navigation store adds nothing here.
+      await page.route(
+        new RegExp(`/api/pms/properties/${propertyId}/navigation-modules$`),
+        (route) =>
+          route.fulfill({
+            json: {
+              hotelId: propertyId,
+              canManage: true,
+              supportedModules: [],
+              activeModules: [],
+              activations: [],
+            },
+          }),
+      );
       let reads = 0;
       let writes = 0;
       await page.route(
