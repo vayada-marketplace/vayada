@@ -52,7 +52,9 @@ export async function lockFinanceReplacementPricingReadiness(client: PoolClient,
         providerBindingActive: typeof account.provider_account_id === "string" && !account.provider_account_id.startsWith("settings-choice:"),
         status: account.status, onboardingStatus: account.onboarding_status, chargesEnabled: account.charges_enabled,
         payoutsEnabled: account.payouts_enabled, detailsSubmitted: account.account_metadata.detailsSubmitted === true,
-        cardPaymentsStatus: account.account_metadata.cardPaymentsStatus ?? null, capabilities: account.capabilities,
+        cardPaymentsStatus: account.account_metadata.cardPaymentsStatus ?? null,
+        // Stripe reconciliation re-appends card_payments; order is not readiness (VAY-2088).
+        capabilities: Array.isArray(account.capabilities) ? [...new Set(account.capabilities as string[])].sort() : account.capabilities,
         cardCapabilityRevision: Number(account.card_capability_revision),
       };
       const executionEvidence = evidence && evidence.accepted_at <= now ? {
