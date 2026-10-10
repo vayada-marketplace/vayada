@@ -4470,6 +4470,17 @@ async function previewTargetDateChange(
     if (isHttpError(error) && (error.statusCode === 404 || error.statusCode === 409)) {
       return blocked("The requested dates are no longer available for this room and rate.");
     }
+    // The retired checkout quote can't reprice bookings made before pricing v2 (VAY-2110).
+    if (
+      isHttpError(error) &&
+      ["PRICING_RETIRED", "PRICING_UNAVAILABLE"].includes(
+        String((error as { code?: unknown }).code),
+      )
+    ) {
+      return blocked(
+        "The dates of this booking can't be changed online. Cancel and rebook it instead.",
+      );
+    }
     throw error;
   }
 }
