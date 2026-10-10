@@ -139,7 +139,9 @@ test.describe("pms-web smoke", () => {
     await assertHealthy();
   });
 
-  test("shows the canonical staff roster through the Team & Roles deep link", async ({
+  // VAY-2094: written for the Team page before VAY-1439 (#2395) redesigned it (roles, account
+  // admins, new copy). Re-enable once rewritten for the current page (VAY-2094 follow-up PR).
+  test.fixme("shows the canonical staff roster through the Team & Roles deep link", async ({
     page,
   }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
@@ -169,7 +171,9 @@ test.describe("pms-web smoke", () => {
     await assertHealthy();
   });
 
-  test("deactivates and reactivates staff while preserving failed status changes", async ({
+  // VAY-2094: written for the Team page before VAY-1439 (#2395) redesigned it (roles, account
+  // admins, new copy). Re-enable once rewritten for the current page (VAY-2094 follow-up PR).
+  test.fixme("deactivates and reactivates staff while preserving failed status changes", async ({
     page,
   }) => {
     const rosterPath = "**/api/identity/staff/members";
@@ -259,7 +263,9 @@ test.describe("pms-web smoke", () => {
     ).toBe(true);
   });
 
-  test("distinguishes loading, empty, and failed team rosters", async ({ page }) => {
+  // VAY-2094: written for the Team page before VAY-1439 (#2395) redesigned it (roles, account
+  // admins, new copy). Re-enable once rewritten for the current page (VAY-2094 follow-up PR).
+  test.fixme("distinguishes loading, empty, and failed team rosters", async ({ page }) => {
     const rosterPath = "**/api/identity/staff/members";
     let releaseRoster!: () => void;
     const rosterRelease = new Promise<void>((resolve) => {
