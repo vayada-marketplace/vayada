@@ -117,4 +117,37 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL runtime pool budget", () => {
       await runtime.close();
     }
   }, 30_000);
+
+  it("fails the health check while a pool stops handing out connections", async () => {
+    assertTestDatabase();
+    const postgres = { Pool: pg.Pool };
+    const runtime = installPostgresPoolRuntime(postgres);
+    // statement_timeout makes this a one-connection pool; holding that connection stalls it.
+    const pool = new postgres.Pool({
+      connectionString: TEST_DATABASE_URL!,
+      statement_timeout: 5_000,
+      connectionTimeoutMillis: 50,
+    });
+    const health = runtime.healthCheck(TEST_DATABASE_URL!);
+    let held: pg.PoolClient | undefined;
+    try {
+      expect(await health()).toBe(true);
+      held = await pool.connect();
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await expect(pool.query("SELECT 1")).rejects.toThrow(
+          "timeout exceeded when trying to connect",
+        );
+      }
+      // The database still answers the probe, but this pool serves nobody.
+      expect(await health()).toBe(false);
+      held.release();
+      held = undefined;
+      await expect(pool.query("SELECT 1 AS ok")).resolves.toMatchObject({ rows: [{ ok: 1 }] });
+      expect(await health()).toBe(true);
+    } finally {
+      held?.release();
+      await pool.end();
+      await runtime.close();
+    }
+  });
 });

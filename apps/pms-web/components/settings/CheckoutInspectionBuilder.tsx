@@ -10,7 +10,6 @@ import {
   PlusIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
-import { isPmsOperationsReadModelEnabled } from "@/services/api/pmsOperationsClient";
 import { CheckoutInspectionStep, settingsService } from "@/services/settings";
 import { useTranslation } from "@/lib/i18n";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
@@ -77,7 +76,6 @@ export function CheckoutInspectionPreview({ steps }: { steps: CheckoutInspection
 
 export function CheckoutInspectionBuilder() {
   const { t } = useTranslation();
-  const supportsCustomCopy = !isPmsOperationsReadModelEnabled();
   const [steps, setSteps] = useState<CheckoutInspectionStep[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -145,14 +143,12 @@ export function CheckoutInspectionBuilder() {
     const nextErrors: Record<string, string> = {};
     normalizedSteps.forEach((step) => {
       if (!step.label.trim()) nextErrors[step.id] = t("settings.inspection.labelRequired");
-      if (supportsCustomCopy) {
-        if (!step.okLabel.trim())
-          nextErrors[`${step.id}-ok`] = t("settings.inspection.okLabelRequired");
-        if (!step.negativeLabel.trim())
-          nextErrors[`${step.id}-negative`] = t("settings.inspection.negativeLabelRequired");
-        if (!step.notePrompt.trim())
-          nextErrors[`${step.id}-prompt`] = t("settings.inspection.notePromptRequired");
-      }
+      if (!step.okLabel.trim())
+        nextErrors[`${step.id}-ok`] = t("settings.inspection.okLabelRequired");
+      if (!step.negativeLabel.trim())
+        nextErrors[`${step.id}-negative`] = t("settings.inspection.negativeLabelRequired");
+      if (!step.notePrompt.trim())
+        nextErrors[`${step.id}-prompt`] = t("settings.inspection.notePromptRequired");
     });
     setErrors(nextErrors);
     setError("");
@@ -241,13 +237,7 @@ export function CheckoutInspectionBuilder() {
                     }}
                     className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm"
                   >
-                    <div
-                      className={
-                        supportsCustomCopy
-                          ? "grid gap-3 md:grid-cols-[88px_minmax(0,1fr)_110px_120px_150px_40px] md:items-start"
-                          : "grid gap-3 md:grid-cols-[88px_minmax(0,1fr)_40px] md:items-start"
-                      }
-                    >
+                    <div className="grid gap-3 md:grid-cols-[88px_minmax(0,1fr)_110px_120px_150px_40px] md:items-start">
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
@@ -285,30 +275,26 @@ export function CheckoutInspectionBuilder() {
                         dataStepLabel={step.id}
                         onChange={(value) => updateStep(step.id, { label: value })}
                       />
-                      {supportsCustomCopy && (
-                        <>
-                          <Field
-                            value={displayStep.okLabel}
-                            placeholder={t("settings.inspection.okPlaceholder")}
-                            maxLength={40}
-                            error={errors[`${step.id}-ok`]}
-                            onChange={(value) => updateStep(step.id, { okLabel: value })}
-                          />
-                          <Field
-                            value={displayStep.negativeLabel}
-                            placeholder={t("settings.inspection.negativePlaceholder")}
-                            maxLength={40}
-                            error={errors[`${step.id}-negative`]}
-                            onChange={(value) => updateStep(step.id, { negativeLabel: value })}
-                          />
-                          <Field
-                            value={displayStep.notePrompt}
-                            placeholder={t("settings.inspection.notePlaceholder")}
-                            error={errors[`${step.id}-prompt`]}
-                            onChange={(value) => updateStep(step.id, { notePrompt: value })}
-                          />
-                        </>
-                      )}
+                      <Field
+                        value={displayStep.okLabel}
+                        placeholder={t("settings.inspection.okPlaceholder")}
+                        maxLength={40}
+                        error={errors[`${step.id}-ok`]}
+                        onChange={(value) => updateStep(step.id, { okLabel: value })}
+                      />
+                      <Field
+                        value={displayStep.negativeLabel}
+                        placeholder={t("settings.inspection.negativePlaceholder")}
+                        maxLength={40}
+                        error={errors[`${step.id}-negative`]}
+                        onChange={(value) => updateStep(step.id, { negativeLabel: value })}
+                      />
+                      <Field
+                        value={displayStep.notePrompt}
+                        placeholder={t("settings.inspection.notePlaceholder")}
+                        error={errors[`${step.id}-prompt`]}
+                        onChange={(value) => updateStep(step.id, { notePrompt: value })}
+                      />
                       <button
                         type="button"
                         onClick={() => removeStep(step.id)}
