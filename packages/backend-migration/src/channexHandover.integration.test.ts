@@ -96,7 +96,7 @@ describe.skipIf(!URL)("Channex handover executor (PostgreSQL)", () => {
       ["capabilities_invalid", metadata('{"legacyCapabilities":["booking","sell"]}'), [PROPERTY]],
       [
         "management_job_running",
-        `INSERT INTO platform.jobs (job_key, queue_name, job_type, status, tenant_scope, property_id) VALUES ('vay-2108-running', 'pms.channex.management', 'channex.sync_ari', 'running', 'property', $1)`,
+        `INSERT INTO platform.jobs (job_key, queue_name, job_type, status, attempts_count, locked_at, locked_by, tenant_scope, property_id) VALUES ('vay-2108-running', 'pms.channex.management', 'channex.sync_ari', 'running', 1, now(), 'fixture', 'property', $1)`,
         [PROPERTY],
       ],
     ];
