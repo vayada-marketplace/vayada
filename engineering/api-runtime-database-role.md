@@ -120,8 +120,10 @@ is write-protected, and `^(hotel_setup_|identity_migration_|legacy_historical_bi
 or `^finance_.*_worker_properties$` is also read-protected (the Channex worker
 allowlist stays readable: the API reads it today). Outside `platform`,
 `^pms\.channex_room_availability_`, `^pms\.channex_ari_schedule_`,
-`^(marketplace|booking)\.affiliate_click_` and `^finance\.expense_generation_`
-are write-protected. The grant task revokes by
+`^pms\.channex_offer_ari_deliver` (the ongoing offer ARI deliveries, dates and
+receipts from 0481: worker-only provider evidence, written by the Channex
+management worker), `^(marketplace|booking)\.affiliate_click_` and
+`^finance\.expense_generation_` are write-protected. The grant task revokes by
 list and pattern; the preflight asserts both.
 
 ## Identity: lock capability only
