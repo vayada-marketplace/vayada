@@ -151,8 +151,8 @@ it("refuses stale, mismatched and unsupported evidence before sending", async ()
         ...quote,
         acceptanceMode: "request",
         paymentMethod: "card",
-        dueNowMinor: "20600",
-        dueLaterMinor: "0",
+        dueNowMinor: "600",
+        dueLaterMinor: "20000",
       },
       disclosure,
     ],
@@ -263,6 +263,42 @@ it("returns a card payment step and confirms it with the same request key", asyn
   await expect(
     acceptPricingQuote("hotel", card as PublicBookingQuote, disclosure, guest),
   ).rejects.toThrow("confirmation could not be verified");
+});
+
+it("reads a card request's authorisation as a request waiting for the hotel", async () => {
+  fetcher.mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({
+        kind: "requested",
+        bookingId: fresh.bookingId,
+        bookingReference: fresh.bookingReference,
+        acceptanceId: fresh.acceptanceId,
+        acceptedAt: fresh.acceptedAt,
+        hostResponseDeadlineAt: "2026-09-15T12:01:01.000Z",
+        replayed: false,
+      }),
+    ),
+  );
+  await expect(completePricingCardPayment("hotel", quote.quoteId, "accept-1")).resolves.toEqual({
+    kind: "requested",
+    bookingId: fresh.bookingId,
+    bookingReference: fresh.bookingReference,
+    replayed: false,
+    hostResponseDeadlineAt: "2026-09-15T12:01:01.000Z",
+  });
+  fetcher.mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({
+        kind: "requested",
+        bookingId: fresh.bookingId,
+        bookingReference: fresh.bookingReference,
+        replayed: false,
+      }),
+    ),
+  );
+  await expect(completePricingCardPayment("hotel", quote.quoteId, "accept-1")).rejects.toThrow(
+    "confirmation could not be verified",
+  );
 });
 
 it("does not return a response after cancellation", async () => {

@@ -202,7 +202,7 @@ it("keeps an uncertain attempt retryable", async () => {
 
 it.each([
   { paymentMethod: "card", dueNowMinor: "5000", dueLaterMinor: "15000" },
-  { acceptanceMode: "request", paymentMethod: "card", dueNowMinor: "20000", dueLaterMinor: "0" },
+  { acceptanceMode: "request", paymentMethod: "card", dueNowMinor: "5000", dueLaterMinor: "15000" },
 ] as const)("does not offer unsupported request or payment modes (%o)", (change) => {
   act(() =>
     root.render(
@@ -259,6 +259,61 @@ it("sends a pay-at-property request and says the hotel still has to accept it", 
   expect(document.body.textContent).toContain("Booking request sent");
   expect(document.body.textContent).toContain("Nothing has been charged");
   expect(document.body.textContent).toContain(result.bookingReference);
+  expect(document.body.textContent).not.toContain("Booking confirmed");
+});
+
+it("authorises a card request and says the card is charged only if the hotel accepts", async () => {
+  const card = {
+    ...quote,
+    acceptanceMode: "request",
+    paymentMethod: "card",
+    dueNowMinor: "20000",
+    dueLaterMinor: "0",
+  };
+  const required = {
+    kind: "payment_required" as const,
+    bookingId: result.bookingId,
+    bookingReference: result.bookingReference,
+    requestId: "accept-1",
+    payment: {
+      provider: "stripe" as const,
+      clientSecret: "pi_1_secret_2",
+      stripeAccountId: "acct_1",
+      paymentIntentId: "pi_1",
+      expiresAt: "2026-09-14T12:31:01.000Z",
+    },
+  };
+  vi.mocked(acceptPricingQuote).mockResolvedValueOnce(required);
+  act(() =>
+    root.render(
+      createElement(ReplacementBookingConfirmation, {
+        slug: "hotel",
+        quote: card as PublicBookingQuote,
+        disclosure,
+        termsAccepted: true,
+      }),
+    ),
+  );
+  expect(document.querySelector('button[type="submit"]')?.textContent).toBe(
+    "Continue to card authorisation",
+  );
+  input("firstName").value = "Ada";
+  input("lastName").value = "Lovelace";
+  input("email").value = "ada@example.test";
+  input("phone").value = "+49";
+  await submit();
+  expect(cardStep.props).toMatchObject({ required, request: true });
+  act(() =>
+    (cardStep.props!.onPaid as (value: unknown) => void)({
+      kind: "requested",
+      bookingId: result.bookingId,
+      bookingReference: result.bookingReference,
+      replayed: false,
+      hostResponseDeadlineAt: "2026-09-15T12:01:01.000Z",
+    }),
+  );
+  expect(document.body.textContent).toContain("Booking request sent");
+  expect(document.body.textContent).toContain("authorised but not charged");
   expect(document.body.textContent).not.toContain("Booking confirmed");
 });
 
