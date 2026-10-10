@@ -39,12 +39,16 @@ describe("owner email index proposal", () => {
     expect(iterations).toBe(1);
     expect(result.sql).not.toContain("DROP TABLE");
   });
+  it("covers a wave cohort's owners (VAY-1362 P19)", () => {
+    expect(plan(hashes.slice(0, 3)).sql.match(/'[0-9a-f]{64}'/g)).toHaveLength(3);
+  });
   it("rejects incomplete, duplicate or injected scope", () => {
     const sparse = [...hashes];
     delete sparse[0];
     for (const invalid of [
       sparse,
-      hashes.slice(1),
+      [],
+      [...hashes, createHash("sha256").update("ninth").digest("hex")],
       [...hashes, hashes[0]!],
       [...hashes.slice(1), hashes[1]!],
       ["';DROP TABLE identity.users;--", ...hashes.slice(1)],

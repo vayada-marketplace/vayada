@@ -63,6 +63,18 @@ describe.skipIf(!url)("bounded owner source reader on migrated PostgreSQL", () =
     }
   });
 
+  it("reads a three-hotel wave cohort's six rows (VAY-1362 P19)", async () => {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    try {
+      const wave = { ...request, owners: request.owners.slice(0, 3) };
+      const result = await readLegacyOwnerBootstrapSources(client, wave);
+      expect(result.map((row) => row.ownerId)).toEqual(wave.owners.map((owner) => owner.ownerId));
+      expect(result.every((row) => row.sourceOwnership === "matched")).toBe(true);
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+
   it("rejects safe-looking session defaults without an active transaction", async () => {
     await client.query("SET default_transaction_read_only=on");
     await client.query("SET default_transaction_isolation='repeatable read'");

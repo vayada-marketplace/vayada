@@ -181,6 +181,18 @@ describe("bounded source reader", () => {
       "sourceOwnership",
     ]);
   });
+  it("reads a smaller wave cohort's pairs with a matching row bound (VAY-1362 P19)", async () => {
+    const input = request();
+    input.owners = input.owners.slice(0, 3);
+    const wanted = new Set(input.owners.flatMap((owner) => [owner.ownerId, owner.hotelId]));
+    const db = client(rows().filter((row) => wanted.has(row.id)));
+    await expect(readLegacyOwnerBootstrapSources(db as never, input)).resolves.toHaveLength(3);
+    expect(db.query.mock.calls[1]![0]).toContain("LIMIT 7");
+    // The full eight-pair source rows are too many for three pairs.
+    await expect(readLegacyOwnerBootstrapSources(client() as never, input)).rejects.toThrow(
+      "OWNER_SOURCE_READ_FAILED",
+    );
+  });
   it.each(["missing", "extra", "duplicate", "checksum", "ordinal", "snapshot"])(
     "rejects %s rows",
     async (mode) => {
@@ -204,12 +216,12 @@ describe("bounded source reader", () => {
       (await readLegacyOwnerBootstrapSources(client(output) as never, request()))[0],
     ).toMatchObject({ sourceStatus: "suspended", sourceOwnership: "conflict" });
   });
-  it.each(["missing", "duplicate", "protected", "hash"])(
+  it.each(["empty", "duplicate", "protected", "hash"])(
     "rejects %s scope before reads",
     async (mode) => {
       const input = request(),
         db = client();
-      if (mode === "missing") input.owners.pop();
+      if (mode === "empty") input.owners = [];
       if (mode === "duplicate") input.owners[1] = input.owners[0]!;
       if (mode === "protected") input.owners[0]!.hotelId = "65f6b2fc-c783-4963-9d6b-a85f82319769";
       if (mode === "hash") input.owners[0]!.userSha256 = "invalid";

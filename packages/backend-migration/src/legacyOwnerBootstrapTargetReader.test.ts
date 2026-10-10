@@ -18,7 +18,7 @@ const rows = () =>
 const client = (query: unknown) => ({ query }) as AdoptionQueryClient;
 describe("scoped target read boundary", () => {
   it.each([
-    "missing",
+    "empty",
     "duplicate_id",
     "duplicate_email",
     "invalid_email",
@@ -27,7 +27,7 @@ describe("scoped target read boundary", () => {
   ])("rejects %s before SQL", async (mode) => {
     const input = structuredClone(owners),
       query = vi.fn();
-    if (mode === "missing") input.pop();
+    if (mode === "empty") input.length = 0;
     if (mode === "duplicate_id") input[1]!.ownerId = input[0]!.ownerId;
     if (mode === "duplicate_email") input[1]!.email = input[0]!.email.toUpperCase();
     if (mode === "invalid_email") input[0]!.email = "";
@@ -35,6 +35,22 @@ describe("scoped target read boundary", () => {
     if (mode === "invalid_id") input[0]!.ownerId = "invalid";
     await expect(readLegacyOwnerBootstrapTargets(client(query), input)).rejects.toThrow();
     expect(query).not.toHaveBeenCalled();
+  });
+  it("reads a smaller wave cohort's owners (VAY-1362 P19)", async () => {
+    const wave = owners.slice(0, 3);
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ transaction_read_only: "on" }] })
+      .mockResolvedValueOnce({ rows: rows().slice(0, 3) });
+    const result = await readLegacyOwnerBootstrapTargets(client(query), wave);
+    expect(result.map((row) => row.ownerId)).toEqual(wave.map((owner) => owner.ownerId));
+    const eight = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ transaction_read_only: "on" }] })
+      .mockResolvedValueOnce({ rows: rows() });
+    await expect(readLegacyOwnerBootstrapTargets(client(eight), wave)).rejects.toThrow(
+      "OWNER_TARGET_READ_FAILED",
+    );
   });
   it("rejects writable sessions before identity reads", async () => {
     const query = vi.fn().mockResolvedValue({ rows: [{ transaction_read_only: "off" }] });

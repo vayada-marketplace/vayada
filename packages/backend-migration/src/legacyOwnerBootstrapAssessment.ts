@@ -9,6 +9,10 @@ import {
   planLegacyOwnerBootstrap,
   type OwnerBootstrapObservation,
 } from "./legacyOwnerBootstrapPlan.js";
+import {
+  parseProductionMigrationCohort,
+  type ProductionMigrationCohort,
+} from "./productionMigrationCohort.js";
 
 type ReadOnlyWorkos = {
   organizations: Pick<WorkOS["organizations"], "getOrganization">;
@@ -30,6 +34,8 @@ export async function assessLegacyOwnerBootstrap(
     source: OwnerSourceRequest;
     targetEnvironment: "preprod" | "production";
     controlOrganizationId: string;
+    /** The run's approved cohort: the owners are exactly one per cohort PMS hotel. */
+    cohort: ProductionMigrationCohort;
   },
   clock: () => Date = () => new Date(),
 ) {
@@ -42,6 +48,13 @@ export async function assessLegacyOwnerBootstrap(
       !Number.isFinite(startedAt.getTime())
     )
       throw Error();
+    if (!ownersMatchCohort(expected.cohort, expected.source))
+      return {
+        outcome: "blocked" as const,
+        reason: "cohort_mismatch",
+        owners: [],
+        executable: false as const,
+      };
     // Independent snapshots: never claim cross-database/provider atomicity.
     const source = await snapshot(sourcePool, (client) =>
       readLegacyOwnerBootstrapSources(client, expected.source),
@@ -161,6 +174,35 @@ export async function assessLegacyOwnerBootstrap(
       executable: false as const,
     };
   }
+}
+
+/** VAY-1362 P19: the cohort file is self-consistent (its checksum re-derives from its ID sets),
+ * binds the same source run, and its PMS hotels are exactly the requested owner/hotel pairs'
+ * hotels, one distinct owner each. Approval of the cohort itself stays the caller's check. */
+function ownersMatchCohort(cohort: ProductionMigrationCohort, source: OwnerSourceRequest): boolean {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  if (
+    !cohort ||
+    !Array.isArray(source.owners) ||
+    source.owners.length < 1 ||
+    source.owners.some((owner) => !uuid.test(owner?.hotelId) || !uuid.test(owner?.ownerId)) ||
+    new Set(source.owners.map((owner) => owner.ownerId)).size !== source.owners.length
+  )
+    return false;
+  const { cohortSha256, ...approved } = cohort;
+  let parsed: ProductionMigrationCohort;
+  try {
+    parsed = parseProductionMigrationCohort(approved);
+  } catch {
+    return false;
+  }
+  const hotels = [...new Set(source.owners.map((owner) => owner?.hotelId))].sort();
+  return (
+    parsed.cohortSha256 === cohortSha256 &&
+    parsed.sourceRunId === source.sourceRunId &&
+    hotels.length === source.owners.length &&
+    hotels.join(",") === parsed.pmsHotelIds.join(",")
+  );
 }
 
 async function snapshot<T>(pool: pg.Pool, read: (client: pg.PoolClient) => Promise<T>): Promise<T> {
