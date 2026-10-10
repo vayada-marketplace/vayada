@@ -1136,6 +1136,20 @@ function addDomainInvariantFindings(
           ),
         );
     }
+    // VAY-2112: every imported checklist step must read back (stepId and label).
+    for (const [template, steps] of Object.entries(parity.checklistSteps ?? {}))
+      if (steps.readable !== steps.legacy)
+        findings.push(
+          finding(
+            "fail",
+            "CHECKLIST_STEPS_UNREADABLE",
+            domain,
+            `pms.${template}`,
+            "Imported checklist steps the runtime cannot read back (stepId and label)",
+            `${steps.legacy} legacy steps`,
+            `${steps.readable} readable`,
+          ),
+        );
     for (const [roomTypeId, inventory] of Object.entries(parity.futureInventoryByRoomType))
       // Native jobs may extend a calendared cohort hotel's coverage after the import.
       if (

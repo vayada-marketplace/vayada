@@ -8,6 +8,7 @@ import {
   readProductionPmsPrerequisites,
   readProductionPmsTargetState,
 } from "./productionPmsTargetReader.js";
+import { LEGACY_DEFAULT_TEMPLATE_STEPS } from "./productionPmsGuestOperationsRecords.js";
 import { writeProductionPmsRecords } from "./productionPmsWriter.js";
 import type { PmsTargetRecord } from "./productionPmsTypes.js";
 import { assertSafeTestDatabase } from "./testUtils.js";
@@ -315,6 +316,25 @@ describe.skipIf(!URL)("production PMS writers (PostgreSQL)", () => {
       expect(verified.blockers).toEqual([]);
       expect(verified.writes).toEqual([]);
       expect(verified.checksum).toBe(plan.checksum);
+      // VAY-2112: both imported checklists read back every legacy step, in the native shape.
+      expect(verified.parity.checklistSteps).toEqual({
+        [`checkin_checklist_templates:${PROPERTY}`]: { legacy: 1, readable: 1 },
+        [`checkout_inspection_templates:${PROPERTY}`]: { legacy: 1, readable: 1 },
+      });
+      const checklists = await client.query(
+        `SELECT 'checkin' AS kind, steps FROM pms.checkin_checklist_templates WHERE property_id = $1
+         UNION ALL
+         SELECT 'checkout', steps FROM pms.checkout_inspection_templates WHERE property_id = $1
+         ORDER BY kind`,
+        [PROPERTY],
+      );
+      expect(checklists.rows).toEqual([
+        {
+          kind: "checkin",
+          steps: [{ stepId: "identity", label: "Verify identity", required: false }],
+        },
+        { kind: "checkout", steps: [{ stepId: "keys", label: "Return keys", required: true }] },
+      ]);
 
       const preview = await client.query(
         `SELECT thread.last_message_preview, char_length(thread.last_message_preview) AS length,
@@ -797,6 +817,22 @@ describe.skipIf(!URL)("production PMS writers (PostgreSQL)", () => {
       const first = await apply();
       expect(first.writes.map((record) => record.targetTable)).toContain("channel_connections");
       expect(await state()).toEqual(inert);
+      // VAY-2112: without legacy template rows the cohort hotel keeps legacy's built-in steps.
+      const checklists = await client.query(
+        `SELECT 'checkin' AS kind, steps FROM pms.checkin_checklist_templates WHERE property_id = $1
+         UNION ALL
+         SELECT 'checkout', steps FROM pms.checkout_inspection_templates WHERE property_id = $1
+         ORDER BY kind`,
+        [PROPERTY],
+      );
+      expect(checklists.rows).toEqual([
+        { kind: "checkin", steps: LEGACY_DEFAULT_TEMPLATE_STEPS.checkin },
+        { kind: "checkout", steps: LEGACY_DEFAULT_TEMPLATE_STEPS.checkout },
+      ]);
+      expect((await plan(first.records)).parity.checklistSteps).toEqual({
+        [`checkin_checklist_templates:${PROPERTY}`]: { legacy: 3, readable: 3 },
+        [`checkout_inspection_templates:${PROPERTY}`]: { legacy: 3, readable: 3 },
+      });
       // A later snapshot with legacy already disabled (F.7) would replace the pending handover
       // with a historical claim: it blocks instead.
       source[1]!.data["is_active"] = false;
@@ -879,7 +915,8 @@ describe.skipIf(!URL)("production PMS writers (PostgreSQL)", () => {
       const apply = async () => {
         const planned = await plan((await plan()).records);
         expect(planned.blockers).toEqual([]);
-        expect(await writeProductionPmsRecords(client, planned.writes)).toEqual({
+        // VAY-2112: the first apply also writes legacy's built-in checklists (no legacy rows).
+        expect(await writeProductionPmsRecords(client, planned.writes)).toMatchObject({
           calendar_auto_open_settings: 1,
         });
         await writeProductionMigrationProvenance(client, planned.provenance, RUN);

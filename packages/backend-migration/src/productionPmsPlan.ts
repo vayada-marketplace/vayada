@@ -11,7 +11,11 @@ import { buildPmsCohortCoverageRecords } from "./productionPmsCohortCoverageReco
 import { planPmsCohortModules } from "./productionPmsCohortModules.js";
 import { buildPmsPricingSettingsRecords, carriedCohortHotel } from "./productionPmsCohortSetup.js";
 import { createProductionPmsContext, propertyForHotel } from "./productionPmsContext.js";
-import { buildPmsGuestOperationsRecords } from "./productionPmsGuestOperationsRecords.js";
+import {
+  buildPmsGuestOperationsRecords,
+  LEGACY_DEFAULT_TEMPLATE_STEPS,
+  legacyDefaultTemplates,
+} from "./productionPmsGuestOperationsRecords.js";
 import {
   buildPmsInventoryRecords,
   withCohortInventoryHorizons,
@@ -28,7 +32,7 @@ import type {
 } from "./productionPmsTypes.js";
 import type { ProductionMigrationSourceLink } from "./productionBookingTypes.js";
 import { sha256 } from "./productionBookingValues.js";
-import { sourceIdentity } from "./productionPmsValues.js";
+import { jsonArray, sourceIdentity } from "./productionPmsValues.js";
 
 export function buildProductionPmsPlan(input: {
   sourceRunId: string;
@@ -174,6 +178,7 @@ export function reconcileProductionPmsRecords(
     actualActiveRoomTypesByProperty: _actualRoomTypes,
     futureInventoryByProperty: _futureInventory,
     futureInventoryByRoomType: _futureRoomInventory,
+    checklistSteps: _checklistSteps,
     ...stableParity
   } = parity;
   const blockers = context.blockers.sort((left, right) =>
@@ -212,6 +217,71 @@ export function reconcileProductionPmsRecords(
     parity,
     counts,
   };
+}
+
+/** A template saved natively after its last migration (kept by preserve_newer), or never migrated. */
+function nativelyEdited(context: PmsBuildContext, table: string, propertyId: string): boolean {
+  const updatedAt = context.target.records.find(
+    (record) => record.targetTable === table && record.targetId === propertyId,
+  )?.updatedAt;
+  const link = context.target.provenance.find(
+    (entry) => entry.targetTable === table && entry.targetId === propertyId,
+  );
+  // A stored row the migration never linked is native too.
+  return Boolean(updatedAt && (!link || Date.parse(updatedAt) > Date.parse(link.lastMigratedAt)));
+}
+
+/** VAY-2112: what the runtime's toPmsTemplateSteps reads back (a string stepId and label). */
+function readableChecklistSteps(context: PmsBuildContext) {
+  const result: Record<string, { legacy: number; readable: number }> = {};
+  for (const table of ["checkin_checklist_templates", "checkout_inspection_templates"])
+    for (const source of context.rowsByTable.get(table) ?? []) {
+      const propertyId = context.propertyByHotel.get(
+        String(source.data["hotel_id"] ?? "").toLowerCase(),
+      );
+      let legacy: number;
+      try {
+        legacy = jsonArray(source.data["steps"], "steps").length;
+      } catch {
+        continue; // The builder already blocks the row.
+      }
+      if (!propertyId || nativelyEdited(context, table, propertyId)) continue;
+      const stored = context.target.records.find(
+        (record) => record.targetTable === table && record.targetId === propertyId,
+      )?.row["steps"];
+      const readable = Array.isArray(stored)
+        ? stored.filter(
+            (step) =>
+              step &&
+              typeof step === "object" &&
+              typeof (step as Record<string, unknown>)["stepId"] === "string" &&
+              typeof (step as Record<string, unknown>)["label"] === "string",
+          ).length
+        : 0;
+      result[`${table}:${propertyId}`] = { legacy, readable };
+    }
+  // A carried cohort hotel without a legacy row reads back exactly legacy's built-in steps.
+  for (const { propertyId, table, kind } of legacyDefaultTemplates(context)) {
+    if (nativelyEdited(context, table, propertyId)) continue;
+    const stored = context.target.records.find(
+      (record) => record.targetTable === table && record.targetId === propertyId,
+    )?.row["steps"];
+    const defaults = LEGACY_DEFAULT_TEMPLATE_STEPS[kind];
+    const matches =
+      Array.isArray(stored) &&
+      stored.length === defaults.length &&
+      defaults.every((step, index) => {
+        const read = stored[index] as Record<string, unknown> | null;
+        return read?.["stepId"] === step.stepId && read?.["label"] === step.label;
+      });
+    result[`${table}:${propertyId}`] = {
+      legacy: defaults.length,
+      readable: matches ? defaults.length : 0,
+    };
+  }
+  return Object.fromEntries(
+    Object.entries(result).sort(([left], [right]) => left.localeCompare(right)),
+  );
 }
 
 function summarizeParity(
@@ -322,10 +392,12 @@ function summarizeParity(
       ])
       .sort(([left], [right]) => String(left).localeCompare(String(right))),
   );
+  const checklistSteps = readableChecklistSteps(context);
   return {
     ...(Object.keys(expectedInventoryDaysByRoomType).length
       ? { expectedInventoryDaysByRoomType }
       : {}),
+    ...(Object.keys(checklistSteps).length ? { checklistSteps } : {}),
     sourceTableCounts: countBy(context.rows, (row) => `pms.${row.sourceTable}`),
     targetTableCounts: countBy(
       records,

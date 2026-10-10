@@ -206,6 +206,9 @@ export type ProductionPmsPlan = {
         rows: number;
       }
     >;
+    /** VAY-2112: legacy steps per imported template, and the steps the runtime reads back from
+     * the stored target row (`<table>:<propertyId>`). */
+    checklistSteps?: Record<string, { legacy: number; readable: number }>;
   };
   counts: {
     sourceRows: number;

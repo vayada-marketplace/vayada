@@ -356,6 +356,19 @@ describe("production migration parity", () => {
     );
   });
 
+  it("hard-fails imported checklist steps the runtime cannot read back (VAY-2112)", async () => {
+    const decide = async (legacy: number, readable: number) => {
+      const reports = domainReports();
+      reports.pms.parity.checklistSteps = {
+        "checkin_checklist_templates:property": { legacy, readable },
+      };
+      const report = await runProductionParity(config(), services({ reports }));
+      return report.findings.some((finding) => finding.code === "CHECKLIST_STEPS_UNREADABLE");
+    };
+    expect(await decide(3, 3)).toBe(false);
+    expect(await decide(3, 0)).toBe(true);
+  });
+
   it("reports the cohort module activations it could not carry, hashed and passing", async () => {
     const reports = domainReports();
     const hash = (id: string) => createHash("sha256").update(id).digest("hex");
