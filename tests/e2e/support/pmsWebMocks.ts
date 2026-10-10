@@ -283,8 +283,9 @@ export const PMS_WEB_OWNER_PERMISSIONS = [
 ];
 
 export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
-  // The app layout refuses to render without self-access (VAY-1439). This default owner is a
-  // context route, so a spec's own page.route for self-access wins whenever it was registered.
+  // The app layout refuses to render without self-access (VAY-1439), and the sidebar checks
+  // Financials access for anyone holding pms.finance.read (VAY-1138). These owner defaults are
+  // context routes, so a spec's own page.route for either wins whenever it was registered.
   await page.context().route("**/api/identity/staff/self-access", (route) =>
     route.fulfill({
       json: {
@@ -293,6 +294,9 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
         permissions: PMS_WEB_OWNER_PERMISSIONS,
       },
     }),
+  );
+  await page.context().route("**/api/finance/properties/*/financials/access", (route) =>
+    route.fulfill({ status: 204 }),
   );
 
   await page.route("**/api/pms/properties/*/reservations/*/no-show-report", (route) =>
