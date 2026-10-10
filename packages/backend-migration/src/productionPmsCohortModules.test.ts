@@ -306,7 +306,12 @@ describe("production PMS cohort module activations", () => {
   it("mirrors the native first currencies, base entitlements, categories, markers and audits", async () => {
     const source = (file: string) => readFile(join(ROOT, file), "utf8");
     const completion = await source("apps/api/src/domains/hotelSetupFirstCurrencyCompletion.ts");
-    const first = /FIRST_CURRENCIES = \[([^\]]*)\]/.exec(completion)?.[1]?.match(/[A-Z]{3}/g);
+    // Since 0474 the first currencies are the native pricing list itself (VAY-2085).
+    expect(completion).toContain(
+      "FIRST_CURRENCIES: readonly string[] = PMS_SUPPORTED_PRICING_CURRENCY_CODES_V1;",
+    );
+    const capabilities = await source("apps/api/src/domains/pmsPricingCurrencyCapabilities.ts");
+    const first = /CODE_STRINGS_V1 = \[([^\]]*)\]/.exec(capabilities)?.[1]?.match(/[A-Z]{3}/g);
     expect(first?.sort()).toEqual([...NATIVE_PRICING_CURRENCIES].sort());
     expect(completion).toContain(
       "'newHotelFinancialsActivationTransaction', pg_current_xact_id()::text)",
