@@ -149,6 +149,9 @@ describe("uploadImage", () => {
 
     expect(isAcceptedHeroImage(new File(["hero"], "hero.webp", { type: "image/webp" }))).toBe(true);
     expect(isAcceptedHeroImage(new File(["hero"], "hero.gif", { type: "image/gif" }))).toBe(false);
+    expect(isAcceptedHeroImage(new File(["hero"], "hero.jfif", { type: "image/jpeg" }))).toBe(
+      false,
+    );
     expect(
       isAcceptedHeroImage(
         new File([new Uint8Array(10 * 1024 * 1024 + 1)], "hero.jpg", { type: "image/jpeg" }),

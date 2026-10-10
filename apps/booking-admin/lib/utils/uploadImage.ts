@@ -68,7 +68,11 @@ export async function uploadPropertyGalleryImages(
 
 /** Mirrors the API's property.hero_image policy so bad files fail before any upload. */
 export function isAcceptedHeroImage(file: File): boolean {
-  return HERO_IMAGE_ACCEPT.split(",").includes(file.type) && file.size <= MAX_HERO_IMAGE_BYTES;
+  return (
+    HERO_IMAGE_ACCEPT.split(",").includes(file.type) &&
+    /\.(jpe?g|png|webp)$/i.test(file.name) &&
+    file.size <= MAX_HERO_IMAGE_BYTES
+  );
 }
 
 /** Uploads a private hero image; the caller assigns it as the property cover. */

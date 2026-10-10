@@ -244,21 +244,27 @@ export default function DesignStudioPage() {
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
-    if (file) void uploadHeroImage(file);
+    if (!file) return;
+    heroUploadFailuresRef.current = 0;
+    void uploadHeroImage(file);
   };
 
   const uploadHeroImage = async (file: File) => {
+    if (!isAcceptedHeroImage(file)) {
+      setFeedback({ type: "error", message: "designStudio.media.heroImageInvalidFile" });
+      return;
+    }
     const hotelId = designHotelIdRef.current;
     const propertyId = propertyIdRef.current;
+    // A failed attempt can leave the revision unknown (e.g. offline); reload it before retrying.
+    if (propertyId && profileRevisionRef.current === null) {
+      await refreshCanonicalGallery().catch(() => undefined);
+    }
     if (!hotelId || !propertyId || profileRevisionRef.current === null) {
       setFeedback({
         type: "error",
         message: "admin.thePropertyProfileVersionIsUnavailableRefreshDesignStudioBefore",
       });
-      return;
-    }
-    if (!isAcceptedHeroImage(file)) {
-      setFeedback({ type: "error", message: "designStudio.media.heroImageInvalidFile" });
       return;
     }
     if (!beginGalleryWrite()) return;
@@ -338,15 +344,19 @@ export default function DesignStudioPage() {
       // Clear the canonical cover too, or guests would keep seeing the removed hero.
       if (coverAssignmentRef.current) await assignPresentationMedia(galleryImages, null);
       setHeroImage("");
-      try {
-        await settingsService.updateDesignSettings({ hero_image: "" }, hotelId);
-      } catch {
-        console.error("Failed to auto-save hero image removal");
-      }
-      try {
-        await publishPublicBookabilityProfile(hotelId);
-      } catch {
-        console.error("Failed to publish hero image removal");
+      const saved = await settingsService.updateDesignSettings({ hero_image: "" }, hotelId).then(
+        () => true,
+        () => false,
+      );
+      const published = await publishPublicBookabilityProfile(hotelId).then(
+        () => true,
+        () => false,
+      );
+      if (!saved || !published) {
+        setFeedback({
+          type: "error",
+          message: "admin.designSavedButTheBookingPreviewCouldNotBeRefreshed",
+        });
       }
     } catch {
       await refreshCanonicalGallery().catch(() => undefined);
@@ -394,6 +404,7 @@ export default function DesignStudioPage() {
       `booking.property-gallery.assign:${propertyId}:${crypto.randomUUID()}`,
     );
     profileRevisionRef.current = response.profileRevision;
+    coverAssignmentRef.current = cover;
 
     try {
       const profile = await sharedHotelSetupApi.getPublicPropertyProfile(propertyId);

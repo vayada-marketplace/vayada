@@ -481,6 +481,18 @@ test.describe("booking-admin adaptive setup", () => {
     ).toBeVisible();
     await expect(heroImage).toHaveAttribute("src", media.heroUrl(retryUploadNumber));
     await page.screenshot({ path: test.info().outputPath("hero-upload-failed-repeatedly.png") });
+
+    // A new file starts a fresh count, and Try again recovers a revision lost while offline.
+    media.failNextUploadSessions(1);
+    media.failNextProfileReads(1);
+    await heroInput.setInputFiles(HERO_PNG_FILE);
+    await expect(page.getByText("Image upload failed. Please try again.")).toBeVisible();
+    const recoveredAssignmentIndex = media.assignmentRequests.length;
+    const recoveredUploadNumber = media.uploadSessionRequests.length + 1;
+    await tryAgain.click();
+    await expectHeroAssigned(media, recoveredAssignmentIndex, recoveredUploadNumber, 8);
+    await expect(heroImage).toHaveAttribute("src", media.heroUrl(recoveredUploadNumber));
+    await expect(page.getByText("1/10", { exact: true })).toBeVisible();
   });
 
   test("removes the canonical cover and loads the hero from it", async ({ page }) => {
@@ -820,6 +832,7 @@ async function mockCanonicalHeroMedia(page: Page, { withCover = false } = {}) {
   ];
   let rejectedAssignments = 0;
   let failedUploadSessions = 0;
+  let failedProfileReads = 0;
   const assignmentRequests: Array<Record<string, unknown>> = [];
   const uploadSessionRequests: Array<Record<string, unknown>> = [];
 
@@ -827,23 +840,28 @@ async function mockCanonicalHeroMedia(page: Page, { withCover = false } = {}) {
   await page.route("https://media.example/**", (route) =>
     route.fulfill({ contentType: "image/png", body: HERO_PNG }),
   );
-  await page.route(`**${BOOKING_ADMIN_PUBLIC_PROPERTY_PROFILE_PATH}*`, (route) =>
-    route.request().method() === "OPTIONS"
-      ? route.fulfill({ status: 204, headers: corsHeaders() })
-      : route.fulfill({
-          headers: corsHeaders(),
-          json: {
-            propertyId: BOOKING_ADMIN_PROPERTY_ID,
-            profileRevision,
-            publicProfile: {
-              locale: "en",
-              shortDescription: CANONICAL_PUBLIC_DESCRIPTION,
-              longDescription: null,
-              media: publicMedia,
-            },
-          },
-        }),
-  );
+  await page.route(`**${BOOKING_ADMIN_PUBLIC_PROPERTY_PROFILE_PATH}*`, (route) => {
+    if (route.request().method() === "OPTIONS") {
+      return route.fulfill({ status: 204, headers: corsHeaders() });
+    }
+    if (failedProfileReads > 0) {
+      failedProfileReads -= 1;
+      return route.fulfill({ status: 503, headers: corsHeaders(), json: { message: "Offline" } });
+    }
+    return route.fulfill({
+      headers: corsHeaders(),
+      json: {
+        propertyId: BOOKING_ADMIN_PROPERTY_ID,
+        profileRevision,
+        publicProfile: {
+          locale: "en",
+          shortDescription: CANONICAL_PUBLIC_DESCRIPTION,
+          longDescription: null,
+          media: publicMedia,
+        },
+      },
+    });
+  });
   await page.route(
     `**/api/hotel-setup/properties/${BOOKING_ADMIN_PROPERTY_ID}/media/presentation`,
     (route) => {
@@ -952,6 +970,9 @@ async function mockCanonicalHeroMedia(page: Page, { withCover = false } = {}) {
     },
     failNextUploadSessions: (count: number) => {
       failedUploadSessions = count;
+    },
+    failNextProfileReads: (count: number) => {
+      failedProfileReads = count;
     },
   };
 }
