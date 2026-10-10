@@ -57,7 +57,7 @@ const CARDS: SettingsCardLink[] = [
     title: "settings.cards.benefits.title",
     description: "settings.cards.benefits.description",
     icon: GiftIcon,
-    href: "/booking-flow?tab=benefits",
+    href: "/settings/book-direct-benefits",
   },
   {
     title: "settings.cards.policies.title",

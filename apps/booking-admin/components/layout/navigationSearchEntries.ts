@@ -60,13 +60,13 @@ export const SEARCH_ENTRIES = [
     "settings",
     "bookingFlow.tabs.filters",
   ],
-  ["Add-ons", "/booking-flow?tab=addons", "Booking Flow", "settings", "bookingFlow.tabs.addons"],
+  ["Add-ons", "/add-ons", "Pages", "settings", "bookingFlow.tabs.addons"],
   [
-    "Benefits",
-    "/booking-flow?tab=benefits",
-    "Booking Flow",
+    "Book Direct Benefits",
+    "/settings/book-direct-benefits",
+    "Settings",
     "settings",
-    "bookingFlow.tabs.benefits",
+    "settings.cards.benefits.title",
   ],
   [
     "Guest form",
