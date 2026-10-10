@@ -98,20 +98,22 @@ When a deferred rule eventually graduates to enforced, it gets its own follow-up
 
 ## CI enforcement
 
-Currently the PR workflow runs `npm run check:architecture-boundaries`, root frontend typecheck/lint/build, and the backend test matrix. Playwright smoke tests stay local/on-demand until the team decides the pilot is stable enough to gate PRs.
+Currently the PR workflow runs `npm run check:architecture-boundaries`, root frontend typecheck/lint/build, and the backend test matrix. Of the Playwright projects, PRs run the landing, first-party auth and mocked pms-web suites; the others stay local/on-demand.
 
 ### Which PR checks run
 
 `.github/workflows/pr-checks.yml` has one required status, **Required Checks**. A `changes` job diffs the PR merge commit against the base branch and `scripts/ci/pr-checks.mjs select` maps each changed file to the jobs that cover it. The first matching rule wins per file and the PR runs the union:
 
-| Changed path                                                                                    | Jobs                                                                                                       |
-| ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `**/*.md`, `.agents/**`, `engineering/evidence/**`, `LICENSE`, `.gitignore`, `.coderabbit.yaml` | none                                                                                                       |
-| `apps/marketplace-api/**`, `apps/booking-api/**`, `apps/pms-api/**`                             | Backend Tests (Python)                                                                                     |
-| `apps/*-web/**`, `apps/vayada-admin/**`, `apps/landing/**`                                      | Frontend, First-Party Auth Contracts                                                                       |
-| `tests/e2e/**`                                                                                  | Frontend, First-Party Auth Contracts                                                                       |
-| `apps/api/**`, `packages/**` (including `packages/backend-migration/migrations`)                | Frontend, First-Party Auth, API and package unit suites, both PostgreSQL integration jobs on PG16 and PG17 |
-| anything else (workflows, `scripts/**`, lockfiles, `auth-db/**`, fixtures, …)                   | every job                                                                                                  |
+| Changed path                                                                                            | Jobs                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `**/*.md`, `.agents/**`, `engineering/evidence/**`, `LICENSE`, `.gitignore`, `.coderabbit.yaml`         | none                                                                                                                              |
+| `apps/marketplace-api/**`, `apps/booking-api/**`, `apps/pms-api/**`                                     | Backend Tests (Python)                                                                                                            |
+| `apps/pms-web/**`, `tests/e2e/pms-web/**`, `tests/e2e/support/**`, `tests/e2e/marketplace-web/utils/**` | Frontend, First-Party Auth Contracts, PMS Web Browser Specs                                                                       |
+| other `apps/*-web/**`, `apps/vayada-admin/**`, `apps/landing/**`                                        | Frontend, First-Party Auth Contracts                                                                                              |
+| other `tests/e2e/**`                                                                                    | Frontend, First-Party Auth Contracts                                                                                              |
+| `packages/**` except `packages/backend-*`                                                               | Frontend, First-Party Auth, PMS Web Browser Specs, API and package unit suites, both PostgreSQL integration jobs on PG16 and PG17 |
+| `apps/api/**`, `packages/backend-*/**` (including `packages/backend-migration/migrations`)              | Frontend, First-Party Auth, API and package unit suites, both PostgreSQL integration jobs on PG16 and PG17                        |
+| anything else (workflows, `scripts/**`, lockfiles, `auth-db/**`, fixtures, …)                           | every job                                                                                                                         |
 
 The API and package unit-suite job runs `npm run test:unit-suites` (the full `vayada-api` suite and the backend package suites, no database); `.github/workflows/main-unit-suites.yml` repeats it on every push to `main` and nightly.
 
