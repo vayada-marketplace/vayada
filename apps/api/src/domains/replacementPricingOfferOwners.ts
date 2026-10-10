@@ -11,6 +11,7 @@ import {
   selectNextChannexInitialAriDate,
 } from "./channexInitialAriDate.js";
 import { prepareChannexAdultNightPrices } from "../integrations/channexNightlyPrices.js";
+import { buildChannexOfferAriValue } from "./channexOfferDesiredAri.js";
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -1637,23 +1638,13 @@ async function withPublishedChannexPricing(
                 ),
               });
               if (prepared.kind !== "prepared") return prepared;
-              // Channex requires strictly positive rates; never export a partial occupancy set.
-              if (prepared.candidates.some((c) => BigInt(c.projection.night.totalMinor) <= 0n))
-                return unavailable("provider_rate_unavailable");
-              const request = {
-                values: [
-                  {
-                    property_id: configurationIdentity.externalPropertyId,
-                    rate_plan_id: configurationIdentity.externalRatePlanId,
-                    date: prepared.candidates[0].projection.night.date,
-                    rates: prepared.candidates.map(({ occupancy, rate }) => ({ occupancy, rate })),
-                    ...prepared.candidates[0].restrictionCandidate,
-                    // Pending rates must remain closed regardless of the desired sell state.
-                    // Opening sales is a separate activation operation, never initial ARI.
-                    stop_sell: true,
-                  },
-                ],
-              };
+              // Pending rates must remain closed regardless of the desired sell state.
+              // Opening sales is a separate activation operation, never initial ARI.
+              const built = buildChannexOfferAriValue(prepared, configurationIdentity, {
+                forceStopSell: true,
+              });
+              if (built.kind !== "value") return unavailable(built.reason);
+              const request = { values: [built.value] };
               if (prior.rows.some((row) => row.date === work.date))
                 return unavailable("ari_date_already_reconciled");
               if (work.kind === "ari_dispatch") {
