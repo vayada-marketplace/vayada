@@ -1011,10 +1011,9 @@ test.describe("pms-web smoke", () => {
     await expect(page.getByRole("link", { name: "Open Pricing" })).toHaveCount(0);
     await page.getByRole("button", { name: "Save Changes" }).click();
     await expect(page.getByText("Room type updated successfully")).toBeVisible();
-    expect(roomTypeWrite).toBeDefined();
-    expect(Object.keys(roomTypeWrite!).sort()).toEqual(
-      ["commandId", "idempotencyKey", "latitude", "locationAddress", "longitude"].sort(),
-    );
+    // An unchanged save writes nothing, so published prices stay valid.
+    expect(roomTypeWrite).toBeUndefined();
+    await expect(page.getByText("Prices need to be saved again")).toHaveCount(0);
     expect(pricingCalls).toEqual([]);
     await assertNoLegacyCalls();
     await assertHealthy();

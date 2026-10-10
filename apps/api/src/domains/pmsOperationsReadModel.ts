@@ -76,6 +76,8 @@ export type PmsRoomType = {
   amenities: string[];
   media: PmsRoomTypeMedia[];
   roomMediaRevision?: number;
+  /** Expected by the room amenities command; edits send the revision they loaded. */
+  roomAmenitiesRevision?: number;
   baseRate: PmsMoney;
   active: boolean;
   sortOrder: number;
@@ -824,6 +826,7 @@ type TargetPmsRoomTypeRow = {
   amenities: unknown;
   media: unknown;
   roomMediaRevision: string | number;
+  roomAmenitiesRevision: string | number;
   baseRateAmount: string | number;
   currency: string;
   active: boolean;
@@ -1216,6 +1219,7 @@ async function listRoomTypes(
          ELSE COALESCE(room_media.items, room_type.media_snapshot)
        END AS "media",
        room_type.room_media_revision AS "roomMediaRevision",
+       room_type.room_amenities_revision AS "roomAmenitiesRevision",
        room_type.base_rate_amount AS "baseRateAmount",
        room_type.currency,
        room_type.active,
@@ -1383,6 +1387,7 @@ function toPmsRoomType(row: TargetPmsRoomTypeRow): PmsRoomType {
     amenities: toStringArray(row.amenities),
     media: toMediaArray(row.media),
     roomMediaRevision: toInteger(row.roomMediaRevision),
+    roomAmenitiesRevision: toInteger(row.roomAmenitiesRevision),
     baseRate: {
       amountDecimal: toDecimalString(row.baseRateAmount),
       currency: row.currency,

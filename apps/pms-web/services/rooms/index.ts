@@ -3,6 +3,7 @@ import {
   type RoomTypeFacts,
   parseConfirmRoomTypeAmenitiesResult,
   parseCreateRoomTypeFactsResult,
+  parseUpdateRoomTypeFactsResult,
   parsePhysicalRoomUnitIdentity,
   parseReconcilePhysicalRoomUnitsResult,
   parseRoomTypeCapacitySnapshot,
@@ -21,7 +22,9 @@ import type { RoomImageReference } from "../upload";
 import { imageReferenceUrl, pmsRoomMediaResource, uploadService } from "../upload";
 import {
   bedSummaryFromFacts,
+  roomAmenityInputsChanged,
   roomAmenityKeys,
+  roomFactInputsChanged,
   roomAmenityLabels,
   roomCategoryLabel,
   roomSizeValue,
@@ -81,6 +84,7 @@ export interface RoomType {
   maxChildren: number | null;
   bedrooms: number;
   bathrooms: number;
+  bathroomType: "private" | "shared";
   size: number;
   baseRate: number;
   nonRefundableRate: number | null;
@@ -91,6 +95,8 @@ export interface RoomType {
   amenities: string[];
   images: RoomImageReference[];
   roomMediaRevision: number;
+  /** Null until the API reports it; amenity edits then need a reload. */
+  roomAmenitiesRevision: number | null;
   bedType: string;
   features: string[];
   benefits: string[];
@@ -168,6 +174,12 @@ export interface RoomTypeCreate {
 }
 
 export type RoomTypeUpdate = Partial<RoomTypeCreate>;
+
+export interface RoomTypeSaveResult {
+  roomType: RoomType;
+  /** The edit changed room facts or attributes, which published prices pin. */
+  pricesNeedPublishing: boolean;
+}
 
 export interface Room {
   roomUnitsRevision?: number;
@@ -254,6 +266,7 @@ export interface PmsOperationsRoomType {
   amenities: string[];
   media: { mediaObjectId?: string; url: string; altText?: string | null }[];
   roomMediaRevision: number;
+  roomAmenitiesRevision?: number;
   baseRate: PmsOperationsMoney;
   active: boolean;
   sortOrder: number;
@@ -436,6 +449,7 @@ function toRoomType(propertyId: string, roomType: PmsOperationsRoomType): RoomTy
     maxChildren,
     bedrooms: asNumber(roomType.attributes.bedrooms, 1),
     bathrooms: asNumber(roomType.attributes.bathrooms, 1),
+    bathroomType: roomType.attributes.bathroomType === "shared" ? "shared" : "private",
     size: asNumber(roomSizeValue(roomType.attributes.size)),
     baseRate,
     nonRefundableRate,
@@ -454,7 +468,9 @@ function toRoomType(propertyId: string, roomType: PmsOperationsRoomType): RoomTy
           },
     ),
     roomMediaRevision: roomType.roomMediaRevision ?? 1,
-    bedType: asString(roomType.attributes.bedType, bedSummaryFromFacts(roomType.attributes.beds)),
+    roomAmenitiesRevision: roomType.roomAmenitiesRevision ?? null,
+    // Room facts write `beds`; an older free-text `bedType` stays behind in the row.
+    bedType: bedSummaryFromFacts(roomType.attributes.beds) ?? asString(roomType.attributes.bedType),
     features: [],
     benefits: [],
     totalRooms: roomType.roomCount,
@@ -641,7 +657,13 @@ export const roomsService = {
           await pmsOperationsRoomsReadService.updateRoomType(propertyId, roomTypeId, location);
         }
         // Confirming, even an empty list, marks the amenities reviewed for room publication.
-        await confirmNewRoomTypeAmenities(propertyId, roomTypeId, commandId, amenities);
+        await confirmRoomTypeAmenities(
+          propertyId,
+          roomTypeId,
+          `${commandId}:amenities`,
+          1,
+          amenities,
+        );
         await preparePhysicalRooms(propertyId, roomTypeId, facts.name, data.totalRooms);
         const current = await pmsOperationsRoomsReadService.getRoomType(propertyId, roomTypeId);
         let created = toRoomType(current.propertyId, current.item);
@@ -690,23 +712,44 @@ export const roomsService = {
     );
   },
 
-  update: async (id: string, data: RoomTypeUpdate) => {
+  /** Saves what changed against `saved`, the room the form was loaded from, then re-reads it. */
+  update: async (
+    id: string,
+    data: RoomTypeUpdate,
+    saved: RoomType,
+  ): Promise<RoomTypeSaveResult> => {
     const propertyId = await resolveSelectedPmsPropertyId("updating room type");
-    const response = await pmsOperationsRoomsReadService.updateRoomType(propertyId, id, data);
-    let updated = toRoomType(response.propertyId, response.item);
-    await preparePhysicalRooms(propertyId, id, updated.name, data.totalRooms);
-    if (Number.isInteger(data.totalRooms) && data.totalRooms! >= 1) {
-      const refreshed = await pmsOperationsRoomsReadService.getRoomType(propertyId, id);
-      updated = toRoomType(refreshed.propertyId, refreshed.item);
+    const savedForm = roomTypeUpdateForm(saved);
+    const next = { ...savedForm, ...data } as RoomTypeCreate;
+    // Check every part before the first write, so a rejected edit saves nothing.
+    const facts = roomFactInputsChanged(next, savedForm) ? roomTypeFactsFromForm(next) : null;
+    const amenities = roomAmenityInputsChanged(next.amenities ?? [], saved.amenities)
+      ? roomAmenityKeys(next.amenities ?? [])
+      : null;
+    if (data.images) assertRoomImagesUploaded(data.images);
+    if (amenities && saved.roomAmenitiesRevision === null) {
+      throw new Error("Room amenities are unavailable. Reload the room and try again.");
     }
-    if (data.images && !sameRoomImageOrder(data.images, updated.images)) {
-      await replaceRoomTypeMedia(propertyId, updated, data.images);
+    const location = changedRoomLocation(next, saved);
+    if (facts) await updateRoomTypeFacts(propertyId, id, saved.version, facts);
+    if (location) await pmsOperationsRoomsReadService.updateRoomType(propertyId, id, location);
+    if (amenities) {
+      await confirmRoomTypeAmenities(
+        propertyId,
+        id,
+        randomCommandId("pms-room-amenities"),
+        saved.roomAmenitiesRevision!,
+        amenities,
+      );
     }
-    if (data.images) {
-      const refreshed = await pmsOperationsRoomsReadService.getRoomType(propertyId, id);
-      return toRoomType(refreshed.propertyId, refreshed.item);
+    await preparePhysicalRooms(propertyId, id, next.name, data.totalRooms);
+    let current = await readRoomType(propertyId, id);
+    if (data.images && !sameRoomImageOrder(data.images, current.images)) {
+      await replaceRoomTypeMedia(propertyId, current, data.images);
+      current = await readRoomType(propertyId, id);
     }
-    return updated;
+    // Published prices pin room facts and attributes: guests see no offers until republished.
+    return { roomType: current, pricesNeedPublishing: facts !== null || location !== null };
   },
 
   delete: async (id: string) => {
@@ -752,17 +795,7 @@ async function createRoomTypeFacts(
       idempotentRequestOptions(commandId),
     );
   } catch (error) {
-    if (error instanceof ApiErrorResponse && error.data.code === "room_type_name_conflict") {
-      throw new Error("A room type with this name already exists. Choose another name.", {
-        cause: error,
-      });
-    }
-    if (error instanceof ApiErrorResponse && error.data.code === "unsupported_room_fact_keys") {
-      throw new Error("This room category or bed type is not supported. Choose another one.", {
-        cause: error,
-      });
-    }
-    throw error;
+    throw roomFactsCommandError(error);
   }
   const result = parseCreateRoomTypeFactsResult({ ok: true, response: value });
   if (
@@ -775,19 +808,102 @@ async function createRoomTypeFacts(
   return result.response.roomType.roomTypeId;
 }
 
-async function confirmNewRoomTypeAmenities(
+async function updateRoomTypeFacts(
   propertyId: string,
   roomTypeId: string,
-  commandId: string,
+  version: string,
+  facts: RoomTypeFacts,
+): Promise<void> {
+  const revision = /^room-type-facts-v(\d+)$/.exec(version)?.[1];
+  if (!revision)
+    throw new Error("The room details could not be saved. Reload the room and try again.");
+  let value: unknown;
+  try {
+    value = await pmsOperationsClient.put<unknown>(
+      `/api/pms/setup/properties/${encodeURIComponent(propertyId)}/room-types/${encodeURIComponent(roomTypeId)}`,
+      { expectedRevision: Number(revision), facts },
+      idempotentRequestOptions(randomCommandId("pms-room-facts-update")),
+    );
+  } catch (error) {
+    throw roomFactsCommandError(error);
+  }
+  const result = parseUpdateRoomTypeFactsResult({ ok: true, response: value });
+  if (!result?.ok || result.response.roomType.roomTypeId !== roomTypeId.toLowerCase()) {
+    throw new Error("The room details could not be confirmed. Reload the room and try again.");
+  }
+}
+
+function roomFactsCommandError(error: unknown): unknown {
+  const code = error instanceof ApiErrorResponse ? error.data.code : undefined;
+  const message =
+    code === "room_type_name_conflict"
+      ? "A room type with this name already exists. Choose another name."
+      : code === "unsupported_room_fact_keys"
+        ? "This room category or bed type is not supported. Choose another one."
+        : code === "room_facts_revision_conflict"
+          ? "This room type was changed somewhere else. Reload the room and try again."
+          : code === "room_type_not_found"
+            ? "This room type is closing or no longer active, so its details can't be changed."
+            : null;
+  return message ? new Error(message, { cause: error }) : error;
+}
+
+async function confirmRoomTypeAmenities(
+  propertyId: string,
+  roomTypeId: string,
+  idempotencyKey: string,
+  expectedRoomAmenitiesRevision: number,
   amenities: string[],
 ): Promise<void> {
-  const response = await pmsOperationsClient.put<unknown>(
-    `/api/pms/properties/${encodeURIComponent(propertyId)}/room-types/${encodeURIComponent(roomTypeId)}/amenities`,
-    { expectedRoomAmenitiesRevision: 1, amenities },
-    idempotentRequestOptions(`${commandId}:amenities`),
-  );
+  let response: unknown;
+  try {
+    response = await pmsOperationsClient.put<unknown>(
+      `/api/pms/properties/${encodeURIComponent(propertyId)}/room-types/${encodeURIComponent(roomTypeId)}/amenities`,
+      { expectedRoomAmenitiesRevision, amenities },
+      idempotentRequestOptions(idempotencyKey),
+    );
+  } catch (error) {
+    if (
+      error instanceof ApiErrorResponse &&
+      error.data.code === "room_amenities_revision_conflict"
+    ) {
+      throw new Error(
+        "This room's amenities were changed somewhere else. Reload the room and try again.",
+        {
+          cause: error,
+        },
+      );
+    }
+    throw error;
+  }
   if (!parseConfirmRoomTypeAmenitiesResult({ ok: true, response })?.ok) {
     throw new Error("Room amenities could not be confirmed. Reload the room and try again.");
+  }
+}
+
+async function readRoomType(propertyId: string, roomTypeId: string): Promise<RoomType> {
+  const response = await pmsOperationsRoomsReadService.getRoomType(propertyId, roomTypeId);
+  return toRoomType(response.propertyId, response.item);
+}
+
+function changedRoomLocation(next: RoomTypeUpdate, saved: RoomType): RoomTypeUpdate | null {
+  const location: RoomTypeUpdate = {};
+  if ((next.locationAddress || "") !== (saved.locationAddress || "")) {
+    location.locationAddress = next.locationAddress || "";
+  }
+  if ((next.latitude ?? null) !== saved.latitude) location.latitude = next.latitude ?? null;
+  if ((next.longitude ?? null) !== saved.longitude) location.longitude = next.longitude ?? null;
+  return Object.keys(location).length > 0 ? location : null;
+}
+
+function assertRoomImagesUploaded(images: RoomImageReference[]): void {
+  const pending = images.some((image) => {
+    if (typeof image !== "string" && image.platformMediaObjectId) return false;
+    const url = imageReferenceUrl(image).trim();
+    return !url || url.startsWith("blob:");
+  });
+  if (pending) {
+    throw new Error("Every saved room photo must finish uploading before the room can be saved.");
   }
 }
 
@@ -1256,6 +1372,8 @@ export function roomTypeUpdateForm(r: RoomType): RoomTypeUpdate {
     category: r.category || "",
     bedrooms: r.bedrooms ?? 1,
     bathrooms: r.bathrooms ?? 1,
+    // The form shows one king bed when a room has none; start from what it shows.
+    bedType: r.bedType || "1 King Bed",
     locationAddress: r.locationAddress || "",
   };
 }

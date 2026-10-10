@@ -221,3 +221,22 @@ it("summarises a room's published rates from its lowest base price and links to 
   expect(text()).toContain("No prices yet");
   expect(view.root.findByType("a").children.join("")).toBe("Set prices");
 });
+it("on a room page shows only a stale publication's republish", async () => {
+  await act(async () => {
+    view = create(<RoomsPricesStrip {...props(false)} staleOnly />);
+  });
+  expect(view.toJSON()).toBeNull();
+  act(() =>
+    view.update(
+      <RoomsPricesStrip prices={null} error={new Error("offline")} reload={reload} staleOnly />,
+    ),
+  );
+  expect(view.toJSON()).toBeNull();
+  act(() => view.update(<RoomsPricesStrip {...props()} staleOnly />));
+  expect(text()).toContain("Prices need to be saved again");
+  expect(text()).not.toContain("All prices are in EUR");
+  await act(async () => button("Save prices again")!.props.onClick());
+  expect(publish).toHaveBeenCalledOnce();
+  act(() => view.update(<RoomsPricesStrip {...props(false)} staleOnly />));
+  expect(text()).toContain("Prices saved.");
+});

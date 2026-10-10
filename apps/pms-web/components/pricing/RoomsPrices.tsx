@@ -113,8 +113,14 @@ export function RoomPriceSummary({
 }
 
 /** Property-wide prices above the Rooms list: the currency, and for a stale publication "Save prices again",
- * which republishes every room unchanged (the press is the mandatory-charges declaration). */
-export function RoomsPricesStrip({ prices, error, reload }: PropertyPrices) {
+ * which republishes every room unchanged (the press is the mandatory-charges declaration). `staleOnly` (a room
+ * page, e.g. after a room-details save made the prices stale) shows only that republish and its outcome. */
+export function RoomsPricesStrip({
+  prices,
+  error,
+  reload,
+  staleOnly = false,
+}: PropertyPrices & { staleOnly?: boolean }) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false),
     [failure, setFailure] = useState<unknown>(null),
@@ -178,7 +184,7 @@ export function RoomsPricesStrip({ prices, error, reload }: PropertyPrices) {
       ? t("pricing.list.changed")
       : pricingSaveError(e, t);
   if (error)
-    return (
+    return staleOnly ? null : (
       <div
         role="alert"
         className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[12px] text-red-800"
@@ -189,20 +195,24 @@ export function RoomsPricesStrip({ prices, error, reload }: PropertyPrices) {
         </button>
       </div>
     );
-  if (!prices) return null;
-  const publication = prices.publication;
+  const publication = prices?.publication;
+  if (!prices || (staleOnly && !publication?.stale && !saved && failure === null)) return null;
   return (
     <section
       aria-label={t("pricing.list.label")}
       className="mb-4 rounded-xl border border-gray-200 bg-white px-4 py-3 text-[12px] text-gray-700"
     >
-      <p>
-        {publication
-          ? t("pricing.list.currency", { currency: publication.currency })
-          : t("pricing.list.none")}
-      </p>
+      {!staleOnly && (
+        <p>
+          {publication
+            ? t("pricing.list.currency", { currency: publication.currency })
+            : t("pricing.list.none")}
+        </p>
+      )}
       {publication?.stale && (
-        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+        <div
+          className={`${staleOnly ? "" : "mt-3 "}rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900`}
+        >
           <p className="font-semibold">{t("pricing.list.staleTitle")}</p>
           <p className="mt-1">{t("pricing.list.staleBody")}</p>
           <button

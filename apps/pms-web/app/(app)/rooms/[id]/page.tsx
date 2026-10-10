@@ -11,8 +11,9 @@ import {
   RoomTypeUpdate,
   type PropertyPlan,
 } from "@/services/rooms";
-import RoomTypeForm from "@/components/rooms/RoomTypeForm";
+import RoomTypeForm, { type RoomTab } from "@/components/rooms/RoomTypeForm";
 import { RoomPricesTab } from "@/components/pricing/RoomPricesTab";
+import { RoomsPricesStrip, usePropertyPrices } from "@/components/pricing/RoomsPrices";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useTranslation } from "@/lib/i18n";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
@@ -22,6 +23,10 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
   const { t } = useTranslation();
   const router = useRouter();
   const pricesFirst = useSearchParams().get("tab") === "prices";
+  // The Prices tab mounts once opened and stays mounted, so switching tabs or saving room details keeps
+  // unsaved prices.
+  const [tab, setTab] = useState<RoomTab>(pricesFirst ? "prices" : "details");
+  const [pricesOpened, setPricesOpened] = useState(pricesFirst);
   const [room, setRoom] = useState<RoomType | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<{ cause: unknown; message: string } | null>(null);
@@ -31,8 +36,17 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [propertyPlan, setPropertyPlan] = useState<PropertyPlan | null>(null);
+  const [pricesNeedPublishing, setPricesNeedPublishing] = useState(false);
+  const propertyPrices = usePropertyPrices();
+  // A details save changed what published prices pin: re-read them, so the one-click republish appears.
+  const pricesChanged = () => {
+    setPricesNeedPublishing(true);
+    void propertyPrices.reload();
+  };
 
   const [form, setForm] = useState<RoomTypeUpdate>({});
+  // The form keeps local input state; a new key re-reads every input from the saved room.
+  const [formKey, setFormKey] = useState(0);
 
   useEffect(() => {
     roomsService.getPropertyPlan().then(setPropertyPlan).catch(console.error);
@@ -51,16 +65,34 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!room) return;
     setSaving(true);
     setError("");
     setSuccess("");
     try {
-      const updated = await roomsService.update(id, form);
-      setRoom(updated);
-      setForm(roomTypeUpdateForm(updated));
+      const saved = await roomsService.update(id, form, room);
+      setRoom(saved.roomType);
+      setForm(roomTypeUpdateForm(saved.roomType));
+      setFormKey((key) => key + 1);
+      if (saved.pricesNeedPublishing) pricesChanged();
       setSuccess(t("rooms.edit.success"));
     } catch (error) {
       setError(error instanceof Error ? error.message : t("rooms.edit.failedToUpdate"));
+      // Keep the room the form was loaded from, so a retry still refuses a change made
+      // elsewhere. Part of this edit may have saved what published prices pin.
+      roomsService
+        .get(id)
+        .then((current) => {
+          if (
+            current.version !== room.version ||
+            current.locationAddress !== room.locationAddress ||
+            current.latitude !== room.latitude ||
+            current.longitude !== room.longitude
+          ) {
+            pricesChanged();
+          }
+        })
+        .catch(() => undefined);
     } finally {
       setSaving(false);
     }
@@ -136,7 +168,12 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
         </button>
       </div>
 
+      {(pricesNeedPublishing || propertyPrices.prices?.publication?.stale) && (
+        <RoomsPricesStrip {...propertyPrices} staleOnly />
+      )}
+
       <RoomTypeForm
+        key={formKey}
         form={form}
         onChange={setForm}
         onSubmit={handleSubmit}
@@ -149,9 +186,17 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
         mode="edit"
         roomTypeId={id}
         propertyPlan={propertyPlan}
-        prices={<RoomPricesTab roomTypeId={id} />}
-        initialTab={pricesFirst ? "prices" : undefined}
+        tab={tab}
+        onTabChange={(next) => {
+          setTab(next);
+          if (next === "prices") setPricesOpened(true);
+        }}
       />
+      {pricesOpened && (
+        <div hidden={tab !== "prices"}>
+          <RoomPricesTab roomTypeId={id} />
+        </div>
+      )}
       {showDeleteConfirm && (
         <ConfirmDialog
           title={t("rooms.edit.deleteTitle")}
