@@ -59,6 +59,8 @@ export async function writeProductionCatalogCore(
        AND hotel_catalog.property_source_links.relationship = EXCLUDED.relationship`,
     [JSON.stringify(sourceLinks), runId, migrationPhase],
   );
+  // Private groups lose every owner path. Identity (VAY-1362) already archives non-cohort
+  // resources in their quarantine organization; these updates only touch rows still open.
   await client.query(
     `UPDATE identity.organization_resource_links AS owner_link
         SET status = 'archived', updated_at = now()
@@ -75,7 +77,8 @@ export async function writeProductionCatalogCore(
             owner_link.product = source."sourceSystem"
             AND owner_link.resource_id = source."sourceId"
             AND (
-              (source."sourceSystem" = 'pms'
+              (source."sourceSystem" = 'booking' AND owner_link.resource_type = 'booking_hotel')
+              OR (source."sourceSystem" = 'pms'
                 AND owner_link.resource_type = 'pms_hotel'
                 AND owner_link.relationship = 'operator')
               OR (source."sourceSystem" = 'marketplace'
@@ -88,7 +91,8 @@ export async function writeProductionCatalogCore(
   );
   await client.query(
     `UPDATE identity.product_entitlements AS entitlement
-        SET status = 'suspended', updated_at = now()
+        SET status = CASE source."sourceSystem" WHEN 'booking' THEN 'expired' ELSE 'suspended' END,
+            updated_at = now()
        FROM jsonb_to_recordset($1::jsonb) AS source(
          "propertyId" uuid, "sourceSystem" text, "sourceTable" text, "sourceId" text,
          relationship text, "migrationDisposition" text, "migrationDispositionReason" text)
@@ -97,7 +101,8 @@ export async function writeProductionCatalogCore(
         AND entitlement.resource_product = source."sourceSystem"
         AND entitlement.resource_id = source."sourceId"
         AND (
-          (source."sourceSystem" = 'pms' AND entitlement.resource_type = 'pms_hotel')
+          (source."sourceSystem" = 'booking' AND entitlement.resource_type = 'booking_hotel')
+          OR (source."sourceSystem" = 'pms' AND entitlement.resource_type = 'pms_hotel')
           OR (source."sourceSystem" = 'marketplace'
             AND entitlement.resource_type = 'hotel_profile')
         )`,

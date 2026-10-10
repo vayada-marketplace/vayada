@@ -199,6 +199,57 @@ describe("catalog cohort scope (VAY-1362)", () => {
     }
   });
 
+  it("makes a non-cohort property private without a custom domain or public media", () => {
+    const { core, presentation } = plans(cohort);
+    expect(core.blockers).toEqual([]);
+    expect(core.properties.find((property) => property.id === B)).toMatchObject({
+      publicId: `legacy-private-property-${B}`,
+      profileStatus: "private",
+      completenessReasons: expect.arrayContaining(["outside_migration_cohort"]),
+    });
+    expect(core.properties.find((property) => property.id === A)).toMatchObject({
+      publicId: `legacy-property-${A}`,
+      profileStatus: "complete",
+    });
+    // The legacy slug is kept so slug collisions still block and Booking events still resolve.
+    expect(core.slugs.map((slug) => [slug.propertyId, slug.slug])).toEqual([
+      [A, "alpha"],
+      [B, "beta"],
+      [A, "old-alpha"],
+      [B, "old-beta"],
+    ]);
+    expect(presentation.blockers).toEqual([]);
+    expect(presentation.domains.map((domain) => domain.hostname)).toEqual(["alpha.example.test"]);
+    expect(presentation.media.map((media) => [media.propertyId, media.publicApproved])).toEqual([
+      [A, true],
+      [B, false],
+    ]);
+  });
+
+  it("blocks a custom domain that is not disabled on a property outside the cohort", () => {
+    for (const [verificationStatus, codes] of [
+      ["verified", ["CATALOG_PRIVATE_DOMAIN_CONFLICT"]],
+      ["pending", ["CATALOG_PRIVATE_DOMAIN_CONFLICT"]],
+      ["disabled", []],
+    ] as const) {
+      const { presentation } = plans(cohort, {
+        domains: [
+          {
+            id: "cccccccc-0000-4000-8000-00000000000c",
+            propertyId: B,
+            hostname: "beta.example.test",
+            verificationStatus,
+            canonicalWhenVerified: verificationStatus === "verified",
+            verifiedAt: null,
+            updatedAt: "2026-08-03T00:00:00Z",
+          },
+        ],
+      });
+      expect(presentation.blockers.map((blocker) => blocker.code)).toEqual(codes);
+      expect(presentation.domains.map((domain) => domain.hostname)).toEqual(["alpha.example.test"]);
+    }
+  });
+
   it("attaches an owner's rows only to anchors on the same side of the cohort", () => {
     // One owner with cohort anchor A, non-cohort anchor B and one profile per side.
     const mixed = rows.map((source) =>

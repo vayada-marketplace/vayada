@@ -718,7 +718,11 @@ Marketplace rows attached to it take the same disposition. A property whose
 Booking, PMS and Marketplace members disagree on cohort membership blocks with
 `COHORT_MEMBERSHIP_MISMATCH`; an owner with anchors on both sides attaches each
 row to the single anchor on its own side. Private properties keep their legacy
-slugs, which stay unpublished while the profile is `private`.
+slugs (unpublished while `private`), get no custom-domain row and no public
+media; an existing domain that is not `disabled` on a property outside the cohort
+blocks with `CATALOG_PRIVATE_DOMAIN_CONFLICT`. The core writer also archives
+their `booking_hotel` links and expires their Booking entitlements that are still
+open.
 
 Before a run, a database administrator must bind the target itself with durable
 evidence. The database-level settings path remains supported where available;

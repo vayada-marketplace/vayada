@@ -104,7 +104,23 @@ export function planProductionCatalogPresentation(
           error instanceof Error ? error.message : "custom_domain is malformed",
         );
       }
-    if (booking && hostname) {
+    // VAY-1362 hardening: a private group gets no custom domain row, so nothing can verify
+    // one. The writer never demotes a target row, so a live one outside the cohort blocks.
+    const privateGroup = group.migrationDisposition === "private_quarantine";
+    if (
+      group.migrationDispositionReason === "outside_migration_cohort" &&
+      existingDomains.some(
+        (row) => row.propertyId === group.propertyId && row.verificationStatus !== "disabled",
+      )
+    )
+      addBlocker(
+        blockers,
+        "CATALOG_PRIVATE_DOMAIN_CONFLICT",
+        "hotel_catalog.property_domains",
+        group.propertyId,
+        "A property outside the migration cohort already has a custom domain",
+      );
+    if (booking && hostname && !privateGroup) {
       if (!validHostname(hostname))
         addBlocker(
           blockers,
@@ -408,14 +424,7 @@ function hasMediaValue(
   try {
     return Boolean(optionalText(value, field));
   } catch (error) {
-    if (
-      quarantineMatches(
-        quarantines,
-        identity,
-        mediaValueSha256(value),
-        "INVALID_HTTPS_URL",
-      )
-    )
+    if (quarantineMatches(quarantines, identity, mediaValueSha256(value), "INVALID_HTTPS_URL"))
       return false;
     throw error;
   }
