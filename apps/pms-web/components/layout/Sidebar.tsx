@@ -47,12 +47,6 @@ interface NavItem {
 
 const CORE_NAV_ITEMS: Omit<NavItem, "badge">[] = [
   {
-    labelKey: "layout.sidebar.pricing",
-    href: "/pricing",
-    icon: RoomsIcon,
-    requiredAny: ["pms.rooms_rates.read"],
-  },
-  {
     labelKey: "layout.sidebar.dashboard",
     href: "/dashboard",
     icon: DashboardIcon,
@@ -547,18 +541,7 @@ export default function Sidebar({
               ) : (
                 <Link
                   href={item.href}
-                  onClick={(event) => {
-                    // Document entry lets the pricing editor protect Back/Forward with beforeunload.
-                    if (
-                      item.href === "/pricing" &&
-                      !event.metaKey &&
-                      !event.ctrlKey &&
-                      !event.shiftKey
-                    ) {
-                      event.preventDefault();
-                      window.location.assign(item.href);
-                    } else onNavigate?.();
-                  }}
+                  onClick={() => onNavigate?.()}
                   className={cn(
                     "relative flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[13px] transition-colors",
                     isActive

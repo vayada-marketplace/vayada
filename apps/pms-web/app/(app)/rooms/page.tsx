@@ -298,7 +298,8 @@ function RoomTypeCard({
         >
           <DocumentDuplicateIcon className="w-3.5 h-3.5" />
         </button>
-        <Link
+        {/* A document navigation, so the room page's unsaved-prices warning also covers the browser's back button. */}
+        <a
           href={`/rooms/${room.id}`}
           onClick={(e) => e.stopPropagation()}
           className="flex items-center justify-center gap-1.5 w-8 h-8 md:w-auto md:h-auto md:px-3 md:py-1.5 text-[12px] font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors shrink-0"
@@ -306,7 +307,7 @@ function RoomTypeCard({
         >
           <Cog6ToothIcon className="w-3.5 h-3.5" />
           <span className="hidden md:inline">{t("rooms.configure")}</span>
-        </Link>
+        </a>
       </div>
 
       {/* Expanded: Derived Rates + Individual Rooms */}

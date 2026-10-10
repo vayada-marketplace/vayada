@@ -272,10 +272,7 @@ export default function RoomTypeForm({
 
       {!onTabChange && (
         <p className="mb-4 rounded-lg border border-gray-200 bg-white p-3 text-[11px] text-gray-600">
-          {t("rooms.form.pricingPointer")}{" "}
-          <Link href="/pricing" className="font-semibold text-primary-600 hover:text-primary-700">
-            {t("rooms.form.openPricing")}
-          </Link>
+          {t("rooms.form.pricingPointer")}
         </p>
       )}
 

@@ -38,10 +38,19 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
   const [propertyPlan, setPropertyPlan] = useState<PropertyPlan | null>(null);
   const [pricesNeedPublishing, setPricesNeedPublishing] = useState(false);
   const propertyPrices = usePropertyPrices();
+  // Room details or republished prices changed what the Prices tab shows: it re-reads unless it holds edits.
+  const [pricesRefresh, setPricesRefresh] = useState(0);
+  const refreshPrices = () => setPricesRefresh((value) => value + 1);
+  const stalePrices = !!propertyPrices.prices?.publication?.stale;
+  useEffect(() => {
+    // Once stale prices were seen the strip stays, so the outcome of "Save prices again" remains visible.
+    if (stalePrices) setPricesNeedPublishing(true);
+  }, [stalePrices]);
   // A details save changed what published prices pin: re-read them, so the one-click republish appears.
   const pricesChanged = () => {
     setPricesNeedPublishing(true);
     void propertyPrices.reload();
+    refreshPrices();
   };
 
   const [form, setForm] = useState<RoomTypeUpdate>({});
@@ -75,6 +84,7 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
       setForm(roomTypeUpdateForm(saved.roomType));
       setFormKey((key) => key + 1);
       if (saved.pricesNeedPublishing) pricesChanged();
+      refreshPrices();
       setSuccess(t("rooms.edit.success"));
     } catch (error) {
       setError(error instanceof Error ? error.message : t("rooms.edit.failedToUpdate"));
@@ -168,8 +178,8 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
         </button>
       </div>
 
-      {(pricesNeedPublishing || propertyPrices.prices?.publication?.stale) && (
-        <RoomsPricesStrip {...propertyPrices} staleOnly />
+      {pricesNeedPublishing && (
+        <RoomsPricesStrip {...propertyPrices} staleOnly onSaved={refreshPrices} />
       )}
 
       <RoomTypeForm
@@ -194,7 +204,15 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
       />
       {pricesOpened && (
         <div hidden={tab !== "prices"}>
-          <RoomPricesTab roomTypeId={id} />
+          <RoomPricesTab
+            roomTypeId={id}
+            refresh={pricesRefresh}
+            onAttention={() => {
+              setTab("prices");
+              setPricesOpened(true);
+            }}
+            onPublished={() => void propertyPrices.reload()}
+          />
         </div>
       )}
       {showDeleteConfirm && (

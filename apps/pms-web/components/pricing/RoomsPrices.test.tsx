@@ -213,7 +213,7 @@ it("summarises a room's published rates from its lowest base price and links to 
       />,
     );
   });
-  expect(text()).toContain("2 rates · from 90.00 EUR");
+  expect(text()).toContain("2 rates · base price from 90.00 EUR");
   expect(view.root.findByType("a").props.href).toBe(
     `/rooms/${room.roomTypeId.toLowerCase()}?tab=prices`,
   );
@@ -221,9 +221,10 @@ it("summarises a room's published rates from its lowest base price and links to 
   expect(text()).toContain("No prices yet");
   expect(view.root.findByType("a").children.join("")).toBe("Set prices");
 });
-it("on a room page shows only a stale publication's republish", async () => {
+it("on a room page shows only a stale publication's republish, or that prices could not be checked", async () => {
+  const onSaved = vi.fn();
   await act(async () => {
-    view = create(<RoomsPricesStrip {...props(false)} staleOnly />);
+    view = create(<RoomsPricesStrip {...props(false)} staleOnly onSaved={onSaved} />);
   });
   expect(view.toJSON()).toBeNull();
   act(() =>
@@ -231,12 +232,13 @@ it("on a room page shows only a stale publication's republish", async () => {
       <RoomsPricesStrip prices={null} error={new Error("offline")} reload={reload} staleOnly />,
     ),
   );
-  expect(view.toJSON()).toBeNull();
-  act(() => view.update(<RoomsPricesStrip {...props()} staleOnly />));
+  expect(text()).toContain("Prices could not be loaded.");
+  act(() => view.update(<RoomsPricesStrip {...props()} staleOnly onSaved={onSaved} />));
   expect(text()).toContain("Prices need to be saved again");
   expect(text()).not.toContain("All prices are in EUR");
   await act(async () => button("Save prices again")!.props.onClick());
   expect(publish).toHaveBeenCalledOnce();
-  act(() => view.update(<RoomsPricesStrip {...props(false)} staleOnly />));
+  expect(onSaved).toHaveBeenCalledOnce();
+  act(() => view.update(<RoomsPricesStrip {...props(false)} staleOnly onSaved={onSaved} />));
   expect(text()).toContain("Prices saved.");
 });
