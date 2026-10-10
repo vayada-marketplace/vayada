@@ -31,49 +31,6 @@ const ROOM_CATEGORIES = [
   "Penthouse",
 ];
 
-const FEATURE_CATEGORIES = [
-  {
-    name: "VIEWS & LOCATION",
-    items: [
-      { label: "Sea view", emoji: "\uD83C\uDF0A" },
-      { label: "Ocean view", emoji: "\uD83C\uDF05" },
-      { label: "Mountain view", emoji: "\u26F0\uFE0F" },
-      { label: "Garden view", emoji: "\uD83C\uDF3F" },
-      { label: "Pool view", emoji: "\uD83C\uDFCA" },
-      { label: "Beachfront", emoji: "\uD83C\uDFD6\uFE0F" },
-      { label: "Forest view", emoji: "\uD83C\uDF32" },
-      { label: "City view", emoji: "\uD83C\uDFD9\uFE0F" },
-      { label: "Lake view", emoji: "\uD83C\uDFDE\uFE0F" },
-      { label: "River view", emoji: "\uD83C\uDFDE\uFE0F" },
-    ],
-  },
-  {
-    name: "OUTDOOR & RECREATION",
-    items: [
-      { label: "Private Pool", emoji: "\uD83C\uDFCA" },
-      { label: "Shared Pool", emoji: "\uD83C\uDFCA" },
-      { label: "Hot tub", emoji: "\uD83D\uDEC1" },
-      { label: "BBQ", emoji: "\uD83D\uDD25" },
-      { label: "Outdoor dining area", emoji: "\uD83C\uDF7D\uFE0F" },
-      { label: "Private terrace", emoji: "\uD83C\uDF05" },
-      { label: "Balcony", emoji: "\uD83C\uDFE0" },
-      { label: "Garden", emoji: "\uD83C\uDF3F" },
-      { label: "Rooftop access", emoji: "\uD83C\uDFD9\uFE0F" },
-    ],
-  },
-  {
-    name: "SPACE & TYPE",
-    items: [
-      { label: "Entire villa", emoji: "\uD83C\uDFE1" },
-      { label: "Entire apartment", emoji: "\uD83C\uDFE2" },
-      { label: "Private entrance", emoji: "\uD83D\uDEAA" },
-      { label: "Penthouse", emoji: "\uD83C\uDFD9\uFE0F" },
-      { label: "Duplex", emoji: "\uD83C\uDFE0" },
-      { label: "Studio", emoji: "\uD83D\uDECB\uFE0F" },
-    ],
-  },
-];
-
 const AMENITY_CATEGORIES = [
   {
     name: "Internet & Tech",
@@ -128,18 +85,12 @@ const AMENITY_CATEGORIES = [
   },
   {
     name: "Safety & Access",
-    items: ["Safe", "24hr Security", "Smoke detector", "First aid kit", "Fire extinguisher"],
+    items: ["Safe", "Smoke detector", "First aid kit", "Fire extinguisher"],
   },
   {
+    // Services such as parking or room service are property facts, not room amenities.
     name: "Services",
-    items: [
-      "Room service",
-      "Daily housekeeping",
-      "Concierge",
-      "Parking",
-      "Non-smoking",
-      "Adults-Only",
-    ],
+    items: ["Non-smoking"],
   },
 ];
 
@@ -191,10 +142,10 @@ interface RoomTypeFormProps {
   mode?: "create" | "edit";
   roomTypeId?: string;
   propertyPlan: PropertyPlan | null;
-  // The Prices tab (an existing room only). It has its own save, so it sits outside this form and stays
-  // mounted once opened: switching tabs keeps unsaved prices.
-  prices?: React.ReactNode;
-  initialTab?: RoomTab;
+  // With these the page owns the tab and adds the Prices tab (an existing room only). Its content has its own
+  // save, so the page renders it outside this form, where remounting the form cannot drop unsaved prices.
+  tab?: RoomTab;
+  onTabChange?: (tab: RoomTab) => void;
 }
 
 function bedsToSummary(beds: { type: string; count: number }[]): string {
@@ -228,8 +179,8 @@ export default function RoomTypeForm({
   mode = "create",
   roomTypeId,
   propertyPlan,
-  prices,
-  initialTab,
+  tab,
+  onTabChange,
 }: RoomTypeFormProps) {
   const { t } = useTranslation();
   const translateRoomOption = (value: string): string => {
@@ -237,12 +188,10 @@ export default function RoomTypeForm({
     const translated = t(key);
     return translated === key ? value : translated;
   };
-  const [activeTab, setActiveTab] = useState<RoomTab>(
-    prices && initialTab ? initialTab : "details",
-  );
-  const [pricesOpened, setPricesOpened] = useState(activeTab === "prices");
-  const tabs = ROOM_TABS.filter((tab) => tab.key !== "prices" || prices);
-  const [sortOrderInput, setSortOrderInput] = useState<string>(String(form.sortOrder ?? 0));
+  const [ownTab, setOwnTab] = useState<RoomTab>("details");
+  const activeTab = tab ?? ownTab;
+  const setActiveTab = onTabChange ?? setOwnTab;
+  const tabs = ROOM_TABS.filter((item) => item.key !== "prices" || onTabChange);
   const [latitudeInput, setLatitudeInput] = useState<string>(
     form.latitude != null ? String(form.latitude) : "",
   );
@@ -250,7 +199,6 @@ export default function RoomTypeForm({
     form.longitude != null ? String(form.longitude) : "",
   );
   const [amenityInput, setAmenityInput] = useState("");
-  const [featureInput, setFeatureInput] = useState("");
   const [expandedAmenityCategories, setExpandedAmenityCategories] = useState<string[]>([
     "Internet & Tech",
   ]);
@@ -294,17 +242,6 @@ export default function RoomTypeForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [beds]);
 
-  // Resync sortOrder input when form.sortOrder changes externally (e.g., room loaded from API),
-  // but not while the user is mid-edit (input parses to the same value).
-  useEffect(() => {
-    const parsed = parseInt(sortOrderInput, 10);
-    const current = Number.isNaN(parsed) ? 0 : parsed;
-    if (current !== (form.sortOrder ?? 0)) {
-      setSortOrderInput(String(form.sortOrder ?? 0));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.sortOrder]);
-
   // Sync bedrooms/bathrooms -> form
   useEffect(() => {
     onChange((prev: any) =>
@@ -320,7 +257,7 @@ export default function RoomTypeForm({
     onChange(updated);
   };
 
-  const roomForm = (
+  return (
     <form onSubmit={onSubmit}>
       {error && activeTab !== "prices" && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700 font-medium">
@@ -333,7 +270,7 @@ export default function RoomTypeForm({
         </div>
       )}
 
-      {!prices && (
+      {!onTabChange && (
         <p className="mb-4 rounded-lg border border-gray-200 bg-white p-3 text-[11px] text-gray-600">
           {t("rooms.form.pricingPointer")}{" "}
           <Link href="/pricing" className="font-semibold text-primary-600 hover:text-primary-700">
@@ -345,20 +282,17 @@ export default function RoomTypeForm({
       {/* Tabs */}
       <div className="relative border-b border-gray-200 mb-5 md:mb-6">
         <div className="flex gap-5 md:gap-6 overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
-          {tabs.map((tab) => (
+          {tabs.map((item) => (
             <button
-              key={tab.key}
+              key={item.key}
               type="button"
-              onClick={() => {
-                setActiveTab(tab.key);
-                if (tab.key === "prices") setPricesOpened(true);
-              }}
+              onClick={() => setActiveTab(item.key)}
               className={`shrink-0 whitespace-nowrap pb-2.5 text-[12px] font-medium transition-colors relative ${
-                activeTab === tab.key ? "text-gray-900" : "text-gray-400 hover:text-gray-600"
+                activeTab === item.key ? "text-gray-900" : "text-gray-400 hover:text-gray-600"
               }`}
             >
-              {t(tab.labelKey)}
-              {activeTab === tab.key && (
+              {t(item.labelKey)}
+              {activeTab === item.key && (
                 <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gray-900 rounded-full" />
               )}
             </button>
@@ -596,6 +530,8 @@ export default function RoomTypeForm({
               <input
                 type="number"
                 min={0}
+                // A shared-bathroom room stores no private bathroom count.
+                disabled={form.bathroomType === "shared"}
                 value={bathroomsInput}
                 onChange={(e) => {
                   const v = e.target.value;
@@ -832,49 +768,6 @@ export default function RoomTypeForm({
               </div>
             </div>
           </div>
-
-          {/* Sort Order & Active */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1.5">
-                <label className="text-[12px] font-semibold text-gray-900">
-                  {t("rooms.form.sortOrder")}
-                </label>
-              </div>
-              <input
-                type="number"
-                value={sortOrderInput}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  setSortOrderInput(raw);
-                  const parsed = parseInt(raw, 10);
-                  updateForm({ sortOrder: Number.isNaN(parsed) ? 0 : Math.max(0, parsed) });
-                }}
-                onBlur={() => {
-                  if (sortOrderInput.trim() === "") setSortOrderInput("0");
-                }}
-                min={0}
-                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
-              />
-              <p className="text-[10px] text-gray-400 mt-1">{t("rooms.form.sortOrderHint")}</p>
-            </div>
-            <div className="flex items-end md:col-span-2">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <button
-                  type="button"
-                  onClick={() => updateForm({ isActive: !(form.isActive ?? true) })}
-                  className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${(form.isActive ?? true) ? "bg-primary-500" : "bg-gray-300"}`}
-                >
-                  <div
-                    className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${(form.isActive ?? true) ? "left-[20px]" : "left-[2px]"}`}
-                  />
-                </button>
-                <span className="text-[12px] font-semibold text-gray-900">
-                  {t("common.active")}
-                </span>
-              </label>
-            </div>
-          </div>
         </div>
       )}
 
@@ -895,103 +788,6 @@ export default function RoomTypeForm({
               plan={propertyPlan?.plan ?? null}
               label={t("rooms.form.roomImages")}
             />
-          </div>
-
-          {/* Features Section */}
-          <div className="bg-white rounded-xl border border-gray-200 px-4 py-5 md:px-6 md:py-6 space-y-4">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 md:gap-3 flex-wrap min-w-0">
-                <h3 className="text-[11px] font-bold text-gray-900 uppercase tracking-widest">
-                  {t("rooms.form.features")}
-                </h3>
-                <span className="hidden md:inline-block text-[10px] text-gray-400 px-2 py-0.5 bg-gray-100 rounded-full">
-                  &rarr; {t("rooms.form.roomCardTags")}
-                </span>
-                <span className="hidden md:inline-block text-[10px] text-gray-400 px-2 py-0.5 bg-gray-100 rounded-full">
-                  &rarr; {t("rooms.form.modalHighlights")}
-                </span>
-              </div>
-              <span className="shrink-0 text-[11px] font-medium text-primary-600">
-                {t("rooms.form.selectedCount", { count: (form.features || []).length })}
-              </span>
-            </div>
-            <p className="text-[10px] text-gray-400">{t("rooms.form.featuresDescription")}</p>
-
-            {/* Live Preview */}
-            <div className="bg-gray-50 rounded-lg border border-gray-200 px-4 py-3">
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                {t("rooms.form.roomCardPreview")}
-              </p>
-              <p className="text-[12px] font-semibold text-gray-900">
-                {form.name || t("rooms.form.roomNameFallback")}{" "}
-                <span className="text-[11px] font-normal text-gray-400">
-                  &middot; {t("rooms.form.upToGuests", { count: form.maxOccupancy ?? 0 })}
-                </span>
-              </p>
-              {(form.features || []).length > 0 ? (
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {(form.features || []).slice(0, 5).map((f) => (
-                    <span
-                      key={f}
-                      className="text-[10px] text-gray-600 border border-gray-200 bg-white rounded-full px-2 py-0.5"
-                    >
-                      {translateRoomOption(f)}
-                    </span>
-                  ))}
-                  {(form.features || []).length > 5 && (
-                    <span className="text-[10px] text-gray-400 border border-gray-200 bg-white rounded-full px-2 py-0.5">
-                      {t("rooms.form.moreCount", { count: (form.features || []).length - 5 })}
-                    </span>
-                  )}
-                </div>
-              ) : (
-                <p className="text-[10px] text-gray-400 mt-1 italic">
-                  {t("rooms.form.featuresPreviewEmpty")}
-                </p>
-              )}
-            </div>
-
-            {/* Feature Categories */}
-            {FEATURE_CATEGORIES.map((cat) => (
-              <div key={cat.name}>
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">
-                  {translateRoomOption(cat.name)}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {cat.items.map((item) => {
-                    const isSelected = (form.features || []).includes(item.label);
-                    return (
-                      <button
-                        key={item.label}
-                        type="button"
-                        onClick={() => {
-                          const features = form.features || [];
-                          if (isSelected) {
-                            updateForm({ features: features.filter((f) => f !== item.label) });
-                          } else {
-                            updateForm({ features: [...features, item.label] });
-                          }
-                        }}
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
-                          isSelected
-                            ? "border-primary-300 bg-primary-50 text-primary-700"
-                            : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
-                        }`}
-                      >
-                        <span className="text-[13px]">{item.emoji}</span>
-                        {translateRoomOption(item.label)}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-
-            <p className="text-[10px] text-gray-400">
-              {t("rooms.form.featureSelectionSummary", {
-                count: (form.features || []).length,
-              })}
-            </p>
           </div>
 
           {/* Amenities Section */}
@@ -1516,11 +1312,5 @@ export default function RoomTypeForm({
         </div>
       )}
     </form>
-  );
-  return (
-    <>
-      {roomForm}
-      {prices && pricesOpened && <div hidden={activeTab !== "prices"}>{prices}</div>}
-    </>
   );
 }
