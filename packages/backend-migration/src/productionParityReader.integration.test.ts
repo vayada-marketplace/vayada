@@ -38,6 +38,7 @@ const COHORT_FAIL_RUN_ID = `vay1351-${"6".repeat(24)}`;
 const COHORT_AUTO_OPEN_RUN_ID = `vay1351-${"5".repeat(24)}`;
 const COHORT_ROOM_FACTS_RUN_ID = `vay1351-${"4".repeat(24)}`;
 const COHORT_ACTIVATION_RUN_ID = `vay1351-${"3".repeat(24)}`;
+const COHORT_CHANNEL_RUN_ID = `vay1351-${"2".repeat(24)}`;
 const IN_HOTEL_ID = "13620000-0000-4000-8000-000000000001";
 const OUT_HOTEL_ID = "13620000-0000-4000-8000-000000000002";
 const OUT_PMS_HOTEL_ID = "13620000-0000-4000-8000-000000000003";
@@ -49,6 +50,8 @@ const OUT_ROOM_TYPE_ID = "13620000-0000-4000-8000-000000000008";
 const OUT_CONNECTION_ID = "13620000-0000-4000-8000-000000000009";
 const IN_ORGANIZATION_ID = "13620000-0000-4000-8000-000000000010";
 const IN_PMS_HOTEL_ID = "13620000-0000-4000-8000-000000000011";
+const IN_CONNECTION_ID = "13620000-0000-4000-8000-000000000012";
+const IN_ROOM_TYPE_ID = "13620000-0000-4000-8000-000000000013";
 const COHORT_SUBJECTS = new Set([IN_HOTEL_ID, OUT_HOTEL_ID, OUT_PMS_HOTEL_ID, MISSING_HOTEL_ID]);
 
 describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
@@ -800,6 +803,132 @@ describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
       expect(after.violations.filter((row) => row.category === "cohortActiveNotReady")).toEqual([
         { category: "cohortActiveNotReady", subjectId: IN_HOTEL_ID },
       ]);
+    } finally {
+      await cleanupCohort(client);
+      await client.end();
+    }
+  });
+
+  it("fails a cohort Channex connection that is live before its handover", async () => {
+    assertSafeTestDatabase(URL!);
+    const client = new pg.Client({ connectionString: URL });
+    await client.connect();
+    const run = COHORT_CHANNEL_RUN_ID;
+    try {
+      await storeCohort(client, run, [IN_HOTEL_ID], [IN_PMS_HOTEL_ID]);
+      await insertCohortProperties(client, "canonical");
+      await client.query(
+        `INSERT INTO hotel_catalog.property_source_links
+           (property_id, source_system, source_table, source_id, relationship)
+         VALUES ($1, 'pms', 'hotels', $2, 'operational_input')`,
+        [IN_HOTEL_ID, IN_PMS_HOTEL_ID],
+      );
+      const violations = async (category: string) =>
+        (
+          await readProductionParityEvidence({ ...config(), sourceRunId: run })
+        ).cohortScope!.violations.filter((row) => row.category === category);
+      const channel = () => violations("cohortChannelLive");
+      const live = [{ category: "cohortChannelLive", subjectId: IN_HOTEL_ID }];
+      // As the import leaves it (P12): disconnected, no Channex ID, a disabled mapping, no claim.
+      await client.query(
+        `INSERT INTO pms.channel_connections
+           (id, property_id, provider, connection_status, connection_metadata)
+         VALUES ($1, $2, 'channex', 'disconnected', jsonb_build_object('migrationRunId', $3::text,
+                 'migrationCohortRunId', $3::text, 'channexHandover', 'pending'))`,
+        [IN_CONNECTION_ID, IN_HOTEL_ID, run],
+      );
+      await client.query(
+        `INSERT INTO pms.room_types (id, property_id, name, base_rate_amount, currency)
+         VALUES ($1, $2, 'Parity cohort room', 0, 'EUR')`,
+        [IN_ROOM_TYPE_ID, IN_HOTEL_ID],
+      );
+      await client.query(
+        `INSERT INTO pms.channel_room_type_mappings
+           (property_id, connection_id, room_type_id, external_room_type_id, status)
+         VALUES ($1, $2, $3, 'parity-cohort-room', 'disabled')`,
+        [IN_HOTEL_ID, IN_CONNECTION_ID, IN_ROOM_TYPE_ID],
+      );
+      expect(await channel()).toEqual([]);
+      expect(await violations("cohortChannelStamp")).toEqual([]);
+      // Reachable before its handover: a Channex ID on a disconnected row, or an active claim.
+      await client.query(
+        "UPDATE pms.channel_connections SET messaging_app_installed = TRUE WHERE id = $1",
+        [IN_CONNECTION_ID],
+      );
+      expect(await channel()).toEqual(live);
+      await client.query(
+        "UPDATE pms.channel_connections SET messaging_app_installed = FALSE WHERE id = $1",
+        [IN_CONNECTION_ID],
+      );
+      await client.query(
+        `INSERT INTO pms.channel_binding_claims
+           (property_id, provider, external_property_id, claim_state, claim_source)
+         VALUES ($1, 'channex', 'parity-cohort-live', 'active', 'adoption')`,
+        [IN_HOTEL_ID],
+      );
+      expect(await channel()).toEqual(live);
+      await client.query("DELETE FROM pms.channel_binding_claims WHERE property_id = $1", [
+        IN_HOTEL_ID,
+      ]);
+      expect(await channel()).toEqual([]);
+      // The cohort stamp: missing on a cohort connection, or carried outside the cohort, fails.
+      await client.query(
+        `UPDATE pms.channel_connections
+            SET connection_metadata = connection_metadata - 'migrationCohortRunId' WHERE id = $1`,
+        [IN_CONNECTION_ID],
+      );
+      await client.query(
+        `INSERT INTO pms.channel_connections
+           (property_id, provider, connection_status, connection_metadata)
+         VALUES ($1, 'channex', 'disconnected', jsonb_build_object('migrationCohortRunId', $2::text))`,
+        [OUT_HOTEL_ID, run],
+      );
+      expect(await violations("cohortChannelStamp")).toEqual([
+        { category: "cohortChannelStamp", subjectId: IN_HOTEL_ID },
+        { category: "cohortChannelStamp", subjectId: OUT_HOTEL_ID },
+      ]);
+      await client.query(
+        `UPDATE pms.channel_connections
+            SET connection_metadata = connection_metadata || jsonb_build_object(
+              'migrationCohortRunId', $2::text) WHERE id = $1`,
+        [IN_CONNECTION_ID, run],
+      );
+      await client.query("DELETE FROM pms.channel_connections WHERE property_id = $1", [
+        OUT_HOTEL_ID,
+      ]);
+      expect(await violations("cohortChannelStamp")).toEqual([]);
+      await client.query(
+        "UPDATE pms.channel_room_type_mappings SET status = 'active' WHERE property_id = $1",
+        [IN_HOTEL_ID],
+      );
+      expect(await channel()).toEqual(live);
+
+      // Connected as the import wrote it before P12: the 0128 trigger infers an active claim.
+      await client.query(
+        `UPDATE pms.channel_connections
+            SET connection_status = 'connected', external_property_id = 'parity-cohort-live'
+          WHERE id = $1`,
+        [IN_CONNECTION_ID],
+      );
+      const claims = await client.query(
+        "SELECT claim_state, claim_source FROM pms.channel_binding_claims WHERE property_id = $1",
+        [IN_HOTEL_ID],
+      );
+      expect(claims.rows).toEqual([{ claim_state: "active", claim_source: "migration" }]);
+      expect(await channel()).toEqual(live);
+      // The handover marks itself completed: live with its active claim passes, without fails.
+      await client.query(
+        `UPDATE pms.channel_connections
+            SET connection_metadata = connection_metadata || '{"channexHandover": "completed"}'
+          WHERE id = $1`,
+        [IN_CONNECTION_ID],
+      );
+      expect(await channel()).toEqual([]);
+      await client.query(
+        "UPDATE pms.channel_binding_claims SET claim_state = 'released' WHERE property_id = $1",
+        [IN_HOTEL_ID],
+      );
+      expect(await channel()).toEqual(live);
     } finally {
       await cleanupCohort(client);
       await client.end();

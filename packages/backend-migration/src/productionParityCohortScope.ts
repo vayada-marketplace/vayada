@@ -31,6 +31,10 @@ const MESSAGES = {
     "A provisioning cohort property meets every readiness item, so the import did not activate it",
   cohortRoomFacts:
     "A cohort property has an active room type without native room facts, so runtime room reads fail",
+  cohortChannelStamp:
+    "A cohort property's Channex connection lacks this run's migrationCohortRunId, or one outside the cohort carries it",
+  cohortChannelLive:
+    "A cohort property's Channex connection is reachable (status, Channex ID, messaging, an active mapping or claim) before its handover completed with an active claim",
   profileNotPrivate: "A property outside the cohort has a non-private profile",
   verifiedDomain: "A property outside the cohort has a verified custom domain",
   publicMedia: "A property outside the cohort has public media",
@@ -76,7 +80,8 @@ type QueryClient = Pick<pg.ClientBase, "query">;
 
 // Outside the cohort is decided from the three ID sets (like outsideCohortSource), never from
 // the catalog quarantine reason. $1/$2/$3: Booking, PMS and Marketplace cohort hotel IDs; the
-// violation query's $4 is the source run whose PMS snapshot holds the legacy auto-open settings.
+// violation query's $4 is the source run: its PMS snapshot holds the legacy auto-open settings,
+// and it is the cohort stamp of the imported Channex connections.
 // Links are not filtered by run: STALE_MIGRATION_PROVENANCE already fails links of other runs.
 const SCOPE_CTES = `
   WITH legacy_link AS (
@@ -198,6 +203,39 @@ const SCOPE_VIOLATION_QUERY = `${SCOPE_CTES}
        AND link.disposition IS DISTINCT FROM 'private_quarantine'
        AND NOT (room_type.occupancy_limits ? 'total' AND room_type.room_attributes ? 'beds'
                 AND room_type.room_attributes ? 'bathroomType')
+    -- P12: each cohort hotel's imported Channex connection carries the run as its cohort stamp,
+    -- which the handover checks against the stored cohort; none outside the cohort carries it.
+    UNION ALL SELECT 'cohortChannelStamp', link.property_id::text FROM legacy_link link
+      JOIN pms.channel_connections connection
+        ON connection.property_id = link.property_id AND connection.provider = 'channex'
+     WHERE link.source_system = 'pms'
+       AND CASE WHEN link.inside
+         THEN connection.connection_metadata ->> 'migrationCohortRunId' IS DISTINCT FROM $4
+         ELSE connection.connection_metadata ->> 'migrationCohortRunId' = $4 END
+    -- P12: the import leaves cohort Channex state inert (channexHandover 'pending'). Only the
+    -- per-hotel handover makes it live: it writes the active claim and marks itself completed.
+    UNION ALL SELECT 'cohortChannelLive', connection.property_id::text
+      FROM pms.channel_connections connection
+      JOIN (SELECT DISTINCT property_id FROM legacy_link WHERE inside) cohort USING (property_id)
+     WHERE connection.provider = 'channex'
+       AND (connection.connection_status IN ('connected', 'degraded')
+         OR connection.external_property_id IS NOT NULL OR connection.messaging_app_installed
+         OR EXISTS (SELECT 1 FROM pms.channel_room_type_mappings mapping
+                     WHERE mapping.connection_id = connection.id AND mapping.status = 'active')
+         OR EXISTS (SELECT 1 FROM pms.channel_rate_plan_mappings mapping
+                     WHERE mapping.connection_id = connection.id AND mapping.status = 'active')
+         OR EXISTS (SELECT 1 FROM pms.channel_booking_mappings mapping
+                     WHERE mapping.connection_id = connection.id AND mapping.sync_status = 'active')
+         -- Webhook intake resolves a property through an active claim alone.
+         OR EXISTS (SELECT 1 FROM pms.channel_binding_claims claim
+                     WHERE claim.provider = 'channex' AND claim.claim_state = 'active'
+                       AND (claim.property_id = connection.property_id OR claim.external_property_id
+                         = connection.connection_metadata ->> 'legacyExternalPropertyId')))
+       AND (connection.connection_metadata ->> 'channexHandover' IS DISTINCT FROM 'completed'
+         OR NOT EXISTS (SELECT 1 FROM pms.channel_binding_claims claim
+           WHERE claim.property_id = connection.property_id AND claim.provider = 'channex'
+             AND claim.external_property_id = connection.external_property_id
+             AND claim.claim_state = 'active'))
     UNION ALL SELECT 'profileNotPrivate', property.id::text FROM hotel_catalog.properties property
       JOIN outside ON outside.property_id = property.id WHERE property.profile_status <> 'private'
     UNION ALL SELECT 'profileNotPrivate', profile.property_id::text

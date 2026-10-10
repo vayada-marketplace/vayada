@@ -309,6 +309,12 @@ marker). The later-wave path must exempt earlier waves first.
 - It also fails when a cohort property is unexpectedly quarantined, or lacks
   exactly one active hotel organization holding both native links with an
   active, unsuspended PMS entitlement.
+- It also fails (`cohortChannelStamp`) when a cohort property's Channex connection lacks the
+  run as its `migrationCohortRunId`, or a connection outside the cohort carries it.
+- It also fails (`cohortChannelLive`) when a cohort property's Channex connection is reachable
+  (`connected` or `degraded`, a Channex ID, messaging installed, an active room-type, rate-plan or
+  booking mapping, or an active claim on the property or its legacy ID) unless its handover
+  marked it `channexHandover = 'completed'` and an active claim holds its Channex ID.
 - It also fails when an active room type of a cohort property lacks native room facts, and when
   an `active` cohort property misses a readiness item (a–g) or a complete profile. Its summary
   counts the cohort's `active` and `provisioning` properties and what the provisioning ones miss.
