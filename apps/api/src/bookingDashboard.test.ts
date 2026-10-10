@@ -88,12 +88,20 @@ describe("Booking dashboard routes", () => {
     app = buildDashboardApp();
     const url = "/api/booking/properties/prop_alpenrose/dashboard/conversion-funnel";
     const headers = { authorization: "Bearer valid-token" };
-    const allowed = await injectJson(app, { method: "GET", url, headers,
-      query: { windowStart: "2026-06-01", windowEnd: "2026-06-30" } });
+    const allowed = await injectJson(app, {
+      method: "GET",
+      url,
+      headers,
+      query: { windowStart: "2026-06-01", windowEnd: "2026-06-30" },
+    });
     expect(allowed.statusCode).toBe(200);
-    expect(allowed.body).toMatchObject({ funnel: { steps: [], paymentMethods: [], biggestDrop: null } });
-    for (const query of [{ windowStart: "2026-02-30", windowEnd: "2026-03-01" },
-      { windowStart: "2026-01-01", windowEnd: "2026-06-30" }]) {
+    expect(allowed.body).toMatchObject({
+      funnel: { steps: [], paymentMethods: [], biggestDrop: null },
+    });
+    for (const query of [
+      { windowStart: "2026-02-30", windowEnd: "2026-03-01" },
+      { windowStart: "2026-01-01", windowEnd: "2026-06-30" },
+    ]) {
       expect((await injectJson(app, { method: "GET", url, headers, query })).statusCode).toBe(400);
     }
   });
@@ -532,8 +540,10 @@ describe("Booking dashboard routes", () => {
       expect(response.statusCode).toBe(expectedStatus);
       expect(response.body.code).toBe(expectedCode);
       const funnelResponse = await injectJson<{ code: string }>(app, {
-        method: "GET", url: "/api/booking/properties/prop_alpenrose/dashboard/conversion-funnel",
-        headers, query: { windowStart: "2026-06-01", windowEnd: "2026-06-30" },
+        method: "GET",
+        url: "/api/booking/properties/prop_alpenrose/dashboard/conversion-funnel",
+        headers,
+        query: { windowStart: "2026-06-01", windowEnd: "2026-06-30" },
       });
       expect(funnelResponse.statusCode).toBe(expectedStatus);
       expect(funnelResponse.body.code).toBe(expectedCode);
@@ -654,7 +664,7 @@ describe("target Booking dashboard metrics read port", () => {
     expect(pool.queries.join("\n")).not.toContain("booking.booking_guests");
   });
 
-  it("builds seven indexed sparkline buckets that keep the requested tail date", async () => {
+  it("builds daily sparkline buckets, capped at 31, that keep the requested tail date", async () => {
     const pool = createQueuedDashboardPool([
       { rows: [] },
       { rows: [pageViewRow("2026-06-01", "0")] },
@@ -671,9 +681,9 @@ describe("target Booking dashboard metrics read port", () => {
     });
 
     const sql = pool.queries[0];
-    expect(sql).toContain("generate_series(0, 6)");
+    expect(sql).toContain("LEAST($3::date - $2::date + 1, 31) AS bucket_count");
+    expect(sql).toContain("generate_series(0, sizing.bucket_count - 1)");
     expect(sql).toContain("bucket.bucket_end::text");
-    expect(sql).not.toContain("LIMIT 7");
   });
 
   it("buckets deduplicated human page views in the property timezone", async () => {
@@ -763,7 +773,8 @@ describe("target Booking dashboard metrics read port", () => {
 });
 
 function buildDashboardApp(options: DashboardAppOptions = {}): ReturnType<typeof buildApp> {
-  const propertyAccessRepository: import("@vayada/backend-authorization").PropertyAccessRepository = {
+  const propertyAccessRepository: import("@vayada/backend-authorization").PropertyAccessRepository =
+    {
       async findMembershipPropertyScope() {
         return options.propertyScope === undefined
           ? {
@@ -881,7 +892,7 @@ function fakeReadPort(): BookingDashboardMetricsReadPort {
       return fakeSparklines(input.propertyId);
     },
     getConversionFunnel: async () => ({ steps: [], paymentMethods: [], biggestDrop: null }),
-        async getPageViewTimeline(input) {
+    async getPageViewTimeline(input) {
       return fakePageViews(input.propertyId);
     },
   };
