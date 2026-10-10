@@ -13,6 +13,7 @@ import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/branding";
 import { FeedbackAlert, SaveButton } from "@/components/ui";
 import {
   MAX_PROPERTY_GALLERY_PHOTOS,
+  isAcceptedHeroImage,
   uploadPropertyGalleryImages,
   uploadPropertyHeroImage,
   uploadSingleImageWithMediaReference,
@@ -47,9 +48,11 @@ export default function DesignStudioPage() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(
-    null,
-  );
+  const [feedback, setFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+    retryHeroUpload?: boolean;
+  } | null>(null);
   const [domainInput, setDomainInput] = useState("");
   const [domainStatus, setDomainStatus] = useState<CustomDomainStatus | null>(null);
 
@@ -87,6 +90,8 @@ export default function DesignStudioPage() {
     mediaObjectId: string;
     altText: string | null;
   } | null>(null);
+  const lastHeroFileRef = useRef<File | null>(null);
+  const heroUploadFailuresRef = useRef(0);
 
   // Colors state
   const [primaryColor, setPrimaryColor] = useState("#4F46E5");
@@ -204,7 +209,11 @@ export default function DesignStudioPage() {
         setShowReferAGuestButton(settings.show_refer_a_guest_button);
         setShowLanguageSelector(settings.show_language_selector);
         setShowCurrencySelector(settings.show_currency_selector);
-        if (settings.hero_image) setHeroImage(settings.hero_image);
+        // Guests see the canonical cover; the settings URL only covers heroes saved before it existed.
+        const savedHero =
+          publicProfile.publicProfile.media.find(({ mediaType }) => mediaType === "hero_image")
+            ?.url || settings.hero_image;
+        if (savedHero) setHeroImage(savedHero);
         if (settings.hero_heading) setHeroHeading(settings.hero_heading);
         if (settings.hero_subtext) setHeroSubtext(settings.hero_subtext);
         if (settings.primary_color) setPrimaryColor(settings.primary_color);
@@ -232,12 +241,25 @@ export default function DesignStudioPage() {
     applyPublicGallery(publicProfile);
   };
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    heroUploadFailuresRef.current = 0;
+    void uploadHeroImage(file);
+  };
+
+  const uploadHeroImage = async (file: File) => {
+    if (!isAcceptedHeroImage(file)) {
+      setFeedback({ type: "error", message: "designStudio.media.heroImageInvalidFile" });
+      return;
+    }
     const hotelId = designHotelIdRef.current;
     const propertyId = propertyIdRef.current;
+    // A failed attempt can leave the revision unknown (e.g. offline); reload it before retrying.
+    if (propertyId && profileRevisionRef.current === null) {
+      await refreshCanonicalGallery().catch(() => undefined);
+    }
     if (!hotelId || !propertyId || profileRevisionRef.current === null) {
       setFeedback({
         type: "error",
@@ -247,6 +269,7 @@ export default function DesignStudioPage() {
     }
     if (!beginGalleryWrite()) return;
 
+    lastHeroFileRef.current = file;
     const previousImage = heroImage;
     const previewUrl = URL.createObjectURL(file);
     setHeroImage(previewUrl);
@@ -269,6 +292,8 @@ export default function DesignStudioPage() {
       )?.url;
       URL.revokeObjectURL(previewUrl);
       setHeroImage(heroUrl ?? previousImage);
+      lastHeroFileRef.current = null;
+      heroUploadFailuresRef.current = 0;
 
       try {
         if (heroUrl) await settingsService.updateDesignSettings({ hero_image: heroUrl }, hotelId);
@@ -295,16 +320,50 @@ export default function DesignStudioPage() {
       }
       URL.revokeObjectURL(previewUrl);
       setHeroImage(previousImage);
-      setFeedback({ type: "error", message: "bookingFlow.addons.feedback.uploadError" });
+      heroUploadFailuresRef.current += 1;
+      setFeedback({
+        type: "error",
+        message:
+          heroUploadFailuresRef.current >= 3
+            ? "designStudio.media.heroImageUploadFailedRepeatedly"
+            : "designStudio.media.heroImageUploadFailed",
+        retryHeroUpload: true,
+      });
     } finally {
       setUploading(false);
       endGalleryWrite();
     }
   };
 
-  const removeHeroImage = () => {
-    setHeroImage("");
-    if (fileInputRef.current) fileInputRef.current.value = "";
+  const removeHeroImage = async () => {
+    const hotelId = designHotelIdRef.current;
+    if (!hotelId || !window.confirm(t("designStudio.media.removeHeroImageConfirm"))) return;
+    if (!beginGalleryWrite()) return;
+    setFeedback(null);
+    try {
+      // Clear the canonical cover too, or guests would keep seeing the removed hero.
+      if (coverAssignmentRef.current) await assignPresentationMedia(galleryImages, null);
+      setHeroImage("");
+      const saved = await settingsService.updateDesignSettings({ hero_image: "" }, hotelId).then(
+        () => true,
+        () => false,
+      );
+      const published = await publishPublicBookabilityProfile(hotelId).then(
+        () => true,
+        () => false,
+      );
+      if (!saved || !published) {
+        setFeedback({
+          type: "error",
+          message: "admin.designSavedButTheBookingPreviewCouldNotBeRefreshed",
+        });
+      }
+    } catch {
+      await refreshCanonicalGallery().catch(() => undefined);
+      setFeedback({ type: "error", message: "designStudio.media.heroImageRemoveFailed" });
+    } finally {
+      endGalleryWrite();
+    }
   };
 
   const assignPresentationMedia = async (
@@ -345,6 +404,7 @@ export default function DesignStudioPage() {
       `booking.property-gallery.assign:${propertyId}:${crypto.randomUUID()}`,
     );
     profileRevisionRef.current = response.profileRevision;
+    coverAssignmentRef.current = cover;
 
     try {
       const profile = await sharedHotelSetupApi.getPublicPropertyProfile(propertyId);
@@ -742,6 +802,16 @@ export default function DesignStudioPage() {
           type={feedback.type}
           message={t(feedback.message)}
           className="mt-3 shrink-0"
+          action={
+            feedback.retryHeroUpload
+              ? {
+                  label: t("dashboard.pageViewsModal.retry"),
+                  onClick: () => {
+                    if (lastHeroFileRef.current) void uploadHeroImage(lastHeroFileRef.current);
+                  },
+                }
+              : undefined
+          }
         />
       )}
 
@@ -781,6 +851,7 @@ export default function DesignStudioPage() {
                 fileInputRef={fileInputRef}
                 handleImageUpload={handleImageUpload}
                 removeHeroImage={removeHeroImage}
+                heroBusy={uploading || galleryBusy}
                 headerLogo={headerLogo}
                 headerLogoUrl={headerLogoUrl}
                 logoInputRef={logoInputRef}

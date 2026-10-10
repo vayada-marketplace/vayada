@@ -16,7 +16,11 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
 import { getAuthCsrfToken } from "@/services/auth/sessionStore";
-import { resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
+import { pmsNavigationModuleClient } from "@/services/api/pmsNavigationModuleClient";
+import {
+  getStoredPmsPropertyId,
+  resolveSelectedPmsPropertyId,
+} from "@/services/api/pmsPropertyClient";
 import { messagingService } from "@/services/messaging";
 import { verifyFinancialsAccess } from "@/services/finance/financialReports";
 import {
@@ -99,12 +103,27 @@ const CORE_NAV_ITEMS: Omit<NavItem, "badge">[] = [
   },
 ];
 
-export function visiblePmsNavigation(permissions: readonly string[], financialsAvailable = false) {
-  return CORE_NAV_ITEMS.filter(
-    (item) =>
+// Feature Hub switches decide whether these show (VAY-2078); they never gate the pages.
+const NAVIGATION_MODULE_BY_HREF: Record<string, string> = {
+  "/inbox": "inbox",
+  "/reviews": "reviews",
+};
+const NAVIGATION_MODULE_CACHE_PREFIX = "pms-navigation-modules:";
+
+export function visiblePmsNavigation(
+  permissions: readonly string[],
+  financialsAvailable = false,
+  // Active Feature Hub modules; null when they could not be read, so nothing is hidden by mistake.
+  navigationModules: ReadonlySet<string> | null = null,
+) {
+  return CORE_NAV_ITEMS.filter((item) => {
+    const moduleId = NAVIGATION_MODULE_BY_HREF[item.href];
+    return (
       (item.href !== "/financials" || financialsAvailable) &&
-      item.requiredAny.some((permission) => permissions.includes(permission)),
-  );
+      (!moduleId || !navigationModules || navigationModules.has(moduleId)) &&
+      item.requiredAny.some((permission) => permissions.includes(permission))
+    );
+  });
 }
 
 export default function Sidebar({
@@ -123,6 +142,10 @@ export default function Sidebar({
   );
   const [inboxUnread, setInboxUnread] = useState(0);
   const [financialsAvailable, setFinancialsAvailable] = useState(false);
+  // Hidden until read (or cached); a failed read shows both rather than hiding the Inbox.
+  const [navigationModules, setNavigationModules] = useState<ReadonlySet<string> | null>(
+    () => new Set(),
+  );
   const { t } = useTranslation();
   const switcherRef = useRef<HTMLDivElement>(null);
 
@@ -195,6 +218,57 @@ export default function Sidebar({
   }, [pathname, permissions]);
 
   useEffect(() => {
+    let sequence = 0;
+    const storedPropertyId = getStoredPmsPropertyId();
+    try {
+      const cached = storedPropertyId
+        ? JSON.parse(
+            localStorage.getItem(NAVIGATION_MODULE_CACHE_PREFIX + storedPropertyId) ?? "null",
+          )
+        : null;
+      if (Array.isArray(cached)) setNavigationModules(new Set(cached.map(String)));
+    } catch {
+      // The cache only avoids a flash of hidden items; the read below is authoritative.
+    }
+    const refresh = () => {
+      const current = ++sequence;
+      void pmsNavigationModuleClient
+        .list()
+        .then((response) => {
+          if (current !== sequence) return;
+          setNavigationModules(new Set(response.activeModules));
+          try {
+            localStorage.setItem(
+              NAVIGATION_MODULE_CACHE_PREFIX + response.hotelId,
+              JSON.stringify(response.activeModules),
+            );
+          } catch {
+            // Storage may be unavailable; the sidebar still follows the server read.
+          }
+        })
+        .catch(() => {
+          if (current === sequence) setNavigationModules(null);
+        });
+    };
+    refresh();
+    // The Feature Hub announces every switch, so the sidebar follows without a reload.
+    window.addEventListener("vayada-feature-modules-changed", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      sequence += 1;
+      window.removeEventListener("vayada-feature-modules-changed", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, []);
+
+  const visibleItems = visiblePmsNavigation(permissions, financialsAvailable, navigationModules);
+  const inboxShown = visibleItems.some((item) => item.href === "/inbox");
+
+  useEffect(() => {
+    if (!inboxShown) {
+      setInboxUnread(0);
+      return;
+    }
     let cancelled = false;
     const loadUnread = async () => {
       try {
@@ -215,7 +289,7 @@ export default function Sidebar({
       window.clearInterval(interval);
       window.removeEventListener("pms-inbox-unread-changed", loadUnread);
     };
-  }, [pathname]);
+  }, [pathname, inboxShown]);
 
   useEffect(() => {
     let cancelled = false;
@@ -243,7 +317,7 @@ export default function Sidebar({
     };
   }, []);
 
-  const navItems: NavItem[] = visiblePmsNavigation(permissions, financialsAvailable).map((item) =>
+  const navItems: NavItem[] = visibleItems.map((item) =>
     item.href === "/inbox" && inboxUnread > 0 ? { ...item, badge: inboxUnread } : item,
   );
 

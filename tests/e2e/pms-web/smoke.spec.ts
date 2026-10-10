@@ -354,8 +354,12 @@ test.describe("pms-web smoke", () => {
     await expect(page.getByText("Booking acceptance settings saved")).toBeVisible();
 
     await page.goto("/settings/feature-hub");
-    await expect(page.getByText("Inbox", { exact: true })).toHaveCount(0);
-    await expect(page.getByText("Financials", { exact: true })).toHaveCount(0);
+    // VAY-2078: Inbox and Reviews are Feature Hub modules; Financials needs finance access.
+    await expect(page.getByRole("heading", { level: 2, name: "Inbox", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 2, name: "Reviews", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Financials", exact: true })).toHaveCount(0);
 
     await page.goto("/bookings");
     await expect(page.getByRole("heading", { name: /reservation|booking/i })).toBeVisible();

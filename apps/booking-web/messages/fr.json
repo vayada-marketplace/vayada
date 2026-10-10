@@ -298,6 +298,7 @@
     "partialRefund": "Vous recevrez un remboursement partiel de {amount} ({percentage}%).",
     "noRefund": "Aucun remboursement ne sera effectué pour cette annulation.",
     "noPaymentToRefund": "Aucun paiement n’a été encaissé, il n’y a donc rien à rembourser.",
+    "unpaidCancellationFee": "Aucun paiement n’a été encaissé, il n’y a donc rien à rembourser. Selon les conditions de votre réservation, l’établissement peut facturer des frais d’annulation de {amount}.",
     "freeCancellation": "Annulation gratuite",
     "cancellationFeeApplies": "Frais d'annulation applicables",
     "confirmCancel": "Oui, annuler",
