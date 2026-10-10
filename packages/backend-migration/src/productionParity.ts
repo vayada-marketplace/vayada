@@ -25,6 +25,10 @@ import {
   type ProductionMarketplaceMigrationReport,
 } from "./productionMarketplaceMigration.js";
 import {
+  readProductionParityCohortScope,
+  type ProductionParityCohortScopeEvidence,
+} from "./productionParityCohortScope.js";
+import {
   runProductionPmsMigration,
   type ProductionPmsMigrationReport,
 } from "./productionPmsMigration.js";
@@ -97,6 +101,8 @@ export type ProductionParityEvidence = {
   piiExposureCount: number;
   rawLegacyMediaReferenceCount: number;
   staleProvenanceCount: number;
+  /** VAY-1362 stored cohort and its scope violations; null when the run has no stored cohort. */
+  cohortScope?: ProductionParityCohortScopeEvidence | null;
 };
 
 type DomainReport =
@@ -517,6 +523,7 @@ export async function readProductionParityEvidence(
          ) AS stale_provenance`,
       [config.sourceRunId],
     );
+    const cohortScope = await readProductionParityCohortScope(client, config.sourceRunId);
     await client.query("ROLLBACK");
     transactionFinished = true;
 
@@ -563,6 +570,7 @@ export async function readProductionParityEvidence(
       piiExposureCount: number(piiResult.rows[0]?.count),
       rawLegacyMediaReferenceCount: number(mediaResult.rows[0]?.count),
       staleProvenanceCount: number(staleResult.rows[0]?.count),
+      cohortScope,
     };
   } catch (error) {
     if (!transactionFinished) await client.query("ROLLBACK").catch(() => undefined);

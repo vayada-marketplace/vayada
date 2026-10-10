@@ -9,6 +9,10 @@ import {
   withProductionParityTargetWriteFreeze,
   type ProductionParityConfig,
 } from "./productionParity.js";
+import {
+  parseProductionMigrationCohort,
+  writeProductionMigrationCohort,
+} from "./productionMigrationCohort.js";
 import { assertSafeTestDatabase } from "./testUtils.js";
 
 const URL = process.env["TEST_DATABASE_URL"];
@@ -28,6 +32,19 @@ const COLLABORATION_ID = "13590000-0000-4000-8000-000000000010";
 const MESSAGE_ID = "13590000-0000-4000-8000-000000000011";
 const ROOM_TYPE_ID = "13590000-0000-4000-8000-000000000012";
 const ROOM_MEDIA_OBJECT_ID = "13590000-0000-4000-8000-000000000013";
+// VAY-1362 cohort fixture. The cohort table is append-only, so each case owns its source run.
+const COHORT_PASS_RUN_ID = `vay1351-${"7".repeat(24)}`;
+const COHORT_FAIL_RUN_ID = `vay1351-${"6".repeat(24)}`;
+const IN_HOTEL_ID = "13620000-0000-4000-8000-000000000001";
+const OUT_HOTEL_ID = "13620000-0000-4000-8000-000000000002";
+const OUT_PMS_HOTEL_ID = "13620000-0000-4000-8000-000000000003";
+const MISSING_HOTEL_ID = "13620000-0000-4000-8000-000000000004";
+const OUT_ORGANIZATION_ID = "13620000-0000-4000-8000-000000000005";
+const OUT_USER_ID = "13620000-0000-4000-8000-000000000006";
+const OUT_OFFER_ID = "13620000-0000-4000-8000-000000000007";
+const OUT_ROOM_TYPE_ID = "13620000-0000-4000-8000-000000000008";
+const OUT_CONNECTION_ID = "13620000-0000-4000-8000-000000000009";
+const COHORT_SUBJECTS = new Set([IN_HOTEL_ID, OUT_HOTEL_ID, OUT_PMS_HOTEL_ID, MISSING_HOTEL_ID]);
 
 describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
   beforeEach(async () => {
@@ -550,6 +567,75 @@ describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
     }
   });
 
+  it("passes a cohort whose outside hotel keeps only the inert rows the writers leave", async () => {
+    assertSafeTestDatabase(URL!);
+    const client = new pg.Client({ connectionString: URL });
+    await client.connect();
+    try {
+      const cohort = await storeCohort(client, COHORT_PASS_RUN_ID, [IN_HOTEL_ID]);
+      await insertCohortProperties(client, "canonical");
+      await insertOutsideRows(client, false);
+
+      const { cohortScope } = await readProductionParityEvidence({
+        ...config(),
+        sourceRunId: COHORT_PASS_RUN_ID,
+      });
+
+      expect(cohortScope).toMatchObject({
+        cohortSha256: cohort.cohortSha256,
+        approvalProofSha256: cohort.approvalProofSha256,
+      });
+      expect(cohortScope!.cohortProperties).toBeGreaterThanOrEqual(1);
+      expect(cohortScope!.nonCohortProperties).toBeGreaterThanOrEqual(1);
+      expect(cohortScope!.violations.filter((row) => COHORT_SUBJECTS.has(row.subjectId))).toEqual(
+        [],
+      );
+      expect((await readProductionParityEvidence(config())).cohortScope).toBeNull();
+    } finally {
+      await cleanupCohort(client);
+      await client.end();
+    }
+  });
+
+  it("reports every cohort scope category when those rows are live", async () => {
+    assertSafeTestDatabase(URL!);
+    const client = new pg.Client({ connectionString: URL });
+    await client.connect();
+    try {
+      await storeCohort(client, COHORT_FAIL_RUN_ID, [IN_HOTEL_ID, MISSING_HOTEL_ID]);
+      await insertCohortProperties(client, "private_quarantine");
+      await insertOutsideRows(client, true);
+
+      const { cohortScope } = await readProductionParityEvidence({
+        ...config(),
+        sourceRunId: COHORT_FAIL_RUN_ID,
+      });
+      const mine = cohortScope!.violations.filter((row) => COHORT_SUBJECTS.has(row.subjectId));
+
+      expect(mine).toEqual([
+        { category: "actionablePayout", subjectId: OUT_HOTEL_ID },
+        { category: "activeChannexMapping", subjectId: OUT_HOTEL_ID },
+        { category: "activeEntitlement", subjectId: OUT_HOTEL_ID },
+        { category: "activeMembership", subjectId: OUT_HOTEL_ID },
+        { category: "activeOwnerLink", subjectId: OUT_HOTEL_ID },
+        { category: "bindingClaim", subjectId: OUT_HOTEL_ID },
+        { category: "cohortHotelUnresolved", subjectId: MISSING_HOTEL_ID },
+        { category: "cohortPropertyQuarantined", subjectId: IN_HOTEL_ID },
+        { category: "connectedChannel", subjectId: OUT_HOTEL_ID },
+        { category: "enabledProviderAccount", subjectId: OUT_HOTEL_ID },
+        { category: "marketplaceListing", subjectId: OUT_HOTEL_ID },
+        { category: "profileNotPrivate", subjectId: OUT_HOTEL_ID },
+        { category: "publicAddons", subjectId: OUT_HOTEL_ID },
+        { category: "publicMedia", subjectId: OUT_HOTEL_ID },
+        { category: "publicOffers", subjectId: OUT_HOTEL_ID },
+        { category: "verifiedDomain", subjectId: OUT_HOTEL_ID },
+      ]);
+    } finally {
+      await cleanupCohort(client);
+      await client.end();
+    }
+  });
+
   it("holds a write freeze across the complete parity callback", async () => {
     assertSafeTestDatabase(URL!);
     const setup = new pg.Client({ connectionString: URL });
@@ -631,6 +717,185 @@ async function cleanup(client: pg.Client): Promise<void> {
   ]);
   await client.query("DELETE FROM identity.organizations WHERE id = ANY($1::uuid[])", [
     [CREATOR_ORGANIZATION_ID, HOTEL_ORGANIZATION_ID],
+  ]);
+}
+
+async function storeCohort(client: pg.Client, sourceRunId: string, bookingHotelIds: string[]) {
+  const cohort = parseProductionMigrationCohort({
+    sourceRunId,
+    bookingHotelIds,
+    pmsHotelIds: [],
+    marketplaceHotelIds: [],
+    approvalProofSha256: "a".repeat(64),
+  });
+  await writeProductionMigrationCohort(client, cohort);
+  return cohort;
+}
+
+async function insertCohortProperties(client: pg.Client, inDisposition: string): Promise<void> {
+  await client.query(
+    `INSERT INTO hotel_catalog.properties (id, public_id, display_name, profile_status)
+     VALUES ($1, 'parity-cohort-in', 'Parity cohort hotel', 'complete'),
+            ($2, 'parity-cohort-out', 'Parity outside hotel', 'private')`,
+    [IN_HOTEL_ID, OUT_HOTEL_ID],
+  );
+  await client.query(
+    `INSERT INTO hotel_catalog.property_source_links
+       (property_id, source_system, source_table, source_id, relationship, metadata)
+     VALUES ($1::uuid, 'booking', 'booking_hotels', $1::uuid::text, 'canonical_input',
+             jsonb_build_object('migrationDisposition', $4::text)),
+            ($2::uuid, 'booking', 'booking_hotels', $2::uuid::text, 'canonical_input',
+             '{"migrationDisposition":"private_quarantine"}'::jsonb),
+            ($2::uuid, 'pms', 'hotels', $3::text, 'operational_input',
+             '{"migrationDisposition":"private_quarantine"}'::jsonb)`,
+    [IN_HOTEL_ID, OUT_HOTEL_ID, OUT_PMS_HOTEL_ID, inDisposition],
+  );
+}
+
+/** The rows a property outside the cohort keeps: inert as the domain writers leave them, or live. */
+async function insertOutsideRows(client: pg.Client, live: boolean): Promise<void> {
+  const [out, org, pms] = [OUT_HOTEL_ID, OUT_ORGANIZATION_ID, OUT_PMS_HOTEL_ID];
+  const pick = (liveValue: unknown, inertValue: unknown) => (live ? liveValue : inertValue);
+  const statements: Array<[string, unknown[]]> = [
+    [
+      "UPDATE hotel_catalog.properties SET profile_status = $2 WHERE id = $1",
+      [out, pick("complete", "private")],
+    ],
+    [
+      `INSERT INTO hotel_catalog.property_public_profile_read_model
+        (property_id, public_id, display_name, canonical_slug, default_locale, supported_locales,
+         profile_status, verified_custom_domain)
+      VALUES ($1, 'parity-cohort-out', 'Parity outside hotel', 'parity-cohort-out', 'en',
+              ARRAY['en'], $2, $3)`,
+      [out, pick("complete", "private"), pick("out.example.test", null)],
+    ],
+    [
+      `INSERT INTO hotel_catalog.property_domains (property_id, hostname, verification_status)
+      VALUES ($1, 'parity-cohort-out.example.test', $2)`,
+      [out, pick("verified", "disabled")],
+    ],
+    [
+      `INSERT INTO hotel_catalog.property_media
+        (property_id, media_type, url, source_system, public_approved)
+      VALUES ($1, 'hero_image', 'https://legacy.example.test/out.jpg', 'booking', $2)`,
+      [out, live],
+    ],
+    [
+      `INSERT INTO booking.promo_definitions
+        (property_id, code, discount_type, discount_value, is_active, status)
+      VALUES ($1, 'PARITY', 'percentage', 10, $2, $3)`,
+      [out, live, pick("active", "retired")],
+    ],
+    [
+      `INSERT INTO booking.addon_definitions
+        (property_id, source_system, name, pricing_model, currency, public_visible, status)
+      VALUES ($1, 'booking', 'Add-on', 'per_stay', 'EUR', $2, $3)`,
+      [out, live, pick("active", "disabled")],
+    ],
+    [
+      "INSERT INTO identity.users (id, email) VALUES ($1, 'parity-cohort-owner@example.test')",
+      [OUT_USER_ID],
+    ],
+    [
+      `INSERT INTO identity.organizations (id, kind, name, slug, status)
+      VALUES ($1, 'hotel_group', 'Parity outside owner', 'parity-cohort-out-owner', $2)`,
+      [org, pick("active", "archived")],
+    ],
+    [
+      `INSERT INTO identity.organization_memberships
+        (organization_id, user_id, role_key, access_origin, status)
+      VALUES ($1, $2, 'manager', 'agency', $3)`,
+      [org, OUT_USER_ID, pick("active", "inactive")],
+    ],
+    // The PMS source ID, not the property ID, carries the owner path.
+    [
+      `INSERT INTO identity.organization_resource_links
+        (organization_id, product, resource_type, resource_id, relationship, status)
+      VALUES ($1, 'pms', 'pms_hotel', $2, 'operator', $3)`,
+      [org, pms, pick("active", "archived")],
+    ],
+    [
+      `INSERT INTO identity.product_entitlements
+        (organization_id, product, entitlement_key, resource_product, resource_type, resource_id, status)
+      VALUES ($1, 'pms', 'pms', 'pms', 'pms_hotel', $2, $3)`,
+      [org, pms, pick("active", "expired")],
+    ],
+    [
+      `INSERT INTO marketplace.marketplace_hotel_profiles
+        (property_id, organization_id, marketplace_profile_status)
+      VALUES ($1, $2, $3)`,
+      [out, org, pick("verified", "archived")],
+    ],
+    [
+      `INSERT INTO marketplace.marketplace_offers (id, property_id, organization_id, title, offer_status)
+      VALUES ($1, $2, $3, 'Parity outside listing', $4)`,
+      [OUT_OFFER_ID, out, org, pick("verified", "archived")],
+    ],
+    [
+      `INSERT INTO pms.room_types (id, property_id, name, base_rate_amount, currency)
+      VALUES ($1, $2, 'Parity outside room', 0, 'EUR')`,
+      [OUT_ROOM_TYPE_ID, out],
+    ],
+    [
+      `INSERT INTO pms.channel_connections (id, property_id, provider, connection_status)
+      VALUES ($1, $2, 'custom', $3)`,
+      [OUT_CONNECTION_ID, out, pick("degraded", "disconnected")],
+    ],
+    [
+      `INSERT INTO pms.channel_room_type_mappings
+        (property_id, connection_id, room_type_id, external_room_type_id, status)
+      VALUES ($1, $2, $3, 'parity-room', $4)`,
+      [out, OUT_CONNECTION_ID, OUT_ROOM_TYPE_ID, pick("active", "disabled")],
+    ],
+    [
+      `INSERT INTO pms.channel_binding_claims
+        (property_id, provider, external_property_id, claim_state, claim_source)
+      VALUES ($1, 'channex', 'parity-cohort-channex', $2, 'migration')`,
+      [out, pick("historical", "released")],
+    ],
+    [
+      `INSERT INTO finance.payment_provider_accounts
+        (property_id, account_scope, provider, charges_enabled, status)
+      VALUES ($1, 'property', 'manual', $2, $3)`,
+      [out, live, pick("active", "disabled")],
+    ],
+    [
+      `INSERT INTO finance.payouts (owner_scope, property_id, payout_status, amount, currency)
+      VALUES ('property', $1, $2, 1, 'EUR')`,
+      [out, pick("scheduled", "canceled")],
+    ],
+  ];
+  for (const [sql, params] of statements) await client.query(sql, params);
+}
+
+async function cleanupCohort(client: pg.Client): Promise<void> {
+  const properties = [IN_HOTEL_ID, OUT_HOTEL_ID];
+  for (const table of [
+    "finance.payouts",
+    "finance.payment_provider_accounts",
+    "pms.channel_binding_claims",
+    "pms.channel_room_type_mappings",
+    "pms.channel_connections",
+    "pms.room_types",
+    "marketplace.marketplace_offers",
+    "marketplace.marketplace_hotel_profiles",
+    "booking.addon_definitions",
+    "booking.promo_definitions",
+    "hotel_catalog.property_media",
+    "hotel_catalog.property_domains",
+    "hotel_catalog.property_public_profile_read_model",
+  ])
+    await client.query(`DELETE FROM ${table} WHERE property_id = ANY($1::uuid[])`, [properties]);
+  for (const table of [
+    "identity.product_entitlements",
+    "identity.organization_resource_links",
+    "identity.organization_memberships",
+  ])
+    await client.query(`DELETE FROM ${table} WHERE organization_id = $1`, [OUT_ORGANIZATION_ID]);
+  await client.query("DELETE FROM identity.organizations WHERE id = $1", [OUT_ORGANIZATION_ID]);
+  await client.query("DELETE FROM identity.users WHERE id = $1", [OUT_USER_ID]);
+  await client.query("DELETE FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])", [
+    properties,
   ]);
 }
 
