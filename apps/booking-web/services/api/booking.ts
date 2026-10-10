@@ -127,6 +127,8 @@ export interface CancelPreview {
   freeCancellationDays: number;
   daysUntilCheckIn: number;
   currency: string;
+  /** Pricing-v2 stays: what the booked terms keep, in minor units; sent back to confirm the fee. */
+  bookedTermsOutcome?: { retainedMinor: string };
 }
 
 export const bookingService = {
@@ -146,8 +148,16 @@ export const bookingService = {
     );
   },
 
-  async cancel(slug: string, bookingId: string, guestEmail: string): Promise<void> {
-    const body = { guestEmail };
+  async cancel(
+    slug: string,
+    bookingId: string,
+    guestEmail: string,
+    expectedCancellationFeeMinor?: string,
+  ): Promise<void> {
+    const body = {
+      guestEmail,
+      ...(expectedCancellationFeeMinor ? { expectedCancellationFeeMinor } : {}),
+    };
     await bookingWebPublic.post(
       `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/cancel`,
       body,
