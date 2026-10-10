@@ -258,7 +258,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     for (const field of ["property_name", "address", "city", "country"]) {
       expect(settingsWrites[0]).not.toHaveProperty(field);
     }
-    await page.goto("/settings/billing");
+    await page.goto("/settings/payments");
     await expect(page.getByPlaceholder("payments@yourproperty.com")).toHaveValue(
       "pay@alpenrose.example",
     );
