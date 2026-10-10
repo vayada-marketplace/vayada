@@ -80,7 +80,7 @@ function plan(moduleActivations: IdentitySourceRow[], cohort = true) {
         name: "Room",
         total_rooms: 0,
         base_rate: "0",
-        currency: index === 7 ? "IDR" : "EUR",
+        currency: index === 7 ? "JPY" : "EUR",
       }),
     ]),
     target,
