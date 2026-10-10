@@ -293,8 +293,15 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     });
   };
 
-  async function cardFixture(accountRef = "acct_writer_test", currency?: string) {
-    const fixture = await setupFixture(cardQuote, currency);
+  async function cardFixture(
+    accountRef = "acct_writer_test",
+    currency?: string,
+    acceptanceMode: "instant" | "request" = "instant",
+  ) {
+    const fixture = await setupFixture((quote) => {
+      cardQuote(quote);
+      Object.assign(quote, { acceptanceMode });
+    }, currency);
     const slug = `writer-${fixture.propertyId}`;
     fixture.input.slug = slug;
     await fixture.observer.query(
@@ -342,6 +349,61 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       provider,
     };
   }
+
+  it("authorises a card request without capture, holding the rooms on the payment deadline only", async () => {
+    const { fixture, createPaymentIntent, provider } = await cardFixture(
+      undefined,
+      undefined,
+      "request",
+    );
+    try {
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider }),
+      ).rejects.toMatchObject({ code: "request_unavailable" });
+      expect(createPaymentIntent).not.toHaveBeenCalled();
+      const result = await writePricingAcceptance(
+        fixture.pool,
+        fixture.input,
+        undefined,
+        { provider },
+        true,
+      );
+      expect(result).toMatchObject({ kind: "payment_required" });
+      expect(createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({ captureMethod: "manual" }),
+      );
+      const booking = (
+        await fixture.observer.query(
+          `SELECT b.lifecycle_status,b.payment_status,b.booking_metadata ? 'pendingExpiresAt' AS payment_deadline,
+            b.booking_metadata ? 'hostResponseDeadlineAt' AS host_deadline,
+            p.payment_metadata->>'captureMethod' AS capture,p.payment_metadata->>'acceptanceMode' AS mode
+           FROM booking.guest_bookings b JOIN finance.payments p ON p.id=b.active_card_payment_id
+           WHERE b.property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows;
+      expect(booking).toEqual([
+        {
+          lifecycle_status: "pending_payment",
+          payment_status: "unpaid",
+          payment_deadline: true,
+          host_deadline: false,
+          capture: "manual",
+          mode: "request",
+        },
+      ]);
+      await expect(snapshot(fixture.observer, fixture)).resolves.toEqual({
+        bookings: 1,
+        acceptances: 1,
+        jobs: 0,
+        revenue: 0,
+        available: 2,
+        assigned: 1,
+      });
+    } finally {
+      await fixture.close();
+    }
+  });
 
   it("accepts the quote, holds the rooms and starts a Stripe payment without confirming", async () => {
     const { fixture, slug, createPaymentIntent, retrievePaymentIntent, provider } =

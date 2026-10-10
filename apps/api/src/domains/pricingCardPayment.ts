@@ -26,14 +26,15 @@ const fail = (): never => {
   throw new Error("Pricing card payment is unavailable");
 };
 
-/** Card quotes this path can execute: instant and fully paid online. Quotes with an amount
- * due at the property stay pay-at-property until partially paid bookings are supported
- * downstream (balance collection, host cancel, PMS handoff). */
+/** Card quotes this path can execute: fully paid online, instant (captured at once) or a
+ * request (authorised now, captured when the hotel accepts). Quotes with an amount due at the
+ * property stay pay-at-property until partially paid bookings are supported downstream
+ * (balance collection, host cancel, PMS handoff). */
 export function pricingCardQuoteSupported(quote: Current["quote"]): boolean {
   const { totalMinor, dueNowMinor, dueLaterMinor } = quote.evidence;
   return (
     quote.paymentMethod === "card" &&
-    quote.acceptanceMode === "instant" &&
+    (quote.acceptanceMode === "instant" || quote.acceptanceMode === "request") &&
     /^[1-9][0-9]*$/.test(dueNowMinor) &&
     dueNowMinor === totalMinor &&
     dueLaterMinor === "0"
@@ -123,6 +124,8 @@ export async function startPricingCardPayment(
     return fail();
   }
   const idempotencyKey = pricingCardPaymentIdempotencyKey(scope.propertyId, input.requestId);
+  // A request only authorises the card; the hotel's acceptance captures it.
+  const captureMethod = quote.acceptanceMode === "request" ? "manual" : "automatic";
   const intent = await provider.createPaymentIntent({
     propertyId: scope.propertyId,
     bookingReference: input.publicReference,
@@ -130,7 +133,7 @@ export async function startPricingCardPayment(
     amountMinor,
     applicationFeeAmountMinor: feeMinor,
     currency,
-    captureMethod: "automatic",
+    captureMethod,
     idempotencyKey,
   });
   if (
@@ -160,8 +163,8 @@ export async function startPricingCardPayment(
       { contractVersion: "stripe-direct-charge.v1", status: "pending", currency },
       {
         providerStatus: intent.status,
-        captureMethod: "automatic",
-        acceptanceMode: "instant",
+        captureMethod,
+        acceptanceMode: quote.acceptanceMode,
         bookingReference: input.publicReference,
         pricingQuoteId: quote.quoteId,
         billingPlan: input.finance.billingPlanSnapshot,
