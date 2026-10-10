@@ -22,6 +22,7 @@ on:
       - "fm/vay-2089-*"
       - "fm/vay-2099-*"
       - "fm/vay-2100-*"
+      - "fm/vay-2108-*"
       - "fm/vay-2101-*"
       - "fm/vay-2102-*"
       - flamurmaliqi2811/vay-2044-expense-worker-runtime
@@ -676,6 +677,7 @@ jobs:
           src/channexBookingRevisionTombstonesMigration.integration.test.ts
           src/channexAdoptionManifestFoundation.integration.test.ts
           src/channexAdoptionConsumer.integration.test.ts
+          src/channexHandover.integration.test.ts
           src/channexAdoptionEvidence.integration.test.ts
           src/stripeWebhookReceiptRetention.integration.test.ts
           src/productionMediaMigration.integration.test.ts
