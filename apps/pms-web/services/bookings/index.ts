@@ -58,8 +58,18 @@ export interface BookingStay {
   }>;
 }
 
+/** What a pricing-v2 stay's booked terms keep on cancellation (VAY-2100), in minor units. */
+export type BookingCancellationOutcome = {
+  daysBeforeCheckIn: number;
+  totalMinor: string;
+  refundMinor: string;
+  retainedMinor: string;
+};
+
 export interface Booking {
   mealDescription?: string | null;
+  /** Recorded when the guest's cancellation applied the booked terms. */
+  cancellationOutcome?: BookingCancellationOutcome | null;
   id: string;
   bookingReference: string;
   roomTypeId: string;
@@ -372,6 +382,7 @@ type PmsOperationalReservation = {
   }>;
   checkin: { completedAt: string | null; pendingFlags: string[] };
   checkout: { completedAt: string | null; pendingFlags: string[] };
+  cancellationOutcome?: BookingCancellationOutcome | null;
   mealDescription?: string | null;
   bookedOffer?: { roomTypeId: string; roomName: string };
   roomLines?: Array<{
@@ -1353,6 +1364,7 @@ function toBooking(
     checkedInAt: reservation.checkin.completedAt,
     checkedOutAt: reservation.checkout.completedAt,
     hostResponseDeadline: reservation.hostResponseDeadlineAt ?? null,
+    cancellationOutcome: reservation.cancellationOutcome ?? null,
     platformFeeAmount: null,
     affiliateCommissionAmount: null,
     propertyPayoutAmount: null,
@@ -1488,6 +1500,8 @@ export type HostBookingActionRequest = {
   guestMessage?: string;
   checkIn?: string;
   checkOut?: string;
+  /** Cancel only: "guest_request" applies the booked terms; "property" cancels with no fee. */
+  cancellationKind?: "property" | "guest_request";
 };
 export type HostBookingActionPreview = {
   previewId: string;
@@ -1500,6 +1514,7 @@ export type HostBookingActionPreview = {
     currency: string;
     inventory: "release" | "replace";
     payment: "no_payment_received" | "authorization_void";
+    cancellationOutcome?: BookingCancellationOutcome;
     cancellationPolicy: {
       type: "non_refundable" | "flexible" | "mixed_room";
       lines?: {

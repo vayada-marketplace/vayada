@@ -31,7 +31,9 @@ import {
   parseBookingRoomSelection,
   SAME_DAY_BOOKING_POLICY_DEFAULTS,
   type AddonEconomicTerms,
+  type BookedCancellationOutcome,
 } from "@vayada/domain-booking";
+import { pricingCurrencyScale } from "@vayada/domain-booking/replacement-pricing";
 import {
   assertPublicBookabilityPublicSafe,
   PUBLIC_BOOKABILITY_CONTRACT_VERSION,
@@ -83,6 +85,10 @@ import {
   stripeApplicationFeeMinor,
 } from "../domains/stripeMoney.js";
 import { releasedPmsReservationOfferKeys } from "../domains/pmsInventoryReservation.js";
+import {
+  cancelAcceptedPricingStay,
+  loadPricingBookingCancellation,
+} from "../domains/pricingBookingCancellation.js";
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
 import {
   inventoryReservationReceiptFromBookingMetadata,
@@ -136,6 +142,9 @@ type BookingWebBookingStatusQuery = {
 type BookingWebGuestActionRequest = {
   guestEmail?: string;
   guest_email?: string;
+  /** Pricing-v2 cancel: the fee the guest saw in the preview, in minor units (VAY-2100). */
+  expectedCancellationFeeMinor?: string;
+  expected_cancellation_fee_minor?: string;
 };
 
 export type BookingWebCheckoutRequest = Record<string, unknown>;
@@ -2436,10 +2445,12 @@ export function createTargetBookingWebCheckoutAdapter(
           requireGuestEmail(request.guest_email),
         );
         assertLifecycleMutationAllowed(booking, "cancel");
+        const occurredAt = context?.occurredAt ?? new Date();
         const preview = resolveTargetCancellationPreview(
           booking,
           property.timezone,
-          context?.occurredAt ?? new Date(),
+          occurredAt,
+          await loadBookedCancellationOutcome(pool, property.propertyId, booking, occurredAt),
         );
         return {
           propertyId: property.propertyId,
@@ -3856,8 +3867,48 @@ async function withGuestLifecycleMutation(
       requireGuestEmail(request.guest_email),
     );
     assertLifecycleMutationAllowed(booking, mutation.action);
+    let bookedOutcome: BookedCancellationOutcome | null = null;
     if (mutation.action === "cancel") {
-      resolveTargetCancellationPreview(booking, property.timezone, context.occurredAt);
+      let feeBooking = booking;
+      if (objectValue(booking.bookingMetadata)["targetSource"] === "pricing_quote_draft") {
+        // Booking row, then inventory, as PMS host actions take them. NO KEY UPDATE stays
+        // compatible with PMS adoption, which holds inventory while it references the booking.
+        // Paid stays were refused above, so pricing-v2 card owners (inventory first) never race.
+        await client.query(
+          "SELECT 1 FROM booking.guest_bookings WHERE id=$1::uuid AND property_id=$2::uuid FOR NO KEY UPDATE",
+          [booking.guestBookingId, property.propertyId],
+        );
+        await lockPmsInventoryMutationScope(client, property.propertyId);
+        // The fee comes from the stay as it is under the lock.
+        feeBooking = await loadTargetBooking(
+          client,
+          property.propertyId,
+          bookingId,
+          requireGuestEmail(request.guest_email),
+        );
+        assertLifecycleMutationAllowed(feeBooking, mutation.action);
+      }
+      bookedOutcome = await loadBookedCancellationOutcome(
+        client,
+        property.propertyId,
+        feeBooking,
+        context.occurredAt,
+        true,
+      );
+      resolveTargetCancellationPreview(
+        feeBooking,
+        property.timezone,
+        context.occurredAt,
+        bookedOutcome,
+      );
+      if (bookedOutcome) {
+        // A fee is only agreed as previewed; a later tier (after midnight) needs a new preview.
+        if ((request.expected_cancellation_fee_minor ?? "0") !== bookedOutcome.retainedMinor)
+          throw createHttpError(
+            409,
+            "The cancellation fee has changed. Review it again before cancelling.",
+          );
+      }
     }
     const result = await client.query<TargetBookingRow>(
       `WITH updated AS (
@@ -3920,7 +3971,11 @@ async function withGuestLifecycleMutation(
         context.occurredAt.toISOString(),
         mutation.eventType,
         booking.lifecycleStatus,
-        JSON.stringify({ requestId: context.requestId, correlationId: context.correlationId }),
+        JSON.stringify({
+          requestId: context.requestId,
+          correlationId: context.correlationId,
+          ...(bookedOutcome ? { cancellationOutcome: bookedOutcome } : {}),
+        }),
       ],
     );
     const updated = result.rows[0];
@@ -3971,7 +4026,18 @@ async function withGuestLifecycleMutation(
         occurredAt: context.occurredAt,
       });
     }
-    await enqueuePmsReservationHandoff(client, property.propertyId, updated, context, "cancel");
+    if (bookedOutcome)
+      await cancelAcceptedPricingStay(client, inventoryReservationPort, {
+        propertyId: updated.propertyId,
+        guestBookingId: updated.guestBookingId,
+        commandId: context.requestId,
+        fingerprint: context.fingerprint,
+        occurredAt: context.occurredAt,
+      });
+    // Nothing consumes pms.reservation.cancel for pricing-v2 stays. cancelAcceptedPricingStay frees
+    // a cancelled one; a withdrawn request needs the same (VAY-2099).
+    if (objectValue(updated.bookingMetadata)["targetSource"] !== "pricing_quote_draft")
+      await enqueuePmsReservationHandoff(client, property.propertyId, updated, context, "cancel");
     const body = serializeTargetBookingStatus(updated);
     await recordTargetCheckoutCommand(client, {
       propertyId: property.propertyId,
@@ -4568,11 +4634,13 @@ function serializeTargetDateChangePreview(
   return { ...publicPreview, ...projectBookingRoomSelection(_pricingSnapshot?.["selectedOffer"]) };
 }
 
+/** `"no_key"` locks the row FOR NO KEY UPDATE: it still serializes changes to the booking, but
+ * lets PMS adoption insert assignments that reference it (FOR KEY SHARE) while holding inventory. */
 export async function loadTargetHotelBooking(
   pool: BookingWebQueryExecutor,
   propertyId: string,
   bookingId: string,
-  forUpdate = false,
+  forUpdate: boolean | "no_key" = false,
 ): Promise<TargetBookingRow> {
   const result = await pool.query<TargetBookingRow>(
     `SELECT
@@ -4611,7 +4679,7 @@ export async function loadTargetHotelBooking(
      WHERE booking.property_id = $1::uuid
        AND (booking.id::text = $2 OR booking.public_reference = $2)
      LIMIT 1
-     ${forUpdate ? "FOR UPDATE OF booking" : ""}`,
+     ${forUpdate === "no_key" ? "FOR NO KEY UPDATE OF booking" : forUpdate ? "FOR UPDATE OF booking" : ""}`,
     [propertyId, bookingId],
   );
   const booking = result.rows[0];
@@ -5731,9 +5799,12 @@ export function createUnavailableBookingWebAffiliateAdapter(): BookingWebAffilia
 
 function normalizeGuestActionRequest(request: BookingWebGuestActionRequest): {
   guest_email: string | undefined;
+  expected_cancellation_fee_minor?: string;
 } {
+  const fee = request.expected_cancellation_fee_minor ?? request.expectedCancellationFeeMinor;
   return {
     guest_email: request.guest_email ?? request.guestEmail,
+    ...(typeof fee === "string" ? { expected_cancellation_fee_minor: fee } : {}),
   };
 }
 
@@ -6122,8 +6193,11 @@ export function resolveTargetCancellationPreview(
   booking: TargetBookingRow,
   propertyTimezone: string | undefined,
   occurredAt: Date,
+  bookedOutcome?: BookedCancellationOutcome | null,
 ): Record<string, unknown> {
   const metadata = objectValue(booking.bookingMetadata);
+  if (metadata["targetSource"] === "pricing_quote_draft")
+    return pricingCancellationPreview(booking, bookedOutcome ?? null);
   const selectedOffer = objectValue(metadata["selectedOffer"]);
   const selection = projectBookingRoomSelection(selectedOffer);
   if (selection.roomLines) {
@@ -6227,6 +6301,77 @@ export function resolveTargetCancellationPreview(
     currency: booking.currency,
     policy: policySnapshot,
   };
+}
+
+/** Pricing-v2 stays: the terms frozen at acceptance decide (VAY-2100). Partial-refund terms can be
+ * cancelled online in every tier, free cancellation only until its deadline, non-refundable never.
+ * Only unpaid stays get here, so no money moves: refund fields stay 0 and what the terms keep is
+ * a fee the property may charge, never a refund the guest will receive. */
+function pricingCancellationPreview(
+  booking: TargetBookingRow,
+  outcome: BookedCancellationOutcome | null,
+): Record<string, unknown> {
+  const scale = pricingCurrencyScale(booking.currency);
+  if (!outcome || scale === null)
+    throw createHttpError(
+      409,
+      "This booking's cancellation policy cannot be verified online. Contact the property.",
+    );
+  if (outcome.daysBeforeCheckIn < 0)
+    throw createHttpError(409, "This booking's check-in date has passed. Contact the property.");
+  if (outcome.rooms.some((room) => room.rule === "non_refundable"))
+    throw createHttpError(
+      409,
+      "This booked rate is non-refundable and cannot be cancelled online.",
+    );
+  if (outcome.rooms.some((room) => room.rule === "free_until_deadline" && room.refundPercent < 100))
+    throw createHttpError(
+      409,
+      "This booking's free-cancellation period has expired. Contact the property.",
+    );
+  return {
+    amountPaid: 0,
+    refundAmount: 0,
+    refundPercentage: 0,
+    cancellationFeeAmount: Number(outcome.retainedMinor) / 10 ** scale,
+    freeCancellationDays: Math.max(0, ...outcome.rooms.map((room) => room.matchedTierMinDays ?? 0)),
+    daysUntilCheckIn: outcome.daysBeforeCheckIn,
+    currency: booking.currency,
+    bookedTermsOutcome: outcome,
+  };
+}
+
+async function loadBookedCancellationOutcome(
+  db: BookingWebQueryExecutor,
+  propertyId: string,
+  booking: TargetBookingRow,
+  occurredAt: Date,
+  lockAssignments = false,
+): Promise<BookedCancellationOutcome | null> {
+  if (objectValue(booking.bookingMetadata)["targetSource"] !== "pricing_quote_draft") return null;
+  // Locked on cancel, so a check-in cannot commit between this check and the cancellation.
+  const assignments = await db.query<{ status: string }>(
+    `SELECT assignment_status AS status FROM pms.operational_booking_assignments
+     WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid${lockAssignments ? " FOR UPDATE" : ""}`,
+    [propertyId, booking.guestBookingId],
+  );
+  if (
+    assignments.rows.some(({ status }) =>
+      ["checked_in", "in_house", "checked_out"].includes(status),
+    )
+  )
+    throw createHttpError(409, "This stay has already started. Contact the property.");
+  return loadPricingBookingCancellation(db, {
+    propertyId,
+    guestBookingId: booking.guestBookingId,
+    stay: {
+      checkIn: dateOnly(booking.checkIn),
+      checkOut: dateOnly(booking.checkOut),
+      roomCount: booking.roomCount,
+      currency: booking.currency,
+    },
+    cancelledAt: occurredAt,
+  });
 }
 
 function resolveLegacyFreeCancellationDays(policySnapshot: Record<string, unknown>): number {
