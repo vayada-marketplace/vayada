@@ -109,7 +109,12 @@ export default function MyBookingPageClient() {
         setBooking({ ...booking, status: "cancelled" });
         setSuccessMessage(t("bookingWithdrawn"));
       } else {
-        await bookingService.cancel(slug, booking.id, email);
+        await bookingService.cancel(
+          slug,
+          booking.id,
+          email,
+          cancelPreview?.bookedTermsOutcome?.retainedMinor,
+        );
         setBooking({ ...booking, status: "cancelled" });
         setSuccessMessage(t("bookingCancelled"));
       }
@@ -117,6 +122,14 @@ export default function MyBookingPageClient() {
       setCancelPreview(null);
     } catch (err: any) {
       setError(err.message || "Cancellation failed");
+      // The fee may have moved to another tier since the preview: show the current one here.
+      if (!isPending) {
+        try {
+          setCancelPreview(await bookingService.cancelPreview(slug, booking.id, email));
+        } catch {
+          // Keep the shown preview; the error explains why cancelling failed.
+        }
+      }
     } finally {
       setCancelling(false);
     }
@@ -125,6 +138,7 @@ export default function MyBookingPageClient() {
   const handleCloseDialog = () => {
     setShowConfirmDialog(false);
     setCancelPreview(null);
+    setError("");
   };
 
   const statusColor: Record<string, string> = {
@@ -371,6 +385,12 @@ export default function MyBookingPageClient() {
             </h3>
 
             {/* Refund info for confirmed bookings */}
+            {error && (
+              <p role="alert" className="mb-4 text-sm text-red-700">
+                {error}
+              </p>
+            )}
+
             {cancelPreview && !isPending && (
               <div className="mb-4 space-y-2">
                 <div
@@ -391,16 +411,27 @@ export default function MyBookingPageClient() {
                 <p className="text-sm text-gray-700">
                   {cancelPreview.amountPaid === 0 && cancelPreview.cancellationFeeAmount === 0
                     ? t("noPaymentToRefund")
-                    : cancelPreview.refundPercentage >= 100
-                      ? t("fullRefund", {
-                          amount: formatPrice(cancelPreview.refundAmount, cancelPreview.currency),
+                    : cancelPreview.amountPaid === 0 && cancelPreview.cancellationFeeAmount
+                      ? // Nothing was paid online: the terms' share is a fee, never a refund.
+                        t("unpaidCancellationFee", {
+                          amount: formatPrice(
+                            cancelPreview.cancellationFeeAmount,
+                            cancelPreview.currency,
+                          ),
                         })
-                      : cancelPreview.refundPercentage > 0
-                        ? t("partialRefund", {
+                      : cancelPreview.refundPercentage >= 100
+                        ? t("fullRefund", {
                             amount: formatPrice(cancelPreview.refundAmount, cancelPreview.currency),
-                            percentage: cancelPreview.refundPercentage,
                           })
-                        : t("noRefund")}
+                        : cancelPreview.refundPercentage > 0
+                          ? t("partialRefund", {
+                              amount: formatPrice(
+                                cancelPreview.refundAmount,
+                                cancelPreview.currency,
+                              ),
+                              percentage: cancelPreview.refundPercentage,
+                            })
+                          : t("noRefund")}
                 </p>
               </div>
             )}

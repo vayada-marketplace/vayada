@@ -1,6 +1,5 @@
 export const FUNNEL_STAGES = [
   "page_visit",
-  "room_viewed",
   "rate_selected",
   "addons_step_passed",
   "details_completed",
@@ -9,6 +8,11 @@ export const FUNNEL_STAGES = [
   "booking_completed",
 ] as const;
 export type FunnelStage = (typeof FUNNEL_STAGES)[number];
+/**
+ * Funnel telemetry the public endpoint accepts. room_viewed stays tracked as a standalone
+ * metric but is not a stage: guests can select a rate without opening room details (VAY-2074).
+ */
+export const FUNNEL_EVENT_TYPES = [...FUNNEL_STAGES, "room_viewed"] as const;
 export const FUNNEL_PAYMENT_METHODS = [
   "card",
   "bank_transfer",
