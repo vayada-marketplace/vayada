@@ -29,6 +29,16 @@ export type PricingAcceptanceResult =
       checkedAt: string;
     }>
   | Readonly<{
+      /** A request: the booking waits for the hotel, which answers before the deadline. */
+      kind: "requested";
+      bookingId: string;
+      bookingReference: string;
+      acceptanceId: string;
+      acceptedAt: string;
+      hostResponseDeadlineAt: string;
+      checkedAt: string;
+    }>
+  | Readonly<{
       kind: "replayed";
       bookingId: string;
       bookingReference: string;
@@ -140,13 +150,35 @@ function parsePricingAcceptanceResult(value: unknown): PricingAcceptanceResult |
     value.checkedAt >= value.acceptedAt
   )
     return structuredClone(value) as PricingAcceptanceResult;
+  if (
+    exact(value, [
+      "kind",
+      "bookingId",
+      "bookingReference",
+      "acceptanceId",
+      "acceptedAt",
+      "hostResponseDeadlineAt",
+      "checkedAt",
+    ]) &&
+    value.kind === "requested" &&
+    uuid(value.bookingId) &&
+    bookingReference(value.bookingReference) &&
+    uuid(value.acceptanceId) &&
+    iso(value.acceptedAt) &&
+    iso(value.checkedAt) &&
+    iso(value.hostResponseDeadlineAt) &&
+    value.checkedAt >= value.acceptedAt &&
+    value.hostResponseDeadlineAt > value.acceptedAt
+  )
+    return structuredClone(value) as PricingAcceptanceResult;
   return null;
 }
 
 const optional = (value: string | null | undefined) => value?.trim() || null;
 
-/** Instant quotes paid at the property, or paid in full online by card (the answer is then
- * payment_required). The server re-reads and validates every quote, policy and finance owner. */
+/** Quotes paid at the property (instant, or a request the hotel confirms), or instant and paid in
+ * full online by card (the answer is then payment_required). The server re-reads and validates
+ * every quote, policy and finance owner. */
 export async function acceptPricingQuote(
   slug: string,
   quote: PublicBookingQuote,
@@ -214,9 +246,9 @@ export async function acceptPricingQuote(
   return result;
 }
 
-/** Quotes this page can book: instant, and either paid at the property or paid in full by card. */
+/** Quotes this page can book, instantly or as a request the hotel confirms: paid at the
+ * property, or paid in full by card (a request only authorises the card). */
 export function pricingQuoteBookableOnline(quote: PublicBookingQuote): boolean {
-  if (quote.acceptanceMode !== "instant") return false;
   if (quote.paymentMethod === "pay_at_property")
     return quote.dueNowMinor === "0" && quote.dueLaterMinor === quote.totalMinor;
   return (
@@ -226,12 +258,21 @@ export function pricingQuoteBookableOnline(quote: PublicBookingQuote): boolean {
   );
 }
 
-export type PricingCardPaymentResult = Readonly<{
-  kind: "accepted";
-  bookingId: string;
-  bookingReference: string;
-  replayed: boolean;
-}>;
+export type PricingCardPaymentResult =
+  | Readonly<{
+      kind: "accepted";
+      bookingId: string;
+      bookingReference: string;
+      replayed: boolean;
+    }>
+  | Readonly<{
+      /** A card request: authorised, not charged; the hotel answers before the deadline. */
+      kind: "requested";
+      bookingId: string;
+      bookingReference: string;
+      replayed: boolean;
+      hostResponseDeadlineAt: string;
+    }>;
 
 /** After Stripe confirmed the card in the browser: ask the server to confirm the booking.
  * 409 PAYMENT_PENDING means Stripe has not reported the payment yet; retry shortly. */
@@ -249,16 +290,25 @@ export async function completePricingCardPayment(
   const v = raw as Record<string, unknown> | null;
   if (
     !v ||
-    v.kind !== "accepted" ||
+    (v.kind !== "accepted" && v.kind !== "requested") ||
     !uuid(v.bookingId) ||
     !bookingReference(v.bookingReference) ||
-    typeof v.replayed !== "boolean"
+    typeof v.replayed !== "boolean" ||
+    (v.kind === "requested" && !iso(v.hostResponseDeadlineAt))
   )
     throw new Error("The booking confirmation could not be verified. Please try again.");
-  return {
-    kind: "accepted",
-    bookingId: v.bookingId,
-    bookingReference: v.bookingReference,
-    replayed: v.replayed,
-  };
+  return v.kind === "requested"
+    ? {
+        kind: "requested",
+        bookingId: v.bookingId,
+        bookingReference: v.bookingReference,
+        replayed: v.replayed,
+        hostResponseDeadlineAt: v.hostResponseDeadlineAt as string,
+      }
+    : {
+        kind: "accepted",
+        bookingId: v.bookingId,
+        bookingReference: v.bookingReference,
+        replayed: v.replayed,
+      };
 }

@@ -42,6 +42,8 @@ export default function ReplacementBookingConfirmation({
     disclosure: PublicQuoteGuestDisclosure;
   } | null>(null);
   const supported = pricingQuoteBookableOnline(quote);
+  // A request-mode hotel confirms each booking itself; nothing is charged when the guest asks.
+  const request = quote.acceptanceMode === "request";
   const ready =
     supported &&
     !refreshRequired &&
@@ -82,23 +84,43 @@ export default function ReplacementBookingConfirmation({
       // 404 on a first attempt: online booking is off or this hotel is not bookable, so nothing
       // was stored. A retry after an uncertain attempt keeps the uncertain message.
       const unavailable = failure instanceof ApiError && failure.status === 404 && !pending;
-      const cardUnavailable =
-        unavailable &&
-        (failure.detail as { code?: unknown } | null)?.code === "CARD_PAYMENT_UNAVAILABLE";
-      setRefreshRequired(conflict || cardUnavailable);
+      const code =
+        failure instanceof ApiError && (failure.detail as { code?: unknown } | null)?.code;
+      const cardUnavailable = unavailable && code === "CARD_PAYMENT_UNAVAILABLE";
+      // The hotel confirms each booking, but online requests are not switched on yet.
+      const requestUnavailable = unavailable && code === "REQUEST_ACCEPTANCE_UNAVAILABLE";
+      setRefreshRequired(conflict || cardUnavailable || requestUnavailable);
       setError(
         conflict
           ? "This price is no longer available. Get a new price and review its terms again."
-          : cardUnavailable
-            ? "Paying by card online isn’t available right now. Get a new price with “Pay at property”. No room was reserved and no payment was taken."
-            : unavailable
-              ? "Online booking is not available for this hotel right now. No room was reserved and no payment was taken."
-              : "We couldn’t confirm your booking. Your room may still have been booked, so retry with the same details.",
+          : requestUnavailable
+            ? "This hotel confirms each booking itself, and booking requests can’t be sent online yet. No room was reserved and no payment was taken."
+            : cardUnavailable
+              ? "Paying by card online isn’t available right now. Get a new price with “Pay at property”. No room was reserved and no payment was taken."
+              : unavailable
+                ? "Online booking is not available for this hotel right now. No room was reserved and no payment was taken."
+                : request
+                  ? "We couldn’t confirm your request was sent. It may still have reached the hotel, so retry with the same details."
+                  : "We couldn’t confirm your booking. Your room may still have been booked, so retry with the same details.",
       );
     } finally {
       setLoading(false);
     }
   }
+
+  if (result && (result.kind === "requested" || (result.kind === "replayed" && request)))
+    return (
+      <section role="status" className="space-y-2 rounded-xl border border-green-300 p-5">
+        <h2 className="text-xl font-semibold">Booking request sent</h2>
+        <p>Your request reference is {result.bookingReference}.</p>
+        <p>
+          {quote.paymentMethod === "card"
+            ? "The hotel will accept or decline your request within 24 hours. Your card is authorised but not charged; it is charged only if the hotel accepts."
+            : "The hotel will accept or decline your request within 24 hours. Nothing has been charged, and your stay is not confirmed until the hotel accepts."}
+        </p>
+        <p>We sent the request details to the email address you provided.</p>
+      </section>
+    );
 
   if (result)
     return (
@@ -115,6 +137,7 @@ export default function ReplacementBookingConfirmation({
         slug={slug}
         quoteId={quote.quoteId}
         required={cardPayment}
+        request={request}
         onPaid={setResult}
       />
     );
@@ -192,10 +215,16 @@ export default function ReplacementBookingConfirmation({
       {error && <p role="alert">{error}</p>}
       <button className={button} type="submit" disabled={!ready || loading}>
         {loading
-          ? "Confirming booking…"
+          ? request
+            ? "Sending request…"
+            : "Confirming booking…"
           : quote.paymentMethod === "card"
-            ? "Continue to card payment"
-            : "Confirm booking"}
+            ? request
+              ? "Continue to card authorisation"
+              : "Continue to card payment"
+            : request
+              ? "Send booking request"
+              : "Confirm booking"}
       </button>
     </form>
   );

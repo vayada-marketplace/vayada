@@ -612,7 +612,7 @@ async function applyPgLifecycleMutation(
           ),
       );
       await client.query("COMMIT");
-      return outcome === "pending"
+      return outcome === "pending" || outcome === "authorized"
         ? lifecycleNoopResult(candidate, mutation)
         : {
             ...lifecycleNoopResult(candidate, mutation),
