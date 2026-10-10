@@ -2,7 +2,6 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   type GetObjectCommandOutput,
-  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -241,36 +240,6 @@ export function createS3PlatformMediaAdapter(
           Key: required(input.storageKey, "storageKey"),
         }),
       );
-    },
-
-    async deletePrefix(input) {
-      const bucket = required(input.bucket ?? bucketName, "bucket");
-      const prefix = required(input.prefix, "prefix");
-      const [namespace, sessionId, ...extraSegments] = prefix.split("/");
-      if (namespace !== "staging" || !sessionId || extraSegments.length > 0) {
-        throw new Error("Platform media prefix cleanup is restricted to staging namespaces");
-      }
-      assertSegment(sessionId, "staging session ID");
-
-      let continuationToken: string | undefined;
-      do {
-        const page = await s3.send(
-          new ListObjectsV2Command({
-            Bucket: bucket,
-            Prefix: prefix,
-            ContinuationToken: continuationToken,
-          }),
-        );
-        for (const object of page.Contents ?? []) {
-          if (object.Key) {
-            await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: object.Key }));
-          }
-        }
-        if (page.IsTruncated && !page.NextContinuationToken) {
-          throw new Error("S3 prefix listing was truncated without a continuation token");
-        }
-        continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
-      } while (continuationToken);
     },
 
     async signPrivateDownload(policy) {

@@ -1,4 +1,8 @@
-import { parsePmsPricingCurrency, parsePmsPricingCurrencyCapabilities } from "@vayada/domain-pms";
+import {
+  parsePmsPricingCurrency,
+  parsePmsPricingCurrencyCapabilities,
+  pricingCurrencyScale,
+} from "@vayada/domain-pms";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -24,6 +28,7 @@ describe("PMS pricing currency capabilities", () => {
       "GBP",
       "HKD",
       "HRK",
+      "IDR",
       "INR",
       "LKR",
       "MXN",
@@ -54,13 +59,16 @@ describe("PMS pricing currency capabilities", () => {
       await expect(
         PMS_PRICING_CURRENCY_CAPABILITIES_PORT.isSupportedPricingCurrency(code),
       ).resolves.toBe(true);
+      expect(pricingCurrencyScale(code)).toBe(2);
+      // IDR keeps ISO scale 2 in the money model, but current ICU formats it in whole rupiah.
+      if (code === "IDR") continue;
       const formatting = new Intl.NumberFormat("en-GB", {
         style: "currency",
         currency: code,
       }).resolvedOptions();
       expect([formatting.minimumFractionDigits, formatting.maximumFractionDigits]).toEqual([2, 2]);
     }
-    for (const value of ["HUF", "IDR", "JPY", "KRW", "VND", "ZZZ"]) {
+    for (const value of ["HUF", "JPY", "KRW", "VND", "ZZZ"]) {
       const code = parsePmsPricingCurrency(value)!;
       await expect(
         PMS_PRICING_CURRENCY_CAPABILITIES_PORT.isSupportedPricingCurrency(code),

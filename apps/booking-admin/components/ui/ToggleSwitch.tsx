@@ -43,8 +43,8 @@ export function ToggleSwitch({
   }
 
   return (
-    <div className="flex items-center justify-between py-3">
-      <div>
+    <div className="flex items-center justify-between gap-4 py-3">
+      <div className="min-w-0">
         <p className="text-[13px] font-semibold text-gray-900">{label}</p>
         {description && <p className="text-[13px] text-gray-500">{description}</p>}
       </div>
@@ -55,7 +55,7 @@ export function ToggleSwitch({
         aria-label={label}
         disabled={disabled}
         onClick={onChange}
-        className={`relative w-10 h-[22px] rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+        className={`relative w-10 h-[22px] shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${
           enabled ? "bg-primary-500" : "bg-gray-300"
         }`}
       >

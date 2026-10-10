@@ -282,3 +282,87 @@ describe("Booking Web affiliate reference prelaunch guard", () => {
     expect(bookingWebPublicApi.admitAffiliateArrival).not.toHaveBeenCalled();
   });
 });
+
+describe("Booking Web retired booking pages", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  const host = "hotel-alpenrose.next-booking.vayada.com";
+
+  async function visit(path: string, headers: Record<string, string> = { host }) {
+    return middleware(new NextRequest(`https://${host}${path}`, { headers }));
+  }
+
+  it("permanently redirects the retired pages to /book, keeping only what /book reads and the referral", async () => {
+    const response = await visit(
+      "/en/rooms?checkIn=2026-11-12&checkOut=2026-11-14&adults=2&children=1&promoCode=SUMMER20&ref=FRIEND&room=alpine&rateType=flexible",
+    );
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe(
+      `https://${host}/book?checkIn=2026-11-12&checkOut=2026-11-14&adults=2&children=1&promoCode=SUMMER20&ref=FRIEND`,
+    );
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(bookingWebPublicApi.resolveHost).not.toHaveBeenCalled();
+  });
+
+  it("keeps a non-default locale and accepts unprefixed and trailing-slash paths", async () => {
+    expect((await visit("/de/payment")).headers.get("location")).toBe(`https://${host}/de/book`);
+    expect((await visit("/addons/")).headers.get("location")).toBe(`https://${host}/book`);
+    expect((await visit("/payment?checkIn=")).headers.get("location")).toBe(`https://${host}/book`);
+  });
+
+  it("redirects on the browser-facing host when the proxy reports an internal origin", async () => {
+    const response = await middleware(
+      new NextRequest("http://10.0.4.12:3000/fr/addons?checkIn=2026-11-12", {
+        headers: { host: "10.0.4.12:3000", "x-forwarded-host": host, "x-forwarded-proto": "http" },
+      }),
+    );
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe(`https://${host}/fr/book?checkIn=2026-11-12`);
+  });
+
+  it("never redirects to a forwarded host Booking does not serve", async () => {
+    const response = await middleware(
+      new NextRequest(`https://${host}/rooms?checkIn=2026-11-12`, {
+        headers: { host, "x-forwarded-host": "attacker.example" },
+      }),
+    );
+    expect(response.status).not.toBe(308);
+    expect(response.headers.get("location")).toBeNull();
+    expect(bookingWebPublicApi.resolveHost).toHaveBeenCalledWith("attacker.example", {
+      next: { revalidate: 60 },
+    });
+  });
+
+  it("redirects on a hotel's resolved custom domain", async () => {
+    vi.mocked(bookingWebPublicApi.resolveHost).mockResolvedValue({
+      slug: "hotel-alpenrose",
+      canonicalUrl: "https://book.alpenrose.example/en",
+      bookingBaseUrl: "https://book.alpenrose.example",
+      customDomainUrl: "https://book.alpenrose.example",
+      shouldRedirect: false,
+      redirectUrl: null,
+      redirectStatus: null,
+      hotel: {
+        slug: "hotel-alpenrose",
+        name: "Hotel Alpenrose",
+        defaultLocale: "en",
+        supportedLocales: ["en"],
+      },
+    });
+    const response = await middleware(
+      new NextRequest("https://book.alpenrose.example/payment", {
+        headers: { host: "book.alpenrose.example" },
+      }),
+    );
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe("https://book.alpenrose.example/book");
+  });
+
+  it("leaves other pages and unknown locales alone", async () => {
+    for (const path of ["/en/book", "/en/roomsx", "/xx/rooms", "/en/rooms/alpine", "/"]) {
+      const response = await visit(path);
+      expect(response.status, path).not.toBe(308);
+      expect(response.headers.get("location"), path).toBeNull();
+    }
+  });
+});
