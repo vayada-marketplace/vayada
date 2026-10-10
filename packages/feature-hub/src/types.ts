@@ -37,6 +37,7 @@ export interface FeatureModule {
 
 export type FeatureVisualType =
   | "inbox"
+  | "reviews"
   | "financials"
   | "affiliates"
   | "stripe"
@@ -58,6 +59,8 @@ export interface ModuleActivationsResponse {
   supportedModules: string[];
   activeModules: string[];
   activations: ModuleActivation[];
+  /** Modules this caller may switch when it differs per module; canManage covers all otherwise. */
+  manageableModules?: string[];
 }
 
 export interface FeatureActivationClient {

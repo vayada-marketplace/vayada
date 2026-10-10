@@ -446,6 +446,7 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
       },
     }),
   );
+  await mockNavigationModules(page, PMS_WEB_PROPERTY_ID);
   await page.route(
     `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/linked-inventory-groups`,
     (route) => route.fulfill({ json: { propertyId: PMS_WEB_PROPERTY_ID, items: [] } }),
@@ -938,4 +939,34 @@ function readJson(route: Route): Record<string, unknown> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** VAY-2078: Inbox and Reviews sidebar switches, both on unless a spec overrides the route. */
+export async function mockNavigationModules(
+  page: Page,
+  propertyId: string,
+  activeModules: string[] = ["inbox", "reviews"],
+): Promise<void> {
+  await page.route(
+    new RegExp(`/api/pms/properties/${propertyId}/navigation-modules(?:/(?:inbox|reviews))?$`),
+    (route) =>
+      route.request().method() === "PATCH"
+        ? route.fulfill({
+            json: {
+              ...route.request().postDataJSON(),
+              activatedAt: null,
+              deactivatedAt: null,
+              updatedAt: "2026-10-09T00:00:00.000Z",
+            },
+          })
+        : route.fulfill({
+            json: {
+              hotelId: propertyId,
+              canManage: true,
+              supportedModules: ["inbox", "reviews"],
+              activeModules,
+              activations: [],
+            },
+          }),
+  );
 }

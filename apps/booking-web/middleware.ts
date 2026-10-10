@@ -50,37 +50,85 @@ function isLocalHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
+// The room list, add-on and payment pages of the retired booking flow (VAY-1543 C.2)
+// answer a real permanent redirect to the room-and-price page, so crawlers and other
+// clients without JavaScript see it too. Only what /book reads carries over, plus the
+// referral code so old shared links keep their attribution.
+const retiredBookingPagePath = /^(?:\/([^/]+))?\/(?:rooms|addons|payment)\/?$/;
+const bookPageParams = ["checkIn", "checkOut", "adults", "children", "promoCode", "ref"];
+
+async function retiredBookingPageRedirect(request: NextRequest): Promise<NextResponse | null> {
+  const match = retiredBookingPagePath.exec(request.nextUrl.pathname);
+  if (!match) return null;
+  const locale = match[1];
+  if (locale !== undefined && !routing.locales.includes(locale as (typeof routing.locales)[number]))
+    return null;
+  // Never build a redirect on a host Booking does not serve (spoofed forwarded host).
+  const origin = await admittedPublicOrigin(request);
+  if (!origin) return null;
+  let target: URL;
+  try {
+    target = new URL(
+      locale && locale !== routing.defaultLocale ? `/${locale}/book` : "/book",
+      `${origin.protocol}//${origin.host}`,
+    );
+  } catch {
+    return null; // A malformed host header: no redirect, the page simply does not exist.
+  }
+  for (const key of bookPageParams) {
+    const value = request.nextUrl.searchParams.get(key);
+    if (value) target.searchParams.set(key, value);
+  }
+  const redirect = NextResponse.redirect(target, 308);
+  // The target follows the request's own host; never let a shared cache keep it.
+  redirect.headers.set("Cache-Control", "no-store");
+  return redirect;
+}
+
+type PublicOrigin = { host: string; hostname: string; protocol: string };
+
+/**
+ * The browser-facing host and protocol for redirects built in middleware, or null when the
+ * host is not one Booking serves: an unrecognized custom domain, or a loopback name claimed
+ * by a non-local request. Next requires an absolute Location in middleware; use the host
+ * Booking already uses for canonical-host redirects, not an internal proxy host in
+ * request.nextUrl, and never downgrade a public host to HTTP.
+ */
+async function admittedPublicOrigin(request: NextRequest): Promise<PublicOrigin | null> {
+  const host = getRequestHost(request.headers) || request.nextUrl.host;
+  const hostname = normalizeHost(host);
+  const localHost = isLocalHost(hostname) || hostname.endsWith(".localhost");
+  const requestHostname = normalizeHost(request.nextUrl.host);
+  const localRequest = isLocalHost(requestHostname) || requestHostname.endsWith(".localhost");
+  if (
+    (localHost && !localRequest) ||
+    (!localHost && !getKnownSubdomainSlug(hostname) && !(await fetchHostResolution(hostname))?.slug)
+  ) {
+    return null;
+  }
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",", 1)[0]?.trim();
+  const protocol = localHost
+    ? forwardedProto === "https" || forwardedProto === "http"
+      ? `${forwardedProto}:`
+      : request.nextUrl.protocol
+    : "https:";
+  return { host, hostname, protocol };
+}
+
 export default async function middleware(request: NextRequest) {
   // Until first-party admission is live, never forward an opaque click reference
   // through a cached or changed canonical-host redirect.
   if (request.nextUrl.searchParams.has("vref")) {
     const cleanUrl = request.nextUrl.clone();
     cleanUrl.searchParams.delete("vref");
-    // Next requires an absolute Location in middleware. Use the browser-facing
-    // host that Booking already uses for canonical-host redirects, not an
-    // internal proxy host in request.nextUrl.
-    const publicHost = getRequestHost(request.headers) || cleanUrl.host;
-    const publicHostname = normalizeHost(publicHost);
-    const localHost = isLocalHost(publicHostname) || publicHostname.endsWith(".localhost");
-    const requestHostname = normalizeHost(cleanUrl.host);
-    const localRequest = isLocalHost(requestHostname) || requestHostname.endsWith(".localhost");
-    if (
-      (localHost && !localRequest) ||
-      (!localHost &&
-        !getKnownSubdomainSlug(publicHostname) &&
-        !(await fetchHostResolution(publicHostname))?.slug)
-    ) {
+    const origin = await admittedPublicOrigin(request);
+    if (!origin) {
       return new Response(null, { status: 400, headers: { "Cache-Control": "no-store" } });
     }
-    const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",", 1)[0]?.trim();
-    const publicProtocol = localHost
-      ? forwardedProto === "https" || forwardedProto === "http"
-        ? `${forwardedProto}:`
-        : cleanUrl.protocol
-      : "https:";
+    const { hostname: publicHostname, protocol: publicProtocol } = origin;
     const publicUrl = new URL(
       `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`,
-      `${publicProtocol}//${publicHost}`,
+      `${publicProtocol}//${origin.host}`,
     );
     const redirect = NextResponse.redirect(publicUrl, 307);
     redirect.headers.set("Cache-Control", "no-store");
@@ -124,6 +172,9 @@ export default async function middleware(request: NextRequest) {
     }
     return redirect;
   }
+
+  const retiredPageRedirect = await retiredBookingPageRedirect(request);
+  if (retiredPageRedirect) return retiredPageRedirect;
 
   const response = intlMiddleware(request);
 
