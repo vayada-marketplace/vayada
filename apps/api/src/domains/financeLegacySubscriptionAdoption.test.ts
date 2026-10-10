@@ -286,10 +286,11 @@ describe("Legacy fixed-plan subscription adoption", () => {
       fixture.dependencies,
     );
     expect(refused.outcome).toBe("refused");
-    expect(refused.reasons).toEqual([
-      "live_subscription_exists:sub_live",
-      "live_subscription_exists:sub_pending",
-      "live_subscription_exists:sub_unpaid",
+    // unpaid and incomplete collect nothing: a warning for the operator, not a blocker.
+    expect(refused.reasons).toEqual(["live_subscription_exists:sub_live"]);
+    expect(refused.warnings).toEqual([
+      "cancel_in_stripe:sub_pending:incomplete",
+      "cancel_in_stripe:sub_unpaid:unpaid",
     ]);
     expect(fixture.store.clearStaleReference).not.toHaveBeenCalled();
 
@@ -344,10 +345,63 @@ describe("Legacy fixed-plan subscription adoption", () => {
       ruleInactive.dependencies,
     );
 
-    expect(fixedPlan.reasons).toEqual(["legacy_plan_not_commission"]);
+    expect(fixedPlan.reasons).toEqual(["legacy_plan_fixed_needs_revert_flag"]);
     expect(noRule.reasons).toEqual(["commission_rule_not_active"]);
     expect(legacyFixed.store.clearStaleReference).not.toHaveBeenCalled();
     expect(ruleInactive.store.clearStaleReference).not.toHaveBeenCalled();
+  });
+
+  it("reverts a legacy Fixed hotel to Commission only with the explicit flag", async () => {
+    const fixture = setup({ metadata: { providerReentryRequired: true, legacyPlan: "fixed" } });
+    fixture.stripe.findLegacySubscriptionsForHotel.mockResolvedValue([
+      { subscriptionId: "sub_unpaid", status: "unpaid" },
+    ]);
+
+    const dryRun = await clearStaleLegacyBillingReference(
+      { propertyId: PROPERTY, apply: false, revertLegacyFixed: true },
+      fixture.dependencies,
+    );
+    expect(dryRun).toMatchObject({
+      outcome: "would_clear",
+      reasons: [],
+      warnings: ["cancel_in_stripe:sub_unpaid:unpaid"],
+    });
+    expect(fixture.store.clearStaleReference).not.toHaveBeenCalled();
+
+    const reverted = await clearStaleLegacyBillingReference(
+      { propertyId: PROPERTY, apply: true, revertLegacyFixed: true },
+      fixture.dependencies,
+    );
+    expect(reverted.outcome).toBe("cleared");
+    expect(fixture.store.clearStaleReference).toHaveBeenCalledWith({
+      propertyId: PROPERTY,
+      organizationId: ORGANIZATION,
+      clearedAt: NOW.toISOString(),
+      revertedLegacyFixed: true,
+    });
+  });
+
+  it("never reverts while a subscription still collects or the hotel is suspended otherwise", async () => {
+    const fixture = setup({
+      commissionRuleActive: false,
+      metadata: { providerReentryRequired: true, legacyPlan: "fixed" },
+    });
+    fixture.stripe.findLegacySubscriptionsForHotel.mockResolvedValue([
+      { subscriptionId: "sub_paused", status: "paused" },
+      { subscriptionId: "sub_retrying", status: "past_due" },
+    ]);
+
+    const report = await clearStaleLegacyBillingReference(
+      { propertyId: PROPERTY, apply: true, revertLegacyFixed: true },
+      fixture.dependencies,
+    );
+
+    expect(report.reasons).toEqual([
+      "commission_rule_not_active",
+      "live_subscription_exists:sub_paused",
+      "live_subscription_exists:sub_retrying",
+    ]);
+    expect(fixture.store.clearStaleReference).not.toHaveBeenCalled();
   });
 
   it("reports an already cleared hotel and refreshes bookability on apply", async () => {
@@ -410,12 +464,27 @@ describe("Legacy fixed-plan subscription adoption", () => {
       organizationId: ORGANIZATION,
       clearedAt: NOW.toISOString(),
     });
-    const [clearSql] = query.mock.calls[1] as [string, unknown[]];
+    const [clearSql, clearValues] = query.mock.calls[1] as [string, unknown[]];
     expect(clearSql).toContain("billing_status = 'suspended'");
     expect(clearSql).toContain("billing_subscription_ref IS NULL");
+    expect(JSON.parse(String(clearValues[2]))).toMatchObject({
+      planSelectedBy: "legacy-stale-reference-cleared",
+    });
+
+    await store.clearStaleReference({
+      propertyId: PROPERTY,
+      organizationId: ORGANIZATION,
+      clearedAt: NOW.toISOString(),
+      revertedLegacyFixed: true,
+    });
+    const [, revertValues] = query.mock.calls[2] as [string, unknown[]];
+    expect(JSON.parse(String(revertValues[2]))).toMatchObject({
+      planSelectedBy: "legacy-fixed-reverted-to-commission",
+      legacyFixedRevertedAt: NOW.toISOString(),
+    });
 
     await store.getEntitlement(PROPERTY);
-    const [selectSql] = query.mock.calls[2] as [string, unknown[]];
+    const [selectSql] = query.mock.calls[3] as [string, unknown[]];
     expect(selectSql).toContain("finance.commission_rules");
     expect(selectSql).toContain("identity.organizations");
   });

@@ -117,6 +117,35 @@ describe("Stripe legacy subscription adoption port", () => {
     expect(new URL(urls[1]!).searchParams.get("page")).toBe("page_2");
   });
 
+  it("lists every legacy fixed-plan subscription through every page, read-only", async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    const port = createStripeLegacySubscriptionAdoption({
+      secretKey: "sk_test_secret",
+      fetch: async (input, init) => {
+        calls.push({ url: String(input), method: String(init?.method) });
+        return calls.length === 1
+          ? response({ data: [legacySubscription()], has_more: true, next_page: "page_2" })
+          : response({
+              data: [{ ...legacySubscription(), id: "sub_two", status: "unpaid" }],
+              has_more: false,
+            });
+      },
+    });
+
+    const found = await port.searchLegacyFixedPlanSubscriptions();
+
+    expect(found.map((item) => [item.snapshot.subscriptionId, item.snapshot.status])).toEqual([
+      ["sub_legacy", "active"],
+      ["sub_two", "unpaid"],
+    ]);
+    expect(found[0]).toMatchObject({ hotelId: "property-1", flatThirtyDayPrice: true });
+    expect(calls.every((call) => call.method === "GET")).toBe(true);
+    const first = new URL(calls[0]!.url);
+    expect(first.pathname).toBe("/v1/subscriptions/search");
+    expect(first.searchParams.get("query")).toBe("metadata['vayada_payment_kind']:'fixed_plan'");
+    expect(new URL(calls[1]!.url).searchParams.get("page")).toBe("page_2");
+  });
+
   it("does not treat a tiered, multi-item or quantity>1 subscription as a flat legacy price", () => {
     const base = legacySubscription();
     const item = base.items.data[0]!;

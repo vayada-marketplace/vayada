@@ -23,7 +23,9 @@ export function createStripeLegacySubscriptionAdoption(config: {
   secretKey: string;
   endpoint?: string;
   fetch?: typeof globalThis.fetch;
-}): LegacyAdoptionStripe {
+}): LegacyAdoptionStripe & {
+  searchLegacyFixedPlanSubscriptions(): Promise<LegacySubscriptionInspection[]>;
+} {
   const endpoint = config.endpoint ?? "https://api.stripe.com/v1";
   const fetchImpl = config.fetch ?? globalThis.fetch;
 
@@ -80,30 +82,41 @@ export function createStripeLegacySubscriptionAdoption(config: {
 
     async findLegacySubscriptionsForHotel(hotelId) {
       const found: Array<{ subscriptionId: string; status: string }> = [];
-      let page: string | undefined;
-      while (true) {
-        const fields: Array<readonly [string, string]> = [
-          [
-            "query",
-            `metadata['hotel_id']:'${hotelId.replaceAll("'", "")}' AND metadata['vayada_payment_kind']:'fixed_plan'`,
-          ],
-          ["limit", "100"],
-        ];
-        if (page) fields.push(["page", page]);
-        const response = await request("GET", "/subscriptions/search", fields);
-        for (const item of objectArray(response["data"])) {
-          const subscriptionId = text(item["id"]);
-          if (subscriptionId) {
-            found.push({ subscriptionId, status: text(item["status"]) ?? "unknown" });
-          }
+      const query = `metadata['hotel_id']:'${hotelId.replaceAll("'", "")}' AND metadata['vayada_payment_kind']:'fixed_plan'`;
+      for (const item of await search(query)) {
+        const subscriptionId = text(item["id"]);
+        if (subscriptionId) {
+          found.push({ subscriptionId, status: text(item["status"]) ?? "unknown" });
         }
-        const nextPage = text(response["next_page"]);
-        if (response["has_more"] !== true || !nextPage || nextPage === page) break;
-        page = nextPage;
       }
       return found;
     },
+
+    /** Every legacy fixed-plan subscription, any status (VAY-1362 inventory). */
+    async searchLegacyFixedPlanSubscriptions() {
+      return (await search("metadata['vayada_payment_kind']:'fixed_plan'")).map(
+        inspectLegacySubscription,
+      );
+    },
   };
+
+  async function search(query: string): Promise<StripeObject[]> {
+    const found: StripeObject[] = [];
+    let page: string | undefined;
+    while (true) {
+      const fields: Array<readonly [string, string]> = [
+        ["query", query],
+        ["limit", "100"],
+      ];
+      if (page) fields.push(["page", page]);
+      const response = await request("GET", "/subscriptions/search", fields);
+      found.push(...objectArray(response["data"]));
+      const nextPage = text(response["next_page"]);
+      if (response["has_more"] !== true || !nextPage || nextPage === page) break;
+      page = nextPage;
+    }
+    return found;
+  }
 }
 
 export function inspectLegacySubscription(raw: StripeObject): LegacySubscriptionInspection {
