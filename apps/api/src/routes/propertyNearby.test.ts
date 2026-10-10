@@ -90,6 +90,7 @@ function setup(
         mode: options.assigned === false ? "assigned" : "all",
         roleKey: "hotel_owner",
         accessOrigin: "agency",
+        productAccess: { pms: true, booking: true },
         assignedPropertyIds: [],
       };
     },

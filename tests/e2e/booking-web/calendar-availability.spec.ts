@@ -1,46 +1,30 @@
 import { expect, test } from "@playwright/test";
 
-import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
+import { legacyPricingRequests, mockBookingApis } from "../support/bookingMocks";
 
-const unavailableCalendarResponses = [
-  {
-    name: "the request fails",
-    response: { status: 503, json: { detail: "Availability unavailable" } },
-  },
-  {
-    name: "freshness is unavailable",
-    response: {
-      status: 200,
-      json: {
-        calendar: {
-          unavailableDates: [],
-          minStayByArrival: {},
-          maxStayByArrival: {},
-        },
-        freshness: { status: "unavailable" },
-      },
-    },
-  },
-] as const;
+// The retired public calendar used to grey out every date once it failed; the date
+// picker no longer asks it anything, so future dates stay selectable and the stay is
+// priced on the room-and-price page.
+test("keeps future dates selectable without the retired calendar", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2028-03-05T12:00:00Z"));
+  await mockBookingApis(page);
+  const legacyRequests = legacyPricingRequests(page);
 
-for (const scenario of unavailableCalendarResponses) {
-  test(`fails closed when ${scenario.name}`, async ({ page }) => {
-    await mockBookingApis(page);
+  await page.goto("/");
+  await page.getByRole("button").filter({ hasText: "Your Stay" }).click();
 
-    const calendarRoute = `**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/calendar**`;
-    await page.unroute(calendarRoute);
-    await page.route(calendarRoute, async (route) => {
-      await route.fulfill(scenario.response);
-    });
-
-    await page.goto("/");
-    await page.getByRole("button").filter({ hasText: "Your Stay" }).click();
-
-    await expect(
-      page.getByText("Availability is temporarily unavailable for these dates."),
-    ).toBeVisible();
-    const unavailableDateButtons = page.locator('button[title="Availability unavailable"]');
-    await expect(unavailableDateButtons.first()).toBeVisible();
-    await expect(unavailableDateButtons.first()).toBeDisabled();
-  });
-}
+  await expect(page.getByText("Select your dates")).toBeVisible();
+  await expect(
+    page.getByText("Availability is temporarily unavailable for these dates."),
+  ).toHaveCount(0);
+  await expect(page.locator('button[title="Availability unavailable"]')).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "2028-03-04", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "2028-03-10", exact: true }).click();
+  await page.getByRole("button", { name: "2028-03-13", exact: true }).click();
+  await expect(page.getByText("Select your dates")).toBeHidden();
+  await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toHaveAttribute(
+    "href",
+    /^\/(en\/)?book\?checkIn=2028-03-10&checkOut=2028-03-13&adults=2$/,
+  );
+  expect(legacyRequests).toEqual([]);
+});

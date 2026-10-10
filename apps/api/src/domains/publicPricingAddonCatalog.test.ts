@@ -7,7 +7,7 @@ vi.mock("./publicPricingPublication.js", () => ({ lockPublicPricingPublication: 
 vi.mock("./publicPricingAuthority.js", () => ({ lockPublicPricingAuthority: vi.fn() }));
 const id = "11111111-1111-4111-8111-111111111111";
 const propertyId = "22222222-2222-4222-8222-222222222222";
-const scope = { propertyId, organizationId: id, authorityRevision: id };
+const scope = { propertyId, organizationId: id };
 const definition = () => ({
   id,
   name: "Breakfast",
