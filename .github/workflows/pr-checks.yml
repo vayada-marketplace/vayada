@@ -14,6 +14,7 @@ on:
       - "fm/vay-2056-*"
       - "fm/vay-1543-*"
       - "fm/vay-2066-*"
+      - "fm/vay-2078-*"
       - "fm/vay-2079-*"
       - "fm/vay-2088-*"
       - "fm/vay-2082-*"
@@ -91,6 +92,9 @@ jobs:
 
       - name: Finance domain contracts
         run: npm --workspace @vayada/domain-finance run test
+
+      - name: Feature Hub package tests
+        run: npm --workspace @vayada/feature-hub run test
 
       - name: Hotel domain and product onboarding tests
         run: |
@@ -351,6 +355,12 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      - name: Verify PMS navigation module migration backfill
+        if: matrix.shard == 'pms'
+        run: npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/pmsNavigationModules.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Apply target migrations
         run: npm --workspace @vayada/backend-migration run target:migrate -- --env local
         env:
@@ -496,6 +506,8 @@ jobs:
           src/domains/pmsPhysicalRoomManagementRepository.integration.test.ts
           src/domains/pmsRoomPublicationCommandRepository.integration.test.ts
           src/domains/pmsCalendarAutoOpenSettingsRepository.integration.test.ts
+          src/pmsNavigationModules.integration.test.ts
+          src/pmsNavigationModules.test.ts
           src/jobs/pmsChannexScheduler.integration.test.ts
           src/jobs/pmsCalendarAutoOpenScheduler.integration.test.ts
           src/domains/pmsInboxProviderActionCommand.integration.test.ts
