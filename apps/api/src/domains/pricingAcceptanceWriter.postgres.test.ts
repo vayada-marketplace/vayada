@@ -6,6 +6,12 @@ import { parsePmsInventoryReservationBundle } from "@vayada/domain-pms";
 import { pricingDraftFixture } from "./pricingBookingDraft.fixtures.js";
 import { acceptanceFixture } from "./pricingAcceptanceHistory.fixtures.js";
 import { writePricingAcceptance } from "./pricingAcceptanceWriter.js";
+import {
+  completePricingCardPayment,
+  expirePricingCardBooking,
+} from "./pricingCardPaymentCompletion.js";
+import { settleStripeBookingPayment } from "./stripeBookingSettlement.js";
+import { createStripeBookingPaymentProvider } from "./stripeBookingPayments.js";
 import { readBookingAffiliateContextForQuote } from "./bookingAffiliateContextForQuote.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { reserveRevalidatedQuoteInventory } from "./currentQuoteInventory.js";
@@ -271,7 +277,481 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
   });
 });
 
-async function setupFixture() {
+describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", () => {
+  beforeEach(() => vi.resetAllMocks());
+  const cardQuote = (quote: Fixture["f"]["current"]["quote"]) => {
+    Object.assign(quote, { paymentMethod: "card" });
+    Object.assign(quote.evidence, { dueNowMinor: quote.evidence.totalMinor, dueLaterMinor: "0" });
+    Object.assign(quote.evidence.terms[0], {
+      payment: { kind: "full", acceptedMethods: ["card"] },
+    });
+  };
+
+  async function cardFixture(accountRef = "acct_writer_test", currency?: string) {
+    const fixture = await setupFixture(cardQuote, currency);
+    const slug = `writer-${fixture.propertyId}`;
+    fixture.input.slug = slug;
+    await fixture.observer.query(
+      "INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose) VALUES($1,$2,'canonical')",
+      [fixture.propertyId, slug],
+    );
+    const accountId = randomUUID();
+    await fixture.observer.query(
+      `INSERT INTO finance.payment_provider_accounts(id,property_id,account_scope,provider,provider_account_id,status,
+        onboarding_status,charges_enabled,payouts_enabled,capabilities,card_capability_revision,account_metadata)
+       VALUES($1,$2,'property','stripe',$3,'active','completed',true,true,ARRAY['card_payments'],1,'{}')`,
+      [accountId, fixture.propertyId, accountRef],
+    );
+    await fixture.observer.query(
+      `INSERT INTO finance.payment_settings(property_id,provider_account_id,payments_enabled,accepted_methods,default_currency)
+       VALUES($1,$2,true,ARRAY['card'],$3)`,
+      [fixture.propertyId, accountId, fixture.f.current.quote.stay.currency],
+    );
+    mockOwners(fixture);
+    vi.mocked(finishCurrentQuoteAcceptanceTime).mockResolvedValue(new Date().toISOString());
+    const createPaymentIntent = vi.fn(async (input: { amountMinor: number; currency: string }) => ({
+      paymentIntentId: "pi_writer_test",
+      clientSecret: "pi_writer_test_secret",
+      status: "requires_payment_method",
+      amountMinor: input.amountMinor,
+      currency: input.currency,
+      propertyId: fixture.propertyId,
+      bookingReference: null as string | null,
+      providerAccountRef: "acct_writer_test",
+    }));
+    const retrievePaymentIntent = vi.fn(async () =>
+      createPaymentIntent({
+        amountMinor: Number(fixture.f.current.quote.evidence.dueNowMinor),
+        currency: fixture.f.current.quote.stay.currency,
+      }),
+    );
+    const cancelPaymentIntent = vi.fn();
+    const provider = { createPaymentIntent, retrievePaymentIntent, cancelPaymentIntent } as never;
+    return {
+      fixture,
+      slug,
+      createPaymentIntent,
+      retrievePaymentIntent,
+      cancelPaymentIntent,
+      provider,
+    };
+  }
+
+  it("accepts the quote, holds the rooms and starts a Stripe payment without confirming", async () => {
+    const { fixture, slug, createPaymentIntent, retrievePaymentIntent, provider } =
+      await cardFixture();
+    try {
+      await expect(writePricingAcceptance(fixture.pool, fixture.input)).rejects.toMatchObject({
+        code: "card_unavailable",
+      });
+      expect(createPaymentIntent).not.toHaveBeenCalled();
+
+      const result = await writePricingAcceptance(fixture.pool, fixture.input, undefined, {
+        provider,
+      });
+      expect(result).toMatchObject({
+        kind: "payment_required",
+        payment: {
+          provider: "stripe",
+          clientSecret: "pi_writer_test_secret",
+          stripeAccountId: "acct_writer_test",
+          paymentIntentId: "pi_writer_test",
+        },
+      });
+      expect(createPaymentIntent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providerAccountRef: "acct_writer_test",
+          captureMethod: "automatic",
+          currency: fixture.f.current.quote.stay.currency,
+        }),
+      );
+      await expect(snapshot(fixture.observer, fixture)).resolves.toEqual({
+        bookings: 1,
+        acceptances: 1,
+        jobs: 0,
+        revenue: 0,
+        available: 2,
+        assigned: 1,
+      });
+      const booking = (
+        await fixture.observer.query(
+          `SELECT lifecycle_status,payment_status,expected_payment_method,active_card_payment_id IS NOT NULL AS linked,
+            booking_metadata ? 'pendingExpiresAt' AS expires,booking_metadata->>'providerPaymentIntentId' AS intent
+           FROM booking.guest_bookings WHERE property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows[0];
+      expect(booking).toEqual({
+        lifecycle_status: "pending_payment",
+        payment_status: "unpaid",
+        expected_payment_method: "unknown",
+        linked: true,
+        expires: true,
+        intent: "pi_writer_test",
+      });
+      const payment = (
+        await fixture.observer.query(
+          "SELECT status,payment_method,provider_payment_intent_id FROM finance.payments WHERE property_id=$1",
+          [fixture.propertyId],
+        )
+      ).rows;
+      expect(payment).toEqual([
+        {
+          status: "requires_action",
+          payment_method: "card",
+          provider_payment_intent_id: "pi_writer_test",
+        },
+      ]);
+      createPaymentIntent.mockClear();
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider }),
+      ).resolves.toMatchObject({
+        kind: "payment_required",
+        replayed: true,
+        bookingId: (result as { bookingId: string }).bookingId,
+        payment: { clientSecret: "pi_writer_test_secret", paymentIntentId: "pi_writer_test" },
+      });
+      expect(retrievePaymentIntent).toHaveBeenCalledWith("pi_writer_test", "acct_writer_test");
+      await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({
+        bookings: 1,
+        acceptances: 1,
+        available: 2,
+      });
+
+      const reference = (result as { bookingReference: string }).bookingReference;
+      const complete = () =>
+        completePricingCardPayment(fixture.pool, provider, {
+          slug,
+          quoteId: fixture.f.current.quote.quoteId,
+          requestId: fixture.f.command.requestId,
+        });
+      const intent = await createPaymentIntent({
+        amountMinor: Number(fixture.f.current.quote.evidence.dueNowMinor),
+        currency: fixture.f.current.quote.stay.currency,
+      });
+      retrievePaymentIntent.mockResolvedValue({ ...intent, bookingReference: reference });
+      await expect(complete()).rejects.toMatchObject({ code: "pending" });
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: reference,
+        amountMinor: intent.amountMinor + 1,
+        status: "succeeded",
+      });
+      await expect(complete()).rejects.toMatchObject({ code: "conflict" });
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: reference,
+        status: "succeeded",
+      });
+      await expect(complete()).resolves.toMatchObject({ kind: "accepted", replayed: false });
+      await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({
+        bookings: 1,
+        acceptances: 1,
+        jobs: expect.any(Number),
+        available: 2,
+      });
+      const paid = (
+        await fixture.observer.query(
+          `SELECT b.lifecycle_status,b.payment_status,b.balance_amount::text AS balance,p.status AS payment,
+            (SELECT count(*)::int FROM booking.nightly_revenue_evidence r WHERE r.guest_booking_id=b.id) AS revenue,
+            (SELECT count(*)::int FROM platform.jobs j WHERE j.property_id=b.property_id
+              AND j.job_type='pms.reservation.accepted-pricing.create') AS pms
+           FROM booking.guest_bookings b JOIN finance.payments p ON p.id=b.active_card_payment_id
+           WHERE b.property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows[0];
+      expect(paid).toMatchObject({
+        lifecycle_status: "confirmed",
+        payment_status: "paid",
+        payment: "paid",
+        pms: 1,
+      });
+      expect(Number(paid.balance)).toBe(0);
+      expect(paid.revenue).toBeGreaterThan(0);
+      await expect(complete()).resolves.toMatchObject({ kind: "accepted", replayed: true });
+      expect(
+        (
+          await fixture.observer.query(
+            "SELECT count(*)::int AS n FROM platform.jobs WHERE property_id=$1 AND job_type='pms.reservation.accepted-pricing.create'",
+            [fixture.propertyId],
+          )
+        ).rows[0].n,
+      ).toBe(1);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  // Stripe test mode (VAY-1543 K5). Runs only with STRIPE_TEST_SECRET_KEY (a test-mode key) and
+  // STRIPE_TEST_CONNECTED_ACCOUNT; CI has neither, so it never calls Stripe there. Optional
+  // STRIPE_TEST_CURRENCY (EUR, USD or IDR) prices the quote in that currency.
+  const stripeKey = process.env.STRIPE_TEST_SECRET_KEY;
+  const stripeAccount = process.env.STRIPE_TEST_CONNECTED_ACCOUNT;
+  const stripeTestMode =
+    !!stripeKey && /^(sk|rk)_test_/.test(stripeKey) && !!stripeAccount?.startsWith("acct_");
+  const stripeCurrency = process.env.STRIPE_TEST_CURRENCY?.toUpperCase();
+  const confirmWithTestCard = async (paymentIntentId: string, paymentMethod: string) => {
+    const response = await fetch(
+      `https://api.stripe.com/v1/payment_intents/${paymentIntentId}/confirm`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${stripeKey}:`).toString("base64")}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Stripe-Account": stripeAccount!,
+        },
+        body: new URLSearchParams({ payment_method: paymentMethod }).toString(),
+      },
+    );
+    return (await response.json()) as { status?: string; error?: { code?: string } };
+  };
+
+  it.skipIf(!stripeTestMode)(
+    "Stripe test mode: declined card stays pending, test Visa confirms the booking once",
+    async () => {
+      const { fixture } = await cardFixture(stripeAccount!, stripeCurrency);
+      const provider = createStripeBookingPaymentProvider({ secretKey: stripeKey! });
+      try {
+        const required = (await writePricingAcceptance(fixture.pool, fixture.input, undefined, {
+          provider,
+        })) as {
+          kind: string;
+          bookingReference: string;
+          payment: { paymentIntentId: string; clientSecret: string; stripeAccountId: string };
+        };
+        expect(required.kind).toBe("payment_required");
+        expect(required.payment.stripeAccountId).toBe(stripeAccount);
+        const intent = await provider.retrievePaymentIntent(
+          required.payment.paymentIntentId,
+          stripeAccount!,
+        );
+        expect(intent).toMatchObject({
+          status: "requires_payment_method",
+          amountMinor: Number(fixture.f.current.quote.evidence.dueNowMinor),
+          currency: fixture.f.current.quote.stay.currency.toUpperCase(),
+          propertyId: fixture.propertyId,
+          bookingReference: required.bookingReference,
+        });
+        const complete = () =>
+          completePricingCardPayment(fixture.pool, provider, {
+            slug: fixture.input.slug,
+            quoteId: fixture.f.current.quote.quoteId,
+            requestId: fixture.f.command.requestId,
+          });
+        await expect(complete()).rejects.toMatchObject({ code: "pending" });
+        const declined = await confirmWithTestCard(
+          required.payment.paymentIntentId,
+          "pm_card_chargeDeclined",
+        );
+        expect(declined.error?.code).toBe("card_declined");
+        await expect(complete()).rejects.toMatchObject({ code: "pending" });
+        // A retried acceptance returns the same open payment, not a second one.
+        await expect(
+          writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider }),
+        ).resolves.toMatchObject({
+          kind: "payment_required",
+          payment: { paymentIntentId: required.payment.paymentIntentId },
+        });
+        const paid = await confirmWithTestCard(required.payment.paymentIntentId, "pm_card_visa");
+        expect(paid.status).toBe("succeeded");
+        await expect(complete()).resolves.toMatchObject({ kind: "accepted", replayed: false });
+        await expect(complete()).resolves.toMatchObject({ kind: "accepted", replayed: true });
+        const state = (
+          await fixture.observer.query(
+            `SELECT b.lifecycle_status,b.payment_status,p.status AS payment,
+              (SELECT count(*)::int FROM booking.nightly_revenue_evidence r WHERE r.guest_booking_id=b.id) > 0 AS revenue,
+              (SELECT count(*)::int FROM platform.jobs j WHERE j.property_id=b.property_id
+                AND j.job_type='pms.reservation.accepted-pricing.create') AS pms
+             FROM booking.guest_bookings b JOIN finance.payments p ON p.id=b.active_card_payment_id
+             WHERE b.property_id=$1`,
+            [fixture.propertyId],
+          )
+        ).rows[0];
+        expect(state).toEqual({
+          lifecycle_status: "confirmed",
+          payment_status: "paid",
+          payment: "paid",
+          revenue: true,
+          pms: 1,
+        });
+      } finally {
+        await fixture.close();
+      }
+    },
+  );
+
+  it.skipIf(!stripeTestMode)(
+    "Stripe test mode: an unpaid booking expires, Stripe cancels the payment, rooms are released",
+    async () => {
+      const { fixture } = await cardFixture(stripeAccount!, stripeCurrency);
+      const provider = createStripeBookingPaymentProvider({ secretKey: stripeKey! });
+      try {
+        const required = (await writePricingAcceptance(fixture.pool, fixture.input, undefined, {
+          provider,
+        })) as { bookingId: string; payment: { paymentIntentId: string } };
+        const releaseRooms = vi.fn(async () => undefined);
+        const client = await fixture.pool.connect();
+        try {
+          await client.query("BEGIN");
+          await expect(
+            expirePricingCardBooking(
+              client,
+              provider,
+              {
+                propertyId: fixture.propertyId,
+                guestBookingId: required.bookingId,
+                now: new Date(Date.now() + 31 * 60_000),
+              },
+              releaseRooms,
+            ),
+          ).resolves.toBe("expired");
+          await client.query("COMMIT");
+        } finally {
+          client.release();
+        }
+        expect(releaseRooms).toHaveBeenCalledOnce();
+        await expect(
+          provider.retrievePaymentIntent(required.payment.paymentIntentId, stripeAccount!),
+        ).resolves.toMatchObject({ status: "canceled" });
+        const state = (
+          await fixture.observer.query(
+            `SELECT b.lifecycle_status,p.status AS payment FROM booking.guest_bookings b
+             JOIN finance.payments p ON p.id=b.active_card_payment_id WHERE b.property_id=$1`,
+            [fixture.propertyId],
+          )
+        ).rows[0];
+        expect(state).toEqual({ lifecycle_status: "expired", payment: "canceled" });
+      } finally {
+        await fixture.close();
+      }
+    },
+  );
+
+  it("expires an unpaid card booking at its deadline, releases the rooms and never replays it as accepted", async () => {
+    const { fixture, provider, retrievePaymentIntent, cancelPaymentIntent } = await cardFixture();
+    try {
+      const accepted = (await writePricingAcceptance(fixture.pool, fixture.input, undefined, {
+        provider,
+      })) as { bookingId: string; bookingReference: string };
+      const intent = await retrievePaymentIntent();
+      const bound = { ...intent, bookingReference: accepted.bookingReference };
+      retrievePaymentIntent.mockResolvedValue(bound);
+      cancelPaymentIntent.mockResolvedValue({ ...bound, status: "canceled" });
+      const releaseRooms = vi.fn(async () => undefined);
+      const expire = async (now: Date) => {
+        const client = await fixture.pool.connect();
+        try {
+          await client.query("BEGIN");
+          const outcome = await expirePricingCardBooking(
+            client,
+            provider,
+            { propertyId: fixture.propertyId, guestBookingId: accepted.bookingId, now },
+            releaseRooms,
+          );
+          await client.query("COMMIT");
+          return outcome;
+        } finally {
+          client.release();
+        }
+      };
+      await expect(expire(new Date())).resolves.toBe("pending");
+      expect(cancelPaymentIntent).not.toHaveBeenCalled();
+      await expect(expire(new Date(Date.now() + 31 * 60_000))).resolves.toBe("expired");
+      expect(cancelPaymentIntent).toHaveBeenCalledOnce();
+      expect(releaseRooms).toHaveBeenCalledWith(
+        expect.objectContaining({ inventoryReservation: expect.anything() }),
+      );
+      const state = (
+        await fixture.observer.query(
+          `SELECT b.lifecycle_status,p.status AS payment,
+            (SELECT count(*)::int FROM platform.jobs j WHERE j.property_id=b.property_id) AS jobs
+           FROM booking.guest_bookings b JOIN finance.payments p ON p.id=b.active_card_payment_id
+           WHERE b.property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows[0];
+      expect(state).toEqual({ lifecycle_status: "expired", payment: "canceled", jobs: 0 });
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider }),
+      ).rejects.toMatchObject({ code: "conflict" });
+      await expect(writePricingAcceptance(fixture.pool, fixture.input)).rejects.toMatchObject({
+        code: "conflict",
+      });
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("settles a card acceptance through the legacy Stripe settlement without the legacy PMS job", async () => {
+    const { fixture, provider } = await cardFixture();
+    try {
+      await writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider });
+      const client = await fixture.pool.connect();
+      try {
+        await client.query("BEGIN");
+        await expect(
+          settleStripeBookingPayment(client, {
+            paymentIntentId: "pi_writer_test",
+            providerAccountRef: "acct_writer_test",
+            amountMinor: Number(fixture.f.current.quote.evidence.dueNowMinor),
+            currency: fixture.f.current.quote.stay.currency,
+            occurredAt: new Date(),
+            correlationId: "webhook-test",
+          }),
+        ).resolves.toBe("settled");
+        await client.query("COMMIT");
+      } finally {
+        client.release();
+      }
+      const state = (
+        await fixture.observer.query(
+          `SELECT b.lifecycle_status,b.payment_status,
+            (SELECT count(*)::int FROM platform.jobs j WHERE j.property_id=b.property_id
+              AND j.job_type='pms.reservation.accepted-pricing.create') AS accepted_jobs,
+            (SELECT count(*)::int FROM platform.jobs j WHERE j.property_id=b.property_id
+              AND j.job_type='pms.reservation.create') AS legacy_jobs
+           FROM booking.guest_bookings b WHERE b.property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows[0];
+      expect(state).toEqual({
+        lifecycle_status: "confirmed",
+        payment_status: "paid",
+        accepted_jobs: 1,
+        legacy_jobs: 0,
+      });
+    } finally {
+      await fixture.close();
+    }
+  });
+});
+
+// K5 in another currency (STRIPE_TEST_CURRENCY): the same quote with every minor amount scaled, so the
+// card amount clears Stripe's minimum charge (EUR 360.00 becomes IDR 3,600,000.00).
+const CURRENCY_SCALE: Record<string, bigint> = { EUR: 1n, USD: 1n, IDR: 10000n };
+function inCurrency(quote: Fixture["f"]["current"]["quote"], currency: string) {
+  const factor = CURRENCY_SCALE[currency];
+  if (factor === undefined) throw new Error(`unsupported test currency ${currency}`);
+  const scale = (value: unknown, minor = false): unknown =>
+    Array.isArray(value)
+      ? value.map((item) => scale(item, minor))
+      : value && typeof value === "object"
+        ? Object.fromEntries(
+            Object.entries(value).map(([key, item]) => [key, scale(item, key.endsWith("Minor"))]),
+          )
+        : minor && typeof value === "string" && /^[0-9]+$/.test(value)
+          ? String(BigInt(value) * factor)
+          : value;
+  Object.assign(quote, scale(quote));
+  Object.assign(quote.evidence, { currency });
+  Object.assign(quote.stay, { currency });
+}
+
+async function setupFixture(
+  changeQuote?: (quote: Fixture["f"]["current"]["quote"]) => void,
+  currency?: string,
+) {
   if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
     throw new Error("test database required");
   const rawPool = new pg.Pool({ connectionString: url, max: 3 });
@@ -292,6 +772,7 @@ async function setupFixture() {
     sourceRevision: string;
   };
   const f = pricingDraftFixture((quote) => {
+    if (currency) inCurrency(quote, currency);
     Object.assign(quote, { quoteId: randomUUID() });
     Object.assign(quote.stay, { propertyId });
     Object.assign(quote.stay.rooms[0], { roomTypeId });
@@ -310,6 +791,7 @@ async function setupFixture() {
       sourceRevision: quote.evidence.revisions.charges,
     };
     Object.assign(quote.evidence, { mandatoryChargeEvidenceId: charges.basisEvidenceId });
+    changeQuote?.(quote);
   });
   Object.assign(f.current.scope, { propertyId, organizationId });
   Object.assign(f.finance.scope, { propertyId, organizationId });
@@ -346,8 +828,8 @@ async function setupFixture() {
   );
   await observer.query(
     `INSERT INTO pms.room_types(id,property_id,name,occupancy_limits,base_rate_amount,currency)
-     VALUES($1,$2,'Writer room','{"adults":2,"children":1,"total":3}',100,'EUR')`,
-    [roomTypeId, propertyId],
+     VALUES($1,$2,'Writer room','{"adults":2,"children":1,"total":3}',100,$3)`,
+    [roomTypeId, propertyId, f.current.quote.stay.currency],
   );
   // This row is a transaction sentinel for the already-tested inventory owner.
   await observer.query("SET LOCAL session_replication_role=replica");
@@ -369,7 +851,7 @@ async function setupFixture() {
       organizationId,
       f.command.requestId,
       hash(f.command.requestId),
-      { quote, calculation: { version: "booking.quote-calculation.v1" } },
+      { quote, calculation: { ...f.current.calculation, version: "booking.quote-calculation.v1" } },
     ],
   );
   await observer.query("COMMIT");

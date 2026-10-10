@@ -4,6 +4,14 @@ import pg from "pg";
 export const PLATFORM_MEDIA_CLEANUP_CONTRACT_VERSION = "platform-media-cleanup-jobs.v1";
 export const PLATFORM_MEDIA_CLEANUP_QUEUE = "platform.media.cleanup";
 export const DEFAULT_PLATFORM_MEDIA_CLEANUP_LIMIT = 100;
+export const PLATFORM_MEDIA_CLEANUP_MAX_ATTEMPTS = 5;
+// Back-off after failed attempts 1-4; attempt 5 dead-letters the item.
+const PLATFORM_MEDIA_CLEANUP_RETRY_DELAYS_MS = [15, 60, 240, 1440].map(
+  (minutes) => minutes * 60_000,
+);
+// Jobs written under this policy hold their item while backing off and once dead-lettered. Rows the
+// old recorder dead-lettered on every run carry no policy, so those items are retried (VAY-2082).
+const PLATFORM_MEDIA_CLEANUP_RETRY_POLICY = "bounded.v1";
 
 export type PlatformMediaCleanupRunName =
   | "abandonedStagingUploads"
@@ -71,7 +79,19 @@ export type PlatformMediaCleanupFailureResult = {
   jobKey: string;
   reasonCode: "media_storage_delete_failed" | "media_cleanup_apply_failed";
   errorType: string;
+  errorCode: string;
   errorMessage: string;
+  attempt: number;
+  // True only for the failure that dead-lettered the item.
+  deadLettered: boolean;
+};
+
+export type PlatformMediaCleanupFailureLogEntry = {
+  id: string;
+  action: PlatformMediaCleanupAction;
+  stage: "storage_delete" | "apply";
+  code: string;
+  attempt: number;
   deadLettered: boolean;
 };
 
@@ -133,7 +153,6 @@ type PgPlatformMediaCleanupStoreConfig = {
 
 export type PlatformMediaObjectDeleter = {
   deleteObject(input: { bucket: string; storageKey: string }): Promise<void>;
-  deletePrefix(input: { bucket?: string | null; prefix: string }): Promise<void>;
 };
 
 type Queryable = Pick<pg.Pool | pg.PoolClient, "query">;
@@ -287,6 +306,55 @@ export function buildPlatformMediaCleanupJobKey(input: {
   return `platform.media.cleanup:job:${input.resourceId}:${input.action}:${input.deadlineOrWindow}:v1`;
 }
 
+// Log-safe per-item failure details: ids, stage and error code only, never messages, keys or URLs.
+export function platformMediaCleanupFailureLogEntries(
+  result: PlatformMediaCleanupSchedulerResult,
+): PlatformMediaCleanupFailureLogEntry[] {
+  return result.runs.flatMap((run) =>
+    run.failures.map((failure) => ({
+      id: failure.resourceId,
+      action: failure.action,
+      stage: failure.reasonCode === "media_storage_delete_failed" ? "storage_delete" : "apply",
+      code: failure.errorCode,
+      attempt: failure.attempt,
+      deadLettered: failure.deadLettered,
+    })),
+  );
+}
+
+export function platformMediaCleanupRetry(
+  attempt: number,
+  now: Date,
+): { deadLettered: boolean; runAfter: Date } {
+  const delayMs = PLATFORM_MEDIA_CLEANUP_RETRY_DELAYS_MS[attempt - 1];
+  if (attempt >= PLATFORM_MEDIA_CLEANUP_MAX_ATTEMPTS || delayMs === undefined) {
+    return { deadLettered: true, runAfter: now };
+  }
+  return { deadLettered: false, runAfter: new Date(now.getTime() + delayMs) };
+}
+
+// Skips items whose cleanup job is backing off or dead-lettered under the bounded retry policy.
+function cleanupRetryHoldSql(
+  runName: PlatformMediaCleanupRunName,
+  resourceType: "media_upload_session" | "media_object",
+  idColumn: string,
+): string {
+  const jobTypes = [
+    MUTATIONS[runName].jobType,
+    ...(runName === "privateAttachmentRetention" ? [FINANCE_EXPORT_MUTATION.jobType] : []),
+  ];
+  return `NOT EXISTS (
+         SELECT 1 FROM platform.jobs job
+         WHERE job.resource_product = 'platform'
+           AND job.resource_type = '${resourceType}'
+           AND job.resource_id = ${idColumn}::text
+           AND job.queue_name = '${PLATFORM_MEDIA_CLEANUP_QUEUE}'
+           AND job.job_type IN (${jobTypes.map((jobType) => `'${jobType}'`).join(", ")})
+           AND job.job_metadata ->> 'retryPolicy' = '${PLATFORM_MEDIA_CLEANUP_RETRY_POLICY}'
+           AND (job.status = 'dead_lettered'
+             OR (job.status = 'failed' AND job.run_after > $1::timestamptz)))`;
+}
+
 async function runPlatformMediaCleanupJob(
   store: PlatformMediaCleanupStore,
   runName: PlatformMediaCleanupRunName,
@@ -371,6 +439,7 @@ async function selectAbandonedStagingUploads(
      FROM platform.media_upload_sessions
      WHERE session_status IN ('requested', 'signed', 'uploaded', 'failed')
        AND expires_at <= $1::timestamptz
+       AND ${cleanupRetryHoldSql("abandonedStagingUploads", "media_upload_session", "platform.media_upload_sessions.id")}
      ORDER BY expires_at ASC, created_at ASC
      LIMIT $2`,
     [now.toISOString(), limit],
@@ -410,6 +479,7 @@ async function selectReplacedPublicImages(
        AND lifecycle_status = 'delete_requested'
        AND deletion_requested_at <= $1::timestamptz
        AND COALESCE(source_metadata ->> 'replacementReason', '') = 'replaced'
+       AND ${cleanupRetryHoldSql("replacedPublicImages", "media_object", "platform.media_objects.id")}
      ORDER BY deletion_requested_at ASC, updated_at ASC
      LIMIT $2`,
     [now.toISOString(), limit],
@@ -452,6 +522,7 @@ async function selectPrivateAttachmentsPastRetention(
        AND retained_until IS NOT NULL
        AND retained_until <= $1::timestamptz
        AND (purpose <> 'finance.financials_export' OR lifecycle_status <> 'upload_pending' OR NOT EXISTS (SELECT 1 FROM platform.jobs job WHERE job.id::text=source_row_id AND job.status='running' AND job.locked_at >= $1::timestamptz-interval '5 minutes'))
+       AND ${cleanupRetryHoldSql("privateAttachmentRetention", "media_object", "platform.media_objects.id")}
      ORDER BY retained_until ASC, updated_at ASC
      LIMIT $2`,
     [now.toISOString(), limit],
@@ -492,6 +563,7 @@ async function selectRollbackWindowCleanupCandidates(
        AND NULLIF(source_metadata ->> 'rollbackWindowEndsAt', '')::timestamptz <= $1::timestamptz
        AND NULLIF(source_metadata ->> 'rollbackStorageKey', '') IS NOT NULL
        AND COALESCE(source_metadata ->> 'rollbackCleanupStatus', '') <> 'completed'
+       AND ${cleanupRetryHoldSql("rollbackWindowCleanup", "media_object", "platform.media_objects.id")}
      ORDER BY NULLIF(source_metadata ->> 'rollbackWindowEndsAt', '')::timestamptz ASC, updated_at ASC
      LIMIT $2`,
     [now.toISOString(), limit],
@@ -511,7 +583,7 @@ async function applyPgCleanupMutation(
     await client.query("BEGIN");
     const result =
       mutation.action === "abandoned-staging-upload"
-        ? await expireUploadSession(client, objectDeleter, candidate, mutation, context)
+        ? await expireUploadSession(client, candidate, mutation, context)
         : await updateMediaObjectLifecycle(client, objectDeleter, candidate, mutation, context);
     await client.query("COMMIT");
     return result;
@@ -525,14 +597,12 @@ async function applyPgCleanupMutation(
 
 async function expireUploadSession(
   client: pg.PoolClient,
-  objectDeleter: PlatformMediaObjectDeleter,
   candidate: PlatformMediaCleanupCandidate,
   mutation: PlatformMediaCleanupMutation,
   context: PlatformMediaCleanupContext,
 ): Promise<PlatformMediaCleanupMutationResult> {
-  if (candidate.stagingPrefix) {
-    await deleteStoragePrefixForCandidate(objectDeleter, candidate, candidate.stagingPrefix);
-  }
+  // Staged bytes are left to the media bucket's staging/ lifecycle rule (one day, vayada-platform
+  // infra/media.tf). The API role has no s3:ListBucket, so listing the prefix failed (VAY-2082).
   const updated = await client.query<{ resourceId: string }>(
     `UPDATE platform.media_upload_sessions
         SET session_status = 'expired',
@@ -772,7 +842,7 @@ async function insertCleanupSideEffects(
     resourceId,
     context,
   });
-  const jobId = await insertOrFindSucceededCleanupJob(client, {
+  const { id: jobId, attemptsCount } = await insertOrFindSucceededCleanupJob(client, {
     candidate,
     mutation,
     jobKey,
@@ -782,7 +852,16 @@ async function insertCleanupSideEffects(
     domainEventId,
     context,
   });
-  await insertCleanupJobAttempt(client, jobId, "succeeded", context);
+  await insertCleanupJobAttempt(client, jobId, attemptsCount, "succeeded", context);
+  if (attemptsCount > 1) {
+    await client.query(
+      `UPDATE platform.dead_letter_events
+          SET recovery_status = 'resolved', resolved_at = $2::timestamptz
+        WHERE source_kind = 'job' AND job_id = $1::uuid
+          AND recovery_status IN ('open', 'acknowledged')`,
+      [jobId, context.now.toISOString()],
+    );
+  }
   await insertCleanupAudit(client, {
     candidate,
     mutation,
@@ -844,16 +923,64 @@ async function insertCleanupFailureRows(
   });
   const keyHash = sha256Key(cleanupKey);
   const errorInfo = errorDetails(error);
-  const jobId = await insertOrFindFailedCleanupJob(client, {
+  const errorCode = safeErrorCode(error);
+  const failureResult = (
+    attempt: number,
+    deadLettered: boolean,
+  ): PlatformMediaCleanupFailureResult => ({
+    action: mutation.action,
+    resourceId,
+    cleanupKey,
+    jobKey,
+    reasonCode: failureReasonCode(error),
+    errorType: errorInfo.type,
+    errorCode,
+    errorMessage: errorInfo.message,
+    attempt,
+    deadLettered,
+  });
+  const previous = await client.query<{ attemptsCount: number; held: boolean | null }>(
+    `SELECT attempts_count AS "attemptsCount",
+            job_metadata ->> 'retryPolicy' = $3
+              AND (status = 'dead_lettered' OR (status = 'failed' AND run_after > $4::timestamptz))
+              AS held
+     FROM platform.jobs
+     WHERE queue_name = $1 AND job_key = $2
+     FOR UPDATE`,
+    [
+      PLATFORM_MEDIA_CLEANUP_QUEUE,
+      jobKey,
+      PLATFORM_MEDIA_CLEANUP_RETRY_POLICY,
+      context.now.toISOString(),
+    ],
+  );
+  // An overlapping run (another API task) already recorded this attempt: report the failure
+  // without counting it again, so the attempt cap and the single warning still hold.
+  if (previous.rows[0]?.held) return failureResult(previous.rows[0].attemptsCount, false);
+  const attempt = (previous.rows[0]?.attemptsCount ?? 0) + 1;
+  const retry = platformMediaCleanupRetry(attempt, context.now);
+  const jobId = await upsertFailedCleanupJob(client, {
     candidate,
     mutation,
     jobKey,
     keyHash,
     errorInfo,
+    errorCode,
     resourceId,
     context,
+    attempt,
+    retry,
   });
-  const attemptId = await insertCleanupJobAttempt(client, jobId, "failed", context, errorInfo);
+  const attemptId = await insertCleanupJobAttempt(
+    client,
+    jobId,
+    attempt,
+    "failed",
+    context,
+    errorInfo,
+  );
+  const failure = failureResult(attempt, retry.deadLettered);
+  if (!retry.deadLettered) return failure;
   await client.query(
     `INSERT INTO platform.dead_letter_events
        (
@@ -887,8 +1014,7 @@ async function insertCleanupFailureRows(
        $10,
        $11,
        $12::jsonb
-     )
-     ON CONFLICT DO NOTHING`,
+     )`,
     [
       jobId,
       attemptId,
@@ -906,20 +1032,13 @@ async function insertCleanupFailureRows(
         jobKey,
         action: mutation.action,
         errorType: errorInfo.type,
+        errorCode,
         errorMessage: errorInfo.message,
+        attempts: attempt,
       }),
     ],
   );
-  return {
-    action: mutation.action,
-    resourceId,
-    cleanupKey,
-    jobKey,
-    reasonCode: failureReasonCode(error),
-    errorType: errorInfo.type,
-    errorMessage: errorInfo.message,
-    deadLettered: true,
-  };
+  return failure;
 }
 
 async function insertCompletedCleanupIdempotencyKey(
@@ -1095,8 +1214,8 @@ async function insertOrFindSucceededCleanupJob(
     domainEventId: string;
     context: PlatformMediaCleanupContext;
   },
-): Promise<string> {
-  const result = await client.query<{ id: string }>(
+): Promise<{ id: string; attemptsCount: number }> {
+  const result = await client.query<{ id: string; attemptsCount: number }>(
     `INSERT INTO platform.jobs
        (
          job_key,
@@ -1141,13 +1260,27 @@ async function insertOrFindSucceededCleanupJob(
      ON CONFLICT (queue_name, job_key)
      DO UPDATE SET
        updated_at = now(),
+       source_domain_event_id = COALESCE(
+         platform.jobs.source_domain_event_id,
+         EXCLUDED.source_domain_event_id
+       ),
        status = CASE
-         WHEN platform.jobs.status IN ('succeeded', 'dead_lettered', 'canceled')
-         THEN platform.jobs.status
+         WHEN platform.jobs.status IN ('succeeded', 'canceled') THEN platform.jobs.status
          ELSE 'succeeded'
        END,
-       finished_at = COALESCE(platform.jobs.finished_at, EXCLUDED.finished_at)
-     RETURNING id`,
+       attempts_count = CASE
+         WHEN platform.jobs.status IN ('succeeded', 'canceled') THEN platform.jobs.attempts_count
+         ELSE platform.jobs.attempts_count + 1
+       END,
+       max_attempts = CASE
+         WHEN platform.jobs.status IN ('succeeded', 'canceled') THEN platform.jobs.max_attempts
+         ELSE GREATEST(platform.jobs.max_attempts, platform.jobs.attempts_count + 1)
+       END,
+       finished_at = CASE
+         WHEN platform.jobs.status IN ('succeeded', 'canceled') THEN platform.jobs.finished_at
+         ELSE EXCLUDED.finished_at
+       END
+     RETURNING id, attempts_count AS "attemptsCount"`,
     [
       input.jobKey,
       PLATFORM_MEDIA_CLEANUP_QUEUE,
@@ -1169,10 +1302,10 @@ async function insertOrFindSucceededCleanupJob(
       }),
     ],
   );
-  return result.rows[0]!.id;
+  return result.rows[0]!;
 }
 
-async function insertOrFindFailedCleanupJob(
+async function upsertFailedCleanupJob(
   client: pg.PoolClient,
   input: {
     candidate: PlatformMediaCleanupCandidate;
@@ -1180,8 +1313,11 @@ async function insertOrFindFailedCleanupJob(
     jobKey: string;
     keyHash: string;
     errorInfo: { type: string; message: string };
+    errorCode: string;
     resourceId: string;
     context: PlatformMediaCleanupContext;
+    attempt: number;
+    retry: { deadLettered: boolean; runAfter: Date };
   },
 ): Promise<string> {
   const result = await client.query<{ id: string }>(
@@ -1210,10 +1346,10 @@ async function insertOrFindFailedCleanupJob(
        $1,
        $2,
        $3,
-       'dead_lettered',
-       1,
-       1,
-       $4::timestamptz,
+       $14,
+       $15,
+       $16,
+       $17::timestamptz,
        $4::timestamptz,
        $5,
        $6::uuid,
@@ -1229,8 +1365,13 @@ async function insertOrFindFailedCleanupJob(
      ON CONFLICT (queue_name, job_key)
      DO UPDATE SET
        updated_at = now(),
-       status = 'dead_lettered',
-       finished_at = COALESCE(platform.jobs.finished_at, EXCLUDED.finished_at)
+       status = EXCLUDED.status,
+       attempts_count = EXCLUDED.attempts_count,
+       max_attempts = EXCLUDED.max_attempts,
+       run_after = EXCLUDED.run_after,
+       finished_at = EXCLUDED.finished_at,
+       correlation_id = EXCLUDED.correlation_id,
+       job_metadata = platform.jobs.job_metadata || EXCLUDED.job_metadata
      RETURNING id`,
     [
       input.jobKey,
@@ -1251,8 +1392,14 @@ async function insertOrFindFailedCleanupJob(
       JSON.stringify({
         workerId: input.context.workerId,
         errorType: input.errorInfo.type,
+        errorCode: input.errorCode,
         errorMessage: input.errorInfo.message,
+        retryPolicy: PLATFORM_MEDIA_CLEANUP_RETRY_POLICY,
       }),
+      input.retry.deadLettered ? "dead_lettered" : "failed",
+      input.attempt,
+      Math.max(PLATFORM_MEDIA_CLEANUP_MAX_ATTEMPTS, input.attempt),
+      input.retry.runAfter.toISOString(),
     ],
   );
   return result.rows[0]!.id;
@@ -1261,6 +1408,7 @@ async function insertOrFindFailedCleanupJob(
 async function insertCleanupJobAttempt(
   client: pg.PoolClient,
   jobId: string,
+  attemptNumber: number,
   status: "succeeded" | "failed",
   context: PlatformMediaCleanupContext,
   errorInfo?: { type: string; message: string },
@@ -1281,7 +1429,7 @@ async function insertCleanupJobAttempt(
        )
      VALUES (
        $1::uuid,
-       1,
+       $8,
        $2,
        $3,
        $4::timestamptz,
@@ -1306,6 +1454,7 @@ async function insertCleanupJobAttempt(
       errorInfo?.type ?? null,
       errorInfo?.message ?? null,
       JSON.stringify(errorInfo ? { source: "apps/api-platform-media-cleanup" } : {}),
+      attemptNumber,
     ],
   );
   return result.rows[0]!.id;
@@ -1503,18 +1652,6 @@ async function deleteStorageObjectForCandidate(
   }
 }
 
-async function deleteStoragePrefixForCandidate(
-  objectDeleter: PlatformMediaObjectDeleter,
-  candidate: PlatformMediaCleanupCandidate,
-  prefix: string,
-): Promise<void> {
-  try {
-    await objectDeleter.deletePrefix({ bucket: candidate.bucket, prefix });
-  } catch (error) {
-    throw new PlatformMediaStorageDeleteError(cleanupResourceId(candidate), error);
-  }
-}
-
 function tenantScope(
   candidate: PlatformMediaCleanupCandidate,
 ): "platform" | "organization" | "property" {
@@ -1539,6 +1676,14 @@ function errorDetails(error: unknown): { type: string; message: string } {
     return { type: error.name, message: error.message };
   }
   return { type: "UnknownError", message: String(error) };
+}
+
+// AWS SDK errors carry their S3 code in name; pg and Node errors carry SQLSTATE / errno in code.
+function safeErrorCode(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown";
+  const code = (error as { code?: unknown }).code;
+  const value = typeof code === "string" ? code : error.name;
+  return /^[A-Za-z0-9_.-]{1,64}$/.test(value) ? value : "unknown";
 }
 
 function failureReasonCode(
@@ -1579,9 +1724,12 @@ function sumBy<T extends Record<K, number>, K extends keyof T>(items: T[], key: 
 }
 
 class PlatformMediaStorageDeleteError extends Error {
+  readonly code: string;
+
   constructor(resourceId: string, cause: unknown) {
     const message = cause instanceof Error ? cause.message : String(cause);
     super(`Failed to delete media storage for ${resourceId}: ${message}`);
     this.name = "PlatformMediaStorageDeleteError";
+    this.code = safeErrorCode(cause);
   }
 }

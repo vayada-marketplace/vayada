@@ -7,6 +7,7 @@ import { MagnifyingGlassIcon, EllipsisHorizontalIcon } from "@heroicons/react/24
 import { useTranslation } from "@/lib/i18n";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { normalizeChannelKey } from "@/lib/constants/statusStyles";
+import { getBalanceStatus } from "@/lib/bookingBalanceStatus";
 
 const STATUS_STYLES: Record<string, string> = {
   pending: "border-yellow-200 text-yellow-700 bg-yellow-50",
@@ -36,6 +37,7 @@ const BALANCE_STYLES: Record<string, string> = {
   partial: "bg-amber-50 text-amber-700 border-amber-200",
   due: "bg-rose-50 text-rose-600 border-rose-200",
   refunded: "bg-violet-50 text-violet-700 border-violet-200",
+  closed: "bg-gray-50 text-gray-400 border-gray-200",
 };
 
 const SOURCE_ICONS: Record<string, { bg: string; letter: string; titleKey: string }> = {
@@ -49,20 +51,6 @@ const SOURCE_ICONS: Record<string, { bg: string; letter: string; titleKey: strin
   expedia: { bg: "bg-amber-400", letter: "E", titleKey: "calendar.channelExpedia" },
   channex: { bg: "bg-violet-600", letter: "C", titleKey: "bookings.channelChannex" },
 };
-
-function getBalanceStatus(b: Booking): string {
-  if (b.amountStatus === "unverified") return "unverified";
-  if (b.status === "cancelled" || b.status === "declined")
-    return b.paymentStatus === "refunded" ? "refunded" : "due";
-  if (b.depositRequired && b.depositAmount > 0) {
-    if (b.balanceAmount <= 0) return "paid";
-    return b.paymentStatus === "captured" ? "partial" : "due";
-  }
-  if (b.paymentStatus === "captured") return "paid";
-  if (b.paymentStatus === "authorized") return "partial";
-  if (b.paymentMethod === "pay_at_property") return "due";
-  return "due";
-}
 
 function getNights(checkIn: string, checkOut: string): number {
   const d1 = new Date(checkIn);
@@ -390,9 +378,11 @@ export default function ReservationsPage() {
                           ? t("bookings.balancePartial")
                           : balance === "refunded"
                             ? t("bookings.balanceRefunded")
-                            : b.amountStatus === "unverified"
-                              ? t("bookings.detail.amountUnverified")
-                              : t("bookings.balanceDue")}
+                            : balance === "closed"
+                              ? "—"
+                              : b.amountStatus === "unverified"
+                                ? t("bookings.detail.amountUnverified")
+                                : t("bookings.balanceDue")}
                     </span>
                   </div>
                 </Link>
@@ -574,9 +564,11 @@ export default function ReservationsPage() {
                               ? t("bookings.balancePartial")
                               : balance === "refunded"
                                 ? t("bookings.balanceRefunded")
-                                : b.amountStatus === "unverified"
-                                  ? t("bookings.detail.amountUnverified")
-                                  : t("bookings.balanceDue")}
+                                : balance === "closed"
+                                  ? "—"
+                                  : b.amountStatus === "unverified"
+                                    ? t("bookings.detail.amountUnverified")
+                                    : t("bookings.balanceDue")}
                         </span>
                       </td>
 
