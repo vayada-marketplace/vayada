@@ -478,39 +478,42 @@ export function AddonEditor({
             </details>
           </section>
           <aside className="border-t border-gray-200 bg-gray-50 p-6 md:border-l md:border-t-0">
-            <h3 className="text-xs font-semibold tracking-widest text-gray-500">
-              {t("addons.editor.checkoutPreview")}
-            </h3>
-            <div
-              aria-hidden="true"
-              className="mt-3 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
-            >
-              {cover ? (
-                <img src={cover.imageUrl} alt="" className="h-36 w-full object-cover" />
-              ) : (
-                <div className="flex h-36 items-center justify-center bg-primary-50 text-sm text-gray-500">
-                  {t("addons.editor.noPhotoYet")}
-                </div>
-              )}
-              <div className="space-y-2 p-4">
-                <p className="font-semibold text-gray-900">
-                  {values.name.trim() || t("addons.editor.untitledAddOn")}
-                </p>
-                <p className="line-clamp-3 text-sm text-gray-600">
-                  {values.description.trim() || t("addons.editor.previewDescription")}
-                </p>
-                <div className="flex items-end justify-between gap-2 pt-1">
-                  <div>
-                    <p className="font-semibold text-gray-900">{formatPrice(price, currency)}</p>
-                    <p className="text-xs text-gray-500">{t(model[5])}</p>
+            {/* Keep the preview in view while the form scrolls. */}
+            <div className="md:sticky md:top-0">
+              <h3 className="text-xs font-semibold tracking-widest text-gray-500">
+                {t("addons.editor.checkoutPreview")}
+              </h3>
+              <div
+                aria-hidden="true"
+                className="mt-3 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+              >
+                {cover ? (
+                  <img src={cover.imageUrl} alt="" className="h-36 w-full object-cover" />
+                ) : (
+                  <div className="flex h-36 items-center justify-center bg-primary-50 text-sm text-gray-500">
+                    {t("addons.editor.noPhotoYet")}
                   </div>
-                  <span className="rounded-lg bg-primary-600 px-3 py-1.5 text-sm font-medium text-white">
-                    {t("addons.editor.add")}
-                  </span>
+                )}
+                <div className="space-y-2 p-4">
+                  <p className="font-semibold text-gray-900">
+                    {values.name.trim() || t("addons.editor.untitledAddOn")}
+                  </p>
+                  <p className="line-clamp-3 text-sm text-gray-600">
+                    {values.description.trim() || t("addons.editor.previewDescription")}
+                  </p>
+                  <div className="flex items-end justify-between gap-2 pt-1">
+                    <div>
+                      <p className="font-semibold text-gray-900">{formatPrice(price, currency)}</p>
+                      <p className="text-xs text-gray-500">{t(model[5])}</p>
+                    </div>
+                    <span className="rounded-lg bg-primary-600 px-3 py-1.5 text-sm font-medium text-white">
+                      {t("addons.editor.add")}
+                    </span>
+                  </div>
                 </div>
               </div>
+              <p className="mt-3 text-xs text-gray-500">{t("addons.editor.previewHint")}</p>
             </div>
-            <p className="mt-3 text-xs text-gray-500">{t("addons.editor.previewHint")}</p>
           </aside>
         </div>
         <footer className="shrink-0 border-t border-gray-200 px-6 py-4">
