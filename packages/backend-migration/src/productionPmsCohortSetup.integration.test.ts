@@ -1,7 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { PMS_ROOM_FACTS_CONTRACT_VERSION, parseRoomTypeFactsSnapshot } from "@vayada/domain-pms";
+import {
+  PMS_ROOM_FACTS_CONTRACT_VERSION,
+  createPmsOperatingCalendarSourceRevision,
+  parsePmsOperatingCalendarConfigurationSnapshot,
+  parseRoomTypeFactsSnapshot,
+} from "@vayada/domain-pms";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -26,6 +31,7 @@ const HOTEL = "13620000-0000-4000-8000-0000000000a3";
 const ROOM_TYPE = "13620000-0000-4000-8000-0000000000a4";
 const ROOM_A = "13620000-0000-4000-8000-0000000000a5";
 const ROOM_B = "13620000-0000-4000-8000-0000000000a6";
+const OWNER = "13620000-0000-4000-8000-0000000000a7";
 
 describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", () => {
   let client: pg.Client;
@@ -151,6 +157,200 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
       await client.query("ROLLBACK");
     }
   });
+  it("gives a cohort hotel the native operating calendar its readiness checks expect", async () => {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+    try {
+      await seedCalendar(client);
+      const prerequisites = await readProductionPmsPrerequisites(client, RUN);
+      const rows = sourceRows();
+      rows[0]!.data["user_id"] = OWNER;
+      // Open February to December: the calendar takes the legacy season as its schedule.
+      Object.assign(rows[1]!.data, { operating_periods: [{ from: "02-01", to: "12-31" }] });
+      const plan = async (records: PmsTargetRecord[] = []) =>
+        buildProductionPmsPlan({
+          sourceRunId: RUN,
+          snapshotAt: AT,
+          completedAt: AT,
+          rows,
+          cohort: { bookingHotelIds: [], pmsHotelIds: [HOTEL], marketplaceHotelIds: [] },
+          target: await readProductionPmsTargetState(client, records, prerequisites),
+        });
+      const planned = await plan((await plan()).records);
+      expect(planned.blockers).toEqual([]);
+      const written = await writeProductionPmsRecords(client, planned.writes);
+      expect(written).toMatchObject({
+        idempotency_keys: 1,
+        domain_events: 1,
+        outbox_events: 1,
+        operating_calendar_revisions: 1,
+        operating_calendar_recurring_periods: 1,
+        operating_calendar_room_bindings: 1,
+        product_audit_events: 1,
+      });
+      await writeProductionMigrationProvenance(client, planned.provenance, RUN);
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE"); // the deferred manifest trigger
+      const verified = await plan(planned.records);
+      expect([verified.blockers, verified.writes, verified.checksum]).toEqual([
+        [],
+        [],
+        planned.checksum,
+      ]);
+
+      // A later run (parity's dry run, a resume) reads the stored calendar and plans the same.
+      const later = buildProductionPmsPlan({
+        sourceRunId: RUN,
+        snapshotAt: AT,
+        completedAt: AT,
+        rows,
+        cohort: { bookingHotelIds: [], pmsHotelIds: [HOTEL], marketplaceHotelIds: [] },
+        target: await readProductionPmsTargetState(
+          client,
+          planned.records,
+          await readProductionPmsPrerequisites(client, RUN),
+        ),
+      });
+      expect([later.blockers, later.writes, later.checksum]).toEqual([[], [], planned.checksum]);
+
+      // Readiness criteria d and e (VAY-2066), as the producer reads them.
+      const criteria = await client.query(
+        `WITH latest AS (
+           SELECT * FROM pms.operating_calendar_revisions WHERE property_id = $1
+            ORDER BY calendar_revision DESC LIMIT 1)
+         SELECT latest.organization_id IS NOT NULL
+                  AND latest.property_profile_revision = property.profile_revision
+                  AND latest.property_time_zone = location.timezone AS d,
+                (SELECT count(*) FROM pms.room_types room_type WHERE room_type.property_id = $1
+                    AND room_type.active AND EXISTS (
+                      SELECT 1 FROM pms.operating_calendar_room_bindings binding
+                       WHERE binding.property_id = $1
+                         AND binding.calendar_revision = latest.calendar_revision
+                         AND binding.room_type_id = room_type.id
+                         AND binding.source_room_facts_revision = room_type.room_facts_revision
+                         AND binding.source_room_units_revision = room_type.room_units_revision))
+                = (SELECT count(*) FROM pms.operating_calendar_room_bindings binding
+                    WHERE binding.property_id = $1
+                      AND binding.calendar_revision = latest.calendar_revision)
+                AND (SELECT count(*) FROM pms.room_types room_type
+                      WHERE room_type.property_id = $1 AND room_type.active)
+                = (SELECT count(*) FROM pms.operating_calendar_room_bindings binding
+                    WHERE binding.property_id = $1
+                      AND binding.calendar_revision = latest.calendar_revision) AS e,
+                (SELECT status FROM platform.idempotency_keys WHERE id = latest.idempotency_key_id)
+                  AS idempotency,
+                (SELECT destination FROM platform.outbox_events
+                  WHERE id = latest.outbox_event_id AND domain_event_id = latest.domain_event_id)
+                  AS outbox
+           FROM latest
+           JOIN hotel_catalog.properties property ON property.id = latest.property_id
+           JOIN hotel_catalog.property_locations location ON location.property_id = property.id`,
+        [PROPERTY],
+      );
+      expect(criteria.rows).toEqual([
+        { d: true, e: true, idempotency: "completed", outbox: "pms.inventory-source" },
+      ]);
+
+      // The configuration the runtime loads from these rows (pmsOperatingCalendarReadModel).
+      const root = (
+        await client.query(
+          `SELECT calendar_revision AS "calendarRevision", property_profile_revision AS profile,
+                  property_time_zone AS "timeZone", default_minimum_stay_nights AS "minimumStay",
+                  schedule_mode AS "scheduleMode",
+                  to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS at
+             FROM pms.operating_calendar_revisions WHERE property_id = $1`,
+          [PROPERTY],
+        )
+      ).rows[0];
+      const bindings = await client.query(
+        `SELECT room_type_id::text AS "roomTypeId",
+                source_room_facts_revision AS "sourceRoomFactsRevision",
+                source_room_units_revision AS "sourceRoomUnitsRevision",
+                physical_capacity_count AS "physicalCapacityCount",
+                starting_sellable_limit_count AS "startingSellableLimitCount"
+           FROM pms.operating_calendar_room_bindings WHERE property_id = $1 ORDER BY room_type_id`,
+        [PROPERTY],
+      );
+      expect(
+        parsePmsOperatingCalendarConfigurationSnapshot(
+          {
+            contractVersion: "pms-operating-calendar.v1",
+            propertyId: PROPERTY,
+            calendarRevision: root.calendarRevision,
+            source: createPmsOperatingCalendarSourceRevision(PROPERTY, root.calendarRevision),
+            sourceInputs: {
+              propertyProfile: {
+                ownerDomain: "hotel_catalog",
+                entityType: "property_profile",
+                entityId: PROPERTY,
+                revision: `profile:${root.profile}`,
+              },
+              propertyTimeZone: root.timeZone,
+              roomBindings: bindings.rows,
+            },
+            schedule: {
+              mode: root.scheduleMode,
+              periods: (
+                await client.query(
+                  `SELECT lpad(start_month::text, 2, '0') || '-' || lpad(start_day::text, 2, '0')
+                            AS "startsOn",
+                          lpad(end_month::text, 2, '0') || '-' || lpad(end_day::text, 2, '0')
+                            AS "endsOn"
+                     FROM pms.operating_calendar_recurring_periods
+                    WHERE property_id = $1 ORDER BY period_index`,
+                  [PROPERTY],
+                )
+              ).rows,
+            },
+            defaultMinimumStayNights: root.minimumStay,
+            createdAt: root.at,
+            updatedAt: root.at,
+          },
+          {
+            ownerDomain: "hotel_catalog",
+            registryVersion: "test",
+            isCanonicalIanaTimeZone: (zone) => zone === "Europe/Berlin",
+          },
+        ),
+      ).toMatchObject({
+        schedule: { mode: "recurring", periods: [{ startsOn: "02-01", endsOn: "12-31" }] },
+      });
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+
+  it("reads one owner organization only where runtime tenancy finds one", async () => {
+    await client.query("BEGIN");
+    try {
+      await seedCalendar(client);
+      const organizations = async () =>
+        (await readProductionPmsPrerequisites(client, RUN)).cohortProperties?.find(
+          (row) => row.propertyId === PROPERTY,
+        )?.organizationIds;
+      expect(await organizations()).toEqual([ORGANIZATION]);
+      for (const [change, undo] of [
+        [
+          "UPDATE identity.organizations SET status = 'archived' WHERE id = $1",
+          "UPDATE identity.organizations SET status = 'active' WHERE id = $1",
+        ],
+        [
+          `UPDATE identity.organization_resource_links SET status = 'archived'
+            WHERE organization_id = $1 AND resource_type = 'pms_property'`,
+          `UPDATE identity.organization_resource_links SET status = 'active'
+            WHERE organization_id = $1 AND resource_type = 'pms_property'`,
+        ],
+        [
+          "UPDATE identity.organizations SET kind = 'creator_workspace' WHERE id = $1",
+          "UPDATE identity.organizations SET kind = 'hotel_group' WHERE id = $1",
+        ],
+      ]) {
+        await client.query(change!, [ORGANIZATION]);
+        expect(await organizations()).toEqual([]);
+        await client.query(undo!, [ORGANIZATION]);
+      }
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
 });
 
 async function seed(client: pg.Client): Promise<void> {
@@ -204,4 +404,27 @@ function sourceRows(): IdentitySourceRow[] {
     room(ROOM_A, "A-101"),
     room(ROOM_B, "A-102"),
   ];
+}
+
+async function seedCalendar(client: pg.Client): Promise<void> {
+  await seed(client);
+  await client.query(
+    `INSERT INTO identity.users (id, email) VALUES ($1, 'cohort-owner@example.invalid')`,
+    [OWNER],
+  );
+  await client.query(
+    `INSERT INTO hotel_catalog.property_locations (property_id, timezone)
+     VALUES ($1, 'Europe/Berlin')`,
+    [PROPERTY],
+  );
+  await client.query(`UPDATE hotel_catalog.properties SET profile_revision = 4 WHERE id = $1`, [
+    PROPERTY,
+  ]);
+  await client.query(
+    `INSERT INTO identity.organization_resource_links
+       (organization_id, product, resource_type, resource_id, relationship, status)
+     VALUES ($1, 'hotel_catalog', 'property', $2, 'owner', 'active'),
+            ($1, 'pms', 'pms_property', $2, 'owner', 'active')`,
+    [ORGANIZATION, PROPERTY],
+  );
 }

@@ -120,6 +120,21 @@ Runs without a cohort, hotels outside it and quarantined hotels get none of this
   `private` (the form's default), or `shared` without a bathroom count. A room type without a bed
   type or with limits the native contract refuses keeps the legacy shape; parity fails for an
   active one (`cohortRoomFacts`), so fix it in legacy before the extraction.
+- **Operating calendar** (criteria d and e): revision 1 of `pms.operating_calendar_revisions`, as
+  the native calendar save writes it: the legacy operating periods its room types share as the
+  recurring schedule (year-round without periods), minimum stay 1, the owner organization, the
+  catalog profile revision and canonical time zone, and one binding per operating room type at its
+  physical capacity. Room types with different operating periods get no calendar: the schedule is
+  the property's. Periods are read day by day as legacy reads them (unvalidated `MM-DD` strings);
+  a recurring schedule has no 29 February of its own, so a period open only then gives no
+  calendar; inside the imported coverage 29 February stays closed where legacy closes it, and
+  later native days follow the schedule. The import also writes the idempotency key, domain event and outbox row its
+  foreign keys require, and its audit row, with the migration as actor. A hotel gets no calendar
+  without one owner organization, a canonical time zone or a known legacy owner user, or when an
+  operating room type has no native room facts, no rooms, or rooms that differ from its inventory
+  total. A rerun keeps the stored migrated revision 1 as it is, also after later native revisions,
+  and blocks when it no longer carries it; a revision 1 the migration did not write blocks where
+  the import would plan one.
 
 A hotel that misses an item stays `provisioning`.
 
