@@ -15,7 +15,6 @@ test.describe("booking-admin benefits settings cutover", () => {
       "Requires a production booking-admin build so the authenticated shell hydrates.",
     );
 
-    const assertHealthy = watchPageHealth(page, testInfo);
     const assertNoLegacyCalls = watchNoLegacyCalls(
       page,
       testInfo,
@@ -56,6 +55,8 @@ test.describe("booking-admin benefits settings cutover", () => {
     ).toBeVisible();
     await expect(page.getByRole("button", { name: /^Save Benefits$/ })).toHaveCount(0);
     await page.getByRole("button", { name: "Retry", exact: true }).click();
+    // Watch page health only after the deliberate 503 above.
+    const assertHealthy = watchPageHealth(page, testInfo);
     await expect(page.getByText("Complimentary sunset cocktail")).toBeVisible();
     await testInfo.attach("settings-book-direct-benefits", {
       body: await page.screenshot({ fullPage: true }),
