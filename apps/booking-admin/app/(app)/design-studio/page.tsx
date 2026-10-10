@@ -72,7 +72,8 @@ export default function DesignStudioPage() {
   const [propertySlug, setPropertySlug] = useState("");
   const [defaultCurrency, setDefaultCurrency] = useState("EUR");
   const [defaultLanguage, setDefaultLanguage] = useState("en");
-  const [supportedCurrencies, setSupportedCurrencies] = useState<string[]>([]);
+  // null until property settings load, so a failed read never greys out the currency toggle.
+  const [supportedCurrencies, setSupportedCurrencies] = useState<string[] | null>(null);
   // null until property settings load, so a failed read never greys out the language toggle.
   const [supportedLanguages, setSupportedLanguages] = useState<string[] | null>(null);
   const [galleryImages, setGalleryImages] = useState<PropertyGalleryImage[]>([]);
@@ -743,6 +744,10 @@ export default function DesignStudioPage() {
         (BOOKING_GUEST_LANGUAGE_CODES as readonly string[]).includes(code),
       ),
     ).size > 1;
+  // Guests get a currency selector once the hotel adds a display currency (charges stay in
+  // the default currency).
+  const currencySelectorAvailable =
+    supportedCurrencies === null || new Set([defaultCurrency, ...supportedCurrencies]).size > 1;
 
   if (loading) {
     return (
@@ -868,6 +873,9 @@ export default function DesignStudioPage() {
                 showLanguageSelector={showLanguageSelector}
                 setShowLanguageSelector={setShowLanguageSelector}
                 languageSelectorAvailable={languageSelectorAvailable}
+                showCurrencySelector={showCurrencySelector}
+                setShowCurrencySelector={setShowCurrencySelector}
+                currencySelectorAvailable={currencySelectorAvailable}
                 resetContent={resetContent}
                 galleryImages={galleryImages}
                 galleryAtCapacity={
@@ -954,11 +962,9 @@ export default function DesignStudioPage() {
             showContactButton={showContactButton}
             showReferAGuestButton={Boolean(referAGuestModuleEnabled && showReferAGuestButton)}
             showLanguageSelector={showLanguageSelector && languageSelectorAvailable}
-            // Booking publications carry a single pricing currency, so guests never see a
-            // currency selector yet. The stored preference is kept for when that changes.
-            showCurrencySelector={false}
+            showCurrencySelector={showCurrencySelector && currencySelectorAvailable}
             supportedLanguages={supportedLanguages ?? undefined}
-            supportedCurrencies={supportedCurrencies}
+            supportedCurrencies={supportedCurrencies ?? undefined}
             heroHeading={heroHeading}
             heroImage={heroImage}
             heroSubtext={heroSubtext}

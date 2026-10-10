@@ -223,7 +223,7 @@ function Dropdown({
 // --- Main Navigation ---
 export default function BookingNavigation() {
   const { hotel } = useHotel();
-  const { selectedCurrency, setSelectedCurrency } = useCurrency();
+  const { selectedCurrency, setSelectedCurrency, availableCurrencies } = useCurrency();
   const t = useTranslations("nav");
   const locale = useLocale();
   const router = useRouter();
@@ -249,8 +249,7 @@ export default function BookingNavigation() {
       .toUpperCase() || "EN";
 
   const currencyItems = useMemo(() => {
-    const codes = Array.from(new Set([hotel.currency, ...(hotel.supportedCurrencies || [])]));
-    return codes
+    return availableCurrencies
       .map((code: string) => ({
         value: code,
         label: CURRENCY_LABELS[code] || code,
@@ -260,7 +259,7 @@ export default function BookingNavigation() {
         const nameB = b.label.split(" ").slice(1).join(" ") || b.label;
         return nameA.localeCompare(nameB);
       });
-  }, [hotel.currency, hotel.supportedCurrencies]);
+  }, [availableCurrencies]);
 
   const closeAll = () => {
     setContactOpen(false);

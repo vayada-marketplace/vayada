@@ -1,4 +1,5 @@
 "use client";
+import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
 
 import { formatCheckInTime, formatCheckOutTime } from "@/lib/arrivalTimes";
@@ -619,6 +620,7 @@ export default function BookingConfirmationPageClient({
                   </div>
                 </div>
               )}
+              {booking && <ApproximateAmountsNote currency={booking.currency} />}
               {booking?.paymentMethod && (
                 <div className="flex justify-between py-3">
                   <span className="text-gray-600">{t("paymentMethodLabel") || "Payment"}</span>
