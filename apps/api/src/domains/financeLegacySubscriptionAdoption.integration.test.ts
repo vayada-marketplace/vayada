@@ -11,6 +11,7 @@ import {
   createPgLegacyAdoptionStore,
   type LegacyAdoptionStripe,
 } from "./financeLegacySubscriptionAdoption.js";
+import { createTargetFinanceBillingConfigReadPort } from "./financeBillingConfigReadModel.js";
 import { inspectLegacySubscription } from "./stripeLegacySubscriptionAdoption.js";
 
 /**
@@ -34,6 +35,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Legacy fixed-plan adoption PostgreSQL", () 
   });
   const store = createPgLegacyAdoptionStore(pool);
   const webhookStore = createPgFinanceSubscriptionWebhookStore(pool);
+  const billingConfig = createTargetFinanceBillingConfigReadPort({ connectionString: "", pool });
 
   beforeAll(() => assertSafeTestDatabase(TEST_DATABASE_URL!));
 
@@ -135,6 +137,10 @@ describe.skipIf(!TEST_DATABASE_URL)("Legacy fixed-plan adoption PostgreSQL", () 
       providerStatus: "past_due",
     });
     await expect(readIdentityStatus(PROPERTY)).resolves.toBe("active");
+    // Booking terms still resolve to Fixed during retries, as on legacy.
+    await expect(billingConfig.getBillingConfig(PROPERTY)).resolves.toMatchObject({
+      activePlan: "fixed",
+    });
 
     const unpaid = marked(legacySubscription(PROPERTY, "sub_vay1362_it_a", "unpaid"), PROPERTY);
     await webhookStore.applySubscriptionSnapshot({
