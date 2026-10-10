@@ -139,6 +139,9 @@ describe("target public bookability publication", () => {
     expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain("AS public_payment_methods");
     expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain("AS billing_config_ready");
     expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain(
+      "entitlement.entitlement_metadata ->> 'legacyAdoptedAt'",
+    );
+    expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain(
       "source_rule_id = 'onboarding-booking:' || profile.property_id::text",
     );
     expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain(

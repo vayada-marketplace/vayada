@@ -54,6 +54,13 @@ export function createTargetFinanceBillingConfigReadPort(config: {
                  plan_key = 'fixed'
                  AND provider_subscription_status IN ('trialing', 'active')
                )
+               -- VAY-1362: an adopted legacy subscription keeps its Fixed terms
+               -- while Stripe retries, as on legacy.
+               OR (
+                 plan_key = 'fixed'
+                 AND provider_subscription_status = 'past_due'
+                 AND NULLIF(entitlement_metadata ->> 'legacyAdoptedAt', '') IS NOT NULL
+               )
              )
            LIMIT 1
            FOR SHARE
