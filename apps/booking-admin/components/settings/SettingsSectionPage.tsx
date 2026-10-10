@@ -951,13 +951,13 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       const data = await settingsService.updatePropertySettings(targetSettingsUpdate.data);
       // Apply only what was saved: this response carries placeholder payment settings.
       const saved = Object.keys(targetSettingsUpdate.data);
-      if (activeSection === "property") saved.push("address");
+      if (activeSection === "general") saved.push("address");
       setSettings((previous) => ({
         ...previous,
         ...Object.fromEntries(saved.map((key) => [key, data[key as keyof PropertySettings]])),
       }));
       const name = normalizedSettings.property_name.trim();
-      if (activeSection === "property" && name !== savedPropertyName.trim()) {
+      if (activeSection === "general" && name !== savedPropertyName.trim()) {
         try {
           const savedName = await savePropertyName(name);
           setSavedPropertyName(savedName);

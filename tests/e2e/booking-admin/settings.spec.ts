@@ -238,7 +238,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
       }),
     );
 
-    await page.goto("/settings");
+    await page.goto("/settings/general");
     await expect(page.getByTestId("property-address")).toHaveText(
       "Alpenstrasse 12, Munich, 80331, DE",
     );
@@ -248,7 +248,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     const name = page.getByPlaceholder("Enter property name");
     await expect(name).toHaveValue("Alpenrose");
     await name.fill("Alpenrose Lodge");
-    await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+    await page.getByRole("button", { name: "Save property details", exact: true }).click();
     await expect(page.getByText("Settings saved successfully")).toBeVisible();
 
     expect(profileWrites).toEqual([
@@ -258,12 +258,12 @@ test.describe("booking-admin settings no-legacy guard", () => {
     for (const field of ["property_name", "address", "city", "country"]) {
       expect(settingsWrites[0]).not.toHaveProperty(field);
     }
-    await page.getByRole("button", { name: "Billing" }).first().click();
+    await page.goto("/settings/billing");
     await expect(page.getByPlaceholder("payments@yourproperty.com")).toHaveValue(
       "pay@alpenrose.example",
     );
 
-    // Billing is now in the URL; open the Property section again, as a fresh visit would.
+    // The old Property link opens General again, as a fresh visit would.
     await page.goto("/settings?section=property");
     await expect(page.getByPlaceholder("Enter property name")).toHaveValue("Alpenrose Lodge");
     await assertHealthy();
@@ -272,7 +272,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     // (The refused request logs a console error, so page health is checked above.)
     refuseRename = true;
     await page.getByPlaceholder("Enter property name").fill("Alpenrose Hotel");
-    await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+    await page.getByRole("button", { name: "Save property details", exact: true }).click();
     await expect(
       page.getByText("Your other changes were saved, but the property name wasn't changed."),
     ).toBeVisible();
