@@ -1,5 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockBookingApis } from "../support/bookingMocks";
+
+// TODO(VAY-2098): the guest page no longer renders Surroundings; re-enable these checks when it
+// returns behind the Feature Hub "location" module.
+test.skip(true, "VAY-2098: the Location section is hidden on the guest page");
 const payload = {
   schemaVersion: 1,
   status: "ready",
