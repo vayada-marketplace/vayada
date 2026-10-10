@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { PoolClient, QueryResult, QueryResultRow } from "pg";
 import { pricingCurrencyScale } from "@vayada/domain-pms";
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
@@ -8,6 +9,9 @@ import { pricingDecimalMinor } from "./pricingDecimalMinor.js";
 import { stageAcceptedPricingReservationJob } from "./pricingPmsAcceptedReservationJob.js";
 import { pricingRoomRevenueProjection } from "./pricingRoomRevenueProjection.js";
 import { persistDirectNightlyRevenueProjection } from "./stripeBookingSettlement.js";
+import { confirmCapturedPricingCardRequest } from "./pricingCardPaymentCompletion.js";
+import type { StripeBookingPaymentProvider } from "./stripeBookingPayments.js";
+import { stripeAmountMinor } from "./stripeMoney.js";
 
 /** The PMS command client: query only, row count included. */
 type Queryable = {
@@ -24,20 +28,27 @@ const iso = (v: unknown) =>
  * holds the booking row lock and owns the transaction. Everything comes from the stored
  * acceptance, never the hotel's current prices: room-night revenue from the accepted quote,
  * the guest's acceptance email and the PMS reservation job. The rooms were held when the guest
- * asked, so inventory does not change. Anything but an open request is "not_pending". */
+ * asked, so inventory does not change. Anything but an open request is "not_pending".
+ * A card request is captured on the hotel's connected account first, then confirmed. */
 export async function acceptPricingRequest(
   client: Queryable,
   command: PmsBookingLifecycleCommand,
   acceptedAt: string,
-): Promise<"accepted" | "not_pending" | "deadline_passed"> {
+  provider?: StripeBookingPaymentProvider,
+): Promise<"accepted" | "not_pending" | "deadline_passed" | "capture_failed"> {
   const row = (
     await client.query(
       `SELECT a.*,b.lifecycle_status,b.payment_status,b.expected_payment_method,
-        b.total_amount::text,b.balance_amount::text,b.booking_metadata,q.payload AS quote_record
+        b.total_amount::text,b.balance_amount::text,b.booking_metadata,b.public_reference,
+        q.payload AS quote_record,p.status AS card_status,p.provider_payment_intent_id AS card_intent,
+        p.amount::text AS card_amount,p.currency AS card_currency,acct.provider_account_id AS card_account
       FROM booking.pricing_quote_acceptances a
       JOIN booking.guest_bookings b ON b.id=a.guest_booking_id AND b.property_id=a.property_id
       JOIN booking.pricing_quotes q ON q.id=a.pricing_quote_id AND q.property_id=a.property_id
         AND q.organization_id=a.organization_id
+      LEFT JOIN finance.payments p ON p.id=b.active_card_payment_id AND p.property_id=b.property_id
+      LEFT JOIN finance.payment_provider_accounts acct ON acct.id=p.provider_account_id
+        AND acct.property_id=p.property_id
       WHERE a.guest_booking_id=$1 AND a.property_id=$2 FOR UPDATE OF b`,
       [command.guestBookingId, command.propertyId],
     )
@@ -55,20 +66,28 @@ export async function acceptPricingRequest(
     );
   const quote = history?.quote;
   const metadata = row?.booking_metadata;
+  const card = quote?.paymentMethod === "card";
   if (
     !history ||
     !quote ||
     quote.acceptanceMode !== "request" ||
-    quote.paymentMethod !== "pay_at_property" ||
     row.lifecycle_status !== "pending_payment" ||
-    row.payment_status !== "unpaid" ||
-    row.expected_payment_method !== "pay_at_property" ||
+    (card
+      ? row.payment_status !== "authorized" ||
+        row.card_status !== "authorized" ||
+        row.expected_payment_method !== "unknown" ||
+        typeof row.card_intent !== "string" ||
+        typeof row.card_account !== "string"
+      : quote.paymentMethod !== "pay_at_property" ||
+        row.payment_status !== "unpaid" ||
+        row.expected_payment_method !== "pay_at_property") ||
     metadata?.targetSource !== "pricing_quote_draft" ||
     metadata.pricingQuoteId !== quote.quoteId
   )
     return "not_pending";
   const deadline = Date.parse(metadata.hostResponseDeadlineAt ?? "");
   if (!Number.isFinite(deadline) || Date.parse(acceptedAt) >= deadline) return "deadline_passed";
+  // Everything the confirmation needs is checked before any money moves.
   const fail = (): never => {
     throw new Error("Pricing request acceptance is unavailable");
   };
@@ -88,6 +107,50 @@ export async function acceptPricingRequest(
   )
     return fail();
   const user = command.audit.actor.kind === "user" ? command.audit.actor.userId : null;
+  if (card) {
+    if (!provider) return "capture_failed";
+    // Lock the payment before calling Stripe: a lock race can then only fail before a capture.
+    const payment = await client.query(
+      "SELECT 1 FROM finance.payments WHERE provider_payment_intent_id=$1 AND property_id=$2 AND status='authorized' FOR UPDATE",
+      [row.card_intent, command.propertyId],
+    );
+    if (payment.rows.length !== 1) return "not_pending";
+    // The hold must be this booking's own, for its exact amount, before anything is captured.
+    const bound = (
+      intent: Awaited<ReturnType<StripeBookingPaymentProvider["retrievePaymentIntent"]>>,
+    ) =>
+      intent.paymentIntentId === row.card_intent &&
+      intent.propertyId === command.propertyId &&
+      intent.bookingReference === row.public_reference &&
+      intent.amountMinor === stripeAmountMinor(row.card_amount, row.card_currency) &&
+      intent.currency.toUpperCase() === String(row.card_currency).toUpperCase();
+    let intent = await provider.retrievePaymentIntent(row.card_intent, row.card_account);
+    if (!bound(intent)) return "capture_failed";
+    if (intent.status === "requires_capture") {
+      intent = await provider.capturePaymentIntent(
+        row.card_intent,
+        row.card_account,
+        // Per command: Stripe replays a key's first answer, failures included, for 24 hours.
+        `pricing-card-request-capture:${command.propertyId}:${command.guestBookingId}:${createHash("sha256").update(command.idempotencyKey).digest("hex")}`,
+      );
+      if (!bound(intent)) return "capture_failed";
+    }
+    if (intent.status !== "succeeded") return "capture_failed";
+    await confirmCapturedPricingCardRequest(
+      client as unknown as PoolClient,
+      command.propertyId,
+      command.guestBookingId,
+      {
+        paymentIntentId: intent.paymentIntentId,
+        status: intent.status,
+        amountMinor: intent.amountMinor,
+        currency: intent.currency,
+        metadata: { propertyId: intent.propertyId, bookingReference: intent.bookingReference },
+      },
+      user,
+    );
+    return "accepted";
+  }
   const confirmed = (
     await client.query(
       `WITH changed AS (

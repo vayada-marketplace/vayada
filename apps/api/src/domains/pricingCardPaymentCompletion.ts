@@ -41,7 +41,7 @@ const CARD_ROW_SELECT = `SELECT a.*,b.lifecycle_status,b.payment_status,b.expect
 
 type Queryable = Pick<pg.PoolClient, "query">;
 type CardRow = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
-type PaymentEvidence = {
+export type PaymentEvidence = {
   paymentIntentId: string;
   status: string;
   amountMinor: number;
@@ -78,8 +78,17 @@ function decodeCardRow(row: CardRow | undefined, propertyId: string) {
     bookingReference: row.public_reference as string,
   };
   const paid = row.lifecycle_status === "confirmed" && row.payment_status !== "unpaid";
+  // A card request the guest has authorised waits for the hotel, whose acceptance captures it.
+  const authorized =
+    quote.acceptanceMode === "request" &&
+    row.lifecycle_status === "pending_payment" &&
+    row.payment_status === "authorized" &&
+    row.payment_row_status === "authorized" &&
+    typeof row.provider_payment_intent_id === "string" &&
+    typeof row.account_ref === "string";
   if (
     !paid &&
+    !authorized &&
     (row.lifecycle_status !== "pending_payment" ||
       row.payment_status !== "unpaid" ||
       row.payment_row_status !== "requires_action" ||
@@ -87,18 +96,19 @@ function decodeCardRow(row: CardRow | undefined, propertyId: string) {
       typeof row.account_ref !== "string")
   )
     throw new PricingCardPaymentError("unavailable");
-  return { history, quote, done, paid };
+  return { history, quote, done, paid, authorized };
 }
 
-/** Confirm a locked pending card booking from verified Stripe evidence. */
-async function applyCardPayment(
-  client: Queryable,
-  row: CardRow,
-  propertyId: string,
+/** The answer for a card request waiting for the hotel. */
+function requestedResult(
   decoded: ReturnType<typeof decodeCardRow>,
-  evidence: PaymentEvidence,
+  hostResponseDeadlineAt: string,
 ) {
-  const { history, quote, done } = decoded;
+  return { ...decoded.done, kind: "requested" as const, hostResponseDeadlineAt };
+}
+
+/** Stripe evidence must be this booking's own payment, for its exact amount. */
+function checkCardEvidence(row: CardRow, propertyId: string, evidence: PaymentEvidence) {
   let expectedMinor: number;
   try {
     expectedMinor = stripeAmountMinor(row.payment_amount, row.payment_currency);
@@ -114,6 +124,96 @@ async function applyCardPayment(
         evidence.metadata.bookingReference !== row.public_reference))
   )
     throw new PricingCardPaymentError("conflict", "Card payment does not match the booking");
+}
+
+/** Record a card request the guest authorised (Stripe `requires_capture`). The hotel has the
+ * legacy 24 hours from now to answer; the guest and the hotel get the request emails. */
+async function authorizeCardRequest(
+  client: Queryable,
+  row: CardRow,
+  propertyId: string,
+  decoded: ReturnType<typeof decodeCardRow>,
+  evidence: PaymentEvidence,
+) {
+  checkCardEvidence(row, propertyId, evidence);
+  if (decoded.quote.acceptanceMode !== "request") throw new PricingCardPaymentError("conflict");
+  if (evidence.status !== "requires_capture") throw new PricingCardPaymentError("pending");
+  const { history } = decoded;
+  const now = (await client.query("SELECT clock_timestamp() AS now")).rows[0].now as Date;
+  const occurredAt = now.toISOString();
+  const hostResponseDeadlineAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+  const payment = await client.query(
+    `UPDATE finance.payments SET status='authorized',authorized_at=$2::timestamptz,updated_at=$2::timestamptz,
+        payment_metadata=payment_metadata || '{"providerStatus":"requires_capture","reconciliationStatus":"authorized"}'::jsonb
+      WHERE id=$1 AND status='requires_action' RETURNING id`,
+    [row.payment_id, occurredAt],
+  );
+  const counts = (
+    await client.query(
+      `WITH changed AS (
+        UPDATE booking.guest_bookings SET payment_status='authorized',updated_at=$3::timestamptz,
+          booking_metadata=booking_metadata || jsonb_build_object('hostResponseDeadlineAt',$4::text)
+        WHERE id=$1 AND property_id=$2 AND lifecycle_status='pending_payment' AND payment_status='unpaid'
+        RETURNING id
+      ), event AS (
+        INSERT INTO booking.booking_status_events
+          (guest_booking_id,event_type,from_status,to_status,actor_type,public_visible,public_message,event_payload,occurred_at)
+        SELECT id,'guest_booking.payment_authorized','pending_payment','pending_payment','system',true,
+          'Card authorised. Your booking request is waiting for the hotel.',$5::jsonb,$3::timestamptz
+        FROM changed RETURNING id
+      ), summary AS (
+        UPDATE booking.direct_booking_summary_read_model SET payment_status='authorized',projected_at=$3::timestamptz
+        WHERE guest_booking_id IN (SELECT id FROM changed) RETURNING guest_booking_id
+      ) SELECT (SELECT count(*)::int FROM changed) AS bookings,(SELECT count(*)::int FROM event) AS events,
+        (SELECT count(*)::int FROM summary) AS summaries`,
+      [
+        history.bookingId,
+        propertyId,
+        occurredAt,
+        hostResponseDeadlineAt,
+        { provider: "stripe", paymentIntentId: evidence.paymentIntentId, acceptanceId: history.id },
+      ],
+    )
+  ).rows[0];
+  if (
+    payment.rowCount !== 1 ||
+    counts?.bookings !== 1 ||
+    counts.events !== 1 ||
+    counts.summaries !== 1
+  )
+    throw new PricingCardPaymentError("conflict");
+  await enqueueBookingTransitionNotifications(client, {
+    propertyId,
+    guestBookingId: history.bookingId,
+    occurredAt,
+    correlationId: history.command.requestId,
+    causationId: evidence.paymentIntentId,
+    actor: { type: "provider" },
+    source: "apps/api-replacement-booking-card-request",
+    transition: {
+      eventType: "guest_booking.payment_authorized",
+      fromStatus: "pending_payment",
+      toStatus: "pending_payment",
+      revision: history.id,
+    },
+  });
+  return requestedResult(decoded, hostResponseDeadlineAt);
+}
+
+/** Confirm a locked pending card booking from verified Stripe evidence. A captured card request
+ * is the hotel's acceptance (`guest_booking.accepted`, the acceptance email), by the hotel's
+ * user when it accepted in the PMS. */
+async function applyCardPayment(
+  client: Queryable,
+  row: CardRow,
+  propertyId: string,
+  decoded: ReturnType<typeof decodeCardRow>,
+  evidence: PaymentEvidence,
+  acceptedBy: string | null = null,
+) {
+  const { history, quote, done } = decoded;
+  const request = quote.acceptanceMode === "request";
+  checkCardEvidence(row, propertyId, evidence);
   if (evidence.status !== "succeeded") throw new PricingCardPaymentError("pending");
   const intent = evidence;
   const scale = pricingCurrencyScale(quote.stay.currency);
@@ -136,20 +236,21 @@ async function applyCardPayment(
   await client.query(
     `UPDATE finance.payments SET status='paid',paid_at=$2::timestamptz,updated_at=$2::timestamptz,
         payment_metadata=payment_metadata || '{"providerStatus":"succeeded","reconciliationStatus":"matched"}'::jsonb
-      WHERE id=$1 AND status='requires_action'`,
-    [row.payment_id, occurredAt],
+      WHERE id=$1 AND status=$3`,
+    [row.payment_id, occurredAt, request ? "authorized" : "requires_action"],
   );
   const confirmed = await client.query(
     `WITH changed AS (
         UPDATE booking.guest_bookings SET lifecycle_status='confirmed',payment_status=$3,
           balance_amount=$4::numeric,updated_at=$5::timestamptz
-        WHERE id=$1 AND property_id=$2 AND lifecycle_status='pending_payment' AND payment_status='unpaid'
+        WHERE id=$1 AND property_id=$2 AND lifecycle_status='pending_payment' AND payment_status=$7
         RETURNING id
       ), event AS (
         INSERT INTO booking.booking_status_events
-          (guest_booking_id,event_type,from_status,to_status,actor_type,public_visible,public_message,event_payload,occurred_at)
-        SELECT id,'guest_booking.payment_received','pending_payment','confirmed','system',true,
-          'Card payment received. Booking confirmed.',$6::jsonb,$5::timestamptz FROM changed RETURNING id
+          (guest_booking_id,event_type,from_status,to_status,actor_type,actor_user_id,public_visible,
+            public_message,event_payload,occurred_at)
+        SELECT id,$8,'pending_payment','confirmed',$9,$10::uuid,true,$11,$6::jsonb,$5::timestamptz
+        FROM changed RETURNING id
       ), summary AS (
         UPDATE booking.direct_booking_summary_read_model SET lifecycle_status='confirmed',payment_status=$3,
           amount_summary=jsonb_set(amount_summary,'{balanceAmount}',to_jsonb($4::text)),projected_at=$5::timestamptz
@@ -163,6 +264,11 @@ async function applyCardPayment(
       balance,
       occurredAt,
       { provider: "stripe", paymentIntentId: intent.paymentIntentId, acceptanceId: history.id },
+      request ? "authorized" : "unpaid",
+      request ? "guest_booking.accepted" : "guest_booking.payment_received",
+      acceptedBy ? "property_user" : "system",
+      acceptedBy,
+      request ? "Booking request accepted." : "Card payment received. Booking confirmed.",
     ],
   );
   const counts = confirmed.rows[0];
@@ -184,10 +290,10 @@ async function applyCardPayment(
     occurredAt,
     correlationId: history.command.requestId,
     causationId: intent.paymentIntentId,
-    actor: { type: "provider" },
+    actor: acceptedBy ? { type: "user", userId: acceptedBy } : { type: "provider" },
     source: "apps/api-replacement-booking-card-payment",
     transition: {
-      eventType: "guest_booking.payment_received",
+      eventType: request ? "guest_booking.accepted" : "guest_booking.payment_received",
       fromStatus: "pending_payment",
       toStatus: "confirmed",
       revision: history.id,
@@ -256,17 +362,29 @@ export async function completePricingCardPayment(
       await client.query("COMMIT");
       return { ...decoded.done, replayed: true as const };
     }
+    if (decoded.authorized) {
+      await client.query("COMMIT");
+      return {
+        ...requestedResult(decoded, row!.booking_metadata.hostResponseDeadlineAt),
+        replayed: true as const,
+      };
+    }
     const intent = await provider.retrievePaymentIntent(
       row!.provider_payment_intent_id,
       row!.account_ref,
     );
-    const done = await applyCardPayment(client, row!, propertyId, decoded, {
+    const evidence = {
       paymentIntentId: intent.paymentIntentId,
       status: intent.status,
       amountMinor: intent.amountMinor,
       currency: intent.currency,
       metadata: { propertyId: intent.propertyId, bookingReference: intent.bookingReference },
-    });
+    };
+    // A request is only authorised here; the hotel's acceptance captures it.
+    const done =
+      decoded.quote.acceptanceMode === "request"
+        ? await authorizeCardRequest(client, row!, propertyId, decoded, evidence)
+        : await applyCardPayment(client, row!, propertyId, decoded, evidence);
     await client.query("COMMIT");
     return { ...done, replayed: false as const };
   } catch (error) {
@@ -322,6 +440,118 @@ export async function settlePricingCardPayment(
   return "settled";
 }
 
+/** The hotel accepted a card request and Stripe captured it: confirm it from its acceptance under
+ * the booking row lock the PMS accept command already holds. No inventory lock: the capture's
+ * webhook settles inventory lock first and must not deadlock with the accept. Idempotent. */
+export async function confirmCapturedPricingCardRequest(
+  client: Queryable,
+  propertyId: string,
+  guestBookingId: string,
+  evidence: PaymentEvidence,
+  acceptedBy: string | null,
+) {
+  const row = (
+    await client.query(
+      `${CARD_ROW_SELECT} WHERE a.property_id=$1 AND a.guest_booking_id=$2 FOR UPDATE OF b`,
+      [propertyId, guestBookingId],
+    )
+  ).rows[0] as CardRow | undefined;
+  const decoded = decodeCardRow(row, propertyId);
+  if (decoded.paid) return decoded.done;
+  if (!decoded.authorized) throw new PricingCardPaymentError("unavailable");
+  return applyCardPayment(client, row!, propertyId, decoded, evidence, acceptedBy);
+}
+
+/** Record a card request Stripe reports as authorised, inside the caller's transaction (the
+ * expiry sweep, when the guest left before the page confirmed it). Idempotent. */
+export async function authorizePricingCardRequest(
+  client: Queryable,
+  propertyId: string,
+  input: { paymentIntentId: string; amountMinor: number; currency: string },
+): Promise<"authorized" | "already_authorized"> {
+  const row = await lockCardRow(
+    client,
+    propertyId,
+    "a.property_id=$1 AND p.provider_payment_intent_id=$2",
+    [propertyId, input.paymentIntentId],
+  );
+  const decoded = decodeCardRow(row, propertyId);
+  if (decoded.authorized || decoded.paid) return "already_authorized";
+  await authorizeCardRequest(client, row!, propertyId, decoded, {
+    ...input,
+    status: "requires_capture",
+  });
+  return "authorized";
+}
+
+/** Cancel the card hold of a pricing-v2 card booking the guest withdraws, before the booking
+ * changes: an authorised request, or a card payment not made yet. The caller holds the booking
+ * row lock. A payment Stripe already took is refused (conflict), never cancelled here. */
+export async function voidPricingCardPayment(
+  client: Queryable,
+  provider: StripeBookingPaymentProvider | undefined,
+  input: { propertyId: string; guestBookingId: string; occurredAt: Date; commandKey: string },
+): Promise<"voided" | "none"> {
+  const row = (
+    await client.query(
+      `SELECT p.id,p.status,p.provider_payment_intent_id AS intent,acct.provider_account_id AS account,
+        b.public_reference
+      FROM booking.guest_bookings b
+      JOIN finance.payments p ON p.id=b.active_card_payment_id AND p.property_id=b.property_id
+      LEFT JOIN finance.payment_provider_accounts acct ON acct.id=p.provider_account_id
+        AND acct.property_id=p.property_id
+      WHERE b.id=$1 AND b.property_id=$2 AND b.booking_metadata->>'targetSource'='pricing_quote_draft'
+      FOR UPDATE OF p`,
+      [input.guestBookingId, input.propertyId],
+    )
+  ).rows[0];
+  if (!row || row.status === "canceled") return "none";
+  if (
+    !["requires_action", "authorized"].includes(row.status) ||
+    typeof row.intent !== "string" ||
+    typeof row.account !== "string" ||
+    !provider
+  )
+    throw new PricingCardPaymentError("conflict");
+  const check = (
+    intent: Awaited<ReturnType<StripeBookingPaymentProvider["retrievePaymentIntent"]>>,
+  ) => {
+    if (
+      intent.paymentIntentId !== row.intent ||
+      intent.propertyId !== input.propertyId ||
+      intent.bookingReference !== row.public_reference
+    )
+      throw new PricingCardPaymentError("conflict", "Card payment does not match the booking");
+    return intent;
+  };
+  let intent = check(await provider.retrievePaymentIntent(row.intent, row.account));
+  if (intent.status !== "canceled") {
+    if (![...CANCELABLE, "requires_capture"].includes(intent.status))
+      throw new PricingCardPaymentError("conflict", "The card payment was already taken");
+    try {
+      intent = check(
+        await provider.cancelPaymentIntent(
+          row.intent,
+          row.account,
+          // Per command: Stripe replays a key's first answer, failures included, for 24 hours.
+          `pricing-card-withdraw:${input.propertyId}:${input.guestBookingId}:${createHash("sha256").update(input.commandKey).digest("hex")}`,
+        ),
+      );
+    } catch (error) {
+      if (error instanceof PricingCardPaymentError) throw error;
+      intent = check(await provider.retrievePaymentIntent(row.intent, row.account));
+    }
+  }
+  if (intent.status !== "canceled") throw new PricingCardPaymentError("conflict");
+  await client.query(
+    `UPDATE finance.payments SET status='canceled',updated_at=$2::timestamptz,
+      payment_metadata=payment_metadata || '{"providerStatus":"canceled","reconciliationStatus":"canceled"}'::jsonb
+    WHERE id=$1`,
+    [row.id, input.occurredAt.toISOString()],
+  );
+  return "voided";
+}
+
 const CANCELABLE = ["requires_payment_method", "requires_confirmation", "requires_action"];
 
 /** Expiry sweep for an accepted card booking past `pendingExpiresAt`. Takes the inventory lock
@@ -333,7 +563,7 @@ export async function expirePricingCardBooking(
   provider: StripeBookingPaymentProvider,
   input: { propertyId: string; guestBookingId: string; now: Date },
   releaseRooms: (bookingMetadata: unknown) => Promise<void>,
-): Promise<"settled" | "expired" | "pending"> {
+): Promise<"settled" | "expired" | "pending" | "authorized"> {
   await lockPmsInventoryMutationScope(client as pg.PoolClient, input.propertyId);
   const row = (
     await client.query(
@@ -380,6 +610,16 @@ export async function expirePricingCardBooking(
   };
   let intent = check(await provider.retrievePaymentIntent(row.intent, row.account_ref));
   if (intent.status === "succeeded") return settle(intent);
+  // A guest who authorised a card request and left before the page confirmed it: the request
+  // now waits for the hotel instead of expiring.
+  if (intent.status === "requires_capture") {
+    await authorizePricingCardRequest(client, input.propertyId, {
+      paymentIntentId: row.intent,
+      amountMinor: intent.amountMinor,
+      currency: intent.currency,
+    });
+    return "authorized";
+  }
   if (CANCELABLE.includes(intent.status)) {
     try {
       intent = check(

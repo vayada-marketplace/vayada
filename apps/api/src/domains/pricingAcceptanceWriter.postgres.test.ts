@@ -24,6 +24,11 @@ import { finishCurrentQuoteAcceptanceTime } from "./currentQuoteAcceptanceTime.j
 import { pricingRoomRevenueProjection } from "./pricingRoomRevenueProjection.js";
 import { parseBookingQuoteAcceptanceInput } from "./bookingQuoteAcceptanceInput.js";
 import { createTargetPmsOperationsCommandRepository } from "./pmsOperationsCommandRepository.js";
+import { createBookingHostActions } from "./bookingHostActions.js";
+import { createTargetBookingWebCheckoutAdapter } from "../routes/bookingWebPublic.js";
+import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
+import { targetBookingHostActionGuards } from "./bookingHostActionGuards.js";
+import { createFinanceHostBookingPayments } from "./financeHostBookingPayments.js";
 import type { PmsOperationsReadRepository } from "../routes/pmsOperations.js";
 import {
   createPgBookingLifecycleStore,
@@ -696,6 +701,715 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     },
   );
 
+  it("records a card request the guest authorised and starts the hotel's 24 hours", async () => {
+    const { fixture, slug, createPaymentIntent, retrievePaymentIntent, provider } =
+      await cardFixture(undefined, undefined, "request");
+    try {
+      const result = (await writePricingAcceptance(
+        fixture.pool,
+        fixture.input,
+        undefined,
+        { provider },
+        true,
+      )) as { bookingId: string; bookingReference: string };
+      const complete = () =>
+        completePricingCardPayment(fixture.pool, provider, {
+          slug,
+          quoteId: fixture.f.current.quote.quoteId,
+          requestId: fixture.f.command.requestId,
+        });
+      const intent = await createPaymentIntent({
+        amountMinor: Number(fixture.f.current.quote.evidence.dueNowMinor),
+        currency: fixture.f.current.quote.stay.currency,
+      });
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: result.bookingReference,
+      });
+      await expect(complete()).rejects.toMatchObject({ code: "pending" });
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: result.bookingReference,
+        status: "requires_capture",
+      });
+      const authorized = (await complete()) as { kind: string; hostResponseDeadlineAt: string };
+      expect(authorized).toMatchObject({
+        kind: "requested",
+        replayed: false,
+        bookingId: result.bookingId,
+        bookingReference: result.bookingReference,
+      });
+      const window = Date.parse(authorized.hostResponseDeadlineAt) - Date.now();
+      expect(window).toBeGreaterThan(24 * 3600_000 - 120_000);
+      expect(window).toBeLessThanOrEqual(24 * 3600_000);
+      const state = (
+        await fixture.observer.query(
+          `SELECT b.lifecycle_status,b.payment_status,p.status AS payment,s.payment_status AS summary,
+            b.booking_metadata->>'hostResponseDeadlineAt' AS deadline,
+            (SELECT count(*)::int FROM booking.nightly_revenue_evidence r WHERE r.guest_booking_id=b.id) AS revenue
+           FROM booking.guest_bookings b JOIN finance.payments p ON p.id=b.active_card_payment_id
+           JOIN booking.direct_booking_summary_read_model s ON s.guest_booking_id=b.id
+           WHERE b.property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows[0];
+      expect(state).toEqual({
+        lifecycle_status: "pending_payment",
+        payment_status: "authorized",
+        payment: "authorized",
+        summary: "authorized",
+        deadline: authorized.hostResponseDeadlineAt,
+        revenue: 0,
+      });
+      const jobs = (
+        await fixture.observer.query(
+          `SELECT job_type,payload->>'recipientRole' AS role FROM platform.jobs WHERE property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows;
+      expect(jobs).toContainEqual({ job_type: "email.booking-request-received", role: "guest" });
+      expect(jobs.map((job) => job.job_type)).not.toContain(
+        "pms.reservation.accepted-pricing.create",
+      );
+      await expect(complete()).resolves.toMatchObject({
+        kind: "requested",
+        replayed: true,
+        hostResponseDeadlineAt: authorized.hostResponseDeadlineAt,
+      });
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider }, true),
+      ).resolves.toMatchObject({ kind: "replayed", bookingId: result.bookingId });
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("records an authorised card request when the guest retries after a lost confirmation", async () => {
+    const { fixture, retrievePaymentIntent, provider } = await cardFixture(
+      undefined,
+      undefined,
+      "request",
+    );
+    try {
+      const accepted = (await writePricingAcceptance(
+        fixture.pool,
+        fixture.input,
+        undefined,
+        { provider },
+        true,
+      )) as { bookingId: string; bookingReference: string };
+      const intent = await retrievePaymentIntent();
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: accepted.bookingReference,
+        status: "requires_capture",
+      });
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider }, true),
+      ).resolves.toMatchObject({ kind: "replayed", bookingId: accepted.bookingId });
+      const state = (
+        await fixture.observer.query(
+          `SELECT lifecycle_status,payment_status,booking_metadata ? 'hostResponseDeadlineAt' AS deadline
+           FROM booking.guest_bookings WHERE property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows;
+      expect(state).toEqual([
+        { lifecycle_status: "pending_payment", payment_status: "authorized", deadline: true },
+      ]);
+      // The next retry is a plain replay too, and records nothing twice.
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider }, true),
+      ).resolves.toMatchObject({ kind: "replayed" });
+      expect(
+        (
+          await fixture.observer.query(
+            `SELECT count(*)::int AS n FROM booking.booking_status_events
+             WHERE guest_booking_id=$1 AND event_type='guest_booking.payment_authorized'`,
+            [accepted.bookingId],
+          )
+        ).rows[0].n,
+      ).toBe(1);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("captures an authorised card request when the hotel accepts, once", async () => {
+    const { fixture, slug, createPaymentIntent, retrievePaymentIntent, cancelPaymentIntent } =
+      await cardFixture(undefined, undefined, "request");
+    const capturePaymentIntent = vi.fn();
+    const provider = {
+      createPaymentIntent,
+      retrievePaymentIntent,
+      cancelPaymentIntent,
+      capturePaymentIntent,
+    } as never;
+    const pmsPool = new pg.Pool({ connectionString: url, max: 2 });
+    const pms = createTargetPmsOperationsCommandRepository({
+      connectionString: url!,
+      pool: pmsPool,
+      stripePaymentProvider: provider,
+      readRepository: {
+        findReservationByGuestBookingId: async () => ({}),
+      } as unknown as PmsOperationsReadRepository,
+    });
+    const hotelUser = randomUUID();
+    const accept = (bookingId: string) =>
+      pms.acceptBooking({
+        propertyId: fixture.propertyId,
+        guestBookingId: bookingId,
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+        audit: {
+          actor: { kind: "user", userId: hotelUser, organizationId: fixture.organizationId },
+          requestId: randomUUID(),
+          reason: "Request accepted",
+          requestedAt: new Date().toISOString(),
+        },
+      });
+    try {
+      await fixture.observer.query(
+        "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
+        [hotelUser, `${hotelUser}@example.test`],
+      );
+      const accepted = (await writePricingAcceptance(
+        fixture.pool,
+        fixture.input,
+        undefined,
+        { provider },
+        true,
+      )) as { bookingId: string; bookingReference: string };
+      const intent = {
+        ...(await createPaymentIntent({
+          amountMinor: Number(fixture.f.current.quote.evidence.dueNowMinor),
+          currency: fixture.f.current.quote.stay.currency,
+        })),
+        bookingReference: accepted.bookingReference,
+      };
+      retrievePaymentIntent.mockResolvedValue({ ...intent, status: "requires_capture" });
+      await completePricingCardPayment(fixture.pool, provider, {
+        slug,
+        quoteId: fixture.f.current.quote.quoteId,
+        requestId: fixture.f.command.requestId,
+      });
+      // A hold Stripe will not capture leaves the request with the hotel.
+      capturePaymentIntent.mockResolvedValueOnce({ ...intent, status: "canceled" });
+      await expect(accept(accepted.bookingId)).resolves.toMatchObject({
+        ok: false,
+        code: "invalid_status_transition",
+      });
+      const state = async () =>
+        (
+          await fixture.observer.query(
+            `SELECT b.lifecycle_status,b.payment_status,p.status AS payment,s.lifecycle_status AS summary,
+              (SELECT actor_user_id::text FROM booking.booking_status_events e
+                WHERE e.guest_booking_id=b.id AND e.event_type='guest_booking.accepted') AS accepted_by,
+              (SELECT count(*)::int FROM booking.nightly_revenue_evidence r WHERE r.guest_booking_id=b.id) AS revenue
+             FROM booking.guest_bookings b JOIN finance.payments p ON p.id=b.active_card_payment_id
+             JOIN booking.direct_booking_summary_read_model s ON s.guest_booking_id=b.id
+             WHERE b.property_id=$1`,
+            [fixture.propertyId],
+          )
+        ).rows[0];
+      expect(await state()).toMatchObject({
+        lifecycle_status: "pending_payment",
+        payment_status: "authorized",
+        payment: "authorized",
+      });
+
+      capturePaymentIntent.mockResolvedValue({ ...intent, status: "succeeded" });
+      await expect(accept(accepted.bookingId)).resolves.toMatchObject({ ok: true });
+      expect(capturePaymentIntent).toHaveBeenLastCalledWith(
+        "pi_writer_test",
+        "acct_writer_test",
+        expect.stringMatching(
+          new RegExp(
+            `^pricing-card-request-capture:${fixture.propertyId}:${accepted.bookingId}:[0-9a-f]{64}$`,
+          ),
+        ),
+      );
+      await fixture.observer.query(
+        "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
+        [fixture.propertyId],
+      );
+      const confirmed = await state();
+      expect(confirmed).toMatchObject({
+        lifecycle_status: "confirmed",
+        payment_status: "paid",
+        payment: "paid",
+        summary: "confirmed",
+        accepted_by: hotelUser,
+      });
+      expect(confirmed.revenue).toBeGreaterThan(0);
+      const jobs = (
+        await fixture.observer.query("SELECT job_type FROM platform.jobs WHERE property_id=$1", [
+          fixture.propertyId,
+        ])
+      ).rows.map((row) => row.job_type);
+      expect(jobs).toContain("email.booking-accepted");
+      expect(jobs).toContain("pms.reservation.accepted-pricing.create");
+      expect(jobs).not.toContain("email.booking-final-confirmation");
+
+      // Stripe's capture webhook and a second click change nothing.
+      await expect(
+        settleStripeBookingPayment(fixture.observer, {
+          paymentIntentId: "pi_writer_test",
+          amountMinor: intent.amountMinor,
+          currency: intent.currency,
+          occurredAt: new Date(),
+          correlationId: "capture-webhook",
+        }),
+      ).resolves.toBe("already_settled");
+      await expect(accept(accepted.bookingId)).resolves.toMatchObject({ ok: false });
+      expect(capturePaymentIntent).toHaveBeenCalledTimes(2);
+      expect((await state()).revenue).toBe(confirmed.revenue);
+    } finally {
+      await pmsPool.end();
+      await fixture.close();
+    }
+  });
+
+  // An authorised pricing-v2 card request, as the guest's confirm call leaves it.
+  async function authorisedCardRequest() {
+    const card = await cardFixture(undefined, undefined, "request");
+    const capturePaymentIntent = vi.fn();
+    const provider = {
+      createPaymentIntent: card.createPaymentIntent,
+      retrievePaymentIntent: card.retrievePaymentIntent,
+      cancelPaymentIntent: card.cancelPaymentIntent,
+      capturePaymentIntent,
+    } as never;
+    const accepted = (await writePricingAcceptance(
+      card.fixture.pool,
+      card.fixture.input,
+      undefined,
+      { provider },
+      true,
+    )) as { bookingId: string; bookingReference: string };
+    const intent = {
+      ...(await card.createPaymentIntent({
+        amountMinor: Number(card.fixture.f.current.quote.evidence.dueNowMinor),
+        currency: card.fixture.f.current.quote.stay.currency,
+      })),
+      bookingReference: accepted.bookingReference,
+    };
+    card.retrievePaymentIntent.mockResolvedValue({ ...intent, status: "requires_capture" });
+    const authorized = (await completePricingCardPayment(card.fixture.pool, provider, {
+      slug: card.slug,
+      quoteId: card.fixture.f.current.quote.quoteId,
+      requestId: card.fixture.f.command.requestId,
+    })) as { hostResponseDeadlineAt: string };
+    const hotelUser = randomUUID();
+    await card.fixture.observer.query(
+      "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
+      [hotelUser, `${hotelUser}@example.test`],
+    );
+    const status = async () =>
+      (
+        await card.fixture.observer.query(
+          `SELECT b.lifecycle_status,b.payment_status,p.status AS payment
+           FROM booking.guest_bookings b JOIN finance.payments p ON p.id=b.active_card_payment_id
+           WHERE b.id=$1`,
+          [accepted.bookingId],
+        )
+      ).rows[0];
+    return {
+      ...card,
+      provider,
+      capturePaymentIntent,
+      accepted,
+      intent,
+      authorized,
+      hotelUser,
+      status,
+    };
+  }
+
+  it("never captures a hold after the hotel's deadline or one that is not the booking's own", async () => {
+    const card = await authorisedCardRequest();
+    const pmsPool = new pg.Pool({ connectionString: url, max: 2 });
+    const pms = createTargetPmsOperationsCommandRepository({
+      connectionString: url!,
+      pool: pmsPool,
+      stripePaymentProvider: card.provider,
+      readRepository: {
+        findReservationByGuestBookingId: async () => ({}),
+      } as unknown as PmsOperationsReadRepository,
+    });
+    const accept = () =>
+      pms.acceptBooking({
+        propertyId: card.fixture.propertyId,
+        guestBookingId: card.accepted.bookingId,
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+        audit: {
+          actor: {
+            kind: "user",
+            userId: card.hotelUser,
+            organizationId: card.fixture.organizationId,
+          },
+          requestId: randomUUID(),
+          reason: "Request accepted",
+          requestedAt: new Date().toISOString(),
+        },
+      });
+    try {
+      await card.fixture.observer.query(
+        `UPDATE booking.guest_bookings SET booking_metadata=jsonb_set(booking_metadata,
+          '{hostResponseDeadlineAt}',to_jsonb((clock_timestamp()-interval '1 minute')::text)) WHERE id=$1`,
+        [card.accepted.bookingId],
+      );
+      await expect(accept()).resolves.toMatchObject({ ok: false });
+      await card.fixture.observer.query(
+        `UPDATE booking.guest_bookings SET booking_metadata=jsonb_set(booking_metadata,
+          '{hostResponseDeadlineAt}',to_jsonb((clock_timestamp()+interval '1 hour')::text)) WHERE id=$1`,
+        [card.accepted.bookingId],
+      );
+      card.retrievePaymentIntent.mockResolvedValue({
+        ...card.intent,
+        status: "requires_capture",
+        amountMinor: card.intent.amountMinor + 1,
+      });
+      await expect(accept()).resolves.toMatchObject({ ok: false });
+      card.retrievePaymentIntent.mockResolvedValue({
+        ...card.intent,
+        status: "requires_capture",
+        bookingReference: "VAY-SOMEONEELSE",
+      });
+      await expect(accept()).resolves.toMatchObject({ ok: false });
+      expect(card.capturePaymentIntent).not.toHaveBeenCalled();
+      expect(await card.status()).toEqual({
+        lifecycle_status: "pending_payment",
+        payment_status: "authorized",
+        payment: "authorized",
+      });
+    } finally {
+      await pmsPool.end();
+      await card.fixture.close();
+    }
+  });
+
+  it("voids the hold and releases the rooms when the hotel declines a card request", async () => {
+    const card = await authorisedCardRequest();
+    const hostPool = new pg.Pool({ connectionString: url, max: 2 });
+    const released: unknown[] = [];
+    const actions = createBookingHostActions({
+      pool: hostPool,
+      guards: {
+        ...targetBookingHostActionGuards,
+        payment: createFinanceHostBookingPayments(card.provider),
+      },
+      inventory: {
+        reserve: async () => null,
+        async release({ reservation }) {
+          released.push(reservation);
+        },
+      },
+    });
+    try {
+      card.cancelPaymentIntent.mockResolvedValue({ ...card.intent, status: "canceled" });
+      const scope = {
+        propertyId: card.fixture.propertyId,
+        bookingId: card.accepted.bookingId,
+        actorUserId: card.hotelUser,
+      };
+      const preview = await actions.preview(scope, { action: "reject", reason: "Fully booked" });
+      await expect(actions.apply(scope, preview.previewId, "decline-card")).resolves.toEqual({
+        bookingId: card.accepted.bookingId,
+        lifecycleStatus: "declined",
+      });
+      expect(card.cancelPaymentIntent).toHaveBeenCalledOnce();
+      expect(card.capturePaymentIntent).not.toHaveBeenCalled();
+      expect(released).toHaveLength(1);
+      expect(await card.status()).toEqual({
+        lifecycle_status: "declined",
+        payment_status: "failed",
+        payment: "canceled",
+      });
+    } finally {
+      await actions.close();
+      await hostPool.end().catch(() => undefined);
+      await card.fixture.close();
+    }
+  });
+
+  it("cancels the hold and releases the rooms when the hotel lets a card request expire", async () => {
+    const card = await authorisedCardRequest();
+    const sweepPool = new pg.Pool({ connectionString: url, max: 2 });
+    const released: unknown[] = [];
+    const store = createPgBookingLifecycleStore({
+      connectionString: url!,
+      pool: sweepPool,
+      stripePaymentProvider: card.provider,
+      inventoryReservationPort: {
+        reserve: async () => null,
+        async release({ reservation }) {
+          released.push(reservation);
+        },
+      },
+    });
+    try {
+      await card.fixture.observer.query(
+        "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Rome')",
+        [card.fixture.propertyId],
+      );
+      card.cancelPaymentIntent.mockResolvedValue({ ...card.intent, status: "canceled" });
+      const deadline = Date.parse(card.authorized.hostResponseDeadlineAt);
+      const sweep = (now: number) =>
+        runBookingLifecycleSchedulerJobs(store, {
+          now: new Date(now),
+          run: ["pendingBookingExpiry"],
+        });
+      await sweep(deadline - 60_000);
+      expect(card.cancelPaymentIntent).not.toHaveBeenCalled();
+      const run = await sweep(deadline + 1_000);
+      expect(run.failed).toBe(0);
+      expect(card.cancelPaymentIntent).toHaveBeenCalledOnce();
+      expect(released).toHaveLength(1);
+      expect(await card.status()).toMatchObject({
+        lifecycle_status: "expired",
+        payment: "canceled",
+      });
+      const jobs = (
+        await card.fixture.observer.query(
+          "SELECT job_type FROM platform.jobs WHERE property_id=$1",
+          [card.fixture.propertyId],
+        )
+      ).rows.map((row) => row.job_type);
+      expect(jobs).toContain("email.booking-expired");
+      expect(card.capturePaymentIntent).not.toHaveBeenCalled();
+    } finally {
+      await store.close();
+      await sweepPool.end().catch(() => undefined);
+      await card.fixture.close();
+    }
+  });
+
+  it("confirms a card request Stripe captured outside the hotel's accept", async () => {
+    const card = await authorisedCardRequest();
+    try {
+      await expect(
+        settleStripeBookingPayment(card.fixture.observer, {
+          paymentIntentId: "pi_writer_test",
+          amountMinor: card.intent.amountMinor,
+          currency: card.intent.currency,
+          occurredAt: new Date(),
+          correlationId: "captured-elsewhere",
+        }),
+      ).resolves.toBe("settled");
+      expect(await card.status()).toEqual({
+        lifecycle_status: "confirmed",
+        payment_status: "paid",
+        payment: "paid",
+      });
+      const event = (
+        await card.fixture.observer.query(
+          `SELECT actor_type,actor_user_id FROM booking.booking_status_events
+           WHERE guest_booking_id=$1 AND event_type='guest_booking.accepted'`,
+          [card.accepted.bookingId],
+        )
+      ).rows;
+      expect(event).toEqual([{ actor_type: "system", actor_user_id: null }]);
+      const jobs = (
+        await card.fixture.observer.query(
+          "SELECT job_type FROM platform.jobs WHERE property_id=$1",
+          [card.fixture.propertyId],
+        )
+      ).rows.map((row) => row.job_type);
+      expect(jobs).toContain("email.booking-accepted");
+      expect(jobs).toContain("pms.reservation.accepted-pricing.create");
+      await card.fixture.observer.query(
+        "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
+        [card.fixture.propertyId],
+      );
+    } finally {
+      await card.fixture.close();
+    }
+  });
+
+  it("lets the guest withdraw an authorised card request: hold cancelled, rooms released", async () => {
+    const card = await authorisedCardRequest();
+    try {
+      await card.fixture.observer.query(
+        "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Rome')",
+        [card.fixture.propertyId],
+      );
+      card.cancelPaymentIntent.mockResolvedValue({ ...card.intent, status: "canceled" });
+      const { released } = await withdrawAsGuest(
+        card.fixture,
+        card.slug,
+        card.accepted.bookingId,
+        card.provider,
+      );
+      expect(card.cancelPaymentIntent).toHaveBeenCalledWith(
+        "pi_writer_test",
+        "acct_writer_test",
+        expect.stringMatching(
+          new RegExp(
+            `^pricing-card-withdraw:${card.fixture.propertyId}:${card.accepted.bookingId}:[0-9a-f]{64}$`,
+          ),
+        ),
+      );
+      expect(card.capturePaymentIntent).not.toHaveBeenCalled();
+      expect(released).toHaveLength(1);
+      expect(await card.status()).toEqual({
+        lifecycle_status: "canceled",
+        payment_status: "failed",
+        payment: "canceled",
+      });
+    } finally {
+      await card.fixture.close();
+    }
+  });
+
+  it("withdraws a card request whose cancel call failed once Stripe shows the hold cancelled", async () => {
+    const card = await authorisedCardRequest();
+    try {
+      await card.fixture.observer.query(
+        "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Rome')",
+        [card.fixture.propertyId],
+      );
+      card.cancelPaymentIntent.mockRejectedValueOnce(new Error("Stripe timeout"));
+      card.retrievePaymentIntent
+        .mockResolvedValueOnce({ ...card.intent, status: "requires_capture" })
+        .mockResolvedValueOnce({ ...card.intent, status: "canceled" });
+      await withdrawAsGuest(card.fixture, card.slug, card.accepted.bookingId, card.provider);
+      expect(await card.status()).toEqual({
+        lifecycle_status: "canceled",
+        payment_status: "failed",
+        payment: "canceled",
+      });
+    } finally {
+      await card.fixture.close();
+    }
+  });
+
+  it("cancels the open payment when a guest withdraws an instant card booking before paying", async () => {
+    const { fixture, slug, retrievePaymentIntent, cancelPaymentIntent, provider } =
+      await cardFixture();
+    try {
+      await fixture.observer.query(
+        "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Rome')",
+        [fixture.propertyId],
+      );
+      const accepted = (await writePricingAcceptance(fixture.pool, fixture.input, undefined, {
+        provider,
+      })) as { bookingId: string; bookingReference: string };
+      const intent = {
+        ...(await retrievePaymentIntent()),
+        bookingReference: accepted.bookingReference,
+      };
+      retrievePaymentIntent.mockResolvedValue(intent);
+      cancelPaymentIntent.mockResolvedValue({ ...intent, status: "canceled" });
+      const { released } = await withdrawAsGuest(fixture, slug, accepted.bookingId, provider);
+      expect(cancelPaymentIntent).toHaveBeenCalledOnce();
+      expect(released).toHaveLength(1);
+      const state = (
+        await fixture.observer.query(
+          `SELECT b.lifecycle_status,b.payment_status,p.status AS payment
+           FROM booking.guest_bookings b JOIN finance.payments p ON p.id=b.active_card_payment_id
+           WHERE b.id=$1`,
+          [accepted.bookingId],
+        )
+      ).rows[0];
+      expect(state).toEqual({
+        lifecycle_status: "canceled",
+        payment_status: "unpaid",
+        payment: "canceled",
+      });
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("refuses to withdraw a card request Stripe already captured, changing nothing", async () => {
+    const card = await authorisedCardRequest();
+    try {
+      await card.fixture.observer.query(
+        "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Rome')",
+        [card.fixture.propertyId],
+      );
+      card.retrievePaymentIntent.mockClear();
+      card.retrievePaymentIntent.mockResolvedValue({ ...card.intent, status: "succeeded" });
+      await expect(
+        withdrawAsGuest(card.fixture, card.slug, card.accepted.bookingId, card.provider),
+      ).rejects.toMatchObject({
+        statusCode: 409,
+        message: expect.stringContaining("card payment can't be withdrawn online"),
+      });
+      // The withdraw itself asked Stripe, and found the money already taken.
+      expect(card.retrievePaymentIntent).toHaveBeenCalledOnce();
+      expect(card.cancelPaymentIntent).not.toHaveBeenCalled();
+      expect(await card.status()).toEqual({
+        lifecycle_status: "pending_payment",
+        payment_status: "authorized",
+        payment: "authorized",
+      });
+    } finally {
+      await card.fixture.close();
+    }
+  });
+
+  it("records an authorised card request at its payment deadline instead of expiring it", async () => {
+    const { fixture, provider, retrievePaymentIntent, cancelPaymentIntent } = await cardFixture(
+      undefined,
+      undefined,
+      "request",
+    );
+    try {
+      const accepted = (await writePricingAcceptance(
+        fixture.pool,
+        fixture.input,
+        undefined,
+        { provider },
+        true,
+      )) as { bookingId: string; bookingReference: string };
+      const intent = await retrievePaymentIntent();
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: accepted.bookingReference,
+        status: "requires_capture",
+      });
+      const releaseRooms = vi.fn(async () => undefined);
+      const client = await fixture.pool.connect();
+      try {
+        await client.query("BEGIN");
+        await expect(
+          expirePricingCardBooking(
+            client,
+            provider,
+            {
+              propertyId: fixture.propertyId,
+              guestBookingId: accepted.bookingId,
+              now: new Date(Date.now() + 31 * 60_000),
+            },
+            releaseRooms,
+          ),
+        ).resolves.toBe("authorized");
+        await client.query("COMMIT");
+      } finally {
+        client.release();
+      }
+      expect(cancelPaymentIntent).not.toHaveBeenCalled();
+      expect(releaseRooms).not.toHaveBeenCalled();
+      const state = (
+        await fixture.observer.query(
+          `SELECT lifecycle_status,payment_status,booking_metadata ? 'hostResponseDeadlineAt' AS deadline
+           FROM booking.guest_bookings WHERE property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows[0];
+      expect(state).toEqual({
+        lifecycle_status: "pending_payment",
+        payment_status: "authorized",
+        deadline: true,
+      });
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("expires an unpaid card booking at its deadline, releases the rooms and never replays it as accepted", async () => {
     const { fixture, provider, retrievePaymentIntent, cancelPaymentIntent } = await cardFixture();
     try {
@@ -1000,6 +1714,111 @@ describe.skipIf(!url)("pricing acceptance writer requests (PostgreSQL)", () => {
     }
   });
 
+  it("lets the hotel decline a request: rooms released, guest told, no PMS job", async () => {
+    const fixture = await setupFixture((quote) =>
+      Object.assign(quote, { acceptanceMode: "request" }),
+    );
+    const hostPool = new pg.Pool({ connectionString: url, max: 2 });
+    const released: unknown[] = [];
+    const actions = createBookingHostActions({
+      pool: hostPool,
+      guards: targetBookingHostActionGuards,
+      inventory: {
+        reserve: async () => null,
+        async release({ reservation }) {
+          released.push(reservation);
+        },
+      },
+    });
+    const actorUserId = randomUUID();
+    try {
+      mockOwners(fixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      const requested = await writePricingAcceptance(
+        fixture.pool,
+        fixture.input,
+        undefined,
+        undefined,
+        true,
+      );
+      await fixture.observer.query(
+        "INSERT INTO identity.users (id,email,status) VALUES ($1,$2,'active')",
+        [actorUserId, `${actorUserId}@example.test`],
+      );
+      const scope = { propertyId: fixture.propertyId, bookingId: requested.bookingId, actorUserId };
+      const preview = await actions.preview(scope, { action: "reject", reason: "Fully booked" });
+      await expect(actions.apply(scope, preview.previewId, "decline")).resolves.toEqual({
+        bookingId: requested.bookingId,
+        lifecycleStatus: "declined",
+      });
+      expect(released).toEqual([
+        parsePmsInventoryReservationBundle(acceptanceFixture().inventory_reservation_bundle),
+      ]);
+      const jobs = (
+        await fixture.observer.query(
+          "SELECT job_type FROM platform.jobs WHERE property_id=$1 ORDER BY job_type",
+          [fixture.propertyId],
+        )
+      ).rows.map((row) => row.job_type);
+      expect(jobs).toContain("email.booking-rejected");
+      expect(jobs.filter((job) => job.startsWith("pms."))).toEqual([]);
+      await expect(snapshot(fixture.observer, fixture)).resolves.toMatchObject({ revenue: 0 });
+    } finally {
+      await actions.close();
+      await hostPool.end().catch(() => undefined);
+      await fixture.close();
+    }
+  });
+
+  it("lets the guest withdraw a request: rooms released, no PMS job", async () => {
+    const fixture = await setupFixture((quote) =>
+      Object.assign(quote, { acceptanceMode: "request" }),
+    );
+    try {
+      mockOwners(fixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      const slug = `writer-${fixture.propertyId}`;
+      await fixture.observer.query(
+        "INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose) VALUES($1,$2,'canonical')",
+        [fixture.propertyId, slug],
+      );
+      await fixture.observer.query(
+        "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Rome')",
+        [fixture.propertyId],
+      );
+      const requested = await writePricingAcceptance(
+        fixture.pool,
+        fixture.input,
+        undefined,
+        undefined,
+        true,
+      );
+      const { released } = await withdrawAsGuest(fixture, slug, requested.bookingId);
+      expect(released).toEqual([
+        parsePmsInventoryReservationBundle(acceptanceFixture().inventory_reservation_bundle),
+      ]);
+      const state = (
+        await fixture.observer.query(
+          "SELECT lifecycle_status,payment_status FROM booking.guest_bookings WHERE id=$1",
+          [requested.bookingId],
+        )
+      ).rows[0];
+      expect(state).toEqual({ lifecycle_status: "canceled", payment_status: "unpaid" });
+      const jobs = (
+        await fixture.observer.query("SELECT job_type FROM platform.jobs WHERE property_id=$1", [
+          fixture.propertyId,
+        ])
+      ).rows.map((row) => row.job_type);
+      expect(jobs.filter((job) => job.startsWith("pms."))).toEqual([]);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("expires an unanswered request: rooms released, guest and hotel told", async () => {
     const fixture = await setupFixture((quote) =>
       Object.assign(quote, { acceptanceMode: "request" }),
@@ -1109,6 +1928,48 @@ function inCurrency(quote: Fixture["f"]["current"]["quote"], currency: string) {
   Object.assign(quote, scale(quote));
   Object.assign(quote.evidence, { currency });
   Object.assign(quote.stay, { currency });
+}
+
+/** Guest withdraw through the real booking-web adapter (its own transaction and command). */
+async function withdrawAsGuest(
+  fixture: Fixture,
+  slug: string,
+  bookingId: string,
+  provider?: never,
+) {
+  const pool = new pg.Pool({ connectionString: url, max: 2 });
+  const released: unknown[] = [];
+  const adapter = createTargetBookingWebCheckoutAdapter({
+    pool,
+    connectionString: url!,
+    externalChanges: externalBookingChanges,
+    inventoryReservationPort: {
+      reserve: async () => null,
+      async release({ reservation }: { reservation: unknown }) {
+        released.push(reservation);
+      },
+    } as never,
+    ...(provider ? { stripePaymentProvider: provider } : {}),
+  });
+  const key = randomUUID();
+  try {
+    const result = await adapter.withdraw(
+      slug,
+      bookingId,
+      { guest_email: fixture.f.command.guest.email },
+      {
+        operation: "booking-withdraw",
+        requestId: `request-${key}`,
+        correlationId: `correlation-${key}`,
+        idempotencyKey: key,
+        fingerprint: hash(key),
+        occurredAt: new Date(),
+      } as never,
+    );
+    return { result, released };
+  } finally {
+    await pool.end();
+  }
 }
 
 async function setupFixture(
