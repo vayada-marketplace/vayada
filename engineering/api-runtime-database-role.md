@@ -115,8 +115,9 @@ either (table or column level, including PUBLIC or inherited grants).
 | `booking.affiliate_referral_production_preflight_revocations`                                                                                                                                                                         | yes                          | revocation evidence with no API writer                                                       |
 
 Name patterns are a safety net for future tables: in `platform`, anything
-matching `^(production_|source_extraction_|legacy_|channex_adoption_|hotel_setup_|identity_migration_)`
-is write-protected, and `^(hotel_setup_|identity_migration_|legacy_historical_binding_)`
+matching `^(production_|source_extraction_|legacy_|channex_adoption_|hotel_setup_|identity_migration_|channex_management_worker_)`
+is write-protected (the last covers the owner-managed Channex worker scope tables, including the
+claimed operations from 0479), and `^(hotel_setup_|identity_migration_|legacy_historical_binding_)`
 or `^finance_.*_worker_properties$` is also read-protected (the Channex worker
 allowlist stays readable: the API reads it today). Outside `platform`,
 `^pms\.channex_room_availability_`, `^pms\.channex_ari_schedule_`,

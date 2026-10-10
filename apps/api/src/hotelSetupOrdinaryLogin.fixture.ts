@@ -52,7 +52,7 @@ const NO_WRITE = [
   "booking.affiliate_referral_production_preflight_revocations",
 ];
 const NO_WRITE_PATTERNS = [
-  /^platform\.(production_|source_extraction_|legacy_|channex_adoption_|identity_migration_)/,
+  /^platform\.(production_|source_extraction_|legacy_|channex_adoption_|identity_migration_|channex_management_worker_)/,
   /^pms\.channex_room_availability_/,
   /^pms\.channex_ari_schedule_/,
   /^(marketplace|booking)\.affiliate_click_/,
