@@ -24,6 +24,8 @@ export class PricingStorageError extends Error {
       | "stale"
       | "idempotency_conflict"
       | "currency_conversion_required",
+    /** Owner readiness reason the caller may act on (Finance readiness on prepare). */
+    readonly reason?: string,
   ) {
     super(code);
   }

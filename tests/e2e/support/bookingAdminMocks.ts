@@ -400,6 +400,17 @@ export async function mockBookingAdminShellRoutes(
       },
     }),
   );
+  await page.route(/\/api\/pms\/properties\/[^/]+\/navigation-modules$/, (route) =>
+    route.fulfill({
+      json: {
+        hotelId: BOOKING_ADMIN_PROPERTY_ID,
+        canManage: true,
+        supportedModules: ["inbox", "reviews"],
+        activeModules: ["inbox", "reviews"],
+        activations: [],
+      },
+    }),
+  );
   await page.route("**/admin/hotels", (route) =>
     route.fulfill({
       json: [

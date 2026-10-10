@@ -12,6 +12,7 @@ import {
   buildCalendarAutoOpenEventKey,
   buildCalendarAutoOpenJobKey,
   buildPmsChannexAriPushJob,
+  runPmsCalendarAutoOpenScheduler,
   runPmsChannexSchedulerJobs,
   type ChannexAriProvider,
   type ChannexAriProviderResult,
@@ -144,6 +145,39 @@ describe("PMS Channex ARI and calendar scheduler jobs", () => {
     expect(store.domainEvents.map((event) => event.eventKey)).toContain(
       `pms.calendar-auto-open:prop_alpenrose:2028-03-31:source-${candidate.sourceFingerprint}:v2`,
     );
+  });
+
+  it("runs only calendar auto-open from the provider-free scheduler entry point", async () => {
+    const candidate = calendarCandidate();
+    const store = new MemoryPmsChannexSchedulerStore({
+      incrementalAri: [ariCandidate()],
+      fullAri: [ariCandidate({ source: "full" })],
+      calendarAutoOpen: [candidate],
+    });
+
+    const result = await runPmsCalendarAutoOpenScheduler(
+      {
+        findCalendarAutoOpenCandidates: (now, limit) =>
+          store.findCalendarAutoOpenCandidates(now, limit),
+        enqueueCalendarAutoOpenJob: (next, context) =>
+          store.enqueueCalendarAutoOpenJob(next, context),
+      },
+      { now: fixedNow, limit: 10 },
+    );
+
+    expect(result).toMatchObject({
+      name: "calendarAutoOpen",
+      scanned: 1,
+      enqueued: 1,
+      autoOpenEnqueued: 1,
+      providerAttempts: 0,
+      autoOpenFailures: [],
+    });
+    expect(store.jobs).toEqual([]);
+    expect(store.providerAttempts).toEqual([]);
+    expect(store.idempotencyKeys).toEqual([
+      `pms.calendar-auto-open:property:prop_alpenrose:open-through-2028-03-31:source-${candidate.sourceFingerprint}:v2`,
+    ]);
   });
 
   it("reports one calendar enqueue failure without stopping later properties", async () => {

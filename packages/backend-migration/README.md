@@ -723,7 +723,7 @@ planner on the snapshot and the target's source links, and refuses the cohort
 (`COHORT_HOTEL_UNRESOLVED`, nothing written) when a cohort hotel would not
 resolve to exactly one canonical property or members disagree on membership.
 A different cohort for the same source run, or a stored cohort for a run started
-without `--cohort`, fails with `COHORT_CONFLICT`. Without `--cohort`, configuration and evidence hashes are unchanged; the target must carry migration 0474, as every target must match the deployed release.
+without `--cohort`, fails with `COHORT_CONFLICT`. Without `--cohort`, configuration and evidence hashes are unchanged; the target must carry migration 0480, as every target must match the deployed release.
 
 With a cohort, the identity step moves every hotel resource outside the cohort to
 the owner's archived quarantine organization (archived links, expired

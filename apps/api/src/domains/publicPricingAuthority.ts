@@ -1,10 +1,12 @@
 import type { PoolClient } from "pg";
-import { lockBookingPricingAuthority } from "./bookingPricingAuthority.js";
+import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import { lockCurrentPmsPricingEntitlement } from "./replacementPricingAuthorization.js";
 
 /** Internal public-access boundary. Caller owns a READ COMMITTED transaction and retains
  * its locks through source reads/acceptance. This does not validate rates, stay eligibility,
- * calendar/inventory, payment readiness or other pricing owners. Never accept a client scope. */
+ * calendar/inventory, payment readiness or other pricing owners. Never accept a client scope.
+ * The owning organization is the single one linked as owner/operator to both the PMS
+ * property and the catalog property (VAY-2079); none or several fail closed. */
 export async function lockPublicPricingAuthority(client: PoolClient, slug: unknown) {
   if (typeof slug !== "string" || !slug.length || slug.length > 200 || slug !== slug.trim())
     return null;
@@ -19,11 +21,10 @@ export async function lockPublicPricingAuthority(client: PoolClient, slug: unkno
   ).rows;
   if (candidates.length !== 1) return null;
   const propertyId = candidates[0].property_id as string;
-  // Inventory lock precedes identity/catalog locks, matching pricing publication and choice.
-  const authority = await lockBookingPricingAuthority(client, propertyId);
-  if (authority.authority !== "vayada" || !authority.organizationId || !authority.revision)
-    return null;
-  const organizationId = authority.organizationId;
+  // Inventory lock precedes identity/catalog locks, matching pricing publication writers.
+  await lockPmsInventoryMutationScope(client, propertyId);
+  const organizationId = await owningOrganization(client, propertyId);
+  if (!organizationId) return null;
   const organization = await client.query(
     `SELECT id FROM identity.organizations
     WHERE id=$1 AND kind='hotel_group' AND status='active' FOR UPDATE`,
@@ -63,8 +64,27 @@ export async function lockPublicPricingAuthority(client: PoolClient, slug: unkno
   ).rows;
   if (!links.some((r) => r.product === "pms") || !links.some((r) => r.product === "hotel_catalog"))
     return null;
+  // Separate statement after the link locks: a link added to another organization meanwhile
+  // makes ownership ambiguous.
+  if ((await owningOrganization(client, propertyId)) !== organizationId) return null;
   if (!(await lockCurrentPmsPricingEntitlement(client, organizationId, propertyId))) return null;
   const now = (await client.query("SELECT clock_timestamp() AS now")).rows[0].now as Date;
   if (profiles[0].expires_at && profiles[0].expires_at <= now) return null;
-  return { propertyId, organizationId, authorityRevision: authority.revision };
+  return { propertyId, organizationId };
+}
+
+/** The one organization with active owner/operator links to both the PMS and catalog
+ * property, or null when there is none or more than one. Discovery only: callers lock. */
+async function owningOrganization(client: PoolClient, propertyId: string) {
+  const owners = (
+    await client.query(
+      `SELECT organization_id FROM identity.organization_resource_links
+    WHERE resource_id=$1 AND status='active' AND relationship IN ('owner','operator')
+      AND ((product='pms' AND resource_type='pms_property')
+        OR (product='hotel_catalog' AND resource_type='property'))
+    GROUP BY organization_id HAVING count(DISTINCT product)=2`,
+      [propertyId],
+    )
+  ).rows;
+  return owners.length === 1 ? (owners[0].organization_id as string) : null;
 }

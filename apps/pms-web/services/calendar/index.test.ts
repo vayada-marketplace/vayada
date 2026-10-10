@@ -352,4 +352,118 @@ describe("calendarService manual-booking rates", () => {
       { id: "ota-booking", channel: "booking.com" },
     ]);
   });
+
+  // VAY-2065: the published currency wins, the legacy rate's currency is the fallback, and a
+  // room type from the room-facts flow has none, so custom rates leave it to the server.
+  it("takes the currency from the publication, else the legacy rate, else none", async () => {
+    const roomType = (roomTypeId: string, baseRate: unknown, ratePlans: unknown[]) => ({
+      roomTypeId,
+      name: roomTypeId,
+      category: null,
+      attributes: {},
+      occupancyLimits: { total: 2 },
+      baseRate,
+      roomCount: 1,
+      ratePlans,
+    });
+    const published = {
+      ratePlanId: "offer",
+      pricingContractVersion: "pricing.v2",
+      name: "Flexible",
+      rateType: "flexible",
+      baseRate: { amountDecimal: "150.00", currency: "CHF" },
+      active: true,
+    };
+    mocks.get.mockImplementation(async (route: string) =>
+      route.endsWith("/room-types")
+        ? {
+            items: [
+              roomType("published", { amountDecimal: "100.00", currency: "EUR" }, [published]),
+              roomType("legacy", { amountDecimal: "100.00", currency: "EUR" }, []),
+              roomType("setup-created", { amountDecimal: null, currency: null }, []),
+            ],
+          }
+        : route.endsWith("/rooms")
+          ? { items: [], orderVersion: "room-order-v1" }
+          : { items: [], pagination: { total: 0, limit: 500, offset: 0 } },
+    );
+
+    const result = await calendarService.getCalendarData("2026-08-20", "2026-08-24");
+
+    expect(result.roomTypes.map(({ id, currency, baseRate }) => [id, currency, baseRate])).toEqual([
+      ["published", "CHF", 100],
+      ["legacy", "EUR", 100],
+      ["setup-created", null, 0],
+    ]);
+  });
+});
+
+describe("calendarService room currency", () => {
+  // VAY-2068: a room's currency labels its legacy base rate, so both come from that rate. A
+  // room type from the room-facts flow has neither until prices are published, and the room
+  // must carry no currency rather than an invented EUR; its offers belong to the room type.
+  it("maps the room currency from the legacy rate, else none", async () => {
+    vi.clearAllMocks();
+    mocks.resolvePropertyId.mockResolvedValue("property-1");
+    const roomType = (roomTypeId: string, baseRate: unknown, ratePlans: unknown[]) => ({
+      roomTypeId,
+      name: roomTypeId,
+      category: null,
+      attributes: {},
+      occupancyLimits: { total: 2 },
+      baseRate,
+      roomCount: 1,
+      ratePlans,
+    });
+    const room = (roomId: string, roomTypeId: string) => ({
+      roomId,
+      roomTypeId,
+      roomNumber: roomId,
+      floor: "1",
+      status: "available",
+    });
+    const published = {
+      ratePlanId: "offer",
+      pricingContractVersion: "pricing.v2",
+      name: "Flexible",
+      rateType: "flexible",
+      baseRate: { amountDecimal: "150.00", currency: "CHF" },
+      active: true,
+    };
+    mocks.get.mockImplementation(async (route: string) =>
+      route.endsWith("/room-types")
+        ? {
+            items: [
+              roomType("published", { amountDecimal: "100.00", currency: "EUR" }, [published]),
+              roomType("legacy", { amountDecimal: "100.00", currency: "EUR" }, []),
+              roomType("setup-created", { amountDecimal: null, currency: null }, []),
+              roomType("setup-created-published", { amountDecimal: null, currency: null }, [
+                published,
+              ]),
+            ],
+          }
+        : route.endsWith("/rooms")
+          ? {
+              items: [
+                room("room-published", "published"),
+                room("room-legacy", "legacy"),
+                room("room-setup-created", "setup-created"),
+                room("room-setup-created-published", "setup-created-published"),
+                room("room-orphan", "unknown-room-type"),
+              ],
+              orderVersion: "room-order-v1",
+            }
+          : { items: [], pagination: { total: 0, limit: 500, offset: 0 } },
+    );
+
+    const result = await calendarService.getCalendarData("2026-08-20", "2026-08-24");
+
+    expect(result.rooms.map(({ id, currency, baseRate }) => [id, currency, baseRate])).toEqual([
+      ["room-published", "EUR", 100],
+      ["room-legacy", "EUR", 100],
+      ["room-setup-created", null, 0],
+      ["room-setup-created-published", null, 0],
+      ["room-orphan", null, 0],
+    ]);
+  });
 });
