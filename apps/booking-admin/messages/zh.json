@@ -509,6 +509,7 @@
   "settings.billing.switchFromNextMonth": "下月起切换",
   "settings.billing.cancelSwitch": "取消切换",
   "settings.billing.paymentMethods": "支付方式",
+  "settings.billing.comingSoon": "Xendit 和 vayada Payments 暂不支持在线银行卡支付。请选择 Stripe Connect 后保存。",
   "settings.billing.paymentMethodsDesc": "选择客人可用的支付方式。启用多种方式可为客人提供更多灵活性。",
   "settings.billing.onlineCard": "在线卡支付",
   "settings.billing.onlineCardDesc": "客人通过Stripe使用信用卡或借记卡在线支付",

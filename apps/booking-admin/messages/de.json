@@ -509,6 +509,7 @@
   "settings.billing.switchFromNextMonth": "Ab nächstem Monat wechseln",
   "settings.billing.cancelSwitch": "Wechsel abbrechen",
   "settings.billing.paymentMethods": "Zahlungsmethoden",
+  "settings.billing.comingSoon": "Xendit und vayada Payments können noch keine Online-Kartenzahlungen annehmen. Wählen Sie Stripe Connect, um zu speichern.",
   "settings.billing.paymentMethodsDesc": "Wählen Sie, welche Zahlungsoptionen für Gäste verfügbar sind. Aktivieren Sie mehrere, um Gästen Flexibilität zu bieten.",
   "settings.billing.onlineCard": "Online-Kartenzahlung",
   "settings.billing.onlineCardDesc": "Gast zahlt online mit Kredit- oder Debitkarte über Stripe",

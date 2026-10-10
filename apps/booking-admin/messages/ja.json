@@ -509,6 +509,7 @@
   "settings.billing.switchFromNextMonth": "来月から切り替え",
   "settings.billing.cancelSwitch": "切り替えをキャンセル",
   "settings.billing.paymentMethods": "支払い方法",
+  "settings.billing.comingSoon": "Xendit と vayada Payments はまだオンラインのカード決済に対応していません。保存するには Stripe Connect を選択してください。",
   "settings.billing.paymentMethodsDesc": "ゲストが利用できる支払いオプションを選択してください。複数有効にすることでゲストに柔軟性を提供できます。",
   "settings.billing.onlineCard": "オンラインカード",
   "settings.billing.onlineCardDesc": "ゲストがStripe経由でクレジットカードまたはデビットカードでオンライン決済",
