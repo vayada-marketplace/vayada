@@ -8,7 +8,7 @@ database_container="vayada-identity-rls-${RANDOM}${RANDOM}"
 trap 'docker rm -f "${database_container}" >/dev/null 2>&1 || true' EXIT
 
 docker run --detach --rm --name "${database_container}" \
-  --env POSTGRES_PASSWORD=postgres "postgres:${version}" >/dev/null
+  --env POSTGRES_PASSWORD=postgres "public.ecr.aws/docker/library/postgres:${version}-alpine" >/dev/null
 for _ in {1..30}; do
   # The image's temporary initialization server accepts socket connections only.
   docker exec "${database_container}" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1 && break

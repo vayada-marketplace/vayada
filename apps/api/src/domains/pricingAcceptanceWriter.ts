@@ -8,10 +8,17 @@ import { stagePricingBookingLifecycle } from "./pricingBookingLifecycle.js";
 import { stagePricingBookingRevenue } from "./pricingBookingRevenue.js";
 import { stagePmsAcceptedPricingReservationJob } from "./pricingPmsAcceptedReservationJob.js";
 import { storePricingAcceptance } from "./storePricingAcceptance.js";
+import {
+  pricingCardQuoteSupported,
+  pricingCardBookingId,
+  readPricingCardReplay,
+  startPricingCardPayment,
+} from "./pricingCardPayment.js";
+import type { StripeBookingPaymentProvider } from "./stripeBookingPayments.js";
 
 export class PricingAcceptanceError extends Error {
   constructor(
-    readonly code: "conflict" | "storage" | "unexpected",
+    readonly code: "conflict" | "storage" | "unexpected" | "card_unavailable",
     cause: unknown,
   ) {
     super("Pricing acceptance failed", { cause });
@@ -27,6 +34,7 @@ const conflictMessages = new Set([
   "Pricing booking draft is unavailable",
   "Pricing booking lifecycle is unavailable",
   "Pricing booking revenue is unavailable",
+  "Pricing card payment is unavailable",
 ]);
 
 export async function writePricingAcceptance(
@@ -38,6 +46,8 @@ export async function writePricingAcceptance(
   internal?:
     | { syntheticAffiliateContextId: string; affiliateContextId?: never }
     | { affiliateContextId: string; syntheticAffiliateContextId?: never },
+  /** Card quotes are accepted only with a payment provider (REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED). */
+  cardPayments?: { provider: StripeBookingPaymentProvider },
 ) {
   let client: pg.PoolClient | undefined;
   try {
@@ -47,12 +57,25 @@ export async function writePricingAcceptance(
   }
   try {
     await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
-    const prepared = await preparePricingAcceptance(client, input.slug, input.command);
+    const prepared = await preparePricingAcceptance(client, input.slug, input.command, {
+      card: cardPayments !== undefined,
+    });
     if (prepared.kind === "replayed") {
+      // A card acceptance that still awaits payment answers with the same payment; an
+      // expired one is a conflict, never the plain "accepted" replay.
+      const card = await readPricingCardReplay(
+        client,
+        cardPayments?.provider,
+        input.slug,
+        prepared,
+      );
       await client.query("COMMIT");
-      return prepared;
+      return card || prepared;
     }
-    const bookingId = randomUUID();
+    const bookingId =
+      cardPayments && pricingCardQuoteSupported(prepared.current.quote)
+        ? pricingCardBookingId(prepared.current.scope.propertyId, prepared.command.requestId)
+        : randomUUID();
     const publicReference = `VAY-${bookingId.replaceAll("-", "").toUpperCase()}`;
     await stagePricingBookingDraft(client, input.slug, {
       ...prepared,
@@ -67,6 +90,35 @@ export async function writePricingAcceptance(
       prepared.current,
       bookingId,
     );
+    if (cardPayments && pricingCardQuoteSupported(prepared.current.quote)) {
+      // Card: the quote is accepted now, while it is valid, and the rooms stay held with the
+      // booking `pending_payment`. Revenue, notifications and the PMS job follow the
+      // confirmed Stripe payment.
+      const accepted = await storePricingAcceptance(client, input.slug, prepared, lifecycle, null);
+      const intent = await startPricingCardPayment(client, cardPayments.provider, {
+        slug: input.slug,
+        current: prepared.current,
+        finance: prepared.finance,
+        bookingId,
+        publicReference,
+        requestId: prepared.command.requestId,
+        occurredAt: lifecycle.occurredAt,
+      });
+      await finishPricingAcceptance(client, input.slug, prepared.current, prepared.finance);
+      await client.query("COMMIT");
+      return {
+        kind: "payment_required" as const,
+        ...accepted,
+        bookingReference: publicReference,
+        payment: {
+          provider: "stripe" as const,
+          clientSecret: intent.clientSecret,
+          stripeAccountId: intent.providerAccountRef,
+          paymentIntentId: intent.paymentIntentId,
+          expiresAt: lifecycle.paymentDeadlineAt,
+        },
+      };
+    }
     const revenue = await stagePricingBookingRevenue(
       client,
       input.slug,
@@ -92,6 +144,8 @@ export async function writePricingAcceptance(
   } catch (error) {
     await client?.query("ROLLBACK").catch(() => undefined);
     if (error instanceof PricingAcceptanceError) throw error;
+    if (error instanceof Error && error.message === "Card acceptance unavailable")
+      throw new PricingAcceptanceError("card_unavailable", error);
     if (error instanceof Error && conflictMessages.has(error.message))
       throw new PricingAcceptanceError("conflict", error);
     if (

@@ -1,6 +1,7 @@
 import {
   isMinorAmount,
   isPositiveMinor,
+  pricingAmountStep,
   pricingInteger,
   pricingKeys,
   pricingObject,
@@ -20,20 +21,25 @@ const validDiscount = (v: unknown): v is Discount | null =>
       (v.kind === "fixed" &&
         pricingKeys(v, ["kind", "amountMinor"]) &&
         isPositiveMinor(v.amountMinor))));
-function reduction(base: bigint, discount: Discount | null): bigint {
+function reduction(base: bigint, discount: Discount | null, step: bigint): bigint {
   if (!discount) return 0n;
   if (discount.kind === "fixed")
     return BigInt(discount.amountMinor) < base ? BigInt(discount.amountMinor) : base;
-  // Round the remaining price half-up, matching the agreed PMS/Booking price arithmetic.
-  return base - (base * BigInt(10000 - discount.basisPoints) + 5000n) / 10000n;
+  // Round the remaining price half-up to the currency's price step (whole rupiah for IDR),
+  // matching the agreed PMS/Booking price arithmetic.
+  const remaining =
+    ((base * BigInt(10000 - discount.basisPoints) + 5000n * step) / (10000n * step)) * step;
+  return remaining < base ? base - remaining : 0n;
 }
 
 /** Pure Booking arithmetic for already eligible, same-currency owner inputs.
  * Not an eligibility evaluator: dates, hotel/room switches, usage, targeting and
  * revision checks belong to current owner reads before constructing this input.
  * Room amounts include PMS child/linked adjustments; meals and other charges are excluded.
- * Null discounts and zero eligible extras must be explicit owner results, never fallbacks. */
-export function composeReplacementDiscounts(input: unknown) {
+ * Null discounts and zero eligible extras must be explicit owner results, never fallbacks.
+ * `currency` only selects the rounding step for percentage discounts (VAY-2085). */
+export function composeReplacementDiscounts(input: unknown, currency: string) {
+  const step = BigInt(pricingAmountStep(currency));
   if (
     !pricingObject(input) ||
     !pricingKeys(input, ["rooms", "eligibleAddonMinor", "code", "stacking"]) ||
@@ -68,7 +74,7 @@ export function composeReplacementDiscounts(input: unknown) {
     rooms.push({
       selectionId: room.selectionId,
       amount,
-      lastMinute: reduction(amount, room.lastMinute),
+      lastMinute: reduction(amount, room.lastMinute, step),
       codeEligible: room.codeEligible,
     });
   }
@@ -79,7 +85,7 @@ export function composeReplacementDiscounts(input: unknown) {
   const codeBase = rooms
     .filter((r) => r.codeEligible)
     .reduce((sum, r) => sum + r.amount - (input.stacking ? r.lastMinute : 0n), addon);
-  const code = reduction(codeBase, input.code);
+  const code = reduction(codeBase, input.code, step);
   const useLastMinute = input.stacking || lastMinute >= code;
   const useCode = input.stacking || code > lastMinute;
   const lastMinuteLines = rooms
