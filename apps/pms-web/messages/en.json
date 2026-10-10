@@ -818,7 +818,7 @@
   "rooms.form.standardPlan": "(standard plan)",
   "rooms.form.tabDetails": "Room Details",
   "rooms.form.tabPricing": "Prices",
-  "rooms.form.pricingPointer": "Prices aren't set on this form. Save the room type, then publish its rates in Pricing.",
+  "rooms.form.pricingPointer": "Save the room type first, then set its prices in its Prices tab.",
   "rooms.form.openPricing": "Open Pricing",
   "rooms.form.tabMedia": "Images & Amenities",
   "rooms.form.roomTypeBasics": "Room Type Basics",

@@ -606,7 +606,7 @@ export const roomsService = {
 
   create: async (data: RoomTypeCreate) => {
     const propertyId = await resolveSelectedPmsPropertyId("creating room type");
-    // The same room-facts command as hotel setup; prices are published from PMS → Pricing.
+    // The same room-facts command as hotel setup; prices are published from the room's Prices tab.
     const facts = roomTypeFactsFromForm(data);
     const amenities = roomAmenityKeys(data.amenities ?? []);
     const location = roomTypeUpdatePayload(data);

@@ -1,37 +1,6 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { useMemo } from "react";
-import { PricingEditor } from "@/components/pricing/PricingEditor";
-import { errorText } from "@/components/pricing/pricingAmounts";
-import { usePricingRooms } from "@/components/pricing/usePricingRooms";
-import { useTranslation } from "@/lib/i18n";
-import { createReplacementPricingClient } from "@/services/api/replacementPricingClient";
-
+/** Prices moved into each room's Prices tab on Rooms & Rates (VAY-2093); old links land on the room list. */
 export default function PricingPage() {
-  const { rooms, error } = usePricingRooms();
-  const { t } = useTranslation();
-  const client = useMemo(
-    () => (rooms ? createReplacementPricingClient(rooms.propertyId) : null),
-    [rooms],
-  );
-  if (error)
-    return (
-      <p role="alert" className="p-8 text-red-700">
-        {errorText(error, t, "pricing.page.loadFailed")}
-      </p>
-    );
-  if (!rooms || !client)
-    return (
-      <p role="status" className="p-8">
-        {t("pricing.page.loading")}
-      </p>
-    );
-  return (
-    <PricingEditor
-      key={rooms.propertyId}
-      client={client}
-      roomNames={rooms.names}
-      setup={{ propertyId: rooms.propertyId, rooms: rooms.setupRooms }}
-    />
-  );
+  redirect("/rooms");
 }

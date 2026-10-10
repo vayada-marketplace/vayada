@@ -811,7 +811,7 @@
   "rooms.form.standardPlan": "(Standardtarif)",
   "rooms.form.tabDetails": "Zimmerdetails",
   "rooms.form.tabPricing": "Preise",
-  "rooms.form.pricingPointer": "Preise werden nicht in diesem Formular festgelegt. Speichern Sie den Zimmertyp und veröffentlichen Sie seine Preise dann unter „Preise“.",
+  "rooms.form.pricingPointer": "Speichern Sie zuerst den Zimmertyp und legen Sie dann im Tab „Preise“ seine Preise fest.",
   "rooms.form.openPricing": "Preise öffnen",
   "rooms.form.tabMedia": "Bilder & Ausstattung",
   "rooms.form.roomTypeBasics": "Zimmertyp-Grundlagen",
