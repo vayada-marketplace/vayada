@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { assertSafeTestDatabase } from "./testUtils.js";
@@ -196,5 +197,45 @@ describe.skipIf(!url)("Channex ongoing offer ARI storage", () => {
       f.job,
     ]);
     await expect(f.deliver()).rejects.toThrow("Active binding or job correlation mismatch");
+  });
+
+  it("leaves the API login only SELECT on the delivery tables", async () => {
+    assertSafeTestDatabase(url!);
+    // CI creates no runtime role before migrating, so run 0481's block as written against a role
+    // holding the VAY-2054 default DML, inside a transaction that rolls the role and grants back.
+    const migration = readFileSync(
+      new URL("../migrations/0481_channex_offer_ari_deliveries.sql", import.meta.url),
+      "utf8",
+    );
+    const revoke = migration.match(
+      /DO \$\$ BEGIN\n {2}IF EXISTS \(SELECT 1 FROM pg_roles WHERE rolname = 'vayada_next_api_runtime'\)[\s\S]*?END \$\$;/,
+    )?.[0];
+    expect(revoke).toBeDefined();
+    const tables = ["deliveries", "delivery_dates", "delivery_receipts"].map(
+      (name) => `pms.channex_offer_ari_${name}`,
+    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'vayada_next_api_runtime') THEN
+          CREATE ROLE vayada_next_api_runtime NOLOGIN;
+        END IF; END $$`);
+      await client.query(
+        `GRANT USAGE ON SCHEMA pms TO vayada_next_api_runtime;
+         GRANT SELECT, INSERT, UPDATE, DELETE ON ${tables.join(",")} TO vayada_next_api_runtime`,
+      );
+      await client.query(revoke!);
+      const privileges = await client.query(
+        `SELECT t AS "table", has_table_privilege('vayada_next_api_runtime', t, 'SELECT') AS read,
+           has_table_privilege('vayada_next_api_runtime', t, 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS write
+         FROM unnest($1::text[]) t`,
+        [tables],
+      );
+      expect(privileges.rows).toEqual(tables.map((table) => ({ table, read: true, write: false })));
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
   });
 });

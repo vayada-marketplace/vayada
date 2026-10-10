@@ -1,6 +1,7 @@
 -- VAY-2108: ongoing Channex offer ARI (engineering/channex-ongoing-offer-ari.md). Schema only: the
--- worker gets no grants or policies here, and the API login keeps its default privileges; the
--- delivery PR adds both with its boundary re-pin and the platform's protected-table pattern.
+-- worker gets no grants or policies here (the delivery PR adds them with its boundary re-pin), and
+-- the API login keeps only SELECT on the new tables. The platform's protected-table pattern for
+-- them ships before this migration, so its product-DML preflight expects the revoke below.
 SET LOCAL lock_timeout = '5s';
 
 -- Sales stay closed, also right after activation, until the audited open-sales command.
@@ -193,3 +194,12 @@ $$;
 CREATE TRIGGER channex_offer_ari_delivery_receipt_guard BEFORE INSERT OR UPDATE OR DELETE
   ON pms.channex_offer_ari_delivery_receipts FOR EACH ROW
   EXECUTE FUNCTION pms.guard_channex_offer_ari_delivery_receipt();
+
+-- The VAY-2054 default privileges would let the API login write deliveries outside the worker.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'vayada_next_api_runtime') THEN
+    REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+      ON pms.channex_offer_ari_deliveries, pms.channex_offer_ari_delivery_dates,
+        pms.channex_offer_ari_delivery_receipts FROM vayada_next_api_runtime;
+  END IF;
+END $$;

@@ -33,8 +33,9 @@ open-sales|close-sales` commands, which run through the reviewed platform runner
 database only. Opening re-sends every date once, because the initial values carry `stop_sell: true`.
 An open state always has `sales_state_changed_at`. Moving `active_version` (a new version or binding)
 resets the state to `closed`, so a new provider configuration never opens without a new command.
-The database does not stop the API login from writing the column; no API code does, and the delivery
-PR adds the API-login protection for the delivery tables.
+The database does not stop the API login from writing the column; no API code does. On the delivery
+tables 0481 leaves the API login only SELECT (a guarded revoke of the VAY-2054 default writes); the
+platform's protected-table pattern for them ships first, so its product-DML preflight expects that.
 
 ## Delivery
 
