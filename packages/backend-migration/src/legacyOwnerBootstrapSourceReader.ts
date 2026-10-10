@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AdoptionQueryClient } from "./channexAdoptionTargetRows.js";
 import { readSourceLedger } from "./channexAdoptionEvidence.js";
+import { LEGACY_OWNER_BOOTSTRAP_MAX_OWNERS } from "./legacyOwnerBootstrapPlan.js";
 import { hashSourceLedger, hashSnapshotIdentifier } from "./channexAdoptionManifestCrypto.js";
 import { expectedSourceTablesForLedger } from "./productionIdentitySnapshotReader.js";
 import { VAY_1350_INVENTORY_REVISION } from "./sourceExtraction.js";
@@ -36,7 +37,8 @@ type ProjectedRow = {
 /**
  * Historical snapshot association only, never current ownership or access.
  * Caller independently verifies environment, full visibility and an approved
- * request binding exact row hashes/ordinals + ledger hash to the eight pairs.
+ * request binding exact row hashes/ordinals + ledger hash to the cohort's pairs
+ * (one owner per cohort PMS hotel, VAY-1362 P19).
  * Output email is sensitive: consume in memory, never log/serialize to reports.
  */
 export async function readLegacyOwnerBootstrapSources(
@@ -56,9 +58,10 @@ export async function readLegacyOwnerBootstrapSources(
     !expected.sourceEnvironment?.trim() ||
     expected.sourceSchemaRevision !== VAY_1350_INVENTORY_REVISION ||
     !Array.isArray(expected.owners) ||
-    expected.owners.length !== 8 ||
-    new Set(expected.owners.map((o) => o.ownerId)).size !== 8 ||
-    new Set(expected.owners.map((o) => o.hotelId)).size !== 8 ||
+    expected.owners.length < 1 ||
+    expected.owners.length > LEGACY_OWNER_BOOTSTRAP_MAX_OWNERS ||
+    new Set(expected.owners.map((o) => o.ownerId)).size !== expected.owners.length ||
+    new Set(expected.owners.map((o) => o.hotelId)).size !== expected.owners.length ||
     expected.owners.some(
       (o) =>
         !uuid.test(o.ownerId) ||
@@ -108,14 +111,17 @@ export async function readLegacyOwnerBootstrapSources(
         pg_current_xact_id()::text
       FROM migration_source_pms.snapshot_rows
       WHERE run_id=$1 AND source_schema='public' AND source_table='hotels' AND row_data->>'id'=ANY($3::text[])
-      ) scoped ORDER BY database,id,ordinal LIMIT 17`,
+      ) scoped ORDER BY database,id,ordinal LIMIT ${2 * expected.owners.length + 1}`,
       [
         expected.sourceRunId,
         expected.owners.map((o) => o.ownerId),
         expected.owners.map((o) => o.hotelId),
       ],
     );
-    if (rows.length !== 16 || rows.some((row) => row.transactionId !== settings.transactionId))
+    if (
+      rows.length !== 2 * expected.owners.length ||
+      rows.some((row) => row.transactionId !== settings.transactionId)
+    )
       throw Error();
     return expected.owners.map((owner) => {
       const users = rows.filter((row) => row.database === "auth" && row.id === owner.ownerId);

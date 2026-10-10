@@ -349,9 +349,13 @@ marker). The later-wave path must exempt earlier waves first.
 
 ## Related constraints
 
-- The VAY-2017 owner bootstrap planner currently requires exactly eight owners
-  (`legacyOwnerBootstrapPlan.ts`). It must take the approved cohort of each
-  wave instead; wave 1 has three hotels, so this is a wave-1 prerequisite.
+- The VAY-2017 owner-bootstrap diagnostics take a wave's cohort: one distinct owner per cohort
+  PMS hotel (up to eight, the 0224 receipt limit), checked against the cohort file's ID sets
+  and run (`legacyOwnerBootstrapAssessment.ts`); they no longer require exactly eight owners.
+  The diagnostics write nothing: a cohort Channex hotel lands in the pending handover state only
+  when its owner is active in the target at import, which the owner preparation must achieve
+  before go-day. Not yet covered: one owner of two cohort hotels (likely Aether A and B), a
+  cohort PMS hotel without an owner, and owners of Booking-only cohort hotels.
 - **Later waves.** A later wave's hotels were imported as non-cohort (private
   quarantine) by every earlier run. The import refuses to change an existing
   disposition (`CATALOG_SOURCE_DISPOSITION_CONFLICT`), and the identity import

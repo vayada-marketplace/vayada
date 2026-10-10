@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { LEGACY_OWNER_BOOTSTRAP_MAX_OWNERS } from "./legacyOwnerBootstrapPlan.js";
+
 // PostgreSQL convert_to/textsend are STABLE, not index-expression IMMUTABLE.
 // Decode escaped backslashes to preserve the UTF8 database's exact text bytes
 // using native immutable functions. The caller must verify server_encoding=UTF8.
@@ -10,9 +12,10 @@ export const OWNER_EMAIL_INDEX_EXPRESSION = `encode(sha256(decode(replace(${norm
 export function planLegacyOwnerEmailIndex(emailSha256: readonly string[]) {
   const scope = Array.isArray(emailSha256) ? [...emailSha256] : [];
   if (
-    scope.length !== 8 ||
+    scope.length < 1 ||
+    scope.length > LEGACY_OWNER_BOOTSTRAP_MAX_OWNERS ||
     scope.some((hash) => typeof hash !== "string" || !/^[0-9a-f]{64}$/.test(hash)) ||
-    new Set(scope).size !== 8
+    new Set(scope).size !== scope.length
   )
     throw new Error("INVALID_OWNER_EMAIL_GUARD_SCOPE");
   const hashes = scope.sort();

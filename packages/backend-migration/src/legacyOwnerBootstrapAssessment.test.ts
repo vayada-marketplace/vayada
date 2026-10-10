@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { assessLegacyOwnerBootstrap } from "./legacyOwnerBootstrapAssessment.js";
 import { readLegacyOwnerBootstrapSources } from "./legacyOwnerBootstrapSourceReader.js";
 import { readLegacyOwnerBootstrapTargets } from "./legacyOwnerBootstrapTargetReader.js";
+import { parseProductionMigrationCohort } from "./productionMigrationCohort.js";
 import { VAY_1350_INVENTORY_REVISION } from "./sourceExtraction.js";
 vi.mock("./legacyOwnerBootstrapSourceReader.js", () => ({
   readLegacyOwnerBootstrapSources: vi.fn(),
@@ -17,7 +18,16 @@ const source = () =>
     sourceStatus: "pending",
     sourceOwnership: "matched" as const,
   }));
+const cohort = (pmsHotelIds = Array.from({ length: 8 }, (_, i) => id(i + 20))) =>
+  parseProductionMigrationCohort({
+    sourceRunId: `vay1351-${"a".repeat(24)}`,
+    bookingHotelIds: pmsHotelIds,
+    pmsHotelIds,
+    marketplaceHotelIds: [],
+    approvalProofSha256: "f".repeat(64),
+  });
 const input = () => ({
+  cohort: cohort(),
   source: {
     sourceRunId: `vay1351-${"a".repeat(24)}`,
     sourceEnvironment: "preprod",
@@ -86,6 +96,59 @@ beforeEach(() => {
   );
 });
 describe("combined non-executable assessment", () => {
+  it("binds the owners to the run's approved cohort before any read (VAY-1362 P19)", async () => {
+    const hotels = cohort().pmsHotelIds;
+    for (const mismatch of [
+      // A cohort hotel without its owner pair, and a pair outside the cohort.
+      (data: ReturnType<typeof input>) => {
+        data.cohort = cohort(hotels.slice(1));
+      },
+      (data: ReturnType<typeof input>) => {
+        data.cohort = cohort([...hotels.slice(1), id(99)]);
+      },
+      // The ID sets no longer match the checksum, or only the checksum is wrong.
+      (data: ReturnType<typeof input>) => {
+        data.cohort.pmsHotelIds = hotels.slice(1);
+      },
+      (data: ReturnType<typeof input>) => {
+        data.cohort.cohortSha256 = "0".repeat(64);
+      },
+      (data: ReturnType<typeof input>) => {
+        data.cohort.sourceRunId = `vay1351-${"b".repeat(24)}`;
+      },
+    ]) {
+      const f = fixture();
+      const data = input();
+      mismatch(data);
+      expect(await f.run(data)).toEqual({
+        outcome: "blocked",
+        reason: "cohort_mismatch",
+        owners: [],
+        executable: false,
+      });
+      expect(f.a.connect).not.toHaveBeenCalled();
+      expect(f.b.connect).not.toHaveBeenCalled();
+    }
+    // A three-hotel wave: three owner pairs, three diagnoses.
+    const f = fixture();
+    const data = input();
+    data.source.owners = data.source.owners.slice(0, 3);
+    data.cohort = cohort(data.source.owners.map((owner) => owner.hotelId));
+    vi.mocked(readLegacyOwnerBootstrapSources).mockResolvedValue(source().slice(0, 3));
+    vi.mocked(readLegacyOwnerBootstrapTargets).mockResolvedValue(
+      source()
+        .slice(0, 3)
+        .map((o) => ({
+          ownerId: o.ownerId,
+          target: "absent",
+          providerUserId: null,
+          providerEmailMatches: null,
+        })),
+    );
+    const result = await f.run(data);
+    expect(result).toMatchObject({ outcome: "proposed", executable: false });
+    expect(result.owners).toHaveLength(3);
+  });
   it("composes all reads and closes both snapshots before scoped GETs", async () => {
     const f = fixture(),
       result = await f.run();
@@ -162,8 +225,7 @@ describe("combined non-executable assessment", () => {
         providerEmailMatches: true,
       }));
       if (mode === "stale_target_binding") target[0]!.providerUserId = "user_stale";
-      if (mode === "reused_target_binding")
-        target[1]!.providerUserId = target[0]!.providerUserId;
+      if (mode === "reused_target_binding") target[1]!.providerUserId = target[0]!.providerUserId;
       vi.mocked(readLegacyOwnerBootstrapTargets).mockResolvedValue(target);
       f.workos.userManagement.getUserByExternalId.mockImplementation(async (ownerId) => ({
         id: "user_" + ownerId.replaceAll("-", ""),

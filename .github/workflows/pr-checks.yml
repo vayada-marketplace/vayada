@@ -303,6 +303,24 @@ jobs:
           '
           npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/legacyOwnerBootstrapReceipts.integration.test.ts
 
+      - name: Verify the bounded legacy owner bootstrap readers
+        if: matrix.shard == 'platform'
+        env:
+          VAY2017_SOURCE_READER_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_source_reader_fixture
+          VAY2017_TARGET_READER_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_target_reader_fixture
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.VAY2017_SOURCE_READER_TEST_DATABASE_URL);
+            url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href });
+            await client.connect();
+            await client.query("CREATE DATABASE vay2017_source_reader_fixture");
+            await client.query("CREATE DATABASE vay2017_target_reader_fixture");
+            await client.end();
+          '
+          npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/legacyOwnerBootstrapSourceReader.integration.test.ts src/legacyOwnerBootstrapTargetReader.integration.test.ts src/legacyOwnerBootstrapPlan.test.ts src/legacyOwnerBootstrapSourceReader.test.ts src/legacyOwnerBootstrapTargetReader.test.ts src/legacyOwnerBootstrapAssessment.test.ts
+
       - name: Verify scoped legacy owner email guard
         if: matrix.shard == 'platform'
         env:

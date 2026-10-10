@@ -51,8 +51,8 @@ describe.skipIf(!url)("target reader on fresh migrated PostgreSQL", () => {
       ]);
     await client.query(
       `INSERT INTO identity.external_identities(user_id,provider,provider_user_id,provider_email)
-      VALUES($1,'workos','user_other',$3),($2,'workos','user_seven_a',NULL),
-        ($2,'workos','user_seven_b',NULL),($4,'workos','user_ownereight',$5)`,
+      VALUES($1,'workos','user_other',$3),($2,'workos','user_sevenA',NULL),
+        ($2,'workos','user_sevenB',NULL),($4,'workos','user_ownereight',$5)`,
       [id(99), id(7), "\u00a0owner6@example.invalid\ufeff", id(8), "owner8@example.invalid"],
     );
   }, 120000);
@@ -87,7 +87,7 @@ describe.skipIf(!url)("target reader on fresh migrated PostgreSQL", () => {
         null,
         null,
         null,
-        "user_seven_a",
+        "user_sevenA",
         "user_ownereight",
       ]);
       expect(result[7]!.providerEmailMatches).toBe(true);
@@ -99,6 +99,17 @@ describe.skipIf(!url)("target reader on fresh migrated PostgreSQL", () => {
           )
         ).rows,
       ).toEqual(before);
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+  it("classifies a three-owner wave cohort as the full read does (VAY-1362 P19)", async () => {
+    await client.query("BEGIN READ ONLY");
+    try {
+      const all = await readLegacyOwnerBootstrapTargets(client, owners);
+      expect(await readLegacyOwnerBootstrapTargets(client, owners.slice(0, 3))).toEqual(
+        all.slice(0, 3),
+      );
     } finally {
       await client.query("ROLLBACK");
     }

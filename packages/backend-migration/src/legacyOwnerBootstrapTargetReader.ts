@@ -1,5 +1,8 @@
 import type { AdoptionQueryClient } from "./channexAdoptionTargetRows.js";
-import type { OwnerBootstrapObservation } from "./legacyOwnerBootstrapPlan.js";
+import {
+  LEGACY_OWNER_BOOTSTRAP_MAX_OWNERS,
+  type OwnerBootstrapObservation,
+} from "./legacyOwnerBootstrapPlan.js";
 
 type Owner = { ownerId: string; email: string };
 type TargetObservation = Pick<OwnerBootstrapObservation, "ownerId" | "target"> & {
@@ -11,7 +14,7 @@ type TargetObservation = Pick<OwnerBootstrapObservation, "ownerId" | "target"> &
 const trimCharacters =
   "\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
 
-// Every candidate is bounded by one of eight IDs/contact values. Return counts
+// Every candidate is bounded by one of the cohort's owner IDs/contact values. Return counts
 // and classifications only, never contact data or unrelated candidate IDs.
 const sql = `WITH wanted AS (
   SELECT * FROM unnest($1::uuid[], $2::text[]) AS w(owner_id,email)
@@ -41,7 +44,7 @@ FROM wanted w ORDER BY w.owner_id`;
 
 /**
  * Diagnostic only. Caller owns an independently environment-verified connection,
- * full visibility of these target tables, and a READ ONLY transaction. The eight
+ * full visibility of these target tables, and a READ ONLY transaction. The cohort's
  * source IDs/emails must already be authorized and source-bound. This reads no
  * source database, provider, ownership links or entitlements and grants nothing.
  * Never log SQL parameters. Returned observations are NOT a complete planner input.
@@ -53,7 +56,8 @@ export async function readLegacyOwnerBootstrapTargets(
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
   if (
     !Array.isArray(owners) ||
-    owners.length !== 8 ||
+    owners.length < 1 ||
+    owners.length > LEGACY_OWNER_BOOTSTRAP_MAX_OWNERS ||
     owners.some(
       (owner) =>
         !owner ||
@@ -68,7 +72,7 @@ export async function readLegacyOwnerBootstrapTargets(
   // Copy before the first await; caller mutation cannot expand the query scope.
   const ids = owners.map((owner) => owner.ownerId);
   const emails = owners.map((owner) => owner.email.trim().toLowerCase());
-  if (new Set(ids).size !== 8 || new Set(emails).size !== 8)
+  if (new Set(ids).size !== ids.length || new Set(emails).size !== ids.length)
     throw new Error("DUPLICATE_OWNER_TARGET_SCOPE");
   try {
     const setting = await client.query("SHOW transaction_read_only");
@@ -83,8 +87,8 @@ export async function readLegacyOwnerBootstrapTargets(
       providerEmailMatches: boolean | null;
     }>(sql, [ids, emails, trimCharacters]);
     if (
-      rows.length !== 8 ||
-      new Set(rows.map((row) => row.ownerId)).size !== 8 ||
+      rows.length !== ids.length ||
+      new Set(rows.map((row) => row.ownerId)).size !== ids.length ||
       rows.some(
         (row) =>
           !ids.includes(row.ownerId) ||

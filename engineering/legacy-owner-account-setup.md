@@ -28,7 +28,7 @@ historical hotel, even if they verify the historical email address.
 ## Smallest first write boundary
 
 The first future writer prepares **internal identity rows only**. For an
-independently approved subset of the fixed eight-owner cohort, insert only
+independently approved subset of the owner cohort (up to eight owners), insert only
 `identity.users` with the exact legacy UUID, reviewed contact fields, and an
 explicit `status = 'pending'`. Do not rely on the schema's `active` default or
 generate a replacement UUID. Missing names may remain null; do not invent them.
@@ -193,15 +193,15 @@ unguarded. Do not enable preparation until the entire shared boundary is covered
 
 ## Scoped email-index proposal
 
-`planLegacyOwnerEmailIndex` proposes a partial unique index covering exactly eight
-independently approved normalized-email SHA256 values. The key and predicate
+`planLegacyOwnerEmailIndex` proposes a partial unique index covering one to eight distinct
+independently approved normalized-email SHA256 values (a wave cohort's owners, VAY-1362 P19). The key and predicate
 contain hashes, not plaintext contact data. PostgreSQL uniqueness arbitrates
 INSERT/UPDATE races even for writers unaware of migration advisory locks.
 Duplicates outside this email cohort remain allowed; existing in-cohort
 duplicates prevent index creation and must not be deleted or merged to proceed.
 
 This helper only produces SQL; no migration, CLI or executor runs it. Before an
-authorized installation, independently bind the eight hashes to approved source
+authorized installation, independently bind the hashes to approved source
 owners and a UTF8 target database, using the same database normalization and hash
 expression. The expression pins case folding to PostgreSQL's `C` collation;
 unknown normalization correspondence blocks. It uses immutable native functions

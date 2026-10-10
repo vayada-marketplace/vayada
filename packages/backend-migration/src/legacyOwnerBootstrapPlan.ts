@@ -1,4 +1,8 @@
 /** Offline diagnostic only: no SQL, provider calls, credentials, or executable writes. */
+
+/** VAY-1362 P19: a wave cohort's owners, one per cohort PMS hotel. The cap matches migration
+ * 0224's `valid_bootstrap_owner_ids` (1 to 8) and bounds every owner-bootstrap read. */
+export const LEGACY_OWNER_BOOTSTRAP_MAX_OWNERS = 8;
 export type OwnerBootstrapObservation = {
   ownerId: string;
   sourceStatus: string;
@@ -29,8 +33,9 @@ type OwnerResult = {
 };
 
 /**
- * Trusted operator supplies an independently approved eight-ID cohort and the
- * expected run/environment, never derives them from the observed rows. Evidence
+ * Trusted operator supplies the owners of the independently approved migration
+ * cohort (one per cohort PMS hotel, VAY-1362 P19) and the expected
+ * run/environment, never derives them from the observed rows. Evidence
  * is a sanitized reader summary, NOT cryptographically verified by this helper.
  * A proposal is only a work item; it cannot authorize provisioning or PMS access.
  */
@@ -46,11 +51,12 @@ export function planLegacyOwnerBootstrap(
     executable: false as const,
   });
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  const size = Array.isArray(expected.ownerIds) ? expected.ownerIds.length : 0;
   if (
-    !Array.isArray(expected.ownerIds) ||
-    expected.ownerIds.length !== 8 ||
+    size < 1 ||
+    size > LEGACY_OWNER_BOOTSTRAP_MAX_OWNERS ||
     !expected.ownerIds.every((id) => typeof id === "string" && uuid.test(id)) ||
-    new Set(expected.ownerIds).size !== 8
+    new Set(expected.ownerIds).size !== size
   )
     return blocked("invalid_cohort");
   if (
@@ -75,8 +81,8 @@ export function planLegacyOwnerBootstrap(
   if (
     evidence.complete !== true ||
     !Array.isArray(evidence.owners) ||
-    evidence.owners.length !== 8 ||
-    new Set(evidence.owners.map((row) => row?.ownerId)).size !== 8 ||
+    evidence.owners.length !== size ||
+    new Set(evidence.owners.map((row) => row?.ownerId)).size !== size ||
     !evidence.owners.every((row) => row && expected.ownerIds.includes(row.ownerId))
   )
     return blocked("incomplete_cohort");

@@ -33,7 +33,7 @@ function evidence(): OwnerBootstrapEvidence {
 }
 const plan = (input = evidence()) => planLegacyOwnerBootstrap(expected, input, now);
 
-describe("non-executable eight-owner bootstrap diagnostics", () => {
+describe("non-executable cohort owner bootstrap diagnostics", () => {
   it("proposes preparation for eight absent identities without mutating input", () => {
     const input = evidence(),
       before = structuredClone(input),
@@ -109,6 +109,26 @@ describe("non-executable eight-owner bootstrap diagnostics", () => {
       expect(plan(input)).toMatchObject({ outcome: "blocked", owners: [], executable: false });
     },
   );
+  it("takes the approved cohort's owner set at its size (VAY-1362 P19)", () => {
+    const wave = ids.slice(0, 3);
+    const waveEvidence = { ...evidence(), owners: evidence().owners.slice(0, 3) };
+    const result = planLegacyOwnerBootstrap({ ...expected, ownerIds: wave }, waveEvidence, now);
+    expect(result).toMatchObject({ outcome: "proposed", executable: false });
+    expect(result.owners.map((row) => row.ownerId)).toEqual(wave);
+    // Evidence must cover exactly the cohort: not more owners, and never an empty cohort.
+    expect(planLegacyOwnerBootstrap({ ...expected, ownerIds: wave }, evidence(), now).reason).toBe(
+      "incomplete_cohort",
+    );
+    expect(
+      planLegacyOwnerBootstrap({ ...expected, ownerIds: [] }, { ...evidence(), owners: [] }, now)
+        .reason,
+    ).toBe("invalid_cohort");
+    // Never more owners than migration 0224 records in one bootstrap receipt.
+    const nine = [...ids, "00000000-0000-4000-8000-000000000009"];
+    expect(planLegacyOwnerBootstrap({ ...expected, ownerIds: nine }, evidence(), now).reason).toBe(
+      "invalid_cohort",
+    );
+  });
   it.each([
     "2026-09-14T03:00:00.000Z",
     "2026-09-14T04:00:00.000Z",
@@ -127,8 +147,8 @@ describe("non-executable eight-owner bootstrap diagnostics", () => {
   });
   it("validates the independent allowlist and returns deterministic sanitized output", () => {
     expect(
-      planLegacyOwnerBootstrap({ ...expected, ownerIds: ids.slice(1) }, evidence(), now).outcome,
-    ).toBe("blocked");
+      planLegacyOwnerBootstrap({ ...expected, ownerIds: ids.slice(1) }, evidence(), now).reason,
+    ).toBe("incomplete_cohort");
     expect(
       planLegacyOwnerBootstrap({ ...expected, ownerIds: Array(8).fill(ids[0]) }, evidence(), now)
         .outcome,
