@@ -3,6 +3,8 @@
 -- binding claim on the same external id as a connected (or degraded) connection. It is off until
 -- the owner admits operations in the new table. The pinned worker_scope, worker_source and
 -- connection_scope helpers stay byte-identical; every policy keeps its current branches.
+SET LOCAL lock_timeout = '5s';
+
 CREATE TABLE platform.channex_management_worker_claimed_operations (
   operation_type text PRIMARY KEY CHECK (operation_type IN ('sync_ari', 'provision'))
 );
@@ -17,16 +19,22 @@ DO $$ BEGIN
 END $$;
 
 -- Like 0473's helper it returns true for every other current_user before reading worker tables,
--- so it keeps PUBLIC execution and no policy consumer needs a grant. 'binding' reads only claims
--- and 'operation(s)' only the new table, so the claim and connection policies below can use them
--- without recursion; only the other policies use 'property', which reads both. Until the claimed
--- grant lets the worker read the new table, it has no claimed scope instead of failing every scan.
+-- so it keeps PUBLIC execution and no policy consumer needs a grant. 'operation(s)' read only the
+-- new table, 'binding' only claims, 'property' claims and connections. Claims and connections
+-- reach platform.jobs through connection_scope, so the jobs policy calls only 'operation'. Until
+-- the claimed grant lets the worker read the new table it has no claimed scope, instead of
+-- failing every scan. Resources are compared as uuids so the claim lookups can use indexes.
 CREATE FUNCTION platform.channex_management_worker_claimed_scope(kind text, resource text)
 RETURNS boolean LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path = pg_catalog AS $$
 BEGIN
   IF current_user <> 'vayada_next_channex_management_worker' THEN RETURN true; END IF;
   IF kind <> 'binding' AND NOT has_table_privilege(
     'platform.channex_management_worker_claimed_operations', 'SELECT') THEN RETURN false; END IF;
+  IF kind IN ('binding', 'property') AND (resource IS NULL OR resource !~ CASE kind
+    WHEN 'property' THEN '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    ELSE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/' END) THEN
+    RETURN false;
+  END IF;
   CASE kind
     WHEN 'operation' THEN RETURN EXISTS (
       SELECT 1 FROM platform.channex_management_worker_claimed_operations WHERE operation_type = resource);
@@ -34,8 +42,8 @@ BEGIN
       SELECT 1 FROM platform.channex_management_worker_claimed_operations);
     WHEN 'binding' THEN RETURN EXISTS (
       SELECT 1 FROM pms.channel_binding_claims
-      WHERE provider = 'channex' AND claim_state = 'active'
-        AND property_id::text || '/' || external_property_id = resource);
+      WHERE property_id = left(resource, 36)::uuid AND provider = 'channex'
+        AND external_property_id = substr(resource, 38) AND claim_state = 'active');
     WHEN 'property' THEN RETURN EXISTS (
       SELECT 1 FROM platform.channex_management_worker_claimed_operations)
       AND EXISTS (
@@ -43,7 +51,7 @@ BEGIN
       JOIN pms.channel_connections connection ON connection.property_id = claim.property_id
         AND connection.provider = claim.provider
         AND connection.external_property_id = claim.external_property_id
-      WHERE claim.property_id::text = resource AND claim.provider = 'channex'
+      WHERE claim.property_id = resource::uuid AND claim.provider = 'channex'
         AND claim.claim_state = 'active' AND connection.connection_status IN ('connected', 'degraded'));
     ELSE RETURN false;
   END CASE;
@@ -60,6 +68,17 @@ ALTER POLICY channex_management_worker_scope ON pms.channel_connections
       OR (connection_status IN ('connected', 'degraded')
         AND platform.channex_management_worker_claimed_scope('operations', '')
         AND platform.channex_management_worker_claimed_scope('binding', property_id::text || '/' || external_property_id)))));
+-- The claimed branch only reads and updates owned bindings. Creating a claim or a connection still
+-- needs 0473's live enable job, or the worker could reserve any hotel's Channex property.
+ALTER POLICY channex_management_worker_insert ON pms.channel_binding_claims
+  WITH CHECK (current_user <> 'vayada_next_channex_management_worker'
+    OR (provider = 'channex' AND claim_state = 'active' AND claim_source = 'enable'
+      AND platform.channex_management_worker_connection_scope('property', property_id::text)));
+ALTER POLICY channex_management_worker_insert ON pms.channel_connections
+  WITH CHECK (current_user <> 'vayada_next_channex_management_worker'
+    OR (provider = 'channex' AND connection_status = 'connected' AND external_property_id IS NOT NULL
+      AND messaging_app_installed = false AND connection_metadata = '{}'::jsonb
+      AND platform.channex_management_worker_connection_scope('property', property_id::text)));
 
 -- Property-keyed sources: the 0408 canary branch (0473's connection branch for the three tables an
 -- enable job reads) plus the claimed branch.
@@ -109,7 +128,10 @@ ALTER POLICY channex_management_worker_scope ON identity.organization_resource_l
       AND (platform.channex_management_worker_scope('property', resource_id)
         OR platform.channex_management_worker_claimed_scope('property', resource_id))));
 
--- Queue rows: the claimed branch admits the same two job shapes as the canary branch.
+-- Queue rows: the claimed branch admits the canary's two job shapes by admitted operation, like
+-- 0473's enable branch, and never by property: reading claims or connections here would loop
+-- through their connection_scope back into this policy. A job for a hotel the target does not own
+-- stays inert, because every source, connection and evidence row it needs follows the claim.
 ALTER POLICY channex_management_worker_scope ON platform.jobs
   USING (current_user <> 'vayada_next_channex_management_worker' OR (
     tenant_scope = 'property'
@@ -121,12 +143,11 @@ ALTER POLICY channex_management_worker_scope ON platform.jobs
         AND ((job_type = 'channex.sync_ari' AND payload->>'operationType' = 'sync_ari')
           OR (job_type = 'channex.provision' AND payload->>'operationType' = 'provision'
             AND jsonb_typeof(payload->'publishedOffer') = 'object')))
-      OR (platform.channex_management_worker_claimed_scope('property', property_id::text)
-        AND ((job_type = 'channex.sync_ari' AND payload->>'operationType' = 'sync_ari'
-            AND platform.channex_management_worker_claimed_scope('operation', 'sync_ari'))
-          OR (job_type = 'channex.provision' AND payload->>'operationType' = 'provision'
-            AND jsonb_typeof(payload->'publishedOffer') = 'object'
-            AND platform.channex_management_worker_claimed_scope('operation', 'provision'))))
+      OR (job_type = 'channex.sync_ari' AND payload->>'operationType' = 'sync_ari'
+        AND platform.channex_management_worker_claimed_scope('operation', 'sync_ari'))
+      OR (job_type = 'channex.provision' AND payload->>'operationType' = 'provision'
+        AND jsonb_typeof(payload->'publishedOffer') = 'object'
+        AND platform.channex_management_worker_claimed_scope('operation', 'provision'))
       OR (platform.channex_management_worker_connection_scope('operation', 'enable')
         AND job_type = 'channex.enable' AND payload->>'operationType' = 'enable'))
   ));

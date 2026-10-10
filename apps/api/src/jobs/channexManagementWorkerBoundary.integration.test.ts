@@ -699,17 +699,65 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
           }),
         ],
       );
+    // Production shape: no canary allowlist row, and a live enable job for a third hotel (0473
+    // admits it while it runs). Claims and connections reach platform.jobs through
+    // connection_scope, so a jobs policy that read them back would recurse without end.
+    const enabling = randomUUID(),
+      enableJob = randomUUID(),
+      bare = randomUUID();
+    await owner.query(
+      "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Enabling'),($2::uuid,$2::text,'Bare')",
+      [enabling, bare],
+    );
+    // An owned claim without a connection row: the worker must not be able to add one.
+    await owner.query(
+      "INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source) VALUES($1,'channex',$2,'active','repair')",
+      [bare, randomUUID()],
+    );
+    await owner.query(
+      `INSERT INTO platform.jobs(id,job_key,queue_name,job_type,tenant_scope,property_id,resource_product,resource_type,resource_id,payload)
+       VALUES($1::uuid,$1::text,'pms.channex.management','channex.enable','property',$2::uuid,'pms','channex_connection',$2::text,'{"operationType":"enable"}')`,
+      [enableJob, enabling],
+    );
+    const allowlist = (
+      await owner.query<{ id: string }>(
+        "DELETE FROM platform.channex_management_worker_properties RETURNING property_id::text AS id",
+      )
+    ).rows.map((row) => row.id);
+    await owner.query(
+      "INSERT INTO platform.channex_management_worker_operations VALUES('enable') ON CONFLICT DO NOTHING",
+    );
     const rows = async (sql: string, values: unknown[]) =>
       (await pool.query<{ id: string }>(sql, values)).rows.map((row) => row.id);
     const jobs = () =>
-      rows("SELECT id::text FROM platform.jobs WHERE id = ANY($1::uuid[])", [
+      rows("SELECT id::text FROM platform.jobs WHERE id = ANY($1::uuid[]) ORDER BY id", [
         [claimedJob, unclaimedJob],
       ]);
+    const properties = () =>
+      rows("SELECT id::text FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])", [ids]);
+    const connections = () =>
+      rows(
+        "SELECT property_id::text AS id FROM pms.channel_connections WHERE property_id = ANY($1::uuid[])",
+        [ids],
+      );
+    // Every worker read that crosses the claimed helper, the claims and the jobs policy.
+    const scans = async () => {
+      for (const table of [
+        "platform.jobs",
+        "pms.channel_binding_claims",
+        "pms.channel_connections",
+        "platform.dead_letter_events",
+        "platform.idempotency_keys",
+        "platform.product_audit_events",
+        "pms.room_types",
+      ])
+        await pool.query(`SELECT count(*) FROM ${table}`);
+    };
     const claimedTable = "platform.channex_management_worker_claimed_operations";
     const boundary = async (claimedScope: boolean) => {
       const client = await pool.connect();
       try {
-        await assertChannexManagementWorkerBoundary(client, { propertyId: property, claimedScope });
+        await assertChannexManagementWorkerBoundary(client, { claimedScope });
       } finally {
         client.release();
       }
@@ -718,46 +766,66 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
       // The matrix never grants the owner table: until the platform's claimed grant the worker
       // cannot read it, its scans still work and nothing claimed is visible, even with operations.
       await owner.query(`INSERT INTO ${claimedTable} VALUES('sync_ari'),('provision')`);
+      await scans();
       expect(await jobs()).toEqual([]);
-      expect(
-        await rows(
-          "SELECT property_id::text AS id FROM pms.channel_connections WHERE property_id = ANY($1::uuid[])",
-          [ids],
-        ),
-      ).toEqual([]);
+      expect(await connections()).toEqual([]);
       await boundary(false);
       await expect(boundary(true)).rejects.toThrow("channex_worker_claimed_scope_mismatch");
       await owner.query(`DELETE FROM ${claimedTable}`);
       // The claimed grant: SELECT outside the matrix. Nothing is admitted until the operations.
       await owner.query(`GRANT SELECT ON ${claimedTable} TO ${role}`);
+      await scans();
       expect(await jobs()).toEqual([]);
-      expect(
-        await rows("SELECT id::text FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])", [
-          ids,
-        ]),
-      ).toEqual([]);
-      await denied(
-        "INSERT INTO platform.channex_management_worker_claimed_operations VALUES('sync_ari')",
-      );
-      await owner.query(
-        "INSERT INTO platform.channex_management_worker_claimed_operations VALUES('sync_ari'),('provision')",
-      );
+      expect(await properties()).toEqual([]);
+      await boundary(false);
+      await expect(boundary(true)).rejects.toThrow("channex_worker_claimed_scope_mismatch");
+      await denied(`INSERT INTO ${claimedTable} VALUES('sync_ari')`);
+      await owner.query(`INSERT INTO ${claimedTable} VALUES('sync_ari'),('provision')`);
+      // An image that does not ask for the claimed scope still starts after the grant.
+      await boundary(false);
       await boundary(true);
-      expect(await jobs()).toEqual([claimedJob]);
+      await scans();
+      // Queue rows follow the admitted operation (as 0473's enable jobs); sources, connections and
+      // evidence follow the claim, so the other hotel's job stays inert.
+      expect(await jobs()).toEqual([claimedJob, unclaimedJob].sort());
+      expect(await properties()).toEqual([claimed]);
+      expect(await connections()).toEqual([claimed]);
+      // Creating a binding still needs a live enable job: allowed for the enabling hotel, denied by
+      // row security (not by a missing grant) for an owned hotel without one.
+      const insertClaim = (propertyId: string) =>
+        `INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source) VALUES('${propertyId}','channex','${randomUUID()}','active','enable')`;
+      const attempt = async (sql: string) => {
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          return await client.query(sql).then(
+            () => "allowed",
+            (error: Error) => error.message,
+          );
+        } finally {
+          await client.query("ROLLBACK");
+          client.release();
+        }
+      };
+      expect(await attempt(insertClaim(enabling))).toBe("allowed");
+      expect(await attempt(insertClaim(unclaimed))).toMatch(/row-level security/);
       expect(
-        await rows("SELECT id::text FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])", [
-          ids,
-        ]),
-      ).toEqual([claimed]);
-      expect(
-        await rows(
-          "SELECT property_id::text AS id FROM pms.channel_connections WHERE property_id = ANY($1::uuid[])",
-          [ids],
+        await attempt(
+          `INSERT INTO pms.channel_connections(property_id,provider,connection_status,external_property_id) VALUES('${bare}','channex','connected','${randomUUID()}')`,
         ),
-      ).toEqual([claimed]);
+      ).toMatch(/row-level security/);
     } finally {
       await owner.query(`DELETE FROM ${claimedTable}`);
       await owner.query(`REVOKE SELECT ON ${claimedTable} FROM ${role}`);
+      await owner.query("DELETE FROM platform.channex_management_worker_operations");
+      await owner.query(
+        "UPDATE platform.jobs SET status='canceled',finished_at=now() WHERE id=$1::uuid",
+        [enableJob],
+      );
+      for (const id of allowlist)
+        await owner.query("INSERT INTO platform.channex_management_worker_properties VALUES($1)", [
+          id,
+        ]);
     }
   });
 });

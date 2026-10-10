@@ -212,12 +212,14 @@ export async function assertChannexManagementWorkerBoundary(
     ).rows;
     if (rows.length !== 1 || rows[0].operation_type !== "enable") fail("operation_scope_mismatch");
   }
-  // VAY-2108: the claimed scope is exactly ARI plus published-offer provisioning; without it the
-  // owner table stays empty. Its SELECT comes from the platform's claimed grant, never the matrix
-  // (the worker preflight gates every next-api start); without it the claimed helper grants nothing.
+  // VAY-2108: the claimed scope is exactly ARI plus published-offer provisioning. Its SELECT comes
+  // from the platform's claimed grant, never the matrix (this preflight gates every next-api
+  // start); without it the claimed helper grants nothing. The grant may land before an image asks
+  // for claimedScope, so only an explicit claimedScope requires it.
   const readable = (
     await client.query(
-      "SELECT has_table_privilege('platform.channex_management_worker_claimed_operations','SELECT') AS ok",
+      "SELECT has_table_privilege($1,'platform.channex_management_worker_claimed_operations','SELECT') AS ok",
+      [role],
     )
   ).rows[0]?.ok;
   const claimed = readable
@@ -225,9 +227,11 @@ export async function assertChannexManagementWorkerBoundary(
         await client.query(
           "SELECT operation_type FROM platform.channex_management_worker_claimed_operations ORDER BY 1",
         )
-      ).rows.map((row) => row.operation_type)
-    : [];
-  if (claimed.join(",") !== (options.claimedScope ? "provision,sync_ari" : ""))
+      ).rows
+        .map((row) => row.operation_type)
+        .join(",")
+    : "";
+  if (claimed !== "provision,sync_ari" && (options.claimedScope || claimed !== ""))
     fail("claimed_scope_mismatch");
 }
 
