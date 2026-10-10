@@ -104,6 +104,36 @@ describe.skipIf(!URL)("Channex per-hotel ownership gate (PostgreSQL)", () => {
     expect(calls).toEqual([]);
   });
 
+  it("claims booking jobs only for allowlisted hotels under the claimed scope", async () => {
+    const id = await job(OWNED);
+    const counters = await runChannexBookingJobs(URL!, {
+      apiBaseUrl: "https://app.channex.io",
+      apiKey: "secret",
+      ownsMutation: () => true,
+      fetch: fetcher,
+      workerId: "vay-2108",
+      limit: 1,
+      ownedPropertyIds: [CLAIM_ONLY],
+    });
+    expect(counters).toEqual({ succeeded: 0, retryScheduled: 0, deadLettered: 0 });
+    const row = await db.query("SELECT status FROM platform.jobs WHERE id = $1::uuid", [id]);
+    expect(row.rows[0]).toEqual({ status: "pending" });
+    // Allowlisted, the same job is claimed (it then fails on the fixture's missing room mapping).
+    await runChannexBookingJobs(URL!, {
+      apiBaseUrl: "https://app.channex.io",
+      apiKey: "secret",
+      ownsMutation: () => true,
+      fetch: fetcher,
+      workerId: "vay-2108",
+      limit: 1,
+      ownedPropertyIds: [OWNED],
+    });
+    const claimed = await db.query("SELECT attempts_count FROM platform.jobs WHERE id = $1::uuid", [
+      id,
+    ]);
+    expect(claimed.rows[0]).toEqual({ attempts_count: 1 });
+  });
+
   it("enqueues the daily full ARI sync only for owned, unreserved hotels", async () => {
     // One store per property: the staging property scope keeps the producer and the claim on it.
     for (const property of PROPERTIES) {

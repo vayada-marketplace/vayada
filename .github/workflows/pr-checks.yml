@@ -552,6 +552,7 @@ jobs:
           src/domains/channexStagingCatalogScope.test.ts
           src/jobs/channexBookings.integration.test.ts
           src/jobs/channexOwnershipGate.integration.test.ts
+          src/jobs/channexFeedPull.integration.test.ts
           src/domains/channexAlterationIntake.integration.test.ts
           src/jobs/channexMessages.integration.test.ts
           src/jobs/channexStagingImport.integration.test.ts
