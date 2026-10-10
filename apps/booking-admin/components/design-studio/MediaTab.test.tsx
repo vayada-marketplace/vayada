@@ -7,7 +7,7 @@ import MediaTab, { type PropertyGalleryImage } from "./MediaTab";
 
 function renderMediaTab(
   galleryImages: PropertyGalleryImage[],
-  languageSelectorAvailable = true,
+  selectorsAvailable = true,
   hero: { heroImage?: string; heroBusy?: boolean } = {},
 ) {
   return renderToStaticMarkup(
@@ -37,7 +37,10 @@ function renderMediaTab(
         referAGuestModuleEnabled={false}
         showLanguageSelector
         setShowLanguageSelector={vi.fn()}
-        languageSelectorAvailable={languageSelectorAvailable}
+        languageSelectorAvailable={selectorsAvailable}
+        showCurrencySelector
+        setShowCurrencySelector={vi.fn()}
+        currencySelectorAvailable={selectorsAvailable}
         resetContent={vi.fn()}
         galleryImages={galleryImages}
         galleryAtCapacity={galleryImages.length >= 10}
@@ -89,12 +92,16 @@ describe("MediaTab property gallery", () => {
 });
 
 describe("MediaTab header toggles", () => {
-  it("keeps a configurable language selector on and the toggle track from shrinking", () => {
-    const language = switchTag(renderMediaTab([]), "Language selector");
+  it("keeps configurable selectors on and the toggle track from shrinking", () => {
+    const markup = renderMediaTab([]);
+    const language = switchTag(markup, "Language selector");
+    const currency = switchTag(markup, "Currency selector");
 
     expect(language).toContain('aria-checked="true"');
     expect(language).not.toContain('disabled=""');
     expect(language).toContain("shrink-0");
+    expect(currency).toContain('aria-checked="true"');
+    expect(currency).not.toContain('disabled=""');
   });
 
   it("greys out selectors guests cannot see", () => {
@@ -107,7 +114,7 @@ describe("MediaTab header toggles", () => {
     expect(markup).toContain("Hidden automatically when only one language is configured.");
     expect(currency).toContain('aria-checked="false"');
     expect(currency).toContain('disabled=""');
-    expect(markup).toContain("Multi-currency isn&#x27;t available yet.");
+    expect(markup).toContain("Hidden automatically when only one currency is configured.");
   });
 });
 
