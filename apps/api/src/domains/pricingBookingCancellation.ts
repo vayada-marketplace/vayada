@@ -9,13 +9,16 @@ import type {
   DirectBookingInventoryReservationPort,
   InventoryReservationTransaction,
 } from "../platform/inventoryReservation.js";
-import { decodePricingAcceptanceHistory } from "./pricingAcceptanceHistory.js";
+import { loadCurrentPricingAcceptance } from "./pricingAcceptanceAmendments.js";
 import { cancelHostBookingAssignments } from "./pmsHostBookingCancellation.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 
 /** Pricing-v2 stays keep their booked terms in the immutable acceptance, never in booking
- * metadata. Days count in the property timezone the guest booked under, frozen with the terms.
- * Null when the acceptance is missing or no longer describes the stay. */
+ * metadata. A date change (VAY-2110) moves the stay to its latest amendment's quote: its dates and
+ * prices (what the guest now owes) set the base; the cancellation terms are read from the
+ * acceptance, the ones the guest agreed to (0477 keeps an amendment's terms identical). Days count
+ * in the property timezone the guest accepted under. Null when the acceptance is missing or its
+ * current quote no longer describes the stay. */
 export async function loadPricingBookingCancellation(
   client: InventoryReservationTransaction,
   input: {
@@ -25,27 +28,11 @@ export async function loadPricingBookingCancellation(
     cancelledAt: Date;
   },
 ): Promise<BookedCancellationOutcome | null> {
-  const row = (
-    await client.query<Record<string, unknown>>(
-      `SELECT * FROM booking.pricing_quote_acceptances WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid`,
-      [input.propertyId, input.guestBookingId],
-    )
-  ).rows[0];
-  if (!row) return null;
-  const iso = (value: unknown) => (value instanceof Date ? value.toISOString() : value);
-  const history = decodePricingAcceptanceHistory(
-    {
-      ...row,
-      accepted_at: iso(row.accepted_at),
-      finance_terms_captured_at: iso(row.finance_terms_captured_at),
-    },
-    input.propertyId,
-    String(row.organization_id),
-  );
-  const quote = history?.quote;
+  const current = await loadCurrentPricingAcceptance(client as Pick<PoolClient, "query">, input);
+  const quote = current?.quote;
   const { checkIn, checkOut, roomCount, currency } = input.stay;
   if (
-    !history ||
+    !current ||
     !quote ||
     quote.stay.checkIn !== checkIn ||
     quote.stay.checkOut !== checkOut ||
@@ -54,8 +41,9 @@ export async function loadPricingBookingCancellation(
   )
     return null;
   const rooms: BookedCancellationRoom[] = [];
+  const booked = current.acceptance.quote.evidence.terms;
   for (const room of quote.stay.rooms) {
-    const terms = quote.evidence.terms.find(
+    const terms = booked.find(
       (t) => t.roomTypeId === room.roomTypeId && t.offerId === room.offerId,
     );
     if (!terms) return null;
@@ -73,13 +61,14 @@ export async function loadPricingBookingCancellation(
   }
   return resolveBookedCancellationOutcome({
     checkIn: quote.stay.checkIn,
-    cancelledOn: localDate(history.propertyTimeZone, input.cancelledAt),
+    cancelledOn: localDate(current.acceptance.propertyTimeZone, input.cancelledAt),
     totalMinor: quote.evidence.totalMinor,
     rooms,
   });
 }
 
-/** Frees a cancelled, declined, expired or withdrawn v2 stay inside the caller's transaction.
+/** Frees a cancelled, declined, expired or withdrawn v2 stay inside the caller's transaction:
+ * the holds of its current quote (the latest date-change amendment's, else the acceptance's).
  * Nothing consumes the old `pms.reservation.cancel` handoff for these stays. Receipts still
  * reserved (adoption pending, or a request never adopted) are released, so a later adoption fails
  * closed; handed-off receipts are left alone and their adopted PMS assignments are cancelled.
@@ -98,14 +87,9 @@ export async function cancelAcceptedPricingStay(
   },
 ): Promise<{ released: number; canceledAssignments: number }> {
   await lockPmsInventoryMutationScope(client, input.propertyId);
-  const row = (
-    await client.query(
-      `SELECT inventory_reservation_bundle AS bundle FROM booking.pricing_quote_acceptances
-       WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid`,
-      [input.propertyId, input.guestBookingId],
-    )
-  ).rows[0];
-  const reservation = parsePmsInventoryReservationBundle(row?.bundle);
+  const reservation =
+    (await loadCurrentPricingAcceptance(client, input))?.reservation ??
+    (await storedPricingHolds(client, input));
   if (!reservation) throw new Error("Accepted pricing inventory is unavailable");
   const reserved = await client.query(
     `SELECT 1 FROM pms.inventory_reservation_statuses WHERE receipt_id=ANY($1::uuid[]) AND lifecycle_state='reserved'`,
@@ -125,6 +109,33 @@ export async function cancelAcceptedPricingStay(
     occurredAt: input.occurredAt,
   });
   return { released: reserved.rows.length, canceledAssignments };
+}
+
+/** Freeing a stay must never get stuck. Every acceptance decoded when it was written, so this
+ * only covers a decoder that later turns stricter: release the stored holds (the latest
+ * amendment's, else the acceptance's) without the full decode, and say so. */
+async function storedPricingHolds(
+  client: PoolClient,
+  input: { propertyId: string; guestBookingId: string },
+) {
+  const row = (
+    await client.query(
+      `SELECT COALESCE((SELECT amendment.inventory_reservation_bundle
+           FROM booking.pricing_acceptance_amendments amendment
+           WHERE amendment.acceptance_id=acceptance.id ORDER BY amendment.revision DESC LIMIT 1),
+         acceptance.inventory_reservation_bundle) AS bundle
+       FROM booking.pricing_quote_acceptances acceptance
+       WHERE acceptance.property_id=$1::uuid AND acceptance.guest_booking_id=$2::uuid`,
+      [input.propertyId, input.guestBookingId],
+    )
+  ).rows[0];
+  const reservation = parsePmsInventoryReservationBundle(row?.bundle);
+  if (reservation)
+    console.warn("Pricing acceptance no longer decodes; releasing its stored holds.", {
+      propertyId: input.propertyId,
+      guestBookingId: input.guestBookingId,
+    });
+  return reservation;
 }
 
 function localDate(timeZone: string, at: Date): string {

@@ -23,6 +23,7 @@ on:
       - "fm/vay-2082-*"
       - "fm/vay-2084-*"
       - "fm/vay-2089-*"
+      - "fm/vay-2110-*"
       - "fm/vay-2093-*"
       - "fm/vay-2072-*"
       - "fm/vay-2077-*"
@@ -710,9 +711,11 @@ jobs:
             src/domains/pricingBookingRevenue.postgres.test.ts \
             src/domains/pricingInventoryAdoption.postgres.test.ts \
             src/domains/pricingRevenueClear.postgres.test.ts \
-            src/domains/bookingHostActionLocks.postgres.test.ts
+            src/domains/bookingHostActionLocks.postgres.test.ts \
+            src/domains/bookingHostActions.integration.test.ts
           npm --workspace @vayada/backend-migration run test -- \
-            src/bookingPricingAuthorityDrop.integration.test.ts
+            src/bookingPricingAuthorityDrop.integration.test.ts \
+            src/bookingPricingAcceptanceAmendments.integration.test.ts
           npm --workspace vayada-api run test -- --no-file-parallelism \
             src/domains/replacementPricingOfferOwners.integration.test.ts
 
