@@ -1,7 +1,6 @@
 import type { RequestContext } from "@vayada/backend-auth";
 import { parsePricingConfiguration, pricingKeys, pricingObject } from "@vayada/domain-pms";
 import type { Pool } from "pg";
-import { createBookingPricingAuthorityStore } from "./bookingPricingAuthority.js";
 import {
   createBookingPricingOfferTermsStore,
   lockBookingPricingOfferTerms,
@@ -46,7 +45,6 @@ export function createReplacementPricingCommands(pool: Pool, context: RequestCon
     createReplacementPricingStorageGuard(trustedContext),
   );
   const booking = createBookingPricingOfferTermsStore(pool);
-  const authority = createBookingPricingAuthorityStore(pool);
   const charges = createReplacementChargeDeclarationStore(pool);
   function scope(propertyId: string): PricingStorageScope {
     if (!uuid(propertyId)) return fail("invalid");
@@ -60,12 +58,6 @@ export function createReplacementPricingCommands(pool: Pool, context: RequestCon
     };
   }
   return {
-    async readAuthority(propertyId: string) {
-      return authority.read(trustedContext, scope(propertyId));
-    },
-    async chooseAuthority(propertyId: string, input: unknown) {
-      return authority.save(trustedContext, scope(propertyId), input);
-    },
     /** Read-only preparation. Returned evidence can become stale; saves revalidate it. */
     async prepare(propertyId: string, input: unknown, draft?: BookingPricingDraft) {
       const currentScope = scope(propertyId);
@@ -142,7 +134,8 @@ export function createReplacementPricingCommands(pool: Pool, context: RequestCon
           pricingRevision: revision,
           terms,
         });
-        if (finance.kind !== "ready") return fail("denied");
+        // Staff-only (manage authorization passed above): say what to fix in payment settings.
+        if (finance.kind !== "ready") throw new PricingStorageError("denied", finance.reason);
         const snapshot: PricingStorageSnapshot = {
           currency,
           rooms,

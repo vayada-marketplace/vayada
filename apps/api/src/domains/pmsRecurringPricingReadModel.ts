@@ -9,6 +9,8 @@ import {
 } from "@vayada/domain-pms";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
+import { hasPricingPublication } from "./pmsPricingReadModel.js";
+
 export type PmsRecurringPricingReadClient = {
   query<T extends QueryResultRow = QueryResultRow>(
     text: string,
@@ -202,14 +204,16 @@ export async function loadPmsRecurringPricingBookingEvidence(
   const normalizedPropertyId = readUuid(propertyId);
   const aggregate = await queryCurrencyAggregate(queryable, normalizedPropertyId);
   if (!aggregate) return null;
-  const sources = await querySources(queryable, normalizedPropertyId);
+  // A pricing-v2 publication supersedes the retired legacy recurring pricing.
+  const superseded = await hasPricingPublication(queryable, normalizedPropertyId);
+  const sources = superseded ? [] : await querySources(queryable, normalizedPropertyId);
   const evidence = parsePmsRecurringPricingBookingEvidence({
     contractVersion: PMS_RECURRING_PRICING_CONTRACT_VERSION,
     propertyId: normalizedPropertyId,
     pricingCurrencyRevision: positiveInteger(aggregate.pricingCurrencyRevision),
-    optionalPricingAggregateRevision: nonNegativeInteger(
-      aggregate.optionalPricingAggregateRevision,
-    ),
+    optionalPricingAggregateRevision: superseded
+      ? 0
+      : nonNegativeInteger(aggregate.optionalPricingAggregateRevision),
     currency: aggregate.currency,
     sources,
     capturedAt: validDate(capturedAt) ? capturedAt.toISOString() : null,

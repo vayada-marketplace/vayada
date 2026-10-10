@@ -4,7 +4,8 @@ import { reconcilePmsOccupiedInventory } from "./pmsOccupiedInventory.js";
 import { reconcilePmsLinkedInventory } from "./pmsLinkedInventoryReconciler.js";
 import { enqueuePmsLinkedInventorySideEffects } from "./pmsLinkedInventorySideEffects.js";
 
-/** Booking has locked the property inventory scope and made its terminal transition. */
+/** Booking has locked the property inventory scope and made its terminal transition.
+ * Returns how many live assignments were cancelled. */
 export async function cancelHostBookingAssignments(
   client: PoolClient,
   input: {
@@ -25,7 +26,7 @@ export async function cancelHostBookingAssignments(
        AND assignment.assignment_status IN ('pending','assigned') FOR UPDATE OF assignment`,
     [input.propertyId, input.bookingId],
   );
-  if (!spans.rows.length) return;
+  if (!spans.rows.length) return 0;
   await client.query(
     `UPDATE pms.operational_booking_assignments SET assignment_status='canceled',room_id=NULL,assigned_at=NULL,
        assignment_payload=assignment_payload || jsonb_build_object('version',$3::text,'operationalStatus','canceled'),updated_at=$4::timestamptz
@@ -56,4 +57,5 @@ export async function cancelHostBookingAssignments(
     linked,
   );
   await enqueueHostInventoryChanges(client, input, spans.rows);
+  return spans.rows.length;
 }

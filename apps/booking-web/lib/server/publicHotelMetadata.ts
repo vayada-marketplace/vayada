@@ -3,13 +3,7 @@ import { cache } from "react";
 
 import { routing } from "@/i18n/routing";
 import { getRequestHost } from "@/lib/requestHost";
-import {
-  publicHotelPageHreflangUrls,
-  publicHotelPageUrl,
-  resolvePublicHotelUrls,
-  type PublicHotelCrawlPath,
-  type PublicHotelUrlPolicy,
-} from "@/lib/server/publicUrls";
+import { resolvePublicHotelUrls, type PublicHotelUrlPolicy } from "@/lib/server/publicUrls";
 
 export type PublicHotelMetadata = {
   name?: string;
@@ -114,13 +108,11 @@ export function resolveHotelUrlPolicy(
 export function buildPublicHotelMetadata({
   hotel,
   policy,
-  path,
 }: {
   hotel: PublicHotelMetadata;
   policy: PublicHotelUrlPolicy;
-  path: PublicHotelCrawlPath;
 }): Metadata {
-  const canonicalUrl = publicHotelPageUrl(policy, path);
+  const canonicalUrl = policy.canonicalUrl;
   const favicon = hotel.branding?.faviconUrl || "/vayada-logo.png";
 
   return {
@@ -129,7 +121,7 @@ export function buildPublicHotelMetadata({
     icons: { icon: [{ url: favicon }] },
     alternates: {
       canonical: canonicalUrl,
-      languages: publicHotelPageHreflangUrls(policy, path),
+      languages: policy.hreflangUrls,
     },
     openGraph: {
       title: hotel.name || "Book Your Stay",
