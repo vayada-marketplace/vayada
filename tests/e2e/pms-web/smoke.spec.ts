@@ -1014,9 +1014,7 @@ test.describe("pms-web smoke", () => {
     await expect(page.getByText("Room type updated successfully")).toBeVisible();
     // An unchanged save writes nothing, so published prices stay valid.
     expect(roomTypeWrite).toBeUndefined();
-    await expect(page.getByText("Publish prices again so guests can book this room.")).toHaveCount(
-      0,
-    );
+    await expect(page.getByText("Prices need to be saved again")).toHaveCount(0);
     expect(pricingCalls).toEqual([]);
     await assertNoLegacyCalls();
     await assertHealthy();

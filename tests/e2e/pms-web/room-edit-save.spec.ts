@@ -21,17 +21,19 @@ test.describe("pms-web room edit save", () => {
   test("keeps edited room details after a reload", async ({ page }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
     const stored = await mockRoomBackend(page);
+    // The room facts are part of what published prices pin: after the save they read stale (VAY-2093).
+    await mockPublishedPrices(page, () => stored.factWrites.length > 0);
 
     await page.goto(`/rooms/${roomTypeId}`);
     await expect(roomField(page, "Room Type Name")).toHaveValue("Alpine Suite");
+    await expect(page.getByText("Prices need to be saved again")).toHaveCount(0);
     await roomField(page, "Room Type Name").fill("Lake Suite");
     await roomField(page, "Max Children").fill("2");
     await page.getByRole("button", { name: "Save Changes" }).click();
 
     await expect(page.getByText("Room type updated successfully")).toBeVisible();
-    await expect(
-      page.getByText("Publish prices again so guests can book this room."),
-    ).toBeVisible();
+    await expect(page.getByText("Prices need to be saved again")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save prices again" })).toBeVisible();
     expect(stored.factWrites).toEqual([
       expect.objectContaining({
         expectedRevision: 3,
@@ -71,6 +73,70 @@ test.describe("pms-web room edit save", () => {
     expect(stored.room.name).toBe("Alpine Suite");
   });
 });
+
+async function mockPublishedPrices(page: Page, stale: () => boolean) {
+  const token = (digit: string) => digit.repeat(64);
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2`, (route) =>
+    route.fulfill({
+      json: {
+        currency: "EUR",
+        revision: 1,
+        stale: stale(),
+        ownerReferences: { finance: `finance.pricing.v2:${token("1")}` },
+        sources: {
+          room: `pms.pricing.rooms.v2:${token("3")}`,
+          terms: `booking.pricing.terms.v2:${token("4")}`,
+          finance: `finance.pricing.source.v2:${token("5")}`,
+        },
+        rooms: [
+          {
+            version: "pricing.v2",
+            propertyId: PMS_WEB_PROPERTY_ID,
+            roomTypeId,
+            revision: 1,
+            currency: "EUR",
+            capacity: { total: 3, adults: 2, children: 1 },
+            children: {
+              adultFromAge: 12,
+              bands: [
+                { fromAge: 0, throughAge: 11, nightlyMinor: "0", countsTowardCapacity: true },
+              ],
+            },
+            offers: [
+              {
+                id: "flex",
+                termsRevision: "66666666-6666-4666-8666-666666666666",
+                meal: { kind: "room_only", charge: { kind: "room", amountMinor: "0" } },
+                price: {
+                  kind: "independent",
+                  calendar: {
+                    base: { mode: "flat", amountMinor: "18000" },
+                    months: [],
+                    seasons: [],
+                    weekdays: [],
+                    dates: [],
+                  },
+                },
+                restrictions: {
+                  kind: "own",
+                  rules: {
+                    minArrivalNights: 1,
+                    maxStayNights: null,
+                    closedToArrival: false,
+                    closedToDeparture: false,
+                    stopSell: false,
+                  },
+                  seasons: [],
+                  dates: [],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    }),
+  );
+}
 
 function roomField(page: Page, label: string) {
   return page.locator(
