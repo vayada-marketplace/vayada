@@ -78,7 +78,7 @@ describe.skipIf(!url)("Channex ongoing offer ARI storage", () => {
         [job, worker],
       )
     ).rows[0].id as string;
-    const body = (ratePlan = externalRate) =>
+    const body = (ratePlan: string = externalRate) =>
       JSON.stringify({
         values: [
           {
