@@ -9,6 +9,8 @@ import type { ProductionPmsPlan } from "./productionPmsTypes.js";
 import { writeProductionPmsRecords } from "./productionPmsWriter.js";
 import { writeProductionMigrationProvenance } from "./productionBookingWriter.js";
 
+// VAY-1362: the cohort read with the snapshot must reach every plan build.
+const COHORT = { bookingHotelIds: [], pmsHotelIds: [], marketplaceHotelIds: [] };
 const RUN = "vay1351-0123456789abcdef01234567";
 
 describe("production PMS migration transaction", () => {
@@ -33,7 +35,7 @@ describe("production PMS migration transaction", () => {
     expect(report.applied).toBe(false);
     expect(client.sql).toEqual(["BEGIN ISOLATION LEVEL REPEATABLE READ", "ROLLBACK"]);
     expect(services.buildPlan).toHaveBeenCalledWith(
-      expect.objectContaining({ snapshotAt: "2026-08-29T23:59:00.000Z" }),
+      expect.objectContaining({ snapshotAt: "2026-08-29T23:59:00.000Z", cohort: COHORT }),
     );
     expect(services.writeRecords).not.toHaveBeenCalled();
     expect(services.writeProvenance).not.toHaveBeenCalled();
@@ -198,6 +200,7 @@ function serviceFixture(): ProductionPmsMigrationServices {
       rows: [],
       snapshotAt: "2026-08-29T23:59:00.000Z",
       completedAt: "2026-08-30T00:00:00.000Z",
+      cohort: COHORT as never,
     })),
     readPrerequisites: vi.fn(async () => ({
       propertyLinks: [],

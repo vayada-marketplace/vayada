@@ -7,13 +7,15 @@ import {
 } from "./productionFinanceSnapshotReader.js";
 
 const RUN = "vay1351-0123456789abcdef01234567";
+const COHORT = { sourceRunId: RUN } as never;
 
 describe("production Finance snapshot reader", () => {
   it("verifies both Booking and PMS snapshot evidence", async () => {
     const fixture = new FinanceFixture();
     const result = await readProductionFinanceSnapshot(fixture as never, RUN, {
-      validateRun: async () => [],
+      validateRun: async () => ({ cohort: COHORT }),
     });
+    expect(result.cohort).toBe(COHORT);
     expect(result.completedAt).toBe("2026-08-30T01:02:03.000Z");
     expect(result.rows.map((row) => `${row.sourceDatabase}.${row.sourceTable}`)).toEqual([
       "booking.booking_hotels",

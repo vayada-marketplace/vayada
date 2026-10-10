@@ -148,6 +148,33 @@ describe("Channex adoption evidence", () => {
       verifyChannexAdoptionTargetEvidence(client as never, manifest),
     ).rejects.toMatchObject({ code: "CATALOG_PLAN_WARNINGS" });
   });
+
+  // VAY-1362. The identity plan already counts cohort quarantine apart from
+  // quarantinedOrganizations/ResourceLinks (productionIdentityCohortScope.test.ts).
+  it("ignores only catalog quarantine of hotels outside the migration cohort", async () => {
+    const manifest = fixtureManifest();
+    const client = new EvidenceClient(manifest);
+    arrangeTarget(manifest);
+    const catalog = dependencies.buildCatalogPlan();
+    catalog.quarantinedSources.push({ reason: "outside_migration_cohort" });
+    await expect(verifyChannexAdoptionTargetEvidence(client as never, manifest)).resolves.toBe(
+      undefined,
+    );
+
+    catalog.quarantinedSources.push({ reason: "legacy_owner_quarantined" });
+    await expect(
+      verifyChannexAdoptionTargetEvidence(client as never, manifest),
+    ).rejects.toMatchObject({ code: "CATALOG_PLAN_WARNINGS" });
+
+    catalog.quarantinedSources.pop();
+    Object.assign(catalog.sourceLinks[0], {
+      migrationDisposition: "private_quarantine",
+      migrationDispositionReason: "outside_migration_cohort",
+    });
+    await expect(
+      verifyChannexAdoptionTargetEvidence(client as never, manifest),
+    ).rejects.toMatchObject({ code: "TARGET_SOURCE_LINK_MISMATCH" });
+  });
 });
 
 function arrangeTarget(manifest: ChannexAdoptionManifest): void {

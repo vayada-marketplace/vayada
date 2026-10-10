@@ -189,6 +189,20 @@ describe("production media plan", () => {
     expect(plan.references[0]).toMatchObject({ visibility: "private", publicApproved: false });
   });
 
+  // VAY-1362: no Media change is needed; like Marketplace it follows the catalog disposition.
+  it("keeps media of a property outside the migration cohort private", () => {
+    const input = fixture();
+    Object.assign(input.target.propertyLinks[0]!, {
+      migrationDisposition: "private_quarantine",
+      migrationDispositionReason: "outside_migration_cohort",
+    });
+
+    const plan = buildProductionMediaPlan(input);
+
+    expect(plan.blockers).toEqual([]);
+    expect(plan.references[0]).toMatchObject({ visibility: "private", publicApproved: false });
+  });
+
   it("retains suspended creator media as private", () => {
     const input = fixture();
     input.rows = [

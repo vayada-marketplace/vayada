@@ -3,6 +3,7 @@ import type pg from "pg";
 
 import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
 import { readProductionIdentitySnapshot } from "./productionIdentitySnapshotReader.js";
+import type { ProductionMigrationCohort } from "./productionMigrationCohort.js";
 
 type QueryClient = Pick<pg.ClientBase, "query">;
 type BookingDatabase = "booking" | "pms";
@@ -26,7 +27,12 @@ type SnapshotRow = {
   rowData: string;
 };
 
-export type ProductionBookingSnapshot = { rows: IdentitySourceRow[]; completedAt: string };
+export type ProductionBookingSnapshot = {
+  rows: IdentitySourceRow[];
+  completedAt: string;
+  /** VAY-1362 cohort loaded by the same validated run read; null means none. */
+  cohort?: ProductionMigrationCohort | null;
+};
 
 export const PRODUCTION_BOOKING_SOURCE_TABLES: Record<BookingDatabase, readonly string[]> = {
   booking: ["booking_addons", "booking_events", "booking_hotels", "booking_promo_codes"],
@@ -49,7 +55,9 @@ export async function readProductionBookingSnapshot(
     validateRun: readProductionIdentitySnapshot,
   },
 ): Promise<ProductionBookingSnapshot> {
-  await services.validateRun(client, runId);
+  const validated = (await services.validateRun(client, runId)) as
+    | { cohort?: ProductionMigrationCohort | null }
+    | undefined;
   const run = await client.query<{ completedAt: string | null }>(
     `SELECT finished_at::text AS "completedAt"
      FROM platform.source_extraction_runs WHERE run_id = $1`,
@@ -136,5 +144,9 @@ export async function readProductionBookingSnapshot(
         throw new Error(`Source extraction ${runId} mismatches ${database}.${table} checksum`);
     }
   }
-  return { rows: loaded, completedAt: new Date(run.rows[0].completedAt).toISOString() };
+  return {
+    rows: loaded,
+    completedAt: new Date(run.rows[0].completedAt).toISOString(),
+    cohort: validated?.cohort ?? null,
+  };
 }

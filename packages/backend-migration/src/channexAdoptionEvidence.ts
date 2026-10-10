@@ -113,6 +113,8 @@ export async function verifyChannexAdoptionTargetEvidence(
     identitySnapshot.cohort ?? null,
   );
   if (identityPlan.blockers.length) rejectAdoption("IDENTITY_PLAN_BLOCKED");
+  // VAY-1362: quarantine of hotels outside the migration cohort is planned scope, not a warning.
+  // The identity plan already counts it apart; any other quarantine still blocks adoption.
   if (identityPlan.quarantinedOrganizations || identityPlan.quarantinedResourceLinks)
     rejectAdoption("IDENTITY_PLAN_WARNINGS");
 
@@ -133,7 +135,8 @@ export async function verifyChannexAdoptionTargetEvidence(
   );
   const catalogPlan = buildProductionCatalogPlan(catalogRows, catalogTarget, cohort);
   if (catalogPlan.blockers.length) rejectAdoption("CATALOG_PLAN_BLOCKED");
-  if (catalogPlan.quarantinedSources.length) rejectAdoption("CATALOG_PLAN_WARNINGS");
+  if (catalogPlan.quarantinedSources.some((row) => row.reason !== "outside_migration_cohort"))
+    rejectAdoption("CATALOG_PLAN_WARNINGS");
 
   const plannedSourceLinks = catalogPlan.sourceLinks.filter(
     (row) =>

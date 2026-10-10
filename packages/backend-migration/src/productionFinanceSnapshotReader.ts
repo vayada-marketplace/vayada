@@ -3,6 +3,7 @@ import type pg from "pg";
 
 import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
 import { readProductionIdentitySnapshot } from "./productionIdentitySnapshotReader.js";
+import type { ProductionMigrationCohort } from "./productionMigrationCohort.js";
 
 type QueryClient = Pick<pg.ClientBase, "query">;
 
@@ -38,7 +39,12 @@ type SnapshotRow = {
   rowData: string;
 };
 
-export type ProductionFinanceSnapshot = { rows: IdentitySourceRow[]; completedAt: string };
+export type ProductionFinanceSnapshot = {
+  rows: IdentitySourceRow[];
+  completedAt: string;
+  /** VAY-1362 cohort loaded by the same validated run read; null means none. */
+  cohort?: ProductionMigrationCohort | null;
+};
 
 export async function readProductionFinanceSnapshot(
   client: QueryClient,
@@ -47,7 +53,9 @@ export async function readProductionFinanceSnapshot(
     validateRun: readProductionIdentitySnapshot,
   },
 ): Promise<ProductionFinanceSnapshot> {
-  await services.validateRun(client, runId);
+  const validated = (await services.validateRun(client, runId)) as
+    | { cohort?: ProductionMigrationCohort | null }
+    | undefined;
   const run = await client.query<{ completedAt: string | null }>(
     `SELECT finished_at::text AS "completedAt" FROM platform.source_extraction_runs WHERE run_id = $1`,
     [runId],
@@ -135,5 +143,9 @@ export async function readProductionFinanceSnapshot(
     if (checksum.digest("hex") !== table.checksum)
       throw new Error(`Source extraction ${runId} mismatches ${key} checksum`);
   }
-  return { rows, completedAt: new Date(run.rows[0].completedAt).toISOString() };
+  return {
+    rows,
+    completedAt: new Date(run.rows[0].completedAt).toISOString(),
+    cohort: validated?.cohort ?? null,
+  };
 }

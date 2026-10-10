@@ -4,6 +4,8 @@ import type pg from "pg";
 import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
 import { readProductionIdentitySnapshot } from "./productionIdentitySnapshotReader.js";
 
+import type { ProductionMigrationCohort } from "./productionMigrationCohort.js";
+
 type QueryClient = Pick<pg.ClientBase, "query">;
 type SourceEvidence = {
   sourceDatabase: "pms";
@@ -29,6 +31,8 @@ export type ProductionPmsSnapshot = {
   rows: IdentitySourceRow[];
   snapshotAt: string;
   completedAt: string;
+  /** VAY-1362 cohort loaded by the same validated run read; null means none. */
+  cohort?: ProductionMigrationCohort | null;
 };
 
 export const PRODUCTION_PMS_SOURCE_TABLES = [
@@ -68,7 +72,9 @@ export async function readProductionPmsSnapshot(
     validateRun: readProductionIdentitySnapshot,
   },
 ): Promise<ProductionPmsSnapshot> {
-  await services.validateRun(client, runId);
+  const validated = (await services.validateRun(client, runId)) as
+    | { cohort?: ProductionMigrationCohort | null }
+    | undefined;
   const run = await client.query<{ completedAt: string | null }>(
     `SELECT finished_at::text AS "completedAt"
      FROM platform.source_extraction_runs WHERE run_id = $1`,
@@ -159,5 +165,6 @@ export async function readProductionPmsSnapshot(
     rows: loaded,
     snapshotAt: snapshotAt.toISOString(),
     completedAt: new Date(run.rows[0].completedAt).toISOString(),
+    cohort: validated?.cohort ?? null,
   };
 }

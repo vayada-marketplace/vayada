@@ -9,7 +9,12 @@ import {
   sourceId,
   sourceRows,
 } from "./productionFinanceContext.js";
-import { buildFinanceRecords, paymentStatus, payoutStatus } from "./productionFinanceRecords.js";
+import type { IdentityCohortScope } from "./productionIdentityCohortScope.js";
+import {
+  buildFinanceRecords,
+  paymentStatus,
+  targetPayoutStatus,
+} from "./productionFinanceRecords.js";
 import type {
   ExistingFinanceTargetRecord,
   FinanceBuildContext,
@@ -25,6 +30,7 @@ export function buildProductionFinancePlan(input: {
   completedAt: string;
   rows: IdentitySourceRow[];
   target: ProductionFinanceTargetState;
+  cohort?: IdentityCohortScope | null;
 }): ProductionFinancePlan {
   const context = createProductionFinanceContext(input);
   const candidates = buildFinanceRecords(context).sort((left, right) =>
@@ -558,7 +564,8 @@ function rawEconomicDimension(
   // their immutable provider transaction reference, but reconcile the binding
   // dimension as intentionally unbound.
   const provider = "unbound";
-  return `${currency}:${provider}:${payoutStatus(row.data["status"])}:${dimension("owner", owner)}`;
+  const status = targetPayoutStatus(context, hotelId, row.data["status"]);
+  return `${currency}:${provider}:${status}:${dimension("owner", owner)}`;
 }
 
 function providerIndex(records: FinanceTargetRecord[]): Map<string, string> {

@@ -7,6 +7,8 @@ import {
 } from "./productionFinanceMigration.js";
 import type { ProductionFinancePlan } from "./productionFinanceTypes.js";
 
+// VAY-1362: the cohort read with the snapshot must reach every plan build.
+const COHORT = { bookingHotelIds: [], pmsHotelIds: [], marketplaceHotelIds: [] };
 const RUN = "vay1351-0123456789abcdef01234567";
 const APPLY = `production-finance:${RUN}`;
 
@@ -31,6 +33,7 @@ describe("production Finance migration transaction", () => {
     );
     expect(report.applied).toBe(false);
     expect(client.sql).toEqual(["BEGIN ISOLATION LEVEL REPEATABLE READ", "ROLLBACK"]);
+    expect(services.buildPlan).toHaveBeenCalledWith(expect.objectContaining({ cohort: COHORT }));
     expect(services.writeRecords).not.toHaveBeenCalled();
     expect(services.writeProvenance).not.toHaveBeenCalled();
   });
@@ -109,7 +112,11 @@ function serviceFixture(): ProductionFinanceMigrationServices {
     userIds: [],
   };
   return {
-    readSnapshot: vi.fn(async () => ({ rows: [], completedAt: "2026-08-30T00:00:00.000Z" })),
+    readSnapshot: vi.fn(async () => ({
+      rows: [],
+      completedAt: "2026-08-30T00:00:00.000Z",
+      cohort: COHORT as never,
+    })),
     readPrerequisites: vi.fn(async () => prerequisites),
     readTarget: vi.fn(async () => ({ ...prerequisites, records: [], provenance: [] })),
     buildPlan: vi.fn(() => plan(true)),

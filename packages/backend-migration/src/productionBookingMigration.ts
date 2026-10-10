@@ -95,6 +95,7 @@ export async function runProductionBookingTransaction(
       sourceRunId: input.sourceRunId,
       completedAt: snapshot.completedAt,
       rows: snapshot.rows,
+      cohort: snapshot.cohort,
       target: emptyTarget,
     });
     const target = await services.readTarget(client, preliminary.records, ownership);
@@ -102,6 +103,7 @@ export async function runProductionBookingTransaction(
       sourceRunId: input.sourceRunId,
       completedAt: snapshot.completedAt,
       rows: snapshot.rows,
+      cohort: snapshot.cohort,
       target,
     });
     if (input.mode === "dry-run" || plan.blockers.length > 0) {
@@ -143,6 +145,7 @@ export async function runProductionBookingTransaction(
       sourceRunId: input.sourceRunId,
       completedAt: snapshot.completedAt,
       rows: snapshot.rows,
+      cohort: snapshot.cohort,
       target: verifiedTarget,
     });
     if (

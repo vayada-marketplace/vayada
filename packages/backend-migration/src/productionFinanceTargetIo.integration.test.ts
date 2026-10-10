@@ -1,15 +1,26 @@
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { readProductionFinanceTargetState } from "./productionFinanceTargetReader.js";
+import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
+import { buildProductionFinancePlan } from "./productionFinancePlan.js";
+import {
+  readProductionFinancePrerequisites,
+  readProductionFinanceTargetState,
+} from "./productionFinanceTargetReader.js";
 import type {
   FinanceTargetRecord,
   ProductionFinancePrerequisites,
+  ProductionFinanceTargetState,
 } from "./productionFinanceTypes.js";
 import {
   writeProductionFinanceDispositions,
   writeProductionFinanceRecords,
 } from "./productionFinanceWriter.js";
+import {
+  parseProductionMigrationCohort,
+  readProductionMigrationCohort,
+  writeProductionMigrationCohort,
+} from "./productionMigrationCohort.js";
 import { assertSafeTestDatabase } from "./testUtils.js";
 
 const URL = process.env["TEST_DATABASE_URL"];
@@ -127,6 +138,109 @@ describe.skipIf(!URL)("production Finance target IO (PostgreSQL)", () => {
       expect(candidate.row).not.toHaveProperty("identityEntitlementId");
       expect(linked.rows).toHaveLength(1);
       expect(linked.rows[0]!.billingId).toBe(linked.rows[0]!.identityId);
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+
+  // VAY-1362: a PMS hotel without a Booking anchor keeps its own quarantine reason; the cohort
+  // ID sets still retire its payouts.
+  it("retires open payouts of a hotel outside the migration cohort (VAY-1362)", async () => {
+    const hotel = "fa000000-0000-4000-8000-000000000005";
+    const booking = "fa000000-0000-4000-8000-000000000006";
+    const guestBooking = "fa000000-0000-4000-8000-000000000007";
+    const at = "2026-08-29T10:00:00.000Z";
+    await client.query("BEGIN");
+    try {
+      await client.query(
+        `INSERT INTO hotel_catalog.properties (id, public_id, display_name)
+         VALUES ($1, 'legacy-private-property-cohort-test', 'Outside cohort')`,
+        [PROPERTY],
+      );
+      const metadata = JSON.stringify({
+        migrationRunId: RUN,
+        migrationDisposition: "private_quarantine",
+        migrationDispositionReason: "missing_canonical_property",
+      });
+      await client.query(
+        `INSERT INTO hotel_catalog.property_source_links
+           (property_id, source_system, source_table, source_id, relationship, metadata)
+         VALUES ($1, 'booking', 'booking_hotels', $2, 'canonical_input', $3::jsonb),
+                ($1, 'pms', 'hotels', $2, 'operational_input', $3::jsonb)`,
+        [PROPERTY, hotel, metadata],
+      );
+      await client.query(
+        `INSERT INTO booking.guest_bookings
+           (id, property_id, public_reference, source_system, source_booking_id, lifecycle_status,
+            payment_status, check_in, check_out, adults, children, room_count, currency,
+            total_amount, balance_amount, booking_channel, created_at, updated_at)
+         VALUES ($1, $2, 'COHORT-PAYOUT', 'pms', $3, 'confirmed', 'paid', '2026-09-01',
+                 '2026-09-03', 2, 0, 1, 'EUR', 200, 0, 'booking_com', $4, $4)`,
+        [guestBooking, PROPERTY, booking, at],
+      );
+      const payout = (id: string, status: string): IdentitySourceRow => ({
+        sourceDatabase: "pms",
+        sourceTable: "payouts",
+        rowOrdinal: 1,
+        data: {
+          id,
+          booking_id: booking,
+          recipient_type: "hotel",
+          recipient_id: hotel,
+          amount: "100.00",
+          currency: "EUR",
+          status,
+          scheduled_for: at,
+          retry_count: 0,
+          created_at: at,
+          updated_at: at,
+        },
+      });
+      const rows: IdentitySourceRow[] = [
+        {
+          sourceDatabase: "pms",
+          sourceTable: "bookings",
+          rowOrdinal: 1,
+          data: { id: booking, hotel_id: hotel, created_at: at, updated_at: at },
+        },
+        payout(ID, "scheduled"),
+        payout(BILLING, "processing"),
+        payout("fa000000-0000-4000-8000-000000000008", "failed"),
+      ];
+      await writeProductionMigrationCohort(
+        client,
+        parseProductionMigrationCohort({
+          sourceRunId: RUN,
+          bookingHotelIds: [ORGANIZATION],
+          pmsHotelIds: [],
+          marketplaceHotelIds: [],
+          approvalProofSha256: "d".repeat(64),
+        }),
+      );
+      const cohort = await readProductionMigrationCohort(client, RUN);
+      const prerequisites = await readProductionFinancePrerequisites(client, RUN);
+      const build = (target: ProductionFinanceTargetState) =>
+        buildProductionFinancePlan({ sourceRunId: RUN, completedAt: at, rows, target, cohort });
+      const preliminary = build({ ...prerequisites, records: [], provenance: [] });
+      const plan = build(
+        await readProductionFinanceTargetState(client, preliminary.records, prerequisites),
+      );
+      expect(plan.blockers).toEqual([]);
+
+      await expect(writeProductionFinanceRecords(client, plan.writes)).resolves.toEqual({
+        payouts: 3,
+      });
+      const written = await client.query(
+        `SELECT payout_status AS status, payout_metadata ->> 'legacyPayoutStatus' AS legacy,
+                payout_metadata ->> 'retiredReason' AS reason
+           FROM finance.payouts WHERE related_property_id = $1 ORDER BY source_payout_id`,
+        [PROPERTY],
+      );
+      expect(written.rows).toEqual([
+        { status: "canceled", legacy: "scheduled", reason: "outside_migration_cohort" },
+        { status: "canceled", legacy: "processing", reason: "outside_migration_cohort" },
+        { status: "canceled", legacy: "failed", reason: "outside_migration_cohort" },
+      ]);
     } finally {
       await client.query("ROLLBACK");
     }

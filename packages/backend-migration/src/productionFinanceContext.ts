@@ -6,12 +6,15 @@ import type {
   ProductionFinanceTargetState,
 } from "./productionFinanceTypes.js";
 import { requiredText, sha256, uuid } from "./productionBookingValues.js";
+import type { IdentityCohortScope } from "./productionIdentityCohortScope.js";
+import { outsideCohortSource } from "./productionMigrationCohort.js";
 
 export function createProductionFinanceContext(input: {
   sourceRunId: string;
   completedAt: string;
   rows: IdentitySourceRow[];
   target: ProductionFinanceTargetState;
+  cohort?: IdentityCohortScope | null;
 }): FinanceBuildContext {
   const context: FinanceBuildContext = {
     ...input,
@@ -181,6 +184,10 @@ export function resourceStatusFor(
   );
   if (matches.length !== 1)
     throw new Error(`${product}.${resourceType} ${id} has ${matches.length} accepted owner links`);
+  // VAY-1362: like PMS, a property outside the migration cohort stays inert whatever its owner
+  // link says.
+  if (product !== "affiliate" && outsideCohortSource(context.cohort, product, id))
+    return "archived";
   return matches[0]!.status;
 }
 

@@ -1,3 +1,4 @@
+import type { IdentityCohortScope } from "./productionIdentityCohortScope.js";
 import { buildPmsAssignmentRecords } from "./productionPmsAssignmentRecords.js";
 import { buildPmsAuditRecords } from "./productionPmsAuditRecords.js";
 import { buildPmsChannelRecords } from "./productionPmsChannelRecords.js";
@@ -24,6 +25,7 @@ export function buildProductionPmsPlan(input: {
   completedAt: string;
   rows: IdentitySourceRow[];
   target: ProductionPmsTargetState;
+  cohort?: IdentityCohortScope | null;
 }): ProductionPmsPlan {
   const context = createProductionPmsContext(input);
   const rooms = buildPmsRoomRecords(context);

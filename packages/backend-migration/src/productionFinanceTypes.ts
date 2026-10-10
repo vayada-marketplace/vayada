@@ -1,3 +1,4 @@
+import type { IdentityCohortScope } from "./productionIdentityCohortScope.js";
 import type {
   IdentityMigrationBlocker,
   IdentitySourceRow,
@@ -124,6 +125,8 @@ export type FinanceBuildContext = {
   pmsSettingsByProperty: Map<string, IdentitySourceRow>;
   plannedTargetIdsByTable: Map<string, Set<string>>;
   quarantinedSourceRows: Set<IdentitySourceRow>;
+  /** VAY-1362: the run's approved cohort; null or absent means no cohort. */
+  cohort?: IdentityCohortScope | null;
 };
 
 export type FinanceParity = {

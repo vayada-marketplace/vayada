@@ -7,13 +7,15 @@ import {
 } from "./productionPmsSnapshotReader.js";
 
 const RUN = "vay1351-0123456789abcdef01234567";
+const COHORT = { sourceRunId: RUN } as never;
 
 describe("production PMS snapshot reader", () => {
   it("returns only checksum-verified PMS rows and extraction time", async () => {
     const fixture = new PmsFixture();
     const result = await readProductionPmsSnapshot(fixture as never, RUN, {
-      validateRun: async () => [],
+      validateRun: async () => ({ cohort: COHORT }),
     });
+    expect(result.cohort).toBe(COHORT);
     expect(result.completedAt).toBe("2026-08-30T01:02:03.000Z");
     expect(result.snapshotAt).toBe("2026-08-30T00:02:03.000Z");
     expect(result.rows.map((row) => row.sourceTable)).toEqual(["hotels", "room_types"]);

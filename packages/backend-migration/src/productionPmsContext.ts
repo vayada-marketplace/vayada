@@ -9,6 +9,7 @@ import type {
   ProductionPmsTargetState,
 } from "./productionPmsTypes.js";
 import { requiredText, sourceId } from "./productionBookingValues.js";
+import type { IdentityCohortScope } from "./productionIdentityCohortScope.js";
 
 const ID_TABLES = [
   "booking_checkin_records",
@@ -41,6 +42,7 @@ export function createProductionPmsContext(input: {
   completedAt: string;
   rows: IdentitySourceRow[];
   target: ProductionPmsTargetState;
+  cohort?: IdentityCohortScope | null;
 }): PmsBuildContext {
   const blockers = [...(input.target.blockers ?? [])];
   const rowsByTable = new Map<string, IdentitySourceRow[]>();
