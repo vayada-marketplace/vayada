@@ -10,6 +10,10 @@ import type { ProductionParityFinding } from "./productionParity.js";
 const MESSAGES = {
   cohortHotelUnresolved: "A cohort hotel does not resolve to exactly one target property",
   cohortPropertyQuarantined: "A cohort hotel resolves to a private-quarantine property",
+  cohortPropertyOwner:
+    "A cohort property lacks exactly one active hotel organization with both native owner links",
+  cohortPropertyEntitlement:
+    "A cohort property's organization lacks an active, unsuspended PMS property entitlement",
   profileNotPrivate: "A property outside the cohort has a non-private profile",
   verifiedDomain: "A property outside the cohort has a verified custom domain",
   publicMedia: "A property outside the cohort has public media",
@@ -90,6 +94,18 @@ const SCOPE_CTES = `
         ON link.source_system = hotel.source_system AND link.source_id = hotel.id
       LEFT JOIN hotel_catalog.properties property ON property.id = link.property_id
      GROUP BY hotel.source_system, hotel.id
+  ), cohort_owner AS (
+    -- VAY-1543 runtime tenancy: both links active with owner/operator, in the same organization.
+    SELECT DISTINCT cohort.property_id, catalog.organization_id
+      FROM (SELECT DISTINCT property_id FROM legacy_link WHERE inside) cohort
+      JOIN identity.organization_resource_links catalog
+        ON catalog.product = 'hotel_catalog' AND catalog.resource_type = 'property'
+       AND catalog.resource_id = cohort.property_id::text
+      JOIN identity.organization_resource_links pms
+        ON pms.organization_id = catalog.organization_id AND pms.product = 'pms'
+       AND pms.resource_type = 'pms_property' AND pms.resource_id = catalog.resource_id
+     WHERE catalog.status = 'active' AND pms.status = 'active'
+       AND catalog.relationship IN ('owner', 'operator') AND pms.relationship IN ('owner', 'operator')
   )`;
 
 const SCOPE_COUNT_QUERY = `${SCOPE_CTES}
@@ -104,6 +120,25 @@ const SCOPE_VIOLATION_QUERY = `${SCOPE_CTES}
       FROM cohort_resolution WHERE properties <> 1
     UNION ALL SELECT 'cohortPropertyQuarantined', id FROM cohort_resolution
      WHERE properties = 1 AND quarantined
+    UNION ALL SELECT 'cohortPropertyOwner', link.property_id::text FROM legacy_link link
+      JOIN hotel_catalog.properties property ON property.id = link.property_id
+      LEFT JOIN cohort_owner owner USING (property_id)
+      LEFT JOIN identity.organizations organization ON organization.id = owner.organization_id
+     WHERE link.inside GROUP BY link.property_id
+    HAVING count(DISTINCT owner.organization_id) <> 1
+        OR NOT bool_and(organization.kind = 'hotel_group' AND organization.status = 'active')
+    UNION ALL SELECT 'cohortPropertyEntitlement', owner.property_id::text FROM cohort_owner owner
+      LEFT JOIN identity.product_entitlements entitlement
+        ON entitlement.organization_id = owner.organization_id AND entitlement.product = 'pms'
+       AND entitlement.entitlement_key IN ('property-management', 'pms-core', 'account_access')
+       AND (entitlement.resource_product IS NULL
+         OR (entitlement.resource_product = 'pms' AND entitlement.resource_type = 'pms_property'
+           AND entitlement.resource_id = owner.property_id::text))
+       AND (entitlement.starts_at IS NULL OR entitlement.starts_at <= now())
+       AND (entitlement.expires_at IS NULL OR entitlement.expires_at > now())
+     GROUP BY owner.property_id, owner.organization_id
+    HAVING NOT coalesce(bool_or(entitlement.status = 'active'), FALSE)
+        OR coalesce(bool_or(entitlement.status = 'suspended'), FALSE)
     UNION ALL SELECT 'profileNotPrivate', property.id::text FROM hotel_catalog.properties property
       JOIN outside ON outside.property_id = property.id WHERE property.profile_status <> 'private'
     UNION ALL SELECT 'profileNotPrivate', profile.property_id::text

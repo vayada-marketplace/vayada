@@ -44,6 +44,7 @@ const OUT_USER_ID = "13620000-0000-4000-8000-000000000006";
 const OUT_OFFER_ID = "13620000-0000-4000-8000-000000000007";
 const OUT_ROOM_TYPE_ID = "13620000-0000-4000-8000-000000000008";
 const OUT_CONNECTION_ID = "13620000-0000-4000-8000-000000000009";
+const IN_ORGANIZATION_ID = "13620000-0000-4000-8000-000000000010";
 const COHORT_SUBJECTS = new Set([IN_HOTEL_ID, OUT_HOTEL_ID, OUT_PMS_HOTEL_ID, MISSING_HOTEL_ID]);
 
 describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
@@ -575,6 +576,7 @@ describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
       const cohort = await storeCohort(client, COHORT_PASS_RUN_ID, [IN_HOTEL_ID]);
       await insertCohortProperties(client, "canonical");
       await insertOutsideRows(client, false);
+      await insertCohortAccess(client, false);
 
       const { cohortScope } = await readProductionParityEvidence({
         ...config(),
@@ -605,6 +607,7 @@ describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
       await storeCohort(client, COHORT_FAIL_RUN_ID, [IN_HOTEL_ID, MISSING_HOTEL_ID]);
       await insertCohortProperties(client, "private_quarantine");
       await insertOutsideRows(client, true);
+      await insertCohortAccess(client, true);
 
       const { cohortScope } = await readProductionParityEvidence({
         ...config(),
@@ -620,6 +623,8 @@ describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
         { category: "activeOwnerLink", subjectId: OUT_HOTEL_ID },
         { category: "bindingClaim", subjectId: OUT_HOTEL_ID },
         { category: "cohortHotelUnresolved", subjectId: MISSING_HOTEL_ID },
+        { category: "cohortPropertyEntitlement", subjectId: IN_HOTEL_ID },
+        { category: "cohortPropertyOwner", subjectId: IN_HOTEL_ID },
         { category: "cohortPropertyQuarantined", subjectId: IN_HOTEL_ID },
         { category: "connectedChannel", subjectId: OUT_HOTEL_ID },
         { category: "enabledProviderAccount", subjectId: OUT_HOTEL_ID },
@@ -868,6 +873,40 @@ async function insertOutsideRows(client: pg.Client, live: boolean): Promise<void
   for (const [sql, params] of statements) await client.query(sql, params);
 }
 
+/** The cohort hotel's native access as the catalog step writes it. Live adds a second
+ * organization holding both links, and a suspended organization-wide PMS entitlement as the
+ * only failing grant: the second organization holds an active one. */
+async function insertCohortAccess(client: pg.Client, live: boolean): Promise<void> {
+  await client.query(
+    `INSERT INTO identity.organizations (id, kind, name, slug, status)
+     VALUES ($1, 'hotel_group', 'Parity cohort owner', 'parity-cohort-in-owner', 'active')`,
+    [IN_ORGANIZATION_ID],
+  );
+  const organizations = live ? [IN_ORGANIZATION_ID, OUT_ORGANIZATION_ID] : [IN_ORGANIZATION_ID];
+  await client.query(
+    `INSERT INTO identity.organization_resource_links
+       (organization_id, product, resource_type, resource_id, relationship, status)
+     SELECT organization_id, product, resource_type, $2, 'owner', 'active'
+       FROM unnest($1::uuid[]) organization_id, (VALUES ('hotel_catalog', 'property'),
+            ('pms', 'pms_property')) AS native(product, resource_type)`,
+    [organizations, IN_HOTEL_ID],
+  );
+  await client.query(
+    `INSERT INTO identity.product_entitlements
+       (organization_id, product, entitlement_key, status, resource_product, resource_type,
+        resource_id)
+     VALUES ($1, 'pms', 'property-management', 'active', 'pms', 'pms_property', $2)`,
+    [IN_ORGANIZATION_ID, IN_HOTEL_ID],
+  );
+  if (live)
+    await client.query(
+      `INSERT INTO identity.product_entitlements (organization_id, product, entitlement_key, status)
+       VALUES ($1, 'pms', 'property-management', 'suspended'),
+              ($2, 'pms', 'property-management', 'active')`,
+      [IN_ORGANIZATION_ID, OUT_ORGANIZATION_ID],
+    );
+}
+
 async function cleanupCohort(client: pg.Client): Promise<void> {
   const properties = [IN_HOTEL_ID, OUT_HOTEL_ID];
   for (const table of [
@@ -891,8 +930,12 @@ async function cleanupCohort(client: pg.Client): Promise<void> {
     "identity.organization_resource_links",
     "identity.organization_memberships",
   ])
-    await client.query(`DELETE FROM ${table} WHERE organization_id = $1`, [OUT_ORGANIZATION_ID]);
-  await client.query("DELETE FROM identity.organizations WHERE id = $1", [OUT_ORGANIZATION_ID]);
+    await client.query(`DELETE FROM ${table} WHERE organization_id = ANY($1::uuid[])`, [
+      [OUT_ORGANIZATION_ID, IN_ORGANIZATION_ID],
+    ]);
+  await client.query("DELETE FROM identity.organizations WHERE id = ANY($1::uuid[])", [
+    [OUT_ORGANIZATION_ID, IN_ORGANIZATION_ID],
+  ]);
   await client.query("DELETE FROM identity.users WHERE id = $1", [OUT_USER_ID]);
   await client.query("DELETE FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])", [
     properties,

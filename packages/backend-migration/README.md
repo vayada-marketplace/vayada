@@ -625,6 +625,9 @@ the hard check `COHORT_SCOPE_VERIFIED` also gates `GO`
 - the stored `platform.production_migration_cohorts` row is missing, or differs
   from the configured cohort or approval proof;
 - a cohort hotel does not resolve to exactly one non-quarantined property;
+- a cohort property lacks exactly one active hotel organization holding both
+  native links (`hotel_catalog`/`property`, `pms`/`pms_property`), or that
+  organization has no active, unsuspended applicable PMS entitlement (VAY-1543);
 - a property outside the cohort has a public profile, domain, media, offer,
   add-on or Marketplace listing, an owner access path, a connected channel or
   binding claim, an enabled provider account, or an open payout.
