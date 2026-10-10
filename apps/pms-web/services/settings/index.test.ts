@@ -59,3 +59,78 @@ describe("PMS booking acceptance settings", () => {
     });
   });
 });
+
+describe("PMS check-in and check-out templates", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.resolvePropertyId.mockResolvedValue("property-1");
+    mocks.put.mockImplementation(async (_endpoint: string, body: { steps: unknown[] }) => ({
+      template: { steps: body.steps, updatedAt: "2026-10-10T09:00:00.000Z", updatedByUserId: null },
+    }));
+  });
+
+  it("saves and reads back the check-in step prompt and input type", async () => {
+    const saved = await settingsService.updateCheckinChecklist([
+      {
+        id: "deposit",
+        label: "Collect deposit",
+        prompt: "Card or cash",
+        type: "amount",
+        required: true,
+        position: 0,
+      },
+      {
+        id: "ids",
+        label: "Check IDs",
+        prompt: " ",
+        type: "checkbox",
+        required: false,
+        position: 1,
+      },
+    ]);
+
+    const [endpoint, body] = mocks.put.mock.calls[0] as [string, { steps: unknown[] }];
+    expect(endpoint).toBe("/api/pms/properties/property-1/check-in-checklist");
+    expect(body.steps).toEqual([
+      {
+        stepId: "deposit",
+        label: "Collect deposit",
+        required: true,
+        prompt: "Card or cash",
+        type: "amount",
+      },
+      { stepId: "ids", label: "Check IDs", required: false, type: "checkbox" },
+    ]);
+    expect(saved.steps[0]).toMatchObject({ prompt: "Card or cash", type: "amount" });
+  });
+
+  it("saves and reads back the check-out answer labels and note hint", async () => {
+    const saved = await settingsService.updateCheckoutInspection([
+      {
+        id: "minibar",
+        label: "Minibar",
+        okLabel: "Full",
+        negativeLabel: "Used",
+        notePrompt: "Which items?",
+        required: true,
+        position: 0,
+      },
+    ]);
+
+    expect((mocks.put.mock.calls[0] as [string, { steps: unknown[] }])[1].steps).toEqual([
+      {
+        stepId: "minibar",
+        label: "Minibar",
+        required: true,
+        okLabel: "Full",
+        negativeLabel: "Used",
+        notePrompt: "Which items?",
+      },
+    ]);
+    expect(saved.steps[0]).toMatchObject({
+      okLabel: "Full",
+      negativeLabel: "Used",
+      notePrompt: "Which items?",
+    });
+  });
+});
