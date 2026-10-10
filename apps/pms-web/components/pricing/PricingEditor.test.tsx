@@ -110,10 +110,13 @@ const reload = async () => {
   await click("Reload pricing");
   if (button("Discard and reload")) await click("Discard and reload");
 };
-const mount = async () => {
+const mount = async (roomTypeId = "room") => {
   await act(async () => {
     view = create(
-      <PricingEditor client={client as ReturnType<typeof createReplacementPricingClient>} />,
+      <PricingEditor
+        client={client as ReturnType<typeof createReplacementPricingClient>}
+        roomTypeId={roomTypeId}
+      />,
     );
   });
 };
@@ -338,11 +341,11 @@ it("declares for the saved draft even when the server returns its keys in anothe
 it("distinguishes missing configuration from denial and requires reload after a conflict", async () => {
   client.read.mockResolvedValueOnce(null);
   await mount();
-  expect(JSON.stringify(view.toJSON())).toContain("not configured yet");
+  expect(JSON.stringify(view.toJSON())).toContain("This room has no prices yet");
   client.read.mockRejectedValueOnce(new ApiErrorResponse(403, {}));
   await click("Reload pricing");
   expect(JSON.stringify(view.toJSON())).toContain("do not have access");
-  expect(JSON.stringify(view.toJSON())).not.toContain("not configured yet");
+  expect(JSON.stringify(view.toJSON())).not.toContain("This room has no prices yet");
   await click("Reload pricing");
   await touch();
   client.prepare.mockRejectedValueOnce(new ApiErrorResponse(409, {}));
@@ -493,6 +496,7 @@ it.each([new Error("lost preparation response")])(
         <PricingEditor
           client={client as ReturnType<typeof createReplacementPricingClient>}
           setup={{ propertyId: id, rooms: [room] }}
+          roomTypeId={id}
         />,
       );
     });
@@ -2201,142 +2205,6 @@ it("confirms parent changes with exclusive pending guards and fresh saved review
   expect(button("Save prices").props.disabled).toBe(true);
 });
 
-it("appends another room at the existing revision, preserving edits and retrying accepted terms once", async () => {
-  const id = "61000000-0000-4000-8000-000000000004",
-    room = { roomTypeId: id, name: "Family", capacity: { total: 3, adults: 3, children: 2 } };
-  client.read.mockResolvedValueOnce({ ...snapshot, revision: 7, sources, stale: false });
-  const policy = vi.fn().mockResolvedValue({ revision: id });
-  client.termsAction.mockReturnValue(policy);
-  await act(async () => {
-    view = create(
-      <PricingEditor
-        client={client as ReturnType<typeof createReplacementPricingClient>}
-        setup={{
-          propertyId: "property",
-          rooms: [
-            { roomTypeId: "room", name: "Existing", capacity: snapshot.rooms[0].capacity },
-            room,
-          ],
-        }}
-      />,
-    );
-  });
-  await act(async () => input().props.onChange({ target: { value: "155.25" } }));
-  await click("Add another room");
-  expect(view.root.findByType(FirstPricingSetup).props.rooms).toEqual([room]);
-  expect(
-    view.root.findByProps({ "aria-label": "Currency code (for example EUR)" }).props.disabled,
-  ).toBe(true);
-  expect(
-    view.root.findByProps({ "aria-label": "Currency code (for example EUR)" }).props.value,
-  ).toBe("EUR");
-  expect(view.root.findByProps({ "aria-label": "Room 1 Offer 1 Per room" }).props.disabled).toBe(
-    true,
-  );
-  const next = firstPricingInput("property", room, id, {
-    mode: "occupancy",
-    occupancy: ["100", "130", "155"],
-    included: { adults: "", adjustments: [] },
-    methods: ["pay_at_property"],
-    room: id,
-    currency: "EUR",
-    base: "",
-    adultAge: "12",
-    childPrice: "0",
-    countChildren: "yes",
-    minimum: "1",
-    maximum: "",
-    cancellation: "non_refundable",
-    freeDays: "",
-    payment: "full",
-  });
-  client.prepare.mockRejectedValueOnce(new Error("lost preparation"));
-  await act(async () => view.root.findByType(FirstPricingSetup).props.onCreate(next));
-  expect(client.termsAction).not.toHaveBeenCalled();
-  await click("Save prices");
-  expect(button("Reload pricing").props.disabled).toBe(true);
-  const attempted = client.prepare.mock.calls.at(-1)![0];
-  await click("Retry last action");
-  expect(policy).toHaveBeenCalledOnce();
-  expect(client.termsAction).toHaveBeenCalledOnce();
-  expect(client.prepare.mock.calls.at(-1)![0]).toEqual(attempted);
-  expect(client.saveDraft).toHaveBeenCalledTimes(2);
-  expect(publish).toHaveBeenCalledOnce();
-  expect(saved.revision).toBe(2);
-  expect(saved.baseRevision).toBe(7);
-  expect(saved.snapshot.rooms).toHaveLength(2);
-  expect(saved.snapshot.rooms.map((value) => value.revision)).toEqual([8, 8]);
-  expect(saved.snapshot.rooms[0]).toEqual(
-    editedSnapshot(
-      { ...snapshot, rooms: [{ ...snapshot.rooms[0], revision: 8 }] },
-      { "0:0:0": "155.25" },
-    ).rooms[0],
-  );
-  expect(saved.snapshot.rooms[1].offers[0]).toMatchObject({
-    termsRevision: id,
-    price: { calendar: { base: { amountsMinor: ["10000", "13000", "15500"] } } },
-  });
-  expect(button("Add another room")).toBeUndefined();
-  expect(button("Save prices").props.disabled).toBe(true);
-});
-it("cancels room setup without changing the draft and rejects duplicate rooms or currency before policy writes", async () => {
-  const id = "61000000-0000-4000-8000-000000000004",
-    room = { roomTypeId: id, name: "Family", capacity: { total: 3, adults: 3, children: 2 } };
-  await act(async () => {
-    view = create(
-      <PricingEditor
-        client={client as ReturnType<typeof createReplacementPricingClient>}
-        setup={{ propertyId: "property", rooms: [room] }}
-      />,
-    );
-  });
-  await touch();
-  await click("Edit child charges");
-  expect(button("Add another room").props.disabled).toBe(true);
-  await click("Add another room");
-  expect(button("Cancel room setup")).toBeUndefined();
-  await click("Cancel child charges");
-  await click("Add another room");
-  expect(button("Save prices").props.disabled).toBe(true);
-  expect(button("Change meal plan").props.disabled).toBe(true);
-  const warn = vi
-    .mocked(window.addEventListener)
-    .mock.calls.filter(([name]) => name === "beforeunload")
-    .at(-1)![1] as (event: unknown) => void;
-  const event = { preventDefault: vi.fn(), returnValue: undefined };
-  warn(event);
-  expect(event.preventDefault).toHaveBeenCalled();
-  const next = firstPricingInput("property", room, id, {
-    mode: "flat",
-    occupancy: [],
-    included: { adults: "", adjustments: [] },
-    methods: ["pay_at_property"],
-    room: id,
-    currency: "EUR",
-    base: "100",
-    adultAge: "12",
-    childPrice: "0",
-    countChildren: "yes",
-    minimum: "1",
-    maximum: "",
-    cancellation: "non_refundable",
-    freeDays: "",
-    payment: "full",
-  });
-  for (const configuration of [
-    { ...next.configuration, currency: "USD" },
-    { ...next.configuration, roomTypeId: "room" },
-  ]) {
-    await act(async () =>
-      view.root.findByType(FirstPricingSetup).props.onCreate({ ...next, configuration }),
-    );
-  }
-  expect(client.termsAction).not.toHaveBeenCalled();
-  await click("Cancel room setup");
-  expect(button("Save prices").props.disabled).toBe(false);
-  expect(button("Add another room").props.disabled).toBe(false);
-});
-
 it("builds a linked room-only offer with explicit terms and rejects invalid settings", () => {
   const id = "61000000-0000-4000-8000-000000000004",
     room = { ...snapshot.rooms[0], roomTypeId: id };
@@ -2409,7 +2277,7 @@ it("appends linked offers preserving prices, revisions and accepted-policy retry
   });
   const policy = vi.fn().mockResolvedValue({ revision: offerId });
   client.termsAction.mockReturnValue(policy);
-  await mount();
+  await mount(id);
   await touch();
   await act(async () => input().props.onChange({ target: { value: "155.25" } }));
   await click("Add linked offer");
@@ -2584,7 +2452,7 @@ it("creates an independent offer through fixed-room setup and retains policy ret
   });
   const policy = vi.fn().mockResolvedValue({ revision: offerId });
   client.termsAction.mockReturnValue(policy);
-  await mount();
+  await mount(id);
   await touch();
   await click("Edit child charges");
   expect(button("Add independent offer").props.disabled).toBe(true);
@@ -4154,7 +4022,8 @@ it("on a room page, edits only that room, publishes every other room exactly as 
   expect(saved.baseRevision).toBe(1); expect(saved.snapshot.rooms[0]).toEqual({ ...snapshot.rooms[0], revision: 2 });
   expect(saved.snapshot.rooms[1]).toMatchObject({ roomTypeId: familyId, revision: 2, offers: [{ price: { calendar: { base: { amountMinor: "12345" } } } }] });
   expect(client.confirmationAction).toHaveBeenCalledWith(expect.anything(), "save_prices"); expect(client.publicationAction.mock.calls[0][0]).toMatchObject({ baseRevision: 1 });
-  expect(client.read).toHaveBeenCalledTimes(2); expect(JSON.stringify(view.toJSON())).toContain("Prices saved");
+  expect(JSON.stringify(view.toJSON())).toContain("Prices saved"); expect(input().props.disabled).toBe(true);
+  await click("Edit prices again"); expect(client.read).toHaveBeenCalledTimes(2);
   expect(input().props.disabled).toBe(false); expect(button("Save prices").props.disabled).toBe(true);
 });
 it("keeps this room's edits over the reload after a refused save when only another room changed, and declares again", async () => {
