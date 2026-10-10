@@ -195,6 +195,11 @@ The hero remains available through `hotel.branding.heroImage`.
 Migration `0108_public_bookability_gallery_media` rewrites existing untyped Distribution media
 from the canonical Catalog profile so already-published properties adopt this contract at rollout.
 
+`hotel.branding.displayCurrencies` (optional, VAY-2114) lists the currencies a guest may pick
+for display, `defaultCurrency` first. It appears only when Booking settings add currencies
+beyond the pricing currency. It is display only: `supportedCurrencies` and the quote
+parameters keep the pricing currency, and every quote and charge stays in it.
+
 ## Quote Endpoint
 
 Recommended route:
