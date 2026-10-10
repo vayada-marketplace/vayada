@@ -167,10 +167,8 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   );
   await guestAcknowledgement.check();
   await expect(guestAcknowledgement).toBeChecked();
-  if (process.env.E2E_REPLACEMENT_PRICING_ACCEPTANCE_EXPECTED === "true") {
-    await expect(page.getByRole("heading", { name: "Your details" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Confirm booking" })).toBeEnabled();
-  }
+  await expect(page.getByRole("heading", { name: "Your details" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Confirm booking" })).toBeEnabled();
   await expect(page.getByRole("heading", { name: "Your room and rate terms" })).toBeVisible();
   expect(submitted.selection.rooms.map((room: any) => [room.publicOfferKey, room.guests])).toEqual([
     [firstKey, { adults: 2, childAgesAtCheckIn: [0] }],

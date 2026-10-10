@@ -1,7 +1,6 @@
 import {
   DeleteObjectCommand,
   GetObjectCommand,
-  ListObjectsV2Command,
   PutObjectCommand,
   type S3Client,
 } from "@aws-sdk/client-s3";
@@ -142,75 +141,23 @@ describe("S3 platform profile media adapter", () => {
     ).rejects.toThrow("between 1 byte and 25 MB");
   });
 
-  it("deletes cleanup objects and every page in a staging prefix", async () => {
-    let listedPages = 0;
-    const { client, send } = fakeS3(async (command) => {
-      if (command instanceof ListObjectsV2Command) {
-        listedPages += 1;
-        return listedPages === 1
-          ? {
-              Contents: [{ Key: `${stagingKey}.one` }, { Key: `${stagingKey}.two` }],
-              IsTruncated: true,
-              NextContinuationToken: "page-2",
-            }
-          : { Contents: [{ Key: `${stagingKey}.three` }], IsTruncated: false };
-      }
-      return {};
-    });
+  it("deletes a cleanup object by its recorded bucket and key", async () => {
+    const { client, send } = fakeS3(async () => ({}));
     const adapter = createAdapter(client);
 
     await adapter.deleteObject({
       bucket: "legacy-vayada-media",
       storageKey: "legacy/properties/hotel/hero.jpg",
     });
-    await adapter.deletePrefix({ prefix: `staging/${sessionId}` });
 
-    const commands = send.mock.calls.map(([command]) => command);
-    expect(commands[0]).toBeInstanceOf(DeleteObjectCommand);
-    expect((commands[0] as DeleteObjectCommand).input).toEqual({
+    expect(send).toHaveBeenCalledTimes(1);
+    const [command] = send.mock.calls[0]!;
+    expect(command).toBeInstanceOf(DeleteObjectCommand);
+    expect((command as DeleteObjectCommand).input).toEqual({
       Bucket: "legacy-vayada-media",
       Key: "legacy/properties/hotel/hero.jpg",
     });
-    const listings = commands.filter(
-      (command): command is ListObjectsV2Command => command instanceof ListObjectsV2Command,
-    );
-    expect(listings.map(({ input }) => input)).toEqual([
-      {
-        Bucket: bucketName,
-        Prefix: `staging/${sessionId}`,
-        ContinuationToken: undefined,
-      },
-      {
-        Bucket: bucketName,
-        Prefix: `staging/${sessionId}`,
-        ContinuationToken: "page-2",
-      },
-    ]);
-    expect(
-      commands
-        .filter((command): command is DeleteObjectCommand => command instanceof DeleteObjectCommand)
-        .slice(1)
-        .map(({ input }) => input),
-    ).toEqual(
-      ["one", "two", "three"].map((suffix) => ({
-        Bucket: bucketName,
-        Key: `${stagingKey}.${suffix}`,
-      })),
-    );
   });
-
-  it.each(["private/", "staging/"])(
-    "refuses unsafe or broad prefix cleanup for %s",
-    async (prefix) => {
-      const { client, send } = fakeS3(async () => ({}));
-      const adapter = createAdapter(client);
-
-      await expect(adapter.deletePrefix({ prefix })).rejects.toThrow(
-        "restricted to staging namespaces",
-      );
-      expect(send).not.toHaveBeenCalled();
-    },
-  );
 
   it("preserves private chat bytes and signs short-lived GET access", async () => {
     const source = await validJpeg();

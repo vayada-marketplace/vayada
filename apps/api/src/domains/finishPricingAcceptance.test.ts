@@ -3,7 +3,7 @@ import type { PoolClient } from "pg";
 import { finishPricingAcceptance } from "./finishPricingAcceptance.js";
 import { finishCurrentQuoteAcceptanceTime } from "./currentQuoteAcceptanceTime.js";
 vi.mock("./currentQuoteAcceptanceTime.js", () => ({ finishCurrentQuoteAcceptanceTime: vi.fn() }));
-const scope = { propertyId: "hotel", organizationId: "org", authorityRevision: "revision" };
+const scope = { propertyId: "hotel", organizationId: "org" };
 const client = {} as PoolClient;
 const current = { scope } as Parameters<typeof finishPricingAcceptance>[2];
 const finance = {
@@ -44,7 +44,7 @@ it("allows explicitly unbounded Finance but still runs quote expiry checks", asy
 it.each([
   { scope: { ...scope, propertyId: "other" } },
   { scope: { ...scope, organizationId: "other" } },
-  { scope: { ...scope, authorityRevision: "other" } },
+  { scope: { ...scope, organizationId: "00000000-0000-4000-8000-0000000000ff" } },
   { financeTermsCapturedAt: "invalid" },
   { validUntil: "invalid" },
   { validUntil: finance.financeTermsCapturedAt },
