@@ -92,8 +92,12 @@ export async function stagePricingBookingLifecycle(
   const occurredAt = now.toISOString();
   if (occurredAt < quote.evidence.issuedAt || occurredAt >= quote.evidence.expiresAt) return fail();
   const lifecycleStatus = mode === "instant" && !card ? "confirmed" : "pending_payment";
+  // A card request's hotel deadline starts once Stripe authorises the card; until then only
+  // the payment deadline holds the rooms.
   const hostResponseDeadlineAt =
-    mode === "request" ? new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString() : null;
+    mode === "request" && !card
+      ? new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()
+      : null;
   const paymentDeadlineAt = card
     ? new Date(now.getTime() + PRICING_CARD_PAYMENT_MINUTES * 60 * 1000).toISOString()
     : null;

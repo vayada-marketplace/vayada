@@ -15,6 +15,7 @@ const BOOKING_LIFECYCLE_EMAIL_JOB_TYPE_BY_KIND = {
   host_new_booking: "email.booking-host-new-booking",
   host_request_updated: "email.booking-host-request-updated",
   host_review_required: "email.booking-host-review-required",
+  host_request_expired: "email.booking-host-request-expired",
 } as const;
 
 export type BookingLifecycleEmailKind = keyof typeof BOOKING_LIFECYCLE_EMAIL_JOB_TYPE_BY_KIND;
@@ -567,6 +568,19 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       ].join("\n\n"),
     };
   }
+  if (input.kind === "host_request_expired") {
+    return {
+      template: "booking_host_request_expired",
+      subject: `Booking request expired - ${booking.bookingReference}`,
+      text: [
+        "A booking request expired before it was accepted. The rooms are available again.",
+        `Guest: ${name}`,
+        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        `Total: ${money(booking.totalAmount, booking.currency)}`,
+        `Booking reference: ${booking.bookingReference}`,
+      ].join("\n\n"),
+    };
+  }
   if (input.kind === "host_new_booking" || input.kind === "host_review_required") {
     const reviewRequired = input.kind === "host_review_required";
     return {
@@ -686,7 +700,15 @@ function notificationsForTransition(
     (transition.eventType === "guest_booking.canceled" &&
       transition.reason === "accepted_payment_expired")
   ) {
-    return [{ kind: "booking_expired", role: "guest" }];
+    const metadata = record(booking.bookingMetadata);
+    const acceptanceMode = text(metadata["acceptanceMode"] ?? metadata["bookingAcceptanceMode"]);
+    // The hotel let a request lapse; tell it the rooms are free again.
+    return transition.eventType === "guest_booking.expired" && acceptanceMode === "request"
+      ? [
+          { kind: "booking_expired", role: "guest" },
+          { kind: "host_request_expired", role: "host" },
+        ]
+      : [{ kind: "booking_expired", role: "guest" }];
   }
   if (
     transition.eventType === "guest_booking.canceled" &&
@@ -715,7 +737,7 @@ function legacyTransition(kind: BookingLifecycleEmailKind): BookingLifecycleTran
       toStatus: "declined",
     };
   }
-  if (kind === "booking_expired") {
+  if (kind === "booking_expired" || kind === "host_request_expired") {
     return {
       eventType: "guest_booking.expired",
       fromStatus: "pending_payment",

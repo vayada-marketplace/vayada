@@ -12,6 +12,7 @@ import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
 import { publishAffiliateReservationLifecycle } from "./bookingAffiliateReservationLifecycle.js";
+import { acceptPricingRequest } from "./pricingRequestAcceptance.js";
 import {
   PMS_OPERATIONS_CONTRACT_VERSION,
   type PmsAssignmentCommand,
@@ -5596,6 +5597,25 @@ async function applyBookingAcceptanceCommandMutation(
 ): Promise<PmsOperationalMutationSuccess | Exclude<PmsOperationalCommandResult, { ok: true }>> {
   const booking = await loadBookingPaymentLifecycle(client, command);
   if (!booking) return reservationNotFound(command.guestBookingId);
+  // Pricing-v2 bookings confirm from their stored acceptance, never the legacy offer snapshot.
+  if (jsonObject(booking.bookingMetadata)["targetSource"] === "pricing_quote_draft") {
+    const outcome = await acceptPricingRequest(
+      client,
+      command,
+      acceptedAt,
+      config.stripePaymentProvider,
+    );
+    if (outcome === "accepted")
+      return { ok: true, sideEffects: ["guest_notification", "audit_event"] };
+    return invalidStatusTransition(
+      outcome === "deadline_passed"
+        ? "expired request"
+        : outcome === "capture_failed"
+          ? "card_capture_unavailable"
+          : booking.lifecycleStatus,
+      "confirmed",
+    );
+  }
   const acceptanceMode = jsonObject(booking.bookingMetadata)["acceptanceMode"];
   const isRequestPayAtProperty =
     acceptanceMode === "request" &&

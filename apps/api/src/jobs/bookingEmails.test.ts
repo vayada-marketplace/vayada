@@ -335,6 +335,27 @@ describe("booking lifecycle email jobs", () => {
     },
   );
 
+  it("tells the hotel when a request it did not answer expires", async () => {
+    const target = createTargetEmailStore({
+      paymentMethod: "pay_at_property",
+      bookingMetadata: { acceptanceMode: "request" },
+    });
+    const enqueued = await enqueueBookingTransitionNotifications(target, {
+      propertyId: "f2000000-0000-0000-0000-000000000951",
+      guestBookingId: "book_bank_001",
+      occurredAt: "2026-09-01T10:00:00.000Z",
+      transition: {
+        eventType: "guest_booking.expired",
+        fromStatus: "pending_payment",
+        toStatus: "expired",
+      },
+    });
+    expect(enqueued.map((job) => job.jobType)).toEqual([
+      "email.booking-expired",
+      "email.booking-host-request-expired",
+    ]);
+  });
+
   it.each([null, "", "invalid", "guest@example.test\nother@example.test"])(
     "rejects a directly supplied invalid host recipient: %s",
     async (email) => {
