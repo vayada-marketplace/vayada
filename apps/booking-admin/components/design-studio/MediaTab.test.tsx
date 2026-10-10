@@ -5,7 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 import { LanguageProvider } from "@/lib/i18n";
 import MediaTab, { type PropertyGalleryImage } from "./MediaTab";
 
-function renderMediaTab(galleryImages: PropertyGalleryImage[], languageSelectorAvailable = true) {
+function renderMediaTab(
+  galleryImages: PropertyGalleryImage[],
+  selectorsAvailable = true,
+  hero: { heroImage?: string; heroBusy?: boolean } = {},
+) {
   return renderToStaticMarkup(
     <LanguageProvider>
       <MediaTab
@@ -33,7 +37,10 @@ function renderMediaTab(galleryImages: PropertyGalleryImage[], languageSelectorA
         referAGuestModuleEnabled={false}
         showLanguageSelector
         setShowLanguageSelector={vi.fn()}
-        languageSelectorAvailable={languageSelectorAvailable}
+        languageSelectorAvailable={selectorsAvailable}
+        showCurrencySelector
+        setShowCurrencySelector={vi.fn()}
+        currencySelectorAvailable={selectorsAvailable}
         resetContent={vi.fn()}
         galleryImages={galleryImages}
         galleryAtCapacity={galleryImages.length >= 10}
@@ -41,6 +48,7 @@ function renderMediaTab(galleryImages: PropertyGalleryImage[], languageSelectorA
         addGalleryImages={vi.fn()}
         removeGalleryImage={vi.fn()}
         reorderGalleryImage={vi.fn()}
+        {...hero}
       />
     </LanguageProvider>,
   );
@@ -84,12 +92,16 @@ describe("MediaTab property gallery", () => {
 });
 
 describe("MediaTab header toggles", () => {
-  it("keeps a configurable language selector on and the toggle track from shrinking", () => {
-    const language = switchTag(renderMediaTab([]), "Language selector");
+  it("keeps configurable selectors on and the toggle track from shrinking", () => {
+    const markup = renderMediaTab([]);
+    const language = switchTag(markup, "Language selector");
+    const currency = switchTag(markup, "Currency selector");
 
     expect(language).toContain('aria-checked="true"');
     expect(language).not.toContain('disabled=""');
     expect(language).toContain("shrink-0");
+    expect(currency).toContain('aria-checked="true"');
+    expect(currency).not.toContain('disabled=""');
   });
 
   it("greys out selectors guests cannot see", () => {
@@ -102,7 +114,7 @@ describe("MediaTab header toggles", () => {
     expect(markup).toContain("Hidden automatically when only one language is configured.");
     expect(currency).toContain('aria-checked="false"');
     expect(currency).toContain('disabled=""');
-    expect(markup).toContain("Multi-currency isn&#x27;t available yet.");
+    expect(markup).toContain("Hidden automatically when only one currency is configured.");
   });
 });
 
@@ -111,3 +123,16 @@ function switchTag(markup: string, label: string): string {
   if (!tag) throw new Error(`Missing switch: ${label}`);
   return tag;
 }
+
+describe("MediaTab hero image", () => {
+  it("labels the remove control and disables hero actions while media is saving", () => {
+    const markup = renderMediaTab([], true, {
+      heroImage: "https://cdn.vayada.com/hero.webp",
+      heroBusy: true,
+    });
+
+    expect(markup).toContain('type="button" disabled="" aria-label="Remove hero image"');
+    expect(markup).toMatch(/<button type="button" disabled=""[^>]*>Replace Image<\/button>/);
+    expect(markup).toContain('accept="image/jpeg,image/png,image/webp"');
+  });
+});

@@ -12,6 +12,7 @@ import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
 import { publishAffiliateReservationLifecycle } from "./bookingAffiliateReservationLifecycle.js";
+import { acceptPricingRequest } from "./pricingRequestAcceptance.js";
 import {
   PMS_OPERATIONS_CONTRACT_VERSION,
   type PmsAssignmentCommand,
@@ -113,7 +114,7 @@ import {
   type PmsOccupiedInventoryChange,
 } from "./pmsOccupiedInventory.js";
 import { enqueuePmsOccupiedInventoryAriChanges } from "./pmsOccupiedInventorySideEffects.js";
-import type { PmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
+import type { PmsJsonRecord, PmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
 import { lockPmsPhysicalRoomUnitMutationScope } from "./pmsPhysicalRoomUnitMutationLock.js";
 import type { PmsRoomAssignmentOptimizationTriggerPort } from "./pmsRoomAssignmentOptimizationTriggers.js";
 import { lockPmsRoomOrder, pmsRoomOrderVersion } from "./pmsRoomOrder.js";
@@ -465,7 +466,7 @@ export function createTargetPmsOperationsCommandRepository(
 
         const roomType = {
           ...currentRoomType,
-          attributes: { ...currentRoomType.attributes, ...command.attributes },
+          attributes: updated,
           ratePlans: currentRoomType.ratePlans.map((ratePlan) =>
             command.flexibleCancellationPolicy &&
             ratePlan.active &&
@@ -2018,20 +2019,38 @@ async function listCheckoutCharges(
   return result.rows.map(toPmsCheckoutCharge);
 }
 
+/** Writes only the location keys that differ (an absent key equals null), so a no-op save
+ * leaves room_attributes byte-identical: published pricing pins its exact text.
+ * Returns the room's attributes as stored after the write. */
 async function updateRoomTypeLocation(
   client: PmsOperationsCommandClient,
   command: PmsRoomTypeUpdateCommand,
   acceptedAt: string,
-): Promise<boolean> {
-  const result = await client.query(
+): Promise<PmsJsonRecord | null> {
+  const current = await client.query<{ attributes: PmsJsonRecord | null }>(
+    `SELECT room_attributes AS attributes
+     FROM pms.room_types
+     WHERE property_id = $1::uuid
+       AND id = $2::uuid
+     FOR NO KEY UPDATE`,
+    [command.propertyId, command.roomTypeId],
+  );
+  const row = current.rows[0];
+  if (!row) return null;
+  const stored = row.attributes ?? {};
+  const changed = Object.fromEntries(
+    Object.entries(command.attributes).filter(([key, value]) => (stored[key] ?? null) !== value),
+  );
+  if (Object.keys(changed).length === 0) return stored;
+  await client.query(
     `UPDATE pms.room_types
      SET room_attributes = COALESCE(room_attributes, '{}'::jsonb) || $3::jsonb,
          updated_at = $4::timestamptz
      WHERE property_id = $1::uuid
        AND id = $2::uuid`,
-    [command.propertyId, command.roomTypeId, JSON.stringify(command.attributes), acceptedAt],
+    [command.propertyId, command.roomTypeId, JSON.stringify(changed), acceptedAt],
   );
-  return (result.rowCount ?? 0) > 0;
+  return { ...stored, ...changed };
 }
 
 async function updateRoomTypeFlexibleCancellation(
@@ -4943,10 +4962,19 @@ function toPmsTemplateSteps(value: unknown): PmsTemplateStep[] {
       if (!item || typeof item !== "object") return null;
       const step = item as Partial<PmsTemplateStep>;
       if (typeof step.stepId !== "string" || typeof step.label !== "string") return null;
+      const optional = Object.fromEntries(
+        (["prompt", "okLabel", "negativeLabel", "notePrompt"] as const)
+          .filter((field) => typeof step[field] === "string")
+          .map((field) => [field, step[field]]),
+      );
       return {
         stepId: step.stepId,
         label: step.label,
         required: step.required === true,
+        ...optional,
+        ...(step.type === "checkbox" || step.type === "text" || step.type === "amount"
+          ? { type: step.type }
+          : {}),
       };
     })
     .filter((step): step is PmsTemplateStep => step !== null);
@@ -5596,6 +5624,25 @@ async function applyBookingAcceptanceCommandMutation(
 ): Promise<PmsOperationalMutationSuccess | Exclude<PmsOperationalCommandResult, { ok: true }>> {
   const booking = await loadBookingPaymentLifecycle(client, command);
   if (!booking) return reservationNotFound(command.guestBookingId);
+  // Pricing-v2 bookings confirm from their stored acceptance, never the legacy offer snapshot.
+  if (jsonObject(booking.bookingMetadata)["targetSource"] === "pricing_quote_draft") {
+    const outcome = await acceptPricingRequest(
+      client,
+      command,
+      acceptedAt,
+      config.stripePaymentProvider,
+    );
+    if (outcome === "accepted")
+      return { ok: true, sideEffects: ["guest_notification", "audit_event"] };
+    return invalidStatusTransition(
+      outcome === "deadline_passed"
+        ? "expired request"
+        : outcome === "capture_failed"
+          ? "card_capture_unavailable"
+          : booking.lifecycleStatus,
+      "confirmed",
+    );
+  }
   const acceptanceMode = jsonObject(booking.bookingMetadata)["acceptanceMode"];
   const isRequestPayAtProperty =
     acceptanceMode === "request" &&

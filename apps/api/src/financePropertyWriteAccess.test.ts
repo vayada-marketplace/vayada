@@ -96,6 +96,7 @@ function state() {
     mode: "assigned",
     roleKey: "finance_manager",
     accessOrigin: "agency",
+    productAccess: { pms: true, booking: true },
     assignedPropertyIds: [propertyId],
   };
   return { context, scope: scope as MembershipPropertyScope | null };

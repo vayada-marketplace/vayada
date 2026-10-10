@@ -776,14 +776,17 @@ function buildDashboardApp(options: DashboardAppOptions = {}): ReturnType<typeof
   const propertyAccessRepository: import("@vayada/backend-authorization").PropertyAccessRepository =
     {
       async findMembershipPropertyScope() {
-        return options.propertyScope === undefined
-          ? {
-              mode: "all",
-              roleKey: "hotel_owner",
-              accessOrigin: "agency",
-              assignedPropertyIds: [],
-            }
-          : options.propertyScope;
+        const scope =
+          options.propertyScope === undefined
+            ? {
+                mode: "all",
+                roleKey: "hotel_owner",
+                accessOrigin: "agency",
+                assignedPropertyIds: [],
+              }
+            : options.propertyScope;
+        // Stored memberships always carry product access; without it the resolver fails closed.
+        return scope && { productAccess: { pms: true, booking: true }, ...scope };
       },
     };
   return buildApp({

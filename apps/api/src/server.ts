@@ -308,6 +308,7 @@ import { createPgTargetBookingAddonItemsRepository } from "./routes/bookingAddon
 import { createPgTargetBookingPromoCodesRepository } from "./routes/bookingPromoCodes.js";
 import { promotePulledChannexBookingRevision } from "./routes/providerWebhooks.js";
 import { createTargetBookingWebCheckoutAdapter } from "./routes/bookingWebPublic.js";
+import { createBookingWebDisplayRates } from "./routes/bookingWebExchangeRates.js";
 import { createPgTargetBookingSettingsRepository } from "./routes/bookingSettings.js";
 import { createTargetBookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
 import {
@@ -519,6 +520,7 @@ const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   mixedRoomSelectionsEnabled: true,
   replacementPricingAcceptanceEnabled: config.replacementPricingAcceptanceEnabled,
   replacementPricingCardAcceptanceEnabled: config.replacementPricingCardAcceptanceEnabled,
+  replacementPricingRequestAcceptanceEnabled: config.replacementPricingRequestAcceptanceEnabled,
   bankTransfers: bankTransferBookings,
   connectionString: targetDatabaseUrl,
   inventoryReservationPort: createTargetPmsInventoryReservationPort(),
@@ -1630,6 +1632,7 @@ const affiliateCaptureRuntime = affiliateCaptureConfig
   : undefined;
 const app = buildApp({
   airbnbImports: airbnbImportRuntime?.routes,
+  databaseHealth: postgresRuntime.healthCheck(targetDatabaseUrl),
   trustProxy: ["loopback", "linklocal", "uniquelocal"],
   auth: buildAuthOptions(config.auth),
   browserAllowedOrigins: config.authSession?.authAllowedOrigins ?? [],
@@ -2207,6 +2210,7 @@ const app = buildApp({
   publicHotelQuoteRepository,
   bookingWebCalendarRepository,
   bookingWebCheckoutAdapter,
+  bookingWebDisplayRates: createBookingWebDisplayRates(),
   bookingWebAffiliateArrival: affiliateCaptureRuntime,
   marketplaceAffiliatePublicLink:
     config.affiliatePublicRedirectEnabled && affiliateCaptureRuntime

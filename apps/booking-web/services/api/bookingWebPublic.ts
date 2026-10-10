@@ -32,6 +32,7 @@ export type BookingWebPublicHotelResponse = {
       showReferAGuestButton?: boolean;
       showLanguageSelector?: boolean;
       showCurrencySelector?: boolean;
+      displayCurrencies?: string[];
       heroImage: string | null;
       heroHeading: string | null;
       heroSubtext: string | null;
@@ -156,7 +157,8 @@ export function toLegacyHotel(data: BookingWebPublicHotelResponse): Hotel {
     country: hotel.location.country,
     starRating: 0,
     currency: hotel.defaultCurrency,
-    supportedCurrencies: hotel.supportedCurrencies,
+    // Display only: quotes and charges stay in the hotel currency.
+    displayCurrencies: hotel.branding?.displayCurrencies ?? [hotel.defaultCurrency],
     heroImage,
     images,
     amenities: hotel.amenities,
