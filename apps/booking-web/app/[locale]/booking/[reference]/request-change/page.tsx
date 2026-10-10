@@ -9,6 +9,7 @@ import BookingFooter from "@/components/layout/BookingFooter";
 import { bookingImageSizes } from "@/components/booking/imageSizes";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
+import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import { Booking } from "@/lib/types";
 import { readLastBooking } from "@/lib/storage/bookingDraft";
 import { bookingService, ChangeRequestPreview } from "@/services/api/booking";
@@ -299,6 +300,7 @@ export default function RequestChangePage({
                   </span>
                 </div>
               </div>
+              <ApproximateAmountsNote currency={preview?.currency ?? booking.currency} />
               {preview?.blocked && preview.blockReason && (
                 <p className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">
                   {preview.blockReason}
