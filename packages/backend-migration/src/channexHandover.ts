@@ -28,17 +28,27 @@ export type ChannexHandoverInput =
       legacyReadbackSha256: string;
     }
   | { command: "revoke"; propertyId: string; approvalRef: string; reason: string }
-  | { command: "open-sales" | "close-sales"; propertyId: string; approvalRef: string };
-type SalesInput = Extract<ChannexHandoverInput, { command: "open-sales" | "close-sales" }>;
+  | { command: "open-sales"; propertyId: string; approvalRef: string }
+  | { command: "close-sales"; propertyId: string; approvalRef: string };
+type SalesInput = Extract<
+  ChannexHandoverInput,
+  { command: "open-sales" } | { command: "close-sales" }
+>;
 
-/** Active offer targets whose sales state the command changes, bound to their last change. */
+/**
+ * Offer targets whose sales state the command changes, bound to their active version, its binding
+ * and their last change; opening also binds the owning claim.
+ */
 export type ChannexSalesPlan = {
   command: "open-sales" | "close-sales";
   propertyId: string;
+  claimId: string | null;
   targets: Array<{
     id: string;
     offerId: string;
-    externalRatePlanId: string;
+    activeVersion: string | null;
+    bindingGeneration: string | null;
+    externalRatePlanId: string | null;
     changedAt: string | null;
   }>;
   evidence: Record<string, string>;
@@ -56,6 +66,8 @@ export type ChannexHandoverPlan = {
   roomTypeMappingIds: string[];
   ratePlanMappingIds: string[];
   bookingMappingIds: string[];
+  /** Revoke closes every open offer target of the property in the same transaction. */
+  salesOpenTargetIds?: string[];
   evidence: Record<string, string>;
 };
 
@@ -228,6 +240,15 @@ export async function planChannexHandover(
       `SELECT m.id::text FROM pms.channel_booking_mappings m
        WHERE m.connection_id = $1::uuid AND m.property_id = $2::uuid AND m.sync_status = 'active'`,
     ),
+    // After a revoke the worker no longer serves the hotel, so nothing could close them later.
+    salesOpenTargetIds: (
+      await client.query<{ id: string }>(
+        `SELECT target.id::text FROM pms.channex_offer_targets target
+         WHERE target.property_id = $1::uuid AND target.sales_state = 'open'
+         ORDER BY target.id ${lock ? "FOR UPDATE OF target" : ""}`,
+        [input.propertyId],
+      )
+    ).rows.map((row) => row.id),
     evidence: { approvalRef: input.approvalRef, reason: input.reason },
   });
 }
@@ -247,14 +268,42 @@ export async function applyChannexHandover(
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
       `channex.management:${input.propertyId}`,
     ]);
-    // A reviewed plan applies once; re-running it reports the recorded result.
-    const replayed = await client.query<{ id: string }>(
-      "SELECT id::text FROM platform.product_audit_events WHERE product = 'pms' AND audit_key = $1",
-      [auditKey(input, planSha256)],
-    );
-    if (replayed.rows[0]) {
+    validateInput(input);
+    // A reviewed plan applies once; re-running it reports the recorded result, unless a later
+    // handover command has run since (an old revoke must not report a live hotel as revoked).
+    const replayed = (
+      await client.query<{
+        id: string;
+        evidence: Record<string, unknown> | null;
+        occurredAt: string;
+        superseded: boolean;
+      }>(
+        `SELECT event.id::text, event.redacted_payload->'evidence' AS evidence,
+           to_char(event.occurred_at AT TIME ZONE 'UTC', ${UTC}) AS "occurredAt",
+           EXISTS (SELECT 1 FROM platform.product_audit_events later
+             WHERE later.product = 'pms' AND later.property_id = event.property_id
+               AND later.audit_key LIKE 'channex.handover:%'
+               AND later.occurred_at > event.occurred_at) AS superseded
+         FROM platform.product_audit_events event
+         WHERE event.product = 'pms' AND event.audit_key = $1`,
+        [auditKey(input, planSha256)],
+      )
+    ).rows[0];
+    if (replayed) {
+      if (
+        Object.entries(inputEvidence(input)).some(
+          ([key, value]) => replayed.evidence?.[key] !== value,
+        )
+      )
+        refuse("replay_mismatch");
+      if (replayed.superseded) refuse("plan_superseded");
       await client.query("COMMIT");
-      return { replayed: true as const, planSha256, auditId: replayed.rows[0].id };
+      return {
+        replayed: true as const,
+        planSha256,
+        auditId: replayed.id,
+        occurredAt: replayed.occurredAt,
+      };
     }
     if (input.command === "open-sales" || input.command === "close-sales") {
       const sales = await planChannexSales(client, input, true);
@@ -371,6 +420,16 @@ export async function applyChannexHandover(
           [plan.claimId],
         ),
       );
+      const closing = plan.salesOpenTargetIds ?? [];
+      if (closing.length)
+        changed(
+          await client.query(
+            `UPDATE pms.channex_offer_targets SET sales_state = 'closed', sales_state_changed_at = now()
+             WHERE id = ANY($1::uuid[]) AND sales_state = 'open'`,
+            [closing],
+          ),
+          closing.length,
+        );
     }
     const auditId = await audit(
       client,
@@ -393,6 +452,18 @@ export async function applyChannexHandover(
 
 function auditKey(input: ChannexHandoverInput, planSha256: string) {
   return `channex.handover:${input.command}:${input.propertyId}:${planSha256}`;
+}
+
+/** The evidence a plan takes from its input; a replay must repeat it exactly. */
+function inputEvidence(input: ChannexHandoverInput): Record<string, string> {
+  if (input.command === "activate")
+    return {
+      approvalRef: input.approvalRef,
+      legacyDisabledAt: new Date(input.legacyDisabledAt).toISOString(),
+      legacyReadbackSha256: input.legacyReadbackSha256,
+    };
+  if (input.command === "revoke") return { approvalRef: input.approvalRef, reason: input.reason };
+  return { approvalRef: input.approvalRef };
 }
 
 async function audit(
@@ -422,33 +493,37 @@ async function audit(
 
 /**
  * Opening needs a completed handover on the live binding and targets of that binding; closing
- * works for any open active target of the property. The database change is all: the ongoing
- * ARI delivery turns sales_state into stop_sell (engineering/channex-ongoing-offer-ari.md).
+ * works for any open target of the property. The database change is all: the ongoing ARI
+ * delivery turns sales_state into stop_sell (engineering/channex-ongoing-offer-ari.md).
  */
 export async function planChannexSales(client: Client, input: SalesInput, lock = false) {
   validateInput(input);
   const open = input.command === "open-sales";
+  let claimId: string | null = null;
   if (open) {
-    const owned = await client.query(
-      `SELECT 1 FROM pms.channel_connections connection
+    const owned = await client.query<{ claimId: string }>(
+      `SELECT claim.id::text AS "claimId" FROM pms.channel_connections connection
        JOIN pms.channel_binding_claims claim ON claim.property_id = connection.property_id
          AND claim.provider = connection.provider
          AND claim.external_property_id = connection.external_property_id
          AND claim.claim_state = 'active' AND claim.claim_source = 'handover'
        WHERE connection.property_id = $1::uuid AND connection.provider = 'channex'
          AND connection.connection_status = 'connected'
-         AND connection.connection_metadata->>'channexHandover' = 'completed'`,
+         AND connection.connection_metadata->>'channexHandover' = 'completed'
+       ${lock ? "FOR SHARE OF connection, claim" : ""}`,
       [input.propertyId],
     );
-    if (!owned.rowCount) refuse("handover_not_completed");
+    claimId = owned.rows[0]?.claimId ?? refuse("handover_not_completed");
   }
   const targets = (
     await client.query<ChannexSalesPlan["targets"][number]>(
       `SELECT target.id::text, target.offer_id AS "offerId",
+         target.active_version::text AS "activeVersion",
+         version.binding_generation::text AS "bindingGeneration",
          version.external_rate_plan_id AS "externalRatePlanId",
          to_char(target.sales_state_changed_at AT TIME ZONE 'UTC', ${UTC}) AS "changedAt"
        FROM pms.channex_offer_targets target
-       JOIN pms.channex_offer_target_versions version
+       LEFT JOIN pms.channex_offer_target_versions version
          ON version.target_id = target.id AND version.version = target.active_version
        JOIN pms.channel_connections connection ON connection.id = target.connection_id
        WHERE target.property_id = $1::uuid AND target.sales_state <> $2
@@ -461,6 +536,7 @@ export async function planChannexSales(client: Client, input: SalesInput, lock =
   const plan: ChannexSalesPlan = {
     command: input.command,
     propertyId: input.propertyId,
+    claimId,
     targets,
     evidence: { approvalRef: input.approvalRef },
   };
@@ -494,11 +570,17 @@ function validateInput(input: ChannexHandoverInput) {
     refuse("reason_invalid");
 }
 
-/** Revoke binds to its claim and binding, not to mapping ids a busy hotel keeps changing. */
+/** Revoke binds to its claim and binding, not to row ids a busy hotel keeps changing. */
 function seal(plan: ChannexHandoverPlan) {
   const bound =
     plan.command === "revoke"
-      ? { ...plan, roomTypeMappingIds: [], ratePlanMappingIds: [], bookingMappingIds: [] }
+      ? {
+          ...plan,
+          roomTypeMappingIds: [],
+          ratePlanMappingIds: [],
+          bookingMappingIds: [],
+          salesOpenTargetIds: [],
+        }
       : plan;
   return { plan, planSha256: createHash("sha256").update(JSON.stringify(bound)).digest("hex") };
 }

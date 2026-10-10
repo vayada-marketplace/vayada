@@ -188,9 +188,16 @@ describe.skipIf(!URL)("Channex handover executor (PostgreSQL)", () => {
       rooms: [MAP_LIVE],
       session: true,
     });
-    await expect(applyChannexHandover(db, activate, planSha256)).rejects.toThrow(
-      "handover_not_pending",
-    );
+    // Re-running the applied plan reports the recorded result; a new plan is refused.
+    expect(await applyChannexHandover(db, activate, planSha256)).toMatchObject({
+      replayed: true,
+      planSha256,
+      auditId: result.auditId,
+    });
+    await expect(
+      applyChannexHandover(db, { ...activate, approvalRef: "VAY-2108 other ref" }, planSha256),
+    ).rejects.toThrow("replay_mismatch");
+    await expect(plan(activate)).rejects.toThrow("handover_not_pending");
   });
 
   it("revokes everything live on the binding, also rows written after activation", async () => {
@@ -258,56 +265,115 @@ describe.skipIf(!URL)("Channex handover executor (PostgreSQL)", () => {
     const close: ChannexHandoverInput = { ...open, command: "close-sales" };
     const again = await plan(activate);
     await applyChannexHandover(db, activate, again.planSha256);
-    const binding = (
+    const binding = async () =>
+      (
+        await db.query(
+          "SELECT id::text, binding_generation::text AS generation FROM pms.channel_connections WHERE property_id = $1",
+          [PROPERTY],
+        )
+      ).rows[0] as { id: string; generation: string };
+    const first = await binding();
+    const addTarget = async (room: string, rate: string) => {
+      const target = (
+        await db.query(
+          "INSERT INTO pms.channex_offer_targets(property_id,connection_id,room_type_id,offer_id) VALUES($1,$2,$3,$4) RETURNING id::text",
+          [PROPERTY, first.id, room, `offer-${rate}`],
+        )
+      ).rows[0].id as string;
+      const intent = (
+        await db.query(
+          `INSERT INTO pms.channex_offer_target_intents(target_id,operation_key,proposal)
+           VALUES($1,$2,'{"currency":"EUR"}') RETURNING id,version`,
+          [target, `vay-2108-sales-${rate}`],
+        )
+      ).rows[0];
       await db.query(
-        "SELECT id::text, binding_generation::text AS generation FROM pms.channel_connections WHERE property_id = $1",
-        [PROPERTY],
-      )
-    ).rows[0];
-    const target = (
-      await db.query(
-        "INSERT INTO pms.channex_offer_targets(property_id,connection_id,room_type_id,offer_id) VALUES($1,$2,$3,'offer') RETURNING id::text",
-        [PROPERTY, binding.id, ROOM],
-      )
-    ).rows[0].id;
-    const intent = (
-      await db.query(
-        `INSERT INTO pms.channex_offer_target_intents(target_id,operation_key,proposal)
-         VALUES($1,$2,'{"currency":"EUR"}') RETURNING id,version`,
-        [target, "vay-2108-sales"],
-      )
-    ).rows[0];
-    await db.query(
-      `INSERT INTO pms.channex_offer_target_versions(target_id,version,intent_id,binding_generation,
-         external_property_id,external_room_type_id,external_rate_plan_id,configuration,readback_evidence)
-       VALUES($1,$2,$3,$4,$5,'x-room-1','x-rate-offer','{"currency":"EUR"}','{"verified":true}')`,
-      [target, intent.version, intent.id, binding.generation, EXTERNAL],
-    );
-    await db.query("UPDATE pms.channex_offer_targets SET active_version=1 WHERE id=$1", [target]);
-    const state = async () =>
-      (await db.query("SELECT sales_state FROM pms.channex_offer_targets WHERE id=$1", [target]))
-        .rows[0].sales_state;
+        `INSERT INTO pms.channex_offer_target_versions(target_id,version,intent_id,binding_generation,
+           external_property_id,external_room_type_id,external_rate_plan_id,configuration,readback_evidence)
+         VALUES($1,$2,$3,$4,$5,$6,$7,'{"currency":"EUR"}','{"verified":true}')`,
+        [target, intent.version, intent.id, first.generation, EXTERNAL, `x-room-${rate}`, rate],
+      );
+      await db.query("UPDATE pms.channex_offer_targets SET active_version=1 WHERE id=$1", [target]);
+      return target;
+    };
+    const states = async () =>
+      (
+        await db.query(
+          "SELECT sales_state AS state FROM pms.channex_offer_targets WHERE property_id=$1 ORDER BY id",
+          [PROPERTY],
+        )
+      ).rows.map((row) => row.state);
+    const [targetA, targetB] = [
+      await addTarget(ROOM, "x-rate-room"),
+      await addTarget(OTHER_ROOM, "x-rate-other"),
+    ].sort();
 
     await expect(planSales(close)).rejects.toThrow("sales_state_unchanged");
+    const stale = await planSales(open);
+    // The plan binds each target's active version and binding, and the owning claim.
+    expect(stale.plan.claimId).toEqual(expect.any(String));
+    expect(
+      stale.plan.targets.map((item) => [item.id, item.activeVersion, item.bindingGeneration]),
+    ).toEqual([
+      [targetA, "1", first.generation],
+      [targetB, "1", first.generation],
+    ]);
+    // Any change to a planned target since the review refuses the apply.
+    await db.query(
+      "UPDATE pms.channex_offer_targets SET sales_state_changed_at = now() WHERE id = $1",
+      [targetB],
+    );
+    await expect(applyChannexHandover(db, open, stale.planSha256)).rejects.toThrow("plan_changed");
     const opening = await planSales(open);
-    expect(opening.plan.targets.map((item) => item.externalRatePlanId)).toEqual(["x-rate-offer"]);
     const opened = await applyChannexHandover(db, open, opening.planSha256);
     expect(opened).toMatchObject({ replayed: false });
-    expect(await state()).toBe("open");
+    expect(await states()).toEqual(["open", "open"]);
     // Re-running the reviewed plan reports the recorded result instead of failing.
     expect(await applyChannexHandover(db, open, opening.planSha256)).toEqual({
       replayed: true,
       planSha256: opening.planSha256,
       auditId: opened.auditId,
+      occurredAt: expect.any(String),
     });
+    await expect(
+      applyChannexHandover(
+        db,
+        { ...open, approvalRef: "VAY-2108 another ref" },
+        opening.planSha256,
+      ),
+    ).rejects.toThrow("replay_mismatch");
     await expect(planSales(open)).rejects.toThrow("sales_state_unchanged");
-    const closing = await planSales(close);
-    await applyChannexHandover(db, close, closing.planSha256);
-    expect(await state()).toBe("closed");
 
-    const { planSha256 } = await plan(revoke);
-    await applyChannexHandover(db, revoke, planSha256);
+    // Revoke closes every open target with it: nothing could close them on Channex later.
+    const revoking = await plan(revoke);
+    expect(revoking.plan.salesOpenTargetIds).toEqual([targetA, targetB]);
+    const revoked = await applyChannexHandover(db, revoke, revoking.planSha256);
+    expect(await states()).toEqual(["closed", "closed"]);
+    const audit = await db.query(
+      "SELECT redacted_payload->'salesOpenTargetIds' AS closed FROM platform.product_audit_events WHERE id = $1::uuid",
+      [revoked.auditId],
+    );
+    expect(audit.rows[0].closed).toEqual([targetA, targetB]);
     await expect(planSales(open)).rejects.toThrow("handover_not_completed");
+    // An old plan never reports success after a later handover command.
+    await expect(applyChannexHandover(db, open, opening.planSha256)).rejects.toThrow(
+      "plan_superseded",
+    );
+
+    // After a new activation the versions belong to the old binding: opening leaves them out,
+    // closing still reaches an open one.
+    const reactivating = await plan(activate);
+    await applyChannexHandover(db, activate, reactivating.planSha256);
+    expect((await binding()).generation).not.toBe(first.generation);
+    await expect(planSales(open)).rejects.toThrow("sales_state_unchanged");
+    await db.query(
+      "UPDATE pms.channex_offer_targets SET sales_state = 'open', sales_state_changed_at = now() WHERE id = $1",
+      [targetA],
+    );
+    const closing = await planSales(close);
+    expect(closing.plan.targets.map((item) => item.id)).toEqual([targetA]);
+    await applyChannexHandover(db, close, closing.planSha256);
+    expect(await states()).toEqual(["closed", "closed"]);
   });
 
   async function planSales(input: ChannexHandoverInput) {

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import pg from "pg";
 
 import {
@@ -14,6 +15,23 @@ import { normalizePgConnectionString } from "../pgConnection.js";
 //   revoke: --reason TEXT. Without --apply it prints the plan and its sha256 (read only).
 //   --apply SHA applies that plan once; re-running it reports replayed=true.
 const [command, ...rawArgs] = process.argv.slice(2);
+
+/**
+ * The platform runner reads one stdout line below 16 KB. A plan too large for it prints every
+ * list as its count and sha256 instead; the plan sha256 still binds the full lists.
+ */
+function line(value: object) {
+  const full = JSON.stringify(value);
+  if (Buffer.byteLength(full) <= 15_000) return full;
+  return JSON.stringify({ ...value, compacted: true }, (_key, item: unknown) =>
+    Array.isArray(item)
+      ? {
+          count: item.length,
+          sha256: createHash("sha256").update(JSON.stringify(item)).digest("hex"),
+        }
+      : item,
+  );
+}
 
 try {
   if (
@@ -70,7 +88,7 @@ try {
   try {
     if (args.has("apply")) {
       const result = await applyChannexHandover(pool, input, value("apply"));
-      console.log(JSON.stringify({ applied: true, ...result }));
+      console.log(line({ applied: true, ...result }));
       console.log(
         `CHANNEX_HANDOVER_COMPLETE action=${command} property=${input.propertyId} planSha256=${result.planSha256} replayed=${result.replayed}`,
       );
@@ -82,7 +100,7 @@ try {
           input.command === "open-sales" || input.command === "close-sales"
             ? await planChannexSales(client, input)
             : await planChannexHandover(client, input);
-        console.log(JSON.stringify({ applied: false, ...plan }));
+        console.log(line({ applied: false, ...plan }));
       } finally {
         await client.query("ROLLBACK");
         client.release();
