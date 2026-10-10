@@ -42,6 +42,7 @@ const VALUE_ARGUMENTS = new Set([
   "--approved-decision",
   "--approval-proof-sha256",
   "--approval-report",
+  "--cohort",
   "--confirmation",
   "--report",
   ...SOURCE_DATABASES.map((database) => `--${database}-source-tag`),

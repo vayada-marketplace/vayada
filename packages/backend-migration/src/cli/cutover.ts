@@ -18,6 +18,10 @@ import {
   parseProductionCutoverArgs,
   ProductionCutoverArgsError,
 } from "../productionCutoverArgs.js";
+import {
+  parseProductionMigrationCohort,
+  ProductionMigrationCohortError,
+} from "../productionMigrationCohort.js";
 import { parseSourceExtractionManifest, type SourceExtractionConfig } from "../sourceExtraction.js";
 import { parseSourceInventory, SOURCE_DATABASES, type SourceDatabase } from "../sourceInventory.js";
 
@@ -102,6 +106,10 @@ try {
     const approvalReport = approvalReportPath
       ? JSON.parse(await readFile(approvalReportPath, "utf8"))
       : undefined;
+    const cohortPath = parsed.values.get("--cohort");
+    const cohort = cohortPath
+      ? parseProductionMigrationCohort(JSON.parse(await readFile(cohortPath, "utf8")))
+      : undefined;
     const config: ProductionCutoverConfig = {
       connectionString: target,
       migrationsDir,
@@ -128,6 +136,7 @@ try {
       ) as ProductionCutoverConfig["approvedParityDecision"],
       approvalProofSha256: parsed.values.get("--approval-proof-sha256"),
       approvalReport,
+      ...(cohort ? { cohort } : {}),
       confirmation: parsed.values.get("--confirmation"),
       resume: parsed.resume,
       sourceExtraction,
@@ -144,7 +153,9 @@ try {
       ? error
       : error instanceof ProductionCutoverArgsError
         ? new ProductionCutoverError("INVALID_ARGUMENTS", error.message)
-        : new ProductionCutoverError("CUTOVER_COMMAND_FAILED", "Cutover command failed");
+        : error instanceof ProductionMigrationCohortError
+          ? new ProductionCutoverError(error.code, error.message)
+          : new ProductionCutoverError("CUTOVER_COMMAND_FAILED", "Cutover command failed");
   console.error(`${safe.code}: ${safe.message}`);
   process.exitCode = 1;
 }

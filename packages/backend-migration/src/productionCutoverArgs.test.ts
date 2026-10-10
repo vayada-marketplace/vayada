@@ -87,6 +87,16 @@ describe("production cutover arguments", () => {
     expect(parsed).toMatchObject({ command: "status", report: "json" });
   });
 
+  it("accepts one optional reviewed cohort file", () => {
+    const argv = ["node", "cutover.ts", "dry-run", ...baseArguments("preprod", "preprod")];
+    expect(parseProductionCutoverArgs(argv).values.has("--cohort")).toBe(false);
+    const cohort = [...argv, "--cohort", "/reviewed/cohort.json"];
+    expect(parseProductionCutoverArgs(cohort).values.get("--cohort")).toBe("/reviewed/cohort.json");
+    expect(() => parseProductionCutoverArgs([...cohort, "--cohort", "/other.json"])).toThrow(
+      "Unknown or duplicate argument: --cohort",
+    );
+  });
+
   it("does not allow trusted command internals to be replaced", () => {
     expect(() =>
       parseProductionCutoverArgs([

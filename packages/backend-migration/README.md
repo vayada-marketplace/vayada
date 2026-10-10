@@ -692,6 +692,19 @@ The trusted runtime `APPLICATION_RELEASE` or `GIT_SHA` must exactly equal
 staging/staging, dry-run uses preprod/preprod, and production uses
 production/preprod.
 
+`--cohort <reviewed cohort.json>` optionally scopes the run to an approved VAY-1362
+cohort (`engineering/legacy-migration-cohort-scope.md`): `{sourceRunId,
+bookingHotelIds, pmsHotelIds, marketplaceHotelIds, approvalProofSha256}` with
+lowercase, distinct UUIDs. The canonical `cohortSha256` joins the configuration
+hash, the run evidence, the parity checksum and the production approval
+artifact, which must carry the approved dry run's cohort. Before the identity
+step the command writes it once to `platform.production_migration_cohorts`, in
+the same transaction that checks every ID against the attested source
+(`COHORT_HOTEL_NOT_IN_SOURCE`). A different cohort for the same source run, or a
+stored cohort for a run started without `--cohort`, fails with `COHORT_CONFLICT`.
+Without `--cohort`, configuration and evidence hashes are unchanged; the target
+must carry migration 0480, as every target must match the deployed release.
+
 Before a run, a database administrator must bind the target itself with durable
 evidence. The database-level settings path remains supported where available;
 the command reads it only from `pg_catalog.pg_db_role_setting` for the current

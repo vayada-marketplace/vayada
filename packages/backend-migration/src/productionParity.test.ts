@@ -241,6 +241,15 @@ describe("production migration parity", () => {
     expect(first.reportChecksumSha256).toBe(second.reportChecksumSha256);
   });
 
+  it("binds a configured cohort into the checksum and leaves the no-cohort report unchanged", async () => {
+    const plain = await runProductionParity(config(), services());
+    const scoped = await runProductionParity({ ...config(), cohortSha256: SHA }, services());
+
+    expect(plain).not.toHaveProperty("cohortSha256");
+    expect(scoped.cohortSha256).toBe(SHA);
+    expect(scoped.reportChecksumSha256).not.toBe(plain.reportChecksumSha256);
+  });
+
   it("hard-fails an active/future booking lifecycle swap even when totals match", async () => {
     const reports = domainReports();
     reports.booking.parity.activeFutureTargetBookings["booking-1"]!.lifecycleStatus =

@@ -22,6 +22,7 @@ import {
   type ProductionCutoverSmokeReport,
 } from "./productionCutover.js";
 import { stableJson } from "./productionIdentitySourceValidation.js";
+import { parseProductionMigrationCohort } from "./productionMigrationCohort.js";
 import {
   buildSourceExtractionPlan,
   VAY_1350_INVENTORY_REVISION,
@@ -148,6 +149,32 @@ describe.skipIf(!URL)("production cutover orchestration (PostgreSQL)", () => {
     await expect(
       runProductionCutover({ ...input, operator: "different-operator" }, successfulServices([])),
     ).rejects.toMatchObject({ code: "RUN_CONFIGURATION_MISMATCH" });
+  });
+
+  it("binds a cohort into the immutable run configuration and evidence", async () => {
+    const base = config(runId("7"));
+    const cohort = (bookingHotelIds: string[]) =>
+      parseProductionMigrationCohort({
+        sourceRunId: base.sourceRunId,
+        bookingHotelIds,
+        pmsHotelIds: [],
+        marketplaceHotelIds: [],
+        approvalProofSha256: SHA,
+      });
+    const input = { ...base, cohort: cohort(["11111111-1111-4111-8111-111111111111"]) };
+    await attestTarget(input);
+    const report = await completeRun(input, successfulServices([]));
+    expect(report.cohortSha256).toBe(input.cohort.cohortSha256);
+    expect(await readPersistedEvidence(input.runId)).toMatchObject({
+      cohortSha256: input.cohort.cohortSha256,
+    });
+    for (const changed of [
+      base,
+      { ...base, cohort: cohort(["22222222-2222-4222-8222-222222222222"]) },
+    ])
+      await expect(runProductionCutover(changed, successfulServices([]))).rejects.toMatchObject({
+        code: "RUN_CONFIGURATION_MISMATCH",
+      });
   });
 
   it("prevents concurrent cutover runs with an advisory lock", async () => {
