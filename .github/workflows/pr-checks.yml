@@ -4,6 +4,9 @@ on:
   pull_request:
     branches:
       - main
+      # VAY-2074 stack bases (top of the list to avoid append conflicts).
+      - "fm/vay-2074-*"
+      - "fm/vay-2075-*"
       - "fm/vay-1092-*"
       - "fix/vay-965-*"
       - "fm/vay-965-*"
@@ -11,11 +14,15 @@ on:
       - "fm/vay-2056-*"
       - "fm/vay-1543-*"
       - "fm/vay-2066-*"
+      - "fm/vay-2078-*"
       - "fm/vay-2079-*"
+      - "fm/vay-2088-*"
       - "fm/vay-2082-*"
+      - "fm/vay-2084-*"
       - "fm/vay-2089-*"
       - "fm/vay-2093-*"
       - "fm/vay-2099-*"
+      - "fm/vay-2100-*"
       - "fm/vay-2101-*"
       - "fm/vay-2102-*"
       - flamurmaliqi2811/vay-2044-expense-worker-runtime
@@ -91,6 +98,9 @@ jobs:
       - name: Finance domain contracts
         run: npm --workspace @vayada/domain-finance run test
 
+      - name: Feature Hub package tests
+        run: npm --workspace @vayada/feature-hub run test
+
       - name: Hotel domain and product onboarding tests
         run: |
           npm --workspace @vayada/domain-hotels run build
@@ -105,6 +115,9 @@ jobs:
 
       - name: Booking Admin tests
         run: npm --workspace vayada-booking-engine-frontend-admin run test
+
+      - name: Settings UI package tests
+        run: npm --workspace @vayada/settings-ui run test
 
       - name: Booking Web tests
         run: npm --workspace vayada-booking-engine-frontend run test
@@ -350,6 +363,12 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      - name: Verify PMS navigation module migration backfill
+        if: matrix.shard == 'pms'
+        run: npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/pmsNavigationModules.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Apply target migrations
         run: npm --workspace @vayada/backend-migration run target:migrate -- --env local
         env:
@@ -495,6 +514,8 @@ jobs:
           src/domains/pmsPhysicalRoomManagementRepository.integration.test.ts
           src/domains/pmsRoomPublicationCommandRepository.integration.test.ts
           src/domains/pmsCalendarAutoOpenSettingsRepository.integration.test.ts
+          src/pmsNavigationModules.integration.test.ts
+          src/pmsNavigationModules.test.ts
           src/jobs/pmsChannexScheduler.integration.test.ts
           src/jobs/pmsCalendarAutoOpenScheduler.integration.test.ts
           src/domains/pmsInboxProviderActionCommand.integration.test.ts
@@ -514,6 +535,7 @@ jobs:
           src/pmsManualBookingPreviewRoutes.test.ts
           src/pmsManualBookingCreateRoutes.test.ts
           src/domains/bookingGuestPolicyRepository.integration.test.ts
+          src/bookingSettingsPropertyAddress.integration.test.ts
           src/domains/financeOtaCommissionRuleRepository.integration.test.ts
           src/domains/financeExpenseCategoryRepository.integration.test.ts
           src/domains/financeManualExpenseRepository.integration.test.ts
@@ -567,6 +589,7 @@ jobs:
           npm --workspace @vayada/backend-migration run target:migrate -- --env local
           npm --workspace vayada-api run test -- --no-file-parallelism \
             src/domains/publicPricingOwners.integration.test.ts \
+            src/domains/financeReplacementPricingSource.integration.test.ts \
             src/domains/replacementPricingStore.integration.test.ts \
             src/domains/replacementPricingCommands.integration.test.ts \
             src/domains/pmsAcceptedPricingReservationWorker.integration.test.ts \
@@ -578,7 +601,8 @@ jobs:
             src/domains/pricingBookingLifecycle.postgres.test.ts \
             src/domains/pricingBookingRevenue.postgres.test.ts \
             src/domains/pricingInventoryAdoption.postgres.test.ts \
-            src/domains/pricingRevenueClear.postgres.test.ts
+            src/domains/pricingRevenueClear.postgres.test.ts \
+            src/domains/bookingHostActionLocks.postgres.test.ts
           npm --workspace @vayada/backend-migration run test -- \
             src/bookingPricingAuthorityDrop.integration.test.ts
           npm --workspace vayada-api run test -- --no-file-parallelism \
