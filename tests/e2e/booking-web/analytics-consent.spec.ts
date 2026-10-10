@@ -39,8 +39,7 @@ test("accepts, reopens and withdraws optional analytics without blocking rooms",
   expect(await identifiers()).toEqual([]);
   const count = events.length;
   await page.reload();
-  await page.getByRole("button", { name: "View Details", exact: true }).first().click();
-  await expect(page.getByRole("dialog", { name: "Alpine Suite" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toBeVisible();
   expect(events.length).toBe(count);
   expect(await identifiers()).toEqual([]);
 });

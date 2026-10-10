@@ -9,6 +9,7 @@ import { lockCurrentQuoteGuestDisclosure } from "./currentQuoteGuestDisclosure.j
 import { lockFinancePricingAcceptanceTerms } from "./financePricingAcceptanceTerms.js";
 import { parseBookingQuoteAcceptanceInput } from "./bookingQuoteAcceptanceInput.js";
 import { pricingRoomRevenueProjection } from "./pricingRoomRevenueProjection.js";
+import { pricingCardQuoteSupported } from "./pricingCardPayment.js";
 
 /** Start only; caller owns READ COMMITTED through full acceptance or rollback.
  * Public authority takes the existing property inventory mutation lock BEFORE
@@ -16,7 +17,12 @@ import { pricingRoomRevenueProjection } from "./pricingRoomRevenueProjection.js"
  * commit. Do not replace it with an unlocked authority lookup. Completed replay
  * precedes all fresh owners. Fresh returns an IN-PROGRESS receipt, never success;
  * caller must finish every write and the final deadline gate, or roll back all. */
-export async function preparePricingAcceptance(client: PoolClient, slug: unknown, input: unknown) {
+export async function preparePricingAcceptance(
+  client: PoolClient,
+  slug: unknown,
+  input: unknown,
+  options: { card?: boolean } = {},
+) {
   const fail = (): never => {
     throw new Error("Booking acceptance unavailable");
   };
@@ -50,12 +56,18 @@ export async function preparePricingAcceptance(client: PoolClient, slug: unknown
     return fail();
   const command = parseBookingQuoteAcceptanceInput(input, current.quote, disclosure.policy);
   // Match the currently implemented lifecycle/revenue composition before effects.
+  const payAtProperty =
+    current.quote.acceptanceMode === "instant" &&
+    current.quote.paymentMethod === "pay_at_property" &&
+    current.quote.evidence.dueNowMinor === "0" &&
+    current.quote.evidence.dueLaterMinor === current.quote.evidence.totalMinor;
+  const card = options.card === true && pricingCardQuoteSupported(current.quote);
+  // A card quote while online card acceptance is off is unavailable, not a stale price.
+  if (command && !card && current.quote.paymentMethod === "card")
+    throw new Error("Card acceptance unavailable");
   if (
     !command ||
-    current.quote.acceptanceMode !== "instant" ||
-    current.quote.paymentMethod !== "pay_at_property" ||
-    current.quote.evidence.dueNowMinor !== "0" ||
-    current.quote.evidence.dueLaterMinor !== current.quote.evidence.totalMinor ||
+    !(payAtProperty || card) ||
     !pricingRoomRevenueProjection(current.quote, current.calculation?.charges)
   )
     return fail();
