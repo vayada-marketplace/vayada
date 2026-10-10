@@ -38,6 +38,7 @@ export * from "./bookingAttribution.js";
 export * from "./affiliateArrivalTransport.js";
 export * from "./bookingAddonEconomics.js";
 export * from "./sameDayBookingPolicy.js";
+export * from "./bookedCancellationOutcome.js";
 export * from "./roomSelection.js";
 
 export type BookingUtcDateTime = string;
