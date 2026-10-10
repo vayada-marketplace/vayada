@@ -246,25 +246,33 @@ export async function acceptPricingQuote(
   return result;
 }
 
-/** Quotes this page can book: paid at the property (instantly, or as a request the hotel
- * confirms), or instant and paid in full by card. */
+/** Quotes this page can book, instantly or as a request the hotel confirms: paid at the
+ * property, or paid in full by card (a request only authorises the card). */
 export function pricingQuoteBookableOnline(quote: PublicBookingQuote): boolean {
   if (quote.paymentMethod === "pay_at_property")
     return quote.dueNowMinor === "0" && quote.dueLaterMinor === quote.totalMinor;
   return (
-    quote.acceptanceMode === "instant" &&
     quote.paymentMethod === "card" &&
     quote.dueNowMinor === quote.totalMinor &&
     quote.dueLaterMinor === "0"
   );
 }
 
-export type PricingCardPaymentResult = Readonly<{
-  kind: "accepted";
-  bookingId: string;
-  bookingReference: string;
-  replayed: boolean;
-}>;
+export type PricingCardPaymentResult =
+  | Readonly<{
+      kind: "accepted";
+      bookingId: string;
+      bookingReference: string;
+      replayed: boolean;
+    }>
+  | Readonly<{
+      /** A card request: authorised, not charged; the hotel answers before the deadline. */
+      kind: "requested";
+      bookingId: string;
+      bookingReference: string;
+      replayed: boolean;
+      hostResponseDeadlineAt: string;
+    }>;
 
 /** After Stripe confirmed the card in the browser: ask the server to confirm the booking.
  * 409 PAYMENT_PENDING means Stripe has not reported the payment yet; retry shortly. */
@@ -282,16 +290,25 @@ export async function completePricingCardPayment(
   const v = raw as Record<string, unknown> | null;
   if (
     !v ||
-    v.kind !== "accepted" ||
+    (v.kind !== "accepted" && v.kind !== "requested") ||
     !uuid(v.bookingId) ||
     !bookingReference(v.bookingReference) ||
-    typeof v.replayed !== "boolean"
+    typeof v.replayed !== "boolean" ||
+    (v.kind === "requested" && !iso(v.hostResponseDeadlineAt))
   )
     throw new Error("The booking confirmation could not be verified. Please try again.");
-  return {
-    kind: "accepted",
-    bookingId: v.bookingId,
-    bookingReference: v.bookingReference,
-    replayed: v.replayed,
-  };
+  return v.kind === "requested"
+    ? {
+        kind: "requested",
+        bookingId: v.bookingId,
+        bookingReference: v.bookingReference,
+        replayed: v.replayed,
+        hostResponseDeadlineAt: v.hostResponseDeadlineAt as string,
+      }
+    : {
+        kind: "accepted",
+        bookingId: v.bookingId,
+        bookingReference: v.bookingReference,
+        replayed: v.replayed,
+      };
 }
