@@ -34,8 +34,11 @@ type Room = PricingSnapshot["rooms"][number];
 /** A room's unsaved edits carried over a reload after a refused save, with the room as it was loaded. */
 type Kept = { room: Room; base: Room | null; terms: Record<string, PricingTermsInput>; bases: Record<string, string | null> };
 /** One room's prices (the room page's Prices tab). Saving publishes the whole property, with every other room
- * exactly as read. */
-export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus }: { client: Client; roomNames?: Record<string, string>; setup?: { propertyId: string; rooms: readonly SetupRoom[] }; roomTypeId: string }) {
+ * exactly as read. `onAttention`: a leave confirmation is waiting, so the page should show this tab;
+ * `onPublished`: prices were published; a new `refresh` reloads unless this room has unsaved work. */
+export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus, onAttention, onPublished, refresh = 0 }: { client: Client; roomNames?: Record<string, string>; setup?: { propertyId: string; rooms: readonly SetupRoom[] }; roomTypeId: string; onAttention?: () => void; onPublished?: () => void; refresh?: number }) {
+  const callbacks = useRef({ onAttention, onPublished });
+  useEffect(() => { callbacks.current = { onAttention, onPublished }; }, [onAttention, onPublished]);
   const [policyEdits, setPolicyEdits] = useState<Record<string, PricingTermsInput>>({});
   const policyBases = useRef<Record<string, string | null>>({});
   const policyKey = (room: string, offer: string) => JSON.stringify([room, offer]);
@@ -57,7 +60,7 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
   const { t } = useTranslation();
   const roomName = (roomTypeId: string, ri: number) => roomNames[roomTypeId] ?? t("pricing.roomNumber", { number: ri + 1 });
   const offerLabel = (roomTypeId: string, ri: number, oi: number) => t("pricing.roomOffer", { room: roomName(roomTypeId, ri), number: oi + 1 });
-  const load = useCallback(async (after?: { keep?: Kept; notice?: MessageKey }) => {
+  const load = useCallback(async (after?: { keep?: Kept }) => {
     setLoading(true); setEmpty(false); setError(null);
     try {
       const saved = await client.read(); if (!alive.current) return;
@@ -68,7 +71,7 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
       setCurrent(saved || room ? { currency: saved?.currency ?? room!.currency, ownerReferences: { finance: saved?.ownerReferences.finance ?? "" },
         rooms: !room ? rooms : rooms.some((value) => value.roomTypeId === room.roomTypeId) ? rooms.map((value) => value.roomTypeId === room.roomTypeId ? room : value) : [...rooms, room] } : null);
       setAddingOfferRoom(null); setPendingEntries({}); setBaseRevision(saved?.revision ?? 0); setStale(!!saved?.stale); setInputs({}); setDirty(!!room); setNeedsReload(false); setDone(false);
-      setNotice(room ? "pricing.room.noticeKept" : keep ? "pricing.room.noticeDropped" : after?.notice ?? (saved?.stale ? "pricing.room.noticeStale" : ""));
+      setNotice(room ? "pricing.room.noticeKept" : keep ? "pricing.room.noticeDropped" : saved?.stale ? "pricing.room.noticeStale" : "");
     } catch (e) { if (alive.current) setError(e); }
     finally { if (alive.current) setLoading(false); }
   }, [client, focus]);
@@ -83,6 +86,10 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
   }
   useEffect(() => { alive.current = true; void load(); return () => { alive.current = false; }; }, [load]); // Client is property-bound; parent keys this component by property.
   const leaveRisk = hasPendingEntries || dirty || retry || busy;
+  const risk = useRef(leaveRisk);
+  useEffect(() => { risk.current = leaveRisk; }, [leaveRisk]); // Declared before the refresh effect, which reads it.
+  const seenRefresh = useRef(refresh);
+  useEffect(() => { if (refresh === seenRefresh.current) return; seenRefresh.current = refresh; if (!risk.current) void load(); }, [refresh, load]);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => { if (leaveRisk && !leaving.current) { event.preventDefault(); event.returnValue = ""; } };
     // Links stay in-app until this room has unsaved prices; then leaving asks first and leaves through the
@@ -92,13 +99,13 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
       if (!(link instanceof HTMLAnchorElement) || event.metaKey || event.ctrlKey || event.shiftKey || link.target === "_blank" || !leaveRisk) return;
       event.preventDefault(); event.stopPropagation();
       const href = link.href;
-      setLeave(() => () => window.location.assign(href));
+      setLeave(() => () => window.location.assign(href)); callbacks.current.onAttention?.();
     };
     const switchProperty = (event: Event) => {
       if (!leaveRisk) { leaving.current = true; return; }
       event.preventDefault(); // Hold the switch until the in-app dialog confirms; the dispatcher's `proceed` resumes it.
       const proceed = (event as CustomEvent<{ proceed?: () => void } | undefined>).detail?.proceed;
-      if (proceed) setLeave(() => proceed);
+      if (proceed) { setLeave(() => proceed); callbacks.current.onAttention?.(); }
     };
     window.addEventListener("beforeunload", warn); document.addEventListener("click", navigate, true);
     window.addEventListener("pms:before-property-change", switchProperty);
@@ -161,19 +168,22 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
       if (!alive.current) return;
       // Shows the saved prices for review; "Edit prices again" reloads, so the next save starts from the new revision.
       setCurrent(attached.snapshot); setDone(true); setDirty(false); setInputs({}); setPolicyEdits({}); setNotice("pricing.editor.noticeSaved");
+      callbacks.current.onPublished?.();
     }, financeNotReady);
   }
   const disabled = busy || retry || needsReload || done, display = current;
+  // Edits survive a reload after a conflict; a denial (no permission) would only be refused again.
+  const keepsOnReload = needsReload && dirty && !(error instanceof ApiErrorResponse && error.status === 403);
   const roomSetup = setup?.rooms.filter((room) => room.roomTypeId === focus) ?? [];
   const focusIndex = display ? display.rooms.findIndex((room) => room.roomTypeId === focus) : -1, editing = focusIndex >= 0;
   const shownRooms = (display?.rooms ?? []).map((room, ri) => [room, ri] as const).filter(([room]) => room.roomTypeId === focus);
   const scale = display ? pricingCurrencyScale(display.currency)! : 2;
   return <section className="space-y-6">
     <header className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-lg font-semibold text-gray-950">{t("pricing.room.title")}</h2><p className="mt-1 text-sm text-gray-600">{t("pricing.room.subtitle")}</p></div>
-      <button className="rounded-lg border px-4 py-2 text-sm disabled:opacity-50" disabled={loading || busy || retry} onClick={() => { if (needsReload) reloadKeepingRoom(); else if (leaveRisk) setReloading(true); else void load(); }}>{t("pricing.editor.reload")}</button></header>
+      <button className="rounded-lg border px-4 py-2 text-sm disabled:opacity-50" disabled={loading || busy || retry} onClick={() => { if (keepsOnReload) reloadKeepingRoom(); else if (leaveRisk) setReloading(true); else void load(); }}>{t("pricing.editor.reload")}</button></header>
     {reloading && <ConfirmDialog title={t("pricing.reloadTitle")} message={t("pricing.reloadMessage")} confirmLabel={t("pricing.reloadConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { setReloading(false); void load(); }} onCancel={() => setReloading(false)} />}
     {leave && <ConfirmDialog title={t("pricing.leaveTitle")} message={t("pricing.leaveMessage")} confirmLabel={t("pricing.leaveConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { leaving.current = true; setLeave(null); leave(); }} onCancel={() => setLeave(null)} />}
-    {error !== null && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">{pricingSaveError(error, t)}{retry && <p className="mt-2">{t("pricing.editor.retryHint")}</p>}{needsReload && <p className="mt-2">{t("pricing.room.reloadKeeps")}</p>}</div>}
+    {error !== null && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">{pricingSaveError(error, t)}{retry && <p className="mt-2">{t("pricing.editor.retryHint")}</p>}{keepsOnReload && <p className="mt-2">{t("pricing.room.reloadKeeps")}</p>}</div>}
     {notice && <p role="status" className="rounded-lg bg-emerald-50 p-4 text-emerald-900">{t(notice)}</p>}
     {loading ? <p role="status">{t("pricing.editor.loading")}</p> : !display && !empty ? null : !display ? <div className="rounded-xl border bg-white p-8"><h2 className="font-semibold">{t("pricing.room.notConfigured")}</h2>{setup && roomSetup.length ? <FirstPricingSetup propertyId={setup.propertyId} rooms={roomSetup} disabled={disabled} onDirty={() => setDirty(true)} onCreate={createInitial} /> : <p className="mt-2 text-sm text-gray-600">{t(setup ? "pricing.room.notReady" : "pricing.editor.setupUnavailable")}</p>}
       {retry && <button disabled={busy} className="mt-4 rounded-lg border px-4 py-2" onClick={() => void run()}>{t("pricing.editor.retry")}</button>}</div> : <>

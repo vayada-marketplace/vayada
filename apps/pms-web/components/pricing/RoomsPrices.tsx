@@ -114,13 +114,15 @@ export function RoomPriceSummary({
 
 /** Property-wide prices above the Rooms list: the currency, and for a stale publication "Save prices again",
  * which republishes every room unchanged (the press is the mandatory-charges declaration). `staleOnly` (a room
- * page, e.g. after a room-details save made the prices stale) shows only that republish and its outcome. */
+ * page, e.g. after a room-details save made the prices stale) shows only that republish and its outcome, or that
+ * the prices could not be checked. `onSaved` runs after a republish. */
 export function RoomsPricesStrip({
   prices,
   error,
   reload,
   staleOnly = false,
-}: PropertyPrices & { staleOnly?: boolean }) {
+  onSaved,
+}: PropertyPrices & { staleOnly?: boolean; onSaved?: () => void }) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false),
     [failure, setFailure] = useState<unknown>(null),
@@ -146,6 +148,7 @@ export function RoomsPricesStrip({
         setRetry(false);
         setSaved(true);
       }
+      onSaved?.();
       await reload();
     } catch (e) {
       if (!alive.current) return;
@@ -184,7 +187,7 @@ export function RoomsPricesStrip({
       ? t("pricing.list.changed")
       : pricingSaveError(e, t);
   if (error)
-    return staleOnly ? null : (
+    return (
       <div
         role="alert"
         className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[12px] text-red-800"

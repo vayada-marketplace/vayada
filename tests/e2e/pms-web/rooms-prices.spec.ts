@@ -10,6 +10,7 @@ import {
 // VAY-2093: room prices live in each room's Prices tab on Rooms & Rates; /pricing is retired.
 const SUITE = "aaaaaaaa-0000-4000-8000-00000000000a";
 const GARDEN = "bbbbbbbb-0000-4000-8000-00000000000b";
+const LAKE = "cccccccc-0000-4000-8000-00000000000c";
 const TERMS = "66666666-6666-4666-8666-666666666666";
 const token = (digit: string) => digit.repeat(64);
 const sources = {
@@ -20,6 +21,7 @@ const sources = {
 const roomTypes = [
   { ...pmsWebRoomType, roomTypeId: SUITE, name: "Alpine Suite" },
   { ...pmsWebRoomType, roomTypeId: GARDEN, name: "Garden Room", sortOrder: 1 },
+  { ...pmsWebRoomType, roomTypeId: LAKE, name: "Lake Loft", sortOrder: 2 },
 ];
 
 type Room = Record<string, unknown>;
@@ -208,18 +210,22 @@ test("prices a room in its Prices tab and publishes the other rooms unchanged", 
   page,
 }, testInfo) => {
   await openPms(page);
-  const pricing = await mockPricing(page, publicationOf(3, [pricedRoom(SUITE, "12000", 3)]));
+  const pricing = await mockPricing(
+    page,
+    publicationOf(3, [pricedRoom(SUITE, "12000", 3), pricedRoom(GARDEN, "9000", 3)]),
+  );
 
   await page.goto("/rooms");
   await expect(main(page).getByText("All prices are in EUR.", { exact: false })).toBeVisible();
-  await expect(main(page).getByText("1 rate · from 120.00 EUR")).toBeVisible();
+  await expect(main(page).getByText("1 rate · base price from 120.00 EUR")).toBeVisible();
+  await expect(main(page).getByText("1 rate · base price from 90.00 EUR")).toBeVisible();
   await expect(main(page).getByRole("link", { name: "Set prices" })).toHaveAttribute(
     "href",
-    `/rooms/${GARDEN}?tab=prices`,
+    `/rooms/${LAKE}?tab=prices`,
   );
   // Page health from the room page on: the Rooms list's import panels call setup APIs this spec does not mock.
   const assertHealthy = watchPageHealth(page, testInfo);
-  await main(page).getByRole("link", { name: "Edit prices" }).click();
+  await main(page).locator(`a[href="/rooms/${SUITE}?tab=prices"]`).first().click();
 
   await expect(page).toHaveURL(new RegExp(`/rooms/${SUITE}\\?tab=prices$`));
   await expect(main(page).getByRole("heading", { name: "Prices", exact: true })).toBeVisible();
@@ -231,14 +237,20 @@ test("prices a room in its Prices tab and publishes the other rooms unchanged", 
 
   expect(pricing.publishes).toHaveLength(1);
   expect(pricing.publishes[0]).toMatchObject({ expectedRevision: 3 });
-  expect(pricing.publishes[0].snapshot.rooms).toHaveLength(1);
-  expect(pricing.publishes[0].snapshot.rooms[0].offers[0].price.calendar.base.amountMinor).toBe(
-    "13550",
+  const published = pricing.publishes[0].snapshot.rooms as Room[];
+  expect(published).toHaveLength(2);
+  expect(published.find((room) => room.roomTypeId === SUITE)).toMatchObject({
+    revision: 4,
+    offers: [{ price: { calendar: { base: { amountMinor: "13550" } } } }],
+  });
+  // The other room goes out exactly as it was read, only at the new revision.
+  expect(published.find((room) => room.roomTypeId === GARDEN)).toEqual(
+    pricedRoom(GARDEN, "9000", 4),
   );
   await expect(priceInput(page, "Alpine Suite")).toHaveValue("135.50");
   await expect(main(page).getByRole("button", { name: "Save prices" })).toBeDisabled();
 
-  await page.goto(`/rooms/${GARDEN}?tab=prices`);
+  await page.goto(`/rooms/${LAKE}?tab=prices`);
   await expect(main(page).getByText("This room has no prices yet")).toBeVisible();
   await expect(main(page).getByLabel("Currency code (for example EUR)")).toHaveValue("EUR");
   await expect(main(page).getByLabel("Currency code (for example EUR)")).toBeDisabled();

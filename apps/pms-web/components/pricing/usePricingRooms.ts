@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
 import { pmsOperationsRoomsReadService, type PmsOperationsRoomType } from "@/services/rooms";
 
@@ -37,29 +37,33 @@ export function pricingSetupRooms(items: readonly PmsOperationsRoomType[]): Setu
     }));
 }
 
-/** The selected property's rooms for pricing: a name for every room and the rooms that can be priced. */
-export function usePricingRooms() {
+/** The selected property's rooms for pricing: a name for every room and the rooms that can be priced. A new
+ * `version` reads them again (room details changed); a failed re-read keeps the rooms already shown. */
+export function usePricingRooms(version = 0) {
   const [rooms, setRooms] = useState<PricingRooms | null>(null);
   const [error, setError] = useState<Error | null>(null);
+  const loaded = useRef(false);
   useEffect(() => {
     let active = true;
     void resolveSelectedPmsPropertyId("loading pricing")
       .then(async (id) => {
         const listed = await pmsOperationsRoomsReadService.listRoomTypes(id);
         if (listed.propertyId !== id) throw new PricingError("pricing.page.roomMismatch");
-        if (active)
-          setRooms({
-            propertyId: id,
-            names: Object.fromEntries(listed.items.map((room) => [room.roomTypeId, room.name])),
-            setupRooms: pricingSetupRooms(listed.items),
-          });
+        if (!active) return;
+        loaded.current = true;
+        setRooms({
+          propertyId: id,
+          names: Object.fromEntries(listed.items.map((room) => [room.roomTypeId, room.name])),
+          setupRooms: pricingSetupRooms(listed.items),
+        });
       })
       .catch((e: unknown) => {
-        if (active) setError(e instanceof Error ? e : new PricingError("pricing.page.loadFailed"));
+        if (active && !loaded.current)
+          setError(e instanceof Error ? e : new PricingError("pricing.page.loadFailed"));
       });
     return () => {
       active = false;
     };
-  }, []);
+  }, [version]);
   return { rooms, error };
 }

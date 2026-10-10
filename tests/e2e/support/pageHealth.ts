@@ -8,8 +8,11 @@ const ignoredConsoleErrorPatterns = [
   /WebSocket connection .* failed/i,
 ];
 
-/** Before a property's first price publication the pricing-v2 read answers 404 ("no prices yet"). */
-const expectedMissingByDefault = [/\/api\/pms\/properties\/[^/]+\/pricing-v2$/];
+/** The PMS mocks answer their test property's (PMS_WEB_PROPERTY_ID in pmsWebMocks.ts) pricing-v2 read with 404
+ * ("no prices yet", before a first publication); a 404 for any other property or path still fails page health. */
+const expectedMissingByDefault = [
+  /\/api\/pms\/properties\/f6853000-0000-4000-8000-000000000001\/pricing-v2$/,
+];
 
 /** `expectedMissingUrls`: resources whose 404 is a documented "not configured yet" answer. */
 export function watchPageHealth(
