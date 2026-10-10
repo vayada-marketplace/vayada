@@ -14,7 +14,8 @@ describe.skipIf(!url)("Channex ongoing offer ARI storage", () => {
     const property = randomUUID(),
       connection = randomUUID(),
       room = randomUUID(),
-      external = randomUUID(),
+      externalProperty = randomUUID(),
+      externalRate = randomUUID(),
       worker = "vay-2108-delivery";
     await pool.query(
       "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Delivery test')",
@@ -25,8 +26,14 @@ describe.skipIf(!url)("Channex ongoing offer ARI storage", () => {
       property,
     ]);
     await pool.query(
-      "INSERT INTO pms.channel_connections(id,property_id,provider) VALUES($1,$2,'channex')",
-      [connection, property],
+      `INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source)
+       VALUES($1,'channex',$2,'active','repair')`,
+      [property, externalProperty],
+    );
+    await pool.query(
+      `INSERT INTO pms.channel_connections(id,property_id,provider,connection_status,external_property_id)
+       VALUES($1,$2,'channex','connected',$3)`,
+      [connection, property, externalProperty],
     );
     const generation = (
       await pool.query("SELECT binding_generation FROM pms.channel_connections WHERE id=$1", [
@@ -51,13 +58,16 @@ describe.skipIf(!url)("Channex ongoing offer ARI storage", () => {
          (target_id,version,intent_id,binding_generation,external_property_id,external_room_type_id,
           external_rate_plan_id,configuration,readback_evidence)
        VALUES($1,$2,$3,$4,$5,$6,$7,'{"currency":"EUR"}','{"verified":true}')`,
-      [target, intent.version, intent.id, generation, property, room, external],
+      [target, intent.version, intent.id, generation, externalProperty, room, externalRate],
     );
+    // The current lease of a running full ARI job, as the delivery guard requires.
     const job = (
       await pool.query(
-        `INSERT INTO platform.jobs(job_key,queue_name,job_type,tenant_scope,property_id)
-         VALUES($1,'pms.channex.management','channex.sync_ari','property',$2) RETURNING id::text`,
-        [`vay-2108-delivery:${property}`, property],
+        `INSERT INTO platform.jobs(job_key,queue_name,job_type,status,attempts_count,locked_at,locked_by,
+           tenant_scope,property_id,resource_product,resource_type,resource_id,payload)
+         VALUES($1,'pms.channex.management','channex.sync_ari','running',1,now(),$3,'property',$2,
+           'pms','channex_connection',$2::uuid::text,'{"operationType":"sync_ari"}') RETURNING id::text`,
+        [`vay-2108-delivery:${property}`, property, worker],
       )
     ).rows[0].id as string;
     const jobAttempt = (
@@ -67,20 +77,44 @@ describe.skipIf(!url)("Channex ongoing offer ARI storage", () => {
         [job, worker],
       )
     ).rows[0].id as string;
-    const deliver = (identity: Record<string, string> = {}) =>
+    const body = (ratePlan = externalRate) =>
+      JSON.stringify({
+        values: [
+          {
+            property_id: externalProperty,
+            rate_plan_id: ratePlan,
+            date_from: "2026-11-01",
+            date_to: "2026-11-02",
+            stop_sell: true,
+          },
+        ],
+      });
+    const deliver = (requestBody = body(), workerId = worker) =>
       pool.query<{ id: string; external: string; version: string }>(
         `INSERT INTO pms.channex_offer_ari_deliveries
            (target_id,version,binding_generation,external_property_id,external_room_type_id,
             external_rate_plan_id,job_attempt_id,worker_id,request_body)
-         VALUES($1,99,gen_random_uuid(),'forged','forged',$2,$3,$4,
-           '{"values":[{"date_from":"2026-11-01","date_to":"2026-11-02","stop_sell":true}]}')
+         VALUES($1,99,gen_random_uuid(),'forged','forged','forged',$2,$3,$4::jsonb)
          RETURNING id::text,external_rate_plan_id AS external,version::text`,
-        [target, identity.rate ?? "forged", jobAttempt, identity.worker ?? worker],
+        [target, jobAttempt, workerId, requestBody],
       );
-    return { target, external, generation, jobAttempt, worker, deliver };
+    const receipt = (delivery: string) =>
+      pool.query(
+        `INSERT INTO pms.channex_offer_ari_delivery_receipts
+           (id,delivery_id,job_attempt_id,worker_id,outcome,http_status,task_ids,has_warnings)
+         VALUES($1,$2,$3,$4,'complete_json',200,ARRAY[gen_random_uuid()],false)`,
+        [randomUUID(), delivery, jobAttempt, worker],
+      );
+    const date = (delivery: string, day: string) =>
+      pool.query(
+        `INSERT INTO pms.channex_offer_ari_delivery_dates(delivery_id,service_date,value,value_sha256)
+         VALUES($1,$2,'{"stop_sell":true}',repeat('a',64))`,
+        [delivery, day],
+      );
+    return { target, job, externalRate, generation, body, deliver, receipt, date };
   }
 
-  it("keeps sales closed by default and accepts only the two states", async () => {
+  it("keeps sales closed by default and records when they open", async () => {
     const f = await fixture();
     const state = async () =>
       (
@@ -89,9 +123,11 @@ describe.skipIf(!url)("Channex ongoing offer ARI storage", () => {
         ])
       ).rows[0].sales_state;
     expect(await state()).toBe("closed");
-    await expect(
-      pool.query("UPDATE pms.channex_offer_targets SET sales_state='half' WHERE id=$1", [f.target]),
-    ).rejects.toMatchObject({ code: "23514" });
+    for (const sql of [
+      "UPDATE pms.channex_offer_targets SET sales_state='half' WHERE id=$1",
+      "UPDATE pms.channex_offer_targets SET sales_state='open' WHERE id=$1",
+    ])
+      await expect(pool.query(sql, [f.target])).rejects.toMatchObject({ code: "23514" });
     await pool.query(
       "UPDATE pms.channex_offer_targets SET sales_state='open',sales_state_changed_at=now() WHERE id=$1",
       [f.target],
@@ -99,7 +135,7 @@ describe.skipIf(!url)("Channex ongoing offer ARI storage", () => {
     expect(await state()).toBe("open");
   });
 
-  it("copies delivery identity from the active version and admits one unresolved delivery", async () => {
+  it("admits one guarded delivery per active target on the current job lease", async () => {
     const f = await fixture();
     await expect(f.deliver()).rejects.toThrow(
       "Active offer target and unresolved delivery required",
@@ -107,42 +143,34 @@ describe.skipIf(!url)("Channex ongoing offer ARI storage", () => {
     await pool.query("UPDATE pms.channex_offer_targets SET active_version=1 WHERE id=$1", [
       f.target,
     ]);
-    await expect(f.deliver({ worker: "someone-else" })).rejects.toThrow(
+    await expect(f.deliver(undefined, "someone-else")).rejects.toThrow(
       "Active binding or job correlation mismatch",
     );
+    await expect(f.deliver("{}")).rejects.toMatchObject({ code: "23514" });
+    await expect(f.deliver(f.body("another-rate"))).rejects.toThrow(
+      "Delivery values must target the active rate plan",
+    );
     const delivery = (await f.deliver()).rows[0]!;
-    expect(delivery).toMatchObject({ external: f.external, version: "1" });
+    expect(delivery).toMatchObject({ external: f.externalRate, version: "1" });
     await expect(f.deliver()).rejects.toMatchObject({ code: "23505" });
 
-    const date = (day: string, deliveryId = delivery.id) =>
-      pool.query(
-        `INSERT INTO pms.channex_offer_ari_delivery_dates(delivery_id,service_date,value,value_sha256)
-         VALUES($1,$2,'{"stop_sell":true}',repeat('a',64))`,
-        [deliveryId, day],
-      );
-    await date("2026-11-01");
-    await date("2026-11-02");
-    await expect(
-      pool.query(
-        "UPDATE pms.channex_offer_ari_delivery_dates SET value_sha256=repeat('b',64) WHERE delivery_id=$1",
-        [delivery.id],
-      ),
-    ).rejects.toThrow("Offer ARI delivery dates retained");
-
-    const receipt = randomUUID();
-    await pool.query(
-      `INSERT INTO pms.channex_offer_ari_delivery_receipts
-         (id,delivery_id,job_attempt_id,worker_id,outcome,http_status,task_ids,has_warnings)
-       VALUES($1,$2,$3,$4,'complete_json',200,ARRAY[gen_random_uuid()],false)`,
-      [receipt, delivery.id, f.jobAttempt, f.worker],
+    await f.date(delivery.id, "2026-11-01");
+    await f.date(delivery.id, "2026-11-02");
+    const key = await pool.query(
+      "SELECT binding_generation::text AS generation,external_rate_plan_id AS rate FROM pms.channex_offer_ari_delivery_dates WHERE delivery_id=$1 LIMIT 1",
+      [delivery.id],
+    );
+    expect(key.rows[0]).toEqual({ generation: f.generation, rate: f.externalRate });
+    await f.receipt(delivery.id);
+    // Once Channex answered: no more dates, no release, only a reconciliation.
+    await expect(f.date(delivery.id, "2026-11-03")).rejects.toThrow(
+      "Dates belong to an unresolved, unsent delivery",
     );
     await expect(
-      pool.query(
-        "UPDATE pms.channex_offer_ari_delivery_receipts SET has_warnings=true WHERE id=$1",
-        [receipt],
-      ),
-    ).rejects.toThrow("Offer ARI delivery receipts retained");
-
+      pool.query("UPDATE pms.channex_offer_ari_deliveries SET state='released' WHERE id=$1", [
+        delivery.id,
+      ]),
+    ).rejects.toThrow("A delivery with a provider receipt cannot be released");
     await expect(
       pool.query(
         "UPDATE pms.channex_offer_ari_deliveries SET external_rate_plan_id='moved' WHERE id=$1",
@@ -154,17 +182,19 @@ describe.skipIf(!url)("Channex ongoing offer ARI storage", () => {
          reconciliation_evidence='{"schemaVersion":"1"}' WHERE id=$1`,
       [delivery.id],
     );
-    await expect(date("2026-11-03")).rejects.toThrow("Dates belong to an unresolved delivery");
-    await expect(
-      pool.query(
-        "UPDATE pms.channex_offer_ari_deliveries SET state='released',reconciliation_evidence='{}' WHERE id=$1",
-        [delivery.id],
-      ),
-    ).rejects.toThrow("Offer ARI delivery identity and terminal state retained");
     await expect(
       pool.query("DELETE FROM pms.channex_offer_ari_deliveries WHERE id=$1", [delivery.id]),
     ).rejects.toThrow("Offer ARI delivery history retained");
-    // The target is free again for the next delivery once the previous one is terminal.
-    expect((await f.deliver()).rows[0]).toMatchObject({ external: f.external });
+
+    // An unsent delivery may be released; the target is then free again.
+    const unsent = (await f.deliver()).rows[0]!;
+    await pool.query("UPDATE pms.channex_offer_ari_deliveries SET state='released' WHERE id=$1", [
+      unsent.id,
+    ]);
+    // A finished job lease admits nothing.
+    await pool.query("UPDATE platform.jobs SET status='succeeded',finished_at=now() WHERE id=$1", [
+      f.job,
+    ]);
+    await expect(f.deliver()).rejects.toThrow("Active binding or job correlation mismatch");
   });
 });
