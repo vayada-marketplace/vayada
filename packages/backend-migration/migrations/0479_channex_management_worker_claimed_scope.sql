@@ -19,11 +19,14 @@ END $$;
 -- Like 0473's helper it returns true for every other current_user before reading worker tables,
 -- so it keeps PUBLIC execution and no policy consumer needs a grant. 'binding' reads only claims
 -- and 'operation(s)' only the new table, so the claim and connection policies below can use them
--- without recursion; only the other policies use 'property', which reads both.
+-- without recursion; only the other policies use 'property', which reads both. Until the claimed
+-- grant lets the worker read the new table, it has no claimed scope instead of failing every scan.
 CREATE FUNCTION platform.channex_management_worker_claimed_scope(kind text, resource text)
 RETURNS boolean LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path = pg_catalog AS $$
 BEGIN
   IF current_user <> 'vayada_next_channex_management_worker' THEN RETURN true; END IF;
+  IF kind <> 'binding' AND NOT has_table_privilege(
+    'platform.channex_management_worker_claimed_operations', 'SELECT') THEN RETURN false; END IF;
   CASE kind
     WHEN 'operation' THEN RETURN EXISTS (
       SELECT 1 FROM platform.channex_management_worker_claimed_operations WHERE operation_type = resource);

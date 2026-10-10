@@ -705,7 +705,21 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
       rows("SELECT id::text FROM platform.jobs WHERE id = ANY($1::uuid[])", [
         [claimedJob, unclaimedJob],
       ]);
+    const claimedTable = "platform.channex_management_worker_claimed_operations";
     try {
+      // Before the claimed grant the worker cannot read the owner table: its scans still work and
+      // nothing claimed is visible, even with operations admitted.
+      await owner.query(`REVOKE SELECT ON ${claimedTable} FROM ${role}`);
+      await owner.query(`INSERT INTO ${claimedTable} VALUES('sync_ari'),('provision')`);
+      expect(await jobs()).toEqual([]);
+      expect(
+        await rows(
+          "SELECT property_id::text AS id FROM pms.channel_connections WHERE property_id = ANY($1::uuid[])",
+          [ids],
+        ),
+      ).toEqual([]);
+      await owner.query(`DELETE FROM ${claimedTable}`);
+      await owner.query(`GRANT SELECT ON ${claimedTable} TO ${role}`);
       // Nothing is admitted until the owner adds the claimed operations.
       expect(await jobs()).toEqual([]);
       expect(
@@ -741,7 +755,8 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
         ),
       ).toEqual([claimed]);
     } finally {
-      await owner.query("DELETE FROM platform.channex_management_worker_claimed_operations");
+      await owner.query(`DELETE FROM ${claimedTable}`);
+      await owner.query(`GRANT SELECT ON ${claimedTable} TO ${role}`);
     }
   });
 });
