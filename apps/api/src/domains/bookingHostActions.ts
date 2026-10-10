@@ -1,5 +1,10 @@
 import { projectBookingRoomSelection } from "./bookingRoomSelectionProjection.js";
-import { hostPolicyImpact, hostSelectionPolicyImpact, retainHostRoomPolicies, type HostPolicyImpact } from "./bookingHostPolicyImpact.js";
+import {
+  hostPolicyImpact,
+  hostSelectionPolicyImpact,
+  retainHostRoomPolicies,
+  type HostPolicyImpact,
+} from "./bookingHostPolicyImpact.js";
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
 import { targetBookingHostActionPrimitives as bookingOwner } from "../routes/bookingWebPublic.js";
@@ -92,7 +97,14 @@ export function createBookingHostActions(config: {
     request: HostActionRequest,
     at: Date,
   ) => {
-    const booking = await bookingOwner.loadBooking(client, scope.propertyId, scope.bookingId, true);
+    // NO KEY UPDATE: a v2 stay's PMS adoption (inventory lock, then a FOR KEY SHARE reference to
+    // this row) can finish instead of deadlocking against a host action (VAY-2100).
+    const booking = await bookingOwner.loadBooking(
+      client,
+      scope.propertyId,
+      scope.bookingId,
+      "no_key",
+    );
     await config.guards.lockInventory(client, scope.propertyId);
     const metadata = object(booking.bookingMetadata);
     const offer = object(metadata["selectedOffer"]);
@@ -145,19 +157,26 @@ export function createBookingHostActions(config: {
           rateSummary: offer["rateSummary"],
         })
       : offer;
-    const frozenPolicy = offer["roomSelection"] ? object(offer["publicPolicy"]) : object(metadata["policySnapshot"]);
+    const frozenPolicy = offer["roomSelection"]
+      ? object(offer["publicPolicy"])
+      : object(metadata["policySnapshot"]);
     const cancellationPolicy = offer["roomSelection"]
-      ? hostSelectionPolicyImpact(offer, booking.checkIn, dates?.requestedCheckIn ?? booking.checkIn, property.timezone)
+      ? hostSelectionPolicyImpact(
+          offer,
+          booking.checkIn,
+          dates?.requestedCheckIn ?? booking.checkIn,
+          property.timezone,
+        )
       : hostPolicyImpact(
-      frozenPolicy,
-      {
-        ...object(offer["rateSummary"]),
-        rateType: offer["rateType"] ?? object(offer["rateSummary"])["rateType"],
-      },
-      booking.checkIn,
-      dates?.requestedCheckIn ?? booking.checkIn,
-      property.timezone,
-    );
+          frozenPolicy,
+          {
+            ...object(offer["rateSummary"]),
+            rateType: offer["rateType"] ?? object(offer["rateSummary"])["rateType"],
+          },
+          booking.checkIn,
+          dates?.requestedCheckIn ?? booking.checkIn,
+          property.timezone,
+        );
     if (dates && !cancellationPolicy)
       throw new HostActionError(
         "unsupported_edit",
