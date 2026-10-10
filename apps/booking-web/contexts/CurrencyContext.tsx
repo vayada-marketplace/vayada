@@ -23,8 +23,9 @@ interface CurrencyContextValue {
   attribution: RateAttribution | null;
   loading: boolean;
   convertPrice: (amount: number, fromCurrency: string) => number;
-  convertBetween: (amount: number, fromCurrency: string, toCurrency: string) => number;
-  convertAndRound: (amount: number, fromCurrency: string) => number;
+  /** "≈ US$671" in the guest's display currency, or null when nothing is converted. */
+  approximate: (amount: number, fromCurrency: string) => string | null;
+  /** The amount in its own (charged) currency, then the approximation in brackets. */
   formatPrice: (amount: number, fromCurrency: string) => string;
 }
 
@@ -36,8 +37,7 @@ const CurrencyContext = createContext<CurrencyContextValue>({
   attribution: null,
   loading: true,
   convertPrice: (amount) => amount,
-  convertBetween: (amount) => amount,
-  convertAndRound: (amount) => Math.round(amount * 100) / 100,
+  approximate: () => null,
   formatPrice: (amount) => String(amount),
 });
 
@@ -95,7 +95,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
             ),
           ),
         );
-        setAttribution(data.attribution ?? null);
+        setAttribution(data.attribution?.url?.startsWith("https://") ? data.attribution : null);
       })
       .catch(() => {})
       .finally(() => {
@@ -150,62 +150,37 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     [selectedCurrency, baseCurrency, rates],
   );
 
-  const convertBetween = useCallback(
-    (amount: number, fromCurrency: string, toCurrency: string): number => {
-      if (fromCurrency === toCurrency) return amount;
-      let amountInBase = amount;
-      if (fromCurrency !== baseCurrency) {
-        const fromRate = rates[fromCurrency];
-        if (!fromRate) return amount;
-        amountInBase = amount / fromRate;
-      }
-      if (toCurrency === baseCurrency) return amountInBase;
-      const toRate = rates[toCurrency];
-      if (!toRate) return amount;
-      return amountInBase * toRate;
-    },
-    [baseCurrency, rates],
-  );
-
-  // Preserve currency minor units so displayed line amounts retain quoted cents.
-  const convertAndRound = useCallback(
-    (amount: number, fromCurrency: string): number => {
-      let canConvert = true;
-      if (fromCurrency !== selectedCurrency) {
-        if (fromCurrency !== baseCurrency && !rates[fromCurrency]) canConvert = false;
-        if (selectedCurrency !== baseCurrency && !rates[selectedCurrency]) canConvert = false;
-      }
-      const converted = canConvert ? convertPrice(amount, fromCurrency) : amount;
-      const currency = canConvert ? selectedCurrency : fromCurrency;
-      const digits = new Intl.NumberFormat("en-GB", {
+  // The display currency is only ever an approximation: null when it is the amount's own
+  // currency or no rate converts it. Whole units, so it never looks like a charged amount.
+  const approximate = useCallback(
+    (amount: number, fromCurrency: string): string | null => {
+      if (fromCurrency === selectedCurrency) return null;
+      if (fromCurrency !== baseCurrency && !rates[fromCurrency]) return null;
+      const converted = convertPrice(amount, fromCurrency);
+      // Nothing to approximate for zero ("Due now" at the property) or less than one unit.
+      if (Math.abs(converted) < 0.5) return null;
+      return `≈ ${new Intl.NumberFormat("en-GB", {
         style: "currency",
-        currency,
-      }).resolvedOptions().maximumFractionDigits;
-      const factor = 10 ** (digits ?? 2);
-      return Math.round(converted * factor) / factor;
+        currency: selectedCurrency,
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      }).format(converted)}`;
     },
     [convertPrice, selectedCurrency, baseCurrency, rates],
   );
 
+  // A booking amount always shows what is charged, in its own currency, then any approximation.
   const formatPrice = useCallback(
     (amount: number, fromCurrency: string): string => {
-      // Check if we can actually perform the conversion
-      let canConvert = true;
-      if (fromCurrency !== selectedCurrency) {
-        if (fromCurrency !== baseCurrency && !rates[fromCurrency]) canConvert = false;
-        if (selectedCurrency !== baseCurrency && !rates[selectedCurrency]) canConvert = false;
-      }
-
-      const displayCurrency = canConvert ? selectedCurrency : fromCurrency;
-      const displayAmount = canConvert ? convertPrice(amount, fromCurrency) : amount;
-
-      return new Intl.NumberFormat("en-GB", {
+      const exact = new Intl.NumberFormat("en-GB", {
         style: "currency",
-        currency: displayCurrency,
+        currency: fromCurrency,
         minimumFractionDigits: 0,
-      }).format(displayAmount);
+      }).format(amount);
+      const approx = approximate(amount, fromCurrency);
+      return approx ? `${exact} (${approx})` : exact;
     },
-    [convertPrice, selectedCurrency, baseCurrency, rates],
+    [approximate],
   );
 
   return (
@@ -218,8 +193,7 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
         attribution,
         loading,
         convertPrice,
-        convertBetween,
-        convertAndRound,
+        approximate,
         formatPrice,
       }}
     >
