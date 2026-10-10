@@ -27,7 +27,7 @@ import {
   BookingAdditionalGuest,
   BookingAdditionalGuestPayload,
   AssignmentSelector,
-  CancellationPolicy,
+  type BookingCancellationTerms,
 } from "@/services/bookings";
 import { individualRoomsService, Room } from "@/services/rooms";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -267,112 +267,141 @@ function OverflowMenu({
 
 interface CancellationPanelProps {
   checkIn: string;
-  rateType: string;
-  numberOfRooms: number;
-  nightlyRate: number;
-  currency: string;
-  policy: CancellationPolicy | null;
+  /** Plan name for the title; null when unknown or the rooms were booked on different plans. */
+  planLabel: string | null;
+  /** Terms the rooms were booked under; null when none were recorded or rooms differ. */
+  terms: BookingCancellationTerms | null;
+  mixedTerms: boolean;
 }
+
+const DAY_MS = 86_400_000;
 
 function CancellationPolicyPanel({
   checkIn,
-  rateType,
-  numberOfRooms,
-  nightlyRate,
-  currency,
-  policy,
+  planLabel,
+  terms,
+  mixedTerms,
 }: CancellationPanelProps) {
   const { locale, t } = useTranslation();
-  // Free window cutoff = check-in - freeCancellationDays.
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const checkInDate = new Date(checkIn + "T00:00:00");
-  const freeDays = policy?.freeCancellationDays ?? 0;
-  const cutoff = new Date(checkInDate);
-  cutoff.setDate(cutoff.getDate() - freeDays);
+  const daysBeforeCheckIn = Math.round((checkInDate.getTime() - today.getTime()) / DAY_MS);
+  const dateLabel = (daysBefore: number) =>
+    new Date(checkInDate.getTime() - daysBefore * DAY_MS).toLocaleDateString(locale, {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+  const dayLabel = (days: number) => t(days === 1 ? "common.day" : "common.days");
 
-  const inFreeWindow = freeDays > 0 && today.getTime() < cutoff.getTime();
-  // Non-refundable plan: no free window at all.
-  const nonRefundable = freeDays <= 0;
-
-  // Per-room charge after window. Default: first night of each room.
-  const partialPct = policy?.partialRefundPct ?? 0;
-  const perRoomCharge = nightlyRate;
-  const totalCharge = perRoomCharge * numberOfRooms;
-  // Effective refund percent inside the post-window region.
-  const refundPctLabel =
-    partialPct > 0
-      ? t("bookings.detail.partialRefund", { percent: partialPct })
-      : t("bookings.detail.oneNightPerRoom", {
-          amount: formatCurrency(totalCharge, currency),
-        });
-
-  const todayLabel = today.toLocaleDateString(locale, {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
-  const cutoffLabel = cutoff.toLocaleDateString(locale, {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+  // The booked terms (VAY-2089): free until the deadline, or refund steps by notice period for
+  // partial-refund terms, as guests saw them; the full stay is chargeable after the last step.
+  const flexible = terms?.kind === "flexible" ? terms : null;
+  const steps = flexible
+    ? (flexible.refundTiers ?? [
+        { minDaysBeforeCheckIn: flexible.freeCancellationDays, refundPercent: 100 },
+      ])
+    : [];
+  const lastStepDays = steps.length ? steps[steps.length - 1]!.minDaysBeforeCheckIn : 0;
+  const currentStep = steps.find((step) => daysBeforeCheckIn >= step.minDaysBeforeCheckIn);
+  const stepLabel = (refundPercent: number) =>
+    refundPercent === 100
+      ? t("bookings.detail.noCharge")
+      : t("bookings.detail.partialRefund", { percent: refundPercent });
 
   return (
     <div className="border border-gray-200 rounded-lg overflow-hidden">
       <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wide">
-        {t("bookings.detail.cancellationPolicyTitle", { rateType })}
+        {planLabel
+          ? t("bookings.detail.cancellationPolicyTitle", { rateType: planLabel })
+          : t("pricing.cancellationPolicy")}
       </div>
-      <div className="divide-y divide-gray-100">
-        {!nonRefundable && (
-          <div className="px-4 py-3 flex items-start justify-between gap-3">
-            <div className="text-sm">
-              <p className="font-medium text-gray-900">{t("bookings.detail.freeCancellation")}</p>
-              <p className="text-gray-500 text-xs">
-                {t("bookings.detail.freeCancellationDetails", {
-                  cutoff: cutoffLabel,
-                  days: freeDays,
-                  dayLabel: t(freeDays === 1 ? "common.day" : "common.days"),
-                })}
-              </p>
+      {terms ? (
+        <>
+          <div className="divide-y divide-gray-100">
+            {steps.map((step) => (
+              <div
+                key={step.minDaysBeforeCheckIn}
+                className="px-4 py-3 flex items-start justify-between gap-3"
+              >
+                <div className="text-sm">
+                  <p className="font-medium text-gray-900">
+                    {step.refundPercent === 100
+                      ? t("bookings.detail.freeCancellation")
+                      : t("bookings.detail.partialRefund", { percent: step.refundPercent })}
+                  </p>
+                  <p className="text-gray-500 text-xs">
+                    {t("bookings.detail.freeCancellationDetails", {
+                      cutoff: dateLabel(step.minDaysBeforeCheckIn),
+                      days: step.minDaysBeforeCheckIn,
+                      dayLabel: dayLabel(step.minDaysBeforeCheckIn),
+                    })}
+                  </p>
+                </div>
+                <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                  {stepLabel(step.refundPercent)}
+                </span>
+              </div>
+            ))}
+            <div className="px-4 py-3 flex items-start justify-between gap-3">
+              <div className="text-sm">
+                <p className="font-medium text-gray-900">
+                  {flexible ? t("bookings.detail.afterFreeWindow") : t("rooms.nonRefundableShort")}
+                </p>
+                <p className="text-gray-500 text-xs">
+                  {flexible
+                    ? t("bookings.detail.afterFreeWindowDetails", {
+                        cutoff: dateLabel(lastStepDays),
+                        days: lastStepDays,
+                        dayLabel: dayLabel(lastStepDays),
+                      })
+                    : t("bookings.detail.fullStayCancellationCharge")}
+                </p>
+              </div>
+              <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700">
+                {t("bookings.detail.fullStayCharge")}
+              </span>
             </div>
-            <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
-              {t("bookings.detail.noCharge")}
-            </span>
           </div>
-        )}
-        <div className="px-4 py-3 flex items-start justify-between gap-3">
-          <div className="text-sm">
-            <p className="font-medium text-gray-900">
-              {nonRefundable ? t("rooms.nonRefundableShort") : t("bookings.detail.afterFreeWindow")}
-            </p>
-            <p className="text-gray-500 text-xs">
-              {nonRefundable
-                ? t("bookings.detail.fullStayCancellationCharge")
-                : t("bookings.detail.afterFreeWindowDetails", {
-                    cutoff: cutoffLabel,
-                    days: freeDays,
-                    dayLabel: t(freeDays === 1 ? "common.day" : "common.days"),
+          <div
+            className={`px-4 py-2.5 text-xs font-medium ${
+              currentStep?.refundPercent === 100
+                ? "bg-green-50 text-green-800"
+                : "bg-amber-50 text-amber-800"
+            }`}
+          >
+            {t("bookings.detail.todayIs", {
+              date: today.toLocaleDateString(locale, {
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+              }),
+            })}{" "}
+            —{" "}
+            {!currentStep
+              ? t("bookings.detail.fullChargeAllowed")
+              : currentStep.refundPercent === 100
+                ? t("bookings.detail.withinFreeWindow")
+                : t("bookings.detail.refundApplies", {
+                    refund: t("bookings.detail.partialRefund", {
+                      percent: currentStep.refundPercent,
+                    }),
                   })}
-            </p>
           </div>
-          <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700">
-            {refundPctLabel}
-          </span>
-        </div>
-      </div>
-      <div
-        className={`px-4 py-2.5 text-xs font-medium ${
-          inFreeWindow ? "bg-green-50 text-green-800" : "bg-amber-50 text-amber-800"
-        }`}
-      >
-        {t("bookings.detail.todayIs", { date: todayLabel })} —{" "}
-        {inFreeWindow
-          ? t("bookings.detail.withinFreeWindow")
-          : nonRefundable
-            ? t("bookings.detail.fullChargeApplies")
-            : t("bookings.detail.refundApplies", { refund: refundPctLabel })}
-      </div>
+        </>
+      ) : (
+        <p className="px-4 py-3 text-sm text-gray-600">
+          {t(
+            mixedTerms
+              ? "bookings.detail.mixedCancellationTerms"
+              : "bookings.detail.noCancellationTerms",
+          )}
+        </p>
+      )}
+      <p className="px-4 py-2.5 border-t border-gray-100 text-xs text-gray-600">
+        {t("bookings.detail.cancelRecordsNoCharge")}
+      </p>
     </div>
   );
 }
@@ -1218,7 +1247,6 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [directInboxEligibleBookingId, setDirectInboxEligibleBookingId] = useState<string | null>(
     null,
   );
-  const [policy, setPolicy] = useState<CancellationPolicy | null>(null);
   const [notes, setNotes] = useState<BookingNote[]>([]);
   const [guests, setGuests] = useState<BookingAdditionalGuest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1312,10 +1340,6 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       bookingsService
         .listAdditionalGuests(id)
         .then((r) => setGuests(r.guests))
-        .catch(console.error),
-      bookingsService
-        .getPaymentSettings()
-        .then((r) => setPolicy(r.cancellationPolicy))
         .catch(console.error),
       individualRoomsService.list().then(setAllRooms).catch(console.error),
     ]);
@@ -1794,7 +1818,20 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             ? t("calendar.channelExpedia")
             : getChannelLabel(booking.channel);
   const canMessageGuest = channelKey === "direct" && directInboxEligibleBookingId === booking.id;
-  const rateType = t("bookings.detail.flexible"); // current bookings always use the hotel's default rate plan.
+  // The cancellation box shows the plan and terms the rooms were booked on (VAY-2089).
+  // Named plans only: "Rate plan unavailable" would sit oddly above recorded terms.
+  const stayPlanLabels = new Set(
+    booking.stays.map(
+      (stay) =>
+        stay.ratePlanName ??
+        (stay.customRate ? t("calendar.targetManualBooking.customRate") : null),
+    ),
+  );
+  const stayTerms = booking.stays.map((stay) => JSON.stringify(stay.cancellation ?? null));
+  const mixedCancellationTerms = new Set(stayTerms).size > 1;
+  const bookedCancellationTerms = mixedCancellationTerms
+    ? null
+    : (booking.stays[0]?.cancellation ?? null);
 
   // Add-ons rendered with quantity-suffix from addonQuantities.
   const addonRows = booking.addonIds.map((addonId, idx) => {
@@ -3051,11 +3088,11 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             <div className="mb-4">
               <CancellationPolicyPanel
                 checkIn={booking.checkIn}
-                rateType={rateType}
-                numberOfRooms={roomRows.length}
-                nightlyRate={booking.nightlyRate}
-                currency={booking.currency}
-                policy={policy}
+                planLabel={
+                  stayPlanLabels.size === 1 ? (Array.from(stayPlanLabels)[0] ?? null) : null
+                }
+                terms={bookedCancellationTerms}
+                mixedTerms={mixedCancellationTerms}
               />
             </div>
 
