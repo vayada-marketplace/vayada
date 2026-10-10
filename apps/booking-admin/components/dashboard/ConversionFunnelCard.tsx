@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { formatNumber } from "@/lib/utils";
 import { funnelCsv, funnelRows } from "@/lib/utils/dashboardFunnel";
-import type { ConversionFunnel, TimeRange } from "@/services/dashboard";
+import { TIME_RANGES, type ConversionFunnel, type TimeRange } from "@/services/dashboard";
 
 type Props = {
   funnel: ConversionFunnel | null;
@@ -16,12 +16,6 @@ type Props = {
   timeRange: TimeRange;
   onTimeRangeChange: (range: TimeRange) => void;
 };
-
-const TIME_RANGES: [TimeRange, string][] = [
-  ["today", "dashboard.timeRange.today"],
-  ["week", "dashboard.timeRange.week"],
-  ["month", "dashboard.timeRange.month"],
-];
 
 // Branch rows compare with their own eligible cohort rather than the row above.
 const DROP_BASE: Record<string, string> = {
@@ -40,6 +34,7 @@ export function ConversionFunnelCard({
   onTimeRangeChange,
 }: Props) {
   const tooltipId = useId();
+  const rangeLabelId = useId();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -63,8 +58,14 @@ export function ConversionFunnelCard({
     };
   }, [menuOpen]);
 
-  const exportCsv = () => {
+  // Closing the popover removes the focused option, so hand focus back to its button.
+  const closeMenu = () => {
     setMenuOpen(false);
+    menuButtonRef.current?.focus();
+  };
+
+  const exportCsv = () => {
+    closeMenu();
     if (!funnel) return;
     const csv = funnelCsv(
       funnelRows(funnel),
@@ -150,39 +151,44 @@ export function ConversionFunnelCard({
           </button>
           {menuOpen && (
             <div className="absolute right-0 top-full z-10 mt-1 min-w-44 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
-              <p className="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+              <p
+                id={rangeLabelId}
+                className="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+              >
                 {t("dashboard.conversionFunnel.timeRange")}
               </p>
-              {TIME_RANGES.map(([range, label]) => (
-                <button
-                  key={range}
-                  type="button"
-                  aria-pressed={timeRange === range}
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onTimeRangeChange(range);
-                  }}
-                  className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[13px] text-gray-700 hover:bg-gray-50"
-                >
-                  {t(label)}
-                  {timeRange === range && (
-                    <svg
-                      className="w-4 h-4 text-primary-600"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      aria-hidden="true"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="m4.5 12.75 6 6 9-13.5"
-                      />
-                    </svg>
-                  )}
-                </button>
-              ))}
+              <div role="group" aria-labelledby={rangeLabelId}>
+                {TIME_RANGES.map(([range, label]) => (
+                  <button
+                    key={range}
+                    type="button"
+                    aria-pressed={timeRange === range}
+                    onClick={() => {
+                      closeMenu();
+                      onTimeRangeChange(range);
+                    }}
+                    className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[13px] text-gray-700 hover:bg-gray-50"
+                  >
+                    {t(label)}
+                    {timeRange === range && (
+                      <svg
+                        className="w-4 h-4 text-primary-600"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        aria-hidden="true"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="m4.5 12.75 6 6 9-13.5"
+                        />
+                      </svg>
+                    )}
+                  </button>
+                ))}
+              </div>
               <div className="my-1 border-t border-gray-100" />
               <button
                 type="button"

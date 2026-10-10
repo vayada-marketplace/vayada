@@ -131,7 +131,8 @@ test("the funnel options and the page tabs share one time range", async ({ page 
   const options = card.getByRole("button", { name: "Funnel options" });
   // The page tabs come before the card; with the popover closed each label is unique.
   const tab = (name: string) => page.getByRole("button", { name, exact: true });
-  await expect.poll(() => windowStarts.length).toBeGreaterThanOrEqual(1);
+  const distinctWindows = () => new Set(windowStarts).size;
+  await expect.poll(distinctWindows).toBe(1);
 
   await options.click();
   await expect(card.getByRole("button", { name: "Today", exact: true })).toHaveAttribute(
@@ -146,10 +147,10 @@ test("the funnel options and the page tabs share one time range", async ({ page 
   await expect(card.getByRole("button", { name: "Export CSV" })).toHaveCount(0);
   await expect(tab("Last 30 days")).toHaveAttribute("aria-pressed", "true");
   await expect(tab("Today")).toHaveAttribute("aria-pressed", "false");
-  await expect.poll(() => windowStarts.length).toBeGreaterThanOrEqual(2);
+  await expect.poll(distinctWindows).toBe(2);
 
   await tab("This week").click();
-  await expect.poll(() => windowStarts.length).toBeGreaterThanOrEqual(3);
+  await expect.poll(distinctWindows).toBe(3);
   await options.click();
   await expect(card.getByRole("button", { name: "This week", exact: true })).toHaveAttribute(
     "aria-pressed",
@@ -159,5 +160,4 @@ test("the funnel options and the page tabs share one time range", async ({ page 
     "aria-pressed",
     "false",
   );
-  expect(new Set(windowStarts).size).toBe(3);
 });
