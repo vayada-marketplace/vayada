@@ -504,6 +504,7 @@
   "settings.billing.switchFromNextMonth": "Beralih mulai bulan depan",
   "settings.billing.cancelSwitch": "Batalkan peralihan",
   "settings.billing.paymentMethods": "Metode Pembayaran",
+  "settings.billing.comingSoon": "Xendit dan vayada Payments belum bisa menerima pembayaran kartu online. Pilih Stripe Connect untuk menyimpan.",
   "settings.billing.paymentMethodsDesc": "Pilih opsi pembayaran yang tersedia untuk tamu. Aktifkan beberapa untuk memberikan fleksibilitas kepada tamu.",
   "settings.billing.onlineCard": "Kartu Online",
   "settings.billing.onlineCardDesc": "Tamu membayar online dengan kartu kredit atau debit melalui Stripe",
