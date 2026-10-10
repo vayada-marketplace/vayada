@@ -715,10 +715,12 @@ hash, the run evidence, the parity checksum and the production approval
 artifact, which must carry the approved dry run's cohort. Before the identity
 step the command writes it once to `platform.production_migration_cohorts`, in
 the same transaction that checks every ID against the attested source
-(`COHORT_HOTEL_NOT_IN_SOURCE`). A different cohort for the same source run, or a
-stored cohort for a run started without `--cohort`, fails with `COHORT_CONFLICT`.
-Without `--cohort`, configuration and evidence hashes are unchanged; the target
-must carry migration 0480, as every target must match the deployed release.
+(`COHORT_HOTEL_NOT_IN_SOURCE`). Before that insert it runs the catalog ownership
+planner on the snapshot and the target's source links, and refuses the cohort
+(`COHORT_HOTEL_UNRESOLVED`, nothing written) when a cohort hotel would not
+resolve to exactly one canonical property or members disagree on membership.
+A different cohort for the same source run, or a stored cohort for a run started
+without `--cohort`, fails with `COHORT_CONFLICT`. Without `--cohort`, configuration and evidence hashes are unchanged; the target must carry migration 0480, as every target must match the deployed release.
 
 With a cohort, the identity step moves every hotel resource outside the cohort to
 the owner's archived quarantine organization (archived links, expired
@@ -732,9 +734,11 @@ with reason `outside_migration_cohort`. The anchor keeps its ID, and the PMS and
 Marketplace rows attached to it take the same disposition. A property whose
 Booking, PMS and Marketplace members disagree on cohort membership blocks with
 `COHORT_MEMBERSHIP_MISMATCH`; an owner with anchors on both sides attaches each
-row to the single anchor on its own side. Private properties keep their legacy
-slugs (unpublished while `private`), get no custom-domain row and no public
-media; an existing domain that is not `disabled` on a property outside the cohort
+row to the single anchor on its own side. A cohort hotel without exactly one
+planned link that is canonical and at a cohort Booking anchor blocks with
+`COHORT_HOTEL_UNRESOLVED`, whose evidence carries only the `sha256:` of the
+hotel ID. Private properties keep their legacy slugs (unpublished while
+`private`), get no custom-domain row and no public media; an existing domain that is not `disabled` on a property outside the cohort
 blocks with `CATALOG_PRIVATE_DOMAIN_CONFLICT`. The core writer also archives
 their `booking_hotel` links and expires their Booking entitlements that are still
 open.

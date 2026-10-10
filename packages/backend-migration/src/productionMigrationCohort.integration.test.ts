@@ -16,6 +16,7 @@ import {
   parseProductionMigrationCohort,
   writeProductionMigrationCohort,
 } from "./productionMigrationCohort.js";
+import { bindProductionMigrationCohort } from "./productionMigrationCohortBinding.js";
 import { VAY_1350_INVENTORY_REVISION } from "./sourceExtraction.js";
 import { assertSafeTestDatabase } from "./testUtils.js";
 
@@ -27,11 +28,19 @@ const HOTELS = {
   pms: ["hotels", "bbbbbbbb-0000-4000-8000-000000000002"],
   marketplace: ["hotel_profiles", "cccccccc-0000-4000-8000-000000000003"],
 } as const;
-const cohort = (bookingHotelIds: string[]) =>
+const OWNER = "eeeeeeee-0000-4000-8000-000000000005";
+// The owner holds the Booking hotel and the profile; the PMS hotel's owner has no Booking hotel.
+const ROWS: Record<string, object> = {
+  "auth.users": { id: OWNER, type: "hotel", status: "verified" },
+  "booking.booking_hotels": { user_id: OWNER, slug: "alpha", platform_status: "live" },
+  "pms.hotels": { user_id: "ffffffff-0000-4000-8000-000000000006", slug: "beta" },
+  "marketplace.hotel_profiles": { user_id: OWNER, status: "verified" },
+};
+const cohort = (bookingHotelIds: string[], pmsHotelIds: string[] = [HOTELS.pms[1]]) =>
   parseProductionMigrationCohort({
     sourceRunId: RUN,
     bookingHotelIds,
-    pmsHotelIds: [HOTELS.pms[1]],
+    pmsHotelIds,
     marketplaceHotelIds: [HOTELS.marketplace[1]],
     approvalProofSha256: "a".repeat(64),
   });
@@ -67,6 +76,20 @@ describe.skipIf(!URL)("production migration cohort (PostgreSQL)", () => {
       code: "COHORT_HOTEL_NOT_IN_SOURCE",
     });
     await client.query("ROLLBACK TO SAVEPOINT absent");
+  });
+
+  it("refuses to bind a cohort whose hotel the catalog cannot resolve", async () => {
+    const stored = async () =>
+      (await client.query("SELECT cohort_sha256 FROM platform.production_migration_cohorts")).rows;
+    await expect(
+      bindProductionMigrationCohort(client, cohort([HOTELS.booking[1]])),
+    ).rejects.toMatchObject({ code: "COHORT_HOTEL_UNRESOLVED" });
+    expect(await stored()).toEqual([]);
+    await client.query("SAVEPOINT bind");
+    const corrected = cohort([HOTELS.booking[1]], []);
+    await bindProductionMigrationCohort(client, corrected);
+    expect(await stored()).toEqual([{ cohort_sha256: corrected.cohortSha256 }]);
+    await client.query("ROLLBACK TO SAVEPOINT bind");
   });
 
   it("enforces canonical, non-empty ID sets in the table", async () => {
@@ -182,15 +205,21 @@ async function seedSource(client: pg.Client): Promise<void> {
     const hotel = HOTELS[database as keyof typeof HOTELS];
     const aggregate = createHash("sha256");
     let total = 0;
-    const tables = qualifiedTables.map((qualified) => {
+    const tables = [];
+    for (const qualified of qualifiedTables) {
       const [schema, table] = qualified.split(".") as [string, string];
+      const extra = ROWS[`${database}.${table}`];
+      const id = hotel?.[0] === table ? hotel[1] : database === "auth" && extra ? OWNER : null;
       // PostgreSQL's jsonb text form, which the reader re-hashes.
-      const rowData = hotel?.[0] === table ? `{"id": "${hotel[1]}"}` : null;
+      const data = { id, name: `Hotel ${table}`, created_at: TIME, ...extra };
+      const rowData: string | null = id
+        ? (await client.query("SELECT $1::jsonb::text AS t", [JSON.stringify(data)])).rows[0].t
+        : null;
       const checksum = rowData ? sha(`${sha(rowData)}\n`) : sha("");
       total += rowData ? 1 : 0;
       aggregate.update(`${qualified}|${rowData ? 1 : 0}|${checksum}\n`);
-      return { schema, table, rowData, checksum };
-    });
+      tables.push({ schema, table, rowData, checksum });
+    }
     await client.query(
       `INSERT INTO platform.source_extraction_sources
          (run_id, source_database, snapshot_identifier, expected_database_name,

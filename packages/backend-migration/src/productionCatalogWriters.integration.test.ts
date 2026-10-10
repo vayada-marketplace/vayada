@@ -230,8 +230,8 @@ describe.skipIf(!URL)("production catalog writers (PostgreSQL)", () => {
       await client.query(
         `INSERT INTO identity.organization_resource_links
            (organization_id, product, resource_type, resource_id, relationship, status)
-         VALUES ($1, 'booking', 'booking_hotel', $2, 'owner', 'active')`,
-        [ORGANIZATION, OUTSIDE],
+         SELECT $1, 'booking', 'booking_hotel', id, 'owner', 'active' FROM unnest($2::text[]) id`,
+        [ORGANIZATION, [OUTSIDE, PROPERTY]],
       );
       await client.query(
         `INSERT INTO identity.product_entitlements
@@ -335,10 +335,13 @@ describe.skipIf(!URL)("production catalog writers (PostgreSQL)", () => {
   });
 });
 
+// The cohort hotel PROPERTY stays in the snapshot (no media or domain): COHORT_HOTEL_UNRESOLVED
+// blocks a cohort hotel the plan cannot resolve.
 function outsideRows(): IdentitySourceRow[] {
   const [user, hotel] = catalogRows();
   return [
     user!,
+    { ...hotel!, data: { ...hotel!.data, hero_image: null, custom_domain: null } },
     {
       ...hotel!,
       data: {

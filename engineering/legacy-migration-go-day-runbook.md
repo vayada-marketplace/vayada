@@ -48,15 +48,24 @@ the window, and the target pulls them once it owns the stream.
 2. A `target:cutover:dry-run` run completed with parity `GO` and smoke. Its
    report and checksum are the `--approved-run-*` inputs.
 3. The cohort manifest is reviewed, and the slug/domain collision pre-check is
-   clean against the native properties.
-4. Every legacy-sourced cohort property has a historical binding, **or** the
-   Channex enable guard is deployed and refuses enable for it.
+   clean against the native properties. The orchestrator refuses to bind a cohort
+   with a hotel that does not resolve to exactly one canonical property
+   (`COHORT_HOTEL_UNRESOLVED`) before it writes the cohort row, so a corrected
+   manifest can reuse the same source run.
+4. The Channex enable guard for legacy-sourced properties without a historical
+   binding ([#2961](https://github.com/vayada-marketplace/vayada/pull/2961)) is
+   deployed to the target. This is required even when every cohort property has
+   a historical binding.
 5. Owners of cohort hotels are notified of the window. OTA closeouts are booked
    whenever the measured window exceeds 2 h (the default assumption).
 6. Release freeze: no other next-api, platform or hotel-setup deploy overlaps the
    window. Confirm with the release coordinator.
 7. The production backup proof and the target attestation (`vayada_migration_evidence`)
    are prepared for the exact run ID.
+8. Every rehearsal and dry-run target starts from a fresh copy that no migration
+   run has touched. A target that already had an identity or catalog run without a
+   cohort blocks a later cohort run (`USER_EQUAL_TIME_CONFLICT`,
+   `QUARANTINE_RESOURCE_CONFLICT`, `CATALOG_SOURCE_DISPOSITION_CONFLICT`).
 
 ## Window
 
@@ -186,5 +195,7 @@ forward. See the decisions table.
 - Abort semantics for imported rows (R1).
 - Production freeze variables and a protected one-off migration runner
   (platform; inert until go-day).
-- Channex enable guard for legacy-sourced properties without a historical binding.
+- Known gap: `COHORT_SCOPE_VERIFIED` does not check job or outbox rows for
+  properties outside the cohort. The import writes none for them, so parity relies
+  on the native writers being paused (Freeze step 3).
 - The rehearsal on an isolated restore of legacy plus a copy of the live target.
