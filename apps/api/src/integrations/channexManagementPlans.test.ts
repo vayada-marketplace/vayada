@@ -74,6 +74,22 @@ describe("target Channex management plans", () => {
 
     await expect(port.plan(job(operation))).rejects.toThrow(message);
   });
+
+  it.each([["external-1"], ["property-1"]])(
+    "never plans for a reserved binding (%s)",
+    async (reserved) => {
+      const port = createPgChannexManagementPlanPort({
+        connectionString: "postgresql://target",
+        pool: new FakePool("connected"),
+        bookingRevisionHandoff: vi.fn(),
+        excludedIds: [reserved],
+      });
+
+      await expect(port.plan(job("sync_bookings"))).rejects.toThrow(
+        "Channex binding is reserved for staging and tests",
+      );
+    },
+  );
 });
 
 type Mode =

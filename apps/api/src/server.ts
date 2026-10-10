@@ -4,6 +4,7 @@ import { createBookingGuestChoicePublicationReader } from "./domains/bookingGues
 import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore.js";
 import { dispatchNextChannexClosedUpload } from "./domains/channexNextClosedUpload.js";
 import { advancePublishedChannexOfferCreates } from "./domains/channexPublishedOfferCreate.js";
+import { channexExcludedIds } from "./domains/channexOwnershipGate.js";
 import { createPgChannexAriSchedule } from "./jobs/pmsChannexAriSchedule.js";
 import { activatePublishedChannexOffers } from "./domains/replacementPricingOfferOwners.js";
 import { reconcilePendingChannexUploads } from "./domains/channexPendingUploadReconciliation.js";
@@ -896,6 +897,7 @@ const channexManagementPlans = channexManagementDatabase.plans
       stagingMealsPropertyId: config.channexManagement.stagingMealsEnabled
         ? config.channexManagement.stagingRestrictionsPropertyId
         : undefined,
+      excludedIds: channexExcludedIds(config.channexManagement.apiBaseUrl),
       bookingRevisionHandoff: async ({ propertyId, providerPropertyId, revisions }) => {
         if (!channexBookingRevisionStore) {
           if (revisions.length > 0) throw new Error("Channex booking intake is unavailable");
@@ -1293,6 +1295,7 @@ const channexManagementWorkerStore =
         stagingPublishedOffersEnabled: config.channexManagement.stagingPublishedOffersEnabled,
         stagingInventoryEnabled: config.channexManagement.stagingInventoryEnabled,
         connectionOnly: channexConnectionOnlyScope(config.channexManagement),
+        excludedIds: channexExcludedIds(config.channexManagement.apiBaseUrl),
       })
     : undefined;
 const channexOfferSchedule = channexManagementDatabase.scheduler
@@ -1759,6 +1762,7 @@ const app = buildApp({
           connectionString: targetDatabaseUrl,
           stripeConnectProvider,
           stripePaymentProvider: stripeBookingPaymentProvider,
+          channexExcludedIds: channexExcludedIds(config.channexManagement.apiBaseUrl),
         }),
         pmsInboxDeliveryReceipts,
       }

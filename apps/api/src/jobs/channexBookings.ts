@@ -1,5 +1,6 @@
 import { assertChannexUnverifiedAlterationSupport } from "../domains/channexUnverifiedAlterationSupport.js";
 import { resolveVerifiedChannexAlert } from "../domains/channexOperationalAlerts.js";
+import { CHANNEX_RESERVED_TEST_IDS, channexExcludedIds } from "../domains/channexOwnershipGate.js";
 import {
   captureChannexAlterationFinance,
   type ChannexAirbnbFinanceSettingsPort,
@@ -78,7 +79,7 @@ async function processJob(pool:pg.Pool,job:Job,options:Parameters<typeof runChan
     if(job.invalidPayload)throw new Failure("invalid_job_payload",false);
     active(options);
     const loaded = await loadRevisions(pool,job,options);
-    for(const item of loaded){active(options);if(job.recoveryAlertId)await validateAlertRevision(pool,job,item);const revision=parseRevision(item,job),replayed=await persist(pool,job,revision,item,(options.applyAirbnbAlterations ?? false)&&(!options.airbnbAlterationPropertyIds||options.airbnbAlterationPropertyIds.includes(job.propertyId)),()=>active(options),options.stagingImport,options.airbnbFinanceSettings,options.allowUnverifiedAirbnbAlterations ?? false);await heartbeat(pool,job,options);await providerRequest(options,`/api/v1/booking_revisions/${revision.id}/ack`,"POST",replayed)}
+    for(const item of loaded){active(options);if(job.recoveryAlertId)await validateAlertRevision(pool,job,item);const revision=parseRevision(item,job),replayed=await persist(pool,job,revision,item,(options.applyAirbnbAlterations ?? false)&&(!options.airbnbAlterationPropertyIds||options.airbnbAlterationPropertyIds.includes(job.propertyId)),()=>active(options),options.stagingImport,options.airbnbFinanceSettings,options.allowUnverifiedAirbnbAlterations ?? false,channexExcludedIds(options.apiBaseUrl));await heartbeat(pool,job,options);await providerRequest(options,`/api/v1/booking_revisions/${revision.id}/ack`,"POST",replayed)}
     await finish(pool, job, "succeeded");
     return "succeeded";
   } catch (error) {
@@ -153,16 +154,21 @@ async function loadRevisions(pool:pg.Pool,job:Job,options:Parameters<typeof runC
 }
 
 // prettier-ignore
-async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknown,applyAlterations:boolean,assertActive:()=>void,scope?:StagingImportScope,financeSettings?:ChannexAirbnbFinanceSettingsPort,allowUnverifiedAirbnbAlterations=false):Promise<boolean>{
+async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknown,applyAlterations:boolean,assertActive:()=>void,scope?:StagingImportScope,financeSettings?:ChannexAirbnbFinanceSettingsPort,allowUnverifiedAirbnbAlterations=false,excludedIds:readonly string[]=CHANNEX_RESERVED_TEST_IDS):Promise<boolean>{
   return transaction(pool, async (client) => {
     await fence(client,job);
     await lockPmsInventoryMutationScope(client,job.propertyId);
     if(scope)await stagingBinding(client,scope);
+    // VAY-2108: write only for a hotel the target owns (active claim on the connected binding).
     const connection = (
       await client.query<{id:string;bindingGeneration:string}>(
-        `SELECT id::text,binding_generation::text AS "bindingGeneration" FROM pms.channel_connections WHERE property_id=$1::uuid
-           AND provider='channex' AND external_property_id=$2 AND connection_status='connected' FOR UPDATE`,
-        [job.propertyId, job.providerPropertyId],
+        `SELECT c.id::text,c.binding_generation::text AS "bindingGeneration" FROM pms.channel_connections c
+         JOIN pms.channel_binding_claims claim ON claim.property_id=c.property_id AND claim.provider=c.provider
+           AND claim.external_property_id=c.external_property_id AND claim.claim_state='active'
+         WHERE c.property_id=$1::uuid AND c.provider='channex' AND c.external_property_id=$2 AND c.connection_status='connected'
+           AND NOT (c.property_id::text=ANY($3::text[]) OR lower(c.external_property_id)=ANY($3::text[]))
+         FOR UPDATE OF c FOR SHARE OF claim`,
+        [job.propertyId, job.providerPropertyId, excludedIds],
       )
     ).rows;
     if (connection.length !== 1) throw new Failure("connection_not_owned", true);
