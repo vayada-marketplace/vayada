@@ -23,17 +23,20 @@ export async function lockPublicPricingChargeTotals(
     return null;
   // Use the shared charge arithmetic; discard its neutral deferred schedule.
   // Selected payment method and per-rate execution eligibility are separate owners.
-  const amounts = composeReplacementSettlementAmounts({
-    subtotalMinor: components.subtotalMinor,
-    charges: charges.charges.map(({ id, amountMinor, included, collect, basisEvidenceId }) => ({
-      id,
-      amountMinor,
-      included,
-      collect,
-      basisEvidenceId,
-    })),
-    payment: { kind: "pay_at_property" },
-  });
+  const amounts = composeReplacementSettlementAmounts(
+    {
+      subtotalMinor: components.subtotalMinor,
+      charges: charges.charges.map(({ id, amountMinor, included, collect, basisEvidenceId }) => ({
+        id,
+        amountMinor,
+        included,
+        collect,
+        basisEvidenceId,
+      })),
+      payment: { kind: "pay_at_property" },
+    },
+    components.stay.currency,
+  );
   if (!amounts) return null;
   const scope = await lockPublicPricingAuthority(client, slug),
     previous = components.room.owner.scope;
