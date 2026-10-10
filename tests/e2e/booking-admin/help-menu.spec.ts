@@ -47,7 +47,8 @@ for (const viewport of [
     expect(supportRequest).toEqual({
       kind: "support",
       message: "Synthetic admin support test",
-      page: "/",
+      // The admin home redirects to the dashboard before Help opens.
+      page: "/dashboard",
       product: "booking",
     });
     await dialog.getByRole("button", { name: "Close", exact: true }).click();
