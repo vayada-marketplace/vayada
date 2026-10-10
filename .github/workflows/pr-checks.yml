@@ -19,6 +19,7 @@ on:
       - "fm/vay-2088-*"
       - "fm/vay-2082-*"
       - "fm/vay-2089-*"
+      - "fm/vay-2110-*"
       - "fm/vay-2099-*"
       - "fm/vay-2100-*"
       - flamurmaliqi2811/vay-2044-expense-worker-runtime
@@ -595,7 +596,8 @@ jobs:
             src/domains/pricingRevenueClear.postgres.test.ts \
             src/domains/bookingHostActionLocks.postgres.test.ts
           npm --workspace @vayada/backend-migration run test -- \
-            src/bookingPricingAuthorityDrop.integration.test.ts
+            src/bookingPricingAuthorityDrop.integration.test.ts \
+            src/bookingPricingAcceptanceAmendments.integration.test.ts
           npm --workspace vayada-api run test -- --no-file-parallelism \
             src/domains/replacementPricingOfferOwners.integration.test.ts \
             -t '^(?!.*(Channex|ARI|receipt|upload|target|activation|provider|worker|job|nightly candidates)).*(public|quote|publication|publishes)'

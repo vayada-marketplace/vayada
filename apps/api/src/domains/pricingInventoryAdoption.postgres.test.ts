@@ -63,6 +63,10 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
     "repository-stay-cancel-guest-route",
     "repository-stay-cancel-host-guest-request",
     "repository-stay-cancel-host-reject",
+    // VAY-2110: a date-change amendment rebinds the stay to its repriced quote.
+    "amended-complete",
+    "amended-earlier-revision",
+    "amended-stale-booking",
   ])("validates complete historical binding: %s", async (scenario) => {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
       throw new Error("test database required");
@@ -77,6 +81,10 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
       worker = scenario.startsWith("worker-"),
       repository = scenario.startsWith("repository-") || worker,
       changeId = randomUUID();
+    const amended = scenario.startsWith("amended-"),
+      amendedQuoteId = randomUUID();
+    // Amendments move the stay to days the accepted holds don't use.
+    const amendedStay = { checkIn: "2026-10-03", checkOut: "2026-10-04" };
     const types = [randomUUID(), randomUUID()].sort();
     const f = pricingDraftFixture((q) => {
       Object.assign(q, { quoteId: randomUUID() });
@@ -188,8 +196,14 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
          generated_sellable_limit_count,effective_sellable_limit_count,generated_source_revision,
          channel_source_revision,manual_source_revision,block_source_revision,booking_source_revision)
         SELECT $1,id,day,3,3,1,1,3,3,1,0,0,0,0 FROM unnest($2::uuid[]) id,
-          unnest(ARRAY[DATE '2026-10-01',DATE '2026-10-02']) day`,
-        [propertyId, types],
+          unnest($3::date[]) day`,
+        [
+          propertyId,
+          types,
+          amended
+            ? ["2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04"]
+            : ["2026-10-01", "2026-10-02"],
+        ],
       );
       await db.query(
         `INSERT INTO hotel_catalog.property_public_profile_read_model
@@ -214,31 +228,42 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         FROM pms.inventory_days WHERE property_id=$1`,
         [propertyId],
       );
-      const bundle = await createTargetPmsInventoryReservationPort().reserveBundle!({
-        propertyId,
-        checkIn: quote.stay.checkIn,
-        checkOut: quote.stay.checkOut,
-        currency: "EUR",
-        quoteSessionId: scenario.includes("amendment")
+      const reserve = (stay: { checkIn: string; checkOut: string }, quoteSessionId: string) =>
+        createTargetPmsInventoryReservationPort().reserveBundle!({
+          propertyId,
+          checkIn: stay.checkIn,
+          checkOut: stay.checkOut,
+          currency: "EUR",
+          quoteSessionId,
+          occurredAt: new Date("2026-09-01T00:02:00Z"),
+          transaction: db,
+          lines: types.map((roomTypeId, i) => ({
+            roomTypeId,
+            publicOfferKey: roomTypeId,
+            roomCount: i === 0 ? 2 : 1,
+          })),
+        });
+      // A moved stay holds only its amendment's rooms; its accepted holds were released.
+      const movedStay = amended && scenario !== "amended-stale-booking";
+      const bundle = await reserve(
+        movedStay ? amendedStay : quote.stay,
+        scenario.includes("amendment")
           ? `change-request:${changeId}`
           : scenario === "wrong-quote"
             ? randomUUID()
-            : quote.quoteId,
-        occurredAt: new Date("2026-09-01T00:02:00Z"),
-        transaction: db,
-        lines: types.map((roomTypeId, i) => ({
-          roomTypeId,
-          publicOfferKey: roomTypeId,
-          roomCount: i === 0 ? 2 : 1,
-        })),
-      });
+            : movedStay
+              ? amendedQuoteId
+              : quote.quoteId,
+      );
       const receiptRows = (
         await db.query(
           `SELECT receipt_id,room_type_id FROM pms.inventory_reservation_receipts WHERE property_id=$1`,
           [propertyId],
         )
       ).rows;
-      const acceptedReceipts = bundle.receipts.map((receipt) => ({ ...receipt }));
+      const acceptedReceipts = bundle.receipts.map((receipt) =>
+        movedStay ? { ...receipt, receiptId: randomUUID() } : { ...receipt },
+      );
       const acceptedBundle = { ...bundle, receipts: acceptedReceipts };
       if (scenario === "missing-token") acceptedReceipts.pop();
       if (scenario === "extra-token")
@@ -314,6 +339,71 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             f.finance.financeTermsCapturedAt,
           ],
         );
+      // VAY-2110: date changes append amendments; adoption follows the latest one.
+      let assignedStay: { checkIn: string; checkOut: string } = quote.stay;
+      if (amended) {
+        const amend = async (
+          revision: number,
+          stay: { checkIn: string; checkOut: string },
+          quoteId: string,
+          holds: typeof bundle,
+        ) => {
+          // The repriced quote keeps every room and changes only the dates.
+          const amendedQuote = { ...quote, quoteId, stay: { ...quote.stay, ...stay } };
+          const requestId = randomUUID();
+          await db.query(
+            `INSERT INTO booking.pricing_quotes(id,property_id,organization_id,request_id,request_hash,payload)
+            VALUES($1,$2,$3,$4,$5,$6)`,
+            [quoteId, propertyId, acceptedOrg, requestId, hash(requestId), { quote: amendedQuote }],
+          );
+          await db.query(
+            `INSERT INTO booking.pricing_acceptance_amendments
+            (acceptance_id,property_id,organization_id,guest_booking_id,revision,edit_revision,
+             pricing_quote_id,quote_snapshot,inventory_reservation_bundle,source,source_id)
+            VALUES($1,$2,$3,$4,$5,$5,$6,$7,$8,'host_edit',$9)`,
+            [
+              acceptanceId,
+              propertyId,
+              acceptedOrg,
+              bookingId,
+              revision,
+              quoteId,
+              amendedQuote,
+              holds,
+              randomUUID(),
+            ],
+          );
+        };
+        const moveBooking = (
+          stay: { checkIn: string; checkOut: string },
+          quoteId: string,
+          holds: typeof bundle,
+          editRevision: number,
+        ) => {
+          assignedStay = stay;
+          return db.query(
+            `UPDATE booking.guest_bookings SET check_in=$2,check_out=$3,edit_revision=$4,
+            booking_metadata=booking_metadata||jsonb_build_object('pricingQuoteId',$5::text,'inventoryReservation',$6::jsonb)
+            WHERE id=$1`,
+            [bookingId, stay.checkIn, stay.checkOut, editRevision, quoteId, holds],
+          );
+        };
+        if (scenario === "amended-stale-booking") {
+          // The booking still matches its acceptance exactly, which 0312 alone would accept.
+          await amend(1, amendedStay, amendedQuoteId, await reserve(amendedStay, amendedQuoteId));
+        } else if (scenario === "amended-earlier-revision") {
+          // The booking matches revision 1, but revision 2 is the stay's current price.
+          const earlierStay = { checkIn: "2026-10-01", checkOut: "2026-10-02" },
+            earlierQuoteId = randomUUID(),
+            earlierHolds = await reserve(earlierStay, earlierQuoteId);
+          await amend(1, earlierStay, earlierQuoteId, earlierHolds);
+          await amend(2, amendedStay, amendedQuoteId, bundle);
+          await moveBooking(earlierStay, earlierQuoteId, earlierHolds, 1);
+        } else {
+          await amend(1, amendedStay, amendedQuoteId, bundle);
+          await moveBooking(amendedStay, amendedQuoteId, bundle, 1);
+        }
+      }
       if (legacy) {
         await db.query(
           `INSERT INTO booking.quote_sessions
@@ -482,8 +572,8 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
               bookingId,
               selection.roomTypeId,
               i + 1,
-              quote.stay.checkIn,
-              quote.stay.checkOut,
+              assignedStay.checkIn,
+              assignedStay.checkOut,
               {
                 ...(scenario === "channel-without-room"
                   ? { contractVersion: "channex-operational-assignment.v1" }
@@ -519,6 +609,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           "legacy-amendment",
           "repository-complete",
           "worker-complete",
+          "amended-complete",
         ].includes(scenario)
       ) {
         expect(await adopt()).toEqual(
@@ -930,6 +1021,12 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         );
       } else if (scenario === "channel-without-room") {
         await adopt();
+        expect(await snapshot()).toEqual(before);
+      } else if (scenario === "amended-stale-booking" || scenario === "amended-earlier-revision") {
+        await expect(adopt()).rejects.toMatchObject({
+          constraint: "chk_pms_direct_booking_receipt_handoff_scope",
+          message: "replacement inventory has no matching unchanged acceptance",
+        });
         expect(await snapshot()).toEqual(before);
       } else
         await expect(adopt()).rejects.toMatchObject({
