@@ -340,6 +340,8 @@ export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolv
 };
 
 type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
+  /** Makes /health and /ready return 503 while PostgreSQL is unreachable; unset keeps them static. */
+  databaseHealth?: import("./platform/postgresRuntime.js").DatabaseHealthCheck;
   /** Public API logo assignment on the ordinary login (Owner-only); unset keeps the shared writer. */
   hotelSetupLogoAssignments?: Pick<
     import("./domains/propertyMediaCommandRepository.js").PropertyMediaCommandRepository,
@@ -567,7 +569,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     });
   }
 
-  app.register(registerHealthRoutes);
+  app.register(registerHealthRoutes, { databaseHealth: options.databaseHealth });
   if (options.marketplaceAffiliatePublicLink) {
     app.register(
       registerMarketplaceAffiliatePublicLinkRoute,

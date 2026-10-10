@@ -5,20 +5,21 @@ import {
   channexManagementWorkerPrivileges,
 } from "./channexManagementWorkerPrivileges.js";
 
-// Worker policy catalog through 0473, and with the VAY-2108 claimed scope (0479), checked on PG16
-// and PG17. Accepting both keeps this image a safe rollback target once 0479 ships.
+// Worker policy catalog through 0473, and with the VAY-2108 claimed scope (0479), both checked on
+// PG16 and PG17. Accepting both lets this image start on either side of 0479, so it is released
+// before 0479 and stays a safe rollback target once 0479 ships.
 const POLICY_DIGESTS = new Set([
   "c0c08b5d01df4b8fa3c1bed72e7a1fcdbfd77731383e63bd986f3d938ec26323",
-  "POST_0479_POLICY_DIGEST",
+  "0b52560d457b58b225d5d05f24041f6110d737db9f579148481d31a41048a099",
 ]);
 // Shared trigger catalog: through 0473, and after 0474 drops the native hotel-setup triggers
 // (VAY-2056 step 6, PG16 and PG17). Accepting both lets this image start on either side of
 // 0474, so it stays a safe rollback target when 0474 ships in a later release.
-// 0479 adds the claimed helper and changes pms.enqueue_restriction_ari (VAY-2108).
+// 0479 adds the claimed helper and changes pms.enqueue_restriction_ari (VAY-2108, PG16 and PG17).
 const CATALOG_DIGESTS = new Set([
   "10c6d40b2c7b7c4baacc4adaf468ddac1c3675344c114e40a5f77ba335b27794",
   "739a61d86e2ec4698b47af2c2206a3a3cd60c37e4fb9c0a99886336ef5ab71fd",
-  "POST_0479_CATALOG_DIGEST",
+  "6927b3f47d03df91a69c4fbc9afde2d6c40ef1248515d442a60afd487c547137",
 ]);
 export const channexManagementWorkerFunctions = [
   "platform.channex_management_worker_scope(text,text,uuid)",
