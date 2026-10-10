@@ -802,6 +802,7 @@
   "rooms.edit.title": "Bearbeiten: {name}",
   "rooms.edit.submitLabel": "Änderungen speichern",
   "rooms.edit.success": "Zimmertyp erfolgreich aktualisiert",
+  "rooms.edit.publishPricesAgain": "Veröffentlichen Sie die Preise erneut, damit Gäste dieses Zimmer buchen können.",
   "rooms.edit.failedToUpdate": "Aktualisierung fehlgeschlagen",
   "rooms.edit.deleteConfirm": "Möchten Sie diesen Zimmertyp wirklich löschen?",
   "rooms.edit.cannotDelete": "Löschen nicht möglich - Zimmertyp hat möglicherweise Buchungen",
