@@ -1,11 +1,7 @@
 "use client";
 import { useTranslations } from "next-intl";
-import {
-  sameRoomSelection,
-  selectionCheckoutFields,
-  roomSelectionPartyMatches,
-} from "@/lib/roomSelection";
-import type { Addon, RoomType } from "@/lib/types";
+import { sameRoomSelection, roomSelectionPartyMatches } from "@/lib/roomSelection";
+import type { Addon } from "@/lib/types";
 import type { BookingCreateRequest, PaymentSettings } from "@/services/api/booking";
 import type { PendingEditDetails } from "@/services/api/pendingBookingEdits";
 const field = "mt-1 w-full rounded-lg border border-gray-300 bg-white p-3";
@@ -14,7 +10,6 @@ export default function PendingRequestFields({
   input,
   details,
   settings,
-  rooms,
   addons,
   disabled,
   change,
@@ -22,17 +17,13 @@ export default function PendingRequestFields({
   input: BookingCreateRequest;
   details: PendingEditDetails;
   settings: PaymentSettings | null;
-  rooms: RoomType[];
   addons: Addon[];
   disabled: boolean;
   change: (patch: Partial<BookingCreateRequest>) => void;
 }) {
   const t = useTranslations("roomSelection");
-  const selected = rooms.find((room) =>
-    input.roomSelection
-      ? sameRoomSelection(room.combination?.roomSelection, input.roomSelection)
-      : !room.combination && room.id === input.roomTypeId,
-  );
+  // Other rooms were offered by the retired availability search; only the booked
+  // selection can be kept or restored here.
   const original = input.roomSelection
     ? sameRoomSelection(input.roomSelection, details.input.roomSelection)
     : !details.input.roomSelection && input.roomTypeId === details.input.roomTypeId;
@@ -100,39 +91,19 @@ export default function PendingRequestFields({
           Room
           <select
             className={field}
-            value={selected?.id ?? (original ? "original-selection" : "current-selection")}
+            value={original ? "original-selection" : "current-selection"}
             onChange={(e) => {
-              if (e.target.value === "original-selection") {
-                change({
-                  roomTypeId: details.input.roomTypeId,
-                  roomSelection: details.input.roomSelection,
-                  numberOfRooms: details.input.numberOfRooms,
-                  currency: details.input.currency,
-                });
-                return;
-              }
-              const room = rooms.find((candidate) => candidate.id === e.target.value);
-              if (!room) return;
+              if (e.target.value !== "original-selection") return;
               change({
-                ...selectionCheckoutFields(room),
-                numberOfRooms: room.combination
-                  ? room.combination.roomSelection.lines.reduce(
-                      (sum, line) => sum + line.guests.length,
-                      0,
-                    )
-                  : 1,
+                roomTypeId: details.input.roomTypeId,
+                roomSelection: details.input.roomSelection,
+                numberOfRooms: details.input.numberOfRooms,
+                currency: details.input.currency,
               });
             }}
           >
             <option value="original-selection">{details.booking.roomName}</option>
-            {!selected && !original && (
-              <option value="current-selection">{t("selectedAccommodation")}</option>
-            )}
-            {rooms.map((room) => (
-              <option key={room.id} value={room.id}>
-                {room.name}
-              </option>
-            ))}
+            {!original && <option value="current-selection">{t("selectedAccommodation")}</option>}
           </select>
         </label>
         <label>
@@ -157,7 +128,7 @@ export default function PendingRequestFields({
         <fieldset className="space-y-4">
           <legend className="font-semibold">{t("allocateGuests")}</legend>
           {input.roomSelection.lines.map((line, lineIndex) => {
-            const roomName = (selected?.combination?.roomLines ?? details.booking.roomLines)?.find(
+            const roomName = details.booking.roomLines?.find(
               (candidate) =>
                 candidate.roomTypeId === line.roomTypeId &&
                 candidate.publicOfferKey === line.publicOfferKey,

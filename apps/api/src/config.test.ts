@@ -896,21 +896,23 @@ describe("api config", () => {
     );
   });
 
-  it("loads a canonical replacement-pricing acceptance slug allowlist", () => {
+  it("enables replacement-pricing quote acceptance unless the kill switch is off", () => {
+    expect(loadConfig({}).replacementPricingAcceptanceEnabled).toBe(true);
     expect(
-      loadConfig({
-        REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS: "Test-Hotel, other-hotel,test-hotel",
-      }).replacementPricingAcceptanceAllowedSlugs,
-    ).toEqual(["test-hotel", "other-hotel"]);
-    expect(loadConfig({}).replacementPricingAcceptanceAllowedSlugs).toEqual([]);
+      loadConfig({ REPLACEMENT_PRICING_ACCEPTANCE_ENABLED: "false" })
+        .replacementPricingAcceptanceEnabled,
+    ).toBe(false);
+    expect(() => loadConfig({ REPLACEMENT_PRICING_ACCEPTANCE_ENABLED: "test-hotel" })).toThrow(
+      "REPLACEMENT_PRICING_ACCEPTANCE_ENABLED must be true or false",
+    );
   });
 
-  it("rejects malformed replacement-pricing acceptance slugs", () => {
-    expect(() =>
-      loadConfig({ REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS: "test-hotel,*.vayada.com" }),
-    ).toThrow(
-      "REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS requires up to 100 canonical lowercase slugs",
-    );
+  it("keeps card quote acceptance off unless explicitly enabled", () => {
+    expect(loadConfig({}).replacementPricingCardAcceptanceEnabled).toBe(false);
+    expect(
+      loadConfig({ REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED: "true" })
+        .replacementPricingCardAcceptanceEnabled,
+    ).toBe(true);
   });
 
   it("rejects next API runtime when source selectors would default to legacy or disabled", () => {
@@ -1310,6 +1312,66 @@ describe("api config", () => {
     });
     expect(() => loadConfig({ PLATFORM_MEDIA_CLEANUP_INTERVAL_MS: "0" })).toThrow(
       "PLATFORM_MEDIA_CLEANUP_INTERVAL_MS must be a positive integer",
+    );
+  });
+
+  it("runs the calendar auto-open scheduler hourly unless switched off", () => {
+    expect(loadConfig({})).toMatchObject({
+      pmsCalendarAutoOpenSchedulerEnabled: true,
+      pmsCalendarAutoOpenSchedulerIntervalMs: 60 * 60 * 1000,
+    });
+    expect(
+      loadConfig({
+        PMS_CALENDAR_AUTO_OPEN_SCHEDULER_ENABLED: "false",
+        PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS: "900000",
+      }),
+    ).toMatchObject({
+      pmsCalendarAutoOpenSchedulerEnabled: false,
+      pmsCalendarAutoOpenSchedulerIntervalMs: 900_000,
+    });
+    expect(() => loadConfig({ PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS: "0" })).toThrow(
+      "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS must be a positive integer",
+    );
+    expect(() =>
+      loadConfig({ PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS: "2147483648" }),
+    ).toThrow("PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS must not exceed 2147483647");
+    expect(() => loadConfig({ PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS: "59999" })).toThrow(
+      "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS must be at least 60000",
+    );
+  });
+
+  it("checks published pricing freshness hourly unless switched off", () => {
+    expect(loadConfig({})).toMatchObject({
+      pricingPublicationFreshnessCheckEnabled: true,
+      pricingPublicationFreshnessIntervalMs: 60 * 60 * 1000,
+    });
+    expect(
+      loadConfig({
+        PRICING_PUBLICATION_FRESHNESS_CHECK_ENABLED: "false",
+        PRICING_PUBLICATION_FRESHNESS_INTERVAL_MS: "1800000",
+      }),
+    ).toMatchObject({
+      pricingPublicationFreshnessCheckEnabled: false,
+      pricingPublicationFreshnessIntervalMs: 1_800_000,
+    });
+    expect(() => loadConfig({ PRICING_PUBLICATION_FRESHNESS_INTERVAL_MS: "599999" })).toThrow(
+      "PRICING_PUBLICATION_FRESHNESS_INTERVAL_MS must be at least 600000",
+    );
+    expect(loadConfig({}).pricingPublicationFreshnessAlertEmail).toBeUndefined();
+    const email = { RESEND_API_KEY: "test-key", BOOKING_EMAIL_FROM: "sender@example.test" };
+    expect(
+      loadConfig({ ...email, PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL: " ops@example.test " }),
+    ).toMatchObject({ pricingPublicationFreshnessAlertEmail: "ops@example.test" });
+    expect(() =>
+      loadConfig({
+        ...email,
+        PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL: "a@example.test,b@example.test",
+      }),
+    ).toThrow("PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL must be one email address");
+    expect(() =>
+      loadConfig({ PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL: "ops@example.test" }),
+    ).toThrow(
+      "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL requires RESEND_API_KEY and BOOKING_EMAIL_FROM",
     );
   });
 

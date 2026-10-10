@@ -365,7 +365,7 @@ export default function CalendarPage() {
     setShowBlockModal(true);
   };
 
-  // Mobile: tapping "+ New" opens NewBookingModal. If a date range is
+  // Mobile: tapping "+ New" opens the manual booking modal. If a date range is
   // selected on the mobile calendar, use it as check-in/check-out defaults.
   const handleMobileNewBooking = (startDate?: string, endDate?: string) => {
     setPrefill(null);

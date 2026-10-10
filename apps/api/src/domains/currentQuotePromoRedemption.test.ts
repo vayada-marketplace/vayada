@@ -55,7 +55,6 @@ beforeEach(() => {
     scope: {
       propertyId: quote.stay.propertyId,
       organizationId: "organization",
-      authorityRevision: "authority:1",
     },
     calculation: { code: { ...code }, discounts: { codeMinor: "2000" } },
   } as unknown as typeof current;
@@ -145,7 +144,7 @@ it("rejects mismatched booking, replay amount, current authority and unrepresent
   }
   vi.mocked(lockPublicPricingAuthority).mockResolvedValueOnce({
     ...current.scope,
-    authorityRevision: "changed",
+    organizationId: "00000000-0000-4000-8000-0000000000ff",
   });
   await expect(redeemLockedCurrentQuotePromo(client, "hotel", current, bookingId)).rejects.toThrow(
     "unavailable",
