@@ -1,7 +1,11 @@
 import {
   BanknotesIcon,
   ChartBarIcon,
+  ChatBubbleLeftRightIcon,
   ClipboardDocumentCheckIcon,
+  EnvelopeIcon,
+  SparklesIcon,
+  StarIcon,
 } from "@heroicons/react/24/outline";
 import type { CoreNavItem, FeatureCategory, FeatureModule, FeatureProduct } from "./types";
 
@@ -11,7 +15,50 @@ export const FEATURE_CATEGORIES: Array<"All" | FeatureCategory> = [
   "Operations",
 ];
 
+// Order matches the PMS sidebar: Inbox, Reviews, Financials after Reservations.
 export const FEATURE_MODULES: FeatureModule[] = [
+  {
+    id: "inbox",
+    name: "Inbox",
+    description:
+      "Guest messaging, automations, and templates. Chat with guests and automate pre-arrival and post-stay messages.",
+    category: "Operations",
+    type: "internal",
+    product: "pms",
+    icon: "chat",
+    navItem: { label: "Inbox", href: "/inbox", icon: ChatBubbleLeftRightIcon },
+    detail: {
+      headline: "Keep every guest conversation in one place.",
+      visualType: "inbox",
+      features: [
+        {
+          icon: ChatBubbleLeftRightIcon,
+          text: "Reply to guests from connected channels and email.",
+        },
+        { icon: EnvelopeIcon, text: "Save quick replies for common questions." },
+        { icon: SparklesIcon, text: "See unread conversations at a glance." },
+      ],
+    },
+  },
+  {
+    id: "reviews",
+    name: "Reviews",
+    description: "View and manage guest reviews from connected channels.",
+    category: "Distribution",
+    type: "internal",
+    product: "pms",
+    icon: "star",
+    navItem: { label: "Reviews", href: "/reviews", icon: StarIcon },
+    detail: {
+      headline: "See what guests say about your stay.",
+      visualType: "reviews",
+      features: [
+        { icon: StarIcon, text: "Read reviews from your connected channels in one list." },
+        { icon: ChatBubbleLeftRightIcon, text: "Reply to reviews where the channel allows it." },
+        { icon: EnvelopeIcon, text: "Collect reviews from direct guests after their stay." },
+      ],
+    },
+  },
   {
     id: "financials",
     name: "Financials",
@@ -38,7 +85,6 @@ export const CORE_NAV_ITEMS: Record<FeatureProduct, CoreNavItem[]> = {
     { label: "Dashboard", href: "/dashboard" },
     { label: "Calendar", href: "/calendar" },
     { label: "Reservations", href: "/bookings" },
-    { label: "Reviews", href: "/reviews" },
     { label: "Rooms & Rates", href: "/rooms" },
     { label: "Channel Manager", href: "/channel-manager" },
     { label: "Settings", href: "/settings" },
@@ -53,8 +99,9 @@ export const CORE_NAV_ITEMS: Record<FeatureProduct, CoreNavItem[]> = {
   ],
 };
 
+// PMS modules (Inbox, Reviews, Financials) sit right after Reservations, as in the sidebar.
 export const FEATURE_MODULE_NAV_INDEX: Record<FeatureProduct, number> = {
-  pms: 4,
+  pms: 3,
   booking_engine: 4,
 };
 
