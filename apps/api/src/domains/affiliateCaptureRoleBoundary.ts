@@ -250,6 +250,8 @@ const hotelLockPolicies = [
     false,
     "((CURRENT_USER <> 'vayada_next_channex_management_worker'::name) OR platform.channex_management_worker_connection_scope('property'::text, (id)::text))",
     "NULL",
+    // VAY-2108: migration 0479 adds the claimed branch; both shapes are accepted (rollback safety).
+    "POST_0479_PROPERTIES_EXPRESSION",
   ],
   ["hotel_catalog.properties", "finance_expense_worker_compat", "*", true, "true", "NULL"],
   [
@@ -527,7 +529,8 @@ export async function assertAffiliateCaptureRoleHasVisitReadCapabilities(
               ($3::pg_catalog.text[])[position] AS command,
               ($4::pg_catalog.bool[])[position] AS permissive,
               ($5::pg_catalog.text[])[position] AS using_expression,
-              ($6::pg_catalog.text[])[position] AS check_expression
+              ($6::pg_catalog.text[])[position] AS check_expression,
+              ($8::pg_catalog.text[])[position] AS using_alternative
        FROM pg_catalog.generate_subscripts($1::pg_catalog.text[],1) position
      ), actual AS (
        SELECT policy.polrelid::pg_catalog.regclass::pg_catalog.text AS relation,
@@ -553,7 +556,8 @@ export async function assertAffiliateCaptureRoleHasVisitReadCapabilities(
        OR expected.command<>actual.command
        OR expected.permissive<>actual.permissive
        OR actual.roles<>ARRAY[0]::pg_catalog.oid[]
-       OR expected.using_expression<>actual.using_expression
+       OR (expected.using_expression<>actual.using_expression
+         AND actual.using_expression IS DISTINCT FROM expected.using_alternative)
        OR expected.check_expression<>actual.check_expression
      UNION ALL
      SELECT 1 FROM pg_catalog.pg_class relation
@@ -569,6 +573,7 @@ export async function assertAffiliateCaptureRoleHasVisitReadCapabilities(
       hotelLockPolicies.map(([, , , , usingExpression]) => usingExpression),
       hotelLockPolicies.map(([, , , , , checkExpression]) => checkExpression),
       role,
+      hotelLockPolicies.map((policy) => (policy as readonly unknown[])[6] ?? null),
     ],
   );
   if (rowPolicies.rowCount) fail("lock_protection");

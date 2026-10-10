@@ -5,14 +5,20 @@ import {
   channexManagementWorkerPrivileges,
 } from "./channexManagementWorkerPrivileges.js";
 
-// Worker policy catalog through 0473, checked on PG17.
-const POLICY_DIGEST = "c0c08b5d01df4b8fa3c1bed72e7a1fcdbfd77731383e63bd986f3d938ec26323";
+// Worker policy catalog through 0473, and with the VAY-2108 claimed scope (0479), checked on PG16
+// and PG17. Accepting both keeps this image a safe rollback target once 0479 ships.
+const POLICY_DIGESTS = new Set([
+  "c0c08b5d01df4b8fa3c1bed72e7a1fcdbfd77731383e63bd986f3d938ec26323",
+  "POST_0479_POLICY_DIGEST",
+]);
 // Shared trigger catalog: through 0473, and after 0474 drops the native hotel-setup triggers
 // (VAY-2056 step 6, PG16 and PG17). Accepting both lets this image start on either side of
 // 0474, so it stays a safe rollback target when 0474 ships in a later release.
+// 0479 adds the claimed helper and changes pms.enqueue_restriction_ari (VAY-2108).
 const CATALOG_DIGESTS = new Set([
   "10c6d40b2c7b7c4baacc4adaf468ddac1c3675344c114e40a5f77ba335b27794",
   "739a61d86e2ec4698b47af2c2206a3a3cd60c37e4fb9c0a99886336ef5ab71fd",
+  "POST_0479_CATALOG_DIGEST",
 ]);
 export const channexManagementWorkerFunctions = [
   "platform.channex_management_worker_scope(text,text,uuid)",
@@ -22,7 +28,12 @@ export const channexManagementWorkerFunctions = [
   "pms.claim_channex_external_rate(uuid,text,text,uuid,jsonb)",
   "pms.enqueue_restriction_ari(uuid,text)",
 ] as const;
-const pricingScopeViews = new Set(["booking.pricing_runtime_effective_property_scopes"]);
+// Reads tolerated beyond the privilege map: the pricing scope view, and the claimed scope's owner
+// table (VAY-2108, 0479), whose read the claimed grant adds after 0479.
+const toleratedReads = new Set([
+  "booking.pricing_runtime_effective_property_scopes",
+  "platform.channex_management_worker_claimed_operations",
+]);
 export async function assertChannexManagementWorkerBoundary(
   client: Pick<pg.Client, "query">,
   options: { allowMissingGrants?: boolean; propertyId?: string; connectionScope?: boolean } = {},
@@ -85,7 +96,7 @@ export async function assertChannexManagementWorkerBoundary(
       `SELECT schemaname,tablename,policyname,permissive,roles::text,cmd,qual,with_check FROM pg_policies WHERE policyname LIKE 'channex_management_worker_%' ORDER BY schemaname,tablename,policyname`,
     )
   ).rows;
-  if (createHash("sha256").update(JSON.stringify(policyRows)).digest("hex") !== POLICY_DIGEST)
+  if (!POLICY_DIGESTS.has(createHash("sha256").update(JSON.stringify(policyRows)).digest("hex")))
     fail("policy_drift");
   const relations = (
     await client.query(
@@ -122,7 +133,7 @@ export async function assertChannexManagementWorkerBoundary(
     if (
       row.delegate ||
       (channexManagementWorkerPrivileges[row.name]?.[row.privilege] !== true &&
-        !(row.privilege === "SELECT" && pricingScopeViews.has(row.name)))
+        !(row.privilege === "SELECT" && toleratedReads.has(row.name)))
     )
       fail("table_privileges");
   const columnGrants = (
@@ -138,7 +149,7 @@ export async function assertChannexManagementWorkerBoundary(
       !(
         grant === true ||
         (Array.isArray(grant) && grant.includes(row.attname)) ||
-        (row.privilege === "SELECT" && pricingScopeViews.has(row.name))
+        (row.privilege === "SELECT" && toleratedReads.has(row.name))
       )
     )
       fail("column_privileges");
@@ -207,15 +218,16 @@ export const channexWorkerCatalogSql = `
 WITH relations AS (SELECT oid FROM pg_class WHERE oid=ANY($1::regclass[])),
 functions AS (
   SELECT tgfoid AS oid FROM pg_trigger WHERE tgrelid IN (SELECT oid FROM relations) AND NOT tgisinternal
-  UNION SELECT unnest(ARRAY[
-    'platform.channex_management_worker_scope(text,text,uuid)'::regprocedure,
-    'platform.channex_management_worker_connection_scope(text,text)'::regprocedure,
-    'platform.channex_management_worker_source(text,text,uuid)'::regprocedure,
-    'platform.tenant_scope_key(text,uuid,uuid)'::regprocedure,
-    'platform.valid_tenant_scope(text,uuid,uuid)'::regprocedure,
-    'pms.claim_channex_external_rate(uuid,text,text,uuid,jsonb)'::regprocedure,
-    'pms.enqueue_restriction_ari(uuid,text)'::regprocedure
-  ])::oid
+  UNION SELECT to_regprocedure(name)::oid FROM unnest(ARRAY[
+    'platform.channex_management_worker_scope(text,text,uuid)',
+    'platform.channex_management_worker_connection_scope(text,text)',
+    'platform.channex_management_worker_claimed_scope(text,text)',
+    'platform.channex_management_worker_source(text,text,uuid)',
+    'platform.tenant_scope_key(text,uuid,uuid)',
+    'platform.valid_tenant_scope(text,uuid,uuid)',
+    'pms.claim_channex_external_rate(uuid,text,text,uuid,jsonb)',
+    'pms.enqueue_restriction_ari(uuid,text)'
+  ]) name WHERE to_regprocedure(name) IS NOT NULL
 )
 SELECT 'function:'||n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')' AS name,
   pg_get_functiondef(p.oid) AS definition
