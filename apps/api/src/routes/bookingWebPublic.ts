@@ -3869,24 +3869,34 @@ async function withGuestLifecycleMutation(
     assertLifecycleMutationAllowed(booking, mutation.action);
     let bookedOutcome: BookedCancellationOutcome | null = null;
     if (mutation.action === "cancel") {
+      let feeBooking = booking;
       if (objectValue(booking.bookingMetadata)["targetSource"] === "pricing_quote_draft") {
         // Booking row, then inventory, as PMS host actions take them. NO KEY UPDATE stays
         // compatible with PMS adoption, which holds inventory while it references the booking.
+        // Paid stays were refused above, so pricing-v2 card owners (inventory first) never race.
         await client.query(
           "SELECT 1 FROM booking.guest_bookings WHERE id=$1::uuid AND property_id=$2::uuid FOR NO KEY UPDATE",
           [booking.guestBookingId, property.propertyId],
         );
         await lockPmsInventoryMutationScope(client, property.propertyId);
+        // The fee comes from the stay as it is under the lock.
+        feeBooking = await loadTargetBooking(
+          client,
+          property.propertyId,
+          bookingId,
+          requireGuestEmail(request.guest_email),
+        );
+        assertLifecycleMutationAllowed(feeBooking, mutation.action);
       }
       bookedOutcome = await loadBookedCancellationOutcome(
         client,
         property.propertyId,
-        booking,
+        feeBooking,
         context.occurredAt,
         true,
       );
       resolveTargetCancellationPreview(
-        booking,
+        feeBooking,
         property.timezone,
         context.occurredAt,
         bookedOutcome,
@@ -4024,8 +4034,8 @@ async function withGuestLifecycleMutation(
         fingerprint: context.fingerprint,
         occurredAt: context.occurredAt,
       });
-    // Nothing consumes pms.reservation.cancel for pricing-v2 stays; cancelAcceptedPricingStay frees
-    // a cancelled one, and withdrawals (VAY-2099) free theirs the same way.
+    // Nothing consumes pms.reservation.cancel for pricing-v2 stays. cancelAcceptedPricingStay frees
+    // a cancelled one; a withdrawn request needs the same (VAY-2099).
     if (objectValue(updated.bookingMetadata)["targetSource"] !== "pricing_quote_draft")
       await enqueuePmsReservationHandoff(client, property.propertyId, updated, context, "cancel");
     const body = serializeTargetBookingStatus(updated);
