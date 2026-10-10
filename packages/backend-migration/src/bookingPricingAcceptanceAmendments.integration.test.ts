@@ -21,6 +21,15 @@ describe.skipIf(!url)("append-only pricing acceptance amendments", () => {
       guests: { adults: 2, childAgesAtCheckIn: [6] },
     },
   ];
+  const terms = [
+    {
+      roomTypeId,
+      offerId: "offer-1",
+      revision: "terms-1",
+      cancellation: { kind: "non_refundable" },
+      payment: { kind: "pay_at_property" },
+    },
+  ];
   type Scope = { property: string; org: string };
   type Quote = { quoteId: string; stay: { checkIn: string; checkOut: string } };
   // Synthetic storage shapes, not a domain-valid quote or an accepted booking flow.
@@ -39,7 +48,7 @@ describe.skipIf(!url)("append-only pricing acceptance amendments", () => {
       acceptanceMode: "instant",
       stay: { propertyId: scope.property, currency: "EUR", rooms, ...stay },
       rooms: [{ selectionId: "selection-1", mealPlan: "room_only" }],
-      evidence: { totalMinor: "20000" },
+      evidence: { totalMinor: "20000", terms },
       ...quote,
     };
     await client.query(
@@ -251,7 +260,11 @@ describe.skipIf(!url)("append-only pricing acceptance amendments", () => {
         "23514",
       );
       await rejected(client, () => amend(client, base, base.quote), "23514");
-      // Rooms, offers, room types, guests, meal plans, payment, acceptance mode and currency stay.
+      // Rooms, offers, room types, guests, meal plans, booked terms, payment, acceptance mode and
+      // currency stay.
+      const withTerms = (patch: Record<string, unknown>) => ({
+        evidence: { totalMinor: "20000", terms: [{ ...terms[0]!, ...patch }] },
+      });
       for (const [stay, quote] of [
         [{ currency: "USD" }, {}],
         [{ rooms: [{ ...rooms[0]!, offerId: "offer-2" }] }, {}],
@@ -262,6 +275,10 @@ describe.skipIf(!url)("append-only pricing acceptance amendments", () => {
         [{}, { rooms: [{ selectionId: "selection-1", mealPlan: "breakfast" }] }],
         [{}, { paymentMethod: "card" }],
         [{}, { acceptanceMode: "request" }],
+        [{}, withTerms({ cancellation: { kind: "flexible" } })],
+        [{}, withTerms({ payment: { kind: "deposit", basisPoints: 3000 } })],
+        [{}, withTerms({ offerId: "offer-2" })],
+        [{}, { evidence: { totalMinor: "20000" } }],
       ] as const) {
         const changed = await storedQuote(
           client,
@@ -295,7 +312,14 @@ describe.skipIf(!url)("append-only pricing acceptance amendments", () => {
       );
       await rejected(client, () => amend(client, base, moved), "23514");
       await client.query("ROLLBACK TO SAVEPOINT pending");
-      expect((await amend(client, base, moved)).rowCount).toBe(1);
+      // A newer revision of the same cancellation and payment terms is still what was booked.
+      const sameTerms = await storedQuote(
+        client,
+        base.scope,
+        { checkIn: "2026-11-20", checkOut: "2026-11-23" },
+        withTerms({ revision: "terms-2" }),
+      );
+      expect((await amend(client, base, sameTerms)).rowCount).toBe(1);
     } finally {
       await client.query("ROLLBACK");
       client.release();

@@ -47,7 +47,15 @@ LANGUAGE sql IMMUTABLE AS $$
           'mealPlan', (SELECT priced->'mealPlan'
             FROM jsonb_array_elements(CASE WHEN jsonb_typeof(quote->'rooms')='array'
               THEN quote->'rooms' ELSE '[]'::jsonb END) AS priced_room(priced)
-            WHERE priced->'selectionId'=room->'selectionId' LIMIT 1)) ORDER BY position)
+            WHERE priced->'selectionId'=room->'selectionId' LIMIT 1),
+          -- The cancellation and payment terms the guest accepted for this room's rate.
+          'terms', (SELECT jsonb_agg(jsonb_build_object(
+              'cancellation', term->'cancellation', 'payment', term->'payment') ORDER BY term_position)
+            FROM jsonb_array_elements(CASE WHEN jsonb_typeof(quote#>'{evidence,terms}')='array'
+              THEN quote#>'{evidence,terms}' ELSE '[]'::jsonb END)
+              WITH ORDINALITY AS booked_terms(term, term_position)
+            WHERE term->'roomTypeId'=room->'roomTypeId' AND term->'offerId'=room->'offerId')
+        ) ORDER BY position)
       FROM jsonb_array_elements(CASE WHEN jsonb_typeof(quote#>'{stay,rooms}')='array'
         THEN quote#>'{stay,rooms}' ELSE '[]'::jsonb END) WITH ORDINALITY AS selected(room, position)
     ), '[]'::jsonb))
