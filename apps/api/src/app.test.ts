@@ -4654,13 +4654,9 @@ describe("vayada-api", () => {
         authorization: "Bearer valid-token",
       },
       payload: {
-        property_name: "Updated Alpenrose",
         reservation_email: "new-reservations@alpenrose.example",
         phone_number: "+43 1 9999",
         whatsapp_number: "+43 1 8888",
-        address: "Updated street 1",
-        city: "Innsbruck",
-        country: "AT",
         instagram: "https://instagram.com/updated-alpenrose",
         facebook: "https://facebook.com/updated-alpenrose",
         tiktok: "https://tiktok.com/@updated-alpenrose",
@@ -4689,13 +4685,9 @@ describe("vayada-api", () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).toMatchObject({
       id: "booking_hotel_alpenrose",
-      property_name: "Updated Alpenrose",
       reservation_email: "new-reservations@alpenrose.example",
       phone_number: "+43 1 9999",
       whatsapp_number: "+43 1 8888",
-      address: "Updated street 1",
-      city: "Innsbruck",
-      country: "AT",
       instagram: "https://instagram.com/updated-alpenrose",
       facebook: "https://facebook.com/updated-alpenrose",
       tiktok: "https://tiktok.com/@updated-alpenrose",
@@ -4715,6 +4707,36 @@ describe("vayada-api", () => {
       guest_count_enabled: false,
       terms_text: "Updated Alpenrose booking terms.",
       cancellation_policy_text: "Free cancellation until one day before arrival.",
+    });
+  });
+
+  it("refuses the property name and location, which the property profile owns", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "PATCH",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/property",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        property_name: "Updated Alpenrose",
+        address: "Updated street 1",
+        city: "Innsbruck",
+        country: "AT",
+        phone_number: "+43 1 9999",
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.body).toMatchObject({
+      code: "invalid_payload",
+      details: [
+        "property_name is saved through the property profile, not booking settings.",
+        "address is saved through the property profile, not booking settings.",
+        "city is saved through the property profile, not booking settings.",
+        "country is saved through the property profile, not booking settings.",
+      ],
     });
   });
 
@@ -7950,13 +7972,9 @@ describe("vayada-api", () => {
         authorization: "Bearer valid-token",
       },
       payload: {
-        property_name: "Target Alpenrose",
         reservation_email: "target@alpenrose.example",
         phone_number: "+43 1 1111",
         whatsapp_number: "+43 1 2222",
-        address: "Target lane 1",
-        city: "Vienna",
-        country: "AT",
         instagram: "https://instagram.com/target-alpenrose",
         facebook: "https://facebook.com/target-alpenrose",
         tiktok: "https://tiktok.com/@target-alpenrose",
