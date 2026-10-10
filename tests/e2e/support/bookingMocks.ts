@@ -201,128 +201,56 @@ const addons = [
   },
 ];
 
-export const publicOffers = {
-  contractVersion: "public-bookability.v1",
-  generatedAt: "2026-06-06T11:00:00.000Z",
-  publicVisibility: "public_safe",
-  request: {
-    hotelSlug: SEEDED_BOOKING_SLUG,
-    checkIn: "2026-09-12",
-    checkOut: "2026-09-15",
-    nights: 3,
-    adults: 2,
-    children: 0,
-    rooms: 1,
-    currency: "EUR",
-    locale: "en",
-    promoCode: null,
-    referralCode: null,
+// The legacy availability routes answer 410 like the real API does now (VAY-1543 C.2);
+// booking-web must never request them. Specs assert on this through `legacyPricingRequests`.
+export const PRICING_RETIRED = {
+  status: 410,
+  json: {
+    statusCode: 410,
+    code: "PRICING_RETIRED",
+    message:
+      "The old booking flow has been retired. Price and book through the room-and-price flow.",
   },
-  status: "bookable",
-  unavailableReasons: [],
-  quote: {
-    quoteId: "quote_alpenrose_001",
-    quoteHash: "sha256:booking-web-smoke",
-    expiresAt: "2026-09-12T12:00:00.000Z",
-    priceGuarantee: "instant",
-    offers: [
-      {
-        offerId: "alpine-suite_flexible",
-        roomTypeId: "alpine-suite",
-        ratePlanId: "flexible",
-        name: "Alpine Suite",
-        occupancy: {
-          maxAdults: 3,
-          maxChildren: 1,
-        },
-        availableRooms: 2,
-        refundable: true,
-        mealPlan: "breakfast",
-        amenities: rooms[0].amenities,
-        paymentOptions: ["card", "pay_at_property"],
-        totals: {
-          currency: "EUR",
-          roomTotal: 720,
-          taxesAndFees: 0,
-          discounts: 0,
-          grandTotal: 720,
-        },
-        policies: {
-          cancellation: "free_until_7_days",
-          deposit: "No deposit required",
-        },
-        bookingUrl:
-          "http://hotel-alpenrose.booking.localhost:3002/en/book?room_type=alpine-suite&rate_plan=flexible&quote_id=quote_alpenrose_001",
-      },
-      {
-        offerId: "alpine-suite_nonrefundable",
-        roomTypeId: "alpine-suite",
-        ratePlanId: "nonrefundable",
-        name: "Alpine Suite - Non-refundable",
-        occupancy: {
-          maxAdults: 3,
-          maxChildren: 1,
-        },
-        availableRooms: 2,
-        refundable: false,
-        mealPlan: "breakfast",
-        amenities: rooms[0].amenities,
-        paymentOptions: ["card"],
-        totals: {
-          currency: "EUR",
-          roomTotal: 630,
-          taxesAndFees: 0,
-          discounts: 0,
-          grandTotal: 630,
-        },
-        policies: {
-          cancellation: "Non-refundable from booking",
-          deposit: "No deposit required",
-        },
-        bookingUrl:
-          "http://hotel-alpenrose.booking.localhost:3002/en/book?room_type=alpine-suite&rate_plan=nonrefundable&quote_id=quote_alpenrose_001",
-      },
-      {
-        offerId: "garden-room_flexible",
-        roomTypeId: "garden-room",
-        ratePlanId: "flexible",
-        name: "Garden Room",
-        occupancy: {
-          maxAdults: 2,
-          maxChildren: 1,
-        },
-        availableRooms: 0,
-        refundable: true,
-        mealPlan: "room_only",
-        amenities: rooms[1].amenities,
-        paymentOptions: ["card", "pay_at_property"],
-        totals: {
-          currency: "EUR",
-          roomTotal: 480,
-          taxesAndFees: 0,
-          discounts: 0,
-          grandTotal: 480,
-        },
-        policies: {
-          cancellation: "free_until_7_days",
-          deposit: "No deposit required",
-        },
-        bookingUrl:
-          "http://hotel-alpenrose.booking.localhost:3002/en/book?room_type=garden-room&rate_plan=flexible&quote_id=quote_alpenrose_001",
-      },
-    ],
-  },
-  freshness: {
-    status: "fresh",
-    generatedAt: "2026-06-06T11:00:00.000Z",
-    sources: [],
-  },
-  dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
 };
+
+/** A one-room catalogue so the room-and-price page renders its form. */
+export async function mockPricingCatalogue(page: Page) {
+  await page.route("**/pricing-offers", (route) =>
+    route.fulfill({
+      json: {
+        version: "public-pricing-offers.v1",
+        rooms: [
+          {
+            roomTypeId: "suite",
+            name: "Suite",
+            offers: [
+              {
+                publicOfferKey: `pricing-offer.v2:${"a".repeat(64)}`,
+                currency: "EUR",
+                mealPlan: "breakfast",
+              },
+            ],
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/pricing-addons", (route) =>
+    route.fulfill({ json: { version: "public-pricing-addons.v1", addons: [] } }),
+  );
+}
+
+export function legacyPricingRequests(page: Page): string[] {
+  const urls: string[] = [];
+  page.on("request", (request) => {
+    if (/\/api\/booking-web\/hotels\/[^/]+\/(offers|calendar)(\?|$)/.test(request.url()))
+      urls.push(request.url());
+  });
+  return urls;
+}
 
 type MockBookingApisOptions = {
   arrivalBounds?: { checkInUntil: string; checkOutFrom: string };
-  automaticPromotion?: { name: string; discountPercent: number };
   supportedQuoteParameters?: Partial<typeof publicHotelProfile.hotel.supportedQuoteParameters>;
   supportedLocales?: string[];
   supportedCurrencies?: string[];
@@ -333,12 +261,10 @@ type MockBookingApisOptions = {
     showLanguageSelector: boolean;
     showCurrencySelector: boolean;
   };
-  gardenAmenities?: string[];
   publicContacts?: typeof publicHotelProfile.hotel.publicContacts;
 };
 
 export async function mockBookingApis(page: Page, options: MockBookingApisOptions = {}) {
-  const gardenAmenities = options.gardenAmenities;
   const profile = {
     ...publicHotelProfile,
     hotel: {
@@ -370,19 +296,6 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
       },
     },
   };
-  const offersResponse =
-    gardenAmenities === undefined
-      ? publicOffers
-      : {
-          ...publicOffers,
-          quote: {
-            ...publicOffers.quote,
-            offers: publicOffers.quote.offers.map((offer) =>
-              offer.roomTypeId === "garden-room" ? { ...offer, amenities: gardenAmenities } : offer,
-            ),
-          },
-        };
-
   await page.route("**/api/events", async (route) => {
     await route.fulfill({ status: 204, body: "" });
   });
@@ -405,43 +318,11 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
     },
   );
 
-  await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/offers**`, async (route) => {
-    const response = options.automaticPromotion
-      ? {
-          ...offersResponse,
-          quote: {
-            ...offersResponse.quote,
-            offers: offersResponse.quote.offers.map((offer) => {
-              const discountAmount =
-                Math.round(offer.totals.roomTotal * options.automaticPromotion!.discountPercent) /
-                100;
-              return {
-                ...offer,
-                totals: {
-                  ...offer.totals,
-                  discounts: discountAmount,
-                  grandTotal: offer.totals.grandTotal - discountAmount,
-                  promotion: { ...options.automaticPromotion, discountAmount },
-                },
-              };
-            }),
-          },
-        }
-      : offersResponse;
-    await route.fulfill({ json: response });
-  });
-
-  await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/calendar**`, async (route) => {
-    await route.fulfill({
-      json: {
-        calendar: {
-          unavailableDates: [],
-          minStayByArrival: {},
-          maxStayByArrival: {},
-        },
-      },
-    });
-  });
+  for (const retired of ["offers", "calendar"]) {
+    await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/${retired}**`, (route) =>
+      route.fulfill(PRICING_RETIRED),
+    );
+  }
 
   await page.route(`**/api/hotels/${SEEDED_BOOKING_SLUG}`, async (route) => {
     await route.fulfill({ json: hotel });

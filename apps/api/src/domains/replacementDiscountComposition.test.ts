@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { composeReplacementDiscounts as compose } from "./replacementDiscountComposition.js";
+import { composeReplacementDiscounts } from "./replacementDiscountComposition.js";
+const compose = (input: unknown, currency = "EUR") => composeReplacementDiscounts(input, currency);
 const percent = (basisPoints: number) => ({ kind: "percentage", basisPoints });
 const fixed = (amountMinor: string) => ({ kind: "fixed", amountMinor });
 const room = (
@@ -29,6 +30,30 @@ describe("replacement Booking discount composition", () => {
       totalDiscountMinor: "2800",
       remainingRoomAndEligibleAddonMinor: "7200",
     });
+  });
+  it("rounds percentage discounts half-up to whole rupiah for IDR (VAY-2085)", () => {
+    // 10,005 rupiah: 10% leaves 9,004.5 and 15% leaves 8,504.25 rupiah before rounding.
+    const idr = { ...input(), rooms: [room("one", "1000500")], code: percent(1500) };
+    expect(compose(idr, "IDR")).toEqual({
+      version: "booking.discount-components.v1",
+      lastMinuteLines: [],
+      codeMinor: "150100",
+      totalDiscountMinor: "150100",
+      remainingRoomAndEligibleAddonMinor: "850400",
+    });
+    expect(compose({ ...idr, stacking: true }, "IDR")).toMatchObject({
+      lastMinuteLines: [{ selectionId: "one", amountMinor: "100000" }],
+      codeMinor: "135100",
+      remainingRoomAndEligibleAddonMinor: "765400",
+    });
+    expect(compose({ ...idr, stacking: true }, "USD")).toMatchObject({
+      lastMinuteLines: [{ selectionId: "one", amountMinor: "100050" }],
+      remainingRoomAndEligibleAddonMinor: "765383",
+    });
+    // A stray sub-rupiah base can round up past itself; the discount then stays at zero.
+    expect(
+      compose({ ...input(), rooms: [room("one", "60", percent(1))], code: null }, "IDR"),
+    ).toMatchObject({ lastMinuteLines: [], totalDiscountMinor: "0" });
   });
   it("gives last-minute the tie and selects a strictly better code once for the booking", () => {
     expect(compose({ ...input(), code: percent(1000) })).toMatchObject({

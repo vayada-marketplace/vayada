@@ -53,8 +53,13 @@ exit 0
     await rm(fakeBin, { recursive: true, force: true });
   });
 
-  function runStartup(migrationExitCode: number, migrationUrl?: string) {
+  function runStartup(
+    migrationExitCode: number,
+    migrationUrl?: string,
+    extraEnvironment: Record<string, string> = {},
+  ) {
     const safeEnvironment = { ...process.env };
+    delete safeEnvironment["NEXT_API_DATABASE_WAIT_SECONDS"];
     delete safeEnvironment["TARGET_DATABASE_URL"];
     delete safeEnvironment["TARGET_DATABASE_MIGRATION_URL"];
     delete safeEnvironment["AUTH_DATABASE_URL"];
@@ -70,6 +75,7 @@ exit 0
         FAKE_MIGRATION_EXIT_CODE: String(migrationExitCode),
         PATH: `${fakeBin}:${process.env["PATH"] ?? ""}`,
         START_NEXT_API_CALL_LOG: callLog,
+        ...extraEnvironment,
       },
     });
   }
@@ -79,7 +85,7 @@ exit 0
 
     expect(result.status, result.stderr).toBe(0);
     expect((await readFile(callLog, "utf8")).trim().split("\n")).toEqual([
-      "--workspace @vayada/backend-migration run target:migrate:dist -- --env production --git-sha 0123456789abcdef0123456789abcdef01234567|database_role=runtime",
+      "--workspace @vayada/backend-migration run target:migrate:dist -- --env production --git-sha 0123456789abcdef0123456789abcdef01234567 --wait-for-database-seconds 120|database_role=runtime",
       "node:dist/server.js|target_runtime=yes|auth_runtime=yes|migration=unset|local=unset",
     ]);
   });
@@ -89,9 +95,16 @@ exit 0
 
     expect(result.status, result.stderr).toBe(0);
     expect((await readFile(callLog, "utf8")).trim().split("\n")).toEqual([
-      "--workspace @vayada/backend-migration run target:migrate:dist -- --env production --git-sha 0123456789abcdef0123456789abcdef01234567|database_role=migration-owner",
+      "--workspace @vayada/backend-migration run target:migrate:dist -- --env production --git-sha 0123456789abcdef0123456789abcdef01234567 --wait-for-database-seconds 120|database_role=migration-owner",
       "node:dist/server.js|target_runtime=yes|auth_runtime=yes|migration=unset|local=unset",
     ]);
+  });
+
+  it("lets the task override the bounded database wait", async () => {
+    const result = runStartup(0, undefined, { NEXT_API_DATABASE_WAIT_SECONDS: "30" });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(await readFile(callLog, "utf8")).toContain("--wait-for-database-seconds 30|");
   });
 
   it("blocks API startup when the release migration fails", async () => {

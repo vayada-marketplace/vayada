@@ -70,6 +70,7 @@ it.each(["instant", "request"] as const)(
       lifecycleStatus: mode === "instant" ? "confirmed" : "pending_payment",
       hostResponseDeadlineAt:
         mode === "instant" ? null : new Date(f.now.getTime() + 86400000).toISOString(),
+      paymentDeadlineAt: null,
       occurredAt: f.now.toISOString(),
       inventoryReservation: f.bundle,
     });

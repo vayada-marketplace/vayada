@@ -4,11 +4,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   PLATFORM_MEDIA_CLEANUP_CONTRACT_VERSION,
+  PLATFORM_MEDIA_CLEANUP_MAX_ATTEMPTS,
   PLATFORM_MEDIA_CLEANUP_QUEUE,
   buildPlatformMediaCleanupJobKey,
   buildPlatformMediaCleanupKey,
   createPgPlatformMediaCleanupStore,
   distinctPlatformMediaStorageKeys,
+  platformMediaCleanupFailureLogEntries,
+  platformMediaCleanupRetry,
   runPlatformMediaCleanupJobs,
   type PlatformMediaCleanupAction,
   type PlatformMediaCleanupCandidate,
@@ -113,11 +116,6 @@ describe("platform media cleanup jobs", () => {
     expect(store.deadLetterEvents).toHaveLength(0);
     expect(store.storageDeletes).toEqual([
       {
-        kind: "prefix",
-        bucket: null,
-        key: "staging/00000000-0000-0000-0000-000000000101",
-      },
-      {
         kind: "object",
         bucket: "vayada-media-local",
         key: "public/properties/property_alpenrose/00000000-0000-0000-0000-000000000201/original_safe.jpg",
@@ -210,7 +208,6 @@ describe("platform media cleanup jobs", () => {
     const end = vi.spyOn(pg.Pool.prototype, "end").mockResolvedValue(undefined);
     const objectDeleter = {
       deleteObject: vi.fn(async () => undefined),
-      deletePrefix: vi.fn(async () => undefined),
     };
     const store = createPgPlatformMediaCleanupStore({
       connectionString: "postgresql://cleanup-race.invalid/vayada",
@@ -256,25 +253,30 @@ describe("platform media cleanup jobs", () => {
     }
   });
 
-  it("records failure visibility without deleting the candidate and without duplicate dead letters", async () => {
+  it("retries a failing item up to the attempt cap and dead-letters it once", async () => {
     const replaced = contractCase("replaced-public-image-deletes-after-request");
     const store = new MemoryPlatformMediaCleanupStore([replaced.candidate], {
       failResourceIds: [cleanupResourceId(replaced.candidate)],
     });
+    const failures: PlatformMediaCleanupFailureResult[] = [];
 
-    const firstRun = await runPlatformMediaCleanupJobs(store, {
-      now: new Date("2026-06-13T12:00:00.000Z"),
-      workerId: "worker_media_cleanup",
-      run: ["replacedPublicImages"],
-    });
-    const rerun = await runPlatformMediaCleanupJobs(store, {
-      now: new Date("2026-06-13T12:00:00.000Z"),
-      workerId: "worker_media_cleanup",
-      run: ["replacedPublicImages"],
-    });
+    for (let run = 0; run < PLATFORM_MEDIA_CLEANUP_MAX_ATTEMPTS; run += 1) {
+      const result = await runPlatformMediaCleanupJobs(store, {
+        now: new Date("2026-06-13T12:00:00.000Z"),
+        workerId: "worker_media_cleanup",
+        run: ["replacedPublicImages"],
+      });
+      expect(result).toMatchObject({ scanned: 1, applied: 0, failed: 1 });
+      failures.push(...result.runs[0]!.failures);
+    }
 
-    expect(firstRun).toMatchObject({ scanned: 1, applied: 0, failed: 1 });
-    expect(rerun).toMatchObject({ scanned: 1, applied: 0, failed: 1 });
+    expect(failures.map(({ attempt, deadLettered }) => ({ attempt, deadLettered }))).toEqual([
+      { attempt: 1, deadLettered: false },
+      { attempt: 2, deadLettered: false },
+      { attempt: 3, deadLettered: false },
+      { attempt: 4, deadLettered: false },
+      { attempt: 5, deadLettered: true },
+    ]);
     expect(store.media(replaced.candidate.mediaObjectId!)?.lifecycleStatus).toBe(
       "delete_requested",
     );
@@ -284,7 +286,7 @@ describe("platform media cleanup jobs", () => {
       jobType: replaced.expected.jobType,
       status: "dead_lettered",
     });
-    expect(store.jobAttempts).toHaveLength(1);
+    expect(store.jobAttempts).toHaveLength(PLATFORM_MEDIA_CLEANUP_MAX_ATTEMPTS);
     expect(store.jobAttempts[0]).toMatchObject({
       status: "failed",
       errorType: "Error",
@@ -295,6 +297,188 @@ describe("platform media cleanup jobs", () => {
       reasonCode: "media_storage_delete_failed",
       recoveryStatus: "open",
     });
+  });
+
+  it("backs off 15 minutes, 1 hour, 4 hours and 24 hours, then dead-letters", () => {
+    const now = new Date("2026-06-13T12:00:00.000Z");
+    const retries = [1, 2, 3, 4].map((attempt) => platformMediaCleanupRetry(attempt, now));
+
+    expect(retries.map(({ runAfter }) => (runAfter.getTime() - now.getTime()) / 60_000)).toEqual([
+      15, 60, 240, 1440,
+    ]);
+    expect(retries.every(({ deadLettered }) => !deadLettered)).toBe(true);
+    expect(platformMediaCleanupRetry(5, now)).toEqual({ deadLettered: true, runAfter: now });
+    expect(platformMediaCleanupRetry(6, now).deadLettered).toBe(true);
+  });
+
+  it("logs failed items by id, stage and code without the error message", async () => {
+    const replaced = contractCase("replaced-public-image-deletes-after-request");
+    const store = new MemoryPlatformMediaCleanupStore([replaced.candidate], {
+      failResourceIds: [cleanupResourceId(replaced.candidate)],
+    });
+
+    const result = await runPlatformMediaCleanupJobs(store, {
+      now: new Date("2026-06-13T12:00:00.000Z"),
+      run: ["replacedPublicImages"],
+    });
+    const entries = platformMediaCleanupFailureLogEntries(result);
+
+    expect(entries).toEqual([
+      {
+        id: cleanupResourceId(replaced.candidate),
+        action: "delete-replaced-public-image",
+        stage: "storage_delete",
+        code: "Error",
+        attempt: 1,
+        deadLettered: false,
+      },
+    ]);
+    expect(JSON.stringify(entries)).not.toContain("object storage delete failed");
+  });
+
+  it("expires an abandoned upload session without touching storage", async () => {
+    const uploadSessionId = "00000000-0000-0000-0000-000000000111";
+    const expiresAt = "2026-06-13T11:00:00.000Z";
+    const statements: string[] = [];
+    const query = vi.fn(async (statement: string) => {
+      statements.push(statement);
+      return { rows: [{ id: uploadSessionId, resourceId: uploadSessionId }] };
+    });
+    const connect = vi
+      .spyOn(pg.Pool.prototype, "connect")
+      .mockResolvedValue({ query, release: vi.fn() } as never);
+    const end = vi.spyOn(pg.Pool.prototype, "end").mockResolvedValue(undefined);
+    const objectDeleter = { deleteObject: vi.fn(async () => undefined) };
+    const store = createPgPlatformMediaCleanupStore({
+      connectionString: "postgresql://cleanup-staging.invalid/vayada",
+      objectDeleter,
+    });
+
+    try {
+      const result = await store.applyCleanupMutation(
+        {
+          uploadSessionId,
+          resourceProduct: "hotel_catalog",
+          resourceType: "property",
+          resourceId: uploadSessionId,
+          purpose: "property.logo",
+          visibility: "private",
+          lifecycleStatus: "signed",
+          stagingPrefix: `staging/${uploadSessionId}`,
+          expiresAt,
+        },
+        {
+          action: "abandoned-staging-upload",
+          runName: "abandonedStagingUploads",
+          jobType: "platform.media.cleanup.abandoned-staging-upload",
+          eventType: "platform_media.upload_session.expired",
+          auditAction: "platform_media.cleanup.abandoned_staging_upload",
+          deadlineOrWindow: expiresAt,
+        },
+        {
+          now: new Date("2026-06-13T12:00:00.000Z"),
+          correlationId: "cleanup-staging-regression",
+          workerId: "cleanup-test",
+        },
+      );
+
+      expect(result.applied).toBe(true);
+      expect(objectDeleter.deleteObject).not.toHaveBeenCalled();
+      expect(
+        statements.some((statement) => statement.includes("SET session_status = 'expired'")),
+      ).toBe(true);
+      expect(statements.at(-1)).toBe("COMMIT");
+    } finally {
+      await store.close();
+      connect.mockRestore();
+      end.mockRestore();
+    }
+  });
+
+  it.each([
+    {
+      name: "an S3 access denial",
+      error: Object.assign(new Error("User arn:aws:sts::1:assumed-role/x is not authorized"), {
+        name: "AccessDenied",
+      }),
+      failOn: "delete" as const,
+      reasonCode: "media_storage_delete_failed",
+      errorCode: "AccessDenied",
+    },
+    {
+      name: "a PostgreSQL permission error",
+      error: Object.assign(new Error("permission denied for table jobs"), { code: "42501" }),
+      failOn: "update" as const,
+      reasonCode: "media_cleanup_apply_failed",
+      errorCode: "42501",
+    },
+  ])("records a safe error code for $name", async ({ error, failOn, reasonCode, errorCode }) => {
+    const mediaObjectId = "00000000-0000-0000-0000-000000000305";
+    const retainedUntil = "2026-06-20T00:00:00.000Z";
+    const query = vi.fn(async (statement: string) => {
+      if (statement.includes("FROM platform.media_objects media")) {
+        return {
+          rows: [
+            {
+              bucket: "vayada-media-local",
+              storageKey: "private/chat/x.webp",
+              variantStorageKeys: [],
+            },
+          ],
+        };
+      }
+      if (failOn === "update" && statement.includes("SET lifecycle_status = 'deleted'"))
+        throw error;
+      return { rows: [{ id: mediaObjectId }] };
+    });
+    const connect = vi
+      .spyOn(pg.Pool.prototype, "connect")
+      .mockResolvedValue({ query, release: vi.fn() } as never);
+    const end = vi.spyOn(pg.Pool.prototype, "end").mockResolvedValue(undefined);
+    const store = createPgPlatformMediaCleanupStore({
+      connectionString: "postgresql://cleanup-codes.invalid/vayada",
+      objectDeleter: {
+        deleteObject: vi.fn(async () => {
+          if (failOn === "delete") throw error;
+        }),
+      },
+    });
+    const candidate: PlatformMediaCleanupCandidate = {
+      mediaObjectId,
+      resourceProduct: "marketplace",
+      resourceType: "collaboration",
+      resourceId: "collaboration_failing_cleanup",
+      purpose: "marketplace.collaboration_chat.attachment",
+      visibility: "private",
+      lifecycleStatus: "active",
+      bucket: "vayada-media-local",
+      storageKey: "private/chat/x.webp",
+      retainedUntil,
+    };
+    const mutation: PlatformMediaCleanupMutation = {
+      action: "delete-private-attachment-after-retention",
+      runName: "privateAttachmentRetention",
+      jobType: "platform.media.cleanup.private-attachment-retention",
+      eventType: "platform_media.private_attachment.deleted_after_retention",
+      auditAction: "platform_media.cleanup.private_attachment_deleted_after_retention",
+      deadlineOrWindow: retainedUntil,
+    };
+    const context = {
+      now: new Date(retainedUntil),
+      correlationId: "cleanup-codes",
+      workerId: "cleanup-test",
+    };
+
+    try {
+      const thrown = await store.applyCleanupMutation(candidate, mutation, context).catch((e) => e);
+      const failure = await store.recordCleanupFailure(candidate, mutation, thrown, context);
+
+      expect(failure).toMatchObject({ reasonCode, errorCode, attempt: 1, deadLettered: false });
+    } finally {
+      await store.close();
+      connect.mockRestore();
+      end.mockRestore();
+    }
   });
 
   it("uses the stable media cleanup key format", () => {
@@ -345,7 +529,8 @@ type FixtureJob = {
   jobKey: string;
   jobType: string;
   queueName: string;
-  status: "succeeded" | "dead_lettered";
+  status: "succeeded" | "failed" | "dead_lettered";
+  attemptsCount: number;
   payload: Record<string, unknown>;
 };
 
@@ -384,7 +569,7 @@ class MemoryPlatformMediaCleanupStore implements PlatformMediaCleanupStore {
     errorMessage: string;
   }> = [];
   readonly storageDeletes: Array<{
-    kind: "object" | "prefix";
+    kind: "object";
     bucket: string | null;
     key: string;
   }> = [];
@@ -504,13 +689,6 @@ class MemoryPlatformMediaCleanupStore implements PlatformMediaCleanupStore {
 
     if (mutation.action === "abandoned-staging-upload") {
       resource.lifecycleStatus = "expired";
-      if (resource.stagingPrefix) {
-        this.storageDeletes.push({
-          kind: "prefix",
-          bucket: resource.bucket ?? null,
-          key: resource.stagingPrefix,
-        });
-      }
     } else if (mutation.action === "cleanup-rollback-window-object") {
       resource.rollbackCleanupStatus = "completed";
       if (resource.rollbackStorageKey) {
@@ -545,6 +723,7 @@ class MemoryPlatformMediaCleanupStore implements PlatformMediaCleanupStore {
       jobType: mutation.jobType,
       queueName: PLATFORM_MEDIA_CLEANUP_QUEUE,
       status: "succeeded",
+      attemptsCount: 1,
       payload,
     });
     this.jobAttempts.push({ jobKey, attemptNumber: 1, status: "succeeded" });
@@ -561,7 +740,7 @@ class MemoryPlatformMediaCleanupStore implements PlatformMediaCleanupStore {
     candidate: PlatformMediaCleanupCandidate,
     mutation: PlatformMediaCleanupMutation,
     error: unknown,
-    _context: PlatformMediaCleanupContext,
+    context: PlatformMediaCleanupContext,
   ): Promise<PlatformMediaCleanupFailureResult> {
     const resourceId = cleanupResourceId(candidate);
     const cleanupKey = buildPlatformMediaCleanupKey({
@@ -575,22 +754,29 @@ class MemoryPlatformMediaCleanupStore implements PlatformMediaCleanupStore {
       deadlineOrWindow: mutation.deadlineOrWindow,
     });
     const errorInfo = error instanceof Error ? error : new Error(String(error));
-
-    if (!this.jobs.some((job) => job.jobKey === jobKey)) {
-      this.jobs.push({
+    let job = this.jobs.find((existing) => existing.jobKey === jobKey);
+    if (!job) {
+      job = {
         jobKey,
         jobType: mutation.jobType,
         queueName: PLATFORM_MEDIA_CLEANUP_QUEUE,
-        status: "dead_lettered",
-        payload: { action: mutation.action, resourceId },
-      });
-      this.jobAttempts.push({
-        jobKey,
-        attemptNumber: 1,
         status: "failed",
-        errorType: errorInfo.name,
-        errorMessage: errorInfo.message,
-      });
+        attemptsCount: 0,
+        payload: { action: mutation.action, resourceId },
+      };
+      this.jobs.push(job);
+    }
+    job.attemptsCount += 1;
+    const { deadLettered } = platformMediaCleanupRetry(job.attemptsCount, context.now);
+    job.status = deadLettered ? "dead_lettered" : "failed";
+    this.jobAttempts.push({
+      jobKey,
+      attemptNumber: job.attemptsCount,
+      status: "failed",
+      errorType: errorInfo.name,
+      errorMessage: errorInfo.message,
+    });
+    if (deadLettered) {
       this.deadLetterEvents.push({
         jobKey,
         reasonCode: "media_storage_delete_failed",
@@ -606,8 +792,10 @@ class MemoryPlatformMediaCleanupStore implements PlatformMediaCleanupStore {
       jobKey,
       reasonCode: "media_storage_delete_failed",
       errorType: errorInfo.name,
+      errorCode: errorInfo.name,
       errorMessage: errorInfo.message,
-      deadLettered: true,
+      attempt: job.attemptsCount,
+      deadLettered,
     };
   }
 }
