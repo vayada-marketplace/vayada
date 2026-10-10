@@ -26,6 +26,11 @@ import { createPgBookingAffiliateDestinationRepository } from "./domains/booking
 import { readAffiliateDestinationTrackingConfiguration } from "./domains/bookingAffiliateDestinationTrackingReadiness.js";
 import { readFinanceAffiliateCommercialConditions } from "./domains/financeAffiliateCommercialConditions.js";
 import { publishMarketplaceAffiliateTerms } from "./domains/marketplaceAffiliatePublication.js";
+import {
+  createPricingPublicationFreshnessAlert,
+  readPricingPublicationFreshness,
+  summarizePricingPublicationFreshness,
+} from "./domains/pricingPublicationFreshness.js";
 import { createAffiliatePublicationPrerequisites } from "./domains/marketplaceAffiliatePublicationPrerequisites.js";
 import { assertAffiliateCaptureRoleHasVisitReadCapabilities } from "./domains/affiliateCaptureRoleBoundary.js";
 import { createMarketplaceAffiliateVisit } from "./domains/marketplaceAffiliateVisit.js";
@@ -227,7 +232,10 @@ import {
 import { createPropertySetupFinanceStateProvider } from "./platform/propertySetupFinanceState.js";
 import { createPropertySetupReviewLifecycleStateProvider } from "./platform/propertySetupReviewLifecycleState.js";
 import { createPropertySetupRouteStateReadPort } from "./platform/propertySetupRouteState.js";
-import { runPlatformMediaCleanupJobs } from "./jobs/platformMediaCleanup.js";
+import {
+  platformMediaCleanupFailureLogEntries,
+  runPlatformMediaCleanupJobs,
+} from "./jobs/platformMediaCleanup.js";
 import { startPmsInboxAssignmentReconciliationWorker } from "./jobs/pmsInboxAssignmentReconciliation.js";
 import { startPmsInboxFollowUpReleaseWorker } from "./jobs/pmsInboxFollowUpRelease.js";
 import {
@@ -266,6 +274,10 @@ import {
   createPgPmsCalendarAutoOpenWorkerStore,
   runPmsCalendarAutoOpenWorkerOnce,
 } from "./jobs/pmsCalendarAutoOpenWorker.js";
+import {
+  createPgPmsCalendarAutoOpenSchedulerStore,
+  runPmsCalendarAutoOpenScheduler,
+} from "./jobs/pmsChannexScheduler.js";
 import { createPmsChannexManagementTargetState } from "./jobs/pmsChannexManagementTargetState.js";
 import {
   runFinanceSubscriptionNotificationJobs,
@@ -304,6 +316,7 @@ import {
   createXenditBankValidator,
 } from "./routes/finance.js";
 import { createPgPmsModuleActivationRepository } from "./routes/pmsModuleActivations.js";
+import { createPgPmsNavigationModuleRepository } from "./routes/pmsNavigationModules.js";
 import { createPgGuestReviewCommands } from "./domains/pmsGuestReviews.js";
 import { createChannexGuestReviews } from "./integrations/channexGuestReviews.js";
 import { createPgReviewReplyCommands } from "./domains/pmsReviewReplies.js";
@@ -504,7 +517,8 @@ const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   airbnbAlterations: airbnbAlterationRuntime?.adapter,
   externalChanges: externalBookingChanges,
   mixedRoomSelectionsEnabled: true,
-  replacementPricingAcceptanceAllowedSlugs: config.replacementPricingAcceptanceAllowedSlugs,
+  replacementPricingAcceptanceEnabled: config.replacementPricingAcceptanceEnabled,
+  replacementPricingCardAcceptanceEnabled: config.replacementPricingCardAcceptanceEnabled,
   bankTransfers: bankTransferBookings,
   connectionString: targetDatabaseUrl,
   inventoryReservationPort: createTargetPmsInventoryReservationPort(),
@@ -605,6 +619,9 @@ const pmsModuleActivationRepository = config.auth
   ? createPgPmsModuleActivationRepository({
       connectionString: targetDatabaseUrl,
     })
+  : undefined;
+const pmsNavigationModuleRepository = config.auth
+  ? createPgPmsNavigationModuleRepository({ connectionString: targetDatabaseUrl })
   : undefined;
 
 const stripeConnectProvider = config.stripeSubscriptions.secretKey
@@ -1142,6 +1159,7 @@ const propertySetupPmsRuntime = (() => {
     provider: createPropertySetupPmsStateProvider({
       owner,
       pricing: pmsPricingReadModel,
+      publishedPricing: pmsPricingReadModel,
       recurringPricing,
       mandatoryCharges,
       operatingCalendar,
@@ -1298,6 +1316,11 @@ const pmsCalendarAutoOpenWorkerStore = pmsOperatingCalendarRuntime
       propertyProfileEvidence: propertySetupPmsRuntime.propertyProfileEvidence,
     })
   : undefined;
+// VAY-2066: the producer for the worker above. It only enqueues auto-open jobs; no Channex calls.
+const pmsCalendarAutoOpenSchedulerStore =
+  pmsOperatingCalendarRuntime && config.pmsCalendarAutoOpenSchedulerEnabled
+    ? createPgPmsCalendarAutoOpenSchedulerStore({ connectionString: targetDatabaseUrl })
+    : undefined;
 const pmsGuestPolicySetupCommands =
   config.pmsOperationsSource === "target"
     ? {
@@ -1607,6 +1630,7 @@ const affiliateCaptureRuntime = affiliateCaptureConfig
   : undefined;
 const app = buildApp({
   airbnbImports: airbnbImportRuntime?.routes,
+  databaseHealth: postgresRuntime.healthCheck(targetDatabaseUrl),
   trustProxy: ["loopback", "linklocal", "uniquelocal"],
   auth: buildAuthOptions(config.auth),
   browserAllowedOrigins: config.authSession?.authAllowedOrigins ?? [],
@@ -1869,6 +1893,7 @@ const app = buildApp({
     ? { commandPort: pmsPhysicalRoomOperationalLabels }
     : undefined,
   pmsModuleActivationRepository,
+  pmsNavigationModuleRepository,
   ...hotelSetupOrdinaryOptions,
   financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
@@ -2590,7 +2615,11 @@ const runCalendarAutoOpen = () => {
     workerId: `pms-calendar-auto-open:${process.pid}`,
   })
     .then((result) => {
-      if (result.outcome === "dead_lettered") {
+      if (result.outcome === "succeeded") {
+        app.log.info(result, "PMS calendar auto-open job applied");
+      } else if (result.outcome === "retry_scheduled") {
+        app.log.warn(result, "PMS calendar auto-open job will be retried");
+      } else if (result.outcome === "dead_lettered") {
         app.log.error(result, "PMS calendar auto-open job was dead-lettered");
       }
     })
@@ -2608,6 +2637,137 @@ app.addHook("onClose", async () => {
   if (calendarAutoOpenTimer) clearInterval(calendarAutoOpenTimer);
   await activeCalendarAutoOpenRun;
   await pmsCalendarAutoOpenWorkerStore?.close?.();
+});
+
+let activeCalendarAutoOpenSchedule: Promise<void> | undefined;
+const runCalendarAutoOpenSchedule = () => {
+  if (!config.backgroundWorkersEnabled) return;
+  const store = pmsCalendarAutoOpenSchedulerStore;
+  if (!store || activeCalendarAutoOpenSchedule) return;
+  const startedAt = Date.now();
+  activeCalendarAutoOpenSchedule = store
+    .withRunLock(async (session) => {
+      const run = await runPmsCalendarAutoOpenScheduler(session, {
+        workerId: `pms-calendar-auto-open-scheduler:${process.pid}`,
+      });
+      // The counts only explain the run; failing to read them must not hide its result.
+      const stats = await session.readSelectionStats().catch(() => null);
+      return { run, stats };
+    })
+    .then((outcome) => {
+      if (!outcome.ran) {
+        app.log.info({ skippedLocked: true }, "PMS calendar auto-open scheduler run");
+        return;
+      }
+      const { run, stats } = outcome.value;
+      if (run.autoOpenFailures.length > 0) {
+        app.log.warn(
+          {
+            failures: run.autoOpenFailures.length,
+            failedProperties: run.autoOpenFailures.slice(0, 10),
+          },
+          "PMS calendar auto-open scheduler skipped properties",
+        );
+      }
+      app.log.info(
+        {
+          enabledSettings: stats?.enabledSettings ?? null,
+          pausedNotReady: stats?.pausedNotReady ?? null,
+          skippedUnverifiedLabels: stats?.skippedUnverifiedLabels ?? null,
+          enqueued: run.enqueued,
+          reused: run.reused,
+          failures: run.autoOpenFailures.length,
+          durationMs: Date.now() - startedAt,
+        },
+        "PMS calendar auto-open scheduler run",
+      );
+    })
+    .catch((error: unknown) =>
+      app.log.warn({ err: error }, "PMS calendar auto-open scheduler failed"),
+    )
+    .finally(() => {
+      activeCalendarAutoOpenSchedule = undefined;
+    });
+};
+// Hourly; the first run waits a minute so it stays out of startup and deploy health checks.
+const calendarAutoOpenScheduleTimer = pmsCalendarAutoOpenSchedulerStore
+  ? setInterval(runCalendarAutoOpenSchedule, config.pmsCalendarAutoOpenSchedulerIntervalMs)
+  : undefined;
+calendarAutoOpenScheduleTimer?.unref();
+const calendarAutoOpenScheduleStart = pmsCalendarAutoOpenSchedulerStore
+  ? setTimeout(runCalendarAutoOpenSchedule, 60_000)
+  : undefined;
+calendarAutoOpenScheduleStart?.unref();
+app.addHook("onClose", async () => {
+  if (calendarAutoOpenScheduleTimer) clearInterval(calendarAutoOpenScheduleTimer);
+  if (calendarAutoOpenScheduleStart) clearTimeout(calendarAutoOpenScheduleStart);
+  await activeCalendarAutoOpenSchedule;
+  await pmsCalendarAutoOpenSchedulerStore?.close();
+});
+
+// VAY-2088: nothing republishes a stale price list, and public offers fail closed until a
+// "Save prices". This read-only check (every transaction is rolled back) logs one line per run
+// and, with a recipient configured, emails it at most once a day while `problems` > 0.
+const pricingFreshnessPool =
+  config.backgroundWorkersEnabled &&
+  config.pmsOperationsSource === "target" &&
+  config.pricingPublicationFreshnessCheckEnabled
+    ? new pg.Pool({ connectionString: targetDatabaseUrl, connectionTimeoutMillis: 5_000, max: 1 })
+    : undefined;
+const pricingFreshnessAlert =
+  pricingFreshnessPool &&
+  config.pricingPublicationFreshnessAlertEmail &&
+  config.bookingEmailDelivery
+    ? createPricingPublicationFreshnessAlert({
+        to: config.pricingPublicationFreshnessAlertEmail,
+        delivery: createResendBookingEmailDelivery(config.bookingEmailDelivery),
+      })
+    : undefined;
+let activePricingFreshnessCheck: Promise<void> | undefined;
+const runPricingFreshnessCheck = () => {
+  if (!pricingFreshnessPool || activePricingFreshnessCheck) return;
+  const startedAt = Date.now();
+  activePricingFreshnessCheck = readPricingPublicationFreshness(pricingFreshnessPool)
+    .then(async (report) => {
+      const summary = summarizePricingPublicationFreshness(report);
+      const level = summary.problems > 0 ? "warn" : "info";
+      app.log[level](
+        { ...summary, durationMs: Date.now() - startedAt },
+        "Pricing publication freshness check",
+      );
+      // A failed send is retried on the next run; it does not fail the check.
+      await pricingFreshnessAlert?.(summary).then(
+        (sent) => {
+          if (sent)
+            app.log.info(
+              { problems: summary.problems },
+              "Pricing publication freshness alert sent",
+            );
+        },
+        (error: unknown) =>
+          app.log.warn({ err: error }, "Pricing publication freshness alert failed"),
+      );
+    })
+    .catch((error: unknown) =>
+      app.log.warn({ err: error }, "Pricing publication freshness check failed"),
+    )
+    .finally(() => {
+      activePricingFreshnessCheck = undefined;
+    });
+};
+const pricingFreshnessTimer = pricingFreshnessPool
+  ? setInterval(runPricingFreshnessCheck, config.pricingPublicationFreshnessIntervalMs)
+  : undefined;
+pricingFreshnessTimer?.unref();
+const pricingFreshnessStart = pricingFreshnessPool
+  ? setTimeout(runPricingFreshnessCheck, 60_000)
+  : undefined;
+pricingFreshnessStart?.unref();
+app.addHook("onClose", async () => {
+  if (pricingFreshnessTimer) clearInterval(pricingFreshnessTimer);
+  if (pricingFreshnessStart) clearTimeout(pricingFreshnessStart);
+  await activePricingFreshnessCheck;
+  await pricingFreshnessPool?.end();
 });
 
 let activeFinanceSubscriptionBatch: Promise<void> | undefined;
@@ -2919,8 +3079,18 @@ if (platformMediaRuntime) {
     if (activeCleanup) return;
     activeCleanup = runPlatformMediaCleanupJobs(platformMediaRuntime.cleanupStore)
       .then((result) => {
-        if (result.failed > 0) {
-          app.log.warn({ failed: result.failed }, "Platform media cleanup completed with failures");
+        const failures = platformMediaCleanupFailureLogEntries(result);
+        const deadLettered = failures.filter((failure) => failure.deadLettered);
+        const retrying = failures.filter((failure) => !failure.deadLettered);
+        // A dead-lettered item is never selected again, so each one warns exactly once.
+        if (deadLettered.length > 0) {
+          app.log.warn(
+            { failures: deadLettered },
+            "Platform media cleanup dead-lettered items after retries",
+          );
+        }
+        if (retrying.length > 0) {
+          app.log.info({ failures: retrying }, "Platform media cleanup will retry failed items");
         }
       })
       .catch((error: unknown) => {

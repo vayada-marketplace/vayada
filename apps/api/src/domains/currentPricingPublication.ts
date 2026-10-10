@@ -8,14 +8,14 @@ import { lockFinanceReplacementPricingReadiness } from "./financeReplacementPric
 import { lockFinanceReplacementPricingSource } from "./financeReplacementPricingSource.js";
 import { lockPmsPricingRoomScope } from "./pmsPricingRoomScope.js";
 import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
-import { lockBookingPricingAuthority } from "./bookingPricingAuthority.js";
+import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import { lockCurrentPmsPricingEntitlement } from "./replacementPricingAuthorization.js";
 import { lockReplacementChargeCoverage } from "./replacementChargeCoverage.js";
 import { readCurrentPricingSnapshot } from "./replacementPricingSnapshot.js";
 
 /** Internal owner evidence for authorized publication/readiness orchestration.
  * Caller supplies trusted organization/property scope and owns READ COMMITTED.
- * Requires current Vayada authority and owner evidence, not a public profile.
+ * Requires owner evidence (organization links and entitlement), not a public profile.
  * This does not grant guest access or establish room/calendar/checkout readiness. */
 export async function lockCurrentPricingPublication(
   client: PoolClient,
@@ -81,7 +81,6 @@ export async function lockCurrentPricingPublication(
         JSON.stringify({
           propertyId,
           organizationId: scope.organizationId,
-          authorityRevision: scope.authorityRevision,
           pricingRevision: stored.revision,
           room,
           terms: termsSource,
@@ -102,14 +101,8 @@ async function lockOwnerScope(
   if (!uuid(input.propertyId) || !uuid(input.organizationId)) return null;
   const propertyId = input.propertyId.toLowerCase(),
     organizationId = input.organizationId.toLowerCase();
-  // Inventory/authority before organization and owner sources, matching publication writers.
-  const authority = await lockBookingPricingAuthority(client, propertyId);
-  if (
-    authority.authority !== "vayada" ||
-    authority.organizationId !== organizationId ||
-    !authority.revision
-  )
-    return null;
+  // Inventory before organization and owner sources, matching publication writers.
+  await lockPmsInventoryMutationScope(client, propertyId);
   if (
     !(
       await client.query(
@@ -142,5 +135,5 @@ async function lockOwnerScope(
     !(await lockCurrentPmsPricingEntitlement(client, organizationId, propertyId))
   )
     return null;
-  return { propertyId, organizationId, authorityRevision: authority.revision };
+  return { propertyId, organizationId };
 }

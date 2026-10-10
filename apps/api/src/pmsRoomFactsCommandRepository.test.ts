@@ -795,6 +795,30 @@ function completedIdempotency(
 
 function expectedInboundForeignKeys(): InboundForeignKeyRow[] {
   return [
+    inbound(
+      "booking",
+      "room_last_minute_revisions",
+      "room_last_minute_revisions_room_type_id_property_id_fkey",
+      "pms.room_types",
+    ),
+    inbound(
+      "pms",
+      "channex_staging_catalog_references",
+      "fk_pms_staging_catalog_room_property",
+      "pms.room_types",
+    ),
+    inbound(
+      "pms",
+      "channex_offer_targets",
+      "channex_offer_targets_room_type_id_property_id_fkey",
+      "pms.room_types",
+    ),
+    inbound(
+      "pms",
+      "pricing_v2_rooms",
+      "pricing_v2_rooms_room_type_id_property_id_fkey",
+      "pms.room_types",
+    ),
     inbound("pms", "rooms", "fk_pms_rooms_room_type_property", "pms.room_types"),
     inbound("pms", "rate_plans", "fk_pms_rate_plans_room_type_property", "pms.room_types"),
     inbound("pms", "rate_rules", "fk_pms_rate_rules_room_type_property", "pms.room_types"),

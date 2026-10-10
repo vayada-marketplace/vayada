@@ -6,6 +6,12 @@ import type { QueryResult, QueryResultRow } from "pg";
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
 import type { StripeBookingPaymentIntent } from "./stripeBookingPayments.js";
 import { stripeAmountDecimal, stripeAmountMinor } from "./stripeMoney.js";
+import {
+  pricingCardPaymentProperty,
+  settlePricingCardPayment,
+} from "./pricingCardPaymentCompletion.js";
+
+type PricingQueryable = Parameters<typeof pricingCardPaymentProperty>[0];
 
 type SettlementExecutor = {
   query<T extends QueryResultRow = QueryResultRow>(
@@ -48,6 +54,11 @@ export async function authorizeStripeBookingPayment(
     occurredAt: Date;
   },
 ): Promise<"authorized" | "already_authorized" | "not_found"> {
+  // Replacement-pricing card bookings are instant only; nothing authorizes them for capture.
+  if (
+    await pricingCardPaymentProperty(client as unknown as PricingQueryable, input.paymentIntentId)
+  )
+    return "not_found";
   const selected = await client.query<StripePaymentBookingRow>(
     `SELECT
        payment.id::text AS "paymentId",
@@ -148,6 +159,17 @@ export async function settleStripeBookingPayment(
     sourceDomainEventId?: string | null;
   },
 ): Promise<"settled" | "already_settled" | "not_found"> {
+  // Replacement-pricing card bookings settle through their stored acceptance (revenue, PMS
+  // accepted-pricing job), never the legacy way. This function takes no row lock before the
+  // hand-off; the webhook calls it first. The expiry sweep handles these bookings itself
+  // (inventory lock first); the legacy confirm-authorization route locks the booking before
+  // calling here, which PostgreSQL resolves as a retryable deadlock if it races the guest.
+  const pricingProperty = await pricingCardPaymentProperty(
+    client as unknown as PricingQueryable,
+    input.paymentIntentId,
+  );
+  if (pricingProperty)
+    return settlePricingCardPayment(client as unknown as PricingQueryable, pricingProperty, input);
   const selected = await client.query<StripePaymentBookingRow>(
     `SELECT
        payment.id::text AS "paymentId",
@@ -516,12 +538,14 @@ export async function captureDirectNightlyRevenueEvidence(
     if (options.required) throw error;
     return;
   }
-  if (!roomTypeId || !fingerprint) {
+  // Clearing reverses the recorded rows, each under its own room type, so it needs no
+  // booked offer. Pricing-v2 bookings record their nights without one.
+  if ((!roomTypeId && !options.clear) || !fingerprint) {
     if (options.required) throw new Error("Booked room evidence is unavailable.");
     return;
   }
   await persistDirectNightlyRevenueProjection(client, booking, {
-    roomTypeId,
+    roomTypeId: roomTypeId ?? null,
     nights,
     fingerprint,
     recognizedOn: options.recognizedOn,
@@ -535,7 +559,8 @@ export async function persistDirectNightlyRevenueProjection(
   client: SettlementExecutor,
   booking: Pick<DirectRevenueBooking, "guestBookingId" | "propertyId">,
   projection: {
-    roomTypeId: string;
+    /** Default room type for nights without their own; null only when clearing (no nights). */
+    roomTypeId: string | null;
     nights: readonly {
       stayDate: string;
       grossRoomAmount: string;
