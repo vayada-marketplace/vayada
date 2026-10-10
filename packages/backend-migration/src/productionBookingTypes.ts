@@ -2,6 +2,7 @@ import type {
   IdentityMigrationBlocker,
   IdentitySourceRow,
 } from "./productionIdentityDisposition.js";
+import type { IdentityCohortScope } from "./productionIdentityCohortScope.js";
 
 export type BookingTargetRecord = {
   targetProduct: "booking" | "platform";
@@ -145,6 +146,8 @@ export type BookingBuildContext = {
   completedAt: string;
   rows: IdentitySourceRow[];
   target: ProductionBookingTargetState;
+  /** VAY-1362: the run's approved cohort; null or absent means no cohort. */
+  cohort?: IdentityCohortScope | null;
   blockers: IdentityMigrationBlocker[];
   quarantines: ProductionBookingQuarantine[];
   inferences: ProductionBookingInference[];

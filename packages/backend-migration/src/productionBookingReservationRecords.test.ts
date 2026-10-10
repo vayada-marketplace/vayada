@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { createProductionBookingContext } from "./productionBookingContext.js";
-import { buildBookingReservationRecords } from "./productionBookingReservationRecords.js";
+import {
+  buildBookingReservationRecords,
+  LEGACY_HOLD_EXPIRES_AT,
+} from "./productionBookingReservationRecords.js";
 import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
 
 const HOTEL = "13550000-0000-4000-8000-000000000011";
@@ -57,6 +60,32 @@ describe("production Booking reservation records", () => {
     const bookingRecord = buildBookingReservationRecords(context)[0]!;
     expect(bookingRecord.row["checkoutContextId"]).toBe(DRAFT);
     expect(bookingRecord.row["quoteSessionId"]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("holds pending bookings of hotels outside the cohort out of the lifecycle sweep", () => {
+    const metadata = (status: string, pmsHotelIds?: string[]) => {
+      const source = booking();
+      Object.assign(source.data, { status, payment_status: "unpaid" });
+      const context = createProductionBookingContext({
+        ...input([source]),
+        ...(pmsHotelIds
+          ? { cohort: { bookingHotelIds: [PROPERTY], pmsHotelIds, marketplaceHotelIds: [] } }
+          : {}),
+      });
+      const records = buildBookingReservationRecords(context);
+      expect(context.blockers).toEqual([]);
+      return records[0]!.row["bookingMetadata"] as Record<string, unknown>;
+    };
+    const hold = { expiresAt: LEGACY_HOLD_EXPIRES_AT, migrationHold: "outside_migration_cohort" };
+
+    expect(metadata("pending", [])).toMatchObject(hold);
+    // Pending in a wave hotel, any other status, or no cohort at all: no hold.
+    for (const kept of [
+      metadata("pending", [HOTEL]),
+      metadata("confirmed", []),
+      metadata("pending"),
+    ])
+      for (const key of Object.keys(hold)) expect(kept).not.toHaveProperty(key);
   });
 
   it("blocks unknown lifecycle states instead of guessing", () => {
