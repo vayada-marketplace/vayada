@@ -329,7 +329,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
   );
 
   it.each([false, true])(
-    "amends and cancels a handed-off direct PMS stay (linked=%s) without retaining historical capacity",
+    "refuses to move and then cancels a handed-off old-format direct PMS stay (linked=%s) without retaining capacity",
     async (linked) => {
       const f = await createFixture(admin, closeables, { capacity: 1, startingLimit: 1, linked });
       if (linked) {
@@ -357,17 +357,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
       );
       const port = createTargetPmsInventoryReservationPort();
       const pool = new pg.Pool({ connectionString: TEST_DATABASE_URL });
-      let failAfterAmendment = true;
       const actions = createBookingHostActions({
         pool,
         inventory: withPmsHostDateCredit(port),
-        guards: {
-          ...targetBookingHostActionGuards,
-          async completeDateEdit(client, input) {
-            await targetBookingHostActionGuards.completeDateEdit(client, input);
-            if (failAfterAmendment) throw new Error("Simulated post-amendment failure");
-          },
-        },
+        guards: targetBookingHostActionGuards,
         now: () => ACCEPTED_AT,
       });
       closeables.push(actions);
@@ -443,81 +436,36 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
         ).rows[0].lifecycle_state,
       ).toBe("handed_off");
       const scope = { propertyId: f.propertyId, bookingId, actorUserId: f.actorUserId };
-      const preview = await actions.preview(scope, {
-        action: "edit_dates",
-        reason: "Guest request",
-        checkIn: "2026-09-13",
-        checkOut: "2026-09-15",
+      // The checkout that priced bookings made before pricing v2 is retired, so their dates can't
+      // be repriced: the change is refused with a reason and nothing moves (VAY-2110). Pricing-v2
+      // date moves are covered in pricingInventoryAdoption.postgres.test.ts.
+      await expect(
+        actions.preview(scope, {
+          action: "edit_dates",
+          reason: "Guest request",
+          checkIn: "2026-09-13",
+          checkOut: "2026-09-15",
+        }),
+      ).rejects.toMatchObject({
+        code: "inventory_unavailable",
+        message: "The dates of this booking can't be changed online. Cancel and rebook it instead.",
       });
-      expect(preview.impact.cancellationPolicy).toMatchObject({
-        previousDeadline: "2026-09-05",
-        newDeadline: "2026-09-06",
-      });
-      await expect(actions.apply(scope, preview.previewId, "host-edit")).rejects.toThrow(
-        "Simulated post-amendment failure",
-      );
       expect(
         (
           await admin.query(
-            `SELECT check_in::text,room_id::text FROM pms.operational_booking_assignments WHERE guest_booking_id=$1`,
+            `SELECT check_in::text,room_id::text,assignment_status FROM pms.operational_booking_assignments WHERE guest_booking_id=$1`,
             [bookingId],
           )
         ).rows[0],
-      ).toEqual({ check_in: "2026-09-12", room_id: roomId });
+      ).toEqual({ check_in: "2026-09-12", room_id: roomId, assignment_status: "pending" });
       expect(
         (
           await admin.query(
-            `SELECT count(*)::int AS count FROM platform.outbox_events WHERE property_id=$1 AND payload->>'triggerRefId'=$2`,
-            [f.propertyId, preview.previewId],
+            `SELECT assigned_count FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2 ORDER BY stay_date`,
+            [f.propertyId, f.roomTypeId],
           )
-        ).rows[0].count,
-      ).toBe(0);
-      failAfterAmendment = false;
-      await actions.apply(scope, preview.previewId, "host-edit");
-      const effects = await admin.query(
-        `SELECT destination,payload->'dateRange' AS range FROM platform.outbox_events WHERE property_id=$1 AND payload->>'triggerRefId'=$2`,
-        [f.propertyId, preview.previewId],
-      );
-      for (const destination of [
-        "pms.channel-manager",
-        "distribution.public-bookability",
-        "pms.calendar-projection",
-      ]) {
-        expect(effects.rows).toContainEqual({
-          destination,
-          range: { from: "2026-09-12", to: "2026-09-13" },
-        });
-      }
-      if (linked)
-        expect((await linkedState(admin, f.propertyId, f.linkedRoomTypeId!)).available).toEqual([
-          1, 0, 0, 1,
-        ]);
-
-      const days = await admin.query(
-        `SELECT stay_date::text,assigned_count FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2 ORDER BY stay_date`,
-        [f.propertyId, f.roomTypeId],
-      );
-      expect(days.rows.map((row) => row.assigned_count)).toEqual([0, 1, 1, 0]);
-      expect(
-        (
-          await admin.query(
-            `SELECT count(*)::int AS count FROM pms.active_inventory_reservation_receipts WHERE property_id=$1`,
-            [f.propertyId],
-          )
-        ).rows[0].count,
-      ).toBe(1);
-      expect(
-        (
-          await admin.query(
-            `SELECT check_in::text,check_out::text,assignment_status FROM pms.operational_booking_assignments WHERE guest_booking_id=$1`,
-            [bookingId],
-          )
-        ).rows[0],
-      ).toMatchObject({
-        check_in: "2026-09-13",
-        check_out: "2026-09-15",
-        assignment_status: "pending",
-      });
+        ).rows.map((row) => row.assigned_count),
+      ).toEqual([1, 1, 0, 0]);
       const cancellation = await actions.preview(scope, {
         action: "cancel",
         reason: "Host unavailable",
@@ -539,6 +487,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
           )
         ).rows[0].assignment_status,
       ).toBe("canceled");
+      if (linked)
+        expect((await linkedState(admin, f.propertyId, f.linkedRoomTypeId!)).available).toEqual([
+          1, 1, 1, 1,
+        ]);
     },
   );
 

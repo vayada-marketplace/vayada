@@ -1002,10 +1002,17 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             },
           };
         };
+        let failAfterMove = true;
         const actions = createBookingHostActions({
           pool: nested as unknown as pg.Pool,
           inventory: createTargetPmsInventoryReservationPort(),
-          guards: targetBookingHostActionGuards,
+          guards: {
+            ...targetBookingHostActionGuards,
+            async completeDateEdit(client, input) {
+              await targetBookingHostActionGuards.completeDateEdit(client, input);
+              if (failAfterMove) throw new Error("Simulated failure after the move");
+            },
+          },
           now: () => new Date("2026-09-21T08:00:00Z"),
           repriceStay: repriceStay as never,
           // Real holds through the inventory port: this fixture's synthetic calendar isn't the
@@ -1076,6 +1083,33 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         // A preview proves the new nights can be held and keeps nothing.
         expect(await holds()).toEqual(heldBefore);
         expect(await occupied()).toEqual(occupiedBefore);
+        const effects = async () =>
+          (
+            await db.query(
+              `SELECT destination,resource_id AS room,payload->'dateRange' AS range
+               FROM platform.outbox_events WHERE property_id=$1 AND payload->>'triggerRefId'=$2`,
+              [propertyId, hostPreview.previewId],
+            )
+          ).rows;
+        const unmoved = async () =>
+          (
+            await db.query(
+              `SELECT check_in::text AS "checkIn",edit_revision AS revision,
+                 (SELECT count(*)::int FROM booking.pricing_acceptance_amendments
+                   WHERE guest_booking_id=$1) AS amendments
+               FROM booking.guest_bookings WHERE id=$1`,
+              [bookingId],
+            )
+          ).rows[0];
+        // A failure after the stays moved undoes the whole change.
+        await expect(
+          actions.apply(hostScope, hostPreview.previewId, "host-date-change"),
+        ).rejects.toThrow("Simulated failure after the move");
+        expect(await holds()).toEqual(heldBefore);
+        expect(await occupied()).toEqual(occupiedBefore);
+        expect(await effects()).toEqual([]);
+        expect(await unmoved()).toEqual({ checkIn: "2026-10-01", revision: 0, amendments: 0 });
+        failAfterMove = false;
         await expect(
           actions.apply(hostScope, hostPreview.previewId, "host-date-change"),
         ).resolves.toEqual({ bookingId, lifecycleStatus: "confirmed" });
@@ -1138,6 +1172,21 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           [bookingId],
         );
         expect(events.rows).toEqual([{ n: 1 }]);
+        // The channel manager, public bookability and calendar hear about the freed and the new
+        // nights of each room type.
+        const changed = await effects();
+        expect(changed).toHaveLength(3 * types.length * 2);
+        for (const destination of [
+          "pms.channel-manager",
+          "distribution.public-bookability",
+          "pms.calendar-projection",
+        ])
+          for (const room of types)
+            for (const range of [
+              { from: "2026-10-01", to: "2026-10-02" },
+              { from: amendedStay.checkIn, to: amendedStay.checkIn },
+            ])
+              expect(changed).toContainEqual({ destination, room, range });
       } else if (scenario === "repository-stay-cancel-host-reject") {
         // A v2 request the PMS never adopted: rejecting it releases the hold, with no handoff.
         await db.query(
