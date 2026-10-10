@@ -30,11 +30,12 @@ const owner = (resourceId: string, organizationId = ORG) =>
     link(organizationId, "pms:pms_hotel", resourceId, "operator"),
   ] as CatalogOwnerLink[];
 const target = { activeOrganizationIds: [ORG, OTHER], links: [], entitlements: [] };
-const stored = (resourceId: string) => ({
+const stored = (resourceId: string | null, status = "active", effective = true) => ({
   organizationId: ORG,
   entitlementKey: "property-management",
   resourceId,
-  status: "active",
+  status,
+  effective,
 });
 const native = (organizationId: string, relationship: string) =>
   ["hotel_catalog:property", "pms:pms_property"].map((type) =>
@@ -101,5 +102,35 @@ describe("cohort property access (VAY-1362)", () => {
         message: `Cohort property resolves to ${count} active hotel organizations, not one`,
       }),
     ]);
+  });
+
+  it.each([
+    [
+      "a desired link stored suspended",
+      native(ORG, "owner").map((row) => ({ ...row, status: "suspended" })),
+      [],
+    ],
+    ["another organization's active link", native(OTHER, "owner").slice(1), []],
+    ["an active operator link beside the owner link", native(ORG, "operator").slice(0, 1), []],
+    ["a suspended organization-wide PMS grant", [], [stored(null, "suspended")]],
+    ["its entitlement stored expired", [], [stored(P, "active", false)]],
+  ])("blocks a cohort property with %s", (_case, links, entitlements) => {
+    const plan = planCatalogPropertyAccess([group(P)], owner(P), {
+      ...target,
+      links,
+      entitlements,
+    });
+
+    expect(plan.pending).toEqual({ links: [], entitlements: [] });
+    expect(plan.blockers.map((row) => row.code)).toEqual(["COHORT_PROPERTY_ACCESS_CONFLICT"]);
+  });
+
+  it("ignores an organization-wide suspension that has ended", () => {
+    const plan = planCatalogPropertyAccess([group(P)], owner(P), {
+      ...target,
+      entitlements: [stored(null, "suspended", false)],
+    });
+
+    expect(plan.blockers).toEqual([]);
   });
 });
