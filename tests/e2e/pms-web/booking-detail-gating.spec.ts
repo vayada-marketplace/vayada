@@ -333,8 +333,10 @@ test("gates legacy booking writes while keeping supported hotel actions active",
   await expect(page.getByText("Netherlands", { exact: true })).toBeVisible();
   await expect(nationalityError).toHaveCount(0);
   await expect(page.getByText("Needs review")).toHaveCount(0);
-  // Like modify, the legacy cancel button is manual-only (VAY-1279); direct stays cancel via host actions.
-  await expect(page.getByRole("button", { name: "Cancellation unavailable" })).toHaveCount(0);
+  // Like modify, the legacy cancel button is manual-only (VAY-1279); direct stays use host actions.
+  await expect(page.getByRole("button", { name: "Cancel Booking", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Edit stay dates" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancel booking", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Check in guest" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Add note" })).toBeEnabled();
   await expect(page.getByText("Guest prefers a quiet room.")).toBeVisible();

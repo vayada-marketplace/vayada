@@ -235,7 +235,7 @@ export async function mockPmsWebAuthenticatedSession(
   }, propertyId);
 }
 
-// Every permission pms-web gates on, so an owner sees the whole product.
+// Every permission key pms-web checks, as a hotel_owner holds them, so the owner sees the whole product.
 export const PMS_WEB_OWNER_PERMISSIONS = [
   "booking.addons.manage",
   "booking.addons.read",
@@ -249,11 +249,7 @@ export const PMS_WEB_OWNER_PERMISSIONS = [
   "booking.settings.manage",
   "booking.settings.read",
   "finance.billing.manage",
-  "finance.expense.receipt",
   "identity.staff.manage",
-  "pms.assignment.assign",
-  "pms.assignment.move",
-  "pms.assignment.unassign",
   "pms.calendar.manage",
   "pms.calendar.read",
   "pms.channel_manager.read",
@@ -265,17 +261,12 @@ export const PMS_WEB_OWNER_PERMISSIONS = [
   "pms.guest_contact.read",
   "pms.inbox.read",
   "pms.inbox.reply",
-  "pms.messaging.attachment",
-  "pms.note.create",
-  "pms.note.delete",
-  "pms.note.update",
   "pms.operations.manage",
   "pms.operations.read",
   "pms.reservation.cancel",
   "pms.reservation.read",
   "pms.reservation.update",
   "pms.room_status.read",
-  "pms.room_type.media",
   "pms.rooms_rates.manage",
   "pms.rooms_rates.read",
   "pms.settings.manage",
@@ -295,9 +286,11 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
       },
     }),
   );
-  await page.context().route("**/api/finance/properties/*/financials/access", (route) =>
-    route.fulfill({ status: 204 }),
-  );
+  await page
+    .context()
+    .route("**/api/finance/properties/*/financials/access", (route) =>
+      route.fulfill({ status: 204 }),
+    );
 
   await page.route("**/api/pms/properties/*/reservations/*/no-show-report", (route) =>
     route.fulfill({
