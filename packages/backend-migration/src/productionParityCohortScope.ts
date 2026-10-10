@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type pg from "pg";
 
+import { LEGACY_HOLD_EXPIRES_AT } from "./productionBookingReservationRecords.js";
 import { readProductionMigrationCohort } from "./productionMigrationCohort.js";
 import type { ProductionParityFinding } from "./productionParity.js";
 import {
@@ -54,6 +55,8 @@ const MESSAGES = {
     "A property outside the cohort can take payments or has an enabled account",
   actionablePayout:
     "A property outside the cohort has a pending, scheduled, processing or failed payout",
+  pendingBookingNotHeld:
+    "A property outside the cohort has a pending booking whose deadline the lifecycle sweep can reach (no migration hold)",
 } as const;
 export type CohortScopeCategory = keyof typeof MESSAGES;
 export const COHORT_SCOPE_CATEGORIES = Object.keys(MESSAGES) as CohortScopeCategory[];
@@ -306,6 +309,16 @@ const SCOPE_VIOLATION_QUERY = `${SCOPE_CTES}
       JOIN outside
         ON outside.property_id IN (payout.property_id, payout.related_property_id)
      WHERE payout.payout_status IN ('pending', 'scheduled', 'processing', 'failed')
+    -- P18: the deadline the next-api lifecycle sweep reads (first of these keys) must be the
+    -- import's never-due hold, or the sweep expires or cancels a booking legacy still serves.
+    UNION ALL SELECT 'pendingBookingNotHeld', booking.property_id::text
+      FROM booking.guest_bookings booking
+      JOIN outside USING (property_id)
+     WHERE booking.lifecycle_status = 'pending_payment'
+       AND COALESCE(booking.booking_metadata ->> 'acceptedPaymentDeadlineAt',
+                    booking.booking_metadata ->> 'hostResponseDeadlineAt',
+                    booking.booking_metadata ->> 'pendingExpiresAt',
+                    booking.booking_metadata ->> 'expiresAt') IS DISTINCT FROM '${LEGACY_HOLD_EXPIRES_AT}'
   ) AS violation
   ORDER BY category, "subjectId"`;
 

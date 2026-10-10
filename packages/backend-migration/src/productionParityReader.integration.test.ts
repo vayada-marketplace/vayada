@@ -9,6 +9,7 @@ import {
   withProductionParityTargetWriteFreeze,
   type ProductionParityConfig,
 } from "./productionParity.js";
+import { LEGACY_HOLD_EXPIRES_AT } from "./productionBookingReservationRecords.js";
 import {
   parseProductionMigrationCohort,
   writeProductionMigrationCohort,
@@ -637,6 +638,7 @@ describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
         { category: "connectedChannel", subjectId: OUT_HOTEL_ID },
         { category: "enabledProviderAccount", subjectId: OUT_HOTEL_ID },
         { category: "marketplaceListing", subjectId: OUT_HOTEL_ID },
+        { category: "pendingBookingNotHeld", subjectId: OUT_HOTEL_ID },
         { category: "profileNotPrivate", subjectId: OUT_HOTEL_ID },
         { category: "publicAddons", subjectId: OUT_HOTEL_ID },
         { category: "publicMedia", subjectId: OUT_HOTEL_ID },
@@ -1173,6 +1175,19 @@ async function insertOutsideRows(client: pg.Client, live: boolean): Promise<void
       VALUES ($1, 1, $2, 'rolling', 18)`,
       [out, live],
     ],
+    [
+      `INSERT INTO booking.guest_bookings
+        (property_id, public_reference, lifecycle_status, check_in, check_out, currency,
+         booking_metadata)
+      VALUES ($1, 'PARITY-COHORT-OUT-PENDING', 'pending_payment', '2026-11-01', '2026-11-03',
+              'EUR', $2::jsonb)`,
+      [
+        out,
+        live
+          ? {}
+          : { expiresAt: LEGACY_HOLD_EXPIRES_AT, migrationHold: "outside_migration_cohort" },
+      ],
+    ],
   ];
   for (const [sql, params] of statements) await client.query(sql, params);
 }
@@ -1222,6 +1237,7 @@ async function cleanupCohort(client: pg.Client): Promise<void> {
     "pms.room_types",
     "marketplace.marketplace_offers",
     "marketplace.marketplace_hotel_profiles",
+    "booking.guest_bookings",
     "booking.addon_definitions",
     "booking.promo_definitions",
     "hotel_catalog.property_media",

@@ -694,6 +694,7 @@ jobs:
           src/productionPmsCohortModules.test.ts
           src/productionPmsChannelRecords.test.ts
           src/productionParityCohortScope.test.ts
+          src/productionBookingReservationRecords.test.ts
           src/productionCutover.integration.test.ts
           src/productionMigrationCohort.integration.test.ts
           src/productionFinanceTargetIo.integration.test.ts
@@ -759,7 +760,7 @@ jobs:
             await client.end();
           '
           npm --workspace @vayada/backend-migration run target:migrate -- --env local
-          npm --workspace vayada-api run test -- --no-file-parallelism src/routes/pendingBookingEdits.integration.test.ts
+          npm --workspace vayada-api run test -- --no-file-parallelism src/routes/pendingBookingEdits.integration.test.ts src/jobs/bookingLifecycleLegacyHold.integration.test.ts
 
       - name: Verify removed pricing boundaries
         if: matrix.shard == 'pms'

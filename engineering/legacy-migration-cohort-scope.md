@@ -113,6 +113,13 @@ platform.production_migration_cohorts(
     on legacy, and finishes payouts it already started for a migrated hotel.
   - Channex adoption ignores `outside_migration_cohort` quarantine. It no longer
     treats it as a warning that blocks all adoption.
+  - Pending (`pending_payment`) bookings of non-cohort hotels are still legacy's (P18). The
+    next-api lifecycle sweep expires a pending booking at its first deadline key
+    (`acceptedPaymentDeadlineAt`, `hostResponseDeadlineAt`, `pendingExpiresAt`, `expiresAt`)
+    and cancels an unpaid one without a deadline 30 minutes after creation, with emails. The
+    import gives them the never-due `expiresAt = 9999-12-31T23:59:59.999Z` and
+    `migrationHold = 'outside_migration_cohort'`, so neither path takes them; nothing else reads
+    `expiresAt` on a booking. A later wave refreshes them from its own source run.
 
 ## Setup completeness
 
@@ -306,6 +313,8 @@ marker). The later-wave path must exempt earlier waves first.
   - an enabled provider account
   - public media, offers or add-ons
   - a verified domain
+  - a pending booking whose first deadline key is not the never-due hold
+    (`pendingBookingNotHeld`)
 - It also fails when a cohort property is unexpectedly quarantined, or lacks
   exactly one active hotel organization holding both native links with an
   active, unsuspended PMS entitlement.

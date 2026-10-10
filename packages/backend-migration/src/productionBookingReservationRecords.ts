@@ -2,6 +2,7 @@ import { importedNationalityMap } from "./importedNationality.js";
 import { propertyFor } from "./productionBookingContext.js";
 import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
 import type { BookingBuildContext, BookingTargetRecord } from "./productionBookingTypes.js";
+import { outsideCohortSource } from "./productionMigrationCohort.js";
 import {
   bookingLifecycle,
   bookingPayment,
@@ -18,6 +19,9 @@ import {
   sourceId,
   uuid,
 } from "./productionBookingValues.js";
+
+/** VAY-1362 P18: the deadline the lifecycle sweep reads last; far future means never due. */
+export const LEGACY_HOLD_EXPIRES_AT = "9999-12-31T23:59:59.999Z";
 
 export function buildBookingReservationRecords(
   context: BookingBuildContext,
@@ -96,7 +100,17 @@ function reservation(
     totalAmount,
     balanceAmount,
     cancellationReason: lifecycleStatus === "canceled" ? "legacy_canceled" : null,
-    bookingMetadata: bookingMetadata(context, data, billingPlanSnapshot),
+    bookingMetadata: {
+      ...bookingMetadata(context, data, billingPlanSnapshot),
+      // VAY-1362 P18: a pending booking of a hotel outside the cohort is still legacy's. The
+      // next-api lifecycle sweep expires a pending booking at its deadline and cancels a stale
+      // unpaid one only without a deadline, so a never-due deadline keeps it out of both (and out
+      // of their emails) until a later wave refreshes it.
+      ...(lifecycleStatus === "pending_payment" &&
+      outsideCohortSource(context.cohort, "pms", uuid(data["hotel_id"], "hotel_id"))
+        ? { expiresAt: LEGACY_HOLD_EXPIRES_AT, migrationHold: "outside_migration_cohort" }
+        : {}),
+    },
     expectedPaymentMethod: expectedPaymentMethod(data["payment_method"]),
     billingPlanSnapshot,
     commissionTermsSnapshot: commissionTerms(data),
