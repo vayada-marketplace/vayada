@@ -690,7 +690,7 @@ function notificationsForTransition(
   }
   if (
     transition.eventType === "guest_booking.canceled" &&
-    transition.reason === "property_cancellation"
+    (transition.reason === "property_cancellation" || transition.reason === "guest_request")
   ) {
     return [{ kind: "booking_canceled", role: "guest" }];
   }
