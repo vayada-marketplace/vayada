@@ -8,7 +8,7 @@ import {
   planPmsCohortCalendars,
 } from "./productionPmsCohortCalendarRecords.js";
 import { buildPmsCohortCoverageRecords } from "./productionPmsCohortCoverageRecords.js";
-import { buildPmsPricingSettingsRecords } from "./productionPmsCohortSetup.js";
+import { buildPmsPricingSettingsRecords, carriedCohortHotel } from "./productionPmsCohortSetup.js";
 import { createProductionPmsContext, propertyForHotel } from "./productionPmsContext.js";
 import { buildPmsGuestOperationsRecords } from "./productionPmsGuestOperationsRecords.js";
 import {
@@ -166,8 +166,20 @@ export function reconcileProductionPmsRecords(
       `${right.code}:${right.source}:${right.sourceId}`,
     ),
   );
+  const cohortPropertyIds = context.cohort
+    ? [
+        ...new Set(
+          (context.rowsByTable.get("hotels") ?? []).flatMap((hotel) => {
+            const hotelId = String(hotel.data["id"] ?? "").toLowerCase();
+            const propertyId = context.propertyByHotel.get(hotelId);
+            return propertyId && carriedCohortHotel(context, hotelId) ? [propertyId] : [];
+          }),
+        ),
+      ].sort()
+    : null;
   return {
     sourceRunId: context.sourceRunId,
+    ...(cohortPropertyIds ? { cohortPropertyIds } : {}),
     checksum: sha256({
       records: accepted.map((record) => ({
         key: recordKey(record),

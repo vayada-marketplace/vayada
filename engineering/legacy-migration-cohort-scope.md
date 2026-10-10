@@ -162,6 +162,18 @@ A hotel that misses an item stays `provisioning`. One without a calendar keeps l
 inventory days, which the native calendar save and materializer refuse to adopt, so fix its
 calendar prerequisites before the extraction rather than after the import.
 
+**Activation.** At the end of the PMS import, after every setup row is written and verified, a
+carried cohort property whose profile is `complete` and that meets every VAY-2066 readiness item
+(a–g, evaluated on the target) becomes `lifecycle_status = 'active'`, as the native lifecycle
+command activates one (lifecycle revision + 1, its idempotency key and audit row; `updated_at` is
+kept so the catalog reconciliation keeps comparing the migrated profile). A complete profile is
+the native one: `complete` with no completeness reasons. The carried cohort property rows are
+locked `FOR NO KEY UPDATE` before their setup rows are written (other properties' rows rely on
+the table locks), which serializes with the native settings writers and lifecycle commands. A
+hotel that misses an item stays `provisioning`; suspended or retired ones are never touched.
+Parity fails an active carried cohort property that is not ready and a ready one that is still
+`provisioning`, and always reports the counts and what the provisioning ones miss.
+
 ## Verification
 
 - A new parity invariant `COHORT_SCOPE_VERIFIED` fails (no-go) when any
@@ -175,7 +187,9 @@ calendar prerequisites before the extraction rather than after the import.
 - It also fails when a cohort property is unexpectedly quarantined, or lacks
   exactly one active hotel organization holding both native links with an
   active, unsuspended PMS entitlement.
-- It also fails when an active room type of a cohort property lacks native room facts.
+- It also fails when an active room type of a cohort property lacks native room facts, and when
+  an `active` cohort property misses a readiness item (a–g) or a complete profile. Its summary
+  counts the cohort's `active` and `provisioning` properties and what the provisioning ones miss.
 - It also checks calendar auto-open rows, given that a property without one is
   on by default (VAY-2066 R2). A cohort PMS property whose legacy auto-open is on
   needs a matching enabled row, one whose legacy auto-open is off needs none,

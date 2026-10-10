@@ -146,11 +146,19 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
 ### S — Smoke (~30 min)
 
 0. **Make each cohort hotel bookable.** The cutover writes the catalog, the
-   native property links and the property-scoped `property-management`
-   entitlement, but not the following:
-   - `hotel_catalog.properties.lifecycle_status` stays `provisioning`. Public
-     pricing and nearby search need `active`. How migrated hotels become
-     `active` is an open decision (see below).
+   native property links, the property-scoped `property-management`
+   entitlement and the setup rows native onboarding writes (pricing settings,
+   verified room labels, operating calendar, inventory coverage; see the cohort
+   contract). It then sets `lifecycle_status = 'active'` for each cohort hotel
+   whose profile is `complete` and that meets every VAY-2066 readiness item
+   (a–g). Parity reports how many cohort hotels are `active` and `provisioning`
+   and what the provisioning ones miss, and fails an active one that is not
+   ready or a ready one still provisioning. The PMS step does not rerun after a
+   fix: for a hotel fixed before reopen, re-read its readiness (parity, or
+   `COHORT_READINESS_SQL`) and, only when every item holds, activate it with the
+   platform admin lifecycle command (`PATCH /properties/:propertyId/status`,
+   `active`), which does not check a–g itself. Otherwise accept it staying
+   unbookable. The cutover does not write the following:
    - `profile_status` is `complete` only for a hotel that was live in legacy,
      has a public-eligible owner and has country, city and timezone. Fix any
      `incomplete` cohort profile before reopen, or accept it staying unbookable.
@@ -168,7 +176,9 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
    on-by-default (rolling 12), which keeps its dates opening as legacy "off" did.
    Hotels outside the cohort get an explicit disabled row. The VAY-2066 producer
    selects a hotel only once its rooms are verified and it has an operating
-   calendar and pricing settings, so check that it selects each cohort hotel.
+   calendar and pricing settings, which the import writes for every carried
+   cohort hotel that has their prerequisites; check that it selects each of
+   them.
 
    Then check that each cohort hotel passes the VAY-1543 public pricing rule:
    - exactly one active `hotel_group` organization holds both property links
@@ -232,6 +242,12 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
 - `target:cutover:abort` only marks the run aborted: imported rows stay in the
   target. They must stay unpublished, with no owner access. Defining that state
   (or a cleanup) is preparation work.
+- The PMS step has already set ready cohort hotels `active` (lifecycle revision
+  +1), and no native transition leads back to `provisioning`. Suspend each of
+  them with the platform admin lifecycle command (`suspended`), which also
+  withdraws their public bookability, before handing back. A retried go-day
+  does not touch suspended hotels and parity does not count them: reactivate
+  each one with the same command once its readiness holds again.
 - Hand the providers back in reverse order: undo apply 2, then turn the legacy
   scheduler, webhooks and manual syncs back on.
 - Lift the maintenance pages. Legacy remains the source of truth.
@@ -265,8 +281,7 @@ and legacy is not a fallback (decisions table).
   properties outside the cohort. The import writes none for them, so parity relies
   on the native writers being paused (Freeze step 3).
 - The rehearsal on an isolated restore of legacy plus a copy of the live target.
-- Open decision: how migrated cohort hotels become `lifecycle_status='active'`.
-  Options: the cutover sets it for complete cohort profiles, an operator step
-  sets it after smoke, or owners finish the hotel-setup Review step.
+- Decided: the cutover activates cohort hotels with a complete profile that meet
+  every readiness item (VAY-2066 a–g); the rest stay `provisioning`.
 - Open decision: legacy PMS module activations (for example financials) are
   not mapped to the runtime's property-scoped `module:*` entitlements.

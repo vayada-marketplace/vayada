@@ -4,6 +4,15 @@ import type pg from "pg";
 
 import { readProductionMigrationCohort } from "./productionMigrationCohort.js";
 import type { ProductionParityFinding } from "./productionParity.js";
+import {
+  summarizeCohortReadiness,
+  type CohortReadinessSummary,
+} from "./productionPmsCohortActivation.js";
+import {
+  readCohortReadiness,
+  readyForActivation,
+  type CohortReadiness,
+} from "./productionPmsCohortReadiness.js";
 
 // VAY-1362 COHORT_SCOPE_VERIFIED (engineering/legacy-migration-cohort-scope.md, "Verification").
 // Each violation category with the message its finding carries.
@@ -16,6 +25,10 @@ const MESSAGES = {
     "A cohort property's organization lacks an active, unsuspended PMS property entitlement",
   cohortAutoOpen:
     "A cohort property's auto-open row differs from its legacy choice (on: matching; off: none)",
+  cohortActiveNotReady:
+    "An active cohort property lacks a complete profile or a setup-completeness item (VAY-2066 a-g)",
+  cohortReadyNotActive:
+    "A provisioning cohort property meets every readiness item, so the import did not activate it",
   cohortRoomFacts:
     "A cohort property has an active room type without native room facts, so runtime room reads fail",
   profileNotPrivate: "A property outside the cohort has a non-private profile",
@@ -47,12 +60,15 @@ export type ProductionParityCohortScopeEvidence = {
   approvalProofSha256: string;
   cohortProperties: number;
   nonCohortProperties: number;
+  /** Carried cohort PMS properties by lifecycle and the readiness items they miss. */
+  readiness?: CohortReadinessSummary;
   violations: Array<{ category: CohortScopeCategory; subjectId: string }>;
 };
 
 export type ProductionParityCohortScopeSummary = {
   cohortProperties: number;
   nonCohortProperties: number;
+  readiness?: CohortReadinessSummary;
   violations: Record<CohortScopeCategory, number>;
 };
 
@@ -120,6 +136,13 @@ const SCOPE_COUNT_QUERY = `${SCOPE_CTES}
            JOIN hotel_catalog.properties property ON property.id = link.property_id
           WHERE link.inside)::text AS "cohortProperties",
          (SELECT count(*) FROM outside)::text AS "nonCohortProperties"`;
+
+// The carried cohort PMS properties the import activates (productionPmsCohortActivation).
+const CARRIED_QUERY = `${SCOPE_CTES}
+  SELECT DISTINCT link.property_id::text AS "propertyId" FROM legacy_link link
+   WHERE link.inside AND link.source_system = 'pms'
+     AND link.disposition IS DISTINCT FROM 'private_quarantine'
+   ORDER BY 1`;
 
 const SCOPE_VIOLATION_QUERY = `${SCOPE_CTES}
   SELECT DISTINCT category, subject_id::text AS "subjectId" FROM (
@@ -264,13 +287,35 @@ export async function readProductionParityCohortScope(
     SCOPE_VIOLATION_QUERY,
     [...params, sourceRunId],
   );
+  // VAY-1362 activation: a carried cohort property is active exactly when it is complete and meets
+  // a-g (suspended or retired ones aside).
+  const carried = await client.query<{ propertyId: string }>(CARRIED_QUERY, params);
+  const readiness = await readCohortReadiness(
+    client,
+    carried.rows.map((row) => row.propertyId),
+  );
+  const notReady = cohortActivationViolations(readiness);
   return {
     cohortSha256: cohort.cohortSha256,
     approvalProofSha256: cohort.approvalProofSha256,
     cohortProperties: Number(counts.rows[0]?.cohortProperties ?? 0),
     nonCohortProperties: Number(counts.rows[0]?.nonCohortProperties ?? 0),
-    violations: violations.rows,
+    readiness: summarizeCohortReadiness(readiness),
+    violations: [...violations.rows, ...notReady],
   };
+}
+
+/** Carried cohort properties whose lifecycle disagrees with their readiness. */
+export function cohortActivationViolations(
+  readiness: CohortReadiness[],
+): ProductionParityCohortScopeEvidence["violations"] {
+  return readiness.flatMap((row): ProductionParityCohortScopeEvidence["violations"] =>
+    row.lifecycleStatus === "active" && !readyForActivation(row)
+      ? [{ category: "cohortActiveNotReady" as const, subjectId: row.propertyId }]
+      : row.lifecycleStatus === "provisioning" && readyForActivation(row)
+        ? [{ category: "cohortReadyNotActive" as const, subjectId: row.propertyId }]
+        : [],
+  );
 }
 
 /**
@@ -347,11 +392,26 @@ export function evaluateCohortScope(
         `${scope.cohortProperties} cohort, ${scope.nonCohortProperties} outside the cohort`,
       ),
     );
+  // Reported with or without violations: the go-day decision needs the counts either way.
+  if (scope.readiness)
+    findings.push(
+      finding(
+        "pass",
+        "hotel_catalog.properties",
+        "Carried cohort properties by lifecycle, and the readiness items provisioning ones miss",
+        "Active when complete and ready (VAY-2066 a-g)",
+        `${scope.readiness.active} active, ${scope.readiness.provisioning} provisioning; missing ` +
+          Object.entries(scope.readiness.missing)
+            .map(([criterion, count]) => `${criterion}=${count}`)
+            .join(" "),
+      ),
+    );
   return {
     findings,
     summary: {
       cohortProperties: scope.cohortProperties,
       nonCohortProperties: scope.nonCohortProperties,
+      ...(scope.readiness ? { readiness: scope.readiness } : {}),
       violations,
     },
   };
