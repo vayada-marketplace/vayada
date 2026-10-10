@@ -447,7 +447,11 @@ export async function activatePublishedChannexOffers(
         room && row.primaryOccupancy !== null
           ? planChannexOfferConfiguration(room, row.offerId, row.primaryOccupancy)
           : null;
-      if (plan?.kind === "planned" && isDeepStrictEqual(plan.configuration, row.configuration))
+      // Compared as JSON so an undefined optional plan key matches the bootstrap's JSONB equality.
+      if (
+        plan?.kind === "planned" &&
+        isDeepStrictEqual(JSON.parse(JSON.stringify(plan.configuration)), row.configuration)
+      )
         active++;
       else changed ??= "active_offer_configuration_changed";
     }
