@@ -76,7 +76,7 @@ test.describe("adaptive room authoring", () => {
     expect(owner.events.filter((event) => event === "units:label")).toHaveLength(5);
     expect(owner.events).toContain("media:assign");
     expect(owner.events).toContain("amenities:confirm-empty");
-    expect(owner.events.join(" ")).not.toMatch(/pricing|calendar/);
+    expect(owner.events.join(" ")).not.toMatch(/pricing|calendar|retired-room-route/);
     expect(routeState.reads).toBe(1);
     await assertHealthy();
   });
@@ -359,6 +359,16 @@ async function mockRoomOwnerApis(page: Page) {
   let lastDraftPayload: Record<string, unknown> | null = null;
   let lastDraftRoomId: string | null = null;
 
+  // The retired room-create route answers 503 in production; room setup must not call it.
+  await page.route(/\/api\/pms\/properties\/[^/]+\/room-types(?:\?|$)/, async (route) => {
+    if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+    events.push(`retired-room-route:${route.request().method()}`);
+    await route.fulfill({
+      status: 503,
+      headers: corsHeaders(route),
+      json: { code: "PRICING_UNAVAILABLE" },
+    });
+  });
   await page.route(/\/api\/pms\/properties\/[^/]+\/plan-limits$/, async (route) => {
     if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
     await route.fulfill({

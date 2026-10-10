@@ -44,10 +44,8 @@ vi.mock("./hotelPresentationClient", () => ({
 
 import {
   buildPaymentSettingsRequest,
-  buildRoomSetupRequest,
   hotelOperationsErrorMessage,
   hotelOperationsSetupApi,
-  hotelOperationsWriteMayHaveCommitted,
   isPropertyCurrencyConflict,
   isPublicationReady,
   isStripeReady,
@@ -162,64 +160,18 @@ describe("hotel operations setup client", () => {
     });
   });
 
-  it("refuses to POST a duplicate room type when only an inactive room type exists", async () => {
-    mocks.getStatus.mockResolvedValue(
-      roomSetupStatus("actionable", [
-        "missing_active_room_type",
-        "missing_non_retired_room",
-        "missing_active_rate_plan",
-        "missing_future_inventory",
-      ]),
-    );
-    mocks.get.mockResolvedValue({
-      items: [
-        {
-          roomTypeId: "inactive-room",
-          name: "Old room",
-          occupancyLimits: { total: 2 },
-          baseRate: { amountDecimal: "100.00", currency: "EUR" },
-          active: false,
-          rateRulesSummary: { minStayNights: 1 },
-          roomCount: 0,
-        },
-      ],
-    });
-
-    await expect(
-      hotelOperationsSetupApi.saveRoomSetup("property-1", {
-        name: "Duplicate room",
-        totalRooms: 1,
-        maxOccupancy: 2,
-        nightlyRate: 100,
-        currency: "EUR",
-      }),
-    ).resolves.toMatchObject({
-      status: "needs_recovery",
-      room: {
-        roomTypeId: "inactive-room",
-        active: false,
-      },
-    });
-    expect(mocks.post).not.toHaveBeenCalled();
-  });
-
-  it("does not create a duplicate when authoritative setup completed in another session", async () => {
+  it("reports setup complete when authoritative readiness completed in another session", async () => {
     mocks.getStatus.mockResolvedValue(roomSetupStatus("complete"));
     mocks.get.mockResolvedValue({ items: [] });
 
-    await expect(
-      hotelOperationsSetupApi.saveRoomSetup("property-1", {
-        name: "Duplicate suite",
-        totalRooms: 4,
-        maxOccupancy: 3,
-        nightlyRate: 190,
-        currency: "EUR",
-      }),
-    ).resolves.toEqual({ status: "complete", room: null });
+    await expect(hotelOperationsSetupApi.getRoomSetupState("property-1")).resolves.toEqual({
+      status: "complete",
+      room: null,
+    });
     expect(mocks.post).not.toHaveBeenCalled();
   });
 
-  it("blocks recovery instead of creating a duplicate for a partial active room setup", async () => {
+  it("asks for recovery instead of an empty setup for a partial active room setup", async () => {
     mocks.getStatus.mockResolvedValue(
       roomSetupStatus("actionable", ["missing_non_retired_room", "missing_future_inventory"]),
     );
@@ -237,15 +189,7 @@ describe("hotel operations setup client", () => {
       ],
     });
 
-    await expect(
-      hotelOperationsSetupApi.saveRoomSetup("property-1", {
-        name: "Duplicate suite",
-        totalRooms: 2,
-        maxOccupancy: 2,
-        nightlyRate: 150,
-        currency: "EUR",
-      }),
-    ).resolves.toMatchObject({
+    await expect(hotelOperationsSetupApi.getRoomSetupState("property-1")).resolves.toMatchObject({
       status: "needs_recovery",
       room: { roomTypeId: "active-room" },
       reasonCodes: ["missing_non_retired_room", "missing_future_inventory"],
@@ -259,15 +203,7 @@ describe("hotel operations setup client", () => {
     );
     mocks.get.mockResolvedValue({ items: [] });
 
-    await expect(
-      hotelOperationsSetupApi.saveRoomSetup("property-1", {
-        name: "Duplicate suite",
-        totalRooms: 2,
-        maxOccupancy: 2,
-        nightlyRate: 150,
-        currency: "EUR",
-      }),
-    ).resolves.toEqual({
+    await expect(hotelOperationsSetupApi.getRoomSetupState("property-1")).resolves.toEqual({
       status: "needs_recovery",
       room: null,
       reasonCodes: ["missing_non_retired_room", "missing_future_inventory"],
@@ -275,7 +211,7 @@ describe("hotel operations setup client", () => {
     expect(mocks.post).not.toHaveBeenCalled();
   });
 
-  it("blocks creation when an active type is missing but another room fact already exists", async () => {
+  it("asks for recovery when an active type is missing but another room fact already exists", async () => {
     mocks.getStatus.mockResolvedValue(
       roomSetupStatus("actionable", [
         "missing_active_room_type",
@@ -285,15 +221,7 @@ describe("hotel operations setup client", () => {
     );
     mocks.get.mockResolvedValue({ items: [] });
 
-    await expect(
-      hotelOperationsSetupApi.saveRoomSetup("property-1", {
-        name: "Conflicting room",
-        totalRooms: 2,
-        maxOccupancy: 2,
-        nightlyRate: 150,
-        currency: "EUR",
-      }),
-    ).resolves.toEqual({
+    await expect(hotelOperationsSetupApi.getRoomSetupState("property-1")).resolves.toEqual({
       status: "needs_recovery",
       room: null,
       reasonCodes: [
@@ -305,7 +233,7 @@ describe("hotel operations setup client", () => {
     expect(mocks.post).not.toHaveBeenCalled();
   });
 
-  it("creates the atomic room setup only when readiness is actionable and no active room exists", async () => {
+  it("reports an empty hotel only when readiness is actionable and no room type exists", async () => {
     mocks.getStatus.mockResolvedValue(
       roomSetupStatus("actionable", [
         "missing_active_room_type",
@@ -315,82 +243,11 @@ describe("hotel operations setup client", () => {
       ]),
     );
     mocks.get.mockResolvedValue({ items: [] });
-    mocks.post.mockResolvedValue({});
 
-    await expect(
-      hotelOperationsSetupApi.saveRoomSetup("property-1", {
-        name: "Double room",
-        totalRooms: 2,
-        maxOccupancy: 2,
-        nightlyRate: 150,
-        currency: "EUR",
-      }),
-    ).resolves.toEqual({ status: "created" });
-    expect(mocks.post).toHaveBeenCalledWith(
-      "/api/pms/properties/property-1/room-types",
-      expect.objectContaining({ name: "Double room", totalRooms: 2 }),
-    );
+    await expect(hotelOperationsSetupApi.getRoomSetupState("property-1")).resolves.toEqual({
+      status: "empty",
+    });
     expect(mocks.get).toHaveBeenCalledWith("/api/pms/properties/property-1/room-types", undefined);
-  });
-
-  it("adds another room type without reusing the initial-setup guard", async () => {
-    mocks.post.mockResolvedValue({});
-
-    await hotelOperationsSetupApi.addRoomSetup("property-1", {
-      name: "Pool Villa",
-      totalRooms: 3,
-      maxOccupancy: 4,
-      nightlyRate: 280,
-      currency: "IDR",
-    });
-
-    expect(mocks.get).not.toHaveBeenCalled();
-    expect(mocks.getStatus).not.toHaveBeenCalled();
-    expect(mocks.post).toHaveBeenCalledWith(
-      "/api/pms/properties/property-1/room-types",
-      expect.objectContaining({
-        initialSetupOnly: false,
-        name: "Pool Villa",
-        currency: "IDR",
-        seasons: [expect.objectContaining({ minStay: 1 })],
-      }),
-    );
-  });
-
-  it("builds an atomic room, rate, and inventory command with a stable retry key", () => {
-    const draft = {
-      name: "Double room",
-      totalRooms: 4,
-      maxOccupancy: 2,
-      nightlyRate: 189.5,
-      currency: "eur",
-    };
-
-    const first = buildRoomSetupRequest("property-1", draft);
-    const retry = buildRoomSetupRequest("property-1", { ...draft });
-
-    expect(first).toMatchObject({
-      onboardingSetup: true,
-      initialSetupOnly: true,
-      name: "Double room",
-      totalRooms: 4,
-      maxOccupancy: 2,
-      bathroomType: "private",
-      bathrooms: 1,
-      baseRate: "189.50",
-      currency: "EUR",
-      operatingPeriods: [{ from: "01-01", to: "12-31" }],
-      seasons: [
-        expect.objectContaining({
-          from: "01-01",
-          to: "12-31",
-          rate: "189.50",
-          minStay: 1,
-        }),
-      ],
-    });
-    expect(first.commandId).toBe(first.idempotencyKey);
-    expect(retry.commandId).toBe(first.commandId);
   });
 
   it("keeps target validation details out of the host-facing setup error", () => {
@@ -415,10 +272,7 @@ describe("hotel operations setup client", () => {
     ).toBe("The room type could not be saved.");
   });
 
-  it("distinguishes ambiguous room writes from definitive client rejections", () => {
-    expect(hotelOperationsWriteMayHaveCommitted(new TypeError("Failed to fetch"))).toBe(true);
-    expect(hotelOperationsWriteMayHaveCommitted(new ApiErrorResponse(503, {}))).toBe(true);
-    expect(hotelOperationsWriteMayHaveCommitted(new ApiErrorResponse(409, {}))).toBe(false);
+  it("recognises a property currency conflict", () => {
     expect(
       isPropertyCurrencyConflict(new ApiErrorResponse(409, { code: "property_currency_conflict" })),
     ).toBe(true);

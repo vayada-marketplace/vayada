@@ -16,7 +16,8 @@ export function SetupTaskFormRouter({
   onComplete,
   onBack,
   onDirty,
-}: SharedSetupTaskFormContext) {
+  onOpenRoomsAndRates,
+}: SharedSetupTaskFormContext & { onOpenRoomsAndRates: () => void | Promise<void> }) {
   if (task.taskId === "public_profile" || task.taskId === "creator_offer") {
     return (
       <MarketplaceSetupTaskForm
@@ -43,8 +44,11 @@ export function SetupTaskFormRouter({
       case "rooms_rates_availability":
         return (
           <RoomsRatesAvailabilityForm
-            {...props}
             key={`${propertyId}:${task.taskId}:${task.sourceRevision}`}
+            onBack={onBack}
+            onCompleted={onComplete}
+            onOpenRoomsAndRates={onOpenRoomsAndRates}
+            propertyId={propertyId}
             taskComplete={task.readiness === "complete"}
           />
         );

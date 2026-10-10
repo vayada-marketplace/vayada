@@ -45,6 +45,7 @@ import {
 const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_URL || "https://pms.vayada.com";
 const BOOKING_ADMIN_URL =
   process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || "https://admin.booking.vayada.com";
+const PMS_ROOMS_AND_RATES_PATH = "/rooms";
 const PROPERTY_LAUNCH_SETTINGS_API = {
   get: (propertyId: string, options?: RequestInit) =>
     hotelOperationsSetupApi.getPropertyLaunchSettings(propertyId, options?.signal ?? undefined),
@@ -359,7 +360,12 @@ export function SharedHotelSetupPage({
             : undefined
         }
         renderTaskForm={(context: SharedSetupTaskFormContext) => (
-          <SetupTaskFormRouter {...context} />
+          <SetupTaskFormRouter
+            {...context}
+            onOpenRoomsAndRates={() =>
+              handoffToProduct("pms", PMS_ROOMS_AND_RATES_PATH, context.propertyId)
+            }
+          />
         )}
         onExit={handleExit}
       />

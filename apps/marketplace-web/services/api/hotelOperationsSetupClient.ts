@@ -12,14 +12,6 @@ import { sharedHotelSetupApi } from "./sharedHotelSetupClient";
 import { hotelPresentationClient } from "./hotelPresentationClient";
 import { targetApiClient } from "./targetClient";
 
-export type RoomSetupDraft = {
-  name: string;
-  totalRooms: number;
-  maxOccupancy: number;
-  nightlyRate: number;
-  currency: string;
-};
-
 export type ExistingRoomSetup = {
   roomTypeId: string;
   active: boolean;
@@ -42,10 +34,6 @@ export type RoomSetupState =
       room: ExistingRoomSetup | null;
       reasonCodes: string[];
     };
-
-export type RoomSetupSaveResult =
-  | { status: "created" }
-  | Extract<RoomSetupState, { status: "complete" | "needs_recovery" }>;
 
 export type GuestSettingsPolicies = {
   checkInTime: string;
@@ -208,23 +196,6 @@ export type SaveDirectBookingSetupInput = {
 export const hotelOperationsSetupApi = {
   getExistingRoomSetup,
   getRoomSetupState,
-
-  saveRoomSetup: async (
-    propertyId: string,
-    draft: RoomSetupDraft,
-  ): Promise<RoomSetupSaveResult> => {
-    const state = await getRoomSetupState(propertyId);
-    if (state.status !== "empty") return state;
-
-    const body = buildRoomSetupRequest(propertyId, draft);
-    await targetApiClient.post(`/api/pms/properties/${encoded(propertyId)}/room-types`, body);
-    return { status: "created" };
-  },
-
-  addRoomSetup: async (propertyId: string, draft: RoomSetupDraft): Promise<void> => {
-    const body = buildRoomSetupRequest(propertyId, draft, false);
-    await targetApiClient.post(`/api/pms/properties/${encoded(propertyId)}/room-types`, body);
-  },
 
   getGuestSettingsPolicies: async (
     propertyId: string,
@@ -639,42 +610,6 @@ async function getRoomSetupState(
   return { status: "empty" };
 }
 
-export function buildRoomSetupRequest(
-  propertyId: string,
-  draft: RoomSetupDraft,
-  initialSetupOnly = true,
-) {
-  const currency = normalizeCurrency(draft.currency);
-  const rate = positiveNumber(draft.nightlyRate, "Nightly rate").toFixed(2);
-  const payload = {
-    onboardingSetup: true,
-    initialSetupOnly,
-    name: requiredText(draft.name, "Room type name"),
-    totalRooms: positiveInteger(draft.totalRooms, "Number of rooms"),
-    maxOccupancy: positiveInteger(draft.maxOccupancy, "Maximum occupancy"),
-    maxAdults: positiveInteger(draft.maxOccupancy, "Maximum occupancy"),
-    maxChildren: 0,
-    bathroomType: "private",
-    bathrooms: 1,
-    baseRate: rate,
-    currency,
-    isActive: true,
-    operatingPeriods: [{ from: "01-01", to: "12-31" }],
-    seasons: [
-      {
-        name: "Year-round",
-        tier: "standard",
-        from: "01-01",
-        to: "12-31",
-        rate,
-        minStay: 1,
-      },
-    ],
-  };
-  const commandId = stableSetupCommandId("pms-room-type-create", propertyId, payload);
-  return { ...payload, commandId, idempotencyKey: commandId };
-}
-
 export function buildPaymentSettingsRequest(
   propertyId: string,
   draft: PaymentSetupDraft,
@@ -775,10 +710,6 @@ export function hotelOperationsErrorMessage(error: unknown, fallback: string): s
   return error instanceof Error && error.message.trim() ? error.message : fallback;
 }
 
-export function hotelOperationsWriteMayHaveCommitted(error: unknown): boolean {
-  return !(error instanceof ApiErrorResponse) || error.status >= 500;
-}
-
 export function isPropertyCurrencyConflict(error: unknown): boolean {
   return (
     error instanceof ApiErrorResponse &&
@@ -806,26 +737,6 @@ function stringArray(value: unknown): string[] {
 function requiredText(value: string, label: string): string {
   const normalized = value.trim();
   if (!normalized) throw new Error(`${label} is required.`);
-  return normalized;
-}
-
-function positiveNumber(value: number, label: string): number {
-  if (!Number.isFinite(value) || value <= 0) throw new Error(`${label} must be greater than zero.`);
-  return value;
-}
-
-function positiveInteger(value: number, label: string): number {
-  if (!Number.isSafeInteger(value) || value < 1) {
-    throw new Error(`${label} must be at least one.`);
-  }
-  return value;
-}
-
-function normalizeCurrency(value: string): string {
-  const normalized = value.trim().toUpperCase();
-  if (!/^[A-Z]{3}$/.test(normalized)) {
-    throw new Error("Currency must be a three-letter ISO code.");
-  }
   return normalized;
 }
 
