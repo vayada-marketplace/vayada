@@ -86,6 +86,10 @@ Details and commands: [`legacy-fixed-plan-billing-handover.md`](legacy-fixed-pla
    run has touched. A target that already had an identity or catalog run without a
    cohort blocks a later cohort run (`USER_EQUAL_TIME_CONFLICT`,
    `QUARANTINE_RESOURCE_CONFLICT`, `CATALOG_SOURCE_DISPOSITION_CONFLICT`).
+9. **Hard prerequisite:** VAY-2066 R2 (PR3) is live on next-api: the auto-open
+   producer runs and a property without a settings row is on by default (rolling
+   12). Cohort hotels with legacy auto-open off get no row and rely on it;
+   without it their calendar windows stop moving after go-day.
 
 ## Window
 
@@ -151,6 +155,13 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
      (`distribution.public_hotel_bookability_profiles`) is not written by the
      cutover. Publish it per cohort hotel, through the normal booking-profile
      publish or `target:booking-public-bookability:backfill`.
+
+   Calendar auto-open: a cohort hotel with legacy auto-open on keeps an explicit
+   enabled row with its mode. One with it off gets no row and takes the new
+   on-by-default (rolling 12), which keeps its dates opening as legacy "off" did.
+   Hotels outside the cohort get an explicit disabled row. The VAY-2066 producer
+   selects a hotel only once its rooms are verified and it has an operating
+   calendar and pricing settings, so check that it selects each cohort hotel.
 
    Then check that each cohort hotel passes the VAY-1543 public pricing rule:
    - exactly one active `hotel_group` organization holds both property links

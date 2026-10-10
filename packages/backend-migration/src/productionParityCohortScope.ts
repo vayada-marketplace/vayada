@@ -14,6 +14,8 @@ const MESSAGES = {
     "A cohort property lacks exactly one active hotel organization with both native owner links",
   cohortPropertyEntitlement:
     "A cohort property's organization lacks an active, unsuspended PMS property entitlement",
+  cohortAutoOpen:
+    "A cohort property's auto-open row differs from its legacy choice (on: matching; off: none)",
   profileNotPrivate: "A property outside the cohort has a non-private profile",
   verifiedDomain: "A property outside the cohort has a verified custom domain",
   publicMedia: "A property outside the cohort has public media",
@@ -25,6 +27,8 @@ const MESSAGES = {
     "An active membership reaches a property outside the cohort via an unarchived link",
   activeEntitlement: "A property outside the cohort has an active, unexpired entitlement",
   connectedChannel: "A property outside the cohort has a connected or degraded channel connection",
+  autoOpenNotDisabled:
+    "A property outside the cohort lacks an explicitly disabled calendar auto-open setting",
   activeChannexMapping: "A property outside the cohort has an active Channex mapping",
   bindingClaim: "A property outside the cohort holds a Channex binding claim",
   enabledProviderAccount:
@@ -53,7 +57,8 @@ export type ProductionParityCohortScopeSummary = {
 type QueryClient = Pick<pg.ClientBase, "query">;
 
 // Outside the cohort is decided from the three ID sets (like outsideCohortSource), never from
-// the catalog quarantine reason. $1/$2/$3: Booking, PMS and Marketplace cohort hotel IDs.
+// the catalog quarantine reason. $1/$2/$3: Booking, PMS and Marketplace cohort hotel IDs; the
+// violation query's $4 is the source run whose PMS snapshot holds the legacy auto-open settings.
 // Links are not filtered by run: STALE_MIGRATION_PROVENANCE already fails links of other runs.
 const SCOPE_CTES = `
   WITH legacy_link AS (
@@ -139,6 +144,28 @@ const SCOPE_VIOLATION_QUERY = `${SCOPE_CTES}
      GROUP BY owner.property_id, owner.organization_id
     HAVING NOT coalesce(bool_or(entitlement.status = 'active'), FALSE)
         OR coalesce(bool_or(entitlement.status = 'suspended'), FALSE)
+    -- productionPmsCalendarAutoOpenRecords. Without a row auto-open is on by default (VAY-2066
+    -- R2): a cohort hotel with legacy auto-open off must have none, one with it on a match.
+    UNION ALL SELECT 'cohortAutoOpen', link.property_id::text FROM legacy_link link
+      JOIN migration_source_pms.snapshot_rows hotel
+        ON hotel.run_id = $4 AND hotel.source_schema = 'public' AND hotel.source_table = 'hotels'
+       AND lower(hotel.row_data ->> 'id') = link.source_id
+      LEFT JOIN pms.calendar_auto_open_settings setting ON setting.property_id = link.property_id
+     WHERE link.inside AND link.source_system = 'pms'
+       AND link.disposition IS DISTINCT FROM 'private_quarantine'
+       AND NOT CASE
+         WHEN NOT coalesce((hotel.row_data ->> 'calendar_auto_open_enabled')::boolean, FALSE)
+           THEN setting.property_id IS NULL
+         WHEN hotel.row_data ->> 'calendar_auto_open_mode' = 'fixed'
+           THEN coalesce(setting.enabled AND setting.mode = 'fixed' AND setting.fixed_end_month
+             = date_trunc('month', (hotel.row_data ->> 'calendar_auto_open_fixed_month')::date)::date,
+             FALSE)
+         ELSE coalesce(setting.enabled AND setting.mode = 'rolling' AND setting.rolling_months
+             = coalesce((hotel.row_data ->> 'calendar_auto_open_months')::int, 18), FALSE)
+       END
+    UNION ALL SELECT 'autoOpenNotDisabled', link.property_id::text FROM legacy_link link
+      LEFT JOIN pms.calendar_auto_open_settings setting ON setting.property_id = link.property_id
+     WHERE NOT link.inside AND link.source_system = 'pms' AND setting.enabled IS NOT FALSE
     UNION ALL SELECT 'profileNotPrivate', property.id::text FROM hotel_catalog.properties property
       JOIN outside ON outside.property_id = property.id WHERE property.profile_status <> 'private'
     UNION ALL SELECT 'profileNotPrivate', profile.property_id::text
@@ -188,6 +215,9 @@ const SCOPE_VIOLATION_QUERY = `${SCOPE_CTES}
     UNION ALL SELECT 'connectedChannel', connection.property_id::text
       FROM pms.channel_connections connection
       JOIN outside USING (property_id) WHERE connection.connection_status IN ('connected', 'degraded')
+    UNION ALL SELECT 'autoOpenNotDisabled', setting.property_id::text
+      FROM pms.calendar_auto_open_settings setting
+      JOIN outside USING (property_id) WHERE setting.enabled
     UNION ALL SELECT 'activeChannexMapping', mapping.property_id::text
       FROM pms.channel_room_type_mappings mapping
       JOIN outside USING (property_id) WHERE mapping.status = 'active'
@@ -223,7 +253,7 @@ export async function readProductionParityCohortScope(
   );
   const violations = await client.query<{ category: CohortScopeCategory; subjectId: string }>(
     SCOPE_VIOLATION_QUERY,
-    params,
+    [...params, sourceRunId],
   );
   return {
     cohortSha256: cohort.cohortSha256,

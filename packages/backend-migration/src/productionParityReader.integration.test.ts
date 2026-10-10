@@ -35,6 +35,7 @@ const ROOM_MEDIA_OBJECT_ID = "13590000-0000-4000-8000-000000000013";
 // VAY-1362 cohort fixture. The cohort table is append-only, so each case owns its source run.
 const COHORT_PASS_RUN_ID = `vay1351-${"7".repeat(24)}`;
 const COHORT_FAIL_RUN_ID = `vay1351-${"6".repeat(24)}`;
+const COHORT_AUTO_OPEN_RUN_ID = `vay1351-${"5".repeat(24)}`;
 const IN_HOTEL_ID = "13620000-0000-4000-8000-000000000001";
 const OUT_HOTEL_ID = "13620000-0000-4000-8000-000000000002";
 const OUT_PMS_HOTEL_ID = "13620000-0000-4000-8000-000000000003";
@@ -45,6 +46,7 @@ const OUT_OFFER_ID = "13620000-0000-4000-8000-000000000007";
 const OUT_ROOM_TYPE_ID = "13620000-0000-4000-8000-000000000008";
 const OUT_CONNECTION_ID = "13620000-0000-4000-8000-000000000009";
 const IN_ORGANIZATION_ID = "13620000-0000-4000-8000-000000000010";
+const IN_PMS_HOTEL_ID = "13620000-0000-4000-8000-000000000011";
 const COHORT_SUBJECTS = new Set([IN_HOTEL_ID, OUT_HOTEL_ID, OUT_PMS_HOTEL_ID, MISSING_HOTEL_ID]);
 
 describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
@@ -621,6 +623,7 @@ describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
         { category: "activeEntitlement", subjectId: OUT_HOTEL_ID },
         { category: "activeMembership", subjectId: OUT_HOTEL_ID },
         { category: "activeOwnerLink", subjectId: OUT_HOTEL_ID },
+        { category: "autoOpenNotDisabled", subjectId: OUT_HOTEL_ID },
         { category: "bindingClaim", subjectId: OUT_HOTEL_ID },
         { category: "cohortHotelUnresolved", subjectId: MISSING_HOTEL_ID },
         { category: "cohortPropertyEntitlement", subjectId: IN_HOTEL_ID },
@@ -636,6 +639,87 @@ describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
         { category: "verifiedDomain", subjectId: OUT_HOTEL_ID },
       ]);
     } finally {
+      await cleanupCohort(client);
+      await client.end();
+    }
+  });
+
+  it("checks the calendar auto-open rows against each legacy choice", async () => {
+    assertSafeTestDatabase(URL!);
+    const client = new pg.Client({ connectionString: URL });
+    await client.connect();
+    const run = COHORT_AUTO_OPEN_RUN_ID;
+    const legacy = {
+      id: IN_PMS_HOTEL_ID,
+      calendar_auto_open_enabled: true,
+      calendar_auto_open_mode: "fixed",
+      calendar_auto_open_fixed_month: "2027-06-15",
+    };
+    try {
+      await storeCohort(client, run, [IN_HOTEL_ID], [IN_PMS_HOTEL_ID]);
+      await insertCohortProperties(client, "canonical");
+      await client.query(
+        `INSERT INTO hotel_catalog.property_source_links
+           (property_id, source_system, source_table, source_id, relationship)
+         VALUES ($1, 'pms', 'hotels', $2, 'operational_input')`,
+        [IN_HOTEL_ID, IN_PMS_HOTEL_ID],
+      );
+      await client.query(
+        `INSERT INTO platform.source_extraction_runs
+           (run_id, environment, source_schema_revision, status, finished_at, duration_ms)
+         VALUES ($1, 'local', $2, 'completed', now(), 1)`,
+        [run, "1".repeat(40)],
+      );
+      await client.query(
+        `INSERT INTO migration_source_pms.snapshot_rows (run_id, snapshot_identifier,
+           source_schema, source_table, row_ordinal, row_checksum_sha256, row_data)
+         VALUES ($1, 'parity', 'public', 'hotels', 1, $2, $3)`,
+        [run, "5".repeat(64), legacy],
+      );
+      const autoOpen = async () =>
+        (
+          await readProductionParityEvidence({ ...config(), sourceRunId: run })
+        ).cohortScope!.violations.filter((row) => /auto_?open/i.test(row.category));
+
+      // No rows (on by default), then the outside hotel disabled but the cohort hotel carried
+      // with the wrong month, then exactly as the import maps both.
+      expect(await autoOpen()).toEqual([
+        { category: "autoOpenNotDisabled", subjectId: OUT_HOTEL_ID },
+        { category: "cohortAutoOpen", subjectId: IN_HOTEL_ID },
+      ]);
+      await client.query(
+        `INSERT INTO pms.calendar_auto_open_settings
+           (property_id, revision, enabled, mode, rolling_months, fixed_end_month)
+         VALUES ($1, 1, TRUE, 'fixed', NULL, '2027-07-01'), ($2, 1, FALSE, 'rolling', 18, NULL)`,
+        [IN_HOTEL_ID, OUT_HOTEL_ID],
+      );
+      expect(await autoOpen()).toEqual([{ category: "cohortAutoOpen", subjectId: IN_HOTEL_ID }]);
+      await client.query(
+        "UPDATE pms.calendar_auto_open_settings SET fixed_end_month = '2027-06-01' WHERE property_id = $1",
+        [IN_HOTEL_ID],
+      );
+      expect(await autoOpen()).toEqual([]);
+
+      // A legacy "off" takes the on-by-default: any row, enabled or disabled, fails.
+      const inViolation = [{ category: "cohortAutoOpen", subjectId: IN_HOTEL_ID }];
+      await client.query(
+        `UPDATE migration_source_pms.snapshot_rows
+            SET row_data = row_data || '{"calendar_auto_open_enabled": false}' WHERE run_id = $1`,
+        [run],
+      );
+      expect(await autoOpen()).toEqual(inViolation);
+      await client.query(
+        "UPDATE pms.calendar_auto_open_settings SET enabled = FALSE WHERE property_id = $1",
+        [IN_HOTEL_ID],
+      );
+      expect(await autoOpen()).toEqual(inViolation);
+      await client.query("DELETE FROM pms.calendar_auto_open_settings WHERE property_id = $1", [
+        IN_HOTEL_ID,
+      ]);
+      expect(await autoOpen()).toEqual([]);
+    } finally {
+      await client.query("DELETE FROM migration_source_pms.snapshot_rows WHERE run_id = $1", [run]);
+      await client.query("DELETE FROM platform.source_extraction_runs WHERE run_id = $1", [run]);
       await cleanupCohort(client);
       await client.end();
     }
@@ -725,11 +809,16 @@ async function cleanup(client: pg.Client): Promise<void> {
   ]);
 }
 
-async function storeCohort(client: pg.Client, sourceRunId: string, bookingHotelIds: string[]) {
+async function storeCohort(
+  client: pg.Client,
+  sourceRunId: string,
+  bookingHotelIds: string[],
+  pmsHotelIds: string[] = [],
+) {
   const cohort = parseProductionMigrationCohort({
     sourceRunId,
     bookingHotelIds,
-    pmsHotelIds: [],
+    pmsHotelIds,
     marketplaceHotelIds: [],
     approvalProofSha256: "a".repeat(64),
   });
@@ -868,6 +957,11 @@ async function insertOutsideRows(client: pg.Client, live: boolean): Promise<void
       `INSERT INTO finance.payouts (owner_scope, property_id, payout_status, amount, currency)
       VALUES ('property', $1, $2, 1, 'EUR')`,
       [out, pick("scheduled", "canceled")],
+    ],
+    [
+      `INSERT INTO pms.calendar_auto_open_settings (property_id, revision, enabled, mode, rolling_months)
+      VALUES ($1, 1, $2, 'rolling', 18)`,
+      [out, live],
     ],
   ];
   for (const [sql, params] of statements) await client.query(sql, params);

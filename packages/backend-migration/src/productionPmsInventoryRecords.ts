@@ -352,7 +352,7 @@ function propertyHorizon(
   return { from, through: through.toISOString().slice(0, 10) };
 }
 
-function propertyClock(
+export function propertyClock(
   snapshotAt: string,
   timezoneValue: unknown,
 ): { today: string; time: string } {
