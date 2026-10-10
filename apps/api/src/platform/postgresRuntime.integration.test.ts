@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { once } from "node:events";
 import pg from "pg";
 import { describe, expect, it } from "vitest";
 
@@ -59,15 +58,16 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL runtime pool budget", () => {
     const health = runtime.healthCheck(url.toString());
     const admin = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await admin.connect();
+    // Released in finally if an assertion fails first, so pool.end() can't wait forever.
+    let held: pg.PoolClient | undefined;
+    let transaction: pg.PoolClient | undefined;
     try {
       await Promise.all(Array.from({ length: 4 }, () => pool.query("SELECT pg_sleep(0.05)")));
-      const held = await pool.connect();
-      const transaction = await pool.connect();
+      held = await pool.connect();
+      transaction = await pool.connect();
       await transaction.query("BEGIN");
       await transaction.query("SELECT 1");
       expect(await health()).toBe(true);
-      const heldDropped = once(held, "error");
-      const transactionDropped = once(transaction, "error");
       const inFlight = pool.query("SELECT pg_sleep(30)").then(
         () => undefined,
         (error: unknown) => error,
@@ -81,6 +81,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL runtime pool budget", () => {
         return rows[0]?.running === 1;
       });
 
+      // One pooled client stays idle, so the idle path (pg-pool re-emitting on the pool) runs too.
+      expect(pool.idleCount).toBeGreaterThan(0);
       const { rows } = await admin.query<{ terminated: boolean }>(
         `SELECT pg_terminate_backend(pid) AS terminated FROM pg_stat_activity
           WHERE application_name = $1`,
@@ -90,26 +92,26 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL runtime pool budget", () => {
       expect(rows.length).toBeGreaterThanOrEqual(5);
       expect(rows.every(({ terminated }) => terminated)).toBe(true);
 
-      const [[heldError], [transactionError]] = await Promise.all([
-        heldDropped,
-        transactionDropped,
-      ]);
-      expect(isPostgresUnavailableError(heldError)).toBe(true);
-      expect(isPostgresUnavailableError(transactionError)).toBe(true);
+      // No test-side listeners on the clients: only the runtime's own keep this process alive.
       expect(isPostgresUnavailableError(await inFlight)).toBe(true);
-      const commit = await transaction.query("COMMIT").then(
-        () => undefined,
-        (error: unknown) => error,
-      );
-      expect(isPostgresUnavailableError(commit)).toBe(true);
+      const failed = (client: pg.PoolClient, sql: string) =>
+        client.query(sql).then(
+          () => false,
+          (error: unknown) => isPostgresUnavailableError(error),
+        );
+      await eventually(() => failed(held!, "SELECT 1"));
+      await eventually(() => failed(transaction!, "COMMIT"));
       held.release();
       transaction.release();
+      held = transaction = undefined;
 
       // The same pools serve again once their broken clients are replaced: no restart.
       await eventually(async () => (await pool.query("SELECT 1 AS ok")).rows[0]?.ok === 1);
       await new Promise((resolve) => setTimeout(resolve, 5_100));
       expect(await health()).toBe(true);
     } finally {
+      held?.release();
+      transaction?.release();
       await admin.end();
       await pool.end();
       await runtime.close();
