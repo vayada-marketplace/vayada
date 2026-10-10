@@ -986,7 +986,7 @@
   "admin.languageSelector": "Language selector",
   "admin.hiddenAutomaticallyWhenOnlyOneLanguageIsConfigured": "Hidden automatically when only one language is configured.",
   "admin.currencySelector": "Currency selector",
-  "admin.hiddenAutomaticallyWhenOnlyOneCurrencyIsConfigured": "Hidden automatically when only one currency is configured.",
+  "admin.multiCurrencyIsNotAvailableYet": "Multi-currency isn't available yet.",
   "admin.heroHeading": "Hero heading",
   "admin.publicDescription": "Public description",
   "admin.heroSubtext": "Hero subtext",

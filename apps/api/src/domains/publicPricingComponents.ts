@@ -45,7 +45,7 @@ export async function lockPublicPricingComponents(
     code: null,
     stacking: lastMinute.stacking,
   };
-  const lmOnly = composeReplacementDiscounts(base);
+  const lmOnly = composeReplacementDiscounts(base, stay.currency);
   if (!lmOnly) return null;
   // Python checks the minimum against rooms after LM plus extras, even when nonstacking.
   const code =
@@ -61,14 +61,17 @@ export async function lockPublicPricingComponents(
         });
   if (stay.promoCode !== null && (!code || code.bookingLocalDate !== lastMinute.bookingLocalDate))
     return null;
-  const discounts = composeReplacementDiscounts({
-    ...base,
-    code: code?.discount ?? null,
-    rooms: rooms.map((r) => ({
-      ...r,
-      codeEligible: code?.eligibleSelectionIds.includes(r.selectionId) ?? false,
-    })),
-  });
+  const discounts = composeReplacementDiscounts(
+    {
+      ...base,
+      code: code?.discount ?? null,
+      rooms: rooms.map((r) => ({
+        ...r,
+        codeEligible: code?.eligibleSelectionIds.includes(r.selectionId) ?? false,
+      })),
+    },
+    stay.currency,
+  );
   if (!discounts) return null;
   const subtotalMinor = (
     BigInt(discounts.remainingRoomAndEligibleAddonMinor) + BigInt(room.mealMinor)

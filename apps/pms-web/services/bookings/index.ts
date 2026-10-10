@@ -27,6 +27,15 @@ export type AssignmentSelector = { assignmentId: string } | { position: number }
 // prettier-ignore
 export type BookingExpectedPaymentMethod = "unknown" | "pay_at_property" | "bank_transfer" | "manual_card" | "cash" | "other";
 
+export type BookingRefundTier = { minDaysBeforeCheckIn: number; refundPercent: number };
+
+/** Cancellation terms a stay was booked under (VAY-2089). Flexible terms are free until the
+ * deadline, or, for partial-refund terms, refund by notice period (longest first); after that
+ * the whole stay is chargeable. */
+export type BookingCancellationTerms =
+  | { kind: "non_refundable" }
+  | { kind: "flexible"; freeCancellationDays: number; refundTiers: BookingRefundTier[] | null };
+
 export interface BookingStay {
   position: number;
   roomName: string;
@@ -40,6 +49,8 @@ export interface BookingStay {
   childAgesAtCheckIn?: number[] | null;
   /** A manual stay priced with a custom nightly rate: no rate plan and no published offer. */
   customRate?: boolean;
+  /** Terms of the offer a manual stay was booked on; null when none were recorded. */
+  cancellation?: BookingCancellationTerms | null;
   nightly: Array<{
     appliedAmount: number | null;
     currency: string | null;
@@ -339,6 +350,19 @@ type PmsOperationalReservation = {
     /** Published pricing-v2 offer of a manual stay; rate_plan_id stays empty for those. */
     pricingOfferId?: string | null;
     childAgesAtCheckIn?: number[] | null;
+    bookedCancellation?:
+      | { kind: "non_refundable" }
+      | {
+          kind: "flexible";
+          terms: {
+            freeCancellationDeadlineDays: number;
+            flexibleCancellationType?: "free" | "partial_refund";
+            partialRefundCancelWindowDays?: number;
+            partialRefundAmountPercent?: number;
+            partialRefundTiers?: BookingRefundTier[];
+          };
+        }
+      | null;
     stay?: { checkIn: string; checkOut: string; adults: number; children: number };
     nightly?: Array<{
       serviceDate: string;
@@ -1144,6 +1168,36 @@ function appendQueryParam(
   query.set(key, String(value));
 }
 
+function toCancellationTerms(
+  booked: PmsOperationalReservation["assignments"][number]["bookedCancellation"],
+): BookingCancellationTerms | null {
+  if (booked?.kind === "non_refundable") return { kind: "non_refundable" };
+  if (booked?.kind !== "flexible") return null;
+  const { terms } = booked;
+  // Partial-refund terms refund by notice period, as the booking engine shows them to guests.
+  const tiers =
+    terms.flexibleCancellationType !== "partial_refund"
+      ? null
+      : (
+          terms.partialRefundTiers ?? [
+            {
+              minDaysBeforeCheckIn: terms.partialRefundCancelWindowDays ?? NaN,
+              refundPercent: terms.partialRefundAmountPercent ?? NaN,
+            },
+          ]
+        ).filter(
+          (tier) =>
+            Number.isInteger(tier.minDaysBeforeCheckIn) && Number.isFinite(tier.refundPercent),
+        );
+  return {
+    kind: "flexible",
+    freeCancellationDays: terms.freeCancellationDeadlineDays,
+    refundTiers: tiers?.length
+      ? [...tiers].sort((a, b) => b.minDaysBeforeCheckIn - a.minDaysBeforeCheckIn)
+      : null,
+  };
+}
+
 function toBookingStays(
   reservation: PmsOperationalReservation,
   roomTypesById: Map<string, PmsOperationsRoomType>,
@@ -1175,6 +1229,7 @@ function toBookingStays(
           ratePlanName: ratePlan?.name ?? null,
           customRate:
             reservation.source === "manual" && !assignment.ratePlanId && !assignment.pricingOfferId,
+          cancellation: toCancellationTerms(assignment.bookedCancellation),
           roomNumber: assignment.roomNumber,
           checkIn: assignment.stay?.checkIn ?? null,
           checkOut: assignment.stay?.checkOut ?? null,
