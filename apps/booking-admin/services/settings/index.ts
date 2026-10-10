@@ -338,6 +338,8 @@ export interface AddonItem {
   sortOrder?: number;
   ownershipKind: "property" | "partner";
   partnerCommissionRate: string | null;
+  /** Shown to guests on the booking engine (active and publicly visible). */
+  live?: boolean;
   location?: string;
   maxGuests?: string;
   highlights?: string[];

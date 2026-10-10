@@ -60,7 +60,7 @@ export const SEARCH_ENTRIES = [
     "settings",
     "bookingFlow.tabs.filters",
   ],
-  ["Add-ons", "/booking-flow?tab=addons", "Booking Flow", "settings", "bookingFlow.tabs.addons"],
+  ["Add-ons", "/add-ons", "Pages", "settings", "bookingFlow.tabs.addons"],
   [
     "Book Direct Benefits",
     "/settings/book-direct-benefits",
