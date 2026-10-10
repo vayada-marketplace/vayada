@@ -36,7 +36,7 @@ const t: Translate = (key, params) => onboardingText[key] ?? englishPricingSetup
 /**
  * First pricing of a new hotel: one property currency, a first rate for every operating room
  * through the shared PMS first-setup form, published as pricing-v2 offers, and the final-price
- * confirmation. Later price changes happen in the PMS pricing editor.
+ * confirmation. Later price changes happen in each room's Prices tab in the PMS.
  */
 export function PricingStep({
   route,
@@ -252,7 +252,7 @@ export function PricingStep({
         <SectionHeading
           id="room-rates-heading"
           title="Room rates"
-          description="Give every room a first rate. Guests booking directly need a rate with free cancellation for each room. Seasons, weekdays, meal plans and more rates are edited later in the PMS under Pricing."
+          description="Give every room a first rate. Guests booking directly need a rate with free cancellation for each room. Seasons, weekdays, meal plans and more rates are edited later in the PMS, in each room's Prices tab under Rooms & Rates."
         />
         {owners.rooms.length === 0 ? (
           <p className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
@@ -339,7 +339,7 @@ export function PricingStep({
       {allPriced && added.length === 0 && !stale && !complete && (
         <Panel
           title="Pricing is not complete yet"
-          message="Every room has a published rate, but setup has not confirmed it. Reload pricing; if this stays, check the room rates in the PMS under Pricing."
+          message="Every room has a published rate, but setup has not confirmed it. Reload pricing; if this stays, check the room rates in the PMS, in each room's Prices tab under Rooms & Rates."
           actionLabel="Reload pricing"
           onAction={() => void startOver()}
         />

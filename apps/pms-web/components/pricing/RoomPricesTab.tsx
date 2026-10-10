@@ -8,13 +8,26 @@ import { PricingEditor } from "./PricingEditor";
 import { errorText } from "./pricingAmounts";
 import { usePricingRooms } from "./usePricingRooms";
 
-/** The room page's Prices tab: this room's rates. Saving publishes them with the property's other rooms unchanged. */
-export function RoomPricesTab({ roomTypeId }: { roomTypeId: string }) {
-  const { rooms, error } = usePricingRooms();
+/** The room page's Prices tab: this room's rates. Saving publishes them with the property's other rooms unchanged.
+ * A new `refresh` (room details saved, prices republished) re-reads the rooms and, without unsaved work, the prices. */
+export function RoomPricesTab({
+  roomTypeId,
+  refresh = 0,
+  onAttention,
+  onPublished,
+}: {
+  roomTypeId: string;
+  refresh?: number;
+  onAttention?: () => void;
+  onPublished?: () => void;
+}) {
+  const { rooms, error } = usePricingRooms(refresh);
   const { t } = useTranslation();
+  const propertyId = rooms?.propertyId;
+  // One client per property: re-read rooms must not reload the editor and drop unsaved prices.
   const client = useMemo(
-    () => (rooms ? createReplacementPricingClient(rooms.propertyId) : null),
-    [rooms],
+    () => (propertyId ? createReplacementPricingClient(propertyId) : null),
+    [propertyId],
   );
   if (error)
     return (
@@ -34,7 +47,11 @@ export function RoomPricesTab({ roomTypeId }: { roomTypeId: string }) {
       client={client}
       roomNames={rooms.names}
       setup={{ propertyId: rooms.propertyId, rooms: rooms.setupRooms }}
-      roomTypeId={roomTypeId}
+      // Room-type IDs are lower-case UUIDs; a URL may carry another case.
+      roomTypeId={roomTypeId.toLowerCase()}
+      refresh={refresh}
+      onAttention={onAttention}
+      onPublished={onPublished}
     />
   );
 }
