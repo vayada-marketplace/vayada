@@ -998,7 +998,7 @@
   "admin.languageSelector": "Pemilih bahasa",
   "admin.hiddenAutomaticallyWhenOnlyOneLanguageIsConfigured": "Tersembunyi secara otomatis ketika hanya satu bahasa yang dikonfigurasi.",
   "admin.currencySelector": "Pemilih mata uang",
-  "admin.multiCurrencyIsNotAvailableYet": "Multi-mata uang belum tersedia.",
+  "admin.hiddenAutomaticallyWhenOnlyOneCurrencyIsConfigured": "Tersembunyi secara otomatis ketika hanya satu mata uang yang dikonfigurasi.",
   "admin.heroHeading": "Judul pahlawan",
   "admin.publicDescription": "Deskripsi publik",
   "admin.heroSubtext": "Subteks pahlawan",

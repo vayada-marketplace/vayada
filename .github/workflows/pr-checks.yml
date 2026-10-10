@@ -4,6 +4,8 @@ on:
   pull_request:
     branches:
       - main
+      # VAY-2114 guest currency stack bases (top of the list to avoid append conflicts).
+      - "fm/vay-2114-*"
       # VAY-2074 stack bases (top of the list to avoid append conflicts).
       - "fm/vay-2074-*"
       - "fm/vay-2075-*"

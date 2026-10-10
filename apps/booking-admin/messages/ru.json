@@ -998,7 +998,7 @@
   "admin.languageSelector": "Выбор языка",
   "admin.hiddenAutomaticallyWhenOnlyOneLanguageIsConfigured": "Скрывается автоматически, если настроен только один язык.",
   "admin.currencySelector": "Селектор валюты",
-  "admin.multiCurrencyIsNotAvailableYet": "Мультивалютность пока недоступна.",
+  "admin.hiddenAutomaticallyWhenOnlyOneCurrencyIsConfigured": "Скрывается автоматически, если настроена только одна валюта.",
   "admin.heroHeading": "Главный заголовок",
   "admin.publicDescription": "Публичное описание",
   "admin.heroSubtext": "Подтекст героя",
