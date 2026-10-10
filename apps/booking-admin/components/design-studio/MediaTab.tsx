@@ -10,7 +10,7 @@ import {
   XMarkIcon,
   ArrowPathIcon,
 } from "@heroicons/react/24/outline";
-import { MAX_PROPERTY_GALLERY_PHOTOS } from "@/lib/utils/uploadImage";
+import { HERO_IMAGE_ACCEPT, MAX_PROPERTY_GALLERY_PHOTOS } from "@/lib/utils/uploadImage";
 import { ToggleSwitch } from "@/components/ui";
 
 export type PropertyGalleryImage = {
@@ -29,6 +29,7 @@ interface MediaTabProps {
   fileInputRef: RefObject<HTMLInputElement>;
   handleImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   removeHeroImage: () => void;
+  heroBusy?: boolean;
   headerLogo: string;
   headerLogoUrl: string;
   logoInputRef: RefObject<HTMLInputElement>;
@@ -44,8 +45,7 @@ interface MediaTabProps {
   referAGuestModuleEnabled: boolean | null;
   showLanguageSelector: boolean;
   setShowLanguageSelector: (value: boolean) => void;
-  showCurrencySelector: boolean;
-  setShowCurrencySelector: (value: boolean) => void;
+  languageSelectorAvailable: boolean;
   resetContent: () => void;
   galleryImages: PropertyGalleryImage[];
   galleryAtCapacity: boolean;
@@ -71,6 +71,7 @@ export default function MediaTab({
   fileInputRef,
   handleImageUpload,
   removeHeroImage,
+  heroBusy = false,
   headerLogo,
   headerLogoUrl,
   logoInputRef,
@@ -86,8 +87,7 @@ export default function MediaTab({
   referAGuestModuleEnabled,
   showLanguageSelector,
   setShowLanguageSelector,
-  showCurrencySelector,
-  setShowCurrencySelector,
+  languageSelectorAvailable,
   resetContent,
   galleryImages,
   galleryAtCapacity,
@@ -158,18 +158,26 @@ export default function MediaTab({
               onError={(e) => {
                 e.currentTarget.style.display = "none";
               }}
+              onLoad={(e) => {
+                e.currentTarget.style.display = "";
+              }}
             />
             <button
+              type="button"
               onClick={removeHeroImage}
-              className="absolute top-1.5 right-1.5 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center transition-colors"
+              disabled={heroBusy}
+              aria-label={t("designStudio.media.removeHeroImage")}
+              className="absolute top-1.5 right-1.5 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center transition-colors disabled:cursor-not-allowed disabled:opacity-50"
             >
               <XMarkIcon className="w-3.5 h-3.5" />
             </button>
           </div>
         ) : (
           <button
+            type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="w-full h-36 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center gap-1.5 text-gray-400 hover:border-gray-400 hover:text-gray-500 transition-colors"
+            disabled={heroBusy}
+            className="w-full h-36 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center gap-1.5 text-gray-400 hover:border-gray-400 hover:text-gray-500 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
           >
             <PhotoIcon className="w-6 h-6" />
             <span className="text-[12px]">{t("designStudio.media.clickToUpload")}</span>
@@ -179,15 +187,18 @@ export default function MediaTab({
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
+          accept={HERO_IMAGE_ACCEPT}
+          data-testid="hero-image-input"
           onChange={handleImageUpload}
           className="hidden"
         />
 
         {heroImage && (
           <button
+            type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="mt-2 w-full py-1.5 text-[12px] text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            disabled={heroBusy}
+            className="mt-2 w-full py-1.5 text-[12px] text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t("bookingFlow.addons.modal.replaceImage")}
           </button>
@@ -467,16 +478,18 @@ export default function MediaTab({
             />
           </div>
           <ToggleSwitch
-            enabled={showLanguageSelector}
+            enabled={languageSelectorAvailable && showLanguageSelector}
             onChange={() => setShowLanguageSelector(!showLanguageSelector)}
             label={t("admin.languageSelector")}
             description={t("admin.hiddenAutomaticallyWhenOnlyOneLanguageIsConfigured")}
+            disabled={!languageSelectorAvailable}
           />
           <ToggleSwitch
-            enabled={showCurrencySelector}
-            onChange={() => setShowCurrencySelector(!showCurrencySelector)}
+            enabled={false}
+            onChange={() => {}}
             label={t("admin.currencySelector")}
-            description={t("admin.hiddenAutomaticallyWhenOnlyOneCurrencyIsConfigured")}
+            description={t("admin.multiCurrencyIsNotAvailableYet")}
+            disabled
           />
         </div>
       </div>
