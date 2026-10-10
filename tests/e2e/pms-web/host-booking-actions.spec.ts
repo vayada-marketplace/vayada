@@ -7,6 +7,19 @@ import {
   pmsWebReservation,
 } from "../support/pmsWebMocks";
 
+// The app layout's setup guard reads staff self-access, which the shared mocks don't cover.
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/identity/staff/self-access", (route) =>
+    route.fulfill({
+      json: {
+        membershipId: "test-owner",
+        roleKey: "hotel_owner",
+        permissions: ["pms.operations.read", "pms.operations.manage"],
+      },
+    }),
+  );
+});
+
 for (const mixed of [false, true])
   test(`host date editing previews ${mixed ? "mixed" : "single"} impact and retries an uncertain apply with the same key`, async ({
     page,
