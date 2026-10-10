@@ -1040,20 +1040,13 @@ const TARGET_BOOKING_PROPERTY_SETTINGS_SELECT = `
     contact.facebook,
     contact.tiktok,
     contact.youtube,
-    COALESCE(
-      NULLIF(location.raw_marketplace_location, ''),
-      NULLIF(
-        concat_ws(
-          ', ',
-          NULLIF(location.street_address, ''),
-          NULLIF(location.city, ''),
-          NULLIF(location.region, ''),
-          NULLIF(location.postal_code, ''),
-          NULLIF(location.country_code, '')
-        ),
-        ''
-      )
-    ) AS address,
+    -- The imported marketplace text stands in until the location is saved natively
+    -- (hotel setup, Location & surroundings), which moves its owner revision past 1.
+    CASE
+      WHEN COALESCE(location_revision.revision, 1) <= 1
+        THEN COALESCE(NULLIF(location.raw_marketplace_location, ''), structured_location.address)
+      ELSE COALESCE(structured_location.address, NULLIF(location.raw_marketplace_location, ''))
+    END AS address,
     location.city,
     location.country_code AS country,
     location.timezone,
@@ -1119,6 +1112,22 @@ const TARGET_BOOKING_PROPERTY_SETTINGS_SELECT = `
   ) slug ON TRUE
   LEFT JOIN hotel_catalog.property_locations location
     ON location.property_id = property.id
+  LEFT JOIN hotel_catalog.property_owner_revisions location_revision
+    ON location_revision.property_id = property.id
+   AND location_revision.owner_key = 'hotel_catalog.location'
+  CROSS JOIN LATERAL (
+    SELECT NULLIF(
+      concat_ws(
+        ', ',
+        NULLIF(location.street_address, ''),
+        NULLIF(location.city, ''),
+        NULLIF(location.region, ''),
+        NULLIF(location.postal_code, ''),
+        NULLIF(location.country_code, '')
+      ),
+      ''
+    ) AS address
+  ) structured_location
   LEFT JOIN LATERAL (
     SELECT
       COALESCE(
@@ -3176,13 +3185,15 @@ function parsePropertySettingsWriteBody(
 
   const details: string[] = [];
   const value: UpdateBookingPropertySettingsBody = {};
-  const propertyName = expectOptionalRequiredString(body, "property_name", details);
-  if (propertyName !== undefined) value.propertyName = propertyName;
+  // The shared property profile owns the name and location; this write never stored them.
+  for (const field of ["property_name", "address", "city", "country"]) {
+    if (Object.hasOwn(body, field)) {
+      details.push(`${field} is saved through the property profile, not booking settings.`);
+    }
+  }
   assignOptionalNullableString(value, "reservationEmail", body, "reservation_email", details);
   assignOptionalNullableString(value, "phoneNumber", body, "phone_number", details);
   assignOptionalNullableString(value, "whatsappNumber", body, "whatsapp_number", details);
-  assignOptionalNullableString(value, "address", body, "address", details);
-  assignOptionalNullableString(value, "city", body, "city", details);
   assignOptionalNullableString(value, "instagram", body, "instagram", details);
   assignOptionalNullableString(value, "facebook", body, "facebook", details);
   assignOptionalNullableString(value, "tiktok", body, "tiktok", details);
@@ -3197,15 +3208,6 @@ function parsePropertySettingsWriteBody(
     if (socialUrl && !isHttpUrl(socialUrl)) {
       details.push(`${bodyField} must be an http or https URL.`);
     }
-  }
-
-  const country = expectOptionalNullableString(body, "country", details);
-  if (country !== undefined) {
-    const normalizedCountry = country?.toUpperCase() ?? null;
-    if (normalizedCountry && !/^[A-Z]{2}$/.test(normalizedCountry)) {
-      details.push("country must be a two-letter country code.");
-    }
-    value.country = normalizedCountry;
   }
 
   const defaultCurrency = expectOptionalCurrencyCode(body, "default_currency", details);
@@ -3944,25 +3946,6 @@ function assignOptionalBoolean(
 ): void {
   const value = expectOptionalBoolean(record, sourceKey, details);
   if (value !== undefined) target[targetKey] = value;
-}
-
-function expectOptionalRequiredString(
-  record: Record<string, unknown>,
-  key: string,
-  details: string[],
-): string | undefined {
-  if (!Object.hasOwn(record, key)) return undefined;
-  const value = record[key];
-  if (typeof value !== "string") {
-    details.push(`${key} must be a string.`);
-    return undefined;
-  }
-  const normalized = value.trim();
-  if (!normalized) {
-    details.push(`${key} must not be empty.`);
-    return undefined;
-  }
-  return normalized;
 }
 
 function expectOptionalNullableString(

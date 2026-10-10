@@ -61,6 +61,7 @@ describe("PostgreSQL runtime capacity", () => {
     expect(first).not.toBe(second);
     expect(first.options.max).toBe(8);
     expect(first.options.connectionTimeoutMillis).toBe(3_000);
+    expect(first.options).toMatchObject({ keepAlive: true, keepAliveInitialDelayMillis: 10_000 });
     expect(specialized.options.max).toBe(1);
     expect(runtime.snapshot()).toMatchObject({ physicalPoolCount: 6, maxConnections: 41 });
     await first.end();
@@ -226,6 +227,59 @@ describe("PostgreSQL runtime capacity", () => {
       expect(isPostgresUnavailableError(error)).toBe(false);
     } finally {
       await pool.end();
+    }
+  });
+  it("reports a pool only while it stays full after repeated waiter timeouts", async () => {
+    // Connects without a network, so the pool can hand out its single slot.
+    class OfflineClient extends pg.Client {
+      override connect(): Promise<pg.Client>;
+      override connect(callback: (error: Error) => void): void;
+      override connect(callback?: (error: Error) => void): Promise<pg.Client> | void {
+        if (!callback) return Promise.resolve(this);
+        (callback as () => void)();
+      }
+    }
+    const postgres = { Pool: pg.Pool };
+    const runtime = installPostgresPoolRuntime(postgres);
+    const pool = new postgres.Pool({
+      connectionString: "postgresql://example/target",
+      Client: OfflineClient,
+      statement_timeout: 1_000,
+      connectionTimeoutMillis: 20,
+    });
+    const timedOut = () =>
+      pool.connect().then(
+        () => "connected",
+        (error: Error) => error.message,
+      );
+    const timedOutWithCallback = () =>
+      new Promise<string>((resolve) =>
+        pool.connect((error) => resolve(error ? error.message : "connected")),
+      );
+    let held: pg.PoolClient | undefined;
+    try {
+      held = await pool.connect();
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        expect(await timedOut()).toBe("timeout exceeded when trying to connect");
+      }
+      expect(await timedOutWithCallback()).toBe("timeout exceeded when trying to connect");
+      expect(runtime.snapshot().stalledPools).toBe(0);
+      await timedOut();
+      expect(runtime.snapshot().stalledPools).toBe(1);
+
+      // A freed slot ends the stall at once, without waiting for a checkout.
+      held.release();
+      held = undefined;
+      expect(runtime.snapshot().stalledPools).toBe(0);
+
+      // A client handed out resets the streak, so one more timeout is not a stall.
+      held = await pool.connect();
+      await timedOut();
+      expect(runtime.snapshot().stalledPools).toBe(0);
+    } finally {
+      held?.release();
+      await pool.end();
+      await runtime.close();
     }
   });
   it("returns a typed 503 when PostgreSQL cannot acquire a connection", async () => {
