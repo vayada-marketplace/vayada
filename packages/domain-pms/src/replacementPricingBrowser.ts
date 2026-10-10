@@ -1,5 +1,18 @@
 /** Browser-safe pricing validation; excludes operational modules with Node imports. */
-export { isMinorAmount, pricingInteger, pricingKeys, pricingObject, pricingCurrencyScale } from "./replacementPricing.js";
-export { parsePricingConfiguration, type PricingConfiguration } from "./replacementPricingConfiguration.js";
+export {
+  isMinorAmount,
+  pricingAmountStep,
+  pricingInteger,
+  pricingKeys,
+  pricingObject,
+  pricingCurrencyScale,
+} from "./replacementPricing.js";
+export {
+  parsePricingConfiguration,
+  type PricingConfiguration,
+} from "./replacementPricingConfiguration.js";
 export { parseFlexibleCancellationTerms } from "./pricing.js";
-export { calculateReplacementRoomStay, type RoomStayPricingResult } from "./replacementPricingCalculator.js";
+export {
+  calculateReplacementRoomStay,
+  type RoomStayPricingResult,
+} from "./replacementPricingCalculator.js";

@@ -99,6 +99,24 @@ describe("cross-room-type move picker", () => {
     view!.unmount();
   });
 
+  // VAY-2068: a room whose room type has no currency must not show its rate as euros.
+  it("shows no per-night rate for a room without a currency", async () => {
+    const villa = { ...rooms[2]!, currency: null };
+    let view: ReturnType<typeof create>;
+    await act(async () => {
+      // prettier-ignore
+      view = create(
+        <BookingDetailModal bookingId="booking-1" sourceAssignmentSelector={{ assignmentId: "a-1" }} onClose={vi.fn()} onStatusChange={vi.fn()} rooms={[rooms[0]!, rooms[1]!, villa]} bookings={bookings} />,
+      );
+    });
+    await act(async () => buttonContaining(view!, "Move to another room")!.props.onClick());
+    const picker = JSON.stringify(view!.toJSON());
+    expect(picker).toContain("80 m²");
+    expect(picker).not.toContain("€220");
+    expect(picker).not.toContain("220/night");
+    view!.unmount();
+  });
+
   it("fails closed when the selected assignment is stale", async () => {
     let view: ReturnType<typeof create>;
     await act(async () => {

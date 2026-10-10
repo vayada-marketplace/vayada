@@ -15,7 +15,6 @@ function fixture() {
   const scope = {
     propertyId: quote.stay.propertyId,
     organizationId: randomUUID(),
-    authorityRevision: "authority:1",
   };
   const current = { kind: "current_quote_price", scope, quote } as unknown as Parameters<
     typeof persistPricingBookingAddons
