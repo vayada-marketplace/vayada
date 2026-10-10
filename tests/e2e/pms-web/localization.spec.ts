@@ -61,11 +61,8 @@ test("applies German across settings and room setup", async ({ page }) => {
   await expect(page.getByText("Gesamtzahl Zimmer")).toBeVisible();
   await expect(page.getByText("Zimmergröße (m²)")).toBeVisible();
 
-  await expect(page.getByRole("button", { name: "Preise & Tarife" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Preise öffnen" })).toHaveAttribute(
-    "href",
-    "/pricing",
-  );
+  await expect(page.getByRole("button", { name: "Preise", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Preise öffnen" })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Bilder & Ausstattung" }).click();
   await expect(page.getByText("Zimmerbilder", { exact: true })).toBeVisible();

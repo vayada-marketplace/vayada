@@ -77,15 +77,15 @@ function PropertyPreview({ propertyId }: { propertyId: string }) {
       ) : error ? (
         <div role="alert" className="mt-4 text-sm text-red-700">
           {error}{" "}
-          <Link href="/pricing" className="underline">
-            Open pricing
+          <Link href="/rooms" className="underline">
+            Open Rooms &amp; Rates
           </Link>
         </div>
       ) : !publication ? (
         <p className="mt-4 text-sm">
           Publish pricing first.{" "}
-          <Link href="/pricing" className="underline">
-            Open pricing
+          <Link href="/rooms" className="underline">
+            Open Rooms &amp; Rates
           </Link>
         </p>
       ) : (
