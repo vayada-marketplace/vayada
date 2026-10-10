@@ -191,6 +191,7 @@
   "dashboard.conversionFunnel.infoLabel": "About the conversion funnel",
   "dashboard.conversionFunnel.info": "Booking site sessions in this period, counted at each step they reached in order. Red numbers show how many dropped off since the previous step. Card payments add an authorization step; the final step compares with authorized cards plus other payment methods.",
   "dashboard.conversionFunnel.options": "Funnel options",
+  "dashboard.conversionFunnel.timeRange": "Time range",
   "dashboard.conversionFunnel.exportCsv": "Export CSV",
   "dashboard.conversionFunnel.csvStep": "Step",
   "dashboard.conversionFunnel.csvVisitors": "Visitors",

@@ -191,6 +191,7 @@
   "dashboard.conversionFunnel.infoLabel": "コンバージョンファネルについて",
   "dashboard.conversionFunnel.info": "この期間の予約サイトのセッションを、順番に到達した各ステップで集計しています。赤い数字は前のステップから離脱した数を示します。カード払いには追加の承認ステップがあり、最後のステップは承認済みカードとその他の支払い方法の合計と比較されます。",
   "dashboard.conversionFunnel.options": "ファネルのオプション",
+  "dashboard.conversionFunnel.timeRange": "期間",
   "dashboard.conversionFunnel.exportCsv": "CSVをエクスポート",
   "dashboard.conversionFunnel.csvStep": "ステップ",
   "dashboard.conversionFunnel.csvVisitors": "訪問者",

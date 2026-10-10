@@ -191,6 +191,7 @@
   "dashboard.conversionFunnel.infoLabel": "Acerca del embudo de conversión",
   "dashboard.conversionFunnel.info": "Sesiones del sitio de reservas en este período, contadas en cada paso que alcanzaron en orden. Los números en rojo muestran cuántas abandonaron desde el paso anterior. Los pagos con tarjeta añaden un paso de autorización; el último paso se compara con las tarjetas autorizadas más otros métodos de pago.",
   "dashboard.conversionFunnel.options": "Opciones del embudo",
+  "dashboard.conversionFunnel.timeRange": "Periodo",
   "dashboard.conversionFunnel.exportCsv": "Exportar CSV",
   "dashboard.conversionFunnel.csvStep": "Paso",
   "dashboard.conversionFunnel.csvVisitors": "Visitantes",

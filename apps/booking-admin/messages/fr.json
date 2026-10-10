@@ -191,6 +191,7 @@
   "dashboard.conversionFunnel.infoLabel": "À propos de l'entonnoir de conversion",
   "dashboard.conversionFunnel.info": "Sessions du site de réservation sur cette période, comptées à chaque étape atteinte dans l'ordre. Les chiffres en rouge indiquent combien ont abandonné depuis l'étape précédente. Les paiements par carte ajoutent une étape d'autorisation ; la dernière étape se compare aux cartes autorisées plus les autres moyens de paiement.",
   "dashboard.conversionFunnel.options": "Options de l'entonnoir",
+  "dashboard.conversionFunnel.timeRange": "Période",
   "dashboard.conversionFunnel.exportCsv": "Exporter en CSV",
   "dashboard.conversionFunnel.csvStep": "Étape",
   "dashboard.conversionFunnel.csvVisitors": "Visiteurs",

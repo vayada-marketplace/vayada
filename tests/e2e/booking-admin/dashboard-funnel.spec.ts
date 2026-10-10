@@ -103,3 +103,61 @@ test("shows inline drop-offs, the card branch, CSV export and recomputes all tim
   await expect(card.getByText("No booking data for this period")).toBeVisible();
   expect(new Set(windows.map((url) => new URL(url).searchParams.get("windowStart"))).size).toBe(3);
 });
+
+test("the funnel options and the page tabs share one time range", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await mockBookingAdminAuthenticatedSession(page);
+  await mockBookingAdminShellRoutes(page);
+  const windowStarts: string[] = [];
+  await page.route("**/dashboard/conversion-funnel?**", (route) => {
+    windowStarts.push(new URL(route.request().url()).searchParams.get("windowStart") ?? "");
+    return route.fulfill({
+      json: {
+        funnel: {
+          steps: [
+            { stage: "page_visit", count: 82, previousCount: 82, percentOfVisits: 100 },
+            { stage: "rate_selected", count: 41, previousCount: 82, percentOfVisits: 50 },
+          ].map((step) => ({ ...step, conversionPercent: null })),
+          paymentMethods: [],
+          biggestDrop: null,
+        },
+      },
+    });
+  });
+  await page.goto("/dashboard");
+  const card = page
+    .getByRole("heading", { name: "Conversion funnel", exact: true })
+    .locator("xpath=../../..");
+  const options = card.getByRole("button", { name: "Funnel options" });
+  // The page tabs come before the card; with the popover closed each label is unique.
+  const tab = (name: string) => page.getByRole("button", { name, exact: true });
+  const distinctWindows = () => new Set(windowStarts).size;
+  await expect.poll(distinctWindows).toBe(1);
+
+  await options.click();
+  await expect(card.getByRole("button", { name: "Today", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await card.screenshot({
+    path: testInfo.outputPath("conversion-funnel-options.png"),
+    animations: "disabled",
+  });
+  await card.getByRole("button", { name: "Last 30 days", exact: true }).click();
+  await expect(card.getByRole("button", { name: "Export CSV" })).toHaveCount(0);
+  await expect(tab("Last 30 days")).toHaveAttribute("aria-pressed", "true");
+  await expect(tab("Today")).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(distinctWindows).toBe(2);
+
+  await tab("This week").click();
+  await expect.poll(distinctWindows).toBe(3);
+  await options.click();
+  await expect(card.getByRole("button", { name: "This week", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(card.getByRole("button", { name: "Last 30 days", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+});
