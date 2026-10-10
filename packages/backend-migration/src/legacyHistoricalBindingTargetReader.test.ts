@@ -216,11 +216,11 @@ describe.skipIf(!url)("parent-migrated disposable PostgreSQL target reader", () 
       await switched.query("RESET ROLE");
       switched.release();
     }
-    await pool.query(`GRANT vayada_next_hotel_setup_scope TO ${readerRole}`);
+    await pool.query(`GRANT vayada_next_channex_management_worker TO ${readerRole}`);
     try {
       await expect(read(reader, input)).rejects.toThrow("visibility is incomplete");
     } finally {
-      await pool.query(`REVOKE vayada_next_hotel_setup_scope FROM ${readerRole}`);
+      await pool.query(`REVOKE vayada_next_channex_management_worker FROM ${readerRole}`);
     }
   });
   it("rejects a reader membership added after target rows are read", async () => {
@@ -231,7 +231,7 @@ describe.skipIf(!url)("parent-migrated disposable PostgreSQL target reader", () 
       query: async (sql: string, args?: unknown[]) => {
         const result = await query(sql, args);
         if (!granted && sql.includes('FROM "pms"."channel_connections"')) {
-          await pool.query(`GRANT vayada_next_hotel_setup_scope TO ${readerRole}`);
+          await pool.query(`GRANT vayada_next_channex_management_worker TO ${readerRole}`);
           granted = true;
         }
         return result;
@@ -243,7 +243,8 @@ describe.skipIf(!url)("parent-migrated disposable PostgreSQL target reader", () 
         "visibility is incomplete",
       );
     } finally {
-      if (granted) await pool.query(`REVOKE vayada_next_hotel_setup_scope FROM ${readerRole}`);
+      if (granted)
+        await pool.query(`REVOKE vayada_next_channex_management_worker FROM ${readerRole}`);
     }
   });
   it("enumerates property, live-external and metadata-only competitors without truncation", async () => {

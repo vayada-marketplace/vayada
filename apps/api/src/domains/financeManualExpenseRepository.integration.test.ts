@@ -415,7 +415,6 @@ describe.skipIf(!URL)("PostgreSQL Finance manual expense repository", () => {
       connectionString: URL!,
       objectDeleter: {
         deleteObject: vi.fn(async () => undefined),
-        deletePrefix: vi.fn(async () => undefined),
       },
     });
     await expect(
