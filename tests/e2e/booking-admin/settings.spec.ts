@@ -380,7 +380,9 @@ test.describe("booking-admin settings no-legacy guard", () => {
     ).toBeVisible();
     await expect(currency).toBeDisabled();
     await expect(currency).not.toBeChecked();
-    await expect(page.getByText("Multi-currency isn't available yet.")).toBeVisible();
+    await expect(
+      page.getByText("Hidden automatically when only one currency is configured."),
+    ).toBeVisible();
     await expect(page.getByLabel("Live booking page preview")).not.toContainText("EN");
     await language.scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath("design-studio-header-one-language.png") });
@@ -389,6 +391,38 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await expect
       .poll(() => designRequests.find((request) => request.method === "PATCH")?.body)
       .toMatchObject({ showLanguageSelector: true, showCurrencySelector: true });
+    await assertHealthy();
+  });
+
+  test("offers the currency selector once the hotel adds a display currency", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingAdminAuthenticatedSession(page);
+    await mockBookingAdminShellRoutes(page, {
+      propertySettings: { ...defaultBookingAdminPropertySettings, supported_currencies: ["USD"] },
+    });
+    const { requests: designRequests } = await mockBookingAdminDesignSettings(page);
+
+    await page.goto("/design-studio");
+    const currency = page.getByRole("switch", { name: "Currency selector" });
+    const preview = page.getByLabel("Live booking page preview");
+    await expect(currency).toBeEnabled();
+    await expect(currency).toBeChecked();
+    await expect(preview.getByText("EUR", { exact: true })).toBeVisible();
+
+    await currency.click();
+    await expect(currency).not.toBeChecked();
+    await expect(preview.getByText("EUR", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect
+      .poll(() => designRequests.find((request) => request.method === "PATCH")?.body)
+      .toMatchObject({ showCurrencySelector: false });
     await assertHealthy();
   });
 

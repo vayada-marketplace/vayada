@@ -996,7 +996,7 @@
   "admin.languageSelector": "Sélecteur de langue",
   "admin.hiddenAutomaticallyWhenOnlyOneLanguageIsConfigured": "Masqué automatiquement lorsqu'une seule langue est configurée.",
   "admin.currencySelector": "Sélecteur de devises",
-  "admin.multiCurrencyIsNotAvailableYet": "Le multi-devises n'est pas encore disponible.",
+  "admin.hiddenAutomaticallyWhenOnlyOneCurrencyIsConfigured": "Masqué automatiquement lorsqu'une seule devise est configurée.",
   "admin.heroHeading": "Titre du héros",
   "admin.publicDescription": "Description publique",
   "admin.heroSubtext": "Sous-texte du héros",

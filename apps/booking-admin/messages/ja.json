@@ -996,7 +996,7 @@
   "admin.languageSelector": "言語セレクター",
   "admin.hiddenAutomaticallyWhenOnlyOneLanguageIsConfigured": "1 つの言語のみが設定されている場合は、自動的に非表示になります。",
   "admin.currencySelector": "通貨セレクター",
-  "admin.multiCurrencyIsNotAvailableYet": "複数通貨はまだご利用いただけません。",
+  "admin.hiddenAutomaticallyWhenOnlyOneCurrencyIsConfigured": "通貨が 1 つだけ設定されている場合は自動的に非表示になります。",
   "admin.heroHeading": "ヒーローの見出し",
   "admin.publicDescription": "公開説明",
   "admin.heroSubtext": "ヒーローのサブテキスト",
