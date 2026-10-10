@@ -6,7 +6,11 @@ import { createAirbnbAlterationRuntime } from "../airbnbAlterationRuntime.js";
 import { loadConfig } from "../config.js";
 import { createPgFinanceExpenseCategoryRepository } from "../domains/financeExpenseCategoryRepository.js";
 import { createPgFinanceManualExpenseRepository } from "../domains/financeManualExpenseRepository.js";
-import { installPostgresPoolRuntime, isPostgresUnavailableError } from "./postgresRuntime.js";
+import {
+  cachedHealthCheck,
+  installPostgresPoolRuntime,
+  isPostgresUnavailableError,
+} from "./postgresRuntime.js";
 
 describe("PostgreSQL runtime capacity", () => {
   it("keeps the Airbnb decision journal physically separate under server pool sharing", async () => {
@@ -158,6 +162,41 @@ describe("PostgreSQL runtime capacity", () => {
       ).toBe(false);
     } finally {
       await pool.end();
+    }
+  });
+  it("caches the database probe and shares one in-flight check", async () => {
+    let time = 0;
+    let probes = 0;
+    let answer = true;
+    const check = cachedHealthCheck(
+      async () => {
+        probes += 1;
+        if (!answer) throw new Error("connect ECONNREFUSED");
+      },
+      5_000,
+      () => time,
+    );
+    expect(await Promise.all([check(), check()])).toEqual([true, true]);
+    expect(probes).toBe(1);
+    answer = false;
+    time = 4_999;
+    expect(await check()).toBe(true);
+    time = 5_000;
+    expect(await check()).toBe(false);
+    answer = true;
+    time = 10_000;
+    expect(await check()).toBe(true);
+    expect(probes).toBe(3);
+  });
+  it("reports an unreachable database through its own probe connection", async () => {
+    const postgres = { Pool: pg.Pool };
+    const runtime = installPostgresPoolRuntime(postgres);
+    const check = runtime.healthCheck("postgresql://vayada@127.0.0.1:1/target");
+    try {
+      expect(await check()).toBe(false);
+      expect(runtime.snapshot().physicalPoolCount).toBe(0);
+    } finally {
+      await runtime.close();
     }
   });
   it("keeps permanent connect failures out of the unavailable classification", async () => {
