@@ -201,6 +201,21 @@ sets the hotel to active Commission, as legacy did when a subscription ended.
 Every other check stays: no live subscription (`active`, `past_due`,
 `trialing`, `paused`), an active Commission rule and an active organization.
 
+Legacy Fixed with no billing reference (`clear-stale-reference
+--legacy-fixed-without-subscription`, dry run by default). Legacy can show a
+hotel on the Fixed plan while its payment settings hold no billing reference
+at all: no customer, checkout, subscription or status. The import lands it as
+suspended Commission with `providerReentryRequired: false`, which the other
+two variants refuse. With this explicit flag the mode accepts exactly that
+shape (`legacyPlan=fixed`, no reference hash) and sets the hotel to active
+Commission, so it stays publicly bookable. Every other check stays: Stripe
+must hold no live subscription for the hotel (search by `hotel_id`), the
+Commission rule and the organization must be active, and the entitlement must
+still be suspended Commission with no subscription. It records
+`planSelectedBy: legacy-fixed-without-subscription-to-commission`. The hotel
+then pays the 5% booking commission in the target: a commercial decision, not
+a technical one.
+
 Third mode, `inventory` (read-only, Stripe search plus database reads). It
 lists every Stripe subscription with
 `metadata['vayada_payment_kind']:'fixed_plan'` and classifies each one:

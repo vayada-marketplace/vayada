@@ -225,6 +225,72 @@ describe.skipIf(!TEST_DATABASE_URL)("Legacy fixed-plan adoption PostgreSQL", () 
     await expect(readIdentityStatus(PROPERTY)).resolves.toBe("active");
   });
 
+  it("resets a legacy Fixed hotel without any billing reference to active, bookable Commission", async () => {
+    // As the import lands a legacy Fixed hotel whose payment settings hold no
+    // billing reference at all.
+    await pool.query(
+      `UPDATE finance.billing_entitlements
+       SET entitlement_metadata = entitlement_metadata
+         || '{"providerReentryRequired":false,"legacyBillingReferenceSha256":null}'::jsonb
+       WHERE property_id = $1::uuid`,
+      [PROPERTY],
+    );
+    const none = stripePort([]);
+
+    await expect(
+      clearStaleLegacyBillingReference(
+        { propertyId: PROPERTY, apply: true, revertLegacyFixed: true },
+        { store, stripe: none, now: () => NOW },
+      ),
+    ).resolves.toMatchObject({ outcome: "refused", reasons: ["not_a_stale_legacy_reference"] });
+    await expect(
+      clearStaleLegacyBillingReference(
+        { propertyId: PROPERTY, apply: true, legacyFixedWithoutSubscription: true },
+        {
+          store,
+          stripe: stripePort([{ subscriptionId: "sub_vay1362_it_a", status: "active" }]),
+          now: () => NOW,
+        },
+      ),
+    ).resolves.toMatchObject({ outcome: "refused" });
+    await expect(readEntitlement(PROPERTY)).resolves.toMatchObject({ billingStatus: "suspended" });
+
+    await expect(
+      clearStaleLegacyBillingReference(
+        { propertyId: PROPERTY, apply: true, legacyFixedWithoutSubscription: true },
+        { store, stripe: none, now: () => NOW },
+      ),
+    ).resolves.toMatchObject({ outcome: "cleared" });
+    await expect(readEntitlement(PROPERTY)).resolves.toMatchObject({
+      planKey: "commission",
+      billingStatus: "active",
+      billingProvider: "none",
+      planSelectedBy: "legacy-fixed-without-subscription-to-commission",
+      providerReentryRequired: false,
+    });
+    await expect(readIdentityStatus(PROPERTY)).resolves.toBe("active");
+    // The two entitlement conditions public bookability reads (billing_config_ready).
+    const bookable = await pool.query<{ ready: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM finance.billing_entitlements entitlement
+         WHERE entitlement.property_id = $1::uuid AND entitlement.product = 'booking'
+           AND entitlement.entitlement_key = 'direct-booking-finance'
+           AND entitlement.billing_status IN ('trialing', 'active')
+           AND entitlement.plan_key = 'commission'
+           AND NULLIF(entitlement.entitlement_metadata ->> 'planSelectedAt', '') IS NOT NULL
+       ) AS ready`,
+      [PROPERTY],
+    );
+    expect(bookable.rows[0]?.ready).toBe(true);
+
+    await expect(
+      clearStaleLegacyBillingReference(
+        { propertyId: PROPERTY, apply: true, legacyFixedWithoutSubscription: true },
+        { store, stripe: none, now: () => NOW },
+      ),
+    ).resolves.toMatchObject({ outcome: "already_cleared" });
+  });
+
   async function adopt(propertyId: string, raw: Record<string, unknown>) {
     let current = raw;
     const stripe: LegacyAdoptionStripe = {

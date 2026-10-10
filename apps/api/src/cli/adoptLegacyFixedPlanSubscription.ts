@@ -8,7 +8,8 @@
  *   npm --workspace vayada-api run finance:legacy-subscription:adopt -- \
  *     --property-id <uuid> --subscription-id sub_... [--apply-for-property <uuid>]
  *
- *   ... --mode clear-stale-reference --property-id <uuid> [--revert-legacy-fixed]
+ *   ... --mode clear-stale-reference --property-id <uuid>
+ *       [--revert-legacy-fixed | --legacy-fixed-without-subscription]
  *       [--apply-for-property <uuid>]
  *
  *   ... --mode inventory     (read-only; exits 2 while the reopen gate is closed)
@@ -36,6 +37,7 @@ const { values } = parseArgs({
     "subscription-id": { type: "string" },
     "apply-for-property": { type: "string" },
     "revert-legacy-fixed": { type: "boolean" },
+    "legacy-fixed-without-subscription": { type: "boolean" },
   },
 });
 const mode = values.mode ?? "adopt";
@@ -44,6 +46,7 @@ const propertyId = (values["property-id"] ?? "").toLowerCase();
 const subscriptionId = values["subscription-id"] ?? "";
 const apply = values["apply-for-property"] !== undefined;
 const revertLegacyFixed = values["revert-legacy-fixed"] === true;
+const legacyFixedWithoutSubscription = values["legacy-fixed-without-subscription"] === true;
 const databaseUrl = process.env["TARGET_DATABASE_URL"];
 const stripeSecretKey = process.env["STRIPE_SECRET_KEY"];
 if (mode !== "adopt" && mode !== "clear-stale-reference" && mode !== "inventory") {
@@ -52,8 +55,13 @@ if (mode !== "adopt" && mode !== "clear-stale-reference" && mode !== "inventory"
 if (!databaseUrl || !stripeSecretKey) {
   throw new Error("TARGET_DATABASE_URL and STRIPE_SECRET_KEY are required");
 }
-if (revertLegacyFixed && mode !== "clear-stale-reference") {
-  throw new Error("--revert-legacy-fixed only applies to --mode clear-stale-reference");
+if ((revertLegacyFixed || legacyFixedWithoutSubscription) && mode !== "clear-stale-reference") {
+  throw new Error(
+    "--revert-legacy-fixed and --legacy-fixed-without-subscription only apply to --mode clear-stale-reference",
+  );
+}
+if (revertLegacyFixed && legacyFixedWithoutSubscription) {
+  throw new Error("Use --revert-legacy-fixed or --legacy-fixed-without-subscription, not both");
 }
 if (mode === "inventory") {
   if (apply || propertyId || subscriptionId) {
@@ -120,7 +128,7 @@ async function runForProperty(databaseUrl: string, stripeSecretKey: string): Pro
             dependencies,
           )
         : await clearStaleLegacyBillingReference(
-            { propertyId, apply, revertLegacyFixed },
+            { propertyId, apply, revertLegacyFixed, legacyFixedWithoutSubscription },
             dependencies,
           );
     process.stdout.write(JSON.stringify(report, null, 2) + "\n");
