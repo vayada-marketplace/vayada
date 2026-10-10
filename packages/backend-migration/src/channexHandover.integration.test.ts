@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   applyChannexHandover,
   planChannexHandover,
+  planChannexSales,
   type ChannexHandoverInput,
 } from "./channexHandover.js";
 
@@ -248,11 +249,83 @@ describe.skipIf(!URL)("Channex handover executor (PostgreSQL)", () => {
     expect(await claims()).toEqual([{ state: "released", source: "handover", external: EXTERNAL }]);
   });
 
+  it("opens and closes sales of the owned hotel's active offers, once per reviewed plan", async () => {
+    const open: ChannexHandoverInput = {
+      command: "open-sales",
+      propertyId: PROPERTY,
+      approvalRef: "VAY-2108 sales test",
+    };
+    const close: ChannexHandoverInput = { ...open, command: "close-sales" };
+    const again = await plan(activate);
+    await applyChannexHandover(db, activate, again.planSha256);
+    const binding = (
+      await db.query(
+        "SELECT id::text, binding_generation::text AS generation FROM pms.channel_connections WHERE property_id = $1",
+        [PROPERTY],
+      )
+    ).rows[0];
+    const target = (
+      await db.query(
+        "INSERT INTO pms.channex_offer_targets(property_id,connection_id,room_type_id,offer_id) VALUES($1,$2,$3,'offer') RETURNING id::text",
+        [PROPERTY, binding.id, ROOM],
+      )
+    ).rows[0].id;
+    const intent = (
+      await db.query(
+        `INSERT INTO pms.channex_offer_target_intents(target_id,operation_key,proposal)
+         VALUES($1,$2,'{"currency":"EUR"}') RETURNING id,version`,
+        [target, "vay-2108-sales"],
+      )
+    ).rows[0];
+    await db.query(
+      `INSERT INTO pms.channex_offer_target_versions(target_id,version,intent_id,binding_generation,
+         external_property_id,external_room_type_id,external_rate_plan_id,configuration,readback_evidence)
+       VALUES($1,$2,$3,$4,$5,'x-room-1','x-rate-offer','{"currency":"EUR"}','{"verified":true}')`,
+      [target, intent.version, intent.id, binding.generation, EXTERNAL],
+    );
+    await db.query("UPDATE pms.channex_offer_targets SET active_version=1 WHERE id=$1", [target]);
+    const state = async () =>
+      (await db.query("SELECT sales_state FROM pms.channex_offer_targets WHERE id=$1", [target]))
+        .rows[0].sales_state;
+
+    await expect(planSales(close)).rejects.toThrow("sales_state_unchanged");
+    const opening = await planSales(open);
+    expect(opening.plan.targets.map((item) => item.externalRatePlanId)).toEqual(["x-rate-offer"]);
+    const opened = await applyChannexHandover(db, open, opening.planSha256);
+    expect(opened).toMatchObject({ replayed: false });
+    expect(await state()).toBe("open");
+    // Re-running the reviewed plan reports the recorded result instead of failing.
+    expect(await applyChannexHandover(db, open, opening.planSha256)).toEqual({
+      replayed: true,
+      planSha256: opening.planSha256,
+      auditId: opened.auditId,
+    });
+    await expect(planSales(open)).rejects.toThrow("sales_state_unchanged");
+    const closing = await planSales(close);
+    await applyChannexHandover(db, close, closing.planSha256);
+    expect(await state()).toBe("closed");
+
+    const { planSha256 } = await plan(revoke);
+    await applyChannexHandover(db, revoke, planSha256);
+    await expect(planSales(open)).rejects.toThrow("handover_not_completed");
+  });
+
+  async function planSales(input: ChannexHandoverInput) {
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN TRANSACTION READ ONLY");
+      return await planChannexSales(client, input as Parameters<typeof planChannexSales>[1]);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+  }
+
   async function plan(input: ChannexHandoverInput) {
     const client = await db.connect();
     try {
       await client.query("BEGIN TRANSACTION READ ONLY");
-      return await planChannexHandover(client, input);
+      return await planChannexHandover(client, input as Parameters<typeof planChannexHandover>[1]);
     } finally {
       await client.query("ROLLBACK");
       client.release();
@@ -418,6 +491,16 @@ describe.skipIf(!URL)("Channex handover executor (PostgreSQL)", () => {
         await client.query(`DELETE FROM ${table} WHERE property_id = ANY($1::uuid[])`, [
           properties,
         ]);
+      for (const table of ["pms.channex_offer_target_versions", "pms.channex_offer_target_intents"])
+        await client.query(
+          `DELETE FROM ${table} WHERE target_id IN
+             (SELECT id FROM pms.channex_offer_targets WHERE property_id = ANY($1::uuid[]))`,
+          [properties],
+        );
+      await client.query(
+        "DELETE FROM pms.channex_offer_targets WHERE property_id = ANY($1::uuid[])",
+        [properties],
+      );
       await client.query(
         `DELETE FROM pms.channex_external_rate_owners WHERE connection_id IN
            (SELECT id FROM pms.channel_connections WHERE property_id = ANY($1::uuid[]))`,
