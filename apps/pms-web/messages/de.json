@@ -10,6 +10,7 @@
   "layout.header.user": "Benutzer",
   "layout.header.language": "Sprache",
   "layout.header.currency": "Währung",
+  "layout.header.help": "Hilfe",
   "layout.sidebar.propertyManagerDescription": "Betrieb & Inventar",
   "layout.sidebar.creatorMarketplace": "vayada Marktplatz",
   "layout.sidebar.creatorMarketplaceDescription": "Creator & Kooperationen",

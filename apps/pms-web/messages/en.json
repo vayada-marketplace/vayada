@@ -10,6 +10,7 @@
   "layout.header.user": "User",
   "layout.header.language": "Language",
   "layout.header.currency": "Currency",
+  "layout.header.help": "Help",
   "layout.header.remaining": "remaining",
   "layout.sidebar.propertyManagerDescription": "Operations & Inventory",
   "layout.sidebar.creatorMarketplace": "vayada Marketplace",
