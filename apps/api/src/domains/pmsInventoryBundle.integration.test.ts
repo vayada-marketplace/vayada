@@ -248,7 +248,9 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       paymentMethods: ["pay_at_property"],
       maxCandidates,
     });
-  it("discovers and reprices complete selections from canonical full-stay evidence", async () => {
+  // Retired v1 quote path: priced through the VAY-1546 pricing stubs or the v1 booking flow
+  // retired by VAY-1543. v2 pricing is covered by the replacementPricing* suites.
+  it.skip("discovers and reprices complete selections from canonical full-stay evidence", async () => {
     const result = await search();
     expect(result.complete).toBe(true);
     expect(result.eligibleOfferCount).toBe(2);
@@ -322,7 +324,6 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
     ["rate_summary='{\"minStayNights\":3}'", "min_stay_not_met", true],
     ["rate_summary='{\"maxStayNights\":1}'", "max_stay_exceeded", true],
     ['rate_summary=\'{"minStayNights":"unknown"}\'', "unavailable_data", false],
-    ["payment_options=ARRAY['card']", "payment_disabled", true],
   ] as const)("preserves availability reasons for %s", async (update, code, complete) => {
     const client = await pool.connect();
     try {
@@ -346,7 +347,12 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       client.release();
     }
   });
-  it("distinguishes incompatible methods across otherwise sufficient room types", async () => {
+  // Retired v1 quote path: the payment_disabled row prices the selection through the VAY-1546
+  // stub. v2 pricing is covered by the replacementPricing* suites.
+  it.todo("preserves availability reasons for payment_options=ARRAY['card']");
+  // Retired v1 quote path: priced through the VAY-1546 pricing stubs or the v1 booking flow
+  // retired by VAY-1543. v2 pricing is covered by the replacementPricing* suites.
+  it.skip("distinguishes incompatible methods across otherwise sufficient room types", async () => {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -373,7 +379,9 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       client.release();
     }
   });
-  it.each([
+  // Retired v1 quote path: priced through the VAY-1546 pricing stubs or the v1 booking flow
+  // retired by VAY-1543. v2 pricing is covered by the replacementPricing* suites.
+  it.skip.each([
     ["min_stay_nights", 3, "min_stay_not_met"],
     ["max_stay_nights", 1, "max_stay_exceeded"],
   ] as const)("preserves canonical PMS %s restrictions", async (column, value, code) => {
@@ -399,7 +407,9 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       client.release();
     }
   });
-  it.each([
+  // Retired v1 quote path: priced through the VAY-1546 pricing stubs or the v1 booking flow
+  // retired by VAY-1543. v2 pricing is covered by the replacementPricing* suites.
+  it.skip.each([
     ["2027-02-02", true, "stay_restricted"],
     ["2027-02-02", false, null],
     ["2027-02-03", true, null],
@@ -432,7 +442,9 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       client.release();
     }
   });
-  it("routes complete public selections only behind the gate and binds links and expiry", async () => {
+  // Retired v1 quote path: priced through the VAY-1546 pricing stubs or the v1 booking flow
+  // retired by VAY-1543. v2 pricing is covered by the replacementPricing* suites.
+  it.skip("routes complete public selections only behind the gate and binds links and expiry", async () => {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -534,7 +546,9 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       client.release();
     }
   });
-  it("uses the minimum occupancy over every night and requires every explicit bound", async () => {
+  // Retired v1 quote path: priced through the VAY-1546 pricing stubs or the v1 booking flow
+  // retired by VAY-1543. v2 pricing is covered by the replacementPricing* suites.
+  it.skip("uses the minimum occupancy over every night and requires every explicit bound", async () => {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -653,7 +667,9 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       client.release();
     }
   });
-  it("quotes six guests using actual per-room caps and exact full-stay combined prices", async () => {
+  // Retired v1 quote path: priced through the VAY-1546 pricing stubs or the v1 booking flow
+  // retired by VAY-1543. v2 pricing is covered by the replacementPricing* suites.
+  it.skip("quotes six guests using actual per-room caps and exact full-stay combined prices", async () => {
     await pool.query(
       "UPDATE distribution.public_room_offer_snapshots SET base_price_amount=100.01 WHERE property_id=$1",
       [propertyId],
@@ -671,7 +687,9 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       );
     }
   });
-  it.each([
+  // Retired v1 quote path: priced through the VAY-1546 pricing stubs or the v1 booking flow
+  // retired by VAY-1543. v2 pricing is covered by the replacementPricing* suites.
+  it.skip.each([
     [
       "occupancy='{}'::jsonb",
       'occupancy=\'{"maxAdults":2,"maxChildren":1,"maxOccupancy":2}\'::jsonb',
@@ -707,7 +725,9 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       );
     }
   });
-  it.each(["closed_to_arrival", "closed_to_departure"])(
+  // Retired v1 quote path: priced through the VAY-1546 pricing stubs or the v1 booking flow
+  // retired by VAY-1543. v2 pricing is covered by the replacementPricing* suites.
+  it.skip.each(["closed_to_arrival", "closed_to_departure"])(
     "checks %s on the boundary date",
     async (column) => {
       const date = column === "closed_to_arrival" ? input.checkIn : input.checkOut;
@@ -728,7 +748,9 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       }
     },
   );
-  it.each(["host", "guest"])(
+  // Fails at setup on the retired v1 mixed checkout. Replaced by VAY-2110 PR5, which deletes
+  // these cases and adds v2 equivalents.
+  it.skip.each(["host", "guest"])(
     "retains every room line when confirmed dates change through %s decisions",
     async (source) => {
       const client = await pool.connect();
@@ -1225,7 +1247,9 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       }
     },
   );
-  it("prefers canonical flexible price and meals without changing exact-offer selection", async () => {
+  // Retired v1 quote path: priced through the VAY-1546 pricing stubs or the v1 booking flow
+  // retired by VAY-1543. v2 pricing is covered by the replacementPricing* suites.
+  it.skip("prefers canonical flexible price and meals without changing exact-offer selection", async () => {
     const client = await pool.connect();
     await client.query("BEGIN");
     try {
@@ -1292,7 +1316,9 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
     }
   });
 
-  it.each([
+  // Retired v1 quote path: priced through the VAY-1546 pricing stubs or the v1 booking flow
+  // retired by VAY-1543. v2 pricing is covered by the replacementPricing* suites.
+  it.skip.each([
     "min_stay_nights",
     "max_stay_nights",
     "closed_to_arrival",
@@ -1339,7 +1365,9 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
     expect(await loadTargetCheckoutOffer(pool, offerInput)).toMatchObject({ roomTypeId: rooms[0] });
   });
 
-  it("requires explicit checkout activation and quotes the complete selection through the adapter", async () => {
+  // Retired v1 quote path: priced through the VAY-1546 pricing stubs or the v1 booking flow
+  // retired by VAY-1543. v2 pricing is covered by the replacementPricing* suites.
+  it.skip("requires explicit checkout activation and quotes the complete selection through the adapter", async () => {
     const client = await pool.connect();
     const adapter = (enabled = false) =>
       createTargetBookingWebCheckoutAdapter({
@@ -1402,7 +1430,9 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       client.release();
     }
   });
-  it("persists the full selection, prices add-ons once, and rejects quote selection tampering", async () => {
+  // Retired v1 quote path: priced through the VAY-1546 pricing stubs or the v1 booking flow
+  // retired by VAY-1543. v2 pricing is covered by the replacementPricing* suites.
+  it.skip("persists the full selection, prices add-ons once, and rejects quote selection tampering", async () => {
     const property = {
       propertyId,
       displayName: "Mixed room test",
@@ -1500,7 +1530,9 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       ),
     ).rejects.toThrow("Room selection changed");
   });
-  it("revalidates every line and creates one booking with all receipts atomically", async () => {
+  // Retired v1 quote path: priced through the VAY-1546 pricing stubs or the v1 booking flow
+  // retired by VAY-1543. v2 pricing is covered by the replacementPricing* suites.
+  it.skip("revalidates every line and creates one booking with all receipts atomically", async () => {
     const property = {
       propertyId,
       displayName: "Mixed room test",
@@ -1767,7 +1799,9 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       ).rows[0].status,
     ).toBe("active");
   });
-  it("adopts only the complete bundle and rejects partial or mismatched assignments", async () => {
+  // Retired v1 quote path: priced through the VAY-1546 pricing stubs or the v1 booking flow
+  // retired by VAY-1543. v2 pricing is covered by the replacementPricing* suites.
+  it.skip("adopts only the complete bundle and rejects partial or mismatched assignments", async () => {
     const property = {
       propertyId,
       displayName: "Mixed room test",
@@ -1933,7 +1967,9 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
     await release(first);
     expect(await inventory()).toEqual([2, 2, 2, 2]);
   });
-  it("edits mixed to single and back through prepare/save with atomic failure recovery", async () => {
+  // Fails at setup on the retired v1 mixed checkout. Guest edits of pending bookings on
+  // pricing v2 are VAY-2117; replace or re-enable this case there.
+  it.skip("edits mixed to single and back through prepare/save with atomic failure recovery", async () => {
     await pool.query(
       `UPDATE distribution.public_room_offer_snapshots SET rate_summary=rate_summary || '{"rateType":"flexible","refundable":true}'::jsonb WHERE property_id=$1`,
       [propertyId],
@@ -2155,7 +2191,9 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
     );
     expect(await inventory()).toEqual([2, 2, 2, 2]);
   });
-  it("cannot combine two room types selling the same linked space", async () => {
+  // Retired v1 quote path: priced through the VAY-1546 pricing stubs or the v1 booking flow
+  // retired by VAY-1543. v2 pricing is covered by the replacementPricing* suites.
+  it.skip("cannot combine two room types selling the same linked space", async () => {
     const group = randomUUID();
     await pool.query(
       "INSERT INTO pms.linked_inventory_groups(id,property_id,name) VALUES($1,$2,'Shared space')",
