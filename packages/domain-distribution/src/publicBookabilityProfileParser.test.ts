@@ -3,6 +3,14 @@ import { describe, expect, it } from "vitest";
 import { PUBLIC_BOOKABILITY_FIXTURES } from "./fixtures.js";
 import { parsePublicBookabilityProfileProjection } from "./publicBookabilityProfileParser.js";
 
+const branding = (extra: Record<string, unknown>) => ({
+  heroImage: null,
+  heroHeading: null,
+  heroSubtext: null,
+  primaryColor: null,
+  fontPairing: null,
+  ...extra,
+});
 const storedProfile = () =>
   JSON.parse(JSON.stringify(PUBLIC_BOOKABILITY_FIXTURES[0]!.profile)) as Record<string, unknown>;
 
@@ -27,6 +35,18 @@ describe("parsePublicBookabilityProfileProjection", () => {
     const profile = JSON.parse(JSON.stringify(PUBLIC_BOOKABILITY_FIXTURES[0]!.profile));
     profile.hotel.policies = policies;
     expect(parsePublicBookabilityProfileProjection(profile)).toBeNull();
+  });
+
+  it("keeps display-only currencies separate from the pricing currencies", () => {
+    const profile = storedProfile();
+    (profile.hotel as Record<string, unknown>).branding = branding({
+      displayCurrencies: ["EUR", "USD", "GBP"],
+    });
+
+    const parsed = parsePublicBookabilityProfileProjection(profile);
+
+    expect(parsed?.hotel.branding?.displayCurrencies).toEqual(["EUR", "USD", "GBP"]);
+    expect(parsed?.hotel.supportedCurrencies).toEqual(["EUR"]);
   });
 
   it("preserves midnight as the explicit end-of-arrival-day deadline", () => {
@@ -102,6 +122,23 @@ describe("parsePublicBookabilityProfileProjection", () => {
       },
     ],
     ["unknown nested field", (profile: any) => (profile.hotel.location.internalId = "location-1")],
+    [
+      "display currencies not led by the pricing currency",
+      (profile: any) => (profile.hotel.branding = branding({ displayCurrencies: ["USD", "EUR"] })),
+    ],
+    [
+      "a single display currency",
+      (profile: any) => (profile.hotel.branding = branding({ displayCurrencies: ["EUR"] })),
+    ],
+    [
+      "duplicate display currencies",
+      (profile: any) =>
+        (profile.hotel.branding = branding({ displayCurrencies: ["EUR", "USD", "USD"] })),
+    ],
+    [
+      "a lowercase display currency",
+      (profile: any) => (profile.hotel.branding = branding({ displayCurrencies: ["EUR", "usd"] })),
+    ],
   ])("fails closed for %s", (_name, poison) => {
     const profile = storedProfile();
     poison(profile);

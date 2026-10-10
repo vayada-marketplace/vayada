@@ -209,6 +209,10 @@ import {
   type BookingWebCheckoutAdapter,
   type BookingWebPublicRoutesOptions,
 } from "./routes/bookingWebPublic.js";
+import {
+  registerBookingWebExchangeRateRoutes,
+  type BookingWebDisplayRates,
+} from "./routes/bookingWebExchangeRates.js";
 import type { BookingHotelChangeRequestRepository } from "./routes/bookingChangeRequests.js";
 import {
   registerBookingWebAffiliateRoutes,
@@ -508,6 +512,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   bookingWebAffiliateContextBindingEnabled?: boolean;
   bookingWebAttributionSink?: BookingWebAttributionSink;
   bookingWebPublicNow?: BookingWebPublicRoutesOptions["now"];
+  bookingWebDisplayRates?: BookingWebDisplayRates;
   affiliateDashboardRepository?: Partial<AffiliateDashboardReadRepository>;
   financeRepository?: FinanceRoutesOptions["repository"];
   financeSubscriptionService?: FinanceSubscriptionService;
@@ -631,6 +636,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       attributionSink: options.bookingWebAttributionSink,
       now: options.bookingWebPublicNow,
     });
+    if (options.bookingWebDisplayRates) {
+      app.register(registerBookingWebExchangeRateRoutes, {
+        prefix: "/api/booking-web",
+        profileRepository: options.publicHotelProfileRepository,
+        displayRates: options.bookingWebDisplayRates,
+      });
+    }
   } else if (options.bookingWebAffiliateRepository && options.bookingWebAffiliateHotelResolver) {
     app.register(registerBookingWebAffiliateRoutes, {
       prefix: "/api/booking-web",

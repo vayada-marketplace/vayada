@@ -4,7 +4,10 @@ on:
   pull_request:
     branches:
       - main
+      # VAY-2114 guest currency stack bases (top of the list to avoid append conflicts).
+      - "fm/vay-2114-*"
       # VAY-2074 stack bases (top of the list to avoid append conflicts).
+      - "fm/vay-2113-*"
       - "fm/vay-2074-*"
       - "fm/vay-2075-*"
       - "fm/vay-1092-*"
@@ -21,7 +24,10 @@ on:
       - "fm/vay-2084-*"
       - "fm/vay-2089-*"
       - "fm/vay-2093-*"
+      - "fm/vay-2072-*"
+      - "fm/vay-2077-*"
       - "fm/vay-2099-*"
+      - "fm/vay-2094-*"
       - "fm/vay-2100-*"
       - "fm/vay-2101-*"
       - "fm/vay-2102-*"
@@ -49,6 +55,7 @@ jobs:
     outputs:
       run_frontend: ${{ steps.select.outputs.run_frontend }}
       run_first_party_auth: ${{ steps.select.outputs.run_first_party_auth }}
+      run_api_unit: ${{ steps.select.outputs.run_api_unit }}
       run_api_postgres: ${{ steps.select.outputs.run_api_postgres }}
       run_setup_draft_reset_postgres: ${{ steps.select.outputs.run_setup_draft_reset_postgres }}
       run_backend: ${{ steps.select.outputs.run_backend }}
@@ -131,6 +138,9 @@ jobs:
       - name: PMS Web tests
         run: npm --workspace vayada-pms-frontend run test
 
+      - name: Vayada Admin tests
+        run: npm --workspace vayada-admin run test
+
       - name: Landing consent browser regressions
         run: |
           npx playwright install --with-deps chromium
@@ -194,6 +204,37 @@ jobs:
         env:
           E2E_FIRST_PARTY_AUTH_ONLY: "1"
           E2E_START_SERVERS: "1"
+
+  # Every unit suite under apps/api and the backend packages, with no database. Files that need
+  # PostgreSQL skip themselves here; api_postgres runs only the integration files it names (full
+  # integration coverage is VAY-2111). Main pushes and a nightly run repeat this job
+  # (main-unit-suites.yml) to catch two green PRs that break each other.
+  api_unit:
+    name: TypeScript API and Package Unit Suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.run_api_unit == 'true'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run the unit suites
+        run: npm run test:unit-suites
 
   # Each shard gets its own PostgreSQL cluster, so cluster-wide role proofs stay isolated:
   #   platform    - identity, legacy owner, finance worker, Channex worker and authorization proofs
@@ -449,7 +490,6 @@ jobs:
         if: matrix.shard == 'platform'
         run: >-
           npm --workspace vayada-api run test -- --no-file-parallelism
-          src/domains/replacementPricingOfferOwners.integration.test.ts
           src/domains/pmsInventoryMaterializationRepository.integration.test.ts
           -t "restricted Channex login"
         env:
@@ -568,9 +608,9 @@ jobs:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       # Pricing on the ordinary login (VAY-2057). Own database: these suites commit fixture
-      # properties and slugs that other PMS-shard suites would see. Only the public offer and
-      # quote cases of the offer-owner file: its restricted Channex login cases provision the
-      # Channex worker (cluster-wide EXECUTE revokes) and run in the platform shard.
+      # properties and slugs that other PMS-shard suites would see. The whole offer-owner file
+      # runs here, last, including its restricted Channex login cases (VAY-2113): they create,
+      # grant and drop the cluster-wide Channex worker role inside each case.
       - name: Run pricing PostgreSQL integration in an isolated database
         if: matrix.shard == 'pms'
         env:
@@ -606,8 +646,7 @@ jobs:
           npm --workspace @vayada/backend-migration run test -- \
             src/bookingPricingAuthorityDrop.integration.test.ts
           npm --workspace vayada-api run test -- --no-file-parallelism \
-            src/domains/replacementPricingOfferOwners.integration.test.ts \
-            -t '^(?!.*(Channex|ARI|receipt|upload|target|activation|provider|worker|job|nightly candidates)).*(public|quote|publication|publishes)'
+            src/domains/replacementPricingOfferOwners.integration.test.ts
 
       - name: Verify canonical setup payment readiness
         if: matrix.shard == 'hotel-setup'
@@ -958,6 +997,7 @@ jobs:
       - changes
       - frontend
       - first_party_auth
+      - api_unit
       - api_postgres
       - setup_draft_reset_postgres
       - backend

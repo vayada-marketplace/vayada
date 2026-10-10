@@ -41,9 +41,6 @@ export default function BenefitsTab({
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-5">
-      <h3 className="text-[14px] font-semibold text-gray-900 mb-0.5">
-        {t("bookingFlow.benefits.title")}
-      </h3>
       <p className="text-[12px] text-gray-500 mb-4">{t("bookingFlow.benefits.subtitle")}</p>
 
       <div className="space-y-2 mb-4">

@@ -217,6 +217,9 @@ export type PublicBookabilityBranding = {
   showReferAGuestButton?: boolean;
   showLanguageSelector?: boolean;
   showCurrencySelector?: boolean;
+  /** Display-only currencies a guest may switch to, defaultCurrency first; present only with
+   * more than one. Quotes and charges stay in the pricing currency (supportedCurrencies). */
+  displayCurrencies?: string[];
   heroImage: string | null;
   heroHeading: string | null;
   heroSubtext: string | null;

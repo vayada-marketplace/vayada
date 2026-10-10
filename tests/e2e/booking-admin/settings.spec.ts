@@ -74,7 +74,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
       }),
     );
 
-    await page.goto("/settings?section=booking");
+    await page.goto("/settings/booking-rules");
 
     await expect(
       page.getByRole("alert").filter({ hasText: "Same-day booking settings failed to load." }),
@@ -136,7 +136,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
       await route.fulfill({ json: persisted });
     });
 
-    await page.goto("/settings");
+    await page.goto("/settings/general");
 
     await expect(page.getByPlaceholder("https://instagram.com/yourhotel")).toHaveValue(
       "https://instagram.com/alpenrose",
@@ -154,7 +154,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await page
       .getByPlaceholder("https://www.tiktok.com/@yourhotel")
       .fill("https://tiktok.com/@alpenrose-hotel");
-    await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+    await page.getByRole("button", { name: "Save property details", exact: true }).click();
 
     await expect.poll(() => writes.length).toBe(1);
     expect(writes[0]).toMatchObject({
@@ -238,7 +238,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
       }),
     );
 
-    await page.goto("/settings");
+    await page.goto("/settings/general");
     await expect(page.getByTestId("property-address")).toHaveText(
       "Alpenstrasse 12, Munich, 80331, DE",
     );
@@ -248,7 +248,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     const name = page.getByPlaceholder("Enter property name");
     await expect(name).toHaveValue("Alpenrose");
     await name.fill("Alpenrose Lodge");
-    await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+    await page.getByRole("button", { name: "Save property details", exact: true }).click();
     await expect(page.getByText("Settings saved successfully")).toBeVisible();
 
     expect(profileWrites).toEqual([
@@ -258,12 +258,12 @@ test.describe("booking-admin settings no-legacy guard", () => {
     for (const field of ["property_name", "address", "city", "country"]) {
       expect(settingsWrites[0]).not.toHaveProperty(field);
     }
-    await page.getByRole("button", { name: "Billing" }).first().click();
+    await page.goto("/settings/payments");
     await expect(page.getByPlaceholder("payments@yourproperty.com")).toHaveValue(
       "pay@alpenrose.example",
     );
 
-    // Billing is now in the URL; open the Property section again, as a fresh visit would.
+    // The old Property link opens General again, as a fresh visit would.
     await page.goto("/settings?section=property");
     await expect(page.getByPlaceholder("Enter property name")).toHaveValue("Alpenrose Lodge");
     await assertHealthy();
@@ -272,7 +272,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     // (The refused request logs a console error, so page health is checked above.)
     refuseRename = true;
     await page.getByPlaceholder("Enter property name").fill("Alpenrose Hotel");
-    await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+    await page.getByRole("button", { name: "Save property details", exact: true }).click();
     await expect(
       page.getByText("Your other changes were saved, but the property name wasn't changed."),
     ).toBeVisible();
@@ -331,10 +331,8 @@ test.describe("booking-admin settings no-legacy guard", () => {
         },
       }),
     );
-    await page.goto("/settings");
-    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
-
-    await page.getByRole("button", { name: "Booking", exact: true }).click();
+    await page.goto("/settings/booking-rules");
+    await expect(page.getByRole("heading", { name: "Booking rules", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Custom Domain" })).toHaveCount(0);
     await expect(page.getByPlaceholder("booking.yourdomain.com")).toHaveCount(0);
     await expect(page.getByRole("switch", { name: "Enable map view" })).toHaveCount(0);
@@ -342,7 +340,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await expect(page.getByRole("button", { name: "Location map", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Notifications", exact: true })).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Payments", exact: true }).click();
+    await page.goto("/settings/payments");
     await expect(
       page.getByText("vayada Payments is not available in target checkout yet."),
     ).toBeVisible();
@@ -497,7 +495,9 @@ test.describe("booking-admin settings no-legacy guard", () => {
     ).toBeVisible();
     await expect(currency).toBeDisabled();
     await expect(currency).not.toBeChecked();
-    await expect(page.getByText("Multi-currency isn't available yet.")).toBeVisible();
+    await expect(
+      page.getByText("Hidden automatically when only one currency is configured."),
+    ).toBeVisible();
     await expect(page.getByLabel("Live booking page preview")).not.toContainText("EN");
     await language.scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath("design-studio-header-one-language.png") });
@@ -506,6 +506,38 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await expect
       .poll(() => designRequests.find((request) => request.method === "PATCH")?.body)
       .toMatchObject({ showLanguageSelector: true, showCurrencySelector: true });
+    await assertHealthy();
+  });
+
+  test("offers the currency selector once the hotel adds a display currency", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingAdminAuthenticatedSession(page);
+    await mockBookingAdminShellRoutes(page, {
+      propertySettings: { ...defaultBookingAdminPropertySettings, supported_currencies: ["USD"] },
+    });
+    const { requests: designRequests } = await mockBookingAdminDesignSettings(page);
+
+    await page.goto("/design-studio");
+    const currency = page.getByRole("switch", { name: "Currency selector" });
+    const preview = page.getByLabel("Live booking page preview");
+    await expect(currency).toBeEnabled();
+    await expect(currency).toBeChecked();
+    await expect(preview.getByText("EUR", { exact: true })).toBeVisible();
+
+    await currency.click();
+    await expect(currency).not.toBeChecked();
+    await expect(preview.getByText("EUR", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect
+      .poll(() => designRequests.find((request) => request.method === "PATCH")?.body)
+      .toMatchObject({ showCurrencySelector: false });
     await assertHealthy();
   });
 
@@ -553,7 +585,9 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await assertHealthy();
   });
 
-  test("keeps section deep links in sync with browser history", async ({ page }, testInfo) => {
+  test("opens settings pages from the card grid and redirects legacy section links", async ({
+    page,
+  }, testInfo) => {
     test.skip(
       !PROD,
       "Requires a production booking-admin build so the authenticated shell hydrates.",
@@ -588,80 +622,87 @@ test.describe("booking-admin settings no-legacy guard", () => {
       }),
     );
 
-    await page.goto("/settings?billing=canceled&source=email&section=payments", {
-      waitUntil: "networkidle",
-    });
-    await expect(page.getByRole("button", { name: "Payments", exact: true })).toHaveAttribute(
-      "aria-current",
-      "page",
+    await page.goto("/settings", { waitUntil: "networkidle" });
+    await expect(page.getByRole("heading", { name: "Booking Engine settings" })).toBeVisible();
+    const main = page.getByRole("main");
+    await expect(main.getByRole("link", { name: /^Feature Hub/ })).toHaveAttribute(
+      "href",
+      "/settings/feature-hub",
     );
-    await page.reload({ waitUntil: "networkidle" });
-    await expect(page.getByRole("button", { name: "Payments", exact: true })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-
-    await page.getByRole("button", { name: "Booking", exact: true }).click();
-    await expect.poll(() => new URL(page.url()).searchParams.get("section")).toBe("booking");
-    expect(new URL(page.url()).searchParams.get("billing")).toBe("canceled");
-    expect(new URL(page.url()).searchParams.get("source")).toBe("email");
-
-    await page.getByRole("button", { name: "Localization", exact: true }).click();
-    await expect.poll(() => new URL(page.url()).searchParams.get("section")).toBe("localization");
-
-    await page.goBack();
-    await expect(page.getByRole("button", { name: "Booking", exact: true })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-
-    await page.goForward();
-    await expect(page.getByRole("button", { name: "Localization", exact: true })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-
-    for (const section of ["location", "notifications"]) {
-      await page.goto(`/settings?section=${section}`, { waitUntil: "networkidle" });
-      await expect(page.getByRole("button", { name: "Property", exact: true })).toHaveAttribute(
-        "aria-current",
-        "page",
+    for (const [card, href] of [
+      ["Booking rules", "/settings/booking-rules"],
+      ["General", "/settings/general"],
+      ["Payments", "/settings/payments"],
+      ["Policies", "/settings/policies"],
+      ["Billing", "/settings/billing"],
+    ]) {
+      await expect(main.getByRole("link", { name: new RegExp(`^${card}`) })).toHaveAttribute(
+        "href",
+        href,
       );
     }
-
-    await page.goto("/settings?section=unknown", { waitUntil: "networkidle" });
-    await expect(page.getByRole("button", { name: "Property", exact: true })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-
-    await page.goto("/settings?section=account", { waitUntil: "networkidle" });
-    await expect(page.getByRole("button", { name: "Property", exact: true })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-    await expect(page.getByRole("button", { name: "Account", exact: true })).toHaveCount(0);
-    await expect(page.getByText("Personal account security")).toHaveCount(0);
-
-    await page.setViewportSize({ width: 390, height: 844 });
-    const mobilePropertyButton = page.getByRole("button", { name: "Property", exact: true });
-    const mobileBookingButton = page.getByRole("button", { name: "Booking", exact: true });
-    const mobileLocalizationButton = page.getByRole("button", {
-      name: "Localization",
-      exact: true,
+    for (const card of ["Email & notifications", "Account"]) {
+      await expect(main.getByRole("link", { name: new RegExp(`^${card}`) })).toHaveCount(0);
+      await expect(
+        main.getByRole("listitem").filter({ hasText: card }).getByText("Coming soon"),
+      ).toBeVisible();
+    }
+    await testInfo.attach("settings-grid-desktop", {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
     });
-    await expect(mobileBookingButton).toBeVisible();
-    await mobilePropertyButton.focus();
-    await page.keyboard.press("Tab");
-    await expect(mobileBookingButton).toBeFocused();
-    await page.keyboard.press("Tab");
-    await expect(mobileLocalizationButton).toBeFocused();
 
-    await page.goto("/settings?billing=canceled", { waitUntil: "networkidle" });
-    await expect(page.getByRole("button", { name: "Billing", exact: true })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
+    await main.getByRole("link", { name: /^Policies/ }).click();
+    await expect(page).toHaveURL(/\/settings\/policies$/);
+    await expect(page.getByRole("heading", { name: "Policies", exact: true })).toBeVisible();
+    await expect(page.getByText("Terms & Conditions", { exact: true })).toBeVisible();
+    await expect(page.getByRole("switch", { name: "Accept bookings instantly" })).toHaveCount(0);
+    await page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link").click();
+    await expect(page).toHaveURL(/\/settings$/);
+
+    for (const [legacy, target] of [
+      ["?section=property", "/settings/general"],
+      ["?section=localization", "/settings/general#localization"],
+      ["?section=booking", "/settings/booking-rules"],
+      ["?section=payments", "/settings/payments"],
+      ["?section=billing", "/settings/billing"],
+      [
+        "?billing=canceled&source=email&section=payments",
+        "/settings/payments?billing=canceled&source=email",
+      ],
+      ["?billing=canceled", "/settings/billing?billing=canceled"],
+    ]) {
+      await page.goto(`/settings${legacy}`, { waitUntil: "networkidle" });
+      await expect(page).toHaveURL(new URL(target, page.url()).toString());
+    }
+    await expect(
+      page.getByText("Payment failed. Please try again or use a different card."),
+    ).toBeVisible();
+
+    for (const unknown of ["unknown", "account", "location", "notifications"]) {
+      await page.goto(`/settings?section=${unknown}`, { waitUntil: "networkidle" });
+      await expect(page.getByRole("heading", { name: "Booking Engine settings" })).toBeVisible();
+    }
+    await page.goto("/settings/account", { waitUntil: "networkidle" });
+    await expect(page.getByRole("heading", { name: "Account", exact: true })).toHaveCount(0);
+
+    for (const [width, height, name] of [
+      [820, 1180, "tablet"],
+      [390, 844, "mobile"],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await page.goto("/settings", { waitUntil: "networkidle" });
+      await expect(page.getByRole("heading", { name: "Booking Engine settings" })).toBeVisible();
+      await testInfo.attach(`settings-grid-${name}`, {
+        body: await page.screenshot({ fullPage: true }),
+        contentType: "image/png",
+      });
+    }
+    await page.goto("/settings/general", { waitUntil: "networkidle" });
+    await testInfo.attach("settings-general-mobile", {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
     await assertHealthy();
   });
 
@@ -768,8 +809,13 @@ test.describe("booking-admin settings no-legacy guard", () => {
       },
     );
 
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Billing", exact: true }).click();
+    await page.goto("/settings/billing");
+    // Billing is only the Vayada plan; guest payment methods live on Payments.
+    await expect(page.getByRole("heading", { name: "Payment Methods" })).toHaveCount(0);
+    await testInfo.attach("settings-billing", {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
     await page.getByRole("button", { name: "Switch to Fixed Plan" }).click();
     const fixedDialog = page.getByRole("dialog");
     await expect(fixedDialog).toContainText(
@@ -844,8 +890,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
       },
     );
 
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Payments", exact: true }).click();
+    await page.goto("/settings/payments");
     const dashboardButton = page.getByRole("button", { name: "View Stripe Dashboard" });
     await expect(dashboardButton).toBeVisible();
     await expect(
@@ -863,7 +908,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     stripeConnected = false;
     await page.reload();
-    await page.getByRole("button", { name: "Payments", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Payments", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "View Stripe Dashboard" })).toHaveCount(0);
 
     await assertHealthy();
@@ -948,7 +993,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
       },
     );
 
-    await page.goto("/settings?section=payments");
+    await page.goto("/settings/payments");
     await page.getByRole("button", { name: /Stripe Connect/ }).click();
     const firstPopup = page.waitForEvent("popup");
     await page.getByRole("button", { name: "Connect Payment Account" }).click();
@@ -976,10 +1021,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     expect(order).toEqual(["save"]);
     expect(accountCreates).toBe(1);
     await expect(page.getByText("Failed to save")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Payments", exact: true })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
+    await expect(page).toHaveURL(/\/settings\/payments$/);
   });
 
   test("relinks a persisted Stripe account once without rewriting payment settings", async ({
@@ -1045,7 +1087,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
       },
     );
 
-    await page.goto("/settings?section=payments");
+    await page.goto("/settings/payments");
     const popup = page.waitForEvent("popup");
     await page.getByRole("button", { name: "Complete Onboarding" }).dblclick();
     const onboarding = await popup;
@@ -1174,9 +1216,10 @@ test.describe("booking-admin settings no-legacy guard", () => {
       },
     );
 
-    await page.goto("/settings?stripe=return");
+    // The exact return URL Stripe Connect sends hosts back to (apps/api stripeConnect.ts).
+    await page.goto("/settings?section=payments&stripe=return");
 
-    await expect(page).toHaveURL(/\/settings\?section=payments$/);
+    await expect(page).toHaveURL(/\/settings\/payments$/);
     await expect(page.getByText("Stripe is connected.")).toBeVisible();
     await expect(page.getByText("Connected", { exact: true })).toBeVisible();
     expect(reconciliationBodies).toEqual(
@@ -1197,7 +1240,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
       .poll(() => page.evaluate((key) => window.localStorage.getItem(key), markerKey))
       .toBe(`settled:${onboardingFlowId}`);
 
-    await page.goto("/settings?section=payments");
+    await page.goto("/settings/payments");
     await expect(page.getByText("Connected", { exact: true })).toBeVisible();
     const readsBeforeOriginalFocus = paymentSettingsReads;
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
@@ -1212,7 +1255,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     returnMissingAccount = true;
     failReconciliation = true;
     await page.goto("/settings?stripe=return");
-    await expect(page).toHaveURL(/\/settings\?section=payments$/);
+    await expect(page).toHaveURL(/\/settings\/payments$/);
     await expect(page.getByText("Couldn't refresh Stripe status.")).toBeVisible();
     await expect(page.getByText("Pending Onboarding", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Check Stripe status" })).toBeVisible();
@@ -1227,7 +1270,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
 test("saves direct-only transfers while retaining an existing hosted provider", async ({
   page,
-}) => {
+}, testInfo) => {
   await mockBookingAdminAuthenticatedSession(page);
   await mockBookingAdminShellRoutes(page);
   await page.route(
@@ -1274,22 +1317,29 @@ test("saves direct-only transfers while retaining an existing hosted provider", 
       },
     });
   });
-  await page.goto("/settings?section=billing");
+  await page.goto("/settings/payments");
   const transfer = page
     .getByRole("heading", { name: "Direct guest bank transfers" })
     .locator("..")
     .locator("..");
   await expect(page.getByText(/Saved account: •••• 3000/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Payment Methods" })).toBeVisible();
+  await testInfo.attach("settings-payments", {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
   const response = page.waitForResponse(
     (response) =>
       response.request().method() === "PATCH" && response.url().endsWith("/payment-settings"),
   );
-  await transfer.getByRole("button", { name: "Save Changes", exact: true }).click();
+  // One Save covers payment methods, bank details and the provider.
+  const savePayments = page.getByRole("button", { name: "Save Changes", exact: true });
+  await savePayments.click();
   await response;
   expect(write).toMatchObject({ paymentSettings: { acceptedMethods: ["bank_transfer"] } });
   expect(write?.paymentSettings).not.toHaveProperty("paymentProvider");
   await transfer.getByPlaceholder("e.g. HSBC Bank").fill("Partial replacement");
-  await transfer.getByRole("button", { name: "Save Changes", exact: true }).click();
+  await savePayments.click();
   await expect(
     page.getByText(
       "Enter the complete bank details, or leave all fields empty to keep the saved account.",

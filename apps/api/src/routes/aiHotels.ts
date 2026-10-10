@@ -85,6 +85,7 @@ type TargetPublicHotelProfileRow = {
   bookingShowReferAGuestButton: boolean | null;
   bookingShowLanguageSelector: boolean | null;
   bookingShowCurrencySelector: boolean | null;
+  bookingDisplayCurrencies: unknown;
   bookingReferAGuestModuleEnabled: boolean;
   bookingHeroImage: string | null;
   bookingHeroHeading: string | null;
@@ -381,6 +382,9 @@ function serializeHotelProfile(
             ...(hotel.branding.showCurrencySelector === undefined
               ? {}
               : { showCurrencySelector: hotel.branding.showCurrencySelector }),
+            ...(hotel.branding.displayCurrencies === undefined
+              ? {}
+              : { displayCurrencies: hotel.branding.displayCurrencies.map((code) => code) }),
             heroImage: hotel.branding.heroImage ?? null,
             heroHeading: hotel.branding.heroHeading ?? null,
             heroSubtext: hotel.branding.heroSubtext ?? null,
@@ -530,6 +534,7 @@ const TARGET_PUBLIC_PROFILE_SELECT = `SELECT
            booking_branding.show_refer_a_guest_button AS "bookingShowReferAGuestButton",
            booking_branding.show_language_selector AS "bookingShowLanguageSelector",
            booking_branding.show_currency_selector AS "bookingShowCurrencySelector",
+           booking_branding.supported_currencies AS "bookingDisplayCurrencies",
            EXISTS (
              SELECT 1
              FROM identity.product_entitlements entitlement
@@ -722,6 +727,13 @@ function toTargetPublicHotelProfileProjection(
 function publicBookingBranding(
   row: TargetPublicHotelProfileRow,
 ): Pick<PublicBookabilityHotelProfile, "branding"> {
+  // Booking's additional currencies are display only; quotes stay in the pricing currency.
+  const displayCurrencies = [
+    ...new Set([
+      row.defaultCurrency,
+      ...stringArray(row.bookingDisplayCurrencies, []).filter((code) => /^[A-Z]{3}$/.test(code)),
+    ]),
+  ];
   const branding = {
     logoUrl: stringValue(row.bookingHeaderLogo),
     showContactButton: row.bookingShowContactButton ?? true,
@@ -734,6 +746,7 @@ function publicBookingBranding(
     heroSubtext: stringValue(row.bookingHeroSubtext),
     primaryColor: stringValue(row.bookingPrimaryColor),
     fontPairing: stringValue(row.bookingFontPairing),
+    ...(displayCurrencies.length > 1 ? { displayCurrencies } : {}),
   };
   return Object.values(branding).some((value) => value !== null) ? { branding } : {};
 }
