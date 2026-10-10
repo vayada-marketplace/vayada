@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import type { ProductionBookingMigrationReport } from "./productionBookingMigration.js";
@@ -351,6 +353,39 @@ describe("production migration parity", () => {
     expect(report.decision).toBe("no-go");
     expect(report.findings).toContainEqual(
       expect.objectContaining({ code: "FUTURE_INVENTORY_VARIANCE" }),
+    );
+  });
+
+  it("reports the cohort module activations it could not carry, hashed and passing", async () => {
+    const reports = domainReports();
+    const hash = (id: string) => createHash("sha256").update(id).digest("hex");
+    (reports.pms as ProductionPmsMigrationReport).modules = {
+      planned: 2,
+      writes: 0,
+      unchanged: 1,
+      preserved: [
+        {
+          propertyId: "p-preserved",
+          legacy: "on",
+          status: "suspended",
+          ready: true,
+          ownerOff: true,
+        },
+      ],
+      skipped: [{ propertyId: "p-operator", legacy: "on", reason: "owner_organization" }],
+      unmapped: ["h:affiliates"],
+    };
+    const report = await runProductionParity(config(), services({ reports }));
+    expect(report.decision).toBe("go");
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({
+        severity: "pass",
+        code: "COHORT_MODULES_REPORTED",
+        actual:
+          "1 unchanged, 0 to write; " +
+          `skipped owner_organization: sha256:${hash("p-operator")} legacy on; ` +
+          `preserved sha256:${hash("p-preserved")} legacy on, suspended, Owner off; unmapped 1`,
+      }),
     );
   });
 

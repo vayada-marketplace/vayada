@@ -1083,6 +1083,38 @@ function addDomainInvariantFindings(
         ),
       );
   } else if (domain === "pms") {
+    // VAY-1362: what the import could not carry, or kept as it was, needs a go-day decision.
+    const modules = (report as ProductionPmsMigrationReport).modules;
+    if (modules) {
+      const reasons = [...new Set(modules.skipped.map(({ reason }) => reason))].sort();
+      findings.push(
+        finding(
+          "pass",
+          "COHORT_MODULES_REPORTED",
+          domain,
+          "identity.product_entitlements",
+          "Legacy PMS module activations of cohort hotels; skipped and preserved ones need a decision",
+          `${modules.planned} carried`,
+          [
+            `${modules.unchanged} unchanged, ${modules.writes} to write`,
+            ...reasons.map(
+              (reason) =>
+                `skipped ${reason}: ` +
+                modules.skipped
+                  .filter((row) => row.reason === reason)
+                  .map((row) => `sha256:${sha256(row.propertyId)} legacy ${row.legacy}`)
+                  .join(", "),
+            ),
+            ...modules.preserved.map(
+              (row) =>
+                `preserved sha256:${sha256(row.propertyId)} legacy ${row.legacy}, ${row.status}` +
+                `${row.ready ? "" : ", not ready"}${row.ownerOff ? ", Owner off" : ""}`,
+            ),
+            `unmapped ${modules.unmapped.length}`,
+          ].join("; "),
+        ),
+      );
+    }
     const parity = (report as ProductionPmsMigrationReport).parity;
     const propertyIds = new Set([
       ...Object.keys(parity.expectedActiveRoomTypesByProperty),

@@ -19,6 +19,14 @@ import {
   lockCohortProperties,
   type CohortActivationReport,
 } from "./productionPmsCohortActivation.js";
+import {
+  classifyPmsCohortModules,
+  readPmsCohortModules,
+  samePmsCohortModule,
+  writePmsCohortModule,
+  type PreservedModuleActivation,
+  type SkippedModuleActivation,
+} from "./productionPmsCohortModules.js";
 
 type QueryClient = Pick<pg.ClientBase, "query">;
 export type ProductionPmsMigrationMode = "dry-run" | "apply";
@@ -32,6 +40,18 @@ export type ProductionPmsMigrationReport = {
   blockers: ProductionPmsPlan["blockers"];
   /** VAY-1362: cohort lifecycle activation after an apply; absent otherwise. */
   activation?: CohortActivationReport;
+  /** VAY-1362: legacy module activations carried into cohort hotels; absent without a cohort. */
+  modules?: {
+    planned: number;
+    /** Missing modules written by an apply, or that a dry run would write. */
+    writes: number;
+    unchanged: number;
+    /** Stored modules that differ from legacy, kept as they are (newer on the target). */
+    preserved: PreservedModuleActivation[];
+    skipped: SkippedModuleActivation[];
+    /** Active legacy modules without a runtime module, as hotelId:moduleId. */
+    unmapped: string[];
+  };
 };
 export type ProductionPmsMigrationServices = {
   readSnapshot: typeof readProductionPmsSnapshot;
@@ -112,12 +132,35 @@ export async function runProductionPmsTransaction(
       completedAt: snapshot.completedAt,
       rows: snapshot.rows,
       cohort: snapshot.cohort,
+      ...(snapshot.moduleActivations ? { moduleActivations: snapshot.moduleActivations } : {}),
       target,
     });
+    // VAY-1362: stored modules are never rewritten; missing ones are written after verification.
+    const modules = plan.moduleActivations ?? [];
+    const moduleActions = classifyPmsCohortModules(
+      modules,
+      await readPmsCohortModules(client, modules),
+    );
+    const moduleReport = (writes: number) =>
+      modules.length || plan.skippedModules?.length || plan.unmappedModules?.length
+        ? {
+            modules: {
+              planned: modules.length - moduleActions.skipped.length,
+              writes,
+              unchanged: moduleActions.unchanged.length,
+              preserved: moduleActions.preserved,
+              skipped: [...(plan.skippedModules ?? []), ...moduleActions.skipped],
+              unmapped: plan.unmappedModules ?? [],
+            },
+          }
+        : {};
     if (input.mode === "dry-run" || plan.blockers.length > 0) {
       await client.query("ROLLBACK");
       finished = true;
-      return report(input, plan, false);
+      return {
+        ...report(input, plan, false),
+        ...moduleReport(plan.blockers.length ? 0 : moduleActions.write.length),
+      };
     }
     const cohortPropertyIds = plan.cohortPropertyIds ?? [];
     await lockCohortProperties(client, cohortPropertyIds);
@@ -139,6 +182,7 @@ export async function runProductionPmsTransaction(
       completedAt: snapshot.completedAt,
       rows: snapshot.rows,
       cohort: snapshot.cohort,
+      ...(snapshot.moduleActivations ? { moduleActivations: snapshot.moduleActivations } : {}),
       target: verifiedTarget,
     });
     if (verified.blockers.length > 0) {
@@ -148,6 +192,25 @@ export async function runProductionPmsTransaction(
     }
     if (verified.checksum !== plan.checksum || verified.writes.length > 0)
       throw new Error("Post-write PMS verification does not match the migration plan");
+    // VAY-1362: missing module activations are written as native onboarding leaves them, then
+    // verified as the runtime reads them.
+    for (const module of moduleActions.write)
+      await writePmsCohortModule(
+        client,
+        { sourceRunId: input.sourceRunId, completedAt: snapshot.completedAt },
+        module,
+      );
+    const writtenModules = await readPmsCohortModules(client, moduleActions.write);
+    if (
+      moduleActions.write.some(
+        (module) =>
+          !samePmsCohortModule(
+            module,
+            writtenModules.find((row) => row.propertyId === module.propertyId),
+          ),
+      )
+    )
+      throw new Error("Post-write PMS module activation does not match the migration plan");
     // VAY-1362: once every setup row is written and verified, ready cohort hotels go active.
     const activation =
       cohortPropertyIds.length && services.activateCohort
@@ -159,7 +222,11 @@ export async function runProductionPmsTransaction(
         : undefined;
     await client.query("COMMIT");
     finished = true;
-    return { ...report(input, plan, true), ...(activation ? { activation } : {}) };
+    return {
+      ...report(input, plan, true),
+      ...(activation ? { activation } : {}),
+      ...moduleReport(moduleActions.write.length),
+    };
   } catch (error) {
     if (!finished) await client.query("ROLLBACK").catch(() => undefined);
     throw error;
