@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SupportButton } from "./SupportButton";
+import { isSupportAvailable, SupportButton, SupportDialog } from "./SupportButton";
 
 const submit = async () => ({ status: "accepted", reference: "support-test" });
 
@@ -13,18 +13,23 @@ describe("SupportButton placement", () => {
 
     expect(markup).toContain("fixed bottom-4 right-4 z-40 px-3 py-2 shadow-sm");
     expect(markup).toContain(">Help / Report a bug</button>");
+    expect(markup).toContain('aria-label="Help and bug reports"');
   });
 
-  it("offers compact in-flow Help with its full accessible name", () => {
+  it("renders the dialog without a trigger so a menu item can open it", () => {
     vi.stubEnv("NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED", "true");
-    const markup = renderToStaticMarkup(
-      <SupportButton product="pms" submit={submit} placement="header" />,
-    );
+    const markup = renderToStaticMarkup(<SupportDialog product="pms" submit={submit} />);
 
-    expect(markup).not.toContain("fixed");
-    expect(markup).toContain("min-h-11 min-w-11 shrink-0");
-    expect(markup).toContain('aria-label="Help / Report a bug"');
-    expect(markup).toContain(">Help</button>");
+    expect(markup).toMatch(/^<dialog /);
     expect(markup).toContain('aria-label="Help and bug reports"');
+    expect(markup).not.toContain("fixed bottom-4");
+  });
+
+  it("hides both entry points when AuthKit login is off", () => {
+    vi.stubEnv("NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED", "false");
+
+    expect(isSupportAvailable()).toBe(false);
+    expect(renderToStaticMarkup(<SupportButton product="pms" submit={submit} />)).toBe("");
+    expect(renderToStaticMarkup(<SupportDialog product="pms" submit={submit} />)).toBe("");
   });
 });
