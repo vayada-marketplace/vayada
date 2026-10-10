@@ -225,6 +225,70 @@ describe("target booking add-on plan enforcement", () => {
     ).rejects.toThrow("active approved add-on image for this property");
   });
 
+  it("refuses fractional rupiah add-on prices for an IDR hotel (VAY-2085)", async () => {
+    const queries: string[] = [];
+    let rolledBack = false;
+    const client: BookingAddonItemsPoolClient = {
+      async query<T extends QueryResultRow = QueryResultRow>(text: string) {
+        queries.push(text);
+        if (text === "ROLLBACK") rolledBack = true;
+        if (text.includes("FROM pms.property_pricing_settings"))
+          return {
+            rows: [
+              {
+                propertyId: "d3000000-0000-4000-8000-000000000682",
+                currency: "IDR",
+                pricingCurrencyRevision: 1,
+                createdAt: "2026-08-11T10:00:00.000Z",
+                updatedAt: "2026-08-11T10:00:00.000Z",
+              },
+            ] as unknown as T[],
+          };
+        if (text.includes("WITH direct_property AS"))
+          return {
+            rows: [{ propertyId: "d3000000-0000-4000-8000-000000000682" }] as unknown as T[],
+          };
+        if (text.includes('count(*)::text AS "currentCount"'))
+          return { rows: [{ currentCount: "0" }] as unknown as T[] };
+        return { rows: [] as T[] };
+      },
+      release() {},
+    };
+    const repository = createPgTargetBookingAddonItemsRepository({
+      connectionString: "postgresql://target-db",
+      pool: {
+        async query() {
+          return { rows: [] };
+        },
+        async connect() {
+          return client;
+        },
+      },
+    });
+
+    await expect(
+      repository.createAddonItemByHotelId("booking_hotel_alpenrose", {
+        name: "Airport transfer",
+        description: "One way.",
+        price: "150000.50",
+        currency: "EUR",
+        category: "transport",
+        imageMediaObjectId: null,
+        duration: null,
+        pricingModel: "per_stay",
+        publicVisible: true,
+        status: "active",
+        sortOrder: 0,
+        ownershipKind: "property",
+        partnerCommissionRate: null,
+      }),
+    ).rejects.toThrow("price must be a whole IDR amount without decimals.");
+    expect(rolledBack).toBe(true);
+    expect(queries.some((text) => text.includes("INSERT INTO booking.addon_definitions"))).toBe(
+      false,
+    );
+  });
+
   it("serializes creation and preserves existing add-ons when the plan cap is reached", async () => {
     const queries: Array<{ text: string; values?: unknown[] }> = [];
     let released = false;

@@ -39,19 +39,22 @@ export async function lockPublicPricingPaymentAmounts(
     return null;
   const terms = selectedTerms.map((t) => t!);
   if (new Set(terms.map((t) => canonical(t.cancellation))).size !== 1) return null;
-  const amounts = composeReplacementSettlementAmounts({
-    subtotalMinor: total.subtotalMinor,
-    charges: total.charges.charges.map(
-      ({ id, amountMinor, included, collect, basisEvidenceId }) => ({
-        id,
-        amountMinor,
-        included,
-        collect,
-        basisEvidenceId,
-      }),
-    ),
-    payment: { kind: method === "card" ? "full" : "pay_at_property" },
-  });
+  const amounts = composeReplacementSettlementAmounts(
+    {
+      subtotalMinor: total.subtotalMinor,
+      charges: total.charges.charges.map(
+        ({ id, amountMinor, included, collect, basisEvidenceId }) => ({
+          id,
+          amountMinor,
+          included,
+          collect,
+          basisEvidenceId,
+        }),
+      ),
+      payment: { kind: method === "card" ? "full" : "pay_at_property" },
+    },
+    total.stay.currency,
+  );
   if (!amounts || amounts.totalMinor !== total.totalMinor) return null;
   const paymentEvidenceId =
     "booking.payment-amounts.v1:" +
