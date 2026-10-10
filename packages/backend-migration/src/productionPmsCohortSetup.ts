@@ -11,8 +11,9 @@ import { pmsRecord } from "./productionPmsValues.js";
 
 /** The native V1 pricing currencies (apps/api pmsPricingCurrencyCapabilities.ts). */
 export const NATIVE_PRICING_CURRENCIES = new Set([
-  "AED", "AUD", "BGN", "BRL", "CAD", "CHF", "CNY", "CZK", "DKK", "EUR", "GBP", "HKD", "HRK", "INR",
-  "LKR", "MXN", "MYR", "NOK", "NZD", "PHP", "PLN", "RON", "RUB", "SEK", "SGD", "THB", "TRY", "USD",
+  "AED", "AUD", "BGN", "BRL", "CAD", "CHF", "CNY", "CZK", "DKK", "EUR", "GBP", "HKD", "HRK", "IDR",
+  "INR", "LKR", "MXN", "MYR", "NOK", "NZD", "PHP", "PLN", "RON", "RUB", "SEK", "SGD", "THB", "TRY",
+  "USD",
 ]); // prettier-ignore
 
 /** A cohort hotel the import makes operable: inside the cohort and not in private quarantine. */
