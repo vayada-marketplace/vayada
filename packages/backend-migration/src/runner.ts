@@ -292,6 +292,9 @@ export async function runMigrations(config: RunnerConfig): Promise<RunResult> {
   const client = new pg.Client({
     connectionString: normalizePgConnectionString(config.connectionString),
   });
+  // A dropped connection fails the pending query, and PostgreSQL rolls back the open migration
+  // transaction. Without a listener pg would also raise an unhandled 'error' event.
+  client.on("error", () => undefined);
   await client.connect();
 
   try {

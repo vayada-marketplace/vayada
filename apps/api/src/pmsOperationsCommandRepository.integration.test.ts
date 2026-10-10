@@ -15,7 +15,10 @@ let actorUserId = randomUUID();
 let organizationId = randomUUID();
 let propertyId = randomUUID();
 
-describe.skipIf(!TEST_DATABASE_URL)("first-run PMS room setup concurrency", () => {
+// Every case here starts with createRoomType, which has been a deliberate 503
+// PRICING_UNAVAILABLE stub since VAY-1546. PMS creates rooms through the room-facts
+// setup route instead. Re-enable when VAY-1422 restores createRoomType.
+describe.skip("first-run PMS room setup concurrency", () => {
   const control = new pg.Client({
     connectionString: TEST_DATABASE_URL ?? "postgresql://integration-test-disabled",
   });
