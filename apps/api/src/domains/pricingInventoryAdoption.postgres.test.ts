@@ -978,14 +978,28 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         };
         // The same rooms and nightly prices on the new dates; the live publication is not under
         // test here (its repricing has its own suites).
+        let ratesChanged = false;
         const repriceStay = async (
           _client: unknown,
           input: { booked: StoredPricingQuote; checkIn: string; checkOut: string },
         ) => {
-          const quote = repricedQuote(input.booked, {
+          const repriced = repricedQuote(input.booked, {
             checkIn: input.checkIn,
             checkOut: input.checkOut,
           });
+          // The hotel's rates were republished: same amounts, a new rate source revision.
+          const quote = ratesChanged
+            ? {
+                ...repriced,
+                evidence: {
+                  ...repriced.evidence,
+                  revisions: {
+                    ...repriced.evidence.revisions,
+                    pms: `${repriced.evidence.revisions.pms}-republished`,
+                  },
+                },
+              }
+            : repriced;
           return {
             quote,
             calculation: {
@@ -1003,6 +1017,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           };
         };
         let failAfterMove = true;
+        let soldOut = false;
         const actions = createBookingHostActions({
           pool: nested as unknown as pg.Pool,
           inventory: createTargetPmsInventoryReservationPort(),
@@ -1018,6 +1033,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           // Real holds through the inventory port: this fixture's synthetic calendar isn't the
           // current-calendar evidence the pricing-v2 quote reservation requires.
           reserveStayHolds: (client, input) => {
+            if (soldOut) throw new Error("Quote inventory is unavailable");
             const counts = new Map<string, number>();
             for (const room of input.rooms)
               counts.set(room.roomTypeId, (counts.get(room.roomTypeId) ?? 0) + 1);
@@ -1101,6 +1117,21 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
               [bookingId],
             )
           ).rows[0];
+        // Rates republished after the preview need a new preview; new dates that sold out are
+        // refused. Neither writes anything (checked below).
+        ratesChanged = true;
+        await expect(
+          actions.apply(hostScope, hostPreview.previewId, "host-date-change"),
+        ).rejects.toMatchObject({ code: "stale_preview" });
+        ratesChanged = false;
+        soldOut = true;
+        await expect(
+          actions.apply(hostScope, hostPreview.previewId, "host-date-change"),
+        ).rejects.toMatchObject({
+          code: "inventory_unavailable",
+          message: "The new dates are not available for every booked room.",
+        });
+        soldOut = false;
         // A failure after the stays moved undoes the whole change.
         await expect(
           actions.apply(hostScope, hostPreview.previewId, "host-date-change"),

@@ -35,6 +35,7 @@ import {
 import { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js";
 import { createCurrentPricingQuoteStore } from "./currentPricingQuoteStore.js";
 import { lockCurrentPricingQuote } from "./currentPricingQuote.js";
+import { keepsBookedTerms, repriceFromPublication } from "./pricingStayDateChange.js";
 import {
   parsePublicPricingSelection,
   parseStoredPricingQuote,
@@ -6893,6 +6894,57 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       client.release();
     }
   }
+  // VAY-2110: a host date change reprices the booked rooms through the live publication.
+  it("reprices a booked quote's rooms for new dates from the current publication with the booked terms", async () => {
+    const f = await componentsFixture(fixedPolicy(), propertyTerms);
+    await pool.query(
+      `UPDATE booking.booking_settings
+       SET last_minute_discount='{"enabled":false,"stackWithPromo":false,"tiers":[]}' WHERE property_id=$1`,
+      [f.scope.propertyId],
+    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const booked = (await lockCurrentPricingQuote(
+        client,
+        f.scope.propertyId,
+        { ...f.selection, version: "public-pricing-selection.v1", addons: [], promoCode: null },
+        "pay_at_property",
+        300,
+      ))!.quote;
+      // Real quotes carry a zero discount line; a date change refuses only an actual discount.
+      expect(
+        booked.evidence.lines.filter(
+          (line) => line.kind === "discount" && line.amountMinor !== "0",
+        ),
+      ).toEqual([]);
+      const nextDay = (date: string) =>
+        new Date(Date.parse(`${date}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+      const same = await repriceFromPublication(client, {
+        propertyId: f.scope.propertyId,
+        booked,
+        checkIn: booked.stay.checkIn,
+        checkOut: booked.stay.checkOut,
+      });
+      expect(same?.quote.quoteId).not.toBe(booked.quoteId);
+      expect(same?.quote.evidence.totalMinor).toBe(booked.evidence.totalMinor);
+      expect(keepsBookedTerms(booked, same!.quote)).toBe(true);
+      const moved = await repriceFromPublication(client, {
+        propertyId: f.scope.propertyId,
+        booked,
+        checkIn: booked.stay.checkOut,
+        checkOut: nextDay(booked.stay.checkOut),
+      });
+      expect(moved?.quote.stay).toMatchObject({
+        checkIn: booked.stay.checkOut,
+        checkOut: nextDay(booked.stay.checkOut),
+      });
+      expect(keepsBookedTerms(booked, moved!.quote)).toBe(true);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+  });
   it("assembles a validated historical quote with exact lines, nightly records and seven sources", async () => {
     const f = await componentsFixture(fixedPolicy(), propertyTerms),
       record = await assembledQuote(f);

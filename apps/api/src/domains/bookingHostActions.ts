@@ -134,6 +134,8 @@ export function createBookingHostActions(config: {
     scope: HostActionScope,
     request: HostActionRequest,
     at: Date,
+    /** Apply moves the holds for real, so it skips the preview's trial move. */
+    applying = false,
   ) => {
     // NO KEY UPDATE: a v2 stay's PMS adoption (inventory lock, then a FOR KEY SHARE reference to
     // this row) can finish instead of deadlocking against a host action (VAY-2100).
@@ -189,10 +191,11 @@ export function createBookingHostActions(config: {
               today: bookingOwner.propertyDate(property.timezone, at),
               reprice: config.repriceStay ?? repriceFromPublication,
             });
-            await checkPricingStayDateChangeHolds(client, change, {
-              ...pricingMove(scope, reservation, at),
-              previewId: randomUUID(),
-            });
+            if (!applying)
+              await checkPricingStayDateChangeHolds(client, change, {
+                ...pricingMove(scope, reservation, at),
+                previewId: randomUUID(),
+              });
             return change;
           })
         : null;
@@ -371,7 +374,7 @@ export function createBookingHostActions(config: {
             "stale_preview",
             "Preview expired or unavailable. Preview this action again.",
           );
-        const state = await inspect(client, scope, preview.request, at);
+        const state = await inspect(client, scope, preview.request, at, true);
         if (state.revision !== preview.revision || hash(state.impact) !== hash(preview.impact))
           throw new HostActionError(
             "stale_preview",

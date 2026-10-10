@@ -30,12 +30,13 @@ import type {
 export class PricingStayDateChangeRefused extends Error {
   constructor(
     message: string,
-    readonly code: "unsupported_edit" | "inventory_unavailable" = "unsupported_edit",
+    readonly code: PricingStayDateChangeRefusal = "unsupported_edit",
   ) {
     super(message);
   }
 }
-const refuse = (message: string, code?: "unsupported_edit" | "inventory_unavailable"): never => {
+type PricingStayDateChangeRefusal = "unsupported_edit" | "inventory_unavailable" | "stale_preview";
+const refuse = (message: string, code?: PricingStayDateChangeRefusal): never => {
   throw new PricingStayDateChangeRefused(message, code);
 };
 
@@ -118,6 +119,37 @@ const discounted = (quote: StoredPricingQuote) =>
   quote.stay.promoCode !== null ||
   quote.evidence.lines.some((line) => line.kind === "discount" && line.amountMinor !== "0");
 
+/** The repriced stay keeps what the guest booked: the same rooms, offers and guests, each
+ * room's cancellation and payment terms and meal, the payment method and acceptance mode. */
+export function keepsBookedTerms(booked: StoredPricingQuote, quote: StoredPricingQuote) {
+  const termsOf = (q: StoredPricingQuote, room: StoredPricingQuote["stay"]["rooms"][number]) => {
+    const terms = q.evidence.terms.find(
+      (t) => t.roomTypeId === room.roomTypeId && t.offerId === room.offerId,
+    );
+    return terms && { cancellation: terms.cancellation, payment: terms.payment };
+  };
+  const mealOf = (q: StoredPricingQuote, selectionId: string) =>
+    q.rooms.find((room) => room.selectionId === selectionId)?.mealPlan;
+  return (
+    quote.stay.rooms.length === booked.stay.rooms.length &&
+    booked.stay.rooms.every((room, index) => {
+      const next = quote.stay.rooms[index]!;
+      const terms = termsOf(booked, room);
+      return (
+        next.selectionId === room.selectionId &&
+        next.roomTypeId === room.roomTypeId &&
+        next.offerId === room.offerId &&
+        isDeepStrictEqual(next.guests, room.guests) &&
+        terms !== undefined &&
+        isDeepStrictEqual(termsOf(quote, next), terms) &&
+        mealOf(quote, room.selectionId) === mealOf(booked, room.selectionId)
+      );
+    }) &&
+    quote.paymentMethod === booked.paymentMethod &&
+    quote.acceptanceMode === booked.acceptanceMode
+  );
+}
+
 export type PricingStayRepricer = (
   client: PoolClient,
   input: { propertyId: string; booked: StoredPricingQuote; checkIn: string; checkOut: string },
@@ -190,9 +222,17 @@ export async function quotePricingStayDateChange(
     guestBookingId: booking.guestBookingId,
   });
   const booked = current?.quote;
+  const editRevision = (
+    await client.query<{ editRevision: number }>(
+      `SELECT edit_revision AS "editRevision" FROM booking.guest_bookings
+       WHERE id=$1::uuid AND property_id=$2::uuid`,
+      [booking.guestBookingId, booking.propertyId],
+    )
+  ).rows[0]?.editRevision;
   if (
     !current ||
     !booked ||
+    editRevision !== current.editRevision ||
     booked.stay.checkIn !== booking.checkIn ||
     booked.stay.checkOut !== booking.checkOut ||
     booked.stay.rooms.length !== booking.roomCount ||
@@ -239,33 +279,7 @@ export async function quotePricingStayDateChange(
       "The new dates can't be priced: the rate may be closed or restricted on those dates.",
     );
   const quote = priced.quote;
-  // The guest keeps what they booked: each room's terms (cancellation and payment) and meal.
-  const termsOf = (q: StoredPricingQuote, room: StoredPricingQuote["stay"]["rooms"][number]) => {
-    const terms = q.evidence.terms.find(
-      (t) => t.roomTypeId === room.roomTypeId && t.offerId === room.offerId,
-    );
-    return terms && { cancellation: terms.cancellation, payment: terms.payment };
-  };
-  const mealOf = (q: StoredPricingQuote, selectionId: string) =>
-    q.rooms.find((room) => room.selectionId === selectionId)?.mealPlan;
-  if (
-    quote.stay.rooms.length !== booked.stay.rooms.length ||
-    booked.stay.rooms.some((room, index) => {
-      const next = quote.stay.rooms[index]!;
-      const terms = termsOf(booked, room);
-      return (
-        next.selectionId !== room.selectionId ||
-        next.roomTypeId !== room.roomTypeId ||
-        next.offerId !== room.offerId ||
-        !isDeepStrictEqual(next.guests, room.guests) ||
-        !terms ||
-        !isDeepStrictEqual(termsOf(quote, next), terms) ||
-        mealOf(quote, room.selectionId) !== mealOf(booked, room.selectionId)
-      );
-    }) ||
-    quote.paymentMethod !== booked.paymentMethod ||
-    quote.acceptanceMode !== booked.acceptanceMode
-  )
+  if (!keepsBookedTerms(booked, quote))
     return refuse(
       "This rate's terms changed since the booking, so its dates can't change here. Cancel and rebook instead.",
     );
@@ -406,11 +420,7 @@ async function moveHolds(client: PoolClient, change: PricingStayDateChange, move
     throw error;
   }
   const bundle = parsePmsInventoryReservationBundle(held);
-  if (!bundle)
-    return refuse(
-      "The new dates are not available for every booked room.",
-      "inventory_unavailable",
-    );
+  if (!bundle) throw new Error("Pricing stay date change holds did not decode");
   return { previous, bundle };
 }
 
@@ -456,8 +466,9 @@ export async function applyPricingStayDateChange(
     ],
   );
   const { previous, bundle } = await moveHolds(client, change, move);
-  // Before the booking changes, only the new nights may be held: the old nights are freed (every
-  // assignment released, no old hold still reserved) and each new hold is reserved.
+  // Before the booking changes, only the new nights may be held. Adopted holds stay handed off (a
+  // final state), so the old nights are freed by releasing every assignment; no old hold may
+  // still be reserved either. Each new hold is reserved.
   const holds = (
     await client.query<{ oldReserved: number; newReserved: number; occupying: number }>(
       `SELECT
@@ -551,7 +562,8 @@ export async function applyPricingStayDateChange(
       ],
     )
   ).rows[0];
-  if (!updated) return refuse("The booking changed. Preview the date change again.");
+  if (!updated)
+    return refuse("The booking changed. Preview the date change again.", "stale_preview");
   // The PMS hands the new holds off at commit at the assignments' update time, which must not
   // precede their reserve time; reservePmsQuoteInventory stamps that with the database clock.
   const completedAt = (await client.query<{ now: Date }>("SELECT clock_timestamp() AS now"))
