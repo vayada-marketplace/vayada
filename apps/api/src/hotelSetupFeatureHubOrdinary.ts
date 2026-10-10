@@ -13,10 +13,9 @@ import type { PmsModuleActivationRepository } from "./routes/pmsModuleActivation
 
 type ScopePool = Parameters<HotelSetupPropertyScopeRunner>[0];
 
-/** The native receipt (0449) uses newHotelFinancialsOwnerDisabled, which its guard trigger strips
- * from every non-native write, so any later write by anyone cancels it. The ordinary login cannot
- * write that key; it records Owner-off as the switch-off transaction id, which only counts while
- * it equals the row's xmin: any later write to the row by anyone cancels it the same way. */
+/** Owner-off is recorded as the switch-off transaction id and only counts while it equals the
+ * row's xmin, so any later write to the row by anyone cancels it. Migration 0474 carried the
+ * native receipts (newHotelFinancialsOwnerDisabled, 0449) over to this marker. */
 const OWNER_OFF = "featureHubOwnerDisabled";
 
 export class HotelSetupFinancialsUnavailableError extends Error {
@@ -24,7 +23,7 @@ export class HotelSetupFinancialsUnavailableError extends Error {
 }
 
 /** Ordinary-login port of the native Feature Hub command (VAY-2056): the trigger
- * platform.apply_hotel_setup_feature_hub_command (0449) only fires for native logins. Same
+ * platform.apply_hotel_setup_feature_hub_command (0449, dropped in 0474) fired only for native logins. Same
  * scope locks and Owner re-check (pms.finance.manage, base access when enabling), the same
  * activation prerequisites, and an Owner may re-enable only Financials that an Owner switched
  * off, never a row suspended by anyone else. */
@@ -67,8 +66,7 @@ export function createOrdinaryHotelSetupFeatureHubCommands(
             `SELECT id::text, status,
              metadata->>'newHotelFinancialsDefault'='ready'
                AND metadata ? 'newHotelFinancialsActivationTransaction' AS ready,
-             COALESCE(metadata->>'${OWNER_OFF}' = xmin::text, FALSE)
-               OR COALESCE(metadata->'newHotelFinancialsOwnerDisabled'='true'::jsonb, FALSE) AS "ownerOff",
+             COALESCE(metadata->>'${OWNER_OFF}' = xmin::text, FALSE) AS "ownerOff",
              (starts_at IS NULL OR starts_at<=clock_timestamp())
                AND (expires_at IS NULL OR expires_at>clock_timestamp()) AS window
            FROM identity.product_entitlements

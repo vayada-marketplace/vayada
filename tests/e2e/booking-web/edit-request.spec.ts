@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { mockBookingApis, publicOffers, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
+import {
+  legacyPricingRequests,
+  mockBookingApis,
+  SEEDED_BOOKING_SLUG,
+} from "../support/bookingMocks";
 
 const token = "c".repeat(43);
 const input = {
@@ -65,9 +69,7 @@ test("reallocates held mixed rooms and saves without public availability", async
     totalAmount: 200,
   };
   let saved = false;
-  await page.route("**/api/booking-web/hotels/*/offers**", (route) =>
-    route.fulfill({ json: { ...publicOffers, quote: { ...publicOffers.quote, offers: [] } } }),
-  );
+  const legacyRequests = legacyPricingRequests(page);
   await page.route("**/bookings/*/edit/*", (route) => {
     const action = new URL(route.request().url()).pathname.split("/").at(-1);
     const body = route.request().postDataJSON();
@@ -113,6 +115,7 @@ test("reallocates held mixed rooms and saves without public availability", async
   await page.getByRole("button", { name: "Save request", exact: true }).click();
   await expect.poll(() => saved).toBe(true);
   await expect(page).toHaveURL(new RegExp(`/booking/VAY-959\\?token=${token}$`));
+  expect(legacyRequests).toEqual([]);
 });
 
 test("prefills and saves every pending-request field without creating a booking", async ({
@@ -174,7 +177,10 @@ test("prefills and saves every pending-request field without creating a booking"
   await page.getByLabel("Check-out", { exact: true }).fill("2027-02-05");
   await page.getByLabel("Adults", { exact: true }).fill("3");
   await page.getByLabel("Children", { exact: true }).fill("1");
-  await page.getByRole("combobox", { name: "Room", exact: true }).selectOption("garden-room");
+  // Other rooms came from the retired offers search; only the booked room is offered.
+  await expect(
+    page.getByRole("combobox", { name: "Room", exact: true }).locator("option"),
+  ).toHaveText(["Alpine Suite"]);
   await page.getByLabel("Number of rooms", { exact: true }).fill("2");
   await page.getByLabel("Quantity", { exact: true }).fill("2");
   await page.getByLabel("Service dates, if needed").pressSequentially("2027-02-02, 2027-02-04");
@@ -184,7 +190,7 @@ test("prefills and saves every pending-request field without creating a booking"
     .getByRole("textbox", { name: "Special requests", exact: true })
     .fill("Late arrival, please.");
   await page.getByRole("button", { name: /Review/ }).click();
-  await expect.poll(() => quoted?.roomTypeId).toBe("garden-room");
+  await expect.poll(() => quoted?.roomTypeId).toBe("alpine-suite");
   expect(quoted).toMatchObject({
     revision: 3,
     checkIn: "2027-02-02",

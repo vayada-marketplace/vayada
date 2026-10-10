@@ -1,4 +1,3 @@
-import { trackEvent } from "./tracking";
 import { Booking, RoomSelection, RoomSelectionSnapshot } from "@/lib/types";
 import { bookingWebPublic } from "./client";
 
@@ -128,90 +127,11 @@ export interface CancelPreview {
   freeCancellationDays: number;
   daysUntilCheckIn: number;
   currency: string;
+  /** Pricing-v2 stays: what the booked terms keep, in minor units; sent back to confirm the fee. */
+  bookedTermsOutcome?: { retainedMinor: string };
 }
 
 export const bookingService = {
-  async create(
-    slug: string,
-    data: BookingCreateRequest,
-    idempotencyKey?: string,
-  ): Promise<BookingRequestResponse> {
-    const result = await bookingWebPublic.post<BookingRequestResponse>(
-      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings`,
-      data,
-      idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : undefined,
-    );
-    if (result.booking.id && result.booking.status !== "draft" && !result.authorizationExpired) {
-      const paymentMethod = data.paymentMethod ?? result.paymentMethod;
-      if (paymentMethod === "card" && result.authorizationComplete) {
-        trackEvent(slug, "payment_authorized", { paymentMethod });
-      }
-      if (paymentMethod !== "card" || result.authorizationComplete) {
-        trackEvent(slug, "booking_completed", { paymentMethod });
-      }
-    }
-    return result;
-  },
-
-  async quote(
-    slug: string,
-    data: {
-      roomSelection?: RoomSelection;
-      currency?: string;
-      roomTypeId: string;
-      guestFirstName: string;
-      guestLastName: string;
-      guestEmail: string;
-      guestPhone: string;
-      guestCountry?: string;
-      specialRequests?: string;
-      estimatedArrivalTime?: string;
-      numberOfGuests?: number;
-      checkIn: string;
-      checkOut: string;
-      adults: number;
-      children: number;
-      numberOfRooms?: number;
-      referralCode?: string;
-      paymentMethod?: string;
-      rateType?: string;
-      addonIds?: string[];
-      addonQuantities?: Record<string, number>;
-      addonPackageQuantities?: Record<string, number>;
-      addonDates?: Record<string, string[]>;
-      promoCode?: string;
-    },
-    idempotencyKey?: string,
-  ): Promise<BookingQuote> {
-    return bookingWebPublic.post(
-      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/quote`,
-      data,
-      idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : undefined,
-    );
-  },
-
-  // Materializes the soft-hold draft into a real booking row after
-  // Stripe authorizes the card. Returns the booking so the caller can
-  // redirect with a real reference. Idempotent: a second call after the
-  // Stripe webhook has already materialized the draft returns the same
-  // booking. Accepts a draft id (VAY-388) or a legacy booking id.
-  async confirmAuthorization(
-    slug: string,
-    handle: string,
-    idempotencyKey?: string,
-  ): Promise<Booking> {
-    const booking = await bookingWebPublic.post<Booking>(
-      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(handle)}/confirm-authorization`,
-      undefined,
-      idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : undefined,
-    );
-    if (booking.id && booking.status !== "draft") {
-      trackEvent(slug, "payment_authorized", { paymentMethod: "card" });
-      trackEvent(slug, "booking_completed", { paymentMethod: "card" });
-    }
-    return booking;
-  },
-
   async withdraw(slug: string, bookingId: string, guestEmail: string): Promise<void> {
     const body = { guestEmail };
     await bookingWebPublic.post(
@@ -228,8 +148,16 @@ export const bookingService = {
     );
   },
 
-  async cancel(slug: string, bookingId: string, guestEmail: string): Promise<void> {
-    const body = { guestEmail };
+  async cancel(
+    slug: string,
+    bookingId: string,
+    guestEmail: string,
+    expectedCancellationFeeMinor?: string,
+  ): Promise<void> {
+    const body = {
+      guestEmail,
+      ...(expectedCancellationFeeMinor ? { expectedCancellationFeeMinor } : {}),
+    };
     await bookingWebPublic.post(
       `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/cancel`,
       body,

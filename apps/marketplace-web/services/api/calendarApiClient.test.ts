@@ -109,7 +109,7 @@ describe("calendarApiClient", () => {
     await expect(client.loadWorkspace(propertyId)).rejects.toBeInstanceOf(ApiErrorResponse);
   });
 
-  it("fails closed for an invalid timezone, incomplete capacity, or empty active room set", async () => {
+  it("fails closed for an invalid timezone, mismatched capacity, or empty active room set", async () => {
     calls.profile.mockResolvedValue(profile({ timezone: "UTC" }));
     await expect(createCalendarApiClient(http, profiles).loadWorkspace(propertyId)).rejects.toThrow(
       /property timezone adapter returned invalid data/i,
@@ -119,9 +119,9 @@ describe("calendarApiClient", () => {
     calls.get.mockImplementation(async (endpoint) => {
       if (endpoint.endsWith("/operating-calendar")) return currentCalendar();
       if (endpoint.endsWith("/room-types")) return roomList();
-      if (endpoint.endsWith(`/${roomA}/capacity`)) return capacity(roomA, 5, 0);
+      if (endpoint.endsWith(`/${roomA}/capacity`)) return capacity(roomB, 5, 4);
       if (endpoint.endsWith(`/${roomB}/capacity`)) return capacity(roomB, 3, 2);
-      if (endpoint.endsWith(`/${roomA}/units`)) return physicalUnits(roomA, 0);
+      if (endpoint.endsWith(`/${roomA}/units`)) return physicalUnits(roomA, 4);
       if (endpoint.endsWith(`/${roomB}/units`)) return physicalUnits(roomB, 2);
       throw new Error(`Unexpected GET ${endpoint}`);
     });
@@ -160,6 +160,22 @@ describe("calendarApiClient", () => {
 
     await expect(createCalendarApiClient(http, profiles).loadWorkspace(propertyId)).rejects.toThrow(
       "Verify every Garden Suite room label in the Rooms setup step",
+    );
+  });
+
+  it("names a room type without rooms instead of reporting invalid capacity data", async () => {
+    calls.get.mockImplementation(async (endpoint) => {
+      if (endpoint.endsWith("/operating-calendar")) return currentCalendar();
+      if (endpoint.endsWith("/room-types")) return roomList();
+      if (endpoint.endsWith(`/${roomA}/capacity`)) return capacity(roomA, 5, 0);
+      if (endpoint.endsWith(`/${roomB}/capacity`)) return capacity(roomB, 3, 2);
+      if (endpoint.endsWith(`/${roomA}/units`)) return physicalUnits(roomA, 0);
+      if (endpoint.endsWith(`/${roomB}/units`)) return physicalUnits(roomB, 2);
+      throw new Error(`Unexpected GET ${endpoint}`);
+    });
+
+    await expect(createCalendarApiClient(http, profiles).loadWorkspace(propertyId)).rejects.toThrow(
+      "Add at least one Garden Suite room in the Rooms setup step before opening the calendar.",
     );
   });
 
