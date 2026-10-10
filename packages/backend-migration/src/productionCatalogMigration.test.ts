@@ -62,6 +62,29 @@ describe("production catalog migration transaction", () => {
     ]);
   });
 
+  it("plans and verifies with the cohort loaded by the snapshot read", async () => {
+    for (const run of [
+      runProductionCatalogTransaction,
+      runProductionCatalogPrerequisiteTransaction,
+    ]) {
+      const cohort = { cohortSha256: "c".repeat(64) } as never;
+      const cohorts: unknown[] = [];
+      const configured = services([], plan());
+      const build = configured.buildPlan;
+      configured.readSnapshot = async () => ({ rows: [], cohort });
+      configured.buildPlan = (rows, target, scope) => {
+        cohorts.push(scope);
+        return build(rows, target, scope);
+      };
+      await run(
+        new TransactionClient([]) as never,
+        { sourceRunId: RUN, mode: "apply" },
+        configured,
+      );
+      expect(cohorts).toEqual([cohort, cohort]);
+    }
+  });
+
   it("locks each property in deterministic order before presentation writers", async () => {
     const log: string[] = [];
     const first = "15060000-0000-4000-8000-000000000001";
@@ -142,20 +165,23 @@ describe("production catalog migration transaction", () => {
     const marketplaceHotel = "33333333-3333-4333-8333-333333333333";
     const targetReads: string[][] = [];
     const configured = services(log, plan());
-    configured.readSnapshot = async () => [
-      {
-        sourceDatabase: "pms",
-        sourceTable: "hotels",
-        rowOrdinal: 1,
-        data: { id: pmsHotel },
-      },
-      {
-        sourceDatabase: "marketplace",
-        sourceTable: "hotel_profiles",
-        rowOrdinal: 1,
-        data: { id: marketplaceHotel },
-      },
-    ];
+    configured.readSnapshot = async () => ({
+      rows: [
+        {
+          sourceDatabase: "pms",
+          sourceTable: "hotels",
+          rowOrdinal: 1,
+          data: { id: pmsHotel },
+        },
+        {
+          sourceDatabase: "marketplace",
+          sourceTable: "hotel_profiles",
+          rowOrdinal: 1,
+          data: { id: marketplaceHotel },
+        },
+      ],
+      cohort: null,
+    });
     configured.readTarget = async (_client, propertyIds) => {
       targetReads.push(propertyIds);
       return emptyTarget();
@@ -194,7 +220,7 @@ function services(
   return {
     readSnapshot: async () => {
       log.push("snapshot");
-      return [];
+      return { rows: [], cohort: null };
     },
     readTarget: async () => {
       log.push("target");

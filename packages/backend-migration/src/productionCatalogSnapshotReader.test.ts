@@ -11,9 +11,12 @@ const RUN = "vay1351-0123456789abcdef01234567";
 describe("production catalog snapshot reader", () => {
   it("returns only checksum-verified catalog rows", async () => {
     const fixture = new CatalogFixture();
-    const rows = await readProductionCatalogSnapshot(fixture as never, RUN, {
-      validateRun: async () => [],
+    const cohort = { cohortSha256: "c".repeat(64) } as never;
+    const { rows, cohort: loaded } = await readProductionCatalogSnapshot(fixture as never, RUN, {
+      validateRun: async () => ({ cohort }),
     });
+
+    expect(loaded).toBe(cohort);
 
     expect(rows.map((row) => `${row.sourceDatabase}.${row.sourceTable}`)).toEqual([
       "auth.users",
@@ -28,7 +31,7 @@ describe("production catalog snapshot reader", () => {
     fixture.snapshots.booking[1]!.rowChecksum = "f".repeat(64);
 
     await expect(
-      readProductionCatalogSnapshot(fixture as never, RUN, { validateRun: async () => [] }),
+      readProductionCatalogSnapshot(fixture as never, RUN, { validateRun: async () => ({}) }),
     ).rejects.toThrow("corrupt booking.booking_hotels rows");
   });
 
@@ -37,7 +40,7 @@ describe("production catalog snapshot reader", () => {
     fixture.tables = fixture.tables.filter((row) => row.sourceTable !== "hotel_profiles");
 
     await expect(
-      readProductionCatalogSnapshot(fixture as never, RUN, { validateRun: async () => [] }),
+      readProductionCatalogSnapshot(fixture as never, RUN, { validateRun: async () => ({}) }),
     ).rejects.toThrow("incomplete marketplace.hotel_profiles evidence");
   });
 });

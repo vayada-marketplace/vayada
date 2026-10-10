@@ -712,6 +712,14 @@ cohort hotels; a hotel user with no cohort hotel is `suspended` with disposition
 `outside_migration_cohort`. The identity counts then add `cohortSuspendedUsers`,
 `cohortQuarantinedOrganizations` and `cohortQuarantinedResourceLinks`.
 
+The catalog step makes each Booking anchor outside the cohort `private_quarantine`
+with reason `outside_migration_cohort`. The anchor keeps its ID, and the PMS and
+Marketplace rows attached to it take the same disposition. A property whose
+Booking, PMS and Marketplace members disagree on cohort membership blocks with
+`COHORT_MEMBERSHIP_MISMATCH`; an owner with anchors on both sides attaches each
+row to the single anchor on its own side. Private properties keep their legacy
+slugs, which stay unpublished while the profile is `private`.
+
 Before a run, a database administrator must bind the target itself with durable
 evidence. The database-level settings path remains supported where available;
 the command reads it only from `pg_catalog.pg_db_role_setting` for the current

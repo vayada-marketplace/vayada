@@ -8,6 +8,7 @@ import type {
 } from "./productionIdentityDisposition.js";
 import { sortedBy } from "./productionIdentityOwnershipPolicy.js";
 import { addBlocker, stableJson } from "./productionIdentitySourceValidation.js";
+import type { IdentityCohortScope } from "./productionIdentityCohortScope.js";
 import {
   planCatalogOwnership,
   type CatalogQuarantinedSource,
@@ -50,12 +51,18 @@ export type ProductionCatalogPlan = {
 export function buildProductionCatalogPlan(
   rows: IdentitySourceRow[],
   target: ProductionCatalogTargetState,
+  cohort?: IdentityCohortScope | null,
 ): ProductionCatalogPlan {
   const orderedRows = sortedBy(
     rows,
     (row) => `${row.sourceDatabase}:${row.sourceTable}:${row.rowOrdinal}:${stableJson(row.data)}`,
   );
-  const ownership = planCatalogOwnership(orderedRows, target.sourceLinks, target.ownerLinks);
+  const ownership = planCatalogOwnership(
+    orderedRows,
+    target.sourceLinks,
+    target.ownerLinks,
+    cohort,
+  );
   const core = planProductionCatalogCore(orderedRows, ownership);
   const content = planProductionCatalogContent(orderedRows, ownership, core);
   const presentation = planProductionCatalogPresentation(orderedRows, ownership, content, {
