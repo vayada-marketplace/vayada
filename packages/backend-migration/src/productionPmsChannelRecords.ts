@@ -52,7 +52,15 @@ function connection(context: PmsBuildContext, source: IdentitySourceRow): PmsTar
   const active = bool(data["is_active"], "is_active", true);
   const ownerStatus = ownerStatusForHotel(context, hotelId);
   const ownerActive = ownerStatus === "active";
-  const retainedActive = ownerActive && active && Boolean(externalPropertyId);
+  const legacyLive = ownerActive && active && Boolean(externalPropertyId);
+  // VAY-1362 P12: a cohort run imports no connection live. A cohort hotel's live legacy
+  // connection stays disconnected, without a claim, until its per-hotel handover (VAY-2108)
+  // writes the claim and promotes it (contract: legacy-migration-cohort-scope.md). Its run
+  // stamp lets the handover check the hotel against platform.production_migration_cohorts.
+  const cohortHotel =
+    Boolean(context.cohort) && !outsideCohortSource(context.cohort, "pms", hotelId);
+  const retainedActive = legacyLive && !context.cohort;
+  const awaitingHandover = legacyLive && cohortHotel;
   const error = optionalText(data["last_ari_sync_error"], "last_ari_sync_error");
   const markups = channelMarkups(context, hotelId);
   const updatedAt = latestIso([
@@ -66,7 +74,7 @@ function connection(context: PmsBuildContext, source: IdentitySourceRow): PmsTar
   // on its Channex property and it cannot be restored or adopted from one.
   const historicalClaim =
     Boolean(externalPropertyId) &&
-    !retainedActive &&
+    !legacyLive &&
     !outsideCohortSource(context.cohort, "pms", hotelId);
   const records: PmsTargetRecord[] = [];
   if (historicalClaim) {
@@ -102,14 +110,13 @@ function connection(context: PmsBuildContext, source: IdentitySourceRow): PmsTar
         id,
         propertyId,
         provider: "channex",
-        connectionStatus:
-          !ownerActive || !active
-            ? "disconnected"
-            : !externalPropertyId
-              ? "setup_incomplete"
-              : error
-                ? "degraded"
-                : "connected",
+        connectionStatus: retainedActive
+          ? error
+            ? "degraded"
+            : "connected"
+          : ownerActive && active && !externalPropertyId
+            ? "setup_incomplete"
+            : "disconnected",
         externalPropertyId: retainedActive ? externalPropertyId : null,
         capabilities: retainedActive ? capabilities : [],
         messagingAppInstalled: retainedActive && capabilities.includes("message"),
@@ -118,12 +125,14 @@ function connection(context: PmsBuildContext, source: IdentitySourceRow): PmsTar
         lastMessageSyncAt: optionalIso(data["last_message_sync_at"], "last_message_sync_at"),
         connectionMetadata: {
           migrationRunId: context.sourceRunId,
+          ...(cohortHotel ? { migrationCohortRunId: context.sourceRunId } : {}),
           ...(!retainedActive
             ? {
                 legacyExternalPropertyId: externalPropertyId,
                 ownerStatus,
                 retainedClaimState: historicalClaim ? "historical" : null,
                 legacyCapabilities: capabilities,
+                ...(awaitingHandover ? { channexHandover: "pending" } : {}),
               }
             : {}),
           legacyAriError: error,
@@ -378,9 +387,11 @@ function bookingMapping(
   ];
 }
 
+/** Imported live, as connection() decides: never in a cohort run (VAY-1362 P12). */
 function connectionIsActive(context: PmsBuildContext, source: IdentitySourceRow): boolean {
   const hotelId = uuid(source.data["hotel_id"], "connection.hotel_id");
   return (
+    !context.cohort &&
     ownerStatusForHotel(context, hotelId) === "active" &&
     bool(source.data["is_active"], "connection.is_active", true) &&
     Boolean(optionalUuid(source.data["channex_property_id"], "connection.channex_property_id"))

@@ -721,6 +721,140 @@ describe.skipIf(!URL)("production PMS writers (PostgreSQL)", () => {
     }
   });
 
+  it("keeps a cohort hotel's Channex connection inert and unclaimed across re-runs", async () => {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+    try {
+      await seedPrerequisites(client);
+      const prerequisites = await readProductionPmsPrerequisites(client, RUN);
+      const source = [
+        row("hotels", { id: HOTEL, calendar_auto_open_enabled: false }),
+        channelRows().find((entry) => entry.sourceTable === "channex_connections")!,
+      ];
+      const plan = async (records: PmsTargetRecord[] = []) =>
+        buildProductionPmsPlan({
+          sourceRunId: RUN,
+          snapshotAt: "2026-09-04T00:00:00Z",
+          completedAt: "2026-09-04T00:00:00Z",
+          rows: source,
+          cohort: { bookingHotelIds: [], pmsHotelIds: [HOTEL], marketplaceHotelIds: [] },
+          target: await readProductionPmsTargetState(client, records, prerequisites),
+        });
+      // Plan, write and verify as the migration transaction does; a resume re-plans the same.
+      const apply = async () => {
+        const planned = await plan((await plan()).records);
+        expect(planned.blockers).toEqual([]);
+        await writeProductionPmsRecords(client, planned.writes);
+        await writeProductionMigrationProvenance(client, planned.provenance, RUN);
+        const verified = await plan(planned.records);
+        expect([verified.blockers, verified.writes]).toEqual([[], []]);
+        return planned;
+      };
+      const state = async () =>
+        (
+          await client.query(
+            `SELECT connection.connection_status AS status,
+                    connection.external_property_id AS "externalPropertyId",
+                    connection.connection_metadata ->> 'channexHandover' AS handover,
+                    connection.connection_metadata ->> 'legacyExternalPropertyId' AS legacy,
+                    connection.connection_metadata ->> 'migrationCohortRunId' AS "cohortRun",
+                    (SELECT count(*)::int FROM pms.channel_binding_claims claim
+                      WHERE claim.property_id = $1 OR claim.external_property_id = $2) AS claims
+               FROM pms.channel_connections connection WHERE connection.id = $3`,
+            [PROPERTY, EXTERNAL_PROPERTY, CONNECTION],
+          )
+        ).rows;
+      const inert = [
+        {
+          status: "disconnected",
+          externalPropertyId: null,
+          handover: "pending",
+          legacy: EXTERNAL_PROPERTY,
+          cohortRun: RUN,
+          claims: 0,
+        },
+      ];
+
+      // Another property holding the legacy Channex ID blocks the import before go-day.
+      const other = "13560000-0000-4000-8000-000000000391";
+      await client.query(
+        `INSERT INTO hotel_catalog.properties(id, public_id, display_name)
+         VALUES ($1, 'pms-handover-holder', 'Handover holder')`,
+        [other],
+      );
+      await client.query(
+        `INSERT INTO pms.channel_binding_claims
+           (property_id, provider, external_property_id, claim_state, claim_source)
+         VALUES ($1, 'channex', $2, 'historical', 'migration')`,
+        [other, EXTERNAL_PROPERTY],
+      );
+      expect((await plan((await plan()).records)).blockers).toContainEqual(
+        expect.objectContaining({
+          message: "An existing Channex claim blocks the pending handover",
+        }),
+      );
+      await client.query("DELETE FROM pms.channel_binding_claims WHERE property_id = $1", [other]);
+
+      const first = await apply();
+      expect(first.writes.map((record) => record.targetTable)).toContain("channel_connections");
+      expect(await state()).toEqual(inert);
+      // A later snapshot with legacy already disabled (F.7) would replace the pending handover
+      // with a historical claim: it blocks instead.
+      source[1]!.data["is_active"] = false;
+      expect((await plan((await plan()).records)).blockers).toContainEqual(
+        expect.objectContaining({
+          message: "A historical claim would replace a pending or completed Channex handover",
+        }),
+      );
+      source[1]!.data["is_active"] = true;
+      // A re-run or resume of the same source writes nothing.
+      expect((await apply()).writes).toEqual([]);
+      expect(await state()).toEqual(inert);
+      // A changed legacy row updates the connection, still without its Channex ID.
+      const legacy = source[1]!.data;
+      Object.assign(legacy, {
+        last_booking_sync_at: "2026-09-03T00:00:00Z",
+        updated_at: "2026-09-03T00:00:00Z",
+      });
+      expect((await apply()).counts.updates).toBeGreaterThan(0);
+      expect(await state()).toEqual(inert);
+
+      // The handover (VAY-2108) writes its claim first, then binds the connection. A later
+      // re-run with a changed legacy row keeps the newer, promoted row.
+      await client.query(
+        `INSERT INTO pms.channel_binding_claims
+           (property_id, provider, external_property_id, claim_state, claim_source)
+         VALUES ($1, 'channex', $2, 'active', 'adoption')`,
+        [PROPERTY, EXTERNAL_PROPERTY],
+      );
+      await client.query(
+        `UPDATE pms.channel_connections
+            SET connection_status = 'connected', external_property_id = $2,
+                connection_metadata = connection_metadata || '{"channexHandover": "completed"}',
+                updated_at = now() + interval '1 minute'
+          WHERE id = $1`,
+        [CONNECTION, EXTERNAL_PROPERTY],
+      );
+      Object.assign(legacy, { updated_at: "2026-09-03T12:00:00Z" });
+      const rerun = await plan((await plan()).records);
+      expect(rerun.blockers).toEqual([]);
+      expect(rerun.writes.map((record) => record.targetTable)).not.toContain("channel_connections");
+      expect(rerun.counts.preservedNewerTarget).toBeGreaterThan(0);
+      await writeProductionPmsRecords(client, rerun.writes);
+      expect(await state()).toEqual([
+        {
+          status: "connected",
+          externalPropertyId: EXTERNAL_PROPERTY,
+          handover: "completed",
+          legacy: EXTERNAL_PROPERTY,
+          cohortRun: RUN,
+          claims: 1,
+        },
+      ]);
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+
   it("carries a cohort hotel's auto-open setting and keeps a newer native edit", async () => {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
     try {
