@@ -121,6 +121,7 @@ describe("Finance subscription route authorization", () => {
           mode: "assigned",
           roleKey: "finance_manager",
           accessOrigin: "agency",
+          productAccess: { pms: true, booking: true },
           assignedPropertyIds: [],
         }),
       },
@@ -132,6 +133,7 @@ describe("Finance subscription route authorization", () => {
         headers: { authorization: "Bearer valid-token" },
       });
       expect(response.statusCode).toBe(403);
+      expect(response.json().code).toBe("missing_resource_access");
     }
     expect(fixture.service.getPlanStatus).not.toHaveBeenCalled();
     expect(fixture.service.getBillingOverview).not.toHaveBeenCalled();
@@ -142,6 +144,7 @@ describe("Finance subscription route authorization", () => {
       payload: { commandId: "command-1", idempotencyKey: "checkout-1" },
     });
     expect(checkout.statusCode).toBe(403);
+    expect(checkout.json().code).toBe("missing_resource_access");
     expect(fixture.service.createFixedPlanCheckout).not.toHaveBeenCalled();
   });
 });

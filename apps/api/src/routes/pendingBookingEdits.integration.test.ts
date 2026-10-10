@@ -166,14 +166,14 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
         ["save", { revision: 0, attemptId }],
       ] as const) {
         await expect(edit(action, request)).rejects.toMatchObject({
-          statusCode: 503,
-          code: "PRICING_UNAVAILABLE",
+          statusCode: 410,
+          code: "PRICING_RETIRED",
         });
         expect(await snapshot()).toEqual(before);
       }
       await expect(adapter.createBooking("vay-959-hotel", input, command())).rejects.toMatchObject({
-        statusCode: 503,
-        code: "PRICING_UNAVAILABLE",
+        statusCode: 410,
+        code: "PRICING_RETIRED",
       });
       expect(await snapshot()).toEqual(before);
       expect(intents.size).toBe(0);
@@ -491,12 +491,12 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
         );
         expect((await edit("details", {})).revision).toBe(details.revision);
         await expect(edit("quote", input)).rejects.toMatchObject({
-          statusCode: 503,
-          code: "PRICING_UNAVAILABLE",
+          statusCode: 410,
+          code: "PRICING_RETIRED",
         });
         await expect(edit("prepare", input)).rejects.toMatchObject({
-          statusCode: 503,
-          code: "PRICING_UNAVAILABLE",
+          statusCode: 410,
+          code: "PRICING_RETIRED",
         });
       }
       expect(

@@ -77,10 +77,16 @@ export type PmsCalendarAutoOpenSource = Readonly<{
   }>;
 }>;
 
+/**
+ * The virtual setting (revision 0) of a property with no saved choice. Since VAY-2066 auto-open
+ * is on by default; an explicit saved choice, including Off, always replaces it. The source
+ * fingerprint carries only the revision, so a later change of this default reaches existing
+ * properties through the new `openThrough` in the job key, not through the fingerprint.
+ */
 export const PMS_CALENDAR_AUTO_OPEN_DEFAULT_CONFIGURATION = Object.freeze({
-  enabled: false,
+  enabled: true,
   mode: "rolling",
-  rollingMonths: 18,
+  rollingMonths: 12,
   fixedEndMonth: null,
 } satisfies PmsCalendarAutoOpenConfiguration);
 
@@ -244,7 +250,9 @@ function assertSource(
 ): void {
   const positive = (value: number) => Number.isSafeInteger(value) && value > 0;
   if (
-    !positive(input.settingRevision) ||
+    // Revision 0 is the virtual default setting of a property with no saved choice.
+    !Number.isSafeInteger(input.settingRevision) ||
+    input.settingRevision < 0 ||
     !positive(input.propertyProfileRevision) ||
     !positive(input.operatingCalendarRevision) ||
     input.propertyTimeZone.trim() !== input.propertyTimeZone ||
