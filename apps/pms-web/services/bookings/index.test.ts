@@ -558,6 +558,36 @@ describe("PMS target booking projection", () => {
     });
   });
 
+  it("maps the cancellation terms each stay was booked under", async () => {
+    // prettier-ignore
+    const read = async (bookedCancellation: object | null) => {
+      const item = { ...heterogeneousReservation, roomCount: 1, assignments: [{ ...assignments[0], bookedCancellation }] };
+      mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: roomTypes } : reservationPage(item));
+      return (await bookingsService.list()).bookings[0]!.stays[0]!.cancellation;
+    };
+    const flexible = {
+      type: "free_until_days_before_arrival",
+      freeCancellationDeadlineDays: 7,
+      afterDeadlinePenalty: "full_booking_amount",
+      noShowPenalty: "full_booking_amount",
+    };
+    expect(await read({ kind: "flexible", terms: flexible })).toEqual({
+      kind: "flexible",
+      freeCancellationDays: 7,
+      refundTiers: null,
+    });
+    // Partial-refund terms refund by notice period, longest first, as guests saw them.
+    // prettier-ignore
+    const tiers = [{ minDaysBeforeCheckIn: 7, refundPercent: 20 }, { minDaysBeforeCheckIn: 30, refundPercent: 50 }];
+    // prettier-ignore
+    expect(await read({ kind: "flexible", terms: { ...flexible, flexibleCancellationType: "partial_refund", partialRefundAmountPercent: 50, partialRefundTiers: tiers } })).toEqual({ kind: "flexible", freeCancellationDays: 7, refundTiers: [tiers[1], tiers[0]] });
+    // Older terms carry one window and percent instead of tiers.
+    // prettier-ignore
+    expect(await read({ kind: "flexible", terms: { ...flexible, flexibleCancellationType: "partial_refund", partialRefundCancelWindowDays: 14, partialRefundAmountPercent: 50 } })).toMatchObject({ refundTiers: [{ minDaysBeforeCheckIn: 14, refundPercent: 50 }] });
+    expect(await read({ kind: "non_refundable" })).toEqual({ kind: "non_refundable" });
+    expect(await read(null)).toBeNull();
+  });
+
   it("maps exact and partial stay evidence without copying booking-wide values", async () => {
     // prettier-ignore
     mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: roomTypes } : reservationPage(heterogeneousReservation));

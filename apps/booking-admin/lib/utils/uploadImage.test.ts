@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 type StoredValue = string | null;
 
-describe("uploadImages", () => {
+describe("uploadImage", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
@@ -16,7 +16,7 @@ describe("uploadImages", () => {
     vi.stubGlobal("localStorage", window.localStorage);
 
     const { setAuthKitSession } = await import("@/services/auth/sessionStore");
-    const { uploadImages } = await import("./uploadImage");
+    const { uploadSingleImageWithMediaReference } = await import("./uploadImage");
     setAuthKitSession({
       accessToken: "authkit-token",
       resources: {
@@ -30,8 +30,7 @@ describe("uploadImages", () => {
       expect(new Headers(init?.headers).get("authorization")).toBe("Bearer authkit-token");
       if (url === "https://next-api.vayada.com/api/media/upload-sessions") {
         expect(JSON.parse(String(init?.body))).toMatchObject({
-          purpose: "property.hero_image",
-          expectedProfileRevision: 7,
+          purpose: "booking.addon.image",
           resource: {
             product: "booking",
             resourceType: "booking_hotel",
@@ -65,89 +64,74 @@ describe("uploadImages", () => {
     vi.stubGlobal("fetch", fetch);
 
     await expect(
-      uploadImages(
+      uploadSingleImageWithMediaReference(
         new File(["image"], "room.jpg", { type: "image/jpeg" }),
-        "property.hero_image",
+        "booking.addon.image",
         "booking_hotel_bergwald",
-        7,
       ),
-    ).resolves.toEqual(["https://cdn.vayada.com/media/room.jpg"]);
+    ).resolves.toEqual({
+      mediaObjectId: "a1000000-0000-4000-8000-000000000001",
+      publicUrl: "https://cdn.vayada.com/media/room.jpg",
+    });
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  it("requires an editor-loaded profile revision for hero image uploads", async () => {
+  it("uploads a private hero image against the canonical property without a profile revision", async () => {
     vi.stubEnv("NEXT_PUBLIC_PLATFORM_MEDIA_API_URL", "https://next-api.vayada.com");
-    const { setAuthKitSession } = await import("@/services/auth/sessionStore");
-    const { uploadSingleImage } = await import("./uploadImage");
-    setAuthKitSession({
-      accessToken: "authkit-token",
-      resources: { "booking:booking_hotel": ["booking_hotel_alpenrose"] },
-      user: { id: "user_1", email: "owner@example.com", status: "active" },
-    });
-    const fetch = vi.fn();
-    vi.stubGlobal("fetch", fetch);
-
-    await expect(
-      uploadSingleImage(
-        new File(["image"], "hero.jpg", { type: "image/jpeg" }),
-        "property.hero_image",
-        "booking_hotel_alpenrose",
-      ),
-    ).rejects.toThrow("valid property profile revision is required");
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it("does not send a profile revision for gallery image uploads", async () => {
-    vi.stubEnv("NEXT_PUBLIC_PLATFORM_MEDIA_API_URL", "https://next-api.vayada.com");
-    const window = createWindowWithStorage();
-    vi.stubGlobal("window", window);
-    vi.stubGlobal("localStorage", window.localStorage);
-
-    const { setAuthKitSession } = await import("@/services/auth/sessionStore");
-    const { uploadImages } = await import("./uploadImage");
-    setAuthKitSession({
-      accessToken: "authkit-token",
-      resources: { "booking:booking_hotel": ["booking_hotel_alpenrose"] },
-      user: { id: "user_1", email: "owner@example.com", status: "active" },
-    });
-
+    const propertyId = "55555555-5555-4555-8555-555555555551";
+    const mediaObjectId = "66666666-6666-4666-8666-666666666661";
+    const { uploadPropertyHeroImage } = await import("./uploadImage");
     const fetch = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith("/api/media/upload-sessions")) {
-        expect(JSON.parse(String(init?.body))).toEqual({
-          purpose: "property.gallery_image",
-          visibility: "public",
+      if (url === "https://next-api.vayada.com/api/media/upload-sessions") {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        expect(body.idempotencyKey).toMatch(
+          new RegExp(`^booking\\.property-hero\\.upload:${propertyId}:`),
+        );
+        expect({ ...body, idempotencyKey: undefined }).toEqual({
+          idempotencyKey: undefined,
+          purpose: "property.hero_image",
+          visibility: "private",
           resource: {
-            product: "booking",
-            resourceType: "booking_hotel",
-            resourceId: "booking_hotel_alpenrose",
+            product: "hotel_catalog",
+            resourceType: "property",
+            resourceId: propertyId,
           },
           files: [
             {
               clientFileId: "file_1",
-              filename: "room.jpg",
-              contentType: "image/jpeg",
-              sizeBytes: 5,
+              filename: "hero.webp",
+              contentType: "image/webp",
+              sizeBytes: 4,
             },
           ],
         });
         return jsonResponse({
-          uploadSession: { sessionId: "session_1" },
+          contractVersion: "platform-media-upload.v2",
+          uploadSession: { sessionId: "hero_session", status: "signed" },
           uploadTargets: [
             {
-              uploadTargetId: "target_1",
+              uploadTargetId: "hero_target",
               clientFileId: "file_1",
               method: "PUT",
-              uploadUrl: "https://uploads.vayada.localhost/target_1",
+              uploadUrl: "https://uploads.vayada.localhost/hero_target",
               headers: {},
             },
           ],
         });
       }
+      expect(url).toBe(
+        "https://next-api.vayada.com/api/media/upload-sessions/hero_session/finalize",
+      );
       return jsonResponse({
+        contractVersion: "platform-media-upload.v2",
+        uploadSession: { sessionId: "hero_session", status: "completed" },
+        uploadTargets: [],
         mediaObjects: [
           {
-            mediaId: "a1000000-0000-4000-8000-000000000002",
-            variants: [{ publicCdnUrl: "https://cdn.vayada.com/media/room.jpg" }],
+            mediaObjectId,
+            purpose: "property.hero_image",
+            status: "private_ready",
+            publicVariants: [],
           },
         ],
       });
@@ -155,14 +139,39 @@ describe("uploadImages", () => {
     vi.stubGlobal("fetch", fetch);
 
     await expect(
-      uploadImages(
-        new File(["image"], "room.jpg", { type: "image/jpeg" }),
-        "property.gallery_image",
-        "booking_hotel_alpenrose",
-        99,
-      ),
-    ).resolves.toEqual(["https://cdn.vayada.com/media/room.jpg"]);
+      uploadPropertyHeroImage(new File(["hero"], "hero.webp", { type: "image/webp" }), propertyId),
+    ).resolves.toBe(mediaObjectId);
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects a hero upload that platform media completed under another purpose", async () => {
+    vi.stubEnv("NEXT_PUBLIC_PLATFORM_MEDIA_API_URL", "https://next-api.vayada.com");
+    const { uploadPropertyHeroImage } = await import("./uploadImage");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          contractVersion: "platform-media-upload.v2",
+          uploadSession: { sessionId: "hero_session", status: "completed" },
+          uploadTargets: [],
+          mediaObjects: [
+            {
+              mediaObjectId: "66666666-6666-4666-8666-666666666662",
+              purpose: "property.gallery_image",
+              status: "private_ready",
+              publicVariants: [],
+            },
+          ],
+        }),
+      ),
+    );
+
+    await expect(
+      uploadPropertyHeroImage(
+        new File(["hero"], "hero.jpg", { type: "image/jpeg" }),
+        "55555555-5555-4555-8555-555555555551",
+      ),
+    ).rejects.toThrow("did not return the uploaded property photos");
   });
 
   it("uploads a Booking-owned SVG header logo without a Catalog profile revision", async () => {
@@ -237,7 +246,7 @@ describe("uploadImages", () => {
   it("rejects a finalized image that has no public HTTPS URL", async () => {
     vi.stubEnv("NEXT_PUBLIC_PLATFORM_MEDIA_API_URL", "https://next-api.vayada.com");
     const { setAuthKitSession } = await import("@/services/auth/sessionStore");
-    const { uploadSingleImage } = await import("./uploadImage");
+    const { uploadSingleImageWithMediaReference } = await import("./uploadImage");
     setAuthKitSession({
       accessToken: "authkit-token",
       user: { id: "user_1", email: "owner@example.com", status: "active" },
@@ -272,11 +281,9 @@ describe("uploadImages", () => {
     );
 
     await expect(
-      uploadSingleImage(
-        new File(["image"], "hero.jpg", { type: "image/jpeg" }),
-        "property.hero_image",
-        undefined,
-        3,
+      uploadSingleImageWithMediaReference(
+        new File(["image"], "addon.jpg", { type: "image/jpeg" }),
+        "booking.addon.image",
       ),
     ).rejects.toThrow("did not return a public HTTPS image URL");
   });
@@ -284,7 +291,7 @@ describe("uploadImages", () => {
   it("rejects an explicit Booking hotel outside the active organization scope", async () => {
     vi.stubEnv("NEXT_PUBLIC_PLATFORM_MEDIA_API_URL", "https://next-api.vayada.com");
     const { setAuthKitSession } = await import("@/services/auth/sessionStore");
-    const { uploadSingleImage } = await import("./uploadImage");
+    const { uploadSingleImageWithMediaReference } = await import("./uploadImage");
     setAuthKitSession({
       accessToken: "authkit-token",
       resources: { "booking:booking_hotel": ["booking_hotel_alpenrose"] },
@@ -294,11 +301,10 @@ describe("uploadImages", () => {
     vi.stubGlobal("fetch", fetch);
 
     await expect(
-      uploadSingleImage(
-        new File(["image"], "hero.jpg", { type: "image/jpeg" }),
-        "property.hero_image",
+      uploadSingleImageWithMediaReference(
+        new File(["image"], "addon.jpg", { type: "image/jpeg" }),
+        "booking.addon.image",
         "booking_hotel_bergwald",
-        2,
       ),
     ).rejects.toThrow("outside the active organization scope");
     expect(fetch).not.toHaveBeenCalled();
