@@ -572,15 +572,36 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   // The receipt stores retain a receipt only while its attempt is unresolved (VAY-1545), so a
   // late receipt for an identified or reconciled attempt is refused. Rows that reach the table
   // anyway are written directly, as the store would, to keep exercising the downstream holds.
+  async function expectResolvedAttempt(
+    attempts: "pms.channex_offer_create_attempts" | "pms.channex_offer_ari_attempts",
+    correlation: Parameters<typeof prepareChannexReceiptPersistence>[1],
+  ) {
+    const attempt = (
+      await pool.query(
+        `SELECT a.state,a.job_attempt_id,a.worker_id,t.property_id,t.connection_id
+         FROM ${attempts} a JOIN pms.channex_offer_targets t ON t.id=a.target_id WHERE a.id=$1`,
+        [correlation.attemptId],
+      )
+    ).rows[0];
+    expect(attempt).toMatchObject({
+      job_attempt_id: correlation.jobAttemptId,
+      worker_id: correlation.workerId,
+      property_id: correlation.propertyId,
+      connection_id: correlation.connectionId,
+    });
+    expect(attempt.state).not.toBe("unresolved");
+  }
   async function insertLateCreationReceipt(
     correlation: Parameters<typeof prepareChannexReceiptPersistence>[1],
     response: Response,
   ) {
+    await expectResolvedAttempt("pms.channex_offer_create_attempts", correlation);
     await expect(
       (await prepareChannexReceiptPersistence(pool, correlation, response.clone()))(),
     ).rejects.toThrow("Channex receipt correlation unavailable");
     const observation = await readChannexCreationResponse(response);
     const client = await pool.connect();
+    let committed = false;
     try {
       await client.query("BEGIN");
       await client.query(
@@ -605,14 +626,16 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         ],
       );
       await client.query("COMMIT");
+      committed = true;
     } finally {
-      await client.query("ROLLBACK");
-      client.release();
+      // Without a commit, discard the connection, which also ends its transaction.
+      client.release(!committed);
     }
   }
   async function insertLateAriTransportReceipt(
     correlation: Parameters<typeof prepareChannexAriTransportFailurePersistence>[1],
   ) {
+    await expectResolvedAttempt("pms.channex_offer_ari_attempts", correlation);
     await expect(
       (await prepareChannexAriTransportFailurePersistence(pool, correlation))(),
     ).rejects.toThrow("Channex receipt correlation unavailable");
@@ -1519,7 +1542,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         if (mode === "timeout") return new Promise<Response>(() => {});
         throw new Error("private transport error");
       });
+      const started = performance.now();
       expect((await f.prepared.dispatch({ get: f.get, post })).kind).toBe("retained");
+      expect(performance.now() - started).toBeLessThan(20_000);
       expect(await f.prepared.dispatch(f)).toMatchObject({ reason: "dispatch_already_used" });
       expect(post).toHaveBeenCalledOnce();
       const rows = await pool.query(
@@ -1623,6 +1648,16 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     // The claim now has a receipt, so it cannot be released and stays held for reconciliation.
     expect(result).toMatchObject({ kind: "unavailable", reason: "ari_reconciliation_required" });
     expect(f.post).not.toHaveBeenCalled();
+    const held = (
+      await pool.query(
+        `SELECT a.state,(SELECT count(*)::int FROM pms.channex_offer_ari_receipts r
+           WHERE r.attempt_id=a.id) AS receipts
+         FROM pms.channex_offer_ari_attempts a WHERE a.id=$1`,
+        [attempt.id],
+      )
+    ).rows[0];
+    expect(held.state).toBe("unresolved");
+    expect(held.receipts).toBeGreaterThan(0);
   });
   async function ariReceiptFixture(date = initialAriDate) {
     const f = await initialAriFixture(),
@@ -1750,7 +1785,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   it("bounds the whole guest price read and stops further GETs after timeout", async () => {
     const f = await stagedPriceFixture();
     const get = vi.fn(async () => new Promise<unknown>(() => {}));
+    const started = performance.now();
     await expect(f.read(get)).rejects.toThrow();
+    expect(performance.now() - started).toBeLessThan(20_000);
     expect(get).toHaveBeenCalledOnce();
   }, 30_000);
   async function stagedReadFixture() {
@@ -3064,7 +3101,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       ),
     );
     const get = vi.fn(async () => new Promise<unknown>(() => {}));
+    const started = performance.now();
     await expect(f.readTasks(get)).rejects.toThrow();
+    expect(performance.now() - started).toBeLessThan(20_000);
     expect(get).toHaveBeenCalledOnce();
   }, 30_000);
   it("admits retained explicit Success without warnings for original task observation", async () => {
@@ -6184,6 +6223,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     );
     expect(await f.readPublic()).toBeNull();
     const hidden = await publicFixture();
+    expect(await hidden.readPublic()).not.toBeNull();
     await pool.query(
       "UPDATE distribution.public_hotel_bookability_profiles SET profile_status='unpublished' WHERE property_id=$1",
       [hidden.scope.propertyId],
