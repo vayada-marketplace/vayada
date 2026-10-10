@@ -3,7 +3,7 @@
 # Workspace package @vayada/locale-constants is resolved from packages/.
 
 # Stage 1: Builder
-FROM node:20-alpine AS builder
+FROM public.ecr.aws/docker/library/node:20-alpine AS builder
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
@@ -43,7 +43,7 @@ WORKDIR /app/apps/pms-web
 RUN npm run build
 
 # Stage 2: Runner
-FROM node:20-alpine AS runner
+FROM public.ecr.aws/docker/library/node:20-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
