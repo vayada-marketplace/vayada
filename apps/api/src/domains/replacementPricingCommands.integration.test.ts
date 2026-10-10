@@ -10,6 +10,7 @@ import {
   LEGACY_IMPORT_DECLARATION_NOTE,
   replacementChargeFingerprint,
 } from "./replacementChargeDeclarations.js";
+import { readPricingPublicationFreshness } from "./pricingPublicationFreshness.js";
 import { createReplacementPricingCommands } from "./replacementPricingCommands.js";
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("trusted replacement pricing commands", () => {
@@ -228,6 +229,28 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
     expect(await f.commands.publish(id, command)).toEqual({ revision: 1, replayed: true });
     expect(await counts(id)).toEqual({ drafts: 1, revisions: 1, events: 1 });
     expect(await f.commands.read(id)).toMatchObject({ revision: 1, stale: false });
+  });
+  it("reports which recorded source of a publication went stale, read-only (VAY-2088)", async () => {
+    const f = await fixture(),
+      id = f.scope.propertyId;
+    expect(await readPricingPublicationFreshness(pool, id)).toEqual([]);
+    expect(await f.commands.publish(id, await confirmed(f))).toEqual({
+      revision: 1,
+      replayed: false,
+    });
+    expect(await readPricingPublicationFreshness(pool, id)).toEqual([
+      { propertyId: id, revision: 1, stale: [] },
+    ]);
+    await pool.query(
+      "UPDATE finance.payment_settings SET tax_policy='{\"version\":2}'::jsonb WHERE property_id=$1",
+      [id],
+    );
+    const before = await counts(id);
+    expect(await readPricingPublicationFreshness(pool, id)).toEqual([
+      { propertyId: id, revision: 1, stale: ["finance"] },
+    ]);
+    expect(await counts(id)).toEqual(before);
+    expect(await f.commands.read(id)).toMatchObject({ revision: 1, stale: true });
   });
   it("retains distinct calendar occupancy settings through trusted publication and readback", async () => {
     const f = await fixture(),
