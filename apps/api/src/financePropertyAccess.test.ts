@@ -57,6 +57,7 @@ function state() {
     mode: "assigned",
     roleKey: "hotel_custom",
     accessOrigin: "agency",
+    productAccess: { pms: true, booking: true },
     assignedPropertyIds: [propertyId],
     permissionOverrides: { grant: ["pms.finance.read"], deny: [] },
   };
