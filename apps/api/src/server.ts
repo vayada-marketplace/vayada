@@ -64,7 +64,7 @@ import {
 } from "@vayada/domain-booking";
 import { createHotelMediaResolutionPort } from "@vayada/domain-hotels";
 import pg from "pg";
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
 import { createOrdinaryHotelSetupLogoRuntime } from "./hotelSetupLogoRuntime.js";
@@ -256,6 +256,7 @@ import { startCreatorPlatformSyncWorker } from "./jobs/creatorPlatformSync.js";
 import { createPgCreatorPlatformSyncStore } from "./jobs/creatorPlatformSyncStore.js";
 import { runChannexReviewJobs } from "./jobs/channexReviews.js";
 import { runChannexBookingJobs } from "./jobs/channexBookings.js";
+import { runChannexFeedPulls } from "./jobs/channexFeedPull.js";
 import { runChannexMessageJobs } from "./jobs/channexMessages.js";
 import { createChannexManagementProvider } from "./integrations/channexManagement.js";
 import { preflightChannexManagementWorker } from "./jobs/channexManagementWorkerStartup.js";
@@ -2462,6 +2463,36 @@ const channexBookingTimer = channexBookingWorkerEnabled
   ? setInterval(runChannexBookings, 2_000)
   : undefined;
 
+// VAY-2108: the claimed scope pulls each owned hotel's booking feed every 5 minutes (wave 1 is
+// pull-only); the booking worker above persists and acknowledges what the pull queues.
+let activeChannexFeedPull: Promise<void> | undefined;
+const channexFeedPullAbort = new AbortController();
+const channexFeedPullWorkerId = `channex-feed-pull:${process.pid}:${randomUUID().slice(0, 8)}`;
+const channexFeedPullEnabled = channexBookingWorkerEnabled && Boolean(channexOwnedPropertyIds);
+const runChannexFeedPull = () => {
+  if (activeChannexFeedPull || !channexFeedPullEnabled) return;
+  activeChannexFeedPull = runChannexFeedPulls(targetDatabaseUrl, {
+    apiBaseUrl: config.channexManagement.apiBaseUrl!,
+    apiKey: config.channexManagement.apiKey!,
+    ownedPropertyIds: channexOwnedPropertyIds ?? [],
+    excludedIds: channexExcludedIds(config.channexManagement.apiBaseUrl),
+    workerId: channexFeedPullWorkerId,
+    signal: channexFeedPullAbort.signal,
+  })
+    .then(({ failures }) => {
+      if (failures.length) app.log.warn({ failures }, "Channex booking feed pulls failed");
+    })
+    .catch((error: unknown) => app.log.warn({ err: error }, "Channex booking feed pull failed"))
+    .finally(() => {
+      activeChannexFeedPull = undefined;
+    });
+};
+const channexFeedPullTimer = channexFeedPullEnabled
+  ? setInterval(runChannexFeedPull, 60_000)
+  : undefined;
+channexFeedPullTimer?.unref();
+if (channexFeedPullEnabled) runChannexFeedPull();
+
 let activeChannexMessageBatch: Promise<void> | undefined;
 const channexMessageAbort = new AbortController();
 const channexMessageWorkerEnabled =
@@ -2517,12 +2548,15 @@ if (channexMessageWorkerEnabled) runChannexMessages();
 app.addHook("onClose", async () => {
   if (channexReviewTimer) clearInterval(channexReviewTimer);
   if (channexBookingTimer) clearInterval(channexBookingTimer);
+  if (channexFeedPullTimer) clearInterval(channexFeedPullTimer);
+  channexFeedPullAbort.abort();
   if (channexMessageTimer) clearInterval(channexMessageTimer);
   channexBookingAbort.abort();
   channexMessageAbort.abort();
   await Promise.all([
     activeChannexReviewBatch,
     activeChannexBookingBatch,
+    activeChannexFeedPull,
     activeChannexMessageBatch,
   ]);
 });
