@@ -1,8 +1,4 @@
-/**
- * One ApiClient class, instantiated once per backend:
- *   - bookingWebPublic: TypeScript public Booking Web API
- *   - bookingEngine:   booking API for remaining non-BFF reads
- */
+/** One ApiClient class for the TypeScript public Booking Web API (bookingWebPublic). */
 
 class ApiError extends Error {
   status: number;
@@ -83,5 +79,4 @@ async function parse<T>(res: Response): Promise<T> {
 // verified hotel custom domains functional without trusting arbitrary origins
 // in the public API's CORS policy.
 export const bookingWebPublic = new ApiClient("");
-export const bookingEngine = new ApiClient("");
 export { ApiError };

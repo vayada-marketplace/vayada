@@ -20,7 +20,7 @@ export default function RoomSelectionSummary({
   const tc = useTranslations("common");
   const th = useTranslations("home");
   const locale = useLocale();
-  const { formatPrice, convertAndRound, selectedCurrency } = useCurrency();
+  const { formatPrice } = useCurrency();
   return (
     <ul className="space-y-4" data-testid="room-selection-lines">
       {lines.map((line) => {
@@ -79,9 +79,7 @@ export default function RoomSelectionSummary({
                 {line.roomCount} × {line.roomName}
               </span>
               {Number.isFinite(amount) && (
-                <span className="whitespace-nowrap">
-                  {formatPrice(convertAndRound(amount, currency), selectedCurrency)}
-                </span>
+                <span className="whitespace-nowrap">{formatPrice(amount, currency)}</span>
               )}
             </div>
             {typeof line.rateSummary.name === "string" && (

@@ -28,10 +28,6 @@ const nextConfig = {
         source: "/api/hotels/:path*",
         destination: `${bookingApiOrigin}/api/hotels/:path*`,
       },
-      {
-        source: "/api/exchange-rates",
-        destination: `${bookingApiOrigin}/api/exchange-rates`,
-      },
     ];
   },
   images: {
