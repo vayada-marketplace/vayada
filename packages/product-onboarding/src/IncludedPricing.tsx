@@ -9,9 +9,15 @@ type IncludedBase = Extract<
   { mode: "included_guests" }
 >;
 export type IncludedInput = { adults: string; adjustments: { kind: string; value: string }[] };
-export function includedPrice(input: IncludedInput, base: string, capacity: number, scale: number) {
+export function includedPrice(
+  input: IncludedInput,
+  base: string,
+  capacity: number,
+  scale: number,
+  step = 1,
+) {
   const baseGuests = Number(input.adults),
-    baseMinor = parseMinorInput(base, scale);
+    baseMinor = parseMinorInput(base, scale, false, step);
   if (
     !/^\d+$/.test(input.adults) ||
     !Number.isSafeInteger(baseGuests) ||
@@ -28,16 +34,18 @@ export function includedPrice(input: IncludedInput, base: string, capacity: numb
       !/^[+-]?\d+(?:\.\d+)?$/.test(row.value)
     )
       throw new PricingError("pricing.included.errorAdjustment");
-    const unsigned = parseMinorInput(
-      row.value.replace(/^[+-]/, ""),
-      row.kind === "fixed" ? scale : 2,
-      true,
-    );
+    const unsigned =
+      row.kind === "fixed"
+        ? parseMinorInput(row.value.replace(/^[+-]/, ""), scale, true, step)
+        : parseMinorInput(row.value.replace(/^[+-]/, ""), 2, true);
     const signed = BigInt(unsigned) * (row.value.startsWith("-") ? -BigInt("1") : BigInt("1"));
     const amount =
       row.kind === "fixed"
         ? BigInt(baseMinor) + signed
-        : (BigInt(baseMinor) * (BigInt("10000") + signed) + BigInt("5000")) / BigInt("10000");
+        : // Same half-up rounding to the price step as the calculator (whole rupiah for IDR).
+          ((BigInt(baseMinor) * (BigInt("10000") + signed) + BigInt("5000") * BigInt(step)) /
+            (BigInt("10000") * BigInt(step))) *
+          BigInt(step);
     if (amount <= BigInt("0") || amount > BigInt("999999999999999999"))
       throw new PricingError("pricing.included.errorRange");
     if (
