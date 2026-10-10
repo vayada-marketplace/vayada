@@ -7,6 +7,19 @@ import {
 } from "../support/pmsWebMocks";
 import { watchPageHealth } from "../support/pageHealth";
 
+// The app layout reads the member's permissions before it renders any PMS page (VAY-1439).
+async function mockInboxSelfAccess(page: Page) {
+  await page.route("**/api/identity/staff/self-access", (route) =>
+    route.fulfill({
+      json: {
+        membershipId: "pms-owner-membership",
+        roleKey: "hotel_owner",
+        permissions: ["pms.dashboard.read", "pms.inbox.read", "pms.inbox.reply"],
+      },
+    }),
+  );
+}
+
 async function openHelpFromProfileMenu(page: Page) {
   const avatar = page.getByRole("banner").getByRole("button", { name: "PO", exact: true });
   await avatar.click();
@@ -39,6 +52,7 @@ for (const viewport of [
     await page.setViewportSize(viewport);
     await mockPmsWebAuthenticatedSession(page);
     await mockPmsWebTargetRoutes(page);
+    await mockInboxSelfAccess(page);
     let supportRequests = 0;
     await page.route("**/api/support", async (route) => {
       supportRequests += 1;
@@ -99,6 +113,7 @@ test("keeps mobile Help reachable while direct email sending is held", async ({ 
   await page.setViewportSize({ width: 390, height: 844 });
   await mockPmsWebAuthenticatedSession(page);
   await mockPmsWebTargetRoutes(page);
+  await mockInboxSelfAccess(page);
   await page.route(
     (url) =>
       url.pathname ===
