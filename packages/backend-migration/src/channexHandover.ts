@@ -473,11 +473,13 @@ async function audit(
   action: string,
   payload: object,
 ) {
+  // clock_timestamp(), taken after the advisory lock, so audit order is apply order (the
+  // replay's superseded check compares it); now() is when the transaction began.
   const row = await client.query<{ id: string }>(
     `INSERT INTO platform.product_audit_events (audit_key, product, action, occurred_at, tenant_scope,
        property_id, actor_type, target_resource_product, target_resource_type, target_resource_id,
        redacted_payload, audit_metadata, retention_class, privacy_scope)
-     VALUES ($1, 'pms', $2, now(), 'property', $3::uuid, 'migration', 'pms', 'channex_connection',
+     VALUES ($1, 'pms', $2, clock_timestamp(), 'property', $3::uuid, 'migration', 'pms', 'channex_connection',
        $3::uuid::text, $4::jsonb, jsonb_build_object('sessionUser', session_user::text),
        'security', 'restricted')
      RETURNING id::text`,
