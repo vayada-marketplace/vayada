@@ -226,6 +226,56 @@ describe("PMS operations command repository", () => {
     ).toHaveLength(1);
   });
 
+  it("keeps check-in prompts and check-out labels through the template reader and replay", async () => {
+    const target = targetPrivateNotesPool();
+    const repository = createTargetPmsOperationsCommandRepository({
+      connectionString: "postgresql://pms-target",
+      pool: target.pool,
+      readRepository: unusedReadRepository,
+      now: target.now,
+    });
+    const checkInSteps = [
+      {
+        stepId: "deposit",
+        label: "Collect deposit",
+        required: true,
+        prompt: "Card",
+        type: "amount",
+      },
+    ] as const;
+    const checkOutSteps = [
+      {
+        stepId: "minibar",
+        label: "Minibar",
+        required: true,
+        okLabel: "Full",
+        negativeLabel: "Used",
+        notePrompt: "Which items?",
+      },
+    ];
+    const checkIn = templateUpdateCommand("check_in_checklist", { steps: [...checkInSteps] });
+
+    await repository.updateOperationalTemplate(checkIn);
+    await repository.updateOperationalTemplate(
+      templateUpdateCommand("check_out_inspection", {
+        commandId: "cmd-inspection-fields",
+        idempotencyKey: "client-inspection-fields",
+        steps: checkOutSteps,
+      }),
+    );
+
+    await expect(
+      repository.getOperationalTemplate(defaultPropertyId, "check_in_checklist"),
+    ).resolves.toMatchObject({ steps: checkInSteps });
+    await expect(
+      repository.getOperationalTemplate(defaultPropertyId, "check_out_inspection"),
+    ).resolves.toMatchObject({ steps: checkOutSteps });
+    await expect(repository.updateOperationalTemplate(checkIn)).resolves.toMatchObject({
+      ok: true,
+      template: { steps: checkInSteps },
+    });
+  });
+
   it("persists checkout charge operational commands without finance writes or outbox side effects", async () => {
     const target = targetPrivateNotesPool();
     const repository = createTargetPmsOperationsCommandRepository({
@@ -457,6 +507,65 @@ describe("PMS operations command repository", () => {
     ).toHaveLength(2);
   });
 
+  it("writes only changed room-type location keys and skips a no-op save", async () => {
+    const target = targetPrivateNotesPool();
+    const readRepository: PmsOperationsReadRepository = {
+      ...unusedReadRepository,
+      async findRoomTypeById(propertyId, roomTypeId) {
+        const record = target.roomTypes.find(
+          (item) => item.propertyId === propertyId && item.roomType.roomTypeId === roomTypeId,
+        );
+        return record ? structuredClone(record.roomType) : null;
+      },
+    };
+    const repository = createTargetPmsOperationsCommandRepository({
+      connectionString: "postgresql://pms-target",
+      pool: target.pool,
+      readRepository,
+      now: target.now,
+    });
+    const created = target.seedRoomType();
+    const unchanged = await repository.updateRoomTypeLocation(
+      roomTypeUpdateCommand(created.roomType.roomTypeId, {
+        commandId: "cmd-room-type-location-noop",
+        idempotencyKey: "client-room-type-location-noop",
+        attributes: { locationAddress: null, latitude: null, longitude: null },
+      }),
+    );
+
+    expect(unchanged).toMatchObject({
+      ok: true,
+      roomType: { attributes: { bedType: "queen", smoking: false } },
+    });
+    if (!unchanged.ok) throw new Error("room type update unexpectedly failed");
+    expect(unchanged.roomType.attributes).not.toHaveProperty("locationAddress");
+    expect(target.roomTypes[0]!.roomType.attributes).toEqual({ bedType: "queen", smoking: false });
+    expect(target.calls.filter((call) => call.text.includes("UPDATE pms.room_types"))).toHaveLength(
+      0,
+    );
+
+    const moved = await repository.updateRoomTypeLocation(
+      roomTypeUpdateCommand(created.roomType.roomTypeId, {
+        attributes: {
+          locationAddress: "Seestrasse 12, Innsbruck",
+          latitude: null,
+          longitude: null,
+        },
+      }),
+    );
+
+    expect(moved.ok).toBe(true);
+    const update = target.calls.find((call) => call.text.includes("UPDATE pms.room_types"));
+    expect(JSON.parse(String(update?.values?.[2]))).toEqual({
+      locationAddress: "Seestrasse 12, Innsbruck",
+    });
+    expect(target.roomTypes[0]!.roomType.attributes).toEqual({
+      bedType: "queen",
+      smoking: false,
+      locationAddress: "Seestrasse 12, Innsbruck",
+    });
+  });
+
   it("rejects checkout charge assignment IDs outside the reservation before insert", async () => {
     const target = targetPrivateNotesPool();
     const repository = createTargetPmsOperationsCommandRepository({
@@ -666,6 +775,13 @@ function targetPrivateNotesPool(
               roomFactsRevision: Number(record.roomType.version.split("v").at(-1)),
             } as unknown as T,
           ])
+        : emptyRows<T>();
+    }
+
+    if (text.includes("SELECT room_attributes AS attributes")) {
+      const record = roomTypes.get(String(values?.[1]));
+      return record && record.propertyId === String(values?.[0])
+        ? rows([{ attributes: structuredClone(record.roomType.attributes) } as unknown as T])
         : emptyRows<T>();
     }
 

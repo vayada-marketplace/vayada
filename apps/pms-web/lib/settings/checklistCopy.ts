@@ -44,7 +44,13 @@ export function localizeBuiltInCheckinStep(
 ): CheckinChecklistStep {
   const defaultStep = CHECKIN_DEFAULTS.find((candidate) => candidate.id === step.id);
   // The persisted ID establishes built-in identity; canonical copy means the user has not edited it.
-  if (!defaultStep || step.label !== defaultStep.label) return step;
+  if (!defaultStep) return step;
+  if (step.label !== defaultStep.label) {
+    // Saved templates keep the English default prompt of an untouched prompt.
+    return step.prompt === defaultStep.prompt
+      ? { ...step, prompt: t(defaultStep.promptKey) }
+      : step;
+  }
 
   return {
     ...step,
