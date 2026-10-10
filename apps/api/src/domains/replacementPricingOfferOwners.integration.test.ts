@@ -111,7 +111,6 @@ import {
 import type { PricingStorageSnapshot, PricingStorageSources } from "./replacementPricingStore.js";
 import { createReplacementPricingStore } from "./replacementPricingStore.js";
 import { createReplacementPricingStorageGuard } from "./replacementPricingStorageGuard.js";
-import { createBookingPricingAuthorityStore } from "./bookingPricingAuthority.js";
 import { lockPublicPricingPublication } from "./publicPricingPublication.js";
 import { lockPublicPricingRoomStay, publicPricingOfferBindings } from "./publicPricingRoomStay.js";
 type TermsSetup = (
@@ -5699,12 +5698,6 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       'public','fresh','{"status":"ready"}','{"paymentMethods":["pay_at_property"]}')`,
       [propertyId],
     );
-    const authority = createBookingPricingAuthorityStore(pool);
-    const choice = await authority.save(f.context, f.scope, {
-      requestId: randomUUID(),
-      expectedRevision: null,
-      authority: "vayada",
-    });
     const publishPrices = () =>
       createReplacementPricingStore(pool, createReplacementPricingStorageGuard(f.context)).save(
         f.scope,
@@ -5734,7 +5727,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         client.release();
       }
     };
-    return { ...f, authority, choice, readPublic, publishPrices };
+    return { ...f, readPublic, publishPrices };
   }
   it("reads owner evidence before public projection, without granting public access", async () => {
     const f = await publicFixture(false);
@@ -5783,17 +5776,15 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         client.release();
       }
     }
-    const external = await f.authority.save(f.context, f.scope, {
-      requestId: randomUUID(),
-      expectedRevision: f.choice.revision,
-      authority: "external",
-    });
+    await pool.query(
+      "UPDATE identity.organization_resource_links SET status='archived' WHERE organization_id=$1 AND product='pms'",
+      [f.scope.organizationId],
+    );
     expect(await readOwner()).toBeNull();
-    await f.authority.save(f.context, f.scope, {
-      requestId: randomUUID(),
-      expectedRevision: external.revision,
-      authority: "vayada",
-    });
+    await pool.query(
+      "UPDATE identity.organization_resource_links SET status='active' WHERE organization_id=$1 AND product='pms'",
+      [f.scope.organizationId],
+    );
     expect(await readOwner()).not.toBeNull();
     await pool.query(
       "UPDATE identity.product_entitlements SET status='suspended' WHERE organization_id=$1",
@@ -5817,7 +5808,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     await f.publishPrices();
     const result = await f.readPublic();
     expect(result).toMatchObject({
-      scope: { propertyId: f.scope.propertyId, authorityRevision: f.choice.revision },
+      scope: { propertyId: f.scope.propertyId, organizationId: f.scope.organizationId },
       publication: { revision: 1, currency: "EUR", sources: f.sources },
       finance: f.finance,
       charges: f.charges,
@@ -6086,12 +6077,6 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         expect(await catalog.read(scope.propertyId)).toBeNull();
       }
       await publishContent(built!.publicContent);
-      await f.authority.save(f.context, f.scope, {
-        requestId: randomUUID(),
-        expectedRevision: f.choice.revision,
-        authority: "vayada",
-      });
-      expect(await catalog.read(scope.propertyId)).toBeNull(); // Previously published keys cannot survive a new authority revision.
       await pool.query(
         "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
         [scope.propertyId],
@@ -6101,20 +6086,41 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       await single.end();
     }
   });
-  it("changes the source identity after a new authority choice and refuses external or hidden properties", async () => {
+  it("serves the single owning organization and refuses unlinked, ambiguous or hidden properties", async () => {
     const f = await publicFixture(),
       initial = await f.readPublic();
-    const same = await f.authority.save(f.context, f.scope, {
-      requestId: randomUUID(),
-      expectedRevision: f.choice.revision,
-      authority: "vayada",
+    expect(initial?.scope).toEqual({
+      propertyId: f.scope.propertyId,
+      organizationId: f.scope.organizationId,
     });
-    expect((await f.readPublic())?.pmsSourceRevision).not.toBe(initial?.pmsSourceRevision);
-    await f.authority.save(f.context, f.scope, {
-      requestId: randomUUID(),
-      expectedRevision: same.revision,
-      authority: "external",
-    });
+    expect((await f.readPublic())?.pmsSourceRevision).toBe(initial?.pmsSourceRevision);
+    // A second organization owning both resources makes ownership ambiguous: fail closed.
+    const other = randomUUID();
+    await pool.query(
+      "INSERT INTO identity.organizations(id,kind,name,slug) VALUES($1,'hotel_group','Second owner',$1::text)",
+      [other],
+    );
+    for (const [product, type] of [
+      ["pms", "pms_property"],
+      ["hotel_catalog", "property"],
+    ])
+      await pool.query(
+        `INSERT INTO identity.organization_resource_links
+      (organization_id,product,resource_type,resource_id,relationship) VALUES($1,$2,$3,$4,'operator')`,
+        [other, product, type, f.scope.propertyId],
+      );
+    expect(await f.readPublic()).toBeNull();
+    // Linked to only one of the two resources, the second organization is not an owner.
+    await pool.query(
+      "UPDATE identity.organization_resource_links SET status='archived' WHERE organization_id=$1 AND product='pms'",
+      [other],
+    );
+    expect((await f.readPublic())?.scope.organizationId).toBe(f.scope.organizationId);
+    // Without its own PMS link the hotel has no owner at all.
+    await pool.query(
+      "UPDATE identity.organization_resource_links SET status='archived' WHERE organization_id=$1 AND product='pms'",
+      [f.scope.organizationId],
+    );
     expect(await f.readPublic()).toBeNull();
     const hidden = await publicFixture();
     await pool.query(
@@ -6180,13 +6186,6 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           requestId: randomUUID(),
           expectedRevision: f.terms[0].revision,
           terms: f.termsInput,
-        }),
-      ).rejects.toMatchObject({ code: "55P03" });
-      await expect(
-        createBookingPricingAuthorityStore(writer).save(f.context, f.scope, {
-          requestId: randomUUID(),
-          expectedRevision: f.choice.revision,
-          authority: "external",
         }),
       ).rejects.toMatchObject({ code: "55P03" });
     } finally {
@@ -6442,12 +6441,6 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       { ...f.selection, rooms: [f.selection.rooms[0], f.selection.rooms[0]] },
     ])
       expect(await f.price(input)).toBeNull();
-    await f.authority.save(f.context, f.scope, {
-      requestId: randomUUID(),
-      expectedRevision: f.choice.revision,
-      authority: "vayada",
-    });
-    expect(await f.price()).toBeNull();
   });
   it("rejects nightly stop-sell and aggregate overflow across otherwise valid rooms", async () => {
     const closed = await stayFixture((s) => ({
@@ -7185,7 +7178,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       await pool.query("UPDATE hotel_catalog.properties SET profile_status='private' WHERE id=$1", [
         f.scope.propertyId,
       ]);
-      expect((await post()).statusCode).toBe(404); // Historical retry still needs public authority.
+      expect((await post()).statusCode).toBe(404); // Historical retry still needs public access.
     } finally {
       await app.close();
     }

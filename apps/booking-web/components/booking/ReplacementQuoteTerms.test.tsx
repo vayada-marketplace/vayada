@@ -100,32 +100,46 @@ it("discloses each physical room's actual name, meal, cancellation and payment t
   expect(checkbox().closest("label")?.textContent).toContain("price preview");
 });
 
-it("preserves every partial-refund field, zero-percent tier and policy text without inventing a cutoff", () => {
+it("shows partial-refund steps alone, most notice first, without a free-cancellation deadline", () => {
+  const partial = structuredClone(quote);
+  const cancellation = partial.rooms[0].cancellation;
+  if (cancellation.kind !== "flexible") throw new Error("fixture");
+  Object.assign(cancellation.terms, {
+    freeCancellationDeadlineDays: 365,
+    flexibleCancellationType: "partial_refund",
+    partialRefundCancelWindowDays: 30,
+    partialRefundAmountPercent: 50,
+    partialRefundTiers: [
+      { minDaysBeforeCheckIn: 14, refundPercent: 50 },
+      { minDaysBeforeCheckIn: 30, refundPercent: 75 },
+      { minDaysBeforeCheckIn: 7, refundPercent: 0 },
+    ],
+  });
+  render({ quote: partial });
+  const room = document.querySelector('section[aria-label="Room 1 terms"]')!.textContent;
+  expect(room).toContain("Cancellation type: Partial refund.");
+  expect(Array.from(document.querySelectorAll("li")).map((li) => li.textContent)).toEqual([
+    "75% refund with at least 30 days before check-in.",
+    "50% refund with at least 14 days before check-in.",
+    "0% refund with at least 7 days before check-in.",
+  ]);
+  expect(room).toContain("No refund with less than 7 days before check-in.");
+  expect(room).toContain("No-show penalty: full booking amount.");
+  expect(room).not.toMatch(/Free cancellation deadline|After-deadline penalty|window|amount: 50%/);
+  expect(document.body.textContent).not.toMatch(/midnight|23:59|2027-01-25/);
+});
+
+it("adds no less-notice line when a step starts at check-in", () => {
   const partial = structuredClone(quote);
   const cancellation = partial.rooms[0].cancellation;
   if (cancellation.kind !== "flexible") throw new Error("fixture");
   Object.assign(cancellation.terms, {
     flexibleCancellationType: "partial_refund",
-    partialRefundCancelWindowDays: 30,
-    partialRefundAmountPercent: 50,
-    partialRefundTiers: [
-      { minDaysBeforeCheckIn: 30, refundPercent: 75 },
-      { minDaysBeforeCheckIn: 14, refundPercent: 50 },
-      { minDaysBeforeCheckIn: 0, refundPercent: 0 },
-    ],
+    partialRefundTiers: [{ minDaysBeforeCheckIn: 0, refundPercent: 20 }],
   });
   render({ quote: partial });
-  expect(document.body.textContent).toContain("Cancellation type: Partial refund.");
-  expect(document.body.textContent).toContain(
-    "Partial refund cancellation window: 30 days before check-in.",
-  );
-  expect(document.body.textContent).toContain("Partial refund amount: 50%.");
-  expect(Array.from(document.querySelectorAll("li")).map((li) => li.textContent)).toEqual([
-    "75% refund with at least 30 days before check-in.",
-    "50% refund with at least 14 days before check-in.",
-    "0% refund with at least 0 days before check-in.",
-  ]);
-  expect(document.body.textContent).not.toMatch(/midnight|23:59|2027-01-25/);
+  expect(document.body.textContent).toContain("20% refund with at least 0 days before check-in.");
+  expect(document.body.textContent).not.toContain("No refund with less than");
 });
 
 it("binds acknowledgement to evidence and ignores the replay transport flag", () => {

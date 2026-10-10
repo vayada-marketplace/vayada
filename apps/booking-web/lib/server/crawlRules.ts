@@ -10,8 +10,7 @@ const PRIVATE_CRAWL_PATHS = [
 ] as const;
 
 export function publicAllowRules(locales: readonly string[]): string[] {
-  const localeRules = locales.flatMap((locale) => [`/${locale}`, `/${locale}/rooms`]);
-  return ["/", "/rooms", ...localeRules];
+  return ["/", ...locales.map((locale) => `/${locale}`)];
 }
 
 export function privateDisallowRules(locales: readonly string[]): string[] {

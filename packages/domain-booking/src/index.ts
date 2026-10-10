@@ -38,6 +38,7 @@ export * from "./bookingAttribution.js";
 export * from "./affiliateArrivalTransport.js";
 export * from "./bookingAddonEconomics.js";
 export * from "./sameDayBookingPolicy.js";
+export * from "./bookedCancellationOutcome.js";
 export * from "./roomSelection.js";
 
 export type BookingUtcDateTime = string;
@@ -93,7 +94,7 @@ export type BookingSparklinePoint = {
 
 export type BookingSparklineReadModel = {
   propertyId: string;
-  /** 7 contiguous non-overlapping date buckets */
+  /** One bucket per day for windows up to 31 days; longer windows use 31 contiguous buckets. */
   points: readonly BookingSparklinePoint[];
 };
 
