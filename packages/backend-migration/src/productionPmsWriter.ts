@@ -20,8 +20,16 @@ export async function writeProductionPmsRecords(
   for (const [targetTable, rows] of [...grouped].sort(
     ([left], [right]) => order(left) - order(right),
   )) {
-    const definition = PRODUCTION_PMS_TABLES[targetTable];
-    if (!definition) throw new Error(`Unsupported PMS writer ${targetTable}`);
+    const table = PRODUCTION_PMS_TABLES[targetTable];
+    if (!table) throw new Error(`Unsupported PMS writer ${targetTable}`);
+    const columns = table.columns.filter(([jsonKey, , , optional]) => {
+      if (!optional) return true;
+      const carried = rows.filter((row) => jsonKey in row.row).length;
+      if (carried !== 0 && carried !== rows.length)
+        throw new Error(`PMS ${targetTable} rows disagree on writing ${jsonKey}`);
+      return carried > 0;
+    });
+    const definition = { ...table, columns };
     const aliases = definition.columns
       .map(([jsonKey, , type]) => `"${jsonKey}" ${type}`)
       .join(", ");

@@ -22,7 +22,8 @@ create name and slug duplicates of native properties.
 A **cohort** is an approved, immutable list of legacy hotel IDs for one source
 run.
 
-- **Cohort hotels** migrate exactly as today.
+- **Cohort hotels** migrate as today, plus the setup rows native onboarding writes (see
+  [Setup completeness](#setup-completeness)).
 - **Non-cohort hotels** still import **every** row, so the full-row extraction,
   checksum and parity accounting is unchanged. Each one lands in a state that is:
   1. **Private.** The profile is `private`. There is no verified custom domain,
@@ -97,6 +98,22 @@ platform.production_migration_cohorts(
     not kept actionable.
   - Channex adoption ignores `outside_migration_cohort` quarantine. It no longer
     treats it as a warning that blocks all adoption.
+
+## Setup completeness
+
+A carried cohort hotel (inside the cohort and not in private quarantine) leaves the PMS import in
+the state native onboarding leaves a property in, measured by the VAY-2066 readiness criteria.
+Runs without a cohort, hotels outside it and quarantined hotels get none of this.
+
+- **Pricing settings** (criterion f): `pms.property_pricing_settings` in the native first-currency
+  shape, with the currency of the operating room types. An ambiguous or natively unsupported
+  currency writes no row; a stored row with another currency blocks.
+- **Room labels** (criterion c): the legacy room number becomes a verified operational label for
+  operating rooms whose printable-ASCII label is unique case-insensitively in the property. This
+  replaces the 0048 rule that migrated labels stay unverified, for cohort hotels only. A twin stays
+  unverified, so the property stays in setup.
+
+A hotel that misses an item stays `provisioning`.
 
 ## Verification
 

@@ -6,7 +6,7 @@ import type {
   PmsTargetRecord,
 } from "./productionPmsTypes.js";
 import { bool, integer, optionalDate, optionalText, uuid } from "./productionBookingValues.js";
-import { outsideCohortSource } from "./productionMigrationCohort.js";
+import { carriedCohortHotel } from "./productionPmsCohortSetup.js";
 import { propertyClock } from "./productionPmsInventoryRecords.js";
 import { pmsRecord } from "./productionPmsValues.js";
 
@@ -37,13 +37,7 @@ export function buildPmsCalendarAutoOpenRecords(context: PmsBuildContext): PmsTa
       // An unresolved hotel is already a source-coverage blocker.
       const propertyId = context.propertyByHotel.get(hotelId);
       if (!propertyId) continue;
-      const carried =
-        !outsideCohortSource(context.cohort, "pms", hotelId) &&
-        !context.target.propertyLinks.some(
-          (link) =>
-            link.sourceId.toLowerCase() === hotelId &&
-            link.migrationDisposition === "private_quarantine",
-        );
+      const carried = carriedCohortHotel(context, hotelId);
       const legacyOn = bool(
         hotel.data["calendar_auto_open_enabled"],
         "calendar_auto_open_enabled",

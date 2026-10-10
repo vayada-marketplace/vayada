@@ -1,4 +1,5 @@
-export type PmsColumn = readonly [jsonKey: string, sqlName: string, type: string];
+/** optional: written only when the planned rows carry the key, so other runs' SQL is unchanged. */
+export type PmsColumn = readonly [jsonKey: string, sqlName: string, type: string, optional?: true];
 export type PmsTableDefinition = {
   product: "pms" | "platform";
   table: string;
@@ -21,6 +22,7 @@ export const PRODUCTION_PMS_WRITE_ORDER = [
   "rooms",
   "rate_plans",
   "rate_rules",
+  "property_pricing_settings",
   "operational_booking_assignments",
   "room_blocks",
   "inventory_days",
@@ -93,6 +95,8 @@ export const PRODUCTION_PMS_TABLES: Record<string, PmsTableDefinition> = {
     c("sourceSystem", "source_system", "text"),
     c("sourceRoomId", "source_room_id", "text"),
     c("roomNumber", "room_number", "text"),
+    // Stated by cohort runs only (VAY-1362); other runs leave the column to its 0048 default.
+    ["operationalLabelStatus", "operational_label_status", "text", true],
     c("floor", "floor", "text"),
     c("status", "status", "text"),
     c("sortOrder", "sort_order", "integer"),
@@ -136,6 +140,17 @@ export const PRODUCTION_PMS_TABLES: Record<string, PmsTableDefinition> = {
     created,
     updated,
   ]),
+  // optional_pricing_aggregate_revision keeps its default 0, as the native first-currency insert.
+  property_pricing_settings: {
+    ...table("pms.property_pricing_settings", true, [
+      property,
+      c("currency", "currency", "text"),
+      c("pricingCurrencyRevision", "pricing_currency_revision", "integer"),
+      created,
+      updated,
+    ]),
+    key: ["property_id"],
+  },
   operational_booking_assignments: table("pms.operational_booking_assignments", true, [
     id,
     property,

@@ -57,6 +57,7 @@ describe.skipIf(!URL)("production PMS snapshot reader (PostgreSQL)", () => {
         rows: [],
         snapshotAt: "2026-08-30T01:02:03.000Z",
         completedAt: "2026-08-30T01:02:03.000Z",
+        cohort: null,
       });
 
       await client.query(

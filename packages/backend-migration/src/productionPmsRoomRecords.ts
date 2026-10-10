@@ -5,6 +5,7 @@ import {
   propertyForHotel,
   safePmsSourceId,
 } from "./productionPmsContext.js";
+import { verifiedCohortRoomIds } from "./productionPmsCohortSetup.js";
 import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
 import type { PmsBuildContext, PmsRoomBuild, PmsTargetRecord } from "./productionPmsTypes.js";
 import {
@@ -49,8 +50,9 @@ export function buildPmsRoomRecords(context: PmsBuildContext): PmsRoomBuild {
       flexiblePlanByRoomType.set(built.roomTypeId, built.flexiblePlanId);
       return built.records;
     });
+  const verifiedRooms = verifiedCohortRoomIds(context);
   for (const source of context.rowsByTable.get("rooms") ?? [])
-    append(context, source, records, () => room(context, source));
+    append(context, source, records, () => room(context, source, verifiedRooms));
   for (const source of context.rowsByTable.get("channex_rate_plan_mappings") ?? [])
     append(context, source, records, () => {
       const built = channelPlan(context, source);
@@ -531,7 +533,11 @@ function roomType(
   };
 }
 
-function room(context: PmsBuildContext, source: IdentitySourceRow): PmsTargetRecord[] {
+function room(
+  context: PmsBuildContext,
+  source: IdentitySourceRow,
+  verifiedRooms: Set<string>,
+): PmsTargetRecord[] {
   const data = source.data;
   const id = uuid(data["id"], "id");
   const propertyId = propertyForHotel(context, data["hotel_id"]);
@@ -548,23 +554,37 @@ function room(context: PmsBuildContext, source: IdentitySourceRow): PmsTargetRec
     context.effectiveRoomTypeActiveById.get(roomTypeId) ??
     bool(parent.data["is_active"], "room_type.is_active", true);
   const effectiveStatus = roomTypeActive ? status : "retired";
+  // VAY-1362: only cohort runs state the label status, so no-cohort rows are unchanged. The status
+  // also depends on other rooms, so it joins the checksum.
+  const labelStatus = context.cohort
+    ? { operationalLabelStatus: verifiedRooms.has(id) ? "verified" : "unverified" }
+    : {};
   return [
-    pmsRecord(source, "rooms", id, updatedAt, true, {
+    pmsRecord(
+      source,
+      "rooms",
       id,
-      propertyId,
-      roomTypeId,
-      sourceSystem: "pms",
-      sourceRoomId: id,
-      roomNumber: requiredText(data["room_number"], "room_number"),
-      floor: optionalText(data["floor"], "floor"),
-      status: effectiveStatus,
-      sortOrder: integer(data["sort_order"], "sort_order", 0),
-      roomMetadata: roomTypeActive
-        ? {}
-        : { legacySourceStatus: status, reasonCode: "parent_room_type_inactive" },
-      createdAt,
       updatedAt,
-    }),
+      true,
+      {
+        id,
+        propertyId,
+        roomTypeId,
+        sourceSystem: "pms",
+        sourceRoomId: id,
+        roomNumber: requiredText(data["room_number"], "room_number"),
+        ...labelStatus,
+        floor: optionalText(data["floor"], "floor"),
+        status: effectiveStatus,
+        sortOrder: integer(data["sort_order"], "sort_order", 0),
+        roomMetadata: roomTypeActive
+          ? {}
+          : { legacySourceStatus: status, reasonCode: "parent_room_type_inactive" },
+        createdAt,
+        updatedAt,
+      },
+      context.cohort ? { row: data, ...labelStatus } : data,
+    ),
   ];
 }
 
