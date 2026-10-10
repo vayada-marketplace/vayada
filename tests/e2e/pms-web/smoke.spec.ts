@@ -327,7 +327,7 @@ test.describe("pms-web smoke", () => {
     await expect(page.getByRole("heading", { name: "Not available yet" })).toHaveCount(0);
 
     await page.goto("/financials");
-    await expect(page.getByRole("heading", { level: 1, name: "Financials" })).toBeVisible();
+    await expect(page.getByRole("tablist", { name: "Financials sections" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Not available yet" })).toBeVisible();
 
     await page.goto("/settings");
