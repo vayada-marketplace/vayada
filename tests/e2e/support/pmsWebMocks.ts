@@ -235,7 +235,66 @@ export async function mockPmsWebAuthenticatedSession(
   }, propertyId);
 }
 
+// Every permission pms-web gates on, so an owner sees the whole product.
+export const PMS_WEB_OWNER_PERMISSIONS = [
+  "booking.addons.manage",
+  "booking.addons.read",
+  "booking.analytics.read",
+  "booking.design.manage",
+  "booking.design.read",
+  "booking.flow.manage",
+  "booking.flow.read",
+  "booking.promos.manage",
+  "booking.promos.read",
+  "booking.settings.manage",
+  "booking.settings.read",
+  "finance.billing.manage",
+  "finance.expense.receipt",
+  "identity.staff.manage",
+  "pms.assignment.assign",
+  "pms.assignment.move",
+  "pms.assignment.unassign",
+  "pms.calendar.manage",
+  "pms.calendar.read",
+  "pms.channel_manager.read",
+  "pms.dashboard.finance.read",
+  "pms.dashboard.operations.read",
+  "pms.dashboard.read",
+  "pms.finance.manage",
+  "pms.finance.read",
+  "pms.guest_contact.read",
+  "pms.inbox.read",
+  "pms.inbox.reply",
+  "pms.messaging.attachment",
+  "pms.note.create",
+  "pms.note.delete",
+  "pms.note.update",
+  "pms.operations.manage",
+  "pms.operations.read",
+  "pms.reservation.cancel",
+  "pms.reservation.read",
+  "pms.reservation.update",
+  "pms.room_status.read",
+  "pms.room_type.media",
+  "pms.rooms_rates.manage",
+  "pms.rooms_rates.read",
+  "pms.settings.manage",
+  "pms.settings.read",
+];
+
 export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
+  // The app layout refuses to render without self-access (VAY-1439). This default owner is a
+  // context route, so a spec's own page.route for self-access wins whenever it was registered.
+  await page.context().route("**/api/identity/staff/self-access", (route) =>
+    route.fulfill({
+      json: {
+        membershipId: "pms-owner-membership",
+        roleKey: "hotel_owner",
+        permissions: PMS_WEB_OWNER_PERMISSIONS,
+      },
+    }),
+  );
+
   await page.route("**/api/pms/properties/*/reservations/*/no-show-report", (route) =>
     route.fulfill({
       json: {
