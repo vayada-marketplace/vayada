@@ -293,10 +293,10 @@ describe("production Finance plan", () => {
     };
     const row = (result: ReturnType<typeof plan>, table: string) =>
       result.records.find((record) => record.targetTable === table)!.row;
-    // No cohort and cohort members keep their owner state exactly.
+    // No cohort and cohort members keep their owner state exactly; only their open payouts change.
     const unscoped = plan(null);
     const inside = { bookingHotelIds: [HOTEL], pmsHotelIds: [HOTEL], marketplaceHotelIds: [] };
-    expect(plan(inside).checksum).toBe(unscoped.checksum);
+    expect(plan(inside, "completed").checksum).toBe(plan(null, "completed").checksum);
     expect(row(unscoped, "payouts")["payoutStatus"]).toBe("scheduled");
     expect(row(unscoped, "payment_provider_accounts")["payoutsEnabled"]).toBe(true);
 
@@ -339,6 +339,57 @@ describe("production Finance plan", () => {
         result.parity.sourcePayoutCountsByCurrencyStatusOwner,
       );
     }
+  });
+
+  it("imports a cohort hotel's open legacy payouts in flight for settlement review", () => {
+    const plan = (cohort: IdentityCohortScope | null, status: string) => {
+      const rows = sourceRows();
+      Object.assign(rows.find((row) => row.sourceTable === "payouts")!.data, {
+        status,
+        completed_at: AT,
+      });
+      return buildProductionFinancePlan({
+        sourceRunId: RUN,
+        completedAt: "2026-08-30T00:00:00.000Z",
+        rows,
+        target: target(),
+        cohort,
+      });
+    };
+    const payout = (result: ReturnType<typeof plan>) =>
+      result.records.find((record) => record.targetTable === "payouts")!.row;
+    const inside = { bookingHotelIds: [HOTEL], pmsHotelIds: [HOTEL], marketplaceHotelIds: [] };
+    for (const legacy of ["scheduled", "processing", "failed"]) {
+      const result = plan(inside, legacy);
+      expect(result.blockers).toEqual([]);
+      expect(payout(result)).toMatchObject({
+        payoutStatus: "processing",
+        providerPayoutId: null,
+        payoutMetadata: {
+          legacyPayoutStatus: legacy,
+          settlementRequiresReview: true,
+          settlementReviewReason: "legacy_settles_open_payout",
+          activeLegacyTransferWindow: true,
+          maxDispatchAttempts: 0,
+        },
+      });
+      expect(payout(result)["payoutMetadata"]).not.toHaveProperty("retiredReason");
+      // A legacy failure stays evidence in the metadata, not a failure of the in-flight row.
+      expect(payout(result)).toMatchObject({ failedAt: null, failureCode: null });
+      if (legacy === "failed")
+        expect(payout(result)["payoutMetadata"]).toHaveProperty("legacyFailedAt");
+      expect(result.parity.targetPayoutCountsByCurrencyStatusOwner).toEqual(
+        result.parity.sourcePayoutCountsByCurrencyStatusOwner,
+      );
+      // Without a cohort the legacy status and metadata stay exactly as before.
+      expect(payout(plan(null, legacy))["payoutStatus"]).toBe(legacy);
+      expect(payout(plan(null, legacy))["payoutMetadata"]).not.toHaveProperty(
+        "settlementRequiresReview",
+      );
+    }
+    expect(payout(plan(inside, "completed"))["payoutMetadata"]).not.toHaveProperty(
+      "settlementRequiresReview",
+    );
   });
 
   it("blocks Booking and PMS payment settings owned by different organizations", () => {

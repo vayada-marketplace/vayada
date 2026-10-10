@@ -55,6 +55,8 @@ const MESSAGES = {
     "A property outside the cohort can take payments or has an enabled account",
   actionablePayout:
     "A property outside the cohort has a pending, scheduled, processing or failed payout",
+  cohortPayoutActionable:
+    "A cohort property has an imported open legacy payout a dispatcher could take (not held for settlement review)",
   pendingBookingNotHeld:
     "A property outside the cohort has a pending booking whose deadline the lifecycle sweep can reach (no migration hold)",
 } as const;
@@ -319,6 +321,15 @@ const SCOPE_VIOLATION_QUERY = `${SCOPE_CTES}
                     booking.booking_metadata ->> 'hostResponseDeadlineAt',
                     booking.booking_metadata ->> 'pendingExpiresAt',
                     booking.booking_metadata ->> 'expiresAt') IS DISTINCT FROM '${LEGACY_HOLD_EXPIRES_AT}'
+    -- C: legacy settles a cohort hotel's open payouts; the import holds them in flight for review.
+    UNION ALL SELECT 'cohortPayoutActionable', cohort.property_id::text FROM finance.payouts payout
+      JOIN (SELECT DISTINCT property_id FROM legacy_link WHERE inside) cohort
+        ON cohort.property_id IN (payout.property_id, payout.related_property_id)
+     WHERE payout.source_system = 'pms'
+       AND (payout.payout_status IN ('pending', 'scheduled', 'failed')
+         OR (payout.payout_status = 'processing'
+           AND NOT (payout.payout_metadata @> '{"settlementRequiresReview": true,
+                      "activeLegacyTransferWindow": true, "maxDispatchAttempts": 0}'::jsonb)))
   ) AS violation
   ORDER BY category, "subjectId"`;
 
