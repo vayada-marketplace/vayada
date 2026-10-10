@@ -529,7 +529,14 @@ export async function transformPmsOperations(client: pg.Client): Promise<void> {
       (property_id, steps, updated_by_user_id, updated_at)
     SELECT
       property_id,
-      checkin_template->'steps',
+      -- VAY-2112: the native step shape the runtime reads (stepId, label, required).
+      (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+         'stepId', COALESCE(NULLIF(btrim(step->>'stepId'), ''), NULLIF(btrim(step->>'id'), ''),
+           NULLIF(btrim(step->>'key'), ''),
+           'legacy-step-' || position),
+         'label', btrim(step->>'label'),
+         'required', COALESCE((step->>'required')::boolean, false)) ORDER BY position), '[]')
+         FROM jsonb_array_elements(checkin_template->'steps') WITH ORDINALITY AS item(step, position)),
       owner_user_id,
       (checkin_template->>'updatedAt')::timestamptz
     FROM migration_source_pms.operations_snapshot_inputs
@@ -540,7 +547,14 @@ export async function transformPmsOperations(client: pg.Client): Promise<void> {
       (property_id, steps, updated_by_user_id, updated_at)
     SELECT
       property_id,
-      checkout_template->'steps',
+      -- VAY-2112: the native step shape the runtime reads (stepId, label, required).
+      (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+         'stepId', COALESCE(NULLIF(btrim(step->>'stepId'), ''), NULLIF(btrim(step->>'id'), ''),
+           NULLIF(btrim(step->>'key'), ''),
+           'legacy-step-' || position),
+         'label', btrim(step->>'label'),
+         'required', COALESCE((step->>'required')::boolean, true)) ORDER BY position), '[]')
+         FROM jsonb_array_elements(checkout_template->'steps') WITH ORDINALITY AS item(step, position)),
       owner_user_id,
       (checkout_template->>'updatedAt')::timestamptz
     FROM migration_source_pms.operations_snapshot_inputs

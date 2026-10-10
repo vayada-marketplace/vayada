@@ -166,16 +166,20 @@ describe("production PMS calendar auto-open settings", () => {
       });
     };
 
+    // VAY-2112: a cohort plan also carries legacy's built-in checklists; only the setting counts.
+    const own = (records: Array<{ targetTable: string; row: Record<string, unknown> }>) =>
+      records.filter((record) => record.targetTable === "calendar_auto_open_settings");
+
     it("keeps an unchanged setting, revision and time on a later run", () => {
       const result = plan({}, {}, AT, true);
       expect(result.blockers).toEqual([]);
-      expect(result.writes).toEqual([]);
-      expect(result.records[0]!.row).toMatchObject({ revision: 1, updatedAt: AT });
+      expect(own(result.writes)).toEqual([]);
+      expect(own(result.records)[0]!.row).toMatchObject({ revision: 1, updatedAt: AT });
     });
 
     it("advances the revision when the legacy setting changed", () => {
       const result = plan(twelve, {}, AT, true);
-      expect(result.writes.map((record) => record.row)).toEqual([
+      expect(own(result.writes).map((record) => record.row)).toEqual([
         expect.objectContaining({ revision: 2, rollingMonths: 12, updatedAt: LATER }),
       ]);
     });
@@ -183,14 +187,14 @@ describe("production PMS calendar auto-open settings", () => {
     it("enables a hotel that joins the cohort after an earlier run kept it disabled", () => {
       const result = plan({}, {}, AT, true, cohort());
       expect(result.blockers).toEqual([]);
-      expect(result.writes.map((record) => record.row)).toEqual([
+      expect(own(result.writes).map((record) => record.row)).toEqual([
         expect.objectContaining({ revision: 2, enabled: true, updatedAt: LATER }),
       ]);
     });
 
     it("blocks a newer conflicting row without migration provenance", () => {
       const result = plan({}, { revision: 3, rollingMonths: 24 }, NEWER, false);
-      expect(result.writes).toEqual([]);
+      expect(own(result.writes)).toEqual([]);
       expect(result.blockers).toEqual([
         expect.objectContaining({ code: "TARGET_NEWER_WITHOUT_PROVENANCE", source: "pms.hotels" }),
       ]);

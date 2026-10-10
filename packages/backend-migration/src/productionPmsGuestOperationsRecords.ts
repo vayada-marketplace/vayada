@@ -1,4 +1,5 @@
 import { targetBooking } from "./productionPmsAssignmentRecords.js";
+import { carriedCohortHotel } from "./productionPmsCohortSetup.js";
 import { addPmsBlocker, propertyForHotel, safePmsSourceId } from "./productionPmsContext.js";
 import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
 import type { PmsAssignmentBuild, PmsBuildContext, PmsTargetRecord } from "./productionPmsTypes.js";
@@ -39,7 +40,89 @@ export function buildPmsGuestOperationsRecords(
           error instanceof Error ? error.message : "Invalid PMS guest operation",
         );
       }
+  const migratedAt = new Date(context.completedAt).toISOString();
+  for (const { hotel, hotelId, propertyId, table, kind } of legacyDefaultTemplates(context)) {
+    // An existing row keeps its time, so reruns plan nothing and a later native edit is kept.
+    const current = context.target.records.find(
+      (record) => record.targetTable === table && record.targetId === propertyId,
+    );
+    // A native template the migration never wrote stands.
+    if (
+      current &&
+      !context.target.provenance.some(
+        (link) => link.targetTable === table && link.targetId === propertyId,
+      )
+    )
+      continue;
+    records.push(
+      pmsRecord(
+        hotel,
+        table,
+        propertyId,
+        migratedAt,
+        true,
+        {
+          propertyId,
+          steps: LEGACY_DEFAULT_TEMPLATE_STEPS[kind].map((step) => ({ ...step })),
+          updatedByUserId: null,
+          updatedAt: current?.updatedAt ?? migratedAt,
+        },
+        { id: hotelId, template: `${kind}_legacy_default` },
+      ),
+    );
+  }
   return records;
+}
+
+/**
+ * VAY-2112: legacy shows its built-in steps to a hotel without a template row (apps/pms-api
+ * models/checkin.py DEFAULT_CHECKIN_CHECKLIST_STEPS, routers/admin_checkout.py
+ * DEFAULT_INSPECTION_STEPS), all required, with these IDs, which its check-in and check-out
+ * records reference. A carried cohort hotel keeps seeing them in the target.
+ */
+export const LEGACY_DEFAULT_TEMPLATE_STEPS = {
+  checkin: [
+    { stepId: "default-verify-guest-ids", label: "Verify guest IDs / passports", required: true },
+    {
+      stepId: "default-confirm-payment-status",
+      label: "Confirm payment / deposit status",
+      required: true,
+    },
+    { stepId: "default-room-access", label: "Assign room & hand over keys/access", required: true },
+  ],
+  checkout: [
+    { stepId: "default-minibar", label: "Minibar", required: true },
+    { stepId: "default-room-condition", label: "Room condition", required: true },
+    { stepId: "default-keys-access", label: "Keys / access", required: true },
+  ],
+} as const;
+
+/** Carried cohort hotels without a legacy template row of a kind. */
+export function legacyDefaultTemplates(context: PmsBuildContext) {
+  if (!context.cohort) return [];
+  const result: Array<{
+    hotel: IdentitySourceRow;
+    hotelId: string;
+    propertyId: string;
+    table: "checkin_checklist_templates" | "checkout_inspection_templates";
+    kind: "checkin" | "checkout";
+  }> = [];
+  for (const hotel of context.rowsByTable.get("hotels") ?? []) {
+    const hotelId = String(hotel.data["id"] ?? "").toLowerCase();
+    const propertyId = context.propertyByHotel.get(hotelId);
+    if (!propertyId || !carriedCohortHotel(context, hotelId)) continue;
+    for (const kind of ["checkin", "checkout"] as const) {
+      const table =
+        kind === "checkin" ? "checkin_checklist_templates" : "checkout_inspection_templates";
+      if (
+        !(context.rowsByTable.get(table) ?? []).some(
+          (row) => String(row.data["hotel_id"] ?? "").toLowerCase() === hotelId,
+        )
+      )
+        result.push({ hotel, hotelId, propertyId, table, kind });
+    }
+  }
+  return result;
 }
 
 function checklist(
@@ -52,13 +135,57 @@ function checklist(
   const table =
     kind === "checkin" ? "checkin_checklist_templates" : "checkout_inspection_templates";
   return [
-    pmsRecord(source, table, propertyId, updatedAt, true, {
+    pmsRecord(
+      source,
+      table,
       propertyId,
-      steps: jsonArray(source.data["steps"], "steps"),
-      updatedByUserId: optionalActor(source.data["updated_by"], "updated_by", context.userIds),
       updatedAt,
-    }),
+      true,
+      {
+        propertyId,
+        steps: nativeTemplateSteps(source.data["steps"], kind),
+        updatedByUserId: optionalActor(source.data["updated_by"], "updated_by", context.userIds),
+        updatedAt,
+      },
+      // A row stored in the earlier legacy shape takes the update path instead of a mismatch.
+      { ...source.data, nativeStepShape: 1 },
+    ),
   ];
+}
+
+const STEP_ID = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,99}$/;
+
+/**
+ * VAY-2112: the runtime reads a template step only in the shape the native template writer
+ * stores (apps/api pmsOperations toOperationalTemplateSteps: `{ stepId, label, required }`,
+ * trimmed, IDs unique); the repository's toPmsTemplateSteps drops any other step. Its reader has
+ * no step limit, so a legacy template over the native save limit of 50 is carried whole.
+ * Legacy keys the ID `id` (`key` in older rows) and defaults `required` to false for check-in
+ * steps and true for check-out ones. A missing, invalid or repeated legacy ID takes the step's
+ * position; a step without a label blocks, as legacy and the native writer require one.
+ */
+export function nativeTemplateSteps(
+  value: unknown,
+  kind: "checkin" | "checkout",
+): Array<{ stepId: string; label: string; required: boolean }> {
+  const steps = jsonArray(value, "steps");
+  const seen = new Set<string>();
+  return steps.map((step, index) => {
+    if (!step || typeof step !== "object" || Array.isArray(step))
+      throw new Error(`template step ${index + 1} is not an object`);
+    const raw = step as Record<string, unknown>;
+    const label = typeof raw["label"] === "string" ? raw["label"].trim() : "";
+    if (!label || label.length > 200)
+      throw new Error(`template step ${index + 1} needs a label of 1 to 200 characters`);
+    const legacyId = [raw["stepId"], raw["id"], raw["key"]]
+      .map((candidate) => (typeof candidate === "string" ? candidate.trim() : ""))
+      .find((candidate) => STEP_ID.test(candidate));
+    const stepId = legacyId && !seen.has(legacyId) ? legacyId : `legacy-step-${index + 1}`;
+    if (seen.has(stepId)) throw new Error(`template step ${index + 1} repeats step ID ${stepId}`);
+    seen.add(stepId);
+    const required = typeof raw["required"] === "boolean" ? raw["required"] : kind === "checkout";
+    return { stepId, label, required };
+  });
 }
 
 function checkin(
