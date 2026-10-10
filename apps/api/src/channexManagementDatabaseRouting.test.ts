@@ -36,6 +36,36 @@ describe("Channex management database routing", () => {
     ).toEqual({});
   });
 
+  it("keeps claimed booking sync off the worker login", () => {
+    const claimed = (connection: "mutating" | "observe_only") =>
+      resolveChannexManagementDatabaseRouting({
+        config: config({
+          scope: "claimed",
+          ownedPropertyIds: [],
+          capabilityModes: {
+            ...config().capabilityModes,
+            provisioning: "observe_only",
+            ariSync: "observe_only",
+            bookingSync: "mutating",
+            connection,
+          },
+        }),
+        commandsMutating: true,
+      });
+    expect(claimed("observe_only")).toEqual({
+      bookingRevisionStore: undefined,
+      plans: undefined,
+      reconciliation: undefined,
+      availabilityInventory: undefined,
+      workerStore: undefined,
+      scheduler: undefined,
+    });
+    expect(claimed("mutating")).toMatchObject({
+      bookingRevisionStore: undefined,
+      workerStore: "postgresql://channex_worker@db/app",
+    });
+  });
+
   it("routes every selected-offer management consumer to the dedicated credential", () => {
     const connectionString = "postgresql://channex_worker@db/app";
     expect(

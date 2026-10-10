@@ -1,5 +1,9 @@
 import pg from "pg";
-import { channexConnectionOnlyScope, type ChannexManagementConfig } from "../config.js";
+import {
+  channexClaimedScope,
+  channexConnectionOnlyScope,
+  type ChannexManagementConfig,
+} from "../config.js";
 import { assertChannexManagementWorkerBoundary } from "./channexManagementWorkerBoundary.js";
 import { CHANNEX_MANAGEMENT_WORKER_ROLE } from "./channexManagementWorkerPrivileges.js";
 
@@ -9,7 +13,10 @@ export async function preflightChannexManagementWorker(
   commandsMutating: boolean,
 ) {
   if (!config.workerEnabled || !commandsMutating) return;
-  const connectionOnly = channexConnectionOnlyScope(config);
+  // VAY-2108: claimed booking sync needs no worker; with connection it keeps the connection scope.
+  const claimed = channexClaimedScope(config);
+  if (claimed && config.capabilityModes.connection !== "mutating") return;
+  const connectionOnly = channexConnectionOnlyScope(config) || claimed;
   if (!config.workerDatabaseUrl || !(connectionOnly || stagingCanaryScope(config)))
     throw new Error("channex_worker_scope_unsupported");
   const client = new pg.Client({
