@@ -19,7 +19,6 @@ test.describe("booking-admin add-ons settings cutover", () => {
       "Requires a production booking-admin build so the authenticated shell hydrates.",
     );
 
-    const assertHealthy = watchPageHealth(page, testInfo);
     const assertNoLegacyCalls = watchNoLegacyCalls(page, testInfo, "booking-admin-booking-flow");
 
     await mockBookingAdminBookingFlow(page);
@@ -167,6 +166,8 @@ test.describe("booking-admin add-ons settings cutover", () => {
       page.getByRole("alert").filter({ hasText: "Failed to load settings" }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Retry", exact: true }).click();
+    // Watch page health only after the deliberate 503 above.
+    const assertHealthy = watchPageHealth(page, testInfo);
 
     const addonNames = page.getByTestId("booking-addon-item-name");
     await expect(addonNames).toHaveText(["Airport transfer", "Breakfast basket"]);
