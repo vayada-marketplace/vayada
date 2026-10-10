@@ -15,11 +15,13 @@ const button =
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Card step of a replacement-pricing booking: the booking is accepted and holds its rooms
- * until `payment.expiresAt`; the guest pays the PaymentIntent, then the server confirms. */
+ * until `payment.expiresAt`; the guest pays the PaymentIntent, then the server confirms. For a
+ * request the card is only authorised; the hotel's acceptance charges it. */
 export default function ReplacementCardPayment(props: {
   slug: string;
   quoteId: string;
   required: PricingCardPaymentRequired;
+  request?: boolean;
   onPaid: (result: PricingCardPaymentResult) => void;
 }) {
   return (
@@ -36,11 +38,13 @@ function CardForm({
   slug,
   quoteId,
   required,
+  request = false,
   onPaid,
 }: {
   slug: string;
   quoteId: string;
   required: PricingCardPaymentRequired;
+  request?: boolean;
   onPaid: (result: PricingCardPaymentResult) => void;
 }) {
   const stripe = useStripe();
@@ -85,7 +89,9 @@ function CardForm({
       onPaid(await confirmWithServer());
     } catch {
       setError(
-        "We couldn’t confirm your payment yet. If your card was charged, your booking will be confirmed by email.",
+        request
+          ? "We couldn’t confirm your card authorisation yet. If it went through, we’ll email you when the hotel answers."
+          : "We couldn’t confirm your payment yet. If your card was charged, your booking will be confirmed by email.",
       );
       started.current = false;
     } finally {
@@ -95,7 +101,13 @@ function CardForm({
 
   return (
     <section aria-label="Card payment" className="space-y-4 rounded-xl border p-5">
-      <h3 className="text-lg font-semibold">Pay by card</h3>
+      <h3 className="text-lg font-semibold">{request ? "Authorise your card" : "Pay by card"}</h3>
+      {request && (
+        <p className="text-sm">
+          Your card is authorised now and charged only if the hotel accepts your request. The hotel
+          answers within 24 hours.
+        </p>
+      )}
       <p className="text-sm text-gray-600">
         Your rooms are held until{" "}
         {new Date(required.payment.expiresAt).toLocaleTimeString([], {
@@ -107,7 +119,13 @@ function CardForm({
       <PaymentElement />
       {error && <p role="alert">{error}</p>}
       <button className={button} type="button" onClick={pay} disabled={!stripe || busy}>
-        {busy ? "Paying…" : "Pay and confirm booking"}
+        {busy
+          ? request
+            ? "Authorising…"
+            : "Paying…"
+          : request
+            ? "Authorise card and send request"
+            : "Pay and confirm booking"}
       </button>
     </section>
   );

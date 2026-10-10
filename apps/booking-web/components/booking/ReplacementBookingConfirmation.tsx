@@ -114,8 +114,9 @@ export default function ReplacementBookingConfirmation({
         <h2 className="text-xl font-semibold">Booking request sent</h2>
         <p>Your request reference is {result.bookingReference}.</p>
         <p>
-          The hotel will accept or decline your request within 24 hours. Nothing has been charged,
-          and your stay is not confirmed until the hotel accepts.
+          {quote.paymentMethod === "card"
+            ? "The hotel will accept or decline your request within 24 hours. Your card is authorised but not charged; it is charged only if the hotel accepts."
+            : "The hotel will accept or decline your request within 24 hours. Nothing has been charged, and your stay is not confirmed until the hotel accepts."}
         </p>
         <p>We sent the request details to the email address you provided.</p>
       </section>
@@ -136,6 +137,7 @@ export default function ReplacementBookingConfirmation({
         slug={slug}
         quoteId={quote.quoteId}
         required={cardPayment}
+        request={request}
         onPaid={setResult}
       />
     );
@@ -217,7 +219,9 @@ export default function ReplacementBookingConfirmation({
             ? "Sending request…"
             : "Confirming booking…"
           : quote.paymentMethod === "card"
-            ? "Continue to card payment"
+            ? request
+              ? "Continue to card authorisation"
+              : "Continue to card payment"
             : request
               ? "Send booking request"
               : "Confirm booking"}
