@@ -169,7 +169,8 @@ export function rangeQuery(
   const currentEnd = dateInTimeZone(new Date(), timeZone);
   const days = range === "today" ? 1 : range === "week" ? 7 : 30;
   const currentStart = shiftIsoDate(currentEnd, -(days - 1));
-  const previousEnd = shiftIsoDate(currentStart, -1);
+  // Today compares with the same weekday last week, which evens out weekly booking patterns.
+  const previousEnd = shiftIsoDate(currentStart, range === "today" ? -7 : -1);
   const previousStart = shiftIsoDate(previousEnd, -(days - 1));
   return {
     currentStart,
@@ -245,7 +246,9 @@ export const dashboardService = {
 
   getSparklines: async (range: TimeRange, timeZone: string): Promise<Sparklines> => {
     const basePath = requireDashboardBasePath();
-    const query = rangeQuery(range, timeZone);
+    // Booking metrics are dated by check-in, so a single day has no intraday trend:
+    // Today's sparkline shows the 7 days ending today as context.
+    const query = rangeQuery(range === "today" ? "week" : range, timeZone);
     const response = await apiClient.get<TargetSparklinesResponse>(
       `${basePath}/sparklines?windowStart=${query.currentStart}&windowEnd=${query.currentEnd}`,
     );
