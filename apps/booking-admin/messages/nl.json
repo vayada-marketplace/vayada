@@ -504,6 +504,7 @@
   "settings.billing.switchFromNextMonth": "Overstappen vanaf volgende maand",
   "settings.billing.cancelSwitch": "Overstap annuleren",
   "settings.billing.paymentMethods": "Betaalmethoden",
+  "settings.billing.comingSoon": "Xendit en vayada Payments kunnen nog geen online kaartbetalingen verwerken. Kies Stripe Connect om op te slaan.",
   "settings.billing.paymentMethodsDesc": "Kies welke betaalopties beschikbaar zijn voor gasten. Schakel meerdere in voor meer flexibiliteit.",
   "settings.billing.onlineCard": "Online kaartbetaling",
   "settings.billing.onlineCardDesc": "Gast betaalt online met credit- of betaalpas via Stripe",

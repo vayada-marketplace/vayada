@@ -16,6 +16,7 @@ export default function NewRoomPage() {
   const isOnboarding = onboarding === "pms-activation" || onboarding === "booking-readiness";
   const [saving, setSaving] = useState(false);
   const [setupComplete, setSetupComplete] = useState(false);
+  const [createdRoomTypeId, setCreatedRoomTypeId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [propertyPlan, setPropertyPlan] = useState<PropertyPlan | null>(null);
   const [form, setForm] = useState<RoomTypeCreate>({
@@ -52,8 +53,9 @@ export default function NewRoomPage() {
     setSaving(true);
     setError("");
     try {
-      await roomsService.create(form);
+      const created = await roomsService.create(form);
       if (isOnboarding) {
+        setCreatedRoomTypeId(created.id);
         setSetupComplete(true);
       } else {
         router.push("/rooms");
@@ -80,10 +82,19 @@ export default function NewRoomPage() {
           </h1>
           <p className="mt-3 leading-7 text-gray-600">{t("rooms.new.firstRoomReadyDescription")}</p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+            {createdRoomTypeId && (
+              // A document navigation, so the Prices tab's leave warning also covers the browser's back button.
+              <a
+                href={`/rooms/${encodeURIComponent(createdRoomTypeId)}?tab=prices`}
+                className="rounded-xl bg-primary-600 px-5 py-3 text-center text-sm font-semibold text-white transition-colors hover:bg-primary-700"
+              >
+                {t("rooms.new.setPrices")}
+              </a>
+            )}
             <button
               type="button"
               onClick={() => router.push("/rooms")}
-              className="rounded-xl bg-primary-600 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary-700"
+              className="rounded-xl border border-gray-300 bg-white px-5 py-3 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50"
             >
               {t("rooms.new.continueToPms")}
             </button>

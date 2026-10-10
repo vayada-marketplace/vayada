@@ -6,7 +6,8 @@ import { useTranslation } from "@/lib/i18n";
 import type { PricingSnapshot } from "@/services/api/replacementPricingClient";
 import { decimalAmount, editedSnapshot, errorText, type MessageKey, PricingError } from "./pricingAmounts";
 
-type Props = { snapshot: PricingSnapshot; inputs: Record<string, string>; disabled: boolean; saved: boolean; roomNames: Record<string, string> };
+/** `roomTypeId` limits the choice to that room's offers (a room page). */
+type Props = { snapshot: PricingSnapshot; inputs: Record<string, string>; disabled: boolean; saved: boolean; roomNames: Record<string, string>; roomTypeId?: string };
 const reasons: Record<Extract<RoomStayPricingResult, { kind: "unavailable" }>["reason"], MessageKey> = {
   invalid_configuration: "pricing.preview.reasonInvalidConfiguration",
   invalid_request: "pricing.preview.reasonInvalidRequest",
@@ -18,8 +19,8 @@ const reasons: Record<Extract<RoomStayPricingResult, { kind: "unavailable" }>["r
   overflow: "pricing.preview.reasonOverflow",
 };
 
-export function PricingStayPreview({ snapshot, inputs, disabled, saved, roomNames }: Props) {
-  const [choice, setChoice] = useState("0:0"), [checkIn, setCheckIn] = useState(""), [checkOut, setCheckOut] = useState("");
+export function PricingStayPreview({ snapshot, inputs, disabled, saved, roomNames, roomTypeId }: Props) {
+  const [choice, setChoice] = useState(() => `${roomTypeId ? Math.max(0, snapshot.rooms.findIndex((room) => room.roomTypeId === roomTypeId)) : 0}:0`), [checkIn, setCheckIn] = useState(""), [checkOut, setCheckOut] = useState("");
   const [adults, setAdults] = useState("2"), [ages, setAges] = useState("");
   const [answer, setAnswer] = useState<{ key: string; result?: RoomStayPricingResult; error?: string } | null>(null);
   const { t } = useTranslation();
@@ -47,7 +48,7 @@ export function PricingStayPreview({ snapshot, inputs, disabled, saved, roomName
     <p className="mt-2 text-sm text-gray-600">{t(saved ? "pricing.preview.saved" : "pricing.preview.unsaved")} {t("pricing.preview.scope")}</p>
     <fieldset disabled={disabled} className="mt-4 flex flex-wrap gap-4 disabled:opacity-50">
       <label className="text-sm">{t("pricing.preview.choice")}<select aria-label={t("pricing.preview.choiceLabel")} value={choice} onChange={(e) => setChoice(e.target.value)} className="mt-1 block rounded border p-2">
-        {snapshot.rooms.flatMap((room, ri) => room.offers.map((offer, oi) => <option key={`${ri}:${oi}`} value={`${ri}:${oi}`}>{roomNames[room.roomTypeId] ?? t("pricing.roomNumber", { number: ri + 1 })} · {t("pricing.offerNumber", { number: oi + 1 })} · {t(`pricing.meal.${offer.meal.kind}`)}</option>))}
+        {snapshot.rooms.flatMap((room, ri) => roomTypeId && room.roomTypeId !== roomTypeId ? [] : room.offers.map((offer, oi) => <option key={`${ri}:${oi}`} value={`${ri}:${oi}`}>{roomNames[room.roomTypeId] ?? t("pricing.roomNumber", { number: ri + 1 })} · {t("pricing.offerNumber", { number: oi + 1 })} · {t(`pricing.meal.${offer.meal.kind}`)}</option>))}
       </select></label>
       <label className="text-sm">{t("pricing.preview.checkIn")}<input aria-label={t("pricing.preview.checkInLabel")} type="date" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} className="mt-1 block rounded border p-2" /></label>
       <label className="text-sm">{t("pricing.preview.checkOut")}<input aria-label={t("pricing.preview.checkOutLabel")} type="date" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} className="mt-1 block rounded border p-2" /></label>

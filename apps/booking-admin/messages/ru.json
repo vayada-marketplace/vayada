@@ -504,6 +504,7 @@
   "settings.billing.switchFromNextMonth": "Переключить со следующего месяца",
   "settings.billing.cancelSwitch": "Отменить переключение",
   "settings.billing.paymentMethods": "Способы оплаты",
+  "settings.billing.comingSoon": "Xendit и vayada Payments пока не принимают онлайн-оплату картой. Чтобы сохранить, выберите Stripe Connect.",
   "settings.billing.paymentMethodsDesc": "Выберите, какие способы оплаты доступны гостям. Включите несколько для удобства гостей.",
   "settings.billing.onlineCard": "Оплата картой онлайн",
   "settings.billing.onlineCardDesc": "Гость платит онлайн кредитной или дебетовой картой через Stripe",

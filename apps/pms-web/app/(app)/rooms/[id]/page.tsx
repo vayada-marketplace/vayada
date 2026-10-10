@@ -3,7 +3,7 @@
 import { useState, useEffect, use } from "react";
 import { ArrowLeftIcon, TrashIcon } from "@heroicons/react/24/outline";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   roomsService,
   roomTypeUpdateForm,
@@ -11,7 +11,9 @@ import {
   RoomTypeUpdate,
   type PropertyPlan,
 } from "@/services/rooms";
-import RoomTypeForm from "@/components/rooms/RoomTypeForm";
+import RoomTypeForm, { type RoomTab } from "@/components/rooms/RoomTypeForm";
+import { RoomPricesTab } from "@/components/pricing/RoomPricesTab";
+import { RoomsPricesStrip, usePropertyPrices } from "@/components/pricing/RoomsPrices";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useTranslation } from "@/lib/i18n";
 import { localizedErrorText } from "@/lib/i18n/localizedErrorText";
@@ -20,6 +22,11 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
   const { id } = use(params);
   const { t } = useTranslation();
   const router = useRouter();
+  const pricesFirst = useSearchParams().get("tab") === "prices";
+  // The Prices tab mounts once opened and stays mounted, so switching tabs or saving room details keeps
+  // unsaved prices.
+  const [tab, setTab] = useState<RoomTab>(pricesFirst ? "prices" : "details");
+  const [pricesOpened, setPricesOpened] = useState(pricesFirst);
   const [room, setRoom] = useState<RoomType | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<{ cause: unknown; message: string } | null>(null);
@@ -30,6 +37,21 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
   const [deleting, setDeleting] = useState(false);
   const [propertyPlan, setPropertyPlan] = useState<PropertyPlan | null>(null);
   const [pricesNeedPublishing, setPricesNeedPublishing] = useState(false);
+  const propertyPrices = usePropertyPrices();
+  // Room details or republished prices changed what the Prices tab shows: it re-reads unless it holds edits.
+  const [pricesRefresh, setPricesRefresh] = useState(0);
+  const refreshPrices = () => setPricesRefresh((value) => value + 1);
+  const stalePrices = !!propertyPrices.prices?.publication?.stale;
+  useEffect(() => {
+    // Once stale prices were seen the strip stays, so the outcome of "Save prices again" remains visible.
+    if (stalePrices) setPricesNeedPublishing(true);
+  }, [stalePrices]);
+  // A details save changed what published prices pin: re-read them, so the one-click republish appears.
+  const pricesChanged = () => {
+    setPricesNeedPublishing(true);
+    void propertyPrices.reload();
+    refreshPrices();
+  };
 
   const [form, setForm] = useState<RoomTypeUpdate>({});
   // The form keeps local input state; a new key re-reads every input from the saved room.
@@ -61,7 +83,8 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
       setRoom(saved.roomType);
       setForm(roomTypeUpdateForm(saved.roomType));
       setFormKey((key) => key + 1);
-      if (saved.pricesNeedPublishing) setPricesNeedPublishing(true);
+      if (saved.pricesNeedPublishing) pricesChanged();
+      refreshPrices();
       setSuccess(t("rooms.edit.success"));
     } catch (error) {
       setError(error instanceof Error ? error.message : t("rooms.edit.failedToUpdate"));
@@ -76,7 +99,7 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
             current.latitude !== room.latitude ||
             current.longitude !== room.longitude
           ) {
-            setPricesNeedPublishing(true);
+            pricesChanged();
           }
         })
         .catch(() => undefined);
@@ -155,7 +178,9 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
         </button>
       </div>
 
-      {pricesNeedPublishing && <PublishPricesAgainNotice />}
+      {pricesNeedPublishing && (
+        <RoomsPricesStrip {...propertyPrices} staleOnly onSaved={refreshPrices} />
+      )}
 
       <RoomTypeForm
         key={formKey}
@@ -171,7 +196,25 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
         mode="edit"
         roomTypeId={id}
         propertyPlan={propertyPlan}
+        tab={tab}
+        onTabChange={(next) => {
+          setTab(next);
+          if (next === "prices") setPricesOpened(true);
+        }}
       />
+      {pricesOpened && (
+        <div hidden={tab !== "prices"}>
+          <RoomPricesTab
+            roomTypeId={id}
+            refresh={pricesRefresh}
+            onAttention={() => {
+              setTab("prices");
+              setPricesOpened(true);
+            }}
+            onPublished={() => void propertyPrices.reload()}
+          />
+        </div>
+      )}
       {showDeleteConfirm && (
         <ConfirmDialog
           title={t("rooms.edit.deleteTitle")}
@@ -184,21 +227,5 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
         />
       )}
     </div>
-  );
-}
-
-/** Room facts changed: the published prices no longer match until they are published again. */
-function PublishPricesAgainNotice() {
-  const { t } = useTranslation();
-  return (
-    <p
-      role="status"
-      className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] font-medium text-amber-800"
-    >
-      {t("rooms.edit.publishPricesAgain")}{" "}
-      <Link href="/pricing" className="font-semibold underline">
-        {t("rooms.form.openPricing")}
-      </Link>
-    </p>
   );
 }

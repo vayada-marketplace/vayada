@@ -235,7 +235,63 @@ export async function mockPmsWebAuthenticatedSession(
   }, propertyId);
 }
 
+// Every permission key pms-web checks, as a hotel_owner holds them, so the owner sees the whole product.
+export const PMS_WEB_OWNER_PERMISSIONS = [
+  "booking.addons.manage",
+  "booking.addons.read",
+  "booking.analytics.read",
+  "booking.design.manage",
+  "booking.design.read",
+  "booking.flow.manage",
+  "booking.flow.read",
+  "booking.promos.manage",
+  "booking.promos.read",
+  "booking.settings.manage",
+  "booking.settings.read",
+  "finance.billing.manage",
+  "identity.staff.manage",
+  "pms.calendar.manage",
+  "pms.calendar.read",
+  "pms.channel_manager.read",
+  "pms.dashboard.finance.read",
+  "pms.dashboard.operations.read",
+  "pms.dashboard.read",
+  "pms.finance.manage",
+  "pms.finance.read",
+  "pms.guest_contact.read",
+  "pms.inbox.read",
+  "pms.inbox.reply",
+  "pms.operations.manage",
+  "pms.operations.read",
+  "pms.reservation.cancel",
+  "pms.reservation.read",
+  "pms.reservation.update",
+  "pms.room_status.read",
+  "pms.rooms_rates.manage",
+  "pms.rooms_rates.read",
+  "pms.settings.manage",
+  "pms.settings.read",
+];
+
 export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
+  // The app layout refuses to render without self-access (VAY-1439), and the sidebar checks
+  // Financials access for anyone holding pms.finance.read (VAY-1138). These owner defaults are
+  // context routes, so a spec's own page.route for either wins whenever it was registered.
+  await page.context().route("**/api/identity/staff/self-access", (route) =>
+    route.fulfill({
+      json: {
+        membershipId: "pms-owner-membership",
+        roleKey: "hotel_owner",
+        permissions: PMS_WEB_OWNER_PERMISSIONS,
+      },
+    }),
+  );
+  await page
+    .context()
+    .route("**/api/finance/properties/*/financials/access", (route) =>
+      route.fulfill({ status: 204 }),
+    );
+
   await page.route("**/api/pms/properties/*/reservations/*/no-show-report", (route) =>
     route.fulfill({
       json: {
@@ -457,6 +513,13 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-types*`, (route) =>
     route.fulfill({ json: targetList([pmsWebRoomType]) }),
   );
+  // No prices yet (the Rooms list reads the publication). A context route, so a spec's own page.route for
+  // pricing-v2 wins whatever order it was registered in.
+  await page
+    .context()
+    .route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2`, (route) =>
+      route.fulfill({ status: 404, json: { code: "not_found" } }),
+    );
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/plan-limits`, (route) =>
     route.fulfill({
       json: {

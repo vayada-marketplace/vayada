@@ -52,7 +52,7 @@ test("hydrates the selected property on direct booking navigation without a relo
     (route) => route.fulfill({ json: { items: [] } }),
   );
   await page.route(
-    `**/api/booking/hotels/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}/change-request`,
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}/change-request`,
     (route) => route.fulfill({ json: null }),
   );
 
@@ -116,7 +116,7 @@ test("shows the exact connected-account payment breakdown to the host", async ({
     (route) => route.fulfill({ json: { items: [] } }),
   );
   await page.route(
-    `**/api/booking/hotels/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}/change-request`,
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}/change-request`,
     (route) => route.fulfill({ json: null }),
   );
 
@@ -300,7 +300,7 @@ test("gates legacy booking writes while keeping supported hotel actions active",
     },
   );
   await page.route(
-    `**/api/booking/hotels/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}/change-request**`,
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations/${PMS_WEB_RESERVATION_ID}/change-request**`,
     (route) => {
       if (route.request().url().endsWith("/accept")) {
         approvals += 1;
@@ -313,9 +313,8 @@ test("gates legacy booking writes while keeping supported hotel actions active",
   await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
 
   await expect(page.getByRole("heading", { name: "Booking VAY-ADA" })).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: /modify booking.*not available yet/i }),
-  ).toBeDisabled();
+  // Only manual stays keep the (disabled) legacy modify button; direct stays use host actions.
+  await expect(page.getByRole("button", { name: /modify booking/i })).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: /edit booker.*not available yet/i }),
   ).toBeDisabled();
@@ -334,7 +333,10 @@ test("gates legacy booking writes while keeping supported hotel actions active",
   await expect(page.getByText("Netherlands", { exact: true })).toBeVisible();
   await expect(nationalityError).toHaveCount(0);
   await expect(page.getByText("Needs review")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Cancellation unavailable" })).toBeDisabled();
+  // Like modify, the legacy cancel button is manual-only (VAY-1279); direct stays use host actions.
+  await expect(page.getByRole("button", { name: "Cancel Booking", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Edit stay dates" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancel booking", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Check in guest" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Add note" })).toBeEnabled();
   await expect(page.getByText("Guest prefers a quiet room.")).toBeVisible();

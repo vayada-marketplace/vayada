@@ -15,6 +15,10 @@ vi.mock("next/link", () => ({ default: "a" }));
 vi.mock("@/services/api/pmsPropertyClient", () => ({
   resolveSelectedPmsPropertyId: async () => "test-property",
 }));
+const { pricingRead } = vi.hoisted(() => ({ pricingRead: vi.fn() }));
+vi.mock("@/services/api/replacementPricingClient", () => ({
+  createReplacementPricingClient: () => ({ read: pricingRead }),
+}));
 vi.mock("@vayada/product-onboarding/PreparedHotelImportPanel", () => ({
   PreparedHotelImportPanel: () => null,
 }));
@@ -22,6 +26,7 @@ vi.mock("@vayada/product-onboarding/PreparedHotelImportPanel", () => ({
 let view: ReactTestRenderer;
 const room = { id: "room-1", name: "Existing suite" } as RoomType;
 beforeEach(() => {
+  pricingRead.mockReset().mockResolvedValue(null);
   vi.spyOn(individualRoomsService, "list").mockResolvedValue([]);
   vi.spyOn(linkedInventoryGroupsService, "list").mockResolvedValue([]);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -85,4 +90,38 @@ it("ignores a late failed read after a newer import refresh succeeds", async () 
   });
   expect(text()).toContain("Existing suite");
   expect(text()).not.toContain("rooms.loadFailed");
+});
+
+it("shows each room's published prices with a link to its Prices tab (VAY-2093)", async () => {
+  pricingRead.mockResolvedValue({
+    currency: "EUR",
+    revision: 2,
+    stale: false,
+    ownerReferences: { finance: "finance" },
+    rooms: [
+      {
+        roomTypeId: "ROOM-1",
+        offers: [
+          {
+            id: "flex",
+            price: {
+              kind: "independent",
+              calendar: { base: { mode: "flat", amountMinor: "12000" } },
+            },
+          },
+        ],
+      },
+    ],
+  });
+  vi.spyOn(roomsService, "list").mockResolvedValue([room, { ...room, id: "room-2", name: "Loft" }]);
+  await mount();
+  expect(text()).toContain("pricing.list.currency");
+  expect(text()).toContain("pricing.list.rates.one · pricing.list.from");
+  const links = view.root
+    .findAllByType("a")
+    .filter((node) => String(node.props.href).endsWith("?tab=prices"));
+  expect(links.map((node) => [node.props.href, node.children.join("")])).toEqual([
+    ["/rooms/room-1?tab=prices", "pricing.list.editPrices"],
+    ["/rooms/room-2?tab=prices", "pricing.list.setPrices"],
+  ]);
 });

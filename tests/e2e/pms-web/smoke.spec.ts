@@ -146,14 +146,18 @@ test.describe("pms-web smoke", () => {
 
     await mockPmsWebAuthenticatedSession(page);
     await mockPmsWebTargetRoutes(page);
+    await mockTeamCatalog(page);
     await page.goto("/settings/team");
 
-    await expect(page.getByRole("heading", { name: "Team & Roles" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Team, roles & permissions" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Team & Roles" }).last()).toHaveAttribute(
       "aria-current",
       "page",
     );
-    const roster = page.getByRole("table");
+    // The page also renders a property access matrix table; the roster is the one with roles.
+    const roster = page
+      .getByRole("table")
+      .filter({ has: page.getByRole("columnheader", { name: "Role" }) });
     await expect(roster.getByText("Ada Lovelace")).toBeVisible();
     await expect(roster.getByText("ada@example.com")).toBeVisible();
     await expect(roster.getByText("Front Desk")).toBeVisible();
@@ -182,6 +186,7 @@ test.describe("pms-web smoke", () => {
 
     await mockPmsWebAuthenticatedSession(page);
     await mockPmsWebTargetRoutes(page);
+    await mockTeamCatalog(page);
     await page.unroute(rosterPath);
     await page.route(rosterPath, (route) =>
       route.fulfill({
@@ -222,19 +227,29 @@ test.describe("pms-web smoke", () => {
             json: { membershipId: "staff_membership_ada", status },
           });
     });
-    page.on("dialog", (dialog) => dialog.accept());
     await page.goto("/settings/team");
 
-    const adaRow = page.getByRole("row").filter({ hasText: "Ada Lovelace" });
-    const graceRow = page.getByRole("row").filter({ hasText: "Grace Hopper" });
-    await expect(graceRow.getByText("Invitation pending")).toBeVisible();
-    await expect(graceRow.getByRole("button")).toHaveCount(0);
+    const roster = page
+      .getByRole("table")
+      .filter({ has: page.getByRole("columnheader", { name: "Role" }) });
+    const adaRow = roster.getByRole("row").filter({ hasText: "Ada Lovelace" });
+    const graceRow = roster.getByRole("row").filter({ hasText: "grace@example.com" });
+    // A pending invite can only be resent, not deactivated.
+    await expect(graceRow.getByText("Pending invite")).toBeVisible();
+    await expect(graceRow.getByText("Pending", { exact: true })).toBeVisible();
+    await expect(graceRow.getByRole("button")).toHaveText(["Resend invitation"]);
+    // Deactivation asks for an in-app confirmation (VAY-908).
+    const confirmDeactivation = async () => {
+      const dialog = page.getByRole("dialog", { name: "Deactivate Ada Lovelace" });
+      await dialog.getByRole("button", { name: "Deactivate", exact: true }).click();
+    };
 
     await page.setViewportSize({ width: 390, height: 844 });
     const deactivate = adaRow.getByRole("button", { name: "Deactivate Ada Lovelace" });
     await deactivate.focus();
     await expect(deactivate).toBeFocused();
     await deactivate.click();
+    await confirmDeactivation();
     await expect(
       adaRow.getByRole("button", { name: "Saving status for Ada Lovelace" }),
     ).toHaveAttribute("aria-busy", "true");
@@ -243,6 +258,7 @@ test.describe("pms-web smoke", () => {
     await expect(adaRow.getByText("Active", { exact: true })).toBeVisible();
 
     await deactivate.click();
+    await confirmDeactivation();
     await expect(adaRow.getByText("Deactivated", { exact: true })).toBeVisible();
     const reactivate = adaRow.getByRole("button", { name: "Reactivate Ada Lovelace" });
     await reactivate.click();
@@ -268,13 +284,16 @@ test.describe("pms-web smoke", () => {
 
     await mockPmsWebAuthenticatedSession(page);
     await mockPmsWebTargetRoutes(page);
+    await mockTeamCatalog(page);
     await page.route(rosterPath, async (route) => {
       await rosterRelease;
       return route.fulfill({ json: { members: [] } });
     });
     await page.goto("/settings/team");
 
-    await expect(page.getByRole("status")).toHaveText("Loading team members…");
+    await expect(
+      page.getByRole("status").filter({ hasText: "Loading team members…" }),
+    ).toBeVisible();
     releaseRoster();
     await expect(page.getByText("No team members yet")).toBeVisible();
 
@@ -299,11 +318,15 @@ test.describe("pms-web smoke", () => {
   test("loads migrated PMS operations surfaces without legacy helper calls", async ({
     page,
   }, testInfo) => {
-    const assertHealthy = watchPageHealth(page, testInfo);
+    // A property without v2 pricing answers 404, which the offer preview treats as "not set up".
+    const assertHealthy = watchPageHealth(page, testInfo, {
+      expectedMissingUrls: [/\/pricing-v2$/],
+    });
     const assertNoLegacyCalls = watchNoLegacyCalls(page, testInfo, "pms-web-operations");
 
     await mockPmsWebAuthenticatedSession(page);
     await mockPmsWebTargetRoutes(page);
+    await mockOperationsWalkReads(page);
 
     await page.goto("/rooms");
     await expect(page.getByRole("heading", { name: /rooms/i })).toBeVisible();
@@ -327,8 +350,7 @@ test.describe("pms-web smoke", () => {
     await expect(page.getByRole("heading", { name: "Not available yet" })).toHaveCount(0);
 
     await page.goto("/financials");
-    await expect(page.getByRole("heading", { level: 1, name: "Financials" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Not available yet" })).toBeVisible();
+    await expect(page.getByRole("tablist", { name: "Financials sections" })).toBeVisible();
 
     await page.goto("/settings");
     await expect(page.getByRole("heading", { name: /settings/i })).toBeVisible();
@@ -900,11 +922,10 @@ test.describe("pms-web smoke", () => {
     );
 
     await page.goto("/rooms/new");
-    await expect(page.getByRole("button", { name: "Pricing & Rates" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Open Pricing" })).toHaveAttribute(
-      "href",
-      "/pricing",
-    );
+    await expect(page.getByRole("button", { name: "Prices", exact: true })).toHaveCount(0);
+    await expect(
+      page.getByText("Save the room type first, then set its prices in its Prices tab."),
+    ).toBeVisible();
     await page.getByPlaceholder("e.g. Two-Bedroom Villa").fill("Castrop Suite");
     await page.getByPlaceholder("50").fill("32");
     await page.getByRole("button", { name: "Create Room Type" }).click();
@@ -932,18 +953,20 @@ test.describe("pms-web smoke", () => {
     await assertHealthy();
   });
 
-  test("points the German room form to Pricing", async ({ page }) => {
+  test("points the German new-room form to the room's Prices tab", async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem("admin_language", "de"));
     await mockPmsWebAuthenticatedSession(page);
     await mockPmsWebTargetRoutes(page);
     await mockManageSelfAccess(page);
 
     await page.goto("/rooms/new");
-    await expect(page.getByRole("button", { name: "Preise & Tarife" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Preise öffnen" })).toHaveAttribute(
-      "href",
-      "/pricing",
-    );
+    await expect(page.getByRole("button", { name: "Preise", exact: true })).toHaveCount(0);
+    await expect(
+      page.getByText(
+        "Speichern Sie zuerst den Zimmertyp und legen Sie dann im Tab „Preise“ seine Preise fest.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByRole("link", { name: "Preise öffnen" })).toHaveCount(0);
   });
 
   test("edits a room type without the legacy pricing tab", async ({ page }, testInfo) => {
@@ -1009,18 +1032,14 @@ test.describe("pms-web smoke", () => {
 
     await page.goto(`/rooms/${roomTypeId}`);
     await expect(page.getByRole("button", { name: "Room Details" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Pricing & Rates" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Open Pricing" })).toHaveAttribute(
-      "href",
-      "/pricing",
-    );
+    // Prices have their own tab (opened on demand) and save; the room form never touches pricing.
+    await expect(page.getByRole("button", { name: "Prices", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Open Pricing" })).toHaveCount(0);
     await page.getByRole("button", { name: "Save Changes" }).click();
     await expect(page.getByText("Room type updated successfully")).toBeVisible();
     // An unchanged save writes nothing, so published prices stay valid.
     expect(roomTypeWrite).toBeUndefined();
-    await expect(page.getByText("Publish prices again so guests can book this room.")).toHaveCount(
-      0,
-    );
+    await expect(page.getByText("Prices need to be saved again")).toHaveCount(0);
     expect(pricingCalls).toEqual([]);
     await assertNoLegacyCalls();
     await assertHealthy();
@@ -1147,6 +1166,70 @@ test.describe("pms-web smoke", () => {
   });
 });
 
+// Reads the operations walk's pages gained after it was written: the prepared-import panel on
+// Rooms, the v2 pricing offer preview, and the Financials dashboard with its public profile.
+async function mockOperationsWalkReads(page: Page) {
+  await page.route(`**/api/hotel-setup/properties/${PMS_WEB_PROPERTY_ID}/import`, (route) =>
+    route.fulfill({ json: { import: null } }),
+  );
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2`, (route) =>
+    route.fulfill({ status: 404, json: { code: "not_found" } }),
+  );
+  await page.route(`**/api/hotel-setup/properties/${PMS_WEB_PROPERTY_ID}/public-profile`, (route) =>
+    route.fulfill({
+      json: {
+        propertyId: PMS_WEB_PROPERTY_ID,
+        profileRevision: 1,
+        publicProfile: {
+          locale: "en-GB",
+          shortDescription: null,
+          longDescription: null,
+          media: [],
+        },
+      },
+    }),
+  );
+  const money = (amount: string) => ({ amount, currency: "EUR" });
+  const metric = (amount: string) => ({
+    value: money(amount),
+    absoluteChange: money("0.0000"),
+    percentChange: null,
+  });
+  await page.route(
+    `**/api/finance/properties/${PMS_WEB_PROPERTY_ID}/financials/dashboard**`,
+    (route) =>
+      route.fulfill({
+        json: {
+          contractVersion: "pms-financials.v1",
+          propertyId: PMS_WEB_PROPERTY_ID,
+          currency: "EUR",
+          timeZone: "Europe/Berlin",
+          generatedAt: "2026-09-17T12:00:00.000Z",
+          sourceFreshness: {},
+          incompleteEvidence: [],
+          cards: {
+            revenueToday: metric("0.0000"),
+            revenueMtd: metric("0.0000"),
+            expensesMtd: metric("0.0000"),
+            profitMtd: metric("0.0000"),
+          },
+          daily: [],
+          upcoming: [],
+        },
+      }),
+  );
+}
+
+// The Team page also loads the role catalog and account admins since VAY-1439.
+async function mockTeamCatalog(page: Page) {
+  await page.route("**/api/identity/staff/roles", (route) =>
+    route.fulfill({ json: { roles: [], canManageRoles: true } }),
+  );
+  await page.route("**/api/identity/staff/account-admins", (route) =>
+    route.fulfill({ json: { admins: [], actorMembershipId: "pms-owner-membership" } }),
+  );
+}
+
 async function mockManageSelfAccess(page: Page) {
   await page.route("**/api/identity/staff/self-access", (route) =>
     route.fulfill({
@@ -1159,7 +1242,7 @@ async function mockManageSelfAccess(page: Page) {
   );
 }
 
-// Room prices are published from PMS → Pricing; the room form must not touch the retired writes.
+// Room prices are published from the room's Prices tab; the room form must not touch the retired writes.
 async function watchLegacyPricingCalls(page: Page, calls: string[]) {
   await page.route(/\/pricing-source|\/flexible-rate-plan/, (route) => {
     calls.push(`${route.request().method()} ${route.request().url()}`);
