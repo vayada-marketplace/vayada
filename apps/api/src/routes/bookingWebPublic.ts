@@ -4634,11 +4634,13 @@ function serializeTargetDateChangePreview(
   return { ...publicPreview, ...projectBookingRoomSelection(_pricingSnapshot?.["selectedOffer"]) };
 }
 
+/** `"no_key"` locks the row FOR NO KEY UPDATE: it still serializes changes to the booking, but
+ * lets PMS adoption insert assignments that reference it (FOR KEY SHARE) while holding inventory. */
 export async function loadTargetHotelBooking(
   pool: BookingWebQueryExecutor,
   propertyId: string,
   bookingId: string,
-  forUpdate = false,
+  forUpdate: boolean | "no_key" = false,
 ): Promise<TargetBookingRow> {
   const result = await pool.query<TargetBookingRow>(
     `SELECT
@@ -4677,7 +4679,7 @@ export async function loadTargetHotelBooking(
      WHERE booking.property_id = $1::uuid
        AND (booking.id::text = $2 OR booking.public_reference = $2)
      LIMIT 1
-     ${forUpdate ? "FOR UPDATE OF booking" : ""}`,
+     ${forUpdate === "no_key" ? "FOR NO KEY UPDATE OF booking" : forUpdate ? "FOR UPDATE OF booking" : ""}`,
     [propertyId, bookingId],
   );
   const booking = result.rows[0];
