@@ -10,15 +10,15 @@ needs an explicit human go on the day._
 
 ## Decisions recorded
 
-| Topic                     | Decision (2026-10-08)                                                                                                                                                                                                          |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Scope                     | Cohort-scoped import. Only the reviewed cohort of legacy PMS hotels becomes live target properties; the rest of the legacy estate is not published and gets no owner access. The cohort manifest is reviewed outside the repo. |
-| Candidates                | 8 legacy PMS hotels. One with an inactive Channex connection is skipped. One pair of same-name registrations moves as a single hotel, chosen in the rehearsal by which one has bookings.                                       |
-| Native lookalikes         | Native Owner properties with similar names are separate businesses; there is no reuse mapping.                                                                                                                                 |
-| Owner access              | PMS-only access to the owner's own hotels, no email matching, no automatic Marketplace approval (VAY-2017).                                                                                                                    |
-| Fixed-plan Stripe billing | Proposed: stays on legacy through a separate subscription-only Stripe endpoint until billing migrates (VAY-1120). Awaiting confirmation.                                                                                       |
-| Rollback window           | Open (proposed: 7 days with legacy read-only).                                                                                                                                                                                 |
-| Rollback after reopen     | Open (build reconciliation tooling or accept forward-fix only).                                                                                                                                                                |
+| Topic                     | Decision (2026-10-08)                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Scope                     | Cohort-scoped import. Only the reviewed cohort of legacy PMS hotels becomes live target properties; the rest of the legacy estate is not published and gets no owner access. The cohort manifest is reviewed outside the repo.                                                                                                                                                                                     |
+| Candidates                | 8 legacy PMS hotels. One with an inactive Channex connection is skipped. One pair of same-name registrations moves as a single hotel, chosen in the rehearsal by which one has bookings.                                                                                                                                                                                                                           |
+| Native lookalikes         | Native Owner properties with similar names are separate businesses; there is no reuse mapping.                                                                                                                                                                                                                                                                                                                     |
+| Owner access              | PMS-only access to the owner's own hotels, no email matching, no automatic Marketplace approval (VAY-2017).                                                                                                                                                                                                                                                                                                        |
+| Fixed-plan Stripe billing | Moves to the target **before** go-day: legacy billing is frozen about a week ahead, and the target adopts the existing subscriptions (same card, price and 30-day cycle) right after the import and before reopen. Exhausted retries revert to Commission. Non-cohort subscriptions are cancelled at period end with notice. See [`legacy-fixed-plan-billing-handover.md`](legacy-fixed-plan-billing-handover.md). |
+| Rollback window           | None. The switch is instant: legacy is not kept as a fallback after reopen.                                                                                                                                                                                                                                                                                                                                        |
+| Rollback after reopen     | Fix forward only. Rollback exists only before reopen (R1), so the pre-reopen gates are the safety net.                                                                                                                                                                                                                                                                                                             |
 
 ## One-writer rule
 
@@ -40,6 +40,26 @@ webhooks use `proxy_to_target` with **no** target URL; the handler then answers
 `503`, and Stripe retries later. For Channex, the durable buffer is the
 **unacknowledged booking-revision feed**: nobody acknowledges revisions during
 the window, and the target pulls them once it owns the stream.
+
+## Billing before the window (T-7 days → T-1 day)
+
+Details and commands: [`legacy-fixed-plan-billing-handover.md`](legacy-fixed-plan-billing-handover.md).
+
+1. **[GO: billing freeze]** About a week before go-day, set legacy
+   `FIXED_PLAN_BILLING_MODE=frozen` on `pms-backend` and check that every legacy
+   task reports it (`/health`). Stripe stays the record and keeps charging the
+   cards. Payment failures in the frozen period produce no automatic ops email,
+   so watch the Stripe dashboard and email manually.
+2. At least 24 h after the freeze, run the read-only adoption
+   `--mode inventory`. It lists every fixed-plan subscription, its hotel, status
+   and period end. Non-cohort subscriptions: **[GO]** cancel at period end in the
+   Stripe dashboard and notify the hotel, then reset their legacy plan to
+   Commission.
+3. Check each cohort subscription's period end against the 24 h adoption guard.
+   If a renewal falls in the go-day window, adopt right after the renewal invoice
+   is paid, or move go-day.
+4. Stripe settings (human): retries exhausted → mark the subscription `unpaid`;
+   the customer portal allows no subscription changes.
 
 ## Readiness gate (T-2 days)
 
@@ -142,14 +162,21 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
 
    Repoint the Channex webhook URL and the Stripe booking-payment endpoint to the
    target. Change the Stripe endpoint URL in place and keep its signing secret.
-   Fixed-plan subscription events follow the billing decision above.
+   In the Stripe dashboard (human step), add the six subscription event types to
+   the target endpoint and confirm the legacy endpoint no longer receives them.
 
-3. Pull the unacknowledged Channex booking revisions once. Stripe's late retries
+3. **[GO: billing adoption]** Set target `FINANCE_BILLING_OPS_EMAIL` and confirm
+   `STRIPE_WEBHOOK_INTAKE_MODE=mutating` and `FINANCE_SOURCE=target`. For each
+   cohort subscription, run the adoption command as a dry run, then with
+   `--apply-for-property`. Re-run `--mode inventory`. It must exit 0: every live
+   subscription is adopted or ending. This is a reopen gate.
+
+4. Pull the unacknowledged Channex booking revisions once. Stripe's late retries
    are deduplicated by event ID. Reconcile the counts.
-4. ARI: run a diff/dry-run of the first availability and rate push first.
+5. ARI: run a diff/dry-run of the first availability and rate push first.
    Published offers serve as PMS rate plans (VAY-1422). Only then set
    `PMS_CHANNEX_ARI_SYNC_MODE=mutating`.
-5. Airbnb all-hotels (VAY-1551) stays off until day +1.
+6. Airbnb all-hotels (VAY-1551) stays off until day +1.
 
 ### O — Reopen **[GO: reopen]**
 
@@ -169,9 +196,8 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
   scheduler, webhooks and manual syncs back on.
 - Lift the maintenance pages. Legacy remains the source of truth.
 
-**R2 — after reopen.** Never restore a backup over new writes. Either
-reconcile target writes back into legacy (tooling not built yet) or fix
-forward. See the decisions table.
+**R2 — after reopen.** Fix forward. Never restore a backup over new writes,
+and legacy is not a fallback (decisions table).
 
 **Triggers:**
 
@@ -186,15 +212,15 @@ forward. See the decisions table.
 
 - Day +1: Airbnb all-hotels (VAY-1551); review replies for the migrated hotels
   (VAY-1532/1533).
-- End of the rollback window: acceptance record, then legacy retirement
-  (VAY-1363). An archive-restore proof comes before any deletion.
+- After acceptance: legacy retirement (VAY-1363) can start right away, since
+  there is no rollback window. An archive-restore proof comes before any deletion.
 
 ## Open preparation items
 
-- Cohort scope in the migration contract (scope decision above).
 - Abort semantics for imported rows (R1).
-- Production freeze variables and a protected one-off migration runner
-  (platform; inert until go-day).
+- Platform: production freeze variables (merge waits on #462) and the go-day
+  one-off script with its read-only counts mode.
+- Billing handover stack (#2979–#2988).
 - Known gap: `COHORT_SCOPE_VERIFIED` does not check job or outbox rows for
   properties outside the cohort. The import writes none for them, so parity relies
   on the native writers being paused (Freeze step 3).
