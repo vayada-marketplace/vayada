@@ -56,8 +56,9 @@ describe.skipIf(!TEST_DATABASE_URL)("Legacy fixed-plan adoption PostgreSQL", () 
       await pool.query(
         `INSERT INTO finance.commission_rules
            (property_id, organization_id, rule_scope, product, commission_type,
-            percentage_rate, status)
-         VALUES ($1::uuid, $2::uuid, 'property', 'booking', 'percentage', 5, 'active')`,
+            percentage_rate, status, source_rule_id)
+         VALUES ($1::uuid, $2::uuid, 'property', 'booking', 'percentage', 5, 'active',
+           'onboarding-booking:' || $1::text)`,
         [propertyId, ORGANIZATION],
       );
       // As the migration lands a legacy hotel with a billing reference.
