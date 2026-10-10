@@ -8,6 +8,7 @@ import {
   MagnifyingGlassIcon,
   PowerIcon,
   SparklesIcon,
+  StarIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 
@@ -57,11 +58,22 @@ const PRODUCT_PREVIEW_LABELS: Record<FeatureProduct, string> = {
 const ALL_PRODUCTS = Object.keys(PRODUCT_LABELS) as FeatureProduct[];
 
 export function FeatureHubPage({
-  translate: t = defaultTranslate,
+  translate,
   activationClient,
   initialProduct = "pms",
   products,
 }: FeatureHubPageProps) {
+  // Module copy the host catalog lacks falls back to the English defaults, not to the raw key.
+  const t = useMemo<Translate>(
+    () =>
+      translate
+        ? (key, params) => {
+            const text = translate(key, params);
+            return text === key && key in featureHubMessages ? defaultTranslate(key, params) : text;
+          }
+        : defaultTranslate,
+    [translate],
+  );
   const [product, setProduct] = useState<FeatureProduct>(initialProduct);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<"All" | FeatureCategory>("All");
@@ -74,10 +86,13 @@ export function FeatureHubPage({
     configuredModuleSet,
     supportedModuleIds,
     canManage,
+    manageableModuleSet,
     loading,
     error,
     setModuleActive,
   } = useFeatureModuleActivations(activationClient);
+  const canManageModule = (moduleId: string) =>
+    manageableModuleSet ? manageableModuleSet.has(moduleId) : canManage;
   const supportedModuleSet = useMemo(() => new Set(supportedModuleIds), [supportedModuleIds]);
 
   const availableProducts = useMemo(() => {
@@ -306,7 +321,7 @@ export function FeatureHubPage({
                         key={module.id}
                         module={module}
                         isActive={configuredModuleSet.has(module.id)}
-                        disabled={loading || !canManage || savingModuleId !== null}
+                        disabled={loading || !canManageModule(module.id) || savingModuleId !== null}
                         saving={savingModuleId === module.id}
                         onOpen={() => setSelectedModule(module)}
                         onToggle={(isActive) => toggleModule(module, isActive)}
@@ -335,7 +350,7 @@ export function FeatureHubPage({
           t={t}
           module={selectedModule}
           isActive={configuredModuleSet.has(selectedModule.id)}
-          disabled={loading || !canManage || savingModuleId !== null}
+          disabled={loading || !canManageModule(selectedModule.id) || savingModuleId !== null}
           saving={savingModuleId === selectedModule.id}
           error={updateError ? t(updateError) || updateError : ""}
           onClose={() => setSelectedModule(null)}
@@ -480,6 +495,7 @@ function ModuleIcon({ module, active }: { module: FeatureModule; active: boolean
   const icons = {
     chart: ChartGlyph,
     chat: ChatGlyph,
+    star: StarIcon,
     users: UsersGlyph,
   };
   const Icon = icons[module.icon as keyof typeof icons] || ChatGlyph;
@@ -788,7 +804,51 @@ function ModuleVisual({ type, t }: { type: FeatureModule["detail"]["visualType"]
   if (type === "paypal") return <PayPalVisual />;
   if (type === "xendit") return <XenditVisual />;
   if (type === "lodgify") return <LodgifyVisual />;
+  if (type === "reviews") return <ReviewsVisual />;
   return <InboxVisual />;
+}
+
+function ReviewsVisual() {
+  const rows = [
+    ["Booking.com", "Marta Silva", "Lovely garden and a calm room.", 5],
+    ["Airbnb", "Jon Keller", "Great host, easy check-in.", 4],
+    ["Direct", "Ari Putra", "Breakfast was the highlight.", 5],
+  ] as const;
+  return (
+    <svg viewBox="0 0 760 300" className="h-auto w-full" role="img" aria-label="Reviews preview">
+      <rect width="760" height="300" fill="#f8faf8" />
+      <rect x="34" y="34" width="692" height="232" rx="10" fill="#fff" stroke="#d6d3d1" />
+      {rows.map(([channel, guest, text, stars], index) => {
+        const y = 58 + index * 66;
+        return (
+          <g key={guest}>
+            <rect x="58" y={y} width="644" height="52" rx="8" fill="#fff" stroke="#e7e5e4" />
+            <text x="78" y={y + 22} fontSize="12" fontWeight="700" fill="#111827">
+              {guest}
+            </text>
+            <text x="78" y={y + 39} fontSize="10" fill="#78716c">
+              {text}
+            </text>
+            {Array.from({ length: 5 }, (_, star) => (
+              <text
+                key={star}
+                x={440 + star * 16}
+                y={y + 31}
+                fontSize="14"
+                fill={star < stars ? "#f59e0b" : "#e7e5e4"}
+              >
+                ★
+              </text>
+            ))}
+            <rect x="560" y={y + 17} width="96" height="18" rx="9" fill="#e0f2fe" />
+            <text x="574" y={y + 30} fontSize="9" fontWeight="700" fill="#0369a1">
+              {channel}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
 }
 
 function InboxVisual() {
@@ -1152,6 +1212,19 @@ export const featureHubMessages = {
     "Let partners earn commission on the bookings they refer to you.",
   "featureHub.module.affiliates.headline":
     "Open a partner channel without adding manual commission tracking.",
+  "featureHub.module.inbox.name": "Inbox",
+  "featureHub.module.inbox.description":
+    "Guest messaging, automations, and templates. Chat with guests and automate pre-arrival and post-stay messages.",
+  "featureHub.module.inbox.headline": "Keep every guest conversation in one place.",
+  "featureHub.module.inbox.feature.0": "Reply to guests from connected channels and email.",
+  "featureHub.module.inbox.feature.1": "Save quick replies for common questions.",
+  "featureHub.module.inbox.feature.2": "See unread conversations at a glance.",
+  "featureHub.module.reviews.name": "Reviews",
+  "featureHub.module.reviews.description": "View and manage guest reviews from connected channels.",
+  "featureHub.module.reviews.headline": "See what guests say about your stay.",
+  "featureHub.module.reviews.feature.0": "Read reviews from your connected channels in one list.",
+  "featureHub.module.reviews.feature.1": "Reply to reviews where the channel allows it.",
+  "featureHub.module.reviews.feature.2": "Collect reviews from direct guests after their stay.",
   "featureHub.module.financials.name": "Financials",
   "featureHub.module.financials.description":
     "Revenue, expenses, profit and loss, and operational folios for your property.",
@@ -1182,6 +1255,7 @@ export const featureHubMessages = {
   "featureHub.navigationItem.Promo Codes": "Promo Codes",
   "featureHub.navigationItem.Affiliates": "Affiliates",
   "featureHub.navigationItem.Financials": "Financials",
+  "featureHub.navigationItem.Inbox": "Inbox",
   "featureHub.copy.couldNotUpdateModuleActivation": "Could not update module activation.",
   "featureHub.copy.featureHub": "Feature Hub",
   "featureHub.copy.activatePropertyModulesAndKeepNavigationFocusedOnTheTools":

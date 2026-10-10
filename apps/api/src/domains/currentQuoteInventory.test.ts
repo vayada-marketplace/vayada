@@ -18,7 +18,6 @@ const quoteId = "a1000000-0000-4000-8000-000000000001";
 const scope = {
   propertyId: "property",
   organizationId: "organization",
-  authorityRevision: "authority:1",
 };
 // Owner/decoder mocks intentionally expose only inventory-relevant quote fields.
 const quote = {
@@ -111,7 +110,7 @@ it("rejects changed stored quote or property/organization/authority evidence bef
   for (const changedScope of [
     { ...scope, propertyId: "foreign" },
     { ...scope, organizationId: "foreign" },
-    { ...scope, authorityRevision: "authority:2" },
+    { ...scope, organizationId: "00000000-0000-4000-8000-0000000000ff" },
   ]) {
     await expect(
       reserveRevalidatedQuoteInventory(client, "hotel", {

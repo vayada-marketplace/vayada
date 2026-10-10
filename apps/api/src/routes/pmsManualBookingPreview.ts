@@ -26,6 +26,9 @@ const moneyInput = z.strictObject({
   amountDecimal: z.string().refine((value) => roundBookingPriceDecimalToMinorUnits(value) !== null),
   currency: z.string().regex(/^[A-Z]{3}$/),
 });
+// v1 amendment (VAY-2065): a custom rate may omit the currency; the server prices it in the
+// property pricing currency it resolves anyway.
+const customAmountInput = moneyInput.extend({ currency: moneyInput.shape.currency.optional() });
 const unitInput = z.strictObject({
   serviceDate: z.string().nullable(),
   guestCount: z.number().int().nullable(),
@@ -47,7 +50,7 @@ const stayInput = z.strictObject({
   childAgesAtCheckIn: z.array(z.number().int().min(0).max(17)).max(20).optional(),
   pricing: z.discriminatedUnion("kind", [
     z.strictObject({ kind: z.literal("rate_plan"), manualOverride: moneyInput.nullable() }),
-    z.strictObject({ kind: z.literal("custom"), nightlyAmount: moneyInput }),
+    z.strictObject({ kind: z.literal("custom"), nightlyAmount: customAmountInput }),
   ]),
 });
 const selectionInput = z.strictObject({

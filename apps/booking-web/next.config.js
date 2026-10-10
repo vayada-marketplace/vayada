@@ -57,6 +57,11 @@ const nextConfig = {
         hostname: "cdn.vayada.com",
       },
       {
+        // Platform media CDN serving published property photos.
+        protocol: "https",
+        hostname: "images.vayada.com",
+      },
+      {
         protocol: "http",
         hostname: "localhost",
       },

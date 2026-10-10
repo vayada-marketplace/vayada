@@ -32,6 +32,10 @@ import type {
 export type PropertySetupPmsStateOptions = Readonly<{
   owner: PropertySetupPmsOwnerReadPort;
   pricing: Pick<PmsPricingReadPort, "getPricingSourceSnapshot">;
+  /** Room types with at least one offer in the active pricing-v2 publication; null without one. */
+  publishedPricing: {
+    listPublishedOfferRoomTypeIds(propertyId: string): Promise<readonly string[] | null>;
+  };
   recurringPricing: Pick<PmsRecurringPricingReadPort, "getRecurringPricingBookingEvidence">;
   mandatoryCharges: PmsMandatoryChargeConfirmationReadPort;
   operatingCalendar: Pick<PmsOperatingCalendarReadPort, "getCurrentOperatingCalendarConfiguration">;
@@ -153,6 +157,7 @@ async function readSnapshot(
     rawCalendar,
     rawInventory,
     rawCatalogLocation,
+    publishedRoomIds,
   ] = await Promise.all([
     options.owner.getRoomOwnerSnapshot({
       organizationId: request.organizationId,
@@ -173,6 +178,7 @@ async function readSnapshot(
       organizationId: request.organizationId,
       propertyId: request.propertyId,
     }),
+    options.publishedPricing.listPublishedOfferRoomTypeIds(request.propertyId),
   ]);
   const rooms =
     rawRooms.organizationId === request.organizationId &&
@@ -267,7 +273,9 @@ async function readSnapshot(
     "hotel_catalog.location": catalogLocation.evidence.baseRevision,
   });
   const activeRoomIds = rooms.rooms.map(({ roomTypeId }) => roomTypeId);
-  const planRoomIds = new Set(ratePlans.map(({ roomTypeId }) => roomTypeId));
+  // With a pricing-v2 publication, every operating room needs at least one published offer;
+  // otherwise (legacy data) a flexible plan.
+  const planRoomIds = new Set(publishedRoomIds ?? ratePlans.map(({ roomTypeId }) => roomTypeId));
   const pricingComplete =
     pricing !== null &&
     activeRoomIds.length > 0 &&
@@ -308,7 +316,10 @@ async function readSnapshot(
       : pricing
         ? ("saved" as const)
         : ("not_started" as const),
-    pricingRevision: collectionRevision("pricing", Object.entries(pricingManifest)),
+    pricingRevision: collectionRevision("pricing", [
+      ...Object.entries(pricingManifest),
+      ...(publishedRoomIds ? [["published-rooms", [...publishedRoomIds].sort()]] : []),
+    ]),
     pricingManifest,
     calendarState: calendarComplete
       ? ("complete" as const)

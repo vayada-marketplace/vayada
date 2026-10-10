@@ -7,6 +7,7 @@
   "layout.header.user": "Usuario",
   "layout.header.language": "Idioma",
   "layout.header.currency": "Moneda",
+  "layout.header.help": "Ayuda",
   "layout.header.remaining": "restantes",
   "layout.sidebar.propertyManagerDescription": "Operaciones e Inventario",
   "layout.sidebar.creatorMarketplace": "Mercado vayada",

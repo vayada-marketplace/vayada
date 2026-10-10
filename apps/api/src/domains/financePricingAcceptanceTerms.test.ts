@@ -6,7 +6,6 @@ vi.mock("./publicPricingAuthority.js", () => ({ lockPublicPricingAuthority: vi.f
 const scope = {
   propertyId: "11111111-1111-4111-8111-111111111111",
   organizationId: "22222222-2222-4222-8222-222222222222",
-  authorityRevision: "owner-1",
 };
 let entitlement: Record<string, unknown>, commission: Record<string, unknown>;
 let now: Date, missing: string | null, events: string[];
@@ -146,7 +145,7 @@ it("rejects missing/revoked/changed public scope without accepting caller-posted
   expect(query).not.toHaveBeenCalled();
   vi.mocked(lockPublicPricingAuthority)
     .mockResolvedValueOnce(scope)
-    .mockResolvedValueOnce({ ...scope, authorityRevision: "owner-2" });
+    .mockResolvedValueOnce({ ...scope, organizationId: "00000000-0000-4000-8000-0000000000ff" });
   expect(await lockFinancePricingAcceptanceTerms(client, "hotel")).toBeNull();
   expect(events).not.toContain("clock");
 });

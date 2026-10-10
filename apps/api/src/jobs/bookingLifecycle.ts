@@ -4,6 +4,10 @@ import pg from "pg";
 import { publishAffiliateReservationLifecycle } from "../domains/bookingAffiliateReservationLifecycle.js";
 import type { StripeBookingPaymentProvider } from "../domains/stripeBookingPayments.js";
 import {
+  expirePricingCardBooking,
+  pricingCardPaymentProperty,
+} from "../domains/pricingCardPaymentCompletion.js";
+import {
   captureDirectNightlyRevenueEvidence,
   reconcileStripeBookingPaymentProviderDetails,
   settleStripeBookingPayment,
@@ -577,6 +581,44 @@ async function applyPgLifecycleMutation(
         await client.query("COMMIT");
         return cardResult;
       }
+    }
+    if (
+      mutation.action === "pending-expiry" &&
+      candidate.paymentStatus === "unpaid" &&
+      candidate.providerPaymentIntentId &&
+      (await pricingCardPaymentProperty(client, candidate.providerPaymentIntentId))
+    ) {
+      // Replacement-pricing card acceptance past its payment deadline (own lock order,
+      // no revenue to clear, no expiry email).
+      if (!config.stripePaymentProvider) {
+        await client.query("COMMIT");
+        return lifecycleNoopResult(candidate, mutation);
+      }
+      const outcome = await expirePricingCardBooking(
+        client,
+        config.stripePaymentProvider,
+        {
+          propertyId: candidate.propertyId,
+          guestBookingId: candidate.guestBookingId,
+          now: context.now,
+        },
+        (metadata) =>
+          releaseLifecycleInventory(
+            client,
+            config.inventoryReservationPort,
+            candidate.propertyId,
+            metadata,
+            context.now,
+          ),
+      );
+      await client.query("COMMIT");
+      return outcome === "pending"
+        ? lifecycleNoopResult(candidate, mutation)
+        : {
+            ...lifecycleNoopResult(candidate, mutation),
+            applied: true,
+            toStatus: outcome === "settled" ? "confirmed" : "expired",
+          };
     }
     if (mutation.deleteDraft && candidate.providerPaymentIntentId) {
       const cardResult = await resolveExpiredStripeDraft(
