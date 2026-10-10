@@ -60,10 +60,12 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
   const { t } = useTranslation();
   const roomName = (roomTypeId: string, ri: number) => roomNames[roomTypeId] ?? t("pricing.roomNumber", { number: ri + 1 });
   const offerLabel = (roomTypeId: string, ri: number, oi: number) => t("pricing.roomOffer", { room: roomName(roomTypeId, ri), number: oi + 1 });
+  const loads = useRef(0);
   const load = useCallback(async (after?: { keep?: Kept }) => {
+    const seq = ++loads.current, latest = () => alive.current && seq === loads.current; // An older read never overwrites a newer one.
     setLoading(true); setEmpty(false); setError(null);
     try {
-      const saved = await client.read(); if (!alive.current) return;
+      const saved = await client.read(); if (!latest()) return;
       const revision = (saved?.revision ?? 0) + 1, rooms = (saved?.rooms ?? []).map((room) => ({ ...room, revision }));
       const keep = after?.keep, kept = keep && keptRoom(keep, saved), room = kept && { ...kept, revision };
       setEmpty(saved === null && !room); setPolicyEdits(room ? keep!.terms : {}); loadedRooms.current = saved?.rooms ?? [];
@@ -72,8 +74,8 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
         rooms: !room ? rooms : rooms.some((value) => value.roomTypeId === room.roomTypeId) ? rooms.map((value) => value.roomTypeId === room.roomTypeId ? room : value) : [...rooms, room] } : null);
       setAddingOfferRoom(null); setPendingEntries({}); setBaseRevision(saved?.revision ?? 0); setStale(!!saved?.stale); setInputs({}); setDirty(!!room); setNeedsReload(false); setDone(false);
       setNotice(room ? "pricing.room.noticeKept" : keep ? "pricing.room.noticeDropped" : saved?.stale ? "pricing.room.noticeStale" : "");
-    } catch (e) { if (alive.current) setError(e); }
-    finally { if (alive.current) setLoading(false); }
+    } catch (e) { if (latest()) setError(e); }
+    finally { if (latest()) setLoading(false); }
   }, [client, focus]);
   /** After a refused save (another publication, or a room, terms or payment change), reload and keep this room's
    * edits when the server still has this room exactly as it was loaded; the next press declares again. */
@@ -87,7 +89,9 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
   useEffect(() => { alive.current = true; void load(); return () => { alive.current = false; }; }, [load]); // Client is property-bound; parent keys this component by property.
   const leaveRisk = hasPendingEntries || dirty || retry || busy;
   const risk = useRef(leaveRisk);
-  useEffect(() => { risk.current = leaveRisk; }, [leaveRisk]); // Declared before the refresh effect, which reads it.
+  // Unsaved work, or the saved prices still on show for review, outlast a page refresh. Declared before the
+  // refresh effect, which reads it.
+  useEffect(() => { risk.current = leaveRisk || done; }, [leaveRisk, done]);
   const seenRefresh = useRef(refresh);
   useEffect(() => { if (refresh === seenRefresh.current) return; seenRefresh.current = refresh; if (!risk.current) void load(); }, [refresh, load]);
   useEffect(() => {

@@ -4095,6 +4095,18 @@ it("reloads on a page refresh only without unsaved work and tells the page after
   await act(async () => input().props.onChange({ target: { value: "123.45" } }));
   await act(async () => view.update(roomEditor(rooms, { onPublished, refresh: 2 }))); expect(client.read).toHaveBeenCalledTimes(2); expect(input().props.value).toBe("123.45");
   await click("Save prices"); expect(onPublished).toHaveBeenCalledOnce();
+  // The saved prices stay on show for review until "Edit prices again".
+  await act(async () => view.update(roomEditor(rooms, { onPublished, refresh: 3 }))); expect(client.read).toHaveBeenCalledTimes(2);
+  expect(JSON.stringify(view.toJSON())).toContain("Prices saved");
+});
+it("keeps the newest read when an older one answers last", async () => {
+  let answerFirst!: (value: unknown) => void;
+  client.read.mockImplementationOnce(() => new Promise((resolve) => { answerFirst = resolve; }));
+  await act(async () => { view = create(roomEditor([familySetup])); });
+  client.read.mockResolvedValueOnce(published([snapshot.rooms[0], { ...family, offers: [{ ...family.offers[0], price: { kind: "independent", calendar: { base: { mode: "flat", amountMinor: "20000" }, months: [], seasons: [], weekdays: [], dates: [] } } }] }], 2));
+  await act(async () => view.update(roomEditor([familySetup], { refresh: 1 })));
+  await act(async () => answerFirst(published()));
+  expect(input().props.value).toBe("200.00");
 });
 it("does not offer to keep edits after a denial, or when nothing was edited", async () => {
   client.read.mockResolvedValue(published()); await mountRoom();
