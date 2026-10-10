@@ -8,7 +8,13 @@ import { parse } from "yaml";
 import { SELECTABLE_JOBS, selectJobs, verifyRequiredChecks } from "./pr-checks.mjs";
 
 const ALL = [...SELECTABLE_JOBS];
-const TYPESCRIPT = ["frontend", "first_party_auth", "api_postgres", "setup_draft_reset_postgres"];
+const TYPESCRIPT = [
+  "frontend",
+  "first_party_auth",
+  "api_unit",
+  "api_postgres",
+  "setup_draft_reset_postgres",
+];
 
 test("docs-only changes select no jobs", () => {
   const files = [
@@ -22,7 +28,7 @@ test("docs-only changes select no jobs", () => {
   assert.deepEqual(selectJobs(files).jobs, []);
 });
 
-test("TypeScript API, shared packages and migrations run full PostgreSQL coverage", () => {
+test("TypeScript API, shared packages and migrations run the unit suites and full PostgreSQL coverage", () => {
   for (const file of [
     "apps/api/src/server.ts",
     "packages/backend-migration/migrations/0400_new.sql",

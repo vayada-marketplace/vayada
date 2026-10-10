@@ -64,6 +64,7 @@
     "lint:marketplace-web": "npm --workspace vayada-creator-marketplace run lint",
     "lint:pms-web": "npm --workspace vayada-pms-frontend run lint",
     "test:api": "npm --workspace vayada-api run test",
+    "test:unit-suites": "npm --workspace vayada-api run build:backend-packages && npm run test --ignore-scripts --workspace @vayada/backend-auth --workspace @vayada/backend-authorization --workspace @vayada/backend-config --workspace @vayada/backend-db --workspace @vayada/backend-http --workspace @vayada/domain-booking --workspace @vayada/domain-distribution --workspace @vayada/domain-marketplace --workspace @vayada/domain-pms --workspace @vayada/domain-pms-channex --workspace @vayada/pms-vayada-adapter --workspace @vayada/settings-ui --workspace vayada-api",
     "typecheck:api": "npm --workspace vayada-api run typecheck",
     "target:migrate": "npm --workspace @vayada/backend-migration run target:migrate --",
     "target:rebuild": "npm --workspace @vayada/backend-migration run target:rebuild --",
