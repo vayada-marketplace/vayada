@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { replacementStayKey, type StoredPricingQuote } from "@vayada/domain-booking";
 import { pricingDraftFixture } from "./pricingBookingDraft.fixtures.js";
 import {
@@ -116,6 +116,9 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
     "repository-stay-cancel-guest-route",
     "repository-stay-cancel-host-guest-request",
     "repository-stay-cancel-host-reject",
+    "repository-date-change",
+    "repository-stay-cancel-amended",
+    "repository-stay-cancel-undecodable",
     // VAY-2110: a date-change amendment rebinds the stay to its repriced quote.
     "amended-complete",
     "amended-earlier-revision",
@@ -253,7 +256,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         [
           propertyId,
           types,
-          amended
+          amended || scenario === "repository-date-change"
             ? ["2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04"]
             : ["2026-10-01", "2026-10-02"],
         ],
@@ -372,7 +375,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         (id,property_id,organization_id,pricing_quote_id,guest_booking_id,command_receipt_id,request_id,key_hash,
          request_fingerprint_hash,quote_snapshot,disclosure_json,disclosure_hash,guest_policy_source_revision,
          acceptance_command,inventory_reservation_bundle,billing_plan_snapshot,commission_terms_snapshot,finance_terms_captured_at,accepted_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'guest-policy:1',$13,$14,'fixed',$15,$16,'2026-09-01T00:02:00Z')`,
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'guest-policy:1',$13,$14,'fixed',$15,$16,$17)`,
           [
             acceptanceId,
             propertyId,
@@ -390,6 +393,10 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             acceptedBundle,
             f.finance.commissionTermsSnapshot,
             f.finance.financeTermsCapturedAt,
+            // After the quote expired: the stored row no longer decodes (VAY-2110 fallback).
+            scenario === "repository-stay-cancel-undecodable"
+              ? "2026-09-01T00:20:00Z"
+              : "2026-09-01T00:02:00Z",
           ],
         );
       // VAY-2110: date changes append amendments; adoption follows the latest one.
@@ -949,6 +956,408 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           [bookingId],
         );
         expect(jobs.rows).toEqual([]);
+      } else if (scenario === "repository-date-change") {
+        // VAY-2110: PMS staff move an adopted v2 stay to new dates at its booked terms.
+        expect(await adopt()).toMatchObject({ outcome: "adopted" });
+        await db.query(
+          `UPDATE booking.guest_bookings
+           SET booking_metadata=booking_metadata || '{"paymentMethod":"pay_at_property"}' WHERE id=$1`,
+          [bookingId],
+        );
+        const actorUserId = randomUUID();
+        await db.query("INSERT INTO identity.users(id,email,status) VALUES($1,$2,'active')", [
+          actorUserId,
+          `${actorUserId}@example.test`,
+        ]);
+        const nested = {
+          query: (text: string, values?: unknown[]) =>
+            db.query(
+              (
+                {
+                  BEGIN: "SAVEPOINT host_dates",
+                  COMMIT: "RELEASE SAVEPOINT host_dates",
+                  ROLLBACK: "ROLLBACK TO SAVEPOINT host_dates",
+                } as Record<string, string>
+              )[text] ?? text,
+              values,
+            ),
+        };
+        // The same rooms and nightly prices on the new dates; the live publication is not under
+        // test here (its repricing has its own suites).
+        let ratesChanged = false;
+        const repriceStay = async (
+          _client: unknown,
+          input: { booked: StoredPricingQuote; checkIn: string; checkOut: string },
+        ) => {
+          const repriced = repricedQuote(input.booked, {
+            checkIn: input.checkIn,
+            checkOut: input.checkOut,
+          });
+          // The hotel's rates were republished: same amounts, a new rate source revision.
+          const quote = ratesChanged
+            ? {
+                ...repriced,
+                evidence: {
+                  ...repriced.evidence,
+                  revisions: {
+                    ...repriced.evidence.revisions,
+                    pms: `${repriced.evidence.revisions.pms}-republished`,
+                  },
+                },
+              }
+            : repriced;
+          return {
+            quote,
+            calculation: {
+              charges: {
+                version: "booking.fixed-charge-amounts.v1",
+                currency: quote.stay.currency,
+                requestKey: quote.evidence.requestKey,
+                sourceRevision: quote.evidence.revisions.charges,
+                basisEvidenceId: quote.evidence.mandatoryChargeEvidenceId,
+                includedChargeMinor: "0",
+                additionalChargeMinor: "0",
+                charges: [],
+              },
+            },
+          };
+        };
+        let failAfterMove = true;
+        let soldOut = false;
+        const actions = createBookingHostActions({
+          pool: nested as unknown as pg.Pool,
+          inventory: createTargetPmsInventoryReservationPort(),
+          guards: {
+            ...targetBookingHostActionGuards,
+            async completeDateEdit(client, input) {
+              await targetBookingHostActionGuards.completeDateEdit(client, input);
+              if (failAfterMove) throw new Error("Simulated failure after the move");
+            },
+          },
+          now: () => new Date("2026-09-21T08:00:00Z"),
+          repriceStay: repriceStay as never,
+          // Real holds through the inventory port: this fixture's synthetic calendar isn't the
+          // current-calendar evidence the pricing-v2 quote reservation requires.
+          reserveStayHolds: (client, input) => {
+            if (soldOut) throw new Error("Quote inventory is unavailable");
+            const counts = new Map<string, number>();
+            for (const room of input.rooms)
+              counts.set(room.roomTypeId, (counts.get(room.roomTypeId) ?? 0) + 1);
+            return createTargetPmsInventoryReservationPort().reserveBundle!({
+              propertyId: input.propertyId,
+              checkIn: input.checkIn,
+              checkOut: input.checkOut,
+              currency: "EUR",
+              quoteSessionId: input.quoteId,
+              occurredAt: new Date("2026-09-21T08:00:00Z"),
+              transaction: client,
+              lines: [...counts].map(([roomTypeId, roomCount]) => ({
+                roomTypeId,
+                publicOfferKey: roomTypeId,
+                roomCount,
+              })),
+            });
+          },
+        });
+        const hostScope = { propertyId, bookingId, actorUserId };
+        const holds = async () =>
+          (
+            await db.query(
+              `SELECT receipt.receipt_id::text AS id,receipt.check_in::text AS "checkIn",
+                 status.lifecycle_state AS state
+               FROM pms.inventory_reservation_receipts receipt
+               JOIN pms.inventory_reservation_statuses status USING(receipt_id)
+               WHERE receipt.property_id=$1 ORDER BY receipt.check_in,receipt.receipt_id`,
+              [propertyId],
+            )
+          ).rows;
+        const occupied = async () =>
+          (
+            await db.query(
+              `SELECT room_type_id::text AS room,stay_date::text AS date,assigned_count AS assigned
+               FROM pms.inventory_days WHERE property_id=$1 AND assigned_count>0
+               ORDER BY stay_date,room_type_id`,
+              [propertyId],
+            )
+          ).rows;
+        const heldBefore = await holds();
+        const occupiedBefore = await occupied();
+        // The adopted stay occupies both accepted nights: two rooms of one type, one of the other.
+        expect(occupiedBefore.map(({ date, assigned }) => [date, assigned])).toEqual([
+          ["2026-10-01", 2],
+          ["2026-10-01", 1],
+          ["2026-10-02", 2],
+          ["2026-10-02", 1],
+        ]);
+        const hostPreview = await actions.preview(hostScope, {
+          action: "edit_dates",
+          checkIn: amendedStay.checkIn,
+          checkOut: amendedStay.checkOut,
+          reason: "Guest asked",
+        });
+        // Three rooms at 300.00 + 60.00 a night, for one night instead of two.
+        expect(hostPreview.impact).toMatchObject({
+          checkIn: amendedStay.checkIn,
+          checkOut: amendedStay.checkOut,
+          newTotalAmount: "540.00",
+          inventory: "replace",
+        });
+        // A preview proves the new nights can be held and keeps nothing.
+        expect(await holds()).toEqual(heldBefore);
+        expect(await occupied()).toEqual(occupiedBefore);
+        const effects = async () =>
+          (
+            await db.query(
+              `SELECT destination,resource_id AS room,payload->'dateRange' AS range
+               FROM platform.outbox_events WHERE property_id=$1 AND payload->>'triggerRefId'=$2`,
+              [propertyId, hostPreview.previewId],
+            )
+          ).rows;
+        const unmoved = async () =>
+          (
+            await db.query(
+              `SELECT check_in::text AS "checkIn",edit_revision AS revision,
+                 (SELECT count(*)::int FROM booking.pricing_acceptance_amendments
+                   WHERE guest_booking_id=$1) AS amendments
+               FROM booking.guest_bookings WHERE id=$1`,
+              [bookingId],
+            )
+          ).rows[0];
+        // Rates republished after the preview need a new preview; new dates that sold out are
+        // refused. Neither writes anything (checked below).
+        ratesChanged = true;
+        await expect(
+          actions.apply(hostScope, hostPreview.previewId, "host-date-change"),
+        ).rejects.toMatchObject({ code: "stale_preview" });
+        ratesChanged = false;
+        soldOut = true;
+        await expect(
+          actions.apply(hostScope, hostPreview.previewId, "host-date-change"),
+        ).rejects.toMatchObject({
+          code: "inventory_unavailable",
+          message: "The new dates are not available for every booked room.",
+        });
+        soldOut = false;
+        // A failure after the stays moved undoes the whole change.
+        await expect(
+          actions.apply(hostScope, hostPreview.previewId, "host-date-change"),
+        ).rejects.toThrow("Simulated failure after the move");
+        expect(await holds()).toEqual(heldBefore);
+        expect(await occupied()).toEqual(occupiedBefore);
+        expect(await effects()).toEqual([]);
+        expect(await unmoved()).toEqual({ checkIn: "2026-10-01", revision: 0, amendments: 0 });
+        failAfterMove = false;
+        await expect(
+          actions.apply(hostScope, hostPreview.previewId, "host-date-change"),
+        ).resolves.toEqual({ bookingId, lifecycleStatus: "confirmed" });
+        await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+        // Only the new night is occupied: the accepted nights are free again, and the new holds
+        // were handed to the moved assignments. Adopted holds stay handed off (a final state).
+        expect(await occupied()).toEqual(
+          occupiedBefore
+            .filter(({ date }) => date === "2026-10-01")
+            .map((night) => ({ ...night, date: amendedStay.checkIn })),
+        );
+        const heldAfter = await holds();
+        const oldIds = new Set(heldBefore.map((hold) => hold.id));
+        expect(heldAfter.filter((hold) => oldIds.has(hold.id))).toEqual(heldBefore);
+        const fresh = heldAfter.filter((hold) => !oldIds.has(hold.id));
+        expect(fresh).toHaveLength(types.length);
+        expect(
+          fresh.every(
+            (hold) => hold.checkIn === amendedStay.checkIn && hold.state === "handed_off",
+          ),
+        ).toBe(true);
+        const moved = (
+          await db.query(
+            `SELECT check_in::text AS "checkIn",check_out::text AS "checkOut",edit_revision AS revision,
+               total_amount::text AS total,booking_metadata->>'pricingQuoteId' AS quote
+             FROM booking.guest_bookings WHERE id=$1`,
+            [bookingId],
+          )
+        ).rows[0];
+        const amendment = (
+          await db.query(
+            `SELECT revision,edit_revision AS "editRevision",pricing_quote_id::text AS quote,
+               quote_snapshot#>>'{stay,checkIn}' AS "checkIn"
+             FROM booking.pricing_acceptance_amendments WHERE guest_booking_id=$1`,
+            [bookingId],
+          )
+        ).rows;
+        expect(amendment).toEqual([
+          { revision: 1, editRevision: 1, quote: moved.quote, checkIn: amendedStay.checkIn },
+        ]);
+        expect(moved).toMatchObject({ ...amendedStay, revision: 1, total: "540.00" });
+        const assignments = await db.query(
+          `SELECT DISTINCT check_in::text AS "checkIn",check_out::text AS "checkOut",
+             assignment_status AS status
+           FROM pms.operational_booking_assignments WHERE guest_booking_id=$1`,
+          [bookingId],
+        );
+        expect(assignments.rows).toEqual([{ ...amendedStay, status: "pending" }]);
+        const revenue = await db.query(
+          `SELECT stay_date::text AS date,sum(occupied_room_nights)::int AS occupied
+           FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1
+           GROUP BY stay_date ORDER BY stay_date`,
+          [bookingId],
+        );
+        expect(revenue.rows.filter((row) => row.occupied > 0)).toEqual([
+          { date: amendedStay.checkIn, occupied: 3 },
+        ]);
+        const events = await db.query(
+          "SELECT count(*)::int AS n FROM booking.booking_status_events WHERE guest_booking_id=$1 AND event_type='guest_booking.host_dates_updated'",
+          [bookingId],
+        );
+        expect(events.rows).toEqual([{ n: 1 }]);
+        // The channel manager, public bookability and calendar hear about the freed and the new
+        // nights of each room type.
+        const changed = await effects();
+        expect(changed).toHaveLength(3 * types.length * 2);
+        for (const destination of [
+          "pms.channel-manager",
+          "distribution.public-bookability",
+          "pms.calendar-projection",
+        ])
+          for (const room of types)
+            for (const range of [
+              { from: "2026-10-01", to: "2026-10-02" },
+              { from: amendedStay.checkIn, to: amendedStay.checkIn },
+            ])
+              expect(changed).toContainEqual({ destination, room, range });
+      } else if (scenario === "repository-stay-cancel-amended") {
+        // VAY-2110: the host moved check-in from 1 to 2 October; the stay was repriced at one night.
+        const port = createTargetPmsInventoryReservationPort(),
+          at = new Date("2026-09-10T00:00:00Z"),
+          movedId = randomUUID();
+        await port.release({
+          propertyId,
+          transaction: db,
+          reservation: acceptedBundle,
+          occurredAt: at,
+        });
+        // The same rooms, nightly prices and booked terms (0477 pins them) on the new date.
+        const moved = repricedQuote(
+          quote,
+          { checkIn: "2026-10-02", checkOut: "2026-10-03" },
+          movedId,
+        );
+        const movedHolds = await port.reserveBundle!({
+          propertyId,
+          checkIn: "2026-10-02",
+          checkOut: "2026-10-03",
+          currency: "EUR",
+          quoteSessionId: movedId,
+          occurredAt: at,
+          transaction: db,
+          lines: types.map((roomTypeId, i) => ({
+            roomTypeId,
+            publicOfferKey: roomTypeId,
+            roomCount: i === 0 ? 2 : 1,
+          })),
+        });
+        const requestId = randomUUID();
+        await db.query(
+          `INSERT INTO booking.pricing_quotes(id,property_id,organization_id,request_id,request_hash,payload)
+          VALUES($1,$2,$3,$4,$5,$6)`,
+          [movedId, propertyId, acceptedOrg, requestId, hash(requestId), { quote: moved }],
+        );
+        await db.query(
+          `INSERT INTO booking.pricing_acceptance_amendments
+          (acceptance_id,property_id,organization_id,guest_booking_id,revision,edit_revision,
+           pricing_quote_id,quote_snapshot,inventory_reservation_bundle,source,source_id)
+          VALUES($1,$2,$3,$4,1,1,$5,$6,$7,'host_edit',$8)`,
+          [
+            acceptanceId,
+            propertyId,
+            acceptedOrg,
+            bookingId,
+            movedId,
+            moved,
+            movedHolds,
+            randomUUID(),
+          ],
+        );
+        await db.query(
+          `UPDATE booking.guest_bookings SET check_in='2026-10-02',edit_revision=1,
+          booking_metadata=booking_metadata||jsonb_build_object('pricingQuoteId',$2::text,'inventoryReservation',$3::jsonb)
+          WHERE id=$1`,
+          [bookingId, movedId, movedHolds],
+        );
+        const movedStay = {
+          checkIn: "2026-10-02",
+          checkOut: "2026-10-03",
+          roomCount: 3,
+          currency: "EUR",
+        };
+        const cancellation = (stay: typeof movedStay) =>
+          loadPricingBookingCancellation(db, {
+            propertyId,
+            guestBookingId: bookingId,
+            stay,
+            cancelledAt: new Date("2026-09-18T08:00:00Z"),
+          });
+        // 18 September is 14 days before the new check-in (50%), 13 before the accepted one (25%);
+        // the base is the repriced one-night total.
+        expect(await cancellation(movedStay)).toMatchObject({
+          daysBeforeCheckIn: 14,
+          totalMinor: "54000",
+          refundMinor: "27000",
+          retainedMinor: "27000",
+        });
+        expect(await cancellation({ ...movedStay, checkIn: "2026-10-01" })).toBeNull();
+        // Freeing the stay releases the amendment's holds, not the accepted (already released) ones.
+        const free = () =>
+          cancelAcceptedPricingStay(db, port, {
+            propertyId,
+            guestBookingId: bookingId,
+            commandId: randomUUID(),
+            fingerprint: hash(scenario),
+            occurredAt: new Date("2026-09-18T08:00:00Z"),
+          });
+        expect(await free()).toEqual({ released: 2, canceledAssignments: 0 });
+        await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+        expect(await free()).toEqual({ released: 0, canceledAssignments: 0 });
+        expect((await snapshot()).receipts.map(({ lifecycle_state }) => lifecycle_state)).toEqual([
+          "released",
+          "released",
+          "released",
+          "released",
+        ]);
+      } else if (scenario === "repository-stay-cancel-undecodable") {
+        // A stored acceptance that no longer decodes: no online fee, but freeing never gets stuck.
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+        try {
+          expect(
+            await loadPricingBookingCancellation(db, {
+              propertyId,
+              guestBookingId: bookingId,
+              stay: {
+                checkIn: "2026-10-01",
+                checkOut: "2026-10-03",
+                roomCount: 3,
+                currency: "EUR",
+              },
+              cancelledAt: new Date("2026-09-21T08:00:00Z"),
+            }),
+          ).toBeNull();
+          const free = () =>
+            cancelAcceptedPricingStay(db, createTargetPmsInventoryReservationPort(), {
+              propertyId,
+              guestBookingId: bookingId,
+              commandId: randomUUID(),
+              fingerprint: hash(scenario),
+              occurredAt: new Date("2026-09-21T08:00:00Z"),
+            });
+          expect(await free()).toEqual({ released: 2, canceledAssignments: 0 });
+          await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+          expect(await free()).toEqual({ released: 0, canceledAssignments: 0 });
+          expect(warn).toHaveBeenCalledWith(
+            "Pricing acceptance no longer decodes; releasing its stored holds.",
+            { propertyId, guestBookingId: bookingId },
+          );
+        } finally {
+          warn.mockRestore();
+        }
       } else if (scenario === "repository-stay-cancel-host-reject") {
         // A v2 request the PMS never adopted: rejecting it releases the hold, with no handoff.
         await db.query(
