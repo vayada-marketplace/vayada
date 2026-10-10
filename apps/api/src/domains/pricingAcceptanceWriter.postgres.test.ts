@@ -1245,7 +1245,11 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
       expect(card.cancelPaymentIntent).toHaveBeenCalledWith(
         "pi_writer_test",
         "acct_writer_test",
-        `pricing-card-withdraw:${card.fixture.propertyId}:${card.accepted.bookingId}:v1`,
+        expect.stringMatching(
+          new RegExp(
+            `^pricing-card-withdraw:${card.fixture.propertyId}:${card.accepted.bookingId}:[0-9a-f]{64}$`,
+          ),
+        ),
       );
       expect(card.capturePaymentIntent).not.toHaveBeenCalled();
       expect(released).toHaveLength(1);
@@ -1259,6 +1263,66 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     }
   });
 
+  it("withdraws a card request whose cancel call failed once Stripe shows the hold cancelled", async () => {
+    const card = await authorisedCardRequest();
+    try {
+      await card.fixture.observer.query(
+        "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Rome')",
+        [card.fixture.propertyId],
+      );
+      card.cancelPaymentIntent.mockRejectedValueOnce(new Error("Stripe timeout"));
+      card.retrievePaymentIntent
+        .mockResolvedValueOnce({ ...card.intent, status: "requires_capture" })
+        .mockResolvedValueOnce({ ...card.intent, status: "canceled" });
+      await withdrawAsGuest(card.fixture, card.slug, card.accepted.bookingId, card.provider);
+      expect(await card.status()).toEqual({
+        lifecycle_status: "canceled",
+        payment_status: "failed",
+        payment: "canceled",
+      });
+    } finally {
+      await card.fixture.close();
+    }
+  });
+
+  it("cancels the open payment when a guest withdraws an instant card booking before paying", async () => {
+    const { fixture, slug, retrievePaymentIntent, cancelPaymentIntent, provider } =
+      await cardFixture();
+    try {
+      await fixture.observer.query(
+        "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Rome')",
+        [fixture.propertyId],
+      );
+      const accepted = (await writePricingAcceptance(fixture.pool, fixture.input, undefined, {
+        provider,
+      })) as { bookingId: string; bookingReference: string };
+      const intent = {
+        ...(await retrievePaymentIntent()),
+        bookingReference: accepted.bookingReference,
+      };
+      retrievePaymentIntent.mockResolvedValue(intent);
+      cancelPaymentIntent.mockResolvedValue({ ...intent, status: "canceled" });
+      const { released } = await withdrawAsGuest(fixture, slug, accepted.bookingId, provider);
+      expect(cancelPaymentIntent).toHaveBeenCalledOnce();
+      expect(released).toHaveLength(1);
+      const state = (
+        await fixture.observer.query(
+          `SELECT b.lifecycle_status,b.payment_status,p.status AS payment
+           FROM booking.guest_bookings b JOIN finance.payments p ON p.id=b.active_card_payment_id
+           WHERE b.id=$1`,
+          [accepted.bookingId],
+        )
+      ).rows[0];
+      expect(state).toEqual({
+        lifecycle_status: "canceled",
+        payment_status: "unpaid",
+        payment: "canceled",
+      });
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("refuses to withdraw a card request Stripe already captured, changing nothing", async () => {
     const card = await authorisedCardRequest();
     try {
@@ -1266,10 +1330,16 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
         "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Rome')",
         [card.fixture.propertyId],
       );
+      card.retrievePaymentIntent.mockClear();
       card.retrievePaymentIntent.mockResolvedValue({ ...card.intent, status: "succeeded" });
       await expect(
         withdrawAsGuest(card.fixture, card.slug, card.accepted.bookingId, card.provider),
-      ).rejects.toMatchObject({ statusCode: 409 });
+      ).rejects.toMatchObject({
+        statusCode: 409,
+        message: expect.stringContaining("card payment can't be withdrawn online"),
+      });
+      // The withdraw itself asked Stripe, and found the money already taken.
+      expect(card.retrievePaymentIntent).toHaveBeenCalledOnce();
       expect(card.cancelPaymentIntent).not.toHaveBeenCalled();
       expect(await card.status()).toEqual({
         lifecycle_status: "pending_payment",

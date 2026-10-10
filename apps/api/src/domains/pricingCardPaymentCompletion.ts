@@ -490,7 +490,7 @@ export async function authorizePricingCardRequest(
 export async function voidPricingCardPayment(
   client: Queryable,
   provider: StripeBookingPaymentProvider | undefined,
-  input: { propertyId: string; guestBookingId: string; occurredAt: Date },
+  input: { propertyId: string; guestBookingId: string; occurredAt: Date; commandKey: string },
 ): Promise<"voided" | "none"> {
   const row = (
     await client.query(
@@ -498,7 +498,7 @@ export async function voidPricingCardPayment(
         b.public_reference
       FROM booking.guest_bookings b
       JOIN finance.payments p ON p.id=b.active_card_payment_id AND p.property_id=b.property_id
-      JOIN finance.payment_provider_accounts acct ON acct.id=p.provider_account_id
+      LEFT JOIN finance.payment_provider_accounts acct ON acct.id=p.provider_account_id
         AND acct.property_id=p.property_id
       WHERE b.id=$1 AND b.property_id=$2 AND b.booking_metadata->>'targetSource'='pricing_quote_draft'
       FOR UPDATE OF p`,
@@ -533,7 +533,8 @@ export async function voidPricingCardPayment(
         await provider.cancelPaymentIntent(
           row.intent,
           row.account,
-          `pricing-card-withdraw:${input.propertyId}:${input.guestBookingId}:v1`,
+          // Per command: Stripe replays a key's first answer, failures included, for 24 hours.
+          `pricing-card-withdraw:${input.propertyId}:${input.guestBookingId}:${createHash("sha256").update(input.commandKey).digest("hex")}`,
         ),
       );
     } catch (error) {

@@ -3885,17 +3885,20 @@ async function withGuestLifecycleMutation(
       bookingMetadata["paymentMethod"] === "card"
     ) {
       // VAY-2099: a withdrawn pricing-v2 card booking cancels its hold first (an authorised
-      // request, or a card payment not made yet). Booking row, then payment, as the hotel's
-      // accept takes them; the status change below still requires the booking to be pending.
+      // request, or a card payment not made yet). Booking row, inventory, then payment, as the
+      // hotel's decline takes them: every lock is held before Stripe is called, so a lock
+      // conflict can only fail before the hold is cancelled.
       await client.query(
         "SELECT 1 FROM booking.guest_bookings WHERE id=$1::uuid AND property_id=$2::uuid FOR NO KEY UPDATE",
         [booking.guestBookingId, property.propertyId],
       );
+      await lockPmsInventoryMutationScope(client, property.propertyId);
       try {
         await voidPricingCardPayment(client, cardPayments, {
           propertyId: property.propertyId,
           guestBookingId: booking.guestBookingId,
           occurredAt: context.occurredAt,
+          commandKey: context.idempotencyKey,
         });
       } catch (error) {
         if (!(error instanceof PricingCardPaymentError)) throw error;
