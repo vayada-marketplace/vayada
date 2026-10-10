@@ -217,7 +217,12 @@ export type ApiConfig = {
   pmsOperationsAllowedOrigins: string[];
   financialsActivationPropertyIds: string[];
   bookingWebEventSink: BookingWebEventSink;
-  replacementPricingAcceptanceAllowedSlugs: string[];
+  /** Kill switch for public quote acceptance; each hotel still needs a current publication
+   * and a single owning organization. */
+  replacementPricingAcceptanceEnabled: boolean;
+  /** Card quotes in public acceptance (Stripe). Off until confirmation, webhook and expiry
+   * handling for these bookings are live. */
+  replacementPricingCardAcceptanceEnabled: boolean;
   bookingHostBase?: string;
   platformMediaServing?: PlatformMediaServingConfig;
   platformMediaCleanupEnabled: boolean;
@@ -227,6 +232,14 @@ export type ApiConfig = {
   propertySetupDraftRetentionBatchSize: number;
   pmsInventoryPublicOfferRetryEnabled: boolean;
   pmsInventoryPublicOfferRetryIntervalMs: number;
+  /** Kill switch for the hourly calendar auto-open producer (VAY-2066); on by default. */
+  pmsCalendarAutoOpenSchedulerEnabled: boolean;
+  pmsCalendarAutoOpenSchedulerIntervalMs: number;
+  /** Kill switch for the hourly published-pricing freshness check (VAY-2088); on by default. */
+  pricingPublicationFreshnessCheckEnabled: boolean;
+  pricingPublicationFreshnessIntervalMs: number;
+  /** Recipient of the at-most-daily stale-pricing email; unset sends none (log line only). */
+  pricingPublicationFreshnessAlertEmail?: string;
   creatorPlatformConnections?: CreatorPlatformConnectionsConfig;
   providerWebhooks: ProviderWebhookConfig;
   airbnbImport?: ReturnType<typeof loadAirbnbImportConfig>;
@@ -365,14 +378,6 @@ function readOptionalCsvEnv(
         .map((entry) => entry.trim())
         .filter(Boolean)
     : defaultValue;
-}
-
-function readSlugAllowlistEnv(env: NodeJS.ProcessEnv, key: string): string[] {
-  const slugs = [...new Set(readOptionalCsvEnv(env, key).map((slug) => slug.toLowerCase()))];
-  if (slugs.length > 100 || slugs.some((slug) => !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug))) {
-    throw new Error(`${key} requires up to 100 canonical lowercase slugs`);
-  }
-  return slugs;
 }
 
 function readPropertyIdAllowlistEnv(env: NodeJS.ProcessEnv, key: string): string[] {
@@ -550,6 +555,37 @@ function readTimerIntervalEnv(env: NodeJS.ProcessEnv, key: string, defaultValue:
   if (value > 2_147_483_647) {
     throw new Error(`${key} must not exceed 2147483647`);
   }
+  return value;
+}
+
+// Each run scans every enabled property, so it never repeats more often than once a minute.
+function readCalendarAutoOpenSchedulerIntervalEnv(env: NodeJS.ProcessEnv): number {
+  const key = "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_INTERVAL_MS";
+  const value = readTimerIntervalEnv(env, key, 60 * 60 * 1000);
+  if (value < 60_000) throw new Error(`${key} must be at least 60000`);
+  return value;
+}
+
+// One recipient; the email goes through the booking email provider and sender.
+function readPricingPublicationFreshnessAlertEmail(
+  env: NodeJS.ProcessEnv,
+  emailConfigured: boolean,
+): string | undefined {
+  const key = "PRICING_PUBLICATION_FRESHNESS_ALERT_EMAIL";
+  const value = readOptionalEnv(env, key);
+  if (!value) return undefined;
+  if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(value)) {
+    throw new Error(`${key} must be one email address`);
+  }
+  if (!emailConfigured) throw new Error(`${key} requires RESEND_API_KEY and BOOKING_EMAIL_FROM`);
+  return value;
+}
+
+// Each run briefly locks every published property in turn, so it never repeats within ten minutes.
+function readPricingPublicationFreshnessIntervalEnv(env: NodeJS.ProcessEnv): number {
+  const key = "PRICING_PUBLICATION_FRESHNESS_INTERVAL_MS";
+  const value = readTimerIntervalEnv(env, key, 60 * 60 * 1000);
+  if (value < 600_000) throw new Error(`${key} must be at least 600000`);
   return value;
 }
 
@@ -1338,9 +1374,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "PMS_FINANCIALS_ACTIVATION_PROPERTY_IDS",
     ),
     bookingWebEventSink,
-    replacementPricingAcceptanceAllowedSlugs: readSlugAllowlistEnv(
+    replacementPricingAcceptanceEnabled: readBooleanEnv(
       env,
-      "REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS",
+      "REPLACEMENT_PRICING_ACCEPTANCE_ENABLED",
+      true,
+    ),
+    replacementPricingCardAcceptanceEnabled: readBooleanEnv(
+      env,
+      "REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED",
     ),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
     platformMediaServing,
@@ -1374,6 +1415,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       env,
       "PMS_INVENTORY_PUBLIC_OFFER_RETRY_INTERVAL_MS",
       30_000,
+    ),
+    pmsCalendarAutoOpenSchedulerEnabled: readBooleanEnv(
+      env,
+      "PMS_CALENDAR_AUTO_OPEN_SCHEDULER_ENABLED",
+      true,
+    ),
+    pmsCalendarAutoOpenSchedulerIntervalMs: readCalendarAutoOpenSchedulerIntervalEnv(env),
+    pricingPublicationFreshnessCheckEnabled: readBooleanEnv(
+      env,
+      "PRICING_PUBLICATION_FRESHNESS_CHECK_ENABLED",
+      true,
+    ),
+    pricingPublicationFreshnessIntervalMs: readPricingPublicationFreshnessIntervalEnv(env),
+    pricingPublicationFreshnessAlertEmail: readPricingPublicationFreshnessAlertEmail(
+      env,
+      Boolean(bookingEmailDelivery),
     ),
     creatorPlatformConnections,
     providerWebhooks: prospectiveConfig.providerWebhooks,

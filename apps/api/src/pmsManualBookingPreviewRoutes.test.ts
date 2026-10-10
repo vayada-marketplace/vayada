@@ -237,6 +237,41 @@ describe("target manual-booking preview", () => {
       "pricing_not_published",
     ]);
   });
+
+  // VAY-2065: the client cannot know the currency of a room type from the room-facts flow, so a
+  // custom rate may omit it and takes the resolved one; a sent currency must still match.
+  it("prices a custom rate without a currency in the resolved currency", async () => {
+    const custom = command();
+    custom.stays = [{ ...custom.stays[1], position: 1 }];
+    custom.stays[0].pricing = { kind: "custom", nightlyAmount: { amountDecimal: "80" } };
+    custom.addOns = [];
+    app = await testApp({
+      reads: [],
+      unpublished: true,
+      roomTypeCurrency: null,
+      propertyCurrency: "CHF",
+    });
+    const property = await request(app, custom);
+    expect([property.statusCode, property.json().currency]).toEqual([200, "CHF"]);
+    expect(property.json().stays[0].appliedTotal).toEqual({
+      amountDecimal: "160.00",
+      currency: "CHF",
+    });
+    await app.close();
+
+    app = await testApp({ reads: [], currency: "USD", amountsMinor: ["10000"] });
+    const published = await request(app, custom);
+    expect([published.statusCode, published.json().currency]).toEqual([200, "USD"]);
+    custom.stays[0].pricing = {
+      kind: "custom",
+      nightlyAmount: { amountDecimal: "80", currency: "EUR" },
+    };
+    const mismatch = await request(app, custom);
+    expect([mismatch.statusCode, mismatch.json().code]).toEqual([422, "currency_mismatch"]);
+    custom.stays[0].pricing = { kind: "rate_plan", manualOverride: { amountDecimal: "80" } };
+    custom.stays[0].ratePlanId = "flex";
+    expect((await request(app, custom)).json().code).toBe("invalid_body");
+  });
 });
 
 async function testApp(state: State, auth: Auth = {}) {

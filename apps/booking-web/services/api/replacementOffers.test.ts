@@ -83,7 +83,9 @@ it("formats accounting units without float rounding or ICU zero-decimal shortcut
   expect(displayQuoteMoney("9007199254740993", "EUR")).toBe("EUR 90071992547409.93");
   expect(displayQuoteMoney("1", "JPY")).toBe("JPY 1");
   expect(displayQuoteMoney("1", "KWD")).toBe("KWD 0.001");
-  expect(displayQuoteMoney("10800", "IDR")).toBe("IDR 108.00");
+  expect(displayQuoteMoney("10800", "IDR")).toBe("IDR 108");
+  expect(displayQuoteMoney("150000000", "IDR")).toBe("IDR 1500000");
+  expect(displayQuoteMoney("150000050", "IDR")).toBe("IDR 1500001"); // half-up display only
 });
 
 it("sends the entered promo with the exact selection and clears it explicitly", () => {

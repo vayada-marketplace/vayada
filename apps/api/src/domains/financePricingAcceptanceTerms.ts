@@ -72,8 +72,7 @@ export async function lockFinancePricingAcceptanceTerms(client: PoolClient, slug
   if (
     !latestScope ||
     latestScope.propertyId !== scope.propertyId ||
-    latestScope.organizationId !== scope.organizationId ||
-    latestScope.authorityRevision !== scope.authorityRevision
+    latestScope.organizationId !== scope.organizationId
   )
     return null;
   const captured = (await client.query("SELECT clock_timestamp() AS now")).rows[0]?.now;
