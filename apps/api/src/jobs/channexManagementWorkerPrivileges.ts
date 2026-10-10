@@ -8,8 +8,6 @@ export const CHANNEX_MANAGEMENT_WORKER_ROLE = "vayada_next_channex_management_wo
 export const channexManagementWorkerPrivileges: Record<string, Record<string, true | string[]>> = {
   "platform.channex_management_worker_properties": { SELECT: true },
   "platform.channex_management_worker_operations": { SELECT: true },
-  // VAY-2108 (0479): the claimed scope's owner-managed operations.
-  "platform.channex_management_worker_claimed_operations": { SELECT: true },
   "platform.external_webhook_events": { SELECT: ["id", "provider"] },
   "platform.jobs": { SELECT: true, INSERT: ["job_key", "queue_name", "job_type", "max_attempts", "tenant_scope", "property_id", "resource_product", "resource_type", "resource_id", "payload", "job_metadata"], UPDATE: ["status", "attempts_count", "max_attempts", "run_after", "locked_at", "locked_by", "finished_at", "updated_at", "job_metadata"] },
   "platform.job_attempts": { SELECT: true, INSERT: ["job_id", "attempt_number", "status", "worker_id", "started_at", "error_metadata"], UPDATE: ["status", "finished_at", "error_type", "error_message", "retry_after", "error_metadata"] },

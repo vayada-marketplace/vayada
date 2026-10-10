@@ -165,7 +165,6 @@ export async function assertChannexManagementWorkerBoundary(
     if (
       name !== "platform.channex_management_worker_properties" &&
       name !== "platform.channex_management_worker_operations" &&
-      name !== "platform.channex_management_worker_claimed_operations" &&
       name !== "finance.online_card_readiness" &&
       !relations.find((row) => row.name === name)?.rls
     )
@@ -214,8 +213,8 @@ export async function assertChannexManagementWorkerBoundary(
     if (rows.length !== 1 || rows[0].operation_type !== "enable") fail("operation_scope_mismatch");
   }
   // VAY-2108: the claimed scope is exactly ARI plus published-offer provisioning; without it the
-  // owner table stays empty. Before the claimed grant the worker cannot read it, and the claimed
-  // helper then grants nothing.
+  // owner table stays empty. Its SELECT comes from the platform's claimed grant, never the matrix
+  // (the worker preflight gates every next-api start); without it the claimed helper grants nothing.
   const readable = (
     await client.query(
       "SELECT has_table_privilege('platform.channex_management_worker_claimed_operations','SELECT') AS ok",

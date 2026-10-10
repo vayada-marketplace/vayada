@@ -706,10 +706,17 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
         [claimedJob, unclaimedJob],
       ]);
     const claimedTable = "platform.channex_management_worker_claimed_operations";
+    const boundary = async (claimedScope: boolean) => {
+      const client = await pool.connect();
+      try {
+        await assertChannexManagementWorkerBoundary(client, { propertyId: property, claimedScope });
+      } finally {
+        client.release();
+      }
+    };
     try {
-      // Before the claimed grant the worker cannot read the owner table: its scans still work and
-      // nothing claimed is visible, even with operations admitted.
-      await owner.query(`REVOKE SELECT ON ${claimedTable} FROM ${role}`);
+      // The matrix never grants the owner table: until the platform's claimed grant the worker
+      // cannot read it, its scans still work and nothing claimed is visible, even with operations.
       await owner.query(`INSERT INTO ${claimedTable} VALUES('sync_ari'),('provision')`);
       expect(await jobs()).toEqual([]);
       expect(
@@ -718,9 +725,11 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
           [ids],
         ),
       ).toEqual([]);
+      await boundary(false);
+      await expect(boundary(true)).rejects.toThrow("channex_worker_claimed_scope_mismatch");
       await owner.query(`DELETE FROM ${claimedTable}`);
+      // The claimed grant: SELECT outside the matrix. Nothing is admitted until the operations.
       await owner.query(`GRANT SELECT ON ${claimedTable} TO ${role}`);
-      // Nothing is admitted until the owner adds the claimed operations.
       expect(await jobs()).toEqual([]);
       expect(
         await rows("SELECT id::text FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])", [
@@ -733,15 +742,7 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
       await owner.query(
         "INSERT INTO platform.channex_management_worker_claimed_operations VALUES('sync_ari'),('provision')",
       );
-      const client = await pool.connect();
-      try {
-        await assertChannexManagementWorkerBoundary(client, {
-          propertyId: property,
-          claimedScope: true,
-        });
-      } finally {
-        client.release();
-      }
+      await boundary(true);
       expect(await jobs()).toEqual([claimedJob]);
       expect(
         await rows("SELECT id::text FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])", [
@@ -756,7 +757,7 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
       ).toEqual([claimed]);
     } finally {
       await owner.query(`DELETE FROM ${claimedTable}`);
-      await owner.query(`GRANT SELECT ON ${claimedTable} TO ${role}`);
+      await owner.query(`REVOKE SELECT ON ${claimedTable} FROM ${role}`);
     }
   });
 });
