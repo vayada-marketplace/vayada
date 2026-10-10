@@ -181,6 +181,13 @@ type PmsOperationalAssignment = {
   ratePlanId: string | null;
   pricingOfferId?: string | null; // published pricing-v2 offer; rate_plan_id is empty for those (VAY-1422)
   childAgesAtCheckIn?: number[] | null; // recorded child ages, when known (VAY-1422)
+  // Cancellation terms of the offer a manual stay was booked on, read at its stored publication
+  // revision; null for custom rates and other sources. Only the single-reservation read fills it;
+  // list and calendar reads return null (VAY-2089).
+  bookedCancellation?:
+    | { kind: "non_refundable" }
+    | { kind: "flexible"; terms: FlexibleCancellationTerms }
+    | null;
   roomId: string | null;
   roomNumber: string | null;
   position: number;
