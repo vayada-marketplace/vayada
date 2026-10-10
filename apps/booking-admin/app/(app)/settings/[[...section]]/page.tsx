@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { BookDirectBenefitsPage } from "@/components/settings/BookDirectBenefitsPage";
 import { SettingsIndex } from "@/components/settings/SettingsIndex";
 import SettingsSectionPage from "@/components/settings/SettingsSectionPage";
 import { isSettingsPage } from "@/lib/utils/settingsSectionUrl";
@@ -12,6 +13,8 @@ export default async function SettingsRoute({
   const { section } = await params;
   if (!section) return <SettingsIndex />;
   const [page, ...rest] = section;
-  if (rest.length > 0 || !isSettingsPage(page)) notFound();
+  if (rest.length > 0) notFound();
+  if (page === "book-direct-benefits") return <BookDirectBenefitsPage />;
+  if (!isSettingsPage(page)) notFound();
   return <SettingsSectionPage section={page} />;
 }

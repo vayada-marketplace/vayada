@@ -8,16 +8,26 @@ import {
   type AddonEditorValues,
 } from "@vayada/product-onboarding/AddonEditor";
 import Link from "next/link";
-import { PlusIcon, PencilSquareIcon, TrashIcon } from "@heroicons/react/24/outline";
+import {
+  DocumentDuplicateIcon,
+  MagnifyingGlassIcon,
+  PencilIcon,
+  PhotoIcon,
+  PlusIcon,
+  TrashIcon,
+} from "@heroicons/react/24/outline";
 import { ToggleSwitch } from "@/components/ui";
 import type { AddonItem, AddonSettings } from "@/services/settings";
-import { formatCurrency } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
 
-const CATEGORY_COLORS: Record<string, string> = {
-  transport: "bg-blue-100 text-blue-700",
-  wellness: "bg-purple-100 text-purple-700",
-  dining: "bg-orange-100 text-orange-700",
-  experience: "bg-green-100 text-green-700",
+// The redesign's filter chips; "other" appears only when an add-on uses it.
+const FILTER_CATEGORIES = ["dining", "transport", "wellness", "experience"];
+
+const PRICING_MODEL_LABELS: Record<string, string> = {
+  "false:false": "addons.editor.flatFee",
+  "true:false": "addons.editor.perPerson",
+  "false:true": "addons.editor.perNight",
+  "true:true": "addons.editor.perPersonNight",
 };
 
 export type AddonItemFormValues = AddonEditorValues;
@@ -87,10 +97,11 @@ interface AddonsTabProps {
     limits: { maxAddons: number };
   };
   handleToggleAddonSetting: (key: keyof AddonSettings) => void;
-  onCreateAddon: (values: AddonItemFormValues) => Promise<void>;
+  onCreateAddon: (values: AddonItemFormValues, options?: { hidden?: boolean }) => Promise<void>;
   onUpdateAddon: (addonId: string, values: AddonItemFormValues) => Promise<void>;
   onDeleteAddon: (addonId: string) => Promise<void>;
   onReorderAddon: (sourceAddonId: string, targetAddonId: string) => Promise<void>;
+  onToggleAddonLive: (addon: AddonItem) => Promise<void>;
 }
 
 export default function AddonsTab({
@@ -103,23 +114,31 @@ export default function AddonsTab({
   onUpdateAddon,
   onDeleteAddon,
   onReorderAddon,
+  onToggleAddonLive,
 }: AddonsTabProps) {
   const { t, locale } = useTranslation();
   const [filterCategory, setFilterCategory] = useState("all");
+  const [search, setSearch] = useState("");
   const [draft, setDraft] = useState<AddonItemFormValues>(() => emptyAddonValues(propertyCurrency));
   const [editingAddon, setEditingAddon] = useState<AddonItem | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [savingItem, setSavingItem] = useState(false);
-  const [deletingAddonId, setDeletingAddonId] = useState<string | null>(null);
+  const [busyAddonId, setBusyAddonId] = useState<string | null>(null);
   const [itemError, setItemError] = useState<string | null>(null);
   const [draggingAddonId, setDraggingAddonId] = useState<string | null>(null);
   const orderedAddons = orderAddons(addons);
-  const categories = Array.from(new Set(orderedAddons.map((a) => a.category).filter(Boolean)));
-  const filteredAddons =
-    filterCategory === "all"
-      ? orderedAddons
-      : orderedAddons.filter((a) => a.category === filterCategory);
-  const canReorder = filterCategory === "all" && orderedAddons.length > 1;
+  const categories = [
+    ...FILTER_CATEGORIES,
+    ...(addons.some((addon) => addon.category === "other") ? ["other"] : []),
+  ];
+  const query = search.trim().toLocaleLowerCase();
+  const filteredAddons = orderedAddons.filter(
+    (addon) =>
+      (filterCategory === "all" || addon.category === filterCategory) &&
+      (!query || `${addon.name} ${addon.description}`.toLocaleLowerCase().includes(query)),
+  );
+  const canReorder = filterCategory === "all" && !query && orderedAddons.length > 1;
+  const liveCount = addons.filter((addon) => addon.live !== false).length;
   const maxAddons = propertyPlan.limits.maxAddons;
   const addonLimitReached = addons.length >= maxAddons;
   const addonLimitMessage =
@@ -162,17 +181,42 @@ export default function AddonsTab({
     }
   };
 
-  const handleDelete = async (addon: AddonItem) => {
-    if (!window.confirm(t("admin.deleteName", { name: addon.name }))) return;
-    setDeletingAddonId(addon.id);
+  const runRowAction = async (addon: AddonItem, action: () => Promise<void>) => {
+    setBusyAddonId(addon.id);
     setItemError(null);
     try {
-      await onDeleteAddon(addon.id);
-    } catch {
-      setItemError(t("admin.failedToDeleteAddOn"));
+      await action();
     } finally {
-      setDeletingAddonId(null);
+      setBusyAddonId(null);
     }
+  };
+
+  const handleDelete = (addon: AddonItem) => {
+    if (!window.confirm(t("admin.deleteName", { name: addon.name }))) return;
+    void runRowAction(addon, () =>
+      onDeleteAddon(addon.id).catch(() => setItemError(t("admin.failedToDeleteAddOn"))),
+    );
+  };
+
+  // The copy starts hidden so guests never see it before the host edits it. Imported photos
+  // without a media object can't be attached to a new add-on, so it keeps only uploaded ones.
+  const handleDuplicate = (addon: AddonItem) => {
+    const values = toDraft(addon, propertyCurrency);
+    const photos = values.photos.filter((photo) => photo.mediaObjectId);
+    const keepsCover = photos.some((photo) => photo.isCover);
+    void runRowAction(addon, () =>
+      onCreateAddon(
+        {
+          ...values,
+          name: t("addons.list.copyName", { name: addon.name }),
+          photos: photos.map((photo, index) => ({
+            ...photo,
+            isCover: keepsCover ? photo.isCover : index === 0,
+          })),
+        },
+        { hidden: true },
+      ).catch(() => undefined),
+    );
   };
 
   const handleDragStart = (event: DragEvent<HTMLButtonElement>, addonId: string) => {
@@ -186,14 +230,14 @@ export default function AddonsTab({
     event.dataTransfer.setData("text/plain", addonId);
   };
 
-  const handleDragOver = (event: DragEvent<HTMLDivElement>, targetAddonId: string) => {
+  const handleDragOver = (event: DragEvent<HTMLLIElement>, targetAddonId: string) => {
     const sourceAddonId = draggingAddonId || event.dataTransfer.getData("text/plain");
     if (!canReorder || !sourceAddonId || sourceAddonId === targetAddonId) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
   };
 
-  const handleDrop = async (event: DragEvent<HTMLDivElement>, targetAddonId: string) => {
+  const handleDrop = async (event: DragEvent<HTMLLIElement>, targetAddonId: string) => {
     event.preventDefault();
     const sourceAddonId = event.dataTransfer.getData("text/plain") || draggingAddonId;
     setDraggingAddonId(null);
@@ -207,210 +251,277 @@ export default function AddonsTab({
     }
   };
 
+  const chipClass = (active: boolean) =>
+    cn(
+      "rounded-full border px-3.5 py-1.5 text-[13px] transition-colors",
+      active
+        ? "border-primary-500 bg-primary-50 text-primary-700"
+        : "border-gray-200 bg-white text-gray-600 hover:border-gray-300",
+    );
+  const iconButtonClass =
+    "rounded-lg border border-gray-200 bg-white p-2 text-gray-600 hover:bg-gray-50 hover:text-gray-900 disabled:opacity-50";
+
   return (
-    <div className="max-w-2xl space-y-4">
-      {/* Guest Experiences */}
-      <div className="bg-white rounded-lg border border-gray-200 p-5">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 className="text-[14px] font-semibold text-gray-900">
-              {t("bookingFlow.addons.title")}
-            </h2>
-            <p className="text-[12px] text-gray-500 mt-0.5">{t("bookingFlow.addons.subtitle")}</p>
-          </div>
-          <button
-            onClick={openCreateEditor}
-            disabled={addonLimitReached}
-            className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-900 text-white text-[12px] font-medium rounded-lg hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <PlusIcon className="w-3.5 h-3.5" />
-            {t("bookingFlow.addons.addExperience")}
-          </button>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">
+            {t("bookingFlow.tabs.addons")}
+          </h1>
+          <p className="mt-1 text-[13px] text-gray-500">
+            {t(addons.length === 1 ? "addons.list.summaryOne" : "addons.list.summary", {
+              count: addons.length,
+              live: liveCount,
+              currency: propertyCurrency,
+            })}
+          </p>
         </div>
+        <button
+          onClick={openCreateEditor}
+          disabled={addonLimitReached}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2 text-[13px] font-medium text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <PlusIcon className="h-4 w-4" />
+          {t("addons.list.new")}
+        </button>
+      </div>
 
-        <div className="mb-4 flex items-center justify-between gap-3 text-[12px]">
-          <span className="text-gray-500">
-            {addons.length}/{maxAddons} {t("admin.addOns")}
-          </span>
-        </div>
-
-        {addonLimitReached && (
-          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
-            <p>{addonLimitMessage}</p>
-            {propertyPlan.plan === "commission" && (
-              <Link
-                href="/settings/billing"
-                className="mt-1 inline-block font-semibold underline underline-offset-2"
-              >
-                {t("admin.upgradeToOfferUpTo9AddOnsAndIncrease")}
-              </Link>
-            )}
-          </div>
-        )}
-
-        {itemError && (
-          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
-            {itemError}
-          </div>
-        )}
-
-        {/* Category filter pills */}
-        {categories.length > 1 && (
-          <div className="flex items-center gap-1.5 mb-4 flex-wrap">
-            <button
-              onClick={() => setFilterCategory("all")}
-              className={`px-3 py-1 rounded-full text-[11px] font-medium border transition-colors ${filterCategory === "all" ? "border-gray-900 text-gray-900 bg-gray-50" : "border-gray-200 text-gray-500 hover:border-gray-300"}`}
+      {addonLimitReached && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+          <p>
+            {addonLimitMessage} ({addons.length}/{maxAddons} {t("admin.addOns")})
+          </p>
+          {propertyPlan.plan === "commission" && (
+            <Link
+              href="/settings/billing"
+              className="mt-1 inline-block font-semibold underline underline-offset-2"
             >
-              {t("admin.all")}
-              {addons.length})
-            </button>
-            {categories.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setFilterCategory(cat)}
-                className={`px-3 py-1 rounded-full text-[11px] font-medium border transition-colors ${filterCategory === cat ? "border-gray-900 text-gray-900 bg-gray-50" : "border-gray-200 text-gray-500 hover:border-gray-300"}`}
-              >
-                {t(`addons.category.${cat}`)} ({addons.filter((a) => a.category === cat).length})
-              </button>
-            ))}
-          </div>
-        )}
+              {t("admin.upgradeToOfferUpTo9AddOnsAndIncrease")}
+            </Link>
+          )}
+        </div>
+      )}
 
-        {addons.length === 0 ? (
-          <div className="bg-gray-50 rounded-lg border border-dashed border-gray-300 p-6 text-center">
-            <div className="w-10 h-10 bg-gray-200 rounded-full mx-auto flex items-center justify-center mb-2">
-              <AddonsIcon className="w-5 h-5 text-gray-400" />
-            </div>
-            <p className="text-[13px] font-medium text-gray-600">
-              {t("bookingFlow.addons.noAddons")}
-            </p>
-            <p className="text-[12px] text-gray-400 mt-0.5">
-              {t("bookingFlow.addons.noAddonsDesc")}
-            </p>
+      {itemError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
+          {itemError}
+        </div>
+      )}
+
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <label className="relative block lg:w-80 lg:shrink-0">
+          <span className="sr-only">{t("addons.list.search")}</span>
+          <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={t("addons.list.search")}
+            className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-9 pr-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500"
+          />
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            aria-pressed={filterCategory === "all"}
+            onClick={() => setFilterCategory("all")}
+            className={chipClass(filterCategory === "all")}
+          >
+            {t("addons.list.all")}
+          </button>
+          {categories.map((category) => (
+            <button
+              key={category}
+              type="button"
+              aria-pressed={filterCategory === category}
+              onClick={() => setFilterCategory(category)}
+              className={chipClass(filterCategory === category)}
+            >
+              {t(`addons.category.${category}`)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {addons.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center">
+          <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-gray-100">
+            <AddonsIcon className="h-5 w-5 text-gray-400" />
           </div>
-        ) : (
-          <div className="space-y-2">
-            {filteredAddons.map((addon) => (
-              <div
+          <p className="text-[13px] font-medium text-gray-600">
+            {t("bookingFlow.addons.noAddons")}
+          </p>
+          <p className="mt-0.5 text-[12px] text-gray-400">{t("bookingFlow.addons.noAddonsDesc")}</p>
+        </div>
+      ) : filteredAddons.length === 0 ? (
+        <p className="rounded-2xl border border-gray-200 bg-white p-6 text-center text-[13px] text-gray-500">
+          {t("addons.list.noMatches")}
+        </p>
+      ) : (
+        <ul className="space-y-3">
+          {filteredAddons.map((addon) => {
+            const photoCount = addon.photos?.length ?? (addon.image ? 1 : 0);
+            const live = addon.live !== false;
+            return (
+              <li
                 key={addon.id}
                 data-testid={`booking-addon-item-${addon.id}`}
                 onDragOver={(event) => handleDragOver(event, addon.id)}
                 onDrop={(event) => handleDrop(event, addon.id)}
-                className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
-                  draggingAddonId === addon.id
-                    ? "border-gray-400 bg-gray-50"
-                    : "border-gray-200 hover:border-gray-300"
-                }`}
-              >
-                <button
-                  type="button"
-                  aria-label={t("admin.dragName", { name: addon.name })}
-                  title={
-                    canReorder
-                      ? t("admin.dragToReorder")
-                      : t("admin.reorderingIsAvailableInAllView")
-                  }
-                  draggable={canReorder}
-                  disabled={!canReorder}
-                  onDragStart={(event) => handleDragStart(event, addon.id)}
-                  onDragEnd={() => setDraggingAddonId(null)}
-                  className={`text-gray-300 shrink-0 rounded p-1 ${
-                    canReorder
-                      ? "cursor-grab hover:text-gray-500 active:cursor-grabbing"
-                      : "cursor-not-allowed opacity-50"
-                  }`}
-                >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                    <circle cx="9" cy="6" r="1.5" />
-                    <circle cx="15" cy="6" r="1.5" />
-                    <circle cx="9" cy="12" r="1.5" />
-                    <circle cx="15" cy="12" r="1.5" />
-                    <circle cx="9" cy="18" r="1.5" />
-                    <circle cx="15" cy="18" r="1.5" />
-                  </svg>
-                </button>
-
-                {/* Image thumbnail */}
-                {addon.image ? (
-                  <img
-                    src={addon.image}
-                    alt={addon.name}
-                    className="w-10 h-10 rounded-md object-cover shrink-0"
-                  />
-                ) : (
-                  <div className="w-10 h-10 rounded-md bg-gray-100 flex items-center justify-center shrink-0">
-                    <AddonsIcon className="w-4 h-4 text-gray-400" />
-                  </div>
+                className={cn(
+                  "flex flex-col gap-4 rounded-2xl border bg-white p-4 transition-colors sm:flex-row sm:items-start md:p-5",
+                  draggingAddonId === addon.id ? "border-gray-400" : "border-gray-200",
                 )}
-
-                {/* Name and category */}
-                <div className="flex-1 min-w-0">
-                  <p
-                    data-testid="booking-addon-item-name"
-                    className="text-[13px] font-medium text-gray-900 truncate"
-                  >
-                    {addon.name}
-                  </p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span
-                      className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${CATEGORY_COLORS[addon.category] || "bg-gray-100 text-gray-600"}`}
-                    >
-                      {t(`addons.category.${addon.category}`)}
-                    </span>
-                    {addon.duration && (
-                      <span className="text-[11px] text-gray-400">{addon.duration}</span>
+              >
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <button
+                    type="button"
+                    aria-label={t("admin.dragName", { name: addon.name })}
+                    title={
+                      canReorder
+                        ? t("admin.dragToReorder")
+                        : t("admin.reorderingIsAvailableInAllView")
+                    }
+                    draggable={canReorder}
+                    disabled={!canReorder}
+                    onDragStart={(event) => handleDragStart(event, addon.id)}
+                    onDragEnd={() => setDraggingAddonId(null)}
+                    className={cn(
+                      "mt-6 shrink-0 rounded p-0.5 text-gray-300",
+                      canReorder
+                        ? "cursor-grab hover:text-gray-500 active:cursor-grabbing"
+                        : "cursor-not-allowed opacity-50",
                     )}
-                    <span className="text-[11px] text-gray-400">
-                      {addon.ownershipKind === "partner"
-                        ? t("admin.partnerRate", { rate: addon.partnerCommissionRate ?? "" })
-                        : t("admin.own")}
-                    </span>
+                  >
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                      <circle cx="9" cy="6" r="1.5" />
+                      <circle cx="15" cy="6" r="1.5" />
+                      <circle cx="9" cy="12" r="1.5" />
+                      <circle cx="15" cy="12" r="1.5" />
+                      <circle cx="9" cy="18" r="1.5" />
+                      <circle cx="15" cy="18" r="1.5" />
+                    </svg>
+                  </button>
+
+                  <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-center text-[12px] text-gray-600">
+                    {photoCount > 0 ? (
+                      t(photoCount === 1 ? "addons.list.onePhoto" : "addons.list.photos", {
+                        count: photoCount,
+                      })
+                    ) : (
+                      <PhotoIcon className="h-6 w-6 text-gray-500" aria-hidden="true" />
+                    )}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p
+                        data-testid="booking-addon-item-name"
+                        className="text-[15px] font-semibold text-gray-900"
+                      >
+                        {addon.name}
+                      </p>
+                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600">
+                        {t(`addons.category.${addon.category}`)}
+                      </span>
+                      {!live && (
+                        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500">
+                          {t("addons.list.hidden")}
+                        </span>
+                      )}
+                    </div>
+                    {addon.description && (
+                      <p className="mt-1 line-clamp-2 text-[13px] text-gray-600">
+                        {addon.description}
+                      </p>
+                    )}
+                    <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-gray-500">
+                      <li className="font-semibold text-gray-900">
+                        {formatCurrency(addon.price, propertyCurrency, locale, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </li>
+                      <li>
+                        {t(
+                          PRICING_MODEL_LABELS[
+                            `${addon.perPerson === true}:${addon.perNight === true}`
+                          ]!,
+                        )}
+                      </li>
+                      {addon.maxQuantity != null && (
+                        <li>{t("addons.list.maxPerBooking", { count: addon.maxQuantity })}</li>
+                      )}
+                      {addon.duration && <li>{addon.duration}</li>}
+                      {addon.leadTime && <li>{addon.leadTime}</li>}
+                      {addon.ownershipKind === "partner" && (
+                        <li>
+                          {t("admin.partnerRate", { rate: addon.partnerCommissionRate ?? "" })}
+                        </li>
+                      )}
+                    </ul>
                   </div>
                 </div>
 
-                {/* Price */}
-                <div className="text-right shrink-0">
-                  <p className="text-[13px] font-semibold text-gray-900">
-                    {formatCurrency(addon.price, propertyCurrency, locale, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </p>
-                  {addon.perPerson && (
-                    <p className="text-[10px] text-gray-400">{t("bookingFlow.addons.perPerson")}</p>
-                  )}
-                </div>
-
-                {/* Actions */}
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="flex items-center gap-2 sm:shrink-0">
                   <button
+                    type="button"
+                    role="switch"
+                    aria-checked={live}
+                    aria-label={t("addons.list.showOnBookingEngine", { name: addon.name })}
+                    disabled={busyAddonId === addon.id}
+                    onClick={() => void runRowAction(addon, () => onToggleAddonLive(addon))}
+                    className={cn(
+                      "relative mr-1 h-6 w-11 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 disabled:opacity-60",
+                      live ? "bg-primary-600" : "bg-gray-200",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform",
+                        live && "translate-x-5",
+                      )}
+                    />
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => openEditEditor(addon)}
                     aria-label={t("admin.editName", { name: addon.name })}
-                    className="p-1.5 text-gray-500 hover:text-gray-900 rounded-md hover:bg-gray-100"
+                    className={iconButtonClass}
                   >
-                    <PencilSquareIcon className="w-4 h-4" />
+                    <PencilIcon className="h-4 w-4" />
                   </button>
                   <button
-                    onClick={() => handleDelete(addon)}
-                    disabled={deletingAddonId === addon.id}
-                    aria-label={t("admin.deleteName2", { name: addon.name })}
-                    className="p-1.5 text-gray-500 hover:text-red-600 rounded-md hover:bg-red-50 disabled:opacity-50"
+                    type="button"
+                    onClick={() => handleDuplicate(addon)}
+                    disabled={addonLimitReached || busyAddonId === addon.id}
+                    aria-label={t("addons.list.duplicate", { name: addon.name })}
+                    className={iconButtonClass}
                   >
-                    <TrashIcon className="w-4 h-4" />
+                    <DocumentDuplicateIcon className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(addon)}
+                    disabled={busyAddonId === addon.id}
+                    aria-label={t("admin.deleteName2", { name: addon.name })}
+                    className={cn(iconButtonClass, "hover:bg-red-50 hover:text-red-600")}
+                  >
+                    <TrashIcon className="h-4 w-4" />
                   </button>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
 
       {/* Display Settings */}
-      <div className="bg-white rounded-lg border border-gray-200 p-5">
+      <div className="rounded-2xl border border-gray-200 bg-white p-5">
         <h2 className="text-[14px] font-semibold text-gray-900">
           {t("bookingFlow.addons.displaySettings")}
         </h2>
-        <p className="text-[12px] text-gray-500 mt-0.5 mb-4">
+        <p className="mb-4 mt-0.5 text-[12px] text-gray-500">
           {t("bookingFlow.addons.displaySettingsDesc")}
         </p>
 
