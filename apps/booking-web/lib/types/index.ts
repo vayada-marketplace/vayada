@@ -48,7 +48,8 @@ export interface Hotel {
   country: string;
   starRating: number;
   currency: string;
-  supportedCurrencies: string[];
+  /** Display-only currencies a guest may switch to, the hotel currency first. */
+  displayCurrencies: string[];
   heroImage: string;
   images: string[];
   amenities: string[];

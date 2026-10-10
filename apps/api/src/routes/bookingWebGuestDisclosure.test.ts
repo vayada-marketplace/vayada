@@ -81,7 +81,13 @@ afterEach(async () => {
   await app?.close();
 });
 const stripeProvider = { createPaymentIntent: vi.fn() } as never;
-async function mount(available = true, acceptance = false, affiliateBinding = false, card = false) {
+async function mount(
+  available = true,
+  acceptance = false,
+  affiliateBinding = false,
+  card = false,
+  request = false,
+) {
   app = Fastify({ logger: false });
   const checkoutAdapter = available
     ? createTargetBookingWebCheckoutAdapter({
@@ -90,6 +96,7 @@ async function mount(available = true, acceptance = false, affiliateBinding = fa
         inventoryReservationPort: {} as never,
         replacementPricingAcceptanceEnabled: acceptance,
         replacementPricingCardAcceptanceEnabled: card,
+        replacementPricingRequestAcceptanceEnabled: request,
         stripePaymentProvider: stripeProvider,
         pool: { query, connect: async () => ({ query, release }), end: async () => {} } as never,
       })
@@ -193,6 +200,7 @@ it("binds the path and idempotency key before invoking enabled acceptance", asyn
     { slug: "hotel", command: payload },
     undefined,
     undefined,
+    false,
   );
   for (const [quoteId, requestId] of [
     ["33333333-3333-4333-8333-333333333333", "accept-1"],
@@ -227,9 +235,39 @@ it("passes the Stripe provider to the writer only when card acceptance is switch
       { slug: "hotel", command: payload },
       undefined,
       card ? { provider: stripeProvider } : undefined,
+      false,
     );
     await app.close();
   }
+});
+
+it("forwards the request switch and answers a refused request with 404", async () => {
+  const payload = { version: "booking-quote-acceptance.v1", requestId: "accept-1", quoteId: id };
+  const accept = () =>
+    app.inject({
+      method: "POST",
+      url: `/api/booking-web/hotels/hotel/bookings/quotes/${id}/accept`,
+      headers: { "idempotency-key": "accept-1" },
+      payload,
+    });
+  vi.mocked(writePricingAcceptance).mockResolvedValue({ kind: "requested" } as never);
+  await mount(true, true, false, false, true);
+  expect((await accept()).statusCode).toBe(200);
+  expect(writePricingAcceptance).toHaveBeenLastCalledWith(
+    expect.anything(),
+    { slug: "hotel", command: payload },
+    undefined,
+    undefined,
+    true,
+  );
+  await app.close();
+  vi.mocked(writePricingAcceptance).mockRejectedValue(
+    new PricingAcceptanceError("request_unavailable", null),
+  );
+  await mount(true, true);
+  const refused = await accept();
+  expect(refused.statusCode).toBe(404);
+  expect(refused.json()).toMatchObject({ code: "REQUEST_ACCEPTANCE_UNAVAILABLE" });
 });
 
 it("completes a card payment only when card acceptance is switched on", async () => {
@@ -298,6 +336,7 @@ it("takes a valid affiliate handle only from the cookie and verifies it before t
     { slug: "hotel", command: payload },
     { affiliateContextId: contextId },
     undefined,
+    false,
   );
 });
 
@@ -321,6 +360,7 @@ it("keeps affiliate cookie binding off by default even when a cookie is supplied
     { slug: "hotel", command: payload },
     undefined,
     undefined,
+    false,
   );
 });
 
@@ -347,6 +387,7 @@ it("ignores duplicate, invalid, or unavailable affiliate cookies without blockin
     { slug: "hotel", command: payload },
     undefined,
     undefined,
+    false,
   );
   vi.mocked(readBookingAffiliateContextForQuote).mockRejectedValue(
     new Error("storage unavailable"),
@@ -366,6 +407,7 @@ it("ignores duplicate, invalid, or unavailable affiliate cookies without blockin
     { slug: "hotel", command: payload },
     undefined,
     undefined,
+    false,
   );
 });
 it.each([

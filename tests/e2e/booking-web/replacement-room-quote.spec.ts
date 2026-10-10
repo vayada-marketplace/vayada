@@ -232,3 +232,86 @@ test("retries unavailable catalogue without inventing a room option", async ({
   await expect(page.getByText("Room options are currently unavailable.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Get price", exact: true })).toHaveCount(0);
 });
+
+test("keeps the charged currency first when the guest views prices in another currency", async ({
+  page,
+}) => {
+  await mockBookingApis(page, {
+    headerSettings: {
+      showContactButton: true,
+      showReferAGuestButton: false,
+      showLanguageSelector: true,
+      showCurrencySelector: true,
+    },
+  });
+  await page.route("**/pricing-offers", (route) =>
+    route.fulfill({
+      json: {
+        version: "public-pricing-offers.v1",
+        rooms: [
+          {
+            roomTypeId: "suite",
+            name: "Suite",
+            offers: [{ publicOfferKey: firstKey, currency: "EUR", mealPlan: "breakfast" }],
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/pricing-addons", (route) =>
+    route.fulfill({ json: { version: "public-pricing-addons.v1", addons: [] } }),
+  );
+  await page.route("**/bookings/quote", (route) => {
+    const { selection, paymentMethod } = route.request().postDataJSON();
+    return route.fulfill({
+      json: {
+        version: "public-booking-quote.v1",
+        quoteId: "11111111-1111-4111-8111-000000000009",
+        replayed: false,
+        checkIn: selection.checkIn,
+        checkOut: selection.checkOut,
+        currency: "EUR",
+        paymentMethod,
+        acceptanceMode: "instant",
+        issuedAt: new Date(Date.now() - 1000).toISOString(),
+        expiresAt: new Date(Date.now() + 600_000).toISOString(),
+        totalMinor: "31500",
+        dueNowMinor: "0",
+        dueLaterMinor: "31500",
+        lines: [
+          { kind: "room", selectionId: selection.rooms[0].selectionId, amountMinor: "31500" },
+        ],
+        rooms: selection.rooms.map((room: any) => ({
+          selectionId: room.selectionId,
+          mealPlan: "breakfast",
+          cancellation: { kind: "non_refundable" },
+          payment: { kind: "full", acceptedMethods: ["pay_at_property"] },
+        })),
+      },
+    });
+  });
+
+  await page.goto("/en");
+  const nav = page.locator("nav");
+  await nav.getByRole("button", { name: "EUR", exact: true }).click();
+  await nav.getByRole("button", { name: "$ US Dollar" }).click();
+  await expect(nav.getByRole("button", { name: "USD", exact: true })).toBeVisible();
+
+  await page.goto(`/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-10-01&checkOut=2026-10-03`);
+  await page.getByRole("button", { name: "Add room", exact: true }).click();
+  const room = page.getByRole("group", { name: "Room 1", exact: true });
+  await room.getByLabel("Room and meal option").selectOption(firstKey);
+  await room.getByLabel(/Adults/).fill("2");
+  await page.getByLabel("Payment preference").selectOption("pay_at_property");
+  await page.getByRole("button", { name: "Get price", exact: true }).click();
+
+  await expect(page.getByText("Total: EUR 315.00 (≈ US$347)", { exact: true })).toBeVisible();
+  await expect(page.getByText("Due later: EUR 315.00 (≈ US$347)", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("approximate-amounts-note")).toContainText(
+    "We charge in EUR. Amounts marked ≈ are approximate conversions.",
+  );
+  await expect(page.getByRole("link", { name: "Rates By Exchange Rate API" })).toHaveAttribute(
+    "href",
+    "https://www.exchangerate-api.com",
+  );
+});

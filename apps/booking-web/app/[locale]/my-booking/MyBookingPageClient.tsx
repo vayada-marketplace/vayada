@@ -2,6 +2,7 @@
 
 import { formatCheckInTime, formatCheckOutTime } from "@/lib/arrivalTimes";
 import { Link } from "@/i18n/navigation";
+import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
 import { useState, useEffect } from "react";
 import Image from "next/image";
@@ -338,6 +339,7 @@ export default function MyBookingPageClient() {
                   {formatPrice(booking.totalAmount, booking.currency)}
                 </span>
               </div>
+              <ApproximateAmountsNote currency={booking.currency} />
             </div>
 
             {booking.roomLines && (

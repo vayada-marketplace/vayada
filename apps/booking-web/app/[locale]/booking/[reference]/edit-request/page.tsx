@@ -1,4 +1,5 @@
 "use client";
+import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
 import { sameRoomSelection } from "@/lib/roomSelection";
 import PendingRequestFields from "@/components/booking/PendingRequestFields";
@@ -9,6 +10,7 @@ import { Link, useRouter } from "@/i18n/navigation";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
 import StripeProvider from "@/components/StripeProvider";
+import { useCurrency } from "@/contexts/CurrencyContext";
 import { useAddons, useHotel, useSlug } from "@/contexts/HotelContext";
 import {
   bookingService,
@@ -37,6 +39,7 @@ export default function EditRequestPage({
   const { token = "", payment_intent: returnedIntent } = use(searchParams);
   const { slug } = useSlug();
   const { hotel } = useHotel();
+  const { approximate } = useCurrency();
   const { addons } = useAddons();
   const router = useRouter();
   const [details, setDetails] = useState<PendingEditDetails | null>(null);
@@ -200,6 +203,7 @@ export default function EditRequestPage({
     (sameRoomSelection(input?.roomSelection, details?.input.roomSelection)
       ? details?.booking.roomLines
       : undefined);
+  const updatedTotalApproximation = quote ? approximate(quote.totalAmount, quote.currency) : null;
 
   return (
     <>
@@ -251,7 +255,9 @@ export default function EditRequestPage({
               <section aria-label="Updated total" className="rounded-xl bg-gray-50 p-6">
                 <p className="text-xl font-semibold">
                   Updated total: {quote.currency} {quote.totalAmount.toFixed(2)}
+                  {updatedTotalApproximation && ` (${updatedTotalApproximation})`}
                 </p>
+                <ApproximateAmountsNote currency={quote.currency} />
                 <p className="mt-2 text-sm text-gray-600">
                   Your booking reference and original review deadline remain the same.
                 </p>

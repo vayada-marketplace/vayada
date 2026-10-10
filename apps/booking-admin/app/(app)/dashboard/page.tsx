@@ -10,6 +10,7 @@ import { compareRate, compareSummary, type SummaryChange } from "@/lib/utils/das
 import {
   dashboardService,
   rangeQuery,
+  TIME_RANGES,
   type DashboardStats,
   type BookingsBySource,
   type ConversionFunnel,
@@ -220,13 +221,10 @@ export default function DashboardPage() {
 
       {/* Time Range Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-full sm:w-fit">
-        {[
-          { key: "today" as TimeRange, label: t("dashboard.timeRange.today") },
-          { key: "week" as TimeRange, label: t("dashboard.timeRange.week") },
-          { key: "month" as TimeRange, label: t("dashboard.timeRange.month") },
-        ].map(({ key, label }) => (
+        {TIME_RANGES.map(([key, label]) => (
           <button
             key={key}
+            aria-pressed={timeRange === key}
             onClick={() => selectTimeRange(key)}
             className={`flex-1 sm:flex-initial px-4 py-1.5 rounded-md text-[13px] font-medium transition-colors ${
               timeRange === key
@@ -234,7 +232,7 @@ export default function DashboardPage() {
                 : "text-gray-500 hover:text-gray-700"
             }`}
           >
-            {label}
+            {t(label)}
           </button>
         ))}
       </div>
@@ -404,6 +402,8 @@ export default function DashboardPage() {
           locale={locale}
           t={t}
           exportFileName={funnelExportFileName}
+          timeRange={timeRange}
+          onTimeRangeChange={selectTimeRange}
         />
       </div>
     </div>
