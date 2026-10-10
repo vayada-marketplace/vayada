@@ -36,6 +36,7 @@ const ROOM_MEDIA_OBJECT_ID = "13590000-0000-4000-8000-000000000013";
 const COHORT_PASS_RUN_ID = `vay1351-${"7".repeat(24)}`;
 const COHORT_FAIL_RUN_ID = `vay1351-${"6".repeat(24)}`;
 const COHORT_AUTO_OPEN_RUN_ID = `vay1351-${"5".repeat(24)}`;
+const COHORT_ROOM_FACTS_RUN_ID = `vay1351-${"4".repeat(24)}`;
 const IN_HOTEL_ID = "13620000-0000-4000-8000-000000000001";
 const OUT_HOTEL_ID = "13620000-0000-4000-8000-000000000002";
 const OUT_PMS_HOTEL_ID = "13620000-0000-4000-8000-000000000003";
@@ -720,6 +721,46 @@ describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
     } finally {
       await client.query("DELETE FROM migration_source_pms.snapshot_rows WHERE run_id = $1", [run]);
       await client.query("DELETE FROM platform.source_extraction_runs WHERE run_id = $1", [run]);
+      await cleanupCohort(client);
+      await client.end();
+    }
+  });
+
+  it("fails a cohort property whose active room type lacks native room facts", async () => {
+    assertSafeTestDatabase(URL!);
+    const client = new pg.Client({ connectionString: URL });
+    await client.connect();
+    const run = COHORT_ROOM_FACTS_RUN_ID;
+    try {
+      await storeCohort(client, run, [IN_HOTEL_ID], [IN_PMS_HOTEL_ID]);
+      await insertCohortProperties(client, "canonical");
+      await client.query(
+        `INSERT INTO hotel_catalog.property_source_links
+           (property_id, source_system, source_table, source_id, relationship)
+         VALUES ($1, 'pms', 'hotels', $2, 'operational_input')`,
+        [IN_HOTEL_ID, IN_PMS_HOTEL_ID],
+      );
+      const roomFacts = async () =>
+        (
+          await readProductionParityEvidence({ ...config(), sourceRunId: run })
+        ).cohortScope!.violations.filter((row) => row.category === "cohortRoomFacts");
+      await client.query(
+        `INSERT INTO pms.room_types (property_id, name, occupancy_limits, room_attributes, active)
+         VALUES ($1, 'Legacy double', '{"maxOccupancy": 2}', '{"bedType": "1 Double Bed"}', TRUE),
+                ($1, 'Retired legacy', '{"maxOccupancy": 2}', '{}', FALSE)`,
+        [IN_HOTEL_ID],
+      );
+      expect(await roomFacts()).toEqual([{ category: "cohortRoomFacts", subjectId: IN_HOTEL_ID }]);
+      await client.query(
+        `UPDATE pms.room_types
+            SET occupancy_limits = '{"total": 2, "adults": 2, "children": 2}',
+                room_attributes = '{"beds": [{"type": "double", "quantity": 1}],
+                                    "bathroomType": "private"}'
+          WHERE property_id = $1 AND active`,
+        [IN_HOTEL_ID],
+      );
+      expect(await roomFacts()).toEqual([]);
+    } finally {
       await cleanupCohort(client);
       await client.end();
     }

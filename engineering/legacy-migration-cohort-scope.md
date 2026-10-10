@@ -112,6 +112,14 @@ Runs without a cohort, hotels outside it and quarantined hotels get none of this
   operating rooms whose printable-ASCII label is unique case-insensitively in the property. This
   replaces the 0048 rule that migrated labels stay unverified, for cohort hotels only. A twin stays
   unverified, so the property stays in setup.
+- **Room facts**: a cohort room type takes the native room-facts columns (`occupancy_limits`
+  total/adults/children; `room_attributes` beds, bedrooms, bathrooms, bathroom type, size; the
+  category key), mapped as the PMS room form maps its fields; the legacy copies move under
+  `room_attributes.legacyRoomFacts`. The runtime's room-facts reads (rooms, operating calendar,
+  inventory) fail for the whole property on the legacy shape. Legacy records no bathroom type:
+  `private` (the form's default), or `shared` without a bathroom count. A room type without a bed
+  type or with limits the native contract refuses keeps the legacy shape; parity fails for an
+  active one (`cohortRoomFacts`), so fix it in legacy before the extraction.
 
 A hotel that misses an item stays `provisioning`.
 
@@ -128,6 +136,7 @@ A hotel that misses an item stays `provisioning`.
 - It also fails when a cohort property is unexpectedly quarantined, or lacks
   exactly one active hotel organization holding both native links with an
   active, unsuspended PMS entitlement.
+- It also fails when an active room type of a cohort property lacks native room facts.
 - It also checks calendar auto-open rows, given that a property without one is
   on by default (VAY-2066 R2). A cohort PMS property whose legacy auto-open is on
   needs a matching enabled row, one whose legacy auto-open is off needs none,

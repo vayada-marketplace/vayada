@@ -5,7 +5,8 @@ import {
   propertyForHotel,
   safePmsSourceId,
 } from "./productionPmsContext.js";
-import { verifiedCohortRoomIds } from "./productionPmsCohortSetup.js";
+import { cohortRoomFacts, nativeRoomFactColumns } from "./productionPmsCohortRoomFacts.js";
+import { carriedCohortHotel, verifiedCohortRoomIds } from "./productionPmsCohortSetup.js";
 import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
 import type { PmsBuildContext, PmsRoomBuild, PmsTargetRecord } from "./productionPmsTypes.js";
 import {
@@ -35,6 +36,7 @@ export function buildPmsRoomRecords(context: PmsBuildContext): PmsRoomBuild {
   const records: PmsTargetRecord[] = [];
   const flexiblePlanByRoomType = new Map<string, string>();
   const channelPlanByMapping = new Map<string, string>();
+  const nativeFactsRoomTypes = new Set<string>();
   const duplicateNameDispositions = roomTypeDuplicateNameDispositions(context);
   const currencyDispositions = roomTypeCurrencyDispositions(context);
   for (const source of context.rowsByTable.get("linked_inventory_groups") ?? [])
@@ -44,6 +46,7 @@ export function buildPmsRoomRecords(context: PmsBuildContext): PmsRoomBuild {
       const built = roomType(
         context,
         source,
+        nativeFactsRoomTypes,
         duplicateNameDispositions.get(uuid(source.data["id"], "id")),
         currencyDispositions.get(uuid(source.data["id"], "id")),
       );
@@ -59,7 +62,7 @@ export function buildPmsRoomRecords(context: PmsBuildContext): PmsRoomBuild {
       channelPlanByMapping.set(built.mappingId, built.planId);
       return [built.record];
     });
-  return { records, flexiblePlanByRoomType, channelPlanByMapping };
+  return { records, flexiblePlanByRoomType, channelPlanByMapping, nativeFactsRoomTypes };
 }
 
 type RoomTypeDuplicateNameDisposition = {
@@ -329,6 +332,7 @@ function linkedGroup(context: PmsBuildContext, source: IdentitySourceRow): PmsTa
 function roomType(
   context: PmsBuildContext,
   source: IdentitySourceRow,
+  nativeFactsRoomTypes: Set<string>,
   duplicateNameDisposition?: RoomTypeDuplicateNameDisposition,
   currencyDisposition?: RoomTypeCurrencyDisposition,
 ): { roomTypeId: string; flexiblePlanId: string; records: PmsTargetRecord[] } {
@@ -390,6 +394,41 @@ function roomType(
       { row: data, mediaObjectId: item.mediaObjectId, sortOrder: index },
     ),
   );
+  const occupancyLimits = {
+    maxOccupancy: integer(data["max_occupancy"], "max_occupancy", 2),
+    maxAdults: nullableInteger(data["max_adults"], "max_adults"),
+    maxChildren: nullableInteger(data["max_children"], "max_children"),
+  };
+  const roomAttributes = {
+    shortDescription: optionalText(data["short_description"], "short_description"),
+    size: integer(data["size"], "size", 0),
+    bedType: optionalText(data["bed_type"], "bed_type"),
+    features: jsonArray(data["features"], "features"),
+    benefits: jsonArray(data["benefits"], "benefits"),
+    bedrooms: integer(data["bedrooms"], "bedrooms", 1),
+    bathrooms: integer(data["bathrooms"], "bathrooms", 1),
+    legacyPricing,
+    ...(duplicateNameDisposition
+      ? { legacyRoomTypeDisposition: { ...duplicateNameDisposition, effectiveActive } }
+      : {}),
+    ...(currencyDisposition
+      ? { legacyCurrencyDisposition: { ...currencyDisposition, effectiveActive } }
+      : {}),
+    ...(imageQuarantine
+      ? {
+          legacyMediaDisposition: {
+            reasonCode: imageQuarantine.reasonCode,
+            sourceValueSha256: imageQuarantine.sourceValueSha256,
+          },
+        }
+      : {}),
+  };
+  // VAY-1362: a carried cohort room type takes the native room-facts columns, so the runtime's
+  // room-facts reads (rooms, operating calendar, inventory) accept it.
+  const native = carriedCohortHotel(context, uuid(data["hotel_id"], "hotel_id"))
+    ? cohortRoomFacts(data)
+    : null;
+  if (native) nativeFactsRoomTypes.add(id);
   const roomRecord = pmsRecord(
     source,
     "room_types",
@@ -404,35 +443,15 @@ function roomType(
       name: requiredText(data["name"], "name"),
       description: optionalText(data["description"], "description") ?? "",
       category: optionalText(data["category"], "category"),
-      occupancyLimits: {
-        maxOccupancy: integer(data["max_occupancy"], "max_occupancy", 2),
-        maxAdults: nullableInteger(data["max_adults"], "max_adults"),
-        maxChildren: nullableInteger(data["max_children"], "max_children"),
-      },
-      roomAttributes: {
-        shortDescription: optionalText(data["short_description"], "short_description"),
-        size: integer(data["size"], "size", 0),
-        bedType: optionalText(data["bed_type"], "bed_type"),
-        features: jsonArray(data["features"], "features"),
-        benefits: jsonArray(data["benefits"], "benefits"),
-        bedrooms: integer(data["bedrooms"], "bedrooms", 1),
-        bathrooms: integer(data["bathrooms"], "bathrooms", 1),
-        legacyPricing,
-        ...(duplicateNameDisposition
-          ? { legacyRoomTypeDisposition: { ...duplicateNameDisposition, effectiveActive } }
-          : {}),
-        ...(currencyDisposition
-          ? { legacyCurrencyDisposition: { ...currencyDisposition, effectiveActive } }
-          : {}),
-        ...(imageQuarantine
-          ? {
-              legacyMediaDisposition: {
-                reasonCode: imageQuarantine.reasonCode,
-                sourceValueSha256: imageQuarantine.sourceValueSha256,
-              },
-            }
-          : {}),
-      },
+      occupancyLimits,
+      roomAttributes,
+      ...(native
+        ? nativeRoomFactColumns(
+            native.facts,
+            { occupancyLimits, roomAttributes },
+            native.legacyCategory,
+          )
+        : {}),
       amenitiesSnapshot: jsonArray(data["amenities"], "amenities"),
       mediaSnapshot: media.map((item) => ({
         mediaObjectId: item.mediaObjectId,
@@ -454,7 +473,12 @@ function roomType(
       createdAt,
       updatedAt,
     },
-    { row: data, linkedGroupId, duplicateNameDisposition },
+    {
+      row: data,
+      linkedGroupId,
+      duplicateNameDisposition,
+      ...(native ? { nativeFacts: true } : {}),
+    },
   );
   const flexiblePlanId = deterministicUuid("production-pms", "rate-plan", id, "flexible");
   const plans = [
