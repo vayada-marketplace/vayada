@@ -4009,8 +4009,11 @@ it("disables the stay preview for unapplied calendar edits", async () => {
 const familyId = "61000000-0000-4000-8000-000000000004", family = { ...snapshot.rooms[0], roomTypeId: familyId };
 const familySetup = { roomTypeId: familyId, name: "Family", capacity: family.capacity };
 const published = (rooms: PricingSnapshot["rooms"] = [snapshot.rooms[0], family], revision = 1) => ({ ...snapshot, rooms, revision, sources, stale: false });
-const mountRoom = async (rooms = [{ roomTypeId: "room", name: "Existing", capacity: snapshot.rooms[0].capacity }, familySetup]) => {
-  await act(async () => { view = create(<PricingEditor client={client as ReturnType<typeof createReplacementPricingClient>} roomNames={{ room: "Existing", [familyId]: "Family" }} setup={{ propertyId: "property", rooms }} roomTypeId={familyId} />); });
+type RoomProps = Partial<Pick<Parameters<typeof PricingEditor>[0], "onAttention" | "onPublished" | "refresh">>;
+const roomEditor = (rooms: { roomTypeId: string; name: string; capacity: PricingSnapshot["rooms"][number]["capacity"] }[], extra: RoomProps = {}) =>
+  <PricingEditor client={client as ReturnType<typeof createReplacementPricingClient>} roomNames={{ room: "Existing", [familyId]: "Family" }} setup={{ propertyId: "property", rooms }} roomTypeId={familyId} {...extra} />;
+const mountRoom = async (rooms = [{ roomTypeId: "room", name: "Existing", capacity: snapshot.rooms[0].capacity }, familySetup], extra: RoomProps = {}) => {
+  await act(async () => { view = create(roomEditor(rooms, extra)); });
 };
 const familyInput = (base: string) => firstPricingInput("property", familySetup, familyId, { mode: "flat", occupancy: [], included: { adults: "", adjustments: [] }, methods: ["pay_at_property"], room: familyId, currency: "EUR", base, adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "non_refundable", freeDays: "", payment: "full" });
 it("on a room page, edits only that room, publishes every other room exactly as read and continues from the new publication (VAY-2093)", async () => {
@@ -4072,11 +4075,49 @@ it("on a room page, lets links navigate in the app until there are unsaved price
   const assign = vi.fn();
   vi.stubGlobal("Element", FakeElement); vi.stubGlobal("HTMLAnchorElement", FakeAnchor);
   vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn(), location: { assign } });
-  client.read.mockResolvedValue(published()); await mountRoom();
+  const onAttention = vi.fn();
+  client.read.mockResolvedValue(published()); await mountRoom(undefined, { onAttention });
   const listener = () => vi.mocked(document.addEventListener).mock.calls.filter(([name]) => name === "click").at(-1)![1] as (event: unknown) => void;
   const linkClick = () => ({ target: new FakeElement(new FakeAnchor()), preventDefault: vi.fn(), stopPropagation: vi.fn() });
   const free = linkClick(); listener()(free); expect(free.preventDefault).not.toHaveBeenCalled();
   await act(async () => input().props.onChange({ target: { value: "120" } }));
+  expect(onAttention).not.toHaveBeenCalled();
   const held = linkClick(); await act(async () => listener()(held)); expect(held.preventDefault).toHaveBeenCalled(); expect(assign).not.toHaveBeenCalled();
+  // The page shows the Prices tab, so the confirmation is visible even when another tab was open.
+  expect(onAttention).toHaveBeenCalledOnce();
   await click("Leave"); expect(assign).toHaveBeenCalledWith("http://localhost/rooms");
+});
+it("reloads on a page refresh only without unsaved work and tells the page after publishing", async () => {
+  const onPublished = vi.fn();
+  client.read.mockResolvedValue(published()); await mountRoom(undefined, { onPublished });
+  const rooms = [{ roomTypeId: "room", name: "Existing", capacity: snapshot.rooms[0].capacity }, familySetup];
+  await act(async () => view.update(roomEditor(rooms, { onPublished, refresh: 1 }))); expect(client.read).toHaveBeenCalledTimes(2);
+  await act(async () => input().props.onChange({ target: { value: "123.45" } }));
+  await act(async () => view.update(roomEditor(rooms, { onPublished, refresh: 2 }))); expect(client.read).toHaveBeenCalledTimes(2); expect(input().props.value).toBe("123.45");
+  await click("Save prices"); expect(onPublished).toHaveBeenCalledOnce();
+  // The saved prices stay on show for review until "Edit prices again".
+  await act(async () => view.update(roomEditor(rooms, { onPublished, refresh: 3 }))); expect(client.read).toHaveBeenCalledTimes(2);
+  expect(JSON.stringify(view.toJSON())).toContain("Prices saved");
+});
+it("keeps the newest read when an older one answers last", async () => {
+  let answerFirst!: (value: unknown) => void;
+  client.read.mockImplementationOnce(() => new Promise((resolve) => { answerFirst = resolve; }));
+  await act(async () => { view = create(roomEditor([familySetup])); });
+  client.read.mockResolvedValueOnce(published([snapshot.rooms[0], { ...family, offers: [{ ...family.offers[0], price: { kind: "independent", calendar: { base: { mode: "flat", amountMinor: "20000" }, months: [], seasons: [], weekdays: [], dates: [] } } }] }], 2));
+  await act(async () => view.update(roomEditor([familySetup], { refresh: 1 })));
+  await act(async () => answerFirst(published()));
+  expect(input().props.value).toBe("200.00");
+});
+it("does not offer to keep edits after a denial, or when nothing was edited", async () => {
+  client.read.mockResolvedValue(published()); await mountRoom();
+  await act(async () => input().props.onChange({ target: { value: "123.45" } }));
+  client.prepare.mockRejectedValueOnce(new ApiErrorResponse(403, {})); await click("Save prices");
+  expect(JSON.stringify(view.toJSON())).not.toContain("Your changes to this room are kept"); await click("Reload pricing");
+  expect(button("Discard and reload")).toBeDefined(); await click("Discard and reload");
+  expect(input().props.value).toBe("100.00"); expect(JSON.stringify(view.toJSON())).not.toContain("your changes to this room are kept");
+  act(() => view.unmount());
+  client.read.mockResolvedValue({ ...published(), stale: true }); await mountRoom();
+  client.prepare.mockRejectedValueOnce(new ApiErrorResponse(409, {})); await click("Save prices");
+  await click("Reload pricing"); expect(button("Save prices").props.disabled).toBe(false);
+  expect(JSON.stringify(view.toJSON())).not.toContain("your changes to this room are kept");
 });
