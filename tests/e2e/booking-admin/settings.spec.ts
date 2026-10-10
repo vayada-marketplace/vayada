@@ -244,7 +244,9 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     const assertHealthy = watchPageHealth(page, testInfo);
     await mockBookingAdminAuthenticatedSession(page);
-    await mockBookingAdminShellRoutes(page);
+    await mockBookingAdminShellRoutes(page, {
+      propertySettings: { ...defaultBookingAdminPropertySettings, supported_languages: ["de"] },
+    });
     const { requests: designRequests } = await mockBookingAdminDesignSettings(page);
     let customDomain: BookingAdminCustomDomainFixture = defaultCustomDomain;
     await page.route(`**${BOOKING_ADMIN_CUSTOM_DOMAIN_PATH}*`, async (route) => {
@@ -299,13 +301,17 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await expect(page.getByRole("switch", { name: "Contact button" })).toBeChecked();
     await expect(page.getByRole("switch", { name: "Refer a Guest button" })).toBeDisabled();
     await expect(page.getByRole("switch", { name: "Language selector" })).toBeChecked();
-    await expect(page.getByRole("switch", { name: "Currency selector" })).toBeChecked();
+    await expect(page.getByRole("switch", { name: "Currency selector" })).toBeDisabled();
+    await expect(page.getByRole("switch", { name: "Currency selector" })).not.toBeChecked();
+    await expect(preview).toContainText("EN");
+    await page.getByRole("switch", { name: "Language selector" }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath("design-studio-header-two-languages.png") });
 
     await page.getByRole("switch", { name: "Contact button" }).click();
     await page.getByRole("switch", { name: "Language selector" }).click();
     await expect(preview).not.toContainText("Contact");
     await expect(preview).not.toContainText("EN");
-    await expect(preview).toContainText("EUR");
+    await expect(preview.getByText("EUR", { exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: "Save Changes" }).click();
     await expect
       .poll(
@@ -345,6 +351,44 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     await expect(page.getByPlaceholder("booking.yourdomain.com")).toBeVisible();
     await expect(preview).toContainText(canonicalBookingUrl);
+    await assertHealthy();
+  });
+
+  test("greys out header selectors guests cannot see and keeps the saved choice", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingAdminAuthenticatedSession(page);
+    // Japanese is configurable in the admin but the guest booking site cannot render it.
+    await mockBookingAdminShellRoutes(page, {
+      propertySettings: { ...defaultBookingAdminPropertySettings, supported_languages: ["ja"] },
+    });
+    const { requests: designRequests } = await mockBookingAdminDesignSettings(page);
+
+    await page.goto("/design-studio");
+    const language = page.getByRole("switch", { name: "Language selector" });
+    const currency = page.getByRole("switch", { name: "Currency selector" });
+    await expect(language).toBeDisabled();
+    await expect(language).not.toBeChecked();
+    await expect(
+      page.getByText("Hidden automatically when only one language is configured."),
+    ).toBeVisible();
+    await expect(currency).toBeDisabled();
+    await expect(currency).not.toBeChecked();
+    await expect(page.getByText("Multi-currency isn't available yet.")).toBeVisible();
+    await expect(page.getByLabel("Live booking page preview")).not.toContainText("EN");
+    await language.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath("design-studio-header-one-language.png") });
+
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect
+      .poll(() => designRequests.find((request) => request.method === "PATCH")?.body)
+      .toMatchObject({ showLanguageSelector: true, showCurrencySelector: true });
     await assertHealthy();
   });
 

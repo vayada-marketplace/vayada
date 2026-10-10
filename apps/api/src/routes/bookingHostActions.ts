@@ -60,6 +60,7 @@ export async function registerBookingHostActionRoutes(
             guestMessage: { type: "string", maxLength: 5000 },
             checkIn: { type: "string", format: "date" },
             checkOut: { type: "string", format: "date" },
+            cancellationKind: { enum: ["property", "guest_request"] },
           },
         },
       },
@@ -82,6 +83,8 @@ export async function registerBookingHostActionRoutes(
           : body.checkIn || body.checkOut
       )
         return reply.code(400).send({ message: "Stay dates are required only for date editing." });
+      if (body.cancellationKind && body.action !== "cancel")
+        return reply.code(400).send({ message: "A cancellation kind applies only to cancelling." });
       return options.actions.preview(
         {
           propertyId: request.params.propertyId,

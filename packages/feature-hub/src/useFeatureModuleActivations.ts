@@ -13,6 +13,7 @@ type ModuleSynchronizationDetail = {
   hotelId?: string;
   source: "read" | "write";
   canManage?: boolean;
+  manageableModuleIds?: string[] | null;
   supportedModuleIds?: string[];
 };
 
@@ -60,6 +61,7 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
   const [supportedModuleIds, setSupportedModuleIds] = useState<string[]>([]);
   const [hotelId, setHotelId] = useState<string>("");
   const [canManage, setCanManage] = useState(false);
+  const [manageableModuleIds, setManageableModuleIds] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const clientRef = useRef(client);
@@ -91,6 +93,7 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
     setConfiguredModuleIds(configuredIds);
     setHotelId(response.hotelId);
     setCanManage(response.canManage);
+    setManageableModuleIds(response.manageableModules ?? null);
     setSupportedModuleIds(supported);
     setActiveModuleIds(next);
     publish({
@@ -99,6 +102,7 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
       hotelId: response.hotelId,
       source: "read",
       canManage: response.canManage,
+      manageableModuleIds: response.manageableModules ?? null,
       supportedModuleIds: supported,
     });
   }, []);
@@ -141,6 +145,12 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
       if (detail?.source !== "read") synchronizationRevision.current += 1;
       if (detailHotelId && detailHotelId !== "default" && !hotelId) setHotelId(detailHotelId);
       if (typeof detail?.canManage === "boolean") setCanManage(detail.canManage);
+      const manageable = detail?.manageableModuleIds;
+      if (
+        manageable === null ||
+        (Array.isArray(manageable) && manageable.every((id) => typeof id === "string"))
+      )
+        setManageableModuleIds(manageable);
       const supported = detail?.supportedModuleIds;
       if (Array.isArray(supported) && supported.every((id) => typeof id === "string")) {
         setSupportedModuleIds(supported);
@@ -189,6 +199,7 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
         hotelId,
         source: "write",
         canManage,
+        manageableModuleIds,
         supportedModuleIds,
       });
       try {
@@ -199,6 +210,7 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
           hotelId,
           source: "write",
           canManage,
+          manageableModuleIds,
           supportedModuleIds,
         });
         await refresh();
@@ -211,17 +223,31 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
           hotelId,
           source: "write",
           canManage,
+          manageableModuleIds,
           supportedModuleIds,
         });
         throw err;
       }
     },
-    [activeModuleIds, configuredModuleIds, canManage, hotelId, supportedModuleIds, refresh],
+    [
+      activeModuleIds,
+      configuredModuleIds,
+      canManage,
+      manageableModuleIds,
+      hotelId,
+      supportedModuleIds,
+      refresh,
+    ],
   );
 
   const activeModuleSet = useMemo(() => new Set(activeModuleIds), [activeModuleIds]);
 
   const configuredModuleSet = useMemo(() => new Set(configuredModuleIds), [configuredModuleIds]);
+
+  const manageableModuleSet = useMemo(
+    () => (manageableModuleIds ? new Set(manageableModuleIds) : null),
+    [manageableModuleIds],
+  );
 
   return {
     configuredModuleSet,
@@ -230,6 +256,7 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
     supportedModuleIds,
     hotelId,
     canManage,
+    manageableModuleSet,
     loading,
     error,
     refresh,
