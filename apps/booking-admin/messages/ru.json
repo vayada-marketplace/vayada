@@ -191,6 +191,7 @@
   "dashboard.conversionFunnel.infoLabel": "О воронке конверсии",
   "dashboard.conversionFunnel.info": "Сеансы на сайте бронирования за этот период, учтённые на каждом шаге, которого они достигли по порядку. Красные числа показывают, сколько ушло после предыдущего шага. Для оплаты картой есть дополнительный шаг авторизации; последний шаг сравнивается с авторизованными картами и другими способами оплаты.",
   "dashboard.conversionFunnel.options": "Параметры воронки",
+  "dashboard.conversionFunnel.timeRange": "Период",
   "dashboard.conversionFunnel.exportCsv": "Экспорт в CSV",
   "dashboard.conversionFunnel.csvStep": "Шаг",
   "dashboard.conversionFunnel.csvVisitors": "Посетители",

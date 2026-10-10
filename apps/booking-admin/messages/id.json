@@ -191,6 +191,7 @@
   "dashboard.conversionFunnel.infoLabel": "Tentang corong konversi",
   "dashboard.conversionFunnel.info": "Sesi situs pemesanan dalam periode ini, dihitung di setiap langkah yang dicapai secara berurutan. Angka merah menunjukkan berapa banyak yang berhenti sejak langkah sebelumnya. Pembayaran kartu menambahkan langkah otorisasi; langkah terakhir dibandingkan dengan kartu yang diotorisasi ditambah metode pembayaran lain.",
   "dashboard.conversionFunnel.options": "Opsi corong",
+  "dashboard.conversionFunnel.timeRange": "Rentang waktu",
   "dashboard.conversionFunnel.exportCsv": "Ekspor CSV",
   "dashboard.conversionFunnel.csvStep": "Langkah",
   "dashboard.conversionFunnel.csvVisitors": "Pengunjung",

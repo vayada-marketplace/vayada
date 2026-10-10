@@ -191,6 +191,7 @@
   "dashboard.conversionFunnel.infoLabel": "Über den Conversion-Trichter",
   "dashboard.conversionFunnel.info": "Sitzungen auf der Buchungsseite in diesem Zeitraum, gezählt bei jedem Schritt, den sie der Reihe nach erreicht haben. Rote Zahlen zeigen, wie viele seit dem vorherigen Schritt abgesprungen sind. Kartenzahlungen haben einen zusätzlichen Autorisierungsschritt; der letzte Schritt vergleicht mit autorisierten Karten plus anderen Zahlungsarten.",
   "dashboard.conversionFunnel.options": "Trichter-Optionen",
+  "dashboard.conversionFunnel.timeRange": "Zeitraum",
   "dashboard.conversionFunnel.exportCsv": "CSV exportieren",
   "dashboard.conversionFunnel.csvStep": "Schritt",
   "dashboard.conversionFunnel.csvVisitors": "Besucher",

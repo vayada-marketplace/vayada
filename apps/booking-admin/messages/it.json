@@ -191,6 +191,7 @@
   "dashboard.conversionFunnel.infoLabel": "Informazioni sul funnel di conversione",
   "dashboard.conversionFunnel.info": "Sessioni del sito di prenotazione in questo periodo, contate a ogni passaggio raggiunto in ordine. I numeri in rosso mostrano quante hanno abbandonato rispetto al passaggio precedente. I pagamenti con carta aggiungono un passaggio di autorizzazione; l'ultimo passaggio è confrontato con le carte autorizzate più gli altri metodi di pagamento.",
   "dashboard.conversionFunnel.options": "Opzioni del funnel",
+  "dashboard.conversionFunnel.timeRange": "Periodo",
   "dashboard.conversionFunnel.exportCsv": "Esporta CSV",
   "dashboard.conversionFunnel.csvStep": "Passaggio",
   "dashboard.conversionFunnel.csvVisitors": "Visitatori",

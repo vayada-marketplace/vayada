@@ -227,6 +227,7 @@ export default function DashboardPage() {
         ].map(({ key, label }) => (
           <button
             key={key}
+            aria-pressed={timeRange === key}
             onClick={() => selectTimeRange(key)}
             className={`flex-1 sm:flex-initial px-4 py-1.5 rounded-md text-[13px] font-medium transition-colors ${
               timeRange === key
@@ -404,6 +405,8 @@ export default function DashboardPage() {
           locale={locale}
           t={t}
           exportFileName={funnelExportFileName}
+          timeRange={timeRange}
+          onTimeRangeChange={selectTimeRange}
         />
       </div>
     </div>
