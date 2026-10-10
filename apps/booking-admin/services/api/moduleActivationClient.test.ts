@@ -28,43 +28,44 @@ describe("moduleActivationClient", () => {
     propertyLinkMock.mockReset();
   });
 
-  it("lists and updates module activations through the target PMS route", async () => {
+  it("manages the PMS Inbox and Reviews switches beside Financials", async () => {
+    const options = { headers: { "X-Vayada-Omit-Hotel-Context": "true" } };
     propertyLinkMock.mockResolvedValue({ propertyId: "pms_property_alpenrose" });
-    apiClientMock.get.mockResolvedValue({
+    apiClientMock.get.mockImplementation(async (url: string) => ({
       hotelId: "pms_property_alpenrose",
       canManage: true,
-      supportedModules: ["affiliates"],
-      activeModules: ["affiliates"],
+      supportedModules: url.endsWith("/navigation-modules") ? ["inbox", "reviews"] : ["financials"],
+      activeModules: [],
       activations: [],
-    });
-    apiClientMock.patch.mockResolvedValue({
-      moduleId: "affiliates",
-      isActive: true,
+    }));
+    apiClientMock.patch.mockImplementation(async (_url: string, body: object) => ({
+      ...body,
       activatedAt: null,
       deactivatedAt: null,
       updatedAt: "2026-01-01T00:00:00.000Z",
-    });
+    }));
 
     const { moduleActivationClient } = await import("./moduleActivationClient");
 
     await expect(moduleActivationClient.list()).resolves.toMatchObject({
       hotelId: "pms_property_alpenrose",
-      supportedModules: ["affiliates"],
+      supportedModules: ["inbox", "reviews", "financials"],
+      manageableModules: ["inbox", "reviews", "financials"],
     });
-    await expect(moduleActivationClient.update("affiliates", true)).resolves.toMatchObject({
-      moduleId: "affiliates",
+    await expect(moduleActivationClient.update("inbox", true)).resolves.toMatchObject({
+      moduleId: "inbox",
       isActive: true,
     });
 
     expect(propertyLinkMock).toHaveBeenCalledWith({ hotelId: "booking_hotel_alpenrose" });
-    expect(apiClientMock.get).toHaveBeenCalledWith(
-      "/api/pms/properties/pms_property_alpenrose/module-activations",
-      { headers: { "X-Vayada-Omit-Hotel-Context": "true" } },
-    );
-    expect(apiClientMock.patch).toHaveBeenCalledWith(
-      "/api/pms/properties/pms_property_alpenrose/module-activations/affiliates",
-      { moduleId: "affiliates", isActive: true },
-      { headers: { "X-Vayada-Omit-Hotel-Context": "true" } },
+    expect(apiClientMock.get.mock.calls).toEqual([
+      ["/api/pms/properties/pms_property_alpenrose/navigation-modules", options],
+      ["/api/pms/properties/pms_property_alpenrose/module-activations", options],
+    ]);
+    expect(apiClientMock.patch).toHaveBeenCalledExactlyOnceWith(
+      "/api/pms/properties/pms_property_alpenrose/navigation-modules/inbox",
+      { moduleId: "inbox", isActive: true },
+      options,
     );
   });
 });

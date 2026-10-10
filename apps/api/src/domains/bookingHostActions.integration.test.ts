@@ -1,9 +1,13 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createBookingHostActions, type HostActionScope } from "./bookingHostActions.js";
 import { targetBookingHostActionGuards } from "./bookingHostActionGuards.js";
 import { captureDirectNightlyRevenueEvidence } from "./stripeBookingSettlement.js";
+import { loadPricingBookingCancellation } from "./pricingBookingCancellation.js";
+
+// The booked-terms read has its own PostgreSQL proof (pricingInventoryAdoption); here it is fixed.
+vi.mock("./pricingBookingCancellation.js", () => ({ loadPricingBookingCancellation: vi.fn() }));
 
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("host actions PostgreSQL consistency", () => {
@@ -407,5 +411,65 @@ describe.skipIf(!url)("host actions PostgreSQL consistency", () => {
         )
       ).rows,
     ).toEqual([{ job_type: "email.booking-rejected" }]);
+  });
+  it("applies a guest-requested cancel with the booked terms and records what they keep", async () => {
+    const outcome = (retainedMinor: string) => ({
+      daysBeforeCheckIn: 6,
+      totalMinor: "10000",
+      refundMinor: String(10000 - Number(retainedMinor)),
+      retainedMinor,
+      rooms: [],
+    });
+    const load = vi.mocked(loadPricingBookingCancellation);
+    load.mockResolvedValue(outcome("7500") as never);
+    const guestRequest = {
+      action: "cancel" as const,
+      reason: "Guest called",
+      cancellationKind: "guest_request" as const,
+    };
+    const p = await actions.preview(scope, guestRequest);
+    expect(p.impact.cancellationOutcome).toEqual(outcome("7500"));
+    expect(load).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        propertyId: scope.propertyId,
+        guestBookingId: scope.bookingId,
+        stay: { checkIn: "2026-09-12", checkOut: "2026-09-13", roomCount: 1, currency: "EUR" },
+        cancelledAt: new Date("2026-09-06T10:00:00Z"),
+      }),
+    );
+    // A different outcome at apply time (e.g. a later tier) needs a new preview.
+    load.mockResolvedValueOnce(outcome("10000") as never);
+    await expect(actions.apply(scope, p.previewId, "guest-cancel-stale")).rejects.toMatchObject({
+      code: "stale_preview",
+    });
+    await actions.apply(scope, p.previewId, "guest-cancel");
+    expect(
+      (
+        await pool.query(
+          `SELECT booking.cancellation_reason AS reason, event.event_payload AS payload
+           FROM booking.guest_bookings booking JOIN booking.booking_status_events event
+             ON event.guest_booking_id=booking.id AND event.event_type='guest_booking.canceled'
+           WHERE booking.id=$1`,
+          [scope.bookingId],
+        )
+      ).rows,
+    ).toEqual([{ reason: "guest_request", payload: { cancellationOutcome: outcome("7500") } }]);
+  });
+
+  it("refuses a guest-requested cancel when the booked terms cannot be applied", async () => {
+    vi.mocked(loadPricingBookingCancellation).mockResolvedValue(null);
+    await expect(
+      actions.preview(scope, {
+        action: "cancel",
+        reason: "Guest called",
+        cancellationKind: "guest_request",
+      }),
+    ).rejects.toMatchObject({ code: "unsupported_edit" });
+    expect(await count("booking.host_action_previews", "guest_booking_id", scope.bookingId)).toBe(
+      0,
+    );
+    const p = await preview();
+    expect(p.impact.cancellationOutcome).toBeUndefined();
   });
 });
