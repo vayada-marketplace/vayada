@@ -28,13 +28,42 @@ test("docs-only changes select no jobs", () => {
   assert.deepEqual(selectJobs(files).jobs, []);
 });
 
-test("TypeScript API, shared packages and migrations run the unit suites and full PostgreSQL coverage", () => {
+test("TypeScript API, backend packages and migrations run the unit suites and full PostgreSQL coverage", () => {
   for (const file of [
     "apps/api/src/server.ts",
     "packages/backend-migration/migrations/0400_new.sql",
-    "packages/domain-hotels/src/index.ts",
+    "packages/backend-auth/src/index.ts",
   ]) {
     assert.deepEqual(selectJobs([file]).jobs, TYPESCRIPT, file);
+  }
+});
+
+test("packages pms-web builds on also run the pms-web browser specs", () => {
+  for (const file of [
+    "packages/domain-hotels/src/index.ts",
+    "packages/product-onboarding/src/index.ts",
+    "packages/settings-ui/src/index.ts",
+  ]) {
+    assert.deepEqual(
+      selectJobs([file]).jobs,
+      ["frontend", "first_party_auth", "pms_web_e2e", ...TYPESCRIPT.slice(2)],
+      file,
+    );
+  }
+});
+
+test("pms-web and its browser specs and shared e2e support run the pms-web browser specs", () => {
+  for (const file of [
+    "apps/pms-web/app/(app)/layout.tsx",
+    "tests/e2e/pms-web/smoke.spec.ts",
+    "tests/e2e/support/pmsWebMocks.ts",
+    "tests/e2e/marketplace-web/utils/cors.ts",
+  ]) {
+    assert.deepEqual(
+      selectJobs([file]).jobs,
+      ["frontend", "first_party_auth", "pms_web_e2e"],
+      file,
+    );
   }
 });
 
