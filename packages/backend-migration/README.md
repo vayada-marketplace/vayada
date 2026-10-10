@@ -703,7 +703,7 @@ the same transaction that checks every ID against the attested source
 (`COHORT_HOTEL_NOT_IN_SOURCE`). A different cohort for the same source run, or a
 stored cohort for a run started without `--cohort`, fails with `COHORT_CONFLICT`.
 Without `--cohort`, configuration and evidence hashes are unchanged; the target
-must carry migration 0474, as every target must match the deployed release.
+must carry migration 0480, as every target must match the deployed release.
 
 Before a run, a database administrator must bind the target itself with durable
 evidence. The database-level settings path remains supported where available;
