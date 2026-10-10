@@ -3,6 +3,7 @@ import {
   type BookedCancellationOutcome,
   type BookedCancellationRoom,
 } from "@vayada/domain-booking";
+import { parsePmsInventoryReservationBundle } from "@vayada/domain-pms";
 import type { PoolClient } from "pg";
 import type {
   DirectBookingInventoryReservationPort,
@@ -83,7 +84,9 @@ export async function cancelAcceptedPricingStay(
   },
 ): Promise<{ released: number; canceledAssignments: number }> {
   await lockPmsInventoryMutationScope(client, input.propertyId);
-  const reservation = (await loadCurrentPricingAcceptance(client, input))?.reservation;
+  const reservation =
+    (await loadCurrentPricingAcceptance(client, input))?.reservation ??
+    (await storedPricingHolds(client, input));
   if (!reservation) throw new Error("Accepted pricing inventory is unavailable");
   const reserved = await client.query(
     `SELECT 1 FROM pms.inventory_reservation_statuses WHERE receipt_id=ANY($1::uuid[]) AND lifecycle_state='reserved'`,
@@ -103,6 +106,33 @@ export async function cancelAcceptedPricingStay(
     occurredAt: input.occurredAt,
   });
   return { released: reserved.rows.length, canceledAssignments };
+}
+
+/** Freeing a stay must never get stuck. Every acceptance decoded when it was written, so this
+ * only covers a decoder that later turns stricter: release the stored holds (the latest
+ * amendment's, else the acceptance's) without the full decode, and say so. */
+async function storedPricingHolds(
+  client: PoolClient,
+  input: { propertyId: string; guestBookingId: string },
+) {
+  const row = (
+    await client.query(
+      `SELECT COALESCE((SELECT amendment.inventory_reservation_bundle
+           FROM booking.pricing_acceptance_amendments amendment
+           WHERE amendment.acceptance_id=acceptance.id ORDER BY amendment.revision DESC LIMIT 1),
+         acceptance.inventory_reservation_bundle) AS bundle
+       FROM booking.pricing_quote_acceptances acceptance
+       WHERE acceptance.property_id=$1::uuid AND acceptance.guest_booking_id=$2::uuid`,
+      [input.propertyId, input.guestBookingId],
+    )
+  ).rows[0];
+  const reservation = parsePmsInventoryReservationBundle(row?.bundle);
+  if (reservation)
+    console.warn("Pricing acceptance no longer decodes; releasing its stored holds.", {
+      propertyId: input.propertyId,
+      guestBookingId: input.guestBookingId,
+    });
+  return reservation;
 }
 
 function localDate(timeZone: string, at: Date): string {

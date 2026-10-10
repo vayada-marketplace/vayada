@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { replacementStayKey } from "@vayada/domain-booking";
 import { pricingDraftFixture } from "./pricingBookingDraft.fixtures.js";
 import {
@@ -64,6 +64,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
     "repository-stay-cancel-host-guest-request",
     "repository-stay-cancel-host-reject",
     "repository-stay-cancel-amended",
+    "repository-stay-cancel-undecodable",
     // VAY-2110: a date-change amendment rebinds the stay to its repriced quote.
     "amended-complete",
     "amended-earlier-revision",
@@ -320,7 +321,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         (id,property_id,organization_id,pricing_quote_id,guest_booking_id,command_receipt_id,request_id,key_hash,
          request_fingerprint_hash,quote_snapshot,disclosure_json,disclosure_hash,guest_policy_source_revision,
          acceptance_command,inventory_reservation_bundle,billing_plan_snapshot,commission_terms_snapshot,finance_terms_captured_at,accepted_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'guest-policy:1',$13,$14,'fixed',$15,$16,'2026-09-01T00:02:00Z')`,
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'guest-policy:1',$13,$14,'fixed',$15,$16,$17)`,
           [
             acceptanceId,
             propertyId,
@@ -338,6 +339,10 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             acceptedBundle,
             f.finance.commissionTermsSnapshot,
             f.finance.financeTermsCapturedAt,
+            // After the quote expired: the stored row no longer decodes (VAY-2110 fallback).
+            scenario === "repository-stay-cancel-undecodable"
+              ? "2026-09-01T00:20:00Z"
+              : "2026-09-01T00:02:00Z",
           ],
         );
       // VAY-2110: date changes append amendments; adoption follows the latest one.
@@ -979,6 +984,33 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           "released",
           "released",
         ]);
+      } else if (scenario === "repository-stay-cancel-undecodable") {
+        // A stored acceptance that no longer decodes: no online fee, but freeing never gets stuck.
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+        expect(
+          await loadPricingBookingCancellation(db, {
+            propertyId,
+            guestBookingId: bookingId,
+            stay: { checkIn: "2026-10-01", checkOut: "2026-10-03", roomCount: 3, currency: "EUR" },
+            cancelledAt: new Date("2026-09-21T08:00:00Z"),
+          }),
+        ).toBeNull();
+        const free = () =>
+          cancelAcceptedPricingStay(db, createTargetPmsInventoryReservationPort(), {
+            propertyId,
+            guestBookingId: bookingId,
+            commandId: randomUUID(),
+            fingerprint: hash(scenario),
+            occurredAt: new Date("2026-09-21T08:00:00Z"),
+          });
+        expect(await free()).toEqual({ released: 2, canceledAssignments: 0 });
+        await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+        expect(await free()).toEqual({ released: 0, canceledAssignments: 0 });
+        expect(warn).toHaveBeenCalledWith(
+          "Pricing acceptance no longer decodes; releasing its stored holds.",
+          { propertyId, guestBookingId: bookingId },
+        );
+        warn.mockRestore();
       } else if (scenario === "repository-stay-cancel-host-reject") {
         // A v2 request the PMS never adopted: rejecting it releases the hold, with no handoff.
         await db.query(
