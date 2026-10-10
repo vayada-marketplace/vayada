@@ -3,6 +3,9 @@ import { Buffer } from "node:buffer";
 import {
   FINANCE_FIXED_PLAN_CURRENCY,
   FINANCE_FIXED_PLAN_INTERVAL_MONTHS,
+  FINANCE_LEGACY_ADOPTION_METADATA_KEY,
+  FINANCE_LEGACY_ADOPTION_METADATA_VALUE,
+  FINANCE_LEGACY_PRODUCT_METADATA_KEY,
   fixedPlanAmountMinor,
   type FinanceBillingDetails,
   type FinanceBillingInvoice,
@@ -399,7 +402,7 @@ function isLegacyFixedPrice(price: StripeObject, expectedId: string, rawCurrency
   );
 }
 
-function subscriptionSnapshot(value: StripeObject): StripeSubscriptionSnapshot {
+export function subscriptionSnapshot(value: StripeObject): StripeSubscriptionSnapshot {
   const items = objectArray(asObject(value["items"])["data"]);
   const item = items[0] ?? {};
   const price = asObject(item["price"]);
@@ -411,6 +414,10 @@ function subscriptionSnapshot(value: StripeObject): StripeSubscriptionSnapshot {
   const organizationId = text(subscriptionMetadata["vayada_organization_id"]);
   const currency = (text(price["currency"]) ?? "").trim().toUpperCase();
   const validCurrency = /^[A-Z]{3}$/.test(currency);
+  const targetMetadata =
+    text(subscriptionMetadata["vayada_plan"]) === "fixed" &&
+    Boolean(propertyId) &&
+    Boolean(organizationId);
   const currentTerms =
     validCurrency &&
     text(price["lookup_key"]) === fixedPriceLookupKey(currency) &&
@@ -421,21 +428,45 @@ function subscriptionSnapshot(value: StripeObject): StripeSubscriptionSnapshot {
     text(price["lookup_key"]) === legacyFixedPriceLookupKey(currency) &&
     text(recurring["interval"]) === "day" &&
     Number(recurring["interval_count"]) === 30;
+  const tieredVerified =
+    validCurrency &&
+    text(price["billing_scheme"]) === "tiered" &&
+    text(price["tiers_mode"]) === "graduated" &&
+    text(priceMetadata["vayada_plan"]) === "fixed" &&
+    (currentTerms || legacyTerms) &&
+    targetMetadata;
+  // VAY-1362: a legacy subscription adopted in place keeps its flat per-hotel
+  // price (licensed, per unit, EUR, every 30 days, quantity 1, on the product
+  // pinned at adoption). It verifies only when the adoption command marked it
+  // and the legacy hotel is this property. Reprice rules: the handover note.
+  const unitAmount = Number(price["unit_amount"]);
+  const quantity = Number(item["quantity"]);
+  const product = price["product"];
+  const productId = typeof product === "string" ? product : text(asObject(product)["id"]);
+  const retainedLegacyPrice =
+    items.length === 1 &&
+    currency === FINANCE_FIXED_PLAN_CURRENCY &&
+    text(price["billing_scheme"]) === "per_unit" &&
+    text(recurring["usage_type"]) === "licensed" &&
+    Boolean(productId) &&
+    text(subscriptionMetadata[FINANCE_LEGACY_PRODUCT_METADATA_KEY]) === productId &&
+    text(recurring["interval"]) === "day" &&
+    Number(recurring["interval_count"]) === 30 &&
+    Number.isInteger(unitAmount) &&
+    unitAmount > 0 &&
+    quantity === 1 &&
+    targetMetadata &&
+    text(subscriptionMetadata[FINANCE_LEGACY_ADOPTION_METADATA_KEY]) ===
+      FINANCE_LEGACY_ADOPTION_METADATA_VALUE &&
+    text(subscriptionMetadata["vayada_payment_kind"]) === "fixed_plan" &&
+    text(subscriptionMetadata["hotel_id"]) === propertyId;
   return {
     subscriptionId: requiredText(value, "id"),
     customerId: typeof customer === "string" ? customer : requiredText(asObject(customer), "id"),
     status: text(value["status"]) ?? "unknown",
     propertyId,
     organizationId,
-    fixedPlanVerified:
-      validCurrency &&
-      text(price["billing_scheme"]) === "tiered" &&
-      text(price["tiers_mode"]) === "graduated" &&
-      text(priceMetadata["vayada_plan"]) === "fixed" &&
-      (currentTerms || legacyTerms) &&
-      text(subscriptionMetadata["vayada_plan"]) === "fixed" &&
-      Boolean(propertyId) &&
-      Boolean(organizationId),
+    fixedPlanVerified: tieredVerified || retainedLegacyPrice,
     currentPeriodStart: stripeTimestamp(
       item["current_period_start"] ?? value["current_period_start"],
     ),
@@ -443,6 +474,8 @@ function subscriptionSnapshot(value: StripeObject): StripeSubscriptionSnapshot {
     cancelAtPeriodEnd: value["cancel_at_period_end"] === true,
     subscriptionItemId: text(item["id"]),
     currency: validCurrency ? currency : "",
+    retainedLegacyPrice,
+    amountMinor: retainedLegacyPrice ? unitAmount * quantity : null,
   };
 }
 

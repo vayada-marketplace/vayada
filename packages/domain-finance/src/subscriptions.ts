@@ -195,7 +195,21 @@ export type StripeSubscriptionSnapshot = {
   cancelAtPeriodEnd: boolean;
   subscriptionItemId: string | null;
   currency: string;
+  /**
+   * VAY-1362: a legacy fixed-plan subscription adopted in place keeps its flat
+   * per-hotel price and 30-day cycle. Its quantity must never follow the room
+   * count, and its amount is read from Stripe instead of the catalog.
+   */
+  retainedLegacyPrice?: boolean;
+  /** The current charge per period in minor units when Stripe states it. */
+  amountMinor?: number | null;
 };
+
+/** Subscription metadata written by the legacy adoption command (VAY-1362). */
+export const FINANCE_LEGACY_ADOPTION_METADATA_KEY = "vayada_legacy_adoption" as const;
+export const FINANCE_LEGACY_ADOPTION_METADATA_VALUE = "v1" as const;
+/** The Stripe product of the retained legacy price, pinned at adoption (VAY-1362). */
+export const FINANCE_LEGACY_PRODUCT_METADATA_KEY = "vayada_legacy_product" as const;
 
 export type StripeFinanceSubscriptionProvider = {
   createFixedPlanCheckout(input: StripeFixedPlanCheckoutInput): Promise<{

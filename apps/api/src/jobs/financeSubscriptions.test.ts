@@ -196,6 +196,54 @@ describe("Finance subscription webhook lifecycle", () => {
     expect(String(finish?.[0])).toContain("'outcome'");
   });
 
+  it("never pushes the room count into an adopted legacy subscription's quantity", async () => {
+    const fixture = setup("fixed");
+    fixture.provider.snapshot.retainedLegacyPrice = true;
+    fixture.provider.snapshot.amountMinor = 3_500;
+
+    await expect(
+      processFinanceSubscriptionWebhook(payload("invoice.upcoming", 51), fixture.dependencies),
+    ).resolves.toBe("applied");
+
+    expect(fixture.provider.updateRoomQuantity).not.toHaveBeenCalled();
+    expect(fixture.store.entitlement.activeRoomCount).toBe(4);
+  });
+
+  it("stores the retained legacy amount instead of the catalog price", async () => {
+    const values: unknown[][] = [];
+    const store = createPgFinanceSubscriptionWebhookStore({
+      query: vi.fn(async (_sql: string, params?: readonly unknown[]) => {
+        values.push([...(params ?? [])]);
+        return { rows: [{ propertyId: "property-1", planKey: "fixed" }] };
+      }),
+    } as never);
+    const snapshot = { ...verifiedSnapshot(), retainedLegacyPrice: true, amountMinor: 3_500 };
+
+    await store.applySubscriptionSnapshot({
+      payload: payload("invoice.paid", 52),
+      snapshot,
+      transition: "paid",
+      activeRoomCount: 4,
+    });
+    await store.recordCheckoutCompleted({
+      payload: payload("checkout.session.completed", 53),
+      snapshot,
+      activeRoomCount: 4,
+    });
+    await store.applySubscriptionSnapshot({
+      payload: payload("invoice.paid", 54),
+      snapshot: verifiedSnapshot(),
+      transition: "paid",
+      activeRoomCount: 4,
+    });
+
+    expect(values[0]?.[10]).toBe(3_500);
+    expect(values[0]?.[11]).toBe("EUR");
+    expect(values[0]?.[12]).toBe(4);
+    expect(values[1]?.[7]).toBe(3_500);
+    expect(values[2]?.[10]).toBe(4_500);
+  });
+
   it("rejects an invoice that is not linked to the entitlement subscription", async () => {
     const fixture = setup("fixed");
     fixture.store.entitlement.subscriptionRef = "sub_other";

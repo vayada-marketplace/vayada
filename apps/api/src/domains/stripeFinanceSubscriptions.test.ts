@@ -434,6 +434,101 @@ describe("Stripe fixed-plan provider", () => {
     });
   });
 
+  it("verifies an adopted legacy subscription with its retained flat 30-day price", async () => {
+    const expanded = adoptedLegacySubscription();
+    const expandedItem = expanded.items.data[0]!;
+    const expandedProvider = createStripeFinanceSubscriptionProvider({
+      secretKey: "sk_test_secret",
+      fetch: async () =>
+        response({
+          ...expanded,
+          items: {
+            data: [
+              { ...expandedItem, price: { ...expandedItem.price, product: { id: "prod_legacy" } } },
+            ],
+          },
+        }),
+    });
+    await expect(expandedProvider.retrieveSubscription("sub_legacy")).resolves.toMatchObject({
+      retainedLegacyPrice: true,
+    });
+
+    const provider = createStripeFinanceSubscriptionProvider({
+      secretKey: "sk_test_secret",
+      fetch: async () => response(adoptedLegacySubscription()),
+    });
+
+    await expect(provider.retrieveSubscription("sub_legacy")).resolves.toMatchObject({
+      fixedPlanVerified: true,
+      retainedLegacyPrice: true,
+      amountMinor: 3_500,
+      currency: "EUR",
+      propertyId: "property-1",
+      organizationId: "organization-1",
+      subscriptionItemId: "si_legacy",
+    });
+  });
+
+  it("does not verify a legacy subscription that is not adopted or not flat", async () => {
+    const cases = [
+      { metadata: { vayada_legacy_adoption: undefined } },
+      { metadata: { hotel_id: "property-2" } },
+      { metadata: { vayada_payment_kind: undefined } },
+      { metadata: { vayada_organization_id: undefined } },
+      {
+        items: {
+          data: [
+            {
+              ...adoptedLegacySubscription().items.data[0],
+              // Tiered but not a catalog lookup key: neither shape verifies.
+              price: { ...fixedPrice(), lookup_key: "vayada_fixed_eur_other" },
+            },
+          ],
+        },
+      },
+      { items: { data: [{ ...adoptedLegacySubscription().items.data[0], quantity: 2 }] } },
+      { metadata: { vayada_legacy_product: "prod_other" } },
+      { metadata: { vayada_legacy_product: undefined } },
+      ...[
+        { currency: "usd" },
+        { product: "prod_other" },
+        { recurring: { interval: "day", interval_count: 30, usage_type: "metered" } },
+        { recurring: { interval: "month", interval_count: 1, usage_type: "licensed" } },
+      ].map((price) => {
+        const legacyItem = adoptedLegacySubscription().items.data[0]!;
+        return { items: { data: [{ ...legacyItem, price: { ...legacyItem.price, ...price } }] } };
+      }),
+      {
+        items: {
+          data: [
+            adoptedLegacySubscription().items.data[0],
+            { ...adoptedLegacySubscription().items.data[0], id: "si_second" },
+          ],
+        },
+      },
+    ];
+    for (const override of cases) {
+      const base = adoptedLegacySubscription();
+      const provider = createStripeFinanceSubscriptionProvider({
+        secretKey: "sk_test_secret",
+        fetch: async () =>
+          response({
+            ...base,
+            ...override,
+            metadata: { ...base.metadata, ...(override.metadata ?? {}) },
+          }),
+      });
+      await expect(
+        provider.retrieveSubscription("sub_legacy"),
+        JSON.stringify(override),
+      ).resolves.toMatchObject({
+        fixedPlanVerified: false,
+        retainedLegacyPrice: false,
+        amountMinor: null,
+      });
+    }
+  });
+
   it("returns an unverified snapshot when Stripe omits a valid price currency", async () => {
     const provider = createStripeFinanceSubscriptionProvider({
       secretKey: "sk_test_secret",
@@ -553,6 +648,43 @@ function checkoutInput() {
     successUrl: "https://admin.booking.test/settings?billing=success",
     cancelUrl: "https://admin.booking.test/settings?billing=canceled",
     idempotencyKey: "checkout-1",
+  };
+}
+
+function adoptedLegacySubscription() {
+  return {
+    id: "sub_legacy",
+    customer: "cus_legacy",
+    status: "active",
+    cancel_at_period_end: false,
+    metadata: {
+      hotel_id: "property-1",
+      vayada_payment_kind: "fixed_plan",
+      vayada_plan: "fixed",
+      vayada_property_id: "property-1",
+      vayada_organization_id: "organization-1",
+      vayada_legacy_adoption: "v1",
+      vayada_legacy_product: "prod_legacy",
+    },
+    items: {
+      data: [
+        {
+          id: "si_legacy",
+          quantity: 1,
+          current_period_start: 1_786_449_600,
+          current_period_end: 1_789_041_600,
+          price: {
+            id: "price_legacy_inline",
+            currency: "eur",
+            billing_scheme: "per_unit",
+            unit_amount: 3_500,
+            product: "prod_legacy",
+            recurring: { interval: "day", interval_count: 30, usage_type: "licensed" },
+            metadata: {},
+          },
+        },
+      ],
+    },
   };
 }
 
