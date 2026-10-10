@@ -52,6 +52,14 @@ describe("localized checklist defaults", () => {
     expect(step.prompt).toBe("Use the scanner");
   });
 
+  it("localizes an untouched default prompt after the label was edited", () => {
+    const [builtIn] = defaultCheckinChecklistSteps();
+    const step = localizeBuiltInCheckinStep({ ...builtIn!, label: "Check every passport" }, t);
+
+    expect(step.label).toBe("Check every passport");
+    expect(step.prompt).toMatch(/^de:/);
+  });
+
   it("does not infer a built-in step from user-authored visible text", () => {
     const step = localizeBuiltInCheckinStep(
       {
