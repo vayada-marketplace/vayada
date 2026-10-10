@@ -19,7 +19,7 @@ const POLICY_DIGESTS = new Set([
 const CATALOG_DIGESTS = new Set([
   "10c6d40b2c7b7c4baacc4adaf468ddac1c3675344c114e40a5f77ba335b27794",
   "739a61d86e2ec4698b47af2c2206a3a3cd60c37e4fb9c0a99886336ef5ab71fd",
-  "6927b3f47d03df91a69c4fbc9afde2d6c40ef1248515d442a60afd487c547137",
+  "4da926f9b5374427a53f81b3c2f24e70265b1ecbfed7eba8a3c9c02687ef6f67",
 ]);
 export const channexManagementWorkerFunctions = [
   "platform.channex_management_worker_scope(text,text,uuid)",
