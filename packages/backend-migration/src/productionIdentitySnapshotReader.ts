@@ -5,6 +5,11 @@ import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
 import { RETIRED_AUTH_TABLES } from "./productionIdentityConsentSource.js";
 import { VAY_1350_INVENTORY_REVISION } from "./sourceExtraction.js";
 import { HISTORICAL_SOURCE_TABLES } from "./rawSourceDispositions.js";
+import {
+  ProductionMigrationCohortError,
+  readProductionMigrationCohort,
+  type ProductionMigrationCohort,
+} from "./productionMigrationCohort.js";
 
 type QueryClient = Pick<pg.ClientBase, "query">;
 type SourceDatabase = IdentitySourceRow["sourceDatabase"];
@@ -21,6 +26,8 @@ type SourceEvidence = {
 export type ProductionIdentitySnapshot = {
   rows: IdentitySourceRow[];
   sourceHorizonAt: string;
+  /** The approved VAY-1362 cohort bound to the run; null (or absent in fakes) means none. */
+  cohort?: ProductionMigrationCohort | null;
 };
 type TableEvidence = {
   sourceDatabase: SourceDatabase;
@@ -324,7 +331,28 @@ export async function readProductionIdentitySnapshot(
         rowCountOnly,
       });
   }
-  return { rows: loaded, sourceHorizonAt: sources.get("pms")!.sourceSnapshotAt! };
+  const cohort = await readProductionMigrationCohort(client, runId);
+  if (cohort) assertCohortInSource(cohort, loaded);
+  return { rows: loaded, sourceHorizonAt: sources.get("pms")!.sourceSnapshotAt!, cohort };
+}
+
+function assertCohortInSource(cohort: ProductionMigrationCohort, rows: IdentitySourceRow[]) {
+  const sourceIds = (database: SourceDatabase, table: string) =>
+    new Set(
+      rows
+        .filter((row) => row.sourceDatabase === database && row.sourceTable === table)
+        .map((row) => String(row.data["id"]).toLowerCase()),
+    );
+  const sets: Array<[string[], Set<string>]> = [
+    [cohort.bookingHotelIds, sourceIds("booking", "booking_hotels")],
+    [cohort.pmsHotelIds, sourceIds("pms", "hotels")],
+    [cohort.marketplaceHotelIds, sourceIds("marketplace", "hotel_profiles")],
+  ];
+  if (sets.some(([ids, source]) => ids.some((id) => !source.has(id))))
+    throw new ProductionMigrationCohortError(
+      "COHORT_HOTEL_NOT_IN_SOURCE",
+      `Migration cohort for ${cohort.sourceRunId} names a hotel absent from the attested source`,
+    );
 }
 
 const databases = (): SourceDatabase[] => ["auth", "booking", "marketplace", "pms"];

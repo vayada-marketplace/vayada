@@ -3413,6 +3413,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "production_media_migration_items",
         "production_media_migration_quarantines",
         "production_media_migration_runs",
+        "production_migration_cohorts",
         "production_migration_source_links",
         "schema_migrations",
         "source_extraction_runs",
