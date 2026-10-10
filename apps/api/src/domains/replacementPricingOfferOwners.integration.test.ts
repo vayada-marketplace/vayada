@@ -2351,7 +2351,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       ),
     ).toEqual({
       kind: "unavailable",
-      reason: "active_offer_conflict",
+      reason: "active_offer_configuration_changed",
     });
     expect(
       (
@@ -2426,6 +2426,164 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         )
       ).rows[0].count,
     ).toBe(1);
+  });
+  // VAY-2108 D5: publication 2 over an active offer, declared through the real charges writer.
+  async function publishRevisionTwo(
+    f: Awaited<ReturnType<typeof initialAriFixture>>,
+    change: (room: (typeof f.snapshot.rooms)[number]) => (typeof f.snapshot.rooms)[number] = (
+      room,
+    ) => room,
+  ) {
+    const propertyId = f.scope.propertyId,
+      draftId = randomUUID();
+    const rooms = f.snapshot.rooms.map((room) => change({ ...structuredClone(room), revision: 2 }));
+    // Finance evidence covers the pricing revision, so publication 2 has its own.
+    const reader = await pool.connect();
+    let finance;
+    try {
+      await reader.query("BEGIN");
+      finance = await lockFinanceReplacementPricingReadiness(reader, {
+        propertyId,
+        currency: f.snapshot.currency,
+        pricingRevision: 2,
+        terms: f.terms,
+      });
+    } finally {
+      await reader.query("ROLLBACK");
+      reader.release();
+    }
+    if (finance.kind !== "ready") throw new Error("publication 2 requires Finance evidence");
+    const proposal = {
+      ...f.snapshot,
+      rooms,
+      ownerReferences: { ...f.snapshot.ownerReferences, finance: finance.evidenceId },
+    };
+    await pool.query(
+      `INSERT INTO pms.pricing_v2_drafts(property_id,draft_id,draft_revision,base_revision,source_revisions,snapshot,actor_user_id)
+      VALUES($1,$2,1,1,$3,$4,$5)`,
+      [propertyId, draftId, f.sources, proposal, f.scope.actorUserId],
+    );
+    const charges = await createReplacementChargeDeclarationStore(pool).confirm(
+      f.context,
+      f.scope,
+      {
+        draftId,
+        expectedDraftRevision: 1,
+        claimedFingerprint: replacementChargeFingerprint(propertyId, proposal, f.sources)!,
+        declaration: "all_mandatory_charges_included",
+        requestId: randomUUID(),
+      },
+    );
+    const c = await pool.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query(
+        `INSERT INTO pms.pricing_v2_revisions(property_id,revision,currency,source_revisions,owner_references,request_id,request_hash,actor_user_id,room_count)
+          VALUES($1,2,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          propertyId,
+          proposal.currency,
+          f.sources,
+          { ...proposal.ownerReferences, charges: charges.id },
+          randomUUID(),
+          "b".repeat(64),
+          f.scope.actorUserId,
+          rooms.length,
+        ],
+      );
+      for (const room of rooms)
+        await c.query(
+          "INSERT INTO pms.pricing_v2_rooms(property_id,revision,room_type_id,currency,configuration) VALUES($1,2,$2,$3,$4)",
+          [propertyId, room.roomTypeId, room.currency, room],
+        );
+      await c.query("UPDATE pms.pricing_v2_heads SET revision=2 WHERE property_id=$1", [
+        propertyId,
+      ]);
+      await c.query("COMMIT");
+    } finally {
+      await c.query("ROLLBACK");
+      c.release();
+    }
+  }
+  async function activeTargetState(f: Awaited<ReturnType<typeof initialAriFixture>>) {
+    return (
+      await pool.query(
+        `SELECT t.active_version,(SELECT count(*)::int FROM pms.channex_offer_target_versions v
+           WHERE v.target_id=t.id) AS versions
+         FROM pms.channex_offer_targets t WHERE t.id=$1`,
+        [f.claim.targetId],
+      )
+    ).rows[0];
+  }
+  it("keeps an active offer current across a publication with the same provider configuration", async () => {
+    const f = await initialAriFixture();
+    await seedCurrentAvailability(f);
+    await seedCompletedInitialAri(f);
+    expect(await activatePublishedChannexOffers(pool, f.input)).toEqual({
+      kind: "all_targets_active",
+      count: 2,
+    });
+    const before = await activeTargetState(f);
+    await publishRevisionTwo(f, (room) => ({
+      ...room,
+      offers: room.offers.map((offer) =>
+        offer.price.kind === "independent"
+          ? {
+              ...offer,
+              price: {
+                ...offer.price,
+                calendar: { ...offer.price.calendar, base: { mode: "flat", amountMinor: "12500" } },
+              },
+            }
+          : offer,
+      ),
+    }));
+    expect(await activatePublishedChannexOffers(pool, f.input)).toEqual({
+      kind: "all_targets_active",
+      count: 2,
+    });
+    expect(await activeTargetState(f)).toEqual(before);
+    const create = vi.fn();
+    const job = {
+      ...f.input,
+      propertyId: f.scope.propertyId,
+      correlationId: null,
+      maxAttempts: 3,
+      input: {
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+        operationType: "provision" as const,
+        publishedOffer: {
+          roomTypeId: f.selection.roomTypeId,
+          offerId: f.selection.offerId,
+          publicationRevision: 2,
+          primaryOccupancy: 1,
+        },
+      },
+    };
+    expect(
+      await bootstrapPublishedChannexOffer(pool, job, f.input.workerId, { get: vi.fn(), create }),
+    ).toEqual({ kind: "ready" });
+    expect(create).not.toHaveBeenCalled();
+  });
+  it("refuses to treat an active offer as current after its provider configuration changed", async () => {
+    const f = await initialAriFixture();
+    await seedCurrentAvailability(f);
+    await seedCompletedInitialAri(f);
+    await activatePublishedChannexOffers(pool, f.input);
+    const before = await activeTargetState(f);
+    await publishRevisionTwo(f, (room) => ({
+      ...room,
+      offers: room.offers.map((offer) => ({
+        ...offer,
+        meal: { kind: "breakfast", charge: { kind: "room", amountMinor: "0" } },
+      })),
+    }));
+    expect(await activatePublishedChannexOffers(pool, f.input)).toEqual({
+      kind: "unavailable",
+      reason: "active_offer_configuration_changed",
+    });
+    expect(await activeTargetState(f)).toEqual(before);
   });
   it("does not accept an incomplete replacement over the active version", async () => {
     const f = await initialAriFixture();
@@ -2510,7 +2668,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     );
     expect(await activatePublishedChannexOffers(pool, f.input)).toEqual({
       kind: "unavailable",
-      reason: "target_activation_pending",
+      reason: "active_offer_binding_changed",
     });
   });
   it("does not accept an active version after its room mapping changes", async () => {
@@ -2526,7 +2684,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     );
     expect(await activatePublishedChannexOffers(pool, f.input)).toEqual({
       kind: "unavailable",
-      reason: "target_activation_pending",
+      reason: "active_offer_binding_changed",
     });
   });
   it("worker reconciles today, sends tomorrow closed once, and continues without sync success", async () => {
