@@ -6,7 +6,6 @@ vi.mock("./publicPricingAuthority.js", () => ({ lockPublicPricingAuthority: vi.f
 const scope = {
   propertyId: "property",
   organizationId: "organization",
-  authorityRevision: "00000000-0000-4000-8000-000000000001",
 };
 const current = {
   scope,
@@ -104,10 +103,10 @@ it("rejects changed timezone or revoked/different public scope", async () => {
     "unavailable",
   );
 });
-it("rejects a changed authority revision", async () => {
+it("rejects a changed owning organization", async () => {
   vi.mocked(lockPublicPricingAuthority).mockResolvedValue({
     ...scope,
-    authorityRevision: "00000000-0000-4000-8000-000000000002",
+    organizationId: "00000000-0000-4000-8000-0000000000ff",
   });
   await expect(finishCurrentQuoteAcceptanceTime(client, "hotel", current)).rejects.toThrow(
     "unavailable",

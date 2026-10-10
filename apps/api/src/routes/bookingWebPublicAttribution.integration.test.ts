@@ -58,7 +58,7 @@ describe.skipIf(!TEST_DATABASE_URL)(
             checkoutRequest(reference),
             command("unavailable"),
           ),
-        ).rejects.toMatchObject({ code: "PRICING_UNAVAILABLE", statusCode: 503 });
+        ).rejects.toMatchObject({ code: "PRICING_RETIRED", statusCode: 410 });
       }
       expect(completedReservationQuoteIds.size).toBe(0);
       for (const table of [

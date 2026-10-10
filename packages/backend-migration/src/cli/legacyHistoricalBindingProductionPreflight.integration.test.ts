@@ -115,9 +115,6 @@ describe.skipIf(!url)("production historical binding temporary reader", () => {
         await expect(
           source.query("SELECT * FROM booking.pricing_runtime_effective_property_scopes"),
         ).rejects.toMatchObject({ code: "42501" });
-        await expect(
-          source.query("SELECT * FROM booking.pricing_runtime_effective_authority_scopes"),
-        ).rejects.toMatchObject({ code: "42501" });
         return "ok";
       },
       owner.pathname.slice(1),

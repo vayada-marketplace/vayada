@@ -161,6 +161,45 @@ describe("dashboardService target route adapter", () => {
     );
   });
 
+  it("compares Today with the same weekday last week and charts the week ending today", async () => {
+    vi.setSystemTime(new Date("2026-06-14T23:30:00.000Z"));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input).includes("/sparklines")
+          ? Response.json({ sparklines: { points: [] } })
+          : Response.json({
+              metrics: {
+                current: {
+                  totalRevenue: { amountDecimal: "0", currency: "EUR" },
+                  bookingCount: 0,
+                  avgNightlyRate: { amountDecimal: "0", currency: "EUR" },
+                  pageViewCount: 0,
+                },
+                previous: {
+                  totalRevenue: { amountDecimal: "0", currency: "EUR" },
+                  bookingCount: 0,
+                  avgNightlyRate: { amountDecimal: "0", currency: "EUR" },
+                  pageViewCount: 0,
+                },
+                nextArrivalDate: null,
+                liveSinceDate: null,
+              },
+            }),
+      ),
+    );
+
+    await dashboardService.getStats("today", "Pacific/Auckland");
+    await dashboardService.getSparklines("today", "Pacific/Auckland");
+
+    expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain(
+      "periodStart=2026-06-15&periodEnd=2026-06-15&previousPeriodStart=2026-06-08&previousPeriodEnd=2026-06-08",
+    );
+    expect(String(vi.mocked(fetch).mock.calls[1]?.[0])).toContain(
+      "/sparklines?windowStart=2026-06-09&windowEnd=2026-06-15",
+    );
+  });
+
   it.each(["today", "week", "month"] as const)(
     "loads the %s funnel in property-local dates",
     async (range) => {
