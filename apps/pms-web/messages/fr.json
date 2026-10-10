@@ -7,6 +7,7 @@
   "layout.header.user": "Utilisateur",
   "layout.header.language": "Langue",
   "layout.header.currency": "Devise",
+  "layout.header.help": "Aide",
   "layout.sidebar.propertyManagerDescription": "Operations & Inventaire",
   "layout.sidebar.creatorMarketplace": "Place de marche vayada",
   "layout.sidebar.creatorMarketplaceDescription": "Createurs & collaborations",

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import {
   PMS_CALENDAR_AUTO_OPEN_CONTRACT_VERSION,
+  PMS_CALENDAR_AUTO_OPEN_DEFAULT_CONFIGURATION,
   calculatePmsCalendarAutoOpenHorizon,
   isPmsCalendarAutoOpenConfiguration,
   isPmsCalendarAutoOpenFixedTargetWithinLimit,
@@ -134,7 +135,9 @@ export function createPgPmsCalendarAutoOpenSettingsRepository(config: {
         );
         if (!reservationId) return rollback(client, failure({ code: "command_in_progress" }));
 
-        if (sameConfiguration(current, command)) {
+        // An explicit choice is always saved, even when it equals the virtual default, so a
+        // later change of the default never overrides it.
+        if (current.configured && sameConfiguration(current, command)) {
           const result = success(
             "unchanged",
             currentSetting,
@@ -207,9 +210,10 @@ async function read(client: Pick<Client, "query">, propertyId: string, lock: boo
   return client.query<Row>(
     `SELECT property.id::text AS "propertyId", location.timezone AS "propertyTimeZone",
        settings.property_id IS NOT NULL AS configured,
-       COALESCE(settings.revision, 0) AS revision, COALESCE(settings.enabled, FALSE) AS enabled,
-       COALESCE(settings.mode, 'rolling') AS mode,
-       CASE WHEN settings.property_id IS NULL THEN 18 ELSE settings.rolling_months END AS "rollingMonths",
+       COALESCE(settings.revision, 0) AS revision, COALESCE(settings.enabled, $2::boolean) AS enabled,
+       COALESCE(settings.mode, $3::text) AS mode,
+       CASE WHEN settings.property_id IS NULL THEN $4::smallint
+            ELSE settings.rolling_months END AS "rollingMonths",
        to_char(settings.fixed_end_month, 'YYYY-MM') AS "fixedEndMonth",
        settings.updated_at AS "updatedAt", COALESCE(application.warnings, '[]'::jsonb) AS warnings
      FROM hotel_catalog.properties property
@@ -231,7 +235,12 @@ async function read(client: Pick<Client, "query">, propertyId: string, lock: boo
        LIMIT 1
      ) application ON TRUE
      WHERE property.id = $1::uuid`,
-    [propertyId],
+    [
+      propertyId,
+      PMS_CALENDAR_AUTO_OPEN_DEFAULT_CONFIGURATION.enabled,
+      PMS_CALENDAR_AUTO_OPEN_DEFAULT_CONFIGURATION.mode,
+      PMS_CALENDAR_AUTO_OPEN_DEFAULT_CONFIGURATION.rollingMonths,
+    ],
   );
 }
 

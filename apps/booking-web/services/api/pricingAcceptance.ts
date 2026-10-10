@@ -35,6 +35,21 @@ export type PricingAcceptanceResult =
       replayed: true;
     }>;
 
+/** An accepted card quote whose booking waits for the guest's card payment. */
+export type PricingCardPaymentRequired = Readonly<{
+  kind: "payment_required";
+  bookingId: string;
+  bookingReference: string;
+  requestId: string;
+  payment: Readonly<{
+    provider: "stripe";
+    clientSecret: string;
+    stripeAccountId: string;
+    paymentIntentId: string;
+    expiresAt: string;
+  }>;
+}>;
+
 const uuid = (value: unknown): value is string =>
   typeof value === "string" &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
@@ -50,6 +65,53 @@ const exact = (value: unknown, keys: string[]): value is Record<string, unknown>
   !Array.isArray(value) &&
   Object.keys(value).length === keys.length &&
   keys.every((key) => Object.hasOwn(value, key));
+
+function parseCardPaymentRequired(
+  value: unknown,
+  requestId: string,
+): PricingCardPaymentRequired | null {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    (value as { kind?: unknown }).kind !== "payment_required"
+  )
+    return null;
+  const v = value as Record<string, unknown>;
+  const payment = v.payment;
+  if (
+    !uuid(v.bookingId) ||
+    !bookingReference(v.bookingReference) ||
+    !exact(payment, [
+      "provider",
+      "clientSecret",
+      "stripeAccountId",
+      "paymentIntentId",
+      "expiresAt",
+    ]) ||
+    payment.provider !== "stripe" ||
+    typeof payment.clientSecret !== "string" ||
+    !/^pi_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$/.test(payment.clientSecret) ||
+    typeof payment.stripeAccountId !== "string" ||
+    !/^acct_[A-Za-z0-9]+$/.test(payment.stripeAccountId) ||
+    typeof payment.paymentIntentId !== "string" ||
+    !payment.clientSecret.startsWith(`${payment.paymentIntentId}_secret_`) ||
+    !iso(payment.expiresAt)
+  )
+    return null;
+  return {
+    kind: "payment_required",
+    bookingId: v.bookingId,
+    bookingReference: v.bookingReference,
+    requestId,
+    payment: {
+      provider: "stripe",
+      clientSecret: payment.clientSecret,
+      stripeAccountId: payment.stripeAccountId,
+      paymentIntentId: payment.paymentIntentId,
+      expiresAt: payment.expiresAt,
+    },
+  };
+}
 
 function parsePricingAcceptanceResult(value: unknown): PricingAcceptanceResult | null {
   if (
@@ -83,8 +145,8 @@ function parsePricingAcceptanceResult(value: unknown): PricingAcceptanceResult |
 
 const optional = (value: string | null | undefined) => value?.trim() || null;
 
-/** Builds only the currently supported instant, pay-at-property acceptance.
- * The server re-reads and validates every quote, policy and finance owner. */
+/** Instant quotes paid at the property, or paid in full online by card (the answer is then
+ * payment_required). The server re-reads and validates every quote, policy and finance owner. */
 export async function acceptPricingQuote(
   slug: string,
   quote: PublicBookingQuote,
@@ -92,13 +154,10 @@ export async function acceptPricingQuote(
   guest: PricingAcceptanceGuest,
   signal?: AbortSignal,
   mode: "fresh" | "uncertain-retry" = "fresh",
-): Promise<PricingAcceptanceResult> {
+): Promise<PricingAcceptanceResult | PricingCardPaymentRequired> {
   const verifiedDisclosure = parsePublicQuoteGuestDisclosure(disclosure, quote);
   if (
-    quote.acceptanceMode !== "instant" ||
-    quote.paymentMethod !== "pay_at_property" ||
-    quote.dueNowMinor !== "0" ||
-    quote.dueLaterMinor !== quote.totalMinor ||
+    !pricingQuoteBookableOnline(quote) ||
     !verifiedDisclosure ||
     (mode === "fresh" && Date.parse(quote.expiresAt) <= Date.now())
   )
@@ -146,8 +205,60 @@ export async function acceptPricingQuote(
     throw error;
   }
   signal?.throwIfAborted();
+  const card = parseCardPaymentRequired(raw, requestId);
+  // Keep the key while the card payment is open, so a retry returns the same payment.
+  if (card) return card;
   const result = parsePricingAcceptanceResult(raw);
   if (!result) throw new Error("The booking confirmation could not be verified. Please try again.");
   expireCheckoutIdempotencyKeyAt("pricing-acceptance", identity, quote.expiresAt, requestId);
   return result;
+}
+
+/** Quotes this page can book: instant, and either paid at the property or paid in full by card. */
+export function pricingQuoteBookableOnline(quote: PublicBookingQuote): boolean {
+  if (quote.acceptanceMode !== "instant") return false;
+  if (quote.paymentMethod === "pay_at_property")
+    return quote.dueNowMinor === "0" && quote.dueLaterMinor === quote.totalMinor;
+  return (
+    quote.paymentMethod === "card" &&
+    quote.dueNowMinor === quote.totalMinor &&
+    quote.dueLaterMinor === "0"
+  );
+}
+
+export type PricingCardPaymentResult = Readonly<{
+  kind: "accepted";
+  bookingId: string;
+  bookingReference: string;
+  replayed: boolean;
+}>;
+
+/** After Stripe confirmed the card in the browser: ask the server to confirm the booking.
+ * 409 PAYMENT_PENDING means Stripe has not reported the payment yet; retry shortly. */
+export async function completePricingCardPayment(
+  slug: string,
+  quoteId: string,
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<PricingCardPaymentResult> {
+  const raw = await bookingWebPublic.post<unknown>(
+    `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/quotes/${encodeURIComponent(quoteId)}/accept/payment`,
+    {},
+    { headers: { "Idempotency-Key": requestId }, signal, cache: "no-store" },
+  );
+  const v = raw as Record<string, unknown> | null;
+  if (
+    !v ||
+    v.kind !== "accepted" ||
+    !uuid(v.bookingId) ||
+    !bookingReference(v.bookingReference) ||
+    typeof v.replayed !== "boolean"
+  )
+    throw new Error("The booking confirmation could not be verified. Please try again.");
+  return {
+    kind: "accepted",
+    bookingId: v.bookingId,
+    bookingReference: v.bookingReference,
+    replayed: v.replayed,
+  };
 }
