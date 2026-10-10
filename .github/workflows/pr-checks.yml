@@ -31,6 +31,7 @@ on:
       - "fm/vay-2100-*"
       - "fm/vay-2101-*"
       - "fm/vay-2102-*"
+      - "fm/vay-2120-*"
       - flamurmaliqi2811/vay-2044-expense-worker-runtime
       - fm/vay-2041-worker-permissions
       - fm/vay-2041-worker-source-permissions

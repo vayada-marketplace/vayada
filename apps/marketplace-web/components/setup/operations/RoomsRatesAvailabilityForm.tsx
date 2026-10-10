@@ -1,82 +1,57 @@
 "use client";
 
-import { useContext, useEffect, useRef, useState, type FormEvent } from "react";
+import { useContext, useEffect, useState, type FormEvent } from "react";
 
 import {
   hotelOperationsErrorMessage,
   hotelOperationsSetupApi,
-  hotelOperationsWriteMayHaveCommitted,
-  isPropertyCurrencyConflict,
   type ExistingRoomSetup,
-  type RoomSetupDraft,
   type RoomSetupState,
 } from "@/services/api/hotelOperationsSetupClient";
 
 import { RoomImportRevisionContext } from "../RoomImportRevisionContext";
 
 import {
-  OperationField,
   OperationFormLoadError,
   OperationFormLoading,
   OperationFormShell,
-  operationInputClassName,
 } from "./OperationFormShell";
 
+/**
+ * Rooms are created in PMS Rooms & Rates, which owns the room-facts commands and each room's
+ * Prices tab. This step only reads room readiness and hands the hotel to that page.
+ */
 export function RoomsRatesAvailabilityForm({
   onBack,
-  onBeforeSave,
   onCompleted,
+  onOpenRoomsAndRates,
   propertyId,
   taskComplete,
 }: {
   onBack: (() => void) | null;
-  onBeforeSave: () => Promise<void>;
   onCompleted: () => void | Promise<void>;
+  onOpenRoomsAndRates: () => void | Promise<void>;
   propertyId: string;
   taskComplete: boolean;
 }) {
-  const [draft, setDraft] = useState<RoomSetupDraft>(() => emptyRoomDraft("EUR"));
   const [roomState, setRoomState] = useState<RoomSetupState | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
   const [submitting, setSubmitting] = useState(false);
-  const [roomSaved, setRoomSaved] = useState(false);
-  const [addingAnother, setAddingAnother] = useState(false);
-  const [pendingAdditionalDraft, setPendingAdditionalDraft] = useState<RoomSetupDraft | null>(null);
   const [error, setError] = useState("");
-  const [draftDirty, setDraftDirty] = useState(false);
-  const [importRefreshing, setImportRefreshing] = useState(false);
-  const [importRefreshFailed, setImportRefreshFailed] = useState(false);
   const importRevision = useContext(RoomImportRevisionContext);
-  const observedImportRevision = useRef(importRevision);
 
   useEffect(() => {
     const controller = new AbortController();
-    observedImportRevision.current = importRevision;
-    setDraftDirty(false);
-    setImportRefreshing(false);
-    setImportRefreshFailed(false);
     setLoading(true);
     setLoadError("");
+    setError("");
     setRoomState(null);
-    setRoomSaved(false);
-    setAddingAnother(false);
-    setPendingAdditionalDraft(null);
     void hotelOperationsSetupApi
       .getRoomSetupState(propertyId, controller.signal)
-      .then(async (nextRoomState) => {
-        if (controller.signal.aborted) return;
-        setRoomState(nextRoomState);
-        if (nextRoomState.status !== "empty") return;
-
-        const launchSettings = await hotelOperationsSetupApi.getPropertyLaunchSettings(
-          propertyId,
-          controller.signal,
-        );
-        if (controller.signal.aborted) return;
-        const currency = launchSettings.defaultCurrency.trim().toUpperCase() || "EUR";
-        setDraft(emptyRoomDraft(currency));
+      .then((nextRoomState) => {
+        if (!controller.signal.aborted) setRoomState(nextRoomState);
       })
       .catch((cause) => {
         if (!controller.signal.aborted) {
@@ -89,154 +64,43 @@ export function RoomsRatesAvailabilityForm({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-    // Import refreshes below preserve the in-progress entry instead of resetting this form.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [propertyId, reloadToken, taskComplete]);
+  }, [importRevision, propertyId, reloadToken, taskComplete]);
 
-  useEffect(() => {
-    if (
-      importRevision === observedImportRevision.current ||
-      loading ||
-      submitting ||
-      pendingAdditionalDraft
-    )
-      return;
-    const controller = new AbortController();
-    setImportRefreshing(true);
-    setImportRefreshFailed(false);
-    void hotelOperationsSetupApi
-      .getRoomSetupState(propertyId, controller.signal)
-      .then((next) => {
-        if (controller.signal.aborted) return;
-        observedImportRevision.current = importRevision;
-        setRoomState(next);
-        setRoomSaved(false);
-        setError("");
-      })
-      .catch(() => {
-        if (controller.signal.aborted) return;
-        setImportRefreshFailed(true);
-        setError(
-          "Room setup could not refresh after import. Refresh the prepared data to try again. Your entry is unchanged.",
-        );
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setImportRefreshing(false);
-      });
-    return () => controller.abort();
-  }, [importRevision, propertyId, loading, submitting, pendingAdditionalDraft]);
-
-  const retainedEntry =
-    draftDirty && !roomSaved && roomState?.status !== "empty" ? (
-      <div className="sm:col-span-2 rounded-xl border border-gray-200 p-4">
-        <p className="font-semibold">Your unsaved entry</p>
-        <p className="mb-3 text-sm text-gray-600">
-          Kept here for reference. These values have not been saved.
-        </p>
-        <RoomDraftSummary draft={draft} />
-      </div>
-    ) : null;
-
-  const update = <Key extends keyof RoomSetupDraft>(key: Key, value: RoomSetupDraft[Key]) => {
-    setDraftDirty(true);
-    setDraft((current) => ({ ...current, [key]: value }));
+  // The handoff leaves this page, so the step stays busy instead of allowing a second handoff.
+  const openRoomsAndRates = async () => {
+    setSubmitting(true);
+    setError("");
+    await onOpenRoomsAndRates();
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (importRefreshing || importRefreshFailed) return;
+    if (roomState?.status === "empty") {
+      await openRoomsAndRates();
+      return;
+    }
     setSubmitting(true);
     setError("");
-    let attemptedAdditionalDraft: RoomSetupDraft | null = null;
     try {
-      if (roomSaved) {
-        await refreshProgress(true);
-        return;
-      }
       if (roomState?.status === "complete") {
-        await refreshProgress(false);
+        await refreshProgress();
         return;
       }
-      if (roomState?.status === "needs_recovery") {
-        const refreshed = await hotelOperationsSetupApi.getRoomSetupState(propertyId);
-        setRoomState(refreshed);
-        if (refreshed.status === "complete") {
-          await refreshProgress(false);
-        }
-        return;
-      }
-
-      if (addingAnother) {
-        attemptedAdditionalDraft = pendingAdditionalDraft ?? { ...draft };
-        setPendingAdditionalDraft(attemptedAdditionalDraft);
-        await hotelOperationsSetupApi.addRoomSetup(propertyId, attemptedAdditionalDraft);
-        setPendingAdditionalDraft(null);
-        setDraftDirty(false);
-        setRoomSaved(true);
-        return;
-      }
-
-      await onBeforeSave();
-      const result = await hotelOperationsSetupApi.saveRoomSetup(propertyId, draft);
-      if (result.status === "needs_recovery") {
-        setRoomState(result);
-        return;
-      }
-      if (result.status === "complete") {
-        await refreshProgress(false);
-        return;
-      }
-
-      setDraftDirty(false);
-      setRoomSaved(true);
+      const refreshed = await hotelOperationsSetupApi.getRoomSetupState(propertyId);
+      setRoomState(refreshed);
+      if (refreshed.status === "complete") await refreshProgress();
     } catch (cause) {
-      if (isPropertyCurrencyConflict(cause)) {
-        setPendingAdditionalDraft(null);
-        try {
-          const launchSettings =
-            await hotelOperationsSetupApi.getPropertyLaunchSettings(propertyId);
-          const currency = launchSettings.defaultCurrency.trim().toUpperCase() || "EUR";
-          setDraft((current) => ({ ...current, currency, nightlyRate: Number.NaN }));
-          setError(
-            `Property currency changed to ${currency}. Review and re-enter the nightly rate.`,
-          );
-        } catch (reloadCause) {
-          setError(
-            hotelOperationsErrorMessage(
-              reloadCause,
-              "Property currency changed, but the latest setting could not be loaded.",
-            ),
-          );
-        }
-        return;
-      }
-      if (attemptedAdditionalDraft && !hotelOperationsWriteMayHaveCommitted(cause)) {
-        setPendingAdditionalDraft(null);
-      }
-      setError(hotelOperationsErrorMessage(cause, "The room type could not be saved."));
+      setError(hotelOperationsErrorMessage(cause, "Room setup could not be checked."));
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleAddAnother = () => {
-    setDraftDirty(false);
-    setDraft(emptyRoomDraft(draft.currency));
-    setRoomSaved(false);
-    setAddingAnother(true);
-    setPendingAdditionalDraft(null);
-    setError("");
-  };
-
-  const refreshProgress = async (roomWasSaved: boolean) => {
+  const refreshProgress = async () => {
     try {
       await onCompleted();
     } catch {
-      setError(
-        roomWasSaved
-          ? "Your room types were saved, but setup progress could not be refreshed. Choose Continue setup again. vayada will not submit them twice."
-          : "Setup progress could not be refreshed. Try again.",
-      );
+      setError("Setup progress could not be refreshed. Try again.");
     }
   };
 
@@ -248,31 +112,6 @@ export function RoomsRatesAvailabilityForm({
         onBack={onBack}
         onRetry={() => setReloadToken((current) => current + 1)}
       />
-    );
-  }
-
-  if (roomSaved) {
-    return (
-      <OperationFormShell
-        error={error}
-        notice={
-          <div className="space-y-1">
-            <p className="font-semibold">Room type saved.</p>
-            <p>
-              You can add another room type now, or continue setup. You can always add more room
-              types and configure detailed pricing in Rooms &amp; Rates after setup.
-            </p>
-          </div>
-        }
-        onBack={onBack}
-        onSubmit={handleSubmit}
-        secondaryAction={{ label: "Add another room type", onClick: handleAddAnother }}
-        submitLabel="Continue setup"
-        submitting={submitting || importRefreshing}
-        submitDisabled={importRefreshFailed}
-      >
-        <RoomDraftSummary draft={draft} />
-      </OperationFormShell>
     );
   }
 
@@ -292,11 +131,9 @@ export function RoomsRatesAvailabilityForm({
         onBack={onBack}
         onSubmit={handleSubmit}
         submitLabel="Continue"
-        submitting={submitting || importRefreshing}
-        submitDisabled={importRefreshFailed}
+        submitting={submitting}
       >
         {roomState.room ? <RoomSetupSummary room={roomState.room} /> : null}
-        {retainedEntry}
       </OperationFormShell>
     );
   }
@@ -307,9 +144,9 @@ export function RoomsRatesAvailabilityForm({
         error={error}
         onBack={onBack}
         onSubmit={handleSubmit}
+        secondaryAction={{ label: "Open Rooms & Rates", onClick: () => void openRoomsAndRates() }}
         submitLabel="Check setup again"
-        submitting={submitting || importRefreshing}
-        submitDisabled={importRefreshFailed}
+        submitting={submitting}
       >
         <div
           className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:col-span-2"
@@ -329,7 +166,6 @@ export function RoomsRatesAvailabilityForm({
           </ul>
         </div>
         {roomState.room ? <RoomSetupSummary room={roomState.room} /> : null}
-        {retainedEntry}
       </OperationFormShell>
     );
   }
@@ -339,80 +175,19 @@ export function RoomsRatesAvailabilityForm({
       error={error}
       onBack={onBack}
       onSubmit={handleSubmit}
-      submitLabel={pendingAdditionalDraft ? "Retry save" : "Save and continue"}
-      submitting={submitting || importRefreshing}
-      submitDisabled={importRefreshFailed}
-      submittingLabel={pendingAdditionalDraft ? "Retrying..." : "Saving..."}
+      submitLabel="Open Rooms & Rates"
+      submitting={submitting}
+      submittingLabel="Opening..."
     >
-      <OperationField className="sm:col-span-2" label="Room type name">
-        <input
-          autoComplete="off"
-          className={operationInputClassName}
-          disabled={pendingAdditionalDraft !== null}
-          maxLength={120}
-          onChange={(event) => update("name", event.target.value)}
-          placeholder="e.g. Deluxe Double, Pool Villa, Studio"
-          required
-          value={draft.name}
-        />
-      </OperationField>
-      <OperationField hint="How many of this room type do you have?" label="Number of rooms/units">
-        <input
-          className={operationInputClassName}
-          disabled={pendingAdditionalDraft !== null}
-          inputMode="numeric"
-          min={1}
-          onChange={(event) => update("totalRooms", event.target.valueAsNumber)}
-          required
-          type="number"
-          value={draft.totalRooms}
-        />
-      </OperationField>
-      <OperationField label="Max guests">
-        <input
-          className={operationInputClassName}
-          disabled={pendingAdditionalDraft !== null}
-          inputMode="numeric"
-          min={1}
-          onChange={(event) => update("maxOccupancy", event.target.valueAsNumber)}
-          required
-          type="number"
-          value={draft.maxOccupancy}
-        />
-      </OperationField>
-      <OperationField label="Nightly rate">
-        <div className="flex min-h-11 overflow-hidden rounded-xl border border-gray-300 bg-white focus-within:border-primary-600 focus-within:ring-2 focus-within:ring-primary-100">
-          <input
-            className="min-w-0 flex-1 bg-transparent px-3 py-2.5 text-sm text-gray-950 outline-none"
-            disabled={pendingAdditionalDraft !== null}
-            inputMode="decimal"
-            min="0.01"
-            onChange={(event) => update("nightlyRate", event.target.valueAsNumber)}
-            required
-            step="0.01"
-            type="number"
-            value={Number.isNaN(draft.nightlyRate) ? "" : draft.nightlyRate}
-          />
-          <span
-            className="flex items-center border-l border-gray-200 bg-gray-50 px-3 text-sm font-semibold text-gray-700"
-            data-testid="room-rate-currency"
-          >
-            {draft.currency}
-          </span>
-        </div>
-      </OperationField>
+      <div className="space-y-2 text-sm leading-6 text-gray-700 sm:col-span-2">
+        <p className="font-semibold text-gray-950">Add your room types in Rooms &amp; Rates.</p>
+        <p>
+          Create each room type and its rooms in the PMS, then set its prices in the room&apos;s
+          Prices tab.
+        </p>
+      </div>
     </OperationFormShell>
   );
-}
-
-function emptyRoomDraft(currency: string): RoomSetupDraft {
-  return {
-    name: "",
-    totalRooms: 1,
-    maxOccupancy: 2,
-    nightlyRate: 150,
-    currency,
-  };
 }
 
 function roomRecoveryMessages(reasonCodes: string[], hasActiveRoom: boolean): string[] {
@@ -433,20 +208,6 @@ function roomRecoveryMessages(reasonCodes: string[], hasActiveRoom: boolean): st
   return messages.length > 0
     ? messages
     : ["Finish the remaining room, rate, and availability requirements."];
-}
-
-function RoomDraftSummary({ draft }: { draft: RoomSetupDraft }) {
-  return (
-    <RoomSummary
-      currency={draft.currency}
-      maxOccupancy={draft.maxOccupancy}
-      name={draft.name}
-      nightlyRate={
-        Number.isFinite(draft.nightlyRate) ? draft.nightlyRate.toFixed(2) : "Not entered"
-      }
-      totalRooms={draft.totalRooms}
-    />
-  );
 }
 
 function RoomSetupSummary({ room }: { room: ExistingRoomSetup }) {

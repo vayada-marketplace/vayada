@@ -3,15 +3,10 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getRoomSetupState: vi.fn(),
-  getPropertyLaunchSettings: vi.fn(),
-  saveRoomSetup: vi.fn(),
-  addRoomSetup: vi.fn(),
 }));
 vi.mock("@/services/api/hotelOperationsSetupClient", () => ({
   hotelOperationsSetupApi: mocks,
   hotelOperationsErrorMessage: (_: unknown, fallback: string) => fallback,
-  hotelOperationsWriteMayHaveCommitted: () => false,
-  isPropertyCurrencyConflict: () => false,
 }));
 import { RoomImportRevisionContext } from "../RoomImportRevisionContext";
 import { RoomsRatesAvailabilityForm } from "./RoomsRatesAvailabilityForm";
@@ -29,10 +24,13 @@ const recovery = {
   },
   reasonCodes: ["missing_non_retired_room", "missing_active_rate_plan", "missing_future_inventory"],
 };
+const handlers = {
+  onCompleted: vi.fn(),
+  onOpenRoomsAndRates: vi.fn(),
+};
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getRoomSetupState.mockResolvedValue({ status: "empty" });
-  mocks.getPropertyLaunchSettings.mockResolvedValue({ defaultCurrency: "EUR" });
 });
 function render(revision: number, propertyId = "hotel-a") {
   return createElement(
@@ -42,60 +40,87 @@ function render(revision: number, propertyId = "hotel-a") {
       propertyId,
       taskComplete: false,
       onBack: null,
-      onBeforeSave: vi.fn(),
-      onCompleted: vi.fn(),
+      ...handlers,
     }),
   );
 }
-it("refreshes imports and retains an unfinished entry without saving or duplicating it", async () => {
+async function mount(revision = 0) {
   let view!: ReactTestRenderer;
   await act(async () => {
-    view = create(render(0));
+    view = create(render(revision));
   });
-  await act(async () => {
-    view.root
-      .findByProps({ maxLength: 120 })
-      .props.onChange({ target: { value: "My unsaved room" } });
-  });
+  return view;
+}
+const submitButton = (view: ReactTestRenderer) => view.root.findByProps({ type: "submit" });
+const submit = (view: ReactTestRenderer) =>
+  act(async () => view.root.findByType("form").props.onSubmit({ preventDefault() {} }));
+it("hands a hotel with no rooms to PMS Rooms & Rates instead of offering a room form", async () => {
+  const view = await mount();
+  const output = JSON.stringify(view.toJSON());
+  expect(output).toContain("Add your room types in Rooms & Rates.");
+  expect(output).toContain("Prices tab");
+  expect(view.root.findAllByType("input")).toHaveLength(0);
+  expect(submitButton(view).props.children).toBe("Open Rooms & Rates");
+  await submit(view);
+  expect(handlers.onOpenRoomsAndRates).toHaveBeenCalledTimes(1);
+  expect(handlers.onCompleted).not.toHaveBeenCalled();
+  expect(submitButton(view).props.disabled).toBe(true);
+  await act(async () => view.unmount());
+});
+it("offers Rooms & Rates for an incomplete setup", async () => {
+  mocks.getRoomSetupState.mockResolvedValue(recovery);
+  const view = await mount();
+  const output = JSON.stringify(view.toJSON());
+  expect(output).toContain("Imported Suite");
+  expect(output).toContain("Add at least one active physical room.");
+  await act(async () => view.root.findByProps({ children: "Open Rooms & Rates" }).props.onClick());
+  expect(handlers.onOpenRoomsAndRates).toHaveBeenCalledTimes(1);
+  await act(async () => view.unmount());
+});
+it("checks an incomplete setup again and continues once it is complete", async () => {
+  mocks.getRoomSetupState.mockResolvedValue(recovery);
+  const view = await mount();
+  expect(submitButton(view).props.children).toBe("Check setup again");
+  mocks.getRoomSetupState.mockResolvedValue({ status: "complete", room: null });
+  await submit(view);
+  expect(mocks.getRoomSetupState).toHaveBeenLastCalledWith("hotel-a");
+  expect(handlers.onCompleted).toHaveBeenCalledTimes(1);
+  expect(handlers.onOpenRoomsAndRates).not.toHaveBeenCalled();
+  await act(async () => view.unmount());
+});
+it("continues an already complete setup without opening Rooms & Rates", async () => {
+  mocks.getRoomSetupState.mockResolvedValue({ status: "complete", room: recovery.room });
+  const view = await mount();
+  expect(JSON.stringify(view.toJSON())).toContain("Rooms and rates are already set up.");
+  await submit(view);
+  expect(handlers.onCompleted).toHaveBeenCalledTimes(1);
+  expect(handlers.onOpenRoomsAndRates).not.toHaveBeenCalled();
+  await act(async () => view.unmount());
+});
+it("keeps the step open when setup progress cannot be refreshed", async () => {
+  mocks.getRoomSetupState.mockResolvedValue({ status: "complete", room: null });
+  handlers.onCompleted.mockRejectedValueOnce(new Error("offline"));
+  const view = await mount();
+  await submit(view);
+  expect(JSON.stringify(view.toJSON())).toContain(
+    "Setup progress could not be refreshed. Try again.",
+  );
+  expect(submitButton(view).props.disabled).toBe(false);
+  await act(async () => view.unmount());
+});
+it("reloads room readiness after a prepared import saves rooms", async () => {
+  const view = await mount(0);
   mocks.getRoomSetupState.mockResolvedValue(recovery);
   await act(async () => view.update(render(1)));
   const output = JSON.stringify(view.toJSON());
   expect(output).toContain("Imported Suite");
-  expect(output).toContain("My unsaved room");
-  expect(output).toContain("Your unsaved entry");
-  expect(output).toContain("Add at least one active physical room.");
-  expect(output).not.toContain("Rooms and rates are already set up.");
-  expect(mocks.saveRoomSetup).not.toHaveBeenCalled();
-  expect(mocks.addRoomSetup).not.toHaveBeenCalled();
-  expect(mocks.getPropertyLaunchSettings).toHaveBeenCalledTimes(1);
+  expect(output).not.toContain("Add your room types in Rooms & Rates.");
+  expect(mocks.getRoomSetupState).toHaveBeenCalledTimes(2);
   await act(async () => view.unmount());
 });
-it("keeps failed-refresh input editable, blocks save, and recovers on the next import refresh", async () => {
-  let view!: ReactTestRenderer;
-  await act(async () => {
-    view = create(render(0));
-  });
-  await act(async () =>
-    view.root.findByProps({ maxLength: 120 }).props.onChange({ target: { value: "Keep this" } }),
-  );
-  mocks.getRoomSetupState.mockRejectedValueOnce(new Error("offline"));
-  await act(async () => view.update(render(1)));
-  expect(view.root.findByProps({ maxLength: 120 }).props.value).toBe("Keep this");
-  expect(view.root.findByProps({ type: "submit" }).props.disabled).toBe(true);
-  await act(async () => view.root.findByType("form").props.onSubmit({ preventDefault() {} }));
-  expect(mocks.saveRoomSetup).not.toHaveBeenCalled();
-  mocks.getRoomSetupState.mockResolvedValue(recovery);
-  await act(async () => view.update(render(2)));
-  expect(JSON.stringify(view.toJSON())).toContain("Keep this");
-  expect(view.root.findByProps({ type: "submit" }).props.disabled).toBe(false);
-  await act(async () => view.unmount());
-});
-it("ignores an old property's refresh after switching property", async () => {
-  let view!: ReactTestRenderer;
+it("ignores an old property's readiness after switching property", async () => {
+  const view = await mount(0);
   let finish!: (value: unknown) => void;
-  await act(async () => {
-    view = create(render(0));
-  });
   mocks.getRoomSetupState.mockImplementationOnce(
     () =>
       new Promise((resolve) => {
@@ -106,6 +131,6 @@ it("ignores an old property's refresh after switching property", async () => {
   await act(async () => view.update(render(1, "hotel-b")));
   await act(async () => finish(recovery));
   expect(JSON.stringify(view.toJSON())).not.toContain("Imported Suite");
-  expect(view.root.findByProps({ type: "submit" }).props.disabled).toBe(false);
+  expect(submitButton(view).props.disabled).toBe(false);
   await act(async () => view.unmount());
 });
