@@ -77,6 +77,9 @@ export const LANGUAGE_OPTIONS: LanguageOption[] = [
 
 export const POPULAR_LANGUAGE_CODES = ["id", "de", "fr", "es", "ja", "ru"];
 
+/** Languages the guest booking site (booking-web) can render; others never reach guests. */
+export const BOOKING_GUEST_LANGUAGE_CODES = ["en", "de", "fr", "es", "id", "nl"] as const;
+
 export const CURRENCY_OPTIONS: CurrencyOption[] = [
   { code: "AED", name: "UAE Dirham", flag: "🇦🇪" },
   { code: "AUD", name: "Australian Dollar", flag: "🇦🇺" },
