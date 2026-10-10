@@ -45,9 +45,9 @@ export type ChannexHandoverPlan = {
 };
 
 export class ChannexHandoverRefused extends Error {}
-const refuse = (code: string): never => {
+function refuse(code: string): never {
   throw new ChannexHandoverRefused(code);
-};
+}
 
 type Client = Pick<pg.PoolClient, "query">;
 type Connection = {
@@ -332,8 +332,9 @@ export async function applyChannexHandover(
       `INSERT INTO platform.product_audit_events (audit_key, product, action, occurred_at, tenant_scope,
          property_id, actor_type, target_resource_product, target_resource_type, target_resource_id,
          redacted_payload, audit_metadata, retention_class, privacy_scope)
-       VALUES ($1, 'pms', $2, now(), 'property', $3::uuid, 'migration', 'pms', 'channex_connection', $3,
-         $4::jsonb, jsonb_build_object('sessionUser', session_user::text), 'security', 'restricted')
+       VALUES ($1, 'pms', $2, now(), 'property', $3::uuid, 'migration', 'pms', 'channex_connection',
+         $3::uuid::text, $4::jsonb, jsonb_build_object('sessionUser', session_user::text),
+         'security', 'restricted')
        RETURNING id::text`,
       [
         `channex.handover:${plan.command}:${plan.propertyId}:${planSha256}`,

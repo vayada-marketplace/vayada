@@ -331,16 +331,16 @@ describe.skipIf(!URL)("Channex handover executor (PostgreSQL)", () => {
     );
     for (const room of [ROOM, CLOSED_ROOM, OTHER_ROOM])
       await db.query(
-        "INSERT INTO pms.room_types (id, property_id, name, base_rate_amount, currency, active) VALUES ($1, $2, $1, 0, 'EUR', $3)",
-        [room, PROPERTY, room !== CLOSED_ROOM],
+        "INSERT INTO pms.room_types (id, property_id, name, base_rate_amount, currency, active) VALUES ($1, $2, $4, 0, 'EUR', $3)",
+        [room, PROPERTY, room !== CLOSED_ROOM, `room ${room.slice(-2)}`],
       );
     for (const [rate, room] of [
       [RATE, ROOM],
       [OTHER_RATE, OTHER_ROOM],
     ])
       await db.query(
-        "INSERT INTO pms.rate_plans (id, property_id, room_type_id, code, currency, name) VALUES ($1, $2, $3, $1, 'EUR', 'Rate')",
-        [rate, PROPERTY, room],
+        "INSERT INTO pms.rate_plans (id, property_id, room_type_id, code, currency, name) VALUES ($1, $2, $3, $4, 'EUR', 'Rate')",
+        [rate, PROPERTY, room, `rate-${rate.slice(-2)}`],
       );
     const connectionId = (
       await db.query<{ id: string }>(
