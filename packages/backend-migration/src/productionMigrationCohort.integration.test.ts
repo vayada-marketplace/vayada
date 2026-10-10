@@ -3,6 +3,11 @@ import { createHash } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { writeProductionIdentityCore } from "./productionIdentityCoreWriter.js";
+import { writeProductionIdentityPrivacyAudit } from "./productionIdentityPrivacyAuditWriter.js";
+import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
+import { buildProductionIdentityPlan } from "./productionIdentityPlan.js";
+import { readProductionIdentityTargetState } from "./productionIdentityTargetReader.js";
 import {
   readProductionIdentitySnapshot,
   VAY_1350_ACTIVE_SOURCE_TABLES,
@@ -90,6 +95,78 @@ describe.skipIf(!URL)("production migration cohort (PostgreSQL)", () => {
     );
     await rejects("DELETE FROM platform.production_migration_cohorts", [], "55000");
     expect((await readProductionIdentitySnapshot(client, RUN)).cohort).toEqual(approved);
+  });
+
+  it("writes non-cohort owners to archived quarantine and verifies on replan", async () => {
+    await client.query("SAVEPOINT identity");
+    const [mixed, outside, kept, dropped, alone] = ["1", "2", "a", "b", "c"].map(
+      (c) => `${c.repeat(8)}-1362-4000-8000-000000000000`,
+    );
+    const at = { created_at: TIME, updated_at: TIME };
+    const row = (sourceDatabase: "auth" | "booking", sourceTable: string, data: object) =>
+      ({
+        sourceDatabase,
+        sourceTable,
+        rowOrdinal: 1,
+        data: { ...data, ...at },
+      }) as IdentitySourceRow;
+    const rows = [
+      ...[mixed!, outside!].map((id) =>
+        row("auth", "users", {
+          id,
+          email: `${id}@example.invalid`,
+          name: "Owner",
+          type: "hotel",
+          status: "verified",
+          email_verified: true,
+          is_superadmin: false,
+        }),
+      ),
+      ...[kept, dropped, alone].map((id) =>
+        row("booking", "booking_hotels", {
+          id,
+          user_id: id === alone ? outside : mixed,
+          name: `Hotel ${id}`,
+          platform_status: "live",
+        }),
+      ),
+    ];
+    const scope = { bookingHotelIds: [kept!], pmsHotelIds: [], marketplaceHotelIds: [] };
+    const plan = buildProductionIdentityPlan(rows, undefined, TIME, scope);
+    expect(plan.blockers).toEqual([]);
+    await writeProductionIdentityCore(client, plan);
+    await writeProductionIdentityPrivacyAudit(client, plan);
+    const target = await readProductionIdentityTargetState(client, rows);
+    const replanned = buildProductionIdentityPlan(rows, target, TIME, scope);
+    expect(replanned.blockers).toEqual([]);
+    expect(replanned.counts.pendingTargetWrites).toBe(0);
+    expect(replanned.checksum).toBe(plan.checksum);
+
+    const access = await client.query(
+      `SELECT concat_ws(' ', link.resource_id, link.status, organization.status, entitlement.status,
+                (SELECT string_agg(member.status || ':' || member.property_access_mode, ',')
+                   FROM identity.organization_memberships member
+                  WHERE member.organization_id = link.organization_id)) AS state
+         FROM identity.organization_resource_links link
+         JOIN identity.organizations organization ON organization.id = link.organization_id
+         JOIN identity.product_entitlements entitlement
+           ON entitlement.organization_id = link.organization_id
+          AND entitlement.resource_id = link.resource_id
+        WHERE link.resource_id = ANY($1::text[]) ORDER BY link.resource_id`,
+      [[kept, dropped, alone]],
+    );
+    // resource, link, organization, entitlement, memberships of the owning organization
+    expect(access.rows.map((row) => row.state)).toEqual([
+      `${kept} active active active active:all`,
+      `${dropped} archived archived expired`,
+      `${alone} archived archived expired`,
+    ]);
+    const users = await client.query(
+      "SELECT status FROM identity.users WHERE id = ANY($1::uuid[]) ORDER BY id",
+      [[mixed, outside]],
+    );
+    expect(users.rows).toEqual([{ status: "active" }, { status: "suspended" }]);
+    await client.query("ROLLBACK TO SAVEPOINT identity");
   });
 });
 

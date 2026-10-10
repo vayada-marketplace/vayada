@@ -41,7 +41,8 @@ export type PlannedIdentityUser = {
     | "migrate"
     | "preserve_newer_target"
     | "retire_duplicate_email"
-    | "quarantine_missing_owner";
+    | "quarantine_missing_owner"
+    | "outside_migration_cohort";
   createdAt: string;
   updatedAt: string;
   termsAcceptedAt: string | null;
@@ -78,6 +79,7 @@ export function planIdentityUserDisposition(
   sourceRows: IdentitySourceRow[],
   existingUsers: ExistingIdentityUser[] = [],
   existingWorkosIdentities: ExistingWorkosIdentity[] = [],
+  outsideCohortUserIds: ReadonlySet<string> = new Set(),
 ): IdentityDispositionPlan {
   const blockers: IdentityMigrationBlocker[] = [];
   const users: PlannedIdentityUser[] = [];
@@ -97,6 +99,17 @@ export function planIdentityUserDisposition(
     }
   }
 
+  // VAY-1362: a hotel user whose only ownership is outside the cohort gets no access path.
+  for (const user of users)
+    if (
+      outsideCohortUserIds.has(user.id) &&
+      user.type === "hotel" &&
+      !user.isSuperadmin &&
+      user.status !== "deleted"
+    ) {
+      user.status = "suspended";
+      user.disposition = "outside_migration_cohort";
+    }
   addSourceDuplicateIdBlockers(users, blockers);
   resolveDuplicateEmails(users, blockers);
   const sourceIds = new Set(users.map((user) => user.id));

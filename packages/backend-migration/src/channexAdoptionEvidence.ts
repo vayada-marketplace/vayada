@@ -110,6 +110,7 @@ export async function verifyChannexAdoptionTargetEvidence(
     identitySnapshot.rows,
     identityTarget,
     identitySnapshot.sourceHorizonAt,
+    identitySnapshot.cohort ?? null,
   );
   if (identityPlan.blockers.length) rejectAdoption("IDENTITY_PLAN_BLOCKED");
   if (identityPlan.quarantinedOrganizations || identityPlan.quarantinedResourceLinks)
