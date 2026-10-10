@@ -139,23 +139,25 @@ test.describe("pms-web smoke", () => {
     await assertHealthy();
   });
 
-  // VAY-2094: written for the Team page before VAY-1439 (#2395) redesigned it (roles, account
-  // admins, new copy). Re-enable once rewritten for the current page (VAY-2094 follow-up PR).
-  test.fixme("shows the canonical staff roster through the Team & Roles deep link", async ({
+  test("shows the canonical staff roster through the Team & Roles deep link", async ({
     page,
   }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
 
     await mockPmsWebAuthenticatedSession(page);
     await mockPmsWebTargetRoutes(page);
+    await mockTeamCatalog(page);
     await page.goto("/settings/team");
 
-    await expect(page.getByRole("heading", { name: "Team & Roles" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Team, roles & permissions" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Team & Roles" }).last()).toHaveAttribute(
       "aria-current",
       "page",
     );
-    const roster = page.getByRole("table");
+    // The page also renders a property access matrix table; the roster is the one with roles.
+    const roster = page
+      .getByRole("table")
+      .filter({ has: page.getByRole("columnheader", { name: "Role" }) });
     await expect(roster.getByText("Ada Lovelace")).toBeVisible();
     await expect(roster.getByText("ada@example.com")).toBeVisible();
     await expect(roster.getByText("Front Desk")).toBeVisible();
@@ -171,9 +173,7 @@ test.describe("pms-web smoke", () => {
     await assertHealthy();
   });
 
-  // VAY-2094: written for the Team page before VAY-1439 (#2395) redesigned it (roles, account
-  // admins, new copy). Re-enable once rewritten for the current page (VAY-2094 follow-up PR).
-  test.fixme("deactivates and reactivates staff while preserving failed status changes", async ({
+  test("deactivates and reactivates staff while preserving failed status changes", async ({
     page,
   }) => {
     const rosterPath = "**/api/identity/staff/members";
@@ -186,6 +186,7 @@ test.describe("pms-web smoke", () => {
 
     await mockPmsWebAuthenticatedSession(page);
     await mockPmsWebTargetRoutes(page);
+    await mockTeamCatalog(page);
     await page.unroute(rosterPath);
     await page.route(rosterPath, (route) =>
       route.fulfill({
@@ -226,19 +227,29 @@ test.describe("pms-web smoke", () => {
             json: { membershipId: "staff_membership_ada", status },
           });
     });
-    page.on("dialog", (dialog) => dialog.accept());
     await page.goto("/settings/team");
 
-    const adaRow = page.getByRole("row").filter({ hasText: "Ada Lovelace" });
-    const graceRow = page.getByRole("row").filter({ hasText: "Grace Hopper" });
-    await expect(graceRow.getByText("Invitation pending")).toBeVisible();
-    await expect(graceRow.getByRole("button")).toHaveCount(0);
+    const roster = page
+      .getByRole("table")
+      .filter({ has: page.getByRole("columnheader", { name: "Role" }) });
+    const adaRow = roster.getByRole("row").filter({ hasText: "Ada Lovelace" });
+    const graceRow = roster.getByRole("row").filter({ hasText: "grace@example.com" });
+    // A pending invite can only be resent, not deactivated.
+    await expect(graceRow.getByText("Pending invite")).toBeVisible();
+    await expect(graceRow.getByText("Pending", { exact: true })).toBeVisible();
+    await expect(graceRow.getByRole("button")).toHaveText(["Resend invitation"]);
+    // Deactivation asks for an in-app confirmation (VAY-908).
+    const confirmDeactivation = async () => {
+      const dialog = page.getByRole("dialog", { name: "Deactivate Ada Lovelace" });
+      await dialog.getByRole("button", { name: "Deactivate", exact: true }).click();
+    };
 
     await page.setViewportSize({ width: 390, height: 844 });
     const deactivate = adaRow.getByRole("button", { name: "Deactivate Ada Lovelace" });
     await deactivate.focus();
     await expect(deactivate).toBeFocused();
     await deactivate.click();
+    await confirmDeactivation();
     await expect(
       adaRow.getByRole("button", { name: "Saving status for Ada Lovelace" }),
     ).toHaveAttribute("aria-busy", "true");
@@ -247,6 +258,7 @@ test.describe("pms-web smoke", () => {
     await expect(adaRow.getByText("Active", { exact: true })).toBeVisible();
 
     await deactivate.click();
+    await confirmDeactivation();
     await expect(adaRow.getByText("Deactivated", { exact: true })).toBeVisible();
     const reactivate = adaRow.getByRole("button", { name: "Reactivate Ada Lovelace" });
     await reactivate.click();
@@ -263,9 +275,7 @@ test.describe("pms-web smoke", () => {
     ).toBe(true);
   });
 
-  // VAY-2094: written for the Team page before VAY-1439 (#2395) redesigned it (roles, account
-  // admins, new copy). Re-enable once rewritten for the current page (VAY-2094 follow-up PR).
-  test.fixme("distinguishes loading, empty, and failed team rosters", async ({ page }) => {
+  test("distinguishes loading, empty, and failed team rosters", async ({ page }) => {
     const rosterPath = "**/api/identity/staff/members";
     let releaseRoster!: () => void;
     const rosterRelease = new Promise<void>((resolve) => {
@@ -274,13 +284,16 @@ test.describe("pms-web smoke", () => {
 
     await mockPmsWebAuthenticatedSession(page);
     await mockPmsWebTargetRoutes(page);
+    await mockTeamCatalog(page);
     await page.route(rosterPath, async (route) => {
       await rosterRelease;
       return route.fulfill({ json: { members: [] } });
     });
     await page.goto("/settings/team");
 
-    await expect(page.getByRole("status")).toHaveText("Loading team members…");
+    await expect(
+      page.getByRole("status").filter({ hasText: "Loading team members…" }),
+    ).toBeVisible();
     releaseRoster();
     await expect(page.getByText("No team members yet")).toBeVisible();
 
@@ -302,17 +315,18 @@ test.describe("pms-web smoke", () => {
     await expect(page.getByText("No team members yet")).toBeVisible();
   });
 
-  // VAY-2094: the surfaces this walk visits gained reads it doesn't mock (prepared import,
-  // pricing offer preview, Financials dashboard and public profile). Re-enable with those mocks
-  // in the VAY-2094 follow-up PR.
-  test.fixme("loads migrated PMS operations surfaces without legacy helper calls", async ({
+  test("loads migrated PMS operations surfaces without legacy helper calls", async ({
     page,
   }, testInfo) => {
-    const assertHealthy = watchPageHealth(page, testInfo);
+    // A property without v2 pricing answers 404, which the offer preview treats as "not set up".
+    const assertHealthy = watchPageHealth(page, testInfo, {
+      expectedMissingUrls: [/\/pricing-v2$/],
+    });
     const assertNoLegacyCalls = watchNoLegacyCalls(page, testInfo, "pms-web-operations");
 
     await mockPmsWebAuthenticatedSession(page);
     await mockPmsWebTargetRoutes(page);
+    await mockOperationsWalkReads(page);
 
     await page.goto("/rooms");
     await expect(page.getByRole("heading", { name: /rooms/i })).toBeVisible();
@@ -1154,6 +1168,70 @@ test.describe("pms-web smoke", () => {
     await assertNoLegacyCalls();
   });
 });
+
+// Reads the operations walk's pages gained after it was written: the prepared-import panel on
+// Rooms, the v2 pricing offer preview, and the Financials dashboard with its public profile.
+async function mockOperationsWalkReads(page: Page) {
+  await page.route(`**/api/hotel-setup/properties/${PMS_WEB_PROPERTY_ID}/import`, (route) =>
+    route.fulfill({ json: { import: null } }),
+  );
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2`, (route) =>
+    route.fulfill({ status: 404, json: { code: "not_found" } }),
+  );
+  await page.route(`**/api/hotel-setup/properties/${PMS_WEB_PROPERTY_ID}/public-profile`, (route) =>
+    route.fulfill({
+      json: {
+        propertyId: PMS_WEB_PROPERTY_ID,
+        profileRevision: 1,
+        publicProfile: {
+          locale: "en-GB",
+          shortDescription: null,
+          longDescription: null,
+          media: [],
+        },
+      },
+    }),
+  );
+  const money = (amount: string) => ({ amount, currency: "EUR" });
+  const metric = (amount: string) => ({
+    value: money(amount),
+    absoluteChange: money("0.0000"),
+    percentChange: null,
+  });
+  await page.route(
+    `**/api/finance/properties/${PMS_WEB_PROPERTY_ID}/financials/dashboard**`,
+    (route) =>
+      route.fulfill({
+        json: {
+          contractVersion: "pms-financials.v1",
+          propertyId: PMS_WEB_PROPERTY_ID,
+          currency: "EUR",
+          timeZone: "Europe/Berlin",
+          generatedAt: "2026-09-17T12:00:00.000Z",
+          sourceFreshness: {},
+          incompleteEvidence: [],
+          cards: {
+            revenueToday: metric("0.0000"),
+            revenueMtd: metric("0.0000"),
+            expensesMtd: metric("0.0000"),
+            profitMtd: metric("0.0000"),
+          },
+          daily: [],
+          upcoming: [],
+        },
+      }),
+  );
+}
+
+// The Team page also loads the role catalog and account admins since VAY-1439.
+async function mockTeamCatalog(page: Page) {
+  await page.route("**/api/identity/staff/roles", (route) =>
+    route.fulfill({ json: { roles: [], canManageRoles: true } }),
+  );
+  await page.route("**/api/identity/staff/account-admins", (route) =>
+    route.fulfill({ json: { admins: [], actorMembershipId: "pms-owner-membership" } }),
+  );
+}
 
 async function mockManageSelfAccess(page: Page) {
   await page.route("**/api/identity/staff/self-access", (route) =>
