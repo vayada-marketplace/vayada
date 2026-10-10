@@ -11,6 +11,26 @@ logger = logging.getLogger(__name__)
 
 ACTIVE_SUBSCRIPTION_STATUSES = {"active", "past_due", "trialing"}
 TERMINAL_SUBSCRIPTION_STATUSES = {"canceled", "incomplete_expired", "unpaid"}
+FROZEN_MESSAGE = "Fixed-plan billing is moving to the new platform; contact Vayada support"
+# Written by the target's adoption command (VAY-1362). A subscription carrying it
+# belongs to the target even when this legacy service runs unfrozen.
+TARGET_ADOPTION_METADATA_KEY = "vayada_legacy_adoption"
+
+
+def is_target_adopted(metadata: dict | None) -> bool:
+    return bool((metadata or {}).get(TARGET_ADOPTION_METADATA_KEY))
+
+
+class FixedPlanBillingFrozenError(Exception):
+    """Raised when a billing mutation is attempted while legacy billing is frozen (VAY-1362)."""
+
+    def __init__(self) -> None:
+        super().__init__(FROZEN_MESSAGE)
+
+
+def _ensure_not_frozen() -> None:
+    if settings.fixed_plan_billing_frozen:
+        raise FixedPlanBillingFrozenError()
 
 
 def _amount_cents(config: dict, room_count: int) -> int:
@@ -52,7 +72,11 @@ async def fixed_plan_quote(hotel_id: str) -> dict:
 
 async def billing_status(hotel_id: str) -> dict:
     payment_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
-    if payment_settings and payment_settings.get("stripe_billing_status") == "active":
+    if (
+        payment_settings
+        and payment_settings.get("stripe_billing_status") == "active"
+        and not settings.fixed_plan_billing_frozen
+    ):
         await sync_subscription_price(payment_settings)
         payment_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
     quote = await fixed_plan_quote(hotel_id)
@@ -72,10 +96,12 @@ async def billing_status(hotel_id: str) -> dict:
             (payment_settings or {}).get("stripe_billing_cancel_at_period_end")
         ),
         "canManageBilling": bool((payment_settings or {}).get("stripe_billing_customer_id")),
+        "frozen": settings.fixed_plan_billing_frozen,
     }
 
 
 async def create_checkout(hotel_id: str, user_id: str) -> str:
+    _ensure_not_frozen()
     payment_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
     if (
         payment_settings
@@ -150,6 +176,9 @@ async def _backfill_pre_switch_bookings(hotel_id: str, config: dict) -> None:
 async def activate_subscription(hotel_id: str, subscription_id: str) -> None:
     subscription = await stripe_service.retrieve_billing_subscription(subscription_id)
     metadata = subscription.get("metadata") or {}
+    if is_target_adopted(metadata):
+        logger.warning("Skipping target-adopted Fixed-plan subscription %s", subscription_id)
+        return
     if (
         metadata.get("vayada_payment_kind") != "fixed_plan"
         or str(metadata.get("hotel_id")) != hotel_id
@@ -228,6 +257,9 @@ async def update_subscription_state(subscription_id: str) -> dict | None:
     if not payment_settings:
         return None
     subscription = await stripe_service.retrieve_billing_subscription(subscription_id)
+    if is_target_adopted(subscription.get("metadata")):
+        logger.warning("Skipping target-adopted Fixed-plan subscription %s", subscription_id)
+        return None
     hotel_id = str(payment_settings["hotel_id"])
     if subscription["status"] in TERMINAL_SUBSCRIPTION_STATUSES:
         await hotel_identity_service.set_billing_plan(hotel_id, "commission")
@@ -247,6 +279,12 @@ async def mark_payment_failed(subscription_id: str) -> dict | None:
         subscription_id
     )
     if not payment_settings:
+        return None
+    # An invoice finalized before adoption carries the old subscription
+    # metadata, so the webhook guard cannot see the marker: read it live.
+    subscription = await stripe_service.retrieve_billing_subscription(subscription_id)
+    if is_target_adopted(subscription.get("metadata")):
+        logger.warning("Skipping target-adopted Fixed-plan subscription %s", subscription_id)
         return None
     await HotelPaymentSettingsRepository.upsert(
         str(payment_settings["hotel_id"]),
@@ -300,6 +338,7 @@ async def create_portal(hotel_id: str) -> str:
 
 
 async def cancel_at_period_end(hotel_id: str) -> datetime | None:
+    _ensure_not_frozen()
     payment_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
     subscription_id = (payment_settings or {}).get("stripe_billing_subscription_id")
     if not subscription_id:
@@ -317,6 +356,8 @@ async def cancel_at_period_end(hotel_id: str) -> datetime | None:
 
 
 async def sync_subscription_price(payment_settings: dict) -> None:
+    if settings.fixed_plan_billing_frozen:
+        return
     hotel_id = str(payment_settings["hotel_id"])
     pool = await Database.get_pool()
     async with pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as connection:
@@ -355,14 +396,20 @@ async def _sync_subscription_price_locked(payment_settings: dict) -> None:
         await HotelPaymentSettingsRepository.complete_billing_price_sync(hotel_id, price_version)
         return
 
-    item_id = payment_settings.get("stripe_billing_subscription_item_id")
-    product_id = payment_settings.get("stripe_billing_product_id")
-    if not item_id or not product_id:
-        subscription = await stripe_service.retrieve_billing_subscription(
-            payment_settings["stripe_billing_subscription_id"]
+    # Always read the live subscription before pushing a price: the target may
+    # have adopted it (VAY-1362), and then the retained price is never touched.
+    subscription = await stripe_service.retrieve_billing_subscription(
+        payment_settings["stripe_billing_subscription_id"]
+    )
+    if is_target_adopted(subscription.get("metadata")):
+        logger.warning(
+            "Skipping price sync for target-adopted Fixed-plan subscription of hotel %s",
+            hotel_id,
         )
-        item_id = subscription["item_id"]
-        product_id = subscription["product_id"]
+        await HotelPaymentSettingsRepository.complete_billing_price_sync(hotel_id, price_version)
+        return
+    item_id = payment_settings.get("stripe_billing_subscription_item_id") or subscription["item_id"]
+    product_id = payment_settings.get("stripe_billing_product_id") or subscription["product_id"]
     await stripe_service.update_fixed_plan_price(
         hotel_id=hotel_id,
         subscription_item_id=item_id,
@@ -383,6 +430,8 @@ async def _sync_subscription_price_locked(payment_settings: dict) -> None:
 
 
 async def sync_all_subscription_prices() -> None:
+    if settings.fixed_plan_billing_frozen:
+        return
     for payment_settings in await HotelPaymentSettingsRepository.list_fixed_plan_subscriptions():
         try:
             await sync_subscription_price(payment_settings)
@@ -396,6 +445,8 @@ async def sync_all_subscription_prices() -> None:
 
 async def sync_subscription_price_for_hotel(hotel_id: str) -> None:
     """Best-effort update after room inventory changes; the billing worker retries failures."""
+    if settings.fixed_plan_billing_frozen:
+        return
     try:
         await sync_subscription_price({"hotel_id": hotel_id})
     except Exception:

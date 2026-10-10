@@ -429,7 +429,7 @@ async def create_fixed_plan_checkout(
     hotel_id = await get_hotel_id(user_id)
     try:
         url = await fixed_plan_billing.create_checkout(hotel_id, user_id)
-    except ValueError as exc:
+    except (ValueError, fixed_plan_billing.FixedPlanBillingFrozenError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -461,6 +461,8 @@ async def cancel_fixed_plan_subscription(
     hotel_id = await get_hotel_id(user_id)
     try:
         period_end = await fixed_plan_billing.cancel_at_period_end(hotel_id)
+    except fixed_plan_billing.FixedPlanBillingFrozenError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:

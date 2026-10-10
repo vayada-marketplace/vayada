@@ -368,3 +368,137 @@ async def test_health_exposes_provider_webhook_cutover_modes(monkeypatch):
     assert modes["xendit"]["mode"] == "proxy_to_target"
     assert modes["channex"]["mode"] == "mutating"
     assert modes["xendit"]["proxyTargetConfigured"] is True
+
+
+@pytest.mark.parametrize("mode", ["mutating", "ack_only_with_receipt", "proxy_to_target"])
+async def test_frozen_billing_skips_the_fixed_plan_branch_and_every_stripe_read(monkeypatch, mode):
+    """FIXED_PLAN_BILLING_MODE=frozen (VAY-1362): subscription events are not billing writes."""
+    _set_mode(monkeypatch, "stripe", mode)
+    monkeypatch.setattr(settings, "FIXED_PLAN_BILLING_MODE", "frozen")
+    request = _request("/webhooks/stripe", b"{}", {"stripe-signature": "sig-test"})
+    event = {
+        "id": "evt_fixed_paid_frozen",
+        "type": "invoice.paid",
+        "data": {
+            "object": {
+                "subscription": "sub_fixed",
+                "metadata": {"hotel_id": "hotel-1", "vayada_payment_kind": "fixed_plan"},
+            }
+        },
+    }
+
+    with (
+        patch.object(webhooks.stripe_service, "construct_webhook_event", return_value=event),
+        patch.object(
+            webhooks.stripe_service, "retrieve_billing_subscription", new_callable=AsyncMock
+        ) as retrieve,
+        patch.object(
+            webhooks.HotelPaymentSettingsRepository,
+            "claim_billing_webhook_event",
+            new_callable=AsyncMock,
+        ) as claim,
+        patch.object(
+            webhooks.fixed_plan_billing, "activate_subscription", new_callable=AsyncMock
+        ) as activate,
+        patch.object(
+            webhooks, "_proxy_provider_webhook_to_target", new_callable=AsyncMock
+        ) as proxy,
+    ):
+        proxy.return_value = {"status": "proxied", "mode": "proxy_to_target", "provider": "stripe"}
+        response = await webhooks.stripe_webhook(request)
+
+    retrieve.assert_not_awaited()
+    claim.assert_not_awaited()
+    activate.assert_not_awaited()
+    if mode == "mutating":
+        assert response == {"status": "ok"}
+    else:
+        assert response["mode"] == mode
+        assert response["provider"] == "stripe"
+
+
+@pytest.mark.parametrize(
+    ("event_type", "data"),
+    [
+        (
+            "customer.subscription.updated",
+            {
+                "id": "sub_fixed",
+                "metadata": {
+                    "hotel_id": "hotel-1",
+                    "vayada_payment_kind": "fixed_plan",
+                    "vayada_legacy_adoption": "v1",
+                },
+            },
+        ),
+        (
+            "invoice.payment_failed",
+            {
+                "subscription": "sub_fixed",
+                "metadata": {},
+                "parent": {
+                    "subscription_details": {
+                        "subscription": "sub_fixed",
+                        "metadata": {
+                            "hotel_id": "hotel-1",
+                            "vayada_payment_kind": "fixed_plan",
+                            "vayada_legacy_adoption": "v1",
+                        },
+                    }
+                },
+            },
+        ),
+    ],
+)
+async def test_unfrozen_legacy_ignores_target_adopted_subscription_events(event_type, data):
+    """VAY-1362 defence in depth: adopted subscriptions never reach the legacy billing branch."""
+    assert settings.fixed_plan_billing_frozen is False
+    with (
+        patch.object(
+            webhooks.HotelPaymentSettingsRepository,
+            "get_by_billing_subscription_id",
+            new_callable=AsyncMock,
+        ) as by_subscription,
+        patch.object(
+            webhooks.stripe_service, "retrieve_billing_subscription", new_callable=AsyncMock
+        ) as retrieve,
+    ):
+        assert await webhooks._fixed_plan_context(event_type, data) is None
+
+    by_subscription.assert_not_awaited()
+    retrieve.assert_not_awaited()
+
+
+async def test_unfrozen_legacy_ignores_an_adopted_subscription_found_through_stripe():
+    with (
+        patch.object(
+            webhooks.HotelPaymentSettingsRepository,
+            "get_by_billing_subscription_id",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch.object(
+            webhooks.stripe_service,
+            "retrieve_billing_subscription",
+            new_callable=AsyncMock,
+            return_value={
+                "metadata": {
+                    "hotel_id": "hotel-1",
+                    "vayada_payment_kind": "fixed_plan",
+                    "vayada_legacy_adoption": "v1",
+                }
+            },
+        ),
+    ):
+        context = await webhooks._fixed_plan_context("invoice.paid", {"subscription": "sub_fixed"})
+
+    assert context is None
+
+
+@pytest.mark.parametrize("mode", ["legacy", "frozen"])
+async def test_health_exposes_the_fixed_plan_billing_mode(monkeypatch, mode):
+    monkeypatch.setattr(settings, "FIXED_PLAN_BILLING_MODE", mode)
+
+    response = await health()
+
+    assert response["cutover"]["fixedPlanBillingMode"] == mode
