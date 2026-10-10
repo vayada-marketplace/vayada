@@ -4,6 +4,8 @@ on:
   pull_request:
     branches:
       - main
+      # VAY-2114 guest currency stack bases (top of the list to avoid append conflicts).
+      - "fm/vay-2114-*"
       # VAY-2074 stack bases (top of the list to avoid append conflicts).
       - "fm/vay-2113-*"
       - "fm/vay-2074-*"
@@ -21,8 +23,12 @@ on:
       - "fm/vay-2082-*"
       - "fm/vay-2084-*"
       - "fm/vay-2089-*"
+      - "fm/vay-2072-*"
+      - "fm/vay-2077-*"
       - "fm/vay-2099-*"
       - "fm/vay-2100-*"
+      - "fm/vay-2101-*"
+      - "fm/vay-2102-*"
       - flamurmaliqi2811/vay-2044-expense-worker-runtime
       - fm/vay-2041-worker-permissions
       - fm/vay-2041-worker-source-permissions
@@ -527,10 +533,12 @@ jobs:
           src/domains/pmsManualBookingPublishedPricing.postgres.test.ts
           src/domains/pmsMandatoryChargeConfirmationCommandRepository.integration.test.ts
           src/domains/pmsCrossRoomTypeMove.integration.test.ts
+          src/pmsRoomTypeLocationUpdate.integration.test.ts
           src/domains/pmsManualBookingCommandRepository.test.ts
           src/pmsManualBookingPreviewRoutes.test.ts
           src/pmsManualBookingCreateRoutes.test.ts
           src/domains/bookingGuestPolicyRepository.integration.test.ts
+          src/bookingSettingsPropertyAddress.integration.test.ts
           src/domains/financeOtaCommissionRuleRepository.integration.test.ts
           src/domains/financeExpenseCategoryRepository.integration.test.ts
           src/domains/financeManualExpenseRepository.integration.test.ts

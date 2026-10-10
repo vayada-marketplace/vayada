@@ -156,10 +156,8 @@ test.describe("booking-admin localization settings cutover", () => {
     });
 
     await page.goto("/settings?section=localization");
-    await expect(page.getByRole("button", { name: "Localization", exact: true })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
+    await expect(page).toHaveURL(/\/settings\/general#localization$/);
+    await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
     await expect(
       page.getByRole("alert").filter({ hasText: "Localization settings failed to load." }),
     ).toBeVisible();
@@ -198,14 +196,23 @@ test.describe("booking-admin localization settings cutover", () => {
     ]);
     expect(legacyWrites).toEqual([]);
 
-    await page.reload();
-    await page.getByRole("button", { name: "Payments", exact: true }).click();
+    // Settings pages are separate routes; move between them the way a host does.
+    const openSettingsPage = async (card: string) => {
+      await page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link").click();
+      await page
+        .getByRole("main")
+        .getByRole("link", { name: new RegExp(`^${card}`) })
+        .click();
+      await expect(page.getByRole("heading", { name: card, exact: true })).toBeVisible();
+    };
+
+    await page.goto("/settings/payments");
     await page.getByRole("button", { name: "Save Changes", exact: true }).click();
     await expect.poll(() => financeWrites.length).toBe(1);
     expect(financeWrites[0]).toMatchObject({
       paymentSettings: { defaultCurrency: "CHF", supportedCurrencies: ["CHF"] },
     });
-    await page.getByRole("button", { name: "Localization", exact: true }).click();
+    await openSettingsPage("General");
     await assertHealthy();
 
     await page.getByRole("button", { name: /Swiss Franc/ }).click();
@@ -215,7 +222,8 @@ test.describe("booking-admin localization settings cutover", () => {
     await page.getByRole("button", { name: /^Save Changes$/ }).click();
     await expect.poll(() => typedWrites.length).toBe(2);
 
-    await page.getByRole("button", { name: "Payments", exact: true }).click();
+    // The currency write is still in flight: Payments must not save the old currency.
+    await openSettingsPage("Payments");
     await page.getByRole("button", { name: "Save Changes", exact: true }).click();
     expect(financeWrites).toHaveLength(1);
     await expect(
@@ -226,17 +234,21 @@ test.describe("booking-admin localization settings cutover", () => {
 
     expectedFinanceCurrency = "USD";
     delayWrite = false;
+    // Payments re-reads the canonical currency once the write settles.
+    const reread = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname === BOOKING_ADMIN_LOCALIZATION_SETTINGS_PATH,
+    );
     releaseLocalizationWrite?.();
-    await expect(
-      page.getByRole("status").filter({ hasText: "Currency & language settings saved" }),
-    ).toBeVisible();
+    await reread;
     await page.getByRole("button", { name: "Save Changes", exact: true }).click();
     await expect.poll(() => financeWrites.length).toBe(2);
     expect(financeWrites[1]).toMatchObject({
       paymentSettings: { defaultCurrency: "USD", supportedCurrencies: ["USD"] },
     });
 
-    await page.getByRole("button", { name: "Localization", exact: true }).click();
+    await openSettingsPage("General");
     await page.getByRole("button", { name: /US Dollar/ }).click();
     await page.getByPlaceholder("Search...", { exact: true }).fill("CHF");
     await page.getByRole("button", { name: /Swiss Franc/ }).click();
@@ -247,7 +259,7 @@ test.describe("booking-admin localization settings cutover", () => {
       page.getByRole("alert").filter({ hasText: "Failed to save currency & language settings" }),
     ).toBeVisible();
 
-    await page.getByRole("button", { name: "Payments", exact: true }).click();
+    await openSettingsPage("Payments");
     await page.getByRole("button", { name: "Save Changes", exact: true }).click();
     await expect.poll(() => financeWrites.length).toBe(3);
     expect(financeWrites[2]).toMatchObject({

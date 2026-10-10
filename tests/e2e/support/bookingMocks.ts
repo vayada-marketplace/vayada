@@ -253,7 +253,7 @@ type MockBookingApisOptions = {
   arrivalBounds?: { checkInUntil: string; checkOutFrom: string };
   supportedQuoteParameters?: Partial<typeof publicHotelProfile.hotel.supportedQuoteParameters>;
   supportedLocales?: string[];
-  supportedCurrencies?: string[];
+  displayCurrencies?: string[];
   headerLogoUrl?: string;
   headerSettings?: {
     showContactButton: boolean;
@@ -265,6 +265,7 @@ type MockBookingApisOptions = {
 };
 
 export async function mockBookingApis(page: Page, options: MockBookingApisOptions = {}) {
+  const displayCurrencies = options.displayCurrencies ?? ["EUR", "USD"];
   const profile = {
     ...publicHotelProfile,
     hotel: {
@@ -277,6 +278,7 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
               showReferAGuestButton: options.headerSettings?.showReferAGuestButton ?? true,
               showLanguageSelector: options.headerSettings?.showLanguageSelector ?? true,
               showCurrencySelector: options.headerSettings?.showCurrencySelector ?? true,
+              ...(displayCurrencies.length > 1 ? { displayCurrencies } : {}),
               heroImage: null,
               heroHeading: null,
               heroSubtext: null,
@@ -288,8 +290,6 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
       policies: { ...publicHotelProfile.hotel.policies, ...options.arrivalBounds },
       publicContacts: options.publicContacts ?? publicHotelProfile.hotel.publicContacts,
       supportedLocales: options.supportedLocales ?? publicHotelProfile.hotel.supportedLocales,
-      supportedCurrencies:
-        options.supportedCurrencies ?? publicHotelProfile.hotel.supportedCurrencies,
       supportedQuoteParameters: {
         ...publicHotelProfile.hotel.supportedQuoteParameters,
         ...options.supportedQuoteParameters,
@@ -352,9 +352,21 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
     await route.fulfill({ json: addons });
   });
 
-  await page.route("**/api/exchange-rates**", async (route) => {
-    await route.fulfill({ json: { base: "EUR", rates: { EUR: 1, USD: 1.1 } } });
-  });
+  await page.route(
+    `**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/exchange-rates`,
+    async (route) => {
+      await route.fulfill({
+        json: {
+          base: "EUR",
+          rates: { USD: 1.1 },
+          attribution: {
+            label: "Rates By Exchange Rate API",
+            url: "https://www.exchangerate-api.com",
+          },
+        },
+      });
+    },
+  );
 
   await page.route(`**/api/hotels/${SEEDED_BOOKING_SLUG}/unavailable-dates**`, async (route) => {
     await route.fulfill({ json: { dates: [], min_stay_by_arrival: {} } });
