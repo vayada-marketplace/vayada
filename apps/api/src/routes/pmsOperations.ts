@@ -5061,6 +5061,19 @@ function isRecurringMonthDay(value: string): boolean {
   return day <= new Date(Date.UTC(2024, month, 0)).getUTCDate();
 }
 
+const ROOM_TYPE_UPDATE_FIELDS = new Set([
+  "commandId",
+  "idempotencyKey",
+  "locationAddress",
+  "latitude",
+  "longitude",
+  "cancellationPolicy",
+  "flexibleCancellationType",
+  "partialRefundCancelWindowDays",
+  "partialRefundAmountPercent",
+  "partialRefundTiers",
+]);
+
 function toRoomTypeUpdateCommand(
   propertyId: string,
   roomTypeId: string,
@@ -5069,6 +5082,22 @@ function toRoomTypeUpdateCommand(
   const raw = objectBody(request.body);
   if (!raw) return { error: invalidBody("Room type update body must be an object.") };
   if (!isUuid(roomTypeId)) return { error: invalidBody("roomTypeId must be a UUID.") };
+  // Refuse fields this command does not store instead of answering 200 without saving them.
+  const unsupported = Object.keys(raw).filter((key) => !ROOM_TYPE_UPDATE_FIELDS.has(key));
+  if (unsupported.length > 0) {
+    const named = unsupported
+      .sort()
+      .slice(0, 5)
+      .map((key) => key.slice(0, 40));
+    return {
+      error: invalidBody(
+        `Room type update does not save ${named.join(", ")}${unsupported.length > 5 ? ", …" : ""}.`,
+      ),
+    };
+  }
+  if (!Object.keys(raw).some((key) => key !== "commandId" && key !== "idempotencyKey")) {
+    return { error: invalidBody("Room type update has nothing to save.") };
+  }
 
   const commandId = stringField(raw.commandId);
   const idempotencyKey = stringField(raw.idempotencyKey);

@@ -4654,13 +4654,9 @@ describe("vayada-api", () => {
         authorization: "Bearer valid-token",
       },
       payload: {
-        property_name: "Updated Alpenrose",
         reservation_email: "new-reservations@alpenrose.example",
         phone_number: "+43 1 9999",
         whatsapp_number: "+43 1 8888",
-        address: "Updated street 1",
-        city: "Innsbruck",
-        country: "AT",
         instagram: "https://instagram.com/updated-alpenrose",
         facebook: "https://facebook.com/updated-alpenrose",
         tiktok: "https://tiktok.com/@updated-alpenrose",
@@ -4689,13 +4685,9 @@ describe("vayada-api", () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).toMatchObject({
       id: "booking_hotel_alpenrose",
-      property_name: "Updated Alpenrose",
       reservation_email: "new-reservations@alpenrose.example",
       phone_number: "+43 1 9999",
       whatsapp_number: "+43 1 8888",
-      address: "Updated street 1",
-      city: "Innsbruck",
-      country: "AT",
       instagram: "https://instagram.com/updated-alpenrose",
       facebook: "https://facebook.com/updated-alpenrose",
       tiktok: "https://tiktok.com/@updated-alpenrose",
@@ -4715,6 +4707,36 @@ describe("vayada-api", () => {
       guest_count_enabled: false,
       terms_text: "Updated Alpenrose booking terms.",
       cancellation_policy_text: "Free cancellation until one day before arrival.",
+    });
+  });
+
+  it("refuses the property name and location, which the property profile owns", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "PATCH",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/property",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        property_name: "Updated Alpenrose",
+        address: "Updated street 1",
+        city: "Innsbruck",
+        country: "AT",
+        phone_number: "+43 1 9999",
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.body).toMatchObject({
+      code: "invalid_payload",
+      details: [
+        "property_name is saved through the property profile, not booking settings.",
+        "address is saved through the property profile, not booking settings.",
+        "city is saved through the property profile, not booking settings.",
+        "country is saved through the property profile, not booking settings.",
+      ],
     });
   });
 
@@ -7950,13 +7972,9 @@ describe("vayada-api", () => {
         authorization: "Bearer valid-token",
       },
       payload: {
-        property_name: "Target Alpenrose",
         reservation_email: "target@alpenrose.example",
         phone_number: "+43 1 1111",
         whatsapp_number: "+43 1 2222",
-        address: "Target lane 1",
-        city: "Vienna",
-        country: "AT",
         instagram: "https://instagram.com/target-alpenrose",
         facebook: "https://facebook.com/target-alpenrose",
         tiktok: "https://tiktok.com/@target-alpenrose",
@@ -15406,7 +15424,6 @@ describe("vayada-api", () => {
           { minDaysBeforeCheckIn: 30, refundPercent: 50 },
           { minDaysBeforeCheckIn: 7, refundPercent: 20 },
         ],
-        name: "Ignored by location update",
       },
       headers: { authorization: "Bearer valid-token" },
     });
@@ -15572,6 +15589,62 @@ describe("vayada-api", () => {
     expect(booleanResponse.body).toMatchObject({
       code: "invalid_body",
       message: "Room type update latitude must be between -90 and 90.",
+    });
+    expect(commandRepository.roomTypeUpdates).toHaveLength(0);
+  });
+
+  it("rejects PMS room-type update fields the command does not save", async () => {
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+          resource: {
+            product: "pms",
+            resourceType: "pms_property",
+            resourceId: pmsPropertyId,
+          },
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    const response = await injectJson(app, {
+      method: "PATCH",
+      url: `/api/pms/properties/${pmsPropertyId}/room-types/${pmsRoomTypes[0].roomTypeId}`,
+      payload: {
+        commandId: "cmd-room-type-facts-on-location-route",
+        idempotencyKey: "room-type-facts-on-location-route",
+        locationAddress: "Seestrasse 12, Innsbruck",
+        name: "Lake Suite",
+        maxOccupancy: 3,
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toMatchObject({
+      code: "invalid_body",
+      message: "Room type update does not save maxOccupancy, name.",
+    });
+
+    const empty = await injectJson(app, {
+      method: "PATCH",
+      url: `/api/pms/properties/${pmsPropertyId}/room-types/${pmsRoomTypes[0].roomTypeId}`,
+      payload: {
+        commandId: "cmd-room-type-empty-update",
+        idempotencyKey: "room-type-empty-update",
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(empty.statusCode).toBe(400);
+    expect(empty.body).toMatchObject({
+      code: "invalid_body",
+      message: "Room type update has nothing to save.",
     });
     expect(commandRepository.roomTypeUpdates).toHaveLength(0);
   });
