@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 export const SELECTABLE_JOBS = [
   "frontend",
   "first_party_auth",
+  "pms_web_e2e",
   "api_unit",
   "api_postgres",
   "setup_draft_reset_postgres",
@@ -38,15 +39,32 @@ export const RULES = [
     test: /^apps\/(marketplace-api|booking-api|pms-api)\//,
     jobs: ["backend"],
   },
+  // pms_web_e2e runs the mocked pms-web Playwright project.
+  {
+    name: "pms-web",
+    test: /^apps\/pms-web\//,
+    jobs: ["frontend", "first_party_auth", "pms_web_e2e"],
+  },
   {
     name: "frontend",
-    test: /^apps\/(marketplace-web|vayada-admin|booking-web|booking-admin|pms-web|landing)\//,
+    test: /^apps\/(marketplace-web|vayada-admin|booking-web|booking-admin|landing)\//,
     jobs: ["frontend", "first_party_auth"],
+  },
+  {
+    name: "pms-web-e2e",
+    test: /^tests\/e2e\/(pms-web|support)\//,
+    jobs: ["frontend", "first_party_auth", "pms_web_e2e"],
   },
   // The frontend job runs the landing Playwright suite; first_party_auth runs the auth suite.
   { name: "e2e", test: /^tests\/e2e\//, jobs: ["frontend", "first_party_auth"] },
-  // apps/api, shared packages and packages/backend-migration/migrations: the full unit suites plus
-  // PG16 + PG17 coverage.
+  // Packages pms-web builds on (everything but backend-*) also run its browser specs.
+  {
+    name: "frontend-packages",
+    test: /^packages\/(?!backend-)/,
+    jobs: [...TYPESCRIPT_JOBS, "pms_web_e2e"],
+  },
+  // apps/api, backend packages and packages/backend-migration/migrations: the full unit suites
+  // plus PG16 + PG17 coverage.
   { name: "typescript", test: /^(apps\/api|packages)\//, jobs: TYPESCRIPT_JOBS },
 ];
 

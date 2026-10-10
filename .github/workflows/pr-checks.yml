@@ -55,6 +55,7 @@ jobs:
     outputs:
       run_frontend: ${{ steps.select.outputs.run_frontend }}
       run_first_party_auth: ${{ steps.select.outputs.run_first_party_auth }}
+      run_pms_web_e2e: ${{ steps.select.outputs.run_pms_web_e2e }}
       run_api_unit: ${{ steps.select.outputs.run_api_unit }}
       run_api_postgres: ${{ steps.select.outputs.run_api_postgres }}
       run_setup_draft_reset_postgres: ${{ steps.select.outputs.run_setup_draft_reset_postgres }}
@@ -204,6 +205,59 @@ jobs:
         env:
           E2E_FIRST_PARTY_AUTH_ONLY: "1"
           E2E_START_SERVERS: "1"
+
+  # The mocked pms-web Playwright project against a plain-port dev server. Every API call is
+  # mocked in tests/e2e/support, so no backend or database runs here.
+  pms_web_e2e:
+    name: PMS Web Browser Specs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [changes]
+    if: needs.changes.outputs.run_pms_web_e2e == 'true'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the packages pms-web imports
+        run: npm --workspace vayada-api run build:backend-packages
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the pms-web browser specs
+        run: |
+          npm run dev:pms-web > "$RUNNER_TEMP/pms-web-dev.log" 2>&1 &
+          dev_pid=$!
+          trap 'kill "$dev_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 120); do
+            if curl --silent --fail http://localhost:3164/login >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --silent --fail http://localhost:3164/login >/dev/null || { tail -50 "$RUNNER_TEMP/pms-web-dev.log"; exit 1; }
+          npm run e2e:pms-web -- --workers=1
+        env:
+          CI: "false"
+          E2E_START_SERVERS: "0"
+          PORT: "3164"
+          AUTH_PUBLIC_ORIGIN: http://localhost:3164
+          NEXT_PUBLIC_MARKETPLACE_URL: http://marketplace.localhost:3000
+          NEXT_PUBLIC_BOOKING_ADMIN_URL: http://admin.booking.localhost:3003
+          E2E_PMS_BASE_URL: http://localhost:3164
+          E2E_MARKETPLACE_BASE_URL: http://marketplace.localhost:3000
 
   # Every unit suite under apps/api and the backend packages, with no database. Files that need
   # PostgreSQL skip themselves here; api_postgres runs only the integration files it names (full
@@ -997,6 +1051,7 @@ jobs:
       - changes
       - frontend
       - first_party_auth
+      - pms_web_e2e
       - api_unit
       - api_postgres
       - setup_draft_reset_postgres
