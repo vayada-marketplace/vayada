@@ -10,6 +10,7 @@ import {
 import { apiClient, omitHotelContext } from "@/services/api/client";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
+import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
 import {
   buildFinancePaymentSettingsBody,
   createFinanceStripeDashboardLink,
@@ -190,14 +191,11 @@ function buildTargetSettingsUpdate(
   if (section === "general") {
     return {
       ok: true,
+      // Name and address belong to the shared property profile, saved separately.
       data: {
-        property_name: settings.property_name,
         reservation_email: settings.reservation_email,
         phone_number: settings.phone_number,
         whatsapp_number: settings.whatsapp_number,
-        address: settings.address,
-        city: settings.city,
-        country: settings.country,
         instagram: settings.instagram,
         facebook: settings.facebook,
         tiktok: settings.tiktok,
@@ -299,6 +297,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   const [bankDestination, setBankDestination] = useState<SavedBankTransferDestination | null>(null);
   const [paymentSettingsLoaded, setPaymentSettingsLoaded] = useState(false);
   const [billingPropertyId, setBillingPropertyId] = useState<string | null>(null);
+  const [savedPropertyName, setSavedPropertyName] = useState("");
   const [financePlanStatus, setFinancePlanStatus] = useState<FinancePlanStatus | null>(null);
   const [billingPlanLoading, setBillingPlanLoading] = useState(true);
   const [billingPlanAction, setBillingPlanAction] = useState<
@@ -313,6 +312,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       setLoading(true);
       const data = await settingsService.getPropertySettings();
       setSettings(data);
+      setSavedPropertyName(data.property_name);
       return data;
     } catch {
       setFeedback({ type: "error", message: "settings.feedback.loadError" });
@@ -909,6 +909,19 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     }
   };
 
+  // The property name lives in the shared property profile (hotel setup, PMS). Only the
+  // owner can rename, and the profile must be complete, so it is saved last and on its own.
+  const savePropertyName = async (name: string): Promise<string> => {
+    if (!billingPropertyId) throw new Error("The property link is unavailable.");
+    const current = await sharedHotelSetupApi.getPropertyProfile(billingPropertyId);
+    if (current.profile.displayName === name) return name;
+    const saved = await sharedHotelSetupApi.updatePropertyProfile(billingPropertyId, {
+      expectedProfileRevision: current.profileRevision,
+      patch: { displayName: name },
+    });
+    return saved.profile.displayName;
+  };
+
   const handleSave = async () => {
     if (activeSection === "billing") {
       setFeedback(null);
@@ -936,7 +949,24 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       setSaving(true);
       setFeedback(null);
       const data = await settingsService.updatePropertySettings(targetSettingsUpdate.data);
-      setSettings(data);
+      // Apply only what was saved: this response carries placeholder payment settings.
+      const saved = Object.keys(targetSettingsUpdate.data);
+      if (activeSection === "property") saved.push("address");
+      setSettings((previous) => ({
+        ...previous,
+        ...Object.fromEntries(saved.map((key) => [key, data[key as keyof PropertySettings]])),
+      }));
+      const name = normalizedSettings.property_name.trim();
+      if (activeSection === "property" && name !== savedPropertyName.trim()) {
+        try {
+          const savedName = await savePropertyName(name);
+          setSavedPropertyName(savedName);
+          setSettings((previous) => ({ ...previous, property_name: savedName }));
+        } catch {
+          setFeedback({ type: "error", message: "settings.feedback.propertyNameNotSaved" });
+          return;
+        }
+      }
       setFeedback({ type: "success", message: "settings.feedback.saveSuccess" });
     } catch {
       setFeedback({ type: "error", message: "settings.feedback.saveError" });
@@ -1005,6 +1035,8 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
 
   const updateSetting = <K extends keyof PropertySettings>(key: K, value: PropertySettings[K]) => {
     setSettings({ ...settings, [key]: value });
+    // A success banner next to unsaved edits reads as if they were saved.
+    setFeedback((current) => (current?.type === "success" ? null : current));
   };
 
   // Payments saves the canonical currency, so it needs the same retry when localization fails.
@@ -1084,16 +1116,16 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                     <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
                       {t("settings.property.addressLabel")}
                     </label>
-                    <div className="relative">
-                      <MapPinIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                      <input
-                        type="text"
-                        value={settings.address}
-                        onChange={(e) => updateSetting("address", e.target.value)}
-                        className="w-full pl-8 pr-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder={t("settings.property.addressPlaceholder")}
-                      />
+                    <div className="flex items-start gap-2 text-[13px] text-gray-900">
+                      <MapPinIcon className="mt-0.5 w-3.5 h-3.5 shrink-0 text-gray-400" />
+                      <span data-testid="property-address">{settings.address || "—"}</span>
                     </div>
+                    <a
+                      href="/settings/location"
+                      className="mt-1 inline-block text-[13px] font-medium text-blue-700 underline"
+                    >
+                      {t("settings.property.addressEditInLocation")}
+                    </a>
                   </div>
                 </div>
               </div>
