@@ -27,7 +27,11 @@ describe.skipIf(!URL)("Channex scheduled booking-feed pull (PostgreSQL)", () => 
         property === external(OWNED)
           ? [
               revision("rev-1", "booking-1"),
-              { id: "rev-bad", attributes: {} },
+              // Another provider property's revision: promotion refuses it.
+              {
+                id: "rev-bad",
+                attributes: { property_id: "chx-pull-elsewhere", booking_id: "booking-bad" },
+              },
               revision("rev-2", "booking-2"),
             ]
           : [],
