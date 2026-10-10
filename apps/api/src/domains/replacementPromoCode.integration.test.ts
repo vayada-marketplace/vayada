@@ -129,6 +129,25 @@ describe.skipIf(!url)("current Booking promo code owner", () => {
     expect(await yen.read()).toBeNull();
     await pool.query("UPDATE booking.promo_definitions SET discount_value=2 WHERE id=$1", [yen.id]);
     expect(await yen.read()).toMatchObject({ discount: { kind: "fixed", amountMinor: "2" } });
+    // IDR (VAY-2085): percentages stay as they are; a fixed amount off must be whole rupiah.
+    // The minimum is only a threshold, so a fractional one is still read exactly.
+    const idr = await fixture("IDR");
+    expect(await idr.read()).toMatchObject({
+      discount: { kind: "percentage", basisPoints: 1250 },
+    });
+    await pool.query(
+      "UPDATE booking.promo_definitions SET discount_type='fixed',discount_value=1.25 WHERE id=$1",
+      [idr.id],
+    );
+    expect(await idr.read()).toBeNull();
+    await pool.query(
+      "UPDATE booking.promo_definitions SET discount_value=5000,min_booking_value=99.50 WHERE id=$1",
+      [idr.id],
+    );
+    expect(await idr.read()).toMatchObject({
+      discount: { kind: "fixed", amountMinor: "500000" },
+      minimumBookingMinor: "9950",
+    });
   });
   it("binds source identity to saved policy and usage without redeeming the code", async () => {
     const f = await fixture(),

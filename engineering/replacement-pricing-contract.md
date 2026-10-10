@@ -13,6 +13,14 @@ and scale-3 KWD are representable; provider support is a separate adapter gate.
 Amounts are bounded to 18 digits for validation; calculation overflow must fail.
 Do not pass these objects to old scale-2 interfaces without explicit conversion.
 
+IDR keeps ISO scale 2 but is priced in whole rupiah (VAY-2085): its price step is
+100 minor units (`pricingAmountStep`); every other currency steps by one minor unit.
+Configuration amounts, fixed charges, add-on prices and fixed promo amounts that are
+not whole rupiah fail closed. Every percentage (room adjustments, last-minute and
+promo discounts, deposits) and every FX conversion into IDR rounds half-up to the
+step, so neither creates a fraction of a rupiah. Promo minimums are thresholds and
+keep exact minor units.
+
 One room-price mode per offer: flat, occupancy table, included-guests adjustments,
 or per-person, consistently across base/month/season rows. Explicit final date
 overrides are the exception and may intentionally flatten the price. Unknown/extra fields fail. Switching modes replaces the entire

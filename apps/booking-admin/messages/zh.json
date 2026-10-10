@@ -986,7 +986,7 @@
   "admin.languageSelector": "语言选择器",
   "admin.hiddenAutomaticallyWhenOnlyOneLanguageIsConfigured": "仅配置一种语言时自动隐藏。",
   "admin.currencySelector": "货币选择器",
-  "admin.hiddenAutomaticallyWhenOnlyOneCurrencyIsConfigured": "仅配置一种货币时自动隐藏。",
+  "admin.multiCurrencyIsNotAvailableYet": "多币种功能暂不可用。",
   "admin.heroHeading": "英雄标题",
   "admin.publicDescription": "公开说明",
   "admin.heroSubtext": "英雄潜台词",

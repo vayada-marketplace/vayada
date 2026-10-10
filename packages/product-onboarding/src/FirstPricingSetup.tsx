@@ -2,6 +2,7 @@
 import { useState } from "react";
 import {
   parsePricingConfiguration,
+  pricingAmountStep,
   pricingCurrencyScale,
   type PricingConfiguration,
 } from "@vayada/domain-pms/replacement-pricing";
@@ -61,17 +62,21 @@ export function firstPricingInput(
     throw new PricingError("pricing.setup.errorMode");
   if (values.mode === "occupancy" && values.occupancy.length !== room.capacity.adults)
     throw new PricingError("pricing.setup.errorOccupancy");
+  // Whole rupiah for IDR (VAY-2085); every other currency steps by one minor unit.
+  const step = pricingAmountStep(values.currency);
   const base =
     values.mode === "included_guests"
-      ? includedPrice(values.included, values.base, room.capacity.adults, scale)
+      ? includedPrice(values.included, values.base, room.capacity.adults, scale, step)
       : values.mode === "occupancy"
         ? {
             mode: "occupancy",
-            amountsMinor: Array.from(values.occupancy, (amount) => parseMinorInput(amount, scale)),
+            amountsMinor: Array.from(values.occupancy, (amount) =>
+              parseMinorInput(amount, scale, false, step),
+            ),
           }
         : values.mode === "per_person"
-          ? { mode: "per_person", unitMinor: parseMinorInput(values.base, scale) }
-          : { mode: "flat", amountMinor: parseMinorInput(values.base, scale) };
+          ? { mode: "per_person", unitMinor: parseMinorInput(values.base, scale, false, step) }
+          : { mode: "flat", amountMinor: parseMinorInput(values.base, scale, false, step) };
   const adultFromAge = integer(values.adultAge),
     minArrivalNights = integer(values.minimum);
   const cancellation: PricingTermsInput["cancellation"] =
@@ -106,7 +111,7 @@ export function firstPricingInput(
         {
           fromAge: 0,
           throughAge: adultFromAge - 1,
-          nightlyMinor: parseMinorInput(values.childPrice, scale, true),
+          nightlyMinor: parseMinorInput(values.childPrice, scale, true, step),
           countsTowardCapacity: values.countChildren === "yes",
         },
       ],
