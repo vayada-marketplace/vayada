@@ -327,15 +327,18 @@ function sourceMixSql(): string {
 
 function sparklineSql(): string {
   return `${bookingScopedPropertyCte()},
+  -- One bucket per day up to 31 days; longer windows split into 31 contiguous buckets.
+  sizing AS (
+    SELECT $3::date - $2::date + 1 AS window_days, LEAST($3::date - $2::date + 1, 31) AS bucket_count
+  ),
   buckets AS (
     SELECT
-      ($2::date + floor((($3::date - $2::date + 1) * bucket_index)::numeric / 7)::int)
+      ($2::date + floor((sizing.window_days * bucket_index)::numeric / sizing.bucket_count)::int)
         AS bucket_start,
-      GREATEST(
-        ($2::date + floor((($3::date - $2::date + 1) * (bucket_index + 1))::numeric / 7)::int - 1),
-        ($2::date + floor((($3::date - $2::date + 1) * bucket_index)::numeric / 7)::int)
-      ) AS bucket_end
-    FROM generate_series(0, 6) bucket_index
+      ($2::date + floor((sizing.window_days * (bucket_index + 1))::numeric / sizing.bucket_count)::int - 1)
+        AS bucket_end
+    FROM sizing
+    CROSS JOIN LATERAL generate_series(0, sizing.bucket_count - 1) bucket_index
   )
   SELECT
     bucket.bucket_start::text AS "bucketStart",
@@ -511,7 +514,7 @@ function conversionFunnelSql(): string {
       AND event.property_id = scoped.property_id AND event.tenant_scope = 'property'
       AND event.source_system = 'distribution' AND event.resource_product = 'distribution'
       AND event.resource_type = 'booking_web_hotel'
-      AND event.event_type IN ('booking_web.page_visit', 'booking_web.room_viewed',
+      AND event.event_type IN ('booking_web.page_visit',
         'booking_web.rate_selected', 'booking_web.addons_step_passed', 'booking_web.details_completed',
         'booking_web.complete_booking_clicked', 'booking_web.payment_authorized', 'booking_web.booking_completed')
       AND event.event_status IN ('recorded', 'projected')

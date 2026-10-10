@@ -32,7 +32,7 @@ export async function generateMetadata({
   const hotel = await fetchPublicHotel(slug, locale);
   if (!hotel) return fallbackHotelMetadata;
   const policy = resolveHotelUrlPolicy(hostname, requestProtocol(headersList), locale, hotel, slug);
-  return buildPublicHotelMetadata({ hotel, policy, path: "/" });
+  return buildPublicHotelMetadata({ hotel, policy });
 }
 
 export default async function PublicHotelLayout({

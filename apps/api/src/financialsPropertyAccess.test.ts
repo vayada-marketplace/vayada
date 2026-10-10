@@ -12,6 +12,7 @@ const scope: MembershipPropertyScope = {
   mode: "assigned",
   roleKey: "finance_manager",
   accessOrigin: "agency",
+  productAccess: { pms: true, booking: true },
   assignedPropertyIds: [propertyId],
 };
 const command = { commandId: itemId, idempotencyKey: "test-command", expectedRevision: 1 };

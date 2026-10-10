@@ -1,4 +1,5 @@
 import { queryCurrency } from "../domains/pmsPricingReadModel.js";
+import { pricingDecimalStepIssue } from "../domains/pricingDecimalMinor.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { parseAddonEconomicTerms, type AddonEconomicTerms } from "@vayada/domain-booking";
 import type { PropertyPlanReadModel } from "@vayada/domain-finance";
@@ -338,6 +339,8 @@ export function createPgTargetBookingAddonItemsRepository(config: {
         const currency = await queryCurrency(client, propertyId);
         if (!currency)
           throw new BookingAddonImageInvalidError("Property pricing currency is unavailable.");
+        const priceIssue = pricingDecimalStepIssue("price", body.price, currency.currency);
+        if (priceIssue) throw new BookingAddonImageInvalidError(priceIssue);
         body = { ...body, currency: currency.currency };
         const photos = await resolveAddonPhotos(client, propertyId, body.photos);
         const image =
@@ -404,6 +407,11 @@ export function createPgTargetBookingAddonItemsRepository(config: {
         const currency = await queryCurrency(pool, propertyId);
         if (!currency)
           throw new BookingAddonImageInvalidError("Property pricing currency is unavailable.");
+        const priceIssue =
+          body.price === undefined
+            ? null
+            : pricingDecimalStepIssue("price", body.price, currency.currency);
+        if (priceIssue) throw new BookingAddonImageInvalidError(priceIssue);
         body = { ...body, currency: currency.currency };
       }
       const photos = await resolveAddonPhotos(pool, propertyId, body.photos, addonItemId);
