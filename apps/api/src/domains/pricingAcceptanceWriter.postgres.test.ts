@@ -287,8 +287,8 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     });
   };
 
-  async function cardFixture(accountRef = "acct_writer_test") {
-    const fixture = await setupFixture(cardQuote);
+  async function cardFixture(accountRef = "acct_writer_test", currency?: string) {
+    const fixture = await setupFixture(cardQuote, currency);
     const slug = `writer-${fixture.propertyId}`;
     fixture.input.slug = slug;
     await fixture.observer.query(
@@ -484,11 +484,13 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
   });
 
   // Stripe test mode (VAY-1543 K5). Runs only with STRIPE_TEST_SECRET_KEY (a test-mode key) and
-  // STRIPE_TEST_CONNECTED_ACCOUNT; CI has neither, so it never calls Stripe there.
+  // STRIPE_TEST_CONNECTED_ACCOUNT; CI has neither, so it never calls Stripe there. Optional
+  // STRIPE_TEST_CURRENCY (EUR, USD or IDR) prices the quote in that currency.
   const stripeKey = process.env.STRIPE_TEST_SECRET_KEY;
   const stripeAccount = process.env.STRIPE_TEST_CONNECTED_ACCOUNT;
   const stripeTestMode =
     !!stripeKey && /^(sk|rk)_test_/.test(stripeKey) && !!stripeAccount?.startsWith("acct_");
+  const stripeCurrency = process.env.STRIPE_TEST_CURRENCY?.toUpperCase();
   const confirmWithTestCard = async (paymentIntentId: string, paymentMethod: string) => {
     const response = await fetch(
       `https://api.stripe.com/v1/payment_intents/${paymentIntentId}/confirm`,
@@ -508,7 +510,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
   it.skipIf(!stripeTestMode)(
     "Stripe test mode: declined card stays pending, test Visa confirms the booking once",
     async () => {
-      const { fixture } = await cardFixture(stripeAccount!);
+      const { fixture } = await cardFixture(stripeAccount!, stripeCurrency);
       const provider = createStripeBookingPaymentProvider({ secretKey: stripeKey! });
       try {
         const required = (await writePricingAcceptance(fixture.pool, fixture.input, undefined, {
@@ -582,7 +584,7 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
   it.skipIf(!stripeTestMode)(
     "Stripe test mode: an unpaid booking expires, Stripe cancels the payment, rooms are released",
     async () => {
-      const { fixture } = await cardFixture(stripeAccount!);
+      const { fixture } = await cardFixture(stripeAccount!, stripeCurrency);
       const provider = createStripeBookingPaymentProvider({ secretKey: stripeKey! });
       try {
         const required = (await writePricingAcceptance(fixture.pool, fixture.input, undefined, {
@@ -725,7 +727,31 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
   });
 });
 
-async function setupFixture(changeQuote?: (quote: Fixture["f"]["current"]["quote"]) => void) {
+// K5 in another currency (STRIPE_TEST_CURRENCY): the same quote with every minor amount scaled, so the
+// card amount clears Stripe's minimum charge (EUR 360.00 becomes IDR 3,600,000.00).
+const CURRENCY_SCALE: Record<string, bigint> = { EUR: 1n, USD: 1n, IDR: 10000n };
+function inCurrency(quote: Fixture["f"]["current"]["quote"], currency: string) {
+  const factor = CURRENCY_SCALE[currency];
+  if (factor === undefined) throw new Error(`unsupported test currency ${currency}`);
+  const scale = (value: unknown, minor = false): unknown =>
+    Array.isArray(value)
+      ? value.map((item) => scale(item, minor))
+      : value && typeof value === "object"
+        ? Object.fromEntries(
+            Object.entries(value).map(([key, item]) => [key, scale(item, key.endsWith("Minor"))]),
+          )
+        : minor && typeof value === "string" && /^[0-9]+$/.test(value)
+          ? String(BigInt(value) * factor)
+          : value;
+  Object.assign(quote, scale(quote));
+  Object.assign(quote.evidence, { currency });
+  Object.assign(quote.stay, { currency });
+}
+
+async function setupFixture(
+  changeQuote?: (quote: Fixture["f"]["current"]["quote"]) => void,
+  currency?: string,
+) {
   if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
     throw new Error("test database required");
   const rawPool = new pg.Pool({ connectionString: url, max: 3 });
@@ -746,6 +772,7 @@ async function setupFixture(changeQuote?: (quote: Fixture["f"]["current"]["quote
     sourceRevision: string;
   };
   const f = pricingDraftFixture((quote) => {
+    if (currency) inCurrency(quote, currency);
     Object.assign(quote, { quoteId: randomUUID() });
     Object.assign(quote.stay, { propertyId });
     Object.assign(quote.stay.rooms[0], { roomTypeId });
@@ -801,8 +828,8 @@ async function setupFixture(changeQuote?: (quote: Fixture["f"]["current"]["quote
   );
   await observer.query(
     `INSERT INTO pms.room_types(id,property_id,name,occupancy_limits,base_rate_amount,currency)
-     VALUES($1,$2,'Writer room','{"adults":2,"children":1,"total":3}',100,'EUR')`,
-    [roomTypeId, propertyId],
+     VALUES($1,$2,'Writer room','{"adults":2,"children":1,"total":3}',100,$3)`,
+    [roomTypeId, propertyId, f.current.quote.stay.currency],
   );
   // This row is a transaction sentinel for the already-tested inventory owner.
   await observer.query("SET LOCAL session_replication_role=replica");

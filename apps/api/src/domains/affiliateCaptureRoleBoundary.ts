@@ -148,12 +148,9 @@ const affiliateCaptureReadRelations = [
   "booking.affiliate_referral_production_preflight_revocations",
 ] as const;
 
-// These security-barrier views are intentionally readable by every login and
-// return rows only for assigned pricing-prefixed session users. Either may be absent.
-const publicBaselineReadRelations = [
-  "booking.pricing_runtime_effective_property_scopes",
-  "booking.pricing_runtime_effective_authority_scopes",
-] as const;
+// This security-barrier view is intentionally readable by every login and returns
+// rows only for assigned pricing-prefixed session users. It is skipped if absent.
+const publicBaselineReadRelations = ["booking.pricing_runtime_effective_property_scopes"] as const;
 
 const affiliateCaptureLockRelations = [
   "marketplace.affiliate_agreement_activations",

@@ -2503,7 +2503,12 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
             </>
           )}
           <div className="flex justify-end">
-            <SaveButton onClick={handleSave} saving={saving || savingPayment}>
+            {/* Saving before the stored payment settings load would write the form's defaults. */}
+            <SaveButton
+              onClick={handleSave}
+              saving={saving || savingPayment}
+              disabled={!paymentSettingsLoaded}
+            >
               {t("common.save")}
             </SaveButton>
           </div>
