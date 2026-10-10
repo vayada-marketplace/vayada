@@ -138,6 +138,28 @@ Estimate: 3.5–4.5 h. Every step records evidence in the run's evidence folder.
 
 ### S — Smoke (~30 min)
 
+0. **Make each cohort hotel bookable.** The cutover writes the catalog, the
+   native property links and the property-scoped `property-management`
+   entitlement, but not the following:
+   - `hotel_catalog.properties.lifecycle_status` stays `provisioning`. Public
+     pricing and nearby search need `active`. How migrated hotels become
+     `active` is an open decision (see below).
+   - `profile_status` is `complete` only for a hotel that was live in legacy,
+     has a public-eligible owner and has country, city and timezone. Fix any
+     `incomplete` cohort profile before reopen, or accept it staying unbookable.
+   - The public bookability profile
+     (`distribution.public_hotel_bookability_profiles`) is not written by the
+     cutover. Publish it per cohort hotel, through the normal booking-profile
+     publish or `target:booking-public-bookability:backfill`.
+
+   Then check that each cohort hotel passes the VAY-1543 public pricing rule:
+   - exactly one active `hotel_group` organization holds both property links
+   - an applicable active `pms` entitlement exists and none is suspended
+   - lifecycle `active` and profile `complete`
+   - a location row and an active canonical slug
+   - a bookability profile that is `public_safe`/public/fresh/ready with
+     payment methods
+
 1. For each cohort hotel, check:
    - rooms, rate plans and the availability calendar
    - upcoming and past reservations
@@ -225,3 +247,8 @@ and legacy is not a fallback (decisions table).
   properties outside the cohort. The import writes none for them, so parity relies
   on the native writers being paused (Freeze step 3).
 - The rehearsal on an isolated restore of legacy plus a copy of the live target.
+- Open decision: how migrated cohort hotels become `lifecycle_status='active'`.
+  Options: the cutover sets it for complete cohort profiles, an operator step
+  sets it after smoke, or owners finish the hotel-setup Review step.
+- Open decision: legacy PMS module activations (for example financials) are
+  not mapped to the runtime's property-scoped `module:*` entitlements.
