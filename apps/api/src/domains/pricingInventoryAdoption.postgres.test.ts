@@ -755,6 +755,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           retainedMinor: "81000",
         });
         await actions.apply(hostScope, hostPreview.previewId, "host-guest-request");
+        await db.query("SET CONSTRAINTS ALL IMMEDIATE");
         const cancelled = await db.query(
           `SELECT booking.cancellation_reason AS reason,
              event.event_payload->'cancellationOutcome'->>'retainedMinor' AS fee
@@ -818,6 +819,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           reason: "No rooms that night",
         });
         await actions.apply(hostScope, hostPreview.previewId, "host-reject");
+        await db.query("SET CONSTRAINTS ALL IMMEDIATE");
         const rejected = await db.query(
           "SELECT lifecycle_status AS status FROM booking.guest_bookings WHERE id=$1",
           [bookingId],
