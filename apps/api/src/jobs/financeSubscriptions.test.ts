@@ -10,6 +10,7 @@ import {
   createPgFinanceSubscriptionWebhookStore,
   processFinanceSubscriptionWebhook,
   runFinanceSubscriptionNotificationJobs,
+  runFinanceSubscriptionWebhookJobs,
   type FinanceSubscriptionWebhookEntitlement,
   type FinanceSubscriptionWebhookPayload,
   type FinanceSubscriptionWebhookStore,
@@ -113,6 +114,86 @@ describe("Finance subscription webhook lifecycle", () => {
     expect(fixture.store.entitlement.planKey).toBe("fixed");
     expect(fixture.store.notificationCount).toBe(1);
     expect(fixture.refreshPublicBookability).toHaveBeenCalledWith("property-1");
+  });
+
+  it("acknowledges a legacy-shaped subscription event that no entitlement owns", async () => {
+    // VAY-1362: before adoption, legacy subscriptions carry hotel_id metadata
+    // only, so the intake maps no organization. Nothing retries or dead-letters.
+    const fixture = setup("commission");
+    fixture.store.findEntitlement = async () => null;
+    fixture.provider.snapshot.organizationId = null;
+    fixture.provider.snapshot.propertyId = null;
+    fixture.provider.snapshot.fixedPlanVerified = false;
+    const legacy = {
+      ...payload("invoice.paid", 43),
+      subscriptionId: "sub_legacy",
+      propertyId: null,
+      organizationId: null,
+    };
+
+    await expect(processFinanceSubscriptionWebhook(legacy, fixture.dependencies)).resolves.toBe(
+      "ignored_unowned",
+    );
+    await expect(
+      processFinanceSubscriptionWebhook(
+        { ...legacy, eventType: "customer.subscription.deleted", eventCreated: 44 },
+        fixture.dependencies,
+      ),
+    ).resolves.toBe("ignored_unowned");
+
+    expect(fixture.provider.retrieveSubscription).toHaveBeenCalledWith("sub_legacy");
+    expect(fixture.store.entitlement.planKey).toBe("commission");
+  });
+
+  it("still fails a target-shaped event that maps to no entitlement", async () => {
+    const fixture = setup("commission");
+    fixture.store.findEntitlement = async () => null;
+
+    await expect(
+      processFinanceSubscriptionWebhook(payload("invoice.paid", 45), fixture.dependencies),
+    ).rejects.toThrow("does not map to a Finance entitlement");
+  });
+
+  it("retries an event without metadata when the live subscription is target-owned", async () => {
+    // A native invoice can arrive before its checkout completion is linked;
+    // the live subscription carries the organization, so it must not be dropped.
+    const fixture = setup("commission");
+    fixture.store.findEntitlement = async () => null;
+
+    await expect(
+      processFinanceSubscriptionWebhook(
+        { ...payload("invoice.paid", 47), propertyId: null, organizationId: null },
+        fixture.dependencies,
+      ),
+    ).rejects.toThrow("does not map to a Finance entitlement");
+    expect(fixture.provider.retrieveSubscription).toHaveBeenCalledWith("sub_fixed");
+  });
+
+  it("records the ignored outcome on the finished job", async () => {
+    const legacy = {
+      ...payload("invoice.payment_failed", 46),
+      propertyId: null,
+      organizationId: null,
+    };
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ id: "job-3", payload: legacy }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+    const provider = setup("commission").provider;
+    provider.snapshot.organizationId = null;
+    await expect(
+      runFinanceSubscriptionWebhookJobs(
+        "postgres://unused",
+        provider,
+        { getRoomInventorySnapshot: vi.fn() },
+        { pool: { query } as never },
+      ),
+    ).resolves.toEqual({ processed: 1, failed: 0 });
+    const finish = query.mock.calls.find((call) => String(call[0]).includes("'succeeded'"));
+    expect(finish?.[1]).toEqual(["job-3", "ignored_unowned"]);
+    expect(String(finish?.[0])).toContain("'outcome'");
   });
 
   it("rejects an invoice that is not linked to the entitlement subscription", async () => {
@@ -337,7 +418,7 @@ class MemoryStore implements FinanceSubscriptionWebhookStore {
     };
   }
 
-  async findEntitlement() {
+  async findEntitlement(): Promise<FinanceSubscriptionWebhookEntitlement | null> {
     return { ...this.entitlement };
   }
 

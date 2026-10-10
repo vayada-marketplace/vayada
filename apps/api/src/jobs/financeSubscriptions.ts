@@ -58,6 +58,8 @@ export type FinanceSubscriptionWebhookStore = {
   }): Promise<boolean>;
 };
 
+export type FinanceSubscriptionWebhookOutcome = "applied" | "ignored_stale" | "ignored_unowned";
+
 export type FinanceSubscriptionPaymentFailureNotification = {
   propertyId: string;
   organizationId: string;
@@ -73,11 +75,20 @@ export async function processFinanceSubscriptionWebhook(
     roomInventory: RoomInventoryReadPort;
     refreshPublicBookability?: (propertyId: string) => Promise<void>;
   },
-): Promise<"applied" | "ignored_stale"> {
+): Promise<FinanceSubscriptionWebhookOutcome> {
   validatePayload(payload);
   const existing = await dependencies.store.findEntitlement(payload);
   if (!existing) {
     if (payload.eventType === "checkout.session.completed") return "ignored_stale";
+    // VAY-1362: a legacy-shaped subscription (no target organization metadata)
+    // is owned by nobody until the adoption command runs. Acknowledge it
+    // instead of retrying into the dead letter; the receipt stays stored. The
+    // live subscription is read once so a target event whose invoice omitted
+    // its metadata still retries instead of being dropped.
+    if (!payload.organizationId && payload.subscriptionId) {
+      const live = await dependencies.stripe.retrieveSubscription(payload.subscriptionId);
+      if (!live.organizationId) return "ignored_unowned";
+    }
     throw new Error("Stripe subscription webhook does not map to a Finance entitlement.");
   }
   const subscriptionId = payload.subscriptionId ?? existing.subscriptionRef;
@@ -156,10 +167,12 @@ export async function runFinanceSubscriptionWebhookJobs(
     workerId?: string;
     limit?: number;
     refreshPublicBookability?: (propertyId: string) => Promise<void>;
+    pool?: pg.Pool;
   } = {},
 ): Promise<{ processed: number; failed: number }> {
-  const pool = new pg.Pool({ connectionString, max: 2 });
-  attachPoolErrorLogger(pool, "finance-subscriptions");
+  const ownsPool = !options.pool;
+  const pool = options.pool ?? new pg.Pool({ connectionString, max: 2 });
+  if (ownsPool) attachPoolErrorLogger(pool, "finance-subscriptions");
   const store = createPgFinanceSubscriptionWebhookStore(pool);
   let processed = 0;
   let failed = 0;
@@ -173,13 +186,13 @@ export async function runFinanceSubscriptionWebhookJobs(
       );
       if (!job) break;
       try {
-        await processFinanceSubscriptionWebhook(parsePayload(job.payload), {
+        const outcome = await processFinanceSubscriptionWebhook(parsePayload(job.payload), {
           store,
           stripe,
           roomInventory,
           refreshPublicBookability: options.refreshPublicBookability,
         });
-        await finishJob(pool, job.id);
+        await finishJob(pool, job.id, outcome);
         processed += 1;
       } catch (error) {
         await failJob(pool, job.id, error);
@@ -188,7 +201,7 @@ export async function runFinanceSubscriptionWebhookJobs(
     }
     return { processed, failed };
   } finally {
-    await pool.end();
+    if (ownsPool) await pool.end();
   }
 }
 
@@ -451,11 +464,15 @@ async function claimJob(pool: pg.Pool, workerId: string, queue: string, jobType:
   return result.rows[0] ?? null;
 }
 
-async function finishJob(pool: pg.Pool, jobId: string): Promise<void> {
+// Without an outcome the job metadata is left as it is (the notification runner relies on that).
+async function finishJob(pool: pg.Pool, jobId: string, outcome?: string): Promise<void> {
   await pool.query(
     `UPDATE platform.jobs SET status = 'succeeded', finished_at = now(),
-       locked_at = NULL, locked_by = NULL WHERE id = $1::uuid`,
-    [jobId],
+       locked_at = NULL, locked_by = NULL,
+       job_metadata = CASE WHEN $2::text IS NULL THEN job_metadata
+         ELSE COALESCE(job_metadata, '{}'::jsonb) || jsonb_build_object('outcome', $2::text) END
+     WHERE id = $1::uuid`,
+    [jobId, outcome ?? null],
   );
 }
 
