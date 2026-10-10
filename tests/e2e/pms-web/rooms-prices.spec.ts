@@ -101,8 +101,10 @@ async function mockPricing(page: Page, initial: ReturnType<typeof publicationOf>
       });
     }
     if (suffix === "/prepare" && method === "POST") {
+      // With a draft context the client expects the draft-projected terms sources too.
       return ok(route, {
         sources,
+        effectiveSources: sources,
         snapshot: {
           currency: body.currency,
           rooms: body.rooms,
@@ -119,13 +121,14 @@ async function mockPricing(page: Page, initial: ReturnType<typeof publicationOf>
       return ok(route, { revision: state.draft.revision });
     }
     if (/^\/drafts\/[^/]+\/charge-review$/.test(suffix) && method === "GET" && state.draft) {
-      const { draftId, snapshot, revision, baseRevision } = state.draft;
+      const { draftId, snapshot, revision, baseRevision, effectiveSources } = state.draft;
       return ok(route, {
         draftId,
         snapshot,
         revision,
         baseRevision,
         sources,
+        effectiveSources,
         stale: false,
         fingerprint: token("2"),
         declaration: "all_mandatory_charges_included",
