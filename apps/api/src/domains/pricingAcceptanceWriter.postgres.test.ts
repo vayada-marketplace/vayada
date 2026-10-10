@@ -696,6 +696,199 @@ describe.skipIf(!url)("pricing acceptance writer card payments (PostgreSQL)", ()
     },
   );
 
+  it("records a card request the guest authorised and starts the hotel's 24 hours", async () => {
+    const { fixture, slug, createPaymentIntent, retrievePaymentIntent, provider } =
+      await cardFixture(undefined, undefined, "request");
+    try {
+      const result = (await writePricingAcceptance(
+        fixture.pool,
+        fixture.input,
+        undefined,
+        { provider },
+        true,
+      )) as { bookingId: string; bookingReference: string };
+      const complete = () =>
+        completePricingCardPayment(fixture.pool, provider, {
+          slug,
+          quoteId: fixture.f.current.quote.quoteId,
+          requestId: fixture.f.command.requestId,
+        });
+      const intent = await createPaymentIntent({
+        amountMinor: Number(fixture.f.current.quote.evidence.dueNowMinor),
+        currency: fixture.f.current.quote.stay.currency,
+      });
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: result.bookingReference,
+      });
+      await expect(complete()).rejects.toMatchObject({ code: "pending" });
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: result.bookingReference,
+        status: "requires_capture",
+      });
+      const authorized = (await complete()) as { kind: string; hostResponseDeadlineAt: string };
+      expect(authorized).toMatchObject({
+        kind: "requested",
+        replayed: false,
+        bookingId: result.bookingId,
+        bookingReference: result.bookingReference,
+      });
+      const window = Date.parse(authorized.hostResponseDeadlineAt) - Date.now();
+      expect(window).toBeGreaterThan(24 * 3600_000 - 120_000);
+      expect(window).toBeLessThanOrEqual(24 * 3600_000);
+      const state = (
+        await fixture.observer.query(
+          `SELECT b.lifecycle_status,b.payment_status,p.status AS payment,s.payment_status AS summary,
+            b.booking_metadata->>'hostResponseDeadlineAt' AS deadline,
+            (SELECT count(*)::int FROM booking.nightly_revenue_evidence r WHERE r.guest_booking_id=b.id) AS revenue
+           FROM booking.guest_bookings b JOIN finance.payments p ON p.id=b.active_card_payment_id
+           JOIN booking.direct_booking_summary_read_model s ON s.guest_booking_id=b.id
+           WHERE b.property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows[0];
+      expect(state).toEqual({
+        lifecycle_status: "pending_payment",
+        payment_status: "authorized",
+        payment: "authorized",
+        summary: "authorized",
+        deadline: authorized.hostResponseDeadlineAt,
+        revenue: 0,
+      });
+      const jobs = (
+        await fixture.observer.query(
+          `SELECT job_type,payload->>'recipientRole' AS role FROM platform.jobs WHERE property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows;
+      expect(jobs).toContainEqual({ job_type: "email.booking-request-received", role: "guest" });
+      expect(jobs.map((job) => job.job_type)).not.toContain(
+        "pms.reservation.accepted-pricing.create",
+      );
+      await expect(complete()).resolves.toMatchObject({
+        kind: "requested",
+        replayed: true,
+        hostResponseDeadlineAt: authorized.hostResponseDeadlineAt,
+      });
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider }, true),
+      ).resolves.toMatchObject({ kind: "replayed", bookingId: result.bookingId });
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("records an authorised card request when the guest retries after a lost confirmation", async () => {
+    const { fixture, retrievePaymentIntent, provider } = await cardFixture(
+      undefined,
+      undefined,
+      "request",
+    );
+    try {
+      const accepted = (await writePricingAcceptance(
+        fixture.pool,
+        fixture.input,
+        undefined,
+        { provider },
+        true,
+      )) as { bookingId: string; bookingReference: string };
+      const intent = await retrievePaymentIntent();
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: accepted.bookingReference,
+        status: "requires_capture",
+      });
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider }, true),
+      ).resolves.toMatchObject({ kind: "replayed", bookingId: accepted.bookingId });
+      const state = (
+        await fixture.observer.query(
+          `SELECT lifecycle_status,payment_status,booking_metadata ? 'hostResponseDeadlineAt' AS deadline
+           FROM booking.guest_bookings WHERE property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows;
+      expect(state).toEqual([
+        { lifecycle_status: "pending_payment", payment_status: "authorized", deadline: true },
+      ]);
+      // The next retry is a plain replay too, and records nothing twice.
+      await expect(
+        writePricingAcceptance(fixture.pool, fixture.input, undefined, { provider }, true),
+      ).resolves.toMatchObject({ kind: "replayed" });
+      expect(
+        (
+          await fixture.observer.query(
+            `SELECT count(*)::int AS n FROM booking.booking_status_events
+             WHERE guest_booking_id=$1 AND event_type='guest_booking.payment_authorized'`,
+            [accepted.bookingId],
+          )
+        ).rows[0].n,
+      ).toBe(1);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("records an authorised card request at its payment deadline instead of expiring it", async () => {
+    const { fixture, provider, retrievePaymentIntent, cancelPaymentIntent } = await cardFixture(
+      undefined,
+      undefined,
+      "request",
+    );
+    try {
+      const accepted = (await writePricingAcceptance(
+        fixture.pool,
+        fixture.input,
+        undefined,
+        { provider },
+        true,
+      )) as { bookingId: string; bookingReference: string };
+      const intent = await retrievePaymentIntent();
+      retrievePaymentIntent.mockResolvedValue({
+        ...intent,
+        bookingReference: accepted.bookingReference,
+        status: "requires_capture",
+      });
+      const releaseRooms = vi.fn(async () => undefined);
+      const client = await fixture.pool.connect();
+      try {
+        await client.query("BEGIN");
+        await expect(
+          expirePricingCardBooking(
+            client,
+            provider,
+            {
+              propertyId: fixture.propertyId,
+              guestBookingId: accepted.bookingId,
+              now: new Date(Date.now() + 31 * 60_000),
+            },
+            releaseRooms,
+          ),
+        ).resolves.toBe("authorized");
+        await client.query("COMMIT");
+      } finally {
+        client.release();
+      }
+      expect(cancelPaymentIntent).not.toHaveBeenCalled();
+      expect(releaseRooms).not.toHaveBeenCalled();
+      const state = (
+        await fixture.observer.query(
+          `SELECT lifecycle_status,payment_status,booking_metadata ? 'hostResponseDeadlineAt' AS deadline
+           FROM booking.guest_bookings WHERE property_id=$1`,
+          [fixture.propertyId],
+        )
+      ).rows[0];
+      expect(state).toEqual({
+        lifecycle_status: "pending_payment",
+        payment_status: "authorized",
+        deadline: true,
+      });
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("expires an unpaid card booking at its deadline, releases the rooms and never replays it as accepted", async () => {
     const { fixture, provider, retrievePaymentIntent, cancelPaymentIntent } = await cardFixture();
     try {

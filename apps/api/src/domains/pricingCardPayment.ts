@@ -219,6 +219,7 @@ export async function readPricingCardReplay(
     await client.query(
       `SELECT booking.lifecycle_status,booking.payment_status,
         booking.booking_metadata->>'paymentMethod' AS method,
+        booking.booking_metadata->>'acceptanceMode' AS mode,
         booking.booking_metadata->>'pendingExpiresAt' AS deadline,
         payment.status AS payment_row_status,payment.provider_payment_intent_id AS intent,
         account.provider_account_id AS account
@@ -233,6 +234,9 @@ export async function readPricingCardReplay(
   ).rows[0];
   if (!row || row.method !== "card") return null;
   if (row.lifecycle_status === "confirmed" && row.payment_status !== "unpaid") return null;
+  // An authorised card request is waiting for the hotel: the plain replay is right.
+  if (row.lifecycle_status === "pending_payment" && row.payment_status === "authorized")
+    return null;
   if (
     !provider ||
     row.lifecycle_status !== "pending_payment" ||
@@ -243,6 +247,20 @@ export async function readPricingCardReplay(
   )
     throw new Error("Booking acceptance expired or unavailable");
   const intent = await provider.retrievePaymentIntent(row.intent, row.account);
+  // A card request the guest authorised before its confirmation was lost: the caller records
+  // the authorisation and answers with the plain replay (the request was sent).
+  if (
+    row.mode === "request" &&
+    intent.paymentIntentId === row.intent &&
+    intent.status === "requires_capture"
+  )
+    return {
+      kind: "authorize" as const,
+      propertyId: scope.propertyId,
+      paymentIntentId: row.intent as string,
+      amountMinor: intent.amountMinor,
+      currency: intent.currency,
+    };
   if (
     !intent.clientSecret ||
     intent.paymentIntentId !== row.intent ||
