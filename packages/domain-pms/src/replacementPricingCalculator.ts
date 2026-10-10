@@ -1,4 +1,5 @@
 import {
+  pricingAmountStep,
   pricingInteger,
   pricingObject,
   type PricingAdjustment,
@@ -94,18 +95,20 @@ const fail = (reason: Reason): never => {
 };
 const bound = (n: bigint): bigint => (n < 0n || n > 999999999999999999n ? fail("overflow") : n);
 const positive = (n: bigint): bigint => (n <= 0n ? fail("missing_price") : bound(n));
-function adjust(n: bigint, rule: PricingAdjustment): bigint {
+/** Percentages round half-up to the currency's price step: one minor unit, or a whole rupiah
+ * (100 minor units) for IDR (VAY-2085). Fixed deltas are already whole steps (configuration). */
+function adjust(n: bigint, rule: PricingAdjustment, step: bigint): bigint {
   return positive(
     rule.kind === "fixed"
       ? n + BigInt(rule.deltaMinor)
-      : (n * (10000n + BigInt(rule.basisPoints)) + 5000n) / 10000n,
+      : ((n * (10000n + BigInt(rule.basisPoints)) + 5000n * step) / (10000n * step)) * step,
   );
 }
-function tariff(price: RoomPrice, adults: number): bigint {
+function tariff(price: RoomPrice, adults: number, step: bigint): bigint {
   if (price.mode === "flat") return BigInt(price.amountMinor);
   if (price.mode === "occupancy") return BigInt(price.amountsMinor[adults - 1]);
   if (price.mode === "per_person") return positive(BigInt(price.unitMinor) * BigInt(adults));
-  return adjust(BigInt(price.baseMinor), price.adjustments[adults - 1]);
+  return adjust(BigInt(price.baseMinor), price.adjustments[adults - 1], step);
 }
 const inSeason = (day: string, from: string, through: string) =>
   from <= through ? day >= from && day <= through : day >= from || day <= through;
@@ -154,6 +157,7 @@ function evaluateRoomPricing(
 ): EvaluatedRoomStayResult {
   const config = parsePricingConfiguration(configuration);
   if (!config) return { kind: "unavailable", reason: "invalid_configuration" };
+  const step = BigInt(pricingAmountStep(config.currency));
   const firstDate = period.kind === "stay" ? period.checkIn : period.date;
   if (
     !request ||
@@ -257,12 +261,12 @@ function evaluateRoomPricing(
           price.kind === "linked" ? price.dateOverrides : price.calendar.dates
         ).find((r) => r.date === date);
         if (override) {
-          amount = positive(tariff(override.price, adults) + supplement);
+          amount = positive(tariff(override.price, adults, step) + supplement);
           sources = [{ offerId: offer.id, kind: "date" }];
           continue;
         }
         if (price.kind === "linked") {
-          amount = adjust(amount, price.adjustment);
+          amount = adjust(amount, price.adjustment, step);
           sources.push({ offerId: offer.id, kind: "linked" });
           continue;
         }
@@ -271,13 +275,13 @@ function evaluateRoomPricing(
         const month = calendar.months.find((m) => m.month === Number(date.slice(5, 7)));
         const source = season?.price ?? month?.price ?? calendar.base;
         if (!source) return fail("missing_price");
-        amount = positive(tariff(source, adults) + supplement);
+        amount = positive(tariff(source, adults, step) + supplement);
         sources = [{ offerId: offer.id, kind: season ? "season" : month ? "month" : "base" }];
         const weekday = calendar.weekdays.find(
           (r) => r.day === (new Date(time).getUTCDay() + 6) % 7,
         );
         if (weekday) {
-          amount = adjust(amount, weekday.adjustment);
+          amount = adjust(amount, weekday.adjustment, step);
           sources.push({ offerId: offer.id, kind: "weekday" });
         }
       }
