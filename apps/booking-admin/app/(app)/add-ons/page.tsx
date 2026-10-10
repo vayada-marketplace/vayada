@@ -63,6 +63,7 @@ function toSettingsAddonItem(item: BookingAddonItem): AddonItem {
     sortOrder: item.sortOrder,
     ownershipKind: item.ownershipKind,
     partnerCommissionRate: item.partnerCommissionRate,
+    live: item.publicVisible && item.status === "active",
   };
 }
 
@@ -247,13 +248,14 @@ export default function AddonsPage() {
     }
   };
 
-  const handleCreateAddon = async (values: AddonItemFormValues) => {
+  const handleCreateAddon = async (values: AddonItemFormValues, { hidden = false } = {}) => {
     try {
       const hotelId = getBookingHotelIdForSave();
       const saved = await createBookingAddonItem({
         hotelId,
         body: {
           ...toAddonCreateBody(values, nextAddonSortOrder(addons)),
+          ...(hidden && { publicVisible: false }),
           photos: await addonPhotos(values, hotelId),
         },
       });
@@ -298,6 +300,21 @@ export default function AddonsPage() {
       const message = t("bookingFlow.addons.feedback.saveError");
       showFeedback("error", message);
       throw error;
+    }
+  };
+
+  const handleToggleAddonLive = async (addon: AddonItem) => {
+    try {
+      const saved = await updateBookingAddonItem({
+        hotelId: getBookingHotelIdForSave(),
+        addonItemId: addon.id,
+        body: addon.live ? { publicVisible: false } : { publicVisible: true, status: "active" },
+      });
+      setAddons((current) =>
+        current.map((item) => (item.id === addon.id ? toSettingsAddonItem(saved) : item)),
+      );
+    } catch {
+      showFeedback("error", t("bookingFlow.addons.feedback.saveError"));
     }
   };
 
@@ -385,6 +402,7 @@ export default function AddonsPage() {
         onCreateAddon={handleCreateAddon}
         onUpdateAddon={handleUpdateAddon}
         onDeleteAddon={handleDeleteAddon}
+        onToggleAddonLive={handleToggleAddonLive}
         onReorderAddon={handleReorderAddon}
       />
     </div>
