@@ -9,6 +9,7 @@ import {
 import {
   completePricingCardPayment,
   PricingCardPaymentError,
+  voidPricingCardPayment,
 } from "../domains/pricingCardPaymentCompletion.js";
 import { admitAffiliateArrivalForCurrentHost } from "../domains/bookingAffiliateArrivalHost.js";
 import { readBookingAffiliateContextForQuote } from "../domains/bookingAffiliateContextForQuote.js";
@@ -2440,6 +2441,7 @@ export function createTargetBookingWebCheckoutAdapter(
           action: "withdraw",
           eventType: "guest_booking.withdrawn",
         },
+        config.stripePaymentProvider,
       );
     },
     async cancelPreview(slug, bookingId, request, context) {
@@ -3857,6 +3859,8 @@ async function withGuestLifecycleMutation(
   request: BookingWebGuestActionRequest,
   context: BookingWebCheckoutCommandContext | undefined,
   mutation: { status: string; action: string; eventType: string },
+  /** Withdraw only: cancels a pricing-v2 card booking's hold before the booking changes. */
+  cardPayments?: StripeBookingPaymentProvider,
 ): Promise<Record<string, unknown>> {
   if (!context) {
     throw createHttpError(400, "Checkout command context is required.");
@@ -3874,6 +3878,33 @@ async function withGuestLifecycleMutation(
       requireGuestEmail(request.guest_email),
     );
     assertLifecycleMutationAllowed(booking, mutation.action);
+    const bookingMetadata = objectValue(booking.bookingMetadata);
+    if (
+      mutation.action === "withdraw" &&
+      bookingMetadata["targetSource"] === "pricing_quote_draft" &&
+      bookingMetadata["paymentMethod"] === "card"
+    ) {
+      // VAY-2099: a withdrawn pricing-v2 card booking cancels its hold first (an authorised
+      // request, or a card payment not made yet). Booking row, then payment, as the hotel's
+      // accept takes them; the status change below still requires the booking to be pending.
+      await client.query(
+        "SELECT 1 FROM booking.guest_bookings WHERE id=$1::uuid AND property_id=$2::uuid FOR NO KEY UPDATE",
+        [booking.guestBookingId, property.propertyId],
+      );
+      try {
+        await voidPricingCardPayment(client, cardPayments, {
+          propertyId: property.propertyId,
+          guestBookingId: booking.guestBookingId,
+          occurredAt: context.occurredAt,
+        });
+      } catch (error) {
+        if (!(error instanceof PricingCardPaymentError)) throw error;
+        throw createHttpError(
+          409,
+          "This booking's card payment can't be withdrawn online. Please contact the hotel.",
+        );
+      }
+    }
     let bookedOutcome: BookedCancellationOutcome | null = null;
     if (mutation.action === "cancel") {
       let feeBooking = booking;
@@ -3922,6 +3953,7 @@ async function withGuestLifecycleMutation(
          UPDATE booking.guest_bookings
             SET lifecycle_status = $3,
                 cancellation_reason = COALESCE(cancellation_reason, $4),
+                payment_status = CASE WHEN payment_status = 'authorized' THEN 'failed' ELSE payment_status END,
                 updated_at = $5::timestamptz
           WHERE id = $1::uuid
             AND property_id = $2::uuid
@@ -6188,6 +6220,17 @@ function assertTargetInventoryReleasePaymentStateSupported(
   booking: TargetBookingRow,
   action: "withdraw" | "cancel",
 ): void {
+  // VAY-2099: a pricing-v2 card request the guest authorised can be withdrawn; its hold is
+  // cancelled first, as legacy did.
+  const metadata = objectValue(booking.bookingMetadata);
+  if (
+    action === "withdraw" &&
+    booking.paymentStatus === "authorized" &&
+    metadata["targetSource"] === "pricing_quote_draft" &&
+    metadata["paymentMethod"] === "card" &&
+    metadata["acceptanceMode"] === "request"
+  )
+    return;
   if (booking.paymentStatus !== "unpaid") {
     throw createHttpError(
       409,

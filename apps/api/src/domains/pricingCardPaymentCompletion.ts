@@ -484,6 +484,73 @@ export async function authorizePricingCardRequest(
   return "authorized";
 }
 
+/** Cancel the card hold of a pricing-v2 card booking the guest withdraws, before the booking
+ * changes: an authorised request, or a card payment not made yet. The caller holds the booking
+ * row lock. A payment Stripe already took is refused (conflict), never cancelled here. */
+export async function voidPricingCardPayment(
+  client: Queryable,
+  provider: StripeBookingPaymentProvider | undefined,
+  input: { propertyId: string; guestBookingId: string; occurredAt: Date },
+): Promise<"voided" | "none"> {
+  const row = (
+    await client.query(
+      `SELECT p.id,p.status,p.provider_payment_intent_id AS intent,acct.provider_account_id AS account,
+        b.public_reference
+      FROM booking.guest_bookings b
+      JOIN finance.payments p ON p.id=b.active_card_payment_id AND p.property_id=b.property_id
+      JOIN finance.payment_provider_accounts acct ON acct.id=p.provider_account_id
+        AND acct.property_id=p.property_id
+      WHERE b.id=$1 AND b.property_id=$2 AND b.booking_metadata->>'targetSource'='pricing_quote_draft'
+      FOR UPDATE OF p`,
+      [input.guestBookingId, input.propertyId],
+    )
+  ).rows[0];
+  if (!row || row.status === "canceled") return "none";
+  if (
+    !["requires_action", "authorized"].includes(row.status) ||
+    typeof row.intent !== "string" ||
+    typeof row.account !== "string" ||
+    !provider
+  )
+    throw new PricingCardPaymentError("conflict");
+  const check = (
+    intent: Awaited<ReturnType<StripeBookingPaymentProvider["retrievePaymentIntent"]>>,
+  ) => {
+    if (
+      intent.paymentIntentId !== row.intent ||
+      intent.propertyId !== input.propertyId ||
+      intent.bookingReference !== row.public_reference
+    )
+      throw new PricingCardPaymentError("conflict", "Card payment does not match the booking");
+    return intent;
+  };
+  let intent = check(await provider.retrievePaymentIntent(row.intent, row.account));
+  if (intent.status !== "canceled") {
+    if (![...CANCELABLE, "requires_capture"].includes(intent.status))
+      throw new PricingCardPaymentError("conflict", "The card payment was already taken");
+    try {
+      intent = check(
+        await provider.cancelPaymentIntent(
+          row.intent,
+          row.account,
+          `pricing-card-withdraw:${input.propertyId}:${input.guestBookingId}:v1`,
+        ),
+      );
+    } catch (error) {
+      if (error instanceof PricingCardPaymentError) throw error;
+      intent = check(await provider.retrievePaymentIntent(row.intent, row.account));
+    }
+  }
+  if (intent.status !== "canceled") throw new PricingCardPaymentError("conflict");
+  await client.query(
+    `UPDATE finance.payments SET status='canceled',updated_at=$2::timestamptz,
+      payment_metadata=payment_metadata || '{"providerStatus":"canceled","reconciliationStatus":"canceled"}'::jsonb
+    WHERE id=$1`,
+    [row.id, input.occurredAt.toISOString()],
+  );
+  return "voided";
+}
+
 const CANCELABLE = ["requires_payment_method", "requires_confirmation", "requires_action"];
 
 /** Expiry sweep for an accepted card booking past `pendingExpiresAt`. Takes the inventory lock
