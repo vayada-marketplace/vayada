@@ -391,6 +391,61 @@ describe("target manual booking fields", () => {
     expect(view.root.findByProps({ form: "target-manual-booking" }).props.disabled).toBe(false);
   });
 
+  // VAY-2065: a setup-created room type has no currency until prices are published; the custom
+  // rate is sent without one and the server answers in the property currency.
+  it("sends a custom rate without a currency when the room type has none", async () => {
+    const chf = (amountDecimal: string) => ({ amountDecimal, currency: "CHF" });
+    const request = vi
+      .spyOn(calendarService, "previewManualBooking")
+      .mockImplementation(async (input) => ({
+        ...previewFor(input),
+        currency: "CHF",
+        pricingRevision: null,
+        stays: [
+          {
+            ...preview.stays[0]!,
+            ratePlanId: null,
+            nightly: [{ serviceDate: "2026-09-10", standard: null, applied: chf("150.00") }],
+            standardTotal: null,
+            appliedTotal: chf("150.00"),
+          },
+        ],
+        grandTotal: chf("150.00"),
+      }));
+    const onSubmit = vi.fn().mockResolvedValue({});
+    let view!: ReactTestRenderer;
+    await act(async () => {
+      view = create(
+        createElement(TargetManualBookingModal, {
+          roomTypes: [{ ...roomTypes[0]!, ratePlans: [], currency: null }],
+          rooms: [rooms[0]!],
+          initialCheckIn: "2026-09-10",
+          initialCheckOut: "2026-09-11",
+          onSubmit,
+          onClose: vi.fn(),
+        }),
+      );
+    });
+    await act(async () =>
+      view.root
+        .findByProps({ "aria-label": "Room 1 nightly rate" })
+        .props.onChange({ target: { value: "150" } }),
+    );
+    await settlePreview();
+
+    expect(request.mock.calls[0]![0].stays[0]!.pricing).toEqual({
+      kind: "custom",
+      nightlyAmount: { amountDecimal: "150.00" },
+    });
+    expect(JSON.stringify(view.toJSON())).toContain("Total CHF150");
+    await act(async () => {
+      await view.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() });
+    });
+    expect(onSubmit.mock.calls[0]![0].stays[0].pricing.nightlyAmount).toEqual({
+      amountDecimal: "150.00",
+    });
+  });
+
   it("shows cents from the server amount instead of rounding a custom rate", async () => {
     const cents = { amountDecimal: "150.50", currency: "EUR" };
     // prettier-ignore

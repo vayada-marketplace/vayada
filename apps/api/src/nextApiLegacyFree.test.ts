@@ -167,8 +167,11 @@ describe("next-api legacy-free runtime check", () => {
       "/api/booking-web/hotels/hotel-alpenrose/offers?check_in=2026-09-12&check_out=2026-09-15&adults=2",
     ]) {
       const response = await injectJson(app, { method: "GET", url });
-      expect(response.statusCode).toBe(503);
-      expect(response.body).toMatchObject({ code: "PRICING_UNAVAILABLE" });
+      expect(response.statusCode, url).toBe(410);
+      expect(response.body).toMatchObject({
+        code: "PRICING_RETIRED",
+        message: expect.stringContaining("/pricing-offers"),
+      });
     }
   });
 

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { EyeIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { BOOKING_GUEST_LANGUAGE_CODES } from "@vayada/locale-constants";
 import { BOOKING_PAGE_FONT_STYLESHEET_URL, BookingPagePreview } from "@vayada/product-onboarding";
 import { settingsService, type CustomDomainStatus } from "@/services/settings";
 import { requireSelectedBookingHotelId } from "@/services/api/bookingHotelScope";
@@ -12,8 +13,9 @@ import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/branding";
 import { FeedbackAlert, SaveButton } from "@/components/ui";
 import {
   MAX_PROPERTY_GALLERY_PHOTOS,
+  isAcceptedHeroImage,
   uploadPropertyGalleryImages,
-  uploadSingleImage,
+  uploadPropertyHeroImage,
   uploadSingleImageWithMediaReference,
 } from "@/lib/utils/uploadImage";
 import {
@@ -46,9 +48,11 @@ export default function DesignStudioPage() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(
-    null,
-  );
+  const [feedback, setFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+    retryHeroUpload?: boolean;
+  } | null>(null);
   const [domainInput, setDomainInput] = useState("");
   const [domainStatus, setDomainStatus] = useState<CustomDomainStatus | null>(null);
 
@@ -69,7 +73,8 @@ export default function DesignStudioPage() {
   const [defaultCurrency, setDefaultCurrency] = useState("EUR");
   const [defaultLanguage, setDefaultLanguage] = useState("en");
   const [supportedCurrencies, setSupportedCurrencies] = useState<string[]>([]);
-  const [supportedLanguages, setSupportedLanguages] = useState<string[]>([]);
+  // null until property settings load, so a failed read never greys out the language toggle.
+  const [supportedLanguages, setSupportedLanguages] = useState<string[] | null>(null);
   const [galleryImages, setGalleryImages] = useState<PropertyGalleryImage[]>([]);
   const [galleryOverflowCount, setGalleryOverflowCount] = useState(0);
   const [galleryBusy, setGalleryBusy] = useState(false);
@@ -85,6 +90,8 @@ export default function DesignStudioPage() {
     mediaObjectId: string;
     altText: string | null;
   } | null>(null);
+  const lastHeroFileRef = useRef<File | null>(null);
+  const heroUploadFailuresRef = useRef(0);
 
   // Colors state
   const [primaryColor, setPrimaryColor] = useState("#4F46E5");
@@ -202,7 +209,11 @@ export default function DesignStudioPage() {
         setShowReferAGuestButton(settings.show_refer_a_guest_button);
         setShowLanguageSelector(settings.show_language_selector);
         setShowCurrencySelector(settings.show_currency_selector);
-        if (settings.hero_image) setHeroImage(settings.hero_image);
+        // Guests see the canonical cover; the settings URL only covers heroes saved before it existed.
+        const savedHero =
+          publicProfile.publicProfile.media.find(({ mediaType }) => mediaType === "hero_image")
+            ?.url || settings.hero_image;
+        if (savedHero) setHeroImage(savedHero);
         if (settings.hero_heading) setHeroHeading(settings.hero_heading);
         if (settings.hero_subtext) setHeroSubtext(settings.hero_subtext);
         if (settings.primary_color) setPrimaryColor(settings.primary_color);
@@ -230,46 +241,75 @@ export default function DesignStudioPage() {
     applyPublicGallery(publicProfile);
   };
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = "";
     if (!file) return;
+    heroUploadFailuresRef.current = 0;
+    void uploadHeroImage(file);
+  };
+
+  const uploadHeroImage = async (file: File) => {
+    if (!isAcceptedHeroImage(file)) {
+      setFeedback({ type: "error", message: "designStudio.media.heroImageInvalidFile" });
+      return;
+    }
     const hotelId = designHotelIdRef.current;
-    const expectedProfileRevision = profileRevisionRef.current;
-    if (!hotelId || expectedProfileRevision === null) {
-      e.target.value = "";
+    const propertyId = propertyIdRef.current;
+    // A failed attempt can leave the revision unknown (e.g. offline); reload it before retrying.
+    if (propertyId && profileRevisionRef.current === null) {
+      await refreshCanonicalGallery().catch(() => undefined);
+    }
+    if (!hotelId || !propertyId || profileRevisionRef.current === null) {
       setFeedback({
         type: "error",
         message: "admin.thePropertyProfileVersionIsUnavailableRefreshDesignStudioBefore",
       });
       return;
     }
+    if (!beginGalleryWrite()) return;
 
+    lastHeroFileRef.current = file;
     const previousImage = heroImage;
     const previewUrl = URL.createObjectURL(file);
     setHeroImage(previewUrl);
+    setFeedback(null);
 
     try {
       setUploading(true);
-      const s3Url = await uploadSingleImage(
-        file,
-        "property.hero_image",
-        hotelId,
-        expectedProfileRevision,
-      );
-      profileRevisionRef.current = expectedProfileRevision + 1;
-      URL.revokeObjectURL(previewUrl);
-      setHeroImage(s3Url);
-      try {
-        await refreshCanonicalGallery();
-      } catch {
-        profileRevisionRef.current = null;
+      const mediaObjectId = await uploadPropertyHeroImage(file, propertyId);
+      let { profile } = await assignPresentationMedia(galleryImages, {
+        mediaObjectId,
+        altText: null,
+      });
+      // The cover is committed from here on; a failed read-back must not look like a failed upload.
+      if (!profile) {
+        profile = await sharedHotelSetupApi.getPublicPropertyProfile(propertyId).catch(() => null);
+        if (profile) applyPublicGallery(profile);
       }
+      const heroUrl = profile?.publicProfile.media.find(
+        (media) => media.mediaType === "hero_image" && media.mediaObjectId === mediaObjectId,
+      )?.url;
+      URL.revokeObjectURL(previewUrl);
+      setHeroImage(heroUrl ?? previousImage);
+      lastHeroFileRef.current = null;
+      heroUploadFailuresRef.current = 0;
 
       try {
-        await settingsService.updateDesignSettings({ hero_image: s3Url }, hotelId);
+        if (heroUrl) await settingsService.updateDesignSettings({ hero_image: heroUrl }, hotelId);
+      } catch {
+        console.error("Failed to auto-save hero image");
+      }
+      try {
         await publishPublicBookabilityProfile(hotelId);
       } catch {
-        console.error("Failed to auto-save or publish hero image");
+        console.error("Failed to publish hero image");
+      }
+      if (!heroUrl) {
+        setFeedback({
+          type: "error",
+          message: "admin.designSavedButTheBookingPreviewCouldNotBeRefreshed",
+        });
       }
     } catch (err) {
       console.error("Image upload failed:", err);
@@ -280,27 +320,63 @@ export default function DesignStudioPage() {
       }
       URL.revokeObjectURL(previewUrl);
       setHeroImage(previousImage);
-      setFeedback({ type: "error", message: "bookingFlow.addons.feedback.uploadError" });
+      heroUploadFailuresRef.current += 1;
+      setFeedback({
+        type: "error",
+        message:
+          heroUploadFailuresRef.current >= 3
+            ? "designStudio.media.heroImageUploadFailedRepeatedly"
+            : "designStudio.media.heroImageUploadFailed",
+        retryHeroUpload: true,
+      });
     } finally {
       setUploading(false);
+      endGalleryWrite();
     }
   };
 
-  const removeHeroImage = () => {
-    setHeroImage("");
-    if (fileInputRef.current) fileInputRef.current.value = "";
+  const removeHeroImage = async () => {
+    const hotelId = designHotelIdRef.current;
+    if (!hotelId || !window.confirm(t("designStudio.media.removeHeroImageConfirm"))) return;
+    if (!beginGalleryWrite()) return;
+    setFeedback(null);
+    try {
+      // Clear the canonical cover too, or guests would keep seeing the removed hero.
+      if (coverAssignmentRef.current) await assignPresentationMedia(galleryImages, null);
+      setHeroImage("");
+      const saved = await settingsService.updateDesignSettings({ hero_image: "" }, hotelId).then(
+        () => true,
+        () => false,
+      );
+      const published = await publishPublicBookabilityProfile(hotelId).then(
+        () => true,
+        () => false,
+      );
+      if (!saved || !published) {
+        setFeedback({
+          type: "error",
+          message: "admin.designSavedButTheBookingPreviewCouldNotBeRefreshed",
+        });
+      }
+    } catch {
+      await refreshCanonicalGallery().catch(() => undefined);
+      setFeedback({ type: "error", message: "designStudio.media.heroImageRemoveFailed" });
+    } finally {
+      endGalleryWrite();
+    }
   };
 
-  const persistGallery = async (
+  const assignPresentationMedia = async (
     nextGallery: PropertyGalleryImage[],
-  ): Promise<{ published: boolean; refreshed: boolean }> => {
+    cover: { mediaObjectId: string; altText: string | null } | null = coverAssignmentRef.current,
+  ): Promise<{
+    profile: Awaited<ReturnType<typeof sharedHotelSetupApi.getPublicPropertyProfile>> | null;
+  }> => {
     const propertyId = propertyIdRef.current;
-    const hotelId = designHotelIdRef.current;
     const expectedProfileRevision = profileRevisionRef.current;
-    if (!propertyId || !hotelId || expectedProfileRevision === null) {
+    if (!propertyId || expectedProfileRevision === null) {
       throw new Error(t("admin.thePropertyGalleryVersionIsUnavailableRefreshAndTryAgain"));
     }
-    const cover = coverAssignmentRef.current;
     const sortOffset = cover ? 1 : 0;
     const response = await sharedHotelSetupApi.replacePropertyPresentationMedia(
       propertyId,
@@ -328,14 +404,26 @@ export default function DesignStudioPage() {
       `booking.property-gallery.assign:${propertyId}:${crypto.randomUUID()}`,
     );
     profileRevisionRef.current = response.profileRevision;
+    coverAssignmentRef.current = cover;
 
-    let refreshed = false;
     try {
-      applyPublicGallery(await sharedHotelSetupApi.getPublicPropertyProfile(propertyId));
-      refreshed = true;
+      const profile = await sharedHotelSetupApi.getPublicPropertyProfile(propertyId);
+      applyPublicGallery(profile);
+      return { profile };
     } catch {
       // Keep the optimistic thumbnails; the assignment itself already succeeded.
+      return { profile: null };
     }
+  };
+
+  const persistGallery = async (
+    nextGallery: PropertyGalleryImage[],
+  ): Promise<{ published: boolean; refreshed: boolean }> => {
+    const hotelId = designHotelIdRef.current;
+    if (!hotelId) {
+      throw new Error(t("admin.thePropertyGalleryVersionIsUnavailableRefreshAndTryAgain"));
+    }
+    const refreshed = (await assignPresentationMedia(nextGallery)).profile !== null;
     let published = true;
     try {
       await publishPublicBookabilityProfile(hotelId);
@@ -647,6 +735,14 @@ export default function DesignStudioPage() {
   ];
 
   const currentFont = FONT_PAIRINGS.find((f) => f.id === selectedFont) || FONT_PAIRINGS[0];
+  // Guests only get a language selector with two languages the booking site can render.
+  const languageSelectorAvailable =
+    supportedLanguages === null ||
+    new Set(
+      [defaultLanguage, ...supportedLanguages].filter((code) =>
+        (BOOKING_GUEST_LANGUAGE_CODES as readonly string[]).includes(code),
+      ),
+    ).size > 1;
 
   if (loading) {
     return (
@@ -706,6 +802,16 @@ export default function DesignStudioPage() {
           type={feedback.type}
           message={t(feedback.message)}
           className="mt-3 shrink-0"
+          action={
+            feedback.retryHeroUpload
+              ? {
+                  label: t("dashboard.pageViewsModal.retry"),
+                  onClick: () => {
+                    if (lastHeroFileRef.current) void uploadHeroImage(lastHeroFileRef.current);
+                  },
+                }
+              : undefined
+          }
         />
       )}
 
@@ -745,6 +851,7 @@ export default function DesignStudioPage() {
                 fileInputRef={fileInputRef}
                 handleImageUpload={handleImageUpload}
                 removeHeroImage={removeHeroImage}
+                heroBusy={uploading || galleryBusy}
                 headerLogo={headerLogo}
                 headerLogoUrl={headerLogoUrl}
                 logoInputRef={logoInputRef}
@@ -760,8 +867,7 @@ export default function DesignStudioPage() {
                 referAGuestModuleEnabled={referAGuestModuleEnabled}
                 showLanguageSelector={showLanguageSelector}
                 setShowLanguageSelector={setShowLanguageSelector}
-                showCurrencySelector={showCurrencySelector}
-                setShowCurrencySelector={setShowCurrencySelector}
+                languageSelectorAvailable={languageSelectorAvailable}
                 resetContent={resetContent}
                 galleryImages={galleryImages}
                 galleryAtCapacity={
@@ -847,9 +953,11 @@ export default function DesignStudioPage() {
             headerLogo={headerLogo}
             showContactButton={showContactButton}
             showReferAGuestButton={Boolean(referAGuestModuleEnabled && showReferAGuestButton)}
-            showLanguageSelector={showLanguageSelector}
-            showCurrencySelector={showCurrencySelector}
-            supportedLanguages={supportedLanguages}
+            showLanguageSelector={showLanguageSelector && languageSelectorAvailable}
+            // Booking publications carry a single pricing currency, so guests never see a
+            // currency selector yet. The stored preference is kept for when that changes.
+            showCurrencySelector={false}
+            supportedLanguages={supportedLanguages ?? undefined}
             supportedCurrencies={supportedCurrencies}
             heroHeading={heroHeading}
             heroImage={heroImage}

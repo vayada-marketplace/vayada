@@ -104,12 +104,20 @@ describe.skipIf(!url)("ordinary first currency and Financials default (VAY-2056)
           );
       }
 
-      // A pending new hotel: seven categories, Financials ready and active, one linked audit.
-      const created = await repository.upsertPropertyPricingCurrency(command(pending, "first"));
-      expect(created).toMatchObject({ ok: true, response: { outcome: "created" } });
-      expect(await repository.upsertPropertyPricingCurrency(command(pending, "first"))).toEqual(
-        created,
+      // A pending new hotel (in IDR, VAY-2085): seven categories, Financials ready and active,
+      // one linked audit.
+      const created = await repository.upsertPropertyPricingCurrency(
+        command(pending, "first", org, "IDR"),
       );
+      expect(created).toMatchObject({ ok: true, response: { outcome: "created" } });
+      expect(
+        await repository.upsertPropertyPricingCurrency(command(pending, "first", org, "IDR")),
+      ).toEqual(created);
+      expect(
+        await one("SELECT currency FROM pms.property_pricing_settings WHERE property_id=$1", [
+          pending,
+        ]),
+      ).toEqual({ currency: "IDR" });
       expect(await financials(pending)).toEqual({ status: "active", state: "ready", sealed: true });
       expect(
         await count(
