@@ -15,6 +15,7 @@ on:
       - "fm/vay-2082-*"
       - "fm/vay-2089-*"
       - "fm/vay-2099-*"
+      - "fm/vay-2094-*"
       - flamurmaliqi2811/vay-2044-expense-worker-runtime
       - fm/vay-2041-worker-permissions
       - fm/vay-2041-worker-source-permissions
@@ -39,6 +40,7 @@ jobs:
     outputs:
       run_frontend: ${{ steps.select.outputs.run_frontend }}
       run_first_party_auth: ${{ steps.select.outputs.run_first_party_auth }}
+      run_api_unit: ${{ steps.select.outputs.run_api_unit }}
       run_api_postgres: ${{ steps.select.outputs.run_api_postgres }}
       run_setup_draft_reset_postgres: ${{ steps.select.outputs.run_setup_draft_reset_postgres }}
       run_backend: ${{ steps.select.outputs.run_backend }}
@@ -115,6 +117,9 @@ jobs:
       - name: PMS Web tests
         run: npm --workspace vayada-pms-frontend run test
 
+      - name: Vayada Admin tests
+        run: npm --workspace vayada-admin run test
+
       - name: Landing consent browser regressions
         run: |
           npx playwright install --with-deps chromium
@@ -178,6 +183,36 @@ jobs:
         env:
           E2E_FIRST_PARTY_AUTH_ONLY: "1"
           E2E_START_SERVERS: "1"
+
+  # Every unit suite under apps/api and the backend packages, with no database: files that need
+  # PostgreSQL skip themselves here and run in api_postgres. Main pushes and a nightly run repeat
+  # this job (main-unit-suites.yml) to catch two green PRs that break each other.
+  api_unit:
+    name: TypeScript API and Package Unit Suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [changes]
+    if: needs.changes.outputs.run_api_unit == 'true'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run the unit suites
+        run: npm run test:unit-suites
 
   # Each shard gets its own PostgreSQL cluster, so cluster-wide role proofs stay isolated:
   #   platform    - identity, legacy owner, finance worker, Channex worker and authorization proofs
@@ -930,6 +965,7 @@ jobs:
       - changes
       - frontend
       - first_party_auth
+      - api_unit
       - api_postgres
       - setup_draft_reset_postgres
       - backend
