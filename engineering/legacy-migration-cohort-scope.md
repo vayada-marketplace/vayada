@@ -216,6 +216,86 @@ category. A stored module is never rewritten: one that differs from legacy (an O
 operator change after the import, or a row the Owner can no longer switch) is kept and reported
 as preserved with its status, ready default and Owner-off state.
 
+## Channex handover (P12, import side)
+
+A cohort run imports **no** Channex connection live. Without this, every `mutating` next-api
+Channex switch would act on every imported `connected` hotel at once, and the 0128 binding
+trigger would infer an active `migration` claim for each one. The per-hotel promotion belongs to
+VAY-2108; this is the state it starts from and the rules it must keep.
+
+**What the import leaves**, for a cohort hotel whose legacy connection was active, with a Channex
+property ID and an active owner, at the snapshot:
+
+- `pms.channel_connections`: `connection_status = 'disconnected'`, `external_property_id` null,
+  `capabilities = '{}'`, `messaging_app_installed = false`. `connection_metadata` keeps
+  `migrationRunId`, `migrationCohortRunId` (the cohort's `source_run_id`, on every cohort hotel's
+  Channex connection and on no other), `channexHandover = 'pending'`, `legacyExternalPropertyId`,
+  `legacyCapabilities`, `ownerStatus = 'active'`, `retainedClaimState = null`, the legacy ARI
+  error and the channel markups. The `last_*_sync_at` timestamps and the historical
+  `channel_sync_status` receipts stay as legacy wrote them.
+- No `pms.channel_binding_claims` row for the property or for its Channex property ID.
+- Room-type and rate-plan mappings `disabled`; `mapping_metadata.sourceActive` and
+  `roomTypeActive` keep the legacy flags. Booking mappings `ignored`, with their `assignment_id`.
+
+A cohort hotel whose legacy connection was off, or whose owner is not active in the target, keeps
+today's `historical` claim with the same disconnected, null-ID connection (case V). VAY-2017 can
+never take it live (0432 requires an active legacy source), and the VAY-2108 handover handles
+only the pending case: so the VAY-2017 owner bootstrap runs before the import, and a case-V hotel
+does no Channex handover. Without a cohort nothing changes.
+
+`disconnected` is the inactive value every target reader excludes and the one the promotion paths
+start from. Webhook intake, booking persistence and the Channex scheduler need `connected`; ARI,
+management commands, messaging and the iframe need `connected` or `degraded`; the pricing
+authority and superseded-offer intent also accept `setup_incomplete`. Readers keyed by property
+rely on that status filter; readers keyed by the Channex property ID find a null one; webhook
+resolution also accepts an active claim alone, and there is none. So no switch flip (booking sync,
+webhook intake, ARI, manual booking sync) makes an imported hotel live. `enable` is refused for a
+legacy-sourced property without a claim by #2961, which is on `main` and must be in the deployed
+image (this stack predates it). The VAY-1964 adoption consumer requires exactly this no-claim
+state (`BINDING_CLAIM_HISTORY_EXISTS` otherwise).
+
+The import blocks (`TARGET_UNIQUE_CONFLICT`) when another connection holds the legacy Channex ID
+or a claim exists for the property or that ID (other than the hotel's own promoted active claim
+on a re-run), and when a later snapshot would replace a pending or completed handover with a
+historical claim (for example one taken after the F.7 legacy disable: restore `is_active` for
+the snapshot instead).
+
+**What the promotion must do**, per hotel at its H.2, after the legacy disable (F.7) and H.1:
+
+1. Check the start state above: `channexHandover = 'pending'`, `migrationCohortRunId` naming a
+   stored `platform.production_migration_cohorts` row that lists the hotel, the connection
+   `disconnected` with a null ID, and no claim for either key.
+2. In one transaction, claim first, then the binding:
+   - write the `(property, 'channex', legacyExternalPropertyId)` claim as `active` (direct
+     activation; nothing in the repo activates a claim today). An active claim alone already
+     makes webhook intake resolve the hotel, so it never commits without the binding;
+   - set `external_property_id = legacyExternalPropertyId`, `connection_status = 'connected'`
+     (the legacy ARI error stays history in the metadata), `capabilities = legacyCapabilities`,
+     `messaging_app_installed` when they include `message`, and `channexHandover = 'completed'`,
+     keeping `migrationCohortRunId`;
+   - set room-type and rate-plan mappings `active` where `sourceActive` and `roomTypeActive`
+     hold and the room type is still active, and booking mappings `active` where
+     `assignment_id` is set.
+3. Bump `updated_at` on every row it changes.
+
+Constraints: only this promotion sets `external_property_id`. The import, its re-runs and resumes
+plan the same null ID (a re-run writes nothing; a changed legacy row updates the connection with
+the ID still null). Any writer that sets the ID while no claim matches (a re-run, a repair or
+manual SQL) makes the 0128 trigger insert an active `migration` claim on its own, because the
+connection metadata carries a `vay1351-` run ID: hence claim first, then the ID. Parity fails a
+cohort connection that is reachable (status, Channex ID, messaging, an active mapping or claim)
+until `channexHandover = 'completed'` and an active claim hold its ID. A promoted row with a newer
+`updated_at` is preserved by any later import. One whose `updated_at` did not move blocks a re-run
+of the same source (`TARGET_PROVENANCE_MISMATCH`), and a changed source would **overwrite** it
+back to pending with its active claim left behind, so step 3 is mandatory. The management worker
+cannot do this: it may insert only `enable` claims and bind only with one. Never `enable`, never
+`disable` (it deletes the Channex property).
+
+Later waves (W2.2): in a later run an earlier wave's hotels count as outside the cohort, so its
+outside checks (`connectedChannel`, `bindingClaim`, `activeChannexMapping`) flag handed-over
+hotels, and a still-pending earlier-wave row would be rewritten as outside (dropping its stamp and
+marker). The later-wave path must exempt earlier waves first.
+
 ## Verification
 
 - A new parity invariant `COHORT_SCOPE_VERIFIED` fails (no-go) when any

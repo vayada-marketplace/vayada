@@ -61,6 +61,12 @@ describe("production PMS channels", () => {
       externalBookingId: EXTERNAL_BOOKING,
       channelRoomIndex: 0,
     });
+    for (const key of ["migrationCohortRunId", "channexHandover"])
+      expect(
+        records.find((record) => record.targetTable === "channel_connections")?.row[
+          "connectionMetadata"
+        ],
+      ).not.toHaveProperty(key);
     expect(records.filter((record) => record.targetTable === "channel_sync_status")).toHaveLength(
       3,
     );
@@ -281,12 +287,110 @@ describe("production PMS channels", () => {
         }),
       }),
     ]);
+    expect(rowsOf("channel_connections")[0]!["connectionMetadata"]).not.toHaveProperty(
+      "migrationCohortRunId",
+    );
     const mappings = [
       ...rowsOf("channel_room_type_mappings"),
       ...rowsOf("channel_rate_plan_mappings"),
     ];
     expect(mappings.length).toBeGreaterThan(0);
     expect(mappings.every((row) => row["status"] === "disabled")).toBe(true);
+  });
+
+  it("imports a cohort hotel's live Channex connection inert and unclaimed until its handover", () => {
+    const build = (sourceRows: IdentitySourceRow[]) => {
+      const context = createProductionPmsContext({
+        sourceRunId: "run",
+        completedAt: "2026-08-30T00:00:00Z",
+        rows: sourceRows,
+        target: target(),
+        cohort: { bookingHotelIds: [PROPERTY], pmsHotelIds: [HOTEL], marketplaceHotelIds: [] },
+      });
+      const rooms = buildPmsRoomRecords(context);
+      const assignments = buildPmsAssignmentRecords(context, rooms);
+      const records = buildPmsChannelRecords(context, rooms, assignments);
+      expect(context.blockers).toEqual([]);
+      return (table: string) =>
+        records.filter((record) => record.targetTable === table).map((record) => record.row);
+    };
+    const rowsOf = build(rows());
+
+    expect(rowsOf("channel_binding_claims")).toEqual([]);
+    expect(rowsOf("channel_connections")).toEqual([
+      expect.objectContaining({
+        connectionStatus: "disconnected",
+        externalPropertyId: null,
+        capabilities: [],
+        messagingAppInstalled: false,
+        connectionMetadata: expect.objectContaining({
+          migrationCohortRunId: "run",
+          channexHandover: "pending",
+          legacyExternalPropertyId: EXTERNAL_PROPERTY,
+          legacyCapabilities: ["booking", "ari", "message"],
+          ownerStatus: "active",
+          retainedClaimState: null,
+        }),
+      }),
+    ]);
+    // The handover restores the legacy state the mapping metadata keeps.
+    for (const table of ["channel_room_type_mappings", "channel_rate_plan_mappings"])
+      expect(rowsOf(table)).toEqual([
+        expect.objectContaining({
+          status: "disabled",
+          mappingMetadata: expect.objectContaining({ sourceActive: true, roomTypeActive: true }),
+        }),
+      ]);
+    expect(rowsOf("channel_booking_mappings")).toEqual([
+      expect.objectContaining({ syncStatus: "ignored", assignmentId: expect.any(String) }),
+    ]);
+
+    // A cohort hotel already off in legacy keeps today's historical claim (VAY-2017 path).
+    const off = rows();
+    off.find((row) => row.sourceTable === "channex_connections")!.data["is_active"] = false;
+    const offRows = build(off);
+    expect(offRows("channel_binding_claims")).toEqual([
+      expect.objectContaining({ claimState: "historical", externalPropertyId: EXTERNAL_PROPERTY }),
+    ]);
+    expect(offRows("channel_connections")[0]!["connectionMetadata"]).toMatchObject({
+      migrationCohortRunId: "run",
+    });
+    expect(offRows("channel_connections")[0]!["connectionMetadata"]).not.toHaveProperty(
+      "channexHandover",
+    );
+  });
+
+  it("imports no connection live in a cohort run, even outside it with an active owner", () => {
+    // Only the cohort ID sets decide: an outside hotel whose owner link is still active.
+    const context = createProductionPmsContext({
+      sourceRunId: "run",
+      completedAt: "2026-08-30T00:00:00Z",
+      rows: rows(),
+      target: target(),
+      cohort: { bookingHotelIds: [PROPERTY], pmsHotelIds: [], marketplaceHotelIds: [] },
+    });
+    const rooms = buildPmsRoomRecords(context);
+    const records = buildPmsChannelRecords(
+      context,
+      rooms,
+      buildPmsAssignmentRecords(context, rooms),
+    );
+    const rowsOf = (table: string) =>
+      records.filter((record) => record.targetTable === table).map((record) => record.row);
+
+    expect(context.blockers).toEqual([]);
+    expect(rowsOf("channel_binding_claims")).toEqual([]);
+    expect(rowsOf("channel_connections")).toEqual([
+      expect.objectContaining({ connectionStatus: "disconnected", externalPropertyId: null }),
+    ]);
+    for (const key of ["migrationCohortRunId", "channexHandover"])
+      expect(rowsOf("channel_connections")[0]!["connectionMetadata"]).not.toHaveProperty(key);
+    for (const row of [
+      ...rowsOf("channel_room_type_mappings"),
+      ...rowsOf("channel_rate_plan_mappings"),
+    ])
+      expect(row["status"]).toBe("disabled");
+    expect(rowsOf("channel_booking_mappings")[0]!["syncStatus"]).toBe("ignored");
   });
 
   it("does not revive source-disabled provider mappings", () => {

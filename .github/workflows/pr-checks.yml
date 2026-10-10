@@ -639,6 +639,7 @@ jobs:
           src/productionPmsCohortCoverageRecords.test.ts
           src/productionPmsCohortActivation.test.ts
           src/productionPmsCohortModules.test.ts
+          src/productionPmsChannelRecords.test.ts
           src/productionCutover.integration.test.ts
           src/productionMigrationCohort.integration.test.ts
           src/productionFinanceTargetIo.integration.test.ts

@@ -537,7 +537,7 @@ async function readCollisionBatch(
          "roomTypeId" uuid, code text,
          "guestBookingId" uuid, position integer, source text, "sourceThreadId" text,
          "threadId" uuid, "sourceMessageId" text, provider text, "connectionId" uuid,
-         "externalPropertyId" text, "claimState" text,
+         "externalPropertyId" text, "claimState" text, "connectionMetadata" jsonb,
          "externalRoomTypeId" text, "ratePlanId" uuid, channel text,
          "externalRatePlanId" text, "externalBookingId" text, "channelRoomIndex" integer,
          "syncDomain" text, "auditKey" text, "webhookKeyHash" text
@@ -638,6 +638,34 @@ async function readCollisionBatch(
         (target.external_property_id = requested."externalPropertyId" AND
          target.property_id <> requested."propertyId")
       )
+     UNION ALL
+     -- VAY-1362 P12: a cohort hotel's handover binds its legacy Channex ID later, so nothing may
+     -- hold that ID or a claim now, except its own promoted binding on a re-run.
+     SELECT 'TARGET_UNIQUE_CONFLICT', 'pms.channel_connections', target.id::text,
+            'Another Channex connection holds the legacy property ID of a pending handover'
+     FROM requested JOIN pms.channel_connections target
+      ON requested."targetTable" = 'channel_connections' AND target.id::text <> requested."targetId"
+      AND requested."connectionMetadata" ->> 'channexHandover' = 'pending'
+      AND target.provider = requested.provider
+      AND target.external_property_id = requested."connectionMetadata" ->> 'legacyExternalPropertyId'
+     UNION ALL
+     SELECT 'TARGET_UNIQUE_CONFLICT', 'pms.channel_binding_claims', target.id::text,
+            'An existing Channex claim blocks the pending handover'
+     FROM requested JOIN pms.channel_binding_claims target
+      ON requested."targetTable" = 'channel_connections'
+      AND requested."connectionMetadata" ->> 'channexHandover' = 'pending'
+      AND target.provider = requested.provider
+      AND (target.property_id = requested."propertyId" OR target.external_property_id =
+        requested."connectionMetadata" ->> 'legacyExternalPropertyId')
+      AND NOT (target.property_id = requested."propertyId" AND target.claim_state = 'active'
+        AND target.external_property_id = requested."connectionMetadata" ->> 'legacyExternalPropertyId')
+     UNION ALL
+     SELECT 'TARGET_UNIQUE_CONFLICT', 'pms.channel_connections', target.id::text,
+            'A historical claim would replace a pending or completed Channex handover'
+     FROM requested JOIN pms.channel_connections target
+      ON requested."targetTable" = 'channel_binding_claims'
+      AND target.property_id = requested."propertyId" AND target.provider = requested.provider
+      AND target.connection_metadata ->> 'channexHandover' IN ('pending', 'completed')
      UNION ALL
      SELECT 'TARGET_UNIQUE_CONFLICT', 'pms.channel_room_type_mappings', target.id::text,
             'Another channel room mapping owns the external or internal room type'
