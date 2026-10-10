@@ -9,6 +9,8 @@ const PLATFORM_MEDIA_API_BASE_URL =
   process.env.NEXT_PUBLIC_AUTH_API_URL ||
   "https://api.localhost";
 export const MAX_PROPERTY_GALLERY_PHOTOS = 10;
+export const HERO_IMAGE_ACCEPT = "image/jpeg,image/png,image/webp";
+const MAX_HERO_IMAGE_BYTES = 10 * 1024 * 1024;
 const GALLERY_UPLOAD_TIMEOUT_MS = 30_000;
 
 type BookingMediaPurpose = "booking.header_logo" | "booking.addon.image";
@@ -62,6 +64,11 @@ export async function uploadPropertyGalleryImages(
     if (isTimeoutError(error)) throw new Error("Gallery upload timed out. Try again.");
     throw error;
   }
+}
+
+/** Mirrors the API's property.hero_image policy so bad files fail before any upload. */
+export function isAcceptedHeroImage(file: File): boolean {
+  return HERO_IMAGE_ACCEPT.split(",").includes(file.type) && file.size <= MAX_HERO_IMAGE_BYTES;
 }
 
 /** Uploads a private hero image; the caller assigns it as the property cover. */
