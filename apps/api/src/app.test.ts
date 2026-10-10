@@ -15406,7 +15406,6 @@ describe("vayada-api", () => {
           { minDaysBeforeCheckIn: 30, refundPercent: 50 },
           { minDaysBeforeCheckIn: 7, refundPercent: 20 },
         ],
-        name: "Ignored by location update",
       },
       headers: { authorization: "Bearer valid-token" },
     });
@@ -15572,6 +15571,62 @@ describe("vayada-api", () => {
     expect(booleanResponse.body).toMatchObject({
       code: "invalid_body",
       message: "Room type update latitude must be between -90 and 90.",
+    });
+    expect(commandRepository.roomTypeUpdates).toHaveLength(0);
+  });
+
+  it("rejects PMS room-type update fields the command does not save", async () => {
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+          resource: {
+            product: "pms",
+            resourceType: "pms_property",
+            resourceId: pmsPropertyId,
+          },
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    const response = await injectJson(app, {
+      method: "PATCH",
+      url: `/api/pms/properties/${pmsPropertyId}/room-types/${pmsRoomTypes[0].roomTypeId}`,
+      payload: {
+        commandId: "cmd-room-type-facts-on-location-route",
+        idempotencyKey: "room-type-facts-on-location-route",
+        locationAddress: "Seestrasse 12, Innsbruck",
+        name: "Lake Suite",
+        maxOccupancy: 3,
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toMatchObject({
+      code: "invalid_body",
+      message: "Room type update does not save maxOccupancy, name.",
+    });
+
+    const empty = await injectJson(app, {
+      method: "PATCH",
+      url: `/api/pms/properties/${pmsPropertyId}/room-types/${pmsRoomTypes[0].roomTypeId}`,
+      payload: {
+        commandId: "cmd-room-type-empty-update",
+        idempotencyKey: "room-type-empty-update",
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(empty.statusCode).toBe(400);
+    expect(empty.body).toMatchObject({
+      code: "invalid_body",
+      message: "Room type update has nothing to save.",
     });
     expect(commandRepository.roomTypeUpdates).toHaveLength(0);
   });
