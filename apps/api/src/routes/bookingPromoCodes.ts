@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import pg, { type QueryResultRow } from "pg";
 
 import { enforceRoutePolicy } from "./policy.js";
+import { pricingDecimalStepIssue } from "../domains/pricingDecimalMinor.js";
 
 const DISCOUNT_TYPES = new Set(["percentage", "fixed"]);
 const MAX_POSTGRES_INTEGER = 2_147_483_647;
@@ -134,6 +135,8 @@ export async function registerBookingPromoCodeRoutes(
         if (!promoCode) return sendPromoCodesError(reply, writeNotFoundError());
         return reply.status(201).send(promoCode);
       } catch (error) {
+        if (error instanceof BookingPromoCodeAmountError)
+          return sendInvalidPayload(reply, [error.message]);
         if (isUniqueViolation(error)) return sendPromoCodesError(reply, duplicateCodeError());
         if (isInvalidTargetPayloadError(error)) {
           return sendInvalidPayload(reply, [
@@ -173,6 +176,8 @@ export async function registerBookingPromoCodeRoutes(
         if (!promoCode) return sendPromoCodesError(reply, writeNotFoundError());
         return promoCode;
       } catch (error) {
+        if (error instanceof BookingPromoCodeAmountError)
+          return sendInvalidPayload(reply, [error.message]);
         if (isUniqueViolation(error)) return sendPromoCodesError(reply, duplicateCodeError());
         if (isInvalidTargetPayloadError(error)) {
           return sendInvalidPayload(reply, [
@@ -201,6 +206,9 @@ export async function registerBookingPromoCodeRoutes(
     },
   );
 }
+
+/** A promo amount the hotel's currency cannot charge (fractional rupiah for IDR). */
+export class BookingPromoCodeAmountError extends Error {}
 
 export function createPgTargetBookingPromoCodesRepository(config: {
   connectionString: string;
@@ -246,6 +254,41 @@ export function createPgTargetBookingPromoCodesRepository(config: {
     return result.rows[0]?.propertyId ?? null;
   }
 
+  /** A fixed amount off must fit the hotel currency's price step: whole rupiah for IDR
+   * (VAY-2085). Booking reads refuse other amounts, which would hide the code at checkout. */
+  async function checkFixedAmountStep(
+    propertyId: string,
+    promoCodeId: string | null,
+    body: { discountType?: string; discountValue?: string },
+  ): Promise<void> {
+    if (
+      body.discountType === "percentage" ||
+      (body.discountType === undefined && body.discountValue === undefined)
+    )
+      return;
+    const row = (
+      await pool.query<{
+        currency: string | null;
+        discountType: string | null;
+        discountValue: string | null;
+      }>(
+        `SELECT
+           (SELECT default_currency FROM booking.booking_settings WHERE property_id = $1) AS currency,
+           promo.discount_type AS "discountType",
+           promo.discount_value::text AS "discountValue"
+         FROM (SELECT 1) one
+         LEFT JOIN booking.promo_definitions promo
+           ON promo.property_id = $1 AND promo.id::text = $2`,
+        [propertyId, promoCodeId],
+      )
+    ).rows[0];
+    const discountType = body.discountType ?? row?.discountType;
+    const discountValue = body.discountValue ?? row?.discountValue;
+    if (discountType === "percentage" || !row?.currency || !discountValue) return;
+    const issue = pricingDecimalStepIssue("discountValue", discountValue, row.currency);
+    if (issue) throw new BookingPromoCodeAmountError(issue);
+  }
+
   return {
     async listPromoCodesByHotelId(hotelId) {
       const propertyId = await resolvePropertyId(hotelId);
@@ -262,6 +305,7 @@ export function createPgTargetBookingPromoCodesRepository(config: {
     async createPromoCodeByHotelId(hotelId, body) {
       const propertyId = await resolvePropertyId(hotelId);
       if (!propertyId) return null;
+      await checkFixedAmountStep(propertyId, null, body);
       const result = await pool.query<PromoCodeRow>(
         `WITH inserted AS (
            INSERT INTO booking.promo_definitions (
@@ -297,6 +341,7 @@ export function createPgTargetBookingPromoCodesRepository(config: {
     async updatePromoCodeByHotelId(hotelId, promoCodeId, body) {
       const propertyId = await resolvePropertyId(hotelId);
       if (!propertyId) return null;
+      await checkFixedAmountStep(propertyId, promoCodeId, body);
       const values: unknown[] = [propertyId, promoCodeId];
       const sets: string[] = [];
       addSet(sets, values, "code", body.code);

@@ -188,8 +188,22 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Pull the BuildKit image with retries
+        run: |
+          # ECR Public throttles anonymous pulls ("Rate exceeded") when the matrix jobs start together.
+          # Buildx falls back to this local copy when its own pull is throttled.
+          for attempt in 1 2 3 4 5 6; do
+            docker pull --quiet public.ecr.aws/vend/moby/buildkit:buildx-stable-1 >/dev/null && exit 0
+            echo "BuildKit pull failed (attempt ${attempt}); retrying" >&2
+            sleep $((attempt * 10))
+          done
+          exit 1
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
+        with:
+          # Docker Hub rate-limits anonymous pulls of the BuildKit image.
+          driver-opts: image=public.ecr.aws/vend/moby/buildkit:buildx-stable-1
 
       - name: Build and push immutable service image
         env:
@@ -285,15 +299,25 @@ jobs:
               ;;
             *) echo "::error::Unknown managed service $SERVICE"; exit 1 ;;
           esac
-          docker buildx build \
-            --platform linux/amd64 \
-            --push \
-            --file "${APP_PATH}/Dockerfile" \
-            "${image_tags[@]}" \
-            --cache-from "type=gha,scope=${SERVICE}" \
-            --cache-to "type=gha,mode=max,scope=${SERVICE}" \
-            "${build_args[@]}" \
-            .
+          # Base images come from ECR Public, which throttles anonymous pulls. Retry only on that error.
+          for attempt in 1 2 3; do
+            if docker buildx build \
+              --platform linux/amd64 \
+              --push \
+              --file "${APP_PATH}/Dockerfile" \
+              "${image_tags[@]}" \
+              --cache-from "type=gha,scope=${SERVICE}" \
+              --cache-to "type=gha,mode=max,scope=${SERVICE}" \
+              "${build_args[@]}" \
+              . 2>&1 | tee build-output.log; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ] || ! grep -q -E 'toomanyrequests|Rate exceeded' build-output.log; then
+              exit 1
+            fi
+            echo "Image pull throttled (attempt ${attempt}); retrying" >&2
+            sleep $((attempt * 30))
+          done
 
       - name: Verify immutable ECR digest
         env:

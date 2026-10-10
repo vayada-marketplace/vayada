@@ -28,6 +28,9 @@ function dependencies(input: { rows?: unknown[]; error?: Error } = {}) {
     async query(text: string, values?: readonly unknown[]) {
       queries.push({ text, values });
       if (input.error) throw input.error;
+      // No pricing-v2 publication: the legacy confirmation table answers.
+      if (text.includes("FROM pms.pricing_v2_heads head"))
+        return { rows: [], rowCount: 0 } as never;
       const rows = input.rows ?? [row()];
       return { rows, rowCount: rows.length } as never;
     },
@@ -69,9 +72,12 @@ describe("PMS mandatory-charge confirmation read model", () => {
         confirmedAt,
       },
     });
-    expect(deps.queries[0]?.values).toEqual([organizationId, propertyId]);
-    expect(deps.queries[0]?.text).toContain("ORDER BY confirmation.confirmation_revision DESC");
-    expect(deps.queries[0]?.text).toContain("LIMIT 1");
+    expect(deps.queries.map(({ values }) => values)).toEqual([
+      [organizationId, propertyId],
+      [organizationId, propertyId],
+    ]);
+    expect(deps.queries[1]?.text).toContain("ORDER BY confirmation.confirmation_revision DESC");
+    expect(deps.queries[1]?.text).toContain("LIMIT 1");
   });
 
   it("returns missing when no scoped evidence is available", async () => {
@@ -110,7 +116,12 @@ describe("PMS mandatory-charge confirmation read model", () => {
   it("keeps exact PMS authorization scope in the query", async () => {
     const { readModel, deps } = model({ rows: [] });
     await readModel.getMandatoryChargeConfirmation({ organizationId, propertyId });
-    const sql = deps.queries[0]!.text;
+    const [published, legacy] = deps.queries.map(({ text }) => text);
+    // Both reads keep the same organization, link and entitlement scope.
+    for (const scope of ["organization.kind = 'hotel_group'", "entitlement.status = 'suspended'"])
+      expect(published).toContain(scope);
+    expect(published).toContain("head.property_id = $2::uuid");
+    const sql = legacy!;
     expect(sql).toContain("confirmation.organization_id = $1::uuid");
     expect(sql).toContain("confirmation.property_id = $2::uuid");
     expect(sql).toContain("organization.kind = 'hotel_group'");

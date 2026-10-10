@@ -15,6 +15,16 @@ export async function stagePmsAcceptedPricingReservationJob(
 ) {
   const scope = await lockPublicPricingAuthority(client, slug);
   if (!scope || !accepted) throw new Error("PMS accepted-pricing job unavailable");
+  return stageAcceptedPricingReservationJob(client, scope, accepted);
+}
+
+/** Same job for a caller that already resolved the acceptance's own property, e.g. a paid
+ * card acceptance, which must reach the PMS even if public booking has since changed. */
+export async function stageAcceptedPricingReservationJob(
+  client: PoolClient,
+  scope: { propertyId: string; organizationId: string },
+  accepted: { acceptanceId: string; bookingId: string; acceptedAt: string },
+) {
   const command = await loadAcceptedPricingReservation(client, {
     acceptanceId: accepted.acceptanceId,
     guestBookingId: accepted.bookingId,

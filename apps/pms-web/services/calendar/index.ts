@@ -5,7 +5,6 @@ import {
   resolveSelectedPmsPropertyId,
 } from "../api/pmsPropertyClient";
 import { pmsManualBookingClient } from "../api/pmsManualBookingClient";
-import { unsupportedPmsNextStackFeature } from "../api/unsupported";
 import { BookingAddon } from "../bookings";
 import { orderRoomsByRoomType } from "../../lib/roomOrdering";
 
@@ -19,7 +18,8 @@ export interface CalendarRoomType {
   totalRooms: number;
   baseRate: number;
   maxOccupancy: number;
-  currency: string;
+  /** Null until the hotel publishes prices or sets a legacy rate; the server then prices custom rates. */
+  currency: string | null;
   ratePlans: Array<{
     id: string;
     name: string;
@@ -45,7 +45,8 @@ export interface CalendarRoom {
   floor: string;
   status: string;
   baseRate: number;
-  currency: string;
+  /** The currency of `baseRate`; null for a room type without a legacy rate (VAY-2068). */
+  currency: string | null;
   maxOccupancy: number;
   size: number;
   /** The room type's published Flexible offer with its own price: what "target base" moves charge. */
@@ -136,7 +137,8 @@ type PmsOperationsRoomType = {
   category: string | null;
   occupancyLimits: Record<string, number>;
   attributes: Record<string, unknown>;
-  baseRate: PmsOperationsMoney;
+  /** Room types from the room-facts flow carry neither amount nor currency. */
+  baseRate: { amountDecimal: string | null; currency: string | null };
   roomCount: number;
   ratePlans: Array<{
     ratePlanId: string;
@@ -231,23 +233,6 @@ type PmsOperationsCalendarResponse = {
   sourceFreshness: Record<string, string | number | boolean | null>;
 };
 
-export interface CreateAdminBookingPayload {
-  roomId: string;
-  guestFirstName: string;
-  guestLastName: string;
-  guestEmail: string;
-  guestPhone: string;
-  specialRequests: string;
-  checkIn: string;
-  checkOut: string;
-  adults: number;
-  children: number;
-  nightlyRate: number | null;
-  channel: string;
-  addonIds?: string[];
-  addonQuantities?: Record<string, number>;
-}
-
 export const calendarService = {
   getCalendarData: (start: string, end: string) =>
     pmsOperationsCalendarReadService.getCalendarData(start, end),
@@ -319,9 +304,6 @@ export const calendarService = {
     );
   },
 
-  createAdminBooking: (_data: CreateAdminBookingPayload) =>
-    unsupportedPmsNextStackFeature("Manual booking creation"),
-
   listAvailableAddons: async (_roomId: string): Promise<BookingAddon[]> => {
     const propertyId = await resolveSelectedPmsPropertyId("loading booking add-ons");
     const response = await pmsOperationsClient.get<ManualAddonApi>(
@@ -339,16 +321,6 @@ export const calendarService = {
       perNight: addon.pricingModel === "per_night" || addon.pricingModel === "per_guest_night",
     }));
   },
-
-  // Booking-engine-equivalent nightly rate for the given room type and check-in
-  // date — used by the New Booking modal so the pre-filled rate matches what
-  // the guest would have been quoted (seasons / daily overrides / weekend
-  // surcharge), instead of just the raw base_rate which can be 0 when the
-  // property prices entirely via seasons.
-  getResolvedRate: (_roomTypeId: string, _checkIn: string) =>
-    unsupportedPmsNextStackFeature<{ nightlyRate: number; currency: string }>(
-      "Resolved room rates",
-    ),
 
   reorderRooms: async (orderedRoomIds: string[], expectedVersion: string): Promise<string> => {
     const propertyId = await resolveSelectedPmsPropertyId("reordering rooms");
@@ -443,8 +415,9 @@ function toCalendarData(
         totalRooms: roomType.roomCount,
         baseRate: moneyAmount(roomType.baseRate),
         maxOccupancy: maxOccupancy(roomType),
-        // Room types from the room-facts flow carry no currency; the publication does.
-        currency: published[0]?.baseRate.currency ?? roomType.baseRate.currency,
+        // Room types from the room-facts flow carry no currency; the publication does. With
+        // neither, custom rates are sent without one and the server prices them (VAY-2065).
+        currency: published[0]?.baseRate.currency ?? roomType.baseRate.currency ?? null,
         ratePlans: published.map((plan) => ({
           id: plan.ratePlanId,
           name: plan.name,
@@ -467,7 +440,12 @@ function toCalendarData(
         floor: room.floor ?? "",
         status: room.status,
         baseRate: moneyAmount(roomTypesById.get(room.roomTypeId)?.baseRate),
-        currency: roomTypesById.get(room.roomTypeId)?.baseRate.currency ?? "EUR",
+        // The currency labels `baseRate`, so both come from the legacy rate. A room type from
+        // the room-facts flow has neither, and the calendar must not invent one (VAY-2068).
+        // No hotel-currency fallback is needed: the database stores amount and currency as a
+        // pair (chk_pms_room_types_price_currency_pair), and once the hotel has a pricing
+        // currency every room-type currency must equal it (migration 0050).
+        currency: roomTypesById.get(room.roomTypeId)?.baseRate.currency ?? null,
         maxOccupancy: maxOccupancy(roomTypesById.get(room.roomTypeId)),
         size: numericAttribute(roomTypesById.get(room.roomTypeId)?.attributes?.size),
         flexibleRatePlanId:
@@ -546,7 +524,7 @@ function splitGuestName(displayName: string): [string, string] {
   return [firstName, rest.join(" ")];
 }
 
-function moneyAmount(money: PmsOperationsMoney | undefined): number {
+function moneyAmount(money: { amountDecimal: string | null } | undefined): number {
   const amount = Number.parseFloat(money?.amountDecimal ?? "0");
   return Number.isFinite(amount) ? amount : 0;
 }

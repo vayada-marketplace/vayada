@@ -236,6 +236,30 @@ describe("calendar auto-open editor", () => {
     ).toBe(false);
   });
 
+  it("shows the stored setting again when enabling is refused for setup", async () => {
+    mocks.save.mockRejectedValueOnce(
+      new ApiErrorResponse(409, { code: "operating_calendar_not_configured" }),
+    );
+    let view!: ReturnType<typeof create>;
+    await act(async () => {
+      view = create(createElement(CalendarAutoOpenEditor));
+    });
+    act(() => view.root.findByProps({ "aria-label": "Auto-open future calendar" }).props.onClick());
+    await act(async () => view.root.findByProps({ children: "Save auto-open" }).props.onClick());
+
+    // The refused "On" was not saved, so the stored Off stays visible next to the setup error.
+    expect(
+      view.root.findByProps({ "aria-label": "Auto-open future calendar" }).props["aria-checked"],
+    ).toBe(false);
+    const state = view.root.findByProps({ id: "auto-open-state" }).children.join("");
+    expect(state).toContain("Off");
+    expect(state).not.toContain("paused");
+    expect(
+      view.root.findAllByProps({ role: "alert" }).at(-1)?.findByType("span").children.join(""),
+    ).toContain("Finish Calendar setup");
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+  });
+
   it("does not report success when a replay returns paused setup readiness", async () => {
     mocks.save.mockResolvedValueOnce({
       ...response(4, true),

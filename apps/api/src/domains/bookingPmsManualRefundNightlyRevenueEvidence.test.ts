@@ -86,7 +86,8 @@ describe("manual booking refund evidence", () => {
     expect(JSON.parse(String(insert?.[1]?.[3]))).toEqual([
       { targetEvidenceId: ADDON_EVIDENCE, grossAmount: "-25.0000" },
     ]);
-    expect(String(insert?.[1]?.[4])).toMatch(/^pms-refund:[0-9a-f]{64}:addon:$/);
+    expect(insert?.[1]?.[4]).toBe("refund");
+    expect(String(insert?.[1]?.[5])).toMatch(/^pms-refund:[0-9a-f]{64}:addon:$/);
     expect(
       query.mock.calls.some(([sql]) =>
         String(sql).includes("INSERT INTO booking.nightly_revenue_evidence"),
