@@ -1,4 +1,5 @@
 import {
+  pricingAmountStep,
   pricingCurrencyScale,
   type PricingConfiguration,
 } from "@vayada/domain-pms/replacement-pricing";
@@ -77,7 +78,12 @@ export function editedSnapshot(
         if (offer.price.kind !== "independent" || !offer.price.calendar.base) return offer;
         const base = offer.price.calendar.base,
           values = baseAmounts(base).map(([, minor], ai) =>
-            parseMinorInput(inputs[`${ri}:${oi}:${ai}`] ?? decimalAmount(minor, scale), scale),
+            parseMinorInput(
+              inputs[`${ri}:${oi}:${ai}`] ?? decimalAmount(minor, scale),
+              scale,
+              false,
+              pricingAmountStep(snapshot.currency),
+            ),
           );
         const next =
           base.mode === "flat"
@@ -99,11 +105,15 @@ export function editedSnapshot(
 export function parseAdjustmentInput(input: { kind: string; value: string }, currency: string) {
   if (!["fixed", "percentage"].includes(input.kind) || !/^[+-]?\d+(?:\.\d+)?$/.test(input.value))
     throw new PricingError("pricing.error.adjustmentInvalid");
-  const unsigned = parseMinorInput(
-    input.value.replace(/^[+-]/, ""),
-    input.kind === "fixed" ? pricingCurrencyScale(currency)! : 2,
-    true,
-  );
+  const unsigned =
+    input.kind === "fixed"
+      ? parseMinorInput(
+          input.value.replace(/^[+-]/, ""),
+          pricingCurrencyScale(currency)!,
+          true,
+          pricingAmountStep(currency),
+        )
+      : parseMinorInput(input.value.replace(/^[+-]/, ""), 2, true);
   const signed = BigInt(unsigned) * (input.value.startsWith("-") ? -BigInt("1") : BigInt("1"));
   const adjustment =
     input.kind === "fixed"

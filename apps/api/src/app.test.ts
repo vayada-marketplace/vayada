@@ -85,7 +85,10 @@ import type {
   CreateBookingPromoCodeBody,
   UpdateBookingPromoCodeBody,
 } from "./routes/bookingPromoCodes.js";
-import { createPgTargetBookingPromoCodesRepository } from "./routes/bookingPromoCodes.js";
+import {
+  BookingPromoCodeAmountError,
+  createPgTargetBookingPromoCodesRepository,
+} from "./routes/bookingPromoCodes.js";
 import {
   createTargetBookingCustomDomainRepository,
   type BookingCustomDomainPool,
@@ -6466,6 +6469,37 @@ describe("vayada-api", () => {
     );
   });
 
+  it("returns the currency amount message when a promo amount does not fit the hotel currency", async () => {
+    app = buildAuthenticatedApp({
+      bookingPromoCodesRepository: {
+        ...bookingPromoCodesRepository,
+        async updatePromoCodeByHotelId() {
+          throw new BookingPromoCodeAmountError(
+            "discountValue must be a whole IDR amount without decimals.",
+          );
+        },
+      },
+    });
+
+    const response = await injectJson<Record<string, unknown>>(app, {
+      method: "PATCH",
+      url: `/api/booking/hotels/booking_hotel_alpenrose/promo-codes/${bookingPromoCode.promoCodeId}`,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        discountType: "fixed",
+        discountValue: "15000.50",
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.body).toMatchObject({ code: "invalid_payload" });
+    expect(response.body.details).toEqual([
+      "discountValue must be a whole IDR amount without decimals.",
+    ]);
+  });
+
   it("retires booking promo codes instead of deleting usage history", async () => {
     app = buildAuthenticatedApp();
 
@@ -8669,6 +8703,61 @@ describe("vayada-api", () => {
         .filter((query) => query.text.includes("WITH direct_property AS"))
         .map((query) => query.values),
     ).toEqual([[hotelId], [hotelId], [hotelId], [hotelId]]);
+  });
+
+  it("checks fixed promo amounts against the hotel currency before writing (VAY-2085)", async () => {
+    const writes: string[] = [];
+    const stored = { discountType: "fixed", discountValue: "15000.00" };
+    const pool: BookingPromoCodesPool = {
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+      ): Promise<Pick<QueryResult<T>, "rows">> {
+        if (text.includes("hotel_catalog.property_source_links"))
+          return {
+            rows: [{ propertyId: "d3000000-0000-4000-8000-000000000682" }] as unknown as T[],
+          };
+        if (text.includes("FROM booking.booking_settings"))
+          return { rows: [{ currency: "IDR", ...stored }] as unknown as T[] };
+        writes.push(text);
+        return { rows: [] as T[] };
+      },
+      async end() {},
+    };
+    const repository = createPgTargetBookingPromoCodesRepository({
+      connectionString: "postgresql://target-db",
+      pool,
+    });
+    const create = (discountType: "fixed" | "percentage", discountValue: string) =>
+      repository.createPromoCodeByHotelId("booking_hotel_alpenrose", {
+        code: "RUPIAH",
+        discountType,
+        discountValue,
+        minBookingValue: null,
+        applicableRoomIds: null,
+        validFrom: null,
+        validUntil: null,
+        stayDateFrom: null,
+        stayDateUntil: null,
+        isActive: true,
+        maxUses: 10,
+      });
+
+    await expect(create("fixed", "15000.50")).rejects.toThrow(
+      "discountValue must be a whole IDR amount without decimals.",
+    );
+    await expect(
+      repository.updatePromoCodeByHotelId("booking_hotel_alpenrose", "promo", {
+        discountValue: "12.50",
+      }),
+    ).rejects.toBeInstanceOf(BookingPromoCodeAmountError);
+    expect(writes).toEqual([]);
+    await create("fixed", "15000.00");
+    await create("percentage", "12.50");
+    await repository.updatePromoCodeByHotelId("booking_hotel_alpenrose", "promo", {
+      discountType: "percentage",
+      discountValue: "12.50",
+    });
+    expect(writes).toHaveLength(3);
   });
 
   it("defaults missing booking addon settings fields to the legacy response defaults", async () => {

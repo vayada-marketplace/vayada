@@ -12,19 +12,19 @@ superseded. Python production remains untouched.
 Paths below are relative to the repository. Existing types are evidence of an
 interface, not proof of a working replacement adapter.
 
-| Boundary | Existing implementation | Required change |
-| --- | --- | --- |
-| Public property authority | `apps/api/src/routes/bookingWebPublic.ts`: `resolveTargetCheckoutProperty` | Resolve canonical slug and current public bookability server-side; do not accept body property/organization authority. |
-| Public offers/calendar | Same file: `loadTargetCheckoutOffer`, `createTargetBookingWebCalendarRepository`; `apps/api/src/routes/aiHotelQuotes.ts` | Currently fail with `PRICING_UNAVAILABLE`; consume the approved snapshot through an owner port. |
-| Physical room allocations | `packages/domain-booking/src/roomSelection.ts`: `parseBookingRoomSelection`; `apps/api/src/routes/bookingWebMixedQuote.ts`: `quoteTargetRoomSelection` | Existing allocations contain adult/child counts, not child ages; add a versioned age-aware selection before pricing children. Mixed quote is unavailable. |
-| Approved PMS prices | `apps/api/src/domains/replacementPricingStore.ts` | Current `read` starts its own transaction and requires staff scope. Reuse complete publication decoding in a caller-transaction PMS owner port; do not forge staff context for public guests. |
-| Room-night calculation | `packages/domain-pms/src/replacementPricingCalculator.ts`: `calculateReplacementRoomStay` | Reuse the same pure calculator used by the editor, one call per allocated room. It does not establish current database authority. |
-| Policy/charge/payment evidence | `bookingPricingOfferTerms.ts`, `replacementChargeDeclarations.ts`, `financeReplacementPricingReadiness.ts`, `financeReplacementPricingSource.ts` under `apps/api/src/domains` | Read current published terms, confirmed charge evidence and executable Finance readiness through their owners. Publication readiness alone is not checkout acceptance. |
-| Booking composition | `packages/domain-booking/src/replacementPricingEvidence.ts`, `bookingPromotions.ts`, `bookingAddonEconomics.ts` | Replacement owner-input/evidence contracts exist; the old promotion evaluator is disabled. Implement the agreed promotion/add-on/charge composition rather than reviving it. |
-| Quote storage/read | `bookingWebPublic.ts`: `createTargetCheckoutQuote`, `loadTargetCheckoutQuoteSnapshot` | Both are unavailable. Persist and retrieve server-issued versioned evidence; never trust posted totals or policy snapshots. |
-| Acceptance and receipts | Same file: `createTargetBookingWebCheckoutAdapter`, `withTargetCheckoutTransaction` | Preserve reservation, command replay, Finance, same-day, inventory, promotion redemption and notification ownership while binding new evidence atomically. |
-| Amendments | `apps/api/src/routes/pendingBookingEdits.ts`; date-change path in `bookingWebPublic.ts` | Reprice a proposal explicitly; accept against the current booking revision and preserve original accepted evidence. |
-| Staff preview | `apps/api/src/routes/pmsManualBookingPreviewCalculation.ts` | Replace the unavailable preset-price path with the same composition. Authorized manual overrides remain separate, explicit evidence. |
+| Boundary                       | Existing implementation                                                                                                                                                       | Required change                                                                                                                                                                               |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Public property authority      | `apps/api/src/routes/bookingWebPublic.ts`: `resolveTargetCheckoutProperty`                                                                                                    | Resolve canonical slug and current public bookability server-side; do not accept body property/organization authority.                                                                        |
+| Public offers/calendar         | Same file: `loadTargetCheckoutOffer`, `createTargetBookingWebCalendarRepository`; `apps/api/src/routes/aiHotelQuotes.ts`                                                      | Currently fail with `PRICING_UNAVAILABLE`; consume the approved snapshot through an owner port.                                                                                               |
+| Physical room allocations      | `packages/domain-booking/src/roomSelection.ts`: `parseBookingRoomSelection`; `apps/api/src/routes/bookingWebMixedQuote.ts`: `quoteTargetRoomSelection`                        | Existing allocations contain adult/child counts, not child ages; add a versioned age-aware selection before pricing children. Mixed quote is unavailable.                                     |
+| Approved PMS prices            | `apps/api/src/domains/replacementPricingStore.ts`                                                                                                                             | Current `read` starts its own transaction and requires staff scope. Reuse complete publication decoding in a caller-transaction PMS owner port; do not forge staff context for public guests. |
+| Room-night calculation         | `packages/domain-pms/src/replacementPricingCalculator.ts`: `calculateReplacementRoomStay`                                                                                     | Reuse the same pure calculator used by the editor, one call per allocated room. It does not establish current database authority.                                                             |
+| Policy/charge/payment evidence | `bookingPricingOfferTerms.ts`, `replacementChargeDeclarations.ts`, `financeReplacementPricingReadiness.ts`, `financeReplacementPricingSource.ts` under `apps/api/src/domains` | Read current published terms, confirmed charge evidence and executable Finance readiness through their owners. Publication readiness alone is not checkout acceptance.                        |
+| Booking composition            | `packages/domain-booking/src/replacementPricingEvidence.ts`, `bookingPromotions.ts`, `bookingAddonEconomics.ts`                                                               | Replacement owner-input/evidence contracts exist; the old promotion evaluator is disabled. Implement the agreed promotion/add-on/charge composition rather than reviving it.                  |
+| Quote storage/read             | `bookingWebPublic.ts`: `createTargetCheckoutQuote`, `loadTargetCheckoutQuoteSnapshot`                                                                                         | Both are unavailable. Persist and retrieve server-issued versioned evidence; never trust posted totals or policy snapshots.                                                                   |
+| Acceptance and receipts        | Same file: `createTargetBookingWebCheckoutAdapter`, `withTargetCheckoutTransaction`                                                                                           | Preserve reservation, command replay, Finance, same-day, inventory, promotion redemption and notification ownership while binding new evidence atomically.                                    |
+| Amendments                     | `apps/api/src/routes/pendingBookingEdits.ts`; date-change path in `bookingWebPublic.ts`                                                                                       | Reprice a proposal explicitly; accept against the current booking revision and preserve original accepted evidence.                                                                           |
+| Staff preview                  | `apps/api/src/routes/pmsManualBookingPreviewCalculation.ts`                                                                                                                   | Replace the unavailable preset-price path with the same composition. Authorized manual overrides remain separate, explicit evidence.                                                          |
 
 `apps/api/src/domains/replacementPricingSnapshot.ts` now shares
 `parsePricingStorageSnapshot` and `readCurrentPricingSnapshot` with the pricing
@@ -36,9 +36,9 @@ lock in the same transaction and check current owners separately. Channex job
 leases and channel connections must not become public guest authorization.
 There is no direct-booking price-source choice (VAY-2079). The former
 `vayada`/`external`/`unconfigured` choice and its routes are removed; a current
-publication is what makes prices public. Its tables
-(`booking.pricing_authority_revisions`, `booking.pricing_authority_heads`) stay
-unread until the follow-up migration drops them. The owning organization is the
+publication is what makes prices public. Migration 0475 dropped its tables
+(`booking.pricing_authority_revisions`, `booking.pricing_authority_heads`) and the
+authority-scope view. The owning organization is the
 single organization holding active owner/operator links to both the PMS property
 (`pms`/`pms_property`) and the catalog property (`hotel_catalog`/`property`);
 none or more than one fails closed. External-PMS prices need their own verified
@@ -176,8 +176,9 @@ arithmetic for already eligible, same-currency owner inputs. Last-minute applies
 to each room component, code applies once to eligible rooms plus eligible extras,
 and stacked code subtracts only those rooms' last-minute reductions from its basis.
 Nonstack chooses the greater total reduction, with last-minute winning ties.
-Percentages round the remaining price half-up in integer minor units, matching
-the agreed reference arithmetic; fixed amounts cap at their applicable basis.
+Percentages round the remaining price half-up to the currency's price step (one
+minor unit; a whole rupiah for IDR, VAY-2085), matching the agreed reference
+arithmetic; fixed amounts cap at their applicable basis.
 Meals and other charges are outside this input. Explicit null discounts and zero
 eligible extras are required; missing owner decisions fail rather than defaulting.
 This arithmetic does not establish date eligibility, switches, usage, targeting,
@@ -364,9 +365,10 @@ Included amounts are not added twice; excluded amounts increase the final total.
 Property-collected portions are reserved from online collection, including those
 already embedded in the subtotal. Included allocations cannot exceed subtotal.
 Full online payment collects the remaining online-collectible amount; pay at
-property defers the total. Deposits round half-up on the entire final total:
-360 at30%=108 now/252 later. A deposit exceeding the online-collectible portion
-is unavailable rather than clamped or redirected. This does not establish
+property defers the total. Deposits round half-up on the entire final total, to
+the currency's price step (whole rupiah for IDR): 360 at30%=108 now/252 later.
+A deposit exceeding the online-collectible portion is unavailable rather than
+clamped or redirected. This does not establish
 selected-stay tax/fee ownership or enable deposit execution in Finance. Zero-total
 booking acceptance remains unsupported. Charge basis evidence is preserved, not
 verified, by this pure helper; current-owner and per-rate method checks must
@@ -399,7 +401,6 @@ claim coverage of unsupported tax types or replace public visibility/Finance
 checks. Connecting this fixed-rule owner to complete quotes requires explicit
 coverage and removal/replacement of the older all-included publication gate.
 
-
 A publication may explicitly adopt `booking.fixed-charge-policy.v1:<revision>`
 as its charges owner reference. This selects the entire saved fixed-rule policy
 (including explicit none), not a default inferred from the older inclusion
@@ -417,7 +418,6 @@ subtotal or invalid money. Authority and property-local day are rechecked after
 charge reads. This internal amount result is not a payment schedule, complete
 quote, inventory reservation, legal tax certification or checkout approval.
 
-
 Selected payment composition requires explicit `payment.acceptedMethods` on each
 selected offer's current Booking terms: nonempty, unique `card` and/or
 `pay_at_property`. Absence preserves historical terms decoding but supplies no
@@ -433,7 +433,6 @@ closed. Preserve selected terms/revisions, method, Finance evidence and a
 method-bound calculation identity. This remains an internal result, not an
 accepted quote or permission to charge a provider. Quote persistence, remaining
 owner evidence, inventory and atomic acceptance still precede route activation.
-
 
 The current quote assembler creates `stored-pricing-quote.v1` exclusively from
 locked public payment amounts. Lines preserve gross room/meal/extra amounts,
@@ -451,7 +450,6 @@ after owner reads. The internal caller supplies a bounded lifetime (1–900 seco
 capped at the next property-local midnight; a local-day change during reads is
 unavailable. Stored price evidence is not inventory or checkout acceptance.
 
-
 Migration0205 stores immutable replacement pricing quote records separately from
 legacy checkout sessions, avoiding old amount serializers and conversion jobs.
 Issuance resolves current public authority before request replay. Request keys
@@ -463,7 +461,6 @@ The stored envelope is decoded and bound to the record's property/id on read;
 calculation details are retained server-side as archival JSON, not public output
 or independently validated input to settlement. No quote acceptance status is
 fabricated; atomic acceptance will reference this record after fresh checks.
-
 
 Fresh quote revalidation loads the exact scoped immutable record under current
 public authority, rebuilds current same-currency amounts from the stored selection,
@@ -485,7 +482,6 @@ The future acceptance writer must recheck expiry and same-day time eligibility
 after any later inventory/other-owner waits, immediately before its final write.
 A clock-based decision cannot be kept fresh merely by retaining row locks.
 
-
 `lockPmsCurrentOperatingCalendar` provides current owner evidence on the caller's
 READ COMMITTED transaction. It acquires inventory, Hotel Catalog profile,
 room-facts and sorted physical-unit locks and uses that same connection for room
@@ -495,7 +491,6 @@ missing/stale evidence and keep locks until its acceptance commit or rollback.
 This is an internal PMS prerequisite, not public authorization or a reservation:
 selected-night coverage, closures, linked inventory, capacity consumption and
 lifecycle receipts still belong to the replacement reservation writer.
-
 
 `reservePmsInventoryInTransaction` accepts the existing strict canonical PMS
 reserve command on an authorized caller's READ COMMITTED transaction. It replays
@@ -507,7 +502,6 @@ Caller MUST roll back on any failure/exception and must authorize scope before
 replay. Opaque offer correlations require no legacy Distribution offer snapshot.
 This is an internal single-room-type command; mapping verified quote selections,
 whole-bundle idempotency, final time checks and booking acceptance follow.
-
 
 `reserveCurrentQuoteInventory` resolves the current public property/organization
 and exact immutable quote, then delegates to the PMS quote bundle owner. Physical
@@ -522,7 +516,6 @@ must roll back on later authority/acceptance failures. Held inventory does not
 mean booking acceptance; final expiry/cutoff and accepted-command replay remain
 with the forthcoming acceptance writer.
 
-
 `redeemCurrentQuotePromo` binds an existing guest booking's explicit
 `booking_metadata.pricingQuoteId`, stay, physical room count, currency and exact
 total to the scoped immutable quote. Applied receipts replay before fresh source
@@ -536,7 +529,6 @@ The existing numeric(15,2) column must represent the amount exactly; unsupported
 precision/range fails rather than rounding. Caller owns atomic rollback with the
 booking and inventory. This step does not create or confirm a booking; final
 clock checks follow owner waits, and accepted-command replay precedes all steps.
-
 
 Replacement booking input is `booking-quote-acceptance.v1`: a request ID, exact
 quote ID, explicit acceptance of quote and guest-policy evidence hashes, and
@@ -592,7 +584,6 @@ or switch the disclosure reader. That wiring must select this owner explicitly,
 without a silent legacy fallback, and publish changes to affected consumers before
 activation. The old policy repository remains for existing unrelated consumers.
 
-
 Guest-rule API wiring supersedes the pending reader-switch step above. Protected
 GET/PUT `/api/booking/properties/:propertyId/guest-rules` uses the existing Booking
 settings permission, entitlement, linked-property and assignment checks. PUT accepts
@@ -609,14 +600,12 @@ ready, provide a hotel editor, or create bookings. Those remain separate work.
 Database authorization uses the same transaction connection for reads and writes;
 it must not acquire another pooled connection while holding the guest-owner lock.
 
-
 The marketplace guest-rule client uses the authenticated target API, validates
 saved choice/revision responses, sends explicit confirmation and a caller-retained
 retry key, and renders actionable conflict/permission errors. The editor must keep
 that key for an unchanged uncertain command and must not promote guest-rule saving
 to setup readiness. Browser transport validation does not replace backend scope
 authorization or current owner checks.
-
 
 Guest-experience setup completion now means confirmed guest rules exist. Its
 base-revision manifest contains only `booking.guest_experience`, using
@@ -635,7 +624,6 @@ This is setup configuration state, not public publication readiness. Cancellatio
 payment, operating-calendar, public visibility and booking acceptance gates remain
 separate; no catalog projection receipt or publication readiness is fabricated.
 
-
 The guest-rule editor delegates to the setup controller's save-and-continue action
 only after the owner save succeeds. The controller refreshes the route before
 navigating. A failed navigation/refresh retry must not append another guest-rule
@@ -645,7 +633,6 @@ not turn setup completion into public bookability.
 Guest-rule navigation requests explicitly recheck the leave guard on controller
 retries so edits made after a failed refresh cannot be discarded by the shell's
 Retry button. Existing draft-writing steps retain their current retry behavior.
-
 
 Public publication's Booking owner now reads confirmed guest choices independently
 of the retired guest-policy bundle. Its source identity is guest_choice_revision /
@@ -665,7 +652,6 @@ The prior single-pricing-currency publication constraint remains explicit: Finan
 must advertise only its default currency, matching PMS rates. Merely enabling more
 payment currencies does not establish quote conversion support.
 
-
 Publication orchestration must read approved pricing before a public profile exists.
 `lockCurrentPricingPublication` separates the shared current-owner validation from
 `lockPublicPricingPublication`'s public-access gate. It accepts trusted organization/
@@ -679,7 +665,6 @@ Both return the same pricing source fingerprint; no duplicate calculator or
 legacy-price fallback is introduced. PMS publication content mapping and separate
 room/media/calendar/inventory readiness remain required downstream.
 
-
 Replacement public offers use an explicit quote_required rate variant: the exact
 `pricing-offer.v2` key already consumed by public selection, currency, pricing
 publication revision, terms revision and meal-plan kind. There is no default
@@ -690,7 +675,6 @@ from different rooms. Distribution validates/sanitizes this variant and still
 checks Finance currency and payment readiness. Older flat rate records remain
 decodable; they are not produced by the replacement mapper. This is an offer
 content prerequisite, not the completed PMS source or a public quote endpoint.
-
 
 PMS publication reads current replacement pricing through a transaction-owning
 internal adapter, using trusted orchestrator scope. The adapter releases owner
@@ -704,7 +688,6 @@ flexible/recurring pricing and charge-confirmation sources. Room facts/media,
 calendar profile bindings and independent Finance publication gates remain.
 This connects publication evidence only; stay quoting and atomic guest booking
 acceptance remain separate and are not enabled by a quote-required offer.
-
 
 The existing public POST /api/booking-web/hotels/:slug/bookings/quote now accepts
 {version: "public-booking-quote-request.v1", selection, paymentMethod}, where
@@ -724,7 +707,6 @@ internal offer identifiers. Missing public authority/owner evidence is generical
 unavailable; conflicts require a new request. This replaces the retired target
 quote path without adding a parallel calculator or changing historical bookings.
 
-
 Browser consumption first requires a shared, browser-safe public quote DTO and
 strict response validation against the request's dates, currency, payment method
 and physical selection IDs. Totals stay decimal-string minor units; validate
@@ -737,7 +719,6 @@ and supports cancellation. Expired responses cannot become displayable prices.
 This client prerequisite does not activate the current count-only checkout UI:
 room selection must supply actual child ages and current replacement offer keys
 first. Legacy request payloads cannot be silently converted into those facts.
-
 
 GET /api/booking-web/hotels/:slug/pricing-offers exposes the current published
 replacement offer catalogue for explicit guest selection. It requires current

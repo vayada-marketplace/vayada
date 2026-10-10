@@ -301,6 +301,41 @@ describe.skipIf(!url)("manual booking priced from the published offers", () => {
       expect(reservation?.assignments[0]).toMatchObject({ ratePlanId: null, pricingOfferId: nrId });
     });
 
+    // VAY-2089: Booking Detail's cancellation box shows the terms the stay was booked under.
+    it("returns each manual stay's booked cancellation terms from its stored publication", async () => {
+      const read = (guestBookingId: string) =>
+        createTargetPmsOperationsReadRepository({ connectionString: url!, pool })
+          .findReservationByGuestBookingId(propertyId, guestBookingId)
+          .then((reservation) => reservation?.assignments[0]?.bookedCancellation);
+      const flexible = await repository().createManualBooking(
+        command(flexId, { checkIn: "2027-08-02" }),
+      );
+      expect(await read(flexible.guestBookingId)).toEqual({
+        kind: "flexible",
+        terms: expect.objectContaining({
+          type: "free_until_days_before_arrival",
+          freeCancellationDeadlineDays: 7,
+        }),
+      });
+      const nonRefundable = await repository().createManualBooking(
+        command(nrId, { checkIn: "2027-08-09" }),
+      );
+      expect(await read(nonRefundable.guestBookingId)).toEqual({ kind: "non_refundable" });
+      const custom = await repository().createManualBooking(
+        command(null, { roomId: roomIds[1]!, checkIn: "2027-08-16" }),
+      );
+      expect(await read(custom.guestBookingId)).toBeNull();
+
+      // Terms come from the stored revision, never the current one: an unknown revision reads none.
+      await pool.query(
+        `UPDATE pms.operational_booking_assignments
+            SET assignment_payload = jsonb_set(assignment_payload, '{pricingOffer,pricingRevision}', '99')
+          WHERE guest_booking_id=$1`,
+        [flexible.guestBookingId],
+      );
+      expect(await read(flexible.guestBookingId)).toBeNull();
+    });
+
     it("refuses a save priced from a different publication revision, without writing", async () => {
       const stale = { ...command(nrId, { checkIn: "2027-07-01" }), expectedPricingRevision: 2 };
       await expect(repository().createManualBooking(stale)).rejects.toMatchObject({
