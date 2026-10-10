@@ -54,7 +54,8 @@ export async function authorizeStripeBookingPayment(
     occurredAt: Date;
   },
 ): Promise<"authorized" | "already_authorized" | "not_found"> {
-  // Replacement-pricing card bookings are instant only; nothing authorizes them for capture.
+  // Replacement-pricing card requests authorise through their own acceptance
+  // (authorizePricingCardRequest), never here.
   if (
     await pricingCardPaymentProperty(client as unknown as PricingQueryable, input.paymentIntentId)
   )

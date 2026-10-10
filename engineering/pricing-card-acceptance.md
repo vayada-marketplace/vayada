@@ -1,7 +1,7 @@
 # Card payment for replacement-pricing quote acceptance (VAY-1543 slice C.3)
 
-_Design note, 2026-10-08. Instant bookings only; request-mode (manual capture)
-follows later. Everything stays behind `REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED`
+_Design note, 2026-10-08. Instant bookings; request mode (manual capture) is
+described in [request-mode acceptance](pricing-request-acceptance.md). Everything stays behind `REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED`
 (default `false`) until every step below is merged and verified in Stripe test
 mode on a test hotel._
 

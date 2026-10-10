@@ -1,6 +1,6 @@
 import { pricingDraftFixture } from "./pricingBookingDraft.fixtures.js";
 import { calculateReplacementFixedCharges } from "./replacementFixedCharges.js";
-export function preparationFixture() {
+export function preparationFixture(changeQuote?: Parameters<typeof pricingDraftFixture>[0]) {
   const f = pricingDraftFixture((quote) => {
     const charges = calculateReplacementFixedCharges(quote.stay, {
       version: "booking.fixed-charges.v1",
@@ -9,6 +9,7 @@ export function preparationFixture() {
     })!;
     Object.assign(quote.evidence, { mandatoryChargeEvidenceId: charges.basisEvidenceId });
     Object.assign(quote.evidence.revisions, { charges: "charges:1" });
+    changeQuote?.(quote);
   });
   Object.assign(f.current, {
     calculation: {
