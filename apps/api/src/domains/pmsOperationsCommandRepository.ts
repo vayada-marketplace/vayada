@@ -4961,10 +4961,19 @@ function toPmsTemplateSteps(value: unknown): PmsTemplateStep[] {
       if (!item || typeof item !== "object") return null;
       const step = item as Partial<PmsTemplateStep>;
       if (typeof step.stepId !== "string" || typeof step.label !== "string") return null;
+      const optional = Object.fromEntries(
+        (["prompt", "okLabel", "negativeLabel", "notePrompt"] as const)
+          .filter((field) => typeof step[field] === "string")
+          .map((field) => [field, step[field]]),
+      );
       return {
         stepId: step.stepId,
         label: step.label,
         required: step.required === true,
+        ...optional,
+        ...(step.type === "checkbox" || step.type === "text" || step.type === "amount"
+          ? { type: step.type }
+          : {}),
       };
     })
     .filter((step): step is PmsTemplateStep => step !== null);

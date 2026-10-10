@@ -9,7 +9,6 @@ import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
 import DatePickerCalendar from "@/components/booking/DatePickerCalendar";
 import GuestSelector from "@/components/booking/GuestSelector";
-import Surroundings from "@/components/booking/Surroundings";
 import PublicStructuredData from "@/components/booking/PublicStructuredData";
 import PropertyGallery from "@/components/booking/PropertyGallery";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
@@ -448,7 +447,10 @@ function HomePageContent() {
         </Link>
       </div>
 
-      <Surroundings key={slug} slug={slug} locality={hotel.contact.address} />
+      {/* TODO(VAY-2098): the Location section ("Explore our surroundings", components/booking/
+          Surroundings.tsx) is hidden for every property until the surroundings feature is finished.
+          It comes back behind a Feature Hub "location" module; the admin Location settings and the
+          public /nearby API stay as they are. */}
 
       <BookingFooter />
     </div>
