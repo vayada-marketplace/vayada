@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
 import { describe, expect, it, vi } from "vitest";
-import { replacementStayKey } from "@vayada/domain-booking";
+import { replacementStayKey, type StoredPricingQuote } from "@vayada/domain-booking";
 import { pricingDraftFixture } from "./pricingBookingDraft.fixtures.js";
 import {
   createPgPmsAcceptedPricingReservationPort,
@@ -18,6 +18,7 @@ import {
   loadPricingBookingCancellation,
 } from "./pricingBookingCancellation.js";
 import { createTargetPmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
+import { loadCurrentPricingAcceptance } from "./pricingAcceptanceAmendments.js";
 import {
   PMS_ACCEPTED_PRICING_JOB_TYPE,
   PMS_ACCEPTED_PRICING_JOB_VERSION,
@@ -26,6 +27,58 @@ import {
 
 const url = process.env.TEST_DATABASE_URL;
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
+
+/** The same rooms at the same nightly prices on new dates: a stored quote that decodes like
+ * a real repricing (one priced night per date, matching request key, lines and totals). */
+function repricedQuote(
+  quote: StoredPricingQuote,
+  stay: { checkIn: string; checkOut: string },
+  quoteId: string = randomUUID(),
+): StoredPricingQuote {
+  const dates: string[] = [];
+  for (
+    let day = Date.parse(`${stay.checkIn}T00:00:00Z`);
+    day < Date.parse(`${stay.checkOut}T00:00:00Z`);
+    day += 86_400_000
+  )
+    dates.push(new Date(day).toISOString().slice(0, 10));
+  const moved = { ...quote.stay, ...stay };
+  const rooms = quote.rooms.map((room) => ({
+    ...room,
+    nights: dates.map((date) => ({ ...room.nights[0]!, date })),
+  }));
+  const sum = (values: string[]) =>
+    values.reduce((total, value) => total + BigInt(value), 0n).toString();
+  const lines = rooms.flatMap((room) => [
+    {
+      id: `r-${room.selectionId}`,
+      selectionId: room.selectionId,
+      kind: "room" as const,
+      amountMinor: sum(room.nights.map((night) => night.roomMinor)),
+    },
+    {
+      id: `m-${room.selectionId}`,
+      selectionId: room.selectionId,
+      kind: "meal" as const,
+      amountMinor: sum(room.nights.map((night) => night.mealMinor)),
+    },
+  ]);
+  const totalMinor = sum(lines.map((line) => line.amountMinor));
+  return {
+    ...quote,
+    quoteId,
+    stay: moved,
+    rooms,
+    evidence: {
+      ...quote.evidence,
+      requestKey: replacementStayKey(moved),
+      lines,
+      totalMinor,
+      dueNowMinor: "0",
+      dueLaterMinor: totalMinor,
+    },
+  };
+}
 // Real holds/adoption/constraints, with a synthetic calendar/public-offer source.
 // This does not exercise the future accepted-history port or queue consumer.
 describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
@@ -355,7 +408,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           holds: typeof bundle,
         ) => {
           // The repriced quote keeps every room and changes only the dates.
-          const amendedQuote = { ...quote, quoteId, stay: { ...quote.stay, ...stay } };
+          const amendedQuote = repricedQuote(quote, stay, quoteId);
           const requestId = randomUUID();
           await db.query(
             `INSERT INTO booking.pricing_quotes(id,property_id,organization_id,request_id,request_hash,payload)
@@ -405,6 +458,15 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           await amend(1, earlierStay, earlierQuoteId, earlierHolds);
           await amend(2, amendedStay, amendedQuoteId, bundle);
           await moveBooking(earlierStay, earlierQuoteId, earlierHolds, 1);
+          // Readers see the stay as the latest amendment prices it, too.
+          expect(
+            await loadCurrentPricingAcceptance(db, { propertyId, guestBookingId: bookingId }),
+          ).toMatchObject({
+            revision: 2,
+            editRevision: 2,
+            pricingQuoteId: amendedQuoteId,
+            quote: { stay: amendedStay },
+          });
         } else {
           await amend(1, amendedStay, amendedQuoteId, bundle);
           await moveBooking(amendedStay, amendedQuoteId, bundle, 1);
@@ -625,6 +687,21 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
               ? { outcome: "adopted", guestBookingId: bookingId, acceptanceId }
               : undefined,
         );
+        if (amended) {
+          // The amended acceptance decodes: the accepted consent with the repriced quote and holds.
+          const current = await loadCurrentPricingAcceptance(db, {
+            propertyId,
+            guestBookingId: bookingId,
+          });
+          expect(current).toMatchObject({
+            revision: 1,
+            editRevision: 1,
+            pricingQuoteId: amendedQuoteId,
+            quote: { quoteId: amendedQuoteId, stay: amendedStay },
+            reservation: bundle,
+          });
+          expect(current!.acceptance.quote.quoteId).toBe(quote.quoteId);
+        }
         const after = await snapshot();
         expect(
           after.receipts.every(
@@ -889,24 +966,12 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           reservation: acceptedBundle,
           occurredAt: at,
         });
-        const moved = structuredClone(quote);
-        Object.assign(moved, { quoteId: movedId });
-        Object.assign(moved.stay, { checkIn: "2026-10-02" });
-        for (const room of moved.rooms) Object.assign(room, { nights: room.nights.slice(1) });
-        Object.assign(moved.evidence, {
-          lines: moved.evidence.lines.map((line) => ({
-            ...line,
-            amountMinor: String(Number(line.amountMinor) / 2),
-          })),
-          totalMinor: "54000",
-          dueLaterMinor: "54000",
-          requestKey: replacementStayKey(moved.stay),
-          // Repriced under today's offer terms; the guest accepted the partial-refund tiers.
-          terms: moved.evidence.terms.map((term) => ({
-            ...term,
-            cancellation: { kind: "non_refundable" as const },
-          })),
-        });
+        // The same rooms, nightly prices and booked terms (0477 pins them) on the new date.
+        const moved = repricedQuote(
+          quote,
+          { checkIn: "2026-10-02", checkOut: "2026-10-03" },
+          movedId,
+        );
         const movedHolds = await port.reserveBundle!({
           propertyId,
           checkIn: "2026-10-02",
@@ -963,7 +1028,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             cancelledAt: new Date("2026-09-18T08:00:00Z"),
           });
         // 18 September is 14 days before the new check-in (50%), 13 before the accepted one (25%);
-        // the base is the repriced one-night total, the terms are still the accepted tiers.
+        // the base is the repriced one-night total.
         expect(await cancellation(movedStay)).toMatchObject({
           daysBeforeCheckIn: 14,
           totalMinor: "54000",
@@ -1175,11 +1240,11 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         await adopt();
         expect(await snapshot()).toEqual(before);
       } else if (scenario === "amended-stale-booking" || scenario === "amended-earlier-revision") {
+        // The common ending below rolls back and checks that nothing changed.
         await expect(adopt()).rejects.toMatchObject({
           constraint: "chk_pms_direct_booking_receipt_handoff_scope",
           message: "replacement inventory has no matching unchanged acceptance",
         });
-        expect(await snapshot()).toEqual(before);
       } else
         await expect(adopt()).rejects.toMatchObject({
           constraint:
