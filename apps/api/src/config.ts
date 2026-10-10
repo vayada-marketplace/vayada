@@ -1,4 +1,5 @@
 import { loadAirbnbImportConfig } from "./airbnbImportRuntime.js";
+import { CHANNEX_RESERVED_TEST_IDS } from "./domains/channexOwnershipGate.js";
 import { loadServerConfig } from "@vayada/backend-config";
 import { createHmac } from "node:crypto";
 import pg from "pg";
@@ -89,6 +90,10 @@ export type ChannexManagementConfig = {
   stagingPublishedOffersEnabled?: boolean;
   stagingInventoryEnabled?: boolean;
   stagingNoShowEnabled?: boolean;
+  /** VAY-2108: the per-hotel claimed scope (engineering/channex-per-hotel-ownership.md). */
+  scope?: "claimed";
+  /** Target properties the claimed scope may own, on top of their active claims. */
+  ownedPropertyIds?: readonly string[];
   capabilityModes: {
     connection: ChannexManagementMode;
     provisioning: ChannexManagementMode;
@@ -119,6 +124,23 @@ export function channexConnectionOnlyScope(config: ChannexManagementConfig): boo
     !config.stagingPublishedOffersEnabled &&
     !config.stagingInventoryEnabled &&
     !config.stagingNoShowEnabled &&
+    ["https://app.channex.io", "https://staging.channex.io"].includes(config.apiBaseUrl ?? "")
+  );
+}
+
+/**
+ * VAY-2108: the claimed scope. Until the claimed worker scope exists it adds booking sync, on the
+ * API login, to the connection scope; every other durable capability stays observe_only.
+ */
+export function channexClaimedScope(config: ChannexManagementConfig): boolean {
+  const modes = config.capabilityModes;
+  return (
+    config.scope === "claimed" &&
+    modes.provisioning === "observe_only" &&
+    modes.ariSync === "observe_only" &&
+    modes.markups === "observe_only" &&
+    modes.messaging === "observe_only" &&
+    !config.stagingRestrictionsPropertyId &&
     ["https://app.channex.io", "https://staging.channex.io"].includes(config.apiBaseUrl ?? "")
   );
 }
@@ -815,6 +837,45 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
       "Scoped Channex restrictions require a property UUID, staging URL, disabled background workers, and only ARI mutations",
     );
   }
+  const scope = readOptionalEnv(env, "PMS_CHANNEX_SCOPE");
+  if (scope !== undefined && scope !== "claimed")
+    throw new Error("PMS_CHANNEX_SCOPE must be claimed when set");
+  // Unset and empty differ: claimed needs the list, and an empty list owns no hotel.
+  const ownedRaw = env["PMS_CHANNEX_OWNED_PROPERTY_IDS"];
+  if ((scope === "claimed") !== (ownedRaw !== undefined))
+    throw new Error(
+      "PMS_CHANNEX_OWNED_PROPERTY_IDS is required with, and only with, PMS_CHANNEX_SCOPE=claimed",
+    );
+  const ownedPropertyIds = ownedRaw ? ownedRaw.split(",") : [];
+  if (
+    ownedPropertyIds.some(
+      (id) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id),
+    ) ||
+    new Set(ownedPropertyIds).size !== ownedPropertyIds.length
+  )
+    throw new Error(
+      "PMS_CHANNEX_OWNED_PROPERTY_IDS must be distinct lowercase UUIDs, comma-separated",
+    );
+  if (
+    apiBaseUrl !== "https://staging.channex.io" &&
+    ownedPropertyIds.some((id) => CHANNEX_RESERVED_TEST_IDS.includes(id))
+  )
+    throw new Error("PMS_CHANNEX_OWNED_PROPERTY_IDS names a reserved staging/test property");
+  if (
+    scope === "claimed" &&
+    (stagingRestrictionsPropertyId ||
+      stagingNoShowEnabled ||
+      stagingInventoryEnabled ||
+      stagingMealsEnabled ||
+      stagingPublishedOffersEnabled ||
+      !["https://app.channex.io", "https://staging.channex.io"].includes(apiBaseUrl ?? "") ||
+      (["provisioning", "ariSync", "markups", "messaging", "iframe"] as const).some(
+        (capability) => capabilityModes[capability] === "mutating",
+      ))
+  )
+    throw new Error(
+      "The claimed Channex scope allows only connection, booking sync and reviews on Channex, without staging scopes",
+    );
   const legacyBookingMode = (
     readOptionalEnv(env, "CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE") ?? "legacy-owned"
   )
@@ -837,10 +898,21 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
       "Mutating PMS Channex capabilities require CHANNEX_API_BASE_URL and CHANNEX_API_KEY",
     );
   }
-  const workerEnabled = readBooleanEnv(env, "PMS_CHANNEX_WORKER_ENABLED", durableCommandsMutating);
+  // VAY-2108: claimed booking sync runs on the API login, so it needs no management worker.
+  const claimedWithoutWorker = scope === "claimed" && capabilityModes.connection !== "mutating";
+  const workerEnabled = readBooleanEnv(
+    env,
+    "PMS_CHANNEX_WORKER_ENABLED",
+    durableCommandsMutating && !claimedWithoutWorker,
+  );
   const workerDatabaseUrl = readOptionalPgConnectionEnv(env, "PMS_CHANNEX_MANAGEMENT_DATABASE_URL");
   // A validated isolated staging scope may retain queued commands while its worker is paused.
-  if (durableCommandsMutating && !workerEnabled && !stagingRestrictionsPropertyId) {
+  if (
+    durableCommandsMutating &&
+    !workerEnabled &&
+    !stagingRestrictionsPropertyId &&
+    !claimedWithoutWorker
+  ) {
     throw new Error("Mutating PMS Channex capabilities require PMS_CHANNEX_WORKER_ENABLED=true");
   }
   if (
@@ -887,6 +959,7 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     stagingNoShowEnabled,
     workerEnabled,
     capabilityModes,
+    ...(scope === "claimed" ? { scope, ownedPropertyIds } : {}),
   };
 }
 
@@ -1160,6 +1233,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     pmsOperationsSource !== "target"
   ) {
     throw new Error("Mutating PMS Channex capabilities require PMS_OPERATIONS_SOURCE=target");
+  }
+  // VAY-2108: claimed hotels take bookings by pull only (wave 1); mutating webhook intake would
+  // queue booking and alteration work for every claimed hotel, outside the owned list.
+  if (
+    channexManagement.scope === "claimed" &&
+    prospectiveConfig.providerWebhooks.channexMode === "mutating"
+  ) {
+    throw new Error("The claimed Channex scope requires CHANNEX_WEBHOOK_INTAKE_MODE observe_only");
   }
   if (env.NODE_ENV === "production" && !stripeSubscriptionRuntimeEnabled(prospectiveConfig)) {
     throw new Error(

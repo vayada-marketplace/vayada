@@ -73,6 +73,7 @@ import { createOrdinaryHotelSetupLaunchSettingsCommand } from "./hotelSetupLaunc
 import { createOrdinaryHotelSetupFeatureHubCommands } from "./hotelSetupFeatureHubOrdinary.js";
 import {
   type ApiConfig,
+  channexClaimedScope,
   channexConnectionOnlyScope,
   loadConfig,
   stripeSubscriptionRuntimeEnabled,
@@ -549,6 +550,7 @@ const noShowReportingEnabled =
   config.channexManagement.workerEnabled &&
   (config.channexManagement.stagingNoShowEnabled ||
     (config.channexManagement.capabilityModes.bookingSync === "mutating" &&
+      config.channexManagement.scope !== "claimed" &&
       config.backgroundWorkersEnabled));
 const pmsChannexManagementCommandPort =
   channexCommandsMutating || stagingAlertProperty(config)
@@ -1294,7 +1296,9 @@ const channexManagementWorkerStore =
         stagingMealsEnabled: config.channexManagement.stagingMealsEnabled,
         stagingPublishedOffersEnabled: config.channexManagement.stagingPublishedOffersEnabled,
         stagingInventoryEnabled: config.channexManagement.stagingInventoryEnabled,
-        connectionOnly: channexConnectionOnlyScope(config.channexManagement),
+        connectionOnly:
+          channexConnectionOnlyScope(config.channexManagement) ||
+          channexClaimedScope(config.channexManagement),
         excludedIds: channexExcludedIds(config.channexManagement.apiBaseUrl),
       })
     : undefined;
@@ -1810,8 +1814,15 @@ const app = buildApp({
           ? config.channexManagement.stagingRestrictionsPropertyId
           : undefined,
         datePrices: createPgChannelDatePrices(targetDatabaseUrl),
-        capabilityModes: config.channexManagement.capabilityModes,
-        connectionOnly: channexConnectionOnlyScope(config.channexManagement),
+        // VAY-2108: under the claimed scope booking sync is per hotel and pull-driven, so the routes
+        // offer no sync_bookings command or booking-alert recovery nobody would ever process.
+        capabilityModes:
+          config.channexManagement.scope === "claimed"
+            ? { ...config.channexManagement.capabilityModes, bookingSync: "observe_only" }
+            : config.channexManagement.capabilityModes,
+        connectionOnly:
+          channexConnectionOnlyScope(config.channexManagement) ||
+          channexClaimedScope(config.channexManagement),
         publishedOfferProvisioningEnabled:
           config.channexManagement.stagingPublishedOffersEnabled === true,
         publishedOfferProvisioningPropertyId:
@@ -2420,13 +2431,20 @@ const channexBookingWorkerEnabled =
   config.channexManagement.capabilityModes.bookingSync === "mutating" &&
   config.channexManagement.bookingMutationOwner === "target" &&
   Boolean(config.channexManagement.apiBaseUrl && config.channexManagement.apiKey);
+// VAY-2108: the claimed scope ingests only its allowlisted hotels, even on a canary without
+// background workers (it shares the production database).
+const channexOwnedPropertyIds =
+  config.channexManagement.scope === "claimed"
+    ? (config.channexManagement.ownedPropertyIds ?? [])
+    : undefined;
 const runChannexBookings = () => {
-  if (!config.backgroundWorkersEnabled) return;
+  if (!config.backgroundWorkersEnabled && !channexOwnedPropertyIds) return;
   if (activeChannexBookingBatch || !channexBookingWorkerEnabled) return;
   activeChannexBookingBatch = runChannexBookingJobs(targetDatabaseUrl, {
     apiBaseUrl: config.channexManagement.apiBaseUrl!,
     apiKey: config.channexManagement.apiKey!,
     signal: channexBookingAbort.signal,
+    ownedPropertyIds: channexOwnedPropertyIds,
     ...airbnbAlterationRuntime?.bookingWorkerOptions,
     ownsMutation: () =>
       config.channexManagement.capabilityModes.bookingSync === "mutating" &&

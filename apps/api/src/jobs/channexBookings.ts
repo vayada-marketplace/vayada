@@ -50,7 +50,7 @@ class LeaseLost extends Error{constructor(){super("lease_lost")}}
 // prettier-ignore
 export async function runChannexBookingJobs(
   connectionString: string,
-  options:{apiBaseUrl:string;apiKey:string;ownsMutation:()=>boolean;fetch?:typeof fetch;workerId?:string;limit?:number;signal?:AbortSignal;applyAirbnbAlterations?:boolean;allowUnverifiedAirbnbAlterations?:boolean;airbnbAlterationPropertyIds?:readonly string[];airbnbFinanceSettings?:ChannexAirbnbFinanceSettingsPort;stagingImport?:StagingImportScope},
+  options:{apiBaseUrl:string;apiKey:string;ownsMutation:()=>boolean;ownedPropertyIds?:readonly string[];fetch?:typeof fetch;workerId?:string;limit?:number;signal?:AbortSignal;applyAirbnbAlterations?:boolean;allowUnverifiedAirbnbAlterations?:boolean;airbnbAlterationPropertyIds?:readonly string[];airbnbFinanceSettings?:ChannexAirbnbFinanceSettingsPort;stagingImport?:StagingImportScope},
 ): Promise<Counters> {
   if (options.stagingImport && options.apiBaseUrl !== "https://staging.channex.io") throw new Error("staging_import_required");
   const pool = new pg.Pool({ connectionString, max: 2, connectionTimeoutMillis: 5_000 }),
@@ -58,7 +58,7 @@ export async function runChannexBookingJobs(
   try {
     for (let index = 0; index < (options.limit ?? 25); index += 1) {
       if(options.signal?.aborted)break;
-      const claimed = await claim(pool, options.workerId ?? `channex-bookings:${process.pid}`, options.stagingImport);
+      const claimed = await claim(pool, options.workerId ?? `channex-bookings:${process.pid}`, options.stagingImport, options.ownedPropertyIds);
       if (!claimed) break;
       if ("expired" in claimed) {
         counters.deadLettered += 1;
@@ -90,7 +90,7 @@ async function processJob(pool:pg.Pool,job:Job,options:Parameters<typeof runChan
 }
 
 // prettier-ignore
-async function claim(pool:pg.Pool,workerId:string,scope?:StagingImportScope):Promise<Job|{expired:true}|null>{
+async function claim(pool:pg.Pool,workerId:string,scope?:StagingImportScope,owned?:readonly string[]):Promise<Job|{expired:true}|null>{
   return transaction(pool, async (client) => {
     const row = (
       await client.query<{id:string;propertyId:string|null;resourceId:string;correlationId:string|null;status:"pending"|"running";attemptsCount:number;maxAttempts:number;handledRevisions:unknown;payload:unknown}>(
@@ -103,10 +103,11 @@ async function claim(pool:pg.Pool,workerId:string,scope?:StagingImportScope):Pro
             AND job_metadata->'stagingImport'->>'bindingGeneration'=$9
             AND job_metadata#>>'{stagingImport,catalogHash}' IS NOT DISTINCT FROM $10::text
             AND job_metadata->'stagingAlertRecovery' IS NOT DISTINCT FROM $11::jsonb)) AND
+          ($12::text[] IS NULL OR payload->>'propertyId' = ANY($12::text[])) AND
           ((status='pending' AND run_after<=now() AND attempts_count<max_attempts) OR
            (status='running' AND locked_at<=now()-($3::bigint*interval '1 millisecond')))
          ORDER BY priority DESC,run_after,created_at FOR UPDATE SKIP LOCKED LIMIT 1`,
-        [QUEUE, TYPE, LEASE_MS, scope?.jobId??null, scope?.propertyId??null, scope?.providerPropertyId??null, scope?.channelBookingId??null, scope?.revision??null, scope?.bindingGeneration??null, scope?.catalogHash??null,scope?.alertRecovery?JSON.stringify(scope.alertRecovery):null],
+        [QUEUE, TYPE, LEASE_MS, scope?.jobId??null, scope?.propertyId??null, scope?.providerPropertyId??null, scope?.channelBookingId??null, scope?.revision??null, scope?.bindingGeneration??null, scope?.catalogHash??null,scope?.alertRecovery?JSON.stringify(scope.alertRecovery):null,owned?[...owned]:null],
       )
     ).rows[0];
     if (!row) return null;
