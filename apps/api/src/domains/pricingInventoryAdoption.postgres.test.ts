@@ -683,6 +683,8 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           { ...guest, expected_cancellation_fee_minor: "81000" },
           context("c"),
         );
+        // The adapter commit became a savepoint release: run the deferred checks a commit would.
+        await db.query("SET CONSTRAINTS ALL IMMEDIATE");
         const event = await db.query(
           `SELECT booking.lifecycle_status AS status, event.event_payload->'cancellationOutcome'->>'retainedMinor' AS fee
            FROM booking.guest_bookings booking JOIN booking.booking_status_events event
@@ -758,6 +760,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         if (scenario.endsWith("after-adoption")) {
           expect(await adopt()).toMatchObject({ outcome: "adopted" });
           expect(await free()).toEqual({ released: 0, canceledAssignments: 3 });
+          await db.query("SET CONSTRAINTS ALL IMMEDIATE");
           const assignments = await db.query(
             "SELECT assignment_status AS status FROM pms.operational_booking_assignments WHERE guest_booking_id=$1",
             [bookingId],
@@ -765,6 +768,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           expect(assignments.rows).toEqual([1, 2, 3].map(() => ({ status: "canceled" })));
         } else {
           expect(await free()).toEqual({ released: 2, canceledAssignments: 0 });
+          await db.query("SET CONSTRAINTS ALL IMMEDIATE");
           await db.query("SAVEPOINT late_adoption");
           await expect(adopt()).rejects.toBeInstanceOf(PmsAcceptedPricingReservationConflict);
           await db.query("ROLLBACK TO SAVEPOINT late_adoption");
