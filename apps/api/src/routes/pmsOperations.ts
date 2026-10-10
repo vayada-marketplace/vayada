@@ -238,6 +238,13 @@ export type PmsTemplateStep = {
   stepId: string;
   label: string;
   required: boolean;
+  /** Check-in checklist: what the step asks and which input it shows. */
+  prompt?: string;
+  type?: "checkbox" | "text" | "amount";
+  /** Check-out inspection: the two answer labels and the note hint. */
+  okLabel?: string;
+  negativeLabel?: string;
+  notePrompt?: string;
 };
 
 export type PmsOperationalTemplateKind = "check_in_checklist" | "check_out_inspection";
@@ -5061,6 +5068,19 @@ function isRecurringMonthDay(value: string): boolean {
   return day <= new Date(Date.UTC(2024, month, 0)).getUTCDate();
 }
 
+const ROOM_TYPE_UPDATE_FIELDS = new Set([
+  "commandId",
+  "idempotencyKey",
+  "locationAddress",
+  "latitude",
+  "longitude",
+  "cancellationPolicy",
+  "flexibleCancellationType",
+  "partialRefundCancelWindowDays",
+  "partialRefundAmountPercent",
+  "partialRefundTiers",
+]);
+
 function toRoomTypeUpdateCommand(
   propertyId: string,
   roomTypeId: string,
@@ -5069,6 +5089,22 @@ function toRoomTypeUpdateCommand(
   const raw = objectBody(request.body);
   if (!raw) return { error: invalidBody("Room type update body must be an object.") };
   if (!isUuid(roomTypeId)) return { error: invalidBody("roomTypeId must be a UUID.") };
+  // Refuse fields this command does not store instead of answering 200 without saving them.
+  const unsupported = Object.keys(raw).filter((key) => !ROOM_TYPE_UPDATE_FIELDS.has(key));
+  if (unsupported.length > 0) {
+    const named = unsupported
+      .sort()
+      .slice(0, 5)
+      .map((key) => key.slice(0, 40));
+    return {
+      error: invalidBody(
+        `Room type update does not save ${named.join(", ")}${unsupported.length > 5 ? ", …" : ""}.`,
+      ),
+    };
+  }
+  if (!Object.keys(raw).some((key) => key !== "commandId" && key !== "idempotencyKey")) {
+    return { error: invalidBody("Room type update has nothing to save.") };
+  }
 
   const commandId = stringField(raw.commandId);
   const idempotencyKey = stringField(raw.idempotencyKey);
@@ -5516,7 +5552,7 @@ function toOperationalTemplateUpdateCommand(
     return { error: invalidBody("Template update requires commandId and idempotencyKey.") };
   }
 
-  const steps = toOperationalTemplateSteps(body.steps);
+  const steps = toOperationalTemplateSteps(body.steps, templateKind);
   if ("error" in steps) return steps;
 
   return {
@@ -5531,8 +5567,14 @@ function toOperationalTemplateUpdateCommand(
   };
 }
 
+const TEMPLATE_STEP_TEXT_FIELDS = {
+  check_in_checklist: { prompt: 500 },
+  check_out_inspection: { okLabel: 60, negativeLabel: 60, notePrompt: 200 },
+} as const satisfies Record<PmsOperationalTemplateKind, Record<string, number>>;
+
 function toOperationalTemplateSteps(
   value: unknown,
+  templateKind: PmsOperationalTemplateKind,
 ): { value: PmsTemplateStep[] } | { error: PmsOperationsError } {
   if (!Array.isArray(value)) {
     return { error: invalidBody("Template steps must be an array.") };
@@ -5576,8 +5618,46 @@ function toOperationalTemplateSteps(
       return { error: invalidBody(`Template step ${index + 1} required must be a boolean.`) };
     }
 
+    const step: PmsTemplateStep = { stepId, label, required: raw.required === true };
+    const textFields: Record<string, number> = TEMPLATE_STEP_TEXT_FIELDS[templateKind];
+    const allowed = new Set(["stepId", "label", "required", ...Object.keys(textFields)]);
+    if (templateKind === "check_in_checklist") allowed.add("type");
+    // Refuse what this template does not store instead of answering 200 without it.
+    const unsupported = Object.keys(raw).filter((key) => !allowed.has(key));
+    if (unsupported.length > 0) {
+      return {
+        error: invalidBody(
+          `Template step ${index + 1} does not save ${unsupported
+            .sort()
+            .slice(0, 5)
+            .map((key) => key.slice(0, 40))
+            .join(", ")}.`,
+        ),
+      };
+    }
+    for (const [field, maxLength] of Object.entries(textFields)) {
+      const text = raw[field];
+      if (text === undefined) continue;
+      if (typeof text !== "string" || text.length > maxLength) {
+        return {
+          error: invalidBody(
+            `Template step ${index + 1} ${field} must be text of at most ${maxLength} characters.`,
+          ),
+        };
+      }
+      if (text.trim()) Object.assign(step, { [field]: text.trim() });
+    }
+    if (raw.type !== undefined) {
+      if (raw.type !== "checkbox" && raw.type !== "text" && raw.type !== "amount") {
+        return {
+          error: invalidBody(`Template step ${index + 1} type must be checkbox, text or amount.`),
+        };
+      }
+      step.type = raw.type;
+    }
+
     seenStepIds.add(stepId);
-    steps.push({ stepId, label, required: raw.required === true });
+    steps.push(step);
   }
 
   return { value: steps };
