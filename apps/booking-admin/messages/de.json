@@ -990,7 +990,7 @@
   "admin.languageSelector": "Sprachauswahl",
   "admin.hiddenAutomaticallyWhenOnlyOneLanguageIsConfigured": "Wird automatisch ausgeblendet, wenn nur eine Sprache konfiguriert ist.",
   "admin.currencySelector": "Währungsauswahl",
-  "admin.hiddenAutomaticallyWhenOnlyOneCurrencyIsConfigured": "Wird automatisch ausgeblendet, wenn nur eine Währung konfiguriert ist.",
+  "admin.multiCurrencyIsNotAvailableYet": "Mehrere Währungen sind noch nicht verfügbar.",
   "admin.heroHeading": "Heldenüberschrift",
   "admin.publicDescription": "Öffentliche Beschreibung",
   "admin.heroSubtext": "Helden-Subtext",
