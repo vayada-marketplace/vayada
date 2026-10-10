@@ -7,7 +7,8 @@ import {
   pmsWebReservation,
 } from "../support/pmsWebMocks";
 
-// The app layout's setup guard reads staff self-access, which the shared mocks don't cover.
+// The shared mocks default to an owner with every permission; these tests pin the narrower
+// operations access they were written for (a page route wins over the default).
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/identity/staff/self-access", (route) =>
     route.fulfill({
