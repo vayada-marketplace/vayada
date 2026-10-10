@@ -8,6 +8,8 @@ import {
   BOOKING_ADMIN_PROPERTY_ID,
   BOOKING_ADMIN_PROPERTY_SETTINGS_PATH,
   BOOKING_ADMIN_SAME_DAY_PATH,
+  BOOKING_ADMIN_PROPERTY_PROFILE_PATH,
+  defaultBookingAdminPropertyProfile,
   defaultBookingAdminPropertySettings,
   defaultCustomDomain,
   mockBookingAdminDesignSettings,
@@ -162,6 +164,121 @@ test.describe("booking-admin settings no-legacy guard", () => {
       youtube: "https://youtube.com/@alpenrose",
     });
     await assertHealthy();
+  });
+
+  test("saves the property name through the profile and keeps the address and PayPal", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+    // VAY-2101: the name and address used to be sent to a write that never stored them.
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingAdminAuthenticatedSession(page);
+    const persisted = {
+      ...defaultBookingAdminPropertySettings,
+      property_name: "Alpenrose",
+      address: "Alpenstrasse 12, Munich, 80331, DE",
+    };
+    await mockBookingAdminShellRoutes(page, { propertySettings: persisted });
+    const profile = structuredClone(defaultBookingAdminPropertyProfile);
+    const profileWrites: unknown[] = [];
+    let refuseRename = false;
+    await page.route(`**${BOOKING_ADMIN_PROPERTY_PROFILE_PATH}*`, async (route) => {
+      if (route.request().method() === "PUT" && refuseRename) {
+        await route.fulfill({ status: 403, json: { code: "forbidden" } });
+        return;
+      }
+      if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON() as {
+          expectedProfileRevision: number;
+          patch: { displayName: string };
+        };
+        profileWrites.push(body);
+        profile.profileRevision += 1;
+        profile.profile.displayName = body.patch.displayName;
+        persisted.property_name = body.patch.displayName;
+      }
+      await route.fulfill({ json: profile });
+    });
+    const settingsWrites: Record<string, unknown>[] = [];
+    await page.route(`**${BOOKING_ADMIN_PROPERTY_SETTINGS_PATH}*`, async (route) => {
+      if (route.request().method() === "PATCH") {
+        const body = route.request().postDataJSON() as Record<string, unknown>;
+        settingsWrites.push(body);
+        Object.assign(persisted, body);
+      }
+      await route.fulfill({ json: persisted });
+    });
+    await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH}`, (route) =>
+      route.fulfill({
+        json: {
+          contractVersion: "finance-route-contracts.v1",
+          propertyId: BOOKING_ADMIN_PROPERTY_ID,
+          paymentSettings: {
+            paymentsEnabled: true,
+            paymentProvider: "vayada",
+            acceptedMethods: ["pay_at_property", "cash", "paypal"],
+            defaultCurrency: "EUR",
+            supportedCurrencies: ["EUR"],
+            requiresManualReview: false,
+            depositPolicy: { paypalEmail: "pay@alpenrose.example", paypalPaymentWindowHours: 24 },
+            providerAccount: {
+              providerAccountId: null,
+              provider: null,
+              status: "not_configured",
+              onboardingStatus: "not_started",
+              chargesEnabled: false,
+              payoutsEnabled: false,
+              capabilities: [],
+            },
+          },
+        },
+      }),
+    );
+
+    await page.goto("/settings");
+    await expect(page.getByTestId("property-address")).toHaveText(
+      "Alpenstrasse 12, Munich, 80331, DE",
+    );
+    await expect(
+      page.getByRole("link", { name: "Edit in Location & surroundings" }),
+    ).toHaveAttribute("href", "/settings/location");
+    const name = page.getByPlaceholder("Enter property name");
+    await expect(name).toHaveValue("Alpenrose");
+    await name.fill("Alpenrose Lodge");
+    await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+    await expect(page.getByText("Settings saved successfully")).toBeVisible();
+
+    expect(profileWrites).toEqual([
+      { expectedProfileRevision: 1, patch: { displayName: "Alpenrose Lodge" } },
+    ]);
+    expect(settingsWrites).toHaveLength(1);
+    for (const field of ["property_name", "address", "city", "country"]) {
+      expect(settingsWrites[0]).not.toHaveProperty(field);
+    }
+    await page.getByRole("button", { name: "Billing" }).first().click();
+    await expect(page.getByPlaceholder("payments@yourproperty.com")).toHaveValue(
+      "pay@alpenrose.example",
+    );
+
+    // Billing is now in the URL; open the Property section again, as a fresh visit would.
+    await page.goto("/settings?section=property");
+    await expect(page.getByPlaceholder("Enter property name")).toHaveValue("Alpenrose Lodge");
+    await assertHealthy();
+
+    // Only the owner can rename: other changes save, and the page says the name did not.
+    // (The refused request logs a console error, so page health is checked above.)
+    refuseRename = true;
+    await page.getByPlaceholder("Enter property name").fill("Alpenrose Hotel");
+    await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+    await expect(
+      page.getByText("Your other changes were saved, but the property name wasn't changed."),
+    ).toBeVisible();
+    await expect(page.getByText("Settings saved successfully")).toHaveCount(0);
+    expect(settingsWrites).toHaveLength(2);
+    expect(profileWrites).toHaveLength(1);
   });
 
   test("loads migrated settings surfaces without helper calls", async ({ page }, testInfo) => {
