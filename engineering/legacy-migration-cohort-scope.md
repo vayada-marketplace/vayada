@@ -111,6 +111,16 @@ platform.production_migration_cohorts(
   - Legacy `scheduled` and `processing` payouts of non-cohort hotels are retired
     in the target, not kept actionable. Legacy keeps paying out the hotels still
     on legacy, and finishes payouts it already started for a migrated hotel.
+  - So a cohort hotel's open legacy payouts (`scheduled`, `processing`, `failed`) are imported
+    `processing`, in flight for review, with `legacyPayoutStatus`,
+    `settlementRequiresReview = true`, `settlementReviewReason = 'legacy_settles_open_payout'`,
+    `activeLegacyTransferWindow = true` and `maxDispatchAttempts = 0`. No dispatcher, settlement,
+    release or mark-paid path takes a `processing` payout, except the affiliate dispatcher after
+    an expired lease, which `maxDispatchAttempts = 0` (and the missing `affiliateSettlementReady`)
+    stops; the property dispatcher and its route also refuse an active legacy transfer window.
+    A legacy failure stays evidence in the metadata (`legacyFailedAt`, `legacyFailureCode`).
+    Wave 1 still settles or voids open payouts before the snapshot (F.4): this is defence in
+    depth. Recording legacy's later outcome in the target is a reviewed repair still to build.
   - Channex adoption ignores `outside_migration_cohort` quarantine. It no longer
     treats it as a warning that blocks all adoption.
   - Pending (`pending_payment`) bookings of non-cohort hotels are still legacy's (P18). The
@@ -315,6 +325,8 @@ marker). The later-wave path must exempt earlier waves first.
   - a verified domain
   - a pending booking whose first deadline key is not the never-due hold
     (`pendingBookingNotHeld`)
+- It also fails (`cohortPayoutActionable`) when a cohort property has an imported open payout
+  (`pending`, `scheduled`, `failed`, or `processing` without all three hold markers).
 - It also fails when a cohort property is unexpectedly quarantined, or lacks
   exactly one active hotel organization holding both native links with an
   active, unsuspended PMS entitlement.

@@ -144,8 +144,12 @@ describe.skipIf(!URL)("production Finance target IO (PostgreSQL)", () => {
   });
 
   // VAY-1362: a PMS hotel without a Booking anchor keeps its own quarantine reason; the cohort
-  // ID sets still retire its payouts.
-  it("retires open payouts of a hotel outside the migration cohort (VAY-1362)", async () => {
+  // ID sets still retire its payouts. Legacy also finishes a cohort hotel's open payouts: the
+  // target holds those in flight for settlement review, out of every dispatcher's reach.
+  it.each([
+    ["retires open payouts of a hotel outside the migration cohort", false],
+    ["holds a cohort hotel's open legacy payouts for settlement review", true],
+  ])("%s (VAY-1362)", async (_name, inCohort) => {
     const hotel = "fa000000-0000-4000-8000-000000000005";
     const booking = "fa000000-0000-4000-8000-000000000006";
     const guestBooking = "fa000000-0000-4000-8000-000000000007";
@@ -157,11 +161,15 @@ describe.skipIf(!URL)("production Finance target IO (PostgreSQL)", () => {
          VALUES ($1, 'legacy-private-property-cohort-test', 'Outside cohort')`,
         [PROPERTY],
       );
-      const metadata = JSON.stringify({
-        migrationRunId: RUN,
-        migrationDisposition: "private_quarantine",
-        migrationDispositionReason: "missing_canonical_property",
-      });
+      const metadata = JSON.stringify(
+        inCohort
+          ? { migrationRunId: RUN, migrationDisposition: "canonical" }
+          : {
+              migrationRunId: RUN,
+              migrationDisposition: "private_quarantine",
+              migrationDispositionReason: "missing_canonical_property",
+            },
+      );
       await client.query(
         `INSERT INTO hotel_catalog.property_source_links
            (property_id, source_system, source_table, source_id, relationship, metadata)
@@ -211,8 +219,8 @@ describe.skipIf(!URL)("production Finance target IO (PostgreSQL)", () => {
         client,
         parseProductionMigrationCohort({
           sourceRunId: RUN,
-          bookingHotelIds: [ORGANIZATION],
-          pmsHotelIds: [],
+          bookingHotelIds: inCohort ? [hotel] : [ORGANIZATION],
+          pmsHotelIds: inCohort ? [hotel] : [],
           marketplaceHotelIds: [],
           approvalProofSha256: "d".repeat(64),
         }),
@@ -232,15 +240,31 @@ describe.skipIf(!URL)("production Finance target IO (PostgreSQL)", () => {
       });
       const written = await client.query(
         `SELECT payout_status AS status, payout_metadata ->> 'legacyPayoutStatus' AS legacy,
-                payout_metadata ->> 'retiredReason' AS reason
+                payout_metadata ->> 'retiredReason' AS reason,
+                payout_metadata ->> 'settlementRequiresReview' AS review,
+                payout_metadata ->> 'activeLegacyTransferWindow' AS "legacyWindow",
+                payout_metadata ->> 'maxDispatchAttempts' AS "maxAttempts"
            FROM finance.payouts WHERE related_property_id = $1 ORDER BY source_payout_id`,
         [PROPERTY],
       );
-      expect(written.rows).toEqual([
-        { status: "canceled", legacy: "scheduled", reason: "outside_migration_cohort" },
-        { status: "canceled", legacy: "processing", reason: "outside_migration_cohort" },
-        { status: "canceled", legacy: "failed", reason: "outside_migration_cohort" },
-      ]);
+      const disposition = inCohort
+        ? {
+            status: "processing",
+            reason: null,
+            review: "true",
+            legacyWindow: "true",
+            maxAttempts: "0",
+          }
+        : {
+            status: "canceled",
+            reason: "outside_migration_cohort",
+            review: null,
+            legacyWindow: null,
+            maxAttempts: null,
+          };
+      expect(written.rows).toEqual(
+        ["scheduled", "processing", "failed"].map((legacy) => ({ ...disposition, legacy })),
+      );
     } finally {
       await client.query("ROLLBACK");
     }

@@ -632,6 +632,7 @@ describe.skipIf(!URL)("production parity evidence reader (PostgreSQL)", () => {
         { category: "autoOpenNotDisabled", subjectId: OUT_HOTEL_ID },
         { category: "bindingClaim", subjectId: OUT_HOTEL_ID },
         { category: "cohortHotelUnresolved", subjectId: MISSING_HOTEL_ID },
+        { category: "cohortPayoutActionable", subjectId: IN_HOTEL_ID },
         { category: "cohortPropertyEntitlement", subjectId: IN_HOTEL_ID },
         { category: "cohortPropertyOwner", subjectId: IN_HOTEL_ID },
         { category: "cohortPropertyQuarantined", subjectId: IN_HOTEL_ID },
@@ -1224,6 +1225,23 @@ async function insertCohortAccess(client: pg.Client, live: boolean): Promise<voi
               ($2, 'pms', 'property-management', 'active')`,
       [IN_ORGANIZATION_ID, OUT_ORGANIZATION_ID],
     );
+  // An imported open legacy payout: held in flight for settlement review, or left dispatchable.
+  await client.query(
+    `INSERT INTO finance.payouts (owner_scope, property_id, related_property_id, source_system,
+       source_payout_id, payout_status, amount, currency, payout_metadata)
+     VALUES ('property', $1, $1, 'pms', 'parity-cohort-in-payout', $2, 1, 'EUR', $3::jsonb)`,
+    [
+      IN_HOTEL_ID,
+      live ? "scheduled" : "processing",
+      live
+        ? {}
+        : {
+            settlementRequiresReview: true,
+            activeLegacyTransferWindow: true,
+            maxDispatchAttempts: 0,
+          },
+    ],
+  );
 }
 
 async function cleanupCohort(client: pg.Client): Promise<void> {

@@ -1051,6 +1051,7 @@ function payoutRecords(
     );
   const legacyStatus = payoutStatus(row.data["status"]);
   const status = targetPayoutStatus(context, hotelId, row.data["status"]);
+  const review = settlementReview(context, hotelId, legacyStatus);
   if (recipientType === "affiliate" && status === "paid")
     block(
       context,
@@ -1095,9 +1096,11 @@ function payoutRecords(
       providerPayoutId: null,
       scheduledAt: iso(row.data["scheduled_for"], "scheduled_for"),
       paidAt: status === "paid" ? completedAt : null,
-      failedAt: legacyStatus === "failed" ? updatedAt : null,
+      failedAt: legacyStatus === "failed" && !review ? updatedAt : null,
       failureCode:
-        legacyStatus === "failed" ? optionalText(row.data["last_error"], "last_error") : null,
+        legacyStatus === "failed" && !review
+          ? optionalText(row.data["last_error"], "last_error")
+          : null,
       retryCount,
       payoutMetadata: {
         paymentMethod: optionalText(row.data["payment_method"], "payment_method"),
@@ -1105,9 +1108,24 @@ function payoutRecords(
         notes: optionalText(row.data["notes"], "notes"),
         paidByUserId: row.data["paid_by_user_id"] ?? null,
         migrationDisposition: "historical_unbound",
-        ...(status !== legacyStatus
-          ? { legacyPayoutStatus: legacyStatus, retiredReason: "outside_migration_cohort" }
-          : {}),
+        ...(review
+          ? {
+              legacyPayoutStatus: legacyStatus,
+              settlementRequiresReview: true,
+              settlementReviewReason: "legacy_settles_open_payout",
+              ...(legacyStatus === "failed"
+                ? {
+                    legacyFailedAt: updatedAt,
+                    legacyFailureCode: optionalText(row.data["last_error"], "last_error"),
+                  }
+                : {}),
+              // Both payout dispatchers and the dispatch route skip these (VAY-1362 C).
+              activeLegacyTransferWindow: true,
+              maxDispatchAttempts: 0,
+            }
+          : status !== legacyStatus
+            ? { legacyPayoutStatus: legacyStatus, retiredReason: "outside_migration_cohort" }
+            : {}),
         providerBindingRequiresReview: providerIds.length > 0,
         paymentAllocationRequiresReview: relatedPayments.length > 0,
         legacyProviderPayoutReferenceSha256: providerIds[0] ? sha256(providerIds[0]) : null,
@@ -1719,17 +1737,34 @@ export function payoutStatus(value: unknown): string {
 }
 
 /** VAY-1362: legacy keeps paying out hotels outside the migration cohort, so their open legacy
- * payouts (including retryable failed ones) are retired in the target, never actionable. */
+ * payouts (including retryable failed ones) are retired in the target, never actionable. Legacy
+ * also finishes the open payouts of cohort hotels: they stay in flight ('processing') for
+ * review, a status no dispatcher, settlement, release or mark-paid path takes. */
 export function targetPayoutStatus(
   context: FinanceBuildContext,
   hotelId: string,
   value: unknown,
 ): string {
   const status = payoutStatus(value);
-  return (status === "scheduled" || status === "processing" || status === "failed") &&
-    outsideCohortSource(context.cohort, "pms", hotelId)
-    ? "canceled"
-    : status;
+  if (!openPayoutStatus(status) || !context.cohort) return status;
+  return outsideCohortSource(context.cohort, "pms", hotelId) ? "canceled" : "processing";
+}
+
+/** A cohort hotel's open legacy payout, imported for settlement review (VAY-1362 C). */
+function settlementReview(
+  context: FinanceBuildContext,
+  hotelId: string,
+  legacyStatus: string,
+): boolean {
+  return (
+    openPayoutStatus(legacyStatus) &&
+    Boolean(context.cohort) &&
+    !outsideCohortSource(context.cohort, "pms", hotelId)
+  );
+}
+
+function openPayoutStatus(status: string): boolean {
+  return status === "scheduled" || status === "processing" || status === "failed";
 }
 
 function paymentMethod(value: unknown): string {
