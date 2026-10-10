@@ -404,6 +404,97 @@ describe("Legacy fixed-plan subscription adoption", () => {
     expect(fixture.store.clearStaleReference).not.toHaveBeenCalled();
   });
 
+  it("resets a legacy Fixed hotel with no billing reference only with its own flag", async () => {
+    const fixture = setup({
+      metadata: {
+        legacyPlan: "fixed",
+        providerReentryRequired: false,
+        legacyBillingReferenceSha256: null,
+      },
+    });
+
+    const plain = await clearStaleLegacyBillingReference(
+      { propertyId: PROPERTY, apply: true },
+      fixture.dependencies,
+    );
+    expect(plain.reasons).toEqual([
+      "not_a_stale_legacy_reference",
+      "legacy_plan_fixed_needs_revert_flag",
+    ]);
+
+    const dryRun = await clearStaleLegacyBillingReference(
+      { propertyId: PROPERTY, apply: false, legacyFixedWithoutSubscription: true },
+      fixture.dependencies,
+    );
+    expect(dryRun).toMatchObject({ outcome: "would_clear", reasons: [] });
+    expect(fixture.stripe.findLegacySubscriptionsForHotel).toHaveBeenCalledWith(PROPERTY);
+    expect(fixture.store.clearStaleReference).not.toHaveBeenCalled();
+
+    const cleared = await clearStaleLegacyBillingReference(
+      { propertyId: PROPERTY, apply: true, legacyFixedWithoutSubscription: true },
+      fixture.dependencies,
+    );
+    expect(cleared).toMatchObject({ outcome: "cleared", bookabilityRefreshed: true });
+    expect(fixture.store.clearStaleReference).toHaveBeenCalledWith({
+      propertyId: PROPERTY,
+      organizationId: ORGANIZATION,
+      clearedAt: NOW.toISOString(),
+      legacyFixedWithoutSubscription: true,
+    });
+  });
+
+  it.each([
+    [
+      "a live Stripe subscription",
+      { legacyPlan: "fixed", providerReentryRequired: false, legacyBillingReferenceSha256: null },
+      [{ subscriptionId: "sub_live", status: "active" }],
+      ["live_subscription_exists:sub_live"],
+    ],
+    [
+      "a legacy billing reference",
+      { legacyPlan: "fixed", providerReentryRequired: true, legacyBillingReferenceSha256: "ab" },
+      [],
+      ["legacy_billing_reference_present"],
+    ],
+    [
+      "a legacy Commission plan",
+      { legacyPlan: "commission", providerReentryRequired: false },
+      [],
+      ["legacy_plan_not_fixed"],
+    ],
+  ] as const)(
+    "refuses the no-subscription reset for %s",
+    async (_case, metadata, found, reasons) => {
+      const fixture = setup({ metadata: { ...metadata } });
+      fixture.stripe.findLegacySubscriptionsForHotel.mockResolvedValue([...found]);
+
+      const report = await clearStaleLegacyBillingReference(
+        { propertyId: PROPERTY, apply: true, legacyFixedWithoutSubscription: true },
+        fixture.dependencies,
+      );
+
+      expect(report).toMatchObject({ outcome: "refused", reasons });
+      expect(fixture.store.clearStaleReference).not.toHaveBeenCalled();
+    },
+  );
+
+  it("refuses both Fixed reset flags together", async () => {
+    const fixture = setup({ metadata: { legacyPlan: "fixed", providerReentryRequired: false } });
+
+    const report = await clearStaleLegacyBillingReference(
+      {
+        propertyId: PROPERTY,
+        apply: true,
+        revertLegacyFixed: true,
+        legacyFixedWithoutSubscription: true,
+      },
+      fixture.dependencies,
+    );
+
+    expect(report.reasons).toContain("conflicting_flags");
+    expect(fixture.store.clearStaleReference).not.toHaveBeenCalled();
+  });
+
   it("reports an already cleared hotel and refreshes bookability on apply", async () => {
     const fixture = setup({
       billingStatus: "active",
@@ -483,8 +574,21 @@ describe("Legacy fixed-plan subscription adoption", () => {
       legacyFixedRevertedAt: NOW.toISOString(),
     });
 
+    await store.clearStaleReference({
+      propertyId: PROPERTY,
+      organizationId: ORGANIZATION,
+      clearedAt: NOW.toISOString(),
+      legacyFixedWithoutSubscription: true,
+    });
+    const [, withoutValues] = query.mock.calls[3] as [string, unknown[]];
+    expect(JSON.parse(String(withoutValues[2]))).toMatchObject({
+      planSelectedBy: "legacy-fixed-without-subscription-to-commission",
+      legacyFixedWithoutSubscriptionClearedAt: NOW.toISOString(),
+      providerReentryRequired: false,
+    });
+
     await store.getEntitlement(PROPERTY);
-    const [selectSql] = query.mock.calls[3] as [string, unknown[]];
+    const [selectSql] = query.mock.calls[4] as [string, unknown[]];
     expect(selectSql).toContain("finance.commission_rules");
     expect(selectSql).toContain("identity.organizations");
   });
