@@ -90,31 +90,19 @@ export default function ReplacementQuoteTerms({
                   : "Flexible"}
                 .
               </p>
-              <p>
-                Free cancellation deadline: {room.cancellation.terms.freeCancellationDeadlineDays}{" "}
-                days before arrival.
-              </p>
-              <p>After-deadline penalty: full booking amount.</p>
+              {room.cancellation.terms.flexibleCancellationType === "partial_refund" ? (
+                // The refund steps alone decide (VAY-2100); there is no separate free deadline.
+                <PartialRefundSteps tiers={room.cancellation.terms.partialRefundTiers ?? []} />
+              ) : (
+                <>
+                  <p>
+                    Free cancellation deadline:{" "}
+                    {room.cancellation.terms.freeCancellationDeadlineDays} days before arrival.
+                  </p>
+                  <p>After-deadline penalty: full booking amount.</p>
+                </>
+              )}
               <p>No-show penalty: full booking amount.</p>
-              {room.cancellation.terms.partialRefundCancelWindowDays !== undefined && (
-                <p>
-                  Partial refund cancellation window:{" "}
-                  {room.cancellation.terms.partialRefundCancelWindowDays} days before check-in.
-                </p>
-              )}
-              {room.cancellation.terms.partialRefundAmountPercent !== undefined && (
-                <p>Partial refund amount: {room.cancellation.terms.partialRefundAmountPercent}%.</p>
-              )}
-              {!!room.cancellation.terms.partialRefundTiers?.length && (
-                <ul className="list-disc pl-5" aria-label="Refund notice periods">
-                  {room.cancellation.terms.partialRefundTiers.map((tier) => (
-                    <li key={tier.minDaysBeforeCheckIn}>
-                      {tier.refundPercent}% refund with at least {tier.minDaysBeforeCheckIn} days
-                      before check-in.
-                    </li>
-                  ))}
-                </ul>
-              )}
               {room.cancellation.terms.text && (
                 <p className="whitespace-pre-wrap break-words">{room.cancellation.terms.text}</p>
               )}
@@ -163,5 +151,30 @@ export default function ReplacementQuoteTerms({
         <span>I have read the room and rate terms for this price preview.</span>
       </label>
     </section>
+  );
+}
+
+/** Most notice first; with less notice than the last step, nothing is refunded. */
+function PartialRefundSteps({
+  tiers,
+}: {
+  tiers: readonly { minDaysBeforeCheckIn: number; refundPercent: number }[];
+}) {
+  const steps = [...tiers].sort((a, b) => b.minDaysBeforeCheckIn - a.minDaysBeforeCheckIn);
+  const last = steps.at(-1);
+  return (
+    <>
+      <ul className="list-disc pl-5" aria-label="Refund notice periods">
+        {steps.map((tier) => (
+          <li key={tier.minDaysBeforeCheckIn}>
+            {tier.refundPercent}% refund with at least {tier.minDaysBeforeCheckIn} days before
+            check-in.
+          </li>
+        ))}
+      </ul>
+      {last && last.minDaysBeforeCheckIn > 0 && (
+        <p>No refund with less than {last.minDaysBeforeCheckIn} days before check-in.</p>
+      )}
+    </>
   );
 }
