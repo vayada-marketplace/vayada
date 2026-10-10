@@ -28,7 +28,11 @@ export type PmsPricingReadPool = {
   end?(): Promise<void>;
 };
 
-export type PmsPricingReadModel = PmsPricingReadPort & { close(): Promise<void> };
+export type PmsPricingReadModel = PmsPricingReadPort & {
+  /** Room types with at least one offer in the active publication; null without a publication. */
+  listPublishedOfferRoomTypeIds(propertyId: string): Promise<string[] | null>;
+  close(): Promise<void>;
+};
 
 export type PmsPricingCurrencyRow = {
   propertyId: string;
@@ -176,6 +180,20 @@ export function createPgPmsPricingReadModel(config: {
       return readPublishedFlexibleRatePlans(pool, readUuid(propertyId));
     },
 
+    async listPublishedOfferRoomTypeIds(propertyId) {
+      const result = await pool.query<{ roomTypeId: string | null }>(
+        `SELECT room.room_type_id::text AS "roomTypeId"
+         FROM pms.pricing_v2_heads head
+         LEFT JOIN pms.pricing_v2_rooms room
+           ON room.property_id = head.property_id AND room.revision = head.revision
+          AND jsonb_array_length(room.configuration->'offers') > 0
+         WHERE head.property_id = $1::uuid AND head.revision > 0`,
+        [readUuid(propertyId)],
+      );
+      if (result.rows.length === 0) return null;
+      return result.rows.flatMap(({ roomTypeId }) => (roomTypeId ? [roomTypeId] : []));
+    },
+
     async getPricingSourceSnapshot(propertyId) {
       const normalizedPropertyId = readUuid(propertyId);
       const client = await pool.connect();
@@ -216,6 +234,39 @@ export async function readPublishedFlexibleRatePlans(
     if (plan) plans.set(row.roomTypeId, plan);
   }
   return [...plans.values()];
+}
+
+/** True once the property has a pricing-v2 publication; it then supersedes the retired legacy
+ * flexible plans and recurring pricing in the PMS pricing source. A saved draft alone creates a
+ * head at revision 0, which is not a publication. */
+export async function hasPricingPublication(queryable: Queryable, propertyId: string) {
+  const head = await queryable.query(
+    "SELECT 1 FROM pms.pricing_v2_heads WHERE property_id = $1::uuid AND revision > 0",
+    [propertyId],
+  );
+  return head.rows.length > 0;
+}
+
+/** Flexible plans of the PMS pricing source once the property has a pricing-v2 publication:
+ * the published adapter, limited to open rooms like the legacy rows and to the property's
+ * pricing currency (a plan in another currency is missing, not malformed). Null without a
+ * publication, so the caller keeps the legacy rows. The pricing source and the
+ * mandatory-charge fingerprint both read this, so their evidence stays identical. */
+export async function readSourcePublishedFlexibleRatePlans(
+  queryable: Queryable,
+  propertyId: string,
+  currency: string,
+): Promise<FlexibleRatePlanSnapshot[] | null> {
+  if (!(await hasPricingPublication(queryable, propertyId))) return null;
+  const closed = await queryable.query<{ roomTypeId: string }>(
+    `SELECT room_type_id::text AS "roomTypeId" FROM pms.room_type_closures
+     WHERE property_id = $1::uuid`,
+    [propertyId],
+  );
+  const closedRoomIds = new Set(closed.rows.map(({ roomTypeId }) => roomTypeId));
+  return (await readPublishedFlexibleRatePlans(queryable, propertyId)).filter(
+    (plan) => !closedRoomIds.has(plan.roomTypeId) && plan.baseAmount.currency === currency,
+  );
 }
 
 /** Every published offer for rate-plan lists (e.g. the New Booking dropdown), in editor order.
@@ -325,11 +376,16 @@ export async function loadPmsPricingSourceSnapshot(
   if (result.rows.length !== 1) throw new Error("PMS pricing sources read is malformed");
   const row = result.rows[0]!;
   if (!row.pricingCurrency) return null;
+  const published = await readSourcePublishedFlexibleRatePlans(
+    queryable,
+    normalizedPropertyId,
+    row.pricingCurrency.currency,
+  );
   const snapshot = parsePmsPricingSourceSnapshot({
     contractVersion: PMS_PRICING_CONTRACT_VERSION,
     propertyId: normalizedPropertyId,
     pricingCurrency: pmsPricingCurrencySnapshotFromRow(row.pricingCurrency),
-    flexibleRatePlans: row.flexibleRatePlans.map(pmsFlexibleRatePlanSnapshotFromRow),
+    flexibleRatePlans: published ?? row.flexibleRatePlans.map(pmsFlexibleRatePlanSnapshotFromRow),
     capturedAt: validDate(captured) ? captured.toISOString() : null,
   });
   if (!snapshot) throw new Error("PMS pricing source failed contract validation");

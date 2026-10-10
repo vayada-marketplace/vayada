@@ -27,6 +27,15 @@ export type AssignmentSelector = { assignmentId: string } | { position: number }
 // prettier-ignore
 export type BookingExpectedPaymentMethod = "unknown" | "pay_at_property" | "bank_transfer" | "manual_card" | "cash" | "other";
 
+export type BookingRefundTier = { minDaysBeforeCheckIn: number; refundPercent: number };
+
+/** Cancellation terms a stay was booked under (VAY-2089). Flexible terms are free until the
+ * deadline, or, for partial-refund terms, refund by notice period (longest first); after that
+ * the whole stay is chargeable. */
+export type BookingCancellationTerms =
+  | { kind: "non_refundable" }
+  | { kind: "flexible"; freeCancellationDays: number; refundTiers: BookingRefundTier[] | null };
+
 export interface BookingStay {
   position: number;
   roomName: string;
@@ -38,6 +47,10 @@ export interface BookingStay {
   children: number | null;
   /** Recorded child ages, when known; target-rate move quotes need them. */
   childAgesAtCheckIn?: number[] | null;
+  /** A manual stay priced with a custom nightly rate: no rate plan and no published offer. */
+  customRate?: boolean;
+  /** Terms of the offer a manual stay was booked on; null when none were recorded. */
+  cancellation?: BookingCancellationTerms | null;
   nightly: Array<{
     appliedAmount: number | null;
     currency: string | null;
@@ -45,8 +58,18 @@ export interface BookingStay {
   }>;
 }
 
+/** What a pricing-v2 stay's booked terms keep on cancellation (VAY-2100), in minor units. */
+export type BookingCancellationOutcome = {
+  daysBeforeCheckIn: number;
+  totalMinor: string;
+  refundMinor: string;
+  retainedMinor: string;
+};
+
 export interface Booking {
   mealDescription?: string | null;
+  /** Recorded when the guest's cancellation applied the booked terms. */
+  cancellationOutcome?: BookingCancellationOutcome | null;
   id: string;
   bookingReference: string;
   roomTypeId: string;
@@ -70,6 +93,10 @@ export interface Booking {
   adults: number;
   children: number;
   nightlyRate: number;
+  /** Sum of the recorded nightly room prices of every stay; null when a night has none. */
+  recordedRoomCharges?: number | null;
+  /** The recorded nightly prices differ, so `nightlyRate` is only their average. */
+  nightlyRateVaries?: boolean;
   numberOfRooms: number;
   amountStatus?: "recorded" | "unverified";
   totalAmount: number;
@@ -333,6 +360,19 @@ type PmsOperationalReservation = {
     /** Published pricing-v2 offer of a manual stay; rate_plan_id stays empty for those. */
     pricingOfferId?: string | null;
     childAgesAtCheckIn?: number[] | null;
+    bookedCancellation?:
+      | { kind: "non_refundable" }
+      | {
+          kind: "flexible";
+          terms: {
+            freeCancellationDeadlineDays: number;
+            flexibleCancellationType?: "free" | "partial_refund";
+            partialRefundCancelWindowDays?: number;
+            partialRefundAmountPercent?: number;
+            partialRefundTiers?: BookingRefundTier[];
+          };
+        }
+      | null;
     stay?: { checkIn: string; checkOut: string; adults: number; children: number };
     nightly?: Array<{
       serviceDate: string;
@@ -342,6 +382,7 @@ type PmsOperationalReservation = {
   }>;
   checkin: { completedAt: string | null; pendingFlags: string[] };
   checkout: { completedAt: string | null; pendingFlags: string[] };
+  cancellationOutcome?: BookingCancellationOutcome | null;
   mealDescription?: string | null;
   bookedOffer?: { roomTypeId: string; roomName: string };
   roomLines?: Array<{
@@ -1138,6 +1179,83 @@ function appendQueryParam(
   query.set(key, String(value));
 }
 
+function toCancellationTerms(
+  booked: PmsOperationalReservation["assignments"][number]["bookedCancellation"],
+): BookingCancellationTerms | null {
+  if (booked?.kind === "non_refundable") return { kind: "non_refundable" };
+  if (booked?.kind !== "flexible") return null;
+  const { terms } = booked;
+  // Partial-refund terms refund by notice period, as the booking engine shows them to guests.
+  const tiers =
+    terms.flexibleCancellationType !== "partial_refund"
+      ? null
+      : (
+          terms.partialRefundTiers ?? [
+            {
+              minDaysBeforeCheckIn: terms.partialRefundCancelWindowDays ?? NaN,
+              refundPercent: terms.partialRefundAmountPercent ?? NaN,
+            },
+          ]
+        ).filter(
+          (tier) =>
+            Number.isInteger(tier.minDaysBeforeCheckIn) && Number.isFinite(tier.refundPercent),
+        );
+  return {
+    kind: "flexible",
+    freeCancellationDays: terms.freeCancellationDeadlineDays,
+    refundTiers: tiers?.length
+      ? [...tiers].sort((a, b) => b.minDaysBeforeCheckIn - a.minDaysBeforeCheckIn)
+      : null,
+  };
+}
+
+function toBookingStays(
+  reservation: PmsOperationalReservation,
+  roomTypesById: Map<string, PmsOperationsRoomType>,
+): BookingStay[] {
+  return !reservation.assignments.length && reservation.roomLines?.length
+    ? reservation.roomLines
+        .flatMap((line) =>
+          line.guests.map((guest) => ({
+            roomName: line.roomName,
+            ratePlanName:
+              typeof line.rateSummary["name"] === "string" ? line.rateSummary["name"] : null,
+            roomNumber: null,
+            checkIn: reservation.stay.checkIn,
+            checkOut: reservation.stay.checkOut,
+            adults: guest.adults,
+            children: guest.children,
+            nightly: [],
+          })),
+        )
+        .map((stay, position) => ({ ...stay, position }))
+    : reservation.assignments.map((assignment) => {
+        const assignmentRoomType = roomTypesById.get(assignment.roomTypeId);
+        const ratePlan = assignmentRoomType?.ratePlans?.find(
+          (plan) => plan.ratePlanId === (assignment.ratePlanId ?? assignment.pricingOfferId),
+        );
+        return {
+          position: Math.max(assignment.position - 1, 0),
+          roomName: assignmentRoomType?.name ?? "",
+          ratePlanName: ratePlan?.name ?? null,
+          customRate:
+            reservation.source === "manual" && !assignment.ratePlanId && !assignment.pricingOfferId,
+          cancellation: toCancellationTerms(assignment.bookedCancellation),
+          roomNumber: assignment.roomNumber,
+          checkIn: assignment.stay?.checkIn ?? null,
+          checkOut: assignment.stay?.checkOut ?? null,
+          adults: assignment.stay?.adults ?? null,
+          children: assignment.stay?.children ?? null,
+          childAgesAtCheckIn: assignment.childAgesAtCheckIn ?? null,
+          nightly: (assignment.nightly ?? []).map((night) => ({
+            appliedAmount: night.applied ? moneyAmount(night.applied) : null,
+            currency: night.applied?.currency ?? null,
+            evidenceQuality: night.evidenceQuality,
+          })),
+        };
+      });
+}
+
 function toBooking(
   reservation: PmsOperationalReservation,
   roomTypesById: Map<string, PmsOperationsRoomType>,
@@ -1151,7 +1269,30 @@ function toBooking(
   const totalAmount = reservation.pricing
     ? moneyAmount(reservation.pricing.totalAmount)
     : baseRate * Math.max(nights, 1) * numberOfRooms;
-  const nightlyRate = roomType ? baseRate : totalAmount / Math.max(nights, 1) / numberOfRooms;
+  const stays = toBookingStays(reservation, roomTypesById);
+  // Room charges come from the recorded nightly prices, never the room type's legacy base rate:
+  // rooms priced in the pricing editor keep that at 0 (VAY-2089).
+  const recordedNights = stays.flatMap((stay) => stay.nightly.map((night) => night.appliedAmount));
+  const status = toBookingStatus(reservation.status);
+  // Only a price for every night of every room adds up to the room charges. Cancellations and
+  // no-shows add reversal entries that net each night to 0, so those keep the booked total.
+  const recordedRoomCharges =
+    !["cancelled", "declined", "expired", "no_show"].includes(status) &&
+    stays.length === numberOfRooms &&
+    stays.every(
+      (stay) =>
+        stay.checkIn !== null &&
+        stay.checkOut !== null &&
+        stay.nightly.length === daysBetweenDateOnly(stay.checkIn, stay.checkOut),
+    ) &&
+    recordedNights.length > 0 &&
+    recordedNights.every((amount) => amount !== null)
+      ? recordedNights.reduce<number>((sum, amount) => sum + (amount ?? 0), 0)
+      : null;
+  const nightlyRate =
+    recordedRoomCharges === null
+      ? totalAmount / Math.max(nights, 1) / numberOfRooms
+      : recordedRoomCharges / recordedNights.length;
   const [guestFirstName, guestLastName] = splitGuestName(reservation.primaryGuest.displayName);
   const addOns = reservation.addOns ?? [];
   // prettier-ignore
@@ -1188,6 +1329,8 @@ function toBooking(
     adults: reservation.stay.adults,
     children: reservation.stay.children,
     nightlyRate,
+    recordedRoomCharges,
+    nightlyRateVaries: recordedRoomCharges !== null && new Set(recordedNights).size > 1,
     numberOfRooms,
     totalAmount,
     amountStatus: reservation.pricing?.amountStatus,
@@ -1198,7 +1341,7 @@ function toBooking(
       ? moneyAmount(reservation.pricing.balanceAmount)
       : totalAmount,
     currency: reservation.pricing?.totalAmount.currency ?? roomType?.baseRate.currency ?? "EUR",
-    status: toBookingStatus(reservation.status),
+    status,
     roomId: primaryAssignment?.roomId ?? null,
     roomNumber: primaryAssignment?.roomNumber ?? null,
     assignedRooms: reservation.assignments.map((assignment) => ({
@@ -1208,45 +1351,7 @@ function toBooking(
       position: Math.max(assignment.position - 1, 0),
       roomTypeId: assignment.roomTypeId,
     })),
-    stays:
-      !reservation.assignments.length && reservation.roomLines?.length
-        ? reservation.roomLines
-            .flatMap((line) =>
-              line.guests.map((guest) => ({
-                roomName: line.roomName,
-                ratePlanName:
-                  typeof line.rateSummary["name"] === "string" ? line.rateSummary["name"] : null,
-                roomNumber: null,
-                checkIn: reservation.stay.checkIn,
-                checkOut: reservation.stay.checkOut,
-                adults: guest.adults,
-                children: guest.children,
-                nightly: [],
-              })),
-            )
-            .map((stay, position) => ({ ...stay, position }))
-        : reservation.assignments.map((assignment) => {
-            const assignmentRoomType = roomTypesById.get(assignment.roomTypeId);
-            const ratePlan = assignmentRoomType?.ratePlans?.find(
-              (plan) => plan.ratePlanId === (assignment.ratePlanId ?? assignment.pricingOfferId),
-            );
-            return {
-              position: Math.max(assignment.position - 1, 0),
-              roomName: assignmentRoomType?.name ?? "",
-              ratePlanName: ratePlan?.name ?? null,
-              roomNumber: assignment.roomNumber,
-              checkIn: assignment.stay?.checkIn ?? null,
-              checkOut: assignment.stay?.checkOut ?? null,
-              adults: assignment.stay?.adults ?? null,
-              children: assignment.stay?.children ?? null,
-              childAgesAtCheckIn: assignment.childAgesAtCheckIn ?? null,
-              nightly: (assignment.nightly ?? []).map((night) => ({
-                appliedAmount: night.applied ? moneyAmount(night.applied) : null,
-                currency: night.applied?.currency ?? null,
-                evidenceQuality: night.evidenceQuality,
-              })),
-            };
-          }),
+    stays,
     channel:
       reservation.source === "manual"
         ? "manual"
@@ -1259,6 +1364,7 @@ function toBooking(
     checkedInAt: reservation.checkin.completedAt,
     checkedOutAt: reservation.checkout.completedAt,
     hostResponseDeadline: reservation.hostResponseDeadlineAt ?? null,
+    cancellationOutcome: reservation.cancellationOutcome ?? null,
     platformFeeAmount: null,
     affiliateCommissionAmount: null,
     propertyPayoutAmount: null,
@@ -1394,6 +1500,8 @@ export type HostBookingActionRequest = {
   guestMessage?: string;
   checkIn?: string;
   checkOut?: string;
+  /** Cancel only: "guest_request" applies the booked terms; "property" cancels with no fee. */
+  cancellationKind?: "property" | "guest_request";
 };
 export type HostBookingActionPreview = {
   previewId: string;
@@ -1406,6 +1514,7 @@ export type HostBookingActionPreview = {
     currency: string;
     inventory: "release" | "replace";
     payment: "no_payment_received" | "authorization_void";
+    cancellationOutcome?: BookingCancellationOutcome;
     cancellationPolicy: {
       type: "non_refundable" | "flexible" | "mixed_room";
       lines?: {

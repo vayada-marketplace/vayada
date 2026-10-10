@@ -21,7 +21,7 @@ interface CalendarRoom {
   floor: string;
   status: string;
   baseRate: number;
-  currency: string;
+  currency: string | null;
   maxOccupancy: number;
   size: number;
   flexibleRatePlanId?: string | null;
@@ -340,7 +340,7 @@ export default function BookingDetailModal({
         ? t("calendar.bookingDetail.upToGuests", { count: room.maxOccupancy })
         : "",
       room.size > 0 ? `${room.size} m²` : "",
-      room.baseRate > 0
+      room.baseRate > 0 && room.currency
         ? t("calendar.bookingDetail.perNight", {
             amount: formatCurrency(room.baseRate, room.currency),
           })
@@ -1584,7 +1584,8 @@ export default function BookingDetailModal({
               {booking.amountStatus !== "unverified" && booking.numberOfRooms <= 1 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600">
-                    {formatCurrency(booking.nightlyRate, booking.currency)} x{" "}
+                    {!booking.nightlyRateVaries &&
+                      `${formatCurrency(booking.nightlyRate, booking.currency)} x `}
                     {t(
                       booking.nights === 1
                         ? "calendar.bookingDetail.nightCount"

@@ -1,4 +1,5 @@
 import {
+  pricingAmountStep,
   pricingCurrencyScale,
   type PublicBookingQuoteRequest,
 } from "@vayada/domain-booking/replacement-pricing";
@@ -138,6 +139,11 @@ export function roomQuoteRequest(
 export function displayQuoteMoney(minor: string, currency: string): string {
   const scale = pricingCurrencyScale(currency);
   if (scale === null || !/^(0|[1-9][0-9]*)$/.test(minor)) throw new Error("Invalid amount");
+  // Whole-unit currencies (IDR, VAY-2085) show no decimals, like the other booking views;
+  // amounts are whole rupiah already, and anything else rounds half-up for display.
+  const step = pricingAmountStep(currency);
+  if (step > 1)
+    return `${currency} ${((BigInt(minor) + BigInt(step / 2)) / BigInt(step)).toString()}`;
   const digits = minor.padStart(scale + 1, "0");
   return `${currency} ${scale ? `${digits.slice(0, -scale)}.${digits.slice(-scale)}` : digits}`;
 }
