@@ -44,9 +44,19 @@ type PmsCalendarAutoOpenSetting = {
 - disabling retains the selected mode and parameter so re-enabling is
   predictable;
 - stored `revision` is a positive, monotonically increasing integer;
-- an absent row has the virtual read value `revision = 0`, `enabled = false`,
-  rolling mode, `rollingMonths = 18`, and no fixed month. It causes no writes or
-  jobs until explicitly saved.
+- an absent row has the virtual read value `revision = 0`, `enabled = true`,
+  rolling mode, `rollingMonths = 12`, and no fixed month
+  (`PMS_CALENDAR_AUTO_OPEN_DEFAULT_CONFIGURATION`). Auto-open is on by default
+  since VAY-2066 (owner decision, 2026-10-09). The default writes no settings row:
+  the scheduler applies it once the property's calendar and room setup are ready
+  (operating calendar with current room bindings, at least one active room type,
+  verified physical room labels, a property timezone and pricing settings). Until
+  then the property is paused, not failed. The source fingerprint then carries
+  `settingRevision = 0`;
+- an explicit save always writes a row, even when it equals the virtual default,
+  so a later change of the default never overrides an owner's choice. Off is an
+  explicit row with `enabled = false`. Migrated properties keep their legacy
+  choice through explicit rows.
 
 Updates use compare-and-set with `expectedRevision`. A successful changed
 update advances the revision once. An exact idempotency replay returns the
@@ -155,8 +165,9 @@ intent; a disabled or expired fixed setting does not create application work.
 Provider calls do not occur in that transaction. Eligible saves run
 immediately; the host does not wait for the recurring scheduler.
 
-The PMS-owned scheduler runs at least daily and paginates every enabled
-property, including PMS-only and Booking-only properties. It recalculates the
+The PMS-owned scheduler runs hourly in next-api (VAY-2066) and paginates every
+property whose effective setting is enabled, including PMS-only and
+Booking-only properties. It recalculates the
 property-local month boundary and enqueues only when the target or an owner
 source revision is not reflected in current materialization. One property's
 failure cannot stop later properties. Fixed policies do not advance with time,

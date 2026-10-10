@@ -17,8 +17,6 @@ export type PublicHotelUrlPolicy = {
   hreflangUrls: Record<string, string>;
 };
 
-export type PublicHotelCrawlPath = "/" | "/rooms";
-
 export function resolvePublicHotelUrls(input: PublicHotelUrlPolicyInput): PublicHotelUrlPolicy {
   const protocol = input.requestProtocol ?? inferProtocol(input.requestHost);
   const fallbackBaseUrl = `${protocol}://${fallbackHostForSlug(input.slug, input.requestHost)}`;
@@ -40,31 +38,12 @@ export function resolvePublicHotelUrls(input: PublicHotelUrlPolicyInput): Public
   };
 }
 
-export function publicHotelPageUrl(
-  policy: PublicHotelUrlPolicy,
-  path: PublicHotelCrawlPath,
-): string {
-  if (path === "/") return policy.canonicalUrl;
-  return appendPath(policy.canonicalUrl, path);
-}
-
-export function publicHotelPageHreflangUrls(
-  policy: PublicHotelUrlPolicy,
-  path: PublicHotelCrawlPath,
-): Record<string, string> {
-  if (path === "/") return policy.hreflangUrls;
-  return Object.fromEntries(
-    Object.entries(policy.hreflangUrls).map(([locale, url]) => [locale, appendPath(url, path)]),
-  );
-}
-
+// The hotel page is the only public, indexable page: the former /rooms listing
+// redirects to the private room-and-price page.
 export function publicHotelSitemapEntries(
   policy: PublicHotelUrlPolicy,
 ): Array<{ url: string; alternates: Record<string, string> }> {
-  return (["/", "/rooms"] as const).map((path) => ({
-    url: publicHotelPageUrl(policy, path),
-    alternates: publicHotelPageHreflangUrls(policy, path),
-  }));
+  return [{ url: policy.canonicalUrl, alternates: policy.hreflangUrls }];
 }
 
 export function getCanonicalHostRedirectUrl(
@@ -119,12 +98,6 @@ function fallbackHostForSlug(slug: string, requestHost: string): string {
 
 function withLocalePath(baseUrl: string, locale: string): string {
   return new URL(`/${locale.replace(/^\/+/, "")}`, baseUrl).toString().replace(/\/$/, "");
-}
-
-function appendPath(localeUrl: string, path: PublicHotelCrawlPath): string {
-  const url = new URL(localeUrl);
-  url.pathname = `${url.pathname.replace(/\/$/, "")}${path}`;
-  return url.toString().replace(/\/$/, "");
 }
 
 function normalizeCustomDomainUrl(value?: string | null): string | null {

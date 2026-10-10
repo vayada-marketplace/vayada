@@ -17,6 +17,7 @@ import type { FastifyInstance } from "fastify";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import type { PublicHotelProfileRepository } from "./aiHotels.js";
+import { pricingRetiredError } from "./pricingRetired.js";
 
 export type PublicHotelQuoteQuery = {
   check_in?: string;
@@ -105,11 +106,8 @@ export function createTargetPublicHotelQuoteRepository(config: {
     });
 
   return {
-    async findQuoteBySlug(slug, query) {
-      throw Object.assign(
-        new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
-        { statusCode: 503, code: "PRICING_UNAVAILABLE" },
-      );
+    async findQuoteBySlug() {
+      throw pricingRetiredError();
     },
     async close() {
       await pool.end();
