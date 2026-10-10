@@ -57,7 +57,7 @@ for (const locale of ["de", "fr", "es", "id", "ja", "zh", "ru", "it", "nl"]) {
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("lang", locale);
     await expect(
-      page.getByRole("heading", { name: messages["bookingFlow.title"], exact: true }),
+      page.getByRole("heading", { name: messages["bookingFlow.addons.title"], exact: true }),
     ).toBeVisible();
     await noLegacy();
   });
