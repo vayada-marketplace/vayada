@@ -1,13 +1,26 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { pricingCurrencyScale } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
 import {
   bookingsService,
   type Booking,
+  type BookingCancellationOutcome,
   type HostBookingActionPreview,
   type HostBookingActionRequest,
 } from "@/services/bookings";
+
+const money = (minor: string, currency: string) => {
+  const scale = pricingCurrencyScale(currency) ?? 2;
+  return `${(Number(minor) / 10 ** scale).toFixed(scale)} ${currency}`;
+};
+/** VAY-2100: what the booked terms keep; unpaid, so recorded only and never charged here. */
+const feeValues = (outcome: BookingCancellationOutcome, currency: string) => ({
+  fee: money(outcome.retainedMinor, currency),
+  total: money(outcome.totalMinor, currency),
+  days: outcome.daysBeforeCheckIn,
+});
 
 export function HostBookingActions({
   booking,
@@ -22,6 +35,8 @@ export function HostBookingActions({
   const [checkOut, setCheckOut] = useState(booking.checkOut);
   const [reason, setReason] = useState("");
   const [guestMessage, setGuestMessage] = useState("");
+  const [cancellationKind, setCancellationKind] =
+    useState<NonNullable<HostBookingActionRequest["cancellationKind"]>>("property");
   const [preview, setPreview] = useState<HostBookingActionPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -36,6 +51,7 @@ export function HostBookingActions({
     setNotice("");
     setReason("");
     setGuestMessage("");
+    setCancellationKind("property");
     setCheckIn(booking.checkIn);
     setCheckOut(booking.checkOut);
   };
@@ -51,6 +67,7 @@ export function HostBookingActions({
           reason,
           guestMessage,
           ...(action === "edit_dates" ? { checkIn, checkOut } : {}),
+          ...(action === "cancel" ? { cancellationKind } : {}),
         });
         key.current = crypto.randomUUID();
         setPreview(result);
@@ -77,8 +94,17 @@ export function HostBookingActions({
       setBusy(false);
     }
   };
+  const recorded = booking.cancellationOutcome;
+  // Only stays with recorded booked terms (pricing-v2) can apply them to a guest's request.
+  const hasBookedTerms =
+    booking.stays.length > 0 && booking.stays.every((stay) => stay.cancellation);
   if (booking.channel === "manual" || !["pending", "confirmed"].includes(booking.status))
-    return notice ? <p role="status">{notice}</p> : null;
+    return notice || recorded ? (
+      <div className="space-y-1 text-sm">
+        {notice && <p role="status">{notice}</p>}
+        {recorded && <p>{t("hostActions.recordedFee", feeValues(recorded, booking.currency))}</p>}
+      </div>
+    ) : null;
   const button = "rounded-lg border px-4 py-2 text-sm disabled:opacity-50";
   return (
     <section
@@ -139,6 +165,28 @@ export function HostBookingActions({
                   </label>
                 </div>
               )}
+              {action === "cancel" && hasBookedTerms && (
+                <fieldset className="space-y-2 text-sm">
+                  <legend className="font-medium">{t("hostActions.cancellationKind")}</legend>
+                  {(["property", "guest_request"] as const).map((kind) => (
+                    <label key={kind} className="flex items-start gap-2">
+                      <input
+                        type="radio"
+                        name="cancellationKind"
+                        className="mt-1"
+                        checked={cancellationKind === kind}
+                        disabled={busy}
+                        onChange={() => setCancellationKind(kind)}
+                      />
+                      {t(
+                        kind === "property"
+                          ? "hostActions.kindProperty"
+                          : "hostActions.kindGuestRequest",
+                      )}
+                    </label>
+                  ))}
+                </fieldset>
+              )}
               <label className="block text-sm">
                 {t("hostActions.reason")}
                 <textarea
@@ -176,9 +224,19 @@ export function HostBookingActions({
                     ? "hostActions.voidImpact"
                     : action === "edit_dates"
                       ? "hostActions.editImpact"
-                      : "hostActions.cancelImpact",
+                      : preview.impact.cancellationOutcome
+                        ? "hostActions.guestRequestImpact"
+                        : "hostActions.cancelImpact",
                 )}
               </p>
+              {preview.impact.cancellationOutcome && (
+                <p className="font-medium">
+                  {t(
+                    "hostActions.termsFee",
+                    feeValues(preview.impact.cancellationOutcome, preview.impact.currency),
+                  )}
+                </p>
+              )}
               {preview.impact.cancellationPolicy && (
                 <div>
                   {(
