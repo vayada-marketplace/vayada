@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 export const SELECTABLE_JOBS = [
   "frontend",
   "first_party_auth",
+  "api_unit",
   "api_postgres",
   "setup_draft_reset_postgres",
   "backend",
@@ -20,6 +21,7 @@ export const SELECTABLE_JOBS = [
 const TYPESCRIPT_JOBS = [
   "frontend",
   "first_party_auth",
+  "api_unit",
   "api_postgres",
   "setup_draft_reset_postgres",
 ];
@@ -43,7 +45,8 @@ export const RULES = [
   },
   // The frontend job runs the landing Playwright suite; first_party_auth runs the auth suite.
   { name: "e2e", test: /^tests\/e2e\//, jobs: ["frontend", "first_party_auth"] },
-  // apps/api, shared packages and packages/backend-migration/migrations: full PG16 + PG17 coverage.
+  // apps/api, shared packages and packages/backend-migration/migrations: the full unit suites plus
+  // PG16 + PG17 coverage.
   { name: "typescript", test: /^(apps\/api|packages)\//, jobs: TYPESCRIPT_JOBS },
 ];
 

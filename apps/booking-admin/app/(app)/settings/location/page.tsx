@@ -41,7 +41,7 @@ export default function LocationPage() {
   return (
     <>
       <a
-        href="/settings"
+        href="/settings/general"
         className="ml-4 mt-6 inline-block text-sm text-blue-700 underline sm:ml-8"
       >
         Back to settings

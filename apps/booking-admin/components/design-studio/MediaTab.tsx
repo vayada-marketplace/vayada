@@ -46,6 +46,9 @@ interface MediaTabProps {
   showLanguageSelector: boolean;
   setShowLanguageSelector: (value: boolean) => void;
   languageSelectorAvailable: boolean;
+  showCurrencySelector: boolean;
+  setShowCurrencySelector: (value: boolean) => void;
+  currencySelectorAvailable: boolean;
   resetContent: () => void;
   galleryImages: PropertyGalleryImage[];
   galleryAtCapacity: boolean;
@@ -88,6 +91,9 @@ export default function MediaTab({
   showLanguageSelector,
   setShowLanguageSelector,
   languageSelectorAvailable,
+  showCurrencySelector,
+  setShowCurrencySelector,
+  currencySelectorAvailable,
   resetContent,
   galleryImages,
   galleryAtCapacity,
@@ -485,11 +491,11 @@ export default function MediaTab({
             disabled={!languageSelectorAvailable}
           />
           <ToggleSwitch
-            enabled={false}
-            onChange={() => {}}
+            enabled={currencySelectorAvailable && showCurrencySelector}
+            onChange={() => setShowCurrencySelector(!showCurrencySelector)}
             label={t("admin.currencySelector")}
-            description={t("admin.multiCurrencyIsNotAvailableYet")}
-            disabled
+            description={t("admin.hiddenAutomaticallyWhenOnlyOneCurrencyIsConfigured")}
+            disabled={!currencySelectorAvailable}
           />
         </div>
       </div>

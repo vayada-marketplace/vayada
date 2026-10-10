@@ -12,11 +12,14 @@ import ReplacementQuoteTerms from "@/components/booking/ReplacementQuoteTerms";
 import type { QuoteTermsAcknowledgement } from "@/components/booking/ReplacementQuoteTerms";
 import ReplacementBookingConfirmation from "@/components/booking/ReplacementBookingConfirmation";
 import type { PublicQuoteGuestDisclosure } from "@vayada/domain-booking/replacement-pricing";
+import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
+import { useCurrency } from "@/contexts/CurrencyContext";
 import { useSlug } from "@/contexts/HotelContext";
 import { useReplacementQuote } from "@/lib/hooks/useReplacementQuote";
 import {
   displayQuoteMoney,
   getReplacementOffers,
+  quoteMoneyAmount,
   mealLabels,
   roomQuoteRequest,
   type PricingRoom,
@@ -121,6 +124,12 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     setExtras(null);
   };
   const { quote, error, loading, submit } = useReplacementQuote(slug, request);
+  const { approximate } = useCurrency();
+  // The charged amount in the quote currency, then any approximation in the guest's currency.
+  const chargedMoney = (minor: string, currency: string) => {
+    const approx = approximate(quoteMoneyAmount(minor, currency), currency);
+    return `${displayQuoteMoney(minor, currency)}${approx ? ` (${approx})` : ""}`;
+  };
   const update = (id: string, patch: Partial<RoomChoice>) =>
     changeChoices((current) =>
       current.map((choice) => (choice.selectionId === id ? { ...choice, ...patch } : choice)),
@@ -370,10 +379,11 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             {quote.checkIn} to {quote.checkOut}
           </p>
           <p className="text-2xl font-bold">
-            Total: {displayQuoteMoney(quote.totalMinor, quote.currency)}
+            Total: {chargedMoney(quote.totalMinor, quote.currency)}
           </p>
-          <p>Due now: {displayQuoteMoney(quote.dueNowMinor, quote.currency)}</p>
-          <p>Due later: {displayQuoteMoney(quote.dueLaterMinor, quote.currency)}</p>
+          <p>Due now: {chargedMoney(quote.dueNowMinor, quote.currency)}</p>
+          <p>Due later: {chargedMoney(quote.dueLaterMinor, quote.currency)}</p>
+          <ApproximateAmountsNote currency={quote.currency} />
           <ReplacementQuoteTerms
             quote={quote}
             onAcknowledgementChange={setTermsAcknowledgement}

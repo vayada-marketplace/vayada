@@ -136,6 +136,11 @@ export function roomQuoteRequest(
     },
   };
 }
+/** Major units of a quote amount, for display-only conversion. */
+export function quoteMoneyAmount(minor: string, currency: string): number {
+  return Number(minor) / 10 ** (pricingCurrencyScale(currency) ?? 2);
+}
+
 export function displayQuoteMoney(minor: string, currency: string): string {
   const scale = pricingCurrencyScale(currency);
   if (scale === null || !/^(0|[1-9][0-9]*)$/.test(minor)) throw new Error("Invalid amount");
