@@ -29,8 +29,11 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [propertyPlan, setPropertyPlan] = useState<PropertyPlan | null>(null);
+  const [pricesNeedPublishing, setPricesNeedPublishing] = useState(false);
 
   const [form, setForm] = useState<RoomTypeUpdate>({});
+  // The form keeps local input state; a new key re-reads every input from the saved room.
+  const [formKey, setFormKey] = useState(0);
 
   useEffect(() => {
     roomsService.getPropertyPlan().then(setPropertyPlan).catch(console.error);
@@ -49,16 +52,34 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!room) return;
     setSaving(true);
     setError("");
     setSuccess("");
     try {
-      const updated = await roomsService.update(id, form);
-      setRoom(updated);
-      setForm(roomTypeUpdateForm(updated));
+      const saved = await roomsService.update(id, form, room);
+      setRoom(saved.roomType);
+      setForm(roomTypeUpdateForm(saved.roomType));
+      setFormKey((key) => key + 1);
+      if (saved.pricesNeedPublishing) setPricesNeedPublishing(true);
       setSuccess(t("rooms.edit.success"));
     } catch (error) {
       setError(error instanceof Error ? error.message : t("rooms.edit.failedToUpdate"));
+      // Keep the room the form was loaded from, so a retry still refuses a change made
+      // elsewhere. Part of this edit may have saved what published prices pin.
+      roomsService
+        .get(id)
+        .then((current) => {
+          if (
+            current.version !== room.version ||
+            current.locationAddress !== room.locationAddress ||
+            current.latitude !== room.latitude ||
+            current.longitude !== room.longitude
+          ) {
+            setPricesNeedPublishing(true);
+          }
+        })
+        .catch(() => undefined);
     } finally {
       setSaving(false);
     }
@@ -134,7 +155,10 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
         </button>
       </div>
 
+      {pricesNeedPublishing && <PublishPricesAgainNotice />}
+
       <RoomTypeForm
+        key={formKey}
         form={form}
         onChange={setForm}
         onSubmit={handleSubmit}
@@ -160,5 +184,21 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
         />
       )}
     </div>
+  );
+}
+
+/** Room facts changed: the published prices no longer match until they are published again. */
+function PublishPricesAgainNotice() {
+  const { t } = useTranslation();
+  return (
+    <p
+      role="status"
+      className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] font-medium text-amber-800"
+    >
+      {t("rooms.edit.publishPricesAgain")}{" "}
+      <Link href="/pricing" className="font-semibold underline">
+        {t("rooms.form.openPricing")}
+      </Link>
+    </p>
   );
 }

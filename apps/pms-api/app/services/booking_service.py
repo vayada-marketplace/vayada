@@ -1621,7 +1621,33 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     }
 
 
-async def confirm_payment_authorized(handle: str) -> dict:
+class BookingNotFoundError(ValueError):
+    """Unknown booking, or one that belongs to another hotel than the path slug."""
+
+
+def _require_hotel_slug(hotel_slug: str | None, slug: str, handle: str) -> None:
+    """Reject a booking or draft that belongs to another hotel than the path slug.
+
+    The ALB answers 410 for migrated hotel slugs, so a guest route that
+    ignored the path slug could still reach a migrated hotel's booking
+    through another hotel's slug. A mismatch looks like an unknown booking.
+    """
+    if hotel_slug != slug:
+        logger.warning(
+            "Guest booking call for %s under slug %r; it belongs to %r", handle, slug, hotel_slug
+        )
+        raise BookingNotFoundError("Booking not found")
+
+
+def _guest_booking_for_slug(booking: dict | None, slug: str) -> dict:
+    """Return the booking only when it belongs to the hotel in the path."""
+    if not booking:
+        raise BookingNotFoundError("Booking not found")
+    _require_hotel_slug(booking["hotel_slug"], slug, str(booking["id"]))
+    return booking
+
+
+async def confirm_payment_authorized(slug: str, handle: str) -> dict:
     """Called by the booking-engine after Stripe.confirmPayment resolves.
 
     ``handle`` is either a soft-hold draft id (VAY-388 card flow) or a
@@ -1636,6 +1662,10 @@ async def confirm_payment_authorized(handle: str) -> dict:
     """
     draft = await BookingDraftRepository.get_by_id(handle)
     if draft:
+        hotel_slug = await Database.fetchval(
+            "SELECT slug FROM hotels WHERE id = $1", draft["hotel_id"]
+        )
+        _require_hotel_slug(hotel_slug, slug, handle)
         try:
             return await _confirm_draft_payment(draft, handle)
         except Exception:
@@ -1652,9 +1682,7 @@ async def confirm_payment_authorized(handle: str) -> dict:
                 return _booking_to_response(booking).model_dump(by_alias=True)
             raise
 
-    booking = await BookingRepository.get_by_id(handle)
-    if not booking:
-        raise ValueError("Booking not found")
+    booking = _guest_booking_for_slug(await BookingRepository.get_by_id(handle), slug)
     if booking["payment_status"] == "authorized":
         # Webhook beat us to it — same idempotent shape.
         return _booking_to_response(booking).model_dump(by_alias=True)
@@ -2370,11 +2398,9 @@ async def host_reject_booking(booking_id: str, user_id: str, reason: str | None 
     return updated
 
 
-async def guest_withdraw_booking(booking_id: str, guest_email: str) -> dict:
+async def guest_withdraw_booking(slug: str, booking_id: str, guest_email: str) -> dict:
     """Guest withdraws a pending booking request."""
-    booking = await BookingRepository.get_by_id(booking_id)
-    if not booking:
-        raise ValueError("Booking not found")
+    booking = _guest_booking_for_slug(await BookingRepository.get_by_id(booking_id), slug)
     if booking["status"] != "pending":
         raise ValueError("Booking is not in pending state")
     if booking["guest_email"].lower() != guest_email.lower():
@@ -2587,11 +2613,9 @@ async def _compute_cancellation_refund(booking: dict) -> tuple[float, float, int
     return outcome.refund_amount, outcome.refund_pct, outcome.free_days_for_display
 
 
-async def get_cancellation_preview(booking_id: str, guest_email: str) -> dict:
+async def get_cancellation_preview(slug: str, booking_id: str, guest_email: str) -> dict:
     """Calculate refund details without actually cancelling."""
-    booking = await BookingRepository.get_by_id(booking_id)
-    if not booking:
-        raise ValueError("Booking not found")
+    booking = _guest_booking_for_slug(await BookingRepository.get_by_id(booking_id), slug)
     if booking["status"] != "confirmed":
         raise ValueError("Only confirmed bookings can be previewed for cancellation")
     if booking["guest_email"].lower() != guest_email.lower():
@@ -2614,11 +2638,9 @@ async def get_cancellation_preview(booking_id: str, guest_email: str) -> dict:
     }
 
 
-async def handle_guest_cancellation(booking_id: str, guest_email: str) -> dict:
+async def handle_guest_cancellation(slug: str, booking_id: str, guest_email: str) -> dict:
     """Guest cancels a confirmed booking — applies cancellation policy."""
-    booking = await BookingRepository.get_by_id(booking_id)
-    if not booking:
-        raise ValueError("Booking not found")
+    booking = _guest_booking_for_slug(await BookingRepository.get_by_id(booking_id), slug)
     if booking["status"] != "confirmed":
         raise ValueError("Only confirmed bookings can be cancelled")
     if booking["guest_email"].lower() != guest_email.lower():
