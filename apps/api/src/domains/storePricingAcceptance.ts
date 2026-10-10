@@ -46,7 +46,7 @@ export async function storePricingAcceptance(
       : quote.paymentMethod !== "pay_at_property" ||
         (quote.acceptanceMode !== "instant" && !request)) ||
     lifecycle.lifecycleStatus !== expectedStatus ||
-    (request
+    (request && !card
       ? typeof lifecycle.hostResponseDeadlineAt !== "string"
       : lifecycle.hostResponseDeadlineAt !== null) ||
     (card

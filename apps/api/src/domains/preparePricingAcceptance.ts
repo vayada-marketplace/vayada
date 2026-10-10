@@ -62,13 +62,13 @@ export async function preparePricingAcceptance(
     current.quote.paymentMethod === "pay_at_property" &&
     current.quote.evidence.dueNowMinor === "0" &&
     current.quote.evidence.dueLaterMinor === current.quote.evidence.totalMinor;
+  // A request while hotel-confirmed acceptance is off is unavailable, not a stale price.
+  if (command && mode === "request" && options.request !== true)
+    throw new Error("Request acceptance unavailable");
   const card = options.card === true && pricingCardQuoteSupported(current.quote);
-  // A card quote while online card acceptance is off is unavailable, not a stale price.
+  // Likewise a card quote while online card acceptance is off.
   if (command && !card && current.quote.paymentMethod === "card")
     throw new Error("Card acceptance unavailable");
-  // Likewise a request while hotel-confirmed acceptance is off.
-  if (command && !payAtProperty && mode === "request" && options.request !== true)
-    throw new Error("Request acceptance unavailable");
   if (
     !command ||
     !(payAtProperty || card) ||

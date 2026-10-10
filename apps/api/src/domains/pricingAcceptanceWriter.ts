@@ -15,6 +15,7 @@ import {
   startPricingCardPayment,
 } from "./pricingCardPayment.js";
 import type { StripeBookingPaymentProvider } from "./stripeBookingPayments.js";
+import { authorizePricingCardRequest } from "./pricingCardPaymentCompletion.js";
 
 export class PricingAcceptanceError extends Error {
   constructor(
@@ -77,6 +78,15 @@ export async function writePricingAcceptance(
         input.slug,
         prepared,
       );
+      if (card?.kind === "authorize") {
+        await authorizePricingCardRequest(client, card.propertyId, {
+          paymentIntentId: card.paymentIntentId,
+          amountMinor: card.amountMinor,
+          currency: card.currency,
+        });
+        await client.query("COMMIT");
+        return prepared;
+      }
       await client.query("COMMIT");
       return card || prepared;
     }
