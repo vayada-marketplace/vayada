@@ -7941,6 +7941,14 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         login.username = role;
         login.password = "fixture";
         worker = new pg.Pool({ connectionString: login.toString() });
+        // Whichever shard runs the file, each case runs on the exact restricted login.
+        expect(
+          (
+            await worker.query(
+              "SELECT current_user AS role,rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user",
+            )
+          ).rows,
+        ).toEqual([{ role, rolsuper: false, rolbypassrls: false }]);
         expect(await readPublishedPricingForChannexJob(worker, f.input)).toMatchObject({
           kind: "available",
         });
