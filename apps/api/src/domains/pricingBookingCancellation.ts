@@ -14,9 +14,11 @@ import { cancelHostBookingAssignments } from "./pmsHostBookingCancellation.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 
 /** Pricing-v2 stays keep their booked terms in the immutable acceptance, never in booking
- * metadata. A date change (VAY-2110) moves the stay to its latest amendment's quote, which keeps
- * the booked rooms and terms; days count in the property timezone the guest accepted under.
- * Null when the acceptance is missing or its current quote no longer describes the stay. */
+ * metadata. A date change (VAY-2110) moves the stay to its latest amendment's quote: its dates and
+ * prices (what the guest now owes) set the base, but the cancellation terms stay the ones the
+ * guest accepted, since an amendment pins the rooms and offers, not their terms. Days count in the
+ * property timezone the guest accepted under. Null when the acceptance is missing or its current
+ * quote no longer describes the stay. */
 export async function loadPricingBookingCancellation(
   client: InventoryReservationTransaction,
   input: {
@@ -39,8 +41,9 @@ export async function loadPricingBookingCancellation(
   )
     return null;
   const rooms: BookedCancellationRoom[] = [];
+  const booked = current.acceptance.quote.evidence.terms;
   for (const room of quote.stay.rooms) {
-    const terms = quote.evidence.terms.find(
+    const terms = booked.find(
       (t) => t.roomTypeId === room.roomTypeId && t.offerId === room.offerId,
     );
     if (!terms) return null;

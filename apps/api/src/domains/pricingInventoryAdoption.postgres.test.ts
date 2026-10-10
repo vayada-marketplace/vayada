@@ -901,6 +901,11 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           totalMinor: "54000",
           dueLaterMinor: "54000",
           requestKey: replacementStayKey(moved.stay),
+          // Repriced under today's offer terms; the guest accepted the partial-refund tiers.
+          terms: moved.evidence.terms.map((term) => ({
+            ...term,
+            cancellation: { kind: "non_refundable" as const },
+          })),
         });
         const movedHolds = await port.reserveBundle!({
           propertyId,
@@ -958,7 +963,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             cancelledAt: new Date("2026-09-18T08:00:00Z"),
           });
         // 18 September is 14 days before the new check-in (50%), 13 before the accepted one (25%);
-        // the base is the repriced one-night total.
+        // the base is the repriced one-night total, the terms are still the accepted tiers.
         expect(await cancellation(movedStay)).toMatchObject({
           daysBeforeCheckIn: 14,
           totalMinor: "54000",
@@ -987,30 +992,38 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
       } else if (scenario === "repository-stay-cancel-undecodable") {
         // A stored acceptance that no longer decodes: no online fee, but freeing never gets stuck.
         const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-        expect(
-          await loadPricingBookingCancellation(db, {
-            propertyId,
-            guestBookingId: bookingId,
-            stay: { checkIn: "2026-10-01", checkOut: "2026-10-03", roomCount: 3, currency: "EUR" },
-            cancelledAt: new Date("2026-09-21T08:00:00Z"),
-          }),
-        ).toBeNull();
-        const free = () =>
-          cancelAcceptedPricingStay(db, createTargetPmsInventoryReservationPort(), {
-            propertyId,
-            guestBookingId: bookingId,
-            commandId: randomUUID(),
-            fingerprint: hash(scenario),
-            occurredAt: new Date("2026-09-21T08:00:00Z"),
-          });
-        expect(await free()).toEqual({ released: 2, canceledAssignments: 0 });
-        await db.query("SET CONSTRAINTS ALL IMMEDIATE");
-        expect(await free()).toEqual({ released: 0, canceledAssignments: 0 });
-        expect(warn).toHaveBeenCalledWith(
-          "Pricing acceptance no longer decodes; releasing its stored holds.",
-          { propertyId, guestBookingId: bookingId },
-        );
-        warn.mockRestore();
+        try {
+          expect(
+            await loadPricingBookingCancellation(db, {
+              propertyId,
+              guestBookingId: bookingId,
+              stay: {
+                checkIn: "2026-10-01",
+                checkOut: "2026-10-03",
+                roomCount: 3,
+                currency: "EUR",
+              },
+              cancelledAt: new Date("2026-09-21T08:00:00Z"),
+            }),
+          ).toBeNull();
+          const free = () =>
+            cancelAcceptedPricingStay(db, createTargetPmsInventoryReservationPort(), {
+              propertyId,
+              guestBookingId: bookingId,
+              commandId: randomUUID(),
+              fingerprint: hash(scenario),
+              occurredAt: new Date("2026-09-21T08:00:00Z"),
+            });
+          expect(await free()).toEqual({ released: 2, canceledAssignments: 0 });
+          await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+          expect(await free()).toEqual({ released: 0, canceledAssignments: 0 });
+          expect(warn).toHaveBeenCalledWith(
+            "Pricing acceptance no longer decodes; releasing its stored holds.",
+            { propertyId, guestBookingId: bookingId },
+          );
+        } finally {
+          warn.mockRestore();
+        }
       } else if (scenario === "repository-stay-cancel-host-reject") {
         // A v2 request the PMS never adopted: rejecting it releases the hold, with no handoff.
         await db.query(
