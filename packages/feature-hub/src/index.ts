@@ -1,3 +1,8 @@
+export {
+  combineActivationClients,
+  PMS_NAVIGATION_MODULE_IDS,
+  type ActivationSource,
+} from "./combineActivationClients";
 export { FeatureHubPage } from "./FeatureHubPage";
 export {
   activeModuleCount,

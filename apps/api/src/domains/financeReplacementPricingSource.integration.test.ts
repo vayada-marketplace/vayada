@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
+import { lockFinanceReplacementPricingReadiness } from "./financeReplacementPricingReadiness.js";
 import { lockFinanceReplacementPricingSource as source } from "./financeReplacementPricingSource.js";
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("independent Finance pricing source", () => {
@@ -66,6 +67,46 @@ describe.skipIf(!url)("independent Finance pricing source", () => {
     expect(await read(f.propertyId)).toBe(accepted);
     await pool.query("UPDATE finance.online_card_execution_evidence SET revoked_at=clock_timestamp() WHERE id=$1", [evidenceId]);
     expect(await read(f.propertyId)).not.toBe(accepted);
+  });
+  it("ignores Stripe webhook bookkeeping but tracks every readiness field (VAY-2088)", async () => {
+    const f = await fixture();
+    await pool.query("UPDATE finance.payment_settings SET accepted_methods=ARRAY['card','pay_at_property'] WHERE property_id=$1", [f.propertyId]);
+    await pool.query(`UPDATE finance.payment_provider_accounts SET charges_enabled=true,payouts_enabled=true,
+      capabilities=ARRAY['card_payments','transfers'],account_metadata='{"detailsSubmitted":true,"cardPaymentsStatus":"active"}' WHERE id=$1`, [f.accountId]);
+    const terms = [{ roomTypeId: randomUUID(), offerId: "flex", revision: randomUUID(), cancellation: { kind: "non_refundable" as const }, payment: { kind: "full" as const } }];
+    const evidence = async () => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const readiness = await lockFinanceReplacementPricingReadiness(client, { propertyId: f.propertyId, currency: "EUR", pricingRevision: 1, terms });
+        return readiness.kind === "ready" ? readiness.evidenceId : readiness.reason;
+      } finally { await client.query("ROLLBACK"); client.release(); }
+    };
+    const before = await read(f.propertyId), readyBefore = await evidence();
+    expect(readyBefore).toMatch(/^finance\.pricing\.v2:/);
+    // What every account.updated webhook writes (applyStripeProviderAccountSnapshot): the event ID, and
+    // card_payments removed and re-appended, which reorders the array.
+    await pool.query(`UPDATE finance.payment_provider_accounts SET account_metadata=account_metadata||'{"lastStripeEventId":"evt_1"}',
+      capabilities=ARRAY['transfers','card_payments'],updated_at=clock_timestamp() WHERE id=$1`, [f.accountId]);
+    await pool.query(`UPDATE finance.payment_provider_accounts SET account_metadata=account_metadata||'{"lastStripeEventId":"evt_2"}' WHERE id=$1`, [f.accountId]);
+    expect(await read(f.propertyId)).toBe(before);
+    expect(await evidence()).toBe(readyBefore);
+    for (const change of [
+      "account_metadata=account_metadata||'{\"cardPaymentsStatus\":\"inactive\"}'",
+      "account_metadata=account_metadata||'{\"detailsSubmitted\":false}'",
+      "capabilities=ARRAY['transfers']",
+      "payouts_enabled=false",
+      "status='restricted'",
+      "default_currency='USD'",
+      "card_capability_revision=card_capability_revision+1",
+    ]) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(`UPDATE finance.payment_provider_accounts SET ${change} WHERE id=$1`, [f.accountId]);
+        expect(await source(client, f.propertyId), change).not.toBe(before);
+      } finally { await client.query("ROLLBACK"); client.release(); }
+    }
   });
   it("protects missing settings and missing execution evidence against insertion", async () => {
     const f = await fixture(false), reader = await pool.connect(), writer = await pool.connect();

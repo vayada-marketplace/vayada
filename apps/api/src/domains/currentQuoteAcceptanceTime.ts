@@ -41,8 +41,7 @@ export async function finishCurrentQuoteAcceptanceTime(
   if (
     !scope ||
     scope.propertyId !== current.scope.propertyId ||
-    scope.organizationId !== current.scope.organizationId ||
-    scope.authorityRevision !== current.scope.authorityRevision
+    scope.organizationId !== current.scope.organizationId
   )
     return fail();
   // clock_timestamp, not transaction-start now(): lock waits consume quote lifetime.

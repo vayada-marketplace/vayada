@@ -68,6 +68,27 @@ describe.skipIf(!url)("dashboard unverified booking money", () => {
         revenue: { amountDecimal: "200.00", currency: "EUR" },
         avgNightlyRate: { amountDecimal: "100.00", currency: "EUR" },
       });
+      // Daily buckets up to 31 days; longer windows split into 31 contiguous buckets.
+      const month = await port.getSparklines({
+        propertyId: property,
+        windowStart: "2026-09-10",
+        windowEnd: "2026-10-09",
+      });
+      expect(month.points).toHaveLength(30);
+      expect(month.points[21]).toMatchObject({
+        bucketStart: "2026-10-01",
+        bucketEnd: "2026-10-01",
+        bookingCount: 2,
+      });
+      const year = await port.getSparklines({
+        propertyId: property,
+        windowStart: "2026-01-01",
+        windowEnd: "2026-12-31",
+      });
+      expect(year.points).toHaveLength(31);
+      expect(year.points[0]?.bucketStart).toBe("2026-01-01");
+      expect(year.points.at(-1)?.bucketEnd).toBe("2026-12-31");
+      expect(year.points.reduce((total, point) => total + point.bookingCount, 0)).toBe(2);
       // With only unverified bookings, zero eligible revenue remains explicitly incomplete.
       await pool.query(
         `DELETE FROM booking.guest_bookings WHERE property_id=$1 AND booking_channel='direct'`,
