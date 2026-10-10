@@ -155,7 +155,7 @@ function sha256Hex(value: string): string {
 }
 
 /** The native writers' stable JSON (keys in code-unit order), so response hashes match theirs. */
-function nativeStableJson(value: unknown): string {
+export function nativeStableJson(value: unknown): string {
   const sort = (entry: unknown): unknown =>
     Array.isArray(entry)
       ? entry.map(sort)

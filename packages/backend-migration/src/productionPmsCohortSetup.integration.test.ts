@@ -6,6 +6,7 @@ import {
   createPmsOperatingCalendarSourceRevision,
   parsePmsOperatingCalendarConfigurationSnapshot,
   parseRoomTypeFactsSnapshot,
+  planPmsInventoryMaterialization,
 } from "@vayada/domain-pms";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -166,6 +167,22 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
       rows[0]!.data["user_id"] = OWNER;
       // Open February to December: the calendar takes the legacy season as its schedule.
       Object.assign(rows[1]!.data, { operating_periods: [{ from: "02-01", to: "12-31" }] });
+      // A legacy block past the year extends the coverage to its last night (396 days).
+      rows.push({
+        ...rows[1]!,
+        sourceTable: "room_blocks",
+        data: {
+          id: "13620000-0000-4000-8000-0000000000a8",
+          hotel_id: HOTEL,
+          room_type_id: ROOM_TYPE,
+          start_date: "2027-10-01",
+          end_date: "2027-10-05",
+          blocked_count: 1,
+          reason: "renovation",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-08-29T00:00:00Z",
+        },
+      });
       const plan = async (records: PmsTargetRecord[] = []) =>
         buildProductionPmsPlan({
           sourceRunId: RUN,
@@ -178,14 +195,15 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
       const planned = await plan((await plan()).records);
       expect(planned.blockers).toEqual([]);
       const written = await writeProductionPmsRecords(client, planned.writes);
+      // The calendar save, and the materialization of its coverage.
       expect(written).toMatchObject({
-        idempotency_keys: 1,
-        domain_events: 1,
-        outbox_events: 1,
+        idempotency_keys: 2,
+        domain_events: 2,
+        outbox_events: 2,
         operating_calendar_revisions: 1,
         operating_calendar_recurring_periods: 1,
         operating_calendar_room_bindings: 1,
-        product_audit_events: 1,
+        product_audit_events: 2,
       });
       await writeProductionMigrationProvenance(client, planned.provenance, RUN);
       await client.query("SET CONSTRAINTS ALL IMMEDIATE"); // the deferred manifest trigger
@@ -250,69 +268,128 @@ describe.skipIf(!URL)("production PMS cohort setup completeness (PostgreSQL)", (
       ]);
 
       // The configuration the runtime loads from these rows (pmsOperatingCalendarReadModel).
-      const root = (
-        await client.query(
-          `SELECT calendar_revision AS "calendarRevision", property_profile_revision AS profile,
-                  property_time_zone AS "timeZone", default_minimum_stay_nights AS "minimumStay",
-                  schedule_mode AS "scheduleMode",
-                  to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS at
-             FROM pms.operating_calendar_revisions WHERE property_id = $1`,
-          [PROPERTY],
-        )
-      ).rows[0];
-      const bindings = await client.query(
-        `SELECT room_type_id::text AS "roomTypeId",
-                source_room_facts_revision AS "sourceRoomFactsRevision",
-                source_room_units_revision AS "sourceRoomUnitsRevision",
-                physical_capacity_count AS "physicalCapacityCount",
-                starting_sellable_limit_count AS "startingSellableLimitCount"
-           FROM pms.operating_calendar_room_bindings WHERE property_id = $1 ORDER BY room_type_id`,
-        [PROPERTY],
-      );
-      expect(
-        parsePmsOperatingCalendarConfigurationSnapshot(
-          {
-            contractVersion: "pms-operating-calendar.v1",
-            propertyId: PROPERTY,
-            calendarRevision: root.calendarRevision,
-            source: createPmsOperatingCalendarSourceRevision(PROPERTY, root.calendarRevision),
-            sourceInputs: {
-              propertyProfile: {
-                ownerDomain: "hotel_catalog",
-                entityType: "property_profile",
-                entityId: PROPERTY,
-                revision: `profile:${root.profile}`,
-              },
-              propertyTimeZone: root.timeZone,
-              roomBindings: bindings.rows,
-            },
-            schedule: {
-              mode: root.scheduleMode,
-              periods: (
-                await client.query(
-                  `SELECT lpad(start_month::text, 2, '0') || '-' || lpad(start_day::text, 2, '0')
-                            AS "startsOn",
-                          lpad(end_month::text, 2, '0') || '-' || lpad(end_day::text, 2, '0')
-                            AS "endsOn"
-                     FROM pms.operating_calendar_recurring_periods
-                    WHERE property_id = $1 ORDER BY period_index`,
-                  [PROPERTY],
-                )
-              ).rows,
-            },
-            defaultMinimumStayNights: root.minimumStay,
-            createdAt: root.at,
-            updatedAt: root.at,
-          },
-          {
-            ownerDomain: "hotel_catalog",
-            registryVersion: "test",
-            isCanonicalIanaTimeZone: (zone) => zone === "Europe/Berlin",
-          },
-        ),
-      ).toMatchObject({
+      expect(await readCalendar(client)).toMatchObject({
         schedule: { mode: "recurring", periods: [{ startsOn: "02-01", endsOn: "12-31" }] },
       });
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+
+  it("materializes canonical inventory with the native coverage of the calendar", async () => {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+    try {
+      await seedCalendar(client);
+      const prerequisites = await readProductionPmsPrerequisites(client, RUN);
+      const rows = sourceRows();
+      rows[0]!.data["user_id"] = OWNER;
+      Object.assign(rows[1]!.data, { operating_periods: [{ from: "02-01", to: "12-31" }] });
+      // A legacy block past the year extends the coverage to its last night (396 days).
+      rows.push({
+        ...rows[1]!,
+        sourceTable: "room_blocks",
+        data: {
+          id: "13620000-0000-4000-8000-0000000000a8",
+          hotel_id: HOTEL,
+          room_type_id: ROOM_TYPE,
+          start_date: "2027-10-01",
+          end_date: "2027-10-05",
+          blocked_count: 1,
+          reason: "renovation",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-08-29T00:00:00Z",
+        },
+      });
+      const plan = async (records: PmsTargetRecord[] = []) =>
+        buildProductionPmsPlan({
+          sourceRunId: RUN,
+          snapshotAt: AT,
+          completedAt: AT,
+          rows,
+          cohort: { bookingHotelIds: [], pmsHotelIds: [HOTEL], marketplaceHotelIds: [] },
+          target: await readProductionPmsTargetState(client, records, prerequisites),
+        });
+      const planned = await plan((await plan()).records);
+      expect(planned.blockers).toEqual([]);
+      expect(await writeProductionPmsRecords(client, planned.writes)).toMatchObject({
+        idempotency_keys: 2,
+        domain_events: 2,
+        outbox_events: 2,
+        inventory_days: 396,
+        room_blocks: 1,
+        inventory_materialization_coverage: 1,
+        product_audit_events: 2,
+      });
+      await writeProductionMigrationProvenance(client, planned.provenance, RUN);
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE"); // coverage and calendar manifests
+      const verified = await plan(planned.records);
+      expect([verified.blockers, verified.writes, verified.checksum]).toEqual([
+        [],
+        [],
+        planned.checksum,
+      ]);
+      const coverage = await client.query(
+        `SELECT coverage.calendar_revision AS "calendarRevision",
+                coverage.coverage_from::text AS "from", coverage.coverage_through::text AS through,
+                outbox.destination, outbox.event_type AS "eventType",
+                (SELECT count(*)::int FROM pms.inventory_days day
+                  WHERE day.property_id = coverage.property_id
+                    AND day.status = 'closed') AS "closedDays"
+           FROM pms.inventory_materialization_coverage coverage
+           JOIN platform.outbox_events outbox
+             ON outbox.id = coverage.last_changed_materialization_outbox_event_id
+          WHERE coverage.property_id = $1`,
+        [PROPERTY],
+      );
+      expect(coverage.rows).toEqual([
+        {
+          calendarRevision: 1,
+          from: "2026-09-04",
+          through: "2027-10-04",
+          destination: "distribution.inventory-projection",
+          eventType: "pms.inventory.projection_refresh_requested",
+          closedDays: 31, // the legacy January closure, closed by the calendar's schedule
+        },
+      ]);
+
+      // The native planner adopts the stored days unchanged (pmsInventoryMaterialization).
+      const days = await client.query<Record<string, number | string | boolean | null>>(
+        `SELECT property_id::text AS "propertyId", room_type_id::text AS "roomTypeId",
+                stay_date::text AS "stayDate", calendar_revision AS "calendarRevision",
+                inventory_revision AS "inventoryRevision", status AS "operatingStatus",
+                total_count AS "physicalCapacityCount",
+                generated_sellable_limit_count AS "generatedSellableLimitCount",
+                channel_sellable_limit_count AS "channelSellableLimitCount",
+                manual_sellable_limit_count AS "manualSellableLimitCount",
+                effective_sellable_limit_count AS "effectiveSellableLimitCount",
+                assigned_count AS "assignedCount", blocked_count AS "blockedCount",
+                linked_stop_sell AS "linkedStopSell", linked_source_revision AS "linkedSourceRevision",
+                available_count AS "availableCount", generated_source_revision AS generated,
+                channel_source_revision AS channel, manual_source_revision AS manual,
+                block_source_revision AS block, booking_source_revision AS booking
+           FROM pms.inventory_days WHERE property_id = $1 ORDER BY stay_date`,
+        [PROPERTY],
+      );
+      const configuration = (await readCalendar(client))!;
+      // In batches of at most 366 days, as the native jobs plan a longer coverage.
+      for (const [from, through] of [
+        ["2026-09-04", "2027-09-04"],
+        ["2027-09-05", "2027-10-04"],
+      ] as const) {
+        const native = planPmsInventoryMaterialization({
+          propertyId: PROPERTY,
+          configurationSource: configuration.source,
+          configuration,
+          horizon: { from, through },
+          currentDays: days.rows
+            .filter((day) => String(day["stayDate"]) >= from && String(day["stayDate"]) <= through)
+            .map(({ generated, channel, manual, block, booking, ...day }) => ({
+              ...day,
+              sourceRevisions: { generated, channel, manual, block, booking },
+            })) as never,
+        });
+        expect(native).toMatchObject({ ok: true, outcome: "unchanged", changedDays: [] });
+      }
     } finally {
       await client.query("ROLLBACK");
     }
@@ -426,5 +503,67 @@ async function seedCalendar(client: pg.Client): Promise<void> {
      VALUES ($1, 'hotel_catalog', 'property', $2, 'owner', 'active'),
             ($1, 'pms', 'pms_property', $2, 'owner', 'active')`,
     [ORGANIZATION, PROPERTY],
+  );
+}
+
+/** The configuration the runtime loads from the stored rows (pmsOperatingCalendarReadModel). */
+async function readCalendar(client: pg.Client) {
+  const root = (
+    await client.query(
+      `SELECT calendar_revision AS "calendarRevision", property_profile_revision AS profile,
+              property_time_zone AS "timeZone", default_minimum_stay_nights AS "minimumStay",
+              schedule_mode AS "scheduleMode",
+              to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS at
+         FROM pms.operating_calendar_revisions WHERE property_id = $1`,
+      [PROPERTY],
+    )
+  ).rows[0];
+  const bindings = await client.query(
+    `SELECT room_type_id::text AS "roomTypeId",
+            source_room_facts_revision AS "sourceRoomFactsRevision",
+            source_room_units_revision AS "sourceRoomUnitsRevision",
+            physical_capacity_count AS "physicalCapacityCount",
+            starting_sellable_limit_count AS "startingSellableLimitCount"
+       FROM pms.operating_calendar_room_bindings WHERE property_id = $1 ORDER BY room_type_id`,
+    [PROPERTY],
+  );
+  return parsePmsOperatingCalendarConfigurationSnapshot(
+    {
+      contractVersion: "pms-operating-calendar.v1",
+      propertyId: PROPERTY,
+      calendarRevision: root.calendarRevision,
+      source: createPmsOperatingCalendarSourceRevision(PROPERTY, root.calendarRevision),
+      sourceInputs: {
+        propertyProfile: {
+          ownerDomain: "hotel_catalog",
+          entityType: "property_profile",
+          entityId: PROPERTY,
+          revision: `profile:${root.profile}`,
+        },
+        propertyTimeZone: root.timeZone,
+        roomBindings: bindings.rows,
+      },
+      schedule: {
+        mode: root.scheduleMode,
+        periods: (
+          await client.query(
+            `SELECT lpad(start_month::text, 2, '0') || '-' || lpad(start_day::text, 2, '0')
+                      AS "startsOn",
+                    lpad(end_month::text, 2, '0') || '-' || lpad(end_day::text, 2, '0') AS "endsOn"
+               FROM pms.operating_calendar_recurring_periods
+              WHERE property_id = $1 ORDER BY period_index`,
+            [PROPERTY],
+          )
+        ).rows,
+      },
+      defaultMinimumStayNights: root.minimumStay,
+      createdAt: root.at,
+      updatedAt: root.at,
+    },
+    {
+      ownerDomain: "hotel_catalog",
+      registryVersion: "test",
+      isCanonicalIanaTimeZone: (zone) => zone === "Europe/Berlin",
+    },
   );
 }

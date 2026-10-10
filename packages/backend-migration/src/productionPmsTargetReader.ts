@@ -116,6 +116,10 @@ export async function readProductionPmsPrerequisites(
                  AND catalog.relationship IN ('owner', 'operator')
                ORDER BY 1
             ) AS "organizationIds",
+            (SELECT jsonb_object_agg(day.room_type_id::text, day.last)
+               FROM (SELECT room_type_id, max(stay_date)::text AS last FROM pms.inventory_days
+                      WHERE property_id = property.id GROUP BY room_type_id) day
+            ) AS "inventoryThroughByRoomType",
             (SELECT jsonb_build_object(
                 'idempotencyKeyId', calendar.idempotency_key_id::text,
                 'organizationId', calendar.organization_id::text,

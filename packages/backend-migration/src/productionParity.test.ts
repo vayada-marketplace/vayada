@@ -354,6 +354,26 @@ describe("production migration parity", () => {
     );
   });
 
+  it("holds a calendared cohort room type to at least its coverage, without gaps", async () => {
+    const decide = async (rows: number, distinctDays: number, lastStayDate: string) => {
+      const reports = domainReports();
+      reports.pms.parity.expectedInventoryDaysByRoomType = { "room-type-1": 400 };
+      reports.pms.parity.futureInventoryByRoomType["room-type-1"] = {
+        ...reports.pms.parity.futureInventoryByRoomType["room-type-1"]!,
+        rows,
+        distinctDays,
+        lastStayDate,
+      };
+      const report = await runProductionParity(config(), services({ reports }));
+      return report.findings.some((finding) => finding.code === "FUTURE_INVENTORY_VARIANCE");
+    };
+    expect(await decide(400, 400, "2027-10-03")).toBe(false); // 2026-08-30 + 399 days
+    expect(await decide(430, 430, "2027-11-02")).toBe(false); // extended later by native jobs
+    expect(await decide(399, 399, "2027-10-02")).toBe(true); // short of the coverage
+    expect(await decide(400, 400, "2027-10-04")).toBe(true); // a gap
+    expect(await decide(401, 400, "2027-10-03")).toBe(true); // a duplicate day
+  });
+
   it("enforces a full release Git SHA in the core runner outside local", async () => {
     await expect(
       runProductionParity(

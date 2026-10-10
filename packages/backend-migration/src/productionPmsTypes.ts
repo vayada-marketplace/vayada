@@ -80,6 +80,8 @@ export type PmsCohortPropertyState = {
   timeZone: string | null;
   /** Active hotel organizations holding both native property links. */
   organizationIds: string[];
+  /** The last stored inventory day of each room type, if any (stale-day check). */
+  inventoryThroughByRoomType?: Record<string, string> | null;
   /** Revision 1 of the operating calendar as stored, if any. */
   storedCalendar: {
     idempotencyKeyId: string;
@@ -163,6 +165,8 @@ export type ProductionPmsPlan = {
   provenance: ProductionMigrationSourceLink[];
   blockers: IdentityMigrationBlocker[];
   parity: {
+    /** VAY-1362: days each calendared cohort room type must cover (else 366). */
+    expectedInventoryDaysByRoomType?: Record<string, number>;
     sourceTableCounts: Record<string, number>;
     targetTableCounts: Record<string, number>;
     sourceCountsByProperty: Record<string, Record<string, number>>;
