@@ -318,8 +318,14 @@ describe("replacement pricing HTTP boundary", () => {
       declaredVia: "save_prices",
       requestId: "request-1",
     });
-    for (const declaredVia of ["checkbox", null, ""])
+    for (const declaredVia of ["checkbox", null, "", "legacy_import"])
       expect((await f.inject(4, { ...endpoints[4][2], declaredVia })).statusCode).toBe(400);
+    // VAY-2086: the import declaration is operator-only (the CLI), never accepted over HTTP.
+    const legacyImport = { sourceRunId: `vay1351-${"0a".repeat(12)}`, planSha256: "b".repeat(64) };
+    for (const declaredVia of ["save_prices", "legacy_import"])
+      expect(
+        (await f.inject(4, { ...endpoints[4][2], declaredVia, legacyImport })).statusCode,
+      ).toBe(400);
     expect(f.commands.confirmCharges).toHaveBeenCalledTimes(1);
   });
   it("maps domain failures and sanitizes unexpected failures", async () => {

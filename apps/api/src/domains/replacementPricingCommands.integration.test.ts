@@ -6,7 +6,10 @@ import type { ReplacementOfferTerms } from "@vayada/domain-booking";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { createBookingPricingOfferTermsStore } from "./bookingPricingOfferTerms.js";
-import { replacementChargeFingerprint } from "./replacementChargeDeclarations.js";
+import {
+  LEGACY_IMPORT_DECLARATION_NOTE,
+  replacementChargeFingerprint,
+} from "./replacementChargeDeclarations.js";
 import { readPricingPublicationFreshness } from "./pricingPublicationFreshness.js";
 import { createReplacementPricingCommands } from "./replacementPricingCommands.js";
 const url = process.env["TEST_DATABASE_URL"];
@@ -449,6 +452,44 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
         declaredVia: "checkbox" as "save_prices",
       }),
     ).rejects.toMatchObject({ code: "invalid" });
+    // VAY-2086: Vayada operations declare on the hotel's behalf at import, with the run and plan.
+    const legacyImport = { sourceRunId: `vay1351-${"0a".repeat(12)}`, planSha256: "b".repeat(64) };
+    const imported = {
+      ...confirmation,
+      requestId: randomUUID(),
+      declaredVia: "legacy_import" as const,
+    };
+    const viaImport = await f.commands.confirmCharges(id, { ...imported, legacyImport });
+    await expect(
+      f.commands.confirmCharges(id, {
+        ...imported,
+        legacyImport: { ...legacyImport, planSha256: "c".repeat(64) },
+      }),
+    ).rejects.toMatchObject({ code: "idempotency_conflict" });
+    for (const invalid of [
+      { ...imported, requestId: randomUUID() },
+      {
+        ...imported,
+        requestId: randomUUID(),
+        legacyImport: { ...legacyImport, sourceRunId: "run-1" },
+      },
+      {
+        ...imported,
+        requestId: randomUUID(),
+        legacyImport: { ...legacyImport, planSha256: "B".repeat(64) },
+      },
+      { ...imported, requestId: randomUUID(), legacyImport: { ...legacyImport, note: "mine" } },
+      {
+        ...confirmation,
+        requestId: randomUUID(),
+        declaredVia: "save_prices" as const,
+        legacyImport,
+      },
+      { ...confirmation, requestId: randomUUID(), legacyImport },
+    ])
+      await expect(f.commands.confirmCharges(id, invalid)).rejects.toMatchObject({
+        code: "invalid",
+      });
     const audit = (
       await pool.query(
         `SELECT target_resource_id::text AS id,audit_metadata FROM platform.product_audit_events
@@ -459,6 +500,11 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
     expect(Object.fromEntries(audit.map((row) => [row.id, row.audit_metadata]))).toEqual({
       [viaSave.id]: { declaredVia: "save_prices" },
       [plain.id]: {},
+      [viaImport.id]: {
+        declaredVia: "legacy_import",
+        legacyImport,
+        note: LEGACY_IMPORT_DECLARATION_NOTE,
+      },
     });
   });
   it("rejects malformed, foreign, inactive and stale-term proposals and untrusted identity", async () => {
