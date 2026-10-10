@@ -5,7 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 import { LanguageProvider } from "@/lib/i18n";
 import MediaTab, { type PropertyGalleryImage } from "./MediaTab";
 
-function renderMediaTab(galleryImages: PropertyGalleryImage[], languageSelectorAvailable = true) {
+function renderMediaTab(
+  galleryImages: PropertyGalleryImage[],
+  languageSelectorAvailable = true,
+  hero: { heroImage?: string; heroBusy?: boolean } = {},
+) {
   return renderToStaticMarkup(
     <LanguageProvider>
       <MediaTab
@@ -41,6 +45,7 @@ function renderMediaTab(galleryImages: PropertyGalleryImage[], languageSelectorA
         addGalleryImages={vi.fn()}
         removeGalleryImage={vi.fn()}
         reorderGalleryImage={vi.fn()}
+        {...hero}
       />
     </LanguageProvider>,
   );
@@ -111,3 +116,16 @@ function switchTag(markup: string, label: string): string {
   if (!tag) throw new Error(`Missing switch: ${label}`);
   return tag;
 }
+
+describe("MediaTab hero image", () => {
+  it("labels the remove control and disables hero actions while media is saving", () => {
+    const markup = renderMediaTab([], true, {
+      heroImage: "https://cdn.vayada.com/hero.webp",
+      heroBusy: true,
+    });
+
+    expect(markup).toContain('type="button" disabled="" aria-label="Remove hero image"');
+    expect(markup).toMatch(/<button type="button" disabled=""[^>]*>Replace Image<\/button>/);
+    expect(markup).toContain('accept="image/jpeg,image/png,image/webp"');
+  });
+});

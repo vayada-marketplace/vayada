@@ -4654,13 +4654,9 @@ describe("vayada-api", () => {
         authorization: "Bearer valid-token",
       },
       payload: {
-        property_name: "Updated Alpenrose",
         reservation_email: "new-reservations@alpenrose.example",
         phone_number: "+43 1 9999",
         whatsapp_number: "+43 1 8888",
-        address: "Updated street 1",
-        city: "Innsbruck",
-        country: "AT",
         instagram: "https://instagram.com/updated-alpenrose",
         facebook: "https://facebook.com/updated-alpenrose",
         tiktok: "https://tiktok.com/@updated-alpenrose",
@@ -4689,13 +4685,9 @@ describe("vayada-api", () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).toMatchObject({
       id: "booking_hotel_alpenrose",
-      property_name: "Updated Alpenrose",
       reservation_email: "new-reservations@alpenrose.example",
       phone_number: "+43 1 9999",
       whatsapp_number: "+43 1 8888",
-      address: "Updated street 1",
-      city: "Innsbruck",
-      country: "AT",
       instagram: "https://instagram.com/updated-alpenrose",
       facebook: "https://facebook.com/updated-alpenrose",
       tiktok: "https://tiktok.com/@updated-alpenrose",
@@ -4715,6 +4707,36 @@ describe("vayada-api", () => {
       guest_count_enabled: false,
       terms_text: "Updated Alpenrose booking terms.",
       cancellation_policy_text: "Free cancellation until one day before arrival.",
+    });
+  });
+
+  it("refuses the property name and location, which the property profile owns", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "PATCH",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/property",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        property_name: "Updated Alpenrose",
+        address: "Updated street 1",
+        city: "Innsbruck",
+        country: "AT",
+        phone_number: "+43 1 9999",
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.body).toMatchObject({
+      code: "invalid_payload",
+      details: [
+        "property_name is saved through the property profile, not booking settings.",
+        "address is saved through the property profile, not booking settings.",
+        "city is saved through the property profile, not booking settings.",
+        "country is saved through the property profile, not booking settings.",
+      ],
     });
   });
 
@@ -7950,13 +7972,9 @@ describe("vayada-api", () => {
         authorization: "Bearer valid-token",
       },
       payload: {
-        property_name: "Target Alpenrose",
         reservation_email: "target@alpenrose.example",
         phone_number: "+43 1 1111",
         whatsapp_number: "+43 1 2222",
-        address: "Target lane 1",
-        city: "Vienna",
-        country: "AT",
         instagram: "https://instagram.com/target-alpenrose",
         facebook: "https://facebook.com/target-alpenrose",
         tiktok: "https://tiktok.com/@target-alpenrose",
@@ -18222,6 +18240,81 @@ describe("vayada-api", () => {
     });
     expect(readOnlyWrite.statusCode).toBe(403);
     expect(readOnlyWrite.body).toMatchObject({ code: "missing_permission" });
+  });
+
+  it("stores check-in prompts and types and check-out labels, refusing other step fields", async () => {
+    const commandRepository = createPmsOperationsCommandRepository();
+    const server = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+    app = server;
+    const write = (suffix: string, idempotencyKey: string, steps: unknown[]) =>
+      injectJson(server, {
+        method: "PUT",
+        url: `/api/pms/properties/${pmsPropertyId}/${suffix}`,
+        payload: { commandId: idempotencyKey, idempotencyKey, steps },
+        headers: { authorization: "Bearer valid-token" },
+      });
+
+    const checkIn = await write("check-in-checklist", "template-fields-check-in", [
+      {
+        stepId: "deposit",
+        label: "Collect deposit",
+        required: true,
+        prompt: " Card ",
+        type: "amount",
+      },
+      { stepId: "ids", label: "Check IDs", required: false, prompt: "", type: "checkbox" },
+    ]);
+    const checkOut = await write("check-out-inspection", "template-fields-check-out", [
+      {
+        stepId: "minibar",
+        label: "Minibar",
+        required: true,
+        okLabel: "Full",
+        negativeLabel: "Used",
+        notePrompt: "Which items?",
+      },
+    ]);
+
+    expect(checkIn.statusCode).toBe(200);
+    expect((checkIn.body as PmsOperationalTemplateCommandResponse).template.steps).toEqual([
+      {
+        stepId: "deposit",
+        label: "Collect deposit",
+        required: true,
+        prompt: "Card",
+        type: "amount",
+      },
+      { stepId: "ids", label: "Check IDs", required: false, type: "checkbox" },
+    ]);
+    expect(checkOut.statusCode).toBe(200);
+    expect((checkOut.body as PmsOperationalTemplateCommandResponse).template.steps).toEqual([
+      {
+        stepId: "minibar",
+        label: "Minibar",
+        required: true,
+        okLabel: "Full",
+        negativeLabel: "Used",
+        notePrompt: "Which items?",
+      },
+    ]);
+
+    const wrongKind = await write("check-out-inspection", "template-fields-wrong-kind", [
+      { stepId: "minibar", label: "Minibar", required: true, prompt: "Count bottles" },
+    ]);
+    expect(wrongKind.statusCode).toBe(400);
+    expect(wrongKind.body).toMatchObject({
+      code: "invalid_body",
+      message: "Template step 1 does not save prompt.",
+    });
+    const badType = await write("check-in-checklist", "template-fields-bad-type", [
+      { stepId: "deposit", label: "Collect deposit", type: "signature" },
+    ]);
+    expect(badType.statusCode).toBe(400);
+    expect(commandRepository.templateUpdates).toHaveLength(2);
   });
 
   it("rejects PMS operations reads with an invalid token", async () => {
