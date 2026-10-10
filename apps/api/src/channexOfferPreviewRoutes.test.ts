@@ -246,6 +246,8 @@ describe("channel offer preview HTTP boundary", () => {
     ] as const) {
       const room = structuredClone(snapshot.rooms[0]);
       room.capacity = { adults, children, total: adults + children };
+      // Children that change the price are not representable on Channex.
+      if (children > 0) room.children.bands[0]!.nightlyMinor = "500";
       f.read.mockResolvedValue({ ...snapshot, rooms: [room], revision: 1, sources, stale: false });
       const r = await f.inject();
       expect(r.statusCode).toBe(200);
@@ -257,6 +259,18 @@ describe("channel offer preview HTTP boundary", () => {
       });
       expect(r.json()).not.toHaveProperty("configuration");
     }
+    // Price-neutral children (VAY-2108): previewed with adults-only options.
+    const family = structuredClone(snapshot.rooms[0]);
+    family.capacity = { adults: 2, children: 1, total: 3 };
+    family.children = {
+      adultFromAge: 18,
+      bands: [{ fromAge: 0, throughAge: 17, nightlyMinor: "0", countsTowardCapacity: true }],
+    };
+    f.read.mockResolvedValue({ ...snapshot, rooms: [family], revision: 1, sources, stale: false });
+    const neutral = await f.inject();
+    expect(neutral.statusCode).toBe(200);
+    expect(neutral.json()).toMatchObject({ kind: "preview" });
+    expect(neutral.json().configuration.options).toHaveLength(2);
     const room = structuredClone(snapshot.rooms[0]);
     room.capacity = { total: 100, adults: 100, children: 0 };
     f.read.mockResolvedValue({ ...snapshot, rooms: [room], revision: 1, sources, stale: false });

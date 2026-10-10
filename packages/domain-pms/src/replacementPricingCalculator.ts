@@ -9,6 +9,7 @@ import {
   parsePricingConfiguration,
   pricingDate,
   validPricingGuests,
+  type PricingConfiguration,
   type PricingGuests,
   type PricingOffer,
   type PricingRestrictions,
@@ -135,7 +136,17 @@ export function projectReplacementRoomNight(
   configuration: unknown,
   request: RoomNightProjectionRequest,
 ): RoomNightProjectionResult {
-  const result = evaluateRoomPricing(configuration, request, {
+  const config = parsePricingConfiguration(configuration);
+  if (!config) return { kind: "unavailable", reason: "invalid_configuration" };
+  return projectParsedReplacementRoomNight(config, request);
+}
+/** projectReplacementRoomNight over a configuration returned by parsePricingConfiguration, for
+ * callers that project one configuration many times (parsing dominates a night's cost). */
+export function projectParsedReplacementRoomNight(
+  config: PricingConfiguration,
+  request: RoomNightProjectionRequest,
+): RoomNightProjectionResult {
+  const result = evaluateParsedRoomPricing(config, request, {
     kind: "night",
     date: request?.date,
   });
@@ -157,6 +168,13 @@ function evaluateRoomPricing(
 ): EvaluatedRoomStayResult {
   const config = parsePricingConfiguration(configuration);
   if (!config) return { kind: "unavailable", reason: "invalid_configuration" };
+  return evaluateParsedRoomPricing(config, request, period);
+}
+function evaluateParsedRoomPricing(
+  config: PricingConfiguration,
+  request: Omit<RoomStayPricingRequest, "checkIn" | "checkOut">,
+  period: PricingPeriod,
+): EvaluatedRoomStayResult {
   const step = BigInt(pricingAmountStep(config.currency));
   const firstDate = period.kind === "stay" ? period.checkIn : period.date;
   if (
