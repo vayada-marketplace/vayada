@@ -374,6 +374,13 @@ export const PROJECT_PUBLIC_BOOKABILITY_PROFILE = `
               entitlement.plan_key = 'fixed'
               AND entitlement.provider_subscription_status IN ('trialing', 'active')
             )
+            -- VAY-1362: an adopted legacy subscription keeps selling while
+            -- Stripe retries, as on legacy (its billing_status stays active).
+            OR (
+              entitlement.plan_key = 'fixed'
+              AND entitlement.provider_subscription_status = 'past_due'
+              AND NULLIF(entitlement.entitlement_metadata ->> 'legacyAdoptedAt', '') IS NOT NULL
+            )
           )
           AND (entitlement.starts_at IS NULL OR entitlement.starts_at <= now())
           AND (entitlement.expires_at IS NULL OR entitlement.expires_at > now())
