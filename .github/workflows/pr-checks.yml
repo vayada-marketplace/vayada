@@ -244,13 +244,17 @@ jobs:
           dev_pid=$!
           trap 'kill "$dev_pid" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 120); do
-            if curl --silent --fail http://localhost:3164/login >/dev/null; then break; fi
+            kill -0 "$dev_pid" 2>/dev/null || break
+            if curl --silent --fail --max-time 5 http://localhost:3164/login >/dev/null; then break; fi
             sleep 2
           done
-          curl --silent --fail http://localhost:3164/login >/dev/null || { tail -50 "$RUNNER_TEMP/pms-web-dev.log"; exit 1; }
-          npm run e2e:pms-web -- --workers=1
+          curl --silent --fail --max-time 10 http://localhost:3164/login >/dev/null || { tail -50 "$RUNNER_TEMP/pms-web-dev.log"; exit 1; }
+          npm run e2e:pms-web -- --workers=1 --retries=1
         env:
+          # Any non-empty CI makes playwright.config.ts use CI reporters; "false" keeps it from
+          # starting every app's webServer (that needs CI === "true").
           CI: "false"
+          PLAYWRIGHT_HTML_OPEN: never
           E2E_START_SERVERS: "0"
           PORT: "3164"
           AUTH_PUBLIC_ORIGIN: http://localhost:3164
@@ -258,6 +262,16 @@ jobs:
           NEXT_PUBLIC_BOOKING_ADMIN_URL: http://admin.booking.localhost:3003
           E2E_PMS_BASE_URL: http://localhost:3164
           E2E_MARKETPLACE_BASE_URL: http://marketplace.localhost:3000
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pms-web-playwright-report
+          path: |
+            playwright-report
+            test-results
+          retention-days: 7
 
   # Every unit suite under apps/api and the backend packages, with no database. Files that need
   # PostgreSQL skip themselves here; api_postgres runs only the integration files it names (full

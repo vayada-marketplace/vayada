@@ -52,7 +52,7 @@ export const RULES = [
   },
   {
     name: "pms-web-e2e",
-    test: /^tests\/e2e\/(pms-web|support)\//,
+    test: /^tests\/e2e\/(pms-web|support|marketplace-web\/utils)\//,
     jobs: ["frontend", "first_party_auth", "pms_web_e2e"],
   },
   // The frontend job runs the landing Playwright suite; first_party_auth runs the auth suite.

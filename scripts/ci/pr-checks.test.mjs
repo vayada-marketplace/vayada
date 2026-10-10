@@ -57,6 +57,7 @@ test("pms-web and its browser specs and shared e2e support run the pms-web brows
     "apps/pms-web/app/(app)/layout.tsx",
     "tests/e2e/pms-web/smoke.spec.ts",
     "tests/e2e/support/pmsWebMocks.ts",
+    "tests/e2e/marketplace-web/utils/cors.ts",
   ]) {
     assert.deepEqual(
       selectJobs([file]).jobs,
