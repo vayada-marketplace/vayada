@@ -254,12 +254,12 @@ export function AddonEditor({
                 {categories.map((category) => (
                   <label
                     key={category}
-                    className={`cursor-pointer rounded-full border px-3.5 py-1.5 text-sm focus-within:ring-2 focus-within:ring-primary-500 ${values.category === category ? "border-primary-500 bg-primary-50 text-primary-700" : "border-gray-200 text-gray-700 hover:border-gray-300"}`}
+                    className={`relative cursor-pointer rounded-full border px-3.5 py-1.5 text-sm focus-within:ring-2 focus-within:ring-primary-500 ${values.category === category ? "border-primary-500 bg-primary-50 text-primary-700" : "border-gray-200 text-gray-700 hover:border-gray-300"}`}
                   >
                     <input
                       type="radio"
                       name="addon-category"
-                      className="sr-only"
+                      className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
                       checked={values.category === category}
                       onChange={() => setValues((v) => ({ ...v, category }))}
                     />
