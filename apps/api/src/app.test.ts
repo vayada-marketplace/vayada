@@ -18169,6 +18169,81 @@ describe("vayada-api", () => {
     expect(readOnlyWrite.body).toMatchObject({ code: "missing_permission" });
   });
 
+  it("stores check-in prompts and types and check-out labels, refusing other step fields", async () => {
+    const commandRepository = createPmsOperationsCommandRepository();
+    const server = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+    app = server;
+    const write = (suffix: string, idempotencyKey: string, steps: unknown[]) =>
+      injectJson(server, {
+        method: "PUT",
+        url: `/api/pms/properties/${pmsPropertyId}/${suffix}`,
+        payload: { commandId: idempotencyKey, idempotencyKey, steps },
+        headers: { authorization: "Bearer valid-token" },
+      });
+
+    const checkIn = await write("check-in-checklist", "template-fields-check-in", [
+      {
+        stepId: "deposit",
+        label: "Collect deposit",
+        required: true,
+        prompt: " Card ",
+        type: "amount",
+      },
+      { stepId: "ids", label: "Check IDs", required: false, prompt: "", type: "checkbox" },
+    ]);
+    const checkOut = await write("check-out-inspection", "template-fields-check-out", [
+      {
+        stepId: "minibar",
+        label: "Minibar",
+        required: true,
+        okLabel: "Full",
+        negativeLabel: "Used",
+        notePrompt: "Which items?",
+      },
+    ]);
+
+    expect(checkIn.statusCode).toBe(200);
+    expect((checkIn.body as PmsOperationalTemplateCommandResponse).template.steps).toEqual([
+      {
+        stepId: "deposit",
+        label: "Collect deposit",
+        required: true,
+        prompt: "Card",
+        type: "amount",
+      },
+      { stepId: "ids", label: "Check IDs", required: false, type: "checkbox" },
+    ]);
+    expect(checkOut.statusCode).toBe(200);
+    expect((checkOut.body as PmsOperationalTemplateCommandResponse).template.steps).toEqual([
+      {
+        stepId: "minibar",
+        label: "Minibar",
+        required: true,
+        okLabel: "Full",
+        negativeLabel: "Used",
+        notePrompt: "Which items?",
+      },
+    ]);
+
+    const wrongKind = await write("check-out-inspection", "template-fields-wrong-kind", [
+      { stepId: "minibar", label: "Minibar", required: true, prompt: "Count bottles" },
+    ]);
+    expect(wrongKind.statusCode).toBe(400);
+    expect(wrongKind.body).toMatchObject({
+      code: "invalid_body",
+      message: "Template step 1 does not save prompt.",
+    });
+    const badType = await write("check-in-checklist", "template-fields-bad-type", [
+      { stepId: "deposit", label: "Collect deposit", type: "signature" },
+    ]);
+    expect(badType.statusCode).toBe(400);
+    expect(commandRepository.templateUpdates).toHaveLength(2);
+  });
+
   it("rejects PMS operations reads with an invalid token", async () => {
     app = buildAuthenticatedApp();
 
