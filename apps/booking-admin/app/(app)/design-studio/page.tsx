@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { EyeIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { BOOKING_GUEST_LANGUAGE_CODES } from "@vayada/locale-constants";
 import { BOOKING_PAGE_FONT_STYLESHEET_URL, BookingPagePreview } from "@vayada/product-onboarding";
 import { settingsService, type CustomDomainStatus } from "@/services/settings";
 import { requireSelectedBookingHotelId } from "@/services/api/bookingHotelScope";
@@ -13,7 +14,7 @@ import { FeedbackAlert, SaveButton } from "@/components/ui";
 import {
   MAX_PROPERTY_GALLERY_PHOTOS,
   uploadPropertyGalleryImages,
-  uploadSingleImage,
+  uploadPropertyHeroImage,
   uploadSingleImageWithMediaReference,
 } from "@/lib/utils/uploadImage";
 import {
@@ -69,7 +70,8 @@ export default function DesignStudioPage() {
   const [defaultCurrency, setDefaultCurrency] = useState("EUR");
   const [defaultLanguage, setDefaultLanguage] = useState("en");
   const [supportedCurrencies, setSupportedCurrencies] = useState<string[]>([]);
-  const [supportedLanguages, setSupportedLanguages] = useState<string[]>([]);
+  // null until property settings load, so a failed read never greys out the language toggle.
+  const [supportedLanguages, setSupportedLanguages] = useState<string[] | null>(null);
   const [galleryImages, setGalleryImages] = useState<PropertyGalleryImage[]>([]);
   const [galleryOverflowCount, setGalleryOverflowCount] = useState(0);
   const [galleryBusy, setGalleryBusy] = useState(false);
@@ -232,44 +234,57 @@ export default function DesignStudioPage() {
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = "";
     if (!file) return;
     const hotelId = designHotelIdRef.current;
-    const expectedProfileRevision = profileRevisionRef.current;
-    if (!hotelId || expectedProfileRevision === null) {
-      e.target.value = "";
+    const propertyId = propertyIdRef.current;
+    if (!hotelId || !propertyId || profileRevisionRef.current === null) {
       setFeedback({
         type: "error",
         message: "admin.thePropertyProfileVersionIsUnavailableRefreshDesignStudioBefore",
       });
       return;
     }
+    if (!beginGalleryWrite()) return;
 
     const previousImage = heroImage;
     const previewUrl = URL.createObjectURL(file);
     setHeroImage(previewUrl);
+    setFeedback(null);
 
     try {
       setUploading(true);
-      const s3Url = await uploadSingleImage(
-        file,
-        "property.hero_image",
-        hotelId,
-        expectedProfileRevision,
-      );
-      profileRevisionRef.current = expectedProfileRevision + 1;
-      URL.revokeObjectURL(previewUrl);
-      setHeroImage(s3Url);
-      try {
-        await refreshCanonicalGallery();
-      } catch {
-        profileRevisionRef.current = null;
+      const mediaObjectId = await uploadPropertyHeroImage(file, propertyId);
+      let { profile } = await assignPresentationMedia(galleryImages, {
+        mediaObjectId,
+        altText: null,
+      });
+      // The cover is committed from here on; a failed read-back must not look like a failed upload.
+      if (!profile) {
+        profile = await sharedHotelSetupApi.getPublicPropertyProfile(propertyId).catch(() => null);
+        if (profile) applyPublicGallery(profile);
       }
+      const heroUrl = profile?.publicProfile.media.find(
+        (media) => media.mediaType === "hero_image" && media.mediaObjectId === mediaObjectId,
+      )?.url;
+      URL.revokeObjectURL(previewUrl);
+      setHeroImage(heroUrl ?? previousImage);
 
       try {
-        await settingsService.updateDesignSettings({ hero_image: s3Url }, hotelId);
+        if (heroUrl) await settingsService.updateDesignSettings({ hero_image: heroUrl }, hotelId);
+      } catch {
+        console.error("Failed to auto-save hero image");
+      }
+      try {
         await publishPublicBookabilityProfile(hotelId);
       } catch {
-        console.error("Failed to auto-save or publish hero image");
+        console.error("Failed to publish hero image");
+      }
+      if (!heroUrl) {
+        setFeedback({
+          type: "error",
+          message: "admin.designSavedButTheBookingPreviewCouldNotBeRefreshed",
+        });
       }
     } catch (err) {
       console.error("Image upload failed:", err);
@@ -283,6 +298,7 @@ export default function DesignStudioPage() {
       setFeedback({ type: "error", message: "bookingFlow.addons.feedback.uploadError" });
     } finally {
       setUploading(false);
+      endGalleryWrite();
     }
   };
 
@@ -291,16 +307,17 @@ export default function DesignStudioPage() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const persistGallery = async (
+  const assignPresentationMedia = async (
     nextGallery: PropertyGalleryImage[],
-  ): Promise<{ published: boolean; refreshed: boolean }> => {
+    cover: { mediaObjectId: string; altText: string | null } | null = coverAssignmentRef.current,
+  ): Promise<{
+    profile: Awaited<ReturnType<typeof sharedHotelSetupApi.getPublicPropertyProfile>> | null;
+  }> => {
     const propertyId = propertyIdRef.current;
-    const hotelId = designHotelIdRef.current;
     const expectedProfileRevision = profileRevisionRef.current;
-    if (!propertyId || !hotelId || expectedProfileRevision === null) {
+    if (!propertyId || expectedProfileRevision === null) {
       throw new Error(t("admin.thePropertyGalleryVersionIsUnavailableRefreshAndTryAgain"));
     }
-    const cover = coverAssignmentRef.current;
     const sortOffset = cover ? 1 : 0;
     const response = await sharedHotelSetupApi.replacePropertyPresentationMedia(
       propertyId,
@@ -329,13 +346,24 @@ export default function DesignStudioPage() {
     );
     profileRevisionRef.current = response.profileRevision;
 
-    let refreshed = false;
     try {
-      applyPublicGallery(await sharedHotelSetupApi.getPublicPropertyProfile(propertyId));
-      refreshed = true;
+      const profile = await sharedHotelSetupApi.getPublicPropertyProfile(propertyId);
+      applyPublicGallery(profile);
+      return { profile };
     } catch {
       // Keep the optimistic thumbnails; the assignment itself already succeeded.
+      return { profile: null };
     }
+  };
+
+  const persistGallery = async (
+    nextGallery: PropertyGalleryImage[],
+  ): Promise<{ published: boolean; refreshed: boolean }> => {
+    const hotelId = designHotelIdRef.current;
+    if (!hotelId) {
+      throw new Error(t("admin.thePropertyGalleryVersionIsUnavailableRefreshAndTryAgain"));
+    }
+    const refreshed = (await assignPresentationMedia(nextGallery)).profile !== null;
     let published = true;
     try {
       await publishPublicBookabilityProfile(hotelId);
@@ -647,6 +675,14 @@ export default function DesignStudioPage() {
   ];
 
   const currentFont = FONT_PAIRINGS.find((f) => f.id === selectedFont) || FONT_PAIRINGS[0];
+  // Guests only get a language selector with two languages the booking site can render.
+  const languageSelectorAvailable =
+    supportedLanguages === null ||
+    new Set(
+      [defaultLanguage, ...supportedLanguages].filter((code) =>
+        (BOOKING_GUEST_LANGUAGE_CODES as readonly string[]).includes(code),
+      ),
+    ).size > 1;
 
   if (loading) {
     return (
@@ -760,8 +796,7 @@ export default function DesignStudioPage() {
                 referAGuestModuleEnabled={referAGuestModuleEnabled}
                 showLanguageSelector={showLanguageSelector}
                 setShowLanguageSelector={setShowLanguageSelector}
-                showCurrencySelector={showCurrencySelector}
-                setShowCurrencySelector={setShowCurrencySelector}
+                languageSelectorAvailable={languageSelectorAvailable}
                 resetContent={resetContent}
                 galleryImages={galleryImages}
                 galleryAtCapacity={
@@ -847,9 +882,11 @@ export default function DesignStudioPage() {
             headerLogo={headerLogo}
             showContactButton={showContactButton}
             showReferAGuestButton={Boolean(referAGuestModuleEnabled && showReferAGuestButton)}
-            showLanguageSelector={showLanguageSelector}
-            showCurrencySelector={showCurrencySelector}
-            supportedLanguages={supportedLanguages}
+            showLanguageSelector={showLanguageSelector && languageSelectorAvailable}
+            // Booking publications carry a single pricing currency, so guests never see a
+            // currency selector yet. The stored preference is kept for when that changes.
+            showCurrencySelector={false}
+            supportedLanguages={supportedLanguages ?? undefined}
             supportedCurrencies={supportedCurrencies}
             heroHeading={heroHeading}
             heroImage={heroImage}
