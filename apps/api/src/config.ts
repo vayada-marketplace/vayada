@@ -234,6 +234,8 @@ export type ApiConfig = {
   channexManagement: ChannexManagementConfig;
   stripeSubscriptions: StripeSubscriptionConfig;
   bookingEmailDelivery?: BookingEmailDeliveryConfig;
+  /** VAY-1362: ops mailbox for failed payments on adopted legacy subscriptions. */
+  financeBillingOpsEmail?: string;
   marketplaceCommunicationUnsubscribe?: MarketplaceCommunicationUnsubscribeConfig;
   xenditSecretKey?: string;
 };
@@ -1382,6 +1384,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     airbnbAlterations,
     stripeSubscriptions: prospectiveConfig.stripeSubscriptions,
     bookingEmailDelivery,
+    financeBillingOpsEmail: readOptionalEnv(env, "FINANCE_BILLING_OPS_EMAIL"),
     marketplaceCommunicationUnsubscribe: loadMarketplaceCommunicationUnsubscribeConfig(env),
     xenditSecretKey: readOptionalEnv(env, "XENDIT_SECRET_KEY"),
   };

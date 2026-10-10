@@ -268,6 +268,7 @@ import {
 } from "./jobs/pmsCalendarAutoOpenWorker.js";
 import { createPmsChannexManagementTargetState } from "./jobs/pmsChannexManagementTargetState.js";
 import {
+  financeSubscriptionPaymentFailedEmail,
   runFinanceSubscriptionNotificationJobs,
   runFinanceSubscriptionWebhookJobs,
 } from "./jobs/financeSubscriptions.js";
@@ -2611,21 +2612,47 @@ app.addHook("onClose", async () => {
 });
 
 let activeFinanceSubscriptionBatch: Promise<void> | undefined;
+const financeOpsEmailDelivery =
+  config.bookingEmailDelivery && config.financeBillingOpsEmail
+    ? createResendBookingEmailDelivery(config.bookingEmailDelivery)
+    : undefined;
+if (config.financeBillingOpsEmail && !financeOpsEmailDelivery) {
+  app.log.warn(
+    "FINANCE_BILLING_OPS_EMAIL is set but RESEND_API_KEY/BOOKING_EMAIL_FROM are not; failed-payment emails are disabled",
+  );
+}
 const financeSubscriptionWebhooksEnabled = Boolean(
   stripeSubscriptionProvider &&
   financeSubscriptionRoomInventory &&
   stripeSubscriptionRuntimeEnabled(config),
 );
 const financeSubscriptionJobsEnabled = config.financeSource === "target";
+if (
+  financeSubscriptionWebhooksEnabled &&
+  financeSubscriptionJobsEnabled &&
+  config.backgroundWorkersEnabled &&
+  !config.financeBillingOpsEmail
+) {
+  // VAY-1362: the target owns adopted legacy subscriptions; without the mailbox
+  // their failed payments only reach the log.
+  app.log.warn(
+    "FINANCE_BILLING_OPS_EMAIL is not set; failed payments on adopted legacy Fixed Plan subscriptions send no ops email",
+  );
+}
 const runFinanceSubscriptionJobs = () => {
   if (!config.backgroundWorkersEnabled) return;
   if (activeFinanceSubscriptionBatch || !financeSubscriptionJobsEnabled) return;
   const batches = [
-    runFinanceSubscriptionNotificationJobs(targetDatabaseUrl, (notification) => {
+    runFinanceSubscriptionNotificationJobs(targetDatabaseUrl, async (notification) => {
       app.log.error(
         notification,
         "Fixed Plan recurring payment failed; internal follow-up required",
       );
+      // VAY-1362: adopted legacy subscriptions keep the legacy ops email.
+      if (notification.legacyAdopted && financeOpsEmailDelivery && config.financeBillingOpsEmail) {
+        const email = financeSubscriptionPaymentFailedEmail(notification);
+        await financeOpsEmailDelivery.send({ to: config.financeBillingOpsEmail, ...email });
+      }
     }),
   ];
   if (
