@@ -313,9 +313,8 @@ test("gates legacy booking writes while keeping supported hotel actions active",
   await page.goto(`/bookings/${PMS_WEB_RESERVATION_ID}`);
 
   await expect(page.getByRole("heading", { name: "Booking VAY-ADA" })).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: /modify booking.*not available yet/i }),
-  ).toBeDisabled();
+  // Only manual stays keep the (disabled) legacy modify button; direct stays use host actions.
+  await expect(page.getByRole("button", { name: /modify booking/i })).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: /edit booker.*not available yet/i }),
   ).toBeDisabled();
