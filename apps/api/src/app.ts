@@ -269,6 +269,10 @@ import {
   type PmsInboxAttachmentMediaRoutesOptions,
 } from "./routes/pmsInboxAttachmentMedia.js";
 import { registerPmsCalendarAutoOpenRoutes } from "./routes/pmsCalendarAutoOpen.js";
+import {
+  registerPmsNavigationModuleRoutes,
+  type PmsNavigationModuleRepository,
+} from "./routes/pmsNavigationModules.js";
 import type { PmsLinkedInventoryGroupCommandRepository } from "./domains/pmsLinkedInventoryGroupRepository.js";
 import {
   registerPmsManualBookingPreviewRoutes,
@@ -336,6 +340,8 @@ export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolv
 };
 
 type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
+  /** Makes /health and /ready return 503 while PostgreSQL is unreachable; unset keeps them static. */
+  databaseHealth?: import("./platform/postgresRuntime.js").DatabaseHealthCheck;
   /** Public API logo assignment on the ordinary login (Owner-only); unset keeps the shared writer. */
   hotelSetupLogoAssignments?: Pick<
     import("./domains/propertyMediaCommandRepository.js").PropertyMediaCommandRepository,
@@ -386,6 +392,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   pmsManualBookingPreview?: PmsManualBookingPreviewRoutesOptions;
   pmsManualBookingCreate?: PmsManualBookingCreateRoutesOptions;
   pmsModuleActivationRepository?: PmsModuleActivationRepository;
+  pmsNavigationModuleRepository?: PmsNavigationModuleRepository;
   financialsActivationPropertyIds?: readonly string[];
   pmsReviewRepository?: PmsReviewRepository;
   pmsChannexManagement?: PmsChannexManagementRoutesOptions;
@@ -562,7 +569,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     });
   }
 
-  app.register(registerHealthRoutes);
+  app.register(registerHealthRoutes, { databaseHealth: options.databaseHealth });
   if (options.marketplaceAffiliatePublicLink) {
     app.register(
       registerMarketplaceAffiliatePublicLinkRoute,
@@ -1122,6 +1129,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       allowedOrigins: options.pmsOperationsAllowedOrigins,
       financialsActivationPropertyIds: options.financialsActivationPropertyIds,
       propertyAccessRepository: options.auth?.propertyAccessRepository,
+    });
+  }
+  if (options.pmsNavigationModuleRepository && options.auth) {
+    app.register(registerPmsNavigationModuleRoutes, {
+      prefix: "/api/pms",
+      repository: options.pmsNavigationModuleRepository,
+      propertyAccessRepository: options.auth.propertyAccessRepository,
+      allowedOrigins: options.pmsOperationsAllowedOrigins,
     });
   }
   if (options.pmsReviewRepository) {
