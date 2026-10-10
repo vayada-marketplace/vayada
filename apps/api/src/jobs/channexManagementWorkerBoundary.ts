@@ -101,8 +101,9 @@ export async function assertChannexManagementWorkerBoundary(
       `SELECT schemaname,tablename,policyname,permissive,roles::text,cmd,qual,with_check FROM pg_policies WHERE policyname LIKE 'channex_management_worker_%' ORDER BY schemaname,tablename,policyname`,
     )
   ).rows;
-  if (!POLICY_DIGESTS.has(createHash("sha256").update(JSON.stringify(policyRows)).digest("hex")))
-    fail("policy_drift");
+  // The drift codes carry the actual digest, so a re-pin can be read from the failure.
+  const policyDigest = createHash("sha256").update(JSON.stringify(policyRows)).digest("hex");
+  if (!POLICY_DIGESTS.has(policyDigest)) fail(`policy_drift:${policyDigest}`);
   const relations = (
     await client.query(
       `SELECT n.nspname||'.'||c.relname AS name,c.oid,c.relrowsecurity AS rls FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema'`,
@@ -113,8 +114,8 @@ export async function assertChannexManagementWorkerBoundary(
   const catalog = (
     await client.query(channexWorkerCatalogSql, [Object.keys(channexManagementWorkerPrivileges)])
   ).rows;
-  if (!CATALOG_DIGESTS.has(createHash("sha256").update(JSON.stringify(catalog)).digest("hex")))
-    fail("catalog_drift");
+  const catalogDigest = createHash("sha256").update(JSON.stringify(catalog)).digest("hex");
+  if (!CATALOG_DIGESTS.has(catalogDigest)) fail(`catalog_drift:${catalogDigest}`);
   const version = Number(
     (await client.query("SHOW server_version_num")).rows[0].server_version_num,
   );

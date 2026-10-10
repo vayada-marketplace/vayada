@@ -251,7 +251,7 @@ const hotelLockPolicies = [
     "((CURRENT_USER <> 'vayada_next_channex_management_worker'::name) OR platform.channex_management_worker_connection_scope('property'::text, (id)::text))",
     "NULL",
     // VAY-2108: migration 0479 adds the claimed branch; both shapes are accepted (rollback safety).
-    "POST_0479_PROPERTIES_EXPRESSION",
+    "((CURRENT_USER <> 'vayada_next_channex_management_worker'::name) OR platform.channex_management_worker_connection_scope('property'::text, (id)::text) OR platform.channex_management_worker_claimed_scope('property'::text, (id)::text))",
   ],
   ["hotel_catalog.properties", "finance_expense_worker_compat", "*", true, "true", "NULL"],
   [
