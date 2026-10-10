@@ -9,13 +9,13 @@ const PLATFORM_MEDIA_API_BASE_URL =
   process.env.NEXT_PUBLIC_AUTH_API_URL ||
   "https://api.localhost";
 export const MAX_PROPERTY_GALLERY_PHOTOS = 10;
+export const HERO_IMAGE_ACCEPT = "image/jpeg,image/png,image/webp";
+const MAX_HERO_IMAGE_BYTES = 10 * 1024 * 1024;
 const GALLERY_UPLOAD_TIMEOUT_MS = 30_000;
 
-type BookingMediaPurpose =
-  | "property.hero_image"
-  | "property.gallery_image"
-  | "booking.header_logo"
-  | "booking.addon.image";
+type BookingMediaPurpose = "booking.header_logo" | "booking.addon.image";
+
+type PropertyMediaPurpose = "property.hero_image" | "property.gallery_image";
 
 type UploadTarget = {
   uploadTargetId: string;
@@ -37,14 +37,14 @@ type FinalizeResponse = {
   }>;
 };
 
-type CanonicalGalleryUploadResponse = {
+type CanonicalPropertyUploadResponse = {
   contractVersion: "platform-media-upload.v2";
   uploadSession: { sessionId: string; status: "signed" | "completed" };
   uploadTargets: UploadTarget[];
   mediaObjects?: Array<{
     clientFileId?: string;
     mediaObjectId: string;
-    purpose: "property.gallery_image";
+    purpose: PropertyMediaPurpose;
     status: "private_ready";
   }>;
 };
@@ -59,14 +59,44 @@ export async function uploadPropertyGalleryImages(
   }
 
   try {
-    return await performPropertyGalleryUpload(files, propertyId);
+    return await performPropertyMediaUpload(files, propertyId, "property.gallery_image");
   } catch (error) {
     if (isTimeoutError(error)) throw new Error("Gallery upload timed out. Try again.");
     throw error;
   }
 }
 
-async function performPropertyGalleryUpload(files: File[], propertyId: string): Promise<string[]> {
+/** Mirrors the API's property.hero_image policy so bad files fail before any upload. */
+export function isAcceptedHeroImage(file: File): boolean {
+  return (
+    HERO_IMAGE_ACCEPT.split(",").includes(file.type) &&
+    /\.(jpe?g|png|webp)$/i.test(file.name) &&
+    file.size <= MAX_HERO_IMAGE_BYTES
+  );
+}
+
+/** Uploads a private hero image; the caller assigns it as the property cover. */
+export async function uploadPropertyHeroImage(file: File, propertyId: string): Promise<string> {
+  try {
+    const [mediaObjectId] = await performPropertyMediaUpload(
+      [file],
+      propertyId,
+      "property.hero_image",
+    );
+    if (!mediaObjectId) throw new Error("Platform media did not return the uploaded hero image.");
+    return mediaObjectId;
+  } catch (error) {
+    if (isTimeoutError(error)) throw new Error("Hero image upload timed out. Try again.");
+    throw error;
+  }
+}
+
+async function performPropertyMediaUpload(
+  files: File[],
+  propertyId: string,
+  purpose: PropertyMediaPurpose,
+): Promise<string[]> {
+  const label = purpose === "property.hero_image" ? "property-hero" : "property-gallery";
   const token = getAuthKitAccessToken() ?? getAuthBearerToken();
   const headers = {
     "Content-Type": "application/json",
@@ -74,7 +104,7 @@ async function performPropertyGalleryUpload(files: File[], propertyId: string): 
   };
   const requestFiles = files.map((file, index) => ({
     clientFileId: `file_${index + 1}`,
-    filename: file.name || `property-gallery-${index + 1}.jpg`,
+    filename: file.name || `${label}-${index + 1}.jpg`,
     contentType: file.type || "image/jpeg",
     sizeBytes: file.size,
   }));
@@ -83,8 +113,8 @@ async function performPropertyGalleryUpload(files: File[], propertyId: string): 
     headers,
     signal: AbortSignal.timeout(GALLERY_UPLOAD_TIMEOUT_MS),
     body: JSON.stringify({
-      idempotencyKey: `booking.property-gallery.upload:${propertyId}:${crypto.randomUUID()}`,
-      purpose: "property.gallery_image",
+      idempotencyKey: `booking.${label}.upload:${propertyId}:${crypto.randomUUID()}`,
+      purpose,
       visibility: "private",
       resource: {
         product: "hotel_catalog",
@@ -95,10 +125,11 @@ async function performPropertyGalleryUpload(files: File[], propertyId: string): 
     }),
   });
   if (!create.ok) throw new Error(await readMediaError(create, "Upload session failed"));
-  const created = (await create.json()) as CanonicalGalleryUploadResponse;
+  const created = (await create.json()) as CanonicalPropertyUploadResponse;
   if (created.uploadSession.status === "completed") {
-    return galleryMediaObjectIds(
+    return propertyMediaObjectIds(
       created,
+      purpose,
       requestFiles.map(({ clientFileId }) => clientFileId),
     );
   }
@@ -159,8 +190,9 @@ async function performPropertyGalleryUpload(files: File[], propertyId: string): 
     },
   );
   if (!finalized.ok) throw new Error(await readMediaError(finalized, "Upload finalize failed"));
-  return galleryMediaObjectIds(
-    (await finalized.json()) as CanonicalGalleryUploadResponse,
+  return propertyMediaObjectIds(
+    (await finalized.json()) as CanonicalPropertyUploadResponse,
+    purpose,
     requestFiles.map(({ clientFileId }) => clientFileId),
   );
 }
@@ -179,14 +211,12 @@ export type UploadedImage = {
 
 async function uploadImageRecords(
   files: File | File[],
-  purpose: BookingMediaPurpose = "property.gallery_image",
+  purpose: BookingMediaPurpose,
   explicitBookingHotelId?: string,
-  expectedProfileRevision?: number,
 ): Promise<UploadedImage[]> {
   const fileList = Array.isArray(files) ? files : [files];
   if (fileList.length === 0) return [];
 
-  const profileRevision = validateExpectedProfileRevision(purpose, expectedProfileRevision);
   const token = getAuthKitAccessToken() ?? getAuthBearerToken();
   const headers = {
     "Content-Type": "application/json",
@@ -200,7 +230,6 @@ async function uploadImageRecords(
     body: JSON.stringify({
       purpose,
       visibility: "public",
-      ...(profileRevision === undefined ? {} : { expectedProfileRevision: profileRevision }),
       resource: {
         product: "booking",
         resourceType: "booking_hotel",
@@ -263,32 +292,6 @@ async function uploadImageRecords(
   });
 }
 
-export async function uploadImages(
-  files: File | File[],
-  purpose: BookingMediaPurpose = "property.gallery_image",
-  explicitBookingHotelId?: string,
-  expectedProfileRevision?: number,
-): Promise<string[]> {
-  const images = await uploadImageRecords(
-    files,
-    purpose,
-    explicitBookingHotelId,
-    expectedProfileRevision,
-  );
-  return images.map(({ publicUrl }) => publicUrl);
-}
-
-export async function uploadSingleImage(
-  file: File,
-  purpose: BookingMediaPurpose = "property.gallery_image",
-  explicitBookingHotelId?: string,
-  expectedProfileRevision?: number,
-): Promise<string> {
-  const urls = await uploadImages(file, purpose, explicitBookingHotelId, expectedProfileRevision);
-  if (!urls[0]) throw new Error("No image URL returned");
-  return urls[0];
-}
-
 export async function uploadSingleImageWithMediaReference(
   file: File,
   purpose: BookingMediaPurpose,
@@ -297,22 +300,6 @@ export async function uploadSingleImageWithMediaReference(
   const images = await uploadImageRecords(file, purpose, explicitBookingHotelId);
   if (!images[0]) throw new Error("No image returned");
   return images[0];
-}
-
-function validateExpectedProfileRevision(
-  purpose: BookingMediaPurpose,
-  expectedProfileRevision?: number,
-): number | undefined {
-  if (purpose !== "property.hero_image") return undefined;
-  if (
-    expectedProfileRevision === undefined ||
-    !Number.isSafeInteger(expectedProfileRevision) ||
-    expectedProfileRevision < 1 ||
-    expectedProfileRevision > 2_147_483_647
-  ) {
-    throw new Error("A valid property profile revision is required for hero image uploads.");
-  }
-  return expectedProfileRevision;
 }
 
 function uploadContentType(file: File): string {
@@ -358,18 +345,16 @@ async function readMediaError(response: Response, fallback: string): Promise<str
   return fallback;
 }
 
-function galleryMediaObjectIds(
-  response: CanonicalGalleryUploadResponse,
+function propertyMediaObjectIds(
+  response: CanonicalPropertyUploadResponse,
+  purpose: PropertyMediaPurpose,
   clientFileIds: readonly string[],
 ): string[] {
   if (
     response.contractVersion !== "platform-media-upload.v2" ||
     response.mediaObjects?.length !== clientFileIds.length ||
     response.mediaObjects.some(
-      (item) =>
-        item.purpose !== "property.gallery_image" ||
-        item.status !== "private_ready" ||
-        !item.mediaObjectId,
+      (item) => item.purpose !== purpose || item.status !== "private_ready" || !item.mediaObjectId,
     )
   ) {
     throw new Error("Platform media did not return the uploaded property photos.");

@@ -77,6 +77,13 @@ describe.skipIf(!url)("current Booking add-on owner", () => {
     expect(await jpy.read()).toBeNull();
     await pool.query("UPDATE booking.addon_definitions SET price_amount=0 WHERE id=$1", [jpy.id]);
     expect((await jpy.read())?.addons[0]?.amountMinor).toBe("0");
+    // IDR keeps scale 2 but prices whole rupiah (VAY-2085): 12.50 is refused, 125000 is not.
+    const idr = await fixture("IDR");
+    expect(await idr.read()).toBeNull();
+    await pool.query("UPDATE booking.addon_definitions SET price_amount=125000 WHERE id=$1", [
+      idr.id,
+    ]);
+    expect((await idr.read())?.addons[0]?.amountMinor).toBe("12500000");
   });
   it("rejects missing, foreign, hidden, inactive, mismatched and malformed definitions", async () => {
     const f = await fixture(),

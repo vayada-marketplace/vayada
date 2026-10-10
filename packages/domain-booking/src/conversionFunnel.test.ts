@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildBookingConversionFunnel,
+  FUNNEL_EVENT_TYPES,
   FUNNEL_STAGES,
   type BookingFunnelEvent,
   type FunnelPaymentMethod,
@@ -27,7 +28,7 @@ describe("sequential Booking conversion funnel", () => {
       ...journey("abandoned", "card").slice(0, -2),
     ];
     const funnel = buildBookingConversionFunnel([...events, ...events].reverse(), false);
-    expect(funnel.steps.map((step) => step.count)).toEqual([4, 4, 4, 4, 4, 1, 3]);
+    expect(funnel.steps.map((step) => step.count)).toEqual([4, 4, 4, 4, 1, 3]);
     expect(funnel.steps.at(-2)).toMatchObject({
       conversionPercent: 50,
       percentOfVisits: 25,
@@ -59,8 +60,8 @@ describe("sequential Booking conversion funnel", () => {
       [...valid, ...missingAddon, ...noVisit, ...early],
       true,
     );
-    expect(result.steps.map((step) => step.count)).toEqual([3, 3, 3, 2, 1, 1, 1, 1]);
-    expect(result.steps[4]?.conversionPercent).toBe(50);
+    expect(result.steps.map((step) => step.count)).toEqual([3, 3, 2, 1, 1, 1, 1]);
+    expect(result.steps[3]?.conversionPercent).toBe(50);
     expect(result.biggestDrop).toBe("details_completed");
   });
 
@@ -81,9 +82,27 @@ describe("sequential Booking conversion funnel", () => {
     expect(result.paymentMethods).toEqual([{ method: "bank_transfer", count: 1 }]);
   });
 
+  it("counts a rate selection without a room-detail view, which stays accepted telemetry only", () => {
+    const result = buildBookingConversionFunnel(
+      [
+        { sessionId: "direct", sequence: 1, stage: "page_visit" },
+        { sessionId: "direct", sequence: 2, stage: "rate_selected" },
+      ],
+      false,
+    );
+    expect(result.steps.slice(0, 3).map(({ stage, count }) => [stage, count])).toEqual([
+      ["page_visit", 1],
+      ["rate_selected", 1],
+      ["details_completed", 0],
+    ]);
+    expect(result.biggestDrop).toBe("details_completed");
+    expect(FUNNEL_STAGES).not.toContain("room_viewed");
+    expect(FUNNEL_EVENT_TYPES).toContain("room_viewed");
+  });
+
   it("returns finite empty counts without a false biggest drop", () => {
     const result = buildBookingConversionFunnel([], false);
-    expect(result.steps).toHaveLength(7);
+    expect(result.steps).toHaveLength(6);
     expect(
       result.steps.every(
         (step) =>

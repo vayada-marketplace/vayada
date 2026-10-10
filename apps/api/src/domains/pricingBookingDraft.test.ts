@@ -40,14 +40,23 @@ it("stages exact draft/booker fields without legacy quote records or lifecycle e
     publicReference: input.publicReference,
   });
   const [sql, values] = query.mock.calls.find(([sql]) => sql.startsWith("WITH draft"))!;
-  expect(sql).toContain("'draft','unpaid','pay_at_property'");
+  expect(sql).toContain("'draft','unpaid',$22");
+  expect(values?.[21]).toBe("pay_at_property");
   expect(sql).not.toMatch(/quote_sessions|checkout_contexts|platform.jobs|confirmed/);
   expect(values?.slice(3, 10)).toEqual(["2026-10-01", "2026-10-03", 2, 1, 1, "EUR", "360.00"]);
   expect(values?.[10]).toMatchObject({
     pricingQuoteId: input.current.quote.quoteId,
     pricingSelections: input.current.quote.stay.rooms,
   });
-  expect(values?.slice(14)).toEqual(["Jane", "Guest", "jane@example.test", null, null, null, null]);
+  expect(values?.slice(14, 21)).toEqual([
+    "Jane",
+    "Guest",
+    "jane@example.test",
+    null,
+    null,
+    null,
+    null,
+  ]);
   expect(values?.[12]).toEqual(input.finance.commissionTermsSnapshot);
   expect(persistPricingBookingAddons).toHaveBeenCalledWith(
     client,
