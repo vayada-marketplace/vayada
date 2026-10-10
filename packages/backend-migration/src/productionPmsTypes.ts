@@ -4,6 +4,10 @@ import type {
   IdentitySourceRow,
 } from "./productionIdentityDisposition.js";
 import type { ProductionMigrationSourceLink } from "./productionBookingTypes.js";
+import type {
+  PlannedModuleActivation,
+  SkippedModuleActivation,
+} from "./productionPmsCohortModules.js";
 
 export type PmsTargetRecord = {
   targetProduct: "pms" | "platform";
@@ -82,6 +86,13 @@ export type PmsCohortPropertyState = {
   organizationIds: string[];
   /** The last stored inventory day of each room type, if any (stale-day check). */
   inventoryThroughByRoomType?: Record<string, string> | null;
+  /** Active hotel_group organizations owning both native property links (Feature Hub scope). */
+  financialsOwnerOrganizationIds?: string[];
+  /** Organizations with an active base PMS entitlement for the property and none suspended,
+   * as native Financials activation requires (BASE_ENTITLEMENTS). */
+  pmsBaseOrganizationIds?: string[];
+  /** Organizations with an organization-wide module:financials entitlement in its window. */
+  organizationFinancialsIds?: string[];
   /** Revision 1 of the operating calendar as stored, if any. */
   storedCalendar: {
     idempotencyKeyId: string;
@@ -160,6 +171,11 @@ export type PmsAssignmentBuild = {
 export type ProductionPmsPlan = {
   sourceRunId: string;
   checksum: string;
+  /** VAY-1362: legacy module activations of cohort hotels, the ones skipped, and active legacy
+   * modules without a runtime module. */
+  moduleActivations?: PlannedModuleActivation[];
+  skippedModules?: SkippedModuleActivation[];
+  unmappedModules?: string[];
   /** VAY-1362: the carried cohort properties, which the apply locks and may activate. */
   cohortPropertyIds?: string[];
   records: PmsTargetRecord[];

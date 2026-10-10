@@ -12,10 +12,23 @@ const COHORT = { sourceRunId: RUN } as never;
 describe("production PMS snapshot reader", () => {
   it("returns only checksum-verified PMS rows and extraction time", async () => {
     const fixture = new PmsFixture();
+    const module = {
+      sourceDatabase: "pms",
+      sourceTable: "property_module_activations",
+      rowOrdinal: 1,
+      data: { hotel_id: "h", module_id: "financials", is_active: true },
+    };
+    const identityHotel = { ...module, sourceTable: "hotels", data: { id: "h" } };
     const result = await readProductionPmsSnapshot(fixture as never, RUN, {
-      validateRun: async () => ({ cohort: COHORT }),
+      validateRun: async () => ({ cohort: COHORT, rows: [identityHotel, module] }),
     });
     expect(result.cohort).toBe(COHORT);
+    expect(result.moduleActivations).toEqual([module]);
+    // Without a cohort the snapshot is unchanged.
+    const plain = await readProductionPmsSnapshot(new PmsFixture() as never, RUN, {
+      validateRun: async () => ({ cohort: null, rows: [module] }),
+    });
+    expect(plain).not.toHaveProperty("moduleActivations");
     expect(result.completedAt).toBe("2026-08-30T01:02:03.000Z");
     expect(result.snapshotAt).toBe("2026-08-30T00:02:03.000Z");
     expect(result.rows.map((row) => row.sourceTable)).toEqual(["hotels", "room_types"]);
