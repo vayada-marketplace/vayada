@@ -618,6 +618,21 @@ first applied the latest unchanged migration. Operator identity and all
 domain-level IDs, provider references, and blocker evidence are emitted only as
 hashes.
 
+For a VAY-1362 cohort run (`--cohort-sha256`, or set by `target:cutover*`),
+the hard check `COHORT_SCOPE_VERIFIED` also gates `GO`
+([contract](../../engineering/legacy-migration-cohort-scope.md)). It fails when:
+
+- the stored `platform.production_migration_cohorts` row is missing, or differs
+  from the configured cohort or approval proof;
+- a cohort hotel does not resolve to exactly one non-quarantined property;
+- a property outside the cohort has a public profile, domain, media, offer,
+  add-on or Marketplace listing, an owner access path, a connected channel or
+  binding claim, an enabled provider account, or an open payout.
+
+The report adds cohort and outside counts and violations by category, with
+property IDs hashed. A stored cohort that is not configured also fails. Runs
+without a cohort keep their exact report and checksum.
+
 The command always discovers migrations from the directory bundled with the
 running application. Production parity does not accept a migration-directory
 override, so an operator cannot replace the trusted checksum manifest.

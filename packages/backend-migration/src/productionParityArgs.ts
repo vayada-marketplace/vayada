@@ -31,6 +31,7 @@ export function parseProductionParityArgs(
   const targetMediaBucket = environment["PLATFORM_MEDIA_BUCKET"] ?? "";
   const mediaCdnBaseUrl = environment["PLATFORM_MEDIA_CDN_BASE_URL"] ?? "";
   let report: "json" | "text" = "text";
+  let cohortSha256: string | undefined;
   const sourceTags = {} as Record<SourceDatabase, string>;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -54,6 +55,10 @@ export function parseProductionParityArgs(
       const raw = value(args, ++index, argument);
       if (!/^\d+$/.test(raw)) throw new Error("--warning-budget must be a non-negative integer");
       warningBudget = Number(raw);
+    } else if (argument === "--cohort-sha256") {
+      cohortSha256 = value(args, ++index, argument);
+      if (!/^[0-9a-f]{64}$/.test(cohortSha256))
+        throw new Error("--cohort-sha256 must be a lowercase SHA-256");
     } else if (argument === "--report") {
       const selected = value(args, ++index, argument);
       if (selected !== "json" && selected !== "text")
@@ -104,6 +109,7 @@ export function parseProductionParityArgs(
     migrationsDir,
     targetMediaBucket,
     mediaCdnBaseUrl,
+    ...(cohortSha256 ? { cohortSha256 } : {}),
     report,
   };
 }

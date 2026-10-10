@@ -1,9 +1,12 @@
+import { createHash } from "node:crypto";
+
 import type pg from "pg";
 
 import { readProductionMigrationCohort } from "./productionMigrationCohort.js";
+import type { ProductionParityFinding } from "./productionParity.js";
 
 // VAY-1362 COHORT_SCOPE_VERIFIED (engineering/legacy-migration-cohort-scope.md, "Verification").
-// Each violation category with the message its finding carries (the check itself follows).
+// Each violation category with the message its finding carries.
 const MESSAGES = {
   cohortHotelUnresolved: "A cohort hotel does not resolve to exactly one target property",
   cohortPropertyQuarantined: "A cohort hotel resolves to a private-quarantine property",
@@ -35,6 +38,12 @@ export type ProductionParityCohortScopeEvidence = {
   cohortProperties: number;
   nonCohortProperties: number;
   violations: Array<{ category: CohortScopeCategory; subjectId: string }>;
+};
+
+export type ProductionParityCohortScopeSummary = {
+  cohortProperties: number;
+  nonCohortProperties: number;
+  violations: Record<CohortScopeCategory, number>;
 };
 
 type QueryClient = Pick<pg.ClientBase, "query">;
@@ -188,4 +197,103 @@ export async function readProductionParityCohortScope(
     nonCohortProperties: Number(counts.rows[0]?.nonCohortProperties ?? 0),
     violations: violations.rows,
   };
+}
+
+/**
+ * Applies only when a cohort is configured or stored for the run; otherwise it returns nothing,
+ * so a run without a cohort keeps its report and checksum. Subjects appear only as hashes.
+ */
+export function evaluateCohortScope(
+  config: { cohortSha256?: string; cohortApprovalProofSha256?: string },
+  scope: ProductionParityCohortScopeEvidence | null | undefined,
+): { findings: ProductionParityFinding[]; summary?: ProductionParityCohortScopeSummary } {
+  if (!config.cohortSha256 && !scope) return { findings: [] };
+  const cohortTable = "platform.production_migration_cohorts";
+  if (!scope)
+    return {
+      findings: [
+        finding(
+          "fail",
+          cohortTable,
+          "The configured migration cohort is not stored for the run",
+          config.cohortSha256!,
+          "Missing",
+        ),
+      ],
+    };
+  const findings: ProductionParityFinding[] = [];
+  for (const [configured, stored, what] of [
+    [config.cohortSha256 ?? "No cohort configured", scope.cohortSha256, "cohort"],
+    [
+      config.cohortApprovalProofSha256 ?? scope.approvalProofSha256,
+      scope.approvalProofSha256,
+      "cohort approval proof",
+    ],
+  ])
+    if (configured !== stored)
+      findings.push(
+        finding(
+          "fail",
+          cohortTable,
+          `The stored ${what} differs from the configured ${what}`,
+          configured,
+          stored,
+        ),
+      );
+  const violations = Object.fromEntries(
+    COHORT_SCOPE_CATEGORIES.map((category) => [category, 0]),
+  ) as Record<CohortScopeCategory, number>;
+  for (const category of COHORT_SCOPE_CATEGORIES) {
+    const subjects = [
+      ...new Set(
+        scope.violations
+          .filter((row) => row.category === category)
+          .map((row) => `sha256:${sha256(row.subjectId)}`),
+      ),
+    ].sort();
+    violations[category] = subjects.length;
+    if (subjects.length > 0)
+      findings.push(
+        finding(
+          "fail",
+          `cohort_scope.${category}`,
+          MESSAGES[category],
+          "0",
+          `${subjects.length}: ${subjects.join(", ")}`,
+        ),
+      );
+  }
+  if (findings.length === 0)
+    findings.push(
+      finding(
+        "pass",
+        cohortTable,
+        "Cohort hotels resolve to canonical properties; the rest are private, without access and inert",
+        "Verified",
+        `${scope.cohortProperties} cohort, ${scope.nonCohortProperties} outside the cohort`,
+      ),
+    );
+  return {
+    findings,
+    summary: {
+      cohortProperties: scope.cohortProperties,
+      nonCohortProperties: scope.nonCohortProperties,
+      violations,
+    },
+  };
+}
+
+function finding(
+  severity: "pass" | "fail",
+  targetObject: string,
+  message: string,
+  expected: string,
+  actual: string,
+): ProductionParityFinding {
+  const code = "COHORT_SCOPE_VERIFIED";
+  return { severity, code, owner: "Migration cohort", targetObject, message, expected, actual };
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }

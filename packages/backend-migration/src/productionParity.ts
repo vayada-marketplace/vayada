@@ -25,8 +25,10 @@ import {
   type ProductionMarketplaceMigrationReport,
 } from "./productionMarketplaceMigration.js";
 import {
+  evaluateCohortScope,
   readProductionParityCohortScope,
   type ProductionParityCohortScopeEvidence,
+  type ProductionParityCohortScopeSummary,
 } from "./productionParityCohortScope.js";
 import {
   runProductionPmsMigration,
@@ -175,6 +177,7 @@ export type ProductionParityReport = {
   domains: Partial<Record<ProductionParityDomain, ProductionParityDomainResult>>;
   findings: ProductionParityFinding[];
   cohortSha256?: string;
+  cohortScope?: ProductionParityCohortScopeSummary;
   reportChecksumSha256: string;
 };
 
@@ -193,6 +196,7 @@ export type ProductionParityConfig = {
   mediaCdnBaseUrl: string;
   /** VAY-1362 cohort bound by the orchestrator; only present for cohort-scoped runs. */
   cohortSha256?: string;
+  cohortApprovalProofSha256?: string;
 };
 
 export type ProductionParityServices = {
@@ -239,9 +243,11 @@ async function buildProductionParityReport(
   const startedAt = services.now();
   const findings: ProductionParityFinding[] = [];
   let evidence: ProductionParityEvidence;
+  let evidenceRead = false;
   try {
     evidence = await services.readEvidence(config);
     findings.push(...evaluateEvidence(config, evidence));
+    evidenceRead = true;
   } catch {
     evidence = emptyEvidence();
     findings.push(
@@ -277,6 +283,12 @@ async function buildProductionParityReport(
       );
     }
   }
+
+  // Unavailable evidence already fails as PARITY_EVIDENCE_UNAVAILABLE.
+  const cohortScope = evidenceRead
+    ? evaluateCohortScope(config, evidence.cohortScope)
+    : { findings: [], summary: undefined };
+  findings.push(...cohortScope.findings);
 
   const redactedDomains = domains;
   const orderedFindings = findings.map(redactFinding).sort(compareFindings);
@@ -324,7 +336,10 @@ async function buildProductionParityReport(
       failedTableCount: source.failedTableCount,
     }))
     .sort((left, right) => left.sourceDatabase.localeCompare(right.sourceDatabase));
-  const cohort = config.cohortSha256 ? { cohortSha256: config.cohortSha256 } : {};
+  const cohort = {
+    ...(config.cohortSha256 ? { cohortSha256: config.cohortSha256 } : {}),
+    ...(cohortScope.summary ? { cohortScope: cohortScope.summary } : {}),
+  };
   const checksumMaterial = {
     sourceRunId: config.sourceRunId,
     sourceEnvironment: config.sourceEnvironment,
@@ -1337,6 +1352,9 @@ function assertProductionParityConfig(config: ProductionParityConfig): void {
   cdnPrefix(config.mediaCdnBaseUrl);
   for (const database of SOURCE_DATABASES)
     if (!config.sourceTags[database]?.trim()) throw new Error(`${database} source tag is required`);
+  for (const value of [config.cohortSha256, config.cohortApprovalProofSha256])
+    if (value !== undefined && !isSha256(value))
+      throw new Error("cohortSha256 and cohortApprovalProofSha256 must be lowercase SHA-256");
 }
 
 function cdnPrefix(value: string): string {
