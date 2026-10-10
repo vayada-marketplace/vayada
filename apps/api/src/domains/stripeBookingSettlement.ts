@@ -538,12 +538,14 @@ export async function captureDirectNightlyRevenueEvidence(
     if (options.required) throw error;
     return;
   }
-  if (!roomTypeId || !fingerprint) {
+  // Clearing reverses the recorded rows, each under its own room type, so it needs no
+  // booked offer. Pricing-v2 bookings record their nights without one.
+  if ((!roomTypeId && !options.clear) || !fingerprint) {
     if (options.required) throw new Error("Booked room evidence is unavailable.");
     return;
   }
   await persistDirectNightlyRevenueProjection(client, booking, {
-    roomTypeId,
+    roomTypeId: roomTypeId ?? null,
     nights,
     fingerprint,
     recognizedOn: options.recognizedOn,
@@ -557,7 +559,8 @@ export async function persistDirectNightlyRevenueProjection(
   client: SettlementExecutor,
   booking: Pick<DirectRevenueBooking, "guestBookingId" | "propertyId">,
   projection: {
-    roomTypeId: string;
+    /** Default room type for nights without their own; null only when clearing (no nights). */
+    roomTypeId: string | null;
     nights: readonly {
       stayDate: string;
       grossRoomAmount: string;

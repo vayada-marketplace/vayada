@@ -3,6 +3,7 @@ import {
   BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH,
   BOOKING_ADMIN_HOTEL_ID,
   BOOKING_ADMIN_PUBLIC_BOOKABILITY_PATH,
+  BOOKING_ADMIN_PUBLIC_PROPERTY_PROFILE_PATH,
   BOOKING_ADMIN_PROPERTY_SETTINGS_PATH,
   BOOKING_ADMIN_PROPERTY_ID,
   defaultBookingAdminDesignSettings,
@@ -416,34 +417,102 @@ test.describe("booking-admin adaptive setup", () => {
     expect(new URL(page.url()).searchParams.toString()).toBe(`code=${USED_CODE}`);
   });
 
-  test("advances the canonical media revision and restores the approved hero after a conflict", async ({
+  test("uploads, replaces, and re-uploads the hero as the canonical property cover", async ({
     page,
   }) => {
     await mockBookingAdminAuthenticatedSession(page);
-    await page.addInitScript(
-      (propertyId) => localStorage.setItem("selectedSharedPropertyId", propertyId),
-      BOOKING_ADMIN_PROPERTY_ID,
-    );
     await mockBookingAdminShellRoutes(page);
-    await mockBookingAdminDesignSettings(page, {
+    const { requests: designRequests } = await mockBookingAdminDesignSettings(page, {
       ...defaultBookingAdminDesignSettings,
       heroImage: "",
     });
-    await page.route(
-      `**/api/hotel-setup/properties/${BOOKING_ADMIN_PROPERTY_ID}/public-profile`,
-      (route) =>
-        route.fulfill({
-          json: {
-            propertyId: BOOKING_ADMIN_PROPERTY_ID,
-            profileRevision: 1,
-            publicProfile: {
-              locale: "en",
-              shortDescription: CANONICAL_PUBLIC_DESCRIPTION,
-              longDescription: null,
-              media: [],
+    const heroMediaObjectIds = [
+      "a1000000-0000-4000-8000-000000002061",
+      "a1000000-0000-4000-8000-000000002062",
+      "a1000000-0000-4000-8000-000000002063",
+      "a1000000-0000-4000-8000-000000002064",
+    ];
+    const heroUrl = (mediaObjectId: string) => `https://media.example/${mediaObjectId}.webp`;
+    const galleryPhoto = {
+      mediaObjectId: "a1000000-0000-4000-8000-000000002069",
+      url: "https://media.example/gallery-pool.webp",
+      altText: "Pool",
+    };
+    // The uploader hides images that fail to load, so previews and hero URLs must be real images.
+    const heroPng = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAABAAAAAJCAIAAAC0SDtlAAAAFElEQVR4nGPgK5lAEmIY1TAoNAAAgOWaIUxSi4wAAAAASUVORK5CYII=",
+      "base64",
+    );
+    await page.route("https://media.example/**", (route) =>
+      route.fulfill({ contentType: "image/png", body: heroPng }),
+    );
+    let profileRevision = 4;
+    let publicMedia: Array<Record<string, unknown>> = [
+      { ...galleryPhoto, mediaType: "gallery_image", sortOrder: 0 },
+    ];
+    await page.route(`**${BOOKING_ADMIN_PUBLIC_PROPERTY_PROFILE_PATH}*`, (route) =>
+      route.request().method() === "OPTIONS"
+        ? route.fulfill({ status: 204, headers: corsHeaders() })
+        : route.fulfill({
+            headers: corsHeaders(),
+            json: {
+              propertyId: BOOKING_ADMIN_PROPERTY_ID,
+              profileRevision,
+              publicProfile: {
+                locale: "en",
+                shortDescription: CANONICAL_PUBLIC_DESCRIPTION,
+                longDescription: null,
+                media: publicMedia,
+              },
             },
+          }),
+    );
+
+    const assignmentRequests: Array<Record<string, unknown>> = [];
+    let rejectNextAssignment = false;
+    await page.route(
+      `**/api/hotel-setup/properties/${BOOKING_ADMIN_PROPERTY_ID}/media/presentation`,
+      (route) => {
+        const request = route.request();
+        if (request.method() === "OPTIONS") {
+          return route.fulfill({ status: 204, headers: corsHeaders() });
+        }
+        const body = request.postDataJSON() as {
+          assignments: Array<{
+            mediaObjectId: string;
+            role: "cover" | "gallery";
+            altText: string | null;
+            sortOrder: number;
+          }>;
+        };
+        assignmentRequests.push(body);
+        if (rejectNextAssignment) {
+          rejectNextAssignment = false;
+          profileRevision += 1;
+          return route.fulfill({
+            status: 409,
+            headers: corsHeaders(),
+            json: { code: "profile_revision_conflict", currentRevision: profileRevision },
+          });
+        }
+        profileRevision += 1;
+        publicMedia = body.assignments.map(({ mediaObjectId, role, altText, sortOrder }) => ({
+          mediaObjectId,
+          mediaType: role === "cover" ? "hero_image" : "gallery_image",
+          url: role === "cover" ? heroUrl(mediaObjectId) : galleryPhoto.url,
+          altText,
+          sortOrder,
+        }));
+        return route.fulfill({
+          headers: corsHeaders(),
+          json: {
+            outcome: "updated",
+            profileRevision,
+            logoAssignment: null,
+            presentationAssignments: body.assignments,
           },
-        }),
+        });
+      },
     );
 
     const uploadSessionRequests: Array<Record<string, unknown>> = [];
@@ -453,44 +522,34 @@ test.describe("booking-admin adaptive setup", () => {
         return route.fulfill({ status: 204, headers: corsHeaders() });
       }
       if (request.url().endsWith("/finalize")) {
-        if (uploadSessionRequests.length === 1) {
-          return route.fulfill({
-            status: 200,
-            headers: corsHeaders(),
-            json: {
-              mediaObjects: [
-                {
-                  mediaId: "a1000000-0000-4000-8000-000000000001",
-                  variants: [
-                    {
-                      publicCdnUrl: "https://media.example/approved-hero.webp",
-                      storageKey: "public/hotels/approved-hero.webp",
-                    },
-                  ],
-                },
-              ],
-            },
-          });
-        }
+        const uploadNumber = uploadSessionRequests.length;
         return route.fulfill({
-          status: 409,
           headers: corsHeaders(),
           json: {
-            code: "profile_revision_conflict",
-            message: "The property profile changed while its hero image was being finalized.",
-            currentRevision: 3,
+            contractVersion: "platform-media-upload.v2",
+            uploadSession: { sessionId: `hero-upload-${uploadNumber}`, status: "completed" },
+            uploadTargets: [],
+            mediaObjects: [
+              {
+                mediaObjectId: heroMediaObjectIds[uploadNumber - 1],
+                purpose: "property.hero_image",
+                status: "private_ready",
+                publicVariants: [],
+              },
+            ],
           },
         });
       }
-
-      const body = request.postDataJSON() as Record<string, unknown>;
-      uploadSessionRequests.push(body);
+      uploadSessionRequests.push(request.postDataJSON() as Record<string, unknown>);
       const uploadNumber = uploadSessionRequests.length;
+      // Real uploads outlast the local preview; an instant mock revokes it before it renders.
+      await new Promise((resolve) => setTimeout(resolve, 300));
       return route.fulfill({
         status: 201,
         headers: corsHeaders(),
         json: {
-          uploadSession: { sessionId: `hero-upload-${uploadNumber}` },
+          contractVersion: "platform-media-upload.v2",
+          uploadSession: { sessionId: `hero-upload-${uploadNumber}`, status: "signed" },
           uploadTargets: [
             {
               uploadTargetId: `hero-target-${uploadNumber}`,
@@ -504,64 +563,65 @@ test.describe("booking-admin adaptive setup", () => {
       });
     });
 
-    await page.goto(`/design-studio?${directPublicationTaskParams().toString()}`);
-
-    const missingHeroMessage = page.getByText(
-      "Upload a hero image here so Vayada can approve it for the public booking profile.",
-    );
-    await expect(missingHeroMessage).toBeVisible();
-
+    await page.goto("/design-studio");
+    const heroImage = page.locator('img[alt="Hero"]');
     const heroInput = page.locator('input[type="file"][accept="image/*"]');
+    const uploadHero = async (name: string, attempt: number, expectedProfileRevision: number) => {
+      await heroInput.setInputFiles({ name, mimeType: "image/png", buffer: heroPng });
+      await expect.poll(() => assignmentRequests.length).toBe(attempt);
+      const mediaObjectId = heroMediaObjectIds[attempt - 1]!;
+      expect(uploadSessionRequests[attempt - 1]).toMatchObject({
+        purpose: "property.hero_image",
+        visibility: "private",
+        resource: {
+          product: "hotel_catalog",
+          resourceType: "property",
+          resourceId: BOOKING_ADMIN_PROPERTY_ID,
+        },
+      });
+      expect(uploadSessionRequests[attempt - 1]).not.toHaveProperty("expectedProfileRevision");
+      expect(assignmentRequests[attempt - 1]).toEqual({
+        expectedProfileRevision,
+        assignments: [
+          { mediaObjectId, role: "cover", altText: null, sortOrder: 0 },
+          {
+            mediaObjectId: galleryPhoto.mediaObjectId,
+            role: "gallery",
+            altText: galleryPhoto.altText,
+            sortOrder: 1,
+          },
+        ],
+      });
+      await expect(heroImage).toHaveAttribute("src", heroUrl(mediaObjectId));
+      await expect(heroImage).toBeVisible();
+      await expect
+        .poll(() => designRequests.some(({ body }) => body?.heroImage === heroUrl(mediaObjectId)))
+        .toBe(true);
+    };
+
+    await expect(page.getByText("Click to upload")).toBeVisible();
+    await uploadHero("first-hero.png", 1, 4);
+    await page.screenshot({ path: test.info().outputPath("hero-uploaded.png") });
+
+    await uploadHero("replacement-hero.png", 2, 5);
+
+    await heroImage.locator("..").getByRole("button").click();
+    await expect(heroImage).toHaveCount(0);
+    await uploadHero("re-uploaded-hero.png", 3, 6);
+    await page.screenshot({ path: test.info().outputPath("hero-re-uploaded.png") });
+
+    rejectNextAssignment = true;
     await heroInput.setInputFiles({
-      name: "first-hero.webp",
-      mimeType: "image/webp",
-      buffer: Buffer.from("first approved hero"),
+      name: "conflicting-hero.png",
+      mimeType: "image/png",
+      buffer: heroPng,
     });
+    await expect(page.getByText("Image upload failed. Please try again.")).toBeVisible();
+    expect(assignmentRequests[3]).toMatchObject({ expectedProfileRevision: 7 });
+    await expect(heroImage).toHaveAttribute("src", heroUrl(heroMediaObjectIds[2]!));
+    await expect(heroImage).toBeVisible();
 
-    await expect.poll(() => uploadSessionRequests).toHaveLength(1);
-    expect(uploadSessionRequests[0]).toMatchObject({
-      purpose: "property.hero_image",
-      visibility: "public",
-      expectedProfileRevision: 1,
-      resource: {
-        product: "booking",
-        resourceType: "booking_hotel",
-        resourceId: BOOKING_ADMIN_HOTEL_ID,
-      },
-    });
-    await expect(missingHeroMessage).toHaveCount(0);
-    await expect(page.locator('img[alt="Hero"]')).toHaveAttribute(
-      "src",
-      "https://media.example/approved-hero.webp",
-    );
-
-    await heroInput.setInputFiles({
-      name: "replacement-hero.webp",
-      mimeType: "image/webp",
-      buffer: Buffer.from("conflicting replacement hero"),
-    });
-
-    await expect.poll(() => uploadSessionRequests).toHaveLength(2);
-    expect(uploadSessionRequests[1]).toMatchObject({
-      purpose: "property.hero_image",
-      visibility: "public",
-      expectedProfileRevision: 2,
-      resource: {
-        product: "booking",
-        resourceType: "booking_hotel",
-        resourceId: BOOKING_ADMIN_HOTEL_ID,
-      },
-    });
-    await expect(
-      page.getByText(
-        "This property changed in another session. Refresh Design Studio before uploading a new hero image.",
-      ),
-    ).toBeVisible();
-    await expect(page.locator('img[alt="Hero"]')).toHaveAttribute(
-      "src",
-      "https://media.example/approved-hero.webp",
-    );
-    await expect(missingHeroMessage).toHaveCount(0);
+    await expect(page.getByText("1/10", { exact: true })).toBeVisible();
   });
 
   test("keeps Design Studio read-only until saved branding loads", async ({ page }) => {
@@ -799,15 +859,6 @@ function marketplaceSetupReturnUrl(): string {
   const url = new URL("/setup", marketplaceOrigin());
   url.searchParams.set("propertyId", BOOKING_ADMIN_PROPERTY_ID);
   return url.toString();
-}
-
-function directPublicationTaskParams(): URLSearchParams {
-  return new URLSearchParams({
-    taskId: "direct_booking_publication",
-    destinationRouteKey: "distribution.direct_booking_publication",
-    planRevision: "e2e-plan-1",
-    returnUrl: marketplaceSetupReturnUrl(),
-  });
 }
 
 function canonicalMarketplaceSetupUrl(input: {
