@@ -26,6 +26,11 @@ import { createPgBookingAffiliateDestinationRepository } from "./domains/booking
 import { readAffiliateDestinationTrackingConfiguration } from "./domains/bookingAffiliateDestinationTrackingReadiness.js";
 import { readFinanceAffiliateCommercialConditions } from "./domains/financeAffiliateCommercialConditions.js";
 import { publishMarketplaceAffiliateTerms } from "./domains/marketplaceAffiliatePublication.js";
+import {
+  createPricingPublicationFreshnessAlert,
+  readPricingPublicationFreshness,
+  summarizePricingPublicationFreshness,
+} from "./domains/pricingPublicationFreshness.js";
 import { createAffiliatePublicationPrerequisites } from "./domains/marketplaceAffiliatePublicationPrerequisites.js";
 import { assertAffiliateCaptureRoleHasVisitReadCapabilities } from "./domains/affiliateCaptureRoleBoundary.js";
 import { createMarketplaceAffiliateVisit } from "./domains/marketplaceAffiliateVisit.js";
@@ -2692,6 +2697,71 @@ app.addHook("onClose", async () => {
   if (calendarAutoOpenScheduleStart) clearTimeout(calendarAutoOpenScheduleStart);
   await activeCalendarAutoOpenSchedule;
   await pmsCalendarAutoOpenSchedulerStore?.close();
+});
+
+// VAY-2088: nothing republishes a stale price list, and public offers fail closed until a
+// "Save prices". This read-only check (every transaction is rolled back) logs one line per run
+// and, with a recipient configured, emails it at most once a day while `problems` > 0.
+const pricingFreshnessPool =
+  config.backgroundWorkersEnabled &&
+  config.pmsOperationsSource === "target" &&
+  config.pricingPublicationFreshnessCheckEnabled
+    ? new pg.Pool({ connectionString: targetDatabaseUrl, connectionTimeoutMillis: 5_000, max: 1 })
+    : undefined;
+const pricingFreshnessAlert =
+  pricingFreshnessPool &&
+  config.pricingPublicationFreshnessAlertEmail &&
+  config.bookingEmailDelivery
+    ? createPricingPublicationFreshnessAlert({
+        to: config.pricingPublicationFreshnessAlertEmail,
+        delivery: createResendBookingEmailDelivery(config.bookingEmailDelivery),
+      })
+    : undefined;
+let activePricingFreshnessCheck: Promise<void> | undefined;
+const runPricingFreshnessCheck = () => {
+  if (!pricingFreshnessPool || activePricingFreshnessCheck) return;
+  const startedAt = Date.now();
+  activePricingFreshnessCheck = readPricingPublicationFreshness(pricingFreshnessPool)
+    .then(async (report) => {
+      const summary = summarizePricingPublicationFreshness(report);
+      const level = summary.problems > 0 ? "warn" : "info";
+      app.log[level](
+        { ...summary, durationMs: Date.now() - startedAt },
+        "Pricing publication freshness check",
+      );
+      // A failed send is retried on the next run; it does not fail the check.
+      await pricingFreshnessAlert?.(summary).then(
+        (sent) => {
+          if (sent)
+            app.log.info(
+              { problems: summary.problems },
+              "Pricing publication freshness alert sent",
+            );
+        },
+        (error: unknown) =>
+          app.log.warn({ err: error }, "Pricing publication freshness alert failed"),
+      );
+    })
+    .catch((error: unknown) =>
+      app.log.warn({ err: error }, "Pricing publication freshness check failed"),
+    )
+    .finally(() => {
+      activePricingFreshnessCheck = undefined;
+    });
+};
+const pricingFreshnessTimer = pricingFreshnessPool
+  ? setInterval(runPricingFreshnessCheck, config.pricingPublicationFreshnessIntervalMs)
+  : undefined;
+pricingFreshnessTimer?.unref();
+const pricingFreshnessStart = pricingFreshnessPool
+  ? setTimeout(runPricingFreshnessCheck, 60_000)
+  : undefined;
+pricingFreshnessStart?.unref();
+app.addHook("onClose", async () => {
+  if (pricingFreshnessTimer) clearInterval(pricingFreshnessTimer);
+  if (pricingFreshnessStart) clearTimeout(pricingFreshnessStart);
+  await activePricingFreshnessCheck;
+  await pricingFreshnessPool?.end();
 });
 
 let activeFinanceSubscriptionBatch: Promise<void> | undefined;
