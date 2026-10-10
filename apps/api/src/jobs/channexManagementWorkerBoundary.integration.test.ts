@@ -657,4 +657,91 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
       await owner.query("DELETE FROM platform.channex_management_worker_operations");
     }
   });
+  it("sees only claimed, connected hotels in the VAY-2108 claimed scope", async () => {
+    const claimed = randomUUID(),
+      unclaimed = randomUUID(),
+      claimedJob = randomUUID(),
+      unclaimedJob = randomUUID(),
+      claimedExternal = randomUUID(),
+      unclaimedExternal = randomUUID();
+    const ids = [claimed, unclaimed];
+    await owner.query(
+      "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Claimed'),($2::uuid,$2::text,'Unclaimed')",
+      ids,
+    );
+    await owner.query(
+      "INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source) VALUES($1,'channex',$2,'active','repair'),($3,'channex',$4,'active','repair')",
+      [claimed, claimedExternal, unclaimed, unclaimedExternal],
+    );
+    await owner.query(
+      "INSERT INTO pms.channel_connections(property_id,provider,connection_status,external_property_id) VALUES($1,'channex','connected',$2),($3,'channex','connected',$4)",
+      [claimed, claimedExternal, unclaimed, unclaimedExternal],
+    );
+    // The other hotel's claim leaves 'active', as a revoke would, while its connection stays.
+    await owner.query(
+      "UPDATE pms.channel_binding_claims SET claim_state='released' WHERE property_id=$1",
+      [unclaimed],
+    );
+    for (const [id, propertyId] of [
+      [claimedJob, claimed],
+      [unclaimedJob, unclaimed],
+    ])
+      await owner.query(
+        `INSERT INTO platform.jobs(id,job_key,queue_name,job_type,tenant_scope,property_id,resource_product,resource_type,resource_id,payload)
+        VALUES($1::uuid,$1::text,'pms.channex.management','channex.sync_ari','property',$2::uuid,'pms','channex_connection',$2::text,$3)`,
+        [
+          id,
+          propertyId,
+          JSON.stringify({
+            operationType: "sync_ari",
+            commandId: randomUUID(),
+            idempotencyKey: id,
+          }),
+        ],
+      );
+    const rows = async (sql: string, values: unknown[]) =>
+      (await pool.query<{ id: string }>(sql, values)).rows.map((row) => row.id);
+    const jobs = () =>
+      rows("SELECT id::text FROM platform.jobs WHERE id = ANY($1::uuid[])", [
+        [claimedJob, unclaimedJob],
+      ]);
+    try {
+      // Nothing is admitted until the owner adds the claimed operations.
+      expect(await jobs()).toEqual([]);
+      expect(
+        await rows("SELECT id::text FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])", [
+          ids,
+        ]),
+      ).toEqual([]);
+      await denied(
+        "INSERT INTO platform.channex_management_worker_claimed_operations VALUES('sync_ari')",
+      );
+      await owner.query(
+        "INSERT INTO platform.channex_management_worker_claimed_operations VALUES('sync_ari'),('provision')",
+      );
+      const client = await pool.connect();
+      try {
+        await assertChannexManagementWorkerBoundary(client, {
+          propertyId: property,
+          claimedScope: true,
+        });
+      } finally {
+        client.release();
+      }
+      expect(await jobs()).toEqual([claimedJob]);
+      expect(
+        await rows("SELECT id::text FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])", [
+          ids,
+        ]),
+      ).toEqual([claimed]);
+      expect(
+        await rows(
+          "SELECT property_id::text AS id FROM pms.channel_connections WHERE property_id = ANY($1::uuid[])",
+          [ids],
+        ),
+      ).toEqual([claimed]);
+    } finally {
+      await owner.query("DELETE FROM platform.channex_management_worker_claimed_operations");
+    }
+  });
 });

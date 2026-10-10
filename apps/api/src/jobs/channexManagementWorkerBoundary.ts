@@ -36,7 +36,12 @@ const toleratedReads = new Set([
 ]);
 export async function assertChannexManagementWorkerBoundary(
   client: Pick<pg.Client, "query">,
-  options: { allowMissingGrants?: boolean; propertyId?: string; connectionScope?: boolean } = {},
+  options: {
+    allowMissingGrants?: boolean;
+    propertyId?: string;
+    connectionScope?: boolean;
+    claimedScope?: boolean;
+  } = {},
 ): Promise<void> {
   const role = CHANNEX_MANAGEMENT_WORKER_ROLE;
   const fail = (code: string): never => {
@@ -158,6 +163,7 @@ export async function assertChannexManagementWorkerBoundary(
     if (
       name !== "platform.channex_management_worker_properties" &&
       name !== "platform.channex_management_worker_operations" &&
+      name !== "platform.channex_management_worker_claimed_operations" &&
       name !== "finance.online_card_readiness" &&
       !relations.find((row) => row.name === name)?.rls
     )
@@ -205,6 +211,15 @@ export async function assertChannexManagementWorkerBoundary(
     ).rows;
     if (rows.length !== 1 || rows[0].operation_type !== "enable") fail("operation_scope_mismatch");
   }
+  // VAY-2108: the claimed scope is exactly ARI plus published-offer provisioning; without it the
+  // owner table stays empty.
+  const claimed = (
+    await client.query(
+      "SELECT operation_type FROM platform.channex_management_worker_claimed_operations ORDER BY 1",
+    )
+  ).rows.map((row) => row.operation_type);
+  if (claimed.join(",") !== (options.claimedScope ? "provision,sync_ari" : ""))
+    fail("claimed_scope_mismatch");
 }
 
 // Attest transitive invoker functions, enabled triggers and the invoker view as
