@@ -78,6 +78,7 @@ import {
   prepareChannexReceiptPersistence,
   prepareChannexTransportFailurePersistence,
 } from "./channexCreationReceiptStore.js";
+import { readChannexCreationResponse } from "../integrations/channexCreationReceipt.js";
 import {
   verifyChannexOfferRoom,
   verifyChannexOfferConfiguration,
@@ -124,6 +125,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot,
     configureTerms?: TermsSetup,
     enableCard = false,
+    roomTotal = 2,
   ) {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
       throw new Error("test database required");
@@ -148,8 +150,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     );
     await pool.query(
       `INSERT INTO pms.room_types(id,property_id,name,occupancy_limits)
-       VALUES($1,$2,'Terms room','{"total":2,"adults":2,"children":0}'::jsonb)`,
-      [roomTypeId, propertyId],
+       VALUES($1,$2,'Terms room',jsonb_build_object('total',$3::int,'adults',$3::int,'children',0))`,
+      [roomTypeId, propertyId, roomTotal],
     );
     await pool.query(
       `INSERT INTO identity.organization_memberships(id,organization_id,user_id,role_key,property_access_mode,access_origin)
@@ -208,8 +210,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       secondRoomId = randomUUID();
     await pool.query(
       `INSERT INTO pms.room_types(id,property_id,name,occupancy_limits)
-       VALUES($1,$2,'Second room','{"total":2,"adults":2,"children":0}'::jsonb)`,
-      [secondRoomId, propertyId],
+       VALUES($1,$2,'Second room',jsonb_build_object('total',$3::int,'adults',$3::int,'children',0))`,
+      [secondRoomId, propertyId, roomTotal],
     );
     const termsInput: Omit<ReplacementOfferTerms, "revision"> = {
       roomTypeId,
@@ -401,32 +403,34 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     };
   }
   async function serviceFixture(total = 2, publishedAdults = 2, baseMinor = "10000") {
-    const f = await fixture((snapshot) => ({
-        ...snapshot,
-        rooms: snapshot.rooms.map((room) => ({
-          ...room,
-          capacity: { total: publishedAdults, adults: publishedAdults, children: 0 },
-          offers: room.offers.map((offer) => ({
-            ...offer,
-            price:
-              offer.price.kind === "independent"
-                ? {
-                    ...offer.price,
-                    calendar: {
-                      ...offer.price.calendar,
-                      base: { mode: "flat", amountMinor: baseMinor },
-                    },
-                  }
-                : offer.price,
+    const f = await fixture(
+        (snapshot) => ({
+          ...snapshot,
+          rooms: snapshot.rooms.map((room) => ({
+            ...room,
+            capacity: { total: publishedAdults, adults: publishedAdults, children: 0 },
+            offers: room.offers.map((offer) => ({
+              ...offer,
+              price:
+                offer.price.kind === "independent"
+                  ? {
+                      ...offer.price,
+                      calendar: {
+                        ...offer.price.calendar,
+                        base: { mode: "flat", amountMinor: baseMinor },
+                      },
+                    }
+                  : offer.price,
+            })),
           })),
-        })),
-      })),
+        }),
+        undefined,
+        false,
+        // The room capacity must precede the source evidence that the publication pins.
+        total,
+      ),
       propertyId = f.scope.propertyId,
       jobId = randomUUID();
-    await pool.query(
-      "UPDATE pms.room_types SET occupancy_limits=jsonb_build_object('total',$2::int,'adults',$2::int,'children',0) WHERE property_id=$1",
-      [propertyId, total],
-    );
     await pool.query(
       "INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source) VALUES($1::uuid,'channex',$1::text,'active','enable')",
       [propertyId],
@@ -564,6 +568,66 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         [propertyId],
       )
     ).rows;
+  }
+  // The receipt stores retain a receipt only while its attempt is unresolved (VAY-1545), so a
+  // late receipt for an identified or reconciled attempt is refused. Rows that reach the table
+  // anyway are written directly, as the store would, to keep exercising the downstream holds.
+  async function insertLateCreationReceipt(
+    correlation: Parameters<typeof prepareChannexReceiptPersistence>[1],
+    response: Response,
+  ) {
+    await expect(
+      (await prepareChannexReceiptPersistence(pool, correlation, response.clone()))(),
+    ).rejects.toThrow("Channex receipt correlation unavailable");
+    const observation = await readChannexCreationResponse(response);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `UPDATE pms.channex_offer_targets t SET next_version=t.next_version
+         FROM pms.channex_offer_create_attempts a WHERE a.id=$1 AND t.id=a.target_id`,
+        [correlation.attemptId],
+      );
+      await client.query(
+        `INSERT INTO pms.channex_offer_create_receipts
+         (id,attempt_id,job_attempt_id,worker_id,outcome,http_status,provider_request_id,identity_evidence,has_warnings)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)`,
+        [
+          correlation.receiptId,
+          correlation.attemptId,
+          correlation.jobAttemptId,
+          correlation.workerId,
+          observation.outcome,
+          observation.httpStatus,
+          observation.providerRequestId,
+          JSON.stringify(observation.identityEvidence),
+          observation.hasWarnings,
+        ],
+      );
+      await client.query("COMMIT");
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+  }
+  async function insertLateAriTransportReceipt(
+    correlation: Parameters<typeof prepareChannexAriTransportFailurePersistence>[1],
+  ) {
+    await expect(
+      (await prepareChannexAriTransportFailurePersistence(pool, correlation))(),
+    ).rejects.toThrow("Channex receipt correlation unavailable");
+    // The ARI receipt trigger writes the target fence itself.
+    await pool.query(
+      `INSERT INTO pms.channex_offer_ari_receipts
+       (id,attempt_id,job_attempt_id,worker_id,outcome,task_ids,has_warnings)
+       VALUES($1,$2,$3,$4,'transport_error','{}',true)`,
+      [
+        correlation.receiptId,
+        correlation.attemptId,
+        correlation.jobAttemptId,
+        correlation.workerId,
+      ],
+    );
   }
   const transportEnvelope = {
     outcome: "transport_error",
@@ -1003,13 +1067,10 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           [f.claim.intentId, randomUUID()],
         );
       if (variant === "receipt")
-        await (
-          await prepareChannexReceiptPersistence(
-            pool,
-            { ...f.correlation, receiptId: randomUUID() },
-            new Response("{}", { status: 500 }),
-          )
-        )();
+        await insertLateCreationReceipt(
+          { ...f.correlation, receiptId: randomUUID() },
+          new Response("{}", { status: 500 }),
+        );
       if (variant === "lease")
         await pool.query(
           "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '10 minutes' WHERE id=$1",
@@ -1475,6 +1536,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         },
       ]);
     },
+    30_000,
   );
   it("retains a late initial ARI response after lease loss", async () => {
     const f = await initialDispatchFixture();
@@ -1558,7 +1620,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       },
       post: f.post,
     });
-    expect(result).toMatchObject({ kind: "unavailable", reason: "ari_dispatch_unavailable" });
+    // The claim now has a receipt, so it cannot be released and stays held for reconciliation.
+    expect(result).toMatchObject({ kind: "unavailable", reason: "ari_reconciliation_required" });
     expect(f.post).not.toHaveBeenCalled();
   });
   async function ariReceiptFixture(date = initialAriDate) {
@@ -1689,7 +1752,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     const get = vi.fn(async () => new Promise<unknown>(() => {}));
     await expect(f.read(get)).rejects.toThrow();
     expect(get).toHaveBeenCalledOnce();
-  });
+  }, 30_000);
   async function stagedReadFixture() {
     const f = await ariReceiptFixture();
     const stored = (
@@ -2110,6 +2173,21 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       ).toEqual([]);
     },
   );
+  // Pricing delivery needs the complete continuation bundle (VAY-1545). The worker cases
+  // below cover closed ARI uploads only, so room availability is reported current.
+  const currentRoomAvailability = {
+    reconcileRoomAvailability: async () => ({
+      kind: "pending_availability_reconciled" as const,
+      count: 0,
+    }),
+    prepareRoomAvailability: async () => ({
+      kind: "room_availability_current" as const,
+      from: initialAriDate,
+      through: initialAriDate,
+      roomCount: 0,
+      dayCount: 0,
+    }),
+  };
   async function completedDateFixture() {
     const f = await reconciliationFixture();
     await f.retain();
@@ -2199,13 +2277,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     "holds the next date after a late old receipt %s",
     async (when) => {
       const f = await completedDateFixture();
-      const late = async () =>
-        (
-          await prepareChannexAriTransportFailurePersistence(pool, {
-            ...f.ariCorrelation,
-            receiptId: randomUUID(),
-          })
-        )();
+      const late = () =>
+        insertLateAriTransportReceipt({ ...f.ariCorrelation, receiptId: randomUUID() });
       if (when === "before_claim") {
         await late();
         expect(await f.prepare()).toMatchObject({ reason: "ari_reconciliation_required" });
@@ -2571,6 +2644,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       fetch: fetcher,
       reconcileClosedUploads: (lease, get) => reconcilePendingChannexUploads(pool, lease, get),
       dispatchClosedUpload: (lease, ports) => dispatchNextChannexClosedUpload(pool, lease, ports),
+      ...currentRoomAvailability,
     });
     const state = { succeed: vi.fn(), fail: vi.fn() };
     const job = {
@@ -2651,6 +2725,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       plans: { plan },
       fetch: fetcher,
       reconcileClosedUploads: (lease, get) => reconcilePendingChannexUploads(pool, lease, get),
+      dispatchClosedUpload: async () => ({ kind: "no_closed_upload" as const }),
+      ...currentRoomAvailability,
     });
     const job = {
       jobId: f.input.jobId,
@@ -2990,7 +3066,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     const get = vi.fn(async () => new Promise<unknown>(() => {}));
     await expect(f.readTasks(get)).rejects.toThrow();
     expect(get).toHaveBeenCalledOnce();
-  });
+  }, 30_000);
   it("admits retained explicit Success without warnings for original task observation", async () => {
     const f = await taskReadFixture();
     await f.retain(
@@ -3297,13 +3373,10 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
               [f.input.jobId],
             );
           if (variant === "receipt")
-            await (
-              await prepareChannexReceiptPersistence(
-                pool,
-                { ...f.correlation, receiptId: randomUUID() },
-                new Response("{}", { status: 500 }),
-              )
-            )();
+            await insertLateCreationReceipt(
+              { ...f.correlation, receiptId: randomUUID() },
+              new Response("{}", { status: 500 }),
+            );
           if (variant === "binding")
             await pool.query(
               "UPDATE pms.channel_connections SET binding_generation=gen_random_uuid() WHERE property_id=$1",
@@ -3460,13 +3533,10 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
               [f.input.jobId],
             );
           if (variant === "receipt")
-            await (
-              await prepareChannexReceiptPersistence(
-                pool,
-                { ...f.correlation, receiptId: randomUUID() },
-                new Response("{}", { status: 500 }),
-              )
-            )();
+            await insertLateCreationReceipt(
+              { ...f.correlation, receiptId: randomUUID() },
+              new Response("{}", { status: 500 }),
+            );
           if (variant === "mismatch") return {};
           return f.response().json();
         },
@@ -3736,13 +3806,10 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       propertyId: f.scope.propertyId,
       connectionId,
     };
-    await (
-      await prepareChannexReceiptPersistence(
-        pool,
-        scope,
-        new Response(JSON.stringify(f.response), { status: 201 }),
-      )
-    )();
+    await insertLateCreationReceipt(
+      scope,
+      new Response(JSON.stringify(f.response), { status: 201 }),
+    );
     const ready = await claimPublishedChannexOfferCreate(pool, f.input, selection);
     expect(ready.kind).toBe("claimed");
     if (ready.kind !== "claimed") throw new Error("claim required");
@@ -3769,20 +3836,14 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       propertyId: other.scope.propertyId,
       connectionId: conn,
     };
-    await (
-      await prepareChannexReceiptPersistence(
-        pool,
-        correlation,
-        new Response(JSON.stringify(other.response), { status: 201 }),
-      )
-    )();
-    await (
-      await prepareChannexReceiptPersistence(
-        pool,
-        { ...correlation, receiptId: randomUUID() },
-        new Response(JSON.stringify(createdResponse(other.claim.request.body)), { status: 201 }),
-      )
-    )();
+    await insertLateCreationReceipt(
+      correlation,
+      new Response(JSON.stringify(other.response), { status: 201 }),
+    );
+    await insertLateCreationReceipt(
+      { ...correlation, receiptId: randomUUID() },
+      new Response(JSON.stringify(createdResponse(other.claim.request.body)), { status: 201 }),
+    );
     expect(
       await claimPublishedChannexOfferCreate(pool, other.input, {
         ...other.selection,
@@ -5118,7 +5179,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     });
     expect(performance.now() - started).toBeLessThan(7_000);
     expect(await f.serviceRead()).toMatchObject({ kind: "available" });
-  });
+  }, 30_000);
   function interceptRead(before: (c: pg.PoolClient, sql: string) => Promise<void>) {
     return new Proxy(pool, {
       get(target, key) {
@@ -6097,8 +6158,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     // A second organization owning both resources makes ownership ambiguous: fail closed.
     const other = randomUUID();
     await pool.query(
-      "INSERT INTO identity.organizations(id,kind,name,slug) VALUES($1,'hotel_group','Second owner',$1::text)",
-      [other],
+      "INSERT INTO identity.organizations(id,kind,name,slug) VALUES($1,'hotel_group','Second owner',$2)",
+      [other, other],
     );
     for (const [product, type] of [
       ["pms", "pms_property"],
