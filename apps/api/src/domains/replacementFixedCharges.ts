@@ -7,6 +7,7 @@ import {
 } from "@vayada/domain-booking";
 import {
   isMinorAmount,
+  pricingAmountStep,
   pricingCurrencyScale,
   pricingInteger,
   pricingKeys,
@@ -41,7 +42,8 @@ export function parseFixedChargePolicy(value: unknown): FixedChargePolicy | null
     value.charges.length > 99
   )
     return null;
-  const ids = new Set<string>();
+  const ids = new Set<string>(),
+    step = BigInt(pricingAmountStep(value.currency));
   for (const r of value.charges) {
     if (
       !pricingObject(r) ||
@@ -51,6 +53,7 @@ export function parseFixedChargePolicy(value: unknown): FixedChargePolicy | null
       !text(r.name) ||
       !units.includes(r.unit as Rule["unit"]) ||
       !isMinorAmount(r.amountMinor) ||
+      BigInt(r.amountMinor) % step !== 0n ||
       typeof r.included !== "boolean" ||
       (r.collect !== "online" && r.collect !== "property")
     )

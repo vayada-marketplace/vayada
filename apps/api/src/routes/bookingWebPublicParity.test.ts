@@ -345,7 +345,21 @@ describe("Booking Web public bootstrap parity", () => {
       });
       expect(invalid.statusCode).toBe(400);
     }
+    // Room-detail views stay accepted funnel telemetry although they are no longer a stage.
+    const roomViewed = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/events",
+      payload: {
+        analyticsConsent: true,
+        consentVersion: 1,
+        hotelSlug: "hotel-alpenrose",
+        eventType: "room_viewed",
+        sessionId: "sid_123",
+        metadata: { funnelVersion: 1, funnelSequence: 2 },
+      },
+    });
     expect(response.statusCode).toBe(204);
+    expect(roomViewed.statusCode).toBe(204);
     expect(events).toMatchObject([
       {
         propertyId: "booking_hotel_alpenrose",
@@ -355,6 +369,7 @@ describe("Booking Web public bootstrap parity", () => {
         sessionId: "sid_123",
         metadata: { locale: "de" },
       },
+      { eventType: "room_viewed", sessionId: "sid_123" },
     ]);
     await app.close();
   });

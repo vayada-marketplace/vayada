@@ -46,7 +46,6 @@ export function pricingDraftFixture(changeQuote?: (quote: Input["current"]["quot
   const scope = {
     propertyId: prior.property_id,
     organizationId: prior.organization_id,
-    authorityRevision: "authority-1",
   };
   return {
     bookingId: prior.guest_booking_id,

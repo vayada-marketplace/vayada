@@ -9,6 +9,15 @@ import {
 } from "./pmsAcceptedPricingReservationRepository.js";
 import { processNextPmsAcceptedPricingReservationJob } from "./pmsAcceptedPricingReservationWorker.js";
 import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
+import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
+import { createTargetBookingWebCheckoutAdapter } from "../routes/bookingWebPublic.js";
+import { createBookingHostActions } from "./bookingHostActions.js";
+import { targetBookingHostActionGuards } from "./bookingHostActionGuards.js";
+import {
+  cancelAcceptedPricingStay,
+  loadPricingBookingCancellation,
+} from "./pricingBookingCancellation.js";
+import { createTargetPmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
 import {
   PMS_ACCEPTED_PRICING_JOB_TYPE,
   PMS_ACCEPTED_PRICING_JOB_VERSION,
@@ -49,6 +58,11 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
     "repository-missing-acceptance",
     "repository-suspended-entitlement",
     "worker-complete",
+    "repository-stay-cancel-before-adoption",
+    "repository-stay-cancel-after-adoption",
+    "repository-stay-cancel-guest-route",
+    "repository-stay-cancel-host-guest-request",
+    "repository-stay-cancel-host-reject",
   ])("validates complete historical binding: %s", async (scenario) => {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
       throw new Error("test database required");
@@ -70,6 +84,24 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
       const selected = structuredClone(q.stay.rooms[0]!);
       const priced = structuredClone(q.rooms[0]!);
       const term = structuredClone(q.evidence.terms[0]!);
+      if (scenario.startsWith("repository-stay-cancel"))
+        Object.assign(term, {
+          cancellation: {
+            kind: "flexible",
+            terms: {
+              type: "free_until_days_before_arrival",
+              freeCancellationDeadlineDays: 365,
+              afterDeadlinePenalty: "full_booking_amount",
+              noShowPenalty: "full_booking_amount",
+              flexibleCancellationType: "partial_refund",
+              partialRefundTiers: [
+                { minDaysBeforeCheckIn: 30, refundPercent: 100 },
+                { minDaysBeforeCheckIn: 14, refundPercent: 50 },
+                { minDaysBeforeCheckIn: 7, refundPercent: 25 },
+              ],
+            },
+          },
+        });
       const selections = [types[0]!, types[1]!, types[0]!].map((roomTypeId, i) => ({
         ...selected,
         selectionId: `selection-${i}`,
@@ -592,6 +624,310 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
       ) {
         await expect(adopt()).rejects.toBeInstanceOf(PmsAcceptedPricingReservationConflict);
         expect(await snapshot()).toEqual(before);
+      } else if (scenario === "repository-stay-cancel-guest-route") {
+        // VAY-2100: the guest cancels an adopted v2 stay online, end to end on real PostgreSQL.
+        expect(await adopt()).toMatchObject({ outcome: "adopted" });
+        await db.query(
+          "INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose) VALUES($1,$2,'canonical')",
+          [propertyId, propertyId],
+        );
+        await db.query(
+          `INSERT INTO booking.booking_guests(guest_booking_id,guest_role,first_name,last_name,email)
+           VALUES($1,'booker','Jane','Guest','jane@example.test')`,
+          [bookingId],
+        );
+        // The adapter's own transaction becomes a savepoint inside this test's transaction.
+        const nested = {
+          query: (text: string, values?: unknown[]) =>
+            db.query(
+              (
+                {
+                  BEGIN: "SAVEPOINT guest_cancel",
+                  COMMIT: "RELEASE SAVEPOINT guest_cancel",
+                  ROLLBACK: "ROLLBACK TO SAVEPOINT guest_cancel",
+                } as Record<string, string>
+              )[text] ?? text,
+              values,
+            ),
+        };
+        const adapter = createTargetBookingWebCheckoutAdapter({
+          pool: nested as unknown as pg.Pool,
+          connectionString: url!,
+          externalChanges: externalBookingChanges,
+          inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+        });
+        const context = (key: string) => ({
+          operation: "booking-cancel",
+          requestId: `request-${key}`,
+          correlationId: `correlation-${key}`,
+          idempotencyKey: key,
+          fingerprint: hash(key),
+          occurredAt: new Date("2026-09-21T08:00:00Z"),
+        });
+        const guest = { guest_email: "jane@example.test" };
+        expect(
+          await adapter.cancelPreview(propertyId, bookingId, guest, context("p")),
+        ).toMatchObject({
+          amountPaid: 0,
+          refundAmount: 0,
+          refundPercentage: 0,
+          cancellationFeeAmount: 810,
+          bookedTermsOutcome: { retainedMinor: "81000", refundMinor: "27000" },
+        });
+        await expect(
+          adapter.cancel(
+            propertyId,
+            bookingId,
+            { ...guest, expected_cancellation_fee_minor: "0" },
+            context("stale"),
+          ),
+        ).rejects.toMatchObject({ statusCode: 409 });
+        await adapter.cancel(
+          propertyId,
+          bookingId,
+          { ...guest, expected_cancellation_fee_minor: "81000" },
+          context("c"),
+        );
+        // The adapter commit became a savepoint release: run the deferred checks a commit would.
+        await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+        const event = await db.query(
+          `SELECT booking.lifecycle_status AS status, event.event_payload->'cancellationOutcome'->>'retainedMinor' AS fee
+           FROM booking.guest_bookings booking JOIN booking.booking_status_events event
+             ON event.guest_booking_id=booking.id AND event.event_type='guest_booking.canceled'
+           WHERE booking.id=$1`,
+          [bookingId],
+        );
+        expect(event.rows).toEqual([{ status: "canceled", fee: "81000" }]);
+        const assignments = await db.query(
+          "SELECT DISTINCT assignment_status AS status FROM pms.operational_booking_assignments WHERE guest_booking_id=$1",
+          [bookingId],
+        );
+        expect(assignments.rows).toEqual([{ status: "canceled" }]);
+        const freed = await snapshot();
+        expect(freed.inventory.map(({ assigned_count }) => assigned_count)).toEqual([0, 0, 0, 0]);
+        expect(freed.inventory.map(({ available_count }) => available_count)).toEqual([3, 3, 3, 3]);
+        // Nothing consumes pms.reservation.cancel; no PMS handoff is staged for a v2 stay.
+        const jobs = await db.query(
+          "SELECT job_type FROM platform.jobs WHERE resource_id=$1 AND job_type LIKE 'pms.%'",
+          [bookingId],
+        );
+        expect(jobs.rows).toEqual([]);
+      } else if (scenario === "repository-stay-cancel-host-guest-request") {
+        // VAY-2100: PMS staff cancel an adopted v2 stay because the guest asked.
+        expect(await adopt()).toMatchObject({ outcome: "adopted" });
+        await db.query(
+          `UPDATE booking.guest_bookings
+           SET booking_metadata=booking_metadata || '{"paymentMethod":"pay_at_property"}' WHERE id=$1`,
+          [bookingId],
+        );
+        const actorUserId = randomUUID();
+        await db.query("INSERT INTO identity.users(id,email,status) VALUES($1,$2,'active')", [
+          actorUserId,
+          `${actorUserId}@example.test`,
+        ]);
+        const nested = {
+          query: (text: string, values?: unknown[]) =>
+            db.query(
+              (
+                {
+                  BEGIN: "SAVEPOINT host_cancel",
+                  COMMIT: "RELEASE SAVEPOINT host_cancel",
+                  ROLLBACK: "ROLLBACK TO SAVEPOINT host_cancel",
+                } as Record<string, string>
+              )[text] ?? text,
+              values,
+            ),
+        };
+        const actions = createBookingHostActions({
+          pool: nested as unknown as pg.Pool,
+          inventory: createTargetPmsInventoryReservationPort(),
+          guards: targetBookingHostActionGuards,
+          now: () => new Date("2026-09-21T08:00:00Z"),
+        });
+        const hostScope = { propertyId, bookingId, actorUserId };
+        const hostPreview = await actions.preview(hostScope, {
+          action: "cancel",
+          reason: "Guest emailed",
+          cancellationKind: "guest_request",
+        });
+        expect(hostPreview.impact.cancellationOutcome).toMatchObject({
+          daysBeforeCheckIn: 10,
+          retainedMinor: "81000",
+        });
+        await actions.apply(hostScope, hostPreview.previewId, "host-guest-request");
+        await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+        const cancelled = await db.query(
+          `SELECT booking.cancellation_reason AS reason,
+             event.event_payload->'cancellationOutcome'->>'retainedMinor' AS fee
+           FROM booking.guest_bookings booking JOIN booking.booking_status_events event
+             ON event.guest_booking_id=booking.id AND event.event_type='guest_booking.canceled'
+           WHERE booking.id=$1`,
+          [bookingId],
+        );
+        expect(cancelled.rows).toEqual([{ reason: "guest_request", fee: "81000" }]);
+        const assignments = await db.query(
+          "SELECT DISTINCT assignment_status AS status FROM pms.operational_booking_assignments WHERE guest_booking_id=$1",
+          [bookingId],
+        );
+        expect(assignments.rows).toEqual([{ status: "canceled" }]);
+        const read = await createTargetPmsOperationsReadRepository({
+          connectionString: url!,
+          pool: db,
+        }).findReservationByGuestBookingId(propertyId, bookingId);
+        expect(read?.cancellationOutcome).toMatchObject({ retainedMinor: "81000" });
+        // Nothing consumes pms.reservation.*; no PMS handoff is staged for a v2 stay.
+        const jobs = await db.query(
+          "SELECT job_type FROM platform.jobs WHERE resource_id=$1 AND job_type LIKE 'pms.%'",
+          [bookingId],
+        );
+        expect(jobs.rows).toEqual([]);
+      } else if (scenario === "repository-stay-cancel-host-reject") {
+        // A v2 request the PMS never adopted: rejecting it releases the hold, with no handoff.
+        await db.query(
+          `UPDATE booking.guest_bookings SET lifecycle_status='pending_payment',
+           booking_metadata=booking_metadata || '{"paymentMethod":"pay_at_property","acceptanceMode":"request"}'
+           WHERE id=$1`,
+          [bookingId],
+        );
+        const actorUserId = randomUUID();
+        await db.query("INSERT INTO identity.users(id,email,status) VALUES($1,$2,'active')", [
+          actorUserId,
+          `${actorUserId}@example.test`,
+        ]);
+        const nested = {
+          query: (text: string, values?: unknown[]) =>
+            db.query(
+              (
+                {
+                  BEGIN: "SAVEPOINT host_reject",
+                  COMMIT: "RELEASE SAVEPOINT host_reject",
+                  ROLLBACK: "ROLLBACK TO SAVEPOINT host_reject",
+                } as Record<string, string>
+              )[text] ?? text,
+              values,
+            ),
+        };
+        const actions = createBookingHostActions({
+          pool: nested as unknown as pg.Pool,
+          inventory: createTargetPmsInventoryReservationPort(),
+          guards: targetBookingHostActionGuards,
+          now: () => new Date("2026-09-21T08:00:00Z"),
+        });
+        const hostScope = { propertyId, bookingId, actorUserId };
+        const hostPreview = await actions.preview(hostScope, {
+          action: "reject",
+          reason: "No rooms that night",
+        });
+        await actions.apply(hostScope, hostPreview.previewId, "host-reject");
+        await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+        const rejected = await db.query(
+          "SELECT lifecycle_status AS status FROM booking.guest_bookings WHERE id=$1",
+          [bookingId],
+        );
+        expect(rejected.rows).toEqual([{ status: "declined" }]);
+        expect((await snapshot()).receipts.map(({ lifecycle_state }) => lifecycle_state)).toEqual([
+          "released",
+          "released",
+        ]);
+        const jobs = await db.query(
+          "SELECT job_type FROM platform.jobs WHERE resource_id=$1 AND job_type LIKE 'pms.%'",
+          [bookingId],
+        );
+        expect(jobs.rows).toEqual([]);
+      } else if (scenario.startsWith("repository-stay-cancel")) {
+        // VAY-2100: booked tiers come from the acceptance; 10 days out meets the 7-day 25% tier.
+        // Days count in the frozen Europe/Berlin timezone.
+        const stay = {
+          checkIn: "2026-10-01",
+          checkOut: "2026-10-03",
+          roomCount: 3,
+          currency: "EUR",
+        };
+        const cancellation = (cancelledAt: string, changed: Partial<typeof stay> = {}) =>
+          loadPricingBookingCancellation(db, {
+            propertyId,
+            guestBookingId: bookingId,
+            stay: { ...stay, ...changed },
+            cancelledAt: new Date(cancelledAt),
+          });
+        expect(await cancellation("2026-09-21T08:00:00Z")).toMatchObject({
+          daysBeforeCheckIn: 10,
+          totalMinor: "108000",
+          refundMinor: "27000",
+          retainedMinor: "81000",
+          rooms: quote.stay.rooms.map(({ selectionId }) => ({
+            selectionId,
+            rule: "partial_refund",
+            refundPercent: 25,
+            matchedTierMinDays: 7,
+            baseMinor: "36000",
+          })),
+        });
+        expect((await cancellation("2026-08-31T08:00:00Z"))?.refundMinor).toBe("108000");
+        // 22:30 UTC is already the next day in Berlin: 13 days (25%), not 14 (50%).
+        expect(await cancellation("2026-09-17T22:30:00Z")).toMatchObject({
+          daysBeforeCheckIn: 13,
+          refundMinor: "27000",
+        });
+        for (const changed of [
+          { checkIn: "2026-10-02" },
+          { checkOut: "2026-10-04" },
+          { roomCount: 2 },
+          { currency: "USD" },
+        ])
+          expect(await cancellation("2026-09-21T08:00:00Z", changed)).toBeNull();
+        const free = () =>
+          cancelAcceptedPricingStay(db, createTargetPmsInventoryReservationPort(), {
+            propertyId,
+            guestBookingId: bookingId,
+            commandId: randomUUID(),
+            fingerprint: hash(scenario),
+            occurredAt: new Date("2026-09-21T08:00:00Z"),
+          });
+        if (scenario.endsWith("after-adoption")) {
+          expect(await adopt()).toMatchObject({ outcome: "adopted" });
+          // Booking Detail reads the booked terms from the acceptance, and the recorded outcome.
+          const readReservation = () =>
+            createTargetPmsOperationsReadRepository({
+              connectionString: url!,
+              pool: db,
+            }).findReservationByGuestBookingId(propertyId, bookingId);
+          const booked = await readReservation();
+          expect(booked?.assignments.map((a) => a.bookedCancellation)).toEqual(
+            [1, 2, 3].map(() => quote.evidence.terms[0]!.cancellation),
+          );
+          expect(booked?.cancellationOutcome).toBeUndefined();
+          const recorded = await cancellation("2026-09-21T08:00:00Z");
+          await db.query(
+            `INSERT INTO booking.booking_status_events
+             (guest_booking_id,event_type,from_status,to_status,actor_type,public_visible,public_message,event_payload)
+             VALUES($1,'guest_booking.canceled','confirmed','canceled','guest',true,'Booking updated.',$2)`,
+            [bookingId, { requestId: "r", cancellationOutcome: recorded }],
+          );
+          expect((await readReservation())?.cancellationOutcome).toEqual(recorded);
+          expect(await free()).toEqual({ released: 0, canceledAssignments: 3 });
+          await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+          const assignments = await db.query(
+            "SELECT assignment_status AS status FROM pms.operational_booking_assignments WHERE guest_booking_id=$1",
+            [bookingId],
+          );
+          expect(assignments.rows).toEqual([1, 2, 3].map(() => ({ status: "canceled" })));
+        } else {
+          expect(await free()).toEqual({ released: 2, canceledAssignments: 0 });
+          await db.query("SET CONSTRAINTS ALL IMMEDIATE");
+          await db.query("SAVEPOINT late_adoption");
+          await expect(adopt()).rejects.toBeInstanceOf(PmsAcceptedPricingReservationConflict);
+          await db.query("ROLLBACK TO SAVEPOINT late_adoption");
+        }
+        expect(await free()).toEqual({ released: 0, canceledAssignments: 0 });
+        const freed = await snapshot();
+        expect(freed.inventory.map(({ assigned_count }) => assigned_count)).toEqual([0, 0, 0, 0]);
+        expect(freed.inventory.map(({ available_count }) => available_count)).toEqual([3, 3, 3, 3]);
+        expect(freed.receipts.map(({ lifecycle_state }) => lifecycle_state)).toEqual(
+          scenario.endsWith("after-adoption")
+            ? ["handed_off", "handed_off"]
+            : ["released", "released"],
+        );
       } else if (scenario === "channel-without-room") {
         await adopt();
         expect(await snapshot()).toEqual(before);
