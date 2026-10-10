@@ -86,3 +86,39 @@ it.each([
   if (!["receipt-conflict", "authority"].includes(scenario))
     expect(query.mock.calls.some(([sql]) => sql.startsWith("INSERT"))).toBe(false);
 });
+it("reserves a pay-at-property request only while hotel-confirmed acceptance is on", async () => {
+  f = preparationFixture((quote) => Object.assign(quote, { acceptanceMode: "request" }));
+  vi.mocked(lockPublicPricingAuthority).mockResolvedValue(f.current.scope);
+  vi.mocked(lockCurrentQuoteRevalidation).mockResolvedValue(f.current);
+  vi.mocked(lockCurrentQuoteGuestDisclosure).mockResolvedValue(f.disclosure);
+  vi.mocked(lockFinancePricingAcceptanceTerms).mockResolvedValue(f.finance);
+  await expect(preparePricingAcceptance(db, "hotel", f.input)).rejects.toThrow(
+    "Request acceptance unavailable",
+  );
+  expect(query.mock.calls.some(([sql]) => sql.startsWith("INSERT"))).toBe(false);
+  await expect(
+    preparePricingAcceptance(db, "hotel", f.input, { request: true }),
+  ).resolves.toMatchObject({ kind: "fresh", commandReceiptId: "receipt" });
+});
+it("reserves a card request only while both card and hotel-confirmed acceptance are on", async () => {
+  f = preparationFixture((quote) => {
+    Object.assign(quote, { acceptanceMode: "request", paymentMethod: "card" });
+    Object.assign(quote.evidence, { dueNowMinor: quote.evidence.totalMinor, dueLaterMinor: "0" });
+    Object.assign(quote.evidence.terms[0], {
+      payment: { kind: "full", acceptedMethods: ["card"] },
+    });
+  });
+  vi.mocked(lockPublicPricingAuthority).mockResolvedValue(f.current.scope);
+  vi.mocked(lockCurrentQuoteRevalidation).mockResolvedValue(f.current);
+  vi.mocked(lockCurrentQuoteGuestDisclosure).mockResolvedValue(f.disclosure);
+  vi.mocked(lockFinancePricingAcceptanceTerms).mockResolvedValue(f.finance);
+  await expect(preparePricingAcceptance(db, "hotel", f.input, { card: true })).rejects.toThrow(
+    "Request acceptance unavailable",
+  );
+  await expect(preparePricingAcceptance(db, "hotel", f.input, { request: true })).rejects.toThrow(
+    "Card acceptance unavailable",
+  );
+  await expect(
+    preparePricingAcceptance(db, "hotel", f.input, { card: true, request: true }),
+  ).resolves.toMatchObject({ kind: "fresh", commandReceiptId: "receipt" });
+});

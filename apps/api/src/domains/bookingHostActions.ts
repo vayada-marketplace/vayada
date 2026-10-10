@@ -17,12 +17,22 @@ import type { BookingHostActionGuards } from "./bookingHostActionGuards.js";
 import {
   inventoryReservationReceiptFromBookingMetadata,
   type DirectBookingInventoryReservationPort,
+  type InventoryReservationReceipt,
 } from "../platform/inventoryReservation.js";
 import { captureDirectNightlyRevenueEvidence } from "./stripeBookingSettlement.js";
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
 import { appendMissingAddonRevenueEvidence } from "./bookingAddonRevenueEvidence.js";
 import { publishAffiliateReservationLifecycle } from "./bookingAffiliateReservationLifecycle.js";
 import { loadPricingBookingCancellation } from "./pricingBookingCancellation.js";
+import {
+  applyPricingStayDateChange,
+  checkPricingStayDateChangeHolds,
+  PricingStayDateChangeRefused,
+  quotePricingStayDateChange,
+  repriceFromPublication,
+  type PricingStayHoldReserver,
+  type PricingStayRepricer,
+} from "./pricingStayDateChange.js";
 import type { BookedCancellationOutcome } from "@vayada/domain-booking";
 
 export type HostActionRequest = {
@@ -84,18 +94,48 @@ const object = (value: unknown): Record<string, unknown> =>
 const hash = (value: unknown) =>
   createHash("sha256").update(bookingOwner.stableJson(value)).digest("hex");
 
+/** A pricing-v2 date change the host can't make here is a refused action, not a server error. */
+async function refusedAsHostError<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (error instanceof PricingStayDateChangeRefused)
+      throw new HostActionError(error.code, error.message);
+    throw error;
+  }
+}
+
 export function createBookingHostActions(config: {
   pool: pg.Pool;
   inventory: DirectBookingInventoryReservationPort;
   guards: BookingHostActionGuards;
   now?: () => Date;
+  /** Prices a pricing-v2 date change; the current public publication by default. */
+  repriceStay?: PricingStayRepricer;
+  /** Holds a pricing-v2 date change's new nights; the pricing-v2 quote reservation by default. */
+  reserveStayHolds?: PricingStayHoldReserver;
 }): BookingHostActions {
   const now = config.now ?? (() => new Date());
+  const pricingMove = (
+    scope: HostActionScope,
+    reservation: InventoryReservationReceipt,
+    at: Date,
+  ) => ({
+    propertyId: scope.propertyId,
+    bookingId: scope.bookingId,
+    reservation,
+    occurredAt: at,
+    inventory: config.inventory,
+    guards: config.guards,
+    reserveHolds: config.reserveStayHolds,
+  });
   const inspect = async (
     client: pg.PoolClient,
     scope: HostActionScope,
     request: HostActionRequest,
     at: Date,
+    /** Apply moves the holds for real, so it skips the preview's trial move. */
+    applying = false,
   ) => {
     // NO KEY UPDATE: a v2 stay's PMS adoption (inventory lock, then a FOR KEY SHARE reference to
     // this row) can finish instead of deadlocking against a host action (VAY-2100).
@@ -140,8 +180,27 @@ export function createBookingHostActions(config: {
         "inventory_unavailable",
         "The booking inventory receipt is unavailable.",
       );
+    // Pricing-v2 stays reprice from the current publication with their booked terms (VAY-2110).
+    const pricingV2 = metadata["targetSource"] === "pricing_quote_draft";
+    const pricingChange =
+      request.action === "edit_dates" && pricingV2
+        ? await refusedAsHostError(async () => {
+            const change = await quotePricingStayDateChange(client, {
+              booking,
+              request,
+              today: bookingOwner.propertyDate(property.timezone, at),
+              reprice: config.repriceStay ?? repriceFromPublication,
+            });
+            if (!applying)
+              await checkPricingStayDateChangeHolds(client, change, {
+                ...pricingMove(scope, reservation, at),
+                previewId: randomUUID(),
+              });
+            return change;
+          })
+        : null;
     const dates =
-      request.action === "edit_dates"
+      request.action === "edit_dates" && !pricingV2
         ? await bookingOwner.previewDates(client, config.inventory, property, booking, request, at)
         : null;
     if (dates?.blocked)
@@ -160,23 +219,25 @@ export function createBookingHostActions(config: {
     const frozenPolicy = offer["roomSelection"]
       ? object(offer["publicPolicy"])
       : object(metadata["policySnapshot"]);
-    const cancellationPolicy = offer["roomSelection"]
-      ? hostSelectionPolicyImpact(
-          offer,
-          booking.checkIn,
-          dates?.requestedCheckIn ?? booking.checkIn,
-          property.timezone,
-        )
-      : hostPolicyImpact(
-          frozenPolicy,
-          {
-            ...object(offer["rateSummary"]),
-            rateType: offer["rateType"] ?? object(offer["rateSummary"])["rateType"],
-          },
-          booking.checkIn,
-          dates?.requestedCheckIn ?? booking.checkIn,
-          property.timezone,
-        );
+    const cancellationPolicy = pricingChange
+      ? pricingChange.cancellationPolicy
+      : offer["roomSelection"]
+        ? hostSelectionPolicyImpact(
+            offer,
+            booking.checkIn,
+            dates?.requestedCheckIn ?? booking.checkIn,
+            property.timezone,
+          )
+        : hostPolicyImpact(
+            frozenPolicy,
+            {
+              ...object(offer["rateSummary"]),
+              rateType: offer["rateType"] ?? object(offer["rateSummary"])["rateType"],
+            },
+            booking.checkIn,
+            dates?.requestedCheckIn ?? booking.checkIn,
+            property.timezone,
+          );
     if (dates && !cancellationPolicy)
       throw new HostActionError(
         "unsupported_edit",
@@ -204,31 +265,46 @@ export function createBookingHostActions(config: {
     const impact: HostActionImpact = {
       action: request.action,
       pricingFingerprint: hash(
-        dates
-          ? {
-              ...projectBookingRoomSelection(newOffer),
-              nightly: newOffer["nightlyRoomAmounts"],
-              promotion: newOffer["promotion"],
-              roomTotal: dates.pricingSnapshot?.["roomTotal"],
-              taxesAndFees: dates.pricingSnapshot?.["taxesAndFees"],
-              discounts: dates.pricingSnapshot?.["discounts"],
-              promotionDiscount: dates.pricingSnapshot?.["promotionDiscount"],
-            }
-          : null,
+        pricingChange
+          ? pricingChange.fingerprint
+          : dates
+            ? {
+                ...projectBookingRoomSelection(newOffer),
+                nightly: newOffer["nightlyRoomAmounts"],
+                promotion: newOffer["promotion"],
+                roomTotal: dates.pricingSnapshot?.["roomTotal"],
+                taxesAndFees: dates.pricingSnapshot?.["taxesAndFees"],
+                discounts: dates.pricingSnapshot?.["discounts"],
+                promotionDiscount: dates.pricingSnapshot?.["promotionDiscount"],
+              }
+            : null,
       ),
-      checkIn: dates?.requestedCheckIn ?? booking.checkIn,
-      checkOut: dates?.requestedCheckOut ?? booking.checkOut,
+      checkIn: pricingChange?.requestedCheckIn ?? dates?.requestedCheckIn ?? booking.checkIn,
+      checkOut: pricingChange?.requestedCheckOut ?? dates?.requestedCheckOut ?? booking.checkOut,
       totalAmount: Number(booking.totalAmount).toFixed(2),
-      newTotalAmount: dates ? dates.newTotal.toFixed(2) : Number(booking.totalAmount).toFixed(2),
+      newTotalAmount: (
+        pricingChange?.newTotal ??
+        dates?.newTotal ??
+        Number(booking.totalAmount)
+      ).toFixed(2),
       currency: booking.currency,
       cancellationPolicy,
       oldPolicy: frozenPolicy,
       newPolicy: offer["roomSelection"] ? object(newOffer["publicPolicy"]) : frozenPolicy,
-      inventory: dates ? "replace" : "release",
+      inventory: dates || pricingChange ? "replace" : "release",
       payment,
       ...(cancellationOutcome ? { cancellationOutcome } : {}),
     };
-    return { booking, property, reservation, dates, newOffer, impact, revision: hash(booking) };
+    return {
+      booking,
+      property,
+      reservation,
+      dates,
+      pricingChange,
+      newOffer,
+      impact,
+      revision: hash(booking),
+    };
   };
   return {
     async findAction(scope, previewId) {
@@ -298,7 +374,7 @@ export function createBookingHostActions(config: {
             "stale_preview",
             "Preview expired or unavailable. Preview this action again.",
           );
-        const state = await inspect(client, scope, preview.request, at);
+        const state = await inspect(client, scope, preview.request, at, true);
         if (state.revision !== preview.revision || hash(state.impact) !== hash(preview.impact))
           throw new HostActionError(
             "stale_preview",
@@ -319,14 +395,29 @@ export function createBookingHostActions(config: {
               occurredAt: at,
             })
           : null;
-        await config.inventory.release({
-          transaction: client,
-          propertyId: scope.propertyId,
-          reservation: state.reservation,
-          occurredAt: at,
-        });
+        // A pricing-v2 date change moves its own holds below (VAY-2110).
+        if (!state.pricingChange)
+          await config.inventory.release({
+            transaction: client,
+            propertyId: scope.propertyId,
+            reservation: state.reservation,
+            occurredAt: at,
+          });
         let updated = state.booking;
-        if (state.dates) {
+        if (state.pricingChange) {
+          const pricingChange = state.pricingChange;
+          const moved = await refusedAsHostError(() =>
+            applyPricingStayDateChange(client, pricingChange, {
+              ...pricingMove(scope, state.reservation, at),
+              previewId,
+              actorUserId: scope.actorUserId,
+              requestId: context.requestId,
+              correlationId: context.correlationId,
+              recognizedOn: bookingOwner.propertyDate(state.property.timezone, at),
+            }),
+          );
+          updated = { ...state.booking, lifecycleStatus: moved.lifecycleStatus };
+        } else if (state.dates) {
           const reservation = await bookingOwner.reserveDates(config.inventory, state.newOffer, {
             transaction: client,
             propertyId: scope.propertyId,
@@ -412,7 +503,7 @@ export function createBookingHostActions(config: {
             evidence: { sourceEventType: `guest_booking.${updated.lifecycleStatus}` },
           });
         }
-        if (!state.dates) {
+        if (!state.dates && !state.pricingChange) {
           await config.guards.cancelAssignments(client, {
             ...scope,
             previewId,
@@ -425,12 +516,14 @@ export function createBookingHostActions(config: {
             commandKey: `host-${updated.lifecycleStatus}:${context.fingerprint}`,
           });
         }
-        await captureDirectNightlyRevenueEvidence(client, updated, {
-          ...(state.dates ? { selectedOffer: state.newOffer } : { clear: true }),
-          fingerprint: context.fingerprint,
-          recognizedOn: bookingOwner.propertyDate(state.property.timezone, at),
-          required: true,
-        });
+        // The pricing-v2 date change recorded its nights from the repriced quote.
+        if (!state.pricingChange)
+          await captureDirectNightlyRevenueEvidence(client, updated, {
+            ...(state.dates ? { selectedOffer: state.newOffer } : { clear: true }),
+            fingerprint: context.fingerprint,
+            recognizedOn: bookingOwner.propertyDate(state.property.timezone, at),
+            required: true,
+          });
         // Nothing consumes pms.reservation.* handoffs for pricing-v2 stays; a cancel or reject
         // frees their inventory and assignments above (VAY-2100).
         if (object(state.booking.bookingMetadata)["targetSource"] !== "pricing_quote_draft")
@@ -452,10 +545,11 @@ export function createBookingHostActions(config: {
           source: "apps/api-booking-host-actions",
           guestMessage: preview.request.guestMessage,
           transition: {
-            revision: state.dates ? previewId : undefined,
-            eventType: state.dates
-              ? "guest_booking.host_dates_updated"
-              : `guest_booking.${updated.lifecycleStatus}`,
+            revision: state.dates || state.pricingChange ? previewId : undefined,
+            eventType:
+              state.dates || state.pricingChange
+                ? "guest_booking.host_dates_updated"
+                : `guest_booking.${updated.lifecycleStatus}`,
             fromStatus: state.booking.lifecycleStatus,
             toStatus: updated.lifecycleStatus,
             reason: state.impact.cancellationOutcome ? "guest_request" : "property_cancellation",

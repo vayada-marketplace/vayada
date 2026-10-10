@@ -47,7 +47,8 @@
     "checkOutWindow": "Check-out: {time}",
     "checkInFrom": "Check-in ab {time}",
     "checkOutBy": "Check-out bis {time}",
-    "pricingUpdating": "Die Preise für diese Daten werden noch aktualisiert. Bitte warten Sie einen Moment und versuchen Sie es erneut."
+    "pricingUpdating": "Die Preise für diese Daten werden noch aktualisiert. Bitte warten Sie einen Moment und versuchen Sie es erneut.",
+    "approximateAmounts": "Wir berechnen in {currency}. Mit ≈ markierte Beträge sind ungefähre Umrechnungen."
   },
   "nav": {
     "contact": "Kontakt",

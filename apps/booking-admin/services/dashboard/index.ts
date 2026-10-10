@@ -67,6 +67,13 @@ export interface PageViewsTimeline {
 
 export type TimeRange = "today" | "week" | "month";
 
+/** Ranges in display order with their label keys; the page tabs and the funnel menu share them. */
+export const TIME_RANGES: [TimeRange, string][] = [
+  ["today", "dashboard.timeRange.today"],
+  ["week", "dashboard.timeRange.week"],
+  ["month", "dashboard.timeRange.month"],
+];
+
 type Money = {
   amountDecimal: string;
   currency: string;

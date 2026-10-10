@@ -47,7 +47,8 @@
     "checkOutWindow": "Check-out: {time}",
     "checkInFrom": "Check-in mulai {time}",
     "checkOutBy": "Check-out sampai {time}",
-    "pricingUpdating": "Harga untuk tanggal ini masih diperbarui. Mohon tunggu sebentar dan coba lagi."
+    "pricingUpdating": "Harga untuk tanggal ini masih diperbarui. Mohon tunggu sebentar dan coba lagi.",
+    "approximateAmounts": "Kami menagih dalam {currency}. Jumlah bertanda ≈ adalah konversi perkiraan."
   },
   "nav": {
     "contact": "Kontak",

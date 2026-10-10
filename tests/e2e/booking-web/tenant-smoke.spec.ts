@@ -132,7 +132,7 @@ test.describe("booking-web tenant smoke", () => {
         showCurrencySelector: true,
       },
       supportedLocales: ["en"],
-      supportedCurrencies: ["EUR"],
+      displayCurrencies: ["EUR"],
     });
 
     await page.goto("/");

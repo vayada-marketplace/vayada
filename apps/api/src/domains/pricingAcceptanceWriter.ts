@@ -15,10 +15,16 @@ import {
   startPricingCardPayment,
 } from "./pricingCardPayment.js";
 import type { StripeBookingPaymentProvider } from "./stripeBookingPayments.js";
+import { authorizePricingCardRequest } from "./pricingCardPaymentCompletion.js";
 
 export class PricingAcceptanceError extends Error {
   constructor(
-    readonly code: "conflict" | "storage" | "unexpected" | "card_unavailable",
+    readonly code:
+      | "conflict"
+      | "storage"
+      | "unexpected"
+      | "card_unavailable"
+      | "request_unavailable",
     cause: unknown,
   ) {
     super("Pricing acceptance failed", { cause });
@@ -48,6 +54,8 @@ export async function writePricingAcceptance(
     | { affiliateContextId: string; syntheticAffiliateContextId?: never },
   /** Card quotes are accepted only with a payment provider (REPLACEMENT_PRICING_CARD_ACCEPTANCE_ENABLED). */
   cardPayments?: { provider: StripeBookingPaymentProvider },
+  /** Request-mode pay-at-property quotes (REPLACEMENT_PRICING_REQUEST_ACCEPTANCE_ENABLED). */
+  requests = false,
 ) {
   let client: pg.PoolClient | undefined;
   try {
@@ -59,6 +67,7 @@ export async function writePricingAcceptance(
     await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
     const prepared = await preparePricingAcceptance(client, input.slug, input.command, {
       card: cardPayments !== undefined,
+      request: requests,
     });
     if (prepared.kind === "replayed") {
       // A card acceptance that still awaits payment answers with the same payment; an
@@ -69,6 +78,15 @@ export async function writePricingAcceptance(
         input.slug,
         prepared,
       );
+      if (card?.kind === "authorize") {
+        await authorizePricingCardRequest(client, card.propertyId, {
+          paymentIntentId: card.paymentIntentId,
+          amountMinor: card.amountMinor,
+          currency: card.currency,
+        });
+        await client.query("COMMIT");
+        return prepared;
+      }
       await client.query("COMMIT");
       return card || prepared;
     }
@@ -119,6 +137,26 @@ export async function writePricingAcceptance(
         },
       };
     }
+    if (prepared.current.quote.acceptanceMode === "request") {
+      // Request: the rooms stay held with the booking `pending_payment` until the hotel
+      // answers. Revenue and the PMS job follow its acceptance; decline or expiry release.
+      const accepted = await storePricingAcceptance(client, input.slug, prepared, lifecycle, null);
+      await stagePricingAcceptanceNotifications(client, input.slug, accepted);
+      const checkedAt = await finishPricingAcceptance(
+        client,
+        input.slug,
+        prepared.current,
+        prepared.finance,
+      );
+      await client.query("COMMIT");
+      return {
+        kind: "requested" as const,
+        ...accepted,
+        bookingReference: publicReference,
+        hostResponseDeadlineAt: lifecycle.hostResponseDeadlineAt,
+        checkedAt,
+      };
+    }
     const revenue = await stagePricingBookingRevenue(
       client,
       input.slug,
@@ -146,6 +184,8 @@ export async function writePricingAcceptance(
     if (error instanceof PricingAcceptanceError) throw error;
     if (error instanceof Error && error.message === "Card acceptance unavailable")
       throw new PricingAcceptanceError("card_unavailable", error);
+    if (error instanceof Error && error.message === "Request acceptance unavailable")
+      throw new PricingAcceptanceError("request_unavailable", error);
     if (error instanceof Error && conflictMessages.has(error.message))
       throw new PricingAcceptanceError("conflict", error);
     if (

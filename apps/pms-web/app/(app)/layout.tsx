@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Header from "@/components/layout/Header";
 import Sidebar from "@/components/layout/Sidebar";
+import InboxHiddenNotice from "@/components/layout/InboxHiddenNotice";
 import { authService } from "@/services/auth";
 import { resolvePmsSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import { pmsSetupExitPropertyId } from "@vayada/product-onboarding";
@@ -123,6 +124,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
         <div className="flex-1 flex flex-col min-w-0">
           <Header onMenuToggle={() => setSidebarOpen(!sidebarOpen)} />
+          <InboxHiddenNotice permissions={access.permissions} />
           <main className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain bg-gray-50">
             {children}
           </main>
