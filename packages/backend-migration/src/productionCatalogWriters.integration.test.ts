@@ -6,6 +6,7 @@ import { writeProductionCatalogContent } from "./productionCatalogContentWriter.
 import { writeProductionCatalogCore } from "./productionCatalogCoreWriter.js";
 import { buildProductionCatalogPlan } from "./productionCatalogPlan.js";
 import { writeProductionCatalogPresentation } from "./productionCatalogPresentationWriter.js";
+import { writeCatalogPropertyAccess } from "./productionCatalogPropertyAccess.js";
 import { rebuildProductionCatalogPublicProjection } from "./productionCatalogPublicProjection.js";
 import type { ReconciledCatalogWrites } from "./productionCatalogReconciliation.js";
 import {
@@ -321,11 +322,58 @@ describe.skipIf(!URL)("production catalog writers (PostgreSQL)", () => {
         media: [],
       });
 
+      // VAY-1362: the cohort hotel gets the native links and entitlement, the outsider none.
+      expect(await writeCatalogPropertyAccess(client, plan.propertyAccess)).toEqual({
+        propertyLinks: 2,
+        propertyEntitlements: 1,
+      });
+      const native = await client.query(
+        `SELECT concat_ws(' ', organization_id, product, resource_type, resource_id,
+                          relationship, status) AS row
+           FROM identity.organization_resource_links
+          WHERE product IN ('hotel_catalog', 'pms') AND resource_id = ANY($1::text[])
+         UNION ALL
+         SELECT concat_ws(' ', organization_id, product, entitlement_key, status,
+                          resource_product, resource_type, resource_id, starts_at, expires_at,
+                          metadata)
+           FROM identity.product_entitlements
+          WHERE product = 'pms' AND resource_id = ANY($1::text[])`,
+        [[PROPERTY, OUTSIDE]],
+      );
+      expect(native.rows.map((row) => row.row).sort()).toEqual([
+        `${ORGANIZATION} hotel_catalog property ${PROPERTY} owner active`,
+        `${ORGANIZATION} pms pms_property ${PROPERTY} owner active`,
+        `${ORGANIZATION} pms property-management active pms pms_property ${PROPERTY} {"source": "legacy_migration_cohort"}`,
+      ]);
+      // The VAY-1543 pricing tenancy query (Channex pricing authority) and its entitlement rule.
+      const tenancy = await client.query(
+        `SELECT o.id::text, bool_or(e.status = 'active') AND NOT bool_or(e.status = 'suspended')
+                  AS entitled
+           FROM identity.organizations o
+           JOIN identity.organization_resource_links c ON c.organization_id = o.id
+            AND c.product = 'hotel_catalog' AND c.resource_type = 'property' AND c.resource_id = $1
+            AND c.status = 'active' AND c.relationship IN ('owner', 'operator')
+           JOIN identity.organization_resource_links p ON p.organization_id = o.id
+            AND p.product = 'pms' AND p.resource_type = 'pms_property' AND p.resource_id = $1
+            AND p.status = 'active' AND p.relationship IN ('owner', 'operator')
+           LEFT JOIN identity.product_entitlements e ON e.organization_id = o.id
+            AND e.product = 'pms'
+            AND e.entitlement_key IN ('property-management', 'pms-core', 'account_access')
+            AND (e.resource_product IS NULL OR (e.resource_product = 'pms'
+              AND e.resource_type = 'pms_property' AND e.resource_id = $1))
+            AND (e.starts_at IS NULL OR e.starts_at <= now())
+            AND (e.expires_at IS NULL OR e.expires_at > now())
+          WHERE o.kind = 'hotel_group' AND o.status = 'active' GROUP BY o.id`,
+        [PROPERTY],
+      );
+      expect(tenancy.rows).toEqual([{ id: ORGANIZATION, entitled: true }]);
+
       const replanned = buildProductionCatalogPlan(
         rows,
         await readProductionCatalogTargetState(client, plan.propertyIds, RUN),
         cohort,
       );
+      expect(replanned.propertyAccess).toEqual({ links: [], entitlements: [] });
       expect(replanned.blockers).toEqual([]);
       expect(replanned.checksum).toBe(plan.checksum);
       expect(replanned.counts.writes).toBe(0);

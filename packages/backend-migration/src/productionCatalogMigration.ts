@@ -12,6 +12,7 @@ import {
   type ProductionCatalogPlan,
 } from "./productionCatalogPlan.js";
 import { writeProductionCatalogPresentation } from "./productionCatalogPresentationWriter.js";
+import { writeCatalogPropertyAccess } from "./productionCatalogPropertyAccess.js";
 import { rebuildProductionCatalogPublicProjection } from "./productionCatalogPublicProjection.js";
 import { readProductionCatalogSnapshot } from "./productionCatalogSnapshotReader.js";
 import { readProductionCatalogTargetState } from "./productionCatalogTargetReader.js";
@@ -42,6 +43,7 @@ export type ProductionCatalogMigrationServices = {
   writeCore: typeof writeProductionCatalogCore;
   writeContent: typeof writeProductionCatalogContent;
   writePresentation: typeof writeProductionCatalogPresentation;
+  writePropertyAccess: typeof writeCatalogPropertyAccess;
   rebuildPublicProjection: typeof rebuildProductionCatalogPublicProjection;
 };
 
@@ -52,6 +54,7 @@ const productionServices: ProductionCatalogMigrationServices = {
   writeCore: writeProductionCatalogCore,
   writeContent: writeProductionCatalogContent,
   writePresentation: writeProductionCatalogPresentation,
+  writePropertyAccess: writeCatalogPropertyAccess,
   rebuildPublicProjection: rebuildProductionCatalogPublicProjection,
 };
 
@@ -212,6 +215,12 @@ export async function runProductionCatalogTransaction(
     const content = await services.writeContent(client, plan.writes);
     const presentation = await services.writePresentation(client, plan.writes);
     assertWriteCounts(plan, { ...core, ...content, ...presentation });
+    const access = await services.writePropertyAccess(client, plan.propertyAccess);
+    if (
+      access.propertyLinks !== plan.propertyAccess.links.length ||
+      access.propertyEntitlements !== plan.propertyAccess.entitlements.length
+    )
+      throw new Error("Catalog property access writer did not apply every planned row");
     const verifiedTarget = await services.readTarget(client, plan.propertyIds, input.sourceRunId);
     assertSourceLinks(plan, verifiedTarget.sourceLinks);
     const verified = services.buildPlan(rows, verifiedTarget, cohort);

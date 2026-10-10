@@ -55,11 +55,26 @@ describe("production catalog migration transaction", () => {
       "core:complete",
       "content",
       "presentation",
+      "access",
       "target",
       "plan",
       "projection",
       "COMMIT",
     ]);
+  });
+
+  it("rolls back when the property access writer misses a planned row", async () => {
+    const log: string[] = [];
+    const expected = plan();
+    expected.propertyAccess.entitlements.push({} as never);
+    await expect(
+      runProductionCatalogTransaction(
+        new TransactionClient(log) as never,
+        { sourceRunId: RUN, mode: "apply" },
+        services(log, expected),
+      ),
+    ).rejects.toThrow("property access writer");
+    expect(log.at(-1)).toBe("ROLLBACK");
   });
 
   it("plans and verifies with the cohort loaded by the snapshot read", async () => {
@@ -242,6 +257,10 @@ function services(
       log.push("presentation");
       return { domains: 0, media: 0 };
     },
+    writePropertyAccess: async () => {
+      log.push("access");
+      return { propertyLinks: 0, propertyEntitlements: 0 };
+    },
     rebuildPublicProjection: async () => {
       log.push("projection");
       return 0;
@@ -264,6 +283,7 @@ function plan(): ProductionCatalogPlan {
       policies: [],
       media: [],
     },
+    propertyAccess: { links: [], entitlements: [] },
     preservedTarget: [],
     blockers: [],
     counts: {

@@ -82,6 +82,11 @@ platform.production_migration_cohorts(
   archived organization, archived links, no membership. Archived links already
   make Booking, Finance, PMS, Marketplace and Media resolve to their inactive
   states.
+- **Cohort access.** Catalog completion gives each cohort property the native
+  access hotel setup creates: active `(hotel_catalog, property)` and
+  `(pms, pms_property)` links in the one active hotel organization owning its
+  legacy links, and an active PMS `property-management` entitlement scoped to
+  that property. Runtime tenancy (VAY-1543) and Channex adoption require them.
 - **Hardening.** The existing quarantine path does not cover these yet:
   - The custom domains of private groups are not verified.
   - The core writer archives the `booking_hotel` link and the `booking-engine`

@@ -6,6 +6,10 @@ import type {
   ExistingCatalogMediaObject,
 } from "./productionCatalogPresentationPlan.js";
 import type { CatalogOwnerLink, ExistingCatalogSourceLink } from "./productionCatalogOwnership.js";
+import {
+  readCatalogPropertyAccessTarget,
+  type CatalogPropertyAccessTarget,
+} from "./productionCatalogPropertyAccess.js";
 
 type QueryClient = Pick<pg.ClientBase, "query">;
 export type CatalogTargetRow = Record<string, unknown> & { updatedAt: string };
@@ -29,6 +33,7 @@ export type ProductionCatalogTargetState = {
   mediaObjects: ExistingCatalogMediaObject[];
   mediaQuarantines?: ExistingCatalogMediaQuarantine[];
   ownerRevisions: CatalogOwnerRevision[];
+  propertyAccess?: CatalogPropertyAccessTarget;
 };
 
 export async function readProductionCatalogSourceLinks(
@@ -187,5 +192,6 @@ export async function readProductionCatalogTargetState(
     mediaObjects: mediaObjects.rows,
     mediaQuarantines: mediaQuarantines.rows,
     ownerRevisions: ownerRevisions.rows,
+    propertyAccess: await readCatalogPropertyAccessTarget(client, ids),
   };
 }
