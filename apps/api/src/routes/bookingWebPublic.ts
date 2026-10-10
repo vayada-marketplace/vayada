@@ -25,8 +25,8 @@ import { pmsRoomStayRestrictionReason } from "../domains/pmsRoomSelectionConflic
 import {
   bestBookingPromotion,
   evaluateSameDayBooking,
+  FUNNEL_EVENT_TYPES,
   FUNNEL_PAYMENT_METHODS,
-  FUNNEL_STAGES,
   parseBookingFlexibleCancellationTerms,
   parseBookingRoomSelection,
   SAME_DAY_BOOKING_POLICY_DEFAULTS,
@@ -1117,7 +1117,7 @@ export async function registerBookingWebPublicRoutes(
       const sequence = metadata["funnelSequence"];
       const method = metadata["paymentMethod"];
       if (
-        !(FUNNEL_STAGES as readonly string[]).includes(eventType) ||
+        !(FUNNEL_EVENT_TYPES as readonly string[]).includes(eventType) ||
         !firstString(request.body?.sessionId, request.body?.session_id) ||
         !Number.isSafeInteger(sequence) ||
         Number(sequence) < 1 ||
@@ -1683,8 +1683,8 @@ export function createTargetBookingWebCheckoutAdapter(
             result,
             Boolean(
               config.airbnbAlterations &&
-                (!config.airbnbAlterations.propertyIds ||
-                  config.airbnbAlterations.propertyIds.includes(propertyId)),
+              (!config.airbnbAlterations.propertyIds ||
+                config.airbnbAlterations.propertyIds.includes(propertyId)),
             ),
           )
         : null;

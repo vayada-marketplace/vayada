@@ -4,6 +4,9 @@ on:
   pull_request:
     branches:
       - main
+      # VAY-2074 stack bases (top of the list to avoid append conflicts).
+      - "fm/vay-2074-*"
+      - "fm/vay-2075-*"
       - "fm/vay-1092-*"
       - "fix/vay-965-*"
       - "fm/vay-965-*"
