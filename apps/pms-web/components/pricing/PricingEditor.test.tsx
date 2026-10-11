@@ -1082,6 +1082,7 @@ it("protects the season window independently and requires review after adding a 
   await openSeason();
   for (const [name, value] of [
     ["Season name", "Summer"],
+    ["Tier label (optional)", "High"],
     ["Starts: day", "15"],
     ["Starts: month", "6"],
     ["Ends: day", "10"],
@@ -1097,7 +1098,7 @@ it("protects the season window independently and requires review after adding a 
       seasons: [
         {
           name: "Summer",
-          tier: "",
+          tier: "High",
           from: "06-15",
           through: "09-10",
           price: { amountMinor: "18025" },

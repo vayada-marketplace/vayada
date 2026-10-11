@@ -55,7 +55,8 @@ export function SeasonWindow({
   const season = index === null ? null : (calendar?.seasons[index] ?? null);
   const template = season?.price ?? recurringTemplate(offer);
   const scale = pricingCurrencyScale(room.currency)!;
-  const [name, setName] = useState(season?.name ?? "");
+  const [name, setName] = useState(season?.name ?? ""),
+    [tier, setTier] = useState(season?.tier ?? "");
   const [from, setFrom] = useState(split(season?.from)),
     [through, setThrough] = useState(split(season?.through));
   const [values, setValues] = useState<string[]>(
@@ -86,7 +87,7 @@ export function SeasonWindow({
       const start = monthDay(from),
         end = monthDay(through);
       if (!start || !end) throw new PricingError("pricing.steps.seasons.errorDays");
-      const next = { name: name.trim(), tier: season?.tier ?? "", from: start, through: end };
+      const next = { name: name.trim(), tier: tier.trim(), from: start, through: end };
       if (calendar!.seasons.some((other, i) => i !== index && seasonsOverlap(next, other)))
         throw new PricingError("pricing.steps.seasons.errorOverlap");
       const amounts = Array.from({ length: fields.length }, (_, i) => values[i] ?? "");
@@ -183,6 +184,20 @@ export function SeasonWindow({
             value={name}
             onChange={(event) => {
               setName(event.target.value);
+              setError("");
+            }}
+            className={`mt-1.5 ${ui.input}`}
+          />
+        </label>
+        {/* The engine's optional season category ("High", "Peak"); kept as it is unless changed here. */}
+        <label className={ui.fieldLabel}>
+          {t("pricing.seasons.tier")}
+          <input
+            aria-label={t("pricing.seasons.tier")}
+            disabled={disabled}
+            value={tier}
+            onChange={(event) => {
+              setTier(event.target.value);
               setError("");
             }}
             className={`mt-1.5 ${ui.input}`}
