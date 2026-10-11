@@ -4270,6 +4270,7 @@ it("adds a quick-add option with its terms and deletes an option after folding t
   expect(offers.map((offer) => offer.id)).toEqual(["flex", client.termsAction.mock.calls[0][0].offerId]);
   expect(offers[0].price).toMatchObject({ calendar: { base: { amountMinor: "12300" } } });
   expect(offers[1]).toMatchObject({ termsRevision: revision, price: { kind: "linked", parentId: "flex", adjustment: { kind: "percentage", basisPoints: -1000 } }, restrictions: { kind: "inherit" } });
+});
 it("retries option names whose terms failed and keeps a window open on a price it can't read (VAY-2125)", async () => {
   const [flex] = snapshot.rooms[0].offers;
   if (flex.price.kind !== "independent") throw new Error("fixture");

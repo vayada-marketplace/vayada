@@ -131,11 +131,11 @@ export function optionSummary(
     if (offer.price.kind === "independent") {
       const { seasons, months, weekdays, dates } = offer.price.calendar;
       count("pricing.steps.summary.seasons", seasons.length);
-      count("pricing.steps.more.months", months.length);
+      count("pricing.steps.summary.months", months.length);
       count("pricing.steps.summary.weekdays", weekdays.length);
-      count("pricing.steps.more.dates", dates.length);
+      count("pricing.steps.summary.dates", dates.length);
     } else {
-      count("pricing.steps.more.dates", offer.price.dateOverrides.length);
+      count("pricing.steps.summary.dates", offer.price.dateOverrides.length);
       if (offer.restrictions.kind === "own") parts.push(t("pricing.steps.summary.ownRules"));
     }
   }
