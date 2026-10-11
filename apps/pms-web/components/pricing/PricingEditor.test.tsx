@@ -4377,3 +4377,21 @@ it("shows what guests pay for the picked stay and the month's nightly prices, fr
   await act(async () => input().props.onChange({ target: { value: "abc" } }));
   expect(text()).toContain("Finish the open price entry to see guest prices.");
 });
+it("says in the guest card whether free cancellation is still open for the sample stay (VAY-2125)", async () => {
+  const [flex] = snapshot.rooms[0].offers;
+  client.read.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...snapshot.rooms[0], offers: [{ ...flex, meal: { kind: "room_only", charge: { kind: "room", amountMinor: "0" } } }] }], revision: 1, sources, stale: false });
+  client.readTerms.mockImplementation(async (roomTypeId, offerId, revision) => ({
+    roomTypeId,
+    offerId,
+    revision,
+    cancellation: { kind: "flexible", terms: { type: "free_until_days_before_arrival", freeCancellationDeadlineDays: 7, afterDeadlinePenalty: "full_booking_amount", noShowPenalty: "full_booking_amount" } },
+    payment: { kind: "full", acceptedMethods: ["card"] },
+  }));
+  await mount();
+  await act(async () => {});
+  const text = () => JSON.stringify(view.toJSON());
+  await act(async () => view.root.findByType(PriceCalendar).props.onPick("2099-07-18"));
+  expect(text()).toContain("Free cancellation until 11 Jul");
+  await act(async () => view.root.findByType(PriceCalendar).props.onPick("2020-07-18"));
+  expect(text()).toContain("No free cancellation for these dates");
+});

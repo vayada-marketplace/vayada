@@ -367,7 +367,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
         </div>
         <aside className="min-w-0 space-y-4">
           <GuestPreview room={edited} facts={{ name: roomName(room.roomTypeId, ri), ...(roomFacts[room.roomTypeId] ?? { size: null, photo: null }) }} names={names} terms={optionTerms}
-            stay={stay} selected={previewId} onSelect={setPreviewOffer} />
+            stay={stay} today={today} selected={previewId} onSelect={setPreviewOffer} />
           <PriceCalendar room={edited} offerId={previewId} optionName={names[previewId] ?? ""} month={shownMonth ?? stay.checkIn.slice(0, 7)} stay={stay}
             onMonth={setShownMonth} onPick={(date) => { setStayStart(date); setShownMonth(date.slice(0, 7)); }} />
         </aside>

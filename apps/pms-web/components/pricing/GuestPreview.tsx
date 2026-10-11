@@ -3,7 +3,7 @@
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
 import type { Translate } from "./pricingAmounts";
-import { mainOffer, money, stayTotals, type OptionTerms } from "./stepPricing";
+import { addDays, mainOffer, money, stayTotals, type OptionTerms } from "./stepPricing";
 
 /** Facts the guest card shows beside the prices. */
 export type RoomFacts = { name: string; size: number | null; photo: string | null };
@@ -19,6 +19,7 @@ export function GuestPreview({
   names,
   terms,
   stay,
+  today,
   selected,
   onSelect,
 }: {
@@ -27,6 +28,8 @@ export function GuestPreview({
   names: Readonly<Record<string, string>>;
   terms: Readonly<Record<string, OptionTerms | undefined>>;
   stay: { checkIn: string; checkOut: string };
+  /** The viewer's date (YYYY-MM-DD), for whether free cancellation is still open for the sample stay. */
+  today: string;
   selected: string;
   onSelect: (offerId: string) => void;
 }) {
@@ -54,15 +57,17 @@ export function GuestPreview({
         }),
         green: false,
       };
-    const cancellation = terms[offer.id]?.cancellation.kind;
+    // Free cancellation ends `freeCancellationDeadlineDays` before arrival; a sample stay inside that window has none.
+    const cancellation = terms[offer.id]?.cancellation;
+    if (!cancellation) return { text: "", green: false };
+    if (cancellation.kind === "non_refundable")
+      return { text: t("pricing.steps.summary.noRefund"), green: false };
+    const deadline = addDays(stay.checkIn, -cancellation.terms.freeCancellationDeadlineDays);
     return {
-      text: cancellation
-        ? t(
-            cancellation === "non_refundable"
-              ? "pricing.steps.summary.noRefund"
-              : "pricing.steps.guests.free",
-          )
-        : "",
+      text:
+        deadline < today
+          ? t("pricing.steps.guests.freeGone")
+          : t("pricing.steps.guests.freeUntil", { day: day(deadline, t) }),
       green: false,
     };
   };
