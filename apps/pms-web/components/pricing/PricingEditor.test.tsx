@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
 import { PricingEditor } from "./PricingEditor";
 import { PricingStayPreview } from "./PricingStayPreview";
+import { OptionWindow } from "./OptionWindow";
 import { changeIncludedAdjustments } from "./PricingIncludedAdjustments";
 import { changeDatePrice } from "./PricingDates";
 import { NewLinkedOffer, linkedOfferInput } from "./NewLinkedOffer";
@@ -1090,6 +1091,7 @@ it("protects the season window independently and requires review after adding a 
   await openSeason();
   for (const [name, value] of [
     ["Season name", "Summer"],
+    ["Tier label (optional)", "High"],
     ["Starts: day", "15"],
     ["Starts: month", "6"],
     ["Ends: day", "10"],
@@ -1105,7 +1107,7 @@ it("protects the season window independently and requires review after adding a 
       seasons: [
         {
           name: "Summer",
-          tier: "",
+          tier: "High",
           from: "06-15",
           through: "09-10",
           price: { amountMinor: "18025" },
@@ -4267,4 +4269,24 @@ it("adds a quick-add option with its terms and deletes an option after folding t
   expect(offers.map((offer) => offer.id)).toEqual(["flex", client.termsAction.mock.calls[0][0].offerId]);
   expect(offers[0].price).toMatchObject({ calendar: { base: { amountMinor: "12300" } } });
   expect(offers[1]).toMatchObject({ termsRevision: revision, price: { kind: "linked", parentId: "flex", adjustment: { kind: "percentage", basisPoints: -1000 } }, restrictions: { kind: "inherit" } });
+it("retries option names whose terms failed and keeps a window open on a price it can't read (VAY-2125)", async () => {
+  const [flex] = snapshot.rooms[0].offers;
+  if (flex.price.kind !== "independent") throw new Error("fixture");
+  const second = { ...flex, id: "second", price: { ...flex.price, calendar: { ...flex.price.calendar, base: { mode: "flat" as const, amountMinor: "20000" } } } };
+  client.read.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...snapshot.rooms[0], offers: [flex, second] }], revision: 1, sources, stale: false });
+  client.readTerms.mockRejectedValueOnce(new Error("offline"));
+  await mount();
+  await act(async () => {});
+  const text = () => JSON.stringify(view.toJSON());
+  expect(text()).toContain("Some options' cancellation terms couldn't be loaded");
+  expect(text()).toContain("Option 1 · breakfast");
+  await click("Try again");
+  await act(async () => {});
+  expect(text()).not.toContain("couldn't be loaded");
+  expect(text()).toContain("Non-refundable + breakfast 2");
+  await act(async () => view.root.findByProps({ "aria-label": "Room 1 Offer 2 Per room" }).props.onChange({ target: { value: "12,5" } }));
+  const done = view.root.findAllByType(OptionWindow)[1].findAllByType("button").find((node) => node.children.includes("Done"))!;
+  expect(done.props.disabled).toBe(true);
+  await act(async () => view.root.findByProps({ "aria-label": "Room 1 Offer 2 Per room" }).props.onChange({ target: { value: "125" } }));
+  expect(view.root.findAllByType(OptionWindow)[1].findAllByType("button").find((node) => node.children.includes("Done"))!.props.disabled).toBe(false);
 });

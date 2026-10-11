@@ -2360,6 +2360,8 @@
   "pricing.steps.options.priceNote.other": "pro normaler Nacht für {count} Erwachsene, inklusive Verpflegung",
   "pricing.steps.options.add": "Hinzufügen:",
   "pricing.steps.options.own": "Eigene Option",
+  "pricing.steps.options.termsFailed": "Die Stornobedingungen einiger Optionen konnten nicht geladen werden, daher zeigen sie einen einfachen Namen.",
+  "pricing.steps.options.retry": "Erneut versuchen",
   "pricing.steps.option.close": "Schließen",
   "pricing.steps.option.done": "Fertig",
   "pricing.steps.option.applyFirst": "Übernehmen oder verwerfen Sie zuerst die offene Änderung.",

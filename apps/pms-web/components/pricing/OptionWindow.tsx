@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { XMarkIcon } from "@heroicons/react/24/outline";
 import { useTranslation } from "@/lib/i18n";
 import * as ui from "./pricingStyles";
 
+const focusable =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
 /** A booking option's "Edit" window. It stays mounted while closed (hidden), so its editors keep an unapplied entry
- * and the Save guard that entry holds. While such an entry is open (`closable` false) it cannot be closed. */
+ * and the Save guard that entry holds. While such an entry is open (`closable` false) it cannot be closed. Like the
+ * app's Modal it keeps Tab inside while open, and gives focus back to what opened it on close. */
 export function OptionWindow({
   open,
   title,
@@ -23,10 +26,37 @@ export function OptionWindow({
   children: ReactNode;
 }) {
   const { t } = useTranslation();
-  const panel = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null),
+    opener = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    if (open) panel.current?.focus();
+    if (open) {
+      opener.current = (document.activeElement as HTMLElement | null) ?? null;
+      panel.current?.focus();
+    } else if (opener.current) {
+      opener.current.focus();
+      opener.current = null;
+    }
   }, [open]);
+  const trap = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") return close();
+    if (event.key !== "Tab" || !panel.current) return;
+    const nodes = Array.from(panel.current.querySelectorAll<HTMLElement>(focusable)).filter(
+      (node) => node.offsetParent !== null,
+    );
+    if (!nodes.length) return event.preventDefault();
+    const first = nodes[0]!,
+      last = nodes.at(-1)!;
+    if (
+      event.shiftKey &&
+      (document.activeElement === first || document.activeElement === panel.current)
+    ) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
   const close = () => {
     if (closable) onClose();
   };
@@ -41,9 +71,7 @@ export function OptionWindow({
           aria-modal="true"
           aria-label={title}
           tabIndex={-1}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") close();
-          }}
+          onKeyDown={trap}
           className="relative flex h-[100dvh] w-full flex-col bg-white shadow-xl sm:mx-4 sm:h-auto sm:max-h-[90dvh] sm:max-w-2xl sm:rounded-xl"
         >
           <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-6 py-4">
