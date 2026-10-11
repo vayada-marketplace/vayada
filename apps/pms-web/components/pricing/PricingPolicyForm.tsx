@@ -4,6 +4,7 @@ import { useState } from "react";
 import { parseBookingPricingOfferTerms, type ReplacementOfferTerms } from "@vayada/domain-booking/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
 import { AcceptedPaymentMethods, type PaymentMethod } from "./AcceptedPaymentMethods";
+import * as ui from "./pricingStyles";
 import { decimalAmount, errorText, parseMinorInput, PricingError } from "./pricingAmounts";
 
 export function PricingPolicyForm({ terms, disabled, onApply, onCancel }: { terms: ReplacementOfferTerms; disabled: boolean;
@@ -35,35 +36,35 @@ export function PricingPolicyForm({ terms, disabled, onApply, onCancel }: { term
       onApply(parsed);
     } catch (e) { setError(errorText(e, t, "pricing.policy.errorCheck")); }
   }
-  const field = (key: keyof typeof values, label: string) => <label className="block text-sm">{label}<input aria-label={label} value={values[key]} inputMode="decimal"
-    className="mt-1 block w-full rounded border px-3 py-2" onChange={(e) => setValues({ ...values, [key]: e.target.value })} /></label>;
-  return <fieldset disabled={disabled} className="mt-3 space-y-3 rounded-lg border bg-gray-50 p-4">
-    <legend className="font-medium">{t("pricing.policy.title")}</legend>
-    <label className="block text-sm">{t("pricing.cancellationPolicy")}<select aria-label={t("pricing.cancellationPolicy")} className="mt-1 block w-full rounded border p-2" value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
+  const field = (key: keyof typeof values, label: string) => <label className={ui.fieldLabel}>{label}<input aria-label={label} value={values[key]} inputMode="decimal"
+    className={`mt-1.5 block w-full ${ui.field}`} onChange={(e) => setValues({ ...values, [key]: e.target.value })} /></label>;
+  return <fieldset disabled={disabled} className={`space-y-3 ${ui.draftCard}`}>
+    <legend className={ui.fieldLabel}>{t("pricing.policy.title")}</legend>
+    <label className={ui.fieldLabel}>{t("pricing.cancellationPolicy")}<select aria-label={t("pricing.cancellationPolicy")} className={`mt-1.5 block w-full ${ui.field}`} value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
       <option value="non_refundable">{t("pricing.nonRefundable")}</option><option value="flexible">{t("pricing.policy.flexible")}</option></select></label>
     {kind === "flexible" && <>
       {field("deadline", t("pricing.policy.deadline"))}
-      <label className="block text-sm">{t("pricing.policy.flexibleType")}<select aria-label={t("pricing.policy.flexibleType")} className="mt-1 block w-full rounded border p-2" value={values.type} onChange={(e) => setValues({ ...values, type: e.target.value as typeof values.type })}>
+      <label className={ui.fieldLabel}>{t("pricing.policy.flexibleType")}<select aria-label={t("pricing.policy.flexibleType")} className={`mt-1.5 block w-full ${ui.field}`} value={values.type} onChange={(e) => setValues({ ...values, type: e.target.value as typeof values.type })}>
         <option value="">{t("pricing.policy.typeUnspecified")}</option><option value="free">{t("pricing.policy.typeFree")}</option><option value="partial_refund">{t("pricing.policy.typePartialRefund")}</option></select></label>
-      <p className="text-sm">{t("pricing.policy.penalty")}</p>
+      <p className={ui.text}>{t("pricing.policy.penalty")}</p>
       {field("window", t("pricing.policy.window"))}{field("percent", t("pricing.policy.percent"))}
-      <p className="text-sm">{t("pricing.policy.tiersHint")}</p>
+      <p className={ui.text}>{t("pricing.policy.tiersHint")}</p>
       {tiers.map((tier, i) => <div key={i} className="flex flex-wrap items-end gap-2">
-        {(["days", "percent"] as const).map((key) => <label key={key} className="text-sm">{t(key === "days" ? "pricing.policy.tierDays" : "pricing.policy.tierPercent")}<input aria-label={t(key === "days" ? "pricing.policy.tierDaysLabel" : "pricing.policy.tierPercentLabel", { number: i + 1 })} inputMode="numeric" value={tier[key]} className="mt-1 block w-32 rounded border p-2" onChange={(e) => setTiers(tiers.map((t, j) => j === i ? { ...t, [key]: e.target.value } : t))} /></label>)}
-        <button type="button" className="rounded border px-3 py-2" onClick={() => setTiers(tiers.filter((_, j) => j !== i))}>{t("pricing.policy.removeTier", { number: i + 1 })}</button>
+        {(["days", "percent"] as const).map((key) => <label key={key} className={ui.fieldLabel}>{t(key === "days" ? "pricing.policy.tierDays" : "pricing.policy.tierPercent")}<input aria-label={t(key === "days" ? "pricing.policy.tierDaysLabel" : "pricing.policy.tierPercentLabel", { number: i + 1 })} inputMode="numeric" value={tier[key]} className={`mt-1.5 block w-32 ${ui.field}`} onChange={(e) => setTiers(tiers.map((t, j) => j === i ? { ...t, [key]: e.target.value } : t))} /></label>)}
+        <button type="button" className={ui.secondaryButton} onClick={() => setTiers(tiers.filter((_, j) => j !== i))}>{t("pricing.policy.removeTier", { number: i + 1 })}</button>
       </div>)}
-      <button type="button" disabled={disabled || tiers.length >= 10} className="rounded border px-3 py-2 disabled:opacity-50" onClick={() => setTiers([...tiers, { days: "", percent: "" }])}>{t("pricing.policy.addTier")}</button>
-      <label className="block text-sm">{t("pricing.policy.text")}<textarea aria-label={t("pricing.policy.text")} className="mt-1 block w-full rounded border p-2" rows={3} value={values.text} onChange={(e) => setValues({ ...values, text: e.target.value })} /></label>
-      <p className="text-xs text-gray-600">{t("pricing.policy.switchHint")}</p>
+      <button type="button" disabled={disabled || tiers.length >= 10} className={ui.secondaryButton} onClick={() => setTiers([...tiers, { days: "", percent: "" }])}>{t("pricing.policy.addTier")}</button>
+      <label className={ui.fieldLabel}>{t("pricing.policy.text")}<textarea aria-label={t("pricing.policy.text")} className={`mt-1.5 block w-full ${ui.field}`} rows={3} value={values.text} onChange={(e) => setValues({ ...values, text: e.target.value })} /></label>
+      <p className={ui.hint}>{t("pricing.policy.switchHint")}</p>
     </>}
-    <label className="block text-sm">{t("pricing.policy.schedule")}<select aria-label={t("pricing.policy.schedule")} className="mt-1 block w-full rounded border p-2" value={payment} onChange={(e) => setPayment(e.target.value as typeof payment)}>
+    <label className={ui.fieldLabel}>{t("pricing.policy.schedule")}<select aria-label={t("pricing.policy.schedule")} className={`mt-1.5 block w-full ${ui.field}`} value={payment} onChange={(e) => setPayment(e.target.value as typeof payment)}>
       <option value="full">{t("pricing.fullPayment")}</option><option value="deposit">{t("pricing.policy.depositAndBalance")}</option></select></label>
     {payment === "deposit" && <>{field("deposit", t("pricing.policy.deposit"))}{field("balance", t("pricing.policy.balance"))}
-      <p className="text-sm text-amber-900">{t("pricing.policy.depositUnavailable")}</p></>}
+      <p className="text-[11px] text-amber-700">{t("pricing.policy.depositUnavailable")}</p></>}
     <AcceptedPaymentMethods methods={methods} disabled={disabled} onChange={setMethods} />
-    {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-    <p className="text-sm">{t("pricing.policy.applyHint")}</p>
-    <div className="flex gap-2"><button type="button" className="rounded bg-emerald-700 px-3 py-2 text-white" onClick={apply}>{t("pricing.policy.apply")}</button>
-      <button type="button" className="rounded border px-3 py-2" onClick={onCancel}>{t("pricing.policy.cancel")}</button></div>
+    {error && <p role="alert" className={ui.errorText}>{error}</p>}
+    <p className={ui.text}>{t("pricing.policy.applyHint")}</p>
+    <div className="flex gap-2"><button type="button" className={ui.primaryButton} onClick={apply}>{t("pricing.policy.apply")}</button>
+      <button type="button" className={ui.secondaryButton} onClick={onCancel}>{t("pricing.policy.cancel")}</button></div>
   </fieldset>;
 }

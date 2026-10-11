@@ -8,6 +8,8 @@ import {
 } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
 import { decimalAmount, errorText, parseMinorInput, PricingError } from "./pricingAmounts";
+import { PricingSection } from "./PricingSection";
+import * as ui from "./pricingStyles";
 
 type Offer = PricingConfiguration["offers"][number];
 type Entry = { kind: string; basis: string; amounts: string[] };
@@ -97,13 +99,18 @@ export function PricingMealPlan({
           ),
         ]
       : [t("pricing.perRoom")];
+  const meal = t(`pricing.meal.${offer.meal.kind}`);
   return (
-    <div className="sm:col-span-2 rounded-lg border p-3 text-sm">
-      <p>{t("pricing.mealPlan.current", { label, meal: t(`pricing.meal.${offer.meal.kind}`) })}</p>
+    <PricingSection
+      title={t("pricing.mealPlan.label")}
+      label={t("pricing.mealPlan.current", { label, meal })}
+      value={meal}
+      keepOpen={!!entry}
+    >
       {!entry ? (
         <button
           type="button"
-          className="mt-3 rounded border px-3 py-2 disabled:opacity-50"
+          className={ui.secondaryButton}
           disabled={disabled || blocked}
           onClick={() => {
             if (disabled || blocked) return;
@@ -132,11 +139,11 @@ export function PricingMealPlan({
         <>
           <p className="mt-2">{t("pricing.mealPlan.description")}</p>
           <div className="mt-3 flex flex-wrap gap-3">
-            <label>
+            <label className={ui.fieldLabel}>
               {t("pricing.mealPlan.label")}
               <select
                 aria-label={t("pricing.mealPlan.selectLabel", { label })}
-                className="mt-1 block rounded border px-3 py-2"
+                className={`mt-1.5 block ${ui.field}`}
                 disabled={disabled}
                 value={entry.kind}
                 onChange={(event) => choose(event.target.value, entry.basis)}
@@ -149,11 +156,11 @@ export function PricingMealPlan({
               </select>
             </label>
             {entry.kind !== "room_only" && (
-              <label>
+              <label className={ui.fieldLabel}>
                 {t("pricing.mealPlan.chargePer")}
                 <select
                   aria-label={t("pricing.mealPlan.basisLabel", { label })}
-                  className="mt-1 block rounded border px-3 py-2"
+                  className={`mt-1.5 block ${ui.field}`}
                   disabled={disabled}
                   value={entry.basis}
                   onChange={(event) => choose(entry.kind, event.target.value)}
@@ -171,14 +178,14 @@ export function PricingMealPlan({
           )}
           <div className="mt-3 flex flex-wrap gap-3">
             {entry.amounts.map((amount, index) => (
-              <label key={index}>
+              <label key={index} className={ui.fieldLabel}>
                 {t("pricing.mealPlan.amountLabel", {
                   charge: labels[index],
                   currency: room.currency,
                 })}
                 <input
                   aria-label={t("pricing.mealPlan.inputLabel", { charge: labels[index], label })}
-                  className="mt-1 block w-36 rounded border px-3 py-2"
+                  className={`mt-1.5 block w-36 ${ui.field}`}
                   inputMode="decimal"
                   disabled={disabled}
                   value={amount}
@@ -195,19 +202,20 @@ export function PricingMealPlan({
             ))}
           </div>
           <p className="mt-2">{t("pricing.mealPlan.clearsAmounts")}</p>
-          <label className="mt-3 flex gap-2">
+          <label className="flex items-center gap-2">
             <input
               type="checkbox"
+              aria-label={t("pricing.mealPlan.acknowledge", { label })}
               disabled={disabled}
               checked={ack}
               onChange={(event) => setAck(event.target.checked)}
             />
-            {t("pricing.mealPlan.acknowledge", { label })}
+            {t("pricing.mealPlan.acknowledgeShort")}
           </label>
-          <div className="mt-3 flex gap-3">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              className="rounded border px-3 py-2 disabled:opacity-50"
+              className={ui.secondaryButton}
               disabled={disabled || !ack}
               onClick={() => {
                 if (disabled || !ack) return;
@@ -223,7 +231,7 @@ export function PricingMealPlan({
             </button>
             <button
               type="button"
-              className="rounded border px-3 py-2 disabled:opacity-50"
+              className={ui.secondaryButton}
               disabled={disabled}
               onClick={cancel}
             >
@@ -234,10 +242,10 @@ export function PricingMealPlan({
         </>
       )}
       {error && (
-        <p role="alert" className="mt-2 text-red-700">
+        <p role="alert" className={ui.errorText}>
           {error}
         </p>
       )}
-    </div>
+    </PricingSection>
   );
 }
