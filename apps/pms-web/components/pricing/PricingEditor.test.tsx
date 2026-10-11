@@ -6,6 +6,8 @@ import { PricingEditor } from "./PricingEditor";
 import { PricingStayPreview } from "./PricingStayPreview";
 import { OptionWindow } from "./OptionWindow";
 import { StepOptions } from "./StepOptions";
+import { GuestPreview } from "./GuestPreview";
+import { PriceCalendar } from "./PriceCalendar";
 import { changeIncludedAdjustments } from "./PricingIncludedAdjustments";
 import { changeDatePrice } from "./PricingDates";
 import { NewLinkedOffer, linkedOfferInput } from "./NewLinkedOffer";
@@ -4355,4 +4357,23 @@ it("changes the main option's minimum nights in step 5, keeps own stay rules and
   expect(savedMain.restrictions).toEqual({ ...main.restrictions, rules: { ...rules, minArrivalNights: 3 } });
   expect(savedEarly.restrictions).toEqual(early.restrictions);
   expect(savedMain.price).toEqual(main.price);
+});
+it("shows what guests pay for the picked stay and the month's nightly prices, from the unsaved edits (VAY-2125)", async () => {
+  await mount();
+  await act(async () => {});
+  await act(async () => view.root.findByType(PriceCalendar).props.onPick("2026-07-18"));
+  expect(view.root.findByType(GuestPreview).props.stay).toEqual({ checkIn: "2026-07-18", checkOut: "2026-07-20" });
+  const text = () => JSON.stringify(view.toJSON());
+  // Breakfast for 2 adults (2 × €12) on top of the €100 room, for 2 nights.
+  expect(text()).toContain("2 nights · 18 Jul–20 Jul");
+  expect(text()).toContain("Select · €248 for 2 nights");
+  expect(view.root.findAllByProps({ "aria-label": "18 July 2026, €124, in the sample stay" })).toHaveLength(1);
+  // Only the chosen option of the guest card's radio group is a Tab stop; arrow keys move the choice.
+  const radios = () => view.root.findByType(GuestPreview).findAllByProps({ role: "radio" }).filter((node) => node.type === "button");
+  expect(radios().map((node) => node.props.tabIndex)).toEqual([0]);
+  await act(async () => input().props.onChange({ target: { value: "150" } }));
+  expect(text()).toContain("Select · €348 for 2 nights");
+  expect(view.root.findAllByProps({ "aria-label": "18 July 2026, €174, in the sample stay" })).toHaveLength(1);
+  await act(async () => input().props.onChange({ target: { value: "abc" } }));
+  expect(text()).toContain("Finish the open price entry to see guest prices.");
 });

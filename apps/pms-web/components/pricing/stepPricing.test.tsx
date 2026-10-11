@@ -5,14 +5,18 @@ import {
 } from "@vayada/domain-pms/replacement-pricing";
 import { english } from "./pricingAmounts";
 import {
+  addDays,
   childrenSummary,
   deleteBlocker,
   deleteOption,
   mainOffer,
   missingPresets,
   money,
+  monthNights,
   normalNight,
   presetOption,
+  sampleStay,
+  stayTotals,
   optionNames,
   optionSummary,
   otherWeekdays,
@@ -507,5 +511,62 @@ describe("option card counts", () => {
     expect(summary("early")).toBe(
       "Room only · Based on Option 2 · room only · €5 cheaper · 1 single date · Own stay rules",
     );
+  });
+});
+
+describe("guest preview and price calendar", () => {
+  it("starts the sample stay on the next Friday for at least two nights", () => {
+    expect(addDays("2026-12-31", 1)).toBe("2027-01-01");
+    expect(sampleStay(design, "2026-10-11")).toEqual({
+      checkIn: "2026-10-16",
+      checkOut: "2026-10-18",
+    });
+    expect(sampleStay(design, "2026-10-16")).toEqual({
+      checkIn: "2026-10-23",
+      checkOut: "2026-10-25",
+    });
+    const three = setMinimumNights(design, 3);
+    expect(sampleStay(three, "2026-10-14")).toEqual({
+      checkIn: "2026-10-16",
+      checkOut: "2026-10-19",
+    });
+  });
+  it("totals each option for the sample stay with the engine (the design's July weekend)", () => {
+    const totals = stayTotals(design, "2026-07-18", "2026-07-20");
+    expect(
+      Object.fromEntries(
+        Object.entries(totals).map(([id, result]) => [
+          id,
+          result.kind === "priced" ? result.totalMinor : result.reason,
+        ]),
+      ),
+    ).toEqual({
+      flexible: "30100",
+      nonrefundable: "27090",
+      breakfast: "33100",
+    });
+    // Two nights against a three-night minimum: the engine refuses the stay.
+    expect(stayTotals(setMinimumNights(design, 3), "2026-07-18", "2026-07-20").flexible).toEqual({
+      kind: "unavailable",
+      reason: "restriction",
+    });
+  });
+  it("prices every night of a month with the night evaluator, weekends and seasons included", () => {
+    const nights = monthNights(design, "flexible", "2026-07");
+    expect(nights).toHaveLength(31);
+    const price = (date: string) => {
+      const night = nights.find((entry) => entry.date === date)!.night;
+      return night.kind === "projected"
+        ? [night.night.totalMinor, night.night.sources.map((source) => source.kind)]
+        : night.reason;
+    };
+    expect(price("2026-07-01")).toEqual(["14000", ["season"]]);
+    expect(price("2026-07-03")).toEqual(["16100", ["season", "weekday"]]);
+    expect(
+      monthNights(design, "nonrefundable", "2026-02").find((entry) => entry.date === "2026-02-07")!
+        .night,
+    ).toMatchObject({
+      night: { totalMinor: "8280" },
+    });
   });
 });

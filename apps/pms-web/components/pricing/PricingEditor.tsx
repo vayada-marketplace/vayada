@@ -31,10 +31,12 @@ import { MoreOptions } from "./MoreOptions";
 import { StepPrice } from "./StepPrice";
 import { StepSeasons } from "./StepSeasons";
 import { StepWeekends } from "./StepWeekends";
-import { deleteBlocker, deleteOption, mainOffer, missingPresets, moreOptionsSummary, normalNight, optionNames, type OptionTerms, type PresetKey } from "./stepPricing";
+import { addDays, deleteBlocker, deleteOption, mainOffer, missingPresets, moreOptionsSummary, normalNight, optionNames, sampleStay, type OptionTerms, type PresetKey } from "./stepPricing";
 import { PresetWindow } from "./PresetWindow";
 import { AddOptionButton, StepOptions } from "./StepOptions";
 import { StepStayRules } from "./StepStayRules";
+import { GuestPreview } from "./GuestPreview";
+import { PriceCalendar } from "./PriceCalendar";
 import { OptionWindow } from "./OptionWindow";
 import Modal from "@/components/Modal";
 import * as ui from "./pricingStyles";
@@ -46,7 +48,7 @@ type Kept = { room: Room; base: Room | null; terms: Record<string, PricingTermsI
 /** One room's prices (the room page's Prices tab). Saving publishes the whole property, with every other room
  * exactly as read. `onAttention`: a leave confirmation is waiting, so the page should show this tab;
  * `onPublished`: prices were published; a new `refresh` reloads unless this room has unsaved work. */
-export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus, onAttention, onPublished, refresh = 0 }: { client: Client; roomNames?: Record<string, string>; setup?: { propertyId: string; rooms: readonly SetupRoom[] }; roomTypeId: string; onAttention?: () => void; onPublished?: () => void; refresh?: number }) {
+export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, roomTypeId: focus, onAttention, onPublished, refresh = 0 }: { client: Client; roomNames?: Record<string, string>; roomFacts?: Record<string, { size: number | null; photo: string | null }>; setup?: { propertyId: string; rooms: readonly SetupRoom[] }; roomTypeId: string; onAttention?: () => void; onPublished?: () => void; refresh?: number }) {
   const callbacks = useRef({ onAttention, onPublished });
   useEffect(() => { callbacks.current = { onAttention, onPublished }; }, [onAttention, onPublished]);
   const [policyEdits, setPolicyEdits] = useState<Record<string, PricingTermsInput>>({});
@@ -55,6 +57,8 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
   const [independentOffer, setIndependentOffer] = useState<boolean | null>(null);
   const [optionOpen, setOptionOpen] = useState<string | null>(null), [childrenOpen, setChildrenOpen] = useState(false);
   const [preset, setPreset] = useState<PresetKey | null>(null), [deleting, setDeleting] = useState<string | null>(null), [deleteError, setDeleteError] = useState<unknown>(null);
+  // The guest preview's sample stay (a picked calendar night, or the next weekend), the calendar's month and option.
+  const [stayStart, setStayStart] = useState<string | null>(null), [shownMonth, setShownMonth] = useState<string | null>(null), [previewOffer, setPreviewOffer] = useState<string | null>(null);
   const [addingOfferRoom, setAddingOfferRoom] = useState<string | null>(null);
   const [pendingEntries, setPendingEntries] = useState<Record<string, boolean>>({});
   const exclusiveEditPending = addingOfferRoom !== null || preset !== null || Object.entries(pendingEntries).some(([key, pending]) => (key.startsWith("ownership:") || key.startsWith("mealPlan:") || key.startsWith("parent:") || key.startsWith("included:") || key.startsWith("policy:")) && pending);
@@ -265,7 +269,12 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
       const windowKeys = (oi: number) => (oi === mi ? ["policy", "included", "mealPlan", "meal"] : ["policy", "included", "date", "weekday", "month", "season", "mealPlan", "meal", "parent", "linked", "ownership", "stay", "stayDate", "staySeason"]).map((key) => `${key}:${ri}:${oi}`);
       const cancelAdding = () => { if (!disabled) { setAddingOfferRoom(null); setError(null); } };
       const group = (title: string) => <h3 className={`pt-2 ${ui.cardHeading}`}>{title}</h3>;
-      return <div key={room.roomTypeId} className="space-y-4">
+      const now = new Date(), today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      const sample = sampleStay(edited ?? room, today), stayNights = Math.round((Date.parse(sample.checkOut) - Date.parse(sample.checkIn)) / 86400000);
+      const stay = stayStart ? { checkIn: stayStart, checkOut: addDays(stayStart, stayNights) } : sample;
+      const previewId = previewOffer && room.offers.some((offer) => offer.id === previewOffer) ? previewOffer : main.id;
+      return <div key={room.roomTypeId} className="grid items-start gap-7 xl:grid-cols-[minmax(0,1fr)_400px]">
+        <div className="min-w-0 space-y-4">
         <StepPrice room={room} roomIndex={ri} offerIndex={mi} label={mainLabel} inputs={inputs} disabled={disabled || exclusiveEditPending}
           onInput={(key, value) => { setInputs((previous) => ({ ...previous, [key]: value })); setDirty(true); setNotice(""); }} />
         <StepSeasons room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onPending={pend(`stepSeason:${ri}`)} />
@@ -295,6 +304,8 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
             <PricingStayDates room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onPending={pend(`stayDate:${ri}:${mi}`)} onChange={changeRoom(ri)} />
             <PricingStaySeasons room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onPending={pend(`staySeason:${ri}:${mi}`)} onChange={changeRoom(ri)} />
           </div>
+          {group(t("pricing.steps.more.check"))}
+          <PricingStayPreview key={focusIndex} roomTypeId={focus} names={names} snapshot={display} inputs={inputs} disabled={disabled || hasPendingEntries} saved={false} roomNames={roomNames} />
         </MoreOptions>
         {room.offers.map((offer, oi) => {
           const label = offerLabel(room.roomTypeId, ri, oi), other = oi !== mi;
@@ -353,9 +364,15 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
           <div className="mt-4">{independentOffer === true ? <FirstPricingSetup propertyId={room.propertyId} rooms={[{ roomTypeId: room.roomTypeId, name: roomName(room.roomTypeId, ri), capacity: room.capacity }]} existingRoom={room} fixedCurrency={room.currency} disabled={disabled} onDirty={() => {}} onCreate={(input) => createInitial(input, true)} />
             : independentOffer === false ? <NewLinkedOffer room={room} names={names} disabled={disabled} onCreate={(input) => createInitial(input, true)} /> : <p className={ui.help}>{t("pricing.steps.own.choose")}</p>}</div>
         </Modal>}
+        </div>
+        <aside className="min-w-0 space-y-4">
+          <GuestPreview room={edited} facts={{ name: roomName(room.roomTypeId, ri), ...(roomFacts[room.roomTypeId] ?? { size: null, photo: null }) }} names={names} terms={optionTerms}
+            stay={stay} selected={previewId} onSelect={setPreviewOffer} />
+          <PriceCalendar room={edited} offerId={previewId} optionName={names[previewId] ?? ""} month={shownMonth ?? stay.checkIn.slice(0, 7)} stay={stay}
+            onMonth={setShownMonth} onPick={(date) => { setStayStart(date); setShownMonth(date.slice(0, 7)); }} />
+        </aside>
       </div>;
     })}
-    {!loading && editing && display && <PricingStayPreview key={focusIndex} roomTypeId={focus} names={names} snapshot={display} inputs={inputs} disabled={disabled || hasPendingEntries} saved={false} roomNames={roomNames} />}
     {!loading && editing && <p className={`text-right ${ui.hint}`}>{t("pricing.editor.keepOpen")}</p>}
     {/* Pressing Save is the declaration, so its text stays in the (sticky) bar beside the button. */}
     <div className={`flex-wrap ${ui.actionBar}`}>
