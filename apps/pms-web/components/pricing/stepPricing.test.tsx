@@ -6,8 +6,13 @@ import {
 import { english } from "./pricingAmounts";
 import {
   childrenSummary,
+  deleteBlocker,
+  deleteOption,
   mainOffer,
+  missingPresets,
   money,
+  normalNight,
+  presetOption,
   optionNames,
   optionSummary,
   otherWeekdays,
@@ -336,5 +341,107 @@ describe("stay rules and children", () => {
   });
   it("summarises the child age groups", () => {
     expect(childrenSummary(design, english)).toBe("0–5 free · 6–17 €20 per night");
+  });
+});
+
+describe("option prices, presets and deleting", () => {
+  const roomTypeId = "61000000-0000-4000-8000-000000000009",
+    offerId = "61000000-0000-4000-8000-00000000000a";
+  const priced = { ...design, roomTypeId };
+  it("prices each option's normal night with the engine, meals included, ignoring seasons and weekends", () => {
+    expect(design.offers.map((offer) => normalNight(design, offer.id))).toEqual([
+      "10000",
+      "9000",
+      "11500",
+    ]);
+    const noBase = room([main({ base: null, months: [{ month: 1, price: flat("9000") }] })]);
+    expect(normalNight(noBase, "flexible")).toBeNull();
+    const oneAdult = room([main({ base: { mode: "per_person", unitMinor: "7000" } })]);
+    expect(normalNight(oneAdult, "flexible")).toBe("14000");
+  });
+  it("offers the presets the room lacks, counting only options whose terms are known", () => {
+    expect(missingPresets(design, designTerms)).toEqual(["half_board", "non_refundable_breakfast"]);
+    expect(missingPresets(design, { flexible: flexibleTerms() })).toEqual([
+      "non_refundable",
+      "breakfast",
+      "half_board",
+      "non_refundable_breakfast",
+    ]);
+  });
+  it("builds a preset option linked to the main option, with its terms", () => {
+    const methods = ["card"] as const;
+    const added = presetOption(
+      priced,
+      offerId,
+      "non_refundable",
+      { discount: "12.5", mealAmount: "", mealBasis: "room", methods },
+      flexibleTerms(),
+    );
+    expect(added.configuration.offers.at(-1)).toEqual({
+      id: offerId,
+      termsRevision: offerId,
+      meal: { kind: "room_only", charge: { kind: "room", amountMinor: "0" } },
+      price: {
+        kind: "linked",
+        parentId: "flexible",
+        adjustment: { kind: "percentage", basisPoints: -1250 },
+        dateOverrides: [],
+      },
+      restrictions: { kind: "inherit" },
+    });
+    expect(added.terms).toEqual({
+      roomTypeId,
+      offerId,
+      expectedRevision: null,
+      cancellation: { kind: "non_refundable" },
+      payment: { kind: "full", acceptedMethods: ["card"] },
+    });
+    const half = presetOption(
+      priced,
+      offerId,
+      "half_board",
+      { discount: "", mealAmount: "25", mealBasis: "person", methods },
+      flexibleTerms(3),
+    );
+    expect(half.configuration.offers.at(-1)).toMatchObject({
+      meal: {
+        kind: "half_board",
+        charge: { kind: "person", adultMinor: "2500", childBandAmountsMinor: ["0", "0"] },
+      },
+      price: { adjustment: { kind: "fixed", deltaMinor: "0" } },
+    });
+    expect(half.terms.cancellation).toEqual(flexibleTerms(3).cancellation);
+    for (const values of [
+      { discount: "0", mealAmount: "", mealBasis: "room" as const, methods },
+      { discount: "100", mealAmount: "", mealBasis: "room" as const, methods },
+      { discount: "10", mealAmount: "", mealBasis: "room" as const, methods: [] },
+    ])
+      expect(() =>
+        presetOption(priced, offerId, "non_refundable", values, flexibleTerms()),
+      ).toThrow();
+    expect(() =>
+      presetOption(
+        priced,
+        offerId,
+        "breakfast",
+        { discount: "", mealAmount: "", mealBasis: "room", methods },
+        flexibleTerms(),
+      ),
+    ).toThrow();
+  });
+  it("deletes an option unless it is the only one or others are based on it", () => {
+    expect(deleteBlocker(design, "flexible")).toEqual({
+      kind: "dependents",
+      ids: ["nonrefundable", "breakfast"],
+    });
+    expect(deleteBlocker(room([main()]), "flexible")).toEqual({ kind: "only" });
+    expect(deleteBlocker(design, "breakfast")).toBeNull();
+    expect(deleteOption(design, "breakfast").offers.map((offer) => offer.id)).toEqual([
+      "flexible",
+      "nonrefundable",
+    ]);
+    expect(() => deleteOption(design, "flexible")).toThrow();
+    const two = room([main(), { ...main(), id: "package" }]);
+    expect(mainOffer(deleteOption(two, "flexible")).id).toBe("package");
   });
 });

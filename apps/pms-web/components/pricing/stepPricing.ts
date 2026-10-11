@@ -1,12 +1,17 @@
 import {
   parsePricingConfiguration,
+  pricingAmountStep,
   pricingCurrencyScale,
   projectReplacementRoomNights,
   type PricingConfiguration,
 } from "@vayada/domain-pms/replacement-pricing";
-import type { ReplacementOfferTerms } from "@vayada/domain-booking/replacement-pricing";
+import {
+  parseBookingPricingOfferTerms,
+  type ReplacementOfferTerms,
+} from "@vayada/domain-booking/replacement-pricing";
 import { formatCurrency } from "@/lib/formatCurrency";
-import { decimalAmount, PricingError, type Translate } from "./pricingAmounts";
+import type { PricingTermsInput } from "@/services/api/replacementPricingClient";
+import { decimalAmount, parseMinorInput, PricingError, type Translate } from "./pricingAmounts";
 
 /** The step-by-step Prices tab's view of one room's pricing-v2 configuration. Pure: every change goes back through
  * `parsePricingConfiguration`, so a step never writes a room the engine would refuse. */
@@ -358,4 +363,142 @@ export function normalNight(room: Room, offerId: string): string | null {
     ["2001-01-01"],
   );
   return night?.kind === "projected" ? night.night.totalMinor : null;
+}
+
+/** Quick-add presets: a meal plan and whether the option is non-refundable. */
+export const presetKeys = [
+  "non_refundable",
+  "breakfast",
+  "half_board",
+  "non_refundable_breakfast",
+] as const;
+export type PresetKey = (typeof presetKeys)[number];
+export const presets: Record<PresetKey, { meal: Offer["meal"]["kind"]; nonRefundable: boolean }> = {
+  non_refundable: { meal: "room_only", nonRefundable: true },
+  breakfast: { meal: "breakfast", nonRefundable: false },
+  half_board: { meal: "half_board", nonRefundable: false },
+  non_refundable_breakfast: { meal: "breakfast", nonRefundable: true },
+};
+/** Presets whose meal plan and cancellation no option of the room has yet. Options whose terms are unknown (still
+ * loading, or failed) don't count, so a preset can show until their terms arrive. */
+export function missingPresets(
+  room: Room,
+  terms: Readonly<Record<string, OptionTerms | undefined>>,
+) {
+  const taken = new Set(
+    room.offers.flatMap((offer) => {
+      const cancellation = terms[offer.id]?.cancellation.kind;
+      return cancellation ? [`${offer.meal.kind}:${cancellation === "non_refundable"}`] : [];
+    }),
+  );
+  return presetKeys.filter(
+    (key) => !taken.has(`${presets[key].meal}:${presets[key].nonRefundable}`),
+  );
+}
+export type PresetValues = {
+  discount: string;
+  mealAmount: string;
+  mealBasis: "room" | "person";
+  methods: readonly ("card" | "pay_at_property")[];
+};
+/** A new option from a preset: linked to the main option (`discount` percent cheaper when non-refundable, otherwise the
+ * same price), inheriting its stay rules, with the preset's meal at `mealAmount` per room or per adult (children 0).
+ * Its terms take the main option's payment with `methods`, and the main option's cancellation unless non-refundable. */
+export function presetOption(
+  room: Room,
+  offerId: string,
+  key: PresetKey,
+  values: PresetValues,
+  mainTerms: OptionTerms,
+) {
+  const preset = presets[key],
+    main = mainOffer(room);
+  const discount = values.discount.trim();
+  if (
+    preset.nonRefundable &&
+    (!/^\d+(?:\.\d{1,2})?$/.test(discount) || Number(discount) <= 0 || Number(discount) >= 100)
+  )
+    throw new PricingError("pricing.steps.preset.errorDiscount");
+  const adjustment = preset.nonRefundable
+    ? { kind: "percentage" as const, basisPoints: -Math.round(Number(discount) * 100) }
+    : { kind: "fixed" as const, deltaMinor: "0" };
+  const amount =
+    preset.meal === "room_only"
+      ? "0"
+      : parseMinorInput(
+          values.mealAmount.trim(),
+          pricingCurrencyScale(room.currency)!,
+          true,
+          pricingAmountStep(room.currency),
+        );
+  const meal =
+    preset.meal === "room_only" || values.mealBasis === "room"
+      ? { kind: preset.meal, charge: { kind: "room", amountMinor: amount } }
+      : {
+          kind: preset.meal,
+          charge: {
+            kind: "person",
+            adultMinor: amount,
+            childBandAmountsMinor: room.children.bands.map(() => "0"),
+          },
+        };
+  if (!values.methods.length) throw new PricingError("pricing.error.paymentMethodRequired");
+  const cancellation = preset.nonRefundable
+    ? ({ kind: "non_refundable" } as const)
+    : mainTerms.cancellation;
+  const payment = { ...mainTerms.payment, acceptedMethods: [...values.methods] };
+  if (
+    !parseBookingPricingOfferTerms({
+      roomTypeId: room.roomTypeId,
+      offerId,
+      revision: offerId,
+      cancellation,
+      payment,
+    })
+  )
+    throw new PricingError("pricing.steps.preset.errorTerms");
+  const configuration = parsePricingConfiguration({
+    ...room,
+    offers: [
+      ...room.offers,
+      {
+        id: offerId,
+        termsRevision: offerId,
+        meal,
+        price: { kind: "linked", parentId: main.id, adjustment, dateOverrides: [] },
+        restrictions: { kind: "inherit" },
+      },
+    ],
+  });
+  if (!configuration) throw new PricingError("pricing.linkedOffer.errorConfiguration");
+  const terms: PricingTermsInput = {
+    roomTypeId: room.roomTypeId,
+    offerId,
+    expectedRevision: null,
+    cancellation,
+    payment,
+  };
+  return { configuration, terms };
+}
+
+/** Why an option can't be deleted: it is the room's only option, or other options are based on it. */
+export function deleteBlocker(
+  room: Room,
+  offerId: string,
+): { kind: "only" } | { kind: "dependents"; ids: string[] } | null {
+  if (room.offers.length === 1) return { kind: "only" };
+  const ids = room.offers
+    .filter((offer) => offer.price.kind === "linked" && offer.price.parentId === offerId)
+    .map((offer) => offer.id);
+  return ids.length ? { kind: "dependents", ids } : null;
+}
+/** The room without the option. When it was the main option, the next option with its own prices becomes main. */
+export function deleteOption(room: Room, offerId: string): Room {
+  if (deleteBlocker(room, offerId)) throw new PricingError("pricing.steps.delete.errorBlocked");
+  const result = parsePricingConfiguration({
+    ...room,
+    offers: room.offers.filter((offer) => offer.id !== offerId),
+  });
+  if (!result) throw new PricingError("pricing.steps.delete.errorBlocked");
+  return result;
 }
