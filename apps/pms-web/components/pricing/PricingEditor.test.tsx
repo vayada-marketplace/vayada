@@ -2,6 +2,7 @@ import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
+import { StepFirstPrices } from "./StepFirstPrices";
 import { PricingEditor } from "./PricingEditor";
 import { PricingStayPreview } from "./PricingStayPreview";
 import { OptionWindow } from "./OptionWindow";
@@ -566,7 +567,7 @@ it.each([new Error("lost preparation response")])(
       freeDays: "",
       payment: "full",
     });
-    await act(async () => view.root.findByType(FirstPricingSetup).props.onCreate(input));
+    await act(async () => view.root.findByType(StepFirstPrices).props.onCreate(input));
     expect(client.termsAction).not.toHaveBeenCalled();
     await click("Save prices");
     expect(button("Reload pricing").props.disabled).toBe(true);
@@ -4146,18 +4147,18 @@ it("starts an unpriced room with the first setup in the property currency and pu
   client.read.mockResolvedValue({ ...snapshot, revision: 3, sources, stale: false });
   const policy = vi.fn().mockResolvedValue({ revision: familyId }); client.termsAction.mockReturnValue(policy);
   await mountRoom();
-  expect(view.root.findByType(FirstPricingSetup).props).toMatchObject({ rooms: [familySetup], fixedCurrency: "EUR" });
+  expect(view.root.findByType(StepFirstPrices).props).toMatchObject({ rooms: [familySetup], fixedCurrency: "EUR" });
   expect(button("Save prices")).toBeUndefined(); expect(view.root.findAllByType(PricingStayPreview)).toHaveLength(0);
-  await act(async () => view.root.findByType(FirstPricingSetup).props.onCreate(familyInput("90"))); await click("Save prices");
+  await act(async () => view.root.findByType(StepFirstPrices).props.onCreate(familyInput("90"))); await click("Save prices");
   expect(saved.baseRevision).toBe(3); expect(saved.snapshot.rooms.map((room) => [room.roomTypeId, room.revision])).toEqual([["room", 4], [familyId, 4]]);
   expect(saved.snapshot.rooms[0]).toEqual({ ...snapshot.rooms[0], revision: 4 }); expect(policy).toHaveBeenCalledOnce();
 });
 it("on a room page, offers only that room for the first setup and asks to finish room details when it cannot have prices", async () => {
   client.read.mockResolvedValueOnce(null); await mountRoom();
-  expect(view.root.findByType(FirstPricingSetup).props.rooms).toEqual([familySetup]); expect(view.root.findByType(FirstPricingSetup).props.fixedCurrency).toBeUndefined();
+  expect(view.root.findByType(StepFirstPrices).props.rooms).toEqual([familySetup]); expect(view.root.findByType(StepFirstPrices).props.fixedCurrency).toBeUndefined();
   act(() => view.unmount());
   client.read.mockResolvedValueOnce(null); await mountRoom([]);
-  expect(JSON.stringify(view.toJSON())).toContain("Finish this room's details first"); expect(view.root.findAllByType(FirstPricingSetup)).toHaveLength(0);
+  expect(JSON.stringify(view.toJSON())).toContain("Finish this room's details first"); expect(view.root.findAllByType(StepFirstPrices)).toHaveLength(0);
   client.read.mockResolvedValueOnce({ ...snapshot, revision: 1, sources, stale: false }); await click("Reload pricing");
   expect(JSON.stringify(view.toJSON())).toContain("Finish this room's details first"); expect(button("Save prices")).toBeUndefined();
 });
