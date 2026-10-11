@@ -88,6 +88,7 @@ describe("createPricingPublicationFreshnessAlert", () => {
     expect(text).toContain("- p-1: finance, terms");
     expect(text).toContain("Unreadable (property id):\n- p-2");
     expect(text).toContain('presses "Save prices"');
+    expect(text).toContain("shows the new prices by itself");
   });
 
   it("sends nothing without problems", async () => {

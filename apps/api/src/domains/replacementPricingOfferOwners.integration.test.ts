@@ -2,7 +2,10 @@ import {
   channexManagementWorkerPrivileges,
   CHANNEX_MANAGEMENT_WORKER_ROLE,
 } from "../jobs/channexManagementWorkerPrivileges.js";
-import { createPublicPricingOfferCatalog } from "./publicPricingOfferCatalog.js";
+import {
+  createPublicPricingOfferCatalog,
+  createPublishedOfferCheck,
+} from "./publicPricingOfferCatalog.js";
 import { createTargetPmsInventoryPublicOfferProjection } from "./pmsInventoryPublicOfferProjection.js";
 import { createTargetPublicBookabilityPublicationCommandPort } from "../platform/publicBookabilityPublication.js";
 import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
@@ -6365,6 +6368,155 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       offers?.rooms.flatMap((room) => room.offers.map((offer) => offer.publicOfferKey)),
     ).toEqual(mapped.flatMap((room) => room.offers.map((offer) => offer.ratePlanId)));
     expect(offers?.rooms.flatMap((room) => room.offers)).toHaveLength(3);
+  });
+  /** "Save prices" for the next revision, with its Finance evidence and charge declaration. */
+  async function savePrices(
+    f: Awaited<ReturnType<typeof publicFixture>>,
+    revision: number,
+    change: (
+      room: PricingStorageSnapshot["rooms"][number],
+    ) => PricingStorageSnapshot["rooms"][number],
+  ) {
+    const rooms = f.snapshot.rooms.map((room) => change({ ...room, revision }));
+    const finance = await (async () => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        return await lockFinanceReplacementPricingReadiness(client, {
+          propertyId: f.scope.propertyId,
+          currency: "EUR",
+          pricingRevision: revision,
+          terms: f.terms.filter((terms) =>
+            rooms.some(
+              (room) =>
+                room.roomTypeId === terms.roomTypeId &&
+                room.offers.some((offer) => offer.id === terms.offerId),
+            ),
+          ),
+        });
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    })();
+    if (finance.kind !== "ready") throw new Error("finance evidence required");
+    const next: PricingStorageSnapshot = {
+      currency: "EUR",
+      ownerReferences: { finance: finance.evidenceId },
+      rooms,
+    };
+    const draftId = randomUUID();
+    await pool.query(
+      `INSERT INTO pms.pricing_v2_drafts(property_id,draft_id,draft_revision,base_revision,source_revisions,snapshot,actor_user_id)
+      VALUES($1,$2,1,$3,$4,$5,$6)`,
+      [f.scope.propertyId, draftId, revision - 1, f.sources, next, f.scope.actorUserId],
+    );
+    const charges = await createReplacementChargeDeclarationStore(pool).confirm(
+      f.context,
+      f.scope,
+      {
+        draftId,
+        expectedDraftRevision: 1,
+        claimedFingerprint: replacementChargeFingerprint(f.scope.propertyId, next, f.sources)!,
+        declaration: "all_mandatory_charges_included",
+        requestId: randomUUID(),
+      },
+    );
+    await createReplacementPricingStore(pool, createReplacementPricingStorageGuard(f.context)).save(
+      f.scope,
+      {
+        requestId: randomUUID(),
+        expectedRevision: revision - 1,
+        sources: f.sources,
+        snapshot: { ...next, ownerReferences: { ...next.ownerReferences, charges: charges.id } },
+      },
+    );
+  }
+  it("serves saved price changes at once but waits for a republish after offer changes (VAY-2123)", async () => {
+    const f = await publicFixture(),
+      id = f.scope.propertyId;
+    const catalog = createPublicPricingOfferCatalog(pool);
+    const check = createPublishedOfferCheck(pool);
+    const keys = async () =>
+      (await catalog.read(id))?.rooms.flatMap((room) =>
+        room.offers.map((offer) => offer.publicOfferKey),
+      ) ?? null;
+    const nightPrice = async (publicOfferKey: string) => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const stay = await lockPublicPricingRoomStay(client, id, {
+          version: "public-pricing-selection.v1",
+          checkIn: "2026-10-01",
+          checkOut: "2026-10-02",
+          currency: "EUR",
+          rooms: [
+            { selectionId: "one", publicOfferKey, guests: { adults: 1, childAgesAtCheckIn: [] } },
+          ],
+          addons: [],
+          promoCode: null,
+        });
+        return stay?.roomMinor ?? null;
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    };
+    const first = (await publishBookingPage(f.scope)).flatMap((room) =>
+      room.offers.map((offer) => offer.ratePlanId),
+    );
+    expect(await keys()).toEqual(first);
+    expect(await check.matchCurrent(f.scope)).toBe(true);
+    expect(await nightPrice(first[0]!)).toBe("10000");
+
+    // A price-only save serves at once; offer keys and quotes follow the new revision.
+    await savePrices(f, 2, (room) => ({
+      ...room,
+      offers: room.offers.map((offer) => ({
+        ...offer,
+        price: {
+          kind: "independent",
+          calendar: {
+            base: { mode: "flat", amountMinor: "12000" },
+            months: [],
+            seasons: [],
+            weekdays: [],
+            dates: [],
+          },
+        },
+      })),
+    }));
+    const repriced = await keys();
+    expect(repriced).toHaveLength(3);
+    expect(repriced!.filter((key) => first.includes(key))).toEqual([]);
+    expect(await nightPrice(repriced![0]!)).toBe("12000");
+    expect(await nightPrice(first[0]!)).toBeNull();
+    expect(await check.matchCurrent(f.scope)).toBe(true);
+
+    // A changed meal plan changes the offers: unavailable until "Publish reviewed changes".
+    await savePrices(f, 3, (room) => ({
+      ...room,
+      offers: room.offers.map((offer) => ({
+        ...offer,
+        meal: { kind: "breakfast", charge: { kind: "room", amountMinor: "0" } },
+      })),
+    }));
+    expect(await catalog.read(id)).toBeNull();
+    expect(await check.matchCurrent(f.scope)).toBe(false);
+    await publishBookingPage(f.scope);
+    expect(await keys()).toHaveLength(3);
+    expect(await check.matchCurrent(f.scope)).toBe(true);
+
+    // So does removing an offer.
+    await savePrices(f, 4, (room) => ({
+      ...room,
+      offers: room.offers.filter((offer) => offer.id === "flex"),
+    }));
+    expect(await catalog.read(id)).toBeNull();
+    expect(await check.matchCurrent(f.scope)).toBe(false);
+    await publishBookingPage(f.scope);
+    expect(await keys()).toHaveLength(2);
+    expect(await check.matchCurrent(f.scope)).toBe(true);
   });
   it("serves the single owning organization and refuses unlinked, ambiguous or hidden properties", async () => {
     const f = await publicFixture(),
