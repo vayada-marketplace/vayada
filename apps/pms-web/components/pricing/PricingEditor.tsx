@@ -35,6 +35,7 @@ import { addDays, deleteBlocker, deleteOption, mainOffer, missingPresets, moreOp
 import { PresetWindow } from "./PresetWindow";
 import { AddOptionButton, StepOptions } from "./StepOptions";
 import { StepStayRules } from "./StepStayRules";
+import { StepFirstPrices } from "./StepFirstPrices";
 import { GuestPreview } from "./GuestPreview";
 import { PriceCalendar } from "./PriceCalendar";
 import { OptionWindow } from "./OptionWindow";
@@ -249,9 +250,9 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     {error !== null && <div role="alert" className={ui.errorBanner}>{pricingSaveError(error, t)}{retry && <p className="mt-2">{t("pricing.editor.retryHint")}</p>}{keepsOnReload && <p className="mt-2">{t("pricing.room.reloadKeeps")}</p>}</div>}
     {notice && <p role="status" className={warning ? ui.warningBanner : ui.successBanner}>{t(notice)}</p>}
     {loading && <p role="status" className={ui.text}>{t("pricing.editor.loading")}</p>}
-    {!loading && (display || empty) && !editing && <div className={ui.card}>
+    {!loading && (display || empty) && !editing && <div className={setup && roomSetup.length ? "space-y-4" : ui.card}>
       <div className="flex items-center justify-between gap-3"><h2 className={ui.cardHeading}>{t("pricing.room.title")}</h2><span className="text-[11px] font-medium text-amber-600">{t("pricing.room.notConfigured")}</span></div>
-      {setup && roomSetup.length ? <FirstPricingSetup propertyId={setup.propertyId} rooms={roomSetup} fixedCurrency={display?.currency} disabled={disabled} onDirty={() => setDirty(true)} onCreate={createInitial} /> : <p className={ui.text}>{t(setup ? "pricing.room.notReady" : "pricing.editor.setupUnavailable")}</p>}
+      {setup && roomSetup.length ? <StepFirstPrices propertyId={setup.propertyId} rooms={roomSetup} fixedCurrency={display?.currency} disabled={disabled} onDirty={() => setDirty(true)} onCreate={createInitial} /> : <p className={ui.text}>{t(setup ? "pricing.room.notReady" : "pricing.editor.setupUnavailable")}</p>}
       {retry && <button disabled={busy} className={ui.secondaryButton} onClick={() => void run()}>{t("pricing.editor.retry")}</button>}</div>}
     {!loading && display && shownRooms.map(([room, ri]) => {
       const main = mainOffer(room), mi = room.offers.indexOf(main), mainLabel = offerLabel(room.roomTypeId, ri, mi);
