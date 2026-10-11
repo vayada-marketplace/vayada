@@ -21,12 +21,22 @@ export function publicPricingOfferBindings(
       propertyId: owner.scope.propertyId,
       roomTypeId: room.roomTypeId,
       offerId: offer.id,
-      publicOfferKey:
-        "pricing-offer.v2:" +
-        createHash("sha256")
-          .update(JSON.stringify([owner.pmsSourceRevision, room.roomTypeId, offer.id]))
-          .digest("hex"),
+      publicOfferKey: publicPricingOfferKey(owner.pmsSourceRevision, room.roomTypeId, offer.id),
     })),
+  );
+}
+
+/** One room offer's public key under a PMS pricing source revision. */
+export function publicPricingOfferKey(
+  pmsSourceRevision: string,
+  roomTypeId: string,
+  offerId: string,
+): string {
+  return (
+    "pricing-offer.v2:" +
+    createHash("sha256")
+      .update(JSON.stringify([pmsSourceRevision, roomTypeId, offerId]))
+      .digest("hex")
   );
 }
 

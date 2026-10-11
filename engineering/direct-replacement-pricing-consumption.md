@@ -723,10 +723,15 @@ first. Legacy request payloads cannot be silently converted into those facts.
 GET /api/booking-web/hotels/:slug/pricing-offers exposes the current published
 replacement offer catalogue for explicit guest selection. It requires current
 public authority and the approved pricing owner in one READ COMMITTED transaction,
-then reads the active Distribution content and requires exact room/offer equality
-with the current mapper. Only published names/descriptions/occupancy/images and
+then reads the active Distribution content. The published rooms must equal the
+current rooms, and each room's offers must equal the current ones by offer, meal
+plan and currency (VAY-2123): the published keys are rebuilt from the PMS pricing
+source recorded in the publication's manifest. A saved price, terms or Finance change
+therefore serves at once under the current revision's keys, while an added, removed
+or re-mealed offer or room waits for "Publish reviewed changes" (the owner's Booking
+review shows it). Only published names/descriptions/occupancy/images and current
 public offer keys/currency/meal plans are returned. Closing/inactive rooms, missing
-publication, old flat prices, changed pricing/terms/Finance or mismatched property
+publication, old flat prices, a changed room or offer set or mismatched property
 fail closed; public access is checked again after reads. The catalogue has no
 amounts or availability promise. The existing date-specific /offers contract is
 not reinterpreted as this catalogue. Guest quoting and booking acceptance retain

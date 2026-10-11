@@ -80,6 +80,14 @@ it("reads and recovers without posting a publication", async () => {
     headers: { "Idempotency-Key": "saved-key" },
   });
 });
+it("reads whether published offers are current, defaulting to unknown", async () => {
+  const h = await harness();
+  expect(await h.client.load(propertyId)).toMatchObject({ publishedOffersCurrent: null });
+  h.http.get.mockResolvedValue({ ...h.review, publishedOffersCurrent: false });
+  expect(await h.client.load(propertyId)).toMatchObject({ publishedOffersCurrent: false });
+  h.http.get.mockResolvedValue({ ...h.review, publishedOffersCurrent: "no" });
+  await expect(h.client.load(propertyId)).rejects.toThrow();
+});
 it("rejects readiness hash tampering and foreign scopes", async () => {
   const h = await harness();
   await expect(h.client.load(operationId)).rejects.toThrow();
