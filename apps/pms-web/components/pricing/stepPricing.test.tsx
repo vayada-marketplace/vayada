@@ -356,8 +356,23 @@ describe("option prices, presets and deleting", () => {
     ]);
     const noBase = room([main({ base: null, months: [{ month: 1, price: flat("9000") }] })]);
     expect(normalNight(noBase, "flexible")).toBeNull();
-    const oneAdult = room([main({ base: { mode: "per_person", unitMinor: "7000" } })]);
-    expect(normalNight(oneAdult, "flexible")).toBe("14000");
+    const perAdult = room([main({ base: { mode: "per_person", unitMinor: "7000" } })]);
+    expect(normalNight(perAdult, "flexible")).toBe("14000");
+    // A room for one adult prices one adult.
+    const single = parsePricingConfiguration({
+      ...perAdult,
+      capacity: { total: 1, adults: 1, children: 0 },
+    })!;
+    expect(normalNight(single, "flexible")).toBe("7000");
+    // IDR prices in whole rupiah: 10% off 100,001 rounds half-up to 90,001.
+    const rupiah = room(
+      [
+        main({ base: flat("10000100") }),
+        linked("nonrefundable", "flexible", { kind: "percentage", basisPoints: -1000 }),
+      ],
+      "IDR",
+    );
+    expect(normalNight(rupiah, "nonrefundable")).toBe("9000100");
   });
   it("offers the presets the room lacks, counting only options whose terms are known", () => {
     expect(missingPresets(design, designTerms)).toEqual(["half_board", "non_refundable_breakfast"]);
@@ -365,6 +380,10 @@ describe("option prices, presets and deleting", () => {
       "non_refundable",
       "breakfast",
       "half_board",
+      "non_refundable_breakfast",
+    ]);
+    // A meal preset would copy a non-refundable main option's cancellation, so only non-refundable presets show.
+    expect(missingPresets(design, { flexible: nonRefundable })).toEqual([
       "non_refundable_breakfast",
     ]);
   });
@@ -443,5 +462,50 @@ describe("option prices, presets and deleting", () => {
     expect(() => deleteOption(design, "flexible")).toThrow();
     const two = room([main(), { ...main(), id: "package" }]);
     expect(mainOffer(deleteOption(two, "flexible")).id).toBe("package");
+  });
+});
+
+describe("option card counts", () => {
+  it("counts what only an option's Edit window shows", () => {
+    const busy = room([
+      main(),
+      {
+        ...main({
+          seasons: [
+            { name: "Summer", tier: "", from: "06-01", through: "08-31", price: flat("12000") },
+          ],
+          months: [{ month: 12, price: flat("13000") }],
+          dates: [
+            { date: "2026-12-31", price: flat("20000") },
+            { date: "2027-01-01", price: flat("20000") },
+          ],
+        }),
+        id: "package",
+      },
+      linked(
+        "early",
+        "package",
+        { kind: "fixed", deltaMinor: "-500" },
+        {
+          price: {
+            kind: "linked",
+            parentId: "package",
+            adjustment: { kind: "fixed", deltaMinor: "-500" },
+            dateOverrides: [{ date: "2026-08-15", price: flat("9000") }],
+          },
+          restrictions: { kind: "own", rules: rules(4), seasons: [], dates: [] },
+        },
+      ),
+    ]);
+    const names = optionNames(busy, {}, english);
+    const summary = (id: string) =>
+      optionSummary(busy, busy.offers.find((offer) => offer.id === id)!, names, undefined, english);
+    expect(summary("flexible")).toBe("Room only");
+    expect(summary("package")).toBe(
+      "Room only · Own prices · 1 season · 1 monthly price · 2 single dates",
+    );
+    expect(summary("early")).toBe(
+      "Room only · Based on Option 2 · room only · €5 cheaper · 1 single date · Own stay rules",
+    );
   });
 });

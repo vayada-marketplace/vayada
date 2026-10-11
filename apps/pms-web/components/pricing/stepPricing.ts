@@ -123,6 +123,22 @@ export function optionSummary(
             ),
       );
   } else if (offer.id !== mainOffer(room).id) parts.push(t("pricing.steps.summary.ownPrices"));
+  // What only the option's Edit window shows (the main option's live in steps 2-3 and More options).
+  if (offer.id !== mainOffer(room).id) {
+    const count = (key: string, value: number) => {
+      if (value) parts.push(t(`${key}.${value === 1 ? "one" : "other"}`, { count: value }));
+    };
+    if (offer.price.kind === "independent") {
+      const { seasons, months, weekdays, dates } = offer.price.calendar;
+      count("pricing.steps.summary.seasons", seasons.length);
+      count("pricing.steps.more.months", months.length);
+      count("pricing.steps.summary.weekdays", weekdays.length);
+      count("pricing.steps.more.dates", dates.length);
+    } else {
+      count("pricing.steps.more.dates", offer.price.dateOverrides.length);
+      if (offer.restrictions.kind === "own") parts.push(t("pricing.steps.summary.ownRules"));
+    }
+  }
   const cancellation = terms?.cancellation;
   if (cancellation?.kind === "non_refundable") parts.push(t("pricing.steps.summary.noRefund"));
   else if (cancellation) {
@@ -391,8 +407,13 @@ export function missingPresets(
       return cancellation ? [`${offer.meal.kind}:${cancellation === "non_refundable"}`] : [];
     }),
   );
+  // A meal preset copies the main option's cancellation, so with a non-refundable main option it would only add
+  // another non-refundable option: then only the non-refundable presets are offered.
+  const mainNonRefundable = terms[mainOffer(room).id]?.cancellation.kind === "non_refundable";
   return presetKeys.filter(
-    (key) => !taken.has(`${presets[key].meal}:${presets[key].nonRefundable}`),
+    (key) =>
+      !taken.has(`${presets[key].meal}:${presets[key].nonRefundable}`) &&
+      (presets[key].nonRefundable || !mainNonRefundable),
   );
 }
 export type PresetValues = {

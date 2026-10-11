@@ -7,7 +7,7 @@ import { useTranslation } from "@/lib/i18n";
 import { ApiErrorResponse } from "@/services/api/client";
 import { samePricingValue, type createReplacementPricingClient, type PricingSnapshot, type PricingTermsInput } from "@/services/api/replacementPricingClient";
 
-import { baseAmounts, decimalAmount, editedSnapshot, type MessageKey, parseMinorInput, PricingError } from "./pricingAmounts";
+import { baseAmounts, decimalAmount, editedSnapshot, errorText, type MessageKey, parseMinorInput, PricingError } from "./pricingAmounts";
 import { financeNotReady, pricingSave, pricingSaveError } from "./savePricing";
 import { FirstPricingSetup, type SetupRoom, type firstPricingInput } from "./FirstPricingSetup";
 import { PricingTerms } from "./PricingTerms";
@@ -55,11 +55,11 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
   const policyKey = (room: string, offer: string) => JSON.stringify([room, offer]);
   const [independentOffer, setIndependentOffer] = useState<boolean | null>(null);
   const [optionOpen, setOptionOpen] = useState<string | null>(null);
-  const [preset, setPreset] = useState<PresetKey | null>(null), [deleting, setDeleting] = useState<string | null>(null);
+  const [preset, setPreset] = useState<PresetKey | null>(null), [deleting, setDeleting] = useState<string | null>(null), [deleteError, setDeleteError] = useState<unknown>(null);
   const [addingOfferRoom, setAddingOfferRoom] = useState<string | null>(null);
   const [pendingEntries, setPendingEntries] = useState<Record<string, boolean>>({});
-  const exclusiveEditPending = addingOfferRoom !== null || Object.entries(pendingEntries).some(([key, pending]) => (key.startsWith("ownership:") || key.startsWith("mealPlan:") || key.startsWith("parent:") || key.startsWith("included:") || key.startsWith("policy:")) && pending);
-  const hasPendingEntries = addingOfferRoom !== null || Object.values(pendingEntries).some(Boolean);
+  const exclusiveEditPending = addingOfferRoom !== null || preset !== null || Object.entries(pendingEntries).some(([key, pending]) => (key.startsWith("ownership:") || key.startsWith("mealPlan:") || key.startsWith("parent:") || key.startsWith("included:") || key.startsWith("policy:")) && pending);
+  const hasPendingEntries = addingOfferRoom !== null || preset !== null || Object.values(pendingEntries).some(Boolean);
   const [empty, setEmpty] = useState(false);
   const [current, setCurrent] = useState<PricingSnapshot | null>(null), [baseRevision, setBaseRevision] = useState(0), [stale, setStale] = useState(false);
   const loadedRooms = useRef<readonly Room[]>([]);
@@ -91,7 +91,7 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
       setCurrent(saved || room ? { currency: saved?.currency ?? room!.currency, ownerReferences: { finance: saved?.ownerReferences.finance ?? "" },
         rooms: !room ? rooms : rooms.some((value) => value.roomTypeId === room.roomTypeId) ? rooms.map((value) => value.roomTypeId === room.roomTypeId ? room : value) : [...rooms, room] } : null);
       requestedTerms.current.clear(); setSavedTerms({});
-      setAddingOfferRoom(null); setPendingEntries({}); setBaseRevision(saved?.revision ?? 0); setStale(!!saved?.stale); setInputs({}); setDirty(!!room); setNeedsReload(false); setDone(false);
+      setAddingOfferRoom(null); setPreset(null); setDeleting(null); setDeleteError(null); setPendingEntries({}); setBaseRevision(saved?.revision ?? 0); setStale(!!saved?.stale); setInputs({}); setDirty(!!room); setNeedsReload(false); setDone(false);
       setNotice(room ? "pricing.room.noticeKept" : keep ? "pricing.room.noticeDropped" : saved?.stale ? "pricing.room.noticeStale" : "");
     } catch (e) { if (latest()) setError(e); }
     finally { if (latest()) setLoading(false); }
@@ -170,12 +170,14 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
       }
     } finally { locked.current = false; if (alive.current) setBusy(false); }
   }
-  function createInitial(input: ReturnType<typeof firstPricingInput>, addToRoom = false, targetRoom: string | null = addingOfferRoom) {
-    if (locked.current || busy || retry || needsReload || done) return;
+  /** Returns the error it shows, so a window that asked (quick add) can show it too. */
+  function createInitial(input: ReturnType<typeof firstPricingInput>, addToRoom = false, targetRoom: string | null = addingOfferRoom): unknown {
+    if (locked.current || busy || retry || needsReload || done) return null;
     const otherRoom = input.configuration.roomTypeId !== focus;
     if (!addToRoom && (otherRoom || current && (current.currency !== input.configuration.currency || current.rooms.some((room) => room.roomTypeId === input.configuration.roomTypeId) ||
         !setup?.rooms.some((room) => room.roomTypeId === input.configuration.roomTypeId) || setup.propertyId !== input.configuration.propertyId))) {
-      setError(new PricingError("pricing.editor.errorUnconfiguredRoom")); return;
+      const failure = new PricingError("pricing.editor.errorUnconfiguredRoom");
+      setError(failure); return failure;
     }
     let existing: PricingSnapshot | null, configuration = input.configuration;
     try {
@@ -188,7 +190,7 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
         if (!appended) throw new PricingError("pricing.editor.errorNewOfferSettings");
         configuration = appended;
       }
-    } catch (e) { setError(e); return; }
+    } catch (e) { setError(e); return e; }
     const room = { ...configuration, revision: baseRevision + 1 };
     const rooms = addToRoom ? existing!.rooms.map((value) => value.roomTypeId === room.roomTypeId ? room : value) : [...(existing?.rooms ?? []), room];
     const key = policyKey(input.terms.roomTypeId, input.terms.offerId);
@@ -197,6 +199,7 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
     setCurrent({ currency: room.currency, rooms, ownerReferences: existing?.ownerReferences ?? { finance: "" } });
     setInputs({}); setAddingOfferRoom(null); setPreset(null); setDirty(true);
     setNotice("pricing.editor.noticeSetupAdded");
+    return null;
   }
   /** Deletes an option from this room's draft; saving publishes the room without it. Typed prices are folded into
    * the room first, because they are kept by option position, which the deletion shifts. */
@@ -208,7 +211,7 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
       setCurrent({ ...current, rooms }); setInputs({});
       setPolicyEdits((previous) => Object.fromEntries(Object.entries(previous).filter(([key]) => key !== policyKey(focus, offerId))));
       setOptionOpen(null); setDirty(true); setNotice("pricing.steps.delete.notice");
-    } catch (e) { setError(e); }
+    } catch (e) { setDeleteError(e); }
   }
 
   /** One "Save prices" action (see `pricingSave`). Every finished step is kept, so "Retry last action" resumes
@@ -301,8 +304,8 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
         {room.offers.map((offer, oi) => {
           const label = offerLabel(room.roomTypeId, ri, oi), other = oi !== mi;
           const blocker = deleteBlocker(room, offer.id);
-          return <OptionWindow key={offer.id} open={optionOpen === offer.id} title={names[offer.id] ?? ""} closable={!pendingIn(windowKeys(oi)) && !(oi !== mi && badPrice(oi))} onClose={() => setOptionOpen(null)}
-            footer={blocker ? <p className={ui.help}>{blocker.kind === "only" ? t("pricing.steps.delete.only") : t("pricing.steps.delete.dependents", { names: blocker.ids.map((id) => names[id] ?? "").join(", ") })}</p>
+          return <OptionWindow key={offer.id} open={optionOpen === offer.id} title={names[offer.id] ?? ""} closable={!pendingIn(windowKeys(oi)) && !(oi !== mi && badPrice(oi))} onClose={() => { setOptionOpen(null); setDeleteError(null); }}
+            footer={deleteError && optionOpen === offer.id ? <p role="alert" className={ui.errorText}>{errorText(deleteError, t, "pricing.steps.delete.errorBlocked")}</p> : blocker ? <p className={ui.help}>{blocker.kind === "only" ? t("pricing.steps.delete.only") : t("pricing.steps.delete.dependents", { names: blocker.ids.map((id) => names[id] ?? "").join(", ") })}</p>
               : <button type="button" disabled={disabled || hasPendingEntries} onClick={() => setDeleting(offer.id)} className="text-[13px] font-medium text-red-600 hover:text-red-700 disabled:opacity-50">{t("pricing.steps.delete.button")}</button>}>
             {group(t("pricing.steps.option.price"))}
             {other && offer.price.kind === "independent" && <div><p className={ui.label}>{t("pricing.editor.baseNightlyPrices", { currency: display.currency })}</p>

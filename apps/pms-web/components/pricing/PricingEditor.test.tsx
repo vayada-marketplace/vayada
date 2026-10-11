@@ -5,6 +5,7 @@ import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
 import { PricingEditor } from "./PricingEditor";
 import { PricingStayPreview } from "./PricingStayPreview";
 import { OptionWindow } from "./OptionWindow";
+import { StepOptions } from "./StepOptions";
 import { changeIncludedAdjustments } from "./PricingIncludedAdjustments";
 import { changeDatePrice } from "./PricingDates";
 import { NewLinkedOffer, linkedOfferInput } from "./NewLinkedOffer";
@@ -4289,4 +4290,40 @@ it("retries option names whose terms failed and keeps a window open on a price i
   expect(done.props.disabled).toBe(true);
   await act(async () => view.root.findByProps({ "aria-label": "Room 1 Offer 2 Per room" }).props.onChange({ target: { value: "125" } }));
   expect(view.root.findAllByType(OptionWindow)[1].findAllByType("button").find((node) => node.children.includes("Done"))!.props.disabled).toBe(false);
+});
+it("shows add and delete errors in the window that asked, and counts the quick-add form as unsaved work (VAY-2125)", async () => {
+  const id = "61000000-0000-4000-8000-000000000004";
+  const [flex] = snapshot.rooms[0].offers;
+  if (flex.price.kind !== "independent") throw new Error("fixture");
+  const second = { ...flex, id: "second", price: { ...flex.price, calendar: { ...flex.price.calendar, base: { mode: "flat" as const, amountMinor: "20000" } } } };
+  client.read.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...snapshot.rooms[0], roomTypeId: id, offers: [flex, second] }], revision: 2, sources, stale: false });
+  client.readTerms.mockImplementation(async (roomTypeId, offerId, revision) => ({
+    roomTypeId,
+    offerId,
+    revision,
+    cancellation: { kind: "flexible", terms: { type: "free_until_days_before_arrival", freeCancellationDeadlineDays: 7, afterDeadlinePenalty: "full_booking_amount", noShowPenalty: "full_booking_amount" } },
+    payment: { kind: "full", acceptedMethods: ["card"] },
+  }));
+  await mount(id);
+  await act(async () => {});
+  await click("Non-refundable");
+  // The open form is unsaved work: Save waits, and leaving asks first.
+  expect(button("Save prices").props.disabled).toBe(true);
+  const warn = vi.mocked(window.addEventListener).mock.calls.filter(([name]) => name === "beforeunload").at(-1)![1] as (event: unknown) => void;
+  const event = { preventDefault: vi.fn(), returnValue: undefined };
+  warn(event);
+  expect(event.preventDefault).toHaveBeenCalled();
+  // A price the editor can't read stops the add; the form says why.
+  await act(async () => input().props.onChange({ target: { value: "abc" } }));
+  await act(async () => view.root.findByType(Modal).findAllByType("button").find((node) => node.children.includes("Add option"))!.props.onClick());
+  expect(view.root.findByType(Modal).findAllByProps({ role: "alert" })).toHaveLength(1);
+  await act(async () => view.root.findByType(Modal).findAllByType("button").find((node) => node.children.includes("Cancel"))!.props.onClick());
+  // The same for a delete: the option's window says why.
+  await act(async () => view.root.findAllByType(StepOptions)[0].props.onEdit("second"));
+  const edit = () => view.root.findAllByType(OptionWindow)[1];
+  await act(async () => edit().findAllByType("button").find((node) => node.children.includes("Delete option"))!.props.onClick());
+  await act(async () => view.root.findByType(ConfirmDialog).props.onConfirm());
+  expect(edit().props.open).toBe(true);
+  expect(edit().findAllByProps({ role: "alert" })).toHaveLength(1);
+  expect(client.saveDraft).not.toHaveBeenCalled();
 });

@@ -29,7 +29,8 @@ export function PresetWindow({
   names: Readonly<Record<string, string>>;
   mainTerms: OptionTerms | undefined;
   disabled: boolean;
-  onAdd: (input: ReturnType<typeof presetOption>) => void;
+  /** Adds the option; returns why it couldn't (shown here, in front of the page's own banner). */
+  onAdd: (input: ReturnType<typeof presetOption>) => unknown;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -58,7 +59,7 @@ export function PresetWindow({
   function add() {
     if (disabled || !mainTerms) return;
     try {
-      onAdd(
+      const failure = onAdd(
         presetOption(
           room,
           crypto.randomUUID(),
@@ -67,6 +68,7 @@ export function PresetWindow({
           mainTerms,
         ),
       );
+      if (failure) setError(errorText(failure, t, "pricing.linkedOffer.errorCheck"));
     } catch (cause) {
       setError(errorText(cause, t, "pricing.linkedOffer.errorCheck"));
     }
