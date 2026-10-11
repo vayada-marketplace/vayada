@@ -40,7 +40,10 @@ export async function readPricingPublicationFreshness(
         continue;
       }
       const current = {
-        room: await lockPmsReplacementPricingRoomSource(client, id),
+        room: await lockPmsReplacementPricingRoomSource(client, id, {
+          revision: stored.revision,
+          roomTypeIds: stored.rooms.map((room) => room.roomTypeId),
+        }),
         terms: await lockBookingPricingTermsSource(client, id),
         finance: await lockFinanceReplacementPricingSource(client, id),
       };

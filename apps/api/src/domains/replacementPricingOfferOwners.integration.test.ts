@@ -6631,6 +6631,46 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       ["Terms room", ["breakfast"]],
     ]);
 
+    // Renaming a room or editing its description goes live without saving prices again.
+    await pool.query(
+      `UPDATE pms.room_types SET name='Garden suite',description='Quiet and green',
+       room_facts_revision=room_facts_revision+1 WHERE id=$1`,
+      [f.snapshot.rooms[0]!.roomTypeId],
+    );
+    const renamed = byName((await catalog.read(id))!.rooms);
+    expect(renamed.map((room) => [room.name, room.description])).toEqual([
+      ["Garden suite", "Quiet and green"],
+      ["Second room", ""],
+    ]);
+    const gardenKey = renamed[0]!.offers[0]!.publicOfferKey;
+    expect(await nightPrice(gardenKey)).toBe("12000");
+
+    // A new room does not take the others offline, and a deactivated room hides only itself.
+    const editor = createReplacementPricingStore(
+      pool,
+      createReplacementPricingStorageGuard(f.context),
+    );
+    const newRoomId = randomUUID();
+    await pool.query(
+      `INSERT INTO pms.room_types(id,property_id,name,occupancy_limits)
+       VALUES($1,$2,'New room','{"total":2,"adults":2,"children":0}')`,
+      [newRoomId, id],
+    );
+    expect(await shown()).toEqual([
+      ["Garden suite", ["breakfast"]],
+      ["Second room", ["breakfast", "breakfast"]],
+    ]);
+    expect(await nightPrice(gardenKey)).toBe("12000");
+    // The editor still asks for prices, because the new room has none yet.
+    expect((await editor.read(f.scope))?.stale).toBe(true);
+    await pool.query("DELETE FROM pms.room_types WHERE id=$1", [newRoomId]);
+    expect((await editor.read(f.scope))?.stale).toBe(false);
+    await pool.query("UPDATE pms.room_types SET active=false WHERE id=$1", [secondRoomId]);
+    expect(await shown()).toEqual([["Garden suite", ["breakfast"]]]);
+    expect(await nightPrice(gardenKey)).toBe("12000");
+    expect((await editor.read(f.scope))?.stale).toBe(false);
+    await pool.query("UPDATE pms.room_types SET active=true WHERE id=$1", [secondRoomId]);
+
     // Closing a room hides that room only.
     const client = await pool.connect();
     try {
@@ -6646,7 +6686,14 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     } finally {
       client.release();
     }
-    expect(await shown()).toEqual([["Terms room", ["breakfast"]]]);
+    expect(await shown()).toEqual([["Garden suite", ["breakfast"]]]);
+
+    // A changed occupancy still needs the prices saved again.
+    await pool.query(
+      `UPDATE pms.room_types SET occupancy_limits='{"total":3,"adults":3,"children":0}' WHERE id=$1`,
+      [f.snapshot.rooms[0]!.roomTypeId],
+    );
+    expect(await catalog.read(id)).toBeNull();
   });
   it("serves the single owning organization and refuses unlinked, ambiguous or hidden properties", async () => {
     const f = await publicFixture(),
@@ -6696,17 +6743,27 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     const f = await publicFixture(),
       client = await pool.connect();
     try {
-      for (const sql of [
-        "UPDATE pms.room_types SET active=false WHERE property_id=$1",
-        "UPDATE pms.room_types SET room_attributes='{\"changed\":true}' WHERE property_id=$1",
-        "INSERT INTO pms.room_types(property_id,name) VALUES($1,'Added room')",
-        "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
-        "UPDATE finance.payment_settings SET default_currency='USD' WHERE property_id=$1",
-      ]) {
+      for (const [sql, stays] of [
+        ["UPDATE pms.room_types SET active=false WHERE property_id=$1", false],
+        [
+          `UPDATE pms.room_types SET occupancy_limits='{"total":9,"adults":9,"children":0}'
+           WHERE property_id=$1`,
+          false,
+        ],
+        ["UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", false],
+        ["UPDATE finance.payment_settings SET default_currency='USD' WHERE property_id=$1", false],
+        // VAY-2129: other room facts and a new, unpriced room leave saved prices current.
+        [
+          "UPDATE pms.room_types SET room_attributes='{\"changed\":true}' WHERE property_id=$1",
+          true,
+        ],
+        ["INSERT INTO pms.room_types(property_id,name) VALUES($1,'Added room')", true],
+      ] as const) {
         await client.query("BEGIN");
         try {
           await client.query(sql, [f.scope.propertyId]);
-          expect(await lockPublicPricingPublication(client, f.scope.propertyId)).toBeNull();
+          const publication = await lockPublicPricingPublication(client, f.scope.propertyId);
+          expect(publication === null).toBe(!stays);
         } finally {
           await client.query("ROLLBACK");
         }
