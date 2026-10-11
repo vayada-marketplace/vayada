@@ -11,6 +11,7 @@ import {
   parsePmsOperatingCalendarPropertyProfileEvidence,
   parsePmsOperatingCalendarSourceRevision,
   planPmsInventoryMaterialization,
+  planPmsInventoryRoomAdditionTail,
   type PmsInventoryCoverageEvidence,
   type PmsInventoryDaySnapshot,
   type PmsInventoryLaunchReadinessReadPort,
@@ -635,20 +636,17 @@ async function executeMaterialization(
         const previousRooms = new Set(
           previousConfiguration?.sourceInputs.roomBindings.map((binding) => binding.roomTypeId),
         );
-        // Adding a room must fill the retained horizon's end before coverage advances;
-        // otherwise a later extension cannot distinguish missing new rows from corruption.
+        const roomAdded = exact.sourceInputs.roomBindings.some(
+          (binding) => !previousRooms.has(binding.roomTypeId),
+        );
         // Days before the requested start leave coverage and are never read again, so a
         // start that moved forward to the property's today is fine (VAY-2134). A start
         // after today would leave today's old-room rows without the new room.
         const partialRoomAddition =
           coverage &&
           previousConfiguration &&
-          exact.sourceInputs.roomBindings.some(
-            (binding) => !previousRooms.has(binding.roomTypeId),
-          ) &&
-          (command.horizon.through < requireDatabaseDate(coverage.coverageThrough) ||
-            command.horizon.from >
-              propertyLocalDate(acceptedAt, exact.sourceInputs.propertyTimeZone));
+          roomAdded &&
+          command.horizon.from > propertyLocalDate(acceptedAt, exact.sourceInputs.propertyTimeZone);
         if (
           (priorRevision !== null &&
             priorRevision < exact.calendarRevision &&
@@ -691,17 +689,48 @@ async function executeMaterialization(
           );
         }
 
+        // Adding a room must also fill stored days past the requested horizon, such as an
+        // auto-open tail; otherwise a later extension cannot tell its missing rows from
+        // corruption (VAY-2138).
+        const tailDays =
+          coverage && previousConfiguration && roomAdded
+            ? await lockRoomAdditionTail(
+                client,
+                command,
+                exact,
+                previousConfiguration,
+                coverage,
+                currentDays,
+              )
+            : [];
+        if (!tailDays) {
+          return finalizeMaterialization(
+            client,
+            command,
+            reservation,
+            keyHash,
+            failure("inventory_invariant_violation"),
+            acceptedAt,
+          );
+        }
+
         if (plan.outcome === "unchanged") {
           const result = successUnchanged(plan.coverage);
           return finalizeMaterialization(client, command, reservation, keyHash, result, acceptedAt);
         }
 
-        await persistPmsInventoryMaterializationDays(client, plan.changedDays, acceptedAt);
+        // Tail days stay outside coverage and the result, which describe the requested horizon.
+        const changedDays = [...plan.changedDays, ...tailDays].sort(
+          (left, right) =>
+            compareCodeUnits(left.roomTypeId, right.roomTypeId) ||
+            compareCodeUnits(left.stayDate, right.stayDate),
+        );
+        await persistPmsInventoryMaterializationDays(client, changedDays, acceptedAt);
         const linkedChanges = await reconcilePmsLinkedInventory(
           client,
           command.propertyId,
           acceptedAt.toISOString(),
-          linkedDirtyRanges(plan.changedDays),
+          linkedDirtyRanges(changedDays),
         );
         await enqueuePmsLinkedInventorySideEffects(
           client,
@@ -959,6 +988,63 @@ export async function lockPmsInventoryDaysForMaterialization(
     }
   }
   return Object.freeze(days);
+}
+
+/** New rows for added rooms past the horizon, or null when stored days are not complete. */
+async function lockRoomAdditionTail(
+  client: PmsInventoryMaterializationRepositoryClient,
+  command: PmsInventoryMaterializationCommand,
+  configuration: PmsOperatingCalendarConfigurationSnapshot,
+  previousConfiguration: PmsOperatingCalendarConfigurationSnapshot,
+  coverage: CoverageRow,
+  currentDays: readonly PmsInventoryDaySnapshot[],
+): Promise<readonly PmsInventoryDaySnapshot[] | null> {
+  const stored = await client.query<{ tailThrough: string | null }>(
+    `SELECT max(stay_date)::text AS "tailThrough"
+     FROM pms.inventory_days
+     WHERE property_id = $1::uuid
+       AND room_type_id = ANY($2::uuid[])
+       AND stay_date > $3::date`,
+    [
+      command.propertyId,
+      configuration.sourceInputs.roomBindings.map(({ roomTypeId }) => roomTypeId),
+      command.horizon.through,
+    ],
+  );
+  const tailThrough = stored.rows[0]?.tailThrough ?? null;
+  const coverageThrough = requireDatabaseDate(coverage.coverageThrough);
+  if (tailThrough === null) return coverageThrough > command.horizon.through ? null : [];
+  if (!databaseDate(tailThrough) || tailThrough < coverageThrough) return null;
+  let tailRows: readonly PmsInventoryDaySnapshot[];
+  try {
+    tailRows = await lockPmsInventoryDaysForMaterialization(
+      client,
+      {
+        propertyId: command.propertyId,
+        horizon: {
+          from: new Date(Date.parse(`${command.horizon.through}T00:00:00Z`) + DAY_MS)
+            .toISOString()
+            .slice(0, 10),
+          through: tailThrough,
+        },
+      },
+      configuration,
+    );
+  } catch (error) {
+    if (error instanceof InventoryInvariantError) return null;
+    throw error;
+  }
+  const tail = planPmsInventoryRoomAdditionTail({
+    configuration,
+    previousConfiguration,
+    horizon: command.horizon,
+    tailThrough,
+    currentDays: [
+      ...currentDays.filter(({ stayDate }) => stayDate === command.horizon.through),
+      ...tailRows,
+    ],
+  });
+  return tail.ok ? tail.days : null;
 }
 
 function pristineOnboardingLegacyDay(row: InventoryDayRow, physicalCapacityCount: number): boolean {
