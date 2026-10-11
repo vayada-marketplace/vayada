@@ -6,7 +6,7 @@ import {
   pricingObject,
   type PricingConfiguration,
 } from "@vayada/domain-pms";
-import type { PoolClient } from "pg";
+import type { QueryResultRow } from "pg";
 
 export type PricingStorageSources = Readonly<Record<string, string>>;
 export type PricingStorageSnapshot = Readonly<{
@@ -76,7 +76,7 @@ export function parsePricingStorageSnapshot(
  * in the same transaction. Service composition must separately check current owners.
  */
 export async function readCurrentPricingSnapshot(
-  client: PoolClient,
+  client: { query(text: string, values?: unknown[]): Promise<{ rows: QueryResultRow[] }> },
   propertyId: string,
 ): Promise<StoredPricingRevision | null> {
   const row = (

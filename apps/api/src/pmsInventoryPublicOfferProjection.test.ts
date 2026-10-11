@@ -2,8 +2,10 @@ import type { QueryResultRow } from "pg";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  CLOSE_UNPRICED_PUBLIC_OFFERS,
   createTargetPmsInventoryPublicOfferProjection,
-  PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS,
+  projectPmsInventoryToPublicOffers,
+  UPSERT_PRICED_PUBLIC_OFFERS,
   type TargetPmsInventoryPublicOfferProjectionOptions,
 } from "./domains/pmsInventoryPublicOfferProjection.js";
 
@@ -29,7 +31,7 @@ describe("PMS inventory public offer projection", () => {
     expect(target.queries.some((query) => query.includes("SET status = 'published'"))).toBe(false);
   });
 
-  it("invalidates priced offers once then publishes the durable event", async () => {
+  it("closes unpriced offers once then publishes the durable event", async () => {
     const target = projectionPool({ profileAvailable: true, projectedOfferDays: 366 });
     const projector = createTargetPmsInventoryPublicOfferProjection({
       connectionString: "postgresql://unused",
@@ -46,10 +48,11 @@ describe("PMS inventory public offer projection", () => {
     const claim = target.queries.find((query) => query.includes("WITH candidate_event AS"));
     expect(claim).toContain("outbox.destination = 'distribution.inventory-projection'");
     expect(claim).toContain("outbox.event_type = 'pms.inventory.projection_refresh_requested'");
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain("inventory.available_count");
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain("sellable_publicly = FALSE");
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).not.toContain("base_rate_amount");
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).not.toContain("INSERT INTO");
+    expect(CLOSE_UNPRICED_PUBLIC_OFFERS).toContain("freshness_status = 'fresh'");
+    expect(CLOSE_UNPRICED_PUBLIC_OFFERS).toContain("offer.public_offer_key <> ALL($3::text[])");
+    expect(UPSERT_PRICED_PUBLIC_OFFERS).toContain("WHERE NOT EXISTS");
+    expect(UPSERT_PRICED_PUBLIC_OFFERS).toContain("IS NOT DISTINCT FROM");
+    expect(UPSERT_PRICED_PUBLIC_OFFERS).not.toContain("base_rate_amount");
   });
 
   it("does not duplicate stock or offers after the event has already been published", async () => {
@@ -166,6 +169,145 @@ describe("PMS inventory public offer projection", () => {
     expect(target.state).toMatchObject({ status: "failed", attemptsCount: 1 });
     expect(target.deadLetterEventIds).toEqual(["f6855f00-0000-0000-0000-000000000001"]);
   });
+});
+
+describe("pricing-v2 public offer days", () => {
+  const roomTypeId = "f6853000-0000-0000-0000-000000000002";
+  const rules = {
+    minArrivalNights: 2,
+    maxStayNights: null,
+    closedToArrival: false,
+    closedToDeparture: false,
+    stopSell: false,
+  };
+  const configuration = {
+    version: "pricing.v2",
+    propertyId,
+    roomTypeId,
+    revision: 1,
+    currency: "EUR",
+    capacity: { total: 3, adults: 3, children: 1 },
+    children: {
+      adultFromAge: 12,
+      bands: [{ fromAge: 0, throughAge: 11, nightlyMinor: "2000", countsTowardCapacity: true }],
+    },
+    offers: [
+      {
+        id: "flex",
+        termsRevision: "terms-1",
+        meal: {
+          kind: "half_board",
+          charge: { kind: "person", adultMinor: "1500", childBandAmountsMinor: ["500"] },
+        },
+        price: {
+          kind: "independent",
+          calendar: {
+            base: { mode: "occupancy", amountsMinor: ["10000", "13000", "15500"] },
+            months: [],
+            seasons: [],
+            weekdays: [],
+            dates: [],
+          },
+        },
+        restrictions: {
+          kind: "own",
+          rules,
+          seasons: [],
+          dates: [{ date: "2026-08-19", rules: { ...rules, stopSell: true } }],
+        },
+      },
+    ],
+  };
+  const day = (stayDate: string, availableCount: number, open = true) => ({
+    roomTypeId,
+    stayDate,
+    availableCount,
+    totalCount: 2,
+    open,
+  });
+
+  function client(priced: boolean | "unreadable") {
+    const calls: Array<{ text: string; values: readonly unknown[] }> = [];
+    const query = async <T extends QueryResultRow>(
+      text: string,
+      values: readonly unknown[] = [],
+    ) => {
+      calls.push({ text, values });
+      if (text.includes("FROM pms.pricing_v2_heads"))
+        return rows(
+          (priced
+            ? [
+                {
+                  head_revision: 1,
+                  revision: 1,
+                  currency: "EUR",
+                  source_revisions: priced === "unreadable" ? {} : { room: "1" },
+                  owner_references: { terms: "terms-1" },
+                  room_count: 1,
+                },
+              ]
+            : []) as unknown as T[],
+        );
+      if (text.includes("FROM pms.pricing_v2_rooms"))
+        return rows([{ room_type_id: roomTypeId, configuration }] as unknown as T[]);
+      if (text.includes('AS "stayDate"'))
+        return rows([
+          day("2026-08-15", 2),
+          day("2026-08-16", 1),
+          day("2026-08-17", 0),
+          day("2026-08-18", 2, false),
+          day("2026-08-19", 2),
+        ] as unknown as T[]);
+      if (text === UPSERT_PRICED_PUBLIC_OFFERS)
+        return rows(
+          (values[3] as string[]).map(() => ({ snapshotId: "changed" })) as unknown as T[],
+        );
+      return rows([] as T[]);
+    };
+    return { query, calls };
+  }
+
+  it("projects each priced night with its one-adult price, stock and stop-sell", async () => {
+    const target = client(true);
+    await expect(
+      projectPmsInventoryToPublicOffers(target, propertyId, new Date("2026-08-14T17:00:00Z")),
+    ).resolves.toBe(5);
+    const upsert = target.calls.find((call) => call.text === UPSERT_PRICED_PUBLIC_OFFERS)!;
+    expect(upsert.values.slice(0, 3)).toEqual([propertyId, "EUR", "2026-08-14T17:00:00.000Z"]);
+    const key = `pricing-v2:${roomTypeId}:flex`;
+    expect(upsert.values.slice(3)).toEqual([
+      Array(5).fill(roomTypeId),
+      ["2026-08-15", "2026-08-16", "2026-08-17", "2026-08-18", "2026-08-19"],
+      Array(5).fill(key),
+      ["available", "limited", "sold_out", "closed", "closed"],
+      [2, 1, 0, 0, 2],
+      Array(5).fill("115.00"),
+      Array(5).fill(3),
+      Array(5).fill(1),
+      Array(5).fill(3),
+      Array(5).fill("half_board"),
+      Array(5).fill(2),
+      Array(5).fill(null),
+    ]);
+    const close = target.calls.find((call) => call.text === CLOSE_UNPRICED_PUBLIC_OFFERS)!;
+    expect(close.values).toEqual([propertyId, "2026-08-14T17:00:00.000Z", [key]]);
+  });
+
+  it.each([false, "unreadable"] as const)(
+    "closes every offer day without readable prices (%s)",
+    async (priced) => {
+      const target = client(priced);
+      await expect(
+        projectPmsInventoryToPublicOffers(target, propertyId, new Date("2026-08-14T17:00:00Z")),
+      ).resolves.toBe(0);
+      expect(target.calls.map((call) => call.text)).not.toContain(UPSERT_PRICED_PUBLIC_OFFERS);
+      expect(target.calls.some((call) => call.text.includes('AS "stayDate"'))).toBe(false);
+      expect(target.calls.at(-1)).toEqual({
+        text: CLOSE_UNPRICED_PUBLIC_OFFERS,
+        values: [propertyId, "2026-08-14T17:00:00.000Z", []],
+      });
+    },
+  );
 });
 
 function projectionPool(options: {
