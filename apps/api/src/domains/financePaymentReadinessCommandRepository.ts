@@ -2,15 +2,14 @@ import { createHash } from "node:crypto";
 
 import {
   FINANCE_PAYMENT_READINESS_CONTRACT_VERSION,
-  FINANCE_PAYMENT_READINESS_METHODS,
   FINANCE_PAYMENT_READINESS_OUTBOX_DESTINATION,
   createFinancePaymentReadinessSnapshot,
+  financePaymentReadinessMethodsFromStored,
   parseReplaceFinancePaymentMethodsCommand,
   parseReplaceFinancePaymentMethodsResult,
   resolveFinanceOnlineCardReadiness,
   serializeReplaceFinancePaymentMethodsFingerprint,
   type FinancePaymentReadinessChangedEvent,
-  type FinancePaymentReadinessMethod,
   type FinanceOnlineCardReadinessDecision,
   type FinanceOnlineCardReadinessEvidence,
   type FinancePricingCurrencyEvidence,
@@ -452,7 +451,7 @@ function storedAggregate(
   }
   const revision = positiveInteger(row.paymentMethodsRevision);
   const pricingRevision = positiveInteger(row.sourcePricingCurrencyRevision);
-  const selectedMethods = methods(row.acceptedMethods);
+  const selectedMethods = financePaymentReadinessMethodsFromStored(row.acceptedMethods);
   const updatedAt = isoDate(row.updatedAt);
   if (
     row.contractVersion !== FINANCE_PAYMENT_READINESS_CONTRACT_VERSION ||
@@ -795,16 +794,6 @@ function pricingEvidence(value: unknown): FinancePricingCurrencyEvidence | null 
         currency: value["currency"],
         pricingCurrencyRevision: value["pricingCurrencyRevision"] as number,
       }
-    : null;
-}
-
-function methods(value: unknown): readonly FinancePaymentReadinessMethod[] | null {
-  if (!Array.isArray(value)) return null;
-  const parsed = value.filter((method): method is FinancePaymentReadinessMethod =>
-    FINANCE_PAYMENT_READINESS_METHODS.includes(method as FinancePaymentReadinessMethod),
-  );
-  return parsed.length === value.length && new Set(parsed).size === parsed.length
-    ? FINANCE_PAYMENT_READINESS_METHODS.filter((method) => parsed.includes(method))
     : null;
 }
 

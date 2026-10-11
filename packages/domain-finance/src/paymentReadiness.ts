@@ -10,6 +10,19 @@ export const FINANCE_PAYMENT_READINESS_METHODS = [
   "bank_transfer",
 ] as const;
 
+/** Every method name `finance.payment_settings.accepted_methods` may hold. */
+export const FINANCE_ROUTE_PAYMENT_METHODS = [
+  "card",
+  "pay_at_property",
+  "xendit",
+  "cash",
+  "bank_transfer",
+  "paypal",
+  "manual_card",
+  "wallet",
+  "other",
+] as const;
+
 export const FINANCE_PAYMENT_READINESS_BLOCKERS = [
   "payment_settings_uncommitted",
   "pricing_currency_unavailable",
@@ -40,8 +53,32 @@ export const FINANCE_PAYMENT_READINESS_AUTHORIZATION = Object.freeze({
 } as const);
 
 export type FinancePaymentReadinessMethod = (typeof FINANCE_PAYMENT_READINESS_METHODS)[number];
+export type FinanceRoutePaymentMethod = (typeof FINANCE_ROUTE_PAYMENT_METHODS)[number];
 export type FinancePaymentReadinessBlocker = (typeof FINANCE_PAYMENT_READINESS_BLOCKERS)[number];
 export type FinancePaymentNextAction = (typeof FINANCE_PAYMENT_READINESS_NEXT_ACTIONS)[number];
+
+/**
+ * Readiness view of a stored method list. Both writers share the column: the
+ * settings page details pay_at_property with cash/manual_card and adds checkout
+ * extras (bank_transfer, paypal, xendit, wallet, other). Readiness counts only
+ * pay_at_property and card, like the pricing check (VAY-2136).
+ * Null when the list is not a duplicate-free array of stored method names.
+ */
+export function financePaymentReadinessMethodsFromStored(
+  value: unknown,
+): readonly FinancePaymentReadinessMethod[] | null {
+  if (
+    !Array.isArray(value) ||
+    new Set(value).size !== value.length ||
+    !value.every((method) =>
+      FINANCE_ROUTE_PAYMENT_METHODS.includes(method as FinanceRoutePaymentMethod),
+    )
+  )
+    return null;
+  return FINANCE_PAYMENT_READINESS_METHODS.filter(
+    (method) => method !== "bank_transfer" && value.includes(method),
+  );
+}
 
 export type FinancePaymentMethodReadiness = Readonly<{
   method: FinancePaymentReadinessMethod;
