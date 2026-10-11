@@ -21,13 +21,14 @@ export function linkedParentChoices(room: PricingConfiguration, offerId: string)
   });
 }
 
-export function PricingLinkedParent({ room, offer, label, disabled, blocked, onChange, onPending }: { room: PricingConfiguration; offer: Offer; label: string; disabled: boolean; blocked: boolean;
+/** `names`: the options' names (step 4); without them options show as "Offer N". */
+export function PricingLinkedParent({ room, offer, names, label, disabled, blocked, onChange, onPending }: { room: PricingConfiguration; offer: Offer; names?: Readonly<Record<string, string>>; label: string; disabled: boolean; blocked: boolean;
   onChange: (room: PricingConfiguration) => void; onPending: (pending: boolean) => void }) {
   const [parent, setParent] = useState<string | null>(null), [ack, setAck] = useState(false), [error, setError] = useState("");
   const { t } = useTranslation();
   if (offer.price.kind !== "linked") return null;
   const currentParent = offer.price.parentId, choices = linkedParentChoices(room, offer.id);
-  const name = (id: string) => t("pricing.offerNumber", { number: room.offers.findIndex((value) => value.id === id) + 1 });
+  const name = (id: string) => names?.[id] ?? t("pricing.offerNumber", { number: room.offers.findIndex((value) => value.id === id) + 1 });
   const alternative = choices.some((value) => value.id !== currentParent);
   const cancel = () => { setParent(null); setAck(false); setError(""); onPending(false); };
   return <PricingSection title={t("pricing.linkedParent.section")} label={t("pricing.linkedParent.current", { label, parent: name(currentParent) })} value={name(currentParent)} keepOpen={parent !== null}>

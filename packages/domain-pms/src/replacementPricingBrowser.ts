@@ -14,5 +14,7 @@ export {
 export { parseFlexibleCancellationTerms } from "./pricing.js";
 export {
   calculateReplacementRoomStay,
+  projectReplacementRoomNights,
+  type RoomNightProjectionResult,
   type RoomStayPricingResult,
 } from "./replacementPricingCalculator.js";

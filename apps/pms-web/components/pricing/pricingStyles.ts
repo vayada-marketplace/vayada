@@ -51,3 +51,20 @@ export const formLook = {
   error: errorText,
   button: primaryButton,
 };
+/** The step-by-step tab (Paper design "Prices tab – step by step"): numbered question cards, their chips and buttons. */
+export const stepCard =
+  "flex gap-4 rounded-2xl border border-gray-200 bg-white p-5 md:gap-[18px] md:p-7";
+export const stepNumber =
+  "flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-600 text-[14px] font-bold text-white";
+export const stepTitle = "text-[17px] font-semibold leading-6 text-gray-900";
+export const stepHint = "text-[14px] leading-5 text-gray-500";
+export const stepButton =
+  "inline-flex h-10 items-center gap-2 rounded-[10px] border border-gray-300 bg-white px-4 text-[14px] font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50";
+export const stepLink =
+  "text-[14px] font-medium text-primary-600 hover:text-primary-700 disabled:cursor-not-allowed disabled:opacity-50";
+export const chip = (selected: boolean) =>
+  `inline-flex h-10 items-center rounded-full border px-[18px] text-[14px] transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+    selected
+      ? "border-primary-600 bg-primary-600 font-semibold text-white"
+      : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+  }`;
