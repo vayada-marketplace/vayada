@@ -20,6 +20,7 @@ import { changeSeasonPrice } from "./PricingSeasons";
 import { changeMonthPrice } from "./PricingMonths";
 import { changeWeekdayPrice } from "./PricingWeekdays";
 import { editedSnapshot } from "./pricingAmounts";
+import Modal from "@/components/Modal";
 import { ApiErrorResponse } from "@/services/api/client";
 import type {
   PricingSnapshot,
@@ -116,8 +117,33 @@ const touch = async () => {
   await act(async () => input().props.onChange({ target: { value: input().props.value } }));
 };
 const reload = async () => {
-  await click("Reload pricing");
-  if (button("Discard and reload")) await click("Discard and reload");
+  await click(button("Reload pricing") ? "Reload pricing" : "Cancel");
+  for (const confirm of ["Discard and reload", "Discard changes"])
+    if (button(confirm)) await click(confirm);
+};
+/** Opens step 2's season window: a season from the year bar by its name, or "Add season". */
+const openSeason = async (name?: string) => {
+  const target = name
+    ? view.root
+        .findAllByType("button")
+        .find((node) => String(node.props["aria-label"] ?? "").startsWith(`Edit season ${name} `))!
+    : button("Add season");
+  await act(async () => target.props.onClick());
+};
+/** A button in the open season window (its footer has its own Cancel). */
+const seasonButton = (label: string) =>
+  view.root
+    .findByType(Modal)
+    .findAllByType("button")
+    .find(
+      (node) =>
+        node.children
+          .filter((child) => typeof child === "string")
+          .join("")
+          .trim() === label,
+    );
+const seasonClick = async (label: string) => {
+  await act(async () => seasonButton(label)!.props.onClick());
 };
 const mount = async (roomTypeId = "room") => {
   await act(async () => {
@@ -278,7 +304,8 @@ it.each([
     expect(input().props.value).toBe("123.45");
     expect(input().props.disabled).toBe(false);
     expect(client.saveDraft).not.toHaveBeenCalled();
-    expect(button("Reload pricing").props.disabled).toBe(false);
+    // The edits are still unsaved, so the button beside Save discards them.
+    expect(button("Cancel").props.disabled).toBe(false);
     expect(button("Save prices").props.disabled).toBe(false);
     await act(async () => input().props.onChange({ target: { value: "124.45" } }));
     await click("Save prices");
@@ -1029,13 +1056,13 @@ it("validates recurring season dates and preserves the exact other pricing rules
   }
 });
 
-it("protects season text independently and requires review after adding or clearing", async () => {
+it("protects the season window independently and requires review after adding a season", async () => {
   await mount();
   await touch();
   const field = (name: string) => view.root.findByProps({ "aria-label": name });
   const fill = async (name: string, value: string) =>
     act(async () => field(name).props.onChange({ target: { value } }));
-  await fill("Tier label (optional) for Room 1 Offer 1", "High");
+  await openSeason();
   await fill("Month for Room 1 Offer 1", "8");
   await click("Cancel month entry");
   expect(button("Save prices").props.disabled).toBe(true);
@@ -1047,26 +1074,30 @@ it("protects season text independently and requires review after adding or clear
   listener(unload);
   expect(unload.defaultPrevented).toBe(true);
   await fill("Month for Room 1 Offer 1", "8");
-  await click("Cancel season entry");
+  await seasonClick("Cancel");
+  expect(view.root.findAllByType(Modal)).toHaveLength(0);
   expect(button("Save prices").props.disabled).toBe(true);
   await click("Cancel month entry");
   expect(button("Save prices").props.disabled).toBe(false);
+  await openSeason();
   for (const [name, value] of [
     ["Season name", "Summer"],
-    ["Tier label (optional)", "High"],
-    ["Start (MM-DD)", "06-15"],
-    ["End (MM-DD)", "09-10"],
-    ["Seasonal Per room", "180.25"],
+    ["Starts: day", "15"],
+    ["Starts: month", "6"],
+    ["Ends: day", "10"],
+    ["Ends: month", "9"],
+    ["Season price Per room", "180.25"],
   ])
-    await fill(`${name} for Room 1 Offer 1`, value);
-  await click("Add seasonal price");
+    await fill(name, value);
+  await seasonClick("Save season");
+  expect(view.root.findAllByType(Modal)).toHaveLength(0);
   await click("Save prices");
   expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({
     calendar: {
       seasons: [
         {
           name: "Summer",
-          tier: "High",
+          tier: "",
           from: "06-15",
           through: "09-10",
           price: { amountMinor: "18025" },
@@ -1074,10 +1105,42 @@ it("protects season text independently and requires review after adding or clear
       ],
     },
   });
-  expect(button("Clear seasonal price").props.disabled).toBe(true);
-  expect(button("Add seasonal price").props.disabled).toBe(true);
+  expect(button("Add season").props.disabled).toBe(true);
   expect(button("Save prices").props.disabled).toBe(true);
-  expect(JSON.stringify(view.toJSON())).toContain("Summer");
+  expect(JSON.stringify(view.toJSON())).toContain("Summer · €180.25");
+});
+it("checks the season window's days and overlaps before changing the room", async () => {
+  await mount();
+  const field = (name: string) => view.root.findByProps({ "aria-label": name });
+  const fill = async (name: string, value: string) =>
+    act(async () => field(name).props.onChange({ target: { value } }));
+  const add = async (name: string, from: [string, string], through: [string, string]) => {
+    await openSeason();
+    for (const [label, value] of [
+      ["Season name", name],
+      ["Starts: day", from[0]],
+      ["Starts: month", from[1]],
+      ["Ends: day", through[0]],
+      ["Ends: month", through[1]],
+      ["Season price Per room", "150"],
+    ])
+      await fill(label, value);
+    await seasonClick("Save season");
+  };
+  await add("Winter", ["20", "12"], ["5", "1"]);
+  expect(view.root.findAllByType(Modal)).toHaveLength(0);
+  await add("Odd", ["30", "2"], ["3", "3"]);
+  expect(JSON.stringify(view.toJSON())).toContain("Choose a real start day and end day.");
+  await seasonClick("Cancel");
+  await add("New year", ["1", "1"], ["10", "1"]);
+  expect(JSON.stringify(view.toJSON())).toContain("These days overlap another season.");
+  await seasonClick("Cancel");
+  await openSeason("Winter");
+  expect(field("Starts: day").props.value).toBe("20");
+  expect(field("Ends: month").props.value).toBe("1");
+  await seasonClick("Delete season");
+  await click("Save prices");
+  expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { seasons: [] } });
 });
 
 it("updates only own default stay rules and preserves exceptions and linked ownership", () => {
@@ -3023,7 +3086,7 @@ it("edits seasonal prices in all four modes without replacing the season's setti
     expect(calendar).toEqual(original);
   }
 });
-it("prefills seasonal edits, protects pending values and retains settings through save review and reload", async () => {
+it("prefills season edits, protects pending values and retains settings through save review and reload", async () => {
   const original = includedRoom();
   const room = changeIncludedAdjustments(
     original,
@@ -3050,26 +3113,22 @@ it("prefills seasonal edits, protects pending values and retains settings throug
   const field = (name: string) => view.root.findByProps({ "aria-label": name });
   const fill = async (name: string, value: string) =>
     act(async () => field(name).props.onChange({ target: { value } }));
-  await fill("Season name for Room 1 Offer 1", "New");
-  expect(button("Edit seasonal price").props.disabled).toBe(true);
-  await click("Edit seasonal price");
-  expect(button("Apply seasonal price")).toBeUndefined();
-  await click("Cancel season entry");
-  await click("Edit seasonal price");
-  expect(field("Seasonal 2 adults included for Room 1 Offer 1").props.value).toBe("250.00");
+  const bar = () =>
+    view.root
+      .findAllByType("button")
+      .find((node) => String(node.props["aria-label"] ?? "").startsWith("Edit season Winter "))!;
+  await openSeason("Winter");
+  expect(field("Season price 2 adults included").props.value).toBe("250.00");
   for (const [name, value] of [
     ["Season name", "Winter"],
-    ["Tier label (optional)", "high"],
-    ["Start (MM-DD)", "12-01"],
-    ["End (MM-DD)", "12-31"],
+    ["Starts: day", "1"],
+    ["Starts: month", "12"],
+    ["Ends: day", "31"],
+    ["Ends: month", "12"],
   ]) {
-    expect(field(`${name} for Room 1 Offer 1`).props.value).toBe(value);
-    expect(field(`${name} for Room 1 Offer 1`).props.disabled).toBe(false);
+    expect(field(name).props.value).toBe(value);
+    expect(field(name).props.disabled).toBe(false);
   }
-  expect(button("Clear seasonal price").props.disabled).toBe(true);
-  expect(button("Edit seasonal price").props.disabled).toBe(true);
-  await click("Clear seasonal price");
-  expect(button("Apply seasonal price")).toBeDefined();
   expect(button("Save prices").props.disabled).toBe(true);
   expect(button("Edit included-adult adjustments").props.disabled).toBe(true);
   const warn = vi
@@ -3079,17 +3138,17 @@ it("prefills seasonal edits, protects pending values and retains settings throug
   const event = { preventDefault: vi.fn(), returnValue: undefined };
   warn(event);
   expect(event.preventDefault).toHaveBeenCalled();
-  await fill("Seasonal 2 adults included for Room 1 Offer 1", "20");
-  await click("Apply seasonal price");
+  await fill("Season price 2 adults included", "20");
+  await seasonClick("Save season");
   expect(JSON.stringify(view.toJSON())).toContain("Every adjusted room price must be positive");
-  await click("Cancel season entry");
+  await seasonClick("Cancel");
   expect(button("Save prices").props.disabled).toBe(false);
   expect(client.saveDraft).not.toHaveBeenCalled();
   await fill("Room 1 Offer 1 1 adult included", "150.25");
-  await click("Edit seasonal price");
-  expect(field("Seasonal 2 adults included for Room 1 Offer 1").props.value).toBe("250.00");
-  await fill("Seasonal 2 adults included for Room 1 Offer 1", "260.25");
-  await click("Apply seasonal price");
+  await openSeason("Winter");
+  expect(field("Season price 2 adults included").props.value).toBe("250.00");
+  await fill("Season price 2 adults included", "260.25");
+  await seasonClick("Save season");
   await click("Save prices");
   expect(saved).toMatchObject({ baseRevision: 7, revision: 2 });
   expect(saved.snapshot.rooms[0].revision).toBe(8);
@@ -3106,12 +3165,12 @@ it("prefills seasonal edits, protects pending values and retains settings throug
   expect(price.calendar.months).toEqual(source.calendar.months);
   expect(price.calendar.dates).toEqual(source.calendar.dates);
   expect(saved.snapshot.rooms[0].offers.slice(1)).toEqual(room.offers.slice(1));
-  expect(button("Edit seasonal price").props.disabled).toBe(true);
+  expect(bar().props.disabled).toBe(true);
   expect(button("Save prices").props.disabled).toBe(true);
   client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false });
   await reload();
-  await click("Edit seasonal price");
-  expect(field("Seasonal 2 adults included for Room 1 Offer 1").props.value).toBe("260.25");
+  await openSeason("Winter");
+  expect(field("Season price 2 adults included").props.value).toBe("260.25");
 });
 
 it("moves only the original season and checks overlaps against other seasons", () => {
@@ -3153,7 +3212,7 @@ it("moves only the original season and checks overlaps against other seasons", (
       .offers[0].price,
   ).toMatchObject({ calendar: { seasons: [{ from: "02-29", through: "02-29" }] } });
 });
-it("keeps a cleared season edit pending and saves renamed dates with the original price", async () => {
+it("keeps the season window open on an error and saves renamed dates with the original price", async () => {
   const room = includedRoom();
   client.read.mockResolvedValueOnce({
     ...snapshot,
@@ -3164,34 +3223,38 @@ it("keeps a cleared season edit pending and saves renamed dates with the origina
   });
   await mount();
   await touch();
-  const field = (name: string) =>
-    view.root.findByProps({ "aria-label": `${name} for Room 1 Offer 1` });
+  const field = (name: string) => view.root.findByProps({ "aria-label": name });
   const fill = async (name: string, value: string) =>
     act(async () => field(name).props.onChange({ target: { value } }));
-  await click("Edit seasonal price");
+  await openSeason("Winter");
   for (const name of [
     "Season name",
-    "Tier label (optional)",
-    "Start (MM-DD)",
-    "End (MM-DD)",
-    "Seasonal 2 adults included",
+    "Starts: day",
+    "Starts: month",
+    "Ends: day",
+    "Ends: month",
+    "Season price 2 adults included",
   ])
     await fill(name, "");
   expect(button("Save prices").props.disabled).toBe(true);
-  expect(button("Clear seasonal price").props.disabled).toBe(true);
-  await click("Apply seasonal price");
+  await seasonClick("Save season");
   expect(JSON.stringify(view.toJSON())).toContain("Enter a season name");
-  await click("Cancel season entry");
+  expect(view.root.findAllByType(Modal)).toHaveLength(1);
+  await seasonClick("Cancel");
   expect(button("Save prices").props.disabled).toBe(false);
-  await click("Edit seasonal price");
+  await openSeason("Winter");
   expect(field("Season name").props.value).toBe("Winter");
-  expect(field("Seasonal 2 adults included").props.value).toBe("250.00");
-  await fill("Season name", "Holiday");
-  await fill("Tier label (optional)", "");
-  await fill("Start (MM-DD)", "12-15");
-  await fill("End (MM-DD)", "01-10");
-  expect(field("Seasonal 2 adults included").props.value).toBe("250.00");
-  await click("Apply seasonal price");
+  expect(field("Season price 2 adults included").props.value).toBe("250.00");
+  for (const [name, value] of [
+    ["Season name", "Holiday"],
+    ["Starts: day", "15"],
+    ["Starts: month", "12"],
+    ["Ends: day", "10"],
+    ["Ends: month", "1"],
+  ])
+    await fill(name, value);
+  expect(field("Season price 2 adults included").props.value).toBe("250.00");
+  await seasonClick("Save season");
   await click("Save prices");
   expect(saved).toMatchObject({ revision: 2, baseRevision: 7 });
   expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({
@@ -3199,7 +3262,7 @@ it("keeps a cleared season edit pending and saves renamed dates with the origina
       seasons: [
         {
           name: "Holiday",
-          tier: "",
+          tier: "high",
           from: "12-15",
           through: "01-10",
           price: { baseMinor: "25000", baseGuests: 2 },
@@ -3208,13 +3271,12 @@ it("keeps a cleared season edit pending and saves renamed dates with the origina
     },
   });
   expect(saved.snapshot.rooms[0].offers[0].restrictions).toEqual(room.offers[0].restrictions);
-  expect(button("Edit seasonal price").props.disabled).toBe(true);
   expect(button("Save prices").props.disabled).toBe(true);
   client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false });
   await reload();
-  await click("Edit seasonal price");
+  await openSeason("Holiday");
   expect(field("Season name").props.value).toBe("Holiday");
-  expect(field("End (MM-DD)").props.value).toBe("01-10");
+  expect(field("Ends: day").props.value).toBe("10");
 });
 
 it.each([false, true])(
@@ -3650,20 +3712,29 @@ it.each(["monthly", "seasonal"] as const)(
     const field = (name: string) => view.root.findByProps({ "aria-label": name });
     const fill = async (name: string, value: string) =>
       act(async () => field(name).props.onChange({ target: { value } }));
-    const suffix = ` for Room 1 Offer 1 ${scope} price`,
-      cancel = scope === "monthly" ? "Cancel month entry" : "Cancel season entry";
-    await click(`Edit ${scope} price`);
+    const suffix = ` for Room 1 Offer 1 ${scope} price`;
+    // Monthly prices are edited under More options; seasons in step 2's season window.
+    const open = () => (scope === "monthly" ? click("Edit monthly price") : openSeason("Winter"));
+    const apply = () => (scope === "monthly" ? click("Apply monthly price") : seasonClick("Save season"));
+    const cancel = () => (scope === "monthly" ? click("Cancel month entry") : seasonClick("Cancel"));
+    const editButton = () =>
+      scope === "monthly"
+        ? button("Edit monthly price")
+        : view.root
+            .findAllByType("button")
+            .find((node) => String(node.props["aria-label"] ?? "").startsWith("Edit season Winter "))!;
+    await open();
     expect(field(`Adults included in the base price${suffix}`).props.value).toBe("2");
     expect(field(`Adjustment for 1 adult${suffix}`).props.value).toBe("-30.00");
     expect(field(`Adjustment for 3 adults${suffix}`).props.value).toBe("19.25");
     await fill(`Adults included in the base price${suffix}`, "1");
     expect(field(`Adjustment for 2 adults${suffix}`).props.value).toBe("");
-    await click(`Apply ${scope} price`);
+    await apply();
     expect(view.root.findAllByProps({ role: "alert" })).toHaveLength(1);
     expect(button("Save prices").props.disabled).toBe(true);
-    await click(cancel);
+    await cancel();
     expect(button("Save prices").props.disabled).toBe(false);
-    await click(`Edit ${scope} price`);
+    await open();
     expect(field(`Adults included in the base price${suffix}`).props.value).toBe("2");
     await fill(`Adults included in the base price${suffix}`, "1");
     for (const [count, kind, value] of [
@@ -3673,7 +3744,7 @@ it.each(["monthly", "seasonal"] as const)(
       await fill(`Adjustment type for ${count} adults${suffix}`, kind);
       await fill(`Adjustment for ${count} adults${suffix}`, value);
     }
-    await click(`Apply ${scope} price`);
+    await apply();
     await click("Save prices");
     const source = room.offers[0].price,
       price = saved.snapshot.rooms[0].offers[0].price;
@@ -3698,10 +3769,10 @@ it.each(["monthly", "seasonal"] as const)(
       ],
     });
     expect(saved.snapshot.rooms[0].offers.slice(1)).toEqual(room.offers.slice(1));
-    expect(button(`Edit ${scope} price`).props.disabled).toBe(true);
+    expect(editButton().props.disabled).toBe(true);
     client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false });
     await reload();
-    await click(`Edit ${scope} price`);
+    await open();
     expect(field(`Adults included in the base price${suffix}`).props.value).toBe("1");
     expect(field(`Adjustment for 2 adults${suffix}`).props.value).toBe("12.25");
   },
@@ -3716,7 +3787,7 @@ it("retains independent pending included edits for both calendar forms", async (
   });
   await mount();
   await click("Edit monthly price");
-  await click("Edit seasonal price");
+  await openSeason("Winter");
   const fill = async (name: string, value: string) =>
     act(async () =>
       view.root.findByProps({ "aria-label": name }).props.onChange({ target: { value } }),
@@ -3725,7 +3796,7 @@ it("retains independent pending included edits for both calendar forms", async (
   await fill("Adjustment for 1 adult for Room 1 Offer 1 seasonal price", "-10.25");
   await click("Apply monthly price");
   expect(button("Save prices").props.disabled).toBe(true);
-  await click("Apply seasonal price");
+  await seasonClick("Save season");
   await click("Save prices");
   expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({
     calendar: {
@@ -3883,6 +3954,9 @@ it.each(["monthly", "seasonal", "date"] as const)(
     const fill = async (name: string, value: string) =>
       act(async () => field(name).props.onChange({ target: { value } }));
     const suffix = ` for Room 1 Offer 1 ${scope} price`;
+    // A new season is added in step 2's season window.
+    const add = () => (scope === "seasonal" ? seasonClick("Save season") : click(`Add ${scope} price`));
+    if (scope === "seasonal") await openSeason();
     if (scope === "date") await fill("New date pricing for Room 1 Offer 1", "recurring");
     expect(field(`Adults included in the base price${suffix}`).props.value).toBe("2");
     expect(field(`Adjustment for 1 adult${suffix}`).props.value).toBe("-30.00");
@@ -3892,16 +3966,12 @@ it.each(["monthly", "seasonal", "date"] as const)(
     expect(button("Save prices").props.disabled).toBe(true);
     // Clearing other fields must not drop the pending occupancy settings.
     if (scope === "monthly") await fill("Month for Room 1 Offer 1", "");
-    if (scope === "seasonal") await fill("Season name for Room 1 Offer 1", "");
+    if (scope === "seasonal") await fill("Season name", "");
     expect(button("Save prices").props.disabled).toBe(true);
-    await click(
-      scope === "monthly"
-        ? "Cancel month entry"
-        : scope === "seasonal"
-          ? "Cancel season entry"
-          : "Cancel date entry",
-    );
+    if (scope === "seasonal") await seasonClick("Cancel");
+    else await click(scope === "monthly" ? "Cancel month entry" : "Cancel date entry");
     expect(button("Save prices").props.disabled).toBe(false);
+    if (scope === "seasonal") await openSeason();
     if (scope === "date") await fill("New date pricing for Room 1 Offer 1", "recurring");
     expect(field(`Adults included in the base price${suffix}`).props.value).toBe("2");
     await fill(`Adults included in the base price${suffix}`, "1");
@@ -3909,22 +3979,26 @@ it.each(["monthly", "seasonal", "date"] as const)(
     else if (scope === "seasonal")
       for (const [label, value] of [
         ["Season name", "Spring"],
-        ["Start (MM-DD)", "03-01"],
-        ["End (MM-DD)", "03-31"],
+        ["Starts: day", "1"],
+        ["Starts: month", "3"],
+        ["Ends: day", "31"],
+        ["Ends: month", "3"],
       ])
-        await fill(`${label} for Room 1 Offer 1`, value);
+        await fill(label, value);
     else await fill("Override date for Room 1 Offer 1", "2027-03-01");
     await fill(
-      `${scope === "monthly" ? "Monthly" : scope === "seasonal" ? "Seasonal" : "Date"} 1 adult included for Room 1 Offer 1`,
+      scope === "seasonal"
+        ? "Season price 1 adult included"
+        : `${scope === "monthly" ? "Monthly" : "Date"} 1 adult included for Room 1 Offer 1`,
       "240.25",
     );
-    await click(`Add ${scope} price`);
+    await add();
     expect(view.root.findAllByProps({ role: "alert" })).toHaveLength(1);
     await fill(`Adjustment type for 2 adults${suffix}`, "fixed");
     await fill(`Adjustment for 2 adults${suffix}`, "12.25");
     await fill(`Adjustment type for 3 adults${suffix}`, "percentage");
     await fill(`Adjustment for 3 adults${suffix}`, "15.75");
-    await click(`Add ${scope} price`);
+    await add();
     await click("Save prices");
     const source = room.offers[0].price,
       result = saved.snapshot.rooms[0].offers[0].price;
@@ -3950,13 +4024,13 @@ it.each(["monthly", "seasonal", "date"] as const)(
     expect(saved.snapshot.rooms[0].offers.slice(1)).toEqual(room.offers.slice(1));
     client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false });
     await reload();
-    const editLabel =
-      scope === "monthly"
-        ? "Edit September price"
-        : scope === "seasonal"
-          ? "Edit season 03-01 to 03-31"
-          : "Edit 2027-03-01 price";
-    await act(async () => field(`${editLabel} for Room 1 Offer 1`).props.onClick());
+    if (scope === "seasonal") await openSeason("Spring");
+    else
+      await act(async () =>
+        field(
+          `${scope === "monthly" ? "Edit September price" : "Edit 2027-03-01 price"} for Room 1 Offer 1`,
+        ).props.onClick(),
+      );
     expect(field(`Adults included in the base price${suffix}`).props.value).toBe("1");
     expect(field(`Adjustment for 2 adults${suffix}`).props.value).toBe("12.25");
   },
@@ -4130,7 +4204,7 @@ it("does not offer to keep edits after a denial, or when nothing was edited", as
   await click("Reload pricing"); expect(button("Save prices").props.disabled).toBe(false);
   expect(JSON.stringify(view.toJSON())).not.toContain("your changes to this room are kept");
 });
-it("lays the room's prices out like Room Details: status in the top card, Reload beside Save at the bottom (VAY-2122)", async () => {
+it("keeps the status, the declaration and Reload beside Save in the sticky bar (VAY-2122, VAY-2125)", async () => {
   client.read.mockResolvedValue(published()); await mountRoom();
   const text = () => JSON.stringify(view.toJSON());
   expect(text()).toContain("Current rates");

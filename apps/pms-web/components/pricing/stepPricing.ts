@@ -284,3 +284,34 @@ export function childrenSummary(room: Room, t: Translate) {
     })
     .join(" · ");
 }
+
+/** The symbol shown inside the price field ("€"), or null when it would only repeat the currency code. */
+export function currencySymbol(currency: string) {
+  const symbol = formatCurrency(0, currency)
+    .replace(/[\d\s.,]+$/, "")
+    .trim();
+  return symbol && symbol !== currency ? symbol : null;
+}
+/** A weekday or linked adjustment as a short text: "+15%", "−5%", "+€10". */
+export function adjustmentText(
+  adjustment: Calendar["weekdays"][number]["adjustment"],
+  currency: string,
+) {
+  const value =
+    adjustment.kind === "percentage" ? String(adjustment.basisPoints) : adjustment.deltaMinor;
+  const sign = value.startsWith("-") ? "−" : "+";
+  return adjustment.kind === "percentage"
+    ? `${sign}${Math.abs(adjustment.basisPoints) / 100}%`
+    : `${sign}${money(value.replace(/^-/, ""), currency)}`;
+}
+/** Whether two recurring seasons (MM-DD, possibly over the new year) share a day. */
+export function seasonsOverlap(
+  a: { from: string; through: string },
+  b: { from: string; through: string },
+) {
+  for (let day = 0; day < 366; day++) {
+    const date = new Date(Date.UTC(2000, 0, 1 + day)).toISOString().slice(5, 10);
+    if (inSeason(date, a.from, a.through) && inSeason(date, b.from, b.through)) return true;
+  }
+  return false;
+}
