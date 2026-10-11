@@ -480,6 +480,7 @@
   "bookings.detail.editedBy": "Bearbeitet von {name} · {date}",
   "bookings.detail.checkInGuest": "Gast einchecken",
   "bookings.detail.reviewManualPayment": "Prüfen Sie diese Buchung mit manueller Zahlung.",
+  "bookings.detail.confirmManualPaymentReceipt": "Der Gast zahlt direkt an Sie. Sobald das Geld eingegangen ist, markieren Sie es als erhalten, um die Buchung zu bestätigen. Geht es bis zur Frist nicht ein, verfällt die Buchung und die Zimmer werden freigegeben.",
   "bookings.detail.cancelNotReceived": "Stornieren – nicht eingegangen",
   "bookings.detail.rejectionUnavailable": "Das Ablehnen von Buchungen ist noch nicht verfügbar",
   "bookings.detail.confirmPaypalAfterReceipt": "Bestätigen Sie die PayPal-Zahlung, sobald sie auf Ihrem Konto eingegangen ist.",

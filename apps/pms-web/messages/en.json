@@ -482,6 +482,7 @@
   "bookings.detail.editedBy": "Edited by {name} · {date}",
   "bookings.detail.checkInGuest": "Check in guest",
   "bookings.detail.reviewManualPayment": "Review this manual-payment booking.",
+  "bookings.detail.confirmManualPaymentReceipt": "The guest pays you directly. When the money arrives, mark it as received to confirm the booking. If it doesn't arrive by the deadline, the booking expires and the rooms are released.",
   "bookings.detail.cancelNotReceived": "Cancel - not received",
   "bookings.detail.rejectionUnavailable": "Booking rejection is not available yet",
   "bookings.detail.confirmPaypalAfterReceipt": "Confirm the PayPal payment after it reaches your account.",

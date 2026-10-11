@@ -136,6 +136,8 @@ export interface Booking {
   checkedInAt: string | null;
   checkedOutAt: string | null;
   hostResponseDeadline: string | null;
+  /** The guest pays the hotel directly; "mark paid" confirms the booking, there is no accept step. */
+  awaitingPaymentConfirmation: boolean;
   platformFeeAmount: number | null;
   affiliateCommissionAmount: number | null;
   propertyPayoutAmount: number | null;
@@ -410,6 +412,8 @@ type PmsOperationalReservation = {
     };
   };
   hostResponseDeadlineAt?: string | null;
+  /** Bank transfer or PayPal from the booking page: the hotel confirms the payment (VAY-2139). */
+  awaitingHotelPaymentConfirmation?: boolean;
 };
 
 type PmsOperationsListResponse<T> = {
@@ -1364,6 +1368,7 @@ function toBooking(
     checkedInAt: reservation.checkin.completedAt,
     checkedOutAt: reservation.checkout.completedAt,
     hostResponseDeadline: reservation.hostResponseDeadlineAt ?? null,
+    awaitingPaymentConfirmation: reservation.awaitingHotelPaymentConfirmation === true,
     cancellationOutcome: reservation.cancellationOutcome ?? null,
     platformFeeAmount: null,
     affiliateCommissionAmount: null,

@@ -3003,9 +3003,13 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             most urgent action stays visible without scrolling further. */}
         {isPending && booking.hostResponseDeadline && (
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-            <p className="mb-2 text-xs text-gray-500">{t("bookings.detail.reviewManualPayment")}</p>
+            <p className="mb-2 text-xs text-gray-500">
+              {booking.awaitingPaymentConfirmation
+                ? t("bookings.detail.confirmManualPaymentReceipt")
+                : t("bookings.detail.reviewManualPayment")}
+            </p>
             <div className="flex flex-wrap gap-3">
-              {booking.paymentMethod === "paypal" ? (
+              {booking.paymentMethod === "paypal" || booking.awaitingPaymentConfirmation ? (
                 <button
                   onClick={handleMarkPaid}
                   disabled={
@@ -3014,7 +3018,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                   className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
                 >
                   <CheckCircleIcon className="w-4 h-4" />
-                  {t("bookings.detail.markAsPaid")}
+                  {booking.paymentMethod === "bank_transfer"
+                    ? t("bookings.detail.markBankTransferReceived")
+                    : t("bookings.detail.markAsPaid")}
                 </button>
               ) : (
                 <button
