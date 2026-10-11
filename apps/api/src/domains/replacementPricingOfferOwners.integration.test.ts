@@ -3,6 +3,8 @@ import {
   CHANNEX_MANAGEMENT_WORKER_ROLE,
 } from "../jobs/channexManagementWorkerPrivileges.js";
 import { createPublicPricingOfferCatalog } from "./publicPricingOfferCatalog.js";
+import { createTargetPmsInventoryPublicOfferProjection } from "./pmsInventoryPublicOfferProjection.js";
+import { createTargetPublicBookabilityPublicationCommandPort } from "../platform/publicBookabilityPublication.js";
 import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import { parsePublicBookingQuote } from "@vayada/domain-booking/replacement-pricing";
 import { createReplacementBookingQuoteIssuer } from "../routes/replacementBookingQuote.js";
@@ -127,6 +129,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     configureTerms?: TermsSetup,
     enableCard = false,
     roomTotal = 2,
+    bookable = false,
   ) {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
       throw new Error("test database required");
@@ -237,8 +240,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       );
     await pool.query(
       `INSERT INTO finance.payment_settings(property_id,payments_enabled,accepted_methods,default_currency)
-      VALUES($1,true,ARRAY['pay_at_property'],'EUR')`,
-      [propertyId],
+      VALUES($1,true,$2,'EUR')`,
+      // Cash also makes pay at property a public payment method in booking readiness.
+      [propertyId, bookable ? ["pay_at_property", "cash"] : ["pay_at_property"]],
     );
     if (enableCard) {
       const accountId = randomUUID(),
@@ -5770,8 +5774,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     policy?: FixedChargePolicy,
     configureTerms?: TermsSetup,
     enableCard = false,
+    realReadiness = false,
   ) {
-    const f = await fixture(configure, configureTerms, enableCard),
+    const f = await fixture(configure, configureTerms, enableCard, 2, realReadiness),
       propertyId = f.scope.propertyId;
     await pool.query(
       "UPDATE hotel_catalog.properties SET profile_status='complete',lifecycle_status='active' WHERE id=$1",
@@ -5791,14 +5796,32 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       VALUES($1::uuid,$1::text,'Published pricing test',$1::text,'en',ARRAY['en'],'complete')`,
       [propertyId],
     );
-    await pool.query(
-      `INSERT INTO distribution.public_hotel_bookability_profiles
-      (property_id,public_id,canonical_slug,canonical_url,booking_base_url,timezone,default_currency,supported_currencies,
-      profile_status,freshness_status,public_setup_completeness,capabilities)
-      VALUES($1::uuid,$1::text,$1::text,'https://example.test','https://example.test','Etc/UTC','EUR',ARRAY['EUR'],
-      'public','fresh','{"status":"ready"}','{"paymentMethods":["pay_at_property"]}')`,
-      [propertyId],
-    );
+    if (realReadiness) {
+      // Owner setup that booking readiness reads; the readiness projection builds the profile.
+      await pool.query("INSERT INTO booking.booking_settings(property_id) VALUES($1)", [
+        propertyId,
+      ]);
+      await pool.query(
+        `INSERT INTO finance.billing_entitlements
+        (organization_id,property_id,product,entitlement_key,billing_status,plan_key,billing_provider,source_system,entitlement_metadata)
+        VALUES($1,$2,'booking','direct-booking-finance','active','commission','none','finance','{"planSelectedAt":"2026-01-01T00:00:00Z"}')`,
+        [f.scope.organizationId, propertyId],
+      );
+      await pool.query(
+        `INSERT INTO finance.commission_rules
+        (rule_scope,property_id,product,commission_type,percentage_rate,source_system,source_rule_id)
+        VALUES('property',$1::uuid,'booking','percentage',5,'finance','onboarding-booking:' || $1::uuid::text)`,
+        [propertyId],
+      );
+    } else
+      await pool.query(
+        `INSERT INTO distribution.public_hotel_bookability_profiles
+        (property_id,public_id,canonical_slug,canonical_url,booking_base_url,timezone,default_currency,supported_currencies,
+        profile_status,freshness_status,public_setup_completeness,capabilities)
+        VALUES($1::uuid,$1::text,$1::text,'https://example.test','https://example.test','Etc/UTC','EUR',ARRAY['EUR'],
+        'public','fresh','{"status":"ready"}','{"paymentMethods":["pay_at_property"]}')`,
+        [propertyId],
+      );
     const publishPrices = () =>
       createReplacementPricingStore(pool, createReplacementPricingStorageGuard(f.context)).save(
         f.scope,
@@ -6186,6 +6209,162 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     } finally {
       await single.end();
     }
+  });
+  /** "Publish booking page": public content with the current rooms and offers, built from the
+   * current PMS pricing source as the publication projector records it, then activated. */
+  async function publishBookingPage(scope: {
+    propertyId: string;
+    organizationId: string;
+    actorUserId: string;
+  }) {
+    const id = scope.propertyId;
+    const owner = await (async () => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        return await lockCurrentPricingPublication(client, scope);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    })();
+    const mapped = owner && mapReplacementPublicOffers(owner);
+    if (!owner || !mapped) throw new Error("current offers required");
+    const profile = structuredClone(PUBLIC_BOOKABILITY_FIXTURES[0]!.profile);
+    profile.hotel.propertyId = id;
+    profile.hotel.slug = id;
+    const from = new Intl.DateTimeFormat("sv-SE", { timeZone: profile.hotel.timezone }).format(
+      new Date(profile.generatedAt),
+    );
+    const through = new Date(Date.parse(from) + 365 * 86_400_000).toISOString().slice(0, 10);
+    const hash = `sha256:${"a".repeat(64)}` as const;
+    const built = buildBookingPublicContent({
+      sourceManifestHash: hash,
+      readinessHash: hash,
+      profile,
+      rooms: mapped.map((room) => ({
+        roomTypeId: room.roomTypeId,
+        name: "Suite",
+        description: "",
+        category: null,
+        occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 0 },
+        beds: [{ type: "king", quantity: 1 }],
+        bedrooms: 1,
+        bathrooms: 1,
+        bathroomType: "private" as const,
+        size: null,
+        images: [{ url: "https://cdn.example.test/suite.webp" }],
+        amenities: [],
+        rates: room.offers,
+      })),
+      calendar: {
+        sourceRevision: "calendar:1",
+        materializedRevision: "calendar:1",
+        currentLocalDate: from,
+        coverageFrom: from,
+        coverageThrough: through,
+        materializedThrough: through,
+        expectedDayCount: 366 * mapped.length,
+        materializedDayCount: 366 * mapped.length,
+        gapCount: 0,
+        roomTypeIds: mapped.map((room) => room.roomTypeId),
+        observedAt: profile.generatedAt,
+      },
+      finance: {
+        defaultCurrency: "EUR",
+        supportedCurrencies: ["EUR"],
+        onlinePayment: true,
+        payAtProperty: true,
+        readyPaymentMethods: ["card", "pay_at_property"],
+      },
+    });
+    if (!built) throw new Error("public content required");
+    const revisionId = randomUUID();
+    await pool.query(
+      `INSERT INTO distribution.public_booking_content_revisions
+      (id,property_id,revision_number,readiness_contract_version,source_manifest,source_manifest_hash,readiness_hash,readiness_product,readiness_status,public_content,built_by_user_id)
+      SELECT $1::uuid,$2::uuid,COALESCE(max(revision_number),0)+1,'onboarding-product-readiness.v1',
+        $3::jsonb,$4::text,$4::text,'booking','ready',$5::jsonb,$6::uuid
+      FROM distribution.public_booking_content_revisions WHERE property_id=$2::uuid`,
+      [
+        revisionId,
+        id,
+        {
+          contractVersion: "onboarding-source-manifest.v1",
+          propertyId: id,
+          sources: [
+            {
+              ownerDomain: "pms",
+              entityType: "pms_pricing_publication.v2",
+              entityId: id,
+              revision: owner.pmsSourceRevision,
+            },
+          ],
+        },
+        hash,
+        built.publicContent,
+        scope.actorUserId,
+      ],
+    );
+    await pool.query(
+      `INSERT INTO distribution.active_public_booking_revision(property_id,content_revision_id,activated_by_user_id)
+      VALUES($1,$2,$3) ON CONFLICT(property_id) DO UPDATE SET content_revision_id=EXCLUDED.content_revision_id`,
+      [id, revisionId, scope.actorUserId],
+    );
+    return mapped;
+  }
+  it("makes a hotel with saved prices and free rooms ready and serves its offers (VAY-2123)", async () => {
+    const f = await publicFixture(false, undefined, undefined, undefined, false, true),
+      id = f.scope.propertyId;
+    const publisher = createTargetPublicBookabilityPublicationCommandPort({
+      connectionString: url!,
+      pool,
+    });
+    const readiness = async () =>
+      (
+        await pool.query(
+          `SELECT freshness_status AS freshness,public_setup_completeness AS setup
+          FROM distribution.public_hotel_bookability_profiles WHERE property_id=$1`,
+          [id],
+        )
+      ).rows[0];
+    await publisher.publish({ propertyId: id });
+    // Everything else is set up; only the sellable room offers are missing.
+    expect((await readiness()).setup.missing).toEqual([
+      "availability_source",
+      "sellable_availability",
+      "freshness",
+    ]);
+    await pool.query(
+      `INSERT INTO pms.inventory_days(property_id,room_type_id,stay_date,total_count,available_count)
+      SELECT $1::uuid,room.id,(now() AT TIME ZONE 'Etc/UTC')::date + day,2,2
+      FROM pms.room_types room CROSS JOIN generate_series(0,1) day WHERE room.property_id=$1::uuid`,
+      [id],
+    );
+    await f.publishPrices();
+    const projector = createTargetPmsInventoryPublicOfferProjection({
+      connectionString: url!,
+      pool,
+      refreshPublicBookability: async ({ propertyId }) => {
+        await publisher.publish({ propertyId });
+      },
+    });
+    await expect(projector.projectPending({ propertyId: id })).resolves.toEqual({
+      profileAvailable: true,
+      pendingEvents: 1,
+      projectedOfferDays: 6,
+    });
+    expect(await readiness()).toMatchObject({
+      freshness: "fresh",
+      setup: { status: "ready", missing: [] },
+    });
+
+    const mapped = await publishBookingPage(f.scope);
+    const offers = await createPublicPricingOfferCatalog(pool).read(id);
+    expect(
+      offers?.rooms.flatMap((room) => room.offers.map((offer) => offer.publicOfferKey)),
+    ).toEqual(mapped.flatMap((room) => room.offers.map((offer) => offer.ratePlanId)));
+    expect(offers?.rooms.flatMap((room) => room.offers)).toHaveLength(3);
   });
   it("serves the single owning organization and refuses unlinked, ambiguous or hidden properties", async () => {
     const f = await publicFixture(),
