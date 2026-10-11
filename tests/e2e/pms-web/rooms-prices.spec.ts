@@ -230,6 +230,11 @@ test("prices a room in its Prices tab and publishes the other rooms unchanged", 
   await expect(page).toHaveURL(new RegExp(`/rooms/${SUITE}\\?tab=prices$`));
   await expect(main(page).getByRole("heading", { name: "Prices", exact: true })).toBeVisible();
   await expect(priceInput(page, "Alpine Suite")).toHaveValue("120.00");
+  // VAY-2122: rows show short titles; their accessible names keep the room and offer.
+  await expect(main(page).getByText("Seasonal prices", { exact: true })).toBeVisible();
+  await expect(
+    main(page).getByLabel("Seasonal prices · Alpine Suite Offer 1", { exact: true }),
+  ).toBeVisible();
   await expect(main(page).getByText("Garden Room")).toHaveCount(0);
   await priceInput(page, "Alpine Suite").fill("135.50");
   await main(page).getByRole("button", { name: "Save prices" }).click();

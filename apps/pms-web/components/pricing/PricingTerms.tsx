@@ -8,6 +8,7 @@ import type { PricingTermsInput } from "@/services/api/replacementPricingClient"
 import { ApiErrorResponse } from "@/services/api/client";
 import { useTranslation } from "@/lib/i18n";
 import type { MessageKey } from "./pricingAmounts";
+import * as ui from "./pricingStyles";
 
 type Reference = { propertyId: string; client: ReturnType<typeof createReplacementPricingClient>; roomTypeId: string; offerId: string; revision: string; savedDraft?: { draftId: string; revision: number }; local?: PricingTermsInput; verified?: ReplacementOfferTerms; disabled?: boolean; blocked?: boolean; expanded?: boolean; onApply?(terms: ReplacementOfferTerms): void; onPending?(pending: boolean): void };
 // A new reference gets a new component: old policy data never flashes under a different offer.
@@ -37,22 +38,22 @@ function Terms({ client, roomTypeId, offerId, revision, savedDraft, local, verif
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [open, attempt, client, roomTypeId, offerId, revision, savedDraft, local, verified]);
-  return <div className="mt-3 border-t pt-3">
-    {!open ? <button type="button" className="font-medium text-emerald-800 underline" onClick={() => setOpen(true)}>{t("pricing.terms.show")}</button> : <>
-      <h4 className="font-medium text-gray-900">{t("pricing.terms.title")}</h4>
-      {loading && <p role="status">{t("pricing.terms.loading")}</p>}
-      {error && <div role="alert"><p>{t(error)}</p><button type="button" className="underline" onClick={() => setAttempt(attempt + 1)}>{t("pricing.terms.retry")}</button></div>}
-      {terms && <><Policy terms={terms} />{local && <p className="text-sm text-amber-900">{t("pricing.terms.unsaved")}</p>}
+  return <div className="space-y-2 border-t border-gray-100 pt-4">
+    {!open ? <button type="button" className={ui.secondaryButton} onClick={() => setOpen(true)}>{t("pricing.terms.show")}</button> : <>
+      <h4 className={ui.fieldLabel}>{t("pricing.terms.title")}</h4>
+      {loading && <p role="status" className={ui.help}>{t("pricing.terms.loading")}</p>}
+      {error && <div role="alert" className={ui.errorText}><p>{t(error)}</p><button type="button" className="font-medium text-primary-600 hover:text-primary-700" onClick={() => setAttempt(attempt + 1)}>{t("pricing.terms.retry")}</button></div>}
+      {terms && <><Policy terms={terms} />{local && <p className="text-[11px] text-amber-700">{t("pricing.terms.unsaved")}</p>}
         {onApply && (editing ? <PricingPolicyForm terms={terms} disabled={disabled} onCancel={() => { setEditing(false); onPending?.(false); }}
           onApply={(next) => { onApply(next); setEditing(false); onPending?.(false); }} /> :
-          <button type="button" disabled={disabled || blocked} className="mt-2 rounded border px-3 py-2 disabled:opacity-50" onClick={() => { if (!disabled && !blocked) { setEditing(true); onPending?.(true); } }}>{t("pricing.policy.title")}</button>)}</>}
+          <button type="button" disabled={disabled || blocked} className={ui.secondaryButton} onClick={() => { if (!disabled && !blocked) { setEditing(true); onPending?.(true); } }}>{t("pricing.policy.title")}</button>)}</>}
     </>}
   </div>;
 }
 function Policy({ terms }: { terms: ReplacementOfferTerms }) {
   const cancellation = terms.cancellation, payment = terms.payment;
   const { t } = useTranslation();
-  return <div className="mt-2 space-y-1">
+  return <div className="space-y-1 text-[12px] text-gray-700">
     {cancellation.kind === "non_refundable" ? <p>{t("pricing.terms.nonRefundable")}</p> : <>
       <p>{t(cancellation.terms.flexibleCancellationType === "partial_refund" ? "pricing.terms.partialRefund" : "pricing.terms.flexible")}</p>
       <p>{t("pricing.terms.deadline", { days: cancellation.terms.freeCancellationDeadlineDays })}</p>
@@ -67,7 +68,7 @@ function Policy({ terms }: { terms: ReplacementOfferTerms }) {
       <p>{t("pricing.terms.depositNote")}</p>
     </>}
     {payment.acceptedMethods?.length ? <p>{t("pricing.terms.methods", { methods: payment.acceptedMethods.map((method) => t(method === "card" ? "pricing.terms.methodCard" : "pricing.terms.methodPayAtProperty")).join(", ") })}</p>
-      : <p className="text-amber-900">{t("pricing.terms.noMethods")}</p>}
-    <p className="text-xs text-gray-500">{t("pricing.terms.footer")}</p>
+      : <p className="text-amber-700">{t("pricing.terms.noMethods")}</p>}
+    <p className={ui.hint}>{t("pricing.terms.footer")}</p>
   </div>;
 }

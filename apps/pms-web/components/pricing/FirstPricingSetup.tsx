@@ -5,10 +5,11 @@ import {
   type FirstPricingSetupProps,
 } from "@vayada/product-onboarding/FirstPricingSetup";
 import { useTranslation } from "@/lib/i18n";
+import * as ui from "./pricingStyles";
 
 export { firstPricingInput, type SetupRoom } from "@vayada/product-onboarding/FirstPricingSetup";
 
 export function FirstPricingSetup(props: Omit<FirstPricingSetupProps, "t">) {
   const { t } = useTranslation();
-  return <SharedFirstPricingSetup {...props} t={t} />;
+  return <SharedFirstPricingSetup {...props} t={t} look={ui.formLook} />;
 }
