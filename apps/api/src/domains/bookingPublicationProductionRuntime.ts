@@ -13,6 +13,7 @@ import type { HotelMediaResolutionPort } from "@vayada/domain-hotels";
 import type {
   PmsInventoryLaunchReadinessReadPort,
   PmsOperatingCalendarReadPort,
+  PmsPricingReadPort,
   RoomPublicationSnapshotPort,
 } from "@vayada/domain-pms";
 import type { FinancePaymentReadinessReadPort } from "@vayada/domain-finance";
@@ -31,6 +32,8 @@ import { createFinanceBookingPublicationSnapshotPort } from "./financeBookingPub
 import { createHotelCatalogBookingPublicationSource } from "./hotelCatalogBookingPublicationSource.js";
 import { createPmsBookingPublicationSource } from "./pmsBookingPublicationSource.js";
 import { createPublishedOfferCheck } from "./publicPricingOfferCatalog.js";
+
+type PmsPricingCurrencyReadPort = Pick<PmsPricingReadPort, "getPropertyPricingCurrency">;
 
 export type BookingPublicationProductionRuntime = {
   routes: {
@@ -148,9 +151,12 @@ export function createBookingPublicationProductionRuntime(config: {
   guestRules: BookingGuestChoicePublicationReader;
   rooms: RoomPublicationSnapshotPort;
   pricing: ReplacementPricingPublicationReader;
+  pricingCurrency: PmsPricingCurrencyReadPort;
   operatingCalendar: PmsOperatingCalendarReadPort;
   inventory: PmsInventoryLaunchReadinessReadPort;
   finance: FinancePaymentReadinessReadPort;
+  /** Receives one line per readiness check an owner could not answer (IDs and codes only). */
+  warn?: (fields: Record<string, unknown>, message: string) => void;
 }): BookingPublicationProductionRuntime {
   const catalog = createHotelCatalogBookingPublicationSource({
     connectionString: config.connectionString,
@@ -164,6 +170,7 @@ export function createBookingPublicationProductionRuntime(config: {
   const pms = createPmsBookingPublicationSource({
     rooms: config.rooms,
     pricing: config.pricing,
+    pricingCurrency: config.pricingCurrency,
     operatingCalendar: config.operatingCalendar,
     inventory: config.inventory,
   });
@@ -178,6 +185,8 @@ export function createBookingPublicationProductionRuntime(config: {
     booking,
     pms,
     finance: financeEvidence,
+    onUnavailable: (event) =>
+      config.warn?.({ ...event }, "Booking launch readiness owner unavailable"),
   });
   const builder = createBookingPublicationBuilder({
     catalog,
