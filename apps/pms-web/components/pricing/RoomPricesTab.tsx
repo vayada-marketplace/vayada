@@ -6,6 +6,7 @@ import { createReplacementPricingClient } from "@/services/api/replacementPricin
 
 import { PricingEditor } from "./PricingEditor";
 import { errorText } from "./pricingAmounts";
+import * as ui from "./pricingStyles";
 import { usePricingRooms } from "./usePricingRooms";
 
 /** The room page's Prices tab: this room's rates. Saving publishes them with the property's other rooms unchanged.
@@ -31,13 +32,13 @@ export function RoomPricesTab({
   );
   if (error)
     return (
-      <p role="alert" className="text-sm text-red-700">
+      <p role="alert" className={ui.errorBanner}>
         {errorText(error, t, "pricing.page.loadFailed")}
       </p>
     );
   if (!rooms || !client)
     return (
-      <p role="status" className="text-sm text-gray-600">
+      <p role="status" className="text-[12px] text-gray-500">
         {t("pricing.page.loading")}
       </p>
     );

@@ -93,8 +93,17 @@ const client = {
   publicationAction: vi.fn<(draft: PricingDraft) => typeof publish>(),
   readDraft: vi.fn(),
 };
+/** A button by its text; icons beside the text (e.g. "+ Add linked offer") are ignored. */
 const button = (label: string) =>
-  view.root.findAllByType("button").find((node) => node.children.join("") === label)!;
+  view.root
+    .findAllByType("button")
+    .find(
+      (node) =>
+        node.children
+          .filter((child) => typeof child === "string")
+          .join("")
+          .trim() === label,
+    )!;
 const click = async (label: string) => {
   await act(async () => {
     button(label).props.onClick();
@@ -4120,4 +4129,18 @@ it("does not offer to keep edits after a denial, or when nothing was edited", as
   client.prepare.mockRejectedValueOnce(new ApiErrorResponse(409, {})); await click("Save prices");
   await click("Reload pricing"); expect(button("Save prices").props.disabled).toBe(false);
   expect(JSON.stringify(view.toJSON())).not.toContain("your changes to this room are kept");
+});
+it("lays the room's prices out like Room Details: status in the top card, Reload beside Save at the bottom (VAY-2122)", async () => {
+  client.read.mockResolvedValue(published()); await mountRoom();
+  const text = () => JSON.stringify(view.toJSON());
+  expect(text()).toContain("Current rates");
+  const bar = button("Reload pricing").parent!;
+  expect(bar.props.className).toContain("sticky"); expect(button("Save prices").parent).toBe(bar);
+  expect(view.root.findAllByType("button").filter((node) => node.children.includes("Reload pricing"))).toHaveLength(1);
+  // Pressing Save is the charges declaration: its text sits in the same bar and describes the button.
+  const declaration = view.root.findByProps({ id: button("Save prices").props["aria-describedby"] });
+  expect(declaration.parent).toBe(bar); expect(declaration.children.join("")).toContain("mandatory taxes and fees");
+  await touch(); expect(text()).toContain("Unsaved changes");
+  // No heading repeats the room's name; the room page's title shows it.
+  expect(view.root.findAll((node) => /^h\d$/.test(String(node.type))).map((node) => node.children.join(""))).not.toContain("Family");
 });

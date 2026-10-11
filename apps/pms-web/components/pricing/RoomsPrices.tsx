@@ -12,6 +12,7 @@ import {
 
 import { decimalAmount } from "./pricingAmounts";
 import { financeNotReady, pricingSave, pricingSaveError } from "./savePricing";
+import * as ui from "./pricingStyles";
 
 type Client = ReturnType<typeof createReplacementPricingClient>;
 type Publication = Awaited<ReturnType<Client["read"]>>;
@@ -203,7 +204,12 @@ export function RoomsPricesStrip({
   return (
     <section
       aria-label={t("pricing.list.label")}
-      className="mb-4 rounded-xl border border-gray-200 bg-white px-4 py-3 text-[12px] text-gray-700"
+      // On a room page only the warning shows, as a banner like Room Details' messages.
+      className={
+        staleOnly
+          ? "mb-4 text-[11px]"
+          : "mb-4 rounded-xl border border-gray-200 bg-white px-4 py-3 text-[12px] text-gray-700"
+      }
     >
       {!staleOnly && (
         <p>
@@ -214,7 +220,7 @@ export function RoomsPricesStrip({
       )}
       {publication?.stale && (
         <div
-          className={`${staleOnly ? "" : "mt-3 "}rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900`}
+          className={`${staleOnly ? "" : "mt-3 "}rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800`}
         >
           <p className="font-semibold">{t("pricing.list.staleTitle")}</p>
           <p className="mt-1">{t("pricing.list.staleBody")}</p>
@@ -222,7 +228,7 @@ export function RoomsPricesStrip({
             type="button"
             disabled={busy}
             onClick={retry ? () => void run() : saveAgain}
-            className="mt-3 rounded-lg bg-emerald-700 px-4 py-2 text-[12px] font-medium text-white disabled:opacity-50"
+            className={`mt-3 ${ui.primaryButton}`}
           >
             {t(
               busy
@@ -232,17 +238,17 @@ export function RoomsPricesStrip({
                   : "pricing.list.saveAgain",
             )}
           </button>
-          <p className="mt-2">{t("pricing.editor.saveDeclaration")}</p>
+          <p className="mt-2 text-[10px] text-amber-700">{t("pricing.editor.saveDeclaration")}</p>
         </div>
       )}
       {failure !== null && (
-        <p role="alert" className="mt-2 text-red-700">
+        <p role="alert" className={staleOnly ? `mt-2 ${ui.errorBanner}` : "mt-2 text-red-700"}>
           {message(failure)}
           {retry && ` ${t("pricing.editor.retryHint")}`}
         </p>
       )}
       {saved && failure === null && !publication?.stale && (
-        <p role="status" className="mt-2 text-emerald-800">
+        <p role="status" className={staleOnly ? `mt-2 ${ui.successBanner}` : "mt-2 text-green-700"}>
           {t("pricing.list.savedAgain")}
         </p>
       )}

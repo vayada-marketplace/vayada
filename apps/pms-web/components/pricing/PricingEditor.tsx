@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { PlusIcon } from "@heroicons/react/24/outline";
 import { pricingCurrencyScale, parsePricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useTranslation } from "@/lib/i18n";
@@ -28,6 +29,8 @@ import { PricingLinkedAdjustment } from "./PricingLinkedAdjustment";
 import { PricingDates } from "./PricingDates";
 import { PricingRules } from "./PricingRules";
 import { PricingStayPreview } from "./PricingStayPreview";
+import { PricingSection } from "./PricingSection";
+import * as ui from "./pricingStyles";
 
 type Client = ReturnType<typeof createReplacementPricingClient>;
 type Room = PricingSnapshot["rooms"][number];
@@ -58,6 +61,7 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
   const leaving = useRef(false);
   const [leave, setLeave] = useState<(() => void) | null>(null), [reloading, setReloading] = useState(false);
   const { t } = useTranslation();
+  const declarationId = useId();
   const roomName = (roomTypeId: string, ri: number) => roomNames[roomTypeId] ?? t("pricing.roomNumber", { number: ri + 1 });
   const offerLabel = (roomTypeId: string, ri: number, oi: number) => t("pricing.roomOffer", { room: roomName(roomTypeId, ri), number: oi + 1 });
   const loads = useRef(0);
@@ -182,39 +186,40 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
   const focusIndex = display ? display.rooms.findIndex((room) => room.roomTypeId === focus) : -1, editing = focusIndex >= 0;
   const shownRooms = (display?.rooms ?? []).map((room, ri) => [room, ri] as const).filter(([room]) => room.roomTypeId === focus);
   const scale = display ? pricingCurrencyScale(display.currency)! : 2;
-  return <section className="space-y-6">
-    <header className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-lg font-semibold text-gray-950">{t("pricing.room.title")}</h2><p className="mt-1 text-sm text-gray-600">{t("pricing.room.subtitle")}</p></div>
-      <button className="rounded-lg border px-4 py-2 text-sm disabled:opacity-50" disabled={loading || busy || retry} onClick={() => { if (keepsOnReload) reloadKeepingRoom(); else if (leaveRisk) setReloading(true); else void load(); }}>{t("pricing.editor.reload")}</button></header>
+  const warning = notice === "pricing.room.noticeStale" || notice === "pricing.room.noticeDropped";
+  // Laid out like the Room Details tab: cards with uppercase headings, then Reload and Save at the bottom.
+  return <section className="space-y-4">
     {reloading && <ConfirmDialog title={t("pricing.reloadTitle")} message={t("pricing.reloadMessage")} confirmLabel={t("pricing.reloadConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { setReloading(false); void load(); }} onCancel={() => setReloading(false)} />}
     {leave && <ConfirmDialog title={t("pricing.leaveTitle")} message={t("pricing.leaveMessage")} confirmLabel={t("pricing.leaveConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { leaving.current = true; setLeave(null); leave(); }} onCancel={() => setLeave(null)} />}
-    {error !== null && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">{pricingSaveError(error, t)}{retry && <p className="mt-2">{t("pricing.editor.retryHint")}</p>}{keepsOnReload && <p className="mt-2">{t("pricing.room.reloadKeeps")}</p>}</div>}
-    {notice && <p role="status" className="rounded-lg bg-emerald-50 p-4 text-emerald-900">{t(notice)}</p>}
-    {loading ? <p role="status">{t("pricing.editor.loading")}</p> : !display && !empty ? null : !display ? <div className="rounded-xl border bg-white p-8"><h2 className="font-semibold">{t("pricing.room.notConfigured")}</h2>{setup && roomSetup.length ? <FirstPricingSetup propertyId={setup.propertyId} rooms={roomSetup} disabled={disabled} onDirty={() => setDirty(true)} onCreate={createInitial} /> : <p className="mt-2 text-sm text-gray-600">{t(setup ? "pricing.room.notReady" : "pricing.editor.setupUnavailable")}</p>}
-      {retry && <button disabled={busy} className="mt-4 rounded-lg border px-4 py-2" onClick={() => void run()}>{t("pricing.editor.retry")}</button>}</div> : <>
-      {editing && <div className="flex justify-between text-sm"><strong>{t("pricing.editor.baseNightlyPrices", { currency: display.currency })}</strong><span>{t(done ? "pricing.editor.statusSaved" : dirty ? "pricing.editor.statusUnsaved" : "pricing.editor.statusCurrent")}</span></div>}
-      {!editing && <div className="rounded-xl border bg-white p-5"><h3 className="font-semibold">{t("pricing.room.notConfigured")}</h3>
-        {setup && roomSetup.length ? <FirstPricingSetup propertyId={setup.propertyId} rooms={roomSetup} fixedCurrency={display.currency} disabled={disabled} onDirty={() => setDirty(true)} onCreate={createInitial} /> : <p className="mt-2 text-sm text-gray-600">{t(setup ? "pricing.room.notReady" : "pricing.editor.setupUnavailable")}</p>}
-        {retry && <button disabled={busy} className="mt-4 rounded-lg border px-4 py-2" onClick={() => void run()}>{t("pricing.editor.retry")}</button>}</div>}
-      {shownRooms.map(([room, ri]) => <div key={room.roomTypeId} className="overflow-hidden rounded-xl border bg-white">
-        <h2 className="border-b bg-gray-50 px-5 py-3 font-semibold">{roomName(room.roomTypeId, ri)}</h2>
-        {addingOfferRoom === room.roomTypeId ? <div className="border-b p-5">
-          {independentOffer ? <FirstPricingSetup propertyId={room.propertyId} rooms={[{ roomTypeId: room.roomTypeId, name: roomName(room.roomTypeId, ri), capacity: room.capacity }]} existingRoom={room} fixedCurrency={room.currency} disabled={disabled} onDirty={() => {}} onCreate={(input) => createInitial(input, true)} /> : <NewLinkedOffer room={room} disabled={disabled} onCreate={(input) => createInitial(input, true)} />}
-          <button type="button" className="mt-3 rounded border px-3 py-2 disabled:opacity-50" disabled={disabled} onClick={() => { if (!disabled) { setAddingOfferRoom(null); setError(null); } }}>{t("pricing.editor.cancelOffer")}</button>
-        </div> : <div className="flex gap-3 p-5">{[false, true].map((independent) => <button key={String(independent)} type="button" className="rounded border px-3 py-2 disabled:opacity-50" disabled={disabled || hasPendingEntries} onClick={() => { if (!disabled && !hasPendingEntries) { setIndependentOffer(independent); setAddingOfferRoom(room.roomTypeId); setError(null); } }}>{t(independent ? "pricing.editor.addIndependentOffer" : "pricing.editor.addLinkedOffer")}</button>)}</div>}
-        <PricingChildCharges room={room} label={roomName(room.roomTypeId, ri)} disabled={disabled || exclusiveEditPending}
-          onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`children:${ri}`]: pending }))}
-          onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); }} />
-        {room.offers.map((offer, oi) => <div key={offer.id} className="grid gap-4 border-b p-5 last:border-0 sm:grid-cols-[1fr_2fr]">
-          <div><h3 className="font-medium">{t("pricing.offerNumber", { number: oi + 1 })}</h3><p className="text-sm text-gray-500">{t(offer.price.kind === "linked" ? "pricing.editor.linkedRate" : "pricing.editor.independentRate")}</p></div>
-          <div className="flex flex-wrap gap-3">{offer.price.kind === "independent" && baseAmounts(offer.price.calendar.base, t).map(([label, minor], ai) => <label key={ai} className="text-sm text-gray-600">{label}<input aria-label={`${offerLabel(room.roomTypeId, ri, oi)} ${label}`} inputMode="decimal" className="mt-1 block w-36 rounded-lg border px-3 py-2 text-gray-950 disabled:bg-gray-50" disabled={disabled || exclusiveEditPending}
-            value={inputs[`${ri}:${oi}:${ai}`] ?? decimalAmount(minor, scale)} onChange={(event) => { setInputs({ ...inputs, [`${ri}:${oi}:${ai}`]: event.target.value }); setDirty(true); setNotice(""); }} /></label>)}
-            {offer.price.kind === "independent" && !offer.price.calendar.base && <p className="text-sm text-gray-500">{t("pricing.editor.calendarOnly")}</p>}</div>
-          <div className="sm:col-span-2"><PricingTerms propertyId={room.propertyId} client={client} roomTypeId={room.roomTypeId} offerId={offer.id} revision={offer.termsRevision}
-            local={policyEdits[policyKey(room.roomTypeId, offer.id)]} disabled={disabled} blocked={hasPendingEntries}
-            onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`policy:${ri}:${oi}`]: pending }))}
-            onApply={(terms) => { const key = policyKey(room.roomTypeId, offer.id); setPolicyEdits((previous) => ({ ...previous, [key]: {
-              roomTypeId: room.roomTypeId, offerId: offer.id, expectedRevision: policyBases.current[key], cancellation: terms.cancellation, payment: terms.payment,
-            } })); setDirty(true); setNotice(""); }} /></div>
+    {error !== null && <div role="alert" className={ui.errorBanner}>{pricingSaveError(error, t)}{retry && <p className="mt-2">{t("pricing.editor.retryHint")}</p>}{keepsOnReload && <p className="mt-2">{t("pricing.room.reloadKeeps")}</p>}</div>}
+    {notice && <p role="status" className={warning ? ui.warningBanner : ui.successBanner}>{t(notice)}</p>}
+    <div className={ui.card}>
+      <div className="flex items-center justify-between gap-3"><h2 className={ui.cardHeading}>{t("pricing.room.title")}</h2>
+        {!loading && editing && <span className={`text-[11px] font-medium ${done ? "text-green-600" : dirty ? "text-amber-600" : "text-gray-400"}`}>{t(done ? "pricing.editor.statusSaved" : dirty ? "pricing.editor.statusUnsaved" : "pricing.editor.statusCurrent")}</span>}
+        {!loading && (display || empty) && !editing && <span className="text-[11px] font-medium text-amber-600">{t("pricing.room.notConfigured")}</span>}</div>
+      <p className={ui.hint}>{t("pricing.room.subtitle")}</p>
+      {loading && <p role="status" className={ui.text}>{t("pricing.editor.loading")}</p>}
+      {!loading && shownRooms.map(([room, ri]) => <PricingChildCharges key={room.roomTypeId} room={room} label={roomName(room.roomTypeId, ri)} disabled={disabled || exclusiveEditPending}
+        onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`children:${ri}`]: pending }))}
+        onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); }} />)}
+    </div>
+    {!loading && (display || empty) && !editing && <div className={ui.card}>
+      {setup && roomSetup.length ? <FirstPricingSetup propertyId={setup.propertyId} rooms={roomSetup} fixedCurrency={display?.currency} disabled={disabled} onDirty={() => setDirty(true)} onCreate={createInitial} /> : <p className={ui.text}>{t(setup ? "pricing.room.notReady" : "pricing.editor.setupUnavailable")}</p>}
+      {retry && <button disabled={busy} className={ui.secondaryButton} onClick={() => void run()}>{t("pricing.editor.retry")}</button>}</div>}
+    {!loading && display && shownRooms.map(([room, ri]) => <div key={room.roomTypeId} className="space-y-4">
+      {room.offers.map((offer, oi) => <div key={offer.id} className={ui.card}>
+        <div className="flex items-center justify-between gap-3"><h3 className={ui.cardHeading}>{t("pricing.offerNumber", { number: oi + 1 })}</h3><span className="text-right text-[11px] font-medium text-gray-400">{t(offer.price.kind === "linked" ? "pricing.editor.linkedRate" : "pricing.editor.independentRate")}</span></div>
+        {offer.price.kind === "independent" && <div><p className={ui.label}>{t("pricing.editor.baseNightlyPrices", { currency: display.currency })}</p>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-4">{baseAmounts(offer.price.calendar.base, t).map(([label, minor], ai) => <label key={ai} className="block"><span className="mb-1.5 block text-[11px] text-gray-500">{label}</span><input aria-label={`${offerLabel(room.roomTypeId, ri, oi)} ${label}`} inputMode="decimal" className={ui.input} disabled={disabled || exclusiveEditPending}
+            value={inputs[`${ri}:${oi}:${ai}`] ?? decimalAmount(minor, scale)} onChange={(event) => { setInputs({ ...inputs, [`${ri}:${oi}:${ai}`]: event.target.value }); setDirty(true); setNotice(""); }} /></label>)}</div>
+          {!offer.price.calendar.base && <p className={ui.hint}>{t("pricing.editor.calendarOnly")}</p>}</div>}
+        <PricingTerms propertyId={room.propertyId} client={client} roomTypeId={room.roomTypeId} offerId={offer.id} revision={offer.termsRevision}
+          local={policyEdits[policyKey(room.roomTypeId, offer.id)]} disabled={disabled} blocked={hasPendingEntries}
+          onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`policy:${ri}:${oi}`]: pending }))}
+          onApply={(terms) => { const key = policyKey(room.roomTypeId, offer.id); setPolicyEdits((previous) => ({ ...previous, [key]: {
+            roomTypeId: room.roomTypeId, offerId: offer.id, expectedRevision: policyBases.current[key], cancellation: terms.cancellation, payment: terms.payment,
+          } })); setDirty(true); setNotice(""); }} />
+        <div className="space-y-2">
           <PricingIncludedAdjustments room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} baseValue={inputs[`${ri}:${oi}:0`]} disabled={disabled} blocked={hasPendingEntries}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`included:${ri}:${oi}`]: pending }))}
             onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); }} />
@@ -254,29 +259,35 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
           <PricingStaySeasons room={room} offer={offer} label={offerLabel(room.roomTypeId, ri, oi)} disabled={disabled || exclusiveEditPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`staySeason:${ri}:${oi}`]: pending }))}
             onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); }} />
-        </div>)}
-        <details className="border-t px-5 py-3 text-sm text-gray-600"><summary className="cursor-pointer">{t("pricing.editor.retainedRules")}</summary>
-          <p className="mt-2">{t("pricing.editor.adultAge", { age: room.children.adultFromAge })}</p>
-          <p className="mt-2">{t("pricing.editor.reviewDates")}</p>
-          {room.children.bands.map((band) => <p key={band.fromAge}>{t("pricing.editor.childBand", { from: band.fromAge, through: band.throughAge, amount: decimalAmount(band.nightlyMinor, scale), currency: display.currency })}</p>)}
-          {room.offers.map((offer, oi) => <div key={offer.id} className="mt-2"><p>{t("pricing.offerNumber", { number: oi + 1 })} · {t(`pricing.meal.${offer.meal.kind}`)}</p>
-            {offer.meal.charge.kind === "room" ? <p>{t("pricing.editor.mealPerRoom", { amount: decimalAmount(offer.meal.charge.amountMinor, scale), currency: display.currency })}</p> : <>
-              <p>{t("pricing.editor.mealPerAdult", { amount: decimalAmount(offer.meal.charge.adultMinor, scale), currency: display.currency })}</p>
-              {offer.meal.charge.childBandAmountsMinor.map((minor, bi) => <p key={bi}>{t("pricing.editor.mealPerChild", { from: room.children.bands[bi].fromAge, through: room.children.bands[bi].throughAge, amount: decimalAmount(minor, scale), currency: display.currency })}</p>)}
-            </>}
-            <PricingRules room={room} offer={offer} scale={scale} />
-          </div>)}
-        </details>
+        </div>
       </div>)}
-      {editing && <><PricingStayPreview key={focusIndex} roomTypeId={focus} snapshot={display} inputs={inputs} disabled={disabled || hasPendingEntries} saved={false} roomNames={roomNames} />
-      <footer className="space-y-2 border-t pt-5">
-        {retry ? <button className="rounded-lg bg-emerald-700 px-5 py-2 text-white disabled:opacity-50" disabled={busy} onClick={() => void run()}>{t("pricing.editor.retry")}</button>
-          : <button disabled={disabled || hasPendingEntries || !(dirty || stale)} className="rounded-lg bg-emerald-700 px-5 py-2 text-white disabled:opacity-50" onClick={save}>{t(busy ? "pricing.editor.saving" : "pricing.editor.save")}</button>}
-        {done && <button type="button" className="ml-3 rounded-lg border px-5 py-2" onClick={() => void load()}>{t("pricing.room.editAgain")}</button>}
-        <p className="text-sm text-gray-600">{t("pricing.editor.saveDeclaration")}</p>
-      </footer>
-      <p className="text-xs text-gray-500">{t("pricing.editor.keepOpen")}</p></>}
-    </>}
+      {addingOfferRoom === room.roomTypeId ? <div className={ui.draftCard}>
+        {independentOffer ? <FirstPricingSetup propertyId={room.propertyId} rooms={[{ roomTypeId: room.roomTypeId, name: roomName(room.roomTypeId, ri), capacity: room.capacity }]} existingRoom={room} fixedCurrency={room.currency} disabled={disabled} onDirty={() => {}} onCreate={(input) => createInitial(input, true)} /> : <NewLinkedOffer room={room} disabled={disabled} onCreate={(input) => createInitial(input, true)} />}
+        <button type="button" className={`mt-3 ${ui.secondaryButton}`} disabled={disabled} onClick={() => { if (!disabled) { setAddingOfferRoom(null); setError(null); } }}>{t("pricing.editor.cancelOffer")}</button>
+      </div> : <div className="flex flex-wrap gap-2">{[false, true].map((independent) => <button key={String(independent)} type="button" className={ui.secondaryButton} disabled={disabled || hasPendingEntries} onClick={() => { if (!disabled && !hasPendingEntries) { setIndependentOffer(independent); setAddingOfferRoom(room.roomTypeId); setError(null); } }}><PlusIcon className="h-3.5 w-3.5" /> {t(independent ? "pricing.editor.addIndependentOffer" : "pricing.editor.addLinkedOffer")}</button>)}</div>}
+      <PricingSection title={t("pricing.editor.retainedRules")}>
+        <p>{t("pricing.editor.adultAge", { age: room.children.adultFromAge })}</p>
+        <p>{t("pricing.editor.reviewDates")}</p>
+        {room.children.bands.map((band) => <p key={band.fromAge}>{t("pricing.editor.childBand", { from: band.fromAge, through: band.throughAge, amount: decimalAmount(band.nightlyMinor, scale), currency: display.currency })}</p>)}
+        {room.offers.map((offer, oi) => <div key={offer.id} className="pt-2"><p className="font-semibold text-gray-900">{t("pricing.offerNumber", { number: oi + 1 })} · {t(`pricing.meal.${offer.meal.kind}`)}</p>
+          {offer.meal.charge.kind === "room" ? <p>{t("pricing.editor.mealPerRoom", { amount: decimalAmount(offer.meal.charge.amountMinor, scale), currency: display.currency })}</p> : <>
+            <p>{t("pricing.editor.mealPerAdult", { amount: decimalAmount(offer.meal.charge.adultMinor, scale), currency: display.currency })}</p>
+            {offer.meal.charge.childBandAmountsMinor.map((minor, bi) => <p key={bi}>{t("pricing.editor.mealPerChild", { from: room.children.bands[bi].fromAge, through: room.children.bands[bi].throughAge, amount: decimalAmount(minor, scale), currency: display.currency })}</p>)}
+          </>}
+          <PricingRules room={room} offer={offer} scale={scale} />
+        </div>)}
+      </PricingSection>
+    </div>)}
+    {!loading && editing && display && <PricingStayPreview key={focusIndex} roomTypeId={focus} snapshot={display} inputs={inputs} disabled={disabled || hasPendingEntries} saved={false} roomNames={roomNames} />}
+    {!loading && editing && <p className={`text-right ${ui.hint}`}>{t("pricing.editor.keepOpen")}</p>}
+    {/* Pressing Save is the declaration, so its text stays in the (sticky) bar beside the button. */}
+    <div className={`flex-wrap ${ui.actionBar}`}>
+      {!loading && editing && <p id={declarationId} className="w-full text-[11px] text-gray-500 md:mr-auto md:w-auto">{t("pricing.editor.saveDeclaration")}</p>}
+      <button type="button" className={ui.actionBarButton} disabled={loading || busy || retry} onClick={() => { if (keepsOnReload) reloadKeepingRoom(); else if (leaveRisk) setReloading(true); else void load(); }}>{t("pricing.editor.reload")}</button>
+      {!loading && editing && done && <button type="button" className={ui.actionBarButton} onClick={() => void load()}>{t("pricing.room.editAgain")}</button>}
+      {!loading && editing && (retry ? <button type="button" className={ui.actionBarPrimary} aria-describedby={declarationId} disabled={busy} onClick={() => void run()}>{t("pricing.editor.retry")}</button>
+        : <button type="button" disabled={disabled || hasPendingEntries || !(dirty || stale)} className={ui.actionBarPrimary} aria-describedby={declarationId} onClick={save}>{t(busy ? "pricing.editor.saving" : "pricing.editor.save")}</button>)}
+    </div>
   </section>;
 }
 /** Edits survive only when the server still has this room exactly as it was loaded (or still has no prices for
