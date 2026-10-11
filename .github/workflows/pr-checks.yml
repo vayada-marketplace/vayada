@@ -144,6 +144,9 @@ jobs:
       - name: Vayada Admin tests
         run: npm --workspace vayada-admin run test
 
+      - name: Marketplace Web tests
+        run: npm --workspace vayada-creator-marketplace run test
+
       - name: Landing consent browser regressions
         run: |
           npx playwright install --with-deps chromium

@@ -15,7 +15,8 @@ if (url) assertSafeTestDatabase(url);
 const policyHelper = "platform.channex_management_worker_scope(text,text,uuid)";
 
 describe.skipIf(!url)("production historical binding temporary reader", () => {
-  const owner = new URL(url!);
+  // describe.skipIf still collects this body, so it must not throw without a database URL.
+  const owner = new URL(url ?? "postgresql://integration-test-disabled");
   const executionId = `${Date.now()}-${process.pid % 1000}`;
   const interruptedId = `${Date.now() + 1}-${process.pid % 1000}`;
   const limitedExecutionId = `${Date.now() + 2}-${process.pid % 1000}`;

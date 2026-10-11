@@ -68,6 +68,7 @@ export async function resolveSharedHotelSetupGuard(
   },
 ): Promise<SharedHotelSetupGuardDecision> {
   let status: AdaptiveHotelSetupStatus;
+  let requestedPropertyId = input.propertyId?.trim();
   try {
     status = await api.getStatus({
       entryProduct: input.entryProduct,
@@ -81,8 +82,9 @@ export async function resolveSharedHotelSetupGuard(
       entryProduct: input.entryProduct,
       propertyId: null,
     });
+    // The stale property is already dropped; this answer is for no property, not a mismatch.
+    requestedPropertyId = undefined;
   }
-  const requestedPropertyId = input.propertyId?.trim();
   if (requestedPropertyId && hasExplicitPropertyMismatch(status, requestedPropertyId)) {
     input.onInvalidPropertyId?.();
     const error = new Error("Setup status returned a different property than requested");
