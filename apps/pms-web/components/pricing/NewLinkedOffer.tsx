@@ -23,7 +23,8 @@ export function linkedOfferInput(room: PricingConfiguration, offerId: string, va
   return { configuration, terms };
 }
 
-export function NewLinkedOffer({ room, disabled, onCreate }: { room: PricingConfiguration; disabled: boolean; onCreate: (input: ReturnType<typeof linkedOfferInput>) => void }) {
+/** `names`: the options' names (step 4); without them options show as "Offer N". */
+export function NewLinkedOffer({ room, names, disabled, onCreate }: { room: PricingConfiguration; names?: Readonly<Record<string, string>>; disabled: boolean; onCreate: (input: ReturnType<typeof linkedOfferInput>) => void }) {
   const [values, setValues] = useState<Values>({ parent: "", kind: "", value: "", cancellation: "", deadline: "", payment: "", methods: [] }), [error, setError] = useState("");
   const { t } = useTranslation();
   const change = (key: Exclude<keyof Values, "methods">, value: string) => { setValues({ ...values, [key]: value, ...(key === "kind" ? { value: "" } : {}) }); setError(""); };
@@ -35,7 +36,7 @@ export function NewLinkedOffer({ room, disabled, onCreate }: { room: PricingConf
     <h3 className={ui.cardHeading}>{t("pricing.linkedOffer.title")}</h3>
     <p className={ui.help}>{t("pricing.linkedOffer.intro")}</p>
     <div className="flex flex-wrap items-end gap-3">
-      {select("parent", t("pricing.linkedOffer.parent"), room.offers.map((offer, index) => [offer.id, t("pricing.offerNumber", { number: index + 1 })]))}
+      {select("parent", t("pricing.linkedOffer.parent"), room.offers.map((offer, index) => [offer.id, names?.[offer.id] ?? t("pricing.offerNumber", { number: index + 1 })]))}
       {select("kind", t("pricing.linkedOffer.adjustmentType"), [["fixed", t("pricing.amountIn", { currency: room.currency })], ["percentage", t("pricing.percentage")]])}
       <label className={ui.fieldLabel}>{t("pricing.adjustmentWithUnit", { unit: values.kind === "percentage" ? "%" : room.currency })}<input aria-label={t("pricing.linkedOffer.adjustment")} className={`mt-1.5 block w-36 ${ui.field}`} disabled={disabled} value={values.value} onChange={(event) => change("value", event.target.value)} /></label>
       {select("cancellation", t("pricing.linkedOffer.cancellation"), [["non_refundable", t("pricing.nonRefundable")], ["flexible", t("pricing.freeCancellationUntilDeadline")]])}
