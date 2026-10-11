@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { PoolClient } from "pg";
+import { isManualPricingPaymentMethod } from "@vayada/domain-booking";
 import { pricingObject } from "@vayada/domain-pms";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { replayPricingAcceptance } from "./pricingAcceptanceReplay.js";
@@ -55,6 +56,9 @@ export async function preparePricingAcceptance(
   )
     return fail();
   const command = parseBookingQuoteAcceptanceInput(input, current.quote, disclosure.policy);
+  // Bank transfer and PayPal need their own acceptance step (VAY-2139); until then, unavailable.
+  if (command && isManualPricingPaymentMethod(current.quote.paymentMethod))
+    throw new Error("Manual payment acceptance unavailable");
   // Match the currently implemented lifecycle/revenue composition before effects.
   const mode = current.quote.acceptanceMode;
   const payAtProperty =

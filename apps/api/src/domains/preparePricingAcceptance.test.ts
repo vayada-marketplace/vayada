@@ -100,6 +100,28 @@ it("reserves a pay-at-property request only while hotel-confirmed acceptance is 
     preparePricingAcceptance(db, "hotel", f.input, { request: true }),
   ).resolves.toMatchObject({ kind: "fresh", commandReceiptId: "receipt" });
 });
+it("refuses bank-transfer and PayPal quotes until their acceptance step exists", async () => {
+  for (const [method, mode] of [
+    ["bank_transfer", "instant"],
+    ["paypal", "request"],
+  ]) {
+    f = preparationFixture((quote) => {
+      Object.assign(quote, { acceptanceMode: mode, paymentMethod: method });
+      Object.assign(quote.evidence, { dueNowMinor: quote.evidence.totalMinor, dueLaterMinor: "0" });
+      Object.assign(quote.evidence.terms[0], {
+        payment: { kind: "full", acceptedMethods: [method] },
+      });
+    });
+    vi.mocked(lockPublicPricingAuthority).mockResolvedValue(f.current.scope);
+    vi.mocked(lockCurrentQuoteRevalidation).mockResolvedValue(f.current);
+    vi.mocked(lockCurrentQuoteGuestDisclosure).mockResolvedValue(f.disclosure);
+    vi.mocked(lockFinancePricingAcceptanceTerms).mockResolvedValue(f.finance);
+    await expect(
+      preparePricingAcceptance(db, "hotel", f.input, { card: true, request: true }),
+    ).rejects.toThrow("Manual payment acceptance unavailable");
+  }
+  expect(query.mock.calls.some(([sql]) => sql.startsWith("INSERT"))).toBe(false);
+});
 it("reserves a card request only while both card and hotel-confirmed acceptance are on", async () => {
   f = preparationFixture((quote) => {
     Object.assign(quote, { acceptanceMode: "request", paymentMethod: "card" });

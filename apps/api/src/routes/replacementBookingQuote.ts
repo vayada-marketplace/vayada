@@ -1,6 +1,6 @@
 import type { PublicBookingQuote } from "@vayada/domain-booking/replacement-pricing";
 import type { FastifyRequest } from "fastify";
-import { parsePublicPricingSelection } from "@vayada/domain-booking";
+import { isManualPricingPaymentMethod, parsePublicPricingSelection } from "@vayada/domain-booking";
 import { pricingKeys, pricingObject } from "@vayada/domain-pms";
 import type { createCurrentPricingQuoteStore } from "../domains/currentPricingQuoteStore.js";
 import { PricingStorageError } from "../domains/replacementPricingStore.js";
@@ -22,6 +22,8 @@ export function requirePublicQuoteKey(request: FastifyRequest): string {
 /** Public DTO boundary. Private calculation/provenance never leaves the quote store. */
 export function createReplacementBookingQuoteIssuer(
   store: Pick<ReturnType<typeof createCurrentPricingQuoteStore>, "issue">,
+  /** Bank-transfer and PayPal quotes (REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED). */
+  manualPayments = false,
 ) {
   return async (slug: string, input: unknown, requestId: unknown, signal?: AbortSignal) => {
     if (
@@ -29,7 +31,10 @@ export function createReplacementBookingQuoteIssuer(
       !pricingObject(input) ||
       !pricingKeys(input, ["version", "selection", "paymentMethod"]) ||
       input.version !== "public-booking-quote-request.v1" ||
-      !["card", "pay_at_property"].includes(input.paymentMethod as string)
+      !(
+        ["card", "pay_at_property"].includes(input.paymentMethod as string) ||
+        (manualPayments && isManualPricingPaymentMethod(input.paymentMethod))
+      )
     )
       throw httpError(400, "Invalid quote request.");
     const selection = parsePublicPricingSelection(input.selection);

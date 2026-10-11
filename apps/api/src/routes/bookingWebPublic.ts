@@ -1450,6 +1450,8 @@ export type PgTargetBookingWebCheckoutAdapterConfig = {
   replacementPricingCardAcceptanceEnabled?: boolean;
   /** Request-mode pay-at-property quotes in acceptance; the hotel confirms each booking. */
   replacementPricingRequestAcceptanceEnabled?: boolean;
+  /** Bank-transfer and PayPal quotes; their acceptance follows in VAY-2139. */
+  replacementPricingManualPaymentAcceptanceEnabled?: boolean;
   externalChanges: ExternalChangePresentationPort;
   /** Register only with the reviewed provider runtime; absent keeps Airbnb actions disabled. */
   airbnbAlterations?: {
@@ -1544,6 +1546,7 @@ export function createTargetBookingWebCheckoutAdapter(
   const guestDisclosure = createPublicQuoteGuestDisclosure(pool);
   const issueReplacementQuote = createReplacementBookingQuoteIssuer(
     createCurrentPricingQuoteStore(pool, 300),
+    config.replacementPricingManualPaymentAcceptanceEnabled === true,
   );
   const serializeTargetChangeRequest = (row: TargetChangeRequestRow, enabled = false) =>
     serializeChangeRequest(
@@ -2128,6 +2131,11 @@ export function createTargetBookingWebCheckoutAdapter(
           throw Object.assign(createHttpError(404, "Online booking requests are unavailable."), {
             code: "REQUEST_ACCEPTANCE_UNAVAILABLE",
           });
+        if (error instanceof PricingAcceptanceError && error.code === "manual_unavailable")
+          throw Object.assign(
+            createHttpError(404, "Bank transfer and PayPal bookings are unavailable."),
+            { code: "MANUAL_PAYMENT_UNAVAILABLE" },
+          );
         const statusCode =
           error instanceof PricingAcceptanceError
             ? error.code === "conflict"

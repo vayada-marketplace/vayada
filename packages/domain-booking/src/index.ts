@@ -671,6 +671,7 @@ export * from "./bookingPromotions.js";
 export * from "./roomCombinationSearch.js";
 
 export * from "./replacementPricingEvidence.js";
+export * from "./pricingPaymentMethods.js";
 export * from "./publicPricingSelection.js";
 
 export * from "./storedPricingQuote.js";

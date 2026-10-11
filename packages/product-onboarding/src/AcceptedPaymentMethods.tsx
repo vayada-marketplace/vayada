@@ -1,9 +1,10 @@
 "use client";
 
+import type { PricingPaymentMethod } from "@vayada/domain-booking/replacement-pricing";
 import type { Translate } from "./firstPricingSetupMessages";
 import { defaultPricingFormLook, type PricingFormLook } from "./pricingFormLook";
 
-export type PaymentMethod = "card" | "pay_at_property";
+export type PaymentMethod = PricingPaymentMethod;
 
 const options = [
   { value: "card", labelKey: "pricing.paymentMethods.card" },
@@ -34,13 +35,15 @@ export function AcceptedPaymentMethods({
             disabled={disabled}
             checked={methods.includes(value)}
             onChange={(event) =>
-              onChange(
-                options
+              onChange([
+                ...options
                   .filter((option) =>
                     option.value === value ? event.target.checked : methods.includes(option.value),
                   )
                   .map((option) => option.value),
-              )
+                // Keep methods this list does not show, such as bank transfer (VAY-2139).
+                ...methods.filter((method) => !options.some((option) => option.value === method)),
+              ])
             }
           />
           {t(labelKey)}

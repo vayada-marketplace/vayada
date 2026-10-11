@@ -1,0 +1,52 @@
+import { describe, expect, it, vi } from "vitest";
+import { PricingStorageError } from "../domains/replacementPricingStore.js";
+import { createReplacementBookingQuoteIssuer } from "./replacementBookingQuote.js";
+
+const selection = {
+  version: "public-pricing-selection.v1",
+  checkIn: "2026-10-01",
+  checkOut: "2026-10-02",
+  currency: "EUR",
+  rooms: [
+    {
+      selectionId: "one",
+      publicOfferKey: "offer",
+      guests: { adults: 1, childAgesAtCheckIn: [] },
+    },
+  ],
+  addons: [],
+  promoCode: null,
+};
+const request = (paymentMethod: string) => ({
+  version: "public-booking-quote-request.v1",
+  selection,
+  paymentMethod,
+});
+
+describe("replacement booking quote issuer", () => {
+  it("quotes bank transfer and PayPal only while their acceptance switch is on", async () => {
+    // The store answering "stale" proves the request reached it without building a full quote.
+    const issue = vi.fn().mockRejectedValue(new PricingStorageError("stale"));
+    const off = createReplacementBookingQuoteIssuer({ issue });
+    const on = createReplacementBookingQuoteIssuer({ issue }, true);
+    for (const method of ["bank_transfer", "paypal"]) {
+      await expect(off("hotel", request(method), "key")).rejects.toMatchObject({
+        statusCode: 400,
+      });
+      expect(issue).not.toHaveBeenCalled();
+      await expect(on("hotel", request(method), "key")).rejects.toMatchObject({
+        statusCode: 409,
+        code: "QUOTE_REFRESH_REQUIRED",
+      });
+      expect(issue).toHaveBeenLastCalledWith(
+        "hotel",
+        expect.objectContaining({ requestId: "key", paymentMethod: method }),
+        undefined,
+      );
+      issue.mockClear();
+    }
+    for (const method of ["cash", "manual_card", "xendit"])
+      await expect(on("hotel", request(method), "key")).rejects.toMatchObject({ statusCode: 400 });
+    expect(issue).not.toHaveBeenCalled();
+  });
+});

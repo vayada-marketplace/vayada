@@ -915,6 +915,14 @@ describe("api config", () => {
     ).toBe(true);
   });
 
+  it("keeps bank-transfer and PayPal quote acceptance off unless explicitly enabled", () => {
+    expect(loadConfig({}).replacementPricingManualPaymentAcceptanceEnabled).toBe(false);
+    expect(
+      loadConfig({ REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED: "true" })
+        .replacementPricingManualPaymentAcceptanceEnabled,
+    ).toBe(true);
+  });
+
   it("rejects next API runtime when source selectors would default to legacy or disabled", () => {
     expect(() =>
       loadConfig({

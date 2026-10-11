@@ -226,6 +226,10 @@ export type ApiConfig = {
   /** Request-mode pay-at-property quotes in public acceptance: the hotel confirms each booking.
    * Off until host accept, decline and expiry handle these bookings. */
   replacementPricingRequestAcceptanceEnabled: boolean;
+  /** Bank-transfer and PayPal quotes in public acceptance: the guest pays the hotel directly and
+   * the hotel confirms receipt. Off until acceptance, payment confirmation, decline and expiry
+   * handle these bookings (VAY-2139). */
+  replacementPricingManualPaymentAcceptanceEnabled: boolean;
   bookingHostBase?: string;
   platformMediaServing?: PlatformMediaServingConfig;
   platformMediaCleanupEnabled: boolean;
@@ -1389,6 +1393,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     replacementPricingRequestAcceptanceEnabled: readBooleanEnv(
       env,
       "REPLACEMENT_PRICING_REQUEST_ACCEPTANCE_ENABLED",
+    ),
+    replacementPricingManualPaymentAcceptanceEnabled: readBooleanEnv(
+      env,
+      "REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED",
     ),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
     platformMediaServing,

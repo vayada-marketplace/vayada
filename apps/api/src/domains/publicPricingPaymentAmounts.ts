@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isPricingPaymentMethod } from "@vayada/domain-booking";
 import type { PoolClient } from "pg";
 import { lockPublicPricingChargeTotals } from "./publicPricingChargeTotals.js";
 import { composeReplacementSettlementAmounts } from "./replacementSettlementAmounts.js";
@@ -20,7 +21,7 @@ export async function lockPublicPricingPaymentAmounts(
   input: unknown,
   method: unknown,
 ) {
-  if (method !== "card" && method !== "pay_at_property") return null;
+  if (!isPricingPaymentMethod(method)) return null;
   const total = await lockPublicPricingChargeTotals(client, slug, input);
   if (!total) return null;
   const owner = total.components.room.owner;
@@ -51,7 +52,8 @@ export async function lockPublicPricingPaymentAmounts(
           basisEvidenceId,
         }),
       ),
-      payment: { kind: method === "card" ? "full" : "pay_at_property" },
+      // Card, bank transfer and PayPal are all paid before the stay; only pay at property is later.
+      payment: { kind: method === "pay_at_property" ? "pay_at_property" : "full" },
     },
     total.stay.currency,
   );

@@ -24,7 +24,8 @@ export class PricingAcceptanceError extends Error {
       | "storage"
       | "unexpected"
       | "card_unavailable"
-      | "request_unavailable",
+      | "request_unavailable"
+      | "manual_unavailable",
     cause: unknown,
   ) {
     super("Pricing acceptance failed", { cause });
@@ -186,6 +187,8 @@ export async function writePricingAcceptance(
       throw new PricingAcceptanceError("card_unavailable", error);
     if (error instanceof Error && error.message === "Request acceptance unavailable")
       throw new PricingAcceptanceError("request_unavailable", error);
+    if (error instanceof Error && error.message === "Manual payment acceptance unavailable")
+      throw new PricingAcceptanceError("manual_unavailable", error);
     if (error instanceof Error && conflictMessages.has(error.message))
       throw new PricingAcceptanceError("conflict", error);
     if (

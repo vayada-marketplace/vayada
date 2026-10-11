@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
-import type { ReplacementOfferTerms } from "@vayada/domain-booking";
+import type { PricingPaymentMethod, ReplacementOfferTerms } from "@vayada/domain-booking";
 import { resolveFinanceOnlineCardReadiness } from "@vayada/domain-finance";
 import { pricingCurrencyScale, pricingInteger, pricingObject } from "@vayada/domain-pms";
 import type { PoolClient } from "pg";
 import { parseBookingPricingOfferTerms } from "./bookingPricingOfferTerms.js";
 
-type Method = "card" | "pay_at_property";
+type Method = PricingPaymentMethod;
 export type FinanceReplacementPricingReadiness =
   | { kind: "ready"; evidenceId: string; propertyId: string; currency: string; pricingRevision: number; methods: readonly Method[] }
   | { kind: "unavailable"; reason: "invalid" | "settings_missing" | "payments_disabled" | "currency_mismatch" |
@@ -69,12 +69,23 @@ export async function lockFinanceReplacementPricingReadiness(client: PoolClient,
       } catch { return unavailable("invalid"); }
     }
   }
-  if (!methods.length) return unavailable("method_unavailable");
+  // VAY-2139: the guest pays bank transfer or PayPal to the hotel directly, which needs its bank
+  // details or PayPal email. Kept out of the evidence hash so that adding them never stales saved
+  // prices; quote and acceptance check the destination and email again.
+  const manual: Method[] = [];
+  if (settings.accepted_methods.includes("bank_transfer") && (await client.query(`SELECT 1 FROM finance.bank_transfer_destinations
+    WHERE property_id=$1 AND enabled`, [request.propertyId])).rows.length) manual.push("bank_transfer");
+  if (settings.accepted_methods.includes("paypal")) {
+    const email = (await client.query("SELECT deposit_policy->>'paypalEmail' AS email FROM finance.payment_settings WHERE property_id=$1",
+      [request.propertyId])).rows[0]?.email;
+    if (typeof email === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) manual.push("paypal");
+  }
+  if (!methods.length && !manual.length) return unavailable("method_unavailable");
   const orderedTerms = request.terms.map((t) => [t.roomTypeId, t.offerId, t.revision]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
   const evidenceId = "finance.pricing.v2:" + createHash("sha256").update(JSON.stringify({
     propertyId: request.propertyId, currency: request.currency, pricingRevision: request.pricingRevision,
     terms: orderedTerms, settings, cardSource, methods,
   })).digest("hex");
   if (request.expectedEvidenceId !== undefined && request.expectedEvidenceId !== evidenceId) return unavailable("stale");
-  return { kind: "ready", evidenceId, propertyId: request.propertyId, currency: request.currency, pricingRevision: request.pricingRevision, methods };
+  return { kind: "ready", evidenceId, propertyId: request.propertyId, currency: request.currency, pricingRevision: request.pricingRevision, methods: [...methods, ...manual] };
 }
