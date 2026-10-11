@@ -206,6 +206,12 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       });
       if (!calendar) throw new Error("Calendar runtime is disabled");
       closers.push(() => calendar.close());
+      const financeRead = closing(
+        createPgFinancePaymentReadinessReadModel({
+          connectionString: cs,
+          pricingReadPort: pricingRead,
+        }),
+      );
       const runtime = createBookingPublicationProductionRuntime({
         connectionString: cs,
         bookingHostBase: "booking.example.test",
@@ -230,12 +236,8 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         pricingCurrency: pricingRead,
         operatingCalendar,
         inventory: calendar.inventory,
-        finance: closing(
-          createPgFinancePaymentReadinessReadModel({
-            connectionString: cs,
-            pricingReadPort: pricingRead,
-          }),
-        ),
+        finance: financeRead,
+        financeScope: financeRead,
         warn: (fields) => unavailable.push(fields),
       });
       closers.push(() => runtime.close());
@@ -287,6 +289,10 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       const readiness = () => runtime.routes.readinessProvider.getBookingReadiness(scope);
 
       // A brand-new hotel gets a to-do list, never "temporarily unavailable".
+      expect(await financeRead.hasPaymentReadinessScope(scope)).toBe(true);
+      expect(
+        await financeRead.hasPaymentReadinessScope({ ...scope, organizationId: randomUUID() }),
+      ).toBe(false);
       const fresh = await readiness();
       expect(blockerCodes(fresh)).toEqual(
         expect.arrayContaining([
