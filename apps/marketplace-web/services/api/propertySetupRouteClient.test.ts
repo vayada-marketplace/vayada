@@ -146,8 +146,7 @@ describe("parsePropertySetupRouteReadModel", () => {
         ...route,
         steps: route.steps.map((step) => ({
           ...step,
-          position:
-            getActivePropertySetupStepIds(["hotel_operations"]).indexOf(step.stepId) + 1,
+          position: getActivePropertySetupStepIds(["hotel_operations"]).indexOf(step.stepId) + 1,
         })),
       }),
     ).toBeNull();
