@@ -2,6 +2,7 @@ import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, expect, it, vi } from "vitest";
 import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
+import { defaultPricingFormLook, FirstPricingSetup as SharedFirstPricingSetup } from "@vayada/product-onboarding/FirstPricingSetup";
 const id = "61000000-0000-4000-8000-000000000001";
 const room = { roomTypeId: id, name: "Double", capacity: { total: 2, adults: 2, children: 1 } };
 const values = { mode: "flat", occupancy: [], included: { adults: "", adjustments: [] }, methods: ["pay_at_property"] as ("card" | "pay_at_property")[], room: id, currency: "EUR", base: "123.45", adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "flexible", freeDays: "7", payment: "full" };
@@ -64,4 +65,16 @@ it("validates included-adult setup before returning a policy command", () => {
   const result = firstPricingInput(id, three, id, { ...values, mode: "included_guests", base: "130", included });
   expect(result.configuration.offers[0].price).toMatchObject({ calendar: { base: { mode: "included_guests", baseGuests: 2, adjustments: [{ deltaMinor: "-3000" }, { deltaMinor: "0" }, { basisPoints: 2500 }] } } });
   expect(() => firstPricingInput(id, three, id, { ...values, mode: "included_guests", included: { adults: "2", adjustments: [] } })).toThrow();
+});
+it("uses the Room Details look in PMS and keeps onboarding's look by default (VAY-2122)", async () => {
+  vi.stubGlobal("React", React); let view!: ReactTestRenderer;
+  const props = { propertyId: id, rooms: [room], disabled: false, onCreate: vi.fn(), onDirty: vi.fn() };
+  await act(async () => { view = create(<FirstPricingSetup {...props} />); });
+  expect(view.root.findByType("button").props.className).toContain("bg-primary-600");
+  expect(view.root.findByProps({ "aria-label": "Room type" }).props.className).toContain("bg-gray-50");
+  act(() => view.unmount());
+  await act(async () => { view = create(<SharedFirstPricingSetup {...props} t={(key: string) => key} />); });
+  expect(view.root.findByType("button").props.className).toBe(defaultPricingFormLook.button);
+  expect(defaultPricingFormLook.button).toContain("bg-emerald-700");
+  act(() => view.unmount());
 });
