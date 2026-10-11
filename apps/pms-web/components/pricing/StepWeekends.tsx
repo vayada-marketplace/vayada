@@ -82,7 +82,8 @@ export function StepWeekends({
         <button
           type="button"
           aria-expanded={editor}
-          disabled={pending}
+          // With other Friday/Saturday rules the editor must stay open, so the toggle has nothing to do.
+          disabled={pending || choice === "other"}
           className={ui.chip(choice === "other")}
           onClick={() => setOpen(!open)}
         >
