@@ -46,7 +46,7 @@ export function StepStayRules({
     <StepCard
       number={5}
       title={t("pricing.steps.rules.title")}
-      hint={t("pricing.steps.rules.hint")}
+      hint={t(own.length ? "pricing.steps.rules.hintSome" : "pricing.steps.rules.hint")}
     >
       <div className="grid gap-4 sm:grid-cols-[240px_minmax(0,1fr)]">
         <div className="space-y-1.5">
