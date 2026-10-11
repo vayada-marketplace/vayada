@@ -7,8 +7,8 @@ import type { PricingSnapshot } from "@/services/api/replacementPricingClient";
 import { decimalAmount, editedSnapshot, errorText, type MessageKey, PricingError } from "./pricingAmounts";
 import * as ui from "./pricingStyles";
 
-/** `roomTypeId` limits the choice to that room's offers (a room page). */
-type Props = { snapshot: PricingSnapshot; inputs: Record<string, string>; disabled: boolean; saved: boolean; roomNames: Record<string, string>; roomTypeId?: string };
+/** `roomTypeId` limits the choice to that room's offers (a room page); `names` are its options' names (step 4). */
+type Props = { snapshot: PricingSnapshot; inputs: Record<string, string>; disabled: boolean; saved: boolean; roomNames: Record<string, string>; roomTypeId?: string; names?: Readonly<Record<string, string>> };
 const reasons: Record<Extract<RoomStayPricingResult, { kind: "unavailable" }>["reason"], MessageKey> = {
   invalid_configuration: "pricing.preview.reasonInvalidConfiguration",
   invalid_request: "pricing.preview.reasonInvalidRequest",
@@ -20,11 +20,12 @@ const reasons: Record<Extract<RoomStayPricingResult, { kind: "unavailable" }>["r
   overflow: "pricing.preview.reasonOverflow",
 };
 
-export function PricingStayPreview({ snapshot, inputs, disabled, saved, roomNames, roomTypeId }: Props) {
+export function PricingStayPreview({ snapshot, inputs, disabled, saved, roomNames, roomTypeId, names }: Props) {
   const [choice, setChoice] = useState(() => `${roomTypeId ? Math.max(0, snapshot.rooms.findIndex((room) => room.roomTypeId === roomTypeId)) : 0}:0`), [checkIn, setCheckIn] = useState(""), [checkOut, setCheckOut] = useState("");
   const [adults, setAdults] = useState("2"), [ages, setAges] = useState("");
   const [answer, setAnswer] = useState<{ key: string; result?: RoomStayPricingResult; error?: string } | null>(null);
   const { t } = useTranslation();
+  const offerName = (room: PricingSnapshot["rooms"][number], offerId: string) => names?.[offerId] ?? t("pricing.offerNumber", { number: room.offers.findIndex((offer) => offer.id === offerId) + 1 });
   const key = JSON.stringify([snapshot, inputs, disabled, saved, choice, checkIn, checkOut, adults, ages]);
   // Hide stale totals during render, then forget them so reverting an edit cannot revive a prior result.
   useEffect(() => { setAnswer(null); }, [key]);
@@ -49,7 +50,7 @@ export function PricingStayPreview({ snapshot, inputs, disabled, saved, roomName
     <p className={ui.help}>{t(saved ? "pricing.preview.saved" : "pricing.preview.unsaved")} {t("pricing.preview.scope")}</p>
     <fieldset disabled={disabled} className="flex flex-wrap items-end gap-3 disabled:opacity-50">
       <label className={ui.fieldLabel}>{t("pricing.preview.choice")}<select aria-label={t("pricing.preview.choiceLabel")} value={choice} onChange={(e) => setChoice(e.target.value)} className={`mt-1.5 block ${ui.field}`}>
-        {snapshot.rooms.flatMap((room, ri) => roomTypeId && room.roomTypeId !== roomTypeId ? [] : room.offers.map((offer, oi) => <option key={`${ri}:${oi}`} value={`${ri}:${oi}`}>{roomNames[room.roomTypeId] ?? t("pricing.roomNumber", { number: ri + 1 })} · {t("pricing.offerNumber", { number: oi + 1 })} · {t(`pricing.meal.${offer.meal.kind}`)}</option>))}
+        {snapshot.rooms.flatMap((room, ri) => roomTypeId && room.roomTypeId !== roomTypeId ? [] : room.offers.map((offer, oi) => <option key={`${ri}:${oi}`} value={`${ri}:${oi}`}>{roomNames[room.roomTypeId] ?? t("pricing.roomNumber", { number: ri + 1 })} · {names?.[offer.id] ?? `${t("pricing.offerNumber", { number: oi + 1 })} · ${t(`pricing.meal.${offer.meal.kind}`)}`}</option>))}
       </select></label>
       <label className={ui.fieldLabel}>{t("pricing.preview.checkIn")}<input aria-label={t("pricing.preview.checkInLabel")} type="date" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} className={`mt-1.5 block ${ui.field}`} /></label>
       <label className={ui.fieldLabel}>{t("pricing.preview.checkOut")}<input aria-label={t("pricing.preview.checkOutLabel")} type="date" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} className={`mt-1.5 block ${ui.field}`} /></label>
@@ -63,7 +64,7 @@ export function PricingStayPreview({ snapshot, inputs, disabled, saved, roomName
       <p className="text-[13px] font-semibold text-gray-900">{t("pricing.preview.estimate", { amount: money(result.totalMinor) })}</p>
       <p className={ui.text}>{t(result.nights.length === 1 ? "pricing.preview.summary.one" : "pricing.preview.summary.other", { room: money(result.roomMinor), meal: money(result.mealMinor), count: result.nights.length })}</p>
       <div className="overflow-x-auto"><table className="w-full whitespace-nowrap text-left text-[12px] text-gray-700 [&_td]:pr-4 [&_td]:py-1 [&_th]:pr-4"><caption className="sr-only">{t("pricing.preview.caption")}</caption><thead><tr><th scope="col">{t("pricing.preview.night")}</th><th scope="col">{t("pricing.preview.room")}</th><th scope="col">{t("pricing.preview.meals")}</th><th scope="col">{t("pricing.preview.total")}</th><th scope="col">{t("pricing.preview.rules")}</th></tr></thead>
-        <tbody>{result.nights.map((night) => <tr key={night.date}><td>{night.date}</td><td>{money(night.roomMinor)}</td><td>{money(night.mealMinor)}</td><td>{money(night.totalMinor)}</td><td>{night.sources.map((source) => `${t("pricing.offerNumber", { number: snapshot.rooms.find((room) => room.roomTypeId === result.roomTypeId)!.offers.findIndex((offer) => offer.id === source.offerId) + 1 })}: ${t(`pricing.preview.source.${source.kind}`)}`).join(", ")}</td></tr>)}</tbody>
+        <tbody>{result.nights.map((night) => <tr key={night.date}><td>{night.date}</td><td>{money(night.roomMinor)}</td><td>{money(night.mealMinor)}</td><td>{money(night.totalMinor)}</td><td>{night.sources.map((source) => `${offerName(snapshot.rooms.find((room) => room.roomTypeId === result.roomTypeId)!, source.offerId)}: ${t(`pricing.preview.source.${source.kind}`)}`).join(", ")}</td></tr>)}</tbody>
       </table></div>
     </div>}
   </section>;

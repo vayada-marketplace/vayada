@@ -1,11 +1,20 @@
 import {
+  calculateReplacementRoomStay,
   parsePricingConfiguration,
+  pricingAmountStep,
   pricingCurrencyScale,
+  projectReplacementRoomNights,
   type PricingConfiguration,
+  type RoomNightProjectionResult,
+  type RoomStayPricingResult,
 } from "@vayada/domain-pms/replacement-pricing";
-import type { ReplacementOfferTerms } from "@vayada/domain-booking/replacement-pricing";
+import {
+  parseBookingPricingOfferTerms,
+  type ReplacementOfferTerms,
+} from "@vayada/domain-booking/replacement-pricing";
 import { formatCurrency } from "@/lib/formatCurrency";
-import { decimalAmount, PricingError, type Translate } from "./pricingAmounts";
+import type { PricingTermsInput } from "@/services/api/replacementPricingClient";
+import { decimalAmount, parseMinorInput, PricingError, type Translate } from "./pricingAmounts";
 
 /** The step-by-step Prices tab's view of one room's pricing-v2 configuration. Pure: every change goes back through
  * `parsePricingConfiguration`, so a step never writes a room the engine would refuse. */
@@ -117,6 +126,22 @@ export function optionSummary(
             ),
       );
   } else if (offer.id !== mainOffer(room).id) parts.push(t("pricing.steps.summary.ownPrices"));
+  // What only the option's Edit window shows (the main option's live in steps 2-3 and More options).
+  if (offer.id !== mainOffer(room).id) {
+    const count = (key: string, value: number) => {
+      if (value) parts.push(t(`${key}.${value === 1 ? "one" : "other"}`, { count: value }));
+    };
+    if (offer.price.kind === "independent") {
+      const { seasons, months, weekdays, dates } = offer.price.calendar;
+      count("pricing.steps.summary.seasons", seasons.length);
+      count("pricing.steps.summary.months", months.length);
+      count("pricing.steps.summary.weekdays", weekdays.length);
+      count("pricing.steps.summary.dates", dates.length);
+    } else {
+      count("pricing.steps.summary.dates", offer.price.dateOverrides.length);
+      if (offer.restrictions.kind === "own") parts.push(t("pricing.steps.summary.ownRules"));
+    }
+  }
   const cancellation = terms?.cancellation;
   if (cancellation?.kind === "non_refundable") parts.push(t("pricing.steps.summary.noRefund"));
   else if (cancellation) {
@@ -314,4 +339,283 @@ export function seasonsOverlap(
     if (inSeason(date, a.from, a.through) && inSeason(date, b.from, b.through)) return true;
   }
   return false;
+}
+
+/** Guests for the tab's sample figures: 2 adults, or 1 when the room takes only one. */
+export const sampleAdults = (room: Room) => Math.min(2, room.capacity.adults);
+const termsRevisions = (room: Room) =>
+  Object.fromEntries(room.offers.map((offer) => [offer.id, offer.termsRevision]));
+/** An option's normal night for the sample guests, meal included (the cards' "€90", "€115"). It is the engine's
+ * night evaluator on a copy of the room with only the normal prices (no seasons, months, weekdays or single dates),
+ * so linked adjustments and rounding are the engine's. Null without a normal price. */
+export function normalNight(room: Room, offerId: string): string | null {
+  const plain = {
+    ...room,
+    offers: room.offers.map((offer) =>
+      offer.price.kind === "independent"
+        ? {
+            ...offer,
+            price: {
+              ...offer.price,
+              calendar: {
+                ...offer.price.calendar,
+                months: [],
+                seasons: [],
+                weekdays: [],
+                dates: [],
+              },
+            },
+          }
+        : { ...offer, price: { ...offer.price, dateOverrides: [] } },
+    ),
+  };
+  const [night] = projectReplacementRoomNights(
+    plain,
+    {
+      propertyId: room.propertyId,
+      roomTypeId: room.roomTypeId,
+      offerId,
+      expectedRevision: room.revision,
+      expectedTermsRevisions: termsRevisions(room),
+      guests: { adults: sampleAdults(room), childAgesAtCheckIn: [] },
+    },
+    ["2001-01-01"],
+  );
+  return night?.kind === "projected" ? night.night.totalMinor : null;
+}
+
+/** Quick-add presets: a meal plan and whether the option is non-refundable. */
+export const presetKeys = [
+  "non_refundable",
+  "breakfast",
+  "half_board",
+  "non_refundable_breakfast",
+] as const;
+export type PresetKey = (typeof presetKeys)[number];
+export const presets: Record<PresetKey, { meal: Offer["meal"]["kind"]; nonRefundable: boolean }> = {
+  non_refundable: { meal: "room_only", nonRefundable: true },
+  breakfast: { meal: "breakfast", nonRefundable: false },
+  half_board: { meal: "half_board", nonRefundable: false },
+  non_refundable_breakfast: { meal: "breakfast", nonRefundable: true },
+};
+/** Presets whose meal plan and cancellation no option of the room has yet. Options whose terms are unknown (still
+ * loading, or failed) don't count, so a preset can show until their terms arrive. */
+export function missingPresets(
+  room: Room,
+  terms: Readonly<Record<string, OptionTerms | undefined>>,
+) {
+  const taken = new Set(
+    room.offers.flatMap((offer) => {
+      const cancellation = terms[offer.id]?.cancellation.kind;
+      return cancellation ? [`${offer.meal.kind}:${cancellation === "non_refundable"}`] : [];
+    }),
+  );
+  // A meal preset copies the main option's cancellation, so with a non-refundable main option it would only add
+  // another non-refundable option: then only the non-refundable presets are offered.
+  const mainNonRefundable = terms[mainOffer(room).id]?.cancellation.kind === "non_refundable";
+  return presetKeys.filter(
+    (key) =>
+      !taken.has(`${presets[key].meal}:${presets[key].nonRefundable}`) &&
+      (presets[key].nonRefundable || !mainNonRefundable),
+  );
+}
+export type PresetValues = {
+  discount: string;
+  mealAmount: string;
+  mealBasis: "room" | "person";
+  methods: readonly ("card" | "pay_at_property")[];
+};
+/** A new option from a preset: linked to the main option (`discount` percent cheaper when non-refundable, otherwise the
+ * same price), inheriting its stay rules, with the preset's meal at `mealAmount` per room or per adult (children 0).
+ * Its terms take the main option's payment with `methods`, and the main option's cancellation unless non-refundable. */
+export function presetOption(
+  room: Room,
+  offerId: string,
+  key: PresetKey,
+  values: PresetValues,
+  mainTerms: OptionTerms,
+) {
+  const preset = presets[key],
+    main = mainOffer(room);
+  const discount = values.discount.trim();
+  if (
+    preset.nonRefundable &&
+    (!/^\d+(?:\.\d{1,2})?$/.test(discount) || Number(discount) <= 0 || Number(discount) >= 100)
+  )
+    throw new PricingError("pricing.steps.preset.errorDiscount");
+  const adjustment = preset.nonRefundable
+    ? { kind: "percentage" as const, basisPoints: -Math.round(Number(discount) * 100) }
+    : { kind: "fixed" as const, deltaMinor: "0" };
+  const amount =
+    preset.meal === "room_only"
+      ? "0"
+      : parseMinorInput(
+          values.mealAmount.trim(),
+          pricingCurrencyScale(room.currency)!,
+          true,
+          pricingAmountStep(room.currency),
+        );
+  const meal =
+    preset.meal === "room_only" || values.mealBasis === "room"
+      ? { kind: preset.meal, charge: { kind: "room", amountMinor: amount } }
+      : {
+          kind: preset.meal,
+          charge: {
+            kind: "person",
+            adultMinor: amount,
+            childBandAmountsMinor: room.children.bands.map(() => "0"),
+          },
+        };
+  if (!values.methods.length) throw new PricingError("pricing.error.paymentMethodRequired");
+  const cancellation = preset.nonRefundable
+    ? ({ kind: "non_refundable" } as const)
+    : mainTerms.cancellation;
+  const payment = { ...mainTerms.payment, acceptedMethods: [...values.methods] };
+  if (
+    !parseBookingPricingOfferTerms({
+      roomTypeId: room.roomTypeId,
+      offerId,
+      revision: offerId,
+      cancellation,
+      payment,
+    })
+  )
+    throw new PricingError("pricing.steps.preset.errorTerms");
+  const configuration = parsePricingConfiguration({
+    ...room,
+    offers: [
+      ...room.offers,
+      {
+        id: offerId,
+        termsRevision: offerId,
+        meal,
+        price: { kind: "linked", parentId: main.id, adjustment, dateOverrides: [] },
+        restrictions: { kind: "inherit" },
+      },
+    ],
+  });
+  if (!configuration) throw new PricingError("pricing.linkedOffer.errorConfiguration");
+  const terms: PricingTermsInput = {
+    roomTypeId: room.roomTypeId,
+    offerId,
+    expectedRevision: null,
+    cancellation,
+    payment,
+  };
+  return { configuration, terms };
+}
+
+/** Why an option can't be deleted: it is the room's only option, or other options are based on it. */
+export function deleteBlocker(
+  room: Room,
+  offerId: string,
+): { kind: "only" } | { kind: "dependents"; ids: string[] } | null {
+  if (room.offers.length === 1) return { kind: "only" };
+  const ids = room.offers
+    .filter((offer) => offer.price.kind === "linked" && offer.price.parentId === offerId)
+    .map((offer) => offer.id);
+  return ids.length ? { kind: "dependents", ids } : null;
+}
+/** The room without the option. When it was the main option, the next option with its own prices becomes main. */
+export function deleteOption(room: Room, offerId: string): Room {
+  if (deleteBlocker(room, offerId)) throw new PricingError("pricing.steps.delete.errorBlocked");
+  const result = parsePricingConfiguration({
+    ...room,
+    offers: room.offers.filter((offer) => offer.id !== offerId),
+  });
+  if (!result) throw new PricingError("pricing.steps.delete.errorBlocked");
+  return result;
+}
+
+/** More options' summary line: what it holds for the main option ("2 monthly prices · 1 single date"), or null when
+ * nothing is set there, so a setup the steps don't show is never hidden behind the closed row. */
+export function moreOptionsSummary(room: Room, t: Translate) {
+  const main = mainOffer(room);
+  const calendar = main.price.kind === "independent" ? main.price.calendar : null;
+  const restrictions = main.restrictions.kind === "own" ? main.restrictions : null;
+  const count = (key: string, value: number) =>
+    value ? [t(`${key}.${value === 1 ? "one" : "other"}`, { count: value })] : [];
+  const rules = restrictions?.rules;
+  const parts = [
+    ...count("pricing.steps.more.months", calendar?.months.length ?? 0),
+    ...count("pricing.steps.more.dates", calendar?.dates.length ?? 0),
+    ...count(
+      "pricing.steps.more.exceptions",
+      (restrictions?.dates.length ?? 0) + (restrictions?.seasons.length ?? 0),
+    ),
+    ...(rules &&
+    (rules.maxStayNights !== null ||
+      rules.closedToArrival ||
+      rules.closedToDeparture ||
+      rules.stopSell)
+      ? [t("pricing.steps.more.advanced")]
+      : []),
+  ];
+  return parts.length ? parts.join(" · ") : null;
+}
+
+/** `date` (YYYY-MM-DD) moved by `days`, in UTC like the engine's calendar. */
+export const addDays = (date: string, days: number) =>
+  new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+/** The guest preview's sample stay: the main option's minimum nights (at least 2), from the next Friday after
+ * `today`, so weekend prices show. */
+export function sampleStay(room: Room, today: string) {
+  const main = mainOffer(room);
+  const nights = Math.max(
+    2,
+    main.restrictions.kind === "own" ? main.restrictions.rules.minArrivalNights : 1,
+  );
+  const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
+  const checkIn = addDays(today, (5 - weekday + 7) % 7 || 7);
+  return { checkIn, checkOut: addDays(checkIn, nights) };
+}
+/** Each option's total for a stay of the sample guests: the engine's stay calculation, as in the stay check. */
+export function stayTotals(
+  room: Room,
+  checkIn: string,
+  checkOut: string,
+): Record<string, RoomStayPricingResult> {
+  return Object.fromEntries(
+    room.offers.map((offer) => [
+      offer.id,
+      calculateReplacementRoomStay(room, {
+        propertyId: room.propertyId,
+        roomTypeId: room.roomTypeId,
+        offerId: offer.id,
+        expectedRevision: room.revision,
+        expectedTermsRevisions: termsRevisions(room),
+        checkIn,
+        checkOut,
+        guests: { adults: sampleAdults(room), childAgesAtCheckIn: [] },
+      }),
+    ]),
+  );
+}
+/** Every night of a month (`month` is "YYYY-MM") for one option and the sample guests: the engine's night evaluator,
+ * the one Channex nightly prices use. Each night also carries its own stay rules. */
+export function monthNights(
+  room: Room,
+  offerId: string,
+  month: string,
+): { date: string; night: RoomNightProjectionResult }[] {
+  const days = new Date(
+    Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0),
+  ).getUTCDate();
+  const dates = Array.from(
+    { length: days },
+    (_, day) => `${month}-${String(day + 1).padStart(2, "0")}`,
+  );
+  const nights = projectReplacementRoomNights(
+    room,
+    {
+      propertyId: room.propertyId,
+      roomTypeId: room.roomTypeId,
+      offerId,
+      expectedRevision: room.revision,
+      expectedTermsRevisions: termsRevisions(room),
+      guests: { adults: sampleAdults(room), childAgesAtCheckIn: [] },
+    },
+    dates,
+  );
+  return dates.map((date, index) => ({ date, night: nights[index] }));
 }

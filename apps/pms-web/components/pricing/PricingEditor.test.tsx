@@ -2,8 +2,13 @@ import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
+import { StepFirstPrices } from "./StepFirstPrices";
 import { PricingEditor } from "./PricingEditor";
 import { PricingStayPreview } from "./PricingStayPreview";
+import { OptionWindow } from "./OptionWindow";
+import { StepOptions } from "./StepOptions";
+import { GuestPreview } from "./GuestPreview";
+import { PriceCalendar } from "./PriceCalendar";
 import { changeIncludedAdjustments } from "./PricingIncludedAdjustments";
 import { changeDatePrice } from "./PricingDates";
 import { NewLinkedOffer, linkedOfferInput } from "./NewLinkedOffer";
@@ -20,6 +25,7 @@ import { changeSeasonPrice } from "./PricingSeasons";
 import { changeMonthPrice } from "./PricingMonths";
 import { changeWeekdayPrice } from "./PricingWeekdays";
 import { editedSnapshot } from "./pricingAmounts";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import Modal from "@/components/Modal";
 import { ApiErrorResponse } from "@/services/api/client";
 import type {
@@ -120,6 +126,13 @@ const reload = async () => {
   await click(button("Reload pricing") ? "Reload pricing" : "Cancel");
   for (const confirm of ["Discard and reload", "Discard changes"])
     if (button(confirm)) await click(confirm);
+};
+/** Step 4's "Own option": opens the new-option window and picks how the option is priced. Does nothing while
+ * "Own option" is disabled. */
+const addOption = async (kind: "Based on another option" | "With its own prices") => {
+  if (button("Own option").props.disabled) return;
+  await click("Own option");
+  await click(kind);
 };
 /** Opens step 2's season window: a season from the year bar by its name, or "Add season". */
 const openSeason = async (name?: string) => {
@@ -423,7 +436,7 @@ it("preserves all non-base settings and handles every supported mode without flo
   expect(() => editedSnapshot(snapshot, { "0:0:0": "1e2" })).toThrow();
   expect(() => editedSnapshot(snapshot, { "0:0:0": "0" })).toThrow("greater than zero");
 });
-it("shows retained adjustments, date prices and restrictions with the saved prices", async () => {
+it("shows included adjustments, date prices and restrictions with the saved prices", async () => {
   const room = snapshot.rooms[0],
     offer = room.offers[0];
   client.read.mockResolvedValueOnce({
@@ -476,13 +489,14 @@ it("shows retained adjustments, date prices and restrictions with the saved pric
   await click("Save prices");
   expect(publish).toHaveBeenCalledOnce();
   const text = JSON.stringify(view.toJSON());
+  // VAY-2125: step 1, the option cards, More options and the option windows show what "Retained rules" repeated.
   for (const value of [
     "−30.00 EUR",
     "2026-12-25",
     "200.00 EUR",
-    "-10%",
-    "Minimum arrival stay 1",
-    "Stay restrictions inherited",
+    "10% cheaper",
+    "Minimum arrival stay: 1",
+    "inherited from the parent offer",
     "Show cancellation and payment terms",
   ])
     expect(text).toContain(value);
@@ -553,7 +567,7 @@ it.each([new Error("lost preparation response")])(
       freeDays: "",
       payment: "full",
     });
-    await act(async () => view.root.findByType(FirstPricingSetup).props.onCreate(input));
+    await act(async () => view.root.findByType(StepFirstPrices).props.onCreate(input));
     expect(client.termsAction).not.toHaveBeenCalled();
     await click("Save prices");
     expect(button("Reload pricing").props.disabled).toBe(true);
@@ -637,7 +651,8 @@ it("keeps included-adult adjustments when editing and reviewing the saved base p
   expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({
     calendar: { base: { baseMinor: "15000", baseGuests: 2, adjustments } },
   });
-  expect(JSON.stringify(view.toJSON())).toContain("1 adult −30.00 EUR; 2 adults 0.00 EUR");
+  // VAY-2125: step 1 lists the other guest counts' adjustments.
+  expect(JSON.stringify(view.toJSON())).toContain("Price for 2 adults. Other guest counts: 1 adult −€30");
   expect(button("Save prices").props.disabled).toBe(true);
 });
 it("labels every saved weekday using Monday-zero without changing its adjustment", async () => {
@@ -665,17 +680,10 @@ it("labels every saved weekday using Monday-zero without changing its adjustment
   await mount();
   await touch();
   await click("Save prices");
+  // VAY-2125: step 3 summarises every weekday rule.
   const paragraphs = view.root.findAllByType("p").map((node) => node.children.join(""));
-  expect(paragraphs).toEqual(
-    expect.arrayContaining([
-      "Monday: 1%",
-      "Tuesday: 2%",
-      "Wednesday: 3%",
-      "Thursday: 4%",
-      "Friday: 5%",
-      "Saturday: 6%",
-      "Sunday: 7%",
-    ]),
+  expect(paragraphs).toContain(
+    "Monday +1% · Tuesday +2% · Wednesday +3% · Thursday +4% · Friday +5% · Saturday +6% · Sunday +7%",
   );
   expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { weekdays } });
 });
@@ -2353,7 +2361,7 @@ it("appends linked offers preserving prices, revisions and accepted-policy retry
   await mount(id);
   await touch();
   await act(async () => input().props.onChange({ target: { value: "155.25" } }));
-  await click("Add linked offer");
+  await addOption("Based on another option");
   expect(button("Save prices").props.disabled).toBe(true);
   expect(button("Change meal plan").props.disabled).toBe(true);
   const next = linkedOfferInput(room, offerId, {
@@ -2387,18 +2395,18 @@ it("appends linked offers preserving prices, revisions and accepted-policy retry
   );
   expect(saved.snapshot.rooms[0].offers[1].id).toBe(offerId);
   expect(saved.snapshot.rooms[0].offers[1].termsRevision).toBe(offerId);
-  expect(button("Add linked offer").props.disabled).toBe(true);
+  expect(button("Own option").props.disabled).toBe(true);
   expect(button("Save prices").props.disabled).toBe(true);
 });
 it("cancels new-offer setup without writes and protects pending entries and leaving", async () => {
   await mount();
   await touch();
   await click("Edit child charges");
-  expect(button("Add linked offer").props.disabled).toBe(true);
-  await click("Add linked offer");
+  expect(button("Own option").props.disabled).toBe(true);
+  await addOption("Based on another option");
   expect(button("Cancel new offer")).toBeUndefined();
   await click("Cancel child charges");
-  await click("Add linked offer");
+  await addOption("Based on another option");
   expect(input().props.disabled).toBe(true);
   expect(button("Save prices").props.disabled).toBe(true);
   const warn = vi
@@ -2528,9 +2536,9 @@ it("creates an independent offer through fixed-room setup and retains policy ret
   await mount(id);
   await touch();
   await click("Edit child charges");
-  expect(button("Add independent offer").props.disabled).toBe(true);
+  expect(button("Own option").props.disabled).toBe(true);
   await click("Cancel child charges");
-  await click("Add independent offer");
+  await addOption("With its own prices");
   expect(view.root.findByType(FirstPricingSetup).props.existingRoom).toMatchObject({
     roomTypeId: id,
   });
@@ -2547,7 +2555,7 @@ it("creates an independent offer through fixed-room setup and retains policy ret
   expect(client.termsAction).not.toHaveBeenCalled();
   expect(button("Save prices").props.disabled).toBe(false);
   await act(async () => input().props.onChange({ target: { value: "155.25" } }));
-  await click("Add independent offer");
+  await addOption("With its own prices");
   const next = firstPricingInput(
     room.propertyId,
     { roomTypeId: id, name: "Double", capacity: room.capacity },
@@ -2591,7 +2599,7 @@ it("creates an independent offer through fixed-room setup and retains policy ret
     kind: "independent",
     calendar: { base: { amountMinor: "20000" } },
   });
-  expect(button("Add independent offer").props.disabled).toBe(true);
+  expect(button("Own option").props.disabled).toBe(true);
   expect(button("Save prices").props.disabled).toBe(true);
 });
 
@@ -2775,7 +2783,7 @@ it("prefills included settings, guards pending edits and saves current bases thr
   expect(field("Adjustment for 3 adults").props.value).toBe("19.25");
   expect(button("Save prices").props.disabled).toBe(true);
   expect(input().props.disabled).toBe(true);
-  expect(button("Add independent offer").props.disabled).toBe(true);
+  expect(button("Own option").props.disabled).toBe(true);
   expect(button("Change meal plan").props.disabled).toBe(true);
   expect(button("Edit stay rules").props.disabled).toBe(true);
   const warn = vi
@@ -4104,7 +4112,8 @@ it("on a room page, edits only that room, publishes every other room exactly as 
   client.read.mockResolvedValue(published()); await mountRoom();
   expect(view.root.findAllByProps({ inputMode: "decimal" }).filter((node) => node.type === "input")).toHaveLength(1);
   expect(input().props["aria-label"]).toContain("Family"); expect(button("Add another room")).toBeUndefined();
-  expect(view.root.findByProps({ "aria-label": "Preview room and offer" }).findAllByType("option").map((node) => node.children.join(""))).toEqual(["Family · Offer 1 · breakfast"]);
+  await act(async () => {});
+  expect(view.root.findByProps({ "aria-label": "Preview room and offer" }).findAllByType("option").map((node) => node.children.join(""))).toEqual(["Family · Non-refundable + breakfast"]);
   await act(async () => input().props.onChange({ target: { value: "123.45" } })); await click("Save prices");
   expect(saved.baseRevision).toBe(1); expect(saved.snapshot.rooms[0]).toEqual({ ...snapshot.rooms[0], revision: 2 });
   expect(saved.snapshot.rooms[1]).toMatchObject({ roomTypeId: familyId, revision: 2, offers: [{ price: { calendar: { base: { amountMinor: "12345" } } } }] });
@@ -4138,18 +4147,18 @@ it("starts an unpriced room with the first setup in the property currency and pu
   client.read.mockResolvedValue({ ...snapshot, revision: 3, sources, stale: false });
   const policy = vi.fn().mockResolvedValue({ revision: familyId }); client.termsAction.mockReturnValue(policy);
   await mountRoom();
-  expect(view.root.findByType(FirstPricingSetup).props).toMatchObject({ rooms: [familySetup], fixedCurrency: "EUR" });
+  expect(view.root.findByType(StepFirstPrices).props).toMatchObject({ rooms: [familySetup], fixedCurrency: "EUR" });
   expect(button("Save prices")).toBeUndefined(); expect(view.root.findAllByType(PricingStayPreview)).toHaveLength(0);
-  await act(async () => view.root.findByType(FirstPricingSetup).props.onCreate(familyInput("90"))); await click("Save prices");
+  await act(async () => view.root.findByType(StepFirstPrices).props.onCreate(familyInput("90"))); await click("Save prices");
   expect(saved.baseRevision).toBe(3); expect(saved.snapshot.rooms.map((room) => [room.roomTypeId, room.revision])).toEqual([["room", 4], [familyId, 4]]);
   expect(saved.snapshot.rooms[0]).toEqual({ ...snapshot.rooms[0], revision: 4 }); expect(policy).toHaveBeenCalledOnce();
 });
 it("on a room page, offers only that room for the first setup and asks to finish room details when it cannot have prices", async () => {
   client.read.mockResolvedValueOnce(null); await mountRoom();
-  expect(view.root.findByType(FirstPricingSetup).props.rooms).toEqual([familySetup]); expect(view.root.findByType(FirstPricingSetup).props.fixedCurrency).toBeUndefined();
+  expect(view.root.findByType(StepFirstPrices).props.rooms).toEqual([familySetup]); expect(view.root.findByType(StepFirstPrices).props.fixedCurrency).toBeUndefined();
   act(() => view.unmount());
   client.read.mockResolvedValueOnce(null); await mountRoom([]);
-  expect(JSON.stringify(view.toJSON())).toContain("Finish this room's details first"); expect(view.root.findAllByType(FirstPricingSetup)).toHaveLength(0);
+  expect(JSON.stringify(view.toJSON())).toContain("Finish this room's details first"); expect(view.root.findAllByType(StepFirstPrices)).toHaveLength(0);
   client.read.mockResolvedValueOnce({ ...snapshot, revision: 1, sources, stale: false }); await click("Reload pricing");
   expect(JSON.stringify(view.toJSON())).toContain("Finish this room's details first"); expect(button("Save prices")).toBeUndefined();
 });
@@ -4218,4 +4227,172 @@ it("keeps the status, the declaration and Reload beside Save in the sticky bar (
   await touch(); expect(text()).toContain("Unsaved changes");
   // No heading repeats the room's name; the room page's title shows it.
   expect(view.root.findAll((node) => /^h\d$/.test(String(node.type))).map((node) => node.children.join(""))).not.toContain("Family");
+});
+it("adds a quick-add option with its terms and deletes an option after folding typed prices in (VAY-2125)", async () => {
+  const id = "61000000-0000-4000-8000-000000000004",
+    revision = "61000000-0000-4000-8000-000000000006";
+  const [flex] = snapshot.rooms[0].offers;
+  if (flex.price.kind !== "independent") throw new Error("fixture");
+  const second = { ...flex, id: "second", price: { ...flex.price, calendar: { ...flex.price.calendar, base: { mode: "flat" as const, amountMinor: "20000" } } } };
+  const room = { ...snapshot.rooms[0], roomTypeId: id, offers: [flex, second] };
+  client.read.mockResolvedValueOnce({ ...snapshot, rooms: [room], revision: 7, sources, stale: false });
+  client.readTerms.mockImplementation(async (roomTypeId, offerId, termsRevision) => ({
+    roomTypeId,
+    offerId,
+    revision: termsRevision,
+    cancellation: { kind: "flexible", terms: { type: "free_until_days_before_arrival", freeCancellationDeadlineDays: 7, afterDeadlinePenalty: "full_booking_amount", noShowPenalty: "full_booking_amount" } },
+    payment: { kind: "full", acceptedMethods: ["card"] },
+  }));
+  const policy = vi.fn().mockResolvedValue({ revision });
+  client.termsAction.mockReturnValue(policy);
+  await mount(id);
+  await act(async () => {});
+  const text = () => JSON.stringify(view.toJSON());
+  expect(text()).toContain("With breakfast");
+  expect(text()).toContain("With breakfast 2");
+  await click("Non-refundable");
+  await act(async () => view.root.findByType(Modal).findAllByType("button").find((node) => node.children.includes("Add option"))!.props.onClick());
+  expect(view.root.findAllByType(Modal)).toHaveLength(0);
+  expect(text()).toContain("Room only · 10% cheaper · No refund if cancelled");
+  // The main option now has an option based on it, so its window explains instead of offering Delete.
+  expect(text()).toContain("Other options are based on this one. Delete or change them first: Non-refundable.");
+  await act(async () => input().props.onChange({ target: { value: "123" } }));
+  await click("Delete option");
+  await act(async () => view.root.findByType(ConfirmDialog).props.onConfirm());
+  expect(input().props.value).toBe("123.00");
+  expect(text()).toContain("Option deleted from this draft.");
+  await click("Save prices");
+  expect(policy).toHaveBeenCalledOnce();
+  expect(client.termsAction.mock.calls[0][0]).toMatchObject({ roomTypeId: id, expectedRevision: null, cancellation: { kind: "non_refundable" }, payment: { kind: "full", acceptedMethods: ["card"] } });
+  const offers = saved.snapshot.rooms[0].offers;
+  expect(offers.map((offer) => offer.id)).toEqual(["flex", client.termsAction.mock.calls[0][0].offerId]);
+  expect(offers[0].price).toMatchObject({ calendar: { base: { amountMinor: "12300" } } });
+  expect(offers[1]).toMatchObject({ termsRevision: revision, price: { kind: "linked", parentId: "flex", adjustment: { kind: "percentage", basisPoints: -1000 } }, restrictions: { kind: "inherit" } });
+});
+it("retries option names whose terms failed and keeps a window open on a price it can't read (VAY-2125)", async () => {
+  const [flex] = snapshot.rooms[0].offers;
+  if (flex.price.kind !== "independent") throw new Error("fixture");
+  const second = { ...flex, id: "second", price: { ...flex.price, calendar: { ...flex.price.calendar, base: { mode: "flat" as const, amountMinor: "20000" } } } };
+  client.read.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...snapshot.rooms[0], offers: [flex, second] }], revision: 1, sources, stale: false });
+  client.readTerms.mockRejectedValueOnce(new Error("offline"));
+  await mount();
+  await act(async () => {});
+  const text = () => JSON.stringify(view.toJSON());
+  expect(text()).toContain("Some options' cancellation terms couldn't be loaded");
+  expect(text()).toContain("Option 1 · breakfast");
+  await click("Try again");
+  await act(async () => {});
+  expect(text()).not.toContain("couldn't be loaded");
+  expect(text()).toContain("Non-refundable + breakfast 2");
+  await act(async () => view.root.findByProps({ "aria-label": "Room 1 Offer 2 Per room" }).props.onChange({ target: { value: "12,5" } }));
+  // Step 5's child-price window is an OptionWindow too, so the option's window is found by its title.
+  const done = () => view.root.findAllByType(OptionWindow).find((node) => node.props.title === "Non-refundable + breakfast 2")!.findAllByType("button").find((node) => node.children.includes("Done"))!;
+  expect(done().props.disabled).toBe(true);
+  await act(async () => view.root.findByProps({ "aria-label": "Room 1 Offer 2 Per room" }).props.onChange({ target: { value: "125" } }));
+  expect(done().props.disabled).toBe(false);
+});
+it("shows add and delete errors in the window that asked, and counts the quick-add form as unsaved work (VAY-2125)", async () => {
+  const id = "61000000-0000-4000-8000-000000000004";
+  const [flex] = snapshot.rooms[0].offers;
+  if (flex.price.kind !== "independent") throw new Error("fixture");
+  const second = { ...flex, id: "second", price: { ...flex.price, calendar: { ...flex.price.calendar, base: { mode: "flat" as const, amountMinor: "20000" } } } };
+  client.read.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...snapshot.rooms[0], roomTypeId: id, offers: [flex, second] }], revision: 2, sources, stale: false });
+  client.readTerms.mockImplementation(async (roomTypeId, offerId, revision) => ({
+    roomTypeId,
+    offerId,
+    revision,
+    cancellation: { kind: "flexible", terms: { type: "free_until_days_before_arrival", freeCancellationDeadlineDays: 7, afterDeadlinePenalty: "full_booking_amount", noShowPenalty: "full_booking_amount" } },
+    payment: { kind: "full", acceptedMethods: ["card"] },
+  }));
+  await mount(id);
+  await act(async () => {});
+  await click("Non-refundable");
+  // The open form is unsaved work: Save waits, and leaving asks first.
+  expect(button("Save prices").props.disabled).toBe(true);
+  const warn = vi.mocked(window.addEventListener).mock.calls.filter(([name]) => name === "beforeunload").at(-1)![1] as (event: unknown) => void;
+  const event = { preventDefault: vi.fn(), returnValue: undefined };
+  warn(event);
+  expect(event.preventDefault).toHaveBeenCalled();
+  // A price the editor can't read stops the add; the form says why.
+  await act(async () => input().props.onChange({ target: { value: "abc" } }));
+  await act(async () => view.root.findByType(Modal).findAllByType("button").find((node) => node.children.includes("Add option"))!.props.onClick());
+  expect(view.root.findByType(Modal).findAllByProps({ role: "alert" })).toHaveLength(1);
+  await act(async () => view.root.findByType(Modal).findAllByType("button").find((node) => node.children.includes("Cancel"))!.props.onClick());
+  // The same for a delete: the option's window says why.
+  await act(async () => view.root.findAllByType(StepOptions)[0].props.onEdit("second"));
+  const edit = () => view.root.findAllByType(OptionWindow).find((node) => node.props.title === "With breakfast 2")!;
+  await act(async () => edit().findAllByType("button").find((node) => node.children.includes("Delete option"))!.props.onClick());
+  await act(async () => view.root.findByType(ConfirmDialog).props.onConfirm());
+  expect(edit().props.open).toBe(true);
+  expect(edit().findAllByProps({ role: "alert" })).toHaveLength(1);
+  expect(client.saveDraft).not.toHaveBeenCalled();
+});
+it("changes the main option's minimum nights in step 5, keeps own stay rules and names what More options holds (VAY-2125)", async () => {
+  const room = snapshot.rooms[0],
+    [flex] = room.offers;
+  if (flex.price.kind !== "independent" || flex.restrictions.kind !== "own") throw new Error("fixture");
+  const rules = { ...flex.restrictions.rules, minArrivalNights: 2, maxStayNights: 14 };
+  const main = {
+    ...flex,
+    price: { ...flex.price, calendar: { ...flex.price.calendar, months: [{ month: 8, price: { mode: "flat" as const, amountMinor: "12000" } }], dates: [{ date: "2026-12-25", price: { mode: "flat" as const, amountMinor: "20000" } }] } },
+    restrictions: { kind: "own" as const, rules, seasons: [], dates: [{ date: "2026-12-31", rules: { ...rules, closedToArrival: true } }] },
+  };
+  const early = {
+    ...flex,
+    id: "early",
+    price: { kind: "linked" as const, parentId: "flex", adjustment: { kind: "percentage" as const, basisPoints: -500 }, dateOverrides: [] },
+    restrictions: { kind: "own" as const, rules: { ...rules, minArrivalNights: 4 }, seasons: [], dates: [] },
+  };
+  client.read.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...room, offers: [main, early] }], revision: 3, sources, stale: false });
+  await mount();
+  await act(async () => {});
+  const text = () => JSON.stringify(view.toJSON());
+  expect(text()).toContain("1 monthly price · 1 single date · 1 date or season rule · Advanced rules");
+  expect(text()).toContain("These options have their own stay rules and keep them: Non-refundable + breakfast 2.");
+  expect(text()).toContain("0–11 €25 per night");
+  const more = () => view.root.findByProps({ "aria-label": "One night more" });
+  await act(async () => more().props.onClick());
+  expect(button("Save prices").props.disabled).toBe(false);
+  await click("Save prices");
+  const [savedMain, savedEarly] = saved.snapshot.rooms[0].offers;
+  expect(savedMain.restrictions).toEqual({ ...main.restrictions, rules: { ...rules, minArrivalNights: 3 } });
+  expect(savedEarly.restrictions).toEqual(early.restrictions);
+  expect(savedMain.price).toEqual(main.price);
+});
+it("shows what guests pay for the picked stay and the month's nightly prices, from the unsaved edits (VAY-2125)", async () => {
+  await mount();
+  await act(async () => {});
+  await act(async () => view.root.findByType(PriceCalendar).props.onPick("2026-07-18"));
+  expect(view.root.findByType(GuestPreview).props.stay).toEqual({ checkIn: "2026-07-18", checkOut: "2026-07-20" });
+  const text = () => JSON.stringify(view.toJSON());
+  // Breakfast for 2 adults (2 × €12) on top of the €100 room, for 2 nights.
+  expect(text()).toContain("2 nights · 18 Jul–20 Jul");
+  expect(text()).toContain("Select · €248 for 2 nights");
+  expect(view.root.findAllByProps({ "aria-label": "18 July 2026, €124, in the sample stay" })).toHaveLength(1);
+  // Only the chosen option of the guest card's radio group is a Tab stop; arrow keys move the choice.
+  const radios = () => view.root.findByType(GuestPreview).findAllByProps({ role: "radio" }).filter((node) => node.type === "button");
+  expect(radios().map((node) => node.props.tabIndex)).toEqual([0]);
+  await act(async () => input().props.onChange({ target: { value: "150" } }));
+  expect(text()).toContain("Select · €348 for 2 nights");
+  expect(view.root.findAllByProps({ "aria-label": "18 July 2026, €174, in the sample stay" })).toHaveLength(1);
+  await act(async () => input().props.onChange({ target: { value: "abc" } }));
+  expect(text()).toContain("Finish the open price entry to see guest prices.");
+});
+it("says in the guest card whether free cancellation is still open for the sample stay (VAY-2125)", async () => {
+  const [flex] = snapshot.rooms[0].offers;
+  client.read.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...snapshot.rooms[0], offers: [{ ...flex, meal: { kind: "room_only", charge: { kind: "room", amountMinor: "0" } } }] }], revision: 1, sources, stale: false });
+  client.readTerms.mockImplementation(async (roomTypeId, offerId, revision) => ({
+    roomTypeId,
+    offerId,
+    revision,
+    cancellation: { kind: "flexible", terms: { type: "free_until_days_before_arrival", freeCancellationDeadlineDays: 7, afterDeadlinePenalty: "full_booking_amount", noShowPenalty: "full_booking_amount" } },
+    payment: { kind: "full", acceptedMethods: ["card"] },
+  }));
+  await mount();
+  await act(async () => {});
+  const text = () => JSON.stringify(view.toJSON());
+  await act(async () => view.root.findByType(PriceCalendar).props.onPick("2099-07-18"));
+  expect(text()).toContain("Free cancellation until 11 Jul");
+  await act(async () => view.root.findByType(PriceCalendar).props.onPick("2020-07-18"));
+  expect(text()).toContain("No free cancellation for these dates");
 });
