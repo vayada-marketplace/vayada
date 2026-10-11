@@ -201,6 +201,7 @@ it("binds the path and idempotency key before invoking enabled acceptance", asyn
     undefined,
     undefined,
     false,
+    undefined,
   );
   for (const [quoteId, requestId] of [
     ["33333333-3333-4333-8333-333333333333", "accept-1"],
@@ -236,6 +237,7 @@ it("passes the Stripe provider to the writer only when card acceptance is switch
       undefined,
       card ? { provider: stripeProvider } : undefined,
       false,
+      undefined,
     );
     await app.close();
   }
@@ -259,6 +261,7 @@ it("forwards the request switch and answers a refused request with 404", async (
     undefined,
     undefined,
     true,
+    undefined,
   );
   await app.close();
   vi.mocked(writePricingAcceptance).mockRejectedValue(
@@ -337,6 +340,7 @@ it("takes a valid affiliate handle only from the cookie and verifies it before t
     { affiliateContextId: contextId },
     undefined,
     false,
+    undefined,
   );
 });
 
@@ -361,6 +365,7 @@ it("keeps affiliate cookie binding off by default even when a cookie is supplied
     undefined,
     undefined,
     false,
+    undefined,
   );
 });
 
@@ -388,6 +393,7 @@ it("ignores duplicate, invalid, or unavailable affiliate cookies without blockin
     undefined,
     undefined,
     false,
+    undefined,
   );
   vi.mocked(readBookingAffiliateContextForQuote).mockRejectedValue(
     new Error("storage unavailable"),
@@ -408,6 +414,7 @@ it("ignores duplicate, invalid, or unavailable affiliate cookies without blockin
     undefined,
     undefined,
     false,
+    undefined,
   );
 });
 it.each([

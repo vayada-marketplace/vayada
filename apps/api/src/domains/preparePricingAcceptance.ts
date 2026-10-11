@@ -11,6 +11,7 @@ import { lockFinancePricingAcceptanceTerms } from "./financePricingAcceptanceTer
 import { parseBookingQuoteAcceptanceInput } from "./bookingQuoteAcceptanceInput.js";
 import { pricingRoomRevenueProjection } from "./pricingRoomRevenueProjection.js";
 import { pricingCardQuoteSupported } from "./pricingCardPayment.js";
+import { pricingManualQuoteSupported } from "./pricingManualPayment.js";
 
 /** Start only; caller owns READ COMMITTED through full acceptance or rollback.
  * Public authority takes the existing property inventory mutation lock BEFORE
@@ -22,7 +23,7 @@ export async function preparePricingAcceptance(
   client: PoolClient,
   slug: unknown,
   input: unknown,
-  options: { card?: boolean; request?: boolean } = {},
+  options: { card?: boolean; request?: boolean; manual?: boolean } = {},
 ) {
   const fail = (): never => {
     throw new Error("Booking acceptance unavailable");
@@ -56,8 +57,10 @@ export async function preparePricingAcceptance(
   )
     return fail();
   const command = parseBookingQuoteAcceptanceInput(input, current.quote, disclosure.policy);
-  // Bank transfer and PayPal need their own acceptance step (VAY-2139); until then, unavailable.
-  if (command && isManualPricingPaymentMethod(current.quote.paymentMethod))
+  // Bank transfer and PayPal while their acceptance is off are unavailable, not stale prices.
+  // They wait for the guest's payment in either acceptance mode, so the request switch is not needed.
+  const manual = options.manual === true && pricingManualQuoteSupported(current.quote);
+  if (command && !manual && isManualPricingPaymentMethod(current.quote.paymentMethod))
     throw new Error("Manual payment acceptance unavailable");
   // Match the currently implemented lifecycle/revenue composition before effects.
   const mode = current.quote.acceptanceMode;
@@ -67,7 +70,7 @@ export async function preparePricingAcceptance(
     current.quote.evidence.dueNowMinor === "0" &&
     current.quote.evidence.dueLaterMinor === current.quote.evidence.totalMinor;
   // A request while hotel-confirmed acceptance is off is unavailable, not a stale price.
-  if (command && mode === "request" && options.request !== true)
+  if (command && mode === "request" && options.request !== true && !manual)
     throw new Error("Request acceptance unavailable");
   const card = options.card === true && pricingCardQuoteSupported(current.quote);
   // Likewise a card quote while online card acceptance is off.
@@ -75,7 +78,7 @@ export async function preparePricingAcceptance(
     throw new Error("Card acceptance unavailable");
   if (
     !command ||
-    !(payAtProperty || card) ||
+    !(payAtProperty || card || manual) ||
     !pricingRoomRevenueProjection(current.quote, current.calculation?.charges)
   )
     return fail();

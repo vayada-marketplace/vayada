@@ -100,7 +100,7 @@ it("reserves a pay-at-property request only while hotel-confirmed acceptance is 
     preparePricingAcceptance(db, "hotel", f.input, { request: true }),
   ).resolves.toMatchObject({ kind: "fresh", commandReceiptId: "receipt" });
 });
-it("refuses bank-transfer and PayPal quotes until their acceptance step exists", async () => {
+it("refuses bank-transfer and PayPal quotes while their acceptance is off", async () => {
   for (const [method, mode] of [
     ["bank_transfer", "instant"],
     ["paypal", "request"],

@@ -10,6 +10,10 @@ import type { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js
 import type { lockCurrentQuoteGuestDisclosure } from "./currentQuoteGuestDisclosure.js";
 import type { lockFinancePricingAcceptanceTerms } from "./financePricingAcceptanceTerms.js";
 import { pricingCardQuoteSupported } from "./pricingCardPayment.js";
+import {
+  pricingExpectedPaymentMethod,
+  pricingManualQuoteSupported,
+} from "./pricingManualPayment.js";
 
 type Input = {
   current: NonNullable<Awaited<ReturnType<typeof lockCurrentQuoteRevalidation>>>;
@@ -89,7 +93,8 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
         (quote.acceptanceMode === "instant" || quote.acceptanceMode === "request") &&
         quote.evidence.dueNowMinor === "0" &&
         quote.evidence.dueLaterMinor === quote.evidence.totalMinor) ||
-      pricingCardQuoteSupported(quote)
+      pricingCardQuoteSupported(quote) ||
+      pricingManualQuoteSupported(quote)
     )
   )
     return fail();
@@ -196,9 +201,9 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
       guest.countryCode,
       guest.arrivalTime,
       guest.specialRequests,
-      // Online card bookings keep the legacy checkout default ('unknown', no at-property
-      // method); booking_metadata.paymentMethod says card.
-      quote.paymentMethod === "pay_at_property" ? "pay_at_property" : "unknown",
+      // Online card and PayPal bookings keep the legacy checkout default ('unknown': the column
+      // has no such method); booking_metadata.paymentMethod says which.
+      pricingExpectedPaymentMethod(quote.paymentMethod),
     ],
   );
   if (affiliateContextId !== undefined && syntheticAffiliate)

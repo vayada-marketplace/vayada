@@ -1450,7 +1450,7 @@ export type PgTargetBookingWebCheckoutAdapterConfig = {
   replacementPricingCardAcceptanceEnabled?: boolean;
   /** Request-mode pay-at-property quotes in acceptance; the hotel confirms each booking. */
   replacementPricingRequestAcceptanceEnabled?: boolean;
-  /** Bank-transfer and PayPal quotes; their acceptance follows in VAY-2139. */
+  /** Bank-transfer and PayPal quotes in acceptance; the hotel confirms each payment. */
   replacementPricingManualPaymentAcceptanceEnabled?: boolean;
   externalChanges: ExternalChangePresentationPort;
   /** Register only with the reviewed provider runtime; absent keeps Airbnb actions disabled. */
@@ -2117,13 +2117,30 @@ export function createTargetBookingWebCheckoutAdapter(
           config.replacementPricingCardAcceptanceEnabled && config.stripePaymentProvider
             ? { provider: config.stripePaymentProvider }
             : undefined;
-        return await writePricingAcceptance(
+        const result = await writePricingAcceptance(
           pool,
           { slug, command: request },
           contextId ? { affiliateContextId: contextId } : undefined,
           cardPayments,
           config.replacementPricingRequestAcceptanceEnabled === true,
+          config.replacementPricingManualPaymentAcceptanceEnabled
+            ? { bankTransfers: config.bankTransfers }
+            : undefined,
         );
+        if (result.kind !== "payment_pending") return result;
+        // Bank transfer or PayPal: the token lets the guest open the bank details or PayPal email
+        // (POST /bookings/confirmation); a replay gets a fresh one.
+        const { propertyId, ...body } = result;
+        const confirmation = await issueTargetBookingConfirmationToken(
+          pool,
+          { guestBookingId: result.bookingId, propertyId },
+          new Date(),
+        );
+        return {
+          ...body,
+          confirmationToken: confirmation.token,
+          confirmationTokenExpiresAt: confirmation.expiresAt,
+        };
       } catch (error) {
         if (error instanceof PricingAcceptanceError && error.code === "card_unavailable")
           throw Object.assign(createHttpError(404, "Online card payment is unavailable."), {
