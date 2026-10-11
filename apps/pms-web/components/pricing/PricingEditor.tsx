@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { pricingCurrencyScale, parsePricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
+import { pricingAmountStep, pricingCurrencyScale, parsePricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useTranslation } from "@/lib/i18n";
 import { ApiErrorResponse } from "@/services/api/client";
 import { samePricingValue, type createReplacementPricingClient, type PricingSnapshot, type PricingTermsInput } from "@/services/api/replacementPricingClient";
 
-import { baseAmounts, decimalAmount, editedSnapshot, type MessageKey, PricingError } from "./pricingAmounts";
+import { baseAmounts, decimalAmount, editedSnapshot, type MessageKey, parseMinorInput, PricingError } from "./pricingAmounts";
 import { financeNotReady, pricingSave, pricingSaveError } from "./savePricing";
 import { FirstPricingSetup, type SetupRoom, type firstPricingInput } from "./FirstPricingSetup";
 import { PricingTerms } from "./PricingTerms";
@@ -72,6 +72,10 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
   const declarationId = useId();
   const roomName = (roomTypeId: string, ri: number) => roomNames[roomTypeId] ?? t("pricing.roomNumber", { number: ri + 1 });
   const offerLabel = (roomTypeId: string, ri: number, oi: number) => t("pricing.roomOffer", { room: roomName(roomTypeId, ri), number: oi + 1 });
+  // Options are named from their terms (the engine stores no name), so this room's terms are read up front, once per
+  // offer and terms revision; every load reads them again. An unsaved terms change names its option at once.
+  const [savedTerms, setSavedTerms] = useState<Record<string, OptionTerms | null>>({}), [termsAttempt, setTermsAttempt] = useState(0);
+  const requestedTerms = useRef(new Set<string>());
   const loads = useRef(0);
   const load = useCallback(async (after?: { keep?: Kept }) => {
     const seq = ++loads.current, latest = () => alive.current && seq === loads.current; // An older read never overwrites a newer one.
@@ -84,6 +88,7 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
       policyBases.current = { ...(room ? keep!.bases : {}), ...Object.fromEntries((saved?.rooms ?? []).flatMap((r) => r.offers.map((o) => [policyKey(r.roomTypeId, o.id), o.termsRevision]))) };
       setCurrent(saved || room ? { currency: saved?.currency ?? room!.currency, ownerReferences: { finance: saved?.ownerReferences.finance ?? "" },
         rooms: !room ? rooms : rooms.some((value) => value.roomTypeId === room.roomTypeId) ? rooms.map((value) => value.roomTypeId === room.roomTypeId ? room : value) : [...rooms, room] } : null);
+      requestedTerms.current.clear(); setSavedTerms({});
       setAddingOfferRoom(null); setPendingEntries({}); setBaseRevision(saved?.revision ?? 0); setStale(!!saved?.stale); setInputs({}); setDirty(!!room); setNeedsReload(false); setDone(false);
       setNotice(room ? "pricing.room.noticeKept" : keep ? "pricing.room.noticeDropped" : saved?.stale ? "pricing.room.noticeStale" : "");
     } catch (e) { if (latest()) setError(e); }
@@ -99,10 +104,6 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
       bases: Object.fromEntries(Object.entries(policyBases.current).filter(([key]) => JSON.parse(key)[0] === focus)) } });
   }
   useEffect(() => { alive.current = true; void load(); return () => { alive.current = false; }; }, [load]); // Client is property-bound; parent keys this component by property.
-  // Options are named from their terms (the engine stores no name), so this room's terms are read up front, once per
-  // offer and terms revision. An unsaved terms change names its option at once.
-  const [savedTerms, setSavedTerms] = useState<Record<string, OptionTerms | null>>({});
-  const requestedTerms = useRef(new Set<string>());
   const focusRoom = current?.rooms.find((room) => room.roomTypeId === focus);
   const termsKey = (offer: Room["offers"][number]) => JSON.stringify([focus, offer.id, offer.termsRevision]);
   const wantedTerms = (focusRoom?.offers ?? []).map(termsKey).join("\n");
@@ -114,7 +115,13 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
       void Promise.resolve().then(() => client.readTerms(roomTypeId, offerId, revision)).then((value) => value ?? null, () => null)
         .then((value) => { if (alive.current) setSavedTerms((previous) => ({ ...previous, [key]: value && { cancellation: value.cancellation, payment: value.payment } })); });
     }
-  }, [client, wantedTerms]);
+  }, [client, wantedTerms, termsAttempt]);
+  /** Reads the terms that failed again (step 4's Retry). */
+  function retryTerms() {
+    for (const [key, value] of Object.entries(savedTerms)) if (value === null) requestedTerms.current.delete(key);
+    setSavedTerms((previous) => Object.fromEntries(Object.entries(previous).filter(([, value]) => value !== null)));
+    setTermsAttempt((attempt) => attempt + 1);
+  }
   const optionTerms: Record<string, OptionTerms | undefined> = Object.fromEntries((focusRoom?.offers ?? []).map((offer) => [offer.id, policyEdits[policyKey(focus, offer.id)] ?? savedTerms[termsKey(offer)] ?? undefined]));
   const names = focusRoom ? optionNames(focusRoom, optionTerms, t) : {};
   const leaveRisk = hasPendingEntries || dirty || retry || busy;
@@ -219,8 +226,6 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
   const cancels = leaveRisk && !needsReload && !retry && !busy && !done;
   // Laid out as the Paper design's numbered steps; the other editors sit under More options. Cancel and Save at the bottom.
   return <section className="space-y-4">
-    {reloading && <ConfirmDialog title={t(cancels ? "pricing.steps.discardTitle" : "pricing.reloadTitle")} message={t(cancels ? "pricing.steps.discardMessage" : "pricing.reloadMessage")} confirmLabel={t(cancels ? "pricing.steps.discardConfirm" : "pricing.reloadConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { setReloading(false); void load(); }} onCancel={() => setReloading(false)} />}
-    {leave && <ConfirmDialog title={t("pricing.leaveTitle")} message={t("pricing.leaveMessage")} confirmLabel={t("pricing.leaveConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { leaving.current = true; setLeave(null); leave(); }} onCancel={() => setLeave(null)} />}
     {error !== null && <div role="alert" className={ui.errorBanner}>{pricingSaveError(error, t)}{retry && <p className="mt-2">{t("pricing.editor.retryHint")}</p>}{keepsOnReload && <p className="mt-2">{t("pricing.room.reloadKeeps")}</p>}</div>}
     {notice && <p role="status" className={warning ? ui.warningBanner : ui.successBanner}>{t(notice)}</p>}
     {loading && <p role="status" className={ui.text}>{t("pricing.editor.loading")}</p>}
@@ -237,6 +242,10 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
       // every other option's, in that option's Edit window. An unapplied entry keeps its place open.
       const pendingIn = (keys: readonly string[]) => keys.some((key) => pendingEntries[key]);
       const moreKeys = [`children:${ri}`, ...["month", "date", "stay", "stayDate", "staySeason"].map((key) => `${key}:${ri}:${mi}`)];
+      const badPrice = (oi: number) => Object.entries(inputs).some(([key, value]) => {
+        if (!key.startsWith(`${ri}:${oi}:`)) return false;
+        try { parseMinorInput(value, scale, false, pricingAmountStep(room.currency)); return false; } catch { return true; }
+      });
       const windowKeys = (oi: number) => (oi === mi ? ["policy", "included", "mealPlan", "meal"] : ["policy", "included", "date", "weekday", "month", "season", "mealPlan", "meal", "parent", "linked", "ownership", "stay", "stayDate", "staySeason"]).map((key) => `${key}:${ri}:${oi}`);
       const cancelAdding = () => { if (!disabled) { setAddingOfferRoom(null); setError(null); } };
       const group = (title: string) => <h3 className={`pt-2 ${ui.cardHeading}`}>{title}</h3>;
@@ -245,7 +254,8 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
           onInput={(key, value) => { setInputs((previous) => ({ ...previous, [key]: value })); setDirty(true); setNotice(""); }} />
         <StepSeasons room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onPending={pend(`stepSeason:${ri}`)} />
         <StepWeekends room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onPending={pend(`stepWeekday:${ri}`)} />
-        <StepOptions room={room} names={names} terms={optionTerms} prices={prices} disabled={disabled} onEdit={(offerId) => setOptionOpen(offerId)}
+        <StepOptions room={room} names={names} terms={optionTerms} prices={prices} disabled={disabled}
+          termsFailed={room.offers.some((offer) => !policyEdits[policyKey(focus, offer.id)] && savedTerms[termsKey(offer)] === null)} onRetryTerms={retryTerms} onEdit={(offerId) => setOptionOpen(offerId)}
           add={<AddOptionButton label={t("pricing.steps.options.own")} disabled={disabled || hasPendingEntries}
             onClick={() => { if (!disabled && !hasPendingEntries) { setIndependentOffer(null); setAddingOfferRoom(room.roomTypeId); setError(null); } }} />} />
         <MoreOptions keepOpen={pendingIn(moreKeys)}>
@@ -272,7 +282,7 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
         </MoreOptions>
         {room.offers.map((offer, oi) => {
           const label = offerLabel(room.roomTypeId, ri, oi), other = oi !== mi;
-          return <OptionWindow key={offer.id} open={optionOpen === offer.id} title={names[offer.id] ?? ""} closable={!pendingIn(windowKeys(oi))} onClose={() => setOptionOpen(null)}>
+          return <OptionWindow key={offer.id} open={optionOpen === offer.id} title={names[offer.id] ?? ""} closable={!pendingIn(windowKeys(oi)) && !(oi !== mi && badPrice(oi))} onClose={() => setOptionOpen(null)}>
             {group(t("pricing.steps.option.price"))}
             {other && offer.price.kind === "independent" && <div><p className={ui.label}>{t("pricing.editor.baseNightlyPrices", { currency: display.currency })}</p>
               <div className="grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-4">{baseAmounts(offer.price.calendar.base, t).map(([name, minor], ai) => <label key={ai} className="block"><span className="mb-1.5 block text-[11px] text-gray-500">{name}</span><input aria-label={`${label} ${name}`} inputMode="decimal" className={ui.input} disabled={disabled || exclusiveEditPending}
@@ -333,6 +343,9 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
       {!loading && editing && (retry ? <button type="button" className={ui.actionBarPrimary} aria-describedby={declarationId} disabled={busy} onClick={() => void run()}>{t("pricing.editor.retry")}</button>
         : <button type="button" disabled={disabled || hasPendingEntries || !(dirty || stale)} className={ui.actionBarPrimary} aria-describedby={declarationId} onClick={save}>{t(busy ? "pricing.editor.saving" : "pricing.editor.save")}</button>)}
     </div>
+    {/* Last, so they open above an option's window. */}
+    {reloading && <ConfirmDialog title={t(cancels ? "pricing.steps.discardTitle" : "pricing.reloadTitle")} message={t(cancels ? "pricing.steps.discardMessage" : "pricing.reloadMessage")} confirmLabel={t(cancels ? "pricing.steps.discardConfirm" : "pricing.reloadConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { setReloading(false); void load(); }} onCancel={() => setReloading(false)} />}
+    {leave && <ConfirmDialog title={t("pricing.leaveTitle")} message={t("pricing.leaveMessage")} confirmLabel={t("pricing.leaveConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { leaving.current = true; setLeave(null); leave(); }} onCancel={() => setLeave(null)} />}
   </section>;
 }
 /** Edits survive only when the server still has this room exactly as it was loaded (or still has no prices for

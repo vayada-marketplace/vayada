@@ -44,6 +44,8 @@ export function StepOptions({
   terms,
   prices,
   disabled,
+  termsFailed = false,
+  onRetryTerms,
   onEdit,
   add,
 }: {
@@ -52,6 +54,9 @@ export function StepOptions({
   terms: Readonly<Record<string, OptionTerms | undefined>>;
   prices: Readonly<Record<string, string | null>>;
   disabled: boolean;
+  /** Some options' terms couldn't be read, so they show a plain name; Retry reads them again. */
+  termsFailed?: boolean;
+  onRetryTerms?: () => void;
   onEdit: (offerId: string) => void;
   /** The quick-add buttons. */
   add: ReactNode;
@@ -118,6 +123,14 @@ export function StepOptions({
           );
         })}
       </ul>
+      {termsFailed && (
+        <p role="status" className="text-[13px] text-amber-700">
+          {t("pricing.steps.options.termsFailed")}{" "}
+          <button type="button" onClick={onRetryTerms} className={ui.stepLink}>
+            {t("pricing.steps.options.retry")}
+          </button>
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2.5">
         <span className="text-[14px] text-gray-500">{t("pricing.steps.options.add")}</span>
         {add}

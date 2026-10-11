@@ -2346,6 +2346,8 @@
   "pricing.steps.options.priceNote.other": "per normal night for {count} adults, meals included",
   "pricing.steps.options.add": "Add:",
   "pricing.steps.options.own": "Own option",
+  "pricing.steps.options.termsFailed": "Some options' cancellation terms couldn't be loaded, so they show a plain name.",
+  "pricing.steps.options.retry": "Try again",
   "pricing.steps.option.close": "Close",
   "pricing.steps.option.done": "Done",
   "pricing.steps.option.applyFirst": "Apply or cancel the open change first.",

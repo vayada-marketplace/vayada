@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
 import { PricingEditor } from "./PricingEditor";
 import { PricingStayPreview } from "./PricingStayPreview";
+import { OptionWindow } from "./OptionWindow";
 import { changeIncludedAdjustments } from "./PricingIncludedAdjustments";
 import { changeDatePrice } from "./PricingDates";
 import { NewLinkedOffer, linkedOfferInput } from "./NewLinkedOffer";
@@ -4225,4 +4226,25 @@ it("keeps the status, the declaration and Reload beside Save in the sticky bar (
   await touch(); expect(text()).toContain("Unsaved changes");
   // No heading repeats the room's name; the room page's title shows it.
   expect(view.root.findAll((node) => /^h\d$/.test(String(node.type))).map((node) => node.children.join(""))).not.toContain("Family");
+});
+it("retries option names whose terms failed and keeps a window open on a price it can't read (VAY-2125)", async () => {
+  const [flex] = snapshot.rooms[0].offers;
+  if (flex.price.kind !== "independent") throw new Error("fixture");
+  const second = { ...flex, id: "second", price: { ...flex.price, calendar: { ...flex.price.calendar, base: { mode: "flat" as const, amountMinor: "20000" } } } };
+  client.read.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...snapshot.rooms[0], offers: [flex, second] }], revision: 1, sources, stale: false });
+  client.readTerms.mockRejectedValueOnce(new Error("offline"));
+  await mount();
+  await act(async () => {});
+  const text = () => JSON.stringify(view.toJSON());
+  expect(text()).toContain("Some options' cancellation terms couldn't be loaded");
+  expect(text()).toContain("Option 1 · breakfast");
+  await click("Try again");
+  await act(async () => {});
+  expect(text()).not.toContain("couldn't be loaded");
+  expect(text()).toContain("Non-refundable + breakfast 2");
+  await act(async () => view.root.findByProps({ "aria-label": "Room 1 Offer 2 Per room" }).props.onChange({ target: { value: "12,5" } }));
+  const done = view.root.findAllByType(OptionWindow)[1].findAllByType("button").find((node) => node.children.includes("Done"))!;
+  expect(done.props.disabled).toBe(true);
+  await act(async () => view.root.findByProps({ "aria-label": "Room 1 Offer 2 Per room" }).props.onChange({ target: { value: "125" } }));
+  expect(view.root.findAllByType(OptionWindow)[1].findAllByType("button").find((node) => node.children.includes("Done"))!.props.disabled).toBe(false);
 });
