@@ -1743,7 +1743,8 @@ async function updatePaymentSettingsInClient(
     sameFinancePaymentMethods(previous.acceptedMethods, merged.acceptedMethods)
       ? { ...merged, acceptedMethods: previous.acceptedMethods as typeof merged.acceptedMethods }
       : merged;
-  const completenessError = paymentSettingsCompletenessError(next);
+  // A bound row may keep the setup step's bare pay_at_property, as public bookability does.
+  const completenessError = paymentSettingsCompletenessError(next, bindingPricing !== null);
   if (completenessError) {
     return {
       ok: false,
@@ -1941,11 +1942,13 @@ function mergePaymentSettings(
 
 function paymentSettingsCompletenessError(
   settings: FinancePaymentSettingsReadModel,
+  bound: boolean,
 ): string | null {
   if (!settings.paymentsEnabled || settings.acceptedMethods.length === 0) {
     return "Choose at least one payment method.";
   }
   if (
+    !bound &&
     settings.acceptedMethods.includes("pay_at_property") &&
     !settings.acceptedMethods.some((method) => method === "cash" || method === "manual_card")
   ) {

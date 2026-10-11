@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   parseReplaceFinancePaymentMethodsCommand,
   type FinancePaymentReadinessMethod,
+  type FinancePaymentSettingsPatchPayload,
   type FinanceRoutePaymentMethod,
 } from "@vayada/domain-finance";
 import pg from "pg";
@@ -213,6 +214,54 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Finance payment-method writers",
     await expect(binding()).resolves.toMatchObject({ revision: 1 });
   });
 
+  it("keeps PayPal and the pay-at-hotel choice when the setup step saves", async () => {
+    await saveSettingsPage(["pay_at_property", "manual_card", "paypal"]);
+    await expect(saveSetup(1, ["pay_at_property", "card"])).resolves.toMatchObject({
+      ok: true,
+      response: { paymentReadiness: { paymentMethodsRevision: 2, selectedMethodCount: 2 } },
+    });
+    await expect(settingsPage.getPaymentSettings(propertyId)).resolves.toMatchObject({
+      paymentsEnabled: true,
+      acceptedMethods: ["pay_at_property", "card", "manual_card", "paypal"],
+      depositPolicy: { paypalEmail: "pay@example.test" },
+    });
+
+    await expect(saveSetup(2, ["card"])).resolves.toMatchObject({ ok: true });
+    await expect(settingsPage.getPaymentSettings(propertyId)).resolves.toMatchObject({
+      acceptedMethods: ["card", "paypal"],
+    });
+  });
+
+  it("doesn't switch on extras an older disabled or malformed row still lists", async () => {
+    for (const [enabled, methods] of [
+      [false, ["paypal", "bank_transfer"]],
+      [true, ["cash", "cash"]],
+    ] as const) {
+      await pool.query("DELETE FROM finance.payment_settings WHERE property_id = $1::uuid", [
+        propertyId,
+      ]);
+      await pool.query(
+        `INSERT INTO finance.payment_settings
+           (property_id, payments_enabled, accepted_methods, default_currency)
+         VALUES ($1::uuid, $2, $3::text[], 'EUR')`,
+        [propertyId, enabled, methods],
+      );
+      await expect(saveSetup(0, ["pay_at_property"])).resolves.toMatchObject({ ok: true });
+      await expect(settingsPage.getPaymentSettings(propertyId)).resolves.toMatchObject({
+        paymentsEnabled: true,
+        acceptedMethods: ["pay_at_property"],
+      });
+    }
+  });
+
+  it("lets the settings page save other fields after setup chose plain pay at hotel", async () => {
+    await saveSetup(0, ["pay_at_property"]);
+    await expect(
+      saveSettingsPage([], { payload: { requiresManualReview: true } }),
+    ).resolves.toMatchObject({ ok: true, settings: { acceptedMethods: ["pay_at_property"] } });
+    await expect(binding()).resolves.toMatchObject({ revision: 1 });
+  });
+
   function saveSetup(expectedRevision: number, selectedMethods: FinancePaymentReadinessMethod[]) {
     const command = parseReplaceFinancePaymentMethodsCommand({
       organizationId,
@@ -234,7 +283,11 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Finance payment-method writers",
 
   function saveSettingsPage(
     acceptedMethods: FinanceRoutePaymentMethod[],
-    options: { idempotencyKey?: string; paypalEmail?: string } = {},
+    options: {
+      idempotencyKey?: string;
+      paypalEmail?: string;
+      payload?: FinancePaymentSettingsPatchPayload;
+    } = {},
   ) {
     return settingsPage.updatePaymentSettings!({
       commandType: "finance.payment_settings.update",
@@ -247,7 +300,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Finance payment-method writers",
         reason: "VAY-2136 settings page save",
         requestedAt: acceptedAt,
       },
-      payload: {
+      payload: options.payload ?? {
         paymentsEnabled: true,
         acceptedMethods,
         ...(acceptedMethods.includes("paypal")
