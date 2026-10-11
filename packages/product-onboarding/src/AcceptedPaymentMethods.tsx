@@ -1,6 +1,7 @@
 "use client";
 
 import type { Translate } from "./firstPricingSetupMessages";
+import { defaultPricingFormLook, type PricingFormLook } from "./pricingFormLook";
 
 export type PaymentMethod = "card" | "pay_at_property";
 
@@ -14,17 +15,19 @@ export function AcceptedPaymentMethods({
   disabled,
   onChange,
   t,
+  look = defaultPricingFormLook,
 }: {
   methods: readonly PaymentMethod[];
   disabled: boolean;
   onChange(methods: PaymentMethod[]): void;
   t: Translate;
+  look?: PricingFormLook;
 }) {
   return (
     <fieldset className="space-y-2">
-      <legend className="text-sm font-medium">{t("pricing.paymentMethods.legend")}</legend>
+      <legend className={look.legend}>{t("pricing.paymentMethods.legend")}</legend>
       {options.map(({ value, labelKey }) => (
-        <label key={value} className="flex items-center gap-2 text-sm">
+        <label key={value} className={look.check}>
           <input
             type="checkbox"
             aria-label={t(labelKey)}
@@ -43,7 +46,7 @@ export function AcceptedPaymentMethods({
           {t(labelKey)}
         </label>
       ))}
-      <p className="text-xs text-gray-600">{t("pricing.paymentMethods.hint")}</p>
+      <p className={look.smallHint}>{t("pricing.paymentMethods.hint")}</p>
     </fieldset>
   );
 }

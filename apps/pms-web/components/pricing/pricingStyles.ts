@@ -38,3 +38,16 @@ export const actionBarButton =
   "flex-1 md:flex-initial text-center px-4 py-2.5 md:py-2 text-[13px] md:text-[12px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 bg-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
 export const actionBarPrimary =
   "flex-1 md:flex-initial px-6 py-2.5 md:py-2 bg-primary-600 text-white text-[13px] md:text-[12px] font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors";
+/** The shared pricing forms (first price, included adults, payment methods) in this look. */
+export const formLook = {
+  heading: cardHeading,
+  text,
+  hint: help,
+  smallHint: hint,
+  label: fieldLabel,
+  legend: fieldLabel,
+  check: "flex items-center gap-2 text-[12px] text-gray-700",
+  input: `mt-1.5 block w-full ${field}`,
+  error: errorText,
+  button: primaryButton,
+};
