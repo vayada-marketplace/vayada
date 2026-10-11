@@ -4601,7 +4601,30 @@ describe("vayada-api", () => {
       propertyId: pmsPropertyId,
       actorUserId: "user_hotel_owner",
       idempotencyKey: expect.any(String),
+      onlyIfLive: false,
     });
+  });
+
+  it("refreshes only a live page when a design save asks for it (VAY-2129)", async () => {
+    const refreshInputs: Parameters<BookingPublicationRefreshPort["refresh"]>[0][] = [];
+    app = buildAuthenticatedApp({
+      bookingPublicationRefresh: {
+        async refresh(input) {
+          refreshInputs.push(input);
+          return null;
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/public-bookability?when=live",
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({ propertyId: pmsPropertyId, status: "not_live" });
+    expect(refreshInputs).toMatchObject([{ propertyId: pmsPropertyId, onlyIfLive: true }]);
   });
 
   it("returns booking property settings with auth, policy, and the legacy-compatible shape", async () => {

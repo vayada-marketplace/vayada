@@ -2625,7 +2625,7 @@ export async function registerBookingSettingsRoutes(
 
   const targetPublicBookabilityPublisher = publicBookabilityPublisher;
   if (targetPublicBookabilityPublisher || bookingPublicationRefresh) {
-    app.post<{ Params: BookingHotelParams }>(
+    app.post<{ Params: BookingHotelParams; Querystring: { when?: string } }>(
       "/hotels/:hotelId/public-bookability",
       async (request, reply) => {
         const { hotelId } = request.params;
@@ -2672,13 +2672,16 @@ export async function registerBookingSettingsRoutes(
 
         try {
           if (bookingPublicationRefresh) {
-            return await bookingPublicationRefresh.refresh({
+            const refreshed = await bookingPublicationRefresh.refresh({
               organizationId: context.selectedOrganization.organizationId,
               propertyId: propertyLink.propertyId,
               actorUserId: context.actor.internalUserId,
               idempotencyKey: context.audit.requestId,
               audit: context.audit,
+              // Design and settings saves pass when=live: they refresh a live page only.
+              onlyIfLive: request.query.when === "live",
             });
+            return refreshed ?? { propertyId: propertyLink.propertyId, status: "not_live" };
           }
           if (!targetPublicBookabilityPublisher) {
             throw new Error("Public bookability publication is unavailable.");
