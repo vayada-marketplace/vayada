@@ -17,7 +17,8 @@ export function changeLinkedAdjustment(room: PricingConfiguration, offerId: stri
   return result;
 }
 
-export function PricingLinkedAdjustment({ room, offer, label, disabled, onChange, onPending }: { room: PricingConfiguration; offer: Offer; label: string; disabled: boolean;
+/** `names`: the options' names (step 4); without them the parent shows as "Offer N". */
+export function PricingLinkedAdjustment({ room, offer, names, label, disabled, onChange, onPending }: { room: PricingConfiguration; offer: Offer; names?: Readonly<Record<string, string>>; label: string; disabled: boolean;
   onChange: (room: PricingConfiguration) => void; onPending: (pending: boolean) => void }) {
   const [entry, setEntry] = useState<Entry | null>(null), [error, setError] = useState("");
   const { t } = useTranslation();
@@ -27,7 +28,7 @@ export function PricingLinkedAdjustment({ room, offer, label, disabled, onChange
   const value = `${minor.startsWith("-") ? "-" : ""}${decimalAmount(minor.replace(/^-/, ""), adjustment.kind === "fixed" ? pricingCurrencyScale(room.currency)! : 2)}`;
   const cancel = () => { setEntry(null); setError(""); onPending(false); };
   return <PricingSection title={t("pricing.linkedAdjustment.section")} label={t("pricing.linkedAdjustment.title", { label })} keepOpen={!!entry}>
-    <p className="mt-2">{t("pricing.linkedAdjustment.current", { number: room.offers.findIndex((candidate) => candidate.id === parentId) + 1, adjustment: `${value}${adjustment.kind === "percentage" ? "%" : ` ${room.currency}`}` })}</p>
+    <p className="mt-2">{t("pricing.linkedAdjustment.current", { parent: names?.[parentId] ?? t("pricing.offerNumber", { number: room.offers.findIndex((candidate) => candidate.id === parentId) + 1 }), adjustment: `${value}${adjustment.kind === "percentage" ? "%" : ` ${room.currency}`}` })}</p>
     <p className={ui.help}>{t("pricing.linkedAdjustment.description")}</p>
     {!entry ? <button type="button" className={ui.secondaryButton} disabled={disabled} onClick={() => {
       if (disabled) return; setEntry({ kind: adjustment.kind, value }); setError(""); onPending(true);
