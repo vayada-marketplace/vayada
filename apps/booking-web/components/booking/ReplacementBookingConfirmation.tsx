@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import type {
-  PublicBookingQuote,
-  PublicQuoteGuestDisclosure,
+import {
+  isManualPricingPaymentMethod,
+  type PublicBookingQuote,
+  type PublicQuoteGuestDisclosure,
 } from "@vayada/domain-booking/replacement-pricing";
 import { ApiError } from "@/services/api/client";
 import {
@@ -13,7 +14,9 @@ import {
   type PricingAcceptanceResult,
   type PricingCardPaymentRequired,
   type PricingCardPaymentResult,
+  type PricingManualPaymentPending,
 } from "@/services/api/pricingAcceptance";
+import { displayQuoteMoney } from "@/services/api/replacementOffers";
 import ReplacementCardPayment from "./ReplacementCardPayment";
 
 const field = "mt-1 block w-full rounded-lg border border-gray-300 bg-white p-3 text-gray-900";
@@ -37,13 +40,16 @@ export default function ReplacementBookingConfirmation({
     null,
   );
   const [cardPayment, setCardPayment] = useState<PricingCardPaymentRequired | null>(null);
+  const [manualPayment, setManualPayment] = useState<PricingManualPaymentPending | null>(null);
   const [pending, setPending] = useState<{
     guest: PricingAcceptanceGuest;
     disclosure: PublicQuoteGuestDisclosure;
   } | null>(null);
   const supported = pricingQuoteBookableOnline(quote);
   // A request-mode hotel confirms each booking itself; nothing is charged when the guest asks.
-  const request = quote.acceptanceMode === "request";
+  // Bank transfer and PayPal wait for the payment instead, in either mode.
+  const request =
+    quote.acceptanceMode === "request" && !isManualPricingPaymentMethod(quote.paymentMethod);
   const ready =
     supported &&
     !refreshRequired &&
@@ -78,6 +84,7 @@ export default function ReplacementBookingConfirmation({
         pending ? "uncertain-retry" : "fresh",
       );
       if (accepted.kind === "payment_required") setCardPayment(accepted);
+      else if (accepted.kind === "payment_pending") setManualPayment(accepted);
       else setResult(accepted);
     } catch (failure) {
       const conflict = failure instanceof ApiError && failure.status === 409;
@@ -89,7 +96,9 @@ export default function ReplacementBookingConfirmation({
       const cardUnavailable = unavailable && code === "CARD_PAYMENT_UNAVAILABLE";
       // The hotel confirms each booking, but online requests are not switched on yet.
       const requestUnavailable = unavailable && code === "REQUEST_ACCEPTANCE_UNAVAILABLE";
-      setRefreshRequired(conflict || cardUnavailable || requestUnavailable);
+      // Bank transfer and PayPal on the booking page are not switched on (VAY-2139).
+      const manualUnavailable = unavailable && code === "MANUAL_PAYMENT_UNAVAILABLE";
+      setRefreshRequired(conflict || cardUnavailable || requestUnavailable || manualUnavailable);
       setError(
         conflict
           ? "This price is no longer available. Get a new price and review its terms again."
@@ -97,15 +106,41 @@ export default function ReplacementBookingConfirmation({
             ? "This hotel confirms each booking itself, and booking requests can’t be sent online yet. No room was reserved and no payment was taken."
             : cardUnavailable
               ? "Paying by card online isn’t available right now. Get a new price with “Pay at property”. No room was reserved and no payment was taken."
-              : unavailable
-                ? "Online booking is not available for this hotel right now. No room was reserved and no payment was taken."
-                : request
-                  ? "We couldn’t confirm your request was sent. It may still have reached the hotel, so retry with the same details."
-                  : "We couldn’t confirm your booking. Your room may still have been booked, so retry with the same details.",
+              : manualUnavailable
+                ? "Paying by bank transfer or PayPal isn’t available right now. Get a new price with another payment method. No room was reserved."
+                : unavailable
+                  ? "Online booking is not available for this hotel right now. No room was reserved and no payment was taken."
+                  : request
+                    ? "We couldn’t confirm your request was sent. It may still have reached the hotel, so retry with the same details."
+                    : "We couldn’t confirm your booking. Your room may still have been booked, so retry with the same details.",
       );
     } finally {
       setLoading(false);
     }
+  }
+
+  if (manualPayment) {
+    const { method, amountMinor, currency, deadlineAt } = manualPayment.payment;
+    const details = new URLSearchParams({
+      booking: manualPayment.bookingReference,
+      token: manualPayment.confirmationToken,
+    });
+    return (
+      <section role="status" className="space-y-2 rounded-xl border border-green-300 p-5">
+        <h2 className="text-xl font-semibold">Your room is reserved</h2>
+        <p>Your booking reference is {manualPayment.bookingReference}.</p>
+        <p>
+          Please pay {displayQuoteMoney(amountMinor, currency)} by{" "}
+          {method === "paypal" ? "PayPal" : "bank transfer"} by{" "}
+          {new Date(deadlineAt).toLocaleString()}. We’ll confirm your booking when your payment
+          arrives. If it doesn’t arrive by then, the booking expires and the room is released.
+        </p>
+        <p>We sent the payment details to the email address you provided.</p>
+        <a className={`${button} inline-block`} href={`/confirmation?${details}`}>
+          See payment details
+        </a>
+      </section>
+    );
   }
 
   if (result && (result.kind === "requested" || (result.kind === "replayed" && request)))
@@ -115,8 +150,8 @@ export default function ReplacementBookingConfirmation({
         <p>Your request reference is {result.bookingReference}.</p>
         <p>
           {quote.paymentMethod === "card"
-            ? "The hotel will accept or decline your request within 24 hours. Your card is authorised but not charged; it is charged only if the hotel accepts."
-            : "The hotel will accept or decline your request within 24 hours. Nothing has been charged, and your stay is not confirmed until the hotel accepts."}
+            ? "We’ll accept or decline your request within 24 hours. Your card is authorised but not charged; it is charged only if we accept."
+            : "We’ll accept or decline your request within 24 hours. Nothing has been charged, and your stay is not confirmed until we accept."}
         </p>
         <p>We sent the request details to the email address you provided.</p>
       </section>

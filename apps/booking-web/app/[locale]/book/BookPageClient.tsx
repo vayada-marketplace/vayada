@@ -11,7 +11,14 @@ import {
 import ReplacementQuoteTerms from "@/components/booking/ReplacementQuoteTerms";
 import type { QuoteTermsAcknowledgement } from "@/components/booking/ReplacementQuoteTerms";
 import ReplacementBookingConfirmation from "@/components/booking/ReplacementBookingConfirmation";
-import type { PublicQuoteGuestDisclosure } from "@vayada/domain-booking/replacement-pricing";
+import type {
+  PricingPaymentMethod,
+  PublicQuoteGuestDisclosure,
+} from "@vayada/domain-booking/replacement-pricing";
+import {
+  bookingPagePaymentMethodLabels,
+  getBookingPagePaymentMethods,
+} from "@/services/api/bookingPagePaymentMethods";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useSlug } from "@/contexts/HotelContext";
@@ -83,7 +90,22 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       setChoices([{ ...newRoom(), adults: String(adults), childAges: Array(childCount).fill("") }]);
     }
   }, []);
-  const [payment, setPayment] = useState<"" | "card" | "pay_at_property">("");
+  const [payment, setPayment] = useState<"" | PricingPaymentMethod>("");
+  const [paymentMethods, setPaymentMethods] = useState<PricingPaymentMethod[]>([
+    "card",
+    "pay_at_property",
+  ]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void getBookingPagePaymentMethods(slug, controller.signal)
+      .then((methods) => {
+        if (controller.signal.aborted) return;
+        setPaymentMethods(methods);
+        setPayment((current) => (current && !methods.includes(current) ? "" : current));
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [slug]);
   useEffect(() => {
     const controller = new AbortController();
     setRooms(null);
@@ -335,8 +357,11 @@ function RoomQuoteForm({ slug }: { slug: string }) {
               onChange={(event) => setPayment(event.target.value as typeof payment)}
             >
               <option value="">Choose a payment method</option>
-              <option value="card">Card</option>
-              <option value="pay_at_property">Pay at property</option>
+              {paymentMethods.map((method) => (
+                <option key={method} value={method}>
+                  {bookingPagePaymentMethodLabels[method]}
+                </option>
+              ))}
             </select>
           </label>
           <p className="text-sm text-gray-600">

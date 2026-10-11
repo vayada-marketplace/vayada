@@ -1929,7 +1929,10 @@ export function createTargetBookingWebCheckoutAdapter(
           propertyId: property.propertyId,
           resourceType: "checkout_config",
           resourceId: property.propertyId,
-          body: serializeTargetCheckoutConfig(property, row),
+          body: {
+            ...serializeTargetCheckoutConfig(property, row),
+            bookingPagePaymentMethods: bookingPagePaymentMethods(row, config),
+          },
         };
       });
     },
@@ -2915,6 +2918,33 @@ export function targetCheckoutReadyPaymentMethods(row: TargetCheckoutConfigRow |
     if (method === "paypal") return isValidPaymentEmail(depositPolicy["paypalEmail"]);
     return true;
   });
+}
+
+/** The methods the pricing-v2 booking page offers (VAY-2139). Until bank transfer and PayPal
+ * acceptance is on, it keeps its fixed card and pay-at-property choice. */
+function bookingPagePaymentMethods(
+  row: TargetCheckoutConfigRow | null,
+  config: Pick<
+    PgTargetBookingWebCheckoutAdapterConfig,
+    | "replacementPricingManualPaymentAcceptanceEnabled"
+    | "replacementPricingCardAcceptanceEnabled"
+    | "stripePaymentProvider"
+    | "bankTransfers"
+  >,
+): string[] {
+  if (config.replacementPricingManualPaymentAcceptanceEnabled !== true)
+    return ["card", "pay_at_property"];
+  if (row?.paymentsEnabled !== true) return [];
+  const ready = targetCheckoutReadyPaymentMethods(row);
+  const cardAcceptance =
+    config.replacementPricingCardAcceptanceEnabled === true && !!config.stripePaymentProvider;
+  // Bank transfer needs the bank-details binding (KMS settings) to be accepted.
+  return ["card", "pay_at_property", "bank_transfer", "paypal"].filter(
+    (method) =>
+      ready.includes(method) &&
+      (method !== "card" || cardAcceptance) &&
+      (method !== "bank_transfer" || !!config.bankTransfers),
+  );
 }
 
 function serializeTargetCheckoutConfig(
