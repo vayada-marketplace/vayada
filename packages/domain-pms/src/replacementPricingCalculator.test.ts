@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   calculateReplacementRoomStay,
   projectReplacementRoomNight,
+  projectReplacementRoomNights,
   type RoomNightProjectionRequest,
   type RoomStayPricingRequest,
 } from "./replacementPricingCalculator.js";
@@ -712,5 +713,15 @@ describe("nightly projection independent of Booking eligibility", () => {
       ),
     ).toMatchObject({ reason: "overflow" });
     expect(project(fixture(), { ...r, date: "2024-02-29" }).night.date).toBe("2024-02-29");
+  });
+  it("projects many nights exactly like one night at a time", () => {
+    const { date: _date, ...r } = nightRequest(request(2, "nr"));
+    const dates = ["2026-07-31", "2026-08-01", "2026-02-30", "2024-02-29"];
+    expect(projectReplacementRoomNights(fixture(), r, dates)).toEqual(
+      dates.map((date) => projectReplacementRoomNight(fixture(), { ...r, date })),
+    );
+    expect(projectReplacementRoomNights(null, r, dates.slice(0, 1))).toEqual([
+      { kind: "unavailable", reason: "invalid_configuration" },
+    ]);
   });
 });

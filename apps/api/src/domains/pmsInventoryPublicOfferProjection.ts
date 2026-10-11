@@ -4,7 +4,14 @@ import type {
   PmsInventoryPublicOfferProjectionPort,
   PmsInventoryPublicOfferProjectionResult,
 } from "@vayada/domain-distribution";
+import { pricingCurrencyScale, projectReplacementRoomNights } from "@vayada/domain-pms";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
+
+import {
+  PricingStorageError,
+  readCurrentPricingSnapshot,
+  type StoredPricingRevision,
+} from "./replacementPricingSnapshot.js";
 
 type ProjectionClient = {
   query<T extends QueryResultRow = QueryResultRow>(
@@ -80,8 +87,27 @@ export interface TargetPmsInventoryPublicOfferProjection extends PmsInventoryPub
   ): Promise<PmsInventoryPublicOfferRetryBatchResult>;
 }
 
-type ProjectedRow = {
-  snapshotId: string;
+type InventoryDayRow = {
+  roomTypeId: string;
+  stayDate: string;
+  availableCount: number;
+  totalCount: number;
+  open: boolean;
+};
+
+type PricedOfferDay = {
+  roomTypeId: string;
+  stayDate: string;
+  key: string;
+  status: "available" | "limited" | "sold_out" | "closed";
+  availableRooms: number;
+  price: string;
+  maxAdults: number;
+  maxChildren: number;
+  maxOccupancy: number;
+  mealPlan: string;
+  minStay: number | null;
+  maxStay: number | null;
 };
 
 const DEFAULT_PROJECTION_LEASE_DURATION_MS = 60_000;
@@ -157,31 +183,262 @@ const CLAIM_PENDING_INVENTORY_EVENTS = `
     outbox.max_attempts AS "maxAttempts"
 `;
 
-/** During the reset, refresh inventory visibility without generating any room price. */
-export const PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS = `
-  WITH inventory_lock AS (
-    SELECT pg_advisory_xact_lock(hashtextextended(concat('pms-inventory:', $1::text), 0))
-  )
-  UPDATE distribution.public_room_offer_snapshots offer SET
-    sellable_publicly = FALSE,
-    availability_status = 'closed',
-    available_rooms = CASE WHEN COALESCE(inventory.rate_gate_open, TRUE) AND room.active
+const READ_PUBLIC_OFFER_INVENTORY_DAYS = `
+  SELECT
+    inventory.room_type_id::text AS "roomTypeId",
+    to_char(inventory.stay_date, 'YYYY-MM-DD') AS "stayDate",
+    inventory.available_count AS "availableCount",
+    inventory.total_count AS "totalCount",
+    room.active AND inventory.status <> 'closed' AND COALESCE(inventory.rate_gate_open, TRUE)
       AND NOT EXISTS (
         SELECT 1 FROM pms.room_type_closures closure
         WHERE closure.property_id = room.property_id AND closure.room_type_id = room.id
-      ) THEN inventory.available_count ELSE 0 END,
-    unavailable_reasons = ARRAY['unpublished']::text[],
-    freshness_status = 'unavailable',
-    updated_at = $2::timestamptz
+      ) AS "open"
   FROM pms.inventory_days inventory
   JOIN pms.room_types room ON room.property_id = inventory.property_id AND room.id = inventory.room_type_id
-  CROSS JOIN inventory_lock
-  WHERE offer.property_id = $1::uuid
-    AND inventory.property_id = offer.property_id
-    AND inventory.room_type_id = offer.room_type_id
-    AND inventory.stay_date = offer.stay_date
+  JOIN distribution.public_hotel_bookability_profiles profile
+    ON profile.property_id = inventory.property_id
+  WHERE inventory.property_id = $1::uuid
+    AND inventory.stay_date >= ($2::timestamptz AT TIME ZONE profile.timezone)::date
+  ORDER BY inventory.room_type_id, inventory.stay_date
+`;
+
+/** Rows identical to the projection are filtered out first, so they are neither written nor
+ * locked: a hotel has a row per room, offer and night, and most refreshes change a few. */
+export const UPSERT_PRICED_PUBLIC_OFFERS = `
+  WITH day AS (
+    SELECT
+      input.room_type_id,
+      input.stay_date,
+      input.offer_key,
+      input.status,
+      input.status IN ('available', 'limited') AS sellable,
+      input.available_rooms,
+      input.price,
+      jsonb_build_object(
+        'maxAdults', input.max_adults,
+        'maxChildren', input.max_children,
+        'maxOccupancy', input.max_occupancy
+      ) AS occupancy,
+      jsonb_strip_nulls(jsonb_build_object(
+        'mealPlan', input.meal_plan,
+        'minStayNights', input.min_stay,
+        'maxStayNights', input.max_stay
+      )) AS rate_summary,
+      CASE input.status
+        WHEN 'closed' THEN ARRAY['unpublished']
+        WHEN 'sold_out' THEN ARRAY['sold_out']
+        ELSE ARRAY[]::text[]
+      END AS reasons
+    FROM unnest(
+      $4::uuid[], $5::date[], $6::text[], $7::text[], $8::integer[], $9::numeric[],
+      $10::integer[], $11::integer[], $12::integer[], $13::text[], $14::integer[], $15::integer[]
+    ) AS input(
+      room_type_id, stay_date, offer_key, status, available_rooms, price,
+      max_adults, max_children, max_occupancy, meal_plan, min_stay, max_stay
+    )
+  )
+  INSERT INTO distribution.public_room_offer_snapshots AS offer (
+    property_id, room_type_id, stay_date, public_offer_key, availability_status,
+    sellable_publicly, available_rooms, base_price_amount, currency, occupancy, rate_summary,
+    unavailable_reasons, freshness_status, data_sources, generated_at, updated_at
+  )
+  SELECT
+    $1::uuid, day.room_type_id, day.stay_date, day.offer_key, day.status, day.sellable,
+    day.available_rooms, day.price, $2::text, day.occupancy, day.rate_summary, day.reasons,
+    'fresh', ARRAY['pms', 'distribution'], $3::timestamptz, $3::timestamptz
+  FROM day
+  WHERE NOT EXISTS (
+    SELECT 1
+    FROM distribution.public_room_offer_snapshots current_offer
+    WHERE current_offer.property_id = $1::uuid
+      AND current_offer.public_offer_key = day.offer_key
+      AND current_offer.stay_date = day.stay_date
+      AND (
+        current_offer.room_type_id, current_offer.availability_status,
+        current_offer.sellable_publicly, current_offer.available_rooms,
+        current_offer.base_price_amount, current_offer.currency::text, current_offer.occupancy,
+        current_offer.rate_summary, current_offer.unavailable_reasons,
+        current_offer.freshness_status, current_offer.data_sources, current_offer.expires_at
+      ) IS NOT DISTINCT FROM (
+        day.room_type_id, day.status, day.sellable, day.available_rooms, day.price, $2::text,
+        day.occupancy, day.rate_summary, day.reasons, 'fresh', ARRAY['pms', 'distribution'],
+        NULL::timestamptz
+      )
+  )
+  ON CONFLICT (property_id, public_offer_key, stay_date) DO UPDATE SET
+    room_type_id = EXCLUDED.room_type_id,
+    availability_status = EXCLUDED.availability_status,
+    sellable_publicly = EXCLUDED.sellable_publicly,
+    available_rooms = EXCLUDED.available_rooms,
+    base_price_amount = EXCLUDED.base_price_amount,
+    currency = EXCLUDED.currency,
+    occupancy = EXCLUDED.occupancy,
+    rate_summary = EXCLUDED.rate_summary,
+    unavailable_reasons = EXCLUDED.unavailable_reasons,
+    freshness_status = EXCLUDED.freshness_status,
+    data_sources = EXCLUDED.data_sources,
+    expires_at = NULL,
+    generated_at = EXCLUDED.generated_at,
+    updated_at = EXCLUDED.updated_at
   RETURNING offer.id::text AS "snapshotId"
 `;
+
+/** Closes rows of rooms or offers without current prices, including keys from before pricing v2,
+ * keeping their room counts in step with inventory and their recorded prices. */
+export const CLOSE_UNPRICED_PUBLIC_OFFERS = `
+  UPDATE distribution.public_room_offer_snapshots offer SET
+    sellable_publicly = FALSE,
+    availability_status = 'closed',
+    available_rooms = day.available_rooms,
+    unavailable_reasons = ARRAY['unpublished']::text[],
+    freshness_status = 'fresh',
+    updated_at = $2::timestamptz
+  FROM (
+    SELECT
+      inventory.room_type_id,
+      inventory.stay_date,
+      CASE WHEN COALESCE(inventory.rate_gate_open, TRUE) AND room.active
+        AND NOT EXISTS (
+          SELECT 1 FROM pms.room_type_closures closure
+          WHERE closure.property_id = room.property_id AND closure.room_type_id = room.id
+        ) THEN inventory.available_count ELSE 0 END AS available_rooms
+    FROM pms.inventory_days inventory
+    JOIN pms.room_types room
+      ON room.property_id = inventory.property_id AND room.id = inventory.room_type_id
+    WHERE inventory.property_id = $1::uuid
+  ) day
+  WHERE offer.property_id = $1::uuid
+    AND offer.room_type_id = day.room_type_id
+    AND offer.stay_date = day.stay_date
+    AND offer.public_offer_key <> ALL($3::text[])
+    AND (
+      offer.sellable_publicly, offer.availability_status, offer.available_rooms,
+      offer.unavailable_reasons, offer.freshness_status
+    ) IS DISTINCT FROM (
+      FALSE, 'closed', day.available_rooms, ARRAY['unpublished']::text[], 'fresh'
+    )
+  RETURNING offer.id::text AS "snapshotId"
+`;
+
+/**
+ * Projects the current pricing-v2 prices onto PMS inventory as public offer days (VAY-2123):
+ * one row per priced room, offer and night from the property's local today. A night is
+ * sellable only when the room is active and not closing, the inventory day is open, the rate
+ * gate is open, and the offer has a price and no stop-sell that night. Every row written is a
+ * current fact, so it is fresh. Like the quotes, it follows pricing-v2 restrictions, not the
+ * retired room-level stay rules. Whether owner sources moved on since the save is the public
+ * pricing gate's check, not this projection's. Caller holds the property's PMS inventory lock
+ * in this transaction. Returns how many rows changed.
+ */
+export async function projectPmsInventoryToPublicOffers(
+  client: Pick<ProjectionClient, "query">,
+  propertyId: string,
+  projectedAt: Date,
+): Promise<number> {
+  const at = projectedAt.toISOString();
+  // Unreadable prices sell nothing; the hourly pricing freshness check reports them.
+  const pricing = await readCurrentPricingSnapshot(client, propertyId).catch((error: unknown) => {
+    if (error instanceof PricingStorageError) return null;
+    throw error;
+  });
+  const days = pricing
+    ? (await client.query<InventoryDayRow>(READ_PUBLIC_OFFER_INVENTORY_DAYS, [propertyId, at])).rows
+    : [];
+  const offers = pricing ? pricedOfferDays(pricing, days) : [];
+  const column = <K extends keyof PricedOfferDay>(key: K) => offers.map((offer) => offer[key]);
+  const upserted = offers.length
+    ? await client.query(UPSERT_PRICED_PUBLIC_OFFERS, [
+        propertyId,
+        pricing!.currency,
+        at,
+        column("roomTypeId"),
+        column("stayDate"),
+        column("key"),
+        column("status"),
+        column("availableRooms"),
+        column("price"),
+        column("maxAdults"),
+        column("maxChildren"),
+        column("maxOccupancy"),
+        column("mealPlan"),
+        column("minStay"),
+        column("maxStay"),
+      ])
+    : { rows: [] };
+  const closed = await client.query(CLOSE_UNPRICED_PUBLIC_OFFERS, [
+    propertyId,
+    at,
+    [...new Set(column("key"))],
+  ]);
+  return upserted.rows.length + closed.rows.length;
+}
+
+function pricedOfferDays(
+  pricing: StoredPricingRevision,
+  days: readonly InventoryDayRow[],
+): PricedOfferDay[] {
+  const scale = pricingCurrencyScale(pricing.currency);
+  const daysByRoom = new Map<string, InventoryDayRow[]>();
+  for (const day of days) {
+    const roomDays = daysByRoom.get(day.roomTypeId);
+    if (roomDays) roomDays.push(day);
+    else daysByRoom.set(day.roomTypeId, [day]);
+  }
+  return pricing.rooms.flatMap((room) => {
+    const roomDays = daysByRoom.get(room.roomTypeId) ?? [];
+    const terms = Object.fromEntries(room.offers.map((offer) => [offer.id, offer.termsRevision]));
+    return room.offers.flatMap((offer) => {
+      // The nightly price for one adult, as Channex sends it; quotes stay the price authority.
+      const nights = projectReplacementRoomNights(
+        room,
+        {
+          propertyId: room.propertyId,
+          roomTypeId: room.roomTypeId,
+          offerId: offer.id,
+          expectedRevision: room.revision,
+          expectedTermsRevisions: terms,
+          guests: { adults: 1, childAgesAtCheckIn: [] },
+        },
+        roomDays.map((day) => day.stayDate),
+      );
+      return roomDays.map((day, index): PricedOfferDay => {
+        const projection = nights[index]!;
+        const night = projection.kind === "projected" ? projection.night : null;
+        const price = night && scale !== null ? majorAmount(night.totalMinor, scale) : null;
+        const sellable = day.open && price !== null && !night!.restrictions.stopSell;
+        return {
+          roomTypeId: room.roomTypeId,
+          stayDate: day.stayDate,
+          key: `pricing-v2:${room.roomTypeId}:${offer.id}`,
+          status: !sellable
+            ? "closed"
+            : day.availableCount <= 0
+              ? "sold_out"
+              : day.availableCount < day.totalCount
+                ? "limited"
+                : "available",
+          availableRooms: day.open ? Math.max(0, day.availableCount) : 0,
+          price: price ?? "0",
+          maxAdults: room.capacity.adults,
+          maxChildren: room.capacity.children,
+          maxOccupancy: room.capacity.total,
+          mealPlan: offer.meal.kind,
+          minStay: night?.restrictions.minArrivalNights ?? null,
+          maxStay: night?.restrictions.maxStayNights ?? null,
+        };
+      });
+    });
+  });
+}
+
+/** Minor units as the column's two-decimal amount, rounded half up; null when it cannot fit. */
+function majorAmount(minor: string, scale: number): string | null {
+  const divisor = 10n ** BigInt(scale);
+  const cents = (BigInt(minor) * 100n + divisor / 2n) / divisor;
+  if (cents >= 10n ** 15n) return null;
+  return `${cents / 100n}.${String(cents % 100n).padStart(2, "0")}`;
+}
 
 export function createTargetPmsInventoryPublicOfferProjection(
   options: TargetPmsInventoryPublicOfferProjectionOptions,
@@ -535,10 +792,11 @@ async function projectInventoryClaim(
       "SELECT pg_advisory_xact_lock(hashtextextended(concat('pms-inventory:', $1::text), 0))",
       [claim.propertyId],
     );
-    const projected = await client.query<ProjectedRow>(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS, [
+    const projectedOfferDays = await projectPmsInventoryToPublicOffers(
+      client,
       claim.propertyId,
-      projectedAt.toISOString(),
-    ]);
+      projectedAt,
+    );
     await client.query("COMMIT");
     transactionOpen = false;
 
@@ -588,7 +846,7 @@ async function projectInventoryClaim(
     return {
       profileAvailable: true,
       pendingEvents: ownedEventIds.length,
-      projectedOfferDays: projected.rowCount ?? projected.rows.length,
+      projectedOfferDays,
     };
   } catch (error) {
     if (transactionOpen) await client.query("ROLLBACK");
