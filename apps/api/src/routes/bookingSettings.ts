@@ -2161,6 +2161,7 @@ export async function registerBookingSettingsRoutes(
   bookingAcceptanceSettings?: BookingAcceptanceSettingsPort,
   sameDayBookingSettings?: SameDayBookingSettingsPort,
   ownsSameDayBookingSettings = true,
+  publicPageRefresh?: (propertyId: string) => Promise<void>,
 ): Promise<void> {
   const closeables = new Set(
     [
@@ -2814,6 +2815,35 @@ export async function registerBookingSettingsRoutes(
 
   if (!writeRepository) return;
 
+  // Hotel-level saves reach the live booking page without republishing (VAY-2129). Fire and
+  // forget: the save never waits for it, and a failure is logged; the next save or inventory
+  // projection refreshes the page again. Before go-live the page is left as it is.
+  const refreshPublicPage = (
+    hotelId: string,
+    request: FastifyRequest<{ Params: BookingHotelParams; Body: unknown }>,
+  ) => {
+    void (async () => {
+      const propertyLink = await repository.findPropertyLinkByHotelId?.(hotelId);
+      if (!propertyLink) return;
+      if (bookingPublicationRefresh) {
+        const context = enforceBookingSettingsPolicy(request, hotelId);
+        await bookingPublicationRefresh.refresh({
+          organizationId: context.selectedOrganization.organizationId,
+          propertyId: propertyLink.propertyId,
+          actorUserId: context.actor.internalUserId,
+          idempotencyKey: context.audit.requestId,
+          audit: context.audit,
+          onlyIfLive: true,
+        });
+      } else await publicPageRefresh?.(propertyLink.propertyId);
+    })().catch((error: unknown) =>
+      request.log.warn(
+        { err: error, hotelId },
+        "Booking page refresh after a settings save failed",
+      ),
+    );
+  };
+
   app.patch<{ Params: BookingHotelParams; Body: unknown }>(
     "/hotels/:hotelId/settings/property",
     async (request, reply) =>
@@ -2831,6 +2861,8 @@ export async function registerBookingSettingsRoutes(
             context.selectedOrganization.organizationId,
           );
         },
+        afterWrite: async (hotelId, _settings, _stored, request) =>
+          refreshPublicPage(hotelId, request),
         toResponse: toPropertySettingsResponse,
       }),
   );
@@ -2857,6 +2889,8 @@ export async function registerBookingSettingsRoutes(
         parseBody: parseGuestFormSettingsWriteBody,
         write: (hotelId, settings) =>
           writeRepository.updateGuestFormSettingsByHotelId(hotelId, settings),
+        afterWrite: async (hotelId, _settings, _stored, request) =>
+          refreshPublicPage(hotelId, request),
         toResponse: toGuestFormSettingsResponse,
       }),
   );

@@ -1066,6 +1066,17 @@ const propertySetupOwnerPool = new pg.Pool({
   connectionTimeoutMillis: 5_000,
   max: 5,
 });
+// After go-live, saved hotel details, policies and payment methods reach guests by themselves;
+// before it, saves leave the hotel page as it is (VAY-2129).
+const refreshLivePublicPage = publicBookabilityPublisher
+  ? async (propertyId: string) => {
+      const live = await propertySetupOwnerPool.query(
+        "SELECT 1 FROM distribution.active_public_booking_revision WHERE property_id=$1::uuid",
+        [propertyId],
+      );
+      if (live.rows.length) await publicBookabilityPublisher.publish({ propertyId });
+    }
+  : undefined;
 // VAY-2056: the six hotel-setup Owner operations run on the ordinary API login, only with
 // WorkOS auth configured (their routes need the property-access repository). Their own pool keeps
 // a burst of setup writes, each holding the organization row lock, off the shared setup pools.
@@ -1418,6 +1429,17 @@ const bookingGuestPolicyProjectionProjector = createBookingGuestPolicyOutboxProj
     receipts: bookingGuestPolicyRepository,
     catalog: createPgBookingGuestPolicyCatalogProjectionPort({ pool: propertySetupOwnerPool }),
   }),
+  // Arrival times and other guest policies reach the live booking page once applied (VAY-2129).
+  afterApplied: refreshLivePublicPage
+    ? async ({ propertyId }) => {
+        await refreshLivePublicPage(propertyId).catch((error: unknown) =>
+          process.emitWarning("Booking page refresh after a guest policy change failed", {
+            code: "BOOKING_PAGE_REFRESH_FAILED",
+            detail: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+    : undefined,
 });
 
 const bookingPublicationRuntime = (() => {
@@ -1778,6 +1800,7 @@ const app = buildApp({
     : undefined,
   bookingReservationsRepository,
   financePaymentSetup: financePaymentSetupRuntime.routes,
+  publicPageRefresh: refreshLivePublicPage,
   bookingGuestChoices: {
     store: bookingGuestChoiceStore,
     propertyAccessRepository: bookingPropertyAccessRepository,
