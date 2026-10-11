@@ -5,9 +5,20 @@ export const card =
 export const draftCard = "rounded-xl border border-dashed border-gray-300 bg-gray-50/60 p-4";
 export const cardHeading = "text-[11px] font-bold text-gray-900 uppercase tracking-widest";
 export const label = "block text-[12px] font-semibold text-gray-900 mb-1.5";
-export const input =
-  "w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 disabled:cursor-not-allowed disabled:text-gray-500";
+/** A grey filled field without a width; each use sets one. It resets the weight of a label it sits in. */
+export const field =
+  "px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] font-normal focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900 disabled:cursor-not-allowed disabled:text-gray-500";
+export const input = `w-full ${field}`;
+/** A label that wraps its field. */
+export const fieldLabel = "block text-[12px] font-semibold text-gray-900";
 export const hint = "text-[10px] text-gray-400";
+export const help = "text-[11px] text-gray-500";
+export const errorText = "text-[11px] font-medium text-red-600";
+/** One saved rule in a section's list, with its Edit/Clear buttons. */
+export const entry = "flex flex-wrap items-center gap-2 rounded-lg bg-gray-50 px-3 py-2";
+/** A fixed fact shown in place of a section, e.g. stay rules inherited from the parent offer. */
+export const note =
+  "rounded-lg border border-gray-200 bg-white px-4 py-3 text-[12px] text-gray-700";
 export const text = "text-[12px] text-gray-700";
 /** Outlined secondary button, like "+ Add Bed". */
 export const secondaryButton =

@@ -9,6 +9,8 @@ import {
 import { useTranslation } from "@/lib/i18n";
 import { baseAmounts, decimalAmount, errorText, PricingError } from "./pricingAmounts";
 import { recurringTemplate, recurringPrice, recurringAdjustments } from "./recurringPricingInputs";
+import { PricingSection } from "./PricingSection";
+import * as ui from "./pricingStyles";
 
 import {
   IncludedPricing,
@@ -145,12 +147,15 @@ export function PricingSeasons({
     }
   };
   return (
-    <details className="sm:col-span-2 text-sm">
-      <summary className="cursor-pointer">{t("pricing.seasons.summary", { label })}</summary>
-      <p className="mt-2 text-gray-600">{t("pricing.seasons.intro")}</p>
-      <ul className="my-3 space-y-2">
+    <PricingSection
+      title={t("pricing.seasons.section")}
+      label={t("pricing.seasons.summary", { label })}
+      keepOpen={pending}
+    >
+      <p className={ui.help}>{t("pricing.seasons.intro")}</p>
+      <ul className="space-y-1.5">
         {offer.price.calendar.seasons.map((season) => (
-          <li key={season.from} className="flex flex-wrap items-center gap-3">
+          <li key={season.from} className={ui.entry}>
             <span>
               {season.name}
               {season.tier && ` (${season.tier})`} · {season.from}–{season.through}:{" "}
@@ -161,7 +166,7 @@ export function PricingSeasons({
             </span>
             <button
               type="button"
-              className="rounded border px-3 py-1 disabled:opacity-50"
+              className={ui.secondaryButton}
               disabled={disabled || pending}
               aria-label={t("pricing.seasons.editAria", {
                 from: season.from,
@@ -194,7 +199,7 @@ export function PricingSeasons({
             </button>
             <button
               type="button"
-              className="rounded border px-3 py-1 disabled:opacity-50"
+              className={ui.secondaryButton}
               disabled={disabled || pending}
               aria-label={t("pricing.seasons.clearAria", {
                 from: season.from,
@@ -228,11 +233,11 @@ export function PricingSeasons({
                 ["through", t("pricing.seasonEnd")],
               ] as const
             ).map(([key, name]) => (
-              <label key={key}>
+              <label key={key} className={ui.fieldLabel}>
                 {name}
                 <input
                   aria-label={t("pricing.seasons.fieldAria", { name, label })}
-                  className="mt-1 block w-40 rounded border px-3 py-2"
+                  className={`mt-1.5 block w-40 ${ui.field}`}
                   disabled={disabled}
                   value={entry[key]}
                   onChange={(event) => {
@@ -256,11 +261,11 @@ export function PricingSeasons({
                 : template,
               t,
             ).map(([name], index) => (
-              <label key={index}>
+              <label key={index} className={ui.fieldLabel}>
                 {name} ({room.currency})
                 <input
                   aria-label={t("pricing.seasons.amountAria", { name, label })}
-                  className="mt-1 block w-36 rounded border px-3 py-2"
+                  className={`mt-1.5 block w-36 ${ui.field}`}
                   disabled={disabled}
                   value={values[index] ?? ""}
                   onChange={(event) => {
@@ -298,7 +303,7 @@ export function PricingSeasons({
             )}
             <button
               type="button"
-              className="rounded border px-3 py-2 disabled:opacity-50"
+              className={ui.secondaryButton}
               disabled={disabled}
               onClick={() => apply(entry, values)}
             >
@@ -309,12 +314,7 @@ export function PricingSeasons({
       )}
       {pending && (
         <>
-          <button
-            type="button"
-            className="mt-3 rounded border px-3 py-2 disabled:opacity-50"
-            disabled={disabled}
-            onClick={reset}
-          >
+          <button type="button" className={ui.secondaryButton} disabled={disabled} onClick={reset}>
             {t("pricing.seasons.cancel")}
           </button>
           <p className="mt-2">
@@ -323,10 +323,10 @@ export function PricingSeasons({
         </>
       )}
       {error && (
-        <p role="alert" className="mt-2 text-red-700">
+        <p role="alert" className={ui.errorText}>
           {error}
         </p>
       )}
-    </details>
+    </PricingSection>
   );
 }

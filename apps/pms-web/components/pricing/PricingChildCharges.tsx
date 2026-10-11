@@ -8,6 +8,8 @@ import {
 } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
 import { decimalAmount, errorText, parseMinorInput, PricingError } from "./pricingAmounts";
+import { PricingSection } from "./PricingSection";
+import * as ui from "./pricingStyles";
 
 export function changeChildCharges(
   room: PricingConfiguration,
@@ -49,9 +51,12 @@ export function PricingChildCharges({
     onPending(false);
   };
   return (
-    <details className="border-b p-5 text-sm">
-      <summary className="cursor-pointer">{t("pricing.childCharges.title", { label })}</summary>
-      <p className="mt-2 text-gray-600">
+    <PricingSection
+      title={t("pricing.childCharges.section")}
+      label={t("pricing.childCharges.title", { label })}
+      keepOpen={!!entry}
+    >
+      <p className={ui.help}>
         {t("pricing.childCharges.description", { age: room.children.adultFromAge })}
       </p>
       <ul className="mt-3 space-y-3">
@@ -72,7 +77,7 @@ export function PricingChildCharges({
               {t("pricing.childCharges.childLimit")}
             </p>
             {entry && (
-              <label className="mt-2 block">
+              <label className={`mt-2 ${ui.fieldLabel}`}>
                 {t("pricing.childCharges.nightlyCharge", { currency: room.currency })}
                 <input
                   aria-label={t("pricing.childCharges.inputLabel", {
@@ -81,7 +86,7 @@ export function PricingChildCharges({
                     label,
                   })}
                   inputMode="decimal"
-                  className="mt-1 block w-36 rounded border px-3 py-2"
+                  className={`mt-1.5 block w-36 ${ui.field}`}
                   disabled={disabled}
                   value={entry[index]}
                   onChange={(event) => {
@@ -97,7 +102,7 @@ export function PricingChildCharges({
       {!entry ? (
         <button
           type="button"
-          className="mt-3 rounded border px-3 py-2 disabled:opacity-50"
+          className={ui.secondaryButton}
           disabled={disabled}
           onClick={() => {
             if (disabled) return;
@@ -110,10 +115,10 @@ export function PricingChildCharges({
         </button>
       ) : (
         <>
-          <div className="mt-3 flex gap-3">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              className="rounded border px-3 py-2 disabled:opacity-50"
+              className={ui.secondaryButton}
               disabled={disabled}
               onClick={() => {
                 if (disabled) return;
@@ -129,7 +134,7 @@ export function PricingChildCharges({
             </button>
             <button
               type="button"
-              className="rounded border px-3 py-2 disabled:opacity-50"
+              className={ui.secondaryButton}
               disabled={disabled}
               onClick={cancel}
             >
@@ -140,10 +145,10 @@ export function PricingChildCharges({
         </>
       )}
       {error && (
-        <p role="alert" className="mt-2 text-red-700">
+        <p role="alert" className={ui.errorText}>
           {error}
         </p>
       )}
-    </details>
+    </PricingSection>
   );
 }
