@@ -6,7 +6,7 @@ import {
 } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
 import { baseAmounts, decimalAmount } from "./pricingAmounts";
-import { currencySymbol } from "./stepPricing";
+import { adjustmentText, currencySymbol } from "./stepPricing";
 import { StepCard } from "./StepCard";
 import * as ui from "./pricingStyles";
 
@@ -79,6 +79,24 @@ export function StepPrice({
           <span className="flex h-12 items-center rounded-[10px] border border-gray-200 px-3.5 text-[14px] text-gray-700">
             {room.currency}
           </span>
+          {/* Included-guest prices change by guest count; the option's Edit window edits these steps. */}
+          {base.mode === "included_guests" && (
+            <p className={`w-full ${ui.stepHint}`}>
+              {t("pricing.steps.price.included", {
+                adults: t(base.baseGuests === 1 ? "pricing.adults.one" : "pricing.adults.other", {
+                  count: base.baseGuests,
+                }),
+                steps: base.adjustments
+                  .map((adjustment, index) =>
+                    index + 1 === base.baseGuests
+                      ? ""
+                      : `${t(index ? "pricing.adults.other" : "pricing.adults.one", { count: index + 1 })} ${adjustmentText(adjustment, room.currency)}`,
+                  )
+                  .filter(Boolean)
+                  .join(" · "),
+              })}
+            </p>
+          )}
         </div>
       )}
     </StepCard>

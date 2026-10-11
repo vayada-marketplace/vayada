@@ -26,16 +26,15 @@ import { PricingMealCharges } from "./PricingMealCharges";
 import { PricingChildCharges } from "./PricingChildCharges";
 import { PricingLinkedAdjustment } from "./PricingLinkedAdjustment";
 import { PricingDates } from "./PricingDates";
-import { PricingRules } from "./PricingRules";
 import { PricingStayPreview } from "./PricingStayPreview";
-import { PricingSection } from "./PricingSection";
 import { MoreOptions } from "./MoreOptions";
 import { StepPrice } from "./StepPrice";
 import { StepSeasons } from "./StepSeasons";
 import { StepWeekends } from "./StepWeekends";
-import { deleteBlocker, deleteOption, mainOffer, missingPresets, normalNight, optionNames, type OptionTerms, type PresetKey } from "./stepPricing";
+import { deleteBlocker, deleteOption, mainOffer, missingPresets, moreOptionsSummary, normalNight, optionNames, type OptionTerms, type PresetKey } from "./stepPricing";
 import { PresetWindow } from "./PresetWindow";
 import { AddOptionButton, StepOptions } from "./StepOptions";
+import { StepStayRules } from "./StepStayRules";
 import { OptionWindow } from "./OptionWindow";
 import Modal from "@/components/Modal";
 import * as ui from "./pricingStyles";
@@ -54,7 +53,7 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
   const policyBases = useRef<Record<string, string | null>>({});
   const policyKey = (room: string, offer: string) => JSON.stringify([room, offer]);
   const [independentOffer, setIndependentOffer] = useState<boolean | null>(null);
-  const [optionOpen, setOptionOpen] = useState<string | null>(null);
+  const [optionOpen, setOptionOpen] = useState<string | null>(null), [childrenOpen, setChildrenOpen] = useState(false);
   const [preset, setPreset] = useState<PresetKey | null>(null), [deleting, setDeleting] = useState<string | null>(null), [deleteError, setDeleteError] = useState<unknown>(null);
   const [addingOfferRoom, setAddingOfferRoom] = useState<string | null>(null);
   const [pendingEntries, setPendingEntries] = useState<Record<string, boolean>>({});
@@ -258,7 +257,7 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
       // The main option's month and date prices and its stay rules sit under More options; its other settings, and
       // every other option's, in that option's Edit window. An unapplied entry keeps its place open.
       const pendingIn = (keys: readonly string[]) => keys.some((key) => pendingEntries[key]);
-      const moreKeys = [`children:${ri}`, ...["month", "date", "stay", "stayDate", "staySeason"].map((key) => `${key}:${ri}:${mi}`)];
+      const moreKeys = ["month", "date", "stay", "stayDate", "staySeason"].map((key) => `${key}:${ri}:${mi}`);
       const badPrice = (oi: number) => Object.entries(inputs).some(([key, value]) => {
         if (!key.startsWith(`${ri}:${oi}:`)) return false;
         try { parseMinorInput(value, scale, false, pricingAmountStep(room.currency)); return false; } catch { return true; }
@@ -279,27 +278,23 @@ export function PricingEditor({ client, roomNames = {}, setup, roomTypeId: focus
             <AddOptionButton label={t("pricing.steps.options.own")} disabled={disabled || hasPendingEntries}
               onClick={() => { if (!disabled && !hasPendingEntries) { setIndependentOffer(null); setAddingOfferRoom(room.roomTypeId); setError(null); } }} />
           </>} />
-        <MoreOptions keepOpen={pendingIn(moreKeys)}>
-          <PricingChildCharges room={room} label={roomName(room.roomTypeId, ri)} disabled={disabled || exclusiveEditPending} onPending={pend(`children:${ri}`)} onChange={changeRoom(ri)} />
+        <StepStayRules room={room} names={names} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onEditChildren={() => setChildrenOpen(true)}>
+          <OptionWindow open={childrenOpen} title={t("pricing.steps.rules.childrenTitle")} closable={!pendingEntries[`children:${ri}`]} onClose={() => setChildrenOpen(false)}>
+            <PricingChildCharges room={room} label={roomName(room.roomTypeId, ri)} disabled={disabled || exclusiveEditPending} onPending={pend(`children:${ri}`)} onChange={changeRoom(ri)} />
+          </OptionWindow>
+        </StepStayRules>
+        <MoreOptions keepOpen={pendingIn(moreKeys)} summary={moreOptionsSummary(room, t)}>
+          {group(t("pricing.steps.more.prices"))}
           <div className="space-y-2">
             <PricingMonths room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onPending={pend(`month:${ri}:${mi}`)} onChange={changeRoom(ri)} />
             <PricingDates room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onPending={pend(`date:${ri}:${mi}`)} onChange={changeRoom(ri)} />
+          </div>
+          {group(t("pricing.steps.more.rules"))}
+          <div className="space-y-2">
             <PricingStayRules room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onPending={pend(`stay:${ri}:${mi}`)} onChange={changeRoom(ri)} />
             <PricingStayDates room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onPending={pend(`stayDate:${ri}:${mi}`)} onChange={changeRoom(ri)} />
             <PricingStaySeasons room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onPending={pend(`staySeason:${ri}:${mi}`)} onChange={changeRoom(ri)} />
           </div>
-          <PricingSection title={t("pricing.editor.retainedRules")}>
-            <p>{t("pricing.editor.adultAge", { age: room.children.adultFromAge })}</p>
-            <p>{t("pricing.editor.reviewDates")}</p>
-            {room.children.bands.map((band) => <p key={band.fromAge}>{t("pricing.editor.childBand", { from: band.fromAge, through: band.throughAge, amount: decimalAmount(band.nightlyMinor, scale), currency: display.currency })}</p>)}
-            {room.offers.map((offer, oi) => <div key={offer.id} className="pt-2"><p className="font-semibold text-gray-900">{t("pricing.offerNumber", { number: oi + 1 })} · {t(`pricing.meal.${offer.meal.kind}`)}</p>
-              {offer.meal.charge.kind === "room" ? <p>{t("pricing.editor.mealPerRoom", { amount: decimalAmount(offer.meal.charge.amountMinor, scale), currency: display.currency })}</p> : <>
-                <p>{t("pricing.editor.mealPerAdult", { amount: decimalAmount(offer.meal.charge.adultMinor, scale), currency: display.currency })}</p>
-                {offer.meal.charge.childBandAmountsMinor.map((minor, bi) => <p key={bi}>{t("pricing.editor.mealPerChild", { from: room.children.bands[bi].fromAge, through: room.children.bands[bi].throughAge, amount: decimalAmount(minor, scale), currency: display.currency })}</p>)}
-              </>}
-              <PricingRules room={room} offer={offer} scale={scale} />
-            </div>)}
-          </PricingSection>
         </MoreOptions>
         {room.offers.map((offer, oi) => {
           const label = offerLabel(room.roomTypeId, ri, oi), other = oi !== mi;

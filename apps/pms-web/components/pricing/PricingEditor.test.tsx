@@ -433,7 +433,7 @@ it("preserves all non-base settings and handles every supported mode without flo
   expect(() => editedSnapshot(snapshot, { "0:0:0": "1e2" })).toThrow();
   expect(() => editedSnapshot(snapshot, { "0:0:0": "0" })).toThrow("greater than zero");
 });
-it("shows retained adjustments, date prices and restrictions with the saved prices", async () => {
+it("shows included adjustments, date prices and restrictions with the saved prices", async () => {
   const room = snapshot.rooms[0],
     offer = room.offers[0];
   client.read.mockResolvedValueOnce({
@@ -486,13 +486,14 @@ it("shows retained adjustments, date prices and restrictions with the saved pric
   await click("Save prices");
   expect(publish).toHaveBeenCalledOnce();
   const text = JSON.stringify(view.toJSON());
+  // VAY-2125: step 1, the option cards, More options and the option windows show what "Retained rules" repeated.
   for (const value of [
     "−30.00 EUR",
     "2026-12-25",
     "200.00 EUR",
-    "-10%",
-    "Minimum arrival stay 1",
-    "Stay restrictions inherited",
+    "10% cheaper",
+    "Minimum arrival stay: 1",
+    "inherited from the parent offer",
     "Show cancellation and payment terms",
   ])
     expect(text).toContain(value);
@@ -647,7 +648,8 @@ it("keeps included-adult adjustments when editing and reviewing the saved base p
   expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({
     calendar: { base: { baseMinor: "15000", baseGuests: 2, adjustments } },
   });
-  expect(JSON.stringify(view.toJSON())).toContain("1 adult −30.00 EUR; 2 adults 0.00 EUR");
+  // VAY-2125: step 1 lists the other guest counts' adjustments.
+  expect(JSON.stringify(view.toJSON())).toContain("Price for 2 adults. Other guest counts: 1 adult −€30");
   expect(button("Save prices").props.disabled).toBe(true);
 });
 it("labels every saved weekday using Monday-zero without changing its adjustment", async () => {
@@ -675,17 +677,10 @@ it("labels every saved weekday using Monday-zero without changing its adjustment
   await mount();
   await touch();
   await click("Save prices");
+  // VAY-2125: step 3 summarises every weekday rule.
   const paragraphs = view.root.findAllByType("p").map((node) => node.children.join(""));
-  expect(paragraphs).toEqual(
-    expect.arrayContaining([
-      "Monday: 1%",
-      "Tuesday: 2%",
-      "Wednesday: 3%",
-      "Thursday: 4%",
-      "Friday: 5%",
-      "Saturday: 6%",
-      "Sunday: 7%",
-    ]),
+  expect(paragraphs).toContain(
+    "Monday +1% · Tuesday +2% · Wednesday +3% · Thursday +4% · Friday +5% · Saturday +6% · Sunday +7%",
   );
   expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { weekdays } });
 });
@@ -4287,10 +4282,11 @@ it("retries option names whose terms failed and keeps a window open on a price i
   expect(text()).not.toContain("couldn't be loaded");
   expect(text()).toContain("Non-refundable + breakfast 2");
   await act(async () => view.root.findByProps({ "aria-label": "Room 1 Offer 2 Per room" }).props.onChange({ target: { value: "12,5" } }));
-  const done = view.root.findAllByType(OptionWindow)[1].findAllByType("button").find((node) => node.children.includes("Done"))!;
-  expect(done.props.disabled).toBe(true);
+  // Step 5's child-price window is an OptionWindow too, so the option's window is found by its title.
+  const done = () => view.root.findAllByType(OptionWindow).find((node) => node.props.title === "Non-refundable + breakfast 2")!.findAllByType("button").find((node) => node.children.includes("Done"))!;
+  expect(done().props.disabled).toBe(true);
   await act(async () => view.root.findByProps({ "aria-label": "Room 1 Offer 2 Per room" }).props.onChange({ target: { value: "125" } }));
-  expect(view.root.findAllByType(OptionWindow)[1].findAllByType("button").find((node) => node.children.includes("Done"))!.props.disabled).toBe(false);
+  expect(done().props.disabled).toBe(false);
 });
 it("shows add and delete errors in the window that asked, and counts the quick-add form as unsaved work (VAY-2125)", async () => {
   const id = "61000000-0000-4000-8000-000000000004";
@@ -4321,10 +4317,42 @@ it("shows add and delete errors in the window that asked, and counts the quick-a
   await act(async () => view.root.findByType(Modal).findAllByType("button").find((node) => node.children.includes("Cancel"))!.props.onClick());
   // The same for a delete: the option's window says why.
   await act(async () => view.root.findAllByType(StepOptions)[0].props.onEdit("second"));
-  const edit = () => view.root.findAllByType(OptionWindow)[1];
+  const edit = () => view.root.findAllByType(OptionWindow).find((node) => node.props.title === "With breakfast 2")!;
   await act(async () => edit().findAllByType("button").find((node) => node.children.includes("Delete option"))!.props.onClick());
   await act(async () => view.root.findByType(ConfirmDialog).props.onConfirm());
   expect(edit().props.open).toBe(true);
   expect(edit().findAllByProps({ role: "alert" })).toHaveLength(1);
   expect(client.saveDraft).not.toHaveBeenCalled();
+});
+it("changes the main option's minimum nights in step 5, keeps own stay rules and names what More options holds (VAY-2125)", async () => {
+  const room = snapshot.rooms[0],
+    [flex] = room.offers;
+  if (flex.price.kind !== "independent" || flex.restrictions.kind !== "own") throw new Error("fixture");
+  const rules = { ...flex.restrictions.rules, minArrivalNights: 2, maxStayNights: 14 };
+  const main = {
+    ...flex,
+    price: { ...flex.price, calendar: { ...flex.price.calendar, months: [{ month: 8, price: { mode: "flat" as const, amountMinor: "12000" } }], dates: [{ date: "2026-12-25", price: { mode: "flat" as const, amountMinor: "20000" } }] } },
+    restrictions: { kind: "own" as const, rules, seasons: [], dates: [{ date: "2026-12-31", rules: { ...rules, closedToArrival: true } }] },
+  };
+  const early = {
+    ...flex,
+    id: "early",
+    price: { kind: "linked" as const, parentId: "flex", adjustment: { kind: "percentage" as const, basisPoints: -500 }, dateOverrides: [] },
+    restrictions: { kind: "own" as const, rules: { ...rules, minArrivalNights: 4 }, seasons: [], dates: [] },
+  };
+  client.read.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...room, offers: [main, early] }], revision: 3, sources, stale: false });
+  await mount();
+  await act(async () => {});
+  const text = () => JSON.stringify(view.toJSON());
+  expect(text()).toContain("1 monthly price · 1 single date · 1 date or season rule · Advanced rules");
+  expect(text()).toContain("These options have their own stay rules and keep them: Non-refundable + breakfast 2.");
+  expect(text()).toContain("0–11 €25 per night");
+  const more = () => view.root.findByProps({ "aria-label": "One night more" });
+  await act(async () => more().props.onClick());
+  expect(button("Save prices").props.disabled).toBe(false);
+  await click("Save prices");
+  const [savedMain, savedEarly] = saved.snapshot.rooms[0].offers;
+  expect(savedMain.restrictions).toEqual({ ...main.restrictions, rules: { ...rules, minArrivalNights: 3 } });
+  expect(savedEarly.restrictions).toEqual(early.restrictions);
+  expect(savedMain.price).toEqual(main.price);
 });

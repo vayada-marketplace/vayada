@@ -523,3 +523,30 @@ export function deleteOption(room: Room, offerId: string): Room {
   if (!result) throw new PricingError("pricing.steps.delete.errorBlocked");
   return result;
 }
+
+/** More options' summary line: what it holds for the main option ("2 monthly prices · 1 single date"), or null when
+ * nothing is set there, so a setup the steps don't show is never hidden behind the closed row. */
+export function moreOptionsSummary(room: Room, t: Translate) {
+  const main = mainOffer(room);
+  const calendar = main.price.kind === "independent" ? main.price.calendar : null;
+  const restrictions = main.restrictions.kind === "own" ? main.restrictions : null;
+  const count = (key: string, value: number) =>
+    value ? [t(`${key}.${value === 1 ? "one" : "other"}`, { count: value })] : [];
+  const rules = restrictions?.rules;
+  const parts = [
+    ...count("pricing.steps.more.months", calendar?.months.length ?? 0),
+    ...count("pricing.steps.more.dates", calendar?.dates.length ?? 0),
+    ...count(
+      "pricing.steps.more.exceptions",
+      (restrictions?.dates.length ?? 0) + (restrictions?.seasons.length ?? 0),
+    ),
+    ...(rules &&
+    (rules.maxStayNights !== null ||
+      rules.closedToArrival ||
+      rules.closedToDeparture ||
+      rules.stopSell)
+      ? [t("pricing.steps.more.advanced")]
+      : []),
+  ];
+  return parts.length ? parts.join(" · ") : null;
+}
