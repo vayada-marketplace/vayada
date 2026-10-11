@@ -1,7 +1,10 @@
 import type { AdaptiveHotelSetupStatus } from "@vayada/domain-hotels";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { resolveSharedHotelSetupGuardDecision } from "./sharedHotelSetupGuard";
+import {
+  resolveSharedHotelSetupGuard,
+  resolveSharedHotelSetupGuardDecision,
+} from "./sharedHotelSetupGuard";
 
 describe("resolveSharedHotelSetupGuardDecision", () => {
   it("uses the entry decision instead of setup task completion", () => {
@@ -92,6 +95,53 @@ describe("resolveSharedHotelSetupGuardDecision", () => {
       redirectPath:
         "https://marketplace.localhost:1355/setup?entryProduct=booking&returnProduct=booking",
     });
+  });
+});
+
+describe("resolveSharedHotelSetupGuard", () => {
+  it("drops a stale property once and does not re-check the fallback answer against it", async () => {
+    const fallback = baseStatus();
+    fallback.propertySelection = {
+      state: "single_property",
+      selectedPropertyId: "property-2",
+      availableProperties: [
+        {
+          propertyId: "property-2",
+          publicId: "property-2",
+          displayName: "Alpenrose",
+          locationSummary: "Munich, DE",
+        },
+      ],
+    };
+    fallback.entryDecision = {
+      requestedProduct: "marketplace",
+      propertyId: "property-2",
+      decision: "enter",
+      destinationRouteKey: "marketplace.workspace",
+      reasonCode: null,
+    };
+    const getStatus = vi
+      .fn()
+      .mockRejectedValueOnce({ status: 403, data: { code: "missing_property_resource_link" } })
+      .mockResolvedValueOnce(fallback);
+    const onInvalidPropertyId = vi.fn();
+
+    await expect(
+      resolveSharedHotelSetupGuard(
+        { getStatus },
+        {
+          entryProduct: "marketplace",
+          returnProduct: "marketplace",
+          returnTo: "/marketplace",
+          propertyId: "stale-property",
+          onInvalidPropertyId,
+        },
+      ),
+    ).resolves.toMatchObject({ action: "enter_product", propertyId: "property-2" });
+    // VAY-2094: the fallback answer is for no property, so it must not trigger a second retry.
+    expect(getStatus).toHaveBeenCalledTimes(2);
+    expect(getStatus).toHaveBeenNthCalledWith(2, { entryProduct: "marketplace", propertyId: null });
+    expect(onInvalidPropertyId).toHaveBeenCalledOnce();
   });
 });
 

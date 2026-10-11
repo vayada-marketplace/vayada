@@ -118,6 +118,7 @@ describe("Marketplace setup guards", () => {
       entryProduct: "marketplace",
       propertyId: null,
     });
+    expect(api.getStatus).toHaveBeenCalledTimes(2);
     expect(storage.getItem("selectedSharedPropertyId")).toBe("property-2");
   });
 
