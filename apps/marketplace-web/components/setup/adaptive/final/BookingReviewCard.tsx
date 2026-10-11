@@ -198,6 +198,8 @@ function ScopedBookingReviewCard({
   }
   const unknownRequest = !!attempt && !!review && !review.recoveredOperation && !latestPending;
   const published = !!review?.activeContentRevisionId;
+  // Saved prices go live by themselves; added or removed rooms and offers need a publication.
+  const offersChanged = published && review?.publishedOffersCurrent === false;
   const canPublish =
     review?.readiness.outcome === "evaluated" &&
     review.readiness.status === "ready" &&
@@ -230,16 +232,23 @@ function ScopedBookingReviewCard({
                   ? published
                     ? "Update failed · previous page remains published"
                     : "Publication failed"
-                  : published
-                    ? "Published"
-                    : review.readiness.status === "ready"
-                      ? "Ready to publish"
-                      : review.readiness.status === "pending"
-                        ? "Waiting"
-                        : review.readiness.status === "error"
-                          ? "Temporarily unavailable"
-                          : "Needs attention"}
+                  : offersChanged
+                    ? "Room or offer changes not published"
+                    : published
+                      ? "Published"
+                      : review.readiness.status === "ready"
+                        ? "Ready to publish"
+                        : review.readiness.status === "pending"
+                          ? "Waiting"
+                          : review.readiness.status === "error"
+                            ? "Temporarily unavailable"
+                            : "Needs attention"}
           </p>
+          {offersChanged && !pending && (
+            <p className="mt-2 text-sm text-gray-600">
+              Guests can’t book until you publish reviewed changes.
+            </p>
+          )}
           {pending && (
             <p className="mt-2 text-sm text-gray-600">
               {automaticChecksStopped

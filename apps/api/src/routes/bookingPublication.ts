@@ -27,6 +27,10 @@ export type BookingPublicationRoutesOptions = {
   propertyAccessRepository: PropertyAccessRepository;
   repository: BookingPublicationCommandPort & Partial<BookingPublicationReviewReadPort>;
   readinessProvider: BookingPublicationReadinessProvider;
+  /** Whether the published page still lists the current rooms and offers (VAY-2123). */
+  publishedOffers?: {
+    matchCurrent(scope: { organizationId: string; propertyId: string }): Promise<boolean | null>;
+  };
 };
 type AuthorizedPublicationScope = {
   context: Awaited<ReturnType<typeof enforcePropertyRoutePolicy>>;
@@ -38,7 +42,12 @@ const HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
 export async function registerBookingPublicationRoutes(
   app: FastifyInstance,
-  { propertyAccessRepository, repository, readinessProvider }: BookingPublicationRoutesOptions,
+  {
+    propertyAccessRepository,
+    repository,
+    readinessProvider,
+    publishedOffers,
+  }: BookingPublicationRoutesOptions,
 ): Promise<void> {
   const authorizedScopes = new WeakMap<FastifyRequest, AuthorizedPublicationScope>();
   app.addHook("onClose", async () => repository.close?.());
@@ -131,9 +140,20 @@ export async function registerBookingPublicationRoutes(
           evaluatedAt: new Date().toISOString(),
         };
       }
-      return reply
-        .header("Cache-Control", "no-store")
-        .send({ contractVersion: "booking-publication-review.v1", ...review, readiness });
+      let publishedOffersCurrent: boolean | null = null;
+      if (review.activeContentRevisionId && publishedOffers) {
+        try {
+          publishedOffersCurrent = await publishedOffers.matchCurrent(input);
+        } catch {
+          publishedOffersCurrent = null;
+        }
+      }
+      return reply.header("Cache-Control", "no-store").send({
+        contractVersion: "booking-publication-review.v1",
+        ...review,
+        readiness,
+        publishedOffersCurrent,
+      });
     },
   );
 

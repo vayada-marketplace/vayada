@@ -194,6 +194,26 @@ it("does not expose publication after denied access", async () => {
   expect(text(tree)).not.toContain("Publish booking page");
   expect(mocks.publish).not.toHaveBeenCalled();
 });
+it("says when room or offer changes wait for publication", async () => {
+  mocks.load.mockResolvedValue({
+    ...review,
+    activeContentRevisionId: "active",
+    publishedUrl: "https://hotel.example",
+    publishedOffersCurrent: false,
+  });
+  const tree = await mount();
+  expect(text(tree)).toContain("Room or offer changes not published");
+  expect(text(tree)).toContain("can’t book until you publish reviewed changes");
+  expect(text(tree)).toContain("Publish reviewed changes");
+  mocks.load.mockResolvedValue({
+    ...review,
+    activeContentRevisionId: "active",
+    publishedOffersCurrent: true,
+  });
+  await click(tree, "Refresh Booking status");
+  expect(text(tree)).toContain('"Published"');
+  expect(text(tree)).not.toContain("can’t book");
+});
 it("keeps the previous published page when an update fails", async () => {
   mocks.load.mockResolvedValue({
     ...review,

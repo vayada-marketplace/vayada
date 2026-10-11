@@ -1,12 +1,22 @@
 import { isDeepStrictEqual } from "node:util";
-import type { Pool } from "pg";
-import { parseBookingPublicContent } from "@vayada/domain-distribution/booking-publication";
+import type { Pool, PoolClient } from "pg";
+import {
+  parseBookingPublicContent,
+  type BookingPublicContent,
+} from "@vayada/domain-distribution/booking-publication";
+import { lockCurrentPricingPublication } from "./currentPricingPublication.js";
 import { lockPublicPricingPublication } from "./publicPricingPublication.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
+import { publicPricingOfferKey } from "./publicPricingRoomStay.js";
 import { mapReplacementPublicOffers } from "./replacementPublicOfferMapping.js";
 import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 
-/** Published public choices only; no date-specific price, inventory hold or booking authority. */
+type Owner = NonNullable<Awaited<ReturnType<typeof lockCurrentPricingPublication>>>;
+type Published = Readonly<{ content: BookingPublicContent; pricingSourceRevision: string }>;
+
+/** Published public choices only; no date-specific price, inventory hold or booking authority.
+ * Saved price, terms or Finance changes serve at once; a changed room or offer set waits for
+ * the next publication (VAY-2123). Offer keys always bind the current pricing revision. */
 export function createPublicPricingOfferCatalog(pool: Pool) {
   return {
     async read(slug: string) {
@@ -17,36 +27,20 @@ export function createPublicPricingOfferCatalog(pool: Pool) {
         if (!owner) return null;
         const mapped = mapReplacementPublicOffers(owner);
         if (!mapped) return null;
-        const row = (
-          await client.query(
-            `SELECT revision.public_content FROM distribution.active_public_booking_revision active
-           JOIN distribution.public_booking_content_revisions revision
-             ON revision.id=active.content_revision_id AND revision.property_id=active.property_id
-           WHERE active.property_id=$1 FOR SHARE OF active,revision`,
-            [owner.scope.propertyId],
-          )
-        ).rows[0];
-        const content = parseBookingPublicContent(row?.public_content);
+        const published = await readActivePublication(client, owner.scope.propertyId);
+        if (!published) return null;
+        const { content } = published;
         if (
-          !content ||
           content.profile.hotel.propertyId !== owner.scope.propertyId ||
           content.profile.hotel.slug !== slug ||
-          content.rooms.length !== mapped.length
+          !sameRoomsAndOffers(owner, published)
         )
           return null;
         const eligibility = await readPmsRoomOperatingEligibility(client, owner.scope.propertyId);
         const operating = new Set(
           eligibility.filter((room) => room.state === "operating").map((room) => room.roomTypeId),
         );
-        for (const room of content.rooms) {
-          const current = mapped.find((candidate) => candidate.roomTypeId === room.roomTypeId);
-          if (
-            !operating.has(room.roomTypeId) ||
-            !current ||
-            !isDeepStrictEqual(room.rates, current.offers)
-          )
-            return null;
-        }
+        if (content.rooms.some((room) => !operating.has(room.roomTypeId))) return null;
         const current = await lockPublicPricingAuthority(client, slug);
         if (!current || !isDeepStrictEqual(current, owner.scope)) return null;
         return {
@@ -75,4 +69,84 @@ export function createPublicPricingOfferCatalog(pool: Pool) {
       }
     },
   };
+}
+
+/** For the owner's review screen, not public access: whether the published booking page still
+ * lists the current rooms and offers. Null without a published page or current prices. */
+export function createPublishedOfferCheck(pool: Pool) {
+  return {
+    async matchCurrent(scope: { organizationId: string; propertyId: string }) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+        const owner = await lockCurrentPricingPublication(client, scope);
+        const published = owner && (await readActivePublication(client, scope.propertyId));
+        return owner && published ? sameRoomsAndOffers(owner, published) : null;
+      } finally {
+        try {
+          await client.query("ROLLBACK");
+        } finally {
+          client.release();
+        }
+      }
+    },
+  };
+}
+
+async function readActivePublication(
+  client: PoolClient,
+  propertyId: string,
+): Promise<Published | null> {
+  const row = (
+    await client.query(
+      `SELECT revision.public_content,revision.source_manifest
+       FROM distribution.active_public_booking_revision active
+       JOIN distribution.public_booking_content_revisions revision
+         ON revision.id=active.content_revision_id AND revision.property_id=active.property_id
+       WHERE active.property_id=$1 FOR SHARE OF active,revision`,
+      [propertyId],
+    )
+  ).rows[0];
+  const content = parseBookingPublicContent(row?.public_content);
+  // The page's offer keys derive from the PMS pricing source revision it was built from.
+  const sources: unknown = row?.source_manifest?.sources;
+  const pricing = Array.isArray(sources)
+    ? sources.filter(
+        (source) =>
+          source?.ownerDomain === "pms" &&
+          source.entityType === "pms_pricing_publication.v2" &&
+          source.entityId === propertyId &&
+          typeof source.revision === "string",
+      )
+    : [];
+  return content && pricing.length === 1
+    ? { content, pricingSourceRevision: pricing[0].revision }
+    : null;
+}
+
+/** Same rooms, and per room the same offers by offer, meal plan and currency. */
+function sameRoomsAndOffers(owner: Owner, published: Published): boolean {
+  const identity = (roomTypeId: string, offers: readonly string[]) =>
+    JSON.stringify([roomTypeId, [...offers].sort()]);
+  const current = owner.publication.rooms.map((room) =>
+    identity(
+      room.roomTypeId,
+      room.offers.map((offer) =>
+        JSON.stringify([
+          publicPricingOfferKey(published.pricingSourceRevision, room.roomTypeId, offer.id),
+          offer.meal.kind,
+          owner.publication.currency,
+        ]),
+      ),
+    ),
+  );
+  const shown = published.content.rooms.map((room) =>
+    identity(
+      room.roomTypeId,
+      room.rates.map((rate) =>
+        JSON.stringify([rate.ratePlanId, "mealPlan" in rate ? rate.mealPlan : null, rate.currency]),
+      ),
+    ),
+  );
+  return isDeepStrictEqual(current.sort(), shown.sort());
 }

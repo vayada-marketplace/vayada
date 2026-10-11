@@ -14,6 +14,8 @@ export type BookingPublicationReview = {
   propertyId: string;
   activeContentRevisionId: string | null;
   publishedUrl: string | null;
+  /** False when room or offer changes wait for the next publication; null when unknown. */
+  publishedOffersCurrent: boolean | null;
   latestOperation: BookingPublicationOperation | null;
   recoveredOperation: BookingPublicationOperation | null;
   readiness: ProductReadinessResult | ReadinessProviderFailure;
@@ -64,6 +66,9 @@ export function createBookingPublicationReviewClient(http: Http) {
           throw invalid();
         }
       }
+      const publishedOffersCurrent = raw.publishedOffersCurrent ?? null;
+      if (publishedOffersCurrent !== null && typeof publishedOffersCurrent !== "boolean")
+        throw invalid();
       const latestOperation =
         raw.latestOperation === null ? null : operation(raw.latestOperation, propertyId);
       const recoveredOperation =
@@ -88,7 +93,13 @@ export function createBookingPublicationReviewClient(http: Http) {
           verified.sourceManifestHash !== readiness.sourceManifestHash
         )
           throw invalid();
-        return { ...raw, latestOperation, recoveredOperation, readiness: verified };
+        return {
+          ...raw,
+          publishedOffersCurrent,
+          latestOperation,
+          recoveredOperation,
+          readiness: verified,
+        };
       }
       if (
         readiness.outcome !== "provider_failure" ||
@@ -99,7 +110,7 @@ export function createBookingPublicationReviewClient(http: Http) {
         !readiness.error.retryable
       )
         throw invalid();
-      return { ...raw, latestOperation, recoveredOperation };
+      return { ...raw, publishedOffersCurrent, latestOperation, recoveredOperation };
     },
     async publish(attempt: PublicationAttempt): Promise<BookingPublicationOperation> {
       if (
