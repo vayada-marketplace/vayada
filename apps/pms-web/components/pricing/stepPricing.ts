@@ -1,6 +1,7 @@
 import {
   parsePricingConfiguration,
   pricingCurrencyScale,
+  projectReplacementRoomNights,
   type PricingConfiguration,
 } from "@vayada/domain-pms/replacement-pricing";
 import type { ReplacementOfferTerms } from "@vayada/domain-booking/replacement-pricing";
@@ -314,4 +315,47 @@ export function seasonsOverlap(
     if (inSeason(date, a.from, a.through) && inSeason(date, b.from, b.through)) return true;
   }
   return false;
+}
+
+/** Guests for the tab's sample figures: 2 adults, or 1 when the room takes only one. */
+export const sampleAdults = (room: Room) => Math.min(2, room.capacity.adults);
+const termsRevisions = (room: Room) =>
+  Object.fromEntries(room.offers.map((offer) => [offer.id, offer.termsRevision]));
+/** An option's normal night for the sample guests, meal included (the cards' "€90", "€115"). It is the engine's
+ * night evaluator on a copy of the room with only the normal prices (no seasons, months, weekdays or single dates),
+ * so linked adjustments and rounding are the engine's. Null without a normal price. */
+export function normalNight(room: Room, offerId: string): string | null {
+  const plain = {
+    ...room,
+    offers: room.offers.map((offer) =>
+      offer.price.kind === "independent"
+        ? {
+            ...offer,
+            price: {
+              ...offer.price,
+              calendar: {
+                ...offer.price.calendar,
+                months: [],
+                seasons: [],
+                weekdays: [],
+                dates: [],
+              },
+            },
+          }
+        : { ...offer, price: { ...offer.price, dateOverrides: [] } },
+    ),
+  };
+  const [night] = projectReplacementRoomNights(
+    plain,
+    {
+      propertyId: room.propertyId,
+      roomTypeId: room.roomTypeId,
+      offerId,
+      expectedRevision: room.revision,
+      expectedTermsRevisions: termsRevisions(room),
+      guests: { adults: sampleAdults(room), childAgesAtCheckIn: [] },
+    },
+    ["2001-01-01"],
+  );
+  return night?.kind === "projected" ? night.night.totalMinor : null;
 }

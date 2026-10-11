@@ -121,6 +121,13 @@ const reload = async () => {
   for (const confirm of ["Discard and reload", "Discard changes"])
     if (button(confirm)) await click(confirm);
 };
+/** Step 4's "Own option": opens the new-option window and picks how the option is priced. Does nothing while
+ * "Own option" is disabled. */
+const addOption = async (kind: "Based on another option" | "With its own prices") => {
+  if (button("Own option").props.disabled) return;
+  await click("Own option");
+  await click(kind);
+};
 /** Opens step 2's season window: a season from the year bar by its name, or "Add season". */
 const openSeason = async (name?: string) => {
   const target = name
@@ -2352,7 +2359,7 @@ it("appends linked offers preserving prices, revisions and accepted-policy retry
   await mount(id);
   await touch();
   await act(async () => input().props.onChange({ target: { value: "155.25" } }));
-  await click("Add linked offer");
+  await addOption("Based on another option");
   expect(button("Save prices").props.disabled).toBe(true);
   expect(button("Change meal plan").props.disabled).toBe(true);
   const next = linkedOfferInput(room, offerId, {
@@ -2386,18 +2393,18 @@ it("appends linked offers preserving prices, revisions and accepted-policy retry
   );
   expect(saved.snapshot.rooms[0].offers[1].id).toBe(offerId);
   expect(saved.snapshot.rooms[0].offers[1].termsRevision).toBe(offerId);
-  expect(button("Add linked offer").props.disabled).toBe(true);
+  expect(button("Own option").props.disabled).toBe(true);
   expect(button("Save prices").props.disabled).toBe(true);
 });
 it("cancels new-offer setup without writes and protects pending entries and leaving", async () => {
   await mount();
   await touch();
   await click("Edit child charges");
-  expect(button("Add linked offer").props.disabled).toBe(true);
-  await click("Add linked offer");
+  expect(button("Own option").props.disabled).toBe(true);
+  await addOption("Based on another option");
   expect(button("Cancel new offer")).toBeUndefined();
   await click("Cancel child charges");
-  await click("Add linked offer");
+  await addOption("Based on another option");
   expect(input().props.disabled).toBe(true);
   expect(button("Save prices").props.disabled).toBe(true);
   const warn = vi
@@ -2527,9 +2534,9 @@ it("creates an independent offer through fixed-room setup and retains policy ret
   await mount(id);
   await touch();
   await click("Edit child charges");
-  expect(button("Add independent offer").props.disabled).toBe(true);
+  expect(button("Own option").props.disabled).toBe(true);
   await click("Cancel child charges");
-  await click("Add independent offer");
+  await addOption("With its own prices");
   expect(view.root.findByType(FirstPricingSetup).props.existingRoom).toMatchObject({
     roomTypeId: id,
   });
@@ -2546,7 +2553,7 @@ it("creates an independent offer through fixed-room setup and retains policy ret
   expect(client.termsAction).not.toHaveBeenCalled();
   expect(button("Save prices").props.disabled).toBe(false);
   await act(async () => input().props.onChange({ target: { value: "155.25" } }));
-  await click("Add independent offer");
+  await addOption("With its own prices");
   const next = firstPricingInput(
     room.propertyId,
     { roomTypeId: id, name: "Double", capacity: room.capacity },
@@ -2590,7 +2597,7 @@ it("creates an independent offer through fixed-room setup and retains policy ret
     kind: "independent",
     calendar: { base: { amountMinor: "20000" } },
   });
-  expect(button("Add independent offer").props.disabled).toBe(true);
+  expect(button("Own option").props.disabled).toBe(true);
   expect(button("Save prices").props.disabled).toBe(true);
 });
 
@@ -2774,7 +2781,7 @@ it("prefills included settings, guards pending edits and saves current bases thr
   expect(field("Adjustment for 3 adults").props.value).toBe("19.25");
   expect(button("Save prices").props.disabled).toBe(true);
   expect(input().props.disabled).toBe(true);
-  expect(button("Add independent offer").props.disabled).toBe(true);
+  expect(button("Own option").props.disabled).toBe(true);
   expect(button("Change meal plan").props.disabled).toBe(true);
   expect(button("Edit stay rules").props.disabled).toBe(true);
   const warn = vi
