@@ -11,7 +11,10 @@ import type { PricingTermsInput } from "./replacementPricingClient";
 import type { Translate } from "./firstPricingSetupMessages";
 import { IncludedPricing, includedPrice, type IncludedInput } from "./IncludedPricing";
 import { AcceptedPaymentMethods, type PaymentMethod } from "./AcceptedPaymentMethods";
+import { defaultPricingFormLook, type PricingFormLook } from "./pricingFormLook";
 import { parseMinorInput, PricingError, setupErrorText } from "./pricingSetupAmounts";
+
+export { defaultPricingFormLook, type PricingFormLook } from "./pricingFormLook";
 
 export type SetupRoom = {
   roomTypeId: string;
@@ -163,6 +166,8 @@ export type FirstPricingSetupProps = {
   fixedCurrency?: string;
   existingRoom?: PricingConfiguration;
   t: Translate;
+  /** Class names; onboarding's look by default. */
+  look?: PricingFormLook;
 };
 export function FirstPricingSetup({
   propertyId,
@@ -173,6 +178,7 @@ export function FirstPricingSetup({
   fixedCurrency,
   existingRoom,
   t,
+  look = defaultPricingFormLook,
 }: FirstPricingSetupProps) {
   const [values, setValues] = useState<Values>({
     mode: "",
@@ -210,13 +216,13 @@ export function FirstPricingSetup({
     key: Exclude<keyof Values, "occupancy" | "included" | "methods">,
     label: string,
   ) => (
-    <label className="block text-sm">
+    <label className={look.label}>
       {label}
       <input
         aria-label={label}
         disabled={disabled || (key === "currency" && !!fixedCurrency)}
         value={values[key]}
-        className="mt-1 block w-full rounded-lg border px-3 py-2"
+        className={look.input}
         onChange={(event) => change(key, event.target.value)}
       />
     </label>
@@ -226,13 +232,13 @@ export function FirstPricingSetup({
     label: string,
     options: [string, string][],
   ) => (
-    <label className="block text-sm">
+    <label className={look.label}>
       {label}
       <select
         aria-label={label}
         disabled={disabled}
         value={values[key]}
-        className="mt-1 block w-full rounded-lg border px-3 py-2"
+        className={look.input}
         onChange={(event) => change(key, event.target.value)}
       >
         <option value="">{t("pricing.choose")}</option>
@@ -268,7 +274,7 @@ export function FirstPricingSetup({
         }
       }}
     >
-      <h2 className="text-lg font-semibold">
+      <h2 className={look.heading}>
         {t(
           existingRoom
             ? "pricing.setup.titleOffer"
@@ -277,10 +283,10 @@ export function FirstPricingSetup({
               : "pricing.setup.titleFirst",
         )}
       </h2>
-      <p className="text-sm text-gray-600">{t("pricing.setup.intro")}</p>
+      <p className={look.hint}>{t("pricing.setup.intro")}</p>
       <div className="grid gap-4 sm:grid-cols-2">
         {existingRoom ? (
-          <p>{t("pricing.setup.room", { name: room?.name ?? "" })}</p>
+          <p className={look.text}>{t("pricing.setup.room", { name: room?.name ?? "" })}</p>
         ) : (
           select(
             "room",
@@ -301,7 +307,7 @@ export function FirstPricingSetup({
         {values.mode === "occupancy" &&
           room &&
           Array.from({ length: room.capacity.adults }, (_, index) => (
-            <label key={index} className="block text-sm">
+            <label key={index} className={look.label}>
               {t(
                 index ? "pricing.setup.occupancyPrice.other" : "pricing.setup.occupancyPrice.one",
                 { count: index + 1 },
@@ -314,7 +320,7 @@ export function FirstPricingSetup({
                 inputMode="decimal"
                 disabled={disabled}
                 value={values.occupancy[index] ?? ""}
-                className="mt-1 block w-full rounded-lg border px-3 py-2"
+                className={look.input}
                 onChange={(event) => {
                   const occupancy = Array.from({ length: room.capacity.adults }, (_, i) =>
                     i === index ? event.target.value : (values.occupancy[i] ?? ""),
@@ -329,6 +335,7 @@ export function FirstPricingSetup({
         {values.mode === "included_guests" && room && (
           <IncludedPricing
             t={t}
+            look={look}
             value={values.included}
             capacity={room.capacity.adults}
             disabled={disabled}
@@ -360,6 +367,7 @@ export function FirstPricingSetup({
       </div>
       <AcceptedPaymentMethods
         t={t}
+        look={look}
         methods={values.methods}
         disabled={disabled}
         onChange={(methods) => {
@@ -368,9 +376,9 @@ export function FirstPricingSetup({
           onDirty();
         }}
       />
-      <p className="text-sm text-gray-600">{t("pricing.setup.ageHint")}</p>
+      <p className={look.hint}>{t("pricing.setup.ageHint")}</p>
       {room && (
-        <p className="text-sm">
+        <p className={look.text}>
           {t("pricing.setup.capacity", {
             total: room.capacity.total,
             adults: room.capacity.adults,
@@ -380,18 +388,15 @@ export function FirstPricingSetup({
         </p>
       )}
       {values.cancellation === "flexible" && (
-        <p className="text-sm">{t("pricing.setup.penalty")}</p>
+        <p className={look.text}>{t("pricing.setup.penalty")}</p>
       )}
-      <p className="text-sm text-gray-600">{t("pricing.setup.continueHint")}</p>
+      <p className={look.hint}>{t("pricing.setup.continueHint")}</p>
       {error && (
-        <p role="alert" className="text-red-700">
+        <p role="alert" className={look.error}>
           {error}
         </p>
       )}
-      <button
-        disabled={disabled}
-        className="rounded-lg bg-emerald-700 px-5 py-2 text-white disabled:opacity-50"
-      >
+      <button disabled={disabled} className={look.button}>
         {t("pricing.setup.continue")}
       </button>
     </form>
