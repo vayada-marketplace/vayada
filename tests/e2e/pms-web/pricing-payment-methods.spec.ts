@@ -38,7 +38,8 @@ test("first pricing setup starts without a payment method and lets staff select 
   );
 
   await page.goto(`/rooms/${PMS_WEB_ROOM_TYPE_ID}?tab=prices`);
-  await expect(page.getByRole("heading", { name: "Create your first room price" })).toBeVisible();
+  // VAY-2125: the first price is asked as steps on the room's Prices tab.
+  await expect(page.getByRole("heading", { name: "Set this room's prices" })).toBeVisible();
   const card = page.getByRole("checkbox", { name: "Card online" });
   const atProperty = page.getByRole("checkbox", { name: "Pay at property" });
   await expect(card).not.toBeChecked();
