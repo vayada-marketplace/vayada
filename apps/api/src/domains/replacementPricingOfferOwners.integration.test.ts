@@ -2,10 +2,7 @@ import {
   channexManagementWorkerPrivileges,
   CHANNEX_MANAGEMENT_WORKER_ROLE,
 } from "../jobs/channexManagementWorkerPrivileges.js";
-import {
-  createPublicPricingOfferCatalog,
-  createPublishedOfferCheck,
-} from "./publicPricingOfferCatalog.js";
+import { createPublicPricingOfferCatalog } from "./publicPricingOfferCatalog.js";
 import { createTargetPmsInventoryPublicOfferProjection } from "./pmsInventoryPublicOfferProjection.js";
 import { createTargetPublicBookabilityPublicationCommandPort } from "../platform/publicBookabilityPublication.js";
 import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
@@ -90,7 +87,7 @@ import {
   verifyChannexOfferConfiguration,
 } from "../integrations/channexOfferConfiguration.js";
 import { preparePublishedChannexNightPrices } from "./channexPublishedNightPrices.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import type { ReplacementOfferTerms } from "@vayada/domain-booking";
 import pg from "pg";
@@ -6145,9 +6142,11 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       expect(
         offers?.rooms.flatMap((room) => room.offers.map((offer) => offer.publicOfferKey)),
       ).toEqual(current!.rooms.flatMap((room) => room.offers.map((offer) => offer.ratePlanId)));
-      expect(offers?.rooms.every((room) => room.name === "Suite" && room.images.length === 1)).toBe(
-        true,
-      );
+      // Room content is read live after go-live (VAY-2129), not from the published page.
+      expect(offers?.rooms.map((room) => [room.name, room.images])).toEqual([
+        ["Terms room", []],
+        ["Second room", []],
+      ]);
       expect(JSON.stringify(offers)).not.toMatch(
         /baseNightlyAmount|termsRevision|publicationRevision|ownerReferences|sourceRevision/,
       );
@@ -6198,10 +6197,12 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           };
         },
       ]) {
-        const invalid = structuredClone(built!.publicContent);
-        change(invalid);
-        await publishContent(invalid);
-        expect(await catalog.read(scope.propertyId)).toBeNull();
+        // After go-live the published page is only the go-live switch: its contents no longer
+        // decide which rooms and offers guests see.
+        const outdated = structuredClone(built!.publicContent);
+        change(outdated);
+        await publishContent(outdated);
+        expect(await catalog.read(scope.propertyId)).toEqual(offers);
       }
       await publishContent(built!.publicContent);
       await pool.query(
@@ -6376,6 +6377,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     change: (
       room: PricingStorageSnapshot["rooms"][number],
     ) => PricingStorageSnapshot["rooms"][number],
+    owners: { sources: PricingStorageSources; terms: typeof f.terms } = f,
   ) {
     const rooms = f.snapshot.rooms.map((room) => change({ ...room, revision }));
     const finance = await (async () => {
@@ -6386,7 +6388,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           propertyId: f.scope.propertyId,
           currency: "EUR",
           pricingRevision: revision,
-          terms: f.terms.filter((terms) =>
+          terms: owners.terms.filter((terms) =>
             rooms.some(
               (room) =>
                 room.roomTypeId === terms.roomTypeId &&
@@ -6409,7 +6411,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     await pool.query(
       `INSERT INTO pms.pricing_v2_drafts(property_id,draft_id,draft_revision,base_revision,source_revisions,snapshot,actor_user_id)
       VALUES($1,$2,1,$3,$4,$5,$6)`,
-      [f.scope.propertyId, draftId, revision - 1, f.sources, next, f.scope.actorUserId],
+      [f.scope.propertyId, draftId, revision - 1, owners.sources, next, f.scope.actorUserId],
     );
     const charges = await createReplacementChargeDeclarationStore(pool).confirm(
       f.context,
@@ -6417,7 +6419,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       {
         draftId,
         expectedDraftRevision: 1,
-        claimedFingerprint: replacementChargeFingerprint(f.scope.propertyId, next, f.sources)!,
+        claimedFingerprint: replacementChargeFingerprint(f.scope.propertyId, next, owners.sources)!,
         declaration: "all_mandatory_charges_included",
         requestId: randomUUID(),
       },
@@ -6427,20 +6429,36 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       {
         requestId: randomUUID(),
         expectedRevision: revision - 1,
-        sources: f.sources,
+        sources: owners.sources,
         snapshot: { ...next, ownerReferences: { ...next.ownerReferences, charges: charges.id } },
       },
     );
   }
-  it("serves saved price changes at once but waits for a republish after offer changes (VAY-2123)", async () => {
+  it("serves every saved change after go-live without republishing (VAY-2129)", async () => {
     const f = await publicFixture(),
-      id = f.scope.propertyId;
+      id = f.scope.propertyId,
+      secondRoomId = f.snapshot.rooms[1]!.roomTypeId;
     const catalog = createPublicPricingOfferCatalog(pool);
-    const check = createPublishedOfferCheck(pool);
     const keys = async () =>
       (await catalog.read(id))?.rooms.flatMap((room) =>
         room.offers.map((offer) => offer.publicOfferKey),
       ) ?? null;
+    // The catalog lists rooms by room type id; compare them by name.
+    const byName = <T extends { name: string }>(rooms: readonly T[]) =>
+      [...rooms].sort((a, b) => a.name.localeCompare(b.name));
+    const shown = async () => {
+      const read = await catalog.read(id);
+      return read
+        ? byName(read.rooms).map((room) => [
+            room.name,
+            room.offers.map((offer) => offer.mealPlan),
+          ])
+        : null;
+    };
+    const photos = async (source: typeof catalog) =>
+      Object.fromEntries(
+        ((await source.read(id))?.rooms ?? []).map((room) => [room.name, room.images]),
+      );
     const nightPrice = async (publicOfferKey: string) => {
       const client = await pool.connect();
       try {
@@ -6462,15 +6480,76 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         client.release();
       }
     };
+    // Saved prices alone are not public: the hotel goes live with its first publication.
+    expect(await catalog.read(id)).toBeNull();
     const first = (await publishBookingPage(f.scope)).flatMap((room) =>
       room.offers.map((offer) => offer.ratePlanId),
     );
-    expect(await keys()).toEqual(first);
-    expect(await check.matchCurrent(f.scope)).toBe(true);
+    expect([...(await keys())!].sort()).toEqual([...first].sort());
     expect(await nightPrice(first[0]!)).toBe("10000");
 
-    // A price-only save serves at once; offer keys and quotes follow the new revision.
-    await savePrices(f, 2, (room) => ({
+    // Approved public room photos come from the media CDN; anything else leaves the room without.
+    const serving = {
+      bucketName: "vayada-media-test",
+      cdnBaseUrl: "https://cdn.example.test",
+      publicPathPrefix: "media",
+    };
+    const mediaObjectId = randomUUID();
+    const checksum = createHash("sha256").update(`${mediaObjectId}:original_safe`).digest("hex");
+    const storageKey = `public/media/${mediaObjectId}/original_safe/sha256-${checksum}.webp`;
+    const photoUrl = `https://cdn.example.test/media/${mediaObjectId}/original_safe/sha256-${checksum}.webp`;
+    await pool.query(
+      `INSERT INTO platform.media_objects (
+         id, bucket, storage_key, storage_kind, visibility, purpose,
+         owner_organization_id, property_id, resource_product, resource_type,
+         resource_id, lifecycle_status, content_type, width_px, height_px,
+         size_bytes, checksum_sha256, public_approved, created_by_user_id
+       ) VALUES (
+         $1::uuid, $2, $3, 'vayada_managed', 'public', 'property.gallery_image',
+         $4::uuid, $5::uuid, 'hotel_catalog', 'property', $5,
+         'active', 'image/webp', 1200, 800, 900, $6, TRUE, $7::uuid
+       )`,
+      [
+        mediaObjectId,
+        serving.bucketName,
+        storageKey,
+        f.scope.organizationId,
+        id,
+        checksum,
+        f.scope.actorUserId,
+      ],
+    );
+    await pool.query(
+      `INSERT INTO platform.media_variants (
+         media_object_id, variant_name, visibility, storage_key, content_type,
+         width_px, height_px, size_bytes, checksum_sha256, public_cdn_url
+       ) VALUES ($1::uuid, 'original_safe', 'public', $2, 'image/webp', 1200, 800, 900, $3, $4)`,
+      [mediaObjectId, storageKey, checksum, photoUrl],
+    );
+    await pool.query(
+      `INSERT INTO pms.room_type_media(property_id,room_type_id,platform_media_object_id,alt_text,sort_order)
+       VALUES ($1,$2,$3,'Suite',0)`,
+      [id, f.snapshot.rooms[0]!.roomTypeId, mediaObjectId],
+    );
+    const withPhotos = createPublicPricingOfferCatalog(pool, { mediaServing: serving });
+    expect(await photos(withPhotos)).toEqual({
+      "Terms room": [{ url: photoUrl, alt: "Suite" }],
+      "Second room": [],
+    });
+    expect(await photos(catalog)).toEqual({ "Terms room": [], "Second room": [] });
+    // A photo taken out of public use (its public variant gone, the object private) is dropped.
+    await pool.query("DELETE FROM platform.media_variants WHERE media_object_id=$1", [
+      mediaObjectId,
+    ]);
+    await pool.query(
+      "UPDATE platform.media_objects SET visibility='private', public_approved=false WHERE id=$1",
+      [mediaObjectId],
+    );
+    expect(await photos(withPhotos)).toEqual({ "Terms room": [], "Second room": [] });
+
+    // Each save below builds on the previous one, as an owner's would.
+    type Room = PricingStorageSnapshot["rooms"][number];
+    const repriced12000 = (room: Room): Room => ({
       ...room,
       offers: room.offers.map((offer) => ({
         ...offer,
@@ -6485,38 +6564,89 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           },
         },
       })),
-    }));
+    });
+    const withBreakfast = (room: Room): Room => {
+      const base = repriced12000(room);
+      return {
+        ...base,
+        offers: base.offers.map((offer) => ({
+          ...offer,
+          meal: { kind: "breakfast", charge: { kind: "room", amountMinor: "0" } },
+        })),
+      };
+    };
+    const flexOnly = (room: Room): Room => {
+      const base = withBreakfast(room);
+      return { ...base, offers: base.offers.filter((offer) => offer.id === "flex") };
+    };
+
+    // A price-only save serves at once; offer keys and quotes follow the new revision.
+    await savePrices(f, 2, repriced12000);
     const repriced = await keys();
     expect(repriced).toHaveLength(3);
     expect(repriced!.filter((key) => first.includes(key))).toEqual([]);
     expect(await nightPrice(repriced![0]!)).toBe("12000");
     expect(await nightPrice(first[0]!)).toBeNull();
-    expect(await check.matchCurrent(f.scope)).toBe(true);
 
-    // A changed meal plan changes the offers: unavailable until "Publish reviewed changes".
-    await savePrices(f, 3, (room) => ({
-      ...room,
-      offers: room.offers.map((offer) => ({
-        ...offer,
-        meal: { kind: "breakfast", charge: { kind: "room", amountMinor: "0" } },
-      })),
-    }));
-    expect(await catalog.read(id)).toBeNull();
-    expect(await check.matchCurrent(f.scope)).toBe(false);
-    await publishBookingPage(f.scope);
-    expect(await keys()).toHaveLength(3);
-    expect(await check.matchCurrent(f.scope)).toBe(true);
+    // So does a changed meal plan, a deleted offer and an added offer.
+    await savePrices(f, 3, withBreakfast);
+    expect(await shown()).toEqual([
+      ["Second room", ["breakfast"]],
+      ["Terms room", ["breakfast", "breakfast"]],
+    ]);
+    const beforeDelete = await keys();
+    await savePrices(f, 4, flexOnly);
+    expect(await shown()).toEqual([
+      ["Second room", ["breakfast"]],
+      ["Terms room", ["breakfast"]],
+    ]);
+    for (const key of beforeDelete!) expect(await nightPrice(key)).toBeNull();
+    const late = await f.booking.save(f.context, f.scope, {
+      requestId: randomUUID(),
+      expectedRevision: null,
+      terms: { ...f.termsInput, roomTypeId: secondRoomId, offerId: "late" },
+    });
+    await savePrices(
+      f,
+      5,
+      (room) => {
+        const base = flexOnly(room);
+        return base.roomTypeId === secondRoomId
+          ? {
+              ...base,
+              offers: [
+                ...base.offers,
+                { ...base.offers[0]!, id: "late", termsRevision: late.revision },
+              ],
+            }
+          : base;
+      },
+      {
+        sources: { ...f.sources, terms: await f.currentTermsSource() },
+        terms: [...f.terms, late],
+      },
+    );
+    expect(await shown()).toEqual([
+      ["Second room", ["breakfast", "breakfast"]],
+      ["Terms room", ["breakfast"]],
+    ]);
 
-    // So does removing an offer.
-    await savePrices(f, 4, (room) => ({
-      ...room,
-      offers: room.offers.filter((offer) => offer.id === "flex"),
-    }));
-    expect(await catalog.read(id)).toBeNull();
-    expect(await check.matchCurrent(f.scope)).toBe(false);
-    await publishBookingPage(f.scope);
-    expect(await keys()).toHaveLength(2);
-    expect(await check.matchCurrent(f.scope)).toBe(true);
+    // Closing a room hides that room only.
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN; SET LOCAL session_replication_role=replica");
+      await client.query(
+        `INSERT INTO pms.room_type_closures(property_id,room_type_id,command_id,request_fingerprint,
+        expected_room_facts_revision,expected_room_units_revision,previous_calendar_revision,
+        closed_calendar_revision,cutoff_date,accepted_at,actor_user_id)
+        VALUES($1,$2,gen_random_uuid(),repeat('a',64),1,1,1,2,current_date,now(),$3)`,
+        [id, secondRoomId, f.scope.actorUserId],
+      );
+      await client.query("COMMIT");
+    } finally {
+      client.release();
+    }
+    expect(await shown()).toEqual([["Terms room", ["breakfast"]]]);
   });
   it("serves the single owning organization and refuses unlinked, ambiguous or hidden properties", async () => {
     const f = await publicFixture(),

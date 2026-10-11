@@ -16,7 +16,6 @@ import type {
   RoomPublicationSnapshotPort,
 } from "@vayada/domain-pms";
 import type { FinancePaymentReadinessReadPort } from "@vayada/domain-finance";
-import pg from "pg";
 
 import { createBookingBookingPublicationSource } from "./bookingBookingPublicationSource.js";
 import { createPgBookingPublicationAttemptStatusRepository } from "./bookingPublicationAttemptStatusRepository.js";
@@ -30,13 +29,11 @@ import { createFinanceBookingLaunchEvidenceAdapter } from "./financeBookingLaunc
 import { createFinanceBookingPublicationSnapshotPort } from "./financeBookingPublicationSnapshot.js";
 import { createHotelCatalogBookingPublicationSource } from "./hotelCatalogBookingPublicationSource.js";
 import { createPmsBookingPublicationSource } from "./pmsBookingPublicationSource.js";
-import { createPublishedOfferCheck } from "./publicPricingOfferCatalog.js";
 
 export type BookingPublicationProductionRuntime = {
   routes: {
     repository: ReturnType<typeof createPgBookingPublicationCommandRepository>;
     readinessProvider: ReturnType<typeof createBookingLaunchReadinessProvider>;
-    publishedOffers: ReturnType<typeof createPublishedOfferCheck>;
   };
   projector: BookingPublicationProjector;
   refresh: BookingPublicationRefreshPort["refresh"];
@@ -219,13 +216,8 @@ export function createBookingPublicationProductionRuntime(config: {
     repository,
     projector,
   });
-  const offerPool = new pg.Pool({ connectionString: config.connectionString, max: 2 });
   return {
-    routes: {
-      repository,
-      readinessProvider,
-      publishedOffers: createPublishedOfferCheck(offerPool),
-    },
+    routes: { repository, readinessProvider },
     projector,
     refresh,
     async close() {
@@ -235,7 +227,6 @@ export function createBookingPublicationProductionRuntime(config: {
         attempts.close?.(),
         catalog.close(),
         booking.close(),
-        offerPool.end(),
       ]);
     },
   };
