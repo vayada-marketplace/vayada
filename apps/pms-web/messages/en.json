@@ -2303,6 +2303,8 @@
   "pricing.steps.price.perNight": "per night",
   "pricing.steps.price.perAdultNight": "per adult per night",
   "pricing.steps.price.included": "Price for {adults}. Other guest counts: {steps}.",
+  "pricing.steps.price.includedOnly": "Price for {adults}.",
+  "pricing.steps.rules.hintSome": "Optional. Applies to the options that follow the main price's rules.",
   "pricing.steps.seasons.title": "Is it more expensive at certain times of year?",
   "pricing.steps.seasons.hint": "Add a season and set its price. Optional.",
   "pricing.steps.seasons.normal": "Normal",

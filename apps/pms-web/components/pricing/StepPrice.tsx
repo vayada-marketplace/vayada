@@ -36,6 +36,18 @@ export function StepPrice({
     scale = pricingCurrencyScale(room.currency)!,
     symbol = currencySymbol(room.currency);
   const amounts = baseAmounts(base, t);
+  // An included-guest price's other guest counts and their adjustments ("1 adult −€30").
+  const others =
+    base?.mode === "included_guests"
+      ? base.adjustments
+          .map((adjustment, index) =>
+            index + 1 === base.baseGuests
+              ? ""
+              : `${t(index ? "pricing.adults.other" : "pricing.adults.one", { count: index + 1 })} ${adjustmentText(adjustment, room.currency)}`,
+          )
+          .filter(Boolean)
+          .join(" · ")
+      : "";
   const key = (ai: number) => `${roomIndex}:${offerIndex}:${ai}`;
   return (
     <StepCard
@@ -82,18 +94,11 @@ export function StepPrice({
           {/* Included-guest prices change by guest count; the option's Edit window edits these steps. */}
           {base.mode === "included_guests" && (
             <p className={`w-full ${ui.stepHint}`}>
-              {t("pricing.steps.price.included", {
+              {t(others ? "pricing.steps.price.included" : "pricing.steps.price.includedOnly", {
                 adults: t(base.baseGuests === 1 ? "pricing.adults.one" : "pricing.adults.other", {
                   count: base.baseGuests,
                 }),
-                steps: base.adjustments
-                  .map((adjustment, index) =>
-                    index + 1 === base.baseGuests
-                      ? ""
-                      : `${t(index ? "pricing.adults.other" : "pricing.adults.one", { count: index + 1 })} ${adjustmentText(adjustment, room.currency)}`,
-                  )
-                  .filter(Boolean)
-                  .join(" · "),
+                steps: others,
               })}
             </p>
           )}
