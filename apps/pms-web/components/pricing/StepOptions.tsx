@@ -74,31 +74,28 @@ export function StepOptions({
           const isMain = offer.id === main.id,
             price = prices[offer.id];
           return (
+            // Phones: name, price and Edit on one row, the summary under them at full width. From sm, the design's
+            // four columns with the icon.
             <li
               key={offer.id}
-              className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-gray-200 px-4 py-4 sm:flex-nowrap sm:px-[18px]"
+              className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-4 gap-y-1 rounded-xl border border-gray-200 px-4 py-4 sm:grid-cols-[40px_minmax(0,1fr)_90px_52px] sm:px-[18px]"
             >
               <span
-                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] ${isMain ? "bg-primary-50 text-primary-600" : "bg-gray-100 text-gray-700"}`}
+                className={`hidden h-10 w-10 items-center justify-center rounded-[10px] sm:row-span-2 sm:flex ${isMain ? "bg-primary-50 text-primary-600" : "bg-gray-100 text-gray-700"}`}
               >
                 {icon(offer, terms[offer.id])}
               </span>
-              <div className="min-w-0 flex-1 space-y-0.5">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[15px] font-semibold leading-5 text-gray-900">
-                    {names[offer.id]}
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="text-[15px] font-semibold leading-5 text-gray-900">
+                  {names[offer.id]}
+                </span>
+                {isMain && (
+                  <span className="rounded-md bg-gray-100 px-2 py-0.5 text-[12px] font-medium text-gray-500">
+                    {t("pricing.steps.options.main")}
                   </span>
-                  {isMain && (
-                    <span className="rounded-md bg-gray-100 px-2 py-0.5 text-[12px] font-medium text-gray-500">
-                      {t("pricing.steps.options.main")}
-                    </span>
-                  )}
-                </div>
-                <p className="text-[14px] leading-5 text-gray-500">
-                  {optionSummary(room, offer, names, terms[offer.id], t)}
-                </p>
+                )}
               </div>
-              <span className="ml-auto shrink-0 text-right text-[16px] font-semibold leading-5 text-gray-900 sm:ml-0 sm:w-[90px]">
+              <span className="text-right text-[16px] font-semibold leading-5 text-gray-900 sm:row-span-2">
                 {price ? money(price, room.currency) : "—"}
                 <span className="sr-only">
                   {" "}
@@ -115,10 +112,13 @@ export function StepOptions({
                 aria-label={t("pricing.steps.options.editAria", { name: names[offer.id] })}
                 disabled={disabled}
                 onClick={() => onEdit(offer.id)}
-                className={`shrink-0 text-right sm:w-[52px] ${ui.stepLink}`}
+                className={`text-right sm:row-span-2 ${ui.stepLink}`}
               >
                 {t("pricing.steps.options.edit")}
               </button>
+              <p className="col-span-3 text-[14px] leading-5 text-gray-500 sm:col-span-1 sm:col-start-2">
+                {optionSummary(room, offer, names, terms[offer.id], t)}
+              </p>
             </li>
           );
         })}
