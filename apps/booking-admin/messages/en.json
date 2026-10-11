@@ -22,6 +22,8 @@
   "auth.login.errorValidation": "Validation error.",
   "auth.login.errorUnexpected": "An unexpected error occurred. Please try again.",
   "auth.login.errorSessionExpired": "Your session has expired. Please sign in again.",
+  "auth.login.hotelWorkspaceRequired": "This account isn't connected to a hotel yet. If a hotel invited you, open the invitation email or ask them to send it again.",
+  "auth.login.setUpHotel": "Set up your hotel",
   "auth.register.fullNameLabel": "Full Name",
   "auth.register.fullNamePlaceholder": "John Doe",
   "auth.register.emailLabel": "Email address",

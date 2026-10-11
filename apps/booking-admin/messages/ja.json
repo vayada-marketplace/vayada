@@ -23,6 +23,8 @@
   "auth.login.errorValidation": "入力エラーです。",
   "auth.login.errorUnexpected": "予期しないエラーが発生しました。もう一度お試しください。",
   "auth.login.errorSessionExpired": "セッションが期限切れになりました。再度ログインしてください。",
+  "auth.login.hotelWorkspaceRequired": "このアカウントはまだホテルに接続されていません。ホテルから招待された場合は、招待メールを開くか、再送信を依頼してください。",
+  "auth.login.setUpHotel": "ホテルを設定する",
   "auth.register.fullNameLabel": "氏名",
   "auth.register.fullNamePlaceholder": "山田太郎",
   "auth.register.emailLabel": "メールアドレス",

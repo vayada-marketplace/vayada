@@ -83,6 +83,8 @@
   "auth.login.unexpectedError": "Произошла непредвиденная ошибка. Пожалуйста, попробуйте снова.",
   "auth.login.sessionExpiredBanner": "Ваша сессия истекла. Пожалуйста, войдите снова.",
   "auth.login.signOut": "Выйти",
+  "auth.login.hotelWorkspaceRequired": "Этот аккаунт пока не связан ни с одним отелем. Если вас пригласил отель, откройте письмо с приглашением или попросите отправить его повторно.",
+  "auth.login.setUpHotel": "Настроить отель",
   "auth.register.title": "vayada PMS",
   "auth.register.subtitle": "Создайте аккаунт для управления объектом",
   "auth.register.fullNameLabel": "Полное имя",

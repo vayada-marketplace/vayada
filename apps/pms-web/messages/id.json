@@ -84,6 +84,8 @@
   "auth.login.unexpectedError": "Terjadi kesalahan yang tidak terduga. Silakan coba lagi.",
   "auth.login.sessionExpiredBanner": "Sesi Anda telah berakhir. Silakan masuk kembali.",
   "auth.login.signOut": "Keluar",
+  "auth.login.hotelWorkspaceRequired": "Akun ini belum terhubung ke hotel mana pun. Jika Anda diundang oleh hotel, buka email undangan atau minta hotel mengirimkannya lagi.",
+  "auth.login.setUpHotel": "Siapkan hotel Anda",
   "auth.register.title": "vayada PMS",
   "auth.register.subtitle": "Buat akun manajemen properti Anda",
   "auth.register.fullNameLabel": "Nama Lengkap",
