@@ -119,9 +119,17 @@ export function PriceCalendar({
                 aria-label={[`${Number(date.slice(8))} ${title}`, price, state, stayText]
                   .filter(Boolean)
                   .join(", ")}
+                title={state || undefined}
                 onClick={() => onPick(date)}
-                className={`flex h-[46px] flex-col items-center justify-center gap-px rounded-lg text-[12px] leading-[15px] ${tone} ${inStay ? "ring-[1.5px] ring-inset ring-primary-500" : "hover:ring-1 hover:ring-inset hover:ring-gray-300"}`}
+                className={`relative flex h-[46px] flex-col items-center justify-center gap-px rounded-lg text-[12px] leading-[15px] ${tone} ${inStay ? "ring-[1.5px] ring-inset ring-primary-500" : "hover:ring-1 hover:ring-inset hover:ring-gray-300"}`}
               >
+                {/* A night that can't start a stay gets a red dot, so it doesn't look like any other night. */}
+                {!closed && rules?.closedToArrival && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-red-500"
+                  />
+                )}
                 <span className="text-gray-700">{Number(date.slice(8))}</span>
                 <span
                   className={`font-semibold ${closed ? "text-gray-400 line-through" : "text-gray-900"}`}
