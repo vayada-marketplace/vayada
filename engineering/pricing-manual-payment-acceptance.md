@@ -17,6 +17,14 @@ pending payment. Booking launch readiness keeps counting only card and pay at pr
 bank-only or PayPal-only hotel cannot publish its booking page. Such a hotel can save and publish
 pricing-v2 prices (Finance pricing readiness counts its method), so they also reach channels.
 
+With the switch on, such a hotel can publish: launch readiness, the publication snapshot and the
+setup Finance step count an enabled bank destination or a valid PayPal email, only for a hotel
+that takes neither card nor pay at property. Turning the switch off again takes those pages down:
+the readers of stored booking content (the public profile and the published URL) refuse content
+listing bank transfer or PayPal unless they were created with the switch on. Since VAY-2129 the
+offer catalog serves the current offers while a publication is live, and quotes refuse bank
+transfer and PayPal while the switch is off.
+
 ## Flow (the same for both methods and both acceptance modes)
 
 | Step                    | Effect                                                                                                                                                                                                                                                                                                                                                          |
@@ -42,7 +50,13 @@ Stripe readiness lapses still fails as before. Quotes for them must be due in fu
 (no charges collected at the property), and bank transfer is quoted only where the bank-details
 binding (KMS settings) exists.
 
-## Known gap
+## Known gaps
+
+A published bank-only or PayPal-only page stays up after the hotel disables its bank details or
+removes its PayPal email, until the next publication: Finance's publication source tracks the
+payment methods revision, which those edits do not bump. Quotes and acceptance check the bank
+destination and PayPal email again, so no booking goes through, as for a card hotel whose card
+acceptance lapses. Launch readiness and the setup state show the change at once.
 
 The payment deadline is the agreed window (48 h, or the hotel's PayPal window) even when check-in
 comes first, as in legacy: a late booking can still be waiting for payment when the guest arrives,

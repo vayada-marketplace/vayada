@@ -88,6 +88,9 @@ async function mockPricing(page: Page, initial: ReturnType<typeof publicationOf>
     const method = request.method();
     const suffix = new URL(request.url()).pathname.split("/pricing-v2")[1] ?? "";
     const body = (method === "GET" ? {} : request.postDataJSON()) as Record<string, any>;
+    // Bank-transfer and PayPal acceptance is off, as in production today (VAY-2139).
+    if (suffix === "/payment-methods" && method === "GET")
+      return ok(route, { acceptanceEnabled: false, readyMethods: [] });
     if (suffix === "" && method === "GET") {
       if (!state.publication) return route.fulfill({ status: 404, json: { code: "not_found" } });
       return ok(route, state.publication);
