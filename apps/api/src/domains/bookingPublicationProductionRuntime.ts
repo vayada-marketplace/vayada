@@ -13,6 +13,7 @@ import type { HotelMediaResolutionPort } from "@vayada/domain-hotels";
 import type {
   PmsInventoryLaunchReadinessReadPort,
   PmsOperatingCalendarReadPort,
+  PmsPricingReadPort,
   RoomPublicationSnapshotPort,
 } from "@vayada/domain-pms";
 import type { FinancePaymentReadinessReadPort } from "@vayada/domain-finance";
@@ -27,11 +28,14 @@ import {
 } from "./bookingPublicationProjector.js";
 import { createPgDistributionBookingPublicationProjection } from "./distributionBookingPublicationProjection.js";
 import { createFinanceBookingLaunchEvidenceAdapter } from "./financeBookingLaunchEvidence.js";
+import type { FinancePaymentReadinessScopePort } from "./financePaymentReadinessReadModel.js";
 import { createFinanceBookingPublicationSnapshotPort } from "./financeBookingPublicationSnapshot.js";
 import type { FinanceManualPaymentReadinessReadPort } from "./financeManualPaymentReadiness.js";
 import { createHotelCatalogBookingPublicationSource } from "./hotelCatalogBookingPublicationSource.js";
 import { createPmsBookingPublicationSource } from "./pmsBookingPublicationSource.js";
 import { createPublishedOfferCheck } from "./publicPricingOfferCatalog.js";
+
+type PmsPricingCurrencyReadPort = Pick<PmsPricingReadPort, "getPropertyPricingCurrency">;
 
 export type BookingPublicationProductionRuntime = {
   routes: {
@@ -149,11 +153,15 @@ export function createBookingPublicationProductionRuntime(config: {
   guestRules: BookingGuestChoicePublicationReader;
   rooms: RoomPublicationSnapshotPort;
   pricing: ReplacementPricingPublicationReader;
+  pricingCurrency: PmsPricingCurrencyReadPort;
   operatingCalendar: PmsOperatingCalendarReadPort;
   inventory: PmsInventoryLaunchReadinessReadPort;
   finance: FinancePaymentReadinessReadPort;
   /** Bank transfer and PayPal, only while their acceptance is on (VAY-2139). */
   manualPayments?: FinanceManualPaymentReadinessReadPort;
+  financeScope?: FinancePaymentReadinessScopePort;
+  /** Receives one line per readiness check an owner could not answer (IDs and codes only). */
+  warn?: (fields: Record<string, unknown>, message: string) => void;
 }): BookingPublicationProductionRuntime {
   const catalog = createHotelCatalogBookingPublicationSource({
     connectionString: config.connectionString,
@@ -167,12 +175,14 @@ export function createBookingPublicationProductionRuntime(config: {
   const pms = createPmsBookingPublicationSource({
     rooms: config.rooms,
     pricing: config.pricing,
+    pricingCurrency: config.pricingCurrency,
     operatingCalendar: config.operatingCalendar,
     inventory: config.inventory,
   });
   const financeEvidence = createFinanceBookingLaunchEvidenceAdapter({
     financeReadPort: config.finance,
     manualPayments: config.manualPayments,
+    ...(config.financeScope ? { scope: config.financeScope } : {}),
   });
   const financeSnapshot = createFinanceBookingPublicationSnapshotPort({
     financeReadPort: config.finance,
@@ -183,6 +193,8 @@ export function createBookingPublicationProductionRuntime(config: {
     booking,
     pms,
     finance: financeEvidence,
+    onUnavailable: (event) =>
+      config.warn?.({ ...event }, "Booking launch readiness owner unavailable"),
   });
   const builder = createBookingPublicationBuilder({
     catalog,

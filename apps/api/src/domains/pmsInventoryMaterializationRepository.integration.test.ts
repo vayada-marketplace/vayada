@@ -3213,16 +3213,12 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       },
     });
     await activateCalendarRevision(admin, fixture, 2);
-    for (const [from, through] of [
-      ["2026-08-04", "2026-08-05"],
-      ["2026-08-05", "2026-08-06"],
-    ]) {
-      await expect(
-        fixture.repository.materializeInventory(
-          materializationCommand(fixture, `partial-add-${from}`, 2, from!, through!),
-        ),
-      ).resolves.toMatchObject({ ok: false, error: { code: "inventory_invariant_violation" } });
-    }
+    // A horizon that ends before the stored one would leave old-room rows the new room lacks.
+    await expect(
+      fixture.repository.materializeInventory(
+        materializationCommand(fixture, "partial-add-end", 2, "2026-08-04", "2026-08-05"),
+      ),
+    ).resolves.toMatchObject({ ok: false, error: { code: "inventory_invariant_violation" } });
     expect(
       (
         await admin.query(
@@ -3247,6 +3243,89 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       admin.query(
         "DELETE FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2 AND stay_date='2026-08-05'",
         [fixture.propertyId, fixture.roomTypeId],
+      ),
+    ).rejects.toThrow("inventory materialization coverage is not exact and gap-free");
+  });
+
+  it("adds a new room after the horizon start moved forward (VAY-2134)", async () => {
+    const newRoom = randomUUID();
+    const additionalRoomTypes: string[] = [];
+    const fixture = await createFixture(admin, repositories, [2, 2], additionalRoomTypes);
+    // The first save was the day before the property's today (2026-08-04 in Berlin).
+    await fixture.repository.materializeInventory(
+      materializationCommand(fixture, "moved-before-add", 1, "2026-08-03", "2026-08-05"),
+    );
+    await admin.query(
+      "UPDATE pms.inventory_days SET assigned_count=1, available_count=1, booking_source_revision=1, inventory_revision=2 WHERE property_id=$1 AND stay_date='2026-08-04'",
+      [fixture.propertyId],
+    );
+    await admin.query(
+      "INSERT INTO pms.room_types (id,property_id,name) VALUES ($1,$2,'New room')",
+      [newRoom, fixture.propertyId],
+    );
+    additionalRoomTypes.push(newRoom);
+    const next = fixture.configurations.get(2)!;
+    (fixture.configurations as Map<number, PmsOperatingCalendarConfigurationSnapshot>).set(2, {
+      ...next,
+      sourceInputs: {
+        ...next.sourceInputs,
+        roomBindings: [
+          ...next.sourceInputs.roomBindings,
+          { ...next.sourceInputs.roomBindings[0]!, roomTypeId: newRoom },
+        ].sort((a, b) => a.roomTypeId.localeCompare(b.roomTypeId)),
+      },
+    });
+    await activateCalendarRevision(admin, fixture, 2);
+
+    // A start after the property's today would leave today without the new room.
+    await expect(
+      fixture.repository.materializeInventory(
+        materializationCommand(fixture, "moved-add-future", 2, "2026-08-05", "2026-08-07"),
+      ),
+    ).resolves.toMatchObject({ ok: false, error: { code: "inventory_invariant_violation" } });
+    // The setup client starts at the property's today, a day after the first save.
+    await expect(
+      fixture.repository.materializeInventory(
+        materializationCommand(fixture, "moved-add", 2, "2026-08-04", "2026-08-06"),
+      ),
+    ).resolves.toMatchObject({ ok: true, outcome: "rematerialized" });
+    expect(
+      (
+        await admin.query(
+          "SELECT calendar_revision,coverage_from::text,coverage_through::text FROM pms.inventory_materialization_coverage WHERE property_id=$1",
+          [fixture.propertyId],
+        )
+      ).rows,
+    ).toEqual([
+      { calendar_revision: 2, coverage_from: "2026-08-04", coverage_through: "2026-08-06" },
+    ]);
+    const rows = (
+      await admin.query(
+        "SELECT room_type_id,stay_date::text,calendar_revision,assigned_count FROM pms.inventory_days WHERE property_id=$1 ORDER BY room_type_id,stay_date",
+        [fixture.propertyId],
+      )
+    ).rows;
+    expect(rows.filter((r) => r.room_type_id === newRoom).map((r) => r.stay_date)).toEqual([
+      "2026-08-04",
+      "2026-08-05",
+      "2026-08-06",
+    ]);
+    // The old room keeps its history before the new start and its booking inside it.
+    expect(rows.filter((r) => r.room_type_id === fixture.roomTypeId)).toEqual([
+      expect.objectContaining({ stay_date: "2026-08-03", calendar_revision: 1 }),
+      expect.objectContaining({ stay_date: "2026-08-04", calendar_revision: 2, assigned_count: 1 }),
+      expect.objectContaining({ stay_date: "2026-08-05", calendar_revision: 2 }),
+      expect.objectContaining({ stay_date: "2026-08-06", calendar_revision: 2 }),
+    ]);
+    await expect(
+      fixture.repository.materializeInventory(
+        materializationCommand(fixture, "moved-extend", 2, "2026-08-04", "2026-08-07"),
+      ),
+    ).resolves.toMatchObject({ ok: true, outcome: "extended" });
+    await expect(
+      admin.query(
+        "DELETE FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2 AND stay_date='2026-08-07'",
+        [fixture.propertyId, newRoom],
       ),
     ).rejects.toThrow("inventory materialization coverage is not exact and gap-free");
   });
