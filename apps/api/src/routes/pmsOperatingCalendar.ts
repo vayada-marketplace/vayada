@@ -163,6 +163,10 @@ export async function registerPmsOperatingCalendarRoutes(
           return invalidPortResult(reply);
         }
         if (result.ok) return reply.status(200).send(result);
+        request.log.warn(
+          { propertyId: scope.propertyId, code: result.error.code },
+          "PMS inventory materialization rejected",
+        );
         return reply
           .status(result.error.code === "configuration_not_found" ? 404 : 409)
           .send(result);

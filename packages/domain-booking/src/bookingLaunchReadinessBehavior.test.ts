@@ -121,6 +121,59 @@ describe("Booking launch readiness behavior", () => {
     expect(JSON.stringify(result)).not.toContain(privateOwnerText);
   });
 
+  it("shows hotel wording for known blocker codes and the generic copy otherwise", async () => {
+    const evidence = readyEvidence();
+    const blockers = [
+      {
+        scope: "launch_configuration" as const,
+        kind: "user_fixable" as const,
+        code: "pricing_not_published",
+      },
+      {
+        scope: "launch_configuration" as const,
+        kind: "external_pending" as const,
+        code: "hotel_public_media_processing",
+      },
+      {
+        scope: "launch_configuration" as const,
+        kind: "user_fixable" as const,
+        code: "unknown_owner_code",
+      },
+      {
+        scope: "launch_configuration" as const,
+        kind: "system_error" as const,
+        code: "pricing_not_published",
+        errorSource: "provider" as const,
+      },
+    ];
+    evidence.pms.entities = evidence.pms.entities.map((item) =>
+      item.groupId === "booking.pricing" ? { ...item, blockers } : item,
+    );
+
+    const result = await provider(evidence).getBookingReadiness({ organizationId, propertyId });
+
+    if (result.outcome !== "evaluated") throw new Error("Expected evaluated readiness");
+    const pricing = result.groups.find(({ groupId }) => groupId === "booking.pricing");
+    expect(
+      pricing?.steps[0]?.entities[0]?.blockers.map(({ code, kind, message }) => [
+        code,
+        kind,
+        message,
+      ]),
+    ).toEqual(
+      expect.arrayContaining([
+        ["pricing_not_published", "user_fixable", "Save your room prices."],
+        [
+          "hotel_public_media_processing",
+          "external_pending",
+          "Your hotel photos are still being processed.",
+        ],
+        ["unknown_owner_code", "user_fixable", "Review this setup step before publishing."],
+        ["pricing_not_published", "system_error", "This setup step is temporarily unavailable."],
+      ]),
+    );
+  });
+
   it.each([
     ["external_pending", "selected_payment_pending", "pending"],
     ["user_fixable", "ready_payment_method_missing", "blocked"],
