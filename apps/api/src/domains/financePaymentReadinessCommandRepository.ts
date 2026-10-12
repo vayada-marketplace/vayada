@@ -5,6 +5,7 @@ import {
   FINANCE_PAYMENT_READINESS_OUTBOX_DESTINATION,
   createFinancePaymentReadinessSnapshot,
   financePaymentReadinessMethodsFromStored,
+  financeStoredMethodsAfterSetupSelection,
   parseReplaceFinancePaymentMethodsCommand,
   parseReplaceFinancePaymentMethodsResult,
   resolveFinanceOnlineCardReadiness,
@@ -254,6 +255,13 @@ async function applyCommand(
 
   const nextRevision = aggregate.revision + 1;
   const at = acceptedAt.toISOString();
+  // VAY-2136: keep the extras the settings page enabled (PayPal, bank transfer, pay-at-hotel
+  // details). Only an unbound legacy list can be corrupt here; the selection replaces it.
+  const acceptedMethods =
+    financeStoredMethodsAfterSetupSelection(
+      stored?.paymentsEnabled === true ? stored.acceptedMethods : [],
+      command.selectedMethods,
+    ) ?? command.selectedMethods;
   await client.query(
     `INSERT INTO finance.payment_settings (
        property_id, payments_enabled, accepted_methods, default_currency,
@@ -272,8 +280,8 @@ async function applyCommand(
        updated_at = EXCLUDED.updated_at`,
     [
       command.propertyId,
-      command.selectedMethods.length > 0,
-      command.selectedMethods,
+      acceptedMethods.length > 0,
+      acceptedMethods,
       currentPricing.currency,
       FINANCE_PAYMENT_READINESS_CONTRACT_VERSION,
       nextRevision,
