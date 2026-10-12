@@ -1441,9 +1441,13 @@ const bookingPublicationRuntime = (() => {
     guestRules: createBookingGuestChoicePublicationReader(propertySetupOwnerPool),
     rooms: pmsRoomPublicationRuntime.readModel,
     pricing: createReplacementPricingPublicationReader(propertySetupOwnerPool),
+    pricingCurrency: pmsPricingReadModel,
     operatingCalendar: propertySetupPmsRuntime.operatingCalendar,
     inventory: pmsOperatingCalendarRuntime.inventory,
     finance: financePaymentReadinessReadModel,
+    financeScope: financePaymentReadinessReadModel,
+    // Called per request, after `app` below exists.
+    warn: (fields, message) => app.log.warn(fields, message),
   });
 })();
 
