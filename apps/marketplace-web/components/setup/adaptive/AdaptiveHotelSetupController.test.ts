@@ -498,7 +498,7 @@ describe("AdaptiveHotelSetupController", () => {
       await act(async () => currentShell().onRetry?.());
       expect(mocks.guestSave).toHaveBeenCalledOnce();
       expect(mocks.getRoute).toHaveBeenCalledTimes(3);
-      expect(mocks.push).toHaveBeenLastCalledWith(expect.stringContaining("step=payments"), {
+      expect(mocks.push).toHaveBeenLastCalledWith(expect.stringContaining("step=review"), {
         scroll: false,
       });
       renderer.unmount();
