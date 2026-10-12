@@ -235,6 +235,9 @@ async function mockPricing(page: Page) {
     const suffix = new URL(request.url()).pathname.split("/pricing-v2")[1] ?? "";
     const body = (method === "GET" ? {} : request.postDataJSON()) as Record<string, any>;
     if (method !== "GET") state.writes += 1;
+    // Bank-transfer and PayPal acceptance is off, as in production today (VAY-2139).
+    if (suffix === "/payment-methods" && method === "GET")
+      return ok(route, { acceptanceEnabled: false, readyMethods: [] });
     if (suffix === "" && method === "GET") return ok(route, state.publication);
     const step = suffix === "/prepare" ? "prepare" : suffix === "/publish" ? "publish" : null;
     if (step && state.refuse?.step === step) {
