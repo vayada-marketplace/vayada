@@ -15,6 +15,7 @@ import { PMS_PRICING_CONTRACT_VERSION } from "@vayada/domain-pms";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { enforceRoutePolicy } from "./policy.js";
+import { refreshPublicPageAfterSaves } from "./publicPageRefresh.js";
 
 type PropertyParams = { propertyId: string };
 type AuthorizedScope = {
@@ -25,6 +26,8 @@ type AuthorizedScope = {
 export type FinancePaymentReadinessRoutesOptions = {
   commandPort: FinancePaymentMethodsCommandPort;
   readPort: FinancePaymentReadinessReadPort;
+  /** Refreshes the live booking page after payment-method saves (VAY-2129). */
+  refreshPublicPage?: (propertyId: string) => Promise<void>;
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -35,6 +38,11 @@ export async function registerFinancePaymentReadinessRoutes(
   options: FinancePaymentReadinessRoutesOptions,
 ): Promise<void> {
   const authorized = new WeakMap<FastifyRequest, AuthorizedScope>();
+  refreshPublicPageAfterSaves(
+    app,
+    ["PUT /finance/properties/:propertyId/payment-methods"],
+    options.refreshPublicPage,
+  );
   const authorize = async (request: FastifyRequest, reply: FastifyReply) => {
     const scope = authorizeRequest(request, reply);
     if (scope) authorized.set(request, scope);

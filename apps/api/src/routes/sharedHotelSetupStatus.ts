@@ -46,6 +46,7 @@ import {
   type UpdateBookingPropertySettingsBody,
 } from "./bookingSettings.js";
 import { enforceRoutePolicy } from "./policy.js";
+import { refreshPublicPageAfterSaves } from "./publicPageRefresh.js";
 
 export type SharedHotelSetupEntryProduct = ProductEntryDecision["requestedProduct"];
 export type SharedPropertyTypeCatalog = {
@@ -140,6 +141,8 @@ type SharedHotelSetupStatusRoutesOptions = {
   profileCommand?: HotelSetupPropertyProfileUpdate;
   propertyAccessRepository?: PropertyAccessRepository;
   launchSettingsRepository?: SharedPropertyLaunchSettingsRepository;
+  /** Refreshes the live booking page after hotel-detail saves (VAY-2129). */
+  refreshPublicPage?: (propertyId: string) => Promise<void>;
   now?: () => Date;
 };
 
@@ -182,6 +185,15 @@ export async function registerSharedHotelSetupStatusRoutes(
     now = () => new Date(),
   } = options;
   const trackUpdateAccess = new WeakMap<FastifyRequest, ReturnType<typeof enforceRoutePolicy>>();
+  refreshPublicPageAfterSaves(
+    app,
+    [
+      "PUT /properties/:propertyId/profile",
+      "PUT /properties/:propertyId/public-profile",
+      "PUT /properties/:propertyId/launch-settings",
+    ],
+    options.refreshPublicPage,
+  );
 
   app.addHook("onClose", async () => {
     await Promise.all([repository.close?.(), trackCommandRepository.close()]);
