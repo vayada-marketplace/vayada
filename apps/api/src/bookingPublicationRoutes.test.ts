@@ -18,10 +18,7 @@ import { createProductReadinessResult } from "@vayada/domain-hotels";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "./app.js";
-import type {
-  BookingPublicationReadinessProvider,
-  BookingPublicationRoutesOptions,
-} from "./routes/bookingPublication.js";
+import type { BookingPublicationReadinessProvider } from "./routes/bookingPublication.js";
 
 const propertyId = "85858585-8585-4585-8585-858585858501";
 const operationId = "85858585-8585-4585-8585-858585858502";
@@ -97,48 +94,11 @@ describe("Booking publication routes", () => {
       propertyId,
       readiness,
       recoveredOperation: { operationId, status: "pending" },
-      publishedOffersCurrent: null,
     });
     expect(repository.reviewCalls).toEqual([
       { organizationId, propertyId, actorUserId, idempotencyKey: "lost-response-key" },
     ]);
     expect(repository.requestCalls).toHaveLength(0);
-  });
-  it("reports room or offer changes that wait for the next publication", async () => {
-    const repository = fakeRepository();
-    const review = repository.getPublicationReview.bind(repository);
-    repository.getPublicationReview = async (input) => ({
-      ...(await review(input))!,
-      activeContentRevisionId: "85858585-8585-4585-8585-858585858599",
-    });
-    const calls: unknown[] = [];
-    let current: boolean | Error = false;
-    app = testApp(
-      repository,
-      readinessProvider(await readyEvidence()),
-      {},
-      {
-        async matchCurrent(scope) {
-          calls.push(scope);
-          if (current instanceof Error) throw current;
-          return current;
-        },
-      },
-    );
-    const read = async () =>
-      (
-        await injectJson(app!, {
-          method: "GET",
-          url: `/api/hotel-setup/properties/${propertyId}/publications/booking`,
-          headers: { authorization: "Bearer valid-token" },
-        })
-      ).body;
-    expect(await read()).toMatchObject({ publishedOffersCurrent: false });
-    expect(calls).toEqual([{ organizationId, propertyId, actorUserId }]);
-    current = new Error("private failure");
-    const failed = await read();
-    expect(failed).toMatchObject({ publishedOffersCurrent: null });
-    expect(JSON.stringify(failed)).not.toContain("private failure");
   });
   it("keeps operation recovery available when readiness evaluation fails", async () => {
     const repository = fakeRepository(operation("succeeded"));
@@ -495,7 +455,6 @@ function testApp(
   repository: FakeRepository,
   provider: BookingPublicationReadinessProvider,
   options: AuthOptions = {},
-  publishedOffers?: BookingPublicationRoutesOptions["publishedOffers"],
 ) {
   const propertyScope =
     options.propertyScope === undefined
@@ -511,7 +470,6 @@ function testApp(
       },
       repository,
       readinessProvider: provider,
-      publishedOffers,
     },
   });
   app.decorateRequest("authContext", null);

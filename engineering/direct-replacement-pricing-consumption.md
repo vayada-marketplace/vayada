@@ -720,19 +720,19 @@ This client prerequisite does not activate the current count-only checkout UI:
 room selection must supply actual child ages and current replacement offer keys
 first. Legacy request payloads cannot be silently converted into those facts.
 
-GET /api/booking-web/hotels/:slug/pricing-offers exposes the current published
-replacement offer catalogue for explicit guest selection. It requires current
-public authority and the approved pricing owner in one READ COMMITTED transaction,
-then reads the active Distribution content. The published rooms must equal the
-current rooms, and each room's offers must equal the current ones by offer, meal
-plan and currency (VAY-2123): the published keys are rebuilt from the PMS pricing
-source recorded in the publication's manifest. A saved price, terms or Finance change
-therefore serves at once under the current revision's keys, while an added, removed
-or re-mealed offer or room waits for "Publish reviewed changes" (the owner's Booking
-review shows it). Only published names/descriptions/occupancy/images and current
-public offer keys/currency/meal plans are returned. Closing/inactive rooms, missing
-publication, old flat prices, a changed room or offer set or mismatched property
-fail closed; public access is checked again after reads. The catalogue has no
+GET /api/booking-web/hotels/:slug/pricing-offers exposes the current replacement
+offer catalogue for explicit guest selection. It requires current public authority
+and the approved pricing owner in one READ COMMITTED transaction. The hotel's first
+booking-page publication is its go-live (VAY-2129): before it, the catalogue is
+unavailable; after it, every save serves by itself and there is no "Publish
+reviewed changes" step. The catalogue lists operating (active, not closing) rooms
+that have a current offer, with each room's current name, description, occupancy
+and approved public photos, and the current offers keyed to the current pricing
+revision. Adding, deleting or re-mealing an offer, renaming a room or changing its
+content reaches guests at once; a deleted offer's old key no longer quotes. A room
+with unusable facts is left out without failing the hotel. Unpriced, inactive or
+closing rooms, a missing go-live, stale pricing, Finance or terms, and mismatched
+property fail closed; public access is checked again after reads. The catalogue has no
 amounts or availability promise. The existing date-specific /offers contract is
 not reinterpreted as this catalogue. Guest quoting and booking acceptance retain
 their own date, age, availability and current-evidence checks.

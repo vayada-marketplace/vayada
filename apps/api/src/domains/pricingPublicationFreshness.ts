@@ -40,7 +40,10 @@ export async function readPricingPublicationFreshness(
         continue;
       }
       const current = {
-        room: await lockPmsReplacementPricingRoomSource(client, id),
+        room: await lockPmsReplacementPricingRoomSource(client, id, {
+          revision: stored.revision,
+          roomTypeIds: stored.rooms.map((room) => room.roomTypeId),
+        }),
         terms: await lockBookingPricingTermsSource(client, id),
         finance: await lockFinanceReplacementPricingSource(client, id),
       };
@@ -109,7 +112,7 @@ export function createPricingPublicationFreshnessAlert(options: {
     const lines = [
       `The hourly pricing check on ${day} found ${summary.problems} published price list(s) that need attention.`,
       'Guests cannot see offers or book online at these hotels until someone opens PMS > Pricing and presses "Save prices".',
-      'The booking page then shows the new prices by itself. Added or removed rooms or offers also need "Publish reviewed changes" in hotel setup.',
+      "Once a hotel is live, every save reaches its booking page by itself; no republishing is needed.",
       "",
       ...(summary.stale > 0 ? ["Stale (property id: changed sources):"] : []),
       ...summary.staleProperties.map((row) => `- ${row.propertyId}: ${row.stale.join(", ")}`),
