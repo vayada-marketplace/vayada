@@ -34,6 +34,12 @@ When recovery adds an active room to an already materialized calendar, the
 materializer uses the immutable calendar revision recorded by stored coverage
 to identify the new binding. An entirely empty new room can be initialized;
 partial room coverage and gaps in existing rooms still fail closed. The first
-materialization with added bindings must include the full stored horizon before
-coverage advances to the new revision. Existing reservation and manual inventory
-owners are preserved. This is a prerequisite for VAY-910 mixed-room validation.
+materialization with added bindings must reach at least the stored horizon's end
+before coverage advances to the new revision. Its start may be later than the stored
+start: earlier days leave coverage and no later materialization reads them (VAY-2134).
+Existing reservation and manual inventory owners are preserved. This is a
+prerequisite for VAY-910 mixed-room validation.
+
+When a saved calendar revision was never materialized, the impact preview answers
+`materialization_not_current`. Setup then prepares that saved revision once with its own
+idempotency key, so an earlier stored failure is not replayed, and previews again.

@@ -96,6 +96,79 @@ describe("parsePropertySetupRouteReadModel", () => {
     ).toBeNull();
   });
 
+  it("follows the server's step order, so a reordered route loads during a deploy", () => {
+    const route = paymentsFirst(routeWire(propertyId, ["hotel_operations"]));
+    expect(route.steps.map(({ stepId }) => stepId)).toEqual([
+      "present_hotel",
+      "booking_design",
+      "rooms",
+      "payments",
+      "pricing",
+      "calendar",
+      "guest_experience",
+      "review",
+    ]);
+    expect(parsePropertySetupRouteReadModel(route)).toBe(route);
+  });
+
+  it("fails closed for a reordered route that is not exactly the active steps", () => {
+    const route = paymentsFirst(routeWire(propertyId, ["hotel_operations"]));
+    const pricing = route.steps.find(({ stepId }) => stepId === "pricing")!;
+    // A duplicate step in place of another active step.
+    expect(
+      parsePropertySetupRouteReadModel({
+        ...route,
+        steps: route.steps.map((step) =>
+          step.stepId === "calendar" ? { ...pricing, position: step.position } : step,
+        ),
+      }),
+    ).toBeNull();
+    // A step from a track that is not selected.
+    expect(
+      parsePropertySetupRouteReadModel({
+        ...route,
+        steps: route.steps.map((step) =>
+          step.stepId === "booking_design"
+            ? {
+                ...step,
+                stepId: "marketplace_preferences",
+                currentBaseRevisions: {
+                  "marketplace.collaboration_preferences": "revision:0",
+                },
+              }
+            : step,
+        ),
+      }),
+    ).toBeNull();
+    // Positions must follow the server's order, not the client's own step list.
+    expect(
+      parsePropertySetupRouteReadModel({
+        ...route,
+        steps: route.steps.map((step) => ({
+          ...step,
+          position: getActivePropertySetupStepIds(["hotel_operations"]).indexOf(step.stepId) + 1,
+        })),
+      }),
+    ).toBeNull();
+    // Blocker positions must point at the owning step's position in the server's order.
+    expect(
+      parsePropertySetupRouteReadModel({
+        ...route,
+        steps: route.steps.map((step) =>
+          step.stepId === "payments"
+            ? {
+                ...step,
+                blockers: step.blockers.map((blocker) => ({
+                  ...blocker,
+                  owningStepPosition: 7,
+                })),
+              }
+            : step,
+        ),
+      }),
+    ).toBeNull();
+  });
+
   it("requires each exact current manifest without rebasing persisted draft history", () => {
     const route = routeWire();
     const step = route.steps[0]!;
@@ -122,6 +195,38 @@ describe("parsePropertySetupRouteReadModel", () => {
     ).toBeNull();
   });
 });
+
+/** The route as a server that puts Payments before Pricing sends it, with a Payments blocker. */
+function paymentsFirst(route: PropertySetupRouteReadModel): PropertySetupRouteReadModel {
+  const payments = route.steps.find(({ stepId }) => stepId === "payments")!;
+  const others = route.steps.filter(({ stepId }) => stepId !== "payments");
+  const pricingIndex = others.findIndex(({ stepId }) => stepId === "pricing");
+  const steps = [...others.slice(0, pricingIndex), payments, ...others.slice(pricingIndex)];
+  return {
+    ...route,
+    steps: steps.map((step, index) =>
+      step.stepId === "payments"
+        ? {
+            ...step,
+            position: index + 1,
+            state: "blocked" as const,
+            blockers: [
+              {
+                code: "ready_payment_method_missing",
+                product: "finance" as const,
+                ownerDomain: "finance" as const,
+                owningStepId: "payments" as const,
+                message: "Complete at least one ready payment method.",
+                kind: "user_fixable" as const,
+                sourceRevision: step.sourceRevision,
+                owningStepPosition: index + 1,
+              },
+            ],
+          }
+        : { ...step, position: index + 1 },
+    ),
+  };
+}
 
 function clientReturning(value: unknown): PropertySetupRouteHttpClient {
   return { get: async <T>() => value as T };
