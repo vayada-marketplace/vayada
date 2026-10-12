@@ -93,6 +93,12 @@ export function createReplacementBookingQuoteIssuer(
           statusCode: 503,
         });
       if (error.code === "invalid") throw httpError(400, "Invalid quote request.");
+      // VAY-2145: check-in is too close for this method's payment deadline.
+      if (error.code === "denied" && error.reason === "manual_payment_too_soon")
+        throw Object.assign(
+          httpError(422, "This payment method isn't available this close to check-in."),
+          { code: "MANUAL_PAYMENT_TOO_SOON" },
+        );
       if (error.code === "idempotency_conflict")
         throw httpError(409, "Quote request changed. Use a new Idempotency-Key.");
       if (error.code === "stale")

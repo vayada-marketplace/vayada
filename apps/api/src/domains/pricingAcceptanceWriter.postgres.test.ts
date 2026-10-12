@@ -2184,6 +2184,50 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
       await fixture.close();
     }
   });
+  it("refuses bank transfer when check-in is closer than its deadline, and takes PayPal with a short window (VAY-2145)", async () => {
+    // Check-in is tomorrow at 00:00 in Rome (no check-in time): inside the 48-hour bank deadline.
+    const bankFixture = await setupFixture(manualQuote("bank_transfer", "instant"), undefined, 1);
+    try {
+      mockOwners(bankFixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      await finance(bankFixture, "bank_transfer");
+      await expect(
+        writePricingAcceptance(bankFixture.pool, bankFixture.input, undefined, undefined, false, {
+          bankTransfers: bankOperations(),
+        }),
+      ).rejects.toMatchObject({ code: "manual_unavailable" });
+      await expect(snapshot(bankFixture.observer, bankFixture)).resolves.toMatchObject({
+        bookings: 0,
+      });
+    } finally {
+      await bankFixture.close();
+    }
+    // Two days out, a six-hour PayPal window ends well before check-in.
+    const paypalFixture = await setupFixture(manualQuote("paypal", "instant"), undefined, 2);
+    try {
+      mockOwners(paypalFixture);
+      vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async () =>
+        new Date().toISOString(),
+      );
+      await finance(paypalFixture, "paypal", {
+        paypalEmail: "pay@writer.example.test",
+        paypalPaymentWindowHours: 6,
+      });
+      const pending = await writePricingAcceptance(
+        paypalFixture.pool,
+        paypalFixture.input,
+        undefined,
+        undefined,
+        false,
+        {},
+      );
+      expect(pending.kind).toBe("payment_pending");
+    } finally {
+      await paypalFixture.close();
+    }
+  });
   it("expires an unpaid bank transfer at its deadline, releases the rooms and tells both sides", async () => {
     const fixture = await setupFixture(manualQuote("bank_transfer", "instant"), undefined, true);
     const bank = bankOperations();
@@ -2205,11 +2249,7 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
         new Date().toISOString(),
       );
       await finance(fixture, "bank_transfer");
-      // The sweep dates revenue corrections in the hotel's timezone.
-      await fixture.observer.query(
-        "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Rome')",
-        [fixture.propertyId],
-      );
+      // The sweep dates revenue corrections in the hotel's timezone (Europe/Rome, from the fixture).
       const pending = await writePricingAcceptance(
         fixture.pool,
         fixture.input,
@@ -2537,8 +2577,9 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
 async function setupFixture(
   changeQuote?: (quote: Fixture["f"]["current"]["quote"]) => void,
   currency?: string,
-  /** Move the stay to 10 days from today: bank-transfer and PayPal deadlines stop at check-in. */
-  futureStay = false,
+  /** Move the stay to 10 days from today (or that many days): bank-transfer and PayPal need the
+   * hotel's time zone and a check-in further away than their deadline (VAY-2145). */
+  futureStay: boolean | number = false,
 ) {
   if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
     throw new Error("test database required");
@@ -2567,9 +2608,10 @@ async function setupFixture(
           .toISOString()
           .slice(0, 10);
       const nights = quote.rooms[0].nights.length;
-      Object.assign(quote.stay, { checkIn: day(10), checkOut: day(10 + nights) });
+      const offset = futureStay === true ? 10 : futureStay;
+      Object.assign(quote.stay, { checkIn: day(offset), checkOut: day(offset + nights) });
       for (const room of quote.rooms)
-        room.nights.forEach((night, index) => Object.assign(night, { date: day(10 + index) }));
+        room.nights.forEach((night, index) => Object.assign(night, { date: day(offset + index) }));
     }
     Object.assign(quote, { quoteId: randomUUID() });
     Object.assign(quote.stay, { propertyId });
@@ -2624,6 +2666,11 @@ async function setupFixture(
     "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1,($1::uuid)::text,'Writer test')",
     [propertyId],
   );
+  if (futureStay)
+    await observer.query(
+      "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Rome')",
+      [propertyId],
+    );
   await observer.query(
     `INSERT INTO pms.room_types(id,property_id,name,occupancy_limits,base_rate_amount,currency)
      VALUES($1,$2,'Writer room','{"adults":2,"children":1,"total":3}',100,$3)`,

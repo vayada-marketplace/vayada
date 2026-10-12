@@ -54,4 +54,20 @@ describe("replacement booking quote issuer", () => {
     });
     expect(issue).not.toHaveBeenCalled();
   });
+
+  it("tells the guest when check-in is too close for bank transfer or PayPal (VAY-2145)", async () => {
+    const issue = vi
+      .fn()
+      .mockRejectedValue(new PricingStorageError("denied", "manual_payment_too_soon"));
+    const on = createReplacementBookingQuoteIssuer({ issue }, ["paypal", "bank_transfer"]);
+    await expect(on("hotel", request("bank_transfer"), "key")).rejects.toMatchObject({
+      statusCode: 422,
+      code: "MANUAL_PAYMENT_TOO_SOON",
+    });
+    // Any other refusal stays "Quote unavailable".
+    issue.mockRejectedValue(new PricingStorageError("denied"));
+    await expect(on("hotel", request("paypal"), "key")).rejects.toMatchObject({
+      statusCode: 404,
+    });
+  });
 });

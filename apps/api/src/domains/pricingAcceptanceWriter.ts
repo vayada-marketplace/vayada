@@ -23,6 +23,7 @@ import {
   readPricingManualReplay,
   type PricingManualPaymentTerms,
 } from "./pricingManualPayment.js";
+import { pricingManualLeadTimeAllows } from "./pricingManualPaymentLead.js";
 
 export class PricingAcceptanceError extends Error {
   constructor(
@@ -117,6 +118,16 @@ export async function writePricingAcceptance(
           quote.paymentMethod,
         )) ?? undefined;
       if (!manualTerms) throw new Error("Booking acceptance unavailable");
+      // VAY-2145: time passed since the quote; the deadline must still fall before check-in.
+      if (
+        !(await pricingManualLeadTimeAllows(
+          client,
+          prepared.current.scope.propertyId,
+          manualTerms,
+          quote.stay.checkIn,
+        ))
+      )
+        throw new Error("Manual payment acceptance unavailable");
     }
     const bookingId =
       cardPayments && pricingCardQuoteSupported(prepared.current.quote)

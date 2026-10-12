@@ -58,12 +58,17 @@ payment methods revision, which those edits do not bump. Quotes and acceptance c
 destination and PayPal email again, so no booking goes through, as for a card hotel whose card
 acceptance lapses. Launch readiness and the setup state show the change at once.
 
-The payment deadline is the agreed window (48 h, or the hotel's PayPal window) even when check-in
-comes first, as in legacy: a late booking can still be waiting for payment when the guest arrives,
-and the sweep would then expire it. The hotel can record the payment before the deadline.
-VAY-2145 closes it before the switch goes on: bank transfer is offered only when check-in is at
-least 48 h away and PayPal only when check-in is past its window, in the property time zone,
-checked at quote and acceptance and hidden on `/book`.
+The payment deadline is the agreed window (48 h, or the hotel's PayPal window). VAY-2145 makes
+sure it ends before the guest arrives:
+
+- Bank transfer is offered only when check-in is at least 48 h away, and PayPal only when check-in is
+  further away than its window.
+- "Check-in" is the hotel's check-in time on the arrival date in the property time zone, or 00:00
+  when none is set.
+- The quote refuses a closer stay with 422 `MANUAL_PAYMENT_TOO_SOON`, and acceptance checks again
+  (time passes after the quote) and answers `MANUAL_PAYMENT_UNAVAILABLE`.
+- The checkout settings give `/book` the earliest arrival date for each method, so it can hide
+  them for closer stays.
 
 ## Out of scope
 
