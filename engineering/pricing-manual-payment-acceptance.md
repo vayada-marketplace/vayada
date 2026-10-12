@@ -47,6 +47,9 @@ binding (KMS settings) exists.
 The payment deadline is the agreed window (48 h, or the hotel's PayPal window) even when check-in
 comes first, as in legacy: a late booking can still be waiting for payment when the guest arrives,
 and the sweep would then expire it. The hotel can record the payment before the deadline.
+VAY-2145 closes it before the switch goes on: bank transfer is offered only when check-in is at
+least 48 h away and PayPal only when check-in is past its window, in the property time zone,
+checked at quote and acceptance and hidden on `/book`.
 
 ## Out of scope
 
