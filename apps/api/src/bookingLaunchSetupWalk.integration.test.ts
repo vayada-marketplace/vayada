@@ -33,6 +33,7 @@ import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore
 import { createPgBookingGuestPolicyScopeAuthorizationPort } from "./domains/bookingGuestPolicyScopeAuthorization.js";
 import { createBookingPublicationProductionRuntime } from "./domains/bookingPublicationProductionRuntime.js";
 import { createPgFinancePaymentReadinessCommandRepository } from "./domains/financePaymentReadinessCommandRepository.js";
+import { createFinanceManualPaymentReadinessReader } from "./domains/financeManualPaymentReadiness.js";
 import { createPgFinancePaymentReadinessReadModel } from "./domains/financePaymentReadinessReadModel.js";
 import { createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort } from "./domains/hotelCatalogOperatingCalendarPropertyProfileEvidence.js";
 import { createPgHotelCatalogStep1Repository } from "./domains/hotelCatalogStep1Repository.js";
@@ -58,6 +59,7 @@ import { createHotelSetupOrdinaryLoginFixture } from "./hotelSetupOrdinaryLogin.
 import { createPgHotelMediaResolutionPort } from "./platform/hotelMediaResolver.js";
 import type { PlatformMediaServingConfig } from "./platform/mediaServing.js";
 import { createPgSharedHotelSetupStatusRepository } from "./platform/sharedHotelSetupStatusReadModel.js";
+import { createActiveBookingPublicationProfileRepository } from "./routes/activeBookingPublicationProfile.js";
 import { syncPropertyOfferReadModels } from "./routes/marketplaceAdmin.js";
 import { createTargetFinancePropertySettingsRepository } from "./routes/finance.js";
 
@@ -113,9 +115,14 @@ function parsed<T>(value: T | null, step: string): T {
  * commands, on the production-shaped API login, and replays the TEST ONLY history: payments
  * first saved through the older settings page, and a room added the day after the calendar
  * was prepared. Readiness must explain every gap and end `ready` with a published page.
+ * VAY-2139 walks the same hotel paid only by bank transfer or only by PayPal, with their
+ * acceptance on: the page publishes with that method and stops counting once it is off.
  */
-describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", () => {
-  it("walks setup to ready and publishes the booking page", async () => {
+const METHODS = ["pay_at_property", "bank_transfer", "paypal"] as const;
+const WALK = { timeout: 300_000 };
+describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", WALK, () => {
+  it.each(METHODS)("walks setup to ready and publishes the booking page (%s)", async (method) => {
+    const manualMethod = method === "pay_at_property" ? null : method;
     const endpoint = new URL(url!);
     if (
       !["127.0.0.1", "localhost"].includes(endpoint.hostname) ||
@@ -238,6 +245,10 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         inventory: calendar.inventory,
         finance: financeRead,
         financeScope: financeRead,
+        // Bank transfer and PayPal count only while their acceptance is on (VAY-2139).
+        ...(manualMethod
+          ? { manualPayments: createFinanceManualPaymentReadinessReader({ pool }) }
+          : {}),
         warn: (fields) => unavailable.push(fields),
       });
       closers.push(() => runtime.close());
@@ -530,6 +541,14 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       );
       const legacyPool = new pg.Pool({ connectionString: cs, max: 2 });
       closers.push(() => legacyPool.end());
+      if (manualMethod === "bank_transfer")
+        // TEST ONLY: production saves bank details, KMS-encrypted, through Booking Engine
+        // settings > Payments. The settings page then requires an enabled destination.
+        await admin.query(
+          `INSERT INTO finance.bank_transfer_destinations(property_id,revision,ciphertext,key_arn,account_last4)
+           VALUES($1,1,$2,'arn:aws:kms:eu-central-1:000000000000:key/walk','3000')`,
+          [propertyId, Buffer.alloc(40)],
+        );
       expect(
         await createTargetFinancePropertySettingsRepository({
           connectionString: cs,
@@ -546,7 +565,15 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
             reason: "Payments saved from the settings page",
             requestedAt: now(),
           },
-          payload: { paymentsEnabled: true, acceptedMethods: ["pay_at_property", "cash"] },
+          payload: manualMethod
+            ? {
+                paymentsEnabled: true,
+                acceptedMethods: [manualMethod],
+                ...(manualMethod === "paypal"
+                  ? { depositPolicy: { paypalEmail: `pay-${suffix}@example.test` } }
+                  : {}),
+              }
+            : { paymentsEnabled: true, acceptedMethods: ["pay_at_property", "cash"] },
         }),
       ).toMatchObject({ ok: true });
       // Before VAY-2134 this was "temporarily unavailable". Since VAY-2136 the settings page
@@ -570,25 +597,33 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           pricingReadPort: pricingRead,
         }),
       );
-      ok(
-        await payments.replacePaymentMethods({
-          command: parsed(
-            parseReplaceFinancePaymentMethodsCommand({
-              organizationId,
-              propertyId,
-              idempotencyKey: `payments-${suffix}`,
-              expectedPaymentMethodsRevision: paymentMethodsRevision,
-              expectedPricingCurrencyRevision:
-                currencySaved.response.pricingCurrency.pricingCurrencyRevision,
-              selectedMethods: ["pay_at_property"],
-              audit: commandAudit("payments"),
-            }),
-            "payments",
-          ),
-          currentPricing: null,
-        }),
-        "setup payments",
-      );
+      if (manualMethod) {
+        // A hotel paid only by bank transfer or PayPal selects no setup readiness method; the
+        // settings page save above is its payment choice (VAY-2139).
+        expect(blockerCodes(await readiness())).not.toContain(
+          "booking.payments:ready_payment_method_missing",
+        );
+      } else {
+        ok(
+          await payments.replacePaymentMethods({
+            command: parsed(
+              parseReplaceFinancePaymentMethodsCommand({
+                organizationId,
+                propertyId,
+                idempotencyKey: `payments-${suffix}`,
+                expectedPaymentMethodsRevision: paymentMethodsRevision,
+                expectedPricingCurrencyRevision:
+                  currencySaved.response.pricingCurrency.pricingCurrencyRevision,
+                selectedMethods: ["pay_at_property"],
+                audit: commandAudit("payments"),
+              }),
+              "payments",
+            ),
+            currentPricing: null,
+          }),
+          "setup payments",
+        );
+      }
 
       // 6. Set your room prices (pricing-v2 draft, charges, publish).
       const context: RequestContext = {
@@ -638,7 +673,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
                   roomTypeId,
                   offerId: "standard",
                   cancellation: { kind: "non_refundable" },
-                  payment: { kind: "full", acceptedMethods: ["pay_at_property"] },
+                  payment: { kind: "full", acceptedMethods: [method] },
                 },
               },
               draft,
@@ -899,6 +934,21 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           .map(({ roomTypeId }) => roomTypeId)
           .sort(),
       ).toEqual([gardenSuite, seaSuite].sort());
+      const content = active[0]!.content as {
+        payments: { readyMethods: string[] };
+        profile: { hotel: { slug: string } };
+      };
+      expect(content.payments.readyMethods).toEqual([method]);
+      // The public page counts bank transfer and PayPal only while their acceptance is on.
+      const publicProfile = (manualPayments: boolean) =>
+        createActiveBookingPublicationProfileRepository({
+          connectionString: cs,
+          pool,
+          manualPayments,
+        }).findProfileBySlug(content.profile.hotel.slug);
+      expect(await publicProfile(true)).toMatchObject({ hotel: { propertyId } });
+      if (manualMethod) expect(await publicProfile(false)).toBeNull();
+      else expect(await publicProfile(false)).toMatchObject({ hotel: { propertyId } });
       expect(unavailable).toEqual([]);
     } finally {
       for (const close of closers.reverse()) await close().catch(() => undefined);
@@ -914,7 +964,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       await login.drop();
       await admin.end();
     }
-  }, 300_000);
+  });
 });
 
 function roomFacts2(name: string): RoomTypeFacts {
