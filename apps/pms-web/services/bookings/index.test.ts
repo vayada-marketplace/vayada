@@ -602,6 +602,21 @@ describe("PMS target booking projection", () => {
     // prettier-ignore
     expect((await bookingsService.list()).bookings[0]!.stays[1]).toMatchObject({ checkIn: null, checkOut: null, adults: null, children: null, nightly: [] });
   });
+  it("filters the Pending and Cancelled tabs by the stored lifecycle statuses", async () => {
+    for (const [tab, stored] of [
+      ["pending", "pending_payment"],
+      ["cancelled", "canceled"],
+      ["confirmed", "confirmed"],
+      ["checked_in", "checked_in"],
+    ]) {
+      mocks.get.mockClear();
+      await bookingsService.list({ status: tab, limit: 50, offset: 0 });
+      expect(mocks.get).toHaveBeenCalledWith(
+        `/api/pms/properties/property-1/reservations?status=${stored}&limit=50&offset=0`,
+        expect.anything(),
+      );
+    }
+  });
   it("surfaces target read errors", async () => {
     mocks.get.mockRejectedValue(new Error("read model unavailable"));
     await expect(bookingsService.get("booking-1")).rejects.toThrow("read model unavailable");
