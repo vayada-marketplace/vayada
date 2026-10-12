@@ -42,7 +42,7 @@ const routeScenarios: Array<{
     name: "Hotel Operations-only",
     selectedTracks: ["hotel_operations"],
     resumeStepId: "calendar",
-    expectedStep: 5,
+    expectedStep: 6,
     expectedTotal: 8,
     expectedHeading: "Open your calendar",
   },
@@ -50,7 +50,7 @@ const routeScenarios: Array<{
     name: "combined",
     selectedTracks: ["hotel_operations", "creator_marketplace"],
     resumeStepId: "guest_experience",
-    expectedStep: 7,
+    expectedStep: 8,
     expectedTotal: 9,
     expectedHeading: "Configure the guest experience",
   },
@@ -577,7 +577,7 @@ test.describe("marketplace-web adaptive hotel setup shell", () => {
     });
     await expect(previousHeading).toBeVisible();
     await expect(previousHeading).toBeFocused();
-    await expect(page.getByText("Step 5 of 9")).toBeVisible();
+    await expect(page.getByText("Step 6 of 9")).toBeVisible();
 
     await page.goBack();
 
@@ -587,7 +587,7 @@ test.describe("marketplace-web adaptive hotel setup shell", () => {
     });
     await expect(restoredHeading).toBeVisible();
     await expect(restoredHeading).toBeFocused();
-    await expect(page.getByText("Step 6 of 9")).toBeVisible();
+    await expect(page.getByText("Step 7 of 9")).toBeVisible();
     await assertHealthy();
   });
 
@@ -789,7 +789,7 @@ test.describe("marketplace-web adaptive hotel setup shell", () => {
     await expect(
       page.getByRole("heading", { name: "Set your room prices", level: 1 }),
     ).toBeVisible();
-    await expect(page.getByText("Step 4 of 8")).toBeVisible();
+    await expect(page.getByText("Step 5 of 8")).toBeVisible();
     expect(routeMock.requestCount).toBe(2);
     await assertHealthyAfterRecovery();
   });

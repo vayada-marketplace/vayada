@@ -102,7 +102,7 @@ describe("PricingStep", () => {
     const view = await render(context);
     expect(view.root.findAllByType(FirstPricingSetup)).toHaveLength(0);
     expect(button(view.root, "Publish prices and continue").props.disabled).toBe(true);
-    await act(async () => button(view.root, "Go to Payments").props.onClick());
+    await act(async () => button(view.root, "Back to Payments").props.onClick());
     expect(context.goToStep).toHaveBeenCalledWith("payments");
     expect(mocks.publish).not.toHaveBeenCalled();
     view.unmount();
