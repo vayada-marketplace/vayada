@@ -5996,6 +5996,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       const roomTemplate = pricingEvidence().roomPublication.rooms[0]!;
       const pms = createPmsBookingPublicationSource({
         pricing,
+        pricingCurrency: { getPropertyPricingCurrency: async () => null },
         rooms: {
           async getRoomPublicationSnapshot() {
             return {
