@@ -51,7 +51,9 @@ export type BookingPublicationRefreshPort = {
     actorUserId: string;
     idempotencyKey: string;
     audit: BookingPublicationAuditContext;
-  }): Promise<BookingPublicationOperation>;
+    /** Only republish a page that is already live; null when the hotel has not gone live. */
+    onlyIfLive?: boolean;
+  }): Promise<BookingPublicationOperation | null>;
 };
 
 type BookingPublicationRefreshDependencies = {
@@ -70,7 +72,10 @@ type BookingPublicationRefreshDependencies = {
 export function createBookingPublicationRefresh(
   dependencies: BookingPublicationRefreshDependencies,
 ): BookingPublicationRefreshPort["refresh"] {
-  return async (input) => {
+  return async ({ onlyIfLive, ...input }) => {
+    const active = await dependencies.projection.getActive(input.propertyId);
+    // A save never makes the page public; only "Publish booking page" does (VAY-2129).
+    if (onlyIfLive && !active) return null;
     const readiness = await dependencies.readinessProvider.getBookingReadiness({
       organizationId: input.organizationId,
       propertyId: input.propertyId,
@@ -82,7 +87,6 @@ export function createBookingPublicationRefresh(
     ) {
       throw new Error("Booking publication readiness is incomplete.");
     }
-    const active = await dependencies.projection.getActive(input.propertyId);
     const requested = await dependencies.repository.requestPublication({
       ...input,
       expectedActiveContentRevisionId: active?.revisionId ?? null,

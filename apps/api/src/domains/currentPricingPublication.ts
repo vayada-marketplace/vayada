@@ -34,10 +34,17 @@ export async function lockCurrentPricingPublication(
     !["finance", "charges"].every((key) => typeof stored.ownerReferences[key] === "string")
   )
     return null;
-  const room = await lockPmsReplacementPricingRoomSource(client, propertyId);
+  const room = await lockPmsReplacementPricingRoomSource(client, propertyId, {
+    revision: stored.revision,
+    roomTypeIds: stored.rooms.map((configuration) => configuration.roomTypeId),
+  });
   if (!room || stored.sources.room !== room) return null;
+  // An inactive room keeps its saved prices but sells nothing; the others stay bookable (VAY-2129).
+  const activeRooms = [];
   for (const configuration of stored.rooms)
-    if (!(await lockPmsPricingRoomScope(client, propertyId, configuration.roomTypeId))) return null;
+    if (await lockPmsPricingRoomScope(client, propertyId, configuration.roomTypeId))
+      activeRooms.push(configuration);
+  if (!activeRooms.length) return null;
   const references = stored.rooms.flatMap((r) =>
     r.offers.map((o) => ({
       roomTypeId: r.roomTypeId,
@@ -88,7 +95,14 @@ export async function lockCurrentPricingPublication(
         }),
       )
       .digest("hex");
-  return { scope, publication: stored, terms, finance, charges, pmsSourceRevision };
+  return {
+    scope,
+    publication: { ...stored, rooms: activeRooms },
+    terms,
+    finance,
+    charges,
+    pmsSourceRevision,
+  };
 }
 
 async function lockOwnerScope(
