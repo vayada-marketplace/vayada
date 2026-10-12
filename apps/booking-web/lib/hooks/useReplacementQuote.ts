@@ -4,7 +4,22 @@ import type {
   PublicBookingQuote,
   PublicBookingQuoteRequest,
 } from "@vayada/domain-booking/replacement-pricing";
+import { ApiError } from "@/services/api/client";
 import { requestReplacementQuote } from "@/services/api/replacementQuote";
+
+/** The guest's message when a quote is refused. */
+export function replacementQuoteErrorMessage(error: unknown): string {
+  // VAY-2145: bank transfer and PayPal need their payment deadline to end before check-in.
+  if (
+    error instanceof ApiError &&
+    error.status === 422 &&
+    !!error.detail &&
+    typeof error.detail === "object" &&
+    (error.detail as { code?: unknown }).code === "MANUAL_PAYMENT_TOO_SOON"
+  )
+    return "This payment method isn’t available this close to check-in. Choose another way to pay.";
+  return "We couldn't price this selection. Check your room choices and try again.";
+}
 
 /** Display only the submitted selection, and retire it on edit, tenant change or expiry. */
 export function useReplacementQuote(slug: string, request: PublicBookingQuoteRequest | null) {
@@ -42,13 +57,9 @@ export function useReplacementQuote(slug: string, request: PublicBookingQuoteReq
           Math.max(0, Date.parse(quote.expiresAt) - Date.now()),
         );
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!controller.signal.aborted)
-          setResult({
-            identity,
-            attempt,
-            error: "We couldn't price this selection. Check your room choices and try again.",
-          });
+          setResult({ identity, attempt, error: replacementQuoteErrorMessage(error) });
       });
     return () => {
       controller.abort();

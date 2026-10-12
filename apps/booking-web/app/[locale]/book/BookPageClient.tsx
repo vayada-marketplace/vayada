@@ -16,8 +16,10 @@ import type {
   PublicQuoteGuestDisclosure,
 } from "@vayada/domain-booking/replacement-pricing";
 import {
+  bookingPageMethodsForArrival,
   bookingPagePaymentMethodLabels,
-  getBookingPagePaymentMethods,
+  getBookingPagePayment,
+  type BookingPagePayment,
 } from "@/services/api/bookingPagePaymentMethods";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import { useCurrency } from "@/contexts/CurrencyContext";
@@ -91,21 +93,27 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     }
   }, []);
   const [payment, setPayment] = useState<"" | PricingPaymentMethod>("");
-  const [paymentMethods, setPaymentMethods] = useState<PricingPaymentMethod[]>([
-    "card",
-    "pay_at_property",
-  ]);
+  const [pagePayment, setPagePayment] = useState<BookingPagePayment>({
+    methods: ["card", "pay_at_property"],
+    earliestArrival: {},
+  });
   useEffect(() => {
     const controller = new AbortController();
-    void getBookingPagePaymentMethods(slug, controller.signal)
-      .then((methods) => {
-        if (controller.signal.aborted) return;
-        setPaymentMethods(methods);
-        setPayment((current) => (current && !methods.includes(current) ? "" : current));
+    void getBookingPagePayment(slug, controller.signal)
+      .then((value) => {
+        if (!controller.signal.aborted) setPagePayment(value);
       })
       .catch(() => undefined);
     return () => controller.abort();
   }, [slug]);
+  // Bank transfer and PayPal need their payment deadline to end before check-in (VAY-2145).
+  const paymentMethods = bookingPageMethodsForArrival(pagePayment, checkIn);
+  const tooSoon = pagePayment.methods.filter((method) => !paymentMethods.includes(method));
+  useEffect(() => {
+    setPayment((current) => (current && !paymentMethods.includes(current) ? "" : current));
+    // paymentMethods is derived from these two.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagePayment, checkIn]);
   useEffect(() => {
     const controller = new AbortController();
     setRooms(null);
@@ -364,6 +372,12 @@ function RoomQuoteForm({ slug }: { slug: string }) {
               ))}
             </select>
           </label>
+          {tooSoon.length > 0 && (
+            <p className="text-sm text-gray-600">
+              {tooSoon.map((method) => bookingPagePaymentMethodLabels[method]).join(" and ")}{" "}
+              {tooSoon.length > 1 ? "aren’t" : "isn’t"} available this close to check-in.
+            </p>
+          )}
           <p className="text-sm text-gray-600">
             We’ll check whether your choices and payment method are supported. All rooms must use
             the same currency.
