@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { lockPmsReplacementPricingRoomSource as source } from "./pmsReplacementPricingRoomSource.js";
@@ -33,14 +33,16 @@ describe.skipIf(!url)("PMS replacement pricing complete room source", () => {
     await pool.query("UPDATE pms.room_types SET occupancy_limits=$2 WHERE id=$1", [f.roomId, { adults: 2, total: 3 }]);
     expect(await read(f.propertyId)).toBe(ordered);
   });
-  it("invalidates for facts, capacity, attributes, activity and complete-set membership", async () => {
+  it("invalidates for capacity and room-set membership, not for other room facts", async () => {
     const f = await fixture(); let previous = await read(f.propertyId);
-    for (const update of ["room_facts_revision=room_facts_revision+1", "occupancy_limits='{\"adults\":3}'::jsonb",
-      "room_attributes='{\"beds\":2}'::jsonb", "active=false", "active=true",
-      "room_attributes='{\"externalId\":9007199254740992}'::jsonb", "room_attributes='{\"externalId\":9007199254740993}'::jsonb"]) {
+    // VAY-2129: renaming, describing, re-photographing or deactivating a room keeps saved prices current.
+    for (const update of ["room_facts_revision=room_facts_revision+1", "name='Renamed'", "description='New text'",
+      "room_attributes='{\"beds\":2}'::jsonb", "active=false", "active=true"]) {
       await pool.query(`UPDATE pms.room_types SET ${update} WHERE id=$1`, [f.roomId]);
-      const next = await read(f.propertyId); expect(next).not.toBe(previous); previous = next;
+      expect(await read(f.propertyId)).toBe(previous);
     }
+    await pool.query(`UPDATE pms.room_types SET occupancy_limits='{"adults":3}'::jsonb WHERE id=$1`, [f.roomId]);
+    const next = await read(f.propertyId); expect(next).not.toBe(previous); previous = next;
     const added = randomUUID();
     await pool.query("INSERT INTO pms.room_types(id,property_id,name) VALUES($1,$2,'Added')", [added, f.propertyId]);
     const expanded = await read(f.propertyId); expect(expanded).not.toBe(previous);
@@ -49,6 +51,55 @@ describe.skipIf(!url)("PMS replacement pricing complete room source", () => {
     await pool.query("DELETE FROM pms.room_types WHERE id=$1", [f.roomId]);
     const empty = await read(f.propertyId); expect(empty).not.toBe(previous);
     expect(await read(f.propertyId)).toBe(empty);
+  });
+  it("ignores rooms added after the saved prices when checking them", async () => {
+    const f = await fixture(), actor = randomUUID(), client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("INSERT INTO identity.users(id,email,name) VALUES($1,$2,'Room source test')", [actor, `${actor}@example.test`]);
+      const saved = await source(client, f.propertyId);
+      // Deferred constraints let the head point at a room-less revision until the rollback below.
+      await client.query("INSERT INTO pms.pricing_v2_heads(property_id) VALUES($1)", [f.propertyId]);
+      await client.query(`INSERT INTO pms.pricing_v2_revisions
+        (property_id,revision,currency,source_revisions,owner_references,request_id,request_hash,actor_user_id,room_count,created_at)
+        VALUES($1,1,'EUR',$2,'{"terms":"t"}',$3,$4,$5,1,now()-interval '1 minute')`,
+        [f.propertyId, { room: saved, terms: "t", finance: "f" }, randomUUID(), "a".repeat(64), actor]);
+      await client.query("UPDATE pms.pricing_v2_heads SET revision=1 WHERE property_id=$1", [f.propertyId]);
+      const checked = { revision: 1, roomTypeIds: [f.roomId] };
+      await client.query("UPDATE pms.room_types SET created_at=now()-interval '1 hour' WHERE id=$1", [f.roomId]);
+      expect(await source(client, f.propertyId, checked)).toBe(saved);
+      const added = randomUUID();
+      await client.query("INSERT INTO pms.room_types(id,property_id,name) VALUES($1,$2,'Added')", [added, f.propertyId]);
+      expect(await source(client, f.propertyId, checked)).toBe(saved);
+      expect(await source(client, f.propertyId)).not.toBe(saved);
+      expect(await source(client, f.propertyId, { ...checked, roomTypeIds: [f.roomId, added] })).not.toBe(saved);
+    } finally { await client.query("ROLLBACK"); client.release(); }
+  });
+  it("keeps a source saved before VAY-2129 current until a room fact changes", async () => {
+    const f = await fixture(), actor = randomUUID(), client = await pool.connect();
+    const legacy = async () => {
+      const rooms = (await client.query(`SELECT id,active,room_facts_revision::text AS revision,
+        occupancy_limits::text AS occupancy_limits,room_attributes::text AS room_attributes
+        FROM pms.room_types WHERE property_id=$1 ORDER BY id`, [f.propertyId])).rows;
+      return "pms.pricing.rooms.v2:" + createHash("sha256").update(JSON.stringify({ propertyId: f.propertyId, rooms })).digest("hex");
+    };
+    try {
+      await client.query("BEGIN");
+      await client.query("INSERT INTO identity.users(id,email,name) VALUES($1,$2,'Room source test')", [actor, `${actor}@example.test`]);
+      const saved = await legacy();
+      // Deferred constraints let the head point at a room-less revision until the rollback below.
+      await client.query("INSERT INTO pms.pricing_v2_heads(property_id) VALUES($1)", [f.propertyId]);
+      await client.query(`INSERT INTO pms.pricing_v2_revisions
+        (property_id,revision,currency,source_revisions,owner_references,request_id,request_hash,actor_user_id,room_count)
+        VALUES($1,1,'EUR',$2,'{"terms":"t"}',$3,$4,$5,1)`,
+        [f.propertyId, { room: saved, terms: "t", finance: "f" }, randomUUID(), "a".repeat(64), actor]);
+      await client.query("UPDATE pms.pricing_v2_heads SET revision=1 WHERE property_id=$1", [f.propertyId]);
+      expect(await source(client, f.propertyId)).toBe(saved);
+      await client.query("UPDATE pms.room_types SET name='Renamed',room_facts_revision=room_facts_revision+1 WHERE id=$1", [f.roomId]);
+      const upgraded = await source(client, f.propertyId);
+      expect(upgraded).not.toBe(saved);
+      expect(upgraded).toMatch(/^pms\.pricing\.rooms\.v2:[a-f0-9]{64}$/);
+    } finally { await client.query("ROLLBACK"); client.release(); }
   });
   it("blocks existing-row changes and owner-locked room creation until transaction end", async () => {
     const f = await fixture(), reader = await pool.connect(), writer = await pool.connect();
