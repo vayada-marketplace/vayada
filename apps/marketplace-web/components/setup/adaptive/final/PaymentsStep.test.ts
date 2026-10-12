@@ -16,11 +16,14 @@ const mocks = vi.hoisted(() => ({
   handoff: vi.fn(),
   assign: vi.fn(),
 }));
-vi.mock("@vayada/product-onboarding", () => ({
+vi.mock("@vayada/product-onboarding", async (original) => ({
+  ...(await original<object>()),
   createBrowserAuthHandoff: mocks.handoff,
-  crossAppReauthenticationUrl: (base: string, path: string) => `${base}/login?return=${path}`,
 }));
-vi.mock("@/services/auth/sessionStore", () => ({ getAuthCsrfToken: () => "csrf" }));
+vi.mock("@/services/auth/sessionStore", async (original) => ({
+  ...(await original<object>()),
+  getAuthCsrfToken: () => "csrf",
+}));
 vi.mock("@/services/api/financePaymentReadinessClient", () => ({
   financePaymentReadinessClient: {
     load: mocks.load,
