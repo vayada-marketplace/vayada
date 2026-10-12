@@ -1,10 +1,9 @@
 import {
   FINANCE_PAYMENT_READINESS_CONTRACT_VERSION,
-  FINANCE_PAYMENT_READINESS_METHODS,
   createFinancePaymentReadinessSnapshot,
+  financePaymentReadinessMethodsFromStored,
   resolveFinanceOnlineCardReadiness,
   type FinanceOnlineCardReadinessEvidence,
-  type FinancePaymentReadinessMethod,
   type FinancePaymentReadinessReadPort,
 } from "@vayada/domain-finance";
 import {
@@ -270,7 +269,7 @@ function onlineCardEvidence(row: PaymentSettingsRow): FinanceOnlineCardReadiness
 function storedConfiguration(row: PaymentSettingsRow, propertyId: string) {
   const paymentMethodsRevision = positiveInteger(row.paymentMethodsRevision);
   const sourcePricingCurrencyRevision = positiveInteger(row.sourcePricingCurrencyRevision);
-  const selectedMethods = methods(row.acceptedMethods);
+  const selectedMethods = financePaymentReadinessMethodsFromStored(row.acceptedMethods);
   const updatedAt = isoDate(row.updatedAt);
   if (
     typeof row.propertyId !== "string" ||
@@ -292,15 +291,6 @@ function storedConfiguration(row: PaymentSettingsRow, propertyId: string) {
     selectedMethods,
     updatedAt,
   };
-}
-
-function methods(value: unknown): readonly FinancePaymentReadinessMethod[] | null {
-  if (!Array.isArray(value)) return null;
-  return value.every((method) =>
-    FINANCE_PAYMENT_READINESS_METHODS.includes(method as FinancePaymentReadinessMethod),
-  ) && new Set(value).size === value.length
-    ? (value as readonly FinancePaymentReadinessMethod[])
-    : null;
 }
 
 function readUuid(value: string): string {
