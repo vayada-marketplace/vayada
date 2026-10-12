@@ -406,6 +406,122 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open scheduler (runtime l
     });
   });
 
+  it("waits for an added room's materialization instead of dead-lettering (VAY-2138)", async () => {
+    const property = await seedProperty(admin, 11);
+    const store = schedulerStore();
+    const worker = workerStore();
+    const schedule = () =>
+      store.withRunLock((session) =>
+        runPmsCalendarAutoOpenScheduler(session, { now, limit: 100, workerId: "vay-2138-test" }),
+      );
+    await schedule();
+    await drainUntilDone(worker, property.propertyId);
+
+    // A room is added: the new calendar revision binds it, but the stored days lack it.
+    const addedRoomTypeId = randomUUID();
+    await admin.query(
+      `INSERT INTO pms.room_types (id, property_id, name) VALUES ($1::uuid, $2::uuid, 'Added Room')`,
+      [addedRoomTypeId, property.propertyId],
+    );
+    await asReplica(admin, async (client) => {
+      await client.query(
+        `INSERT INTO pms.operating_calendar_revisions
+           (organization_id, property_id, calendar_revision, contract_version,
+            property_profile_revision, property_time_zone, schedule_mode,
+            recurring_period_count, room_binding_count, default_minimum_stay_nights,
+            idempotency_key_id, domain_event_id, outbox_event_id, created_by_user_id,
+            created_at, updated_at)
+         SELECT organization_id, property_id, 2, contract_version, property_profile_revision,
+                property_time_zone, schedule_mode, recurring_period_count, 2,
+                default_minimum_stay_nights, gen_random_uuid(), gen_random_uuid(),
+                gen_random_uuid(), created_by_user_id, now(), now()
+         FROM pms.operating_calendar_revisions
+         WHERE property_id=$1::uuid AND calendar_revision=1`,
+        [property.propertyId],
+      );
+      await client.query(
+        `INSERT INTO pms.operating_calendar_room_bindings
+           (property_id, calendar_revision, room_type_id, source_room_facts_revision,
+            source_room_units_revision, physical_capacity_count, starting_sellable_limit_count)
+         SELECT $1::uuid, 2, room_type_id, 1, 1, 2, 2
+         FROM unnest(ARRAY[$2::uuid, $3::uuid]) room_type_id`,
+        [property.propertyId, property.roomTypeId, addedRoomTypeId],
+      );
+    });
+    const selected = async () => {
+      const found = await store.withRunLock((session) =>
+        session.findCalendarAutoOpenCandidates(now, 100),
+      );
+      return found.ran && found.value.candidates.some((c) => c.propertyId === property.propertyId);
+    };
+    await expect(selected()).resolves.toBe(false);
+
+    // A job queued without the gate (as by the previous release during a rolling deploy) waits
+    // too: hide the added room's binding while scheduling, then restore it.
+    const addedBinding = (statement: string) =>
+      asReplica(admin, (client) => client.query(statement, [property.propertyId, addedRoomTypeId]));
+    await addedBinding(
+      `DELETE FROM pms.operating_calendar_room_bindings
+       WHERE property_id=$1::uuid AND calendar_revision=2 AND room_type_id=$2::uuid`,
+    );
+    await expect(selected()).resolves.toBe(true);
+    await schedule();
+    await addedBinding(
+      `INSERT INTO pms.operating_calendar_room_bindings
+         (property_id, calendar_revision, room_type_id, source_room_facts_revision,
+          source_room_units_revision, physical_capacity_count, starting_sellable_limit_count)
+       VALUES ($1::uuid, 2, $2::uuid, 1, 1, 2, 2)`,
+    );
+    await drainUntilDone(worker, property.propertyId);
+    const state = () =>
+      admin.query(
+        `SELECT status, attempts_count AS attempts, job_metadata->>'lastError' AS "lastError",
+           (SELECT count(*)::int FROM pms.inventory_days WHERE room_type_id=$2::uuid) AS "addedDays",
+           (SELECT to_char(coverage_through, 'YYYY-MM-DD') || '@' || calendar_revision
+            FROM pms.inventory_materialization_coverage WHERE property_id=$1::uuid) AS coverage
+         FROM platform.jobs WHERE property_id=$1::uuid AND queue_name=$3
+         ORDER BY created_at DESC LIMIT 1`,
+        [property.propertyId, addedRoomTypeId, PMS_CALENDAR_AUTO_OPEN_QUEUE],
+      );
+    expect((await state()).rows[0]).toEqual({
+      status: "pending",
+      attempts: 1,
+      lastError: "Calendar auto-open waits for added rooms to be materialized",
+      addedDays: 0,
+      coverage: "2027-09-30@1",
+    });
+
+    // Setup materializes the calendar for both rooms (simulated); the retry opens the dates.
+    await asReplica(admin, async (client) => {
+      await client.query(
+        `UPDATE pms.inventory_days SET calendar_revision=2, generated_source_revision=2
+         WHERE property_id=$1::uuid`,
+        [property.propertyId],
+      );
+      await client.query(
+        `INSERT INTO pms.inventory_days
+         SELECT (jsonb_populate_record(day, jsonb_build_object('room_type_id', $2::text))).*
+         FROM pms.inventory_days day WHERE day.property_id=$1::uuid`,
+        [property.propertyId, addedRoomTypeId],
+      );
+      await client.query(
+        `UPDATE pms.inventory_materialization_coverage
+         SET calendar_revision=2, materialized_revision=2, room_type_count=2,
+             expected_day_count=expected_day_count*2, materialized_day_count=materialized_day_count*2
+         WHERE property_id=$1::uuid`,
+        [property.propertyId],
+      );
+    });
+    // The retry runs five minutes later.
+    await drainUntilDone(worker, property.propertyId, new Date(now.getTime() + 6 * 60_000));
+    expect((await state()).rows[0]).toMatchObject({
+      status: "succeeded",
+      attempts: 2,
+      addedDays: 393,
+      coverage: "2027-09-30@2",
+    });
+  });
+
   it("counts enabled settings skipped for unverified room labels", async () => {
     const store = schedulerStore();
     const stats = () => store.withRunLock((session) => session.readSelectionStats());
@@ -530,21 +646,37 @@ async function seedProperty(
 async function drainUntilDone(
   worker: ReturnType<typeof createPgPmsCalendarAutoOpenWorkerStore>,
   propertyId: string,
+  at: Date = now,
 ): Promise<void> {
   const admin = new pg.Pool({ connectionString: TEST_DATABASE_URL!, max: 1 });
   try {
     for (let attempt = 0; attempt < 200; attempt += 1) {
-      const [job] = await propertyJobs(admin, propertyId);
+      const job = (await propertyJobs(admin, propertyId)).at(-1);
       if (job?.status !== "pending" && job?.status !== "running") return;
       const result = await runPmsCalendarAutoOpenWorkerOnce({
         store: worker,
         workerId: "vay-2066-test",
-        now: () => now,
+        now: () => at,
       });
       if (result.outcome === "idle") return;
     }
   } finally {
     await admin.end();
+  }
+}
+
+async function asReplica(admin: pg.Pool, run: (client: pg.PoolClient) => Promise<unknown>) {
+  const client = await admin.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL session_replication_role = replica");
+    await run(client);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
   }
 }
 

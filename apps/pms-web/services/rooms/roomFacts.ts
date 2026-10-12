@@ -66,7 +66,10 @@ const ROOM_AMENITY_LABELS = Object.fromEntries(
   Object.entries(ROOM_AMENITY_KEYS).map(([label, key]) => [key, label]),
 );
 
-export function roomTypeFactsFromForm(data: RoomTypeCreate): RoomTypeFacts {
+/** The guest numbers the room-facts command stores for a form (the New room page prices a room with them). */
+export function roomOccupancyFromForm(
+  data: Pick<RoomTypeCreate, "maxOccupancy" | "maxAdults" | "maxChildren">,
+) {
   const maxGuests = data.maxOccupancy ?? 0;
   // A blank adult or child limit means "any", as the room-facts read model treats it.
   const maxAdults = data.maxAdults ?? maxGuests;
@@ -77,6 +80,11 @@ export function roomTypeFactsFromForm(data: RoomTypeCreate): RoomTypeFacts {
   if (maxAdults + maxChildren < maxGuests) {
     throw new Error("Max adults plus max children must add up to at least the maximum occupancy.");
   }
+  return { maxGuests, maxAdults, maxChildren };
+}
+
+export function roomTypeFactsFromForm(data: RoomTypeCreate): RoomTypeFacts {
+  const { maxGuests, maxAdults, maxChildren } = roomOccupancyFromForm(data);
   const facts = parseRoomTypeFacts({
     name: data.name.trim(),
     description: data.description ?? "",

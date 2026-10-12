@@ -31,10 +31,9 @@ const tabs = () =>
     .map((node) => node.children[0]);
 const submit = () => view.root.findAllByProps({ type: "submit" });
 
-it("offers no Prices tab and keeps the pointer where the page has no prices section", async () => {
+it("offers no Prices tab where the page does not own the tab", async () => {
   await mount({ mode: "create" });
   expect(tabs()).toEqual(["rooms.form.tabDetails", "rooms.form.tabMedia"]);
-  expect(JSON.stringify(view.toJSON())).toContain("rooms.form.pricingPointer");
   await act(async () =>
     view.root
       .findAllByType("button")
@@ -48,7 +47,6 @@ it("lets the page own the tab: the Prices tab hides this form's save and leaves 
   const onTabChange = vi.fn();
   await mount({ tab: "prices", onTabChange });
   expect(tabs()).toEqual(["rooms.form.tabDetails", "rooms.form.tabPricing", "rooms.form.tabMedia"]);
-  expect(JSON.stringify(view.toJSON())).not.toContain("rooms.form.pricingPointer");
   expect(submit()).toHaveLength(0);
   expect(JSON.stringify(view.toJSON())).not.toContain("rooms.form.roomTypeBasics");
   await act(async () =>
@@ -74,4 +72,17 @@ it("lets the page own the tab: the Prices tab hides this form's save and leaves 
   );
   expect(submit()).toHaveLength(1);
   expect(JSON.stringify(view.toJSON())).toContain("rooms.form.roomTypeBasics");
+});
+
+it("shows the page's note beside the buttons and its text while saving (VAY-2147)", async () => {
+  await mount({
+    mode: "create",
+    submitLabel: "Create",
+    actionNote: "Creating declares the prices.",
+  });
+  expect(JSON.stringify(view.toJSON())).toContain("Creating declares the prices.");
+  expect(submit()[0].children).toEqual(["Create"]);
+  await mount({ mode: "create", saving: true, savingLabel: "Saving prices…" });
+  expect(submit()[0].children).toEqual(["Saving prices…"]);
+  expect(submit()[0].props.disabled).toBe(true);
 });
