@@ -1812,7 +1812,10 @@ const app = buildApp({
       }
     : undefined,
   bookingReservationsRepository,
-  financePaymentSetup: financePaymentSetupRuntime.routes,
+  financePaymentSetup: {
+    ...financePaymentSetupRuntime.routes,
+    manualPayments: financeManualPaymentReadiness,
+  },
   publicPageRefresh: refreshLivePublicPage,
   bookingGuestChoices: {
     store: bookingGuestChoiceStore,
@@ -1891,6 +1894,7 @@ const app = buildApp({
     config.pmsOperationsSource === "target"
       ? {
           commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context),
+          manualPayments: financeManualPaymentReadiness,
         }
       : undefined,
   pmsPricing: pmsGuestPolicySetupCommands

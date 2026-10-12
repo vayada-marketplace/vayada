@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ManualPaymentMethod } from "@vayada/product-onboarding/AcceptedPaymentMethods";
 import { FirstPricingSetup, type SetupRoom } from "@vayada/product-onboarding/FirstPricingSetup";
 import {
   englishPricingSetup,
@@ -61,6 +62,22 @@ export function PricingStep({
   const running = useRef(false);
   const lastAction = useRef<() => Promise<void>>(async () => undefined);
   const mounted = useRef(true);
+  const [manualMethods, setManualMethods] = useState<ManualPaymentMethod[]>([]);
+  useEffect(() => {
+    let current = true;
+    // First prices may take bank transfer and PayPal only while they can be used (VAY-2139).
+    pricingClient.paymentMethods().then(
+      (value) => {
+        if (current) setManualMethods(value);
+      },
+      () => {
+        if (current) setManualMethods([]);
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [pricingClient]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -315,6 +332,7 @@ export function PricingStep({
               rooms={setupRooms}
               fixedCurrency={currency}
               disabled={busy}
+              manualMethods={manualMethods}
               onDirty={() => setError(null)}
               onCreate={(input) => {
                 setAdded((items) => [...items, input]);
