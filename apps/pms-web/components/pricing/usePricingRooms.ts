@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
 import { pmsOperationsRoomsReadService, type PmsOperationsRoomType } from "@/services/rooms";
+import { roomSizeValue } from "@/services/rooms/roomFacts";
 
 import type { SetupRoom } from "./FirstPricingSetup";
 import { PricingError } from "./pricingAmounts";
@@ -11,7 +12,17 @@ export type PricingRooms = {
   propertyId: string;
   names: Record<string, string>;
   setupRooms: SetupRoom[];
+  /** Size (m²) and first photo per room, for the Prices tab's guest preview. */
+  facts: Record<string, { size: number | null; photo: string | null }>;
 };
+/** A room's size and first photo, when its details have them. */
+export function pricingRoomFacts(room: PmsOperationsRoomType) {
+  const size = Number(roomSizeValue(room.attributes?.size));
+  return {
+    size: Number.isFinite(size) && size > 0 ? size : null,
+    photo: room.media?.[0]?.url ?? null,
+  };
+}
 
 /** Rooms that can be priced: active, with whole-number guest limits and no more adults than the total. */
 export function pricingSetupRooms(items: readonly PmsOperationsRoomType[]): SetupRoom[] {
@@ -55,6 +66,9 @@ export function usePricingRooms(version = 0) {
           propertyId: id,
           names: Object.fromEntries(listed.items.map((room) => [room.roomTypeId, room.name])),
           setupRooms: pricingSetupRooms(listed.items),
+          facts: Object.fromEntries(
+            listed.items.map((room) => [room.roomTypeId, pricingRoomFacts(room)]),
+          ),
         });
       })
       .catch((e: unknown) => {

@@ -47,6 +47,7 @@ export function RoomPricesTab({
       key={rooms.propertyId}
       client={client}
       roomNames={rooms.names}
+      roomFacts={rooms.facts}
       setup={{ propertyId: rooms.propertyId, rooms: rooms.setupRooms }}
       // Room-type IDs are lower-case UUIDs; a URL may carry another case.
       roomTypeId={roomTypeId.toLowerCase()}
