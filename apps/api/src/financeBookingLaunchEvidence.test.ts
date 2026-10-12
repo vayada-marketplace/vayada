@@ -34,13 +34,16 @@ function snapshot(
   });
 }
 
-function adapter(value: FinancePaymentReadinessSnapshot | null) {
+function adapter(value: FinancePaymentReadinessSnapshot | null, inScope?: boolean) {
   const financeReadPort: FinancePaymentReadinessReadPort = {
     async getPaymentReadiness() {
       return value;
     },
   };
-  return createFinanceBookingLaunchEvidenceAdapter({ financeReadPort });
+  return createFinanceBookingLaunchEvidenceAdapter({
+    financeReadPort,
+    ...(inScope === undefined ? {} : { scope: { hasPaymentReadinessScope: async () => inScope } }),
+  });
 }
 
 describe("createFinanceBookingLaunchEvidenceAdapter", () => {
@@ -167,19 +170,75 @@ describe("createFinanceBookingLaunchEvidenceAdapter", () => {
     });
   });
 
-  it("returns explicit unavailable results for missing, invalid, or failed Finance reads", async () => {
-    await expect(adapter(null).getBookingLaunchEvidence(request)).resolves.toEqual({
+  it("asks the hotel to choose payment methods when none are versioned yet (VAY-2134)", async () => {
+    const result = await adapter(null).getBookingLaunchEvidence(request);
+    const source = {
+      ownerDomain: "finance",
+      entityType: "finance_payment_methods.v1",
+      entityId: propertyId,
+      revision: "absent",
+    };
+
+    expect(result).toEqual({
+      outcome: "evidence",
+      port: "finance",
+      organizationId,
+      propertyId,
+      sources: [source],
+      entities: [
+        {
+          groupId: "booking.payments",
+          owningStepId: "payments",
+          source,
+          blockers: [
+            {
+              code: "payment_methods_not_configured",
+              scope: "launch_configuration",
+              kind: "user_fixable",
+            },
+          ],
+        },
+      ],
+    });
+    expect(isBookingLaunchOwnerEvidenceValid(result, request, "finance")).toBe(true);
+    await expect(adapter(null, true).getBookingLaunchEvidence(request)).resolves.toEqual(result);
+  });
+
+  it("keeps a property outside the Finance scope unavailable instead of asking for payments", async () => {
+    await expect(adapter(null, false).getBookingLaunchEvidence(request)).resolves.toEqual({
       outcome: "unavailable",
       port: "finance",
       errorSource: "provider",
+      code: "payment_scope_unavailable",
     });
+    const failing = createFinanceBookingLaunchEvidenceAdapter({
+      financeReadPort: { getPaymentReadiness: async () => null },
+      scope: {
+        async hasPaymentReadinessScope() {
+          throw new Error("connection refused");
+        },
+      },
+    });
+    await expect(failing.getBookingLaunchEvidence(request)).resolves.toEqual({
+      outcome: "unavailable",
+      port: "finance",
+      errorSource: "system",
+      code: "payment_scope_read_failed",
+    });
+  });
 
+  it("returns explicit unavailable results for invalid or failed Finance reads", async () => {
     const poisoned = {
       ...snapshot(["pay_at_property"]),
       providerSecret: "must-not-cross-booking-boundary",
     } as unknown as FinancePaymentReadinessSnapshot;
     const invalid = await adapter(poisoned).getBookingLaunchEvidence(request);
-    expect(invalid).toEqual({ outcome: "unavailable", port: "finance", errorSource: "provider" });
+    expect(invalid).toEqual({
+      outcome: "unavailable",
+      port: "finance",
+      errorSource: "provider",
+      code: "payment_readiness_invalid",
+    });
     expect(JSON.stringify(invalid)).not.toContain("must-not-cross-booking-boundary");
 
     const failed = createFinanceBookingLaunchEvidenceAdapter({
@@ -193,6 +252,7 @@ describe("createFinanceBookingLaunchEvidenceAdapter", () => {
       outcome: "unavailable",
       port: "finance",
       errorSource: "system",
+      code: "payment_readiness_read_failed",
     });
   });
 

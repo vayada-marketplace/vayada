@@ -580,7 +580,13 @@ describe.skipIf(!TEST_DATABASE_URL)("Online-card execution evidence PostgreSQL",
 
     expect(result).toMatchObject({
       ok: true,
-      commandMeta: { outboxEvents: ["finance.online_card_readiness.changed"] },
+      // VAY-2136: the settings page also records the payment-readiness change it binds.
+      commandMeta: {
+        outboxEvents: [
+          "finance.payment_readiness.changed",
+          "finance.online_card_readiness.changed",
+        ],
+      },
     });
     await expect(publicPaymentMethods()).resolves.toEqual(["pay_at_property"]);
   });

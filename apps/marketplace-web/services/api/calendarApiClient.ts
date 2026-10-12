@@ -192,14 +192,30 @@ export function createCalendarApiClient(
   ): Promise<PmsOperatingCalendarImpactPreview> => {
     const request = parsePmsOperatingCalendarImpactPreviewRequest(proposal);
     if (!request) throw invalidClientContract("operating calendar impact proposal");
-    let value: unknown;
-    try {
-      value = await http.post<unknown>(
+    const post = () =>
+      http.post<unknown>(
         `/api/pms/properties/${encodeURIComponent(propertyId)}/operating-calendar/impact-preview`,
         request,
       );
+    let value: unknown;
+    try {
+      value = await post();
     } catch (error) {
-      throw previewOwnerError(error);
+      const ownerError = previewOwnerError(error);
+      if (
+        !(ownerError instanceof CalendarOwnerError) ||
+        ownerError.code !== "materialization_not_current"
+      ) {
+        throw ownerError;
+      }
+      // A saved calendar whose availability was never prepared blocks every preview, so
+      // prepare the saved revision once and preview again (VAY-2134).
+      await prepareSavedCalendar(http, propertyId);
+      try {
+        value = await post();
+      } catch (retryError) {
+        throw previewOwnerError(retryError);
+      }
     }
     const preview = parsePmsOperatingCalendarImpactPreview(value);
     if (!preview || preview.propertyId !== propertyId.toLowerCase()) {
@@ -290,12 +306,28 @@ export function createCalendarApiClient(
 
 export const calendarApi = createCalendarApiClient(targetApiClient, sharedHotelSetupApi);
 
+async function prepareSavedCalendar(http: CalendarHttpClient, propertyId: string) {
+  const current = await readCurrentCalendar(http, propertyId, { cache: "no-store" });
+  if (!current) return;
+  // Its own key, so a failure stored under the save's key is not replayed. Its own result is
+  // replayed for the same horizon until the property's next day.
+  await materializeCalendar(
+    http,
+    propertyId,
+    current.configuration.calendarRevision,
+    current.configuration.sourceInputs.propertyTimeZone,
+    new Date().toISOString(),
+    "inventory-recovery",
+  );
+}
+
 async function materializeCalendar(
   http: CalendarHttpClient,
   propertyId: string,
   calendarRevision: number,
   propertyTimeZone: string,
   acceptedAt: string,
+  keyLabel = "inventory",
 ): Promise<void> {
   const horizon = inventoryHorizon(acceptedAt, propertyTimeZone);
   const body = { expectedCalendarRevision: calendarRevision, horizon };
@@ -304,10 +336,18 @@ async function materializeCalendar(
     value = await http.post<unknown>(
       `/api/pms/properties/${encodeURIComponent(propertyId)}/inventory-materialization`,
       body,
-      { headers: { "Idempotency-Key": await sha256Key("inventory", propertyId, body) } },
+      { headers: { "Idempotency-Key": await sha256Key(keyLabel, propertyId, body) } },
     );
   } catch (error) {
-    const code = error instanceof ApiErrorResponse ? error.data.code : undefined;
+    // Materialization rejections arrive as { ok: false, error: { code } }.
+    const data: unknown = error instanceof ApiErrorResponse ? error.data : undefined;
+    const nested = isRecord(data) && isRecord(data.error) ? data.error.code : undefined;
+    const code =
+      isRecord(data) && typeof data.code === "string"
+        ? data.code
+        : typeof nested === "string"
+          ? nested
+          : undefined;
     throw new CalendarOwnerError(
       "The calendar was saved, but its room availability could not be prepared. Reload Calendar setup and try again.",
       code ?? "inventory_materialization_failed",

@@ -30,6 +30,7 @@ type CatalogRow = QueryResultRow & {
   defaultLocale: string;
   supportedLocales: string[];
   profileStatus: string;
+  lifecycleStatus: string;
   profileRevision: number | string;
   sourceUpdatedAt: Date | string;
   timezone: string | null;
@@ -91,7 +92,7 @@ export function createHotelCatalogBookingPublicationSource(config: {
     async getBookingLaunchEvidence(request) {
       try {
         const loaded = await load(pool, config.mediaResolver, request);
-        return loaded
+        return typeof loaded !== "string"
           ? deepFreeze({
               outcome: "evidence",
               port: "catalog",
@@ -106,9 +107,9 @@ export function createHotelCatalogBookingPublicationSource(config: {
                 },
               ],
             })
-          : unavailableEvidence();
+          : unavailableEvidence("provider", loaded);
       } catch {
-        return unavailableEvidence("system");
+        return unavailableEvidence("system", "owner_read_failed");
       }
     },
     async getSnapshot(request) {
@@ -118,7 +119,7 @@ export function createHotelCatalogBookingPublicationSource(config: {
           propertyId: request.propertyId,
         });
         if (
-          !loaded ||
+          typeof loaded === "string" ||
           loaded.blockers.length > 0 ||
           sourceKeys(loaded.sources) !==
             sourceKeys(
@@ -153,12 +154,14 @@ async function load(
   pool: CatalogPool,
   resolver: HotelMediaResolutionPort,
   scope: { organizationId: string; propertyId: string },
-): Promise<LoadedCatalog | null> {
+): Promise<LoadedCatalog | string> {
   const first = await readRow(pool, scope);
-  if (!first) return null;
+  if (!first) return "catalog_property_unavailable";
   const assignments = mediaAssignments(first.media);
-  if (!assignments) return null;
+  if (!assignments) return "catalog_media_invalid";
   let resolvedMedia: readonly ResolvedPublicHotelMedia[] = [];
+  // A photo or logo that can't be shown yet is a setup task, not an outage (VAY-2134).
+  let mediaBlocker: BookingLaunchOwnerBlocker | null = null;
   const mediaObjectIds = [...new Set(assignments.map(({ mediaObjectId }) => mediaObjectId))];
   if (mediaObjectIds.length > 0) {
     const result = await resolver.resolvePublicMedia({
@@ -166,11 +169,19 @@ async function load(
       target: { kind: "property", propertyId: scope.propertyId },
       mediaObjectIds,
     });
-    if (!result.ok || result.batch.media.length !== mediaObjectIds.length) return null;
-    resolvedMedia = result.batch.media;
+    if (!result.ok) {
+      mediaBlocker =
+        result.error.code === "media_not_ready"
+          ? blocker("hotel_public_media_processing", "external_pending")
+          : blocker("hotel_public_media_unavailable");
+    } else if (result.batch.media.length !== mediaObjectIds.length) {
+      return "catalog_media_invalid";
+    } else {
+      resolvedMedia = result.batch.media;
+    }
   }
   const second = await readRow(pool, scope);
-  if (!second || rowToken(first) !== rowToken(second)) return null;
+  if (!second || rowToken(first) !== rowToken(second)) return "catalog_changed_during_read";
 
   const mediaById = new Map(resolvedMedia.map((item) => [item.mediaObjectId, item]));
   const images = assignments
@@ -187,10 +198,12 @@ async function load(
           }
         : null;
     });
-  if (images.some((image) => image === null)) return null;
+  if (!mediaBlocker && images.some((image) => image === null)) {
+    mediaBlocker = blocker("hotel_public_media_unavailable");
+  }
 
   const profileRevision = positiveRevision(first.profileRevision);
-  if (!profileRevision) return null;
+  if (!profileRevision) return "catalog_profile_revision_invalid";
   const profileSource = source("property_profile", scope.propertyId, `profile:${profileRevision}`);
   const assignmentSource = source(
     "property_media_assignment",
@@ -224,7 +237,7 @@ async function load(
       longitude: geoPublic ? round(first.longitude) : null,
     },
     summary: first.summary,
-    images: images as { url: string; alt?: string | null }[],
+    images: images.filter((image) => image !== null),
     amenities: stringArray(first.amenities),
     publicContacts: contacts(first.contacts),
     profileComplete: first.profileStatus === "complete",
@@ -241,12 +254,17 @@ async function load(
     `sha256:${sha256(JSON.stringify(content))}`,
   );
   const blockers: BookingLaunchOwnerBlocker[] = [];
+  // A hotel still being provisioned can't be published yet (VAY-2134).
+  if (first.lifecycleStatus !== "active") {
+    blockers.push(blocker("hotel_setup_in_progress", "external_pending"));
+  }
   if (!content.profileComplete) blockers.push(blocker("hotel_profile_incomplete"));
   if (!localityPublic || !content.location.country || !content.location.city)
     blockers.push(blocker("hotel_public_locality_missing"));
   if (!content.slug) blockers.push(blocker("hotel_canonical_slug_missing"));
   if (!content.timezone) blockers.push(blocker("hotel_timezone_missing"));
-  if (content.images.length === 0) blockers.push(blocker("hotel_public_media_missing"));
+  if (mediaBlocker) blockers.push(mediaBlocker);
+  else if (content.images.length === 0) blockers.push(blocker("hotel_public_media_missing"));
   return {
     sources: [profileSource, assignmentSource, ...mediaSources, aggregateSource].sort(
       compareSource,
@@ -271,7 +289,8 @@ async function readRow(
 const CATALOG_SQL = `
 SELECT property.id::text AS "propertyId", property.display_name AS "displayName",
        property.default_locale AS "defaultLocale", property.supported_locales AS "supportedLocales",
-       property.profile_status AS "profileStatus", property.profile_revision AS "profileRevision",
+       property.profile_status AS "profileStatus", property.lifecycle_status AS "lifecycleStatus",
+       property.profile_revision AS "profileRevision",
        GREATEST(property.updated_at, COALESCE(location.updated_at, property.updated_at),
          COALESCE((SELECT max(profile.updated_at) FROM hotel_catalog.property_profiles profile WHERE profile.property_id = property.id), property.updated_at),
          COALESCE((SELECT max(media.updated_at) FROM hotel_catalog.property_media media WHERE media.property_id = property.id), property.updated_at)) AS "sourceUpdatedAt",
@@ -289,7 +308,7 @@ LEFT JOIN hotel_catalog.property_locations location ON location.property_id = pr
 LEFT JOIN hotel_catalog.property_profiles profile ON profile.property_id = property.id AND profile.locale = property.default_locale
 LEFT JOIN LATERAL (SELECT candidate.slug FROM hotel_catalog.property_slugs candidate WHERE candidate.property_id = property.id AND candidate.purpose = 'canonical' AND candidate.status = 'active' ORDER BY candidate.updated_at DESC, candidate.id LIMIT 1) slug ON TRUE
 LEFT JOIN LATERAL (SELECT candidate.hostname FROM hotel_catalog.property_domains candidate WHERE candidate.property_id = property.id AND candidate.verification_status = 'verified' AND candidate.canonical_when_verified ORDER BY candidate.verified_at DESC NULLS LAST, candidate.id LIMIT 1) domain ON TRUE
-WHERE property.id = $2::uuid AND property.lifecycle_status = 'active'`;
+WHERE property.id = $2::uuid AND property.lifecycle_status IN ('active', 'provisioning')`;
 
 function mediaAssignments(value: unknown): MediaAssignment[] | null {
   if (!Array.isArray(value)) return null;
@@ -328,15 +347,19 @@ const source = (entityType: string, entityId: string, revision: string): Catalog
   entityId,
   revision,
 });
-const blocker = (code: string): BookingLaunchOwnerBlocker => ({
+const blocker = (
+  code: string,
+  kind: "user_fixable" | "external_pending" = "user_fixable",
+): BookingLaunchOwnerBlocker => ({
   code,
   scope: "launch_configuration",
-  kind: "user_fixable",
+  kind,
 });
-const unavailableEvidence = (errorSource: "provider" | "system" = "provider") => ({
+const unavailableEvidence = (errorSource: "provider" | "system", code: string) => ({
   outcome: "unavailable" as const,
   port: "catalog" as const,
   errorSource,
+  code,
 });
 const unavailableSnapshot = () => ({
   outcome: "unavailable" as const,
