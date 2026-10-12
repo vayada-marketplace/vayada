@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   parseReplaceFinancePaymentMethodsCommand,
   type FinancePaymentReadinessMethod,
+  type FinancePaymentSettingsPatchPayload,
   type FinanceRoutePaymentMethod,
 } from "@vayada/domain-finance";
 import pg from "pg";
@@ -12,6 +13,7 @@ import { createTargetFinancePropertySettingsRepository } from "../routes/finance
 import { createFinanceBookingLaunchEvidenceAdapter } from "./financeBookingLaunchEvidence.js";
 import { createPgFinancePaymentReadinessCommandRepository } from "./financePaymentReadinessCommandRepository.js";
 import { createPgFinancePaymentReadinessReadModel } from "./financePaymentReadinessReadModel.js";
+import { lockFinanceReplacementPricingSource } from "./financeReplacementPricingSource.js";
 import { createPgPmsPricingReadModel } from "./pmsPricingReadModel.js";
 
 // VAY-2136: the settings page (PATCH payment-settings) and the setup Payments step
@@ -62,7 +64,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Finance payment-method writers",
     await expect(
       readiness.getPaymentReadiness({ organizationId, propertyId }),
     ).resolves.toMatchObject({
-      paymentMethodsRevision: 1,
+      paymentMethodsRevision: 2,
       bookingPaymentReady: true,
       methods: [
         { method: "pay_at_property", selected: true, readiness: "ready" },
@@ -76,10 +78,188 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Finance payment-method writers",
       outcome: "evidence",
       entities: [{ groupId: "booking.payments", blockers: [] }],
     });
+    await expect(saveSetup(2, ["pay_at_property", "card"])).resolves.toMatchObject({
+      ok: true,
+      response: { paymentReadiness: { paymentMethodsRevision: 3 } },
+    });
+  });
+
+  it("binds a settings-page save like the setup step, which can then save on top", async () => {
+    await expect(saveSettingsPage(["pay_at_property", "cash"])).resolves.toMatchObject({
+      ok: true,
+      commandMeta: { outboxEvents: ["finance.payment_readiness.changed"] },
+    });
+    await expect(binding()).resolves.toEqual({
+      contractVersion: "finance-payment-readiness.v1",
+      revision: 1,
+      pricingRevision: 7,
+    });
+    await expect(
+      readiness.getPaymentReadiness({ organizationId, propertyId }),
+    ).resolves.toMatchObject({ paymentMethodsRevision: 1, bookingPaymentReady: true });
+    await expect(
+      launch.getBookingLaunchEvidence({ organizationId, propertyId }),
+    ).resolves.toMatchObject({
+      outcome: "evidence",
+      entities: [{ groupId: "booking.payments", blockers: [] }],
+    });
+    await expect(changeEvents()).resolves.toEqual([
+      { outcome: "readiness_gained", revision: 1, outbox: 1 },
+    ]);
+
     await expect(saveSetup(1, ["pay_at_property", "card"])).resolves.toMatchObject({
       ok: true,
-      response: { paymentReadiness: { paymentMethodsRevision: 2 } },
+      response: { outcome: "updated", paymentReadiness: { paymentMethodsRevision: 2 } },
     });
+  });
+
+  it("keeps the revision and saved prices for replays and saves that keep the methods", async () => {
+    const idempotencyKey = randomUUID();
+    const methods: FinanceRoutePaymentMethod[] = ["pay_at_property", "cash", "paypal"];
+    await expect(saveSettingsPage(methods, { idempotencyKey })).resolves.toMatchObject({
+      ok: true,
+      status: "updated",
+    });
+    const source = await pricingSource();
+
+    await expect(saveSettingsPage(methods, { idempotencyKey })).resolves.toMatchObject({
+      ok: true,
+      status: "idempotent_replay",
+    });
+    await expect(pricingSource()).resolves.toBe(source);
+    await saveSettingsPage(methods, { paypalEmail: "new-pay@example.test" });
+    await expect(binding()).resolves.toMatchObject({ revision: 1 });
+
+    const unchangedMethods = await pricingSource();
+    await saveSettingsPage(["pay_at_property", "manual_card"]);
+    await expect(binding()).resolves.toMatchObject({ revision: 2 });
+    await expect(pricingSource()).resolves.not.toBe(unchangedMethods);
+    await expect(changeEvents()).resolves.toEqual([
+      { outcome: "readiness_gained", revision: 1, outbox: 1 },
+      { outcome: "selection_changed", revision: 2, outbox: 1 },
+    ]);
+  });
+
+  it("binds a row the old settings page left without a revision on its next save", async () => {
+    await pool.query(
+      `INSERT INTO finance.payment_settings
+         (property_id, payments_enabled, accepted_methods, default_currency)
+       VALUES ($1::uuid, TRUE, ARRAY['pay_at_property', 'cash'], 'EUR')`,
+      [propertyId],
+    );
+    await expect(readiness.getPaymentReadiness({ organizationId, propertyId })).resolves.toBe(null);
+
+    await expect(saveSettingsPage(["pay_at_property", "cash"])).resolves.toMatchObject({
+      ok: true,
+    });
+    await expect(
+      readiness.getPaymentReadiness({ organizationId, propertyId }),
+    ).resolves.toMatchObject({ paymentMethodsRevision: 1, bookingPaymentReady: true });
+  });
+
+  it("saves without a revision when prices have no currency yet, and setup binds it later", async () => {
+    await pool.query("DELETE FROM pms.property_pricing_settings WHERE property_id = $1::uuid", [
+      propertyId,
+    ]);
+    await expect(saveSettingsPage(["pay_at_property", "cash"])).resolves.toMatchObject({
+      ok: true,
+    });
+    await expect(binding()).resolves.toEqual({
+      contractVersion: null,
+      revision: null,
+      pricingRevision: null,
+    });
+    await expect(changeEvents()).resolves.toEqual([]);
+
+    await seedPricingCurrency();
+    await expect(saveSetup(0, ["pay_at_property"])).resolves.toMatchObject({
+      ok: true,
+      response: { outcome: "created", paymentReadiness: { paymentMethodsRevision: 1 } },
+    });
+  });
+
+  it("keeps the row as is when the same methods arrive in another order", async () => {
+    await saveSettingsPage(["pay_at_property", "cash", "manual_card"]);
+    const before = await rowState();
+
+    await expect(
+      saveSettingsPage(["manual_card", "pay_at_property", "cash"]),
+    ).resolves.toMatchObject({ ok: true, commandMeta: { outboxEvents: [] } });
+    await expect(rowState()).resolves.toEqual(before);
+  });
+
+  it("saves unbound while booking and price currencies differ, but won't rebind a bound row", async () => {
+    await pool.query(
+      `INSERT INTO booking.booking_settings (
+         property_id, default_currency, default_language, supported_languages, acceptance_mode
+       ) VALUES ($1::uuid, 'USD', 'en', ARRAY['en'], 'instant')`,
+      [propertyId],
+    );
+    await expect(saveSettingsPage(["pay_at_property", "cash"])).resolves.toMatchObject({
+      ok: true,
+      settings: { defaultCurrency: "USD" },
+    });
+    await expect(binding()).resolves.toEqual({
+      contractVersion: null,
+      revision: null,
+      pricingRevision: null,
+    });
+
+    await expect(saveSetup(0, ["pay_at_property"])).resolves.toMatchObject({ ok: true });
+    await expect(saveSettingsPage(["pay_at_property", "cash"])).resolves.toMatchObject({
+      ok: false,
+      statusCode: 409,
+      code: "property_currency_conflict",
+    });
+    await expect(binding()).resolves.toMatchObject({ revision: 1 });
+  });
+
+  it("keeps PayPal and the pay-at-hotel choice when the setup step saves", async () => {
+    await saveSettingsPage(["pay_at_property", "manual_card", "paypal"]);
+    await expect(saveSetup(1, ["pay_at_property", "card"])).resolves.toMatchObject({
+      ok: true,
+      response: { paymentReadiness: { paymentMethodsRevision: 2, selectedMethodCount: 2 } },
+    });
+    await expect(settingsPage.getPaymentSettings(propertyId)).resolves.toMatchObject({
+      paymentsEnabled: true,
+      acceptedMethods: ["pay_at_property", "card", "manual_card", "paypal"],
+      depositPolicy: { paypalEmail: "pay@example.test" },
+    });
+
+    await expect(saveSetup(2, ["card"])).resolves.toMatchObject({ ok: true });
+    await expect(settingsPage.getPaymentSettings(propertyId)).resolves.toMatchObject({
+      acceptedMethods: ["card", "paypal"],
+    });
+  });
+
+  it("doesn't switch on extras an older disabled or malformed row still lists", async () => {
+    for (const [enabled, methods] of [
+      [false, ["paypal", "bank_transfer"]],
+      [true, ["cash", "cash"]],
+    ] as const) {
+      await pool.query("DELETE FROM finance.payment_settings WHERE property_id = $1::uuid", [
+        propertyId,
+      ]);
+      await pool.query(
+        `INSERT INTO finance.payment_settings
+           (property_id, payments_enabled, accepted_methods, default_currency)
+         VALUES ($1::uuid, $2, $3::text[], 'EUR')`,
+        [propertyId, enabled, methods],
+      );
+      await expect(saveSetup(0, ["pay_at_property"])).resolves.toMatchObject({ ok: true });
+      await expect(settingsPage.getPaymentSettings(propertyId)).resolves.toMatchObject({
+        paymentsEnabled: true,
+        acceptedMethods: ["pay_at_property"],
+      });
+    }
+  });
+
+  it("lets the settings page save other fields after setup chose plain pay at hotel", async () => {
+    await saveSetup(0, ["pay_at_property"]);
+    await expect(
+      saveSettingsPage([], { payload: { requiresManualReview: true } }),
+    ).resolves.toMatchObject({ ok: true, settings: { acceptedMethods: ["pay_at_property"] } });
+    await expect(binding()).resolves.toMatchObject({ revision: 1 });
   });
 
   function saveSetup(expectedRevision: number, selectedMethods: FinancePaymentReadinessMethod[]) {
@@ -101,11 +281,18 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Finance payment-method writers",
     return setup.replacePaymentMethods({ command, currentPricing: null });
   }
 
-  function saveSettingsPage(acceptedMethods: FinanceRoutePaymentMethod[]) {
+  function saveSettingsPage(
+    acceptedMethods: FinanceRoutePaymentMethod[],
+    options: {
+      idempotencyKey?: string;
+      paypalEmail?: string;
+      payload?: FinancePaymentSettingsPatchPayload;
+    } = {},
+  ) {
     return settingsPage.updatePaymentSettings!({
       commandType: "finance.payment_settings.update",
       commandId: randomUUID(),
-      idempotencyKey: randomUUID(),
+      idempotencyKey: options.idempotencyKey ?? randomUUID(),
       propertyId,
       audit: {
         actor: { kind: "user", userId: actorUserId, organizationId },
@@ -113,14 +300,67 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Finance payment-method writers",
         reason: "VAY-2136 settings page save",
         requestedAt: acceptedAt,
       },
-      payload: {
+      payload: options.payload ?? {
         paymentsEnabled: true,
         acceptedMethods,
         ...(acceptedMethods.includes("paypal")
-          ? { depositPolicy: { paypalEmail: "pay@example.test" } }
+          ? { depositPolicy: { paypalEmail: options.paypalEmail ?? "pay@example.test" } }
           : {}),
       },
     });
+  }
+
+  async function binding() {
+    const result = await pool.query<{
+      contractVersion: string | null;
+      revision: number | null;
+      pricingRevision: number | null;
+    }>(
+      `SELECT payment_readiness_contract_version AS "contractVersion",
+              payment_methods_revision::int AS revision,
+              source_pricing_currency_revision::int AS "pricingRevision"
+       FROM finance.payment_settings WHERE property_id = $1::uuid`,
+      [propertyId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  /** Every column the saved-prices fingerprint and online-card evidence depend on. */
+  async function rowState() {
+    const result = await pool.query(
+      `SELECT to_jsonb(settings) - 'updated_at' - 'created_at' AS state
+       FROM finance.payment_settings settings WHERE property_id = $1::uuid`,
+      [propertyId],
+    );
+    return result.rows[0]?.state ?? null;
+  }
+
+  async function changeEvents() {
+    const result = await pool.query<{ outcome: string; revision: number; outbox: number }>(
+      `SELECT event.payload ->> 'outcome' AS outcome,
+              (event.payload ->> 'paymentMethodsRevision')::int AS revision,
+              (SELECT count(*)::int FROM platform.outbox_events outbox
+               WHERE outbox.domain_event_id = event.id
+                 AND outbox.destination = 'booking.payment-source') AS outbox
+       FROM platform.domain_events event
+       WHERE event.property_id = $1::uuid
+         AND event.event_type = 'finance.payment_readiness.changed'
+       ORDER BY revision`,
+      [propertyId],
+    );
+    return result.rows;
+  }
+
+  /** The Finance fingerprint saved prices are checked against ("Save prices again"). */
+  async function pricingSource() {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      return await lockFinanceReplacementPricingSource(client, propertyId);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
   }
 
   async function seedScope(): Promise<void> {
@@ -159,6 +399,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Finance payment-method writers",
                'pms', 'pms_property', $2::uuid::text)`,
       [organizationId, propertyId],
     );
+    await seedPricingCurrency();
+  }
+
+  async function seedPricingCurrency(): Promise<void> {
     await pool.query(
       `INSERT INTO pms.property_pricing_settings
          (property_id, currency, pricing_currency_revision)

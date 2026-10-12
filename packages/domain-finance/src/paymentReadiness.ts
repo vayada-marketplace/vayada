@@ -80,6 +80,33 @@ export function financePaymentReadinessMethodsFromStored(
   );
 }
 
+/**
+ * The stored list after a setup-step selection. The setup step owns
+ * pay_at_property (keeping its cash/manual_card details while it stays selected)
+ * and card; checkout extras it doesn't show (PayPal, bank transfer, ...) stay.
+ * Null when the stored list is corrupt.
+ */
+export function financeStoredMethodsAfterSetupSelection(
+  stored: unknown,
+  selected: readonly FinancePaymentReadinessMethod[],
+): FinanceRoutePaymentMethod[] | null {
+  const storedMethods = stored ?? [];
+  if (!financePaymentReadinessMethodsFromStored(storedMethods)) return null;
+  const kept = (storedMethods as readonly FinanceRoutePaymentMethod[]).filter((method) =>
+    method === "pay_at_property" || method === "card"
+      ? false
+      : method === "cash" || method === "manual_card"
+        ? selected.includes("pay_at_property")
+        : true,
+  );
+  return [
+    ...FINANCE_PAYMENT_READINESS_METHODS.filter(
+      (method) => method !== "bank_transfer" && selected.includes(method),
+    ),
+    ...kept,
+  ];
+}
+
 export type FinancePaymentMethodReadiness = Readonly<{
   method: FinancePaymentReadinessMethod;
   selected: boolean;

@@ -7,6 +7,7 @@ import {
   FINANCE_PAYMENT_READINESS_SOURCE_OWNER_DOMAIN,
   createFinancePaymentMethodsSourceEntityRevision,
   financePaymentReadinessMethodsFromStored,
+  financeStoredMethodsAfterSetupSelection,
   parseReplaceFinancePaymentMethodsCommand,
   serializeFinancePaymentMethodsSourceRevision,
   serializeReplaceFinancePaymentMethodsFingerprint,
@@ -129,5 +130,37 @@ describe("Finance stored payment methods as readiness methods", () => {
     for (const value of [null, "card", ["card", "card"], ["card", "crypto"], [1]]) {
       expect(financePaymentReadinessMethodsFromStored(value)).toBeNull();
     }
+  });
+});
+
+describe("Finance stored payment methods after a setup selection", () => {
+  it("keeps extras and pay-at-hotel details the setup step doesn't show", () => {
+    const stored = ["paypal", "pay_at_property", "cash", "manual_card", "bank_transfer", "xendit"];
+    expect(financeStoredMethodsAfterSetupSelection(stored, ["pay_at_property", "card"])).toEqual([
+      "pay_at_property",
+      "card",
+      "paypal",
+      "cash",
+      "manual_card",
+      "bank_transfer",
+      "xendit",
+    ]);
+    expect(financeStoredMethodsAfterSetupSelection(stored, ["card"])).toEqual([
+      "card",
+      "paypal",
+      "bank_transfer",
+      "xendit",
+    ]);
+    expect(financeStoredMethodsAfterSetupSelection(null, ["pay_at_property"])).toEqual([
+      "pay_at_property",
+    ]);
+    expect(financeStoredMethodsAfterSetupSelection(["cash"], ["pay_at_property"])).toEqual([
+      "pay_at_property",
+      "cash",
+    ]);
+  });
+
+  it("rejects a corrupt stored list", () => {
+    expect(financeStoredMethodsAfterSetupSelection(["card", "card"], ["card"])).toBeNull();
   });
 });
