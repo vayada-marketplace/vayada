@@ -6,6 +6,11 @@ import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { reserveRevalidatedQuoteInventory } from "./currentQuoteInventory.js";
 import type { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js";
 import { PRICING_CARD_PAYMENT_MINUTES, pricingCardQuoteSupported } from "./pricingCardPayment.js";
+import {
+  pricingExpectedPaymentMethod,
+  pricingManualQuoteSupported,
+  type PricingManualPaymentTerms,
+} from "./pricingManualPayment.js";
 
 type Current = NonNullable<Awaited<ReturnType<typeof lockCurrentQuoteRevalidation>>>;
 /** Internal staging after stagePricingBookingDraft, on the same
@@ -20,6 +25,8 @@ export async function stagePricingBookingLifecycle(
   slug: unknown,
   current: Current,
   bookingId: string,
+  /** Bank transfer or PayPal: Finance terms read in this transaction (VAY-2139). */
+  manualTerms?: PricingManualPaymentTerms,
 ) {
   const fail = (): never => {
     throw new Error("Pricing booking lifecycle is unavailable");
@@ -39,12 +46,15 @@ export async function stagePricingBookingLifecycle(
       (quote.paymentMethod === "pay_at_property" &&
         (mode === "instant" || mode === "request") &&
         quote.evidence.dueNowMinor === "0" &&
-        quote.evidence.dueLaterMinor === quote.evidence.totalMinor) ||
-      pricingCardQuoteSupported(quote)
+        quote.evidence.dueLaterMinor === quote.evidence.totalMinor &&
+        !manualTerms) ||
+      (pricingCardQuoteSupported(quote) && !manualTerms) ||
+      (pricingManualQuoteSupported(quote) && manualTerms?.method === quote.paymentMethod)
     )
   )
     return fail();
   const card = quote.paymentMethod === "card";
+  const manual = manualTerms !== undefined;
   const booking = (
     await client.query(
       `SELECT lifecycle_status,payment_status,source_system,booking_channel,direct_booking_source,
@@ -62,7 +72,7 @@ export async function stagePricingBookingLifecycle(
     booking.source_system !== "booking" ||
     booking.booking_channel !== "direct" ||
     booking.direct_booking_source !== "booking_engine" ||
-    booking.expected_payment_method !== (card ? "unknown" : "pay_at_property") ||
+    booking.expected_payment_method !== pricingExpectedPaymentMethod(quote.paymentMethod) ||
     booking.edit_revision !== 0 ||
     booking.check_in !== quote.stay.checkIn ||
     booking.check_out !== quote.stay.checkOut ||
@@ -91,16 +101,19 @@ export async function stagePricingBookingLifecycle(
   if (!(now instanceof Date) || !Number.isFinite(now.getTime())) return fail();
   const occurredAt = now.toISOString();
   if (occurredAt < quote.evidence.issuedAt || occurredAt >= quote.evidence.expiresAt) return fail();
-  const lifecycleStatus = mode === "instant" && !card ? "confirmed" : "pending_payment";
+  const lifecycleStatus = mode === "instant" && !card && !manual ? "confirmed" : "pending_payment";
   // A card request's hotel deadline starts once Stripe authorises the card; until then only
-  // the payment deadline holds the rooms.
+  // the payment deadline holds the rooms. Bank transfer and PayPal wait only for the payment,
+  // which the hotel confirms, in either mode.
   const hostResponseDeadlineAt =
-    mode === "request" && !card
+    mode === "request" && !card && !manual
       ? new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()
       : null;
   const paymentDeadlineAt = card
     ? new Date(now.getTime() + PRICING_CARD_PAYMENT_MINUTES * 60 * 1000).toISOString()
-    : null;
+    : manual
+      ? new Date(now.getTime() + manualTerms.paymentWindowHours * 60 * 60 * 1000).toISOString()
+      : null;
   const result = await client.query(
     `WITH changed AS (
       UPDATE booking.guest_bookings SET lifecycle_status=$3,updated_at=$4::timestamptz,
@@ -133,12 +146,25 @@ export async function stagePricingBookingLifecycle(
         ...(hostResponseDeadlineAt ? { hostResponseDeadlineAt } : {}),
         // The pending-booking expiry sweep reads pendingExpiresAt (jobs/bookingLifecycle.ts).
         ...(paymentDeadlineAt ? { pendingExpiresAt: paymentDeadlineAt } : {}),
+        // Read by the guest payment-instructions route, as for legacy PayPal bookings.
+        ...(manualTerms?.paypalEmail
+          ? {
+              paymentInstructions: {
+                paypalEmail: manualTerms.paypalEmail,
+                paypalPaymentWindowHours: manualTerms.paymentWindowHours,
+              },
+            }
+          : {}),
       },
       card
         ? "We are waiting for your card payment."
-        : mode === "instant"
-          ? "Your booking is confirmed."
-          : "We have received your booking request.",
+        : manualTerms?.method === "bank_transfer"
+          ? "We are waiting for your bank transfer."
+          : manualTerms?.method === "paypal"
+            ? "We are waiting for your PayPal payment."
+            : mode === "instant"
+              ? "Your booking is confirmed."
+              : "We have received your booking request.",
       { pricingQuoteId: quote.quoteId, requestFingerprint: metadata.requestFingerprint },
       mode,
     ],

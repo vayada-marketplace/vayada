@@ -9,6 +9,7 @@ import {
 import { parsePropertyPricingCurrencySnapshot, type PmsPricingReadPort } from "@vayada/domain-pms";
 
 import type { PropertySetupFinanceOwnerScopePort } from "../domains/propertySetupFinanceOwnerScope.js";
+import type { FinanceManualPaymentReadinessReadPort } from "../domains/financeManualPaymentReadiness.js";
 import type {
   PropertySetupOwnerStateProviderPort,
   PropertySetupOwnerStateRequest,
@@ -19,6 +20,8 @@ export type PropertySetupFinanceStateOptions = Readonly<{
   scope: PropertySetupFinanceOwnerScopePort;
   finance: FinancePaymentReadinessReadPort;
   pricing: Pick<PmsPricingReadPort, "getPropertyPricingCurrency">;
+  /** Bank transfer and PayPal, only while their acceptance is on (VAY-2139). */
+  manualPayments?: FinanceManualPaymentReadinessReadPort;
 }>;
 
 const EXTERNAL_PENDING_BLOCKERS = new Set<FinancePaymentReadinessBlocker>([
@@ -57,7 +60,9 @@ export function createPropertySetupFinanceStateProvider(
             first.paymentMethodsRevision === 0
               ? "not_started"
               : first.selectedMethodCount === 0
-                ? "saved"
+                ? first.manualPaymentReady
+                  ? "complete"
+                  : "saved"
                 : first.bookingPaymentReady
                   ? "complete"
                   : "blocked",
@@ -110,10 +115,18 @@ async function snapshot(
     "finance.payment_methods": `payment-methods:${paymentMethodsRevision}`,
     "pms.pricing_settings": `pricing:${pricingRevision}`,
   });
+  // A hotel paid only by bank transfer or PayPal selects neither readiness method.
+  const manualPaymentReady =
+    !!finance &&
+    !finance.bookingPaymentReady &&
+    finance.selectedMethodCount === 0 &&
+    !!options.manualPayments &&
+    (await options.manualPayments.readyMethods({ propertyId: request.propertyId })).length > 0;
   const payload = {
     paymentMethodsRevision,
     selectedMethodCount: finance?.selectedMethodCount ?? 0,
     bookingPaymentReady: finance?.bookingPaymentReady ?? false,
+    manualPaymentReady,
     blockingCodes: blockingPaymentCodes(finance),
     currentBaseRevisions,
   };

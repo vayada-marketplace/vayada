@@ -18,6 +18,9 @@ export type HostBookingActionState = {
   acceptanceMode: string | null;
   operationalStayStarted: boolean;
   hasPurchasedAddons: boolean;
+  /** Booked on the pricing-v2 booking page; bank transfer and PayPal there wait for the hotel to
+   * confirm the payment (VAY-2139). Optional for callers without it: false. */
+  pricingQuoteBooking?: boolean;
 };
 
 /** Eligibility is deliberately independent of the PMS route or a guest email. */
@@ -37,7 +40,9 @@ export function hostBookingActionConflict(
   if (
     action === "reject"
       ? booking.lifecycleStatus !== "pending_payment" ||
-        (booking.acceptanceMode !== "request" && booking.paymentMethod !== "bank_transfer")
+        (booking.acceptanceMode !== "request" &&
+          booking.paymentMethod !== "bank_transfer" &&
+          !(booking.paymentMethod === "paypal" && booking.pricingQuoteBooking === true))
       : booking.lifecycleStatus !== "confirmed"
   )
     return { code: "invalid_lifecycle", message: "The booking is not eligible for this action." };
@@ -48,7 +53,10 @@ export function hostBookingActionConflict(
   if (
     !voidableRequest &&
     (booking.paymentStatus !== "unpaid" ||
-      !["pay_at_property", "cash", "bank_transfer"].includes(booking.paymentMethod ?? ""))
+      !(
+        ["pay_at_property", "cash", "bank_transfer"].includes(booking.paymentMethod ?? "") ||
+        (booking.paymentMethod === "paypal" && booking.pricingQuoteBooking === true)
+      ))
   )
     return {
       code: "payment_adjustment_required",

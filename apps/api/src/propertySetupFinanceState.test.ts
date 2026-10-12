@@ -35,6 +35,21 @@ describe("property setup Finance owner state", () => {
     });
   });
 
+  it("completes a bank-transfer or PayPal hotel only while their acceptance is on (VAY-2139)", async () => {
+    const state = async (manual?: readonly ("bank_transfer" | "paypal")[]) => {
+      const result = await createPropertySetupFinanceStateProvider({
+        scope: authorizedScope(),
+        finance: { getPaymentReadiness: vi.fn(async () => paymentReadiness(2, 4, [])) },
+        pricing: { getPropertyPricingCurrency: vi.fn(async () => pricingCurrency(4)) },
+        ...(manual ? { manualPayments: { readyMethods: async () => manual } } : {}),
+      }).getOwnerState(request());
+      return result.outcome === "found" ? result.facts[0]!.state : result.outcome;
+    };
+    expect(await state()).toBe("saved");
+    expect(await state([])).toBe("saved");
+    expect(await state(["paypal"])).toBe("complete");
+  });
+
   it("represents truthful first-visit owner state without creating a draft", async () => {
     const provider = createPropertySetupFinanceStateProvider({
       scope: authorizedScope(),

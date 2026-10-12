@@ -281,6 +281,73 @@ describe("booking lifecycle email jobs", () => {
     ]);
   });
 
+  it("sends pricing-v2 bank-transfer and PayPal guests the instructions and tells the hotel (VAY-2139)", async () => {
+    const created = async (paymentMethod: string, paymentInstructions?: object) => {
+      const target = createTargetEmailStore({
+        paymentMethod,
+        bookingMetadata: { targetSource: "pricing_quote_draft", paymentInstructions },
+      });
+      const enqueued = await enqueueBookingTransitionNotifications(target, {
+        propertyId: "f2000000-0000-0000-0000-000000000951",
+        guestBookingId: "book_bank_001",
+        occurredAt: "2026-09-01T10:00:00.000Z",
+        transition: {
+          eventType: "guest_booking.created",
+          fromStatus: "draft",
+          toStatus: "pending_payment",
+        },
+        paymentDeadlineAt: "2026-09-03T10:00:00.000Z",
+      });
+      expect(enqueued.map((job) => job.jobType)).toEqual([
+        "email.booking-reserved-pending-payment",
+        "email.booking-host-payment-pending",
+      ]);
+      const [guest, host] = target.calls
+        .filter((call) => call.text.includes("INSERT INTO platform.jobs"))
+        .map((call) => JSON.parse(String(call.values?.[8])));
+      expect(guest.text).toContain("Payment deadline: 2026-09-03 10:00 UTC");
+      expect(guest.text).toContain("the booking expires and the room is released");
+      expect(host.recipientRole).toBe("host");
+      expect(host.text).toContain("mark the payment as received in your PMS");
+      return { guest, host };
+    };
+    const bank = await created("bank_transfer");
+    expect(bank.guest.text).toContain("while we wait for your bank transfer");
+    expect(bank.guest.requiresBankTransferInstructions).toBe(true);
+    expect(bank.host.text).toContain("will pay by bank transfer");
+    const paypal = await created("paypal", { paypalEmail: "pay@alpenrose.test" });
+    expect(paypal.guest.text).toContain("while we wait for your PayPal payment");
+    expect(paypal.guest.text).toContain("Please send it by PayPal to pay@alpenrose.test.");
+    expect(paypal.guest.requiresBankTransferInstructions).toBe(false);
+    expect(paypal.host.text).toContain("will pay by PayPal");
+  });
+
+  it("tells the guest and the hotel when a pricing-v2 bank transfer or PayPal payment never arrives", async () => {
+    const target = createTargetEmailStore({
+      paymentMethod: "paypal",
+      bookingMetadata: { targetSource: "pricing_quote_draft", acceptanceMode: "request" },
+    });
+    const enqueued = await enqueueBookingTransitionNotifications(target, {
+      propertyId: "f2000000-0000-0000-0000-000000000951",
+      guestBookingId: "book_bank_001",
+      occurredAt: "2026-09-03T10:00:01.000Z",
+      transition: {
+        eventType: "guest_booking.expired",
+        fromStatus: "pending_payment",
+        toStatus: "expired",
+      },
+    });
+    expect(enqueued.map((job) => job.jobType)).toEqual([
+      "email.booking-expired",
+      "email.booking-host-payment-expired",
+    ]);
+    const [guest, host] = target.calls
+      .filter((call) => call.text.includes("INSERT INTO platform.jobs"))
+      .map((call) => JSON.parse(String(call.values?.[8])));
+    expect(guest.text).toContain("We didn't receive your payment by the deadline");
+    expect(host.text).toContain("its payment didn't arrive by the deadline");
+  });
+
   it("waits for card authorization before notifying a future request-mode booking", async () => {
     const target = createTargetEmailStore({
       paymentMethod: "card",

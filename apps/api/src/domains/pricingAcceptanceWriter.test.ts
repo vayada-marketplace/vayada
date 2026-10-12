@@ -22,6 +22,10 @@ vi.mock("./pricingPmsAcceptedReservationJob.js", () => ({
   stagePmsAcceptedPricingReservationJob: vi.fn(),
 }));
 vi.mock("./storePricingAcceptance.js", () => ({ storePricingAcceptance: vi.fn() }));
+vi.mock("./pricingManualPayment.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./pricingManualPayment.js")>()),
+  readPricingManualReplay: vi.fn(async () => null),
+}));
 vi.mock("./pricingCardPayment.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./pricingCardPayment.js")>()),
   readPricingCardReplay: vi.fn(async () => null),
