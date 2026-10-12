@@ -45,8 +45,10 @@ const selection = {
 
 function store() {
   const inserted: unknown[] = [];
+  const queries: string[] = [];
   const client = {
     query: vi.fn(async (text: string, values?: unknown[]) => {
+      queries.push(text);
       if (text.includes("FROM booking.pricing_quotes")) return { rows: [] };
       // 12:00 in Rome on 2026-10-12; check-in from 15:00.
       if (text.includes('AS "checkInTime"'))
@@ -64,7 +66,7 @@ function store() {
     release: vi.fn(),
   };
   const pool = { connect: vi.fn().mockResolvedValue(client) } as unknown as pg.Pool;
-  return { inserted, issue: createCurrentPricingQuoteStore(pool, 300).issue };
+  return { inserted, queries, issue: createCurrentPricingQuoteStore(pool, 300).issue };
 }
 
 describe("current pricing quote store: bank-transfer and PayPal lead time (VAY-2145)", () => {
@@ -94,5 +96,6 @@ describe("current pricing quote store: bank-transfer and PayPal lead time (VAY-2
         paymentMethod: "pay_at_property",
       }),
     ).resolves.toMatchObject({ replayed: false });
+    expect(atProperty.queries.some((text) => text.includes('AS "checkInTime"'))).toBe(false);
   });
 });

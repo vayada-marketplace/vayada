@@ -5,6 +5,7 @@ import { replacementStayKey } from "@vayada/domain-booking";
 import { parsePmsInventoryReservationBundle } from "@vayada/domain-pms";
 import { pricingDraftFixture } from "./pricingBookingDraft.fixtures.js";
 import { acceptanceFixture } from "./pricingAcceptanceHistory.fixtures.js";
+import { readPricingCheckInPlace } from "./pricingManualPaymentLead.js";
 import { writePricingAcceptance } from "./pricingAcceptanceWriter.js";
 import {
   completePricingCardPayment,
@@ -2226,6 +2227,49 @@ describe.skipIf(!url)("pricing acceptance writer bank transfer and PayPal (Postg
       expect(pending.kind).toBe("payment_pending");
     } finally {
       await paypalFixture.close();
+    }
+  });
+  it("reads the check-in time guests see: the guest rules, then the policy summary (VAY-2145)", async () => {
+    const fixture = await setupFixture(manualQuote("paypal", "instant"), undefined, true);
+    const read = () => readPricingCheckInPlace(fixture.observer, fixture.propertyId);
+    try {
+      await fixture.observer.query("BEGIN");
+      await expect(read()).resolves.toMatchObject({
+        place: { timeZone: "Europe/Rome", checkInTime: null },
+      });
+      await fixture.observer.query(
+        "INSERT INTO hotel_catalog.property_policy_summaries(property_id,check_in_time) VALUES($1,'18:00')",
+        [fixture.propertyId],
+      );
+      await expect(read()).resolves.toMatchObject({ place: { checkInTime: "18:00" } });
+      const [actor, revision] = [randomUUID(), randomUUID()];
+      await fixture.observer.query(
+        "INSERT INTO identity.users(id,email,status) VALUES($1,$2,'active')",
+        [actor, `guest-rules-${actor}@example.test`],
+      );
+      await fixture.observer.query(
+        `INSERT INTO booking.guest_choice_revisions
+           (revision,property_id,organization_id,actor_user_id,choices,request_id,request_hash)
+         VALUES($1,$2,$3,$4,$5,$6,$7)`,
+        [
+          revision,
+          fixture.propertyId,
+          fixture.organizationId,
+          actor,
+          { checkInTime: "15:30" },
+          `guest-rules-${revision}`,
+          "a".repeat(64),
+        ],
+      );
+      await fixture.observer.query(
+        "INSERT INTO booking.guest_choice_heads(property_id,revision) VALUES($1,$2)",
+        [fixture.propertyId, revision],
+      );
+      // The guest rules shown on /book win over an older summary.
+      await expect(read()).resolves.toMatchObject({ place: { checkInTime: "15:30" } });
+    } finally {
+      await fixture.observer.query("ROLLBACK");
+      await fixture.close();
     }
   });
   it("expires an unpaid bank transfer at its deadline, releases the rooms and tells both sides", async () => {

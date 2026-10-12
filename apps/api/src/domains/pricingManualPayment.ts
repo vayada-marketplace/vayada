@@ -44,12 +44,15 @@ export async function lockPricingManualPaymentTerms(
   client: Pick<PoolClient, "query">,
   propertyId: string,
   method: unknown,
+  /** False for public reads outside a transaction, such as the checkout settings (VAY-2145). */
+  lock = true,
 ): Promise<PricingManualPaymentTerms | null> {
+  const forShare = lock ? " FOR SHARE" : "";
   if (!isManualPricingPaymentMethod(method)) return null;
   const settings = (
     await client.query(
       `SELECT payments_enabled,accepted_methods,deposit_policy FROM finance.payment_settings
-      WHERE property_id=$1 FOR SHARE`,
+      WHERE property_id=$1${forShare}`,
       [propertyId],
     )
   ).rows[0];
@@ -61,8 +64,7 @@ export async function lockPricingManualPaymentTerms(
     return null;
   if (method === "bank_transfer") {
     const destination = await client.query(
-      `SELECT id FROM finance.bank_transfer_destinations WHERE property_id=$1 AND enabled
-      FOR SHARE`,
+      `SELECT id FROM finance.bank_transfer_destinations WHERE property_id=$1 AND enabled${forShare}`,
       [propertyId],
     );
     return destination.rows.length === 1

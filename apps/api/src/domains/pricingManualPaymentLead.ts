@@ -79,7 +79,9 @@ export function manualPaymentEarliestArrival(input: {
   return null;
 }
 
-/** The property's check-in place and the database clock, or null without a time zone. */
+/** The property's check-in place and the database clock, or null without a time zone. The check-in
+ * time is the one guests see and accept on /book: the current guest rules (guest choices), then
+ * the older policy summary, then none (00:00). */
 export async function readPricingCheckInPlace(
   client: Pick<PoolClient, "query">,
   propertyId: string,
@@ -87,7 +89,14 @@ export async function readPricingCheckInPlace(
   const row = (
     await client.query(
       `SELECT location.timezone AS "timeZone",
-         to_char(summary.check_in_time, 'HH24:MI') AS "checkInTime", clock_timestamp() AS now
+         COALESCE(
+           (SELECT revision.choices->>'checkInTime' FROM booking.guest_choice_heads head
+            JOIN booking.guest_choice_revisions revision
+              ON revision.property_id = head.property_id AND revision.revision = head.revision
+            WHERE head.property_id = property.id),
+           to_char(summary.check_in_time, 'HH24:MI')
+         ) AS "checkInTime",
+         clock_timestamp() AS now
        FROM hotel_catalog.properties property
        LEFT JOIN hotel_catalog.property_locations location ON location.property_id = property.id
        LEFT JOIN hotel_catalog.property_policy_summaries summary

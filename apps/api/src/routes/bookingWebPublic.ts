@@ -2979,7 +2979,7 @@ async function bookingPageManualEarliestArrival(
   const read = await readPricingCheckInPlace(pool, propertyId);
   const earliest: Partial<Record<ManualPricingPaymentMethod, string>> = {};
   for (const method of manual) {
-    const terms = read && (await lockPricingManualPaymentTerms(pool, propertyId, method));
+    const terms = read && (await lockPricingManualPaymentTerms(pool, propertyId, method, false));
     const date =
       read && terms
         ? manualPaymentEarliestArrival({

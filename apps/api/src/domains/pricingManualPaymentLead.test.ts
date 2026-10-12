@@ -20,6 +20,11 @@ describe("bank-transfer and PayPal lead time (VAY-2145)", () => {
     expect(propertyLocalInstant("2026-03-29", "15:00", "Europe/Berlin")?.toISOString()).toBe(
       "2026-03-29T13:00:00.000Z",
     );
+    // 01:30 is still winter time, but 01:30 UTC is already summer time: only the second pass
+    // finds the right instant.
+    expect(propertyLocalInstant("2026-03-29", "01:30", "Europe/Berlin")?.toISOString()).toBe(
+      "2026-03-29T00:30:00.000Z",
+    );
     expect(propertyLocalInstant("2026-02-30", "15:00", "Europe/Berlin")).toBeNull();
     expect(propertyLocalInstant("2026-03-29", "24:00", "Europe/Berlin")).toBeNull();
     expect(propertyLocalInstant("2026-03-29", "15:00", "Not/AZone")).toBeNull();
