@@ -96,6 +96,7 @@ import {
   type DirectBookingInventoryReservationPort,
   type InventoryReservationReceipt,
 } from "../platform/inventoryReservation.js";
+import type { PlatformMediaServingConfig } from "../platform/mediaServing.js";
 import {
   serializePublicHotelQuoteProjection,
   type PublicHotelQuoteQuery,
@@ -1444,6 +1445,8 @@ type TargetChangeRequestRow = QueryResultRow & {
 };
 
 export type PgTargetBookingWebCheckoutAdapterConfig = {
+  /** Public CDN settings for room photos on /pricing-offers; without them rooms show no photos. */
+  mediaServing?: Pick<PlatformMediaServingConfig, "bucketName" | "cdnBaseUrl" | "publicPathPrefix">;
   /** Kill switch; the acceptance writer still requires a current publication. */
   replacementPricingAcceptanceEnabled?: boolean;
   /** Card quotes in acceptance; requires stripePaymentProvider. */
@@ -1539,7 +1542,9 @@ export function createTargetBookingWebCheckoutAdapter(
       max: config.max,
     });
 
-  const pricingOffers = createPublicPricingOfferCatalog(pool);
+  const pricingOffers = createPublicPricingOfferCatalog(pool, {
+    mediaServing: config.mediaServing,
+  });
   const pricingAddons = createPublicPricingAddonCatalog(pool);
   const guestDisclosure = createPublicQuoteGuestDisclosure(pool);
   const issueReplacementQuote = createReplacementBookingQuoteIssuer(
