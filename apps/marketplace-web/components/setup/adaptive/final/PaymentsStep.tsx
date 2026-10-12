@@ -6,7 +6,12 @@ import type {
 } from "@vayada/domain-finance";
 import { createBrowserAuthHandoff, crossAppReauthenticationUrl } from "@vayada/product-onboarding";
 import { ApiErrorResponse } from "@/services/api/client";
-import { getAuthCsrfToken } from "@/services/auth/sessionStore";
+import {
+  getAuthCsrfToken,
+  getAuthOrganizationId,
+  getAuthWorkosOrganizationId,
+} from "@/services/auth/sessionStore";
+import { productHandoffReturnTo } from "../../productHandoffReturnTo";
 import {
   financePaymentReadinessClient as client,
   type ManualPaymentMethods,
@@ -300,7 +305,16 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
       }
     }
     try {
-      window.location.assign(crossAppReauthenticationUrl(BOOKING_ADMIN_URL, PAYMENT_SETTINGS_PATH));
+      // Sign in again, then land on this hotel's payment settings.
+      window.location.assign(
+        crossAppReauthenticationUrl(
+          BOOKING_ADMIN_URL,
+          productHandoffReturnTo(PAYMENT_SETTINGS_PATH, props.propertyId, {
+            organizationId: getAuthOrganizationId(),
+            workosOrganizationId: getAuthWorkosOrganizationId(),
+          }),
+        ),
+      );
     } catch {
       setManualError("We couldn't open Booking Engine settings. Please try again.");
     }

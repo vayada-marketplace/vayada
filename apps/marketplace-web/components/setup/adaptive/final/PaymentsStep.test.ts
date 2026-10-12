@@ -505,6 +505,14 @@ it("sends the hotel to Booking Engine payment settings for bank transfer and Pay
     }),
   );
   expect(mocks.assign).toHaveBeenCalledWith("https://admin.booking.vayada.com/handoff#code");
+  // Without a handoff, Booking Engine's own sign-in still lands on this hotel's settings.
+  mocks.handoff.mockRejectedValueOnce(new Error("handoff unavailable"));
+  await act(async () => {
+    await h.button("Open payment settings").props.onClick();
+  });
+  const fallback = String(mocks.assign.mock.calls.at(-1)![0]);
+  expect(fallback.startsWith("https://admin.booking.vayada.com")).toBe(true);
+  expect(decodeURIComponent(decodeURIComponent(fallback))).toContain(`property_id=${propertyId}`);
   await act(async () => {
     await h.button("Check again").props.onClick();
   });
