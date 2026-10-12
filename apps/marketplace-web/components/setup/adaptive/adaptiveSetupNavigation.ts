@@ -37,6 +37,11 @@ export const ADAPTIVE_SETUP_STEP_COPY: Readonly<
     title: "Add your room types",
     subtitle: "Create one entry for each kind of room or unit guests can book.",
   },
+  payments: {
+    title: "Choose how guests can pay",
+    subtitle:
+      "Choose one or more methods. You can continue while a payment provider reviews your account.",
+  },
   pricing: {
     title: "Set your room prices",
     subtitle: "Choose the prices and cancellation terms guests will see.",
@@ -48,11 +53,6 @@ export const ADAPTIVE_SETUP_STEP_COPY: Readonly<
   guest_experience: {
     title: "Configure the guest experience",
     subtitle: "Set who can book, what guests enter, and the policies they see.",
-  },
-  payments: {
-    title: "Choose how guests can pay",
-    subtitle:
-      "Choose one or more methods. You can continue while a payment provider reviews your account.",
   },
   review: {
     title: "Review and launch",
