@@ -71,7 +71,7 @@ export function createBookingBookingPublicationSource(config: {
     async getBookingLaunchEvidence(request) {
       try {
         const loaded = await load(pool, config.design, config.guestRules, request);
-        if (!loaded) return unavailableEvidence();
+        if (typeof loaded === "string") return unavailableEvidence("provider", loaded);
         return deepFreeze({
           outcome: "evidence",
           port: "booking",
@@ -94,7 +94,7 @@ export function createBookingBookingPublicationSource(config: {
           ],
         });
       } catch {
-        return unavailableEvidence("system");
+        return unavailableEvidence("system", "owner_read_failed");
       }
     },
     async getSnapshot(request) {
@@ -109,7 +109,8 @@ export function createBookingBookingPublicationSource(config: {
             entityType !== BOOKING_LAUNCH_DERIVED_BINDING_SOURCE_ENTITY_TYPE,
         );
         if (
-          !loaded?.content ||
+          typeof loaded === "string" ||
+          !loaded.content ||
           loaded.blockers.page.length ||
           loaded.blockers.guest.length ||
           sourceKeys(loaded.sources) !== sourceKeys(expected)
@@ -140,14 +141,15 @@ async function load(
   designPort: BookingDesignReadinessPort,
   policyPort: BookingGuestChoicePublicationReader,
   scope: { organizationId: string; propertyId: string },
-): Promise<LoadedBooking | null> {
+): Promise<LoadedBooking | string> {
   const [settingsResult, rawDesign, rawPolicy] = await Promise.all([
     pool.query<SettingsRow>(SETTINGS_SQL, [scope.organizationId, scope.propertyId]),
     designPort.getBookingDesignReadiness(scope),
     policyPort.getCurrentGuestRules(scope),
   ]);
   const settings = settingsResult.rows.length === 1 ? settingsResult.rows[0]! : null;
-  if (!settings) return null;
+  // Booking settings and their link come with the hotel; no setup step creates them.
+  if (!settings) return "booking_settings_missing";
   const design = parseBookingDesignReadinessResult(rawDesign, scope);
   const policy = rawPolicy === null ? null : parseBookingGuestPolicyChoices(rawPolicy.choices);
   if (
@@ -160,9 +162,10 @@ async function load(
       !Number.isFinite(Date.parse(rawPolicy.confirmedAt)) ||
       new Date(rawPolicy.confirmedAt).toISOString() !== rawPolicy.confirmedAt)
   )
-    return null;
-  if (!design || design.outcome === "provider_failure" || (rawPolicy !== null && !policy))
-    return null;
+    return "guest_policy_scope_invalid";
+  if (!design) return "booking_design_invalid";
+  if (design.outcome === "provider_failure") return design.error.code;
+  if (rawPolicy !== null && !policy) return "guest_policy_invalid";
 
   const settingsSource = source(
     "booking_settings",
@@ -339,10 +342,11 @@ const ownerBlocker = (code: string): BookingLaunchOwnerBlocker => ({
   scope: "launch_configuration",
   kind: "user_fixable",
 });
-const unavailableEvidence = (errorSource: "provider" | "system" = "provider") => ({
+const unavailableEvidence = (errorSource: "provider" | "system", code: string) => ({
   outcome: "unavailable" as const,
   port: "booking" as const,
   errorSource,
+  code,
 });
 const unavailableSnapshot = () => ({ outcome: "unavailable" as const, owner: "booking" as const });
 const sourceKeys = (sources: readonly SourceEntityRevision[]) =>
