@@ -549,10 +549,20 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           payload: { paymentsEnabled: true, acceptedMethods: ["pay_at_property", "cash"] },
         }),
       ).toMatchObject({ ok: true });
-      // Before VAY-2134 this was "temporarily unavailable" with no hint.
-      expect(blockerCodes(await readiness())).toContain(
+      // Before VAY-2134 this was "temporarily unavailable". Since VAY-2136 the settings page
+      // writes the same versioned row as the setup step, so TEST ONLY's save counts.
+      expect(blockerCodes(await readiness())).not.toContain(
         "booking.payments:payment_methods_not_configured",
       );
+      const paymentMethodsRevision = Number(
+        (
+          await admin.query(
+            "SELECT payment_methods_revision FROM finance.payment_settings WHERE property_id=$1",
+            [propertyId],
+          )
+        ).rows[0]!.payment_methods_revision,
+      );
+      expect(paymentMethodsRevision).toBeGreaterThan(0);
       const payments = closing(
         createPgFinancePaymentReadinessCommandRepository({
           connectionString: cs,
@@ -567,7 +577,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
               organizationId,
               propertyId,
               idempotencyKey: `payments-${suffix}`,
-              expectedPaymentMethodsRevision: 0,
+              expectedPaymentMethodsRevision: paymentMethodsRevision,
               expectedPricingCurrencyRevision:
                 currencySaved.response.pricingCurrency.pricingCurrencyRevision,
               selectedMethods: ["pay_at_property"],
