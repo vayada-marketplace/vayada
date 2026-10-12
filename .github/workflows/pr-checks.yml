@@ -6,12 +6,16 @@ on:
       - main
       # VAY-2147 New room prices stack bases (top of the list to avoid append conflicts).
       - "fm/vay-2147-*"
+      # VAY-2138 room addition tail stack bases (top of the list to avoid append conflicts).
+      - "fm/vay-2138-*"
       # VAY-2139 bank transfer / PayPal launch stack bases (top of the list to avoid append conflicts).
       - "fm/vay-2139-*"
       # VAY-2136 payment-method writers stack bases (top of the list to avoid append conflicts).
       - "fm/vay-2136-*"
       # VAY-2137 setup payments-before-pricing stack bases (top of the list to avoid append conflicts).
       - "fm/vay-2137-*"
+      # VAY-2129 save-is-enough stack bases (top of the list to avoid append conflicts).
+      - "fm/vay-2129-*"
       # VAY-2125 step-by-step Prices tab stack bases (top of the list to avoid append conflicts).
       - "fm/vay-2125-*"
       # VAY-2123 sellable room offers stack bases (top of the list to avoid append conflicts).
@@ -48,6 +52,7 @@ on:
       - "fm/vay-2102-*"
       - "fm/vay-2120-*"
       - "fm/vay-2134-*"
+      - "fm/vay-2140-*"
       - flamurmaliqi2811/vay-2044-expense-worker-runtime
       - fm/vay-2041-worker-permissions
       - fm/vay-2041-worker-source-permissions

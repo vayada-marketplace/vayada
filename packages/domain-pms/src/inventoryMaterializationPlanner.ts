@@ -7,6 +7,7 @@ import {
   type PmsOperatingCalendarSourceRevision,
   type PmsOperatingSchedule,
 } from "./operatingCalendar.js";
+import { PMS_CALENDAR_AUTO_OPEN_MAX_HORIZON_DAYS } from "./calendarAutoOpen.js";
 import {
   PMS_INVENTORY_HORIZON_MAX_DAYS,
   type PmsInventoryCoverageEvidence,
@@ -74,6 +75,22 @@ export type PmsInventoryMaterializationPlan =
       changedDays: readonly PmsInventoryDaySnapshot[];
       coverage: PmsInventoryCoverageEvidence;
     }>
+  | Readonly<{ ok: false; error: PmsInventoryMaterializationPlanError }>;
+
+export type PmsInventoryRoomAdditionTailInput = Readonly<{
+  configuration: PmsOperatingCalendarConfigurationSnapshot;
+  /** Immutable calendar that owns the stored materialization coverage. */
+  previousConfiguration: PmsOperatingCalendarConfigurationSnapshot;
+  /** Requested materialization horizon; the tail starts the day after it ends. */
+  horizon: PmsInventoryRequiredCoverage;
+  /** Last stored day of the retained rooms after the horizon. */
+  tailThrough: string;
+  /** Current days of bound rooms from horizon.through through tailThrough. */
+  currentDays: readonly PmsInventoryDaySnapshot[];
+}>;
+
+export type PmsInventoryRoomAdditionTailPlan =
+  | Readonly<{ ok: true; days: readonly PmsInventoryDaySnapshot[] }>
   | Readonly<{ ok: false; error: PmsInventoryMaterializationPlanError }>;
 
 /** Pure planner. Locking, owner reads, persistence, audit, and outbox stay in the adapter. */
@@ -211,6 +228,107 @@ export function planPmsInventoryMaterialization(
     changedDays: Object.freeze(changedDays),
     coverage,
   });
+}
+
+/**
+ * Rows that added rooms need after the requested horizon when stored inventory, such as an
+ * auto-open tail, already reaches further. Retained rooms must hold one row per day from the
+ * last requested day through tailThrough and added rooms none, so a missing row still reads as
+ * corruption to later extensions. Existing rows are never changed: they stay outside coverage
+ * until auto-open rematerializes them.
+ */
+export function planPmsInventoryRoomAdditionTail(
+  input: PmsInventoryRoomAdditionTailInput,
+): PmsInventoryRoomAdditionTailPlan {
+  if (
+    !dataRecord(input, [
+      "configuration",
+      "previousConfiguration",
+      "horizon",
+      "tailThrough",
+      "currentDays",
+    ]) ||
+    !denseArray(input.currentDays)
+  ) {
+    return failure({ code: "invalid_input" });
+  }
+  const configuration = parseConfiguration(input.configuration);
+  const previous = parseConfiguration(input.previousConfiguration);
+  if (
+    !configuration ||
+    !previous ||
+    previous.propertyId !== configuration.propertyId ||
+    previous.calendarRevision >= configuration.calendarRevision
+  ) {
+    return failure({ code: "configuration_scope_mismatch" });
+  }
+  const from = dataRecord(input.horizon, ["from", "through"])
+    ? isoDateTimestamp(input.horizon.from)
+    : null;
+  const anchor = from === null ? null : isoDateTimestamp(input.horizon.through);
+  const through = isoDateTimestamp(input.tailThrough);
+  if (
+    from === null ||
+    anchor === null ||
+    through === null ||
+    anchor < from ||
+    through <= anchor ||
+    (through - from) / DAY_MS + 1 > PMS_CALENDAR_AUTO_OPEN_MAX_HORIZON_DAYS
+  ) {
+    return failure({ code: "horizon_invalid" });
+  }
+  const dates = Array.from({ length: (through - anchor) / DAY_MS + 1 }, (_, offset) =>
+    new Date(anchor + offset * DAY_MS).toISOString().slice(0, 10),
+  );
+
+  const previousRooms = new Set(previous.sourceInputs.roomBindings.map((b) => b.roomTypeId));
+  const bindings = configuration.sourceInputs.roomBindings;
+  const boundRooms = new Set(bindings.map(({ roomTypeId }) => roomTypeId));
+  const retainedRoomCount = bindings.filter((b) => previousRooms.has(b.roomTypeId)).length;
+  if (retainedRoomCount === 0) return failure({ code: "invalid_input" });
+  const expectedDates = new Set(dates);
+  const keys = new Set<string>();
+  const countByDate = new Map<string, number>();
+  for (let index = 0; index < input.currentDays.length; index += 1) {
+    const current = parseCurrentDay(input.currentDays[index]);
+    if (!current) return failure({ code: "current_day_invalid", index });
+    const errorKey = { roomTypeId: current.roomTypeId, stayDate: current.stayDate };
+    if (
+      current.propertyId !== configuration.propertyId ||
+      !boundRooms.has(current.roomTypeId) ||
+      !expectedDates.has(current.stayDate)
+    ) {
+      return failure({ code: "current_day_scope_invalid", ...errorKey });
+    }
+    const key = dayKey(current.roomTypeId, current.stayDate);
+    if (keys.has(key)) return failure({ code: "current_day_duplicate", ...errorKey });
+    keys.add(key);
+    if (!previousRooms.has(current.roomTypeId)) {
+      return failure({ code: "current_day_coverage_gap", stayDate: current.stayDate });
+    }
+    if (current.sourceRevisions.generated > configuration.calendarRevision) {
+      return failure({ code: "generated_revision_conflict", ...errorKey });
+    }
+    countByDate.set(current.stayDate, (countByDate.get(current.stayDate) ?? 0) + 1);
+  }
+  for (const stayDate of dates) {
+    if (countByDate.get(stayDate) !== retainedRoomCount) {
+      return failure({ code: "current_day_coverage_gap", stayDate });
+    }
+  }
+
+  const days = bindings
+    .filter((binding) => !previousRooms.has(binding.roomTypeId))
+    .flatMap((binding) =>
+      dates
+        .slice(1)
+        .map(
+          (stayDate) =>
+            newDay(configuration, binding, stayDate, binding.startingSellableLimitCount).day,
+        ),
+    )
+    .sort(compareDays);
+  return Object.freeze({ ok: true, days: Object.freeze(days) });
 }
 
 function planExistingDay(
@@ -534,7 +652,9 @@ function freezeDay(day: PmsInventoryDaySnapshot): PmsInventoryDaySnapshot {
   });
 }
 
-function failure(error: PmsInventoryMaterializationPlanError): PmsInventoryMaterializationPlan {
+function failure(
+  error: PmsInventoryMaterializationPlanError,
+): Readonly<{ ok: false; error: PmsInventoryMaterializationPlanError }> {
   return Object.freeze({ ok: false, error: Object.freeze(error) });
 }
 

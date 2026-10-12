@@ -254,8 +254,9 @@ async function load(
     `sha256:${sha256(JSON.stringify(content))}`,
   );
   const blockers: BookingLaunchOwnerBlocker[] = [];
-  // A hotel still being provisioned can't be published yet (VAY-2134).
-  if (first.lifecycleStatus !== "active") {
+  // Setup activates a hotel once its profile is complete (VAY-2140); until then the profile
+  // blockers explain the gap, so this only covers a complete hotel not activated yet.
+  if (first.lifecycleStatus !== "active" && content.profileComplete) {
     blockers.push(blocker("hotel_setup_in_progress", "external_pending"));
   }
   if (!content.profileComplete) blockers.push(blocker("hotel_profile_incomplete"));
