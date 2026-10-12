@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { pricingAmountStep, pricingCurrencyScale, parsePricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useTranslation } from "@/lib/i18n";
@@ -9,6 +9,8 @@ import { samePricingValue, type createReplacementPricingClient, type PricingSnap
 
 import { baseAmounts, decimalAmount, editedSnapshot, errorText, type MessageKey, parseMinorInput, PricingError } from "./pricingAmounts";
 import { financeNotReady, pricingSave, pricingSaveError } from "./savePricing";
+import type { NewRoomPrices } from "./newRoomPrices";
+import type { KeptNewRoomPrices } from "./keptNewRoomPrices";
 import { FirstPricingSetup, type SetupRoom, type firstPricingInput } from "./FirstPricingSetup";
 import { PricingTerms } from "./PricingTerms";
 import { PricingManualMethodsProvider, useLoadedPricingManualMethods } from "./pricingManualMethods";
@@ -47,13 +49,18 @@ type Client = ReturnType<typeof createReplacementPricingClient>;
 type Room = PricingSnapshot["rooms"][number];
 /** A room's unsaved edits carried over a reload after a refused save, with the room as it was loaded. */
 type Kept = { room: Room; base: Room | null; terms: Record<string, PricingTermsInput>; bases: Record<string, string | null> };
+/** The New room page (VAY-2147): prices for a room that does not exist yet, under a temporary id. The page's "Create Room
+ * Type" saves them, so there is no Save here: `take` returns what is typed (null: nothing) or throws what stops it,
+ * `actions` sit in the bar instead, `locked` holds every input while the page saves, `onPrices` says whether any are typed. */
+type NewRoom = { take: MutableRefObject<(() => NewRoomPrices | null) | null>; actions: ReactNode; locked: boolean; onPrices?: (entered: boolean) => void };
 /** One room's prices (the room page's Prices tab). Saving publishes the whole property, with every other room
  * exactly as read. `onAttention`: a leave confirmation is waiting, so the page should show this tab;
  * `onPublished`: prices were published; a new `refresh` reloads unless this room has unsaved work. */
-export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, roomTypeId: focus, onAttention, onPublished, refresh = 0 }: { client: Client; roomNames?: Record<string, string>; roomFacts?: Record<string, { size: number | null; photo: string | null }>; setup?: { propertyId: string; rooms: readonly SetupRoom[] }; roomTypeId: string; onAttention?: () => void; onPublished?: () => void; refresh?: number }) {
+export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, roomTypeId: focus, onAttention, onPublished, refresh = 0, newRoom, kept, onHandover }: { client: Client; roomNames?: Record<string, string>; roomFacts?: Record<string, { size: number | null; photo: string | null }>; setup?: { propertyId: string; rooms: readonly SetupRoom[] }; roomTypeId: string; onAttention?: () => void; onPublished?: () => void; refresh?: number; newRoom?: NewRoom; kept?: KeptNewRoomPrices; onHandover?: (kept: boolean) => void }) {
   const manualMethods = useLoadedPricingManualMethods(client);
-  const callbacks = useRef({ onAttention, onPublished });
-  useEffect(() => { callbacks.current = { onAttention, onPublished }; }, [onAttention, onPublished]);
+  const onPrices = newRoom?.onPrices;
+  const callbacks = useRef({ onAttention, onPublished, onPrices, onHandover });
+  useEffect(() => { callbacks.current = { onAttention, onPublished, onPrices, onHandover }; }, [onAttention, onPublished, onPrices, onHandover]);
   const [policyEdits, setPolicyEdits] = useState<Record<string, PricingTermsInput>>({});
   const policyBases = useRef<Record<string, string | null>>({});
   const policyKey = (room: string, offer: string) => JSON.stringify([room, offer]);
@@ -85,7 +92,11 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const [savedTerms, setSavedTerms] = useState<Record<string, OptionTerms | null>>({}), [termsAttempt, setTermsAttempt] = useState(0);
   const requestedTerms = useRef(new Set<string>());
   const loads = useRef(0);
-  const load = useCallback(async (after?: { keep?: Kept }) => {
+  // Prices the New room page could not save for this room: the first load that reads pricing starts from them and
+  // says why (VAY-2147).
+  const handedOver = useRef(kept);
+  const load = useCallback(async (requested?: { keep?: Kept }) => {
+    const handover = requested ? undefined : handedOver.current, after = handover ? { keep: handedOverEdits(handover) } : requested;
     const seq = ++loads.current, latest = () => alive.current && seq === loads.current; // An older read never overwrites a newer one.
     setLoading(true); setEmpty(false); setError(null);
     try {
@@ -98,7 +109,15 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
         rooms: !room ? rooms : rooms.some((value) => value.roomTypeId === room.roomTypeId) ? rooms.map((value) => value.roomTypeId === room.roomTypeId ? room : value) : [...rooms, room] } : null);
       requestedTerms.current.clear(); setSavedTerms({});
       setAddingOfferRoom(null); setPreset(null); setDeleting(null); setDeleteError(null); setPendingEntries({}); setBaseRevision(saved?.revision ?? 0); setStale(!!saved?.stale); setInputs({}); setDirty(!!room); setNeedsReload(false); setDone(false);
-      setNotice(room ? "pricing.room.noticeKept" : keep ? "pricing.room.noticeDropped" : saved?.stale ? "pricing.room.noticeStale" : "");
+      if (handover) handedOver.current = undefined;
+      // A save that broke off without an answer may have published them after all: only when the published prices
+      // are exactly these (someone else may have priced the room meanwhile).
+      const published = saved?.rooms.find((value) => value.roomTypeId === focus);
+      const savedAfterAll = handover?.outcomeUnknown && published && samePricingValue(savedPrices(published), savedPrices(handover.room));
+      setNotice(room ? (handover ? "pricing.newRoom.noticeKept" : "pricing.room.noticeKept") : savedAfterAll ? "pricing.newRoom.noticeSavedAfterAll" : keep ? "pricing.room.noticeDropped" : saved?.stale ? "pricing.room.noticeStale" : "");
+      // Why they were not saved, also when they no longer apply; `onHandover` says whether they were kept.
+      if (handover && !savedAfterAll) setError(handover.error);
+      if (handover) callbacks.current.onHandover?.(!!room);
     } catch (e) { if (latest()) setError(e); }
     finally { if (latest()) setLoading(false); }
   }, [client, focus]);
@@ -114,7 +133,8 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   useEffect(() => { alive.current = true; void load(); return () => { alive.current = false; }; }, [load]); // Client is property-bound; parent keys this component by property.
   const focusRoom = current?.rooms.find((room) => room.roomTypeId === focus);
   const termsKey = (offer: Room["offers"][number]) => JSON.stringify([focus, offer.id, offer.termsRevision]);
-  const wantedTerms = (focusRoom?.offers ?? []).map(termsKey).join("\n");
+  // A new room has no saved terms: every option it has was added here, with its terms.
+  const wantedTerms = newRoom ? "" : (focusRoom?.offers ?? []).map(termsKey).join("\n");
   useEffect(() => {
     for (const key of wantedTerms ? wantedTerms.split("\n") : []) {
       if (requestedTerms.current.has(key)) continue;
@@ -204,7 +224,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     setPolicyEdits((previous) => ({ ...previous, [key]: input.terms }));
     setCurrent({ currency: room.currency, rooms, ownerReferences: existing?.ownerReferences ?? { finance: "" } });
     setInputs({}); setAddingOfferRoom(null); setPreset(null); setDirty(true);
-    setNotice("pricing.editor.noticeSetupAdded");
+    setNotice(newRoom ? "pricing.newRoom.noticeAdded" : "pricing.editor.noticeSetupAdded");
     return null;
   }
   /** Deletes an option from this room's draft; saving publishes the room without it. Typed prices are folded into
@@ -235,14 +255,28 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       callbacks.current.onPublished?.();
     }, financeNotReady);
   }
-  const disabled = busy || retry || needsReload || done, display = current;
+  const firstPrices = useRef<(() => ReturnType<typeof firstPricingInput>) | null>(null);
+  /** The New room page's prices: the room as edited and its options' terms; unapplied first answers count, an open
+   * window or an amount that does not parse stops the create. While loading there are none ("Remove prices" reloads). */
+  function takeNewRoomPrices(): NewRoomPrices | null {
+    if (loading) return null;
+    if (hasPendingEntries) throw new PricingError("pricing.newRoom.errorPending");
+    const room = current && focusRoom ? editedSnapshot(current, inputs).rooms.find((value) => value.roomTypeId === focus) : undefined;
+    if (room) return { room, terms: Object.values(policyEdits).filter((terms) => terms.roomTypeId === focus) };
+    const first = dirty ? firstPrices.current?.() : undefined;
+    return first ? { room: { ...first.configuration, revision: baseRevision + 1 }, terms: [first.terms] } : null;
+  }
+  const take = newRoom?.take;
+  useEffect(() => { if (!take) return; take.current = takeNewRoomPrices; return () => { take.current = null; }; }); // Gone with the tab.
+  useEffect(() => { callbacks.current.onPrices?.(dirty); }, [dirty]);
+  const disabled = busy || retry || needsReload || done || !!newRoom?.locked, display = current;
   // Edits survive a reload after a conflict; a denial (no permission) would only be refused again.
   const keepsOnReload = needsReload && dirty && !(error instanceof ApiErrorResponse && error.status === 403);
   const roomSetup = setup?.rooms.filter((room) => room.roomTypeId === focus) ?? [];
   const focusIndex = display ? display.rooms.findIndex((room) => room.roomTypeId === focus) : -1, editing = focusIndex >= 0;
   const shownRooms = (display?.rooms ?? []).map((room, ri) => [room, ri] as const).filter(([room]) => room.roomTypeId === focus);
   const scale = display ? pricingCurrencyScale(display.currency)! : 2;
-  const warning = notice === "pricing.room.noticeStale" || notice === "pricing.room.noticeDropped";
+  const warning = notice === "pricing.room.noticeStale" || notice === "pricing.room.noticeDropped" || notice === "pricing.newRoom.noticeKept";
   const changeRoom = (ri: number) => (nextRoom: Room) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); };
   const pend = (key: string) => (pending: boolean) => setPendingEntries((previous) => ({ ...previous, [key]: pending }));
   // While editing, the button beside Save discards this room's changes; otherwise it reloads pricing.
@@ -253,8 +287,8 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     {notice && <p role="status" className={warning ? ui.warningBanner : ui.successBanner}>{t(notice)}</p>}
     {loading && <p role="status" className={ui.text}>{t("pricing.editor.loading")}</p>}
     {!loading && (display || empty) && !editing && <div className={setup && roomSetup.length ? "space-y-4" : ui.card}>
-      <div className="flex items-center justify-between gap-3"><h2 className={ui.cardHeading}>{t("pricing.room.title")}</h2><span className="text-[11px] font-medium text-amber-600">{t("pricing.room.notConfigured")}</span></div>
-      {setup && roomSetup.length ? <StepFirstPrices propertyId={setup.propertyId} rooms={roomSetup} fixedCurrency={display?.currency} disabled={disabled} onDirty={() => setDirty(true)} onCreate={createInitial} /> : <p className={ui.text}>{t(setup ? "pricing.room.notReady" : "pricing.editor.setupUnavailable")}</p>}
+      <div className="flex items-center justify-between gap-3"><h2 className={ui.cardHeading}>{t("pricing.room.title")}</h2><span className={`text-[11px] font-medium ${newRoom ? "text-gray-500" : "text-amber-600"}`}>{t(newRoom ? "pricing.newRoom.optional" : "pricing.room.notConfigured")}</span></div>
+      {setup && roomSetup.length ? <StepFirstPrices propertyId={setup.propertyId} rooms={roomSetup} fixedCurrency={display?.currency} disabled={disabled} onDirty={() => setDirty(true)} onCreate={createInitial} pending={newRoom ? firstPrices : undefined} /> : <p className={ui.text}>{t(setup ? "pricing.room.notReady" : "pricing.editor.setupUnavailable")}</p>}
       {retry && <button disabled={busy} className={ui.secondaryButton} onClick={() => void run()}>{t("pricing.editor.retry")}</button>}</div>}
     {!loading && display && shownRooms.map(([room, ri]) => {
       const main = mainOffer(room), mi = room.offers.indexOf(main), mainLabel = offerLabel(room.roomTypeId, ri, mi);
@@ -376,20 +410,33 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
         </aside>
       </div>;
     })}
-    {!loading && editing && <p className={`text-right ${ui.hint}`}>{t("pricing.editor.keepOpen")}</p>}
-    {/* Pressing Save is the declaration, so its text stays in the (sticky) bar beside the button. */}
-    <div className={`flex-wrap ${ui.actionBar}`}>
+    {!loading && editing && !newRoom && <p className={`text-right ${ui.hint}`}>{t("pricing.editor.keepOpen")}</p>}
+    {/* Pressing Save is the declaration, so its text stays in the (sticky) bar beside the button. On the New room page
+        the page's "Create Room Type" saves, and declares once prices are typed. */}
+    {newRoom ? <div className={`flex-wrap ${ui.actionBar}`}>
+      {dirty && <p className="w-full text-[11px] text-gray-500 md:mr-auto md:w-auto">{t("pricing.newRoom.declaration")}<span className="ml-2 font-medium text-amber-600">{t("pricing.newRoom.status")}</span></p>}
+      {(dirty || error !== null) && <button type="button" className={ui.actionBarButton} disabled={loading || disabled} onClick={() => { if (dirty) setReloading(true); else void load(); }}>{t(dirty ? "pricing.newRoom.remove" : "pricing.editor.reload")}</button>}
+      {newRoom.actions}
+    </div> : <div className={`flex-wrap ${ui.actionBar}`}>
       {!loading && editing && <p id={declarationId} className="w-full text-[11px] text-gray-500 md:mr-auto md:w-auto">{t("pricing.editor.saveDeclaration")}
         <span className={`ml-2 font-medium ${done ? "text-green-600" : dirty ? "text-amber-600" : "text-gray-400"}`}>{t(done ? "pricing.editor.statusSaved" : dirty ? "pricing.editor.statusUnsaved" : "pricing.editor.statusCurrent")}</span></p>}
       <button type="button" className={ui.actionBarButton} disabled={loading || busy || retry} onClick={() => { if (keepsOnReload) reloadKeepingRoom(); else if (leaveRisk) setReloading(true); else void load(); }}>{t(cancels ? "common.cancel" : "pricing.editor.reload")}</button>
       {!loading && editing && done && <button type="button" className={ui.actionBarButton} onClick={() => void load()}>{t("pricing.room.editAgain")}</button>}
       {!loading && editing && (retry ? <button type="button" className={ui.actionBarPrimary} aria-describedby={declarationId} disabled={busy} onClick={() => void run()}>{t("pricing.editor.retry")}</button>
         : <button type="button" disabled={disabled || hasPendingEntries || !(dirty || stale)} className={ui.actionBarPrimary} aria-describedby={declarationId} onClick={save}>{t(busy ? "pricing.editor.saving" : "pricing.editor.save")}</button>)}
-    </div>
+    </div>}
     {/* Last, so they open above an option's window. */}
     {reloading && <ConfirmDialog title={t(cancels ? "pricing.steps.discardTitle" : "pricing.reloadTitle")} message={t(cancels ? "pricing.steps.discardMessage" : "pricing.reloadMessage")} confirmLabel={t(cancels ? "pricing.steps.discardConfirm" : "pricing.reloadConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { setReloading(false); void load(); }} onCancel={() => setReloading(false)} />}
     {leave && <ConfirmDialog title={t("pricing.leaveTitle")} message={t("pricing.leaveMessage")} confirmLabel={t("pricing.leaveConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { leaving.current = true; setLeave(null); leave(); }} onCancel={() => setLeave(null)} />}
   </section></PricingManualMethodsProvider>;
+}
+/** A room's prices without what a save assigns (its revision and its options' terms revisions). */
+const savedPrices = (room: Room) => ({ ...room, revision: 0, offers: room.offers.map((offer) => ({ ...offer, termsRevision: "" })) });
+/** The New room page's kept prices as edits kept over a reload: a new room has no saved prices to compare with. */
+function handedOverEdits(handover: KeptNewRoomPrices): Kept {
+  const key = (terms: PricingTermsInput) => JSON.stringify([terms.roomTypeId, terms.offerId]); // As `policyKey`.
+  return { room: handover.room, base: null, terms: Object.fromEntries(handover.terms.map((terms) => [key(terms), terms])),
+    bases: Object.fromEntries(handover.terms.map((terms) => [key(terms), terms.expectedRevision])) };
 }
 /** Edits survive only when the server still has this room exactly as it was loaded (or still has no prices for
  * it) in the same currency, so a save after the reload never overwrites someone else's change to this room. */

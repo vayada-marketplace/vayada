@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, type MutableRefObject } from "react";
 import { useTranslation } from "@/lib/i18n";
 import { AcceptedPaymentMethods } from "./AcceptedPaymentMethods";
 import { firstPricingInput, type SetupRoom } from "./FirstPricingSetup";
@@ -24,6 +24,7 @@ export function StepFirstPrices({
   disabled,
   onDirty,
   onCreate,
+  pending,
 }: {
   propertyId: string;
   /** The room page's room (the first; the page offers only its own room). */
@@ -32,6 +33,9 @@ export function StepFirstPrices({
   disabled: boolean;
   onDirty: () => void;
   onCreate: (input: ReturnType<typeof firstPricingInput>) => void;
+  /** Filled with a builder for the answers as they stand, for a page that saves them without "Continue" (the New
+   * room page's "Create Room Type"). It shows and throws what is missing. */
+  pending?: MutableRefObject<(() => ReturnType<typeof firstPricingInput>) | null>;
 }) {
   const { t } = useTranslation();
   const room = rooms[0]!;
@@ -92,14 +96,31 @@ export function StepFirstPrices({
       {label}
     </button>
   );
+  const build = () =>
+    firstPricingInput(propertyId, room, crypto.randomUUID(), { ...values, currency });
+  const show = (cause: unknown) => setError(errorText(cause, t, "pricing.setup.errorCheck"));
   function submit() {
     if (disabled) return;
     try {
-      onCreate(firstPricingInput(propertyId, room, crypto.randomUUID(), { ...values, currency }));
+      onCreate(build());
     } catch (cause) {
-      setError(errorText(cause, t, "pricing.setup.errorCheck"));
+      show(cause);
     }
   }
+  useEffect(() => {
+    if (!pending) return;
+    pending.current = () => {
+      try {
+        return build();
+      } catch (cause) {
+        show(cause);
+        throw cause;
+      }
+    };
+    return () => {
+      pending.current = null;
+    };
+  });
   return (
     <form
       className="space-y-4"
@@ -297,7 +318,10 @@ export function StepFirstPrices({
         </p>
       )}
       <div className="flex flex-wrap items-center justify-end gap-3">
-        <p className={`mr-auto ${ui.help}`}>{t("pricing.steps.first.continueHint")}</p>
+        <p className={`mr-auto ${ui.help}`}>
+          {/* Only the New room page reads answers without Continue; there the room's create saves them. */}
+          {t(pending ? "pricing.newRoom.continueHint" : "pricing.steps.first.continueHint")}
+        </p>
         <button type="submit" disabled={disabled} className={ui.primaryButton}>
           {t("pricing.steps.first.continue")}
         </button>

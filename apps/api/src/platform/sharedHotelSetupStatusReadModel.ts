@@ -554,7 +554,7 @@ async function updatePublicProfileCompleteness(
   propertyId: string,
   advanceRevision: boolean,
 ): Promise<void> {
-  await client.query(
+  const updated = await client.query<{ activated: boolean; lifecycleRevision: number | string }>(
     `WITH completeness AS (
        SELECT
          property.id AS property_id,
@@ -593,19 +593,58 @@ async function updatePublicProfileCompleteness(
          ) AS reasons
        FROM hotel_catalog.properties property
        WHERE property.id = $1::uuid
+     ),
+     -- VAY-2140: a new hotel goes live once setup completes its profile; Vayada does not
+     -- approve it. Only provisioning hotels change; suspended and retired ones stay.
+     transition AS (
+       SELECT completeness.*, property.lifecycle_revision AS before_revision, (
+         property.lifecycle_status = 'provisioning'
+         AND property.profile_status NOT IN ('disabled', 'private')
+         AND cardinality(completeness.reasons) = 0
+       ) AS activate
+       FROM completeness
+       JOIN hotel_catalog.properties property ON property.id = completeness.property_id
      )
      UPDATE hotel_catalog.properties property
-     SET completeness_reasons = completeness.reasons,
+     SET completeness_reasons = transition.reasons,
          profile_status = CASE
            WHEN property.profile_status IN ('disabled', 'private') THEN property.profile_status
-           WHEN cardinality(completeness.reasons) = 0 THEN 'complete'
+           WHEN cardinality(transition.reasons) = 0 THEN 'complete'
            ELSE 'incomplete'
          END,
          profile_revision = property.profile_revision + CASE WHEN $2::boolean THEN 1 ELSE 0 END,
+         lifecycle_status = CASE
+           WHEN transition.activate AND property.lifecycle_status = 'provisioning' THEN 'active'
+           ELSE property.lifecycle_status
+         END,
+         lifecycle_revision = property.lifecycle_revision + CASE
+           WHEN transition.activate AND property.lifecycle_status = 'provisioning' THEN 1
+           ELSE 0
+         END,
          updated_at = now()
-     FROM completeness
-     WHERE property.id = completeness.property_id`,
+     FROM transition
+     WHERE property.id = transition.property_id
+     -- Callers lock the property first; a status changed meanwhile is never overwritten.
+     RETURNING transition.activate AND property.lifecycle_status = 'active'
+         AND property.lifecycle_revision = transition.before_revision + 1 AS activated,
+       property.lifecycle_revision AS "lifecycleRevision"`,
     [propertyId, advanceRevision],
+  );
+  const row = updated.rows[0];
+  if (!row?.activated) return;
+  await client.query(
+    `INSERT INTO platform.product_audit_events (
+       audit_key, product, action, occurred_at, tenant_scope, property_id, actor_type,
+       target_resource_product, target_resource_type, target_resource_id,
+       redacted_payload, audit_metadata, privacy_scope
+     ) VALUES ($1, 'hotel_catalog', 'hotel_catalog.property.lifecycle.auto_activate', now(),
+       'property', $2::uuid, 'system', 'hotel_catalog', 'property', $2::text,
+       $3::jsonb, '{"reason":"setup_profile_complete"}'::jsonb, 'confidential')`,
+    [
+      `hotel-catalog-auto-activate:${propertyId}:${row.lifecycleRevision}`,
+      propertyId,
+      JSON.stringify({ status: "active", revision: Number(row.lifecycleRevision) }),
+    ],
   );
 }
 
