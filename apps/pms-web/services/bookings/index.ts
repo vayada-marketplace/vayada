@@ -1160,9 +1160,16 @@ const pmsOperationsBookingsReadService = {
   },
 };
 
+// The status tabs use the display statuses from toBookingStatus; the API filters on stored ones.
+const STORED_RESERVATION_STATUSES: Record<string, string> = {
+  pending: "pending_payment",
+  cancelled: "canceled",
+};
+
 function buildPmsReservationsQuery(params?: BookingListParams): string {
   const query = new URLSearchParams();
-  appendQueryParam(query, "status", params?.status);
+  const status = params?.status;
+  appendQueryParam(query, "status", status && (STORED_RESERVATION_STATUSES[status] ?? status));
   appendQueryParam(query, "search", params?.search);
   appendQueryParam(query, "limit", params?.limit);
   appendQueryParam(query, "offset", params?.offset);
