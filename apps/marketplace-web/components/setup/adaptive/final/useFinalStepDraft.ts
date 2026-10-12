@@ -132,45 +132,48 @@ export function useFinalStepDraft(props: AdaptiveSetupStepComponentProps, stepId
     } as Parameters<typeof propertySetupDraftResetApi.reset>[1]);
     revision.current = { ...base, sessionRevision: receipt.sessionRevision, draftRevision: 0 };
   }, [stepId]);
-  useEffect(
-    () =>
-      registerStaleRecovery?.(
-        async () => {
-          if (busy.current) throw new Error("Wait for this step to finish saving.");
-          busy.current = true;
-          setSaving(true);
-          try {
-            const visible = propsRef.current;
-            if ((visible.route.sessionRevision ?? 0) > revision.current.sessionRevision) {
-              revision.current = adaptiveStepDraftRevision(visible.route, visible.step, stepId);
-              sessionId.current = visible.route.sessionId;
-            }
-            try {
-              await resetOwnDraft();
-            } catch (cause) {
-              if (cause instanceof PropertySetupDraftResetError && cause.requiresRefresh)
-                await visible.refreshRoute();
-              throw cause;
-            }
-            // The durable draft is gone: preserve answers before any fallible read.
-            preserve.current = true;
-            dirty.current = dirtyFields.current.size > 0;
-            const fresh = await routeClient.getRoute(visible.propertyId, { cache: "no-store" });
-            const next = fresh.steps.find((step) => step.stepId === stepId);
-            if (!next || next.draft)
-              throw new Error("This setup draft changed again. Refresh before resetting it.");
-            revision.current = adaptiveStepDraftRevision(fresh, next, stepId);
-            sessionId.current = fresh.sessionId;
+  /** Moves the draft onto the current owner revisions, keeping the answers, and reloads.
+   * `ownerChange` runs first inside the same busy section, so leaving waits for it. */
+  const rebase = useCallback(
+    async (ownerChange?: () => Promise<void>) => {
+      if (busy.current) throw new Error("Wait for this step to finish saving.");
+      busy.current = true;
+      setSaving(true);
+      try {
+        await ownerChange?.();
+        const visible = propsRef.current;
+        if ((visible.route.sessionRevision ?? 0) > revision.current.sessionRevision) {
+          revision.current = adaptiveStepDraftRevision(visible.route, visible.step, stepId);
+          sessionId.current = visible.route.sessionId;
+        }
+        try {
+          await resetOwnDraft();
+        } catch (cause) {
+          if (cause instanceof PropertySetupDraftResetError && cause.requiresRefresh)
             await visible.refreshRoute();
-            setReload((value) => value + 1);
-          } finally {
-            busy.current = false;
-            setSaving(false);
-          }
-        },
-        step.draft ? "reset" : "refresh",
-      ),
-    [registerStaleRecovery, step.draft, resetOwnDraft, stepId],
+          throw cause;
+        }
+        // The durable draft is gone: preserve answers before any fallible read.
+        preserve.current = true;
+        dirty.current = dirtyFields.current.size > 0;
+        const fresh = await routeClient.getRoute(visible.propertyId, { cache: "no-store" });
+        const next = fresh.steps.find((step) => step.stepId === stepId);
+        if (!next || next.draft)
+          throw new Error("This setup draft changed again. Refresh before resetting it.");
+        revision.current = adaptiveStepDraftRevision(fresh, next, stepId);
+        sessionId.current = fresh.sessionId;
+        await visible.refreshRoute();
+        setReload((value) => value + 1);
+      } finally {
+        busy.current = false;
+        setSaving(false);
+      }
+    },
+    [resetOwnDraft, stepId],
+  );
+  useEffect(
+    () => registerStaleRecovery?.(() => rebase(), step.draft ? "reset" : "refresh"),
+    [registerStaleRecovery, step.draft, rebase],
   );
 
   async function commit(save: () => Promise<void>, continueAfterSave = true) {
@@ -211,5 +214,5 @@ export function useFinalStepDraft(props: AdaptiveSetupStepComponentProps, stepId
       setSaving(false);
     }
   }
-  return { data, values, revision, initialize, change, commit, saving, error, reload };
+  return { data, values, revision, initialize, change, commit, rebase, saving, error, reload };
 }

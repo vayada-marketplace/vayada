@@ -6,6 +6,8 @@ on:
       - main
       # VAY-2136 payment-method writers stack bases (top of the list to avoid append conflicts).
       - "fm/vay-2136-*"
+      # VAY-2137 setup payments-before-pricing stack bases (top of the list to avoid append conflicts).
+      - "fm/vay-2137-*"
       # VAY-2125 step-by-step Prices tab stack bases (top of the list to avoid append conflicts).
       - "fm/vay-2125-*"
       # VAY-2123 sellable room offers stack bases (top of the list to avoid append conflicts).
