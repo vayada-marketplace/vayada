@@ -34,7 +34,11 @@ function snapshot(
   });
 }
 
-function adapter(value: FinancePaymentReadinessSnapshot | null, inScope?: boolean) {
+function adapter(
+  value: FinancePaymentReadinessSnapshot | null,
+  options: { manualMethods?: readonly ("bank_transfer" | "paypal")[]; inScope?: boolean } = {},
+) {
+  const { manualMethods, inScope } = options;
   const financeReadPort: FinancePaymentReadinessReadPort = {
     async getPaymentReadiness() {
       return value;
@@ -42,11 +46,40 @@ function adapter(value: FinancePaymentReadinessSnapshot | null, inScope?: boolea
   };
   return createFinanceBookingLaunchEvidenceAdapter({
     financeReadPort,
+    ...(manualMethods ? { manualPayments: { readyMethods: async () => manualMethods } } : {}),
     ...(inScope === undefined ? {} : { scope: { hasPaymentReadinessScope: async () => inScope } }),
   });
 }
 
 describe("createFinanceBookingLaunchEvidenceAdapter", () => {
+  it("counts a bank-transfer or PayPal hotel only while their acceptance is on (VAY-2139)", async () => {
+    const blockers = async (manual?: readonly ("bank_transfer" | "paypal")[]) => {
+      const result = await adapter(snapshot([]), {
+        manualMethods: manual,
+      }).getBookingLaunchEvidence(request);
+      if (result.outcome !== "evidence") throw new Error(result.outcome);
+      return result.entities[0]!.blockers.map(({ code }) => code);
+    };
+    expect(await blockers()).toEqual(["ready_payment_method_missing"]);
+    expect(await blockers([])).toEqual(["ready_payment_method_missing"]);
+    expect(await blockers(["bank_transfer"])).toEqual([]);
+    expect(await blockers(["paypal"])).toEqual([]);
+    const failing = createFinanceBookingLaunchEvidenceAdapter({
+      financeReadPort: { getPaymentReadiness: async () => snapshot([]) },
+      manualPayments: {
+        readyMethods: async () => {
+          throw new Error("database unavailable");
+        },
+      },
+    });
+    await expect(failing.getBookingLaunchEvidence(request)).resolves.toEqual({
+      outcome: "unavailable",
+      port: "finance",
+      errorSource: "system",
+      code: "payment_readiness_read_failed",
+    });
+  });
+
   it("emits one canonical Finance source with the accepted PMS currency binding", async () => {
     const result = await adapter(snapshot(["pay_at_property"])).getBookingLaunchEvidence(request);
 
@@ -201,11 +234,15 @@ describe("createFinanceBookingLaunchEvidenceAdapter", () => {
       ],
     });
     expect(isBookingLaunchOwnerEvidenceValid(result, request, "finance")).toBe(true);
-    await expect(adapter(null, true).getBookingLaunchEvidence(request)).resolves.toEqual(result);
+    await expect(
+      adapter(null, { inScope: true }).getBookingLaunchEvidence(request),
+    ).resolves.toEqual(result);
   });
 
   it("keeps a property outside the Finance scope unavailable instead of asking for payments", async () => {
-    await expect(adapter(null, false).getBookingLaunchEvidence(request)).resolves.toEqual({
+    await expect(
+      adapter(null, { inScope: false }).getBookingLaunchEvidence(request),
+    ).resolves.toEqual({
       outcome: "unavailable",
       port: "finance",
       errorSource: "provider",

@@ -257,6 +257,11 @@ async function mockPaymentsPricingApis(page: Page) {
       await ok(route, readiness());
       return;
     }
+    // Bank-transfer and PayPal acceptance is off, as in production today (VAY-2139).
+    if (pathname.endsWith("/manual-payment-methods") && request.method() === "GET") {
+      await ok(route, { acceptanceEnabled: false, readyMethods: [] });
+      return;
+    }
     if (pathname.endsWith("/payment-methods") && request.method() === "PUT") {
       const body = request.postDataJSON() as {
         expectedPaymentMethodsRevision: number;
@@ -328,6 +333,10 @@ async function mockPaymentsPricingApis(page: Page) {
           acceptedAt,
         },
       });
+      return;
+    }
+    if (pathname.endsWith("/pricing-v2/payment-methods") && method === "GET") {
+      await ok(route, { acceptanceEnabled: false, readyMethods: [] });
       return;
     }
     if (pathname.endsWith("/pricing-v2") && method === "GET") {

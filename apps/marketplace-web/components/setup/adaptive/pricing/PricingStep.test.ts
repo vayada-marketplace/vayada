@@ -18,7 +18,7 @@ vi.mock("@/services/api/onboardingPricingClient", async () => ({
   onboardingPricingApi: {
     load: mocks.load,
     saveCurrency: mocks.saveCurrency,
-    replacementPricing: () => ({ read: mocks.read }),
+    replacementPricing: () => ({ read: mocks.read, paymentMethods: async () => [] }),
   },
 }));
 vi.mock("./publishFirstPricing", async () => ({

@@ -212,6 +212,7 @@ import {
   createBookingPublicationProductionRuntime,
   startBookingPublicationWorker,
 } from "./domains/bookingPublicationProductionRuntime.js";
+import { createFinanceManualPaymentReadinessReader } from "./domains/financeManualPaymentReadiness.js";
 import { createTargetFinanceBillingConfigReadPort } from "./domains/financeBillingConfigReadModel.js";
 import { createFinanceSubscriptionService } from "./domains/financeSubscriptionService.js";
 import { createPgFinanceSubscriptionStore } from "./domains/financeSubscriptionStore.js";
@@ -1444,6 +1445,10 @@ const bookingGuestPolicyProjectionProjector = createBookingGuestPolicyOutboxProj
     : undefined,
 });
 
+// Bank transfer and PayPal count for booking launch only while their acceptance is on (VAY-2139).
+const financeManualPaymentReadiness = config.replacementPricingManualPaymentAcceptanceEnabled
+  ? createFinanceManualPaymentReadinessReader({ pool: propertySetupOwnerPool })
+  : undefined;
 const bookingPublicationRuntime = (() => {
   const dependenciesMissing =
     config.apiRuntime !== "next" ||
@@ -1470,6 +1475,7 @@ const bookingPublicationRuntime = (() => {
     operatingCalendar: propertySetupPmsRuntime.operatingCalendar,
     inventory: pmsOperatingCalendarRuntime.inventory,
     finance: financePaymentReadinessReadModel,
+    manualPayments: financeManualPaymentReadiness,
     financeScope: financePaymentReadinessReadModel,
     // Called per request, after `app` below exists.
     warn: (fields, message) => app.log.warn(fields, message),
@@ -1494,6 +1500,7 @@ const propertySetupRouteStateReadPort = createPropertySetupRouteStateReadPort({
       scope: createPgPropertySetupFinanceOwnerScopePort({ pool: propertySetupOwnerPool }),
       finance: financePaymentReadinessReadModel,
       pricing: pmsPricingReadModel,
+      manualPayments: financeManualPaymentReadiness,
     }),
     review_lifecycle: createPropertySetupReviewLifecycleStateProvider({
       marketplace: marketplaceSetupLifecycleStatusRepository,
@@ -1805,7 +1812,10 @@ const app = buildApp({
       }
     : undefined,
   bookingReservationsRepository,
-  financePaymentSetup: financePaymentSetupRuntime.routes,
+  financePaymentSetup: {
+    ...financePaymentSetupRuntime.routes,
+    manualPayments: financeManualPaymentReadiness,
+  },
   publicPageRefresh: refreshLivePublicPage,
   bookingGuestChoices: {
     store: bookingGuestChoiceStore,
@@ -1884,6 +1894,7 @@ const app = buildApp({
     config.pmsOperationsSource === "target"
       ? {
           commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context),
+          manualPayments: financeManualPaymentReadiness,
         }
       : undefined,
   pmsPricing: pmsGuestPolicySetupCommands

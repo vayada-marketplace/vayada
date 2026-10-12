@@ -30,6 +30,23 @@ describe("host Booking action eligibility", () => {
     ).toBeNull();
     expect(hostBookingActionConflict("reject", booking)?.code).toBe("invalid_lifecycle");
   });
+  it("declines an unpaid booking-page PayPal booking but never changes a paid one (VAY-2139)", () => {
+    const legacy = { ...booking, lifecycleStatus: "pending_payment", paymentMethod: "paypal" };
+    // Legacy-checkout PayPal bookings keep their rules.
+    expect(hostBookingActionConflict("reject", legacy)?.code).toBe("invalid_lifecycle");
+    const pending = { ...legacy, pricingQuoteBooking: true };
+    expect(hostBookingActionConflict("reject", pending)).toBeNull();
+    expect(hostBookingActionConflict("reject", { ...pending, paymentStatus: "paid" })?.code).toBe(
+      "payment_adjustment_required",
+    );
+    expect(
+      hostBookingActionConflict("cancel", {
+        ...booking,
+        paymentMethod: "paypal",
+        paymentStatus: "paid",
+      })?.code,
+    ).toBe("payment_adjustment_required");
+  });
   it.each(["draft", "pending_payment", "declined", "canceled", "completed", "expired"])(
     "cannot cancel or edit a %s booking",
     (lifecycleStatus) => {
