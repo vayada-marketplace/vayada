@@ -28,6 +28,7 @@ import {
 } from "./bookingPublicationProjector.js";
 import { createPgDistributionBookingPublicationProjection } from "./distributionBookingPublicationProjection.js";
 import { createFinanceBookingLaunchEvidenceAdapter } from "./financeBookingLaunchEvidence.js";
+import type { FinancePaymentReadinessScopePort } from "./financePaymentReadinessReadModel.js";
 import { createFinanceBookingPublicationSnapshotPort } from "./financeBookingPublicationSnapshot.js";
 import { createHotelCatalogBookingPublicationSource } from "./hotelCatalogBookingPublicationSource.js";
 import { createPmsBookingPublicationSource } from "./pmsBookingPublicationSource.js";
@@ -155,6 +156,7 @@ export function createBookingPublicationProductionRuntime(config: {
   operatingCalendar: PmsOperatingCalendarReadPort;
   inventory: PmsInventoryLaunchReadinessReadPort;
   finance: FinancePaymentReadinessReadPort;
+  financeScope?: FinancePaymentReadinessScopePort;
   /** Receives one line per readiness check an owner could not answer (IDs and codes only). */
   warn?: (fields: Record<string, unknown>, message: string) => void;
 }): BookingPublicationProductionRuntime {
@@ -176,6 +178,7 @@ export function createBookingPublicationProductionRuntime(config: {
   });
   const financeEvidence = createFinanceBookingLaunchEvidenceAdapter({
     financeReadPort: config.finance,
+    ...(config.financeScope ? { scope: config.financeScope } : {}),
   });
   const financeSnapshot = createFinanceBookingPublicationSnapshotPort({
     financeReadPort: config.finance,
