@@ -48,3 +48,48 @@ test("first pricing setup starts without a payment method and lets staff select 
   await expect(atProperty).toBeChecked();
   await expect(card).not.toBeChecked();
 });
+
+test("first pricing setup offers bank transfer once the hotel can use it (VAY-2139)", async ({
+  page,
+}) => {
+  await mockPmsWebAuthenticatedSession(page);
+  await mockPmsWebTargetRoutes(page);
+  await page.route("**/api/identity/staff/self-access", (route) =>
+    route.fulfill({
+      json: {
+        membershipId: "test-owner",
+        roleKey: "hotel_owner",
+        permissions: ["pms.operations.read", "pms.operations.manage"],
+      },
+    }),
+  );
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2`, (route) =>
+    route.fulfill({ status: 404, json: { code: "not_found" } }),
+  );
+  await page.route(
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2/payment-methods`,
+    (route) =>
+      route.fulfill({ json: { acceptanceEnabled: true, readyMethods: ["bank_transfer"] } }),
+  );
+  await page.route(
+    `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-types/${PMS_WEB_ROOM_TYPE_ID}`,
+    (route) =>
+      route.fulfill({
+        json: {
+          contractVersion: "pms-operations.v1",
+          propertyId: PMS_WEB_PROPERTY_ID,
+          item: pmsWebRoomType,
+          sourceFreshness: {},
+        },
+      }),
+  );
+
+  await page.goto(`/rooms/${PMS_WEB_ROOM_TYPE_ID}?tab=prices`);
+  // VAY-2125: the first price is asked as steps on the room's Prices tab.
+  await expect(page.getByRole("heading", { name: "Set this room's prices" })).toBeVisible();
+  const bank = page.getByRole("checkbox", { name: "Bank transfer" });
+  await expect(bank).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: "PayPal" })).toHaveCount(0);
+  await bank.check();
+  await expect(bank).toBeChecked();
+});
