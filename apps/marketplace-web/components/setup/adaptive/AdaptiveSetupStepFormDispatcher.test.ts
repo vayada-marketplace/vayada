@@ -155,10 +155,10 @@ function setupRoute(): PropertySetupRouteReadModel {
       "marketplace_preferences",
       "booking_design",
       "rooms",
+      "payments",
       "pricing",
       "calendar",
       "guest_experience",
-      "payments",
       "review",
     ].map((stepId, index) => ({
       stepId: stepId as PropertySetupRouteReadModel["steps"][number]["stepId"],

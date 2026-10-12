@@ -56,10 +56,10 @@ describe("property setup route state composition", () => {
         { stepId: "marketplace_preferences", state: "saved" },
         { stepId: "booking_design", state: "not_started" },
         { stepId: "rooms", state: "saved" },
+        { stepId: "payments", state: "not_started" },
         { stepId: "pricing", state: "not_started" },
         { stepId: "calendar", state: "not_started" },
         { stepId: "guest_experience", state: "blocked" },
-        { stepId: "payments", state: "not_started" },
         { stepId: "review", state: "blocked" },
       ],
     });
@@ -99,10 +99,10 @@ describe("property setup route state composition", () => {
       ["marketplace_preferences", "saved"],
       ["booking_design", "draft"],
       ["rooms", "saved"],
+      ["payments", "not_started"],
       ["pricing", "not_started"],
       ["calendar", "not_started"],
       ["guest_experience", "blocked"],
-      ["payments", "not_started"],
       ["review", "blocked"],
     ]);
   });
