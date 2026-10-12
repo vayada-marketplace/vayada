@@ -12,8 +12,10 @@ email". There is no PayPal API, webhook or provider account. Bank details live e
 
 Everything sits behind `REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED` (default `false`).
 While it is off, a bank-transfer or PayPal quote request answers 400, and accepting one answers
-404 `MANUAL_PAYMENT_UNAVAILABLE`. Booking launch readiness keeps counting only card and pay at
-property, so a bank-only or PayPal-only hotel cannot publish its booking page.
+404 `MANUAL_PAYMENT_UNAVAILABLE`; a replay of a booking made while it was on still answers its
+pending payment. Booking launch readiness keeps counting only card and pay at property, so a
+bank-only or PayPal-only hotel cannot publish its booking page. Such a hotel can save and publish
+pricing-v2 prices (Finance pricing readiness counts its method), so they also reach channels.
 
 ## Flow (the same for both methods and both acceptance modes)
 
@@ -39,6 +41,12 @@ Finance ready only for a hotel that accepts neither card nor pay at property, so
 Stripe readiness lapses still fails as before. Quotes for them must be due in full before the stay
 (no charges collected at the property), and bank transfer is quoted only where the bank-details
 binding (KMS settings) exists.
+
+## Known gap
+
+The payment deadline is the agreed window (48 h, or the hotel's PayPal window) even when check-in
+comes first, as in legacy: a late booking can still be waiting for payment when the guest arrives,
+and the sweep would then expire it. The hotel can record the payment before the deadline.
 
 ## Out of scope
 
