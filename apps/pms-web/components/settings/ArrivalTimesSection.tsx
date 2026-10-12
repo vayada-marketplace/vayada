@@ -141,8 +141,7 @@ export function ArrivalTimesSection() {
           )}
           {saved && (
             <p className="mt-2 text-sm text-green-700" role="status">
-              Arrival times saved. Review and publish your booking page to show the updated policy
-              to guests.
+              Arrival times saved. Guests see them on your booking page within a minute.
             </p>
           )}
           {!choices ? (

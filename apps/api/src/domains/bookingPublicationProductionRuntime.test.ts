@@ -165,4 +165,29 @@ describe("Booking publication refresh", () => {
     ).resolves.toEqual(pending);
     expect(projectPending).toHaveBeenCalledWith({ propertyId });
   });
+
+  it("never makes a page public from a live-only refresh (VAY-2129)", async () => {
+    const propertyId = "22222222-2222-4222-8222-222222222222";
+    const getBookingReadiness = vi.fn();
+    const requestPublication = vi.fn();
+    const refresh = createBookingPublicationRefresh({
+      readinessProvider: { getBookingReadiness },
+      projection: { getActive: vi.fn().mockResolvedValue(null) },
+      repository: { requestPublication, getPublicationStatus: vi.fn() },
+      projector: { projectPending: vi.fn() },
+    });
+
+    await expect(
+      refresh({
+        organizationId: "11111111-1111-4111-8111-111111111111",
+        propertyId,
+        actorUserId: "44444444-4444-4444-8444-444444444444",
+        idempotencyKey: "refresh-2",
+        audit: { requestId: "request-2", source: "booking-admin" },
+        onlyIfLive: true,
+      }),
+    ).resolves.toBeNull();
+    expect(getBookingReadiness).not.toHaveBeenCalled();
+    expect(requestPublication).not.toHaveBeenCalled();
+  });
 });

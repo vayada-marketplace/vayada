@@ -3240,9 +3240,10 @@ Choose and save at least one payment method.
 - Review and launch remains reachable when the selected methods are pending.
   Step 9 explains whether Booking can publish.
 - An accepted Step 8 save updates canonical, non-public Finance working
-  configuration plus the resumable draft manifest. Readiness gains reach the
-  live Booking page only through Step 9 publication. Every negative transition
-  listed above fails closed immediately, even before a new publication.
+  configuration plus the resumable draft manifest. Before go-live, readiness gains
+  reach the Booking page only through Step 9's first publication; after go-live,
+  saved changes reach guests by themselves (VAY-2129). Every negative transition
+  listed above fails closed immediately.
 - If a provider redirect is in progress, preserve the current onboarding route
   and return destination server-side. The owner resumes the same Step 8 draft.
 - A stale settings or currency revision produces a conflict with
@@ -3448,7 +3449,9 @@ Use these states:
 - `Ready to publish`: enable `Publish booking page`.
 - `Publishing`: persist an operation identifier and restore status after a
   reload.
-- `Published`: show the canonical guest URL and `Open booking page`.
+- `Live`: show the canonical guest URL and `Open booking page`. The first
+  publication is the go-live; later saves go live by themselves, so there is no
+  republish button (VAY-2129).
 - `Temporarily unavailable`: show a product-level system error and Retry
   without inventing missing configuration.
 

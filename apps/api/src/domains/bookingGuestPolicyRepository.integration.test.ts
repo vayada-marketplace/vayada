@@ -560,6 +560,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking guest-policy repository"
       }),
     ).resolves.toEqual({ outcome: "malformed" });
 
+    const refreshed: string[] = [];
     const projector = createBookingGuestPolicyOutboxProjector({
       pool: projectionPool,
       handler: createBookingGuestPolicyProjectionHandler({
@@ -567,6 +568,11 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking guest-policy repository"
         receipts: repository,
         catalog,
       }),
+      // VAY-2129: an applied policy refreshes the live booking page; a failure is ignored.
+      afterApplied: async (input) => {
+        refreshed.push(input.propertyId);
+        throw new Error("booking page refresh unavailable");
+      },
       now: () => new Date("2026-08-04T20:01:00.000Z"),
     });
 
@@ -580,6 +586,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking guest-policy repository"
         deadLettered: 0,
       },
     );
+    expect(refreshed).toEqual([propertyId]);
     const state = await admin.query<{
       revision: number;
       status: string;
