@@ -1266,7 +1266,7 @@ describe("Booking Web public bootstrap parity", () => {
               },
             ],
           };
-        if (text.includes("FROM finance.payment_settings") && text.includes("FOR SHARE"))
+        if (text.includes("SELECT payments_enabled,accepted_methods,deposit_policy"))
           return {
             rows: [
               {
@@ -1279,7 +1279,7 @@ describe("Booking Web public bootstrap parity", () => {
               },
             ],
           };
-        if (text.includes("FROM finance.bank_transfer_destinations"))
+        if (text.includes("SELECT id FROM finance.bank_transfer_destinations"))
           return { rows: [{ id: "destination-1" }] };
         if (text.includes("FROM hotel_catalog.property_slugs")) {
           return {
