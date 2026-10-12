@@ -108,8 +108,10 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       requestedTerms.current.clear(); setSavedTerms({});
       setAddingOfferRoom(null); setPreset(null); setDeleting(null); setDeleteError(null); setPendingEntries({}); setBaseRevision(saved?.revision ?? 0); setStale(!!saved?.stale); setInputs({}); setDirty(!!room); setNeedsReload(false); setDone(false);
       if (handover) handedOver.current = undefined;
-      // A save that broke off without an answer may have published them after all: this room is new, so they are ours.
-      const savedAfterAll = handover?.outcomeUnknown && saved?.rooms.some((value) => value.roomTypeId === focus);
+      // A save that broke off without an answer may have published them after all: only when the published prices
+      // are exactly these (someone else may have priced the room meanwhile).
+      const published = saved?.rooms.find((value) => value.roomTypeId === focus);
+      const savedAfterAll = handover?.outcomeUnknown && published && samePricingValue(savedPrices(published), savedPrices(handover.room));
       setNotice(room ? (handover ? "pricing.newRoom.noticeKept" : "pricing.room.noticeKept") : savedAfterAll ? "pricing.newRoom.noticeSavedAfterAll" : keep ? "pricing.room.noticeDropped" : saved?.stale ? "pricing.room.noticeStale" : "");
       // Why they were not saved, also when they no longer apply; `onHandover` says whether they were kept.
       if (handover && !savedAfterAll) setError(handover.error);
@@ -426,6 +428,8 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     {leave && <ConfirmDialog title={t("pricing.leaveTitle")} message={t("pricing.leaveMessage")} confirmLabel={t("pricing.leaveConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { leaving.current = true; setLeave(null); leave(); }} onCancel={() => setLeave(null)} />}
   </section>;
 }
+/** A room's prices without what a save assigns (its revision and its options' terms revisions). */
+const savedPrices = (room: Room) => ({ ...room, revision: 0, offers: room.offers.map((offer) => ({ ...offer, termsRevision: "" })) });
 /** The New room page's kept prices as edits kept over a reload: a new room has no saved prices to compare with. */
 function handedOverEdits(handover: KeptNewRoomPrices): Kept {
   const key = (terms: PricingTermsInput) => JSON.stringify([terms.roomTypeId, terms.offerId]); // As `policyKey`.

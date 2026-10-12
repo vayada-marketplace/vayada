@@ -349,6 +349,23 @@ it("says the prices were saved when a save that broke off had published them aft
   expect(onHandover).toHaveBeenCalledWith(false);
 });
 
+it("does not claim them saved when the room was published with other prices meanwhile", async () => {
+  // The same room at €130 instead of €120.
+  const typedRoom = JSON.stringify(handedOver(null).room);
+  expect(typedRoom.split('"12000"')).toHaveLength(2);
+  const changed = { ...JSON.parse(typedRoom.replace('"12000"', '"13000"')), revision: 4 };
+  client.read.mockResolvedValue({
+    ...published,
+    rooms: [{ ...existing, revision: 4 }, changed],
+    revision: 4,
+  });
+  await mountRoom(handedOver(new Error("Failed to fetch"), true));
+  expect(text()).not.toContain(english("pricing.newRoom.noticeSavedAfterAll"));
+  expect(text()).toContain(english("pricing.room.noticeDropped"));
+  expect(text()).toContain("Failed to fetch");
+  expect(onHandover).toHaveBeenCalledWith(false);
+});
+
 it("says why when the kept prices no longer apply (another currency was published meanwhile)", async () => {
   client.read.mockResolvedValue({ ...published, currency: "USD", rooms: [], revision: 4 });
   await mountRoom(handedOver(new PricingError("pricing.newRoom.errorChanged")));
