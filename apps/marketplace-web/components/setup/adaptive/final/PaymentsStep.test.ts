@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { act, create } from "react-test-renderer";
 import { beforeEach, expect, it, vi } from "vitest";
 import { createFinancePaymentReadinessSnapshot } from "@vayada/domain-finance";
+import { ApiErrorResponse } from "@/services/api/client";
 import type { AdaptiveSetupStepComponentProps } from "../AdaptiveSetupStepFormDispatcher";
 const mocks = vi.hoisted(() => ({
   load: vi.fn(),
@@ -9,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   draft: vi.fn(),
   reset: vi.fn(),
   route: vi.fn(),
+  currencies: vi.fn(),
+  saveCurrency: vi.fn(),
 }));
 vi.mock("@/services/api/financePaymentReadinessClient", () => ({
   financePaymentReadinessClient: { load: mocks.load, save: mocks.save },
@@ -23,11 +26,15 @@ vi.mock("@/services/api/propertySetupDraftResetClient", () => ({
 vi.mock("@/services/api/propertySetupRouteClient", () => ({
   createPropertySetupRouteClient: () => ({ getRoute: mocks.route }),
 }));
+vi.mock("@/services/api/onboardingPricingClient", () => ({
+  onboardingPricingApi: { load: mocks.currencies, saveCurrency: mocks.saveCurrency },
+}));
 vi.mock("./StripeSetupControls", () => ({
   StripeSetupControls: (props: unknown) => createElement("stripe-controls", props as {}),
 }));
 import { PaymentsStep } from "./PaymentsStep";
 const propertyId = "22222222-2222-4222-8222-222222222222";
+const setElsewhere = { pricingCurrency: { currency: "EUR" } };
 const pricing = { contractVersion: "pms-pricing.v1", currency: "EUR", pricingCurrencyRevision: 1 };
 function snapshot(
   selectedMethods: ("card" | "pay_at_property" | "bank_transfer")[] = [],
@@ -54,6 +61,9 @@ beforeEach(() => {
     draftRevision: request.expectedDraftRevision + 1,
   }));
   mocks.reset.mockResolvedValue({ sessionRevision: 3 });
+  const owners = { currencies: ["EUR", "USD"], rooms: [], pricing: null };
+  mocks.currencies.mockResolvedValue(owners);
+  mocks.saveCurrency.mockResolvedValue(owners);
   mocks.save.mockImplementation(async (_id, request) =>
     snapshot(request.selectedMethods, request.expectedPaymentMethodsRevision + 1),
   );
@@ -62,13 +72,14 @@ async function harness(
   track: "hotel_operations" | "combined" = "hotel_operations",
   resumed = false,
   paymentRevision = 0,
+  pricingRevision = 1,
 ) {
   let leave!: () => Promise<void>;
   const step = {
     stepId: "payments",
     currentBaseRevisions: {
       "finance.payment_methods": `payment-methods:${paymentRevision}`,
-      "pms.pricing_settings": "pricing:1",
+      "pms.pricing_settings": `pricing:${pricingRevision}`,
     },
     draft: resumed
       ? {
@@ -112,8 +123,10 @@ async function harness(
         ...step,
         draft: null,
         currentBaseRevisions: {
-          ...step.currentBaseRevisions,
-          "finance.payment_methods": "payment-methods:1",
+          "finance.payment_methods": mocks.save.mock.calls.length
+            ? "payment-methods:1"
+            : `payment-methods:${paymentRevision}`,
+          "pms.pricing_settings": "pricing:1",
         },
       },
     ],
@@ -275,5 +288,165 @@ it("requires recovery after a currency-only refresh following an in-place save",
   });
   expect(mocks.save).toHaveBeenCalledOnce();
   expect(h.props.reportRevisionConflict).toHaveBeenCalled();
+  h.view.unmount();
+});
+
+it("chooses the hotel currency here, then saves methods against it without a conflict", async () => {
+  mocks.load.mockResolvedValueOnce(snapshot([], 0, null));
+  const h = await harness("hotel_operations", false, 0, 0);
+  expect(h.text()).toContain("Hotel currency");
+  expect(h.text()).not.toContain("in Pricing");
+  expect(h.button("Save selection").props.disabled).toBe(true);
+  const select = () => h.view.root.findByType("select");
+  expect(
+    select()
+      .findAllByType("option")
+      .map((option) => option.props.value),
+  ).toEqual(["", "EUR", "USD"]);
+  await act(async () => select().props.onChange({ target: { value: "EUR" } }));
+  await act(async () => {
+    await h.button("Save currency").props.onClick();
+  });
+  expect(mocks.saveCurrency).toHaveBeenCalledWith(propertyId, "EUR", {
+    currencies: ["EUR", "USD"],
+    rooms: [],
+    pricing: null,
+  });
+  expect(h.props.refreshRoute).toHaveBeenCalled();
+  expect(mocks.load).toHaveBeenCalledTimes(2);
+  expect(h.view.root.findAllByType("select")).toHaveLength(0);
+  expect(h.text()).toContain("EUR");
+  await act(async () => h.check(0).props.onChange());
+  await act(async () => {
+    await h.button("Save selection").props.onClick();
+  });
+  expect(h.props.reportRevisionConflict).not.toHaveBeenCalled();
+  expect(mocks.save).toHaveBeenCalledWith(propertyId, {
+    expectedPaymentMethodsRevision: 0,
+    expectedPricingCurrencyRevision: 1,
+    selectedMethods: ["pay_at_property"],
+  });
+  h.view.unmount();
+});
+
+it("keeps a chosen pay-at-hotel answer while the currency is saved", async () => {
+  mocks.load.mockResolvedValueOnce(snapshot([], 0, null));
+  const h = await harness("hotel_operations", false, 0, 0);
+  await act(async () => h.check(0).props.onChange());
+  await act(async () =>
+    h.view.root.findByType("select").props.onChange({ target: { value: "USD" } }),
+  );
+  await act(async () => {
+    await h.button("Save currency").props.onClick();
+  });
+  expect(h.check(0).props.checked).toBe(true);
+  expect(h.button("Save selection").props.disabled).toBe(false);
+  h.view.unmount();
+});
+
+it("continues with a currency another session chose instead of retrying a stale write", async () => {
+  mocks.load.mockResolvedValueOnce(snapshot([], 0, null));
+  const h = await harness("hotel_operations", false, 0, 0);
+  mocks.saveCurrency.mockRejectedValueOnce(
+    new Error("The pricing currency changed in another session."),
+  );
+  mocks.currencies.mockResolvedValueOnce({ currencies: ["EUR"], rooms: [], pricing: setElsewhere });
+  await act(async () =>
+    h.view.root.findByType("select").props.onChange({ target: { value: "USD" } }),
+  );
+  await act(async () => {
+    await h.button("Save currency").props.onClick();
+  });
+  expect(mocks.saveCurrency).toHaveBeenCalledOnce();
+  expect(mocks.route).toHaveBeenCalled();
+  expect(h.text()).not.toContain("changed in another session");
+  expect(h.text()).not.toContain("Hotel currency");
+  expect(h.text()).toContain("The hotel currency was already set to EUR in another session.");
+  h.view.unmount();
+});
+
+it("retries a landed currency save after the reload failed", async () => {
+  mocks.load.mockResolvedValueOnce(snapshot([], 0, null));
+  const h = await harness("hotel_operations", false, 0, 0);
+  mocks.route.mockRejectedValueOnce(new Error("Setup is temporarily unavailable."));
+  await act(async () =>
+    h.view.root.findByType("select").props.onChange({ target: { value: "EUR" } }),
+  );
+  await act(async () => {
+    await h.button("Save currency").props.onClick();
+  });
+  expect(h.text()).toContain("Setup is temporarily unavailable.");
+  // The server replays the same idempotent save.
+  await act(async () => {
+    await h.button("Save currency").props.onClick();
+  });
+  expect(mocks.saveCurrency).toHaveBeenCalledTimes(2);
+  expect(mocks.saveCurrency.mock.calls[1]).toEqual(mocks.saveCurrency.mock.calls[0]);
+  expect(h.text()).not.toContain("Hotel currency");
+  expect(h.text()).not.toContain("another session");
+  h.view.unmount();
+});
+
+it("adopts a currency chosen elsewhere before the picker loaded", async () => {
+  mocks.load.mockResolvedValueOnce(snapshot([], 0, null));
+  mocks.currencies.mockResolvedValueOnce({ currencies: ["EUR"], rooms: [], pricing: setElsewhere });
+  const h = await harness("hotel_operations", false, 0, 0);
+  await act(async () => {});
+  expect(mocks.saveCurrency).not.toHaveBeenCalled();
+  expect(mocks.route).toHaveBeenCalled();
+  expect(h.text()).not.toContain("Hotel currency");
+  h.view.unmount();
+});
+
+it("explains that only the owner can choose the currency", async () => {
+  mocks.load.mockResolvedValueOnce(snapshot([], 0, null));
+  const h = await harness("hotel_operations", false, 0, 0);
+  mocks.saveCurrency.mockRejectedValueOnce(new ApiErrorResponse(403, { code: "forbidden" }));
+  await act(async () =>
+    h.view.root.findByType("select").props.onChange({ target: { value: "EUR" } }),
+  );
+  await act(async () => {
+    await h.button("Save currency").props.onClick();
+  });
+  expect(h.text()).toContain("Only the hotel owner can choose the hotel currency.");
+  expect(mocks.route).not.toHaveBeenCalled();
+  h.view.unmount();
+});
+
+it("does not leave the step while the currency is being saved", async () => {
+  mocks.load.mockResolvedValueOnce(snapshot([], 0, null));
+  const h = await harness("hotel_operations", false, 0, 0);
+  let finish!: () => void;
+  mocks.saveCurrency.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = () => resolve({ currencies: ["EUR"], rooms: [], pricing: setElsewhere });
+    }),
+  );
+  await act(async () =>
+    h.view.root.findByType("select").props.onChange({ target: { value: "EUR" } }),
+  );
+  await act(async () => {
+    const save = h.button("Save currency");
+    save.props.onClick();
+    // A second click in the same frame is ignored.
+    save.props.onClick();
+  });
+  await expect(h.leave()).rejects.toThrow("Wait for this step to finish saving.");
+  await act(async () => finish());
+  expect(mocks.saveCurrency).toHaveBeenCalledOnce();
+  expect(h.text()).not.toContain("Hotel currency");
+  h.view.unmount();
+});
+
+it("shows a currency load failure with a retry", async () => {
+  mocks.load.mockResolvedValueOnce(snapshot([], 0, null));
+  mocks.currencies.mockRejectedValueOnce(new Error("Pricing access is no longer available."));
+  const h = await harness();
+  expect(h.text()).toContain("Pricing access is no longer available.");
+  await act(async () => {
+    await h.button("Retry").props.onClick();
+  });
+  expect(mocks.currencies).toHaveBeenCalledTimes(2);
+  expect(h.view.root.findAllByType("select")).toHaveLength(1);
   h.view.unmount();
 });

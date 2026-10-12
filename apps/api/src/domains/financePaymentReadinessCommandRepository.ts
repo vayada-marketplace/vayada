@@ -2,15 +2,15 @@ import { createHash } from "node:crypto";
 
 import {
   FINANCE_PAYMENT_READINESS_CONTRACT_VERSION,
-  FINANCE_PAYMENT_READINESS_METHODS,
   FINANCE_PAYMENT_READINESS_OUTBOX_DESTINATION,
   createFinancePaymentReadinessSnapshot,
+  financePaymentReadinessMethodsFromStored,
+  financeStoredMethodsAfterSetupSelection,
   parseReplaceFinancePaymentMethodsCommand,
   parseReplaceFinancePaymentMethodsResult,
   resolveFinanceOnlineCardReadiness,
   serializeReplaceFinancePaymentMethodsFingerprint,
   type FinancePaymentReadinessChangedEvent,
-  type FinancePaymentReadinessMethod,
   type FinanceOnlineCardReadinessDecision,
   type FinanceOnlineCardReadinessEvidence,
   type FinancePricingCurrencyEvidence,
@@ -56,12 +56,16 @@ type IdempotencyRow = {
 
 type IdempotencyReservation = { id: string; attempt: number };
 
-type PaymentSettingsRow = {
+/** The query part of a transaction client, for helpers other Finance writers reuse. */
+export type FinancePaymentSettingsQueryClient = Pick<FinancePaymentReadinessCommandClient, "query">;
+
+export type FinancePaymentSettingsLockedRow = {
   contractVersion: unknown;
   paymentMethodsRevision: unknown;
   sourcePricingCurrencyRevision: unknown;
   currency: unknown;
   acceptedMethods: unknown;
+  paymentsEnabled: unknown;
   onlineCardCurrencyEligible: unknown;
   providerAccountId: unknown;
   provider: unknown;
@@ -175,7 +179,16 @@ export function createPgFinancePaymentReadinessCommandRepository(config: {
           throw new Error("Finance payment readiness repository produced an invalid result");
         }
         const eventId = changed
-          ? await enqueueChange(client, command, reservation, keyHash, worked.event, acceptedAt)
+          ? await enqueueFinancePaymentReadinessChange(client, {
+              eventKey: `finance.payment_readiness.changed.property.${command.propertyId}.key.${keyHash}.attempt.${reservation.attempt}.v1`,
+              outboxKey: `${FINANCE_PAYMENT_READINESS_OUTBOX_DESTINATION}.payment_methods.property.${command.propertyId}.key.${keyHash}.attempt.${reservation.attempt}.v1`,
+              actorUserId: command.audit.actor.userId,
+              correlationId: command.audit.correlationId ?? command.audit.requestId,
+              causationId: command.audit.requestId,
+              keyHash,
+              event: worked.event,
+              at: acceptedAt,
+            })
           : null;
         await recordAudit(client, command, reservation, keyHash, result, eventId, acceptedAt);
         await completeIdempotency(client, reservation.id, result, acceptedAt);
@@ -218,7 +231,7 @@ async function applyCommand(
     });
   }
 
-  const stored = await lockPaymentSettings(client, command.propertyId);
+  const stored = await lockFinancePaymentSettings(client, command.propertyId);
   const previousOnlineCardReadiness = await loadFinanceOnlineCardReadinessState(
     client,
     command.propertyId,
@@ -242,6 +255,13 @@ async function applyCommand(
 
   const nextRevision = aggregate.revision + 1;
   const at = acceptedAt.toISOString();
+  // VAY-2136: keep the extras the settings page enabled (PayPal, bank transfer, pay-at-hotel
+  // details). Only an unbound legacy list can be corrupt here; the selection replaces it.
+  const acceptedMethods =
+    financeStoredMethodsAfterSetupSelection(
+      stored?.paymentsEnabled === true ? stored.acceptedMethods : [],
+      command.selectedMethods,
+    ) ?? command.selectedMethods;
   await client.query(
     `INSERT INTO finance.payment_settings (
        property_id, payments_enabled, accepted_methods, default_currency,
@@ -260,8 +280,8 @@ async function applyCommand(
        updated_at = EXCLUDED.updated_at`,
     [
       command.propertyId,
-      command.selectedMethods.length > 0,
-      command.selectedMethods,
+      acceptedMethods.length > 0,
+      acceptedMethods,
       currentPricing.currency,
       FINANCE_PAYMENT_READINESS_CONTRACT_VERSION,
       nextRevision,
@@ -270,7 +290,7 @@ async function applyCommand(
     ],
   );
 
-  const nextStored = await lockPaymentSettings(client, command.propertyId);
+  const nextStored = await lockFinancePaymentSettings(client, command.propertyId);
   if (!nextStored) throw new Error("Finance payment readiness write was not visible");
   const nextOnlineCardReadiness = resolveFinanceOnlineCardReadiness(onlineCardEvidence(nextStored));
   await applyFinanceOnlineCardReadinessLoss(client, {
@@ -391,16 +411,17 @@ async function lockAuthorizedScope(
   );
 }
 
-async function lockPaymentSettings(
-  client: FinancePaymentReadinessCommandClient,
+export async function lockFinancePaymentSettings(
+  client: FinancePaymentSettingsQueryClient,
   propertyId: string,
-): Promise<PaymentSettingsRow | null> {
-  const result = await client.query<PaymentSettingsRow>(
+): Promise<FinancePaymentSettingsLockedRow | null> {
+  const result = await client.query<FinancePaymentSettingsLockedRow>(
     `SELECT settings.payment_readiness_contract_version AS "contractVersion",
             settings.payment_methods_revision AS "paymentMethodsRevision",
             settings.source_pricing_currency_revision AS "sourcePricingCurrencyRevision",
             settings.default_currency::text AS currency,
             settings.accepted_methods AS "acceptedMethods",
+            settings.payments_enabled AS "paymentsEnabled",
             online_card.currency_eligible AS "onlineCardCurrencyEligible",
             online_card.provider_account_id::text AS "providerAccountId",
             online_card.provider,
@@ -436,8 +457,18 @@ async function lockPaymentSettings(
   return result.rows[0] ?? null;
 }
 
+/** Stored revision and booking readiness, as the setup step computes them. */
+export function financePaymentSettingsAggregate(
+  row: FinancePaymentSettingsLockedRow | null,
+  propertyId: string,
+  currentPricing: FinancePricingCurrencyEvidence,
+): { revision: number; bookingReady: boolean } {
+  const onlineCardReadiness = resolveFinanceOnlineCardReadiness(onlineCardEvidence(row));
+  return storedAggregate(row, propertyId, currentPricing, onlineCardReadiness);
+}
+
 function storedAggregate(
-  row: PaymentSettingsRow | null,
+  row: FinancePaymentSettingsLockedRow | null,
   propertyId: string,
   currentPricing: FinancePricingCurrencyEvidence,
   onlineCardReadiness: FinanceOnlineCardReadinessDecision,
@@ -452,7 +483,7 @@ function storedAggregate(
   }
   const revision = positiveInteger(row.paymentMethodsRevision);
   const pricingRevision = positiveInteger(row.sourcePricingCurrencyRevision);
-  const selectedMethods = methods(row.acceptedMethods);
+  const selectedMethods = financePaymentReadinessMethodsFromStored(row.acceptedMethods);
   const updatedAt = isoDate(row.updatedAt);
   if (
     row.contractVersion !== FINANCE_PAYMENT_READINESS_CONTRACT_VERSION ||
@@ -481,7 +512,9 @@ function storedAggregate(
   return { revision, bookingReady: snapshot.bookingPaymentReady };
 }
 
-function onlineCardEvidence(row: PaymentSettingsRow | null): FinanceOnlineCardReadinessEvidence {
+function onlineCardEvidence(
+  row: FinancePaymentSettingsLockedRow | null,
+): FinanceOnlineCardReadinessEvidence {
   if (!row) {
     return {
       currencyEligible: false,
@@ -634,15 +667,21 @@ async function completeIdempotency(
   }
 }
 
-async function enqueueChange(
-  client: FinancePaymentReadinessCommandClient,
-  command: ReplaceFinancePaymentMethodsCommand,
-  reservation: IdempotencyReservation,
-  keyHash: string,
-  event: FinancePaymentReadinessChangedEvent,
-  at: Date,
+/** Domain event plus booking.payment-source outbox row for a payment-methods change. */
+export async function enqueueFinancePaymentReadinessChange(
+  client: FinancePaymentSettingsQueryClient,
+  input: {
+    eventKey: string;
+    outboxKey: string;
+    actorUserId: string;
+    correlationId: string;
+    causationId: string;
+    keyHash: string;
+    event: FinancePaymentReadinessChangedEvent;
+    at: Date;
+  },
 ): Promise<string> {
-  const eventKey = `finance.payment_readiness.changed.property.${command.propertyId}.key.${keyHash}.attempt.${reservation.attempt}.v1`;
+  const { event, keyHash } = input;
   const inserted = await client.query<{ eventId: string }>(
     `WITH inserted AS (
        INSERT INTO platform.domain_events (
@@ -664,12 +703,12 @@ async function enqueueChange(
      WHERE source_system = 'finance' AND event_key = $1
      LIMIT 1`,
     [
-      eventKey,
-      at.toISOString(),
-      command.propertyId,
-      command.audit.actor.userId,
-      command.audit.correlationId ?? command.audit.requestId,
-      command.audit.requestId,
+      input.eventKey,
+      input.at.toISOString(),
+      event.propertyId,
+      input.actorUserId,
+      input.correlationId,
+      input.causationId,
       keyHash,
       JSON.stringify(event),
       JSON.stringify({
@@ -693,10 +732,10 @@ async function enqueueChange(
      ON CONFLICT (destination, outbox_key) DO NOTHING`,
     [
       eventId,
-      `${FINANCE_PAYMENT_READINESS_OUTBOX_DESTINATION}.payment_methods.property.${command.propertyId}.key.${keyHash}.attempt.${reservation.attempt}.v1`,
+      input.outboxKey,
       FINANCE_PAYMENT_READINESS_OUTBOX_DESTINATION,
-      command.propertyId,
-      command.audit.correlationId ?? command.audit.requestId,
+      event.propertyId,
+      input.correlationId,
       keyHash,
       JSON.stringify(event),
       JSON.stringify({
@@ -795,16 +834,6 @@ function pricingEvidence(value: unknown): FinancePricingCurrencyEvidence | null 
         currency: value["currency"],
         pricingCurrencyRevision: value["pricingCurrencyRevision"] as number,
       }
-    : null;
-}
-
-function methods(value: unknown): readonly FinancePaymentReadinessMethod[] | null {
-  if (!Array.isArray(value)) return null;
-  const parsed = value.filter((method): method is FinancePaymentReadinessMethod =>
-    FINANCE_PAYMENT_READINESS_METHODS.includes(method as FinancePaymentReadinessMethod),
-  );
-  return parsed.length === value.length && new Set(parsed).size === parsed.length
-    ? FINANCE_PAYMENT_READINESS_METHODS.filter((method) => parsed.includes(method))
     : null;
 }
 
