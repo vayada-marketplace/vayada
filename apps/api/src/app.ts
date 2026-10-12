@@ -488,6 +488,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   propertySetupDraftCommandRepository?: PropertySetupDraftCommandRepository;
   propertySetupRouteStateReadPort?: PropertySetupRouteStateReadPort;
   bookingPublication?: BookingPublicationRoutesOptions;
+  /** Refreshes what guests see after hotel-detail and payment-method saves (VAY-2129). */
+  publicPageRefresh?: (propertyId: string) => Promise<void>;
   identityPrivacyRepository?: IdentityPrivacyRepository;
   identityLifecycleCommandBus?: IdentityLifecycleCommandBus;
   identityAdminUsersReadRepository?: IdentityAdminUsersReadRepository;
@@ -833,6 +835,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       propertyCreationRepository: options.hotelSetupPropertyCreationRepository,
       launchSettingsCommand: options.hotelSetupLaunchSettingsCommand,
       profileCommand: options.hotelSetupProfileCommand,
+      refreshPublicPage: options.publicPageRefresh,
     });
   }
   if (options.propertySetupRouteStateReadPort) {
@@ -917,6 +920,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerFinancePaymentReadinessRoutes, {
       prefix: "/api",
       ...options.financePaymentSetup,
+      refreshPublicPage: options.publicPageRefresh,
     });
   }
   if (options.identityPrivacyRepository) {
@@ -954,6 +958,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     ownsSameDayBookingSettings: !options.pmsOperationsRepository,
     publicBookabilityPublisher: options.publicBookabilityPublisher,
     bookingPublicationRefresh: options.bookingPublicationRefresh,
+    publicPageRefresh: options.publicPageRefresh,
     inventoryPublicOfferProjector: options.pmsInventoryPublicOfferProjector,
     customDomainRepository: options.bookingCustomDomainRepository,
     changeRequestRepository: options.bookingChangeRequestRepository,
