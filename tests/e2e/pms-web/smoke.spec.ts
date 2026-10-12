@@ -922,10 +922,8 @@ test.describe("pms-web smoke", () => {
     );
 
     await page.goto("/rooms/new");
-    await expect(page.getByRole("button", { name: "Prices", exact: true })).toHaveCount(0);
-    await expect(
-      page.getByText("Save the room type first, then set its prices in its Prices tab."),
-    ).toBeVisible();
+    // Prices are optional (VAY-2147): with the Prices tab left closed, the room is created as before.
+    await expect(page.getByRole("button", { name: "Prices", exact: true })).toBeVisible();
     await page.getByPlaceholder("e.g. Two-Bedroom Villa").fill("Castrop Suite");
     await page.getByPlaceholder("50").fill("32");
     await page.getByRole("button", { name: "Create Room Type" }).click();
@@ -953,19 +951,16 @@ test.describe("pms-web smoke", () => {
     await assertHealthy();
   });
 
-  test("points the German new-room form to the room's Prices tab", async ({ page }) => {
+  test("offers the German new-room form its Prices tab", async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem("admin_language", "de"));
     await mockPmsWebAuthenticatedSession(page);
     await mockPmsWebTargetRoutes(page);
     await mockManageSelfAccess(page);
 
     await page.goto("/rooms/new");
-    await expect(page.getByRole("button", { name: "Preise", exact: true })).toHaveCount(0);
-    await expect(
-      page.getByText(
-        "Speichern Sie zuerst den Zimmertyp und legen Sie dann im Tab „Preise“ seine Preise fest.",
-      ),
-    ).toBeVisible();
+    await page.getByRole("button", { name: "Preise", exact: true }).click();
+    await expect(page.getByText("Optional: Sie können Preise auch später festlegen")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Zimmertyp erstellen" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Preise öffnen" })).toHaveCount(0);
   });
 

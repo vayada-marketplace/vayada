@@ -4,6 +4,8 @@ on:
   pull_request:
     branches:
       - main
+      # VAY-2147 New room prices stack bases (top of the list to avoid append conflicts).
+      - "fm/vay-2147-*"
       # VAY-2138 room addition tail stack bases (top of the list to avoid append conflicts).
       - "fm/vay-2138-*"
       # VAY-2139 bank transfer / PayPal launch stack bases (top of the list to avoid append conflicts).
