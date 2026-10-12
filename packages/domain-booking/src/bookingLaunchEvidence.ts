@@ -161,6 +161,8 @@ export type BookingLaunchOwnerUnavailable<
       outcome: "unavailable";
       port: Port;
       errorSource: ReadinessErrorSource;
+      /** Diagnostic reason for operators' logs; never shown to the hotel. */
+      code?: string;
     }>
   : never;
 
@@ -207,7 +209,9 @@ export function isBookingLaunchOwnerUnavailable<Port extends BookingLaunchReadin
     value["outcome"] === "unavailable" &&
     value["port"] === port &&
     typeof value["errorSource"] === "string" &&
-    READINESS_ERROR_SOURCES.has(value["errorSource"])
+    READINESS_ERROR_SOURCES.has(value["errorSource"]) &&
+    (value["code"] === undefined ||
+      (typeof value["code"] === "string" && CODE_PATTERN.test(value["code"])))
   );
 }
 
