@@ -64,7 +64,12 @@ describe("Booking public content", () => {
       },
     });
     expect(result?.publicContent.payments).toEqual({ readyMethods: ["bank_transfer", "paypal"] });
-    expect(parseBookingPublicContent(result?.publicContent)).toEqual(result?.publicContent);
+    expect(parseBookingPublicContent(result?.publicContent, { manualPayments: true })).toEqual(
+      result?.publicContent,
+    );
+    // With their acceptance off again, the stored page no longer counts.
+    expect(parseBookingPublicContent(result?.publicContent)).toBeNull();
+    expect(parseBookingPublicContent(result?.publicContent, { manualPayments: false })).toBeNull();
   });
 
   it("omits rates whose payment method is not ready", () => {

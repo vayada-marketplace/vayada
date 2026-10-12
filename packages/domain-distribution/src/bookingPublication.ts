@@ -133,15 +133,20 @@ export function buildBookingPublicContent(input: {
   });
 }
 
-/** Parses stored immutable JSON into the exact public Booking content contract. */
-export function parseBookingPublicContent(value: unknown): BookingPublicContent | null {
+/** Parses stored immutable JSON into the exact public Booking content contract. Content
+ * published with bank transfer or PayPal counts only while their acceptance is on
+ * (`manualPayments`), so turning it off takes such pages down again (VAY-2139). */
+export function parseBookingPublicContent(
+  value: unknown,
+  context: { manualPayments?: boolean } = {},
+): BookingPublicContent | null {
   try {
     if (!record(value) || !Array.isArray(value.rooms) || !record(value.calendar)) return null;
     const payments = record(value.payments) ? value.payments.readyMethods : null;
     if (!Array.isArray(payments)) return null;
-    const profile = parsePublicBookabilityProfileProjection(value.profile, {
-      manualPaymentReady: publicManualPaymentReady(payments),
-    });
+    const manualPaymentReady = publicManualPaymentReady(payments);
+    if (manualPaymentReady && context.manualPayments !== true) return null;
+    const profile = parsePublicBookabilityProfileProjection(value.profile, { manualPaymentReady });
     if (!profile) return null;
     const built = buildBookingPublicContent({
       sourceManifestHash: `sha256:${"0".repeat(64)}`,

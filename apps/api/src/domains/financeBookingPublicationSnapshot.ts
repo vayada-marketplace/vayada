@@ -59,7 +59,6 @@ export function createFinanceBookingPublicationSnapshotPort(dependencies: {
             : dependencies.manualPayments
               ? [
                   ...(await dependencies.manualPayments.readyMethods({
-                    organizationId: request.organizationId,
                     propertyId: request.propertyId,
                   })),
                 ]

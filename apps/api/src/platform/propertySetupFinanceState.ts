@@ -121,12 +121,7 @@ async function snapshot(
     !finance.bookingPaymentReady &&
     finance.selectedMethodCount === 0 &&
     !!options.manualPayments &&
-    (
-      await options.manualPayments.readyMethods({
-        organizationId: request.organizationId,
-        propertyId: request.propertyId,
-      })
-    ).length > 0;
+    (await options.manualPayments.readyMethods({ propertyId: request.propertyId })).length > 0;
   const payload = {
     paymentMethodsRevision,
     selectedMethodCount: finance?.selectedMethodCount ?? 0,

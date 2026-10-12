@@ -1424,10 +1424,7 @@ const bookingGuestPolicyProjectionProjector = createBookingGuestPolicyOutboxProj
 
 // Bank transfer and PayPal count for booking launch only while their acceptance is on (VAY-2139).
 const financeManualPaymentReadiness = config.replacementPricingManualPaymentAcceptanceEnabled
-  ? createFinanceManualPaymentReadinessReader({
-      connectionString: targetDatabaseUrl,
-      pool: propertySetupOwnerPool,
-    })
+  ? createFinanceManualPaymentReadinessReader({ pool: propertySetupOwnerPool })
   : undefined;
 const bookingPublicationRuntime = (() => {
   const dependenciesMissing =

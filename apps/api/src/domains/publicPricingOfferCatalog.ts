@@ -17,7 +17,7 @@ type Published = Readonly<{ content: BookingPublicContent; pricingSourceRevision
 /** Published public choices only; no date-specific price, inventory hold or booking authority.
  * Saved price, terms or Finance changes serve at once; a changed room or offer set waits for
  * the next publication (VAY-2123). Offer keys always bind the current pricing revision. */
-export function createPublicPricingOfferCatalog(pool: Pool) {
+export function createPublicPricingOfferCatalog(pool: Pool, options: PublishedContentOptions = {}) {
   return {
     async read(slug: string) {
       const client = await pool.connect();
@@ -27,7 +27,7 @@ export function createPublicPricingOfferCatalog(pool: Pool) {
         if (!owner) return null;
         const mapped = mapReplacementPublicOffers(owner);
         if (!mapped) return null;
-        const published = await readActivePublication(client, owner.scope.propertyId);
+        const published = await readActivePublication(client, owner.scope.propertyId, options);
         if (!published) return null;
         const { content } = published;
         if (
@@ -73,14 +73,14 @@ export function createPublicPricingOfferCatalog(pool: Pool) {
 
 /** For the owner's review screen, not public access: whether the published booking page still
  * lists the current rooms and offers. Null without a published page or current prices. */
-export function createPublishedOfferCheck(pool: Pool) {
+export function createPublishedOfferCheck(pool: Pool, options: PublishedContentOptions = {}) {
   return {
     async matchCurrent(scope: { organizationId: string; propertyId: string }) {
       const client = await pool.connect();
       try {
         await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
         const owner = await lockCurrentPricingPublication(client, scope);
-        const published = owner && (await readActivePublication(client, scope.propertyId));
+        const published = owner && (await readActivePublication(client, scope.propertyId, options));
         return owner && published ? sameRoomsAndOffers(owner, published) : null;
       } finally {
         try {
@@ -93,9 +93,13 @@ export function createPublishedOfferCheck(pool: Pool) {
   };
 }
 
+/** Bank-transfer and PayPal pages count only while their acceptance is on (VAY-2139). */
+type PublishedContentOptions = { manualPayments?: boolean };
+
 async function readActivePublication(
   client: PoolClient,
   propertyId: string,
+  options: PublishedContentOptions,
 ): Promise<Published | null> {
   const row = (
     await client.query(
@@ -107,7 +111,7 @@ async function readActivePublication(
       [propertyId],
     )
   ).rows[0];
-  const content = parseBookingPublicContent(row?.public_content);
+  const content = parseBookingPublicContent(row?.public_content, options);
   // The page's offer keys derive from the PMS pricing source revision it was built from.
   const sources: unknown = row?.source_manifest?.sources;
   const pricing = Array.isArray(sources)
