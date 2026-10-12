@@ -24,7 +24,10 @@ export * from "./affiliateEarning.js";
  */
 
 import type { FinancePlatformAffiliatePayoutRepository } from "./platformAffiliatePayouts.js";
-import { FINANCE_ONLINE_CARD_EXECUTION_EVIDENCE_CONTRACT_VERSION } from "./paymentReadiness.js";
+import {
+  FINANCE_ONLINE_CARD_EXECUTION_EVIDENCE_CONTRACT_VERSION,
+  type FinanceRoutePaymentMethod,
+} from "./paymentReadiness.js";
 
 export * from "./paymentReadiness.js";
 export * from "./paymentReadinessParsing.js";
@@ -132,20 +135,6 @@ export const FINANCE_PROVIDER_ACCOUNT_COMMAND_SIDE_EFFECTS = [
 
 export type FinanceProviderAccountCommandSideEffect =
   (typeof FINANCE_PROVIDER_ACCOUNT_COMMAND_SIDE_EFFECTS)[number];
-
-export const FINANCE_ROUTE_PAYMENT_METHODS = [
-  "card",
-  "pay_at_property",
-  "xendit",
-  "cash",
-  "bank_transfer",
-  "paypal",
-  "manual_card",
-  "wallet",
-  "other",
-] as const;
-
-export type FinanceRoutePaymentMethod = (typeof FINANCE_ROUTE_PAYMENT_METHODS)[number];
 
 export const FINANCE_PROVIDER_ACCOUNT_STATUSES = [
   "setup_incomplete",
