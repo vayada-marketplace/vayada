@@ -9,6 +9,9 @@ export type PaymentMethod = PricingPaymentMethod;
 const options = [
   { value: "card", labelKey: "pricing.paymentMethods.card" },
   { value: "pay_at_property", labelKey: "pricing.paymentMethods.payAtProperty" },
+  // Paid to the hotel directly; the hotel confirms each payment (VAY-2139).
+  { value: "bank_transfer", labelKey: "pricing.paymentMethods.bankTransfer" },
+  { value: "paypal", labelKey: "pricing.paymentMethods.paypal" },
 ] as const;
 
 export function AcceptedPaymentMethods({

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AcceptedPaymentMethods } from "./AcceptedPaymentMethods";
 
 describe("accepted payment methods", () => {
-  it("keeps methods it does not show when a shown one is toggled (VAY-2139)", async () => {
+  it("offers bank transfer and PayPal next to card and pay at property (VAY-2139)", async () => {
     const onChange = vi.fn();
     let view: ReactTestRenderer;
     await act(async () => {
@@ -25,5 +25,9 @@ describe("accepted payment methods", () => {
       box("pricing.paymentMethods.card").props.onChange({ target: { checked: false } }),
     );
     expect(onChange).toHaveBeenLastCalledWith(["bank_transfer"]);
+    await act(async () =>
+      box("pricing.paymentMethods.paypal").props.onChange({ target: { checked: true } }),
+    );
+    expect(onChange).toHaveBeenLastCalledWith(["card", "bank_transfer", "paypal"]);
   });
 });
