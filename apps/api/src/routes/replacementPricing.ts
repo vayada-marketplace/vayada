@@ -10,6 +10,7 @@ import {
 } from "@vayada/domain-pms";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { createReplacementPricingCommands } from "../domains/replacementPricingCommands.js";
+import type { FinanceManualPaymentMethodsReadPort } from "../domains/financeManualPaymentReadiness.js";
 import {
   PricingStorageError,
   type PricingStorageSnapshot,
@@ -18,7 +19,11 @@ import {
 import { enforceRoutePolicy } from "./policy.js";
 
 type Commands = ReturnType<typeof createReplacementPricingCommands>;
-export type ReplacementPricingRoutesOptions = { commands(context: RequestContext): Commands };
+export type ReplacementPricingRoutesOptions = {
+  commands(context: RequestContext): Commands;
+  /** Present only while bank-transfer and PayPal acceptance is on (VAY-2139). */
+  manualPayments?: FinanceManualPaymentMethodsReadPort;
+};
 type Params = { propertyId: string; draftId?: string; roomTypeId?: string; offerId?: string };
 const uuid = (v: unknown): v is string =>
   typeof v === "string" &&
@@ -144,6 +149,16 @@ export async function registerReplacementPricingRoutes(
       },
     });
   }
+  // Which of bank transfer and PayPal the rate pickers may offer: their acceptance is on and the
+  // hotel takes them with their details in place (VAY-2139).
+  route("GET", "/payment-methods", async (_commands, id) =>
+    options.manualPayments
+      ? {
+          acceptanceEnabled: true,
+          readyMethods: await options.manualPayments.acceptedMethods({ propertyId: id }),
+        }
+      : { acceptanceEnabled: false, readyMethods: [] },
+  );
   route("GET", "/rooms/:roomTypeId/offers/:offerId/terms", (commands, id, request) =>
     commands.readTerms(id, request.params.roomTypeId!, request.params.offerId!),
   );

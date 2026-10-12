@@ -13,6 +13,7 @@ describe("accepted payment methods", () => {
           disabled={false}
           onChange={onChange}
           t={(key) => key}
+          manualMethods={["paypal"]}
         />,
       );
     });
@@ -30,5 +31,40 @@ describe("accepted payment methods", () => {
       box("pricing.paymentMethods.paypal").props.onChange({ target: { checked: true } }),
     );
     expect(onChange).toHaveBeenLastCalledWith(["card", "bank_transfer", "paypal"]);
+  });
+  it("shows bank transfer and PayPal only when the hotel can use them or a rate takes them (VAY-2139)", async () => {
+    let view: ReactTestRenderer;
+    const render = async (
+      methods: ("card" | "bank_transfer")[],
+      manualMethods?: ("paypal" | "bank_transfer")[],
+    ) =>
+      act(async () => {
+        view = create(
+          <AcceptedPaymentMethods
+            methods={methods}
+            disabled={false}
+            onChange={vi.fn()}
+            t={(key) => key}
+            manualMethods={manualMethods}
+          />,
+        );
+      });
+    const labels = () =>
+      view!.root.findAllByType("input").map((input) => input.props["aria-label"]);
+    await render(["card"]);
+    expect(labels()).toEqual([
+      "pricing.paymentMethods.card",
+      "pricing.paymentMethods.payAtProperty",
+    ]);
+    // A rate that already takes bank transfer keeps it visible, so it can be removed.
+    await render(["card", "bank_transfer"]);
+    expect(labels()).toContain("pricing.paymentMethods.bankTransfer");
+    expect(labels()).not.toContain("pricing.paymentMethods.paypal");
+    await render(["card"], ["paypal"]);
+    expect(labels()).toEqual([
+      "pricing.paymentMethods.card",
+      "pricing.paymentMethods.payAtProperty",
+      "pricing.paymentMethods.paypal",
+    ]);
   });
 });
