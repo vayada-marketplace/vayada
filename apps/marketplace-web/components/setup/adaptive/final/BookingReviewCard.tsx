@@ -197,10 +197,10 @@ function ScopedBookingReviewCard({
     }
   }
   const unknownRequest = !!attempt && !!review && !review.recoveredOperation && !latestPending;
+  // The first publication is the hotel's go-live; later saves go live by themselves (VAY-2129).
   const published = !!review?.activeContentRevisionId;
-  // Saved prices go live by themselves; added or removed rooms and offers need a publication.
-  const offersChanged = published && review?.publishedOffersCurrent === false;
   const canPublish =
+    !published &&
     review?.readiness.outcome === "evaluated" &&
     review.readiness.status === "ready" &&
     storageReady &&
@@ -232,21 +232,23 @@ function ScopedBookingReviewCard({
                   ? published
                     ? "Update failed · previous page remains published"
                     : "Publication failed"
-                  : offersChanged
-                    ? "Room or offer changes not published"
-                    : published
-                      ? "Published"
-                      : review.readiness.status === "ready"
-                        ? "Ready to publish"
-                        : review.readiness.status === "pending"
-                          ? "Waiting"
-                          : review.readiness.status === "error"
-                            ? "Temporarily unavailable"
-                            : "Needs attention"}
+                  : published
+                    ? review.readiness.status === "ready"
+                      ? "Live"
+                      : "Live · needs attention"
+                    : review.readiness.status === "ready"
+                      ? "Ready to publish"
+                      : review.readiness.status === "pending"
+                        ? "Waiting"
+                        : review.readiness.status === "error"
+                          ? "Temporarily unavailable"
+                          : "Needs attention"}
           </p>
-          {offersChanged && !pending && (
+          {published && !pending && !unknownRequest && operation?.status !== "failed" && (
             <p className="mt-2 text-sm text-gray-600">
-              Guests can’t book until you publish reviewed changes.
+              {review.readiness.status === "ready"
+                ? "Your booking page is live. Changes you save go live automatically."
+                : "Your booking page is live, but guests may not be able to book until the items below are fixed. Changes you save go live automatically."}
             </p>
           )}
           {pending && (
@@ -309,7 +311,7 @@ function ScopedBookingReviewCard({
                 className={adaptivePrimaryButtonClass}
                 onClick={() => void publish()}
               >
-                {published ? "Publish reviewed changes" : "Publish booking page"}
+                Publish booking page
               </button>
             ) : null}
           </div>

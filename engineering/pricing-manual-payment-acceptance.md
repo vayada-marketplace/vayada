@@ -20,9 +20,10 @@ pricing-v2 prices (Finance pricing readiness counts its method), so they also re
 With the switch on, such a hotel can publish: launch readiness, the publication snapshot and the
 setup Finance step count an enabled bank destination or a valid PayPal email, only for a hotel
 that takes neither card nor pay at property. Turning the switch off again takes those pages down:
-every reader of stored booking content (the public profile, the offer catalog, the published URL
-and the owner's offer check) refuses content listing bank transfer or PayPal unless it was created
-with the switch on.
+the readers of stored booking content (the public profile and the published URL) refuse content
+listing bank transfer or PayPal unless they were created with the switch on. Since VAY-2129 the
+offer catalog serves the current offers while a publication is live, and quotes refuse bank
+transfer and PayPal while the switch is off.
 
 ## Flow (the same for both methods and both acceptance modes)
 
