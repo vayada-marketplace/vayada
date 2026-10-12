@@ -1,3 +1,4 @@
+import { parseBookingPricingOfferTerms } from "@vayada/domain-booking/replacement-pricing";
 import { parsePricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { PricingError as SetupPricingError } from "@vayada/product-onboarding/pricingSetupAmounts";
 import en from "@/messages/en.json";
@@ -64,26 +65,42 @@ export function readKeptNewRoomPrices(roomTypeId: string): KeptNewRoomPrices | n
   )
     return null;
   const room = parsePricingConfiguration((prices as Record<string, unknown>).room);
-  const terms = (prices as Record<string, unknown>).terms;
-  if (
-    !room ||
-    room.roomTypeId !== roomTypeId.toLowerCase() ||
-    !Array.isArray(terms) ||
-    !terms.every(
-      (item) =>
-        item &&
-        item.roomTypeId === room.roomTypeId &&
-        room.offers.some((offer) => offer.id === item.offerId) &&
-        (item.expectedRevision === null || typeof item.expectedRevision === "string"),
-    )
-  )
-    return null;
+  const stored = (prices as Record<string, unknown>).terms;
+  if (!room || room.roomTypeId !== roomTypeId.toLowerCase() || !Array.isArray(stored)) return null;
+  const terms = stored.map((item) => keptTerms(item, room));
+  if (!terms.every((item) => item !== null)) return null;
   return {
     room,
     terms: terms as PricingTermsInput[],
     error: storedError(error),
     outcomeUnknown: outcomeUnknown === true,
   };
+}
+
+// The terms parser wants a revision; a kept option's terms are new or name the revision they change.
+const newTermsRevision = "00000000-0000-4000-8000-000000000000";
+/** One option's kept terms, when they are complete terms for an option of this room. */
+function keptTerms(item: unknown, room: NonNullable<ReturnType<typeof parsePricingConfiguration>>) {
+  const value = (item ?? {}) as Record<string, unknown>;
+  const expectedRevision = value.expectedRevision;
+  if (expectedRevision !== null && typeof expectedRevision !== "string") return null;
+  if (!room.offers.some((offer) => offer.id === value.offerId)) return null;
+  const parsed = parseBookingPricingOfferTerms({
+    roomTypeId: value.roomTypeId,
+    offerId: value.offerId,
+    revision: expectedRevision ?? newTermsRevision,
+    cancellation: value.cancellation,
+    payment: value.payment,
+  });
+  return parsed && parsed.roomTypeId === room.roomTypeId
+    ? {
+        roomTypeId: parsed.roomTypeId,
+        offerId: parsed.offerId,
+        expectedRevision,
+        cancellation: parsed.cancellation,
+        payment: parsed.payment,
+      }
+    : null;
 }
 
 function storedError(value: unknown): unknown {

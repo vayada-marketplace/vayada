@@ -103,6 +103,20 @@ it("reads only recent prices for exactly this room, and forgets them", () => {
       savedAt: Date.now(),
       prices: { ...saved.prices, terms: [{ ...saved.prices.terms[0], offerId: "unknown" }] },
     },
+    // Terms without what the guest agrees to (CodeRabbit on #3177).
+    {
+      ...saved,
+      savedAt: Date.now(),
+      prices: { ...saved.prices, terms: [{ ...saved.prices.terms[0], payment: undefined }] },
+    },
+    {
+      ...saved,
+      savedAt: Date.now(),
+      prices: {
+        ...saved.prices,
+        terms: [{ ...saved.prices.terms[0], cancellation: { kind: "sometimes" } }],
+      },
+    },
   ]) {
     store.set(key, JSON.stringify(changed));
     expect(readKeptNewRoomPrices(created)).toBeNull();
