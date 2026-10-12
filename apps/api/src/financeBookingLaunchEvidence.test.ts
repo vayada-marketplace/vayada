@@ -34,13 +34,16 @@ function snapshot(
   });
 }
 
-function adapter(value: FinancePaymentReadinessSnapshot | null) {
+function adapter(value: FinancePaymentReadinessSnapshot | null, inScope?: boolean) {
   const financeReadPort: FinancePaymentReadinessReadPort = {
     async getPaymentReadiness() {
       return value;
     },
   };
-  return createFinanceBookingLaunchEvidenceAdapter({ financeReadPort });
+  return createFinanceBookingLaunchEvidenceAdapter({
+    financeReadPort,
+    ...(inScope === undefined ? {} : { scope: { hasPaymentReadinessScope: async () => inScope } }),
+  });
 }
 
 describe("createFinanceBookingLaunchEvidenceAdapter", () => {
@@ -198,6 +201,30 @@ describe("createFinanceBookingLaunchEvidenceAdapter", () => {
       ],
     });
     expect(isBookingLaunchOwnerEvidenceValid(result, request, "finance")).toBe(true);
+    await expect(adapter(null, true).getBookingLaunchEvidence(request)).resolves.toEqual(result);
+  });
+
+  it("keeps a property outside the Finance scope unavailable instead of asking for payments", async () => {
+    await expect(adapter(null, false).getBookingLaunchEvidence(request)).resolves.toEqual({
+      outcome: "unavailable",
+      port: "finance",
+      errorSource: "provider",
+      code: "payment_scope_unavailable",
+    });
+    const failing = createFinanceBookingLaunchEvidenceAdapter({
+      financeReadPort: { getPaymentReadiness: async () => null },
+      scope: {
+        async hasPaymentReadinessScope() {
+          throw new Error("connection refused");
+        },
+      },
+    });
+    await expect(failing.getBookingLaunchEvidence(request)).resolves.toEqual({
+      outcome: "unavailable",
+      port: "finance",
+      errorSource: "system",
+      code: "payment_scope_read_failed",
+    });
   });
 
   it("returns explicit unavailable results for invalid or failed Finance reads", async () => {

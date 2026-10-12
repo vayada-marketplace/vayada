@@ -17,6 +17,8 @@ import {
   serializePmsPricingSourceEntityRevision,
 } from "@vayada/domain-pms";
 
+import type { FinancePaymentReadinessScopePort } from "./financePaymentReadinessReadModel.js";
+
 const EXTERNAL_PENDING = new Set<FinancePaymentReadinessBlocker>([
   "online_card_execution_unavailable",
   "provider_capability_lost",
@@ -25,6 +27,7 @@ const EXTERNAL_PENDING = new Set<FinancePaymentReadinessBlocker>([
 
 export function createFinanceBookingLaunchEvidenceAdapter(dependencies: {
   financeReadPort: FinancePaymentReadinessReadPort;
+  scope?: FinancePaymentReadinessScopePort;
 }): BookingLaunchFinanceEvidencePort {
   return {
     bookingLaunchEvidencePort: "finance",
@@ -36,8 +39,19 @@ export function createFinanceBookingLaunchEvidenceAdapter(dependencies: {
         return unavailable("system", "payment_readiness_read_failed");
       }
       // No versioned payment methods yet: never chosen, or saved only by the older settings
-      // page. The setup Payments step creates them (VAY-2134).
-      if (value === null) return notConfigured(request);
+      // page. The setup Payments step creates them (VAY-2134). A missing organization, PMS
+      // link or entitlement also reads as nothing, and no payment choice fixes that.
+      if (value === null) {
+        let inScope: boolean;
+        try {
+          inScope = (await dependencies.scope?.hasPaymentReadinessScope(request)) ?? true;
+        } catch {
+          return unavailable("system", "payment_scope_read_failed");
+        }
+        return inScope
+          ? notConfigured(request)
+          : unavailable("provider", "payment_scope_unavailable");
+      }
       const snapshot = parseFinancePaymentReadinessSnapshot(value);
       if (!snapshot || snapshot.propertyId !== request.propertyId) {
         return unavailable("provider", "payment_readiness_invalid");
