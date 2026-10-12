@@ -24,11 +24,11 @@ const request = (paymentMethod: string) => ({
 });
 
 describe("replacement booking quote issuer", () => {
-  it("quotes bank transfer and PayPal only while their acceptance switch is on", async () => {
+  it("quotes bank transfer and PayPal only when acceptance can take them", async () => {
     // The store answering "stale" proves the request reached it without building a full quote.
     const issue = vi.fn().mockRejectedValue(new PricingStorageError("stale"));
     const off = createReplacementBookingQuoteIssuer({ issue });
-    const on = createReplacementBookingQuoteIssuer({ issue }, true);
+    const on = createReplacementBookingQuoteIssuer({ issue }, ["paypal", "bank_transfer"]);
     for (const method of ["bank_transfer", "paypal"]) {
       await expect(off("hotel", request(method), "key")).rejects.toMatchObject({
         statusCode: 400,
@@ -47,6 +47,11 @@ describe("replacement booking quote issuer", () => {
     }
     for (const method of ["cash", "manual_card", "xendit"])
       await expect(on("hotel", request(method), "key")).rejects.toMatchObject({ statusCode: 400 });
+    // Without the bank-details binding only PayPal is quoted.
+    const paypalOnly = createReplacementBookingQuoteIssuer({ issue }, ["paypal"]);
+    await expect(paypalOnly("hotel", request("bank_transfer"), "key")).rejects.toMatchObject({
+      statusCode: 400,
+    });
     expect(issue).not.toHaveBeenCalled();
   });
 });

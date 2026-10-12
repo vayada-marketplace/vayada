@@ -34,7 +34,11 @@ hotel's one manual step is "payment received", in either acceptance mode.
 property, but keeps them out of the `finance.pricing.v2` evidence hash. Hotels that already list
 them next to card or pay at property keep their saved prices current when this ships. The bank
 destination and PayPal email are checked again at quote and acceptance. Payment settings edits
-still stale saved prices through the Finance pricing source, as today.
+still stale saved prices through the Finance pricing source, as today. On their own they make
+Finance ready only for a hotel that accepts neither card nor pay at property, so a card hotel whose
+Stripe readiness lapses still fails as before. Quotes for them must be due in full before the stay
+(no charges collected at the property), and bank transfer is quoted only where the bank-details
+binding (KMS settings) exists.
 
 ## Out of scope
 

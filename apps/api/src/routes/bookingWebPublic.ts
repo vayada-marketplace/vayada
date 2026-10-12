@@ -1546,7 +1546,9 @@ export function createTargetBookingWebCheckoutAdapter(
   const guestDisclosure = createPublicQuoteGuestDisclosure(pool);
   const issueReplacementQuote = createReplacementBookingQuoteIssuer(
     createCurrentPricingQuoteStore(pool, 300),
-    config.replacementPricingManualPaymentAcceptanceEnabled === true,
+    config.replacementPricingManualPaymentAcceptanceEnabled === true
+      ? ["paypal", ...(config.bankTransfers ? ["bank_transfer"] : [])]
+      : [],
   );
   const serializeTargetChangeRequest = (row: TargetChangeRequestRow, enabled = false) =>
     serializeChangeRequest(

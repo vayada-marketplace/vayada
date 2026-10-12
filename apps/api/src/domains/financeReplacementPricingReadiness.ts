@@ -80,7 +80,10 @@ export async function lockFinanceReplacementPricingReadiness(client: PoolClient,
       [request.propertyId])).rows[0]?.email;
     if (typeof email === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) manual.push("paypal");
   }
-  if (!methods.length && !manual.length) return unavailable("method_unavailable");
+  // On their own they make ready only a hotel that takes neither card nor pay at property, so a
+  // card hotel whose Stripe readiness lapses still fails here, as before.
+  const otherAccepted = settings.accepted_methods.some((m: unknown) => m === "card" || m === "pay_at_property");
+  if (!methods.length && (otherAccepted || !manual.length)) return unavailable("method_unavailable");
   const orderedTerms = request.terms.map((t) => [t.roomTypeId, t.offerId, t.revision]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
   const evidenceId = "finance.pricing.v2:" + createHash("sha256").update(JSON.stringify({
     propertyId: request.propertyId, currency: request.currency, pricingRevision: request.pricingRevision,

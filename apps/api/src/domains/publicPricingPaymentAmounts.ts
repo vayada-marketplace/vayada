@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { isPricingPaymentMethod } from "@vayada/domain-booking";
+import { isManualPricingPaymentMethod, isPricingPaymentMethod } from "@vayada/domain-booking";
 import type { PoolClient } from "pg";
 import { lockPublicPricingChargeTotals } from "./publicPricingChargeTotals.js";
 import { composeReplacementSettlementAmounts } from "./replacementSettlementAmounts.js";
@@ -58,6 +58,9 @@ export async function lockPublicPricingPaymentAmounts(
     total.stay.currency,
   );
   if (!amounts || amounts.totalMinor !== total.totalMinor) return null;
+  // Bank transfer and PayPal are paid in full to the hotel; charges collected at the property
+  // are not supported for them (VAY-2139).
+  if (isManualPricingPaymentMethod(method) && amounts.dueLaterMinor !== "0") return null;
   const paymentEvidenceId =
     "booking.payment-amounts.v1:" +
     createHash("sha256")

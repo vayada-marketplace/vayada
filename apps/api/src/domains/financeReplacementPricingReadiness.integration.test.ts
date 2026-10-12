@@ -87,6 +87,10 @@ describe.skipIf(!url)("replacement pricing Finance owner readiness", () => {
     await paypal(paypalOnly.propertyId, " pay@example.test ");
     expect(await bankOnly.read()).toMatchObject({ kind: "ready", methods: ["bank_transfer"] });
     expect(await paypalOnly.read()).toMatchObject({ kind: "ready", methods: ["paypal"] });
+    // A card hotel without Stripe readiness still fails, even with bank details.
+    const cardAndBank = await fixture(["card", "bank_transfer"]);
+    await destination(cardAndBank.propertyId);
+    expect(await cardAndBank.read()).toMatchObject({ reason: "method_unavailable" });
   });
   it("requires actual scoped execution evidence and invalidates it when provider capability changes", async () => {
     const f = await fixture(["card"]), other = await fixture(["card"]);
