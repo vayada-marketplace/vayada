@@ -229,7 +229,7 @@ describe("Finance payment readiness read model", () => {
     ["revision", { paymentMethodsRevision: "0" }],
     ["pricing revision", { sourcePricingCurrencyRevision: "0" }],
     ["currency", { currency: "eur" }],
-    ["method", { acceptedMethods: ["paypal"] }],
+    ["method", { acceptedMethods: ["crypto"] }],
     ["duplicate method", { acceptedMethods: ["card", "card"] }],
     ["timestamp", { updatedAt: "secret-value" }],
     ["property", { propertyId: "323e4567-e89b-42d3-a456-426614174000" }],
@@ -264,6 +264,27 @@ describe("Finance payment readiness read model", () => {
     ).rejects.toThrow("Finance payment readiness read scope is malformed");
     await readModel.close();
     expect(deps.ended()).toBe(0);
+  });
+
+  it("reads a row the settings page saved after the setup step (VAY-2136)", async () => {
+    const { readModel } = model({
+      rows: [
+        row({
+          acceptedMethods: ["pay_at_property", "cash", "manual_card", "bank_transfer", "paypal"],
+        }),
+      ],
+    });
+    const snapshot = await readModel.getPaymentReadiness({ organizationId, propertyId });
+    expect(snapshot).toMatchObject({
+      paymentsEnabled: true,
+      bookingPaymentReady: true,
+      selectedMethodCount: 1,
+      methods: [
+        { method: "pay_at_property", selected: true, readiness: "ready" },
+        { method: "card", selected: false },
+        { method: "bank_transfer", selected: false },
+      ],
+    });
   });
 
   it("preserves canonical selected-method ordering", async () => {

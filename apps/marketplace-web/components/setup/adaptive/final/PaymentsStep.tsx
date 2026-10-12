@@ -1,10 +1,15 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   FinancePaymentReadinessSnapshot,
   FinancePaymentReadinessBlocker,
 } from "@vayada/domain-finance";
+import { ApiErrorResponse } from "@/services/api/client";
 import { financePaymentReadinessClient as client } from "@/services/api/financePaymentReadinessClient";
+import {
+  onboardingPricingApi,
+  type OnboardingPricingOwners,
+} from "@/services/api/onboardingPricingClient";
 import type { AdaptiveSetupStepComponentProps } from "../AdaptiveSetupStepFormDispatcher";
 import {
   AdaptiveSaveError,
@@ -40,8 +45,7 @@ const methods = [
 ] as const;
 const blockerCopy: Record<FinancePaymentReadinessBlocker, string> = {
   payment_settings_uncommitted: "Save your payment selection.",
-  pricing_currency_unavailable:
-    "Set your property currency in Pricing before saving payment methods.",
+  pricing_currency_unavailable: "Choose the hotel currency before saving payment methods.",
   pricing_currency_mismatch: "Your property currency changed. Refresh and review this selection.",
   online_card_execution_unavailable:
     "Online card payments are waiting for verified payment execution.",
@@ -52,6 +56,141 @@ const blockerCopy: Record<FinancePaymentReadinessBlocker, string> = {
     "Stripe card capability is unavailable. Review your Stripe account requirements.",
   bank_transfer_contract_unavailable: "Bank transfer is not available for setup.",
 };
+/** The hotel's one pricing currency, saved through the PMS currency route like the Pricing step. */
+function HotelCurrencyChoice({
+  propertyId,
+  disabled,
+  onSaved,
+  onNotice,
+}: {
+  propertyId: string;
+  disabled: boolean;
+  /** Reloads the step on the new currency; runs `save` first, inside the step's busy section. */
+  onSaved: (save?: () => Promise<void>) => Promise<void>;
+  onNotice: (message: string) => void;
+}) {
+  const [owners, setOwners] = useState<OnboardingPricingOwners | null>(null);
+  const [choice, setChoice] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  // A ref, not `busy`: two clicks in one frame both see the old state.
+  const running = useRef(false);
+  const run = useCallback(async (task: () => Promise<void>) => {
+    if (running.current) return;
+    running.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      await task();
+    } catch (cause) {
+      setError(adaptiveStepErrorMessage(cause));
+    } finally {
+      running.current = false;
+      setBusy(false);
+    }
+  }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    setOwners(null);
+    setError(null);
+    void onboardingPricingApi
+      .load(propertyId, { signal: controller.signal, cache: "no-store" })
+      .then((value) => {
+        if (controller.signal.aborted) return;
+        // Chosen elsewhere since Payments loaded (another tab or the PMS): adopt it.
+        if (value.pricing) void run(() => onSaved());
+        else setOwners(value);
+      })
+      .catch((cause) => {
+        if (!controller.signal.aborted) setError(currencyErrorMessage(cause));
+      });
+    return () => controller.abort();
+  }, [propertyId, retry, run, onSaved]);
+  const save = (current: OnboardingPricingOwners) =>
+    run(async () => {
+      const existing = { currency: null as string | null };
+      await onSaved(async () => {
+        try {
+          await onboardingPricingApi.saveCurrency(propertyId, choice, current);
+        } catch (cause) {
+          // The write may have landed before its re-read failed, or another session chose the
+          // currency first: continue with a currency that exists now instead of a stale retry.
+          const now = await onboardingPricingApi
+            .load(propertyId, { cache: "no-store" })
+            .catch(() => null);
+          if (now?.pricing) {
+            existing.currency = now.pricing.pricingCurrency.currency;
+            return;
+          }
+          if (now) setOwners(now);
+          throw new Error(currencyErrorMessage(cause));
+        }
+      });
+      if (existing.currency && existing.currency !== choice)
+        onNotice(`The hotel currency was already set to ${existing.currency} in another session.`);
+    });
+  return (
+    <AdaptiveStepCard>
+      <h2 className="text-lg font-semibold">Hotel currency</h2>
+      <p className="mt-1 text-sm text-gray-600">
+        One currency for every room, rate and payment method of this hotel. Choose it before
+        choosing how guests pay.
+      </p>
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-red-800">
+          {error}
+        </p>
+      )}
+      {!owners && error ? (
+        <button
+          type="button"
+          className={`mt-3 ${adaptiveSecondaryButtonClass}`}
+          onClick={() => setRetry((value) => value + 1)}
+        >
+          Retry
+        </button>
+      ) : (
+        <div className="mt-4 flex max-w-md flex-wrap items-end gap-3">
+          <label className="block grow text-sm font-semibold text-gray-900">
+            Hotel currency
+            <select
+              value={choice}
+              disabled={!owners || busy || disabled}
+              onChange={(event) => setChoice(event.target.value)}
+              className="mt-2 min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+            >
+              <option value="" disabled>
+                {owners ? "Choose currency" : "Loading currencies…"}
+              </option>
+              {owners?.currencies.map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className={adaptiveSecondaryButtonClass}
+            disabled={!owners || !choice || busy || disabled}
+            onClick={() => owners && void save(owners)}
+          >
+            {busy ? "Saving…" : "Save currency"}
+          </button>
+        </div>
+      )}
+    </AdaptiveStepCard>
+  );
+}
+
+function currencyErrorMessage(cause: unknown): string {
+  // The currency route is the owner's (like Pricing); the Payments step itself is not.
+  return cause instanceof ApiErrorResponse && cause.status === 403
+    ? "Only the hotel owner can choose the hotel currency. Ask the owner to finish this step."
+    : adaptiveStepErrorMessage(cause);
+}
+
 export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
   const draft = useFinalStepDraft(props, "payments");
   const canonical = useRef<FinancePaymentReadinessSnapshot | null>(null);
@@ -146,16 +285,20 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
           {notice}
         </p>
       )}
-      <p className="text-sm text-gray-600">
-        Property currency:{" "}
-        <strong>{snapshot.pricingCurrency.current?.currency ?? "Not configured"}</strong>. Manage
-        currency in Pricing.
-      </p>
-      {!snapshot.pricingCurrency.current && (
-        <p role="status" className="rounded-lg bg-amber-50 p-4 text-sm text-amber-900">
-          Set your property currency in Pricing before saving payment methods. Your selection can be
-          saved as a draft when you exit.
+      {snapshot.pricingCurrency.current ? (
+        <p className="text-sm text-gray-600">
+          Property currency: <strong>{snapshot.pricingCurrency.current.currency}</strong>. Prices
+          and payment methods use this currency.
         </p>
+      ) : (
+        // Payment methods need the currency, so a new hotel can choose it here without first
+        // visiting Pricing (VAY-2137).
+        <HotelCurrencyChoice
+          propertyId={props.propertyId}
+          disabled={draft.saving}
+          onSaved={draft.rebase}
+          onNotice={setNotice}
+        />
       )}
       <fieldset disabled={draft.saving} className="grid gap-6 md:grid-cols-2">
         <legend className="sr-only">Payment methods</legend>
