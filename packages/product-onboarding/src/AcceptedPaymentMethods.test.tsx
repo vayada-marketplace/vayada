@@ -17,6 +17,7 @@ describe("accepted payment methods", () => {
       );
     });
     const box = (label: string) => view!.root.findByProps({ "aria-label": label });
+    // The list is controlled and stays card + bank transfer: each toggle starts from it.
     await act(async () =>
       box("pricing.paymentMethods.payAtProperty").props.onChange({ target: { checked: true } }),
     );
