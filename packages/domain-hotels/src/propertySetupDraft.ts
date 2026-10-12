@@ -65,6 +65,14 @@ export const PROPERTY_SETUP_STEP_DEFINITIONS = [
       "room.amenities",
     ],
   },
+  // Before pricing: publishing prices needs payment methods, which need only the currency.
+  {
+    stepId: "payments",
+    track: "hotel_operations",
+    permission: "booking.settings.manage",
+    baseRevisionKeys: ["finance.payment_methods", "pms.pricing_settings"],
+    fields: ["payment.accepted_methods"],
+  },
   {
     stepId: "pricing",
     track: "hotel_operations",
@@ -112,13 +120,6 @@ export const PROPERTY_SETUP_STEP_DEFINITIONS = [
       "policy.check_out_time",
       "policy.cancellation_bundle_confirmation",
     ],
-  },
-  {
-    stepId: "payments",
-    track: "hotel_operations",
-    permission: "booking.settings.manage",
-    baseRevisionKeys: ["finance.payment_methods", "pms.pricing_settings"],
-    fields: ["payment.accepted_methods"],
   },
   {
     stepId: "review",
