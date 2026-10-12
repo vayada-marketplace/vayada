@@ -131,10 +131,10 @@ function activeStepIds(selectedTracks: SetupTrack[]): PropertySetupStepId[] {
       ? ([
           "booking_design",
           "rooms",
+          "payments",
           "pricing",
           "calendar",
           "guest_experience",
-          "payments",
         ] as const)
       : []),
     "review",
