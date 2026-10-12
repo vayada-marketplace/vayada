@@ -139,7 +139,8 @@ export async function writePricingAcceptance(
     );
     if (manualTerms) {
       // Bank transfer and PayPal: the rooms stay held with the booking `pending_payment` until the
-      // hotel confirms the payment. Revenue and the PMS job follow; decline or expiry release.
+      // hotel confirms the payment; the guest gets the instructions and the hotel is told.
+      // Revenue and the PMS job follow the payment; decline or expiry release the rooms.
       const accepted = await storePricingAcceptance(client, input.slug, prepared, lifecycle, null);
       if (manualTerms.method === "bank_transfer")
         await manualPayments!.bankTransfers!.bind(
@@ -147,6 +148,7 @@ export async function writePricingAcceptance(
           prepared.current.scope.propertyId,
           bookingId,
         );
+      await stagePricingAcceptanceNotifications(client, input.slug, accepted);
       const checkedAt = await finishPricingAcceptance(
         client,
         input.slug,

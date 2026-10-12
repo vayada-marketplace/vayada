@@ -12,6 +12,7 @@ import {
   createReplacementChargeDeclarationStore,
   replacementChargeFingerprint,
 } from "./replacementChargeDeclarations.js";
+import { lockReplacementPricingAuthorization } from "./replacementPricingAuthorization.js";
 import { lockReplacementPricingDraftOwners } from "./replacementPricingOfferOwners.js";
 import {
   createReplacementPricingStorageGuard,
@@ -58,6 +59,27 @@ export function createReplacementPricingCommands(pool: Pool, context: RequestCon
     };
   }
   return {
+    /** The Prices tab's read check alone (staff property access included), for reads that
+     * carry no pricing data, such as which payment methods the pickers may offer (VAY-2139). */
+    async authorizeRead(propertyId: string) {
+      const currentScope = scope(propertyId);
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        return await lockReplacementPricingAuthorization(
+          client,
+          trustedContext,
+          currentScope,
+          "read",
+        );
+      } finally {
+        try {
+          await client.query("ROLLBACK");
+        } finally {
+          client.release();
+        }
+      }
+    },
     /** Read-only preparation. Returned evidence can become stale; saves revalidate it. */
     async prepare(propertyId: string, input: unknown, draft?: BookingPricingDraft) {
       const currentScope = scope(propertyId);
