@@ -50,6 +50,28 @@ describe("payment readiness browser client", () => {
     });
     await expect(h.client.providerAccountId(propertyId)).rejects.toThrow();
   });
+  it("reads whether bank transfer and PayPal can be used yet (VAY-2139)", async () => {
+    const h = harness();
+    h.http.get.mockResolvedValue({ acceptanceEnabled: true, readyMethods: ["paypal"] });
+    expect(await h.client.manualPaymentMethods(propertyId)).toEqual({
+      acceptanceEnabled: true,
+      readyMethods: ["paypal"],
+    });
+    expect(h.http.get).toHaveBeenCalledWith(
+      `/api/finance/properties/${propertyId}/manual-payment-methods`,
+      undefined,
+    );
+    for (const invalid of [
+      null,
+      { acceptanceEnabled: "yes", readyMethods: [] },
+      { acceptanceEnabled: true, readyMethods: ["card"] },
+      { acceptanceEnabled: true, readyMethods: ["paypal", "paypal"] },
+      { acceptanceEnabled: false, readyMethods: ["bank_transfer"] },
+    ]) {
+      h.http.get.mockResolvedValue(invalid);
+      await expect(h.client.manualPaymentMethods(propertyId)).rejects.toThrow();
+    }
+  });
   it("keeps selected but unready cards blocked", async () => {
     const h = harness();
     expect((await h.client.load(propertyId)).bookingPaymentReady).toBe(false);

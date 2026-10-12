@@ -7,6 +7,7 @@ import type { AdaptiveSetupStepComponentProps } from "../AdaptiveSetupStepFormDi
 const mocks = vi.hoisted(() => ({
   load: vi.fn(),
   save: vi.fn(),
+  manual: vi.fn(),
   draft: vi.fn(),
   reset: vi.fn(),
   route: vi.fn(),
@@ -14,7 +15,11 @@ const mocks = vi.hoisted(() => ({
   saveCurrency: vi.fn(),
 }));
 vi.mock("@/services/api/financePaymentReadinessClient", () => ({
-  financePaymentReadinessClient: { load: mocks.load, save: mocks.save },
+  financePaymentReadinessClient: {
+    load: mocks.load,
+    save: mocks.save,
+    manualPaymentMethods: mocks.manual,
+  },
 }));
 vi.mock("@/services/api/adaptiveSetupDraftClient", () => ({
   adaptiveSetupDraftClient: { save: mocks.draft },
@@ -54,6 +59,7 @@ function snapshot(
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.load.mockResolvedValue(snapshot());
+  mocks.manual.mockResolvedValue({ acceptanceEnabled: false, readyMethods: [] });
   mocks.draft.mockImplementation(async (_id, request) => ({
     sessionId: "session",
     trackRevision: 1,
@@ -73,10 +79,12 @@ async function harness(
   resumed = false,
   paymentRevision = 0,
   pricingRevision = 1,
+  state = "not_started",
 ) {
   let leave!: () => Promise<void>;
   const step = {
     stepId: "payments",
+    state,
     currentBaseRevisions: {
       "finance.payment_methods": `payment-methods:${paymentRevision}`,
       "pms.pricing_settings": `pricing:${pricingRevision}`,
@@ -449,4 +457,44 @@ it("shows a currency load failure with a retry", async () => {
   expect(mocks.currencies).toHaveBeenCalledTimes(2);
   expect(h.view.root.findAllByType("select")).toHaveLength(1);
   h.view.unmount();
+});
+
+it("keeps the step as it is while bank transfer and PayPal are off (VAY-2139)", async () => {
+  mocks.manual.mockRejectedValueOnce(new Error("unavailable"));
+  const h = await harness();
+  expect(h.text()).not.toContain("Bank transfer or PayPal");
+  expect(h.button("Save and continue").props.disabled).toBe(true);
+  h.view.unmount();
+});
+it("links bank transfer and PayPal to Booking Engine settings and continues once they count (VAY-2139)", async () => {
+  mocks.manual.mockResolvedValue({ acceptanceEnabled: true, readyMethods: [] });
+  const fresh = await harness();
+  expect(fresh.text()).toContain("Bank transfer or PayPal");
+  expect(fresh.text()).toContain("Bank transfer and PayPal bookings need your manual confirmation");
+  expect(fresh.text()).toContain("Not set up");
+  expect(fresh.view.root.findByType("a").props.href).toBe(
+    "https://admin.booking.vayada.com/settings/payments",
+  );
+  // Not counted yet: nothing to continue with.
+  expect(fresh.button("Save and continue").props.disabled).toBe(true);
+  await act(async () => {
+    await fresh.button("Check again").props.onClick();
+  });
+  expect(fresh.props.refreshRoute).toHaveBeenCalledOnce();
+  expect(mocks.manual).toHaveBeenCalledTimes(2);
+  fresh.view.unmount();
+
+  mocks.manual.mockResolvedValue({ acceptanceEnabled: true, readyMethods: ["bank_transfer"] });
+  mocks.load.mockResolvedValue(snapshot([], 1));
+  const ready = await harness("hotel_operations", false, 1, 1, "complete");
+  expect(ready.text()).toContain("Ready: Bank transfer");
+  await act(async () => {
+    await ready.button("Continue").props.onClick();
+  });
+  expect(mocks.save).not.toHaveBeenCalled();
+  expect(ready.props.saveAndContinue).toHaveBeenCalledOnce();
+  // Choosing pay at hotel as well goes back to the usual save.
+  await act(async () => ready.check(0).props.onChange());
+  expect(ready.button("Save and continue")).toBeDefined();
+  ready.view.unmount();
 });

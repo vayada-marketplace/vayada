@@ -14,6 +14,7 @@ import {
 import { PMS_PRICING_CONTRACT_VERSION } from "@vayada/domain-pms";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
+import type { FinanceManualPaymentMethodsReadPort } from "../domains/financeManualPaymentReadiness.js";
 import { enforceRoutePolicy } from "./policy.js";
 import { refreshPublicPageAfterSaves } from "./publicPageRefresh.js";
 
@@ -28,6 +29,8 @@ export type FinancePaymentReadinessRoutesOptions = {
   readPort: FinancePaymentReadinessReadPort;
   /** Refreshes the live booking page after payment-method saves (VAY-2129). */
   refreshPublicPage?: (propertyId: string) => Promise<void>;
+  /** Present only while bank-transfer and PayPal acceptance is on (VAY-2139). */
+  manualPayments?: FinanceManualPaymentMethodsReadPort;
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -69,6 +72,26 @@ export async function registerFinancePaymentReadinessRoutes(
       return snapshot?.propertyId === scope.propertyId
         ? reply.status(200).send(snapshot)
         : portViolation(reply);
+    },
+  );
+
+  // Whether guests can pay this hotel by bank transfer or PayPal yet, for the owner's setup and
+  // rate screens: their acceptance is on, and which of the two have their details in place.
+  app.get<{ Params: PropertyParams }>(
+    "/finance/properties/:propertyId/manual-payment-methods",
+    { onRequest: authorize },
+    async (request, reply) => {
+      const scope = requireAuthorizedScope(authorized, request);
+      if (!options.manualPayments)
+        return reply.status(200).send({ acceptanceEnabled: false, readyMethods: [] });
+      try {
+        const readyMethods = await options.manualPayments.acceptedMethods({
+          propertyId: scope.propertyId,
+        });
+        return reply.status(200).send({ acceptanceEnabled: true, readyMethods });
+      } catch {
+        return portViolation(reply);
+      }
     },
   );
 

@@ -10,6 +10,11 @@ type Request = {
   expectedPricingCurrencyRevision: number;
   selectedMethods: Method[];
 };
+/** Whether guests can pay the hotel by bank transfer or PayPal yet (VAY-2139). */
+export type ManualPaymentMethods = {
+  acceptanceEnabled: boolean;
+  readyMethods: ("bank_transfer" | "paypal")[];
+};
 type Http = {
   get<T>(path: string, options?: RequestInit): Promise<T>;
   put<T>(path: string, value?: unknown, options?: RequestInit): Promise<T>;
@@ -46,6 +51,25 @@ export function createFinancePaymentReadinessClient(http: Http) {
       );
       if (!value || value.propertyId !== propertyId) throw invalid();
       return value;
+    },
+    async manualPaymentMethods(
+      propertyId: string,
+      options?: RequestInit,
+    ): Promise<ManualPaymentMethods> {
+      const value = await http.get<Partial<ManualPaymentMethods> | null>(
+        `${path(propertyId)}/manual-payment-methods`,
+        options,
+      );
+      const methods = value?.readyMethods;
+      if (
+        typeof value?.acceptanceEnabled !== "boolean" ||
+        !Array.isArray(methods) ||
+        methods.some((method) => method !== "bank_transfer" && method !== "paypal") ||
+        new Set(methods).size !== methods.length ||
+        (!value.acceptanceEnabled && methods.length > 0)
+      )
+        throw invalid();
+      return { acceptanceEnabled: value.acceptanceEnabled, readyMethods: [...methods] };
     },
     async save(propertyId: string, request: Request): Promise<FinancePaymentReadinessSnapshot> {
       if (

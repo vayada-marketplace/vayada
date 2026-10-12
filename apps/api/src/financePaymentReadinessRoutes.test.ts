@@ -208,6 +208,50 @@ describe("Finance payment readiness routes", () => {
     });
   });
 
+  it("tells the owner whether bank transfer and PayPal can be used yet (VAY-2139)", async () => {
+    const get = (target: Awaited<ReturnType<typeof testApp>>, headers = true) =>
+      injectJson(target, {
+        method: "GET",
+        url: `/finance/properties/${propertyId}/manual-payment-methods`,
+        headers: headers ? { authorization: "Bearer valid-token" } : {},
+      });
+    app = await testApp(fakePorts());
+    await expect(get(app)).resolves.toMatchObject({
+      statusCode: 200,
+      body: { acceptanceEnabled: false, readyMethods: [] },
+    });
+    await app.close();
+
+    const asked: string[] = [];
+    let fail = false;
+    const ports: FakePorts = {
+      ...fakePorts(),
+      manualPayments: {
+        async acceptedMethods(request) {
+          asked.push(request.propertyId);
+          if (fail) throw new Error("private read failure");
+          return ["bank_transfer"];
+        },
+      },
+    };
+    app = await testApp(ports);
+    await expect(get(app)).resolves.toMatchObject({
+      statusCode: 200,
+      body: { acceptanceEnabled: true, readyMethods: ["bank_transfer"] },
+    });
+    expect(asked).toEqual([propertyId]);
+    fail = true;
+    await expect(get(app)).resolves.toMatchObject({
+      statusCode: 500,
+      body: { code: "finance_payment_readiness_port_contract_violation" },
+    });
+    await expect(get(app, false)).resolves.toMatchObject({ statusCode: 401 });
+    await app.close();
+    app = await testApp(ports, { links: [link("owner", "active", otherPropertyId)] });
+    await expect(get(app)).resolves.toMatchObject({ statusCode: 403 });
+    expect(asked).toEqual([propertyId, propertyId]);
+  });
+
   it("builds canonical commands and returns created then updated", async () => {
     const ports = fakePorts();
     app = await testApp(ports);

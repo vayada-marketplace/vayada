@@ -5,7 +5,10 @@ import type {
   FinancePaymentReadinessBlocker,
 } from "@vayada/domain-finance";
 import { ApiErrorResponse } from "@/services/api/client";
-import { financePaymentReadinessClient as client } from "@/services/api/financePaymentReadinessClient";
+import {
+  financePaymentReadinessClient as client,
+  type ManualPaymentMethods,
+} from "@/services/api/financePaymentReadinessClient";
 import {
   onboardingPricingApi,
   type OnboardingPricingOwners,
@@ -43,6 +46,12 @@ const methods = [
       "Guests pay online. Connecting Stripe is one requirement; verified card payment execution must also be ready.",
   },
 ] as const;
+/** Bank transfer and PayPal are set up in Booking Engine settings for now (VAY-2139). */
+const BOOKING_ADMIN_PAYMENTS_URL = `${(
+  process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || "https://admin.booking.vayada.com"
+).replace(/\/$/, "")}/settings/payments`;
+const MANUAL_OFF: ManualPaymentMethods = { acceptanceEnabled: false, readyMethods: [] };
+const manualLabels = { bank_transfer: "Bank transfer", paypal: "PayPal" } as const;
 const blockerCopy: Record<FinancePaymentReadinessBlocker, string> = {
   payment_settings_uncommitted: "Save your payment selection.",
   pricing_currency_unavailable: "Choose the hotel currency before saving payment methods.",
@@ -199,6 +208,7 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const [notice, setNotice] = useState("");
+  const [manual, setManual] = useState<ManualPaymentMethods>(MANUAL_OFF);
   const { initialize } = draft;
   useEffect(() => {
     const controller = new AbortController();
@@ -222,6 +232,15 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
       .catch((error) => {
         if (!controller.signal.aborted) setLoadError(adaptiveStepErrorMessage(error));
       });
+    void client
+      .manualPaymentMethods(props.propertyId, { signal: controller.signal, cache: "no-store" })
+      .then((value) => {
+        if (!controller.signal.aborted) setManual(value);
+      })
+      // Unknown reads as off: the step stays as it is without bank transfer and PayPal.
+      .catch(() => {
+        if (!controller.signal.aborted) setManual(MANUAL_OFF);
+      });
     return () => controller.abort();
   }, [props.propertyId, initialize, draft.reload, retry]);
   function selected(): Method[] {
@@ -234,8 +253,18 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
   const selection = methods
     .filter(({ field }) => Array.isArray(fields) && fields.includes(field))
     .map(({ method }) => method);
-  const matchesSaved =
-    !!snapshot && matchesSelection(snapshot, selection);
+  const matchesSaved = !!snapshot && matchesSelection(snapshot, selection);
+  // A hotel paid only by bank transfer or PayPal selects no method here: the server marks the
+  // step complete once their details are in Booking Engine settings (VAY-2139).
+  const manualContinue =
+    manual.acceptanceEnabled && !selection.length && props.step.state === "complete";
+  async function continueWithManual() {
+    setNotice("");
+    await draft.commit(async () => {
+      if (!manualContinue)
+        throw new Error("Add your bank details or PayPal email in Booking Engine settings first.");
+    }, true);
+  }
   async function save(advance: boolean) {
     setNotice("");
     await draft.commit(async () => {
@@ -345,6 +374,39 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
           );
         })}
       </fieldset>
+      {manual.acceptanceEnabled && (
+        <AdaptiveStepCard>
+          <h2 className="text-lg font-semibold">Bank transfer or PayPal</h2>
+          <p className="mt-3 text-sm text-gray-600">
+            Guests pay you directly. Add your bank details or PayPal email in Booking Engine
+            settings &gt; Payments.
+          </p>
+          <p className="mt-2 text-sm text-gray-600">
+            Bank transfer and PayPal bookings need your manual confirmation: you mark each payment
+            as received in the PMS.
+          </p>
+          <p className="mt-4 text-sm font-semibold">
+            {manual.readyMethods.length
+              ? `Ready: ${manual.readyMethods.map((method) => manualLabels[method]).join(", ")}`
+              : "Not set up"}
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <a className={adaptiveSecondaryButtonClass} href={BOOKING_ADMIN_PAYMENTS_URL}>
+              Open payment settings
+            </a>
+            <button
+              type="button"
+              className={adaptiveSecondaryButtonClass}
+              disabled={draft.saving}
+              onClick={() =>
+                void props.refreshRoute().finally(() => setRetry((value) => value + 1))
+              }
+            >
+              Check again
+            </button>
+          </div>
+        </AdaptiveStepCard>
+      )}
       <StripeSetupControls
         organizationId={props.route.scope.organizationId}
         visible={selection.includes("card")}
@@ -384,10 +446,12 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
         <button
           type="button"
           className={adaptivePrimaryButtonClass}
-          disabled={draft.saving || !matchesSaved || !snapshot.bookingPaymentReady}
-          onClick={() => void save(true)}
+          disabled={
+            draft.saving || (!manualContinue && (!matchesSaved || !snapshot.bookingPaymentReady))
+          }
+          onClick={() => void (manualContinue ? continueWithManual() : save(true))}
         >
-          Save and continue
+          {manualContinue ? "Continue" : "Save and continue"}
         </button>
       </div>
     </div>

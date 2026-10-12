@@ -1812,7 +1812,10 @@ const app = buildApp({
       }
     : undefined,
   bookingReservationsRepository,
-  financePaymentSetup: financePaymentSetupRuntime.routes,
+  financePaymentSetup: {
+    ...financePaymentSetupRuntime.routes,
+    manualPayments: financeManualPaymentReadiness,
+  },
   publicPageRefresh: refreshLivePublicPage,
   bookingGuestChoices: {
     store: bookingGuestChoiceStore,
