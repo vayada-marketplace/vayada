@@ -1,4 +1,5 @@
 import {
+  FINANCE_PAYMENT_READINESS_CONTRACT_VERSION,
   FINANCE_PAYOUT_STATUSES,
   FINANCE_PROVIDER_ACCOUNT_COMMAND_SIDE_EFFECTS,
   FINANCE_PROVIDER_ACCOUNT_STATUSES,
@@ -102,6 +103,14 @@ import {
   type FinanceOnlineCardReadinessState,
   type FinanceOnlineCardReadinessChangeContext,
 } from "../domains/financeOnlineCardReadinessTransition.js";
+import { lockFinancePaymentSettings } from "../domains/financePaymentReadinessCommandRepository.js";
+import {
+  lockFinancePaymentPricingCurrency,
+  nextFinancePaymentSettingsBinding,
+  recordFinancePaymentSettingsBinding,
+  sameFinancePaymentMethods,
+  type FinancePaymentSettingsBinding,
+} from "../domains/financePaymentSettingsBinding.js";
 import { createFinancePlatformAffiliatePayoutMarkPaidRepository } from "./financePlatformAffiliatePayoutMarkPaid.js";
 import { createFinancePlatformAffiliatePayoutReadRepository } from "./financePlatformAffiliatePayoutRepository.js";
 import { registerFinancePlatformAffiliatePayoutRoutes } from "./financePlatformAffiliatePayoutRoutes.js";
@@ -1654,6 +1663,8 @@ async function updatePaymentSettingsInClient(
   command: FinancePaymentSettingsPatchCommand,
 ): Promise<FinancePaymentSettingsPatchResult> {
   await lockFinanceOnlineCardReadinessProperty(client, command.propertyId);
+  const pricing = await lockFinancePaymentPricingCurrency(client, command.propertyId);
+  const previous = await lockFinancePaymentSettings(client, command.propertyId);
   const previousOnlineCardReadiness = await loadFinanceOnlineCardReadinessState(
     client,
     command.propertyId,
@@ -1673,6 +1684,23 @@ async function updatePaymentSettingsInClient(
       statusCode: 404,
       code: "property_not_found",
       message: "The property currency could not be resolved.",
+    };
+  }
+  // VAY-2136: bind like the setup Payments step, to the PMS pricing currency, when booking
+  // settings agree with it. A bound row can't change currency here; an unbound row whose
+  // currencies disagree saves unbound, as before, until the setup step binds it.
+  const bindingPricing =
+    pricing?.currency === canonicalCurrency && command.audit.actor.kind === "user" ? pricing : null;
+  if (
+    pricing &&
+    pricing.currency !== canonicalCurrency &&
+    previous?.paymentMethodsRevision != null
+  ) {
+    return {
+      ok: false,
+      statusCode: 409,
+      code: "property_currency_conflict",
+      message: `Prices use ${pricing.currency} but booking settings use ${canonicalCurrency}. Use one currency before saving payments.`,
     };
   }
   if (
@@ -1703,12 +1731,20 @@ async function updatePaymentSettingsInClient(
       message: "Bank details require the dedicated destination endpoint.",
     };
   }
-  const next = mergePaymentSettings(current, {
+  const merged = mergePaymentSettings(current, {
     ...command.payload,
     defaultCurrency: canonicalCurrency,
     supportedCurrencies: [canonicalCurrency],
   });
-  const completenessError = paymentSettingsCompletenessError(next);
+  // The same methods in another order would still change the row, which resets online-card
+  // evidence and stales saved prices.
+  const next =
+    Array.isArray(previous?.acceptedMethods) &&
+    sameFinancePaymentMethods(previous.acceptedMethods, merged.acceptedMethods)
+      ? { ...merged, acceptedMethods: previous.acceptedMethods as typeof merged.acceptedMethods }
+      : merged;
+  // A bound row may keep the setup step's bare pay_at_property, as public bookability does.
+  const completenessError = paymentSettingsCompletenessError(next, bindingPricing !== null);
   if (completenessError) {
     return {
       ok: false,
@@ -1825,14 +1861,38 @@ async function updatePaymentSettingsInClient(
   }
 
   if (idempotencyRow?.inserted) {
-    await upsertPaymentSettings(client, command, next);
+    const actor = command.audit.actor;
+    const binding = bindingPricing
+      ? nextFinancePaymentSettingsBinding(previous, next, bindingPricing)
+      : null;
+    await upsertPaymentSettings(client, command, next, binding);
+    if (binding && bindingPricing && actor.kind === "user") {
+      await recordFinancePaymentSettingsBinding(client, {
+        previous,
+        propertyId: command.propertyId,
+        organizationId: actor.organizationId,
+        actorUserId: actor.userId,
+        correlationId: command.audit.correlationId ?? command.audit.requestId,
+        causationId: command.audit.requestId,
+        keyHash,
+        pricing: bindingPricing,
+        at: new Date(command.audit.requestedAt),
+      });
+      commandMeta = {
+        ...commandMeta,
+        outboxEvents: [...commandMeta.outboxEvents, "finance.payment_readiness.changed"],
+      };
+    }
     const readinessLost = await applyFinanceOnlineCardReadinessLoss(client, {
       propertyId: command.propertyId,
       previous: previousOnlineCardReadiness,
       context: onlineCardReadinessChangeContext(command.audit, command.commandId),
     });
     if (readinessLost) {
-      commandMeta = { ...commandMeta, outboxEvents: ["finance.online_card_readiness.changed"] };
+      commandMeta = {
+        ...commandMeta,
+        outboxEvents: [...commandMeta.outboxEvents, "finance.online_card_readiness.changed"],
+      };
     }
     await recordPaymentSettingsAuditEvent(client, command, keyHash);
   }
@@ -1882,11 +1942,13 @@ function mergePaymentSettings(
 
 function paymentSettingsCompletenessError(
   settings: FinancePaymentSettingsReadModel,
+  bound: boolean,
 ): string | null {
   if (!settings.paymentsEnabled || settings.acceptedMethods.length === 0) {
     return "Choose at least one payment method.";
   }
   if (
+    !bound &&
     settings.acceptedMethods.includes("pay_at_property") &&
     !settings.acceptedMethods.some((method) => method === "cash" || method === "manual_card")
   ) {
@@ -1916,6 +1978,7 @@ async function upsertPaymentSettings(
   client: FinancePropertySettingsWriteClient,
   command: FinancePaymentSettingsPatchCommand,
   settings: FinancePaymentSettingsReadModel,
+  binding: FinancePaymentSettingsBinding | null,
 ): Promise<void> {
   const hasProviderChoice = command.payload.paymentProvider !== undefined;
   const providerAccountId = hasProviderChoice
@@ -1933,6 +1996,9 @@ async function upsertPaymentSettings(
        tax_policy,
        statement_descriptor,
        requires_manual_review,
+       payment_readiness_contract_version,
+       payment_methods_revision,
+       source_pricing_currency_revision,
        source_system,
        updated_at
      )
@@ -1947,6 +2013,9 @@ async function upsertPaymentSettings(
        $7::jsonb,
        $8,
        $9,
+       $12,
+       $13::bigint,
+       $14::bigint,
        'finance',
        now()
      )
@@ -1963,6 +2032,18 @@ async function upsertPaymentSettings(
        tax_policy = EXCLUDED.tax_policy,
        statement_descriptor = EXCLUDED.statement_descriptor,
        requires_manual_review = EXCLUDED.requires_manual_review,
+       payment_readiness_contract_version = COALESCE(
+         EXCLUDED.payment_readiness_contract_version,
+         finance.payment_settings.payment_readiness_contract_version
+       ),
+       payment_methods_revision = COALESCE(
+         EXCLUDED.payment_methods_revision,
+         finance.payment_settings.payment_methods_revision
+       ),
+       source_pricing_currency_revision = COALESCE(
+         EXCLUDED.source_pricing_currency_revision,
+         finance.payment_settings.source_pricing_currency_revision
+       ),
        source_system = 'finance',
        updated_at = now()`,
     [
@@ -1977,6 +2058,9 @@ async function upsertPaymentSettings(
       settings.requiresManualReview,
       providerAccountId,
       hasProviderChoice,
+      binding ? FINANCE_PAYMENT_READINESS_CONTRACT_VERSION : null,
+      binding?.paymentMethodsRevision ?? null,
+      binding?.sourcePricingCurrencyRevision ?? null,
     ],
   );
 }
@@ -2242,7 +2326,11 @@ function parseStoredPaymentSettingsResponse(
     stored.sideEffects.length !== 1 ||
     stored.sideEffects[0] !== "audit_event" ||
     !Array.isArray(stored.outboxEvents) ||
-    stored.outboxEvents.some((event) => event !== "finance.online_card_readiness.changed") ||
+    stored.outboxEvents.some(
+      (event) =>
+        event !== "finance.online_card_readiness.changed" &&
+        event !== "finance.payment_readiness.changed",
+    ) ||
     !Array.isArray(stored.jobs) ||
     stored.jobs.length !== 0
   ) {
