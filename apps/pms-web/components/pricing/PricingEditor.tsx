@@ -10,6 +10,7 @@ import { samePricingValue, type createReplacementPricingClient, type PricingSnap
 import { baseAmounts, decimalAmount, editedSnapshot, errorText, type MessageKey, parseMinorInput, PricingError } from "./pricingAmounts";
 import { financeNotReady, pricingSave, pricingSaveError } from "./savePricing";
 import type { NewRoomPrices } from "./newRoomPrices";
+import type { KeptNewRoomPrices } from "./keptNewRoomPrices";
 import { FirstPricingSetup, type SetupRoom, type firstPricingInput } from "./FirstPricingSetup";
 import { PricingTerms } from "./PricingTerms";
 import { PricingIncludedAdjustments } from "./PricingIncludedAdjustments";
@@ -54,10 +55,10 @@ type NewRoom = { take: MutableRefObject<(() => NewRoomPrices | null) | null>; ac
 /** One room's prices (the room page's Prices tab). Saving publishes the whole property, with every other room
  * exactly as read. `onAttention`: a leave confirmation is waiting, so the page should show this tab;
  * `onPublished`: prices were published; a new `refresh` reloads unless this room has unsaved work. */
-export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, roomTypeId: focus, onAttention, onPublished, refresh = 0, newRoom }: { client: Client; roomNames?: Record<string, string>; roomFacts?: Record<string, { size: number | null; photo: string | null }>; setup?: { propertyId: string; rooms: readonly SetupRoom[] }; roomTypeId: string; onAttention?: () => void; onPublished?: () => void; refresh?: number; newRoom?: NewRoom }) {
+export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, roomTypeId: focus, onAttention, onPublished, refresh = 0, newRoom, kept, onHandover }: { client: Client; roomNames?: Record<string, string>; roomFacts?: Record<string, { size: number | null; photo: string | null }>; setup?: { propertyId: string; rooms: readonly SetupRoom[] }; roomTypeId: string; onAttention?: () => void; onPublished?: () => void; refresh?: number; newRoom?: NewRoom; kept?: KeptNewRoomPrices; onHandover?: (kept: boolean) => void }) {
   const onPrices = newRoom?.onPrices;
-  const callbacks = useRef({ onAttention, onPublished, onPrices });
-  useEffect(() => { callbacks.current = { onAttention, onPublished, onPrices }; }, [onAttention, onPublished, onPrices]);
+  const callbacks = useRef({ onAttention, onPublished, onPrices, onHandover });
+  useEffect(() => { callbacks.current = { onAttention, onPublished, onPrices, onHandover }; }, [onAttention, onPublished, onPrices, onHandover]);
   const [policyEdits, setPolicyEdits] = useState<Record<string, PricingTermsInput>>({});
   const policyBases = useRef<Record<string, string | null>>({});
   const policyKey = (room: string, offer: string) => JSON.stringify([room, offer]);
@@ -89,7 +90,11 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const [savedTerms, setSavedTerms] = useState<Record<string, OptionTerms | null>>({}), [termsAttempt, setTermsAttempt] = useState(0);
   const requestedTerms = useRef(new Set<string>());
   const loads = useRef(0);
-  const load = useCallback(async (after?: { keep?: Kept }) => {
+  // Prices the New room page could not save for this room: the first load that reads pricing starts from them and
+  // says why (VAY-2147).
+  const handedOver = useRef(kept);
+  const load = useCallback(async (requested?: { keep?: Kept }) => {
+    const handover = requested ? undefined : handedOver.current, after = handover ? { keep: handedOverEdits(handover) } : requested;
     const seq = ++loads.current, latest = () => alive.current && seq === loads.current; // An older read never overwrites a newer one.
     setLoading(true); setEmpty(false); setError(null);
     try {
@@ -102,7 +107,13 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
         rooms: !room ? rooms : rooms.some((value) => value.roomTypeId === room.roomTypeId) ? rooms.map((value) => value.roomTypeId === room.roomTypeId ? room : value) : [...rooms, room] } : null);
       requestedTerms.current.clear(); setSavedTerms({});
       setAddingOfferRoom(null); setPreset(null); setDeleting(null); setDeleteError(null); setPendingEntries({}); setBaseRevision(saved?.revision ?? 0); setStale(!!saved?.stale); setInputs({}); setDirty(!!room); setNeedsReload(false); setDone(false);
-      setNotice(room ? "pricing.room.noticeKept" : keep ? "pricing.room.noticeDropped" : saved?.stale ? "pricing.room.noticeStale" : "");
+      if (handover) handedOver.current = undefined;
+      // A save that broke off without an answer may have published them after all: this room is new, so they are ours.
+      const savedAfterAll = handover?.outcomeUnknown && saved?.rooms.some((value) => value.roomTypeId === focus);
+      setNotice(room ? (handover ? "pricing.newRoom.noticeKept" : "pricing.room.noticeKept") : savedAfterAll ? "pricing.newRoom.noticeSavedAfterAll" : keep ? "pricing.room.noticeDropped" : saved?.stale ? "pricing.room.noticeStale" : "");
+      // Why they were not saved, also when they no longer apply; `onHandover` says whether they were kept.
+      if (handover && !savedAfterAll) setError(handover.error);
+      if (handover) callbacks.current.onHandover?.(!!room);
     } catch (e) { if (latest()) setError(e); }
     finally { if (latest()) setLoading(false); }
   }, [client, focus]);
@@ -261,7 +272,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const focusIndex = display ? display.rooms.findIndex((room) => room.roomTypeId === focus) : -1, editing = focusIndex >= 0;
   const shownRooms = (display?.rooms ?? []).map((room, ri) => [room, ri] as const).filter(([room]) => room.roomTypeId === focus);
   const scale = display ? pricingCurrencyScale(display.currency)! : 2;
-  const warning = notice === "pricing.room.noticeStale" || notice === "pricing.room.noticeDropped";
+  const warning = notice === "pricing.room.noticeStale" || notice === "pricing.room.noticeDropped" || notice === "pricing.newRoom.noticeKept";
   const changeRoom = (ri: number) => (nextRoom: Room) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); };
   const pend = (key: string) => (pending: boolean) => setPendingEntries((previous) => ({ ...previous, [key]: pending }));
   // While editing, the button beside Save discards this room's changes; otherwise it reloads pricing.
@@ -414,6 +425,12 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     {reloading && <ConfirmDialog title={t(cancels ? "pricing.steps.discardTitle" : "pricing.reloadTitle")} message={t(cancels ? "pricing.steps.discardMessage" : "pricing.reloadMessage")} confirmLabel={t(cancels ? "pricing.steps.discardConfirm" : "pricing.reloadConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { setReloading(false); void load(); }} onCancel={() => setReloading(false)} />}
     {leave && <ConfirmDialog title={t("pricing.leaveTitle")} message={t("pricing.leaveMessage")} confirmLabel={t("pricing.leaveConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { leaving.current = true; setLeave(null); leave(); }} onCancel={() => setLeave(null)} />}
   </section>;
+}
+/** The New room page's kept prices as edits kept over a reload: a new room has no saved prices to compare with. */
+function handedOverEdits(handover: KeptNewRoomPrices): Kept {
+  const key = (terms: PricingTermsInput) => JSON.stringify([terms.roomTypeId, terms.offerId]); // As `policyKey`.
+  return { room: handover.room, base: null, terms: Object.fromEntries(handover.terms.map((terms) => [key(terms), terms])),
+    bases: Object.fromEntries(handover.terms.map((terms) => [key(terms), terms.expectedRevision])) };
 }
 /** Edits survive only when the server still has this room exactly as it was loaded (or still has no prices for
  * it) in the same currency, so a save after the reload never overwrites someone else's change to this room. */
