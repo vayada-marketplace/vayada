@@ -440,8 +440,8 @@ async function readMaterializedConfiguration(
   coverage: CoverageRow | null,
   registry: PmsOperatingCalendarCanonicalTimeZoneRegistry,
 ): Promise<PmsOperatingCalendarConfigurationSnapshot | null> {
-  const savedRevision = input.currentConfiguration?.calendarRevision ?? 0;
   if (!coverage) return null;
+  const savedRevision = input.currentConfiguration?.calendarRevision ?? 0;
   const materializedRevision = positiveInteger(coverage.materializedRevision);
   if (
     savedRevision === 0 ||

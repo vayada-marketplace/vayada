@@ -267,6 +267,25 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS operating-calendar impact co
     });
   });
 
+  it("previews over a first calendar whose availability was never prepared (VAY-2134)", async () => {
+    const first = await requiredPreview(previewCommand("never-prepared"));
+    await expect(
+      calendar.upsertOperatingCalendar(finalCommand("never-prepared", first.confirmation)),
+    ).resolves.toMatchObject({ ok: true, response: { configuration: { calendarRevision: 1 } } });
+    // Nothing was ever prepared, so the next save previews like the first one.
+    const again = { expectedCalendarRevision: 1, defaultMinimumStayNights: 3 };
+    const preview = await requiredPreview(previewCommand("never-prepared-again", again));
+    expect(preview.sourceRevisions).toMatchObject({
+      calendarRevision: 1,
+      inventory: { materializedRevision: null, dayCount: 0 },
+    });
+    await expect(
+      calendar.upsertOperatingCalendar(
+        finalCommand("never-prepared-again", preview.confirmation, again),
+      ),
+    ).resolves.toMatchObject({ ok: true, response: { configuration: { calendarRevision: 2 } } });
+  });
+
   it("saves over a stale calendar whose availability was never prepared (VAY-2134)", async () => {
     await configureAndSeedInventory();
     // Revision 2 is saved, but preparing it fails, so guests still book revision 1.
