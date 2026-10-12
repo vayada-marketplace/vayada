@@ -132,6 +132,10 @@ interface RoomTypeFormProps {
   error?: string;
   success?: string;
   submitLabel?: string;
+  /** The submit button's text while saving (default "Saving..."). */
+  savingLabel?: string;
+  /** Shown beside the buttons, e.g. what pressing submit also confirms. */
+  actionNote?: string;
   cancelHref?: string;
   cancelLabel?: string;
   onCancel?: () => void;
@@ -142,8 +146,8 @@ interface RoomTypeFormProps {
   mode?: "create" | "edit";
   roomTypeId?: string;
   propertyPlan: PropertyPlan | null;
-  // With these the page owns the tab and adds the Prices tab (an existing room only). Its content has its own
-  // save, so the page renders it outside this form, where remounting the form cannot drop unsaved prices.
+  // With these the page owns the tab and adds the Prices tab. The page renders its content outside this form, where
+  // remounting the form cannot drop unsaved prices.
   tab?: RoomTab;
   onTabChange?: (tab: RoomTab) => void;
 }
@@ -173,6 +177,8 @@ export default function RoomTypeForm({
   error,
   success,
   submitLabel,
+  savingLabel,
+  actionNote,
   cancelHref = "/rooms",
   cancelLabel,
   onCancel,
@@ -268,12 +274,6 @@ export default function RoomTypeForm({
         <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-[11px] text-green-700 font-medium">
           {success}
         </div>
-      )}
-
-      {!onTabChange && (
-        <p className="mb-4 rounded-lg border border-gray-200 bg-white p-3 text-[11px] text-gray-600">
-          {t("rooms.form.pricingPointer")}
-        </p>
       )}
 
       {/* Tabs */}
@@ -1282,7 +1282,10 @@ export default function RoomTypeForm({
 
       {/* Submit / Cancel — sticky on mobile, inline on desktop */}
       {activeTab !== "prices" && (
-        <div className="mt-6 flex items-center justify-end gap-3 sticky bottom-0 -mx-4 md:mx-0 px-4 md:px-0 py-3 md:py-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:pb-0 bg-gray-50/95 md:bg-transparent backdrop-blur md:backdrop-blur-none border-t border-gray-200 md:border-t-0 z-10">
+        <div className="mt-6 flex flex-wrap items-center justify-end gap-3 sticky bottom-0 -mx-4 md:mx-0 px-4 md:px-0 py-3 md:py-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:pb-0 bg-gray-50/95 md:bg-transparent backdrop-blur md:backdrop-blur-none border-t border-gray-200 md:border-t-0 z-10">
+          {actionNote && (
+            <p className="w-full text-[11px] text-gray-500 md:mr-auto md:w-auto">{actionNote}</p>
+          )}
           {onCancel ? (
             <button
               type="button"
@@ -1304,7 +1307,7 @@ export default function RoomTypeForm({
             disabled={saving}
             className="flex-1 md:flex-initial px-6 py-2.5 md:py-2 bg-primary-600 text-white text-[13px] md:text-[12px] font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
           >
-            {saving ? t("common.saving") : (submitLabel ?? t("common.save"))}
+            {saving ? (savingLabel ?? t("common.saving")) : (submitLabel ?? t("common.save"))}
           </button>
         </div>
       )}

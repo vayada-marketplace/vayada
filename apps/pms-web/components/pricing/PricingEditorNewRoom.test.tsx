@@ -2,13 +2,17 @@ import React, { createRef } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import { ApiErrorResponse } from "@/services/api/client";
 import type {
   createReplacementPricingClient,
   PricingSnapshot,
 } from "@/services/api/replacementPricingClient";
 import { AcceptedPaymentMethods } from "./AcceptedPaymentMethods";
 import { firstPricingInput } from "./FirstPricingSetup";
+import type { KeptNewRoomPrices } from "./keptNewRoomPrices";
 import type { NewRoomPrices } from "./newRoomPrices";
+import { english, PricingError } from "./pricingAmounts";
+import * as ui from "./pricingStyles";
 import { PricingEditor } from "./PricingEditor";
 import { StepFirstPrices } from "./StepFirstPrices";
 import { AddOptionButton } from "./StepOptions";
@@ -222,4 +226,159 @@ it("removes typed prices after asking, and holds every input while the page save
   expect(take.current!()).toBeNull();
   expect(field("Room price per night").props.value).toBe("");
   expect(onPrices).toHaveBeenLastCalledWith(false);
+});
+
+// After "Create Room Type" created the room but could not save its prices, its Prices tab starts from them.
+const created = "61000000-0000-4000-8000-0000000000bb";
+const createdSetup = { ...setupRoom, roomTypeId: created };
+const handedOver = (error: unknown, outcomeUnknown = false): KeptNewRoomPrices => {
+  const input = firstPricingInput(
+    "property",
+    createdSetup,
+    "61000000-0000-4000-8000-0000000000dd",
+    {
+      mode: "flat",
+      occupancy: [],
+      included: { adults: "", adjustments: [] },
+      methods: ["pay_at_property"],
+      room: created,
+      currency: "EUR",
+      base: "120",
+      adultAge: "12",
+      childPrice: "0",
+      countChildren: "yes",
+      minimum: "1",
+      maximum: "",
+      cancellation: "non_refundable",
+      freeDays: "",
+      payment: "full",
+    },
+  );
+  return {
+    room: { ...input.configuration, revision: 4 },
+    terms: [input.terms],
+    error,
+    outcomeUnknown,
+  };
+};
+const onHandover = vi.fn();
+const mountRoom = async (kept: KeptNewRoomPrices) => {
+  await act(async () => {
+    view = create(
+      <PricingEditor
+        client={client as unknown as ReturnType<typeof createReplacementPricingClient>}
+        roomNames={{ [existingId]: "Existing", [created]: "Castrop Suite" }}
+        setup={{ propertyId: "property", rooms: [createdSetup] }}
+        roomTypeId={created}
+        kept={kept}
+        onHandover={onHandover}
+      />,
+    );
+  });
+};
+const shownPrice = () =>
+  view.root.findAllByType("input").find((node) => node.props.inputMode === "decimal")!.props.value;
+
+it("opens the created room's Prices tab on the prices that were not saved, with why, and saves them there", async () => {
+  let draft: Record<string, unknown> = {};
+  const stage = vi.fn().mockResolvedValue({ revision: "61000000-0000-4000-8000-0000000000ee" });
+  client.termsAction.mockReturnValue(stage);
+  client.prepare.mockImplementation(async (value) => ({
+    sources: published.sources,
+    snapshot: { ...value, ownerReferences: { finance: "finance" } },
+  }));
+  client.saveDraft.mockImplementation(async ({ draftId, expectedDraftRevision, ...rest }) => {
+    draft = {
+      ...rest,
+      draftId,
+      revision: expectedDraftRevision + 1,
+      sources: published.sources,
+      stale: false,
+    };
+    return draft.revision;
+  });
+  client.reviewCharges.mockImplementation(async () => ({
+    ...draft,
+    fingerprint: "f",
+    declaration: "all_mandatory_charges_included",
+  }));
+  client.confirmationAction.mockReturnValue(vi.fn().mockResolvedValue({ id: "declaration" }));
+  client.publicationAction.mockReturnValue(
+    vi.fn().mockResolvedValue({ revision: 4, replayed: false }),
+  );
+  await mountRoom(
+    handedOver(new ApiErrorResponse(403, { code: "denied", reason: "payments_disabled" } as never)),
+  );
+  // Unsaved work to finish: a warning, not a success.
+  expect(view.root.findByProps({ role: "status", className: ui.warningBanner }).children).toEqual([
+    english("pricing.newRoom.noticeKept"),
+  ]);
+  expect(text()).toContain(english("pricing.editor.financePaymentsDisabled"));
+  expect(onHandover).toHaveBeenCalledWith(true);
+  expect(shownPrice()).toBe("120.00");
+  expect(button("Save prices")!.props.disabled).toBe(false);
+  await click("Save prices");
+  expect(stage).toHaveBeenCalledOnce();
+  expect(client.termsAction.mock.calls[0][0]).toMatchObject({
+    roomTypeId: created,
+    expectedRevision: null,
+  });
+  expect(
+    client.prepare.mock.calls[0][0].rooms.map((room: { roomTypeId: string; revision: number }) => [
+      room.roomTypeId,
+      room.revision,
+    ]),
+  ).toEqual([
+    [existingId, 4],
+    [created, 4],
+  ]);
+  expect(text()).toContain("Prices saved.");
+});
+
+it("says the prices were saved when a save that broke off had published them after all", async () => {
+  const saved = { ...handedOver(null).room, revision: 4 };
+  client.read.mockResolvedValue({
+    ...published,
+    rooms: [{ ...existing, revision: 4 }, saved],
+    revision: 4,
+  });
+  await mountRoom(handedOver(new Error("Failed to fetch"), true));
+  expect(text()).toContain(english("pricing.newRoom.noticeSavedAfterAll"));
+  expect(text()).not.toContain("Failed to fetch");
+  expect(button("Save prices")!.props.disabled).toBe(true);
+  expect(onHandover).toHaveBeenCalledWith(false);
+});
+
+it("does not claim them saved when the room was published with other prices meanwhile", async () => {
+  // The same room at €130 instead of €120.
+  const typedRoom = JSON.stringify(handedOver(null).room);
+  expect(typedRoom.split('"12000"')).toHaveLength(2);
+  const changed = { ...JSON.parse(typedRoom.replace('"12000"', '"13000"')), revision: 4 };
+  client.read.mockResolvedValue({
+    ...published,
+    rooms: [{ ...existing, revision: 4 }, changed],
+    revision: 4,
+  });
+  await mountRoom(handedOver(new Error("Failed to fetch"), true));
+  expect(text()).not.toContain(english("pricing.newRoom.noticeSavedAfterAll"));
+  expect(text()).toContain(english("pricing.room.noticeDropped"));
+  expect(text()).toContain("Failed to fetch");
+  expect(onHandover).toHaveBeenCalledWith(false);
+});
+
+it("says why when the kept prices no longer apply (another currency was published meanwhile)", async () => {
+  client.read.mockResolvedValue({ ...published, currency: "USD", rooms: [], revision: 4 });
+  await mountRoom(handedOver(new PricingError("pricing.newRoom.errorChanged")));
+  expect(text()).toContain(english("pricing.room.noticeDropped"));
+  expect(text()).toContain(english("pricing.newRoom.errorChanged"));
+  expect(onHandover).toHaveBeenCalledWith(false);
+});
+
+it("keeps them until pricing could be read", async () => {
+  client.read.mockRejectedValueOnce(new Error("offline"));
+  await mountRoom(handedOver(new ApiErrorResponse(409, { code: "stale" })));
+  expect(text()).toContain("offline");
+  await click("Reload pricing");
+  expect(text()).toContain(english("pricing.newRoom.noticeKept"));
+  expect(shownPrice()).toBe("120.00");
 });

@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "@/lib/i18n";
 import { createReplacementPricingClient } from "@/services/api/replacementPricingClient";
 
+import { forgetKeptNewRoomPrices, readKeptNewRoomPrices } from "./keptNewRoomPrices";
 import { PricingEditor } from "./PricingEditor";
 import { errorText } from "./pricingAmounts";
 import * as ui from "./pricingStyles";
@@ -24,6 +25,10 @@ export function RoomPricesTab({
 }) {
   const { rooms, error } = usePricingRooms(refresh);
   const { t } = useTranslation();
+  // Prices the New room page created this room with but could not save (VAY-2147). They stay stored, for a reload or
+  // a failed read, until they are saved here or no longer apply.
+  const [kept] = useState(() => readKeptNewRoomPrices(roomTypeId));
+  const forget = () => forgetKeptNewRoomPrices(roomTypeId);
   const propertyId = rooms?.propertyId;
   // One client per property: re-read rooms must not reload the editor and drop unsaved prices.
   const client = useMemo(
@@ -53,7 +58,14 @@ export function RoomPricesTab({
       roomTypeId={roomTypeId.toLowerCase()}
       refresh={refresh}
       onAttention={onAttention}
-      onPublished={onPublished}
+      onPublished={() => {
+        forget();
+        onPublished?.();
+      }}
+      kept={kept?.room.propertyId === rooms.propertyId ? kept : undefined}
+      onHandover={(applied) => {
+        if (!applied) forget();
+      }}
     />
   );
 }
