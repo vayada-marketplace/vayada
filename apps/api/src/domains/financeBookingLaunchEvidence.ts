@@ -1,4 +1,5 @@
 import {
+  FINANCE_PAYMENT_READINESS_SOURCE_ENTITY_TYPE,
   createFinancePaymentMethodsSourceEntityRevision,
   parseFinancePaymentReadinessSnapshot,
   type FinancePaymentReadinessBlocker,
@@ -16,6 +17,8 @@ import {
   serializePmsPricingSourceEntityRevision,
 } from "@vayada/domain-pms";
 
+import type { FinancePaymentReadinessScopePort } from "./financePaymentReadinessReadModel.js";
+
 const EXTERNAL_PENDING = new Set<FinancePaymentReadinessBlocker>([
   "online_card_execution_unavailable",
   "provider_capability_lost",
@@ -24,6 +27,7 @@ const EXTERNAL_PENDING = new Set<FinancePaymentReadinessBlocker>([
 
 export function createFinanceBookingLaunchEvidenceAdapter(dependencies: {
   financeReadPort: FinancePaymentReadinessReadPort;
+  scope?: FinancePaymentReadinessScopePort;
 }): BookingLaunchFinanceEvidencePort {
   return {
     bookingLaunchEvidencePort: "finance",
@@ -32,10 +36,26 @@ export function createFinanceBookingLaunchEvidenceAdapter(dependencies: {
       try {
         value = await dependencies.financeReadPort.getPaymentReadiness(request);
       } catch {
-        return unavailable("system");
+        return unavailable("system", "payment_readiness_read_failed");
       }
-      const snapshot = value === null ? null : parseFinancePaymentReadinessSnapshot(value);
-      if (!snapshot || snapshot.propertyId !== request.propertyId) return unavailable("provider");
+      // No versioned payment methods yet: never chosen, or saved only by the older settings
+      // page. The setup Payments step creates them (VAY-2134). A missing organization, PMS
+      // link or entitlement also reads as nothing, and no payment choice fixes that.
+      if (value === null) {
+        let inScope: boolean;
+        try {
+          inScope = (await dependencies.scope?.hasPaymentReadinessScope(request)) ?? true;
+        } catch {
+          return unavailable("system", "payment_scope_read_failed");
+        }
+        return inScope
+          ? notConfigured(request)
+          : unavailable("provider", "payment_scope_unavailable");
+      }
+      const snapshot = parseFinancePaymentReadinessSnapshot(value);
+      if (!snapshot || snapshot.propertyId !== request.propertyId) {
+        return unavailable("provider", "payment_readiness_invalid");
+      }
 
       try {
         const financeSource = createFinancePaymentMethodsSourceEntityRevision(
@@ -45,7 +65,9 @@ export function createFinanceBookingLaunchEvidenceAdapter(dependencies: {
         const pricingSource = snapshot.pricingCurrency.committed
           ? pricingBindingSource(snapshot.propertyId, snapshot.pricingCurrency.committed)
           : null;
-        if (snapshot.pricingCurrency.committed && !pricingSource) return unavailable("provider");
+        if (snapshot.pricingCurrency.committed && !pricingSource) {
+          return unavailable("provider", "payment_pricing_contract_unsupported");
+        }
 
         const blockingCodes = snapshot.methods
           .filter(
@@ -90,10 +112,34 @@ export function createFinanceBookingLaunchEvidenceAdapter(dependencies: {
         } as const satisfies BookingLaunchOwnerEvidence<"finance">;
         return evidence;
       } catch {
-        return unavailable("provider");
+        return unavailable("provider", "payment_readiness_invalid");
       }
     },
   };
+}
+
+function notConfigured(request: { organizationId: string; propertyId: string }) {
+  const source = {
+    ownerDomain: "finance",
+    entityType: FINANCE_PAYMENT_READINESS_SOURCE_ENTITY_TYPE,
+    entityId: request.propertyId,
+    revision: "absent",
+  } as const;
+  return {
+    outcome: "evidence",
+    port: "finance",
+    organizationId: request.organizationId,
+    propertyId: request.propertyId,
+    sources: [source],
+    entities: [
+      {
+        groupId: "booking.payments",
+        owningStepId: "payments",
+        source,
+        blockers: [ownerBlocker("payment_methods_not_configured", "user_fixable")],
+      },
+    ],
+  } as const satisfies BookingLaunchOwnerEvidence<"finance">;
 }
 
 function pricingBindingSource(
@@ -136,6 +182,6 @@ function ownerBlocker(
   return { code, scope: "launch_configuration", kind };
 }
 
-function unavailable(errorSource: "provider" | "system") {
-  return { outcome: "unavailable", port: "finance", errorSource } as const;
+function unavailable(errorSource: "provider" | "system", code: string) {
+  return { outcome: "unavailable", port: "finance", errorSource, code } as const;
 }
