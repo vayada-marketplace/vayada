@@ -2686,6 +2686,7 @@ function buildAuthenticatedApp(
     settingsWriteRepository?: BookingSettingsWriteRepository;
     publicBookabilityPublisher?: PublicBookabilityPublicationCommandPort;
     bookingPublicationRefresh?: BookingPublicationRefreshPort;
+    publicPageRefresh?: (propertyId: string) => Promise<void>;
     pmsInventoryPublicOfferProjector?: PmsInventoryPublicOfferProjectionPort;
     customDomainRepository?: BookingCustomDomainRepository;
     bookingAddonItemsRepository?: BookingAddonItemsRepository;
@@ -2773,6 +2774,7 @@ function buildAuthenticatedApp(
       options.settingsWriteRepository ?? bookingSettingsWriteRepository,
     publicBookabilityPublisher: options.publicBookabilityPublisher,
     bookingPublicationRefresh: options.bookingPublicationRefresh,
+    publicPageRefresh: options.publicPageRefresh,
     pmsInventoryPublicOfferProjector: options.pmsInventoryPublicOfferProjector,
     bookingCustomDomainRepository: options.customDomainRepository ?? bookingCustomDomainRepository,
     bookingPropertyAccessRepository: propertyAccessRepository,
@@ -5188,6 +5190,31 @@ describe("vayada-api", () => {
 
     expect(response.statusCode).toBe(200);
     expect(published).toEqual([pmsPropertyId]);
+  });
+
+  it("refreshes the booking page after a guest-form save without failing the save (VAY-2129)", async () => {
+    const refreshed: string[] = [];
+    let unavailable = false;
+    app = buildAuthenticatedApp({
+      async publicPageRefresh(propertyId) {
+        refreshed.push(propertyId);
+        if (unavailable) throw new Error("projection unavailable");
+      },
+    });
+    const guestForm = settingsWriteCases.find((writeCase) => writeCase.name === "guest-form")!;
+
+    for (const failing of [false, true]) {
+      unavailable = failing;
+      const response = await injectJson(app, {
+        method: "PUT",
+        url: guestForm.url,
+        headers: { authorization: "Bearer valid-token" },
+        payload: guestForm.payload,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toEqual(guestForm.expected);
+    }
+    await vi.waitFor(() => expect(refreshed).toEqual([pmsPropertyId, pmsPropertyId]));
   });
 
   it("preserves guest-form phoneRequired when older clients save five-field payloads", async () => {
