@@ -3320,25 +3320,8 @@ async function inspectRoomTypeRetirement(
         (SELECT count(*) FROM pms.channel_rate_plan_mappings mapping
          WHERE mapping.property_id = room_type.property_id
            AND mapping.room_type_id = room_type.id AND mapping.status = 'active')
-        +
-        (SELECT count(*)
-         FROM distribution.active_public_booking_revision active_revision
-         JOIN distribution.public_booking_content_revisions content
-           ON content.id = active_revision.content_revision_id
-          AND content.property_id = active_revision.property_id
-         WHERE active_revision.property_id = room_type.property_id
-           AND (
-             jsonb_path_exists(
-               content.source_manifest,
-               'strict $.** ? (@ == $roomTypeId)',
-               jsonb_build_object('roomTypeId', to_jsonb(room_type.id::text))
-             )
-             OR jsonb_path_exists(
-               content.public_content,
-               'strict $.** ? (@ == $roomTypeId)',
-               jsonb_build_object('roomTypeId', to_jsonb(room_type.id::text))
-             )
-           ))
+        -- The live booking page follows current rooms after go-live (VAY-2129), so the page
+        -- published at go-live no longer pins a closed room.
        )::bigint AS "publicationCount"
      FROM pms.room_types room_type
      LEFT JOIN pms.room_type_closures closure
@@ -3403,9 +3386,7 @@ async function lockRoomTypeRetirementDependencies(
        pms.rooms, pms.inventory_days, pms.room_blocks,
        pms.rate_plans, pms.rate_rules,
        pms.channel_room_type_mappings, pms.channel_rate_plan_mappings,
-       distribution.public_room_offer_snapshots,
-       distribution.active_public_booking_revision,
-       distribution.public_booking_content_revisions
+       distribution.public_room_offer_snapshots
      IN SHARE ROW EXCLUSIVE MODE`,
   );
 }

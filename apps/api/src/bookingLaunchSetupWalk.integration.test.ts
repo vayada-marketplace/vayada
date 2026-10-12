@@ -824,12 +824,10 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
 
       // 9. The next day the hotel adds a room (TEST ONLY: room caa60b1c on 10-10).
       const seaSuite = await addRoom("Sea Suite", "setup-room-b");
-      expect(blockerCodes(await readiness())).toEqual(
-        expect.arrayContaining([
-          "booking.calendar:operating_calendar_source_stale",
-          "booking.pricing:pricing_rooms_changed",
-        ]),
-      );
+      // The saved prices still hold for the Garden Suite; the new room waits for its own (VAY-2129).
+      const afterRoomAdded = blockerCodes(await readiness());
+      expect(afterRoomAdded).toContain("booking.calendar:operating_calendar_source_stale");
+      expect(afterRoomAdded).not.toContain("booking.pricing:pricing_rooms_changed");
       // Before VAY-2134 this horizon, starting at today, was rejected with a 409.
       ok(
         await saveCalendar([gardenSuite, seaSuite], 1, {

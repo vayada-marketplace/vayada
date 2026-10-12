@@ -55,6 +55,8 @@ export type BookingRoutesOptions = {
   ownsSameDayBookingSettings?: boolean;
   publicBookabilityPublisher?: PublicBookabilityPublicationCommandPort;
   bookingPublicationRefresh?: BookingPublicationRefreshPort;
+  /** Refreshes the live booking page after hotel-level saves (VAY-2129). */
+  publicPageRefresh?: (propertyId: string) => Promise<void>;
   inventoryPublicOfferProjector?: PmsInventoryPublicOfferProjectionPort;
   customDomainRepository?: BookingCustomDomainRepository;
   changeRequestRepository?: BookingHotelChangeRequestRepository;
@@ -83,6 +85,7 @@ export async function registerBookingRoutes(
       options.bookingAcceptanceSettings,
       options.sameDayBookingSettings,
       options.ownsSameDayBookingSettings,
+      options.publicPageRefresh,
     );
   }
 
