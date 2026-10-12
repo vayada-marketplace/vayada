@@ -201,8 +201,11 @@ export function createBookingPublicationProductionRuntime(config: {
       };
     },
   });
+  // The manual-payment reader exists only while bank-transfer and PayPal acceptance is on.
+  const manualPayments = config.manualPayments !== undefined;
   const projection = createPgDistributionBookingPublicationProjection({
     connectionString: config.connectionString,
+    manualPayments,
   });
   const attempts = createPgBookingPublicationAttemptStatusRepository({
     connectionString: config.connectionString,
@@ -229,7 +232,7 @@ export function createBookingPublicationProductionRuntime(config: {
     routes: {
       repository,
       readinessProvider,
-      publishedOffers: createPublishedOfferCheck(offerPool),
+      publishedOffers: createPublishedOfferCheck(offerPool, { manualPayments }),
     },
     projector,
     refresh,

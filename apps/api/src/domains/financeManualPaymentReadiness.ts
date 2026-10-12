@@ -1,23 +1,20 @@
-import pg from "pg";
+import type pg from "pg";
 import type { ManualPricingPaymentMethod } from "@vayada/domain-booking";
 
 /** Bank transfer and PayPal for booking launch (VAY-2139), read only while their acceptance is on.
  * Ready on a committed Finance row (payment methods saved through either writer) that takes them,
  * with an enabled bank destination or a valid PayPal email. Like the pricing check, they count
  * only for a hotel that takes neither card nor pay at property; such a hotel keeps the usual
- * Finance readiness. Callers ask only after Finance's own snapshot matched the property. */
+ * Finance readiness. Property-scoped only: callers ask after Finance's own organization-scoped
+ * snapshot matched the property. */
 export type FinanceManualPaymentReadinessReadPort = {
-  readyMethods(request: {
-    organizationId: string;
-    propertyId: string;
-  }): Promise<readonly ManualPricingPaymentMethod[]>;
+  readyMethods(request: { propertyId: string }): Promise<readonly ManualPricingPaymentMethod[]>;
 };
 
 export function createFinanceManualPaymentReadinessReader(config: {
-  connectionString: string;
-  pool?: Pick<pg.Pool, "query">;
+  pool: Pick<pg.Pool, "query">;
 }): FinanceManualPaymentReadinessReadPort {
-  const pool = config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: 2 });
+  const { pool } = config;
   return {
     async readyMethods({ propertyId }) {
       const row = (

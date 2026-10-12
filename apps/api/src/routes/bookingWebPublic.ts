@@ -1541,7 +1541,9 @@ export function createTargetBookingWebCheckoutAdapter(
       max: config.max,
     });
 
-  const pricingOffers = createPublicPricingOfferCatalog(pool);
+  const pricingOffers = createPublicPricingOfferCatalog(pool, {
+    manualPayments: config.replacementPricingManualPaymentAcceptanceEnabled === true,
+  });
   const pricingAddons = createPublicPricingAddonCatalog(pool);
   const guestDisclosure = createPublicQuoteGuestDisclosure(pool);
   const issueReplacementQuote = createReplacementBookingQuoteIssuer(

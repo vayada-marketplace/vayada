@@ -60,7 +60,7 @@ export function createFinanceBookingLaunchEvidenceAdapter(dependencies: {
         if (!snapshot.bookingPaymentReady && blockers.length === 0 && blockingCodes.length === 0) {
           // A bank-transfer or PayPal hotel is ready when the hotel can be paid that way.
           const manual = dependencies.manualPayments
-            ? await dependencies.manualPayments.readyMethods(request)
+            ? await dependencies.manualPayments.readyMethods({ propertyId: request.propertyId })
             : [];
           if (manual.length === 0)
             blockers.push(ownerBlocker("ready_payment_method_missing", "user_fixable"));
