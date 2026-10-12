@@ -278,6 +278,7 @@ type CalendarSourceRow = {
   optionalPricingAggregateRevision: number | string | null;
   generatedCoverageFrom: string | Date | null;
   generatedCoverageThrough: string | Date | null;
+  roomAdditionStoredThrough: string | Date | null;
   successfulApplications: Array<{
     sourceFingerprint: string;
     openThrough: string;
@@ -964,6 +965,25 @@ async function selectCalendarAutoOpenCandidates(
          pricing.optional_pricing_aggregate_revision AS "optionalPricingAggregateRevision",
          coverage.coverage_from AS "generatedCoverageFrom",
          coverage.coverage_through AS "generatedCoverageThrough",
+         CASE WHEN EXISTS (
+           SELECT 1
+           FROM pms.inventory_materialization_coverage stored
+           JOIN pms.operating_calendar_room_bindings room
+             ON room.property_id = stored.property_id
+            AND room.calendar_revision = calendar.calendar_revision
+           WHERE stored.property_id = setting.property_id
+             AND stored.calendar_revision < calendar.calendar_revision
+             AND NOT EXISTS (
+               SELECT 1
+               FROM pms.operating_calendar_room_bindings materialized
+               WHERE materialized.property_id = stored.property_id
+                 AND materialized.calendar_revision = stored.calendar_revision
+                 AND materialized.room_type_id = room.room_type_id
+             )
+         ) THEN (
+           SELECT max(day.stay_date) FROM pms.inventory_days day
+           WHERE day.property_id = setting.property_id
+         ) END AS "roomAdditionStoredThrough",
          successful_application.applications AS "successfulApplications"
        FROM candidate_properties setting
        JOIN hotel_catalog.properties property ON property.id = setting.property_id
@@ -1794,6 +1814,14 @@ function calendarCandidateFromSourceRow(
   }
   if (!horizon.targetOpenThrough || horizon.targetOpenThrough < horizon.propertyLocalDate)
     return null;
+  // Stored days from today on lack an added room until setup materializes the calendar, and
+  // opening dates before then fails on that gap; the next run after it picks this up (VAY-2138).
+  if (
+    row.roomAdditionStoredThrough &&
+    dateOnly(row.roomAdditionStoredThrough) >= horizon.propertyLocalDate
+  ) {
+    return null;
+  }
 
   const source = createPmsCalendarAutoOpenSource({
     settingRevision: revision,
