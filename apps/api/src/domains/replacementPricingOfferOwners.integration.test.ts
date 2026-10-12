@@ -6143,10 +6143,10 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         offers?.rooms.flatMap((room) => room.offers.map((offer) => offer.publicOfferKey)),
       ).toEqual(current!.rooms.flatMap((room) => room.offers.map((offer) => offer.ratePlanId)));
       // Room content is read live after go-live (VAY-2129), not from the published page.
-      expect(offers?.rooms.map((room) => [room.name, room.images])).toEqual([
-        ["Terms room", []],
-        ["Second room", []],
-      ]);
+      // Rooms are listed by room type id, so compare them by name.
+      expect(
+        Object.fromEntries((offers?.rooms ?? []).map((room) => [room.name, room.images])),
+      ).toEqual({ "Terms room": [], "Second room": [] });
       expect(JSON.stringify(offers)).not.toMatch(
         /baseNightlyAmount|termsRevision|publicationRevision|ownerReferences|sourceRevision/,
       );
