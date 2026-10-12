@@ -275,6 +275,47 @@ describe("calendarApiClient", () => {
     });
   });
 
+  it("prepares an unmaterialized saved calendar once and previews again", async () => {
+    let previews = 0;
+    calls.post.mockImplementation(async (endpoint, data) => {
+      if (!endpoint.endsWith("/impact-preview")) return materializationResponse(endpoint, data);
+      previews += 1;
+      if (previews === 1) throw ownerApiError(409, { code: "materialization_not_current" });
+      return impactPreview();
+    });
+
+    await expect(
+      createCalendarApiClient(http, profiles).previewImpact(propertyId, calendarProposal()),
+    ).resolves.toEqual(impactPreview());
+
+    expect(calls.get).toHaveBeenCalledWith(`/api/pms/properties/${propertyId}/operating-calendar`, {
+      cache: "no-store",
+    });
+    expect(calls.post.mock.calls.map(([endpoint]) => endpoint.split("/").at(-1))).toEqual([
+      "impact-preview",
+      "inventory-materialization",
+      "impact-preview",
+    ]);
+    expect(calls.post.mock.calls[1]?.[1]).toMatchObject({ expectedCalendarRevision: 2 });
+    expect(new Headers(calls.post.mock.calls[1]?.[2]?.headers).get("Idempotency-Key")).toMatch(
+      /^inventory-recovery:/,
+    );
+  });
+
+  it("reports a saved calendar that still cannot be prepared without previewing again", async () => {
+    calls.post.mockImplementation(async (endpoint) => {
+      if (endpoint.endsWith("/impact-preview")) {
+        throw ownerApiError(409, { code: "materialization_not_current" });
+      }
+      throw ownerApiError(409, { ok: false, error: { code: "configuration_not_current" } });
+    });
+
+    await expect(
+      createCalendarApiClient(http, profiles).previewImpact(propertyId, calendarProposal()),
+    ).rejects.toMatchObject({ name: "CalendarOwnerError", code: "configuration_not_current" });
+    expect(calls.post).toHaveBeenCalledTimes(2);
+  });
+
   it("fails closed when a typed preview error arrives with the wrong HTTP status", async () => {
     calls.post.mockRejectedValue(
       ownerApiError(422, {
@@ -414,7 +455,7 @@ describe("calendarApiClient", () => {
       ),
     ).rejects.toMatchObject({
       name: "CalendarOwnerError",
-      code: "inventory_materialization_failed",
+      code: "configuration_not_current",
       requiresRefresh: true,
       requiresPreview: false,
     });

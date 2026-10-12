@@ -29,6 +29,7 @@ describe("production Booking publication owner sources", () => {
       defaultLocale: "en",
       supportedLocales: ["en", "de"],
       profileStatus: "complete",
+      lifecycleStatus: "active",
       profileRevision: 8,
       sourceUpdatedAt: now,
       timezone: "Europe/Berlin",
@@ -98,6 +99,69 @@ describe("production Booking publication owner sources", () => {
         },
       }),
     ).resolves.toEqual({ outcome: "unavailable", owner: "hotel_catalog" });
+    row.lifecycleStatus = "provisioning";
+    const provisioning = await source.getBookingLaunchEvidence(scope);
+    if (provisioning.outcome !== "evidence") throw new Error("Expected Catalog evidence");
+    expect(provisioning.entities[0]?.blockers).toEqual([
+      { code: "hotel_setup_in_progress", scope: "launch_configuration", kind: "external_pending" },
+    ]);
+    await expect(source.getSnapshot(manifestRequest(provisioning.sources))).resolves.toEqual({
+      outcome: "unavailable",
+      owner: "hotel_catalog",
+    });
+  });
+
+  it.each([
+    ["media_not_ready", "hotel_public_media_processing", "external_pending"],
+    ["media_not_authorized", "hotel_public_media_unavailable", "user_fixable"],
+    ["media_not_found", "hotel_public_media_unavailable", "user_fixable"],
+  ] as const)("turns %s hotel media into a %s blocker (VAY-2134)", async (code, blocker, kind) => {
+    const row = {
+      propertyId,
+      displayName: "Hotel Alpenrose",
+      defaultLocale: "en",
+      supportedLocales: ["en"],
+      profileStatus: "complete",
+      lifecycleStatus: "active",
+      profileRevision: 8,
+      sourceUpdatedAt: now,
+      timezone: "Europe/Berlin",
+      countryCode: "DE",
+      region: null,
+      city: "Alpenstadt",
+      latitude: null,
+      longitude: null,
+      localityPublic: true,
+      geoPublic: false,
+      mapDisplayMode: "hidden",
+      summary: "An alpine retreat.",
+      canonicalSlug: "hotel-alpenrose",
+      verifiedHostname: null,
+      amenities: [],
+      contacts: [],
+      media: [{ mediaObjectId, mediaType: "logo", altText: null, sortOrder: 0 }],
+    };
+    const source = createHotelCatalogBookingPublicationSource({
+      connectionString: "postgres://unused",
+      pool: { query: vi.fn(async () => ({ rows: [row] })) } as any,
+      mediaResolver: createHotelMediaResolutionPort({
+        async loadPublicMedia() {
+          return { ok: false as const, error: { code, mediaObjectIds: [mediaObjectId] } };
+        },
+      }),
+    });
+
+    const evidence = await source.getBookingLaunchEvidence(scope);
+
+    expect(isBookingLaunchOwnerEvidenceValid(evidence, scope, "catalog")).toBe(true);
+    if (evidence.outcome !== "evidence") throw new Error("Expected Catalog evidence");
+    expect(evidence.entities[0]?.blockers).toEqual([
+      { code: blocker, scope: "launch_configuration", kind },
+    ]);
+    await expect(source.getSnapshot(manifestRequest(evidence.sources))).resolves.toEqual({
+      outcome: "unavailable",
+      owner: "hotel_catalog",
+    });
   });
 
   it("projects Booking design, guest policy, and settings through Booking-owned ports", async () => {
@@ -187,6 +251,8 @@ describe("production Booking publication owner sources", () => {
     const rate = { ratePlanId: `pricing-offer.v2:${"a".repeat(64)}`, currency: "EUR", pricing: { kind: "quote_required", publicationRevision: 1, termsRevision: propertyId }, mealPlan: "room_only" };
     const offers = { scope, sourceRevision: `booking.pms.publication.v2:${"b".repeat(64)}`, rooms: [{ roomTypeId, offers: [rate] }] };
     const getCurrentPricingOffers = vi.fn().mockResolvedValue(offers);
+    const diagnoseMissingPricing = vi.fn().mockResolvedValue([]);
+    let calendarConfigured = true;
     let inventoryReady = true;
     let inventoryRevision = "calendar:3";
     let inventoryRooms = [roomTypeId];
@@ -197,9 +263,22 @@ describe("production Booking publication owner sources", () => {
           return roomPublication;
         },
       },
-      pricing: { getCurrentPricingOffers },
+      pricing: { getCurrentPricingOffers, diagnoseMissingPricing },
+      pricingCurrency: {
+        async getPropertyPricingCurrency() {
+          return {
+            contractVersion: "pms-pricing.v1",
+            propertyId,
+            currency: "EUR",
+            pricingCurrencyRevision: 7,
+            createdAt: now,
+            updatedAt: now,
+          } as any;
+        },
+      },
       operatingCalendar: {
         async getCurrentOperatingCalendarConfiguration() {
+          if (!calendarConfigured) return null;
           return {
             sourceStatus: calendarStatus,
             sourceConflicts: [],
@@ -256,6 +335,8 @@ describe("production Booking publication owner sources", () => {
     });
     expect(isBookingLaunchOwnerEvidenceValid(evidence, scope, "pms")).toBe(true);
     expect(evidence.sources.some(source => source.entityType === "pms_pricing_publication.v2")).toBe(true);
+    // Finance binds payment methods to this exact source (VAY-2134).
+    expect(evidence.sources).toContainEqual({ ownerDomain: "pms", entityType: "pms_property_pricing_currency.v1", entityId: propertyId, revision: "7" });
     const unavailable = () => expect(source.getSnapshot(manifestRequest(evidence.sources))).resolves.toEqual({ outcome: "unavailable", owner: "pms" });
     getCurrentPricingOffers.mockResolvedValue(null);
     await unavailable();
@@ -282,6 +363,51 @@ describe("production Booking publication owner sources", () => {
     roomPublication.blockers.push({ code: "room_media_missing", affectedEntity: { entityType: "property", entityId: propertyId } });
     await unavailable();
     roomPublication.blockers = [];
+    // VAY-2134: prices the hotel can save again and a calendar it hasn't opened are blockers.
+    await expect(source.getBookingLaunchEvidence(scope)).resolves.toMatchObject({
+      outcome: "evidence",
+    });
+    getCurrentPricingOffers.mockResolvedValue(null);
+    await expect(source.getBookingLaunchEvidence(scope)).resolves.toEqual({
+      outcome: "unavailable",
+      port: "pms",
+      errorSource: "provider",
+      code: "pricing_publication_unavailable",
+    });
+    diagnoseMissingPricing.mockResolvedValue(["rooms_changed", "payments_changed"]);
+    calendarConfigured = false;
+    const gaps = await source.getBookingLaunchEvidence(scope);
+    expect(isBookingLaunchOwnerEvidenceValid(gaps, scope, "pms")).toBe(true);
+    if (gaps.outcome !== "evidence") throw new Error("Expected PMS evidence");
+    const blockersOf = (groupId: string) =>
+      gaps.entities.filter((item) => item.groupId === groupId).flatMap(({ blockers }) => blockers);
+    expect(blockersOf("booking.pricing").map(({ code }) => code)).toEqual([
+      "pricing_rooms_changed",
+      "pricing_payments_changed",
+    ]);
+    expect(blockersOf("booking.calendar").map(({ code }) => code)).toEqual([
+      "operating_calendar_missing",
+    ]);
+    expect(blockersOf("booking.rooms")).toEqual([]);
+    expect(diagnoseMissingPricing).toHaveBeenCalledWith(propertyId);
+    await unavailable();
+    diagnoseMissingPricing.mockResolvedValue(["hotel_setup_in_progress"]);
+    await expect(source.getBookingLaunchEvidence(scope)).resolves.toMatchObject({
+      entities: expect.arrayContaining([
+        expect.objectContaining({
+          groupId: "booking.pricing",
+          blockers: [
+            {
+              code: "pricing_hotel_setup_in_progress",
+              scope: "launch_configuration",
+              kind: "external_pending",
+            },
+          ],
+        }),
+      ]),
+    });
+    calendarConfigured = true;
+    getCurrentPricingOffers.mockResolvedValue(offers);
     calendarStatus = "stale";
     const staleEvidence = await source.getBookingLaunchEvidence(scope);
     expect(staleEvidence).toMatchObject({
