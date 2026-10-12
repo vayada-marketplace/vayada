@@ -34,16 +34,34 @@ function snapshot(
   });
 }
 
-function adapter(value: FinancePaymentReadinessSnapshot | null) {
+function adapter(
+  value: FinancePaymentReadinessSnapshot | null,
+  manualMethods?: readonly ("bank_transfer" | "paypal")[],
+) {
   const financeReadPort: FinancePaymentReadinessReadPort = {
     async getPaymentReadiness() {
       return value;
     },
   };
-  return createFinanceBookingLaunchEvidenceAdapter({ financeReadPort });
+  return createFinanceBookingLaunchEvidenceAdapter({
+    financeReadPort,
+    ...(manualMethods ? { manualPayments: { readyMethods: async () => manualMethods } } : {}),
+  });
 }
 
 describe("createFinanceBookingLaunchEvidenceAdapter", () => {
+  it("counts a bank-transfer or PayPal hotel only while their acceptance is on (VAY-2139)", async () => {
+    const blockers = async (manual?: readonly ("bank_transfer" | "paypal")[]) => {
+      const result = await adapter(snapshot([]), manual).getBookingLaunchEvidence(request);
+      if (result.outcome !== "evidence") throw new Error(result.outcome);
+      return result.entities[0]!.blockers.map(({ code }) => code);
+    };
+    expect(await blockers()).toEqual(["ready_payment_method_missing"]);
+    expect(await blockers([])).toEqual(["ready_payment_method_missing"]);
+    expect(await blockers(["bank_transfer"])).toEqual([]);
+    expect(await blockers(["paypal"])).toEqual([]);
+  });
+
   it("emits one canonical Finance source with the accepted PMS currency binding", async () => {
     const result = await adapter(snapshot(["pay_at_property"])).getBookingLaunchEvidence(request);
 

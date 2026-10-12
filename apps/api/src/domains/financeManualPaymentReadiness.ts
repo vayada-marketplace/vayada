@@ -1,0 +1,45 @@
+import pg from "pg";
+import type { ManualPricingPaymentMethod } from "@vayada/domain-booking";
+
+/** Bank transfer and PayPal for booking launch (VAY-2139), read only while their acceptance is on.
+ * Ready on a committed Finance row (payment methods saved through either writer) that takes them,
+ * with an enabled bank destination or a valid PayPal email. Like the pricing check, they count
+ * only for a hotel that takes neither card nor pay at property; such a hotel keeps the usual
+ * Finance readiness. Callers ask only after Finance's own snapshot matched the property. */
+export type FinanceManualPaymentReadinessReadPort = {
+  readyMethods(request: {
+    organizationId: string;
+    propertyId: string;
+  }): Promise<readonly ManualPricingPaymentMethod[]>;
+};
+
+export function createFinanceManualPaymentReadinessReader(config: {
+  connectionString: string;
+  pool?: Pick<pg.Pool, "query">;
+}): FinanceManualPaymentReadinessReadPort {
+  const pool = config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: 2 });
+  return {
+    async readyMethods({ propertyId }) {
+      const row = (
+        await pool.query(
+          `SELECT settings.accepted_methods,settings.deposit_policy->>'paypalEmail' AS paypal_email,
+            EXISTS(SELECT 1 FROM finance.bank_transfer_destinations destination
+              WHERE destination.property_id=settings.property_id AND destination.enabled) AS bank_destination
+          FROM finance.payment_settings settings
+          WHERE settings.property_id=$1 AND settings.payments_enabled
+            AND settings.payment_methods_revision IS NOT NULL`,
+          [propertyId],
+        )
+      ).rows[0];
+      const accepted: unknown[] = Array.isArray(row?.accepted_methods) ? row.accepted_methods : [];
+      if (accepted.includes("card") || accepted.includes("pay_at_property")) return [];
+      const methods: ManualPricingPaymentMethod[] = [];
+      if (accepted.includes("bank_transfer") && row.bank_destination === true)
+        methods.push("bank_transfer");
+      const email = typeof row?.paypal_email === "string" ? row.paypal_email.trim() : "";
+      if (accepted.includes("paypal") && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+        methods.push("paypal");
+      return methods;
+    },
+  };
+}

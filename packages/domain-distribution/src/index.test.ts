@@ -237,6 +237,19 @@ describe("@vayada/domain-distribution", () => {
     expect(findForbiddenPublicBookabilityKeys(projection)).toEqual([]);
   });
 
+  it("treats a hotel paid only by bank transfer or PayPal as payable (VAY-2139)", () => {
+    const inputs = profileProducerInputs();
+    const unpaid = { ...inputs.finance, onlinePayment: false, payAtProperty: false };
+    const reasons = (finance: PublicBookabilityProducerInputs["finance"]) =>
+      buildPublicBookabilityProfileProjection("2026-06-06T11:00:00.000Z", { ...inputs, finance })
+        .hotel.trust.reasonCodes;
+    expect(reasons(unpaid)).toContain("payment_disabled");
+    expect(reasons({ ...unpaid, readyPaymentMethods: [] })).toContain("payment_disabled");
+    expect(reasons({ ...unpaid, readyPaymentMethods: ["bank_transfer"] })).not.toContain(
+      "payment_disabled",
+    );
+  });
+
   it("flags PMS private-note-shaped keys anywhere in public payloads", () => {
     expect(
       findForbiddenPublicBookabilityKeys({

@@ -436,6 +436,8 @@ export type PublicBookabilityProducerInputs = {
     supportedCurrencies: string[];
     onlinePayment: boolean;
     payAtProperty: boolean;
+    /** Finance's ready methods; bank transfer or PayPal also make the hotel payable (VAY-2139). */
+    readyPaymentMethods?: readonly string[];
   };
   bookingWeb: {
     canonicalUrl: string;
@@ -473,6 +475,11 @@ export type PublicBookabilityQuoteProducerInputs = {
   };
 };
 
+/** Bank transfer and PayPal are paid to the hotel directly (VAY-2139). */
+export function publicManualPaymentReady(methods: readonly unknown[] | undefined): boolean {
+  return !!methods?.some((method) => method === "bank_transfer" || method === "paypal");
+}
+
 export function buildPublicBookabilityProfileProjection(
   generatedAt: string,
   inputs: PublicBookabilityProducerInputs,
@@ -485,7 +492,10 @@ export function buildPublicBookabilityProfileProjection(
     referralCodes: inputs.booking.capabilities.referralCodes,
     bookingDeepLinks: inputs.bookingWeb.bookingDeepLinks,
   };
-  const hasPublicPaymentMethod = capabilities.onlinePayment || capabilities.payAtProperty;
+  const hasPublicPaymentMethod =
+    capabilities.onlinePayment ||
+    capabilities.payAtProperty ||
+    publicManualPaymentReady(inputs.finance.readyPaymentMethods);
   const bookabilityReasonCodes: PublicBookabilityReasonCode[] = [];
 
   if (!inputs.pms.availabilityReady) {

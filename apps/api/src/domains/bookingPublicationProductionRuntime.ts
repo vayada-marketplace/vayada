@@ -28,6 +28,7 @@ import {
 import { createPgDistributionBookingPublicationProjection } from "./distributionBookingPublicationProjection.js";
 import { createFinanceBookingLaunchEvidenceAdapter } from "./financeBookingLaunchEvidence.js";
 import { createFinanceBookingPublicationSnapshotPort } from "./financeBookingPublicationSnapshot.js";
+import type { FinanceManualPaymentReadinessReadPort } from "./financeManualPaymentReadiness.js";
 import { createHotelCatalogBookingPublicationSource } from "./hotelCatalogBookingPublicationSource.js";
 import { createPmsBookingPublicationSource } from "./pmsBookingPublicationSource.js";
 import { createPublishedOfferCheck } from "./publicPricingOfferCatalog.js";
@@ -151,6 +152,8 @@ export function createBookingPublicationProductionRuntime(config: {
   operatingCalendar: PmsOperatingCalendarReadPort;
   inventory: PmsInventoryLaunchReadinessReadPort;
   finance: FinancePaymentReadinessReadPort;
+  /** Bank transfer and PayPal, only while their acceptance is on (VAY-2139). */
+  manualPayments?: FinanceManualPaymentReadinessReadPort;
 }): BookingPublicationProductionRuntime {
   const catalog = createHotelCatalogBookingPublicationSource({
     connectionString: config.connectionString,
@@ -169,9 +172,11 @@ export function createBookingPublicationProductionRuntime(config: {
   });
   const financeEvidence = createFinanceBookingLaunchEvidenceAdapter({
     financeReadPort: config.finance,
+    manualPayments: config.manualPayments,
   });
   const financeSnapshot = createFinanceBookingPublicationSnapshotPort({
     financeReadPort: config.finance,
+    manualPayments: config.manualPayments,
   });
   const readinessProvider = createBookingLaunchReadinessProvider({
     catalog,

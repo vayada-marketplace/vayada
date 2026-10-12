@@ -15,6 +15,7 @@ import {
   PMS_PRICING_SOURCE_ENTITY_TYPES,
   serializePmsPricingSourceEntityRevision,
 } from "@vayada/domain-pms";
+import type { FinanceManualPaymentReadinessReadPort } from "./financeManualPaymentReadiness.js";
 
 const EXTERNAL_PENDING = new Set<FinancePaymentReadinessBlocker>([
   "online_card_execution_unavailable",
@@ -24,6 +25,8 @@ const EXTERNAL_PENDING = new Set<FinancePaymentReadinessBlocker>([
 
 export function createFinanceBookingLaunchEvidenceAdapter(dependencies: {
   financeReadPort: FinancePaymentReadinessReadPort;
+  /** Bank transfer and PayPal, only while their acceptance is on (VAY-2139). */
+  manualPayments?: FinanceManualPaymentReadinessReadPort;
 }): BookingLaunchFinanceEvidencePort {
   return {
     bookingLaunchEvidencePort: "finance",
@@ -55,7 +58,12 @@ export function createFinanceBookingLaunchEvidenceAdapter(dependencies: {
           .flatMap(({ blockers }) => blockers);
         const blockers = ownerBlockers(blockingCodes, Boolean(pricingSource));
         if (!snapshot.bookingPaymentReady && blockers.length === 0 && blockingCodes.length === 0) {
-          blockers.push(ownerBlocker("ready_payment_method_missing", "user_fixable"));
+          // A bank-transfer or PayPal hotel is ready when the hotel can be paid that way.
+          const manual = dependencies.manualPayments
+            ? await dependencies.manualPayments.readyMethods(request)
+            : [];
+          if (manual.length === 0)
+            blockers.push(ownerBlocker("ready_payment_method_missing", "user_fixable"));
         }
         const advisories = ownerAdvisories(
           snapshot.methods

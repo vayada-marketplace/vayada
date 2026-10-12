@@ -212,6 +212,7 @@ import {
   createBookingPublicationProductionRuntime,
   startBookingPublicationWorker,
 } from "./domains/bookingPublicationProductionRuntime.js";
+import { createFinanceManualPaymentReadinessReader } from "./domains/financeManualPaymentReadiness.js";
 import { createTargetFinanceBillingConfigReadPort } from "./domains/financeBillingConfigReadModel.js";
 import { createFinanceSubscriptionService } from "./domains/financeSubscriptionService.js";
 import { createPgFinanceSubscriptionStore } from "./domains/financeSubscriptionStore.js";
@@ -1421,6 +1422,13 @@ const bookingGuestPolicyProjectionProjector = createBookingGuestPolicyOutboxProj
   }),
 });
 
+// Bank transfer and PayPal count for booking launch only while their acceptance is on (VAY-2139).
+const financeManualPaymentReadiness = config.replacementPricingManualPaymentAcceptanceEnabled
+  ? createFinanceManualPaymentReadinessReader({
+      connectionString: targetDatabaseUrl,
+      pool: propertySetupOwnerPool,
+    })
+  : undefined;
 const bookingPublicationRuntime = (() => {
   const dependenciesMissing =
     config.apiRuntime !== "next" ||
@@ -1446,6 +1454,7 @@ const bookingPublicationRuntime = (() => {
     operatingCalendar: propertySetupPmsRuntime.operatingCalendar,
     inventory: pmsOperatingCalendarRuntime.inventory,
     finance: financePaymentReadinessReadModel,
+    manualPayments: financeManualPaymentReadiness,
   });
 })();
 
@@ -1467,6 +1476,7 @@ const propertySetupRouteStateReadPort = createPropertySetupRouteStateReadPort({
       scope: createPgPropertySetupFinanceOwnerScopePort({ pool: propertySetupOwnerPool }),
       finance: financePaymentReadinessReadModel,
       pricing: pmsPricingReadModel,
+      manualPayments: financeManualPaymentReadiness,
     }),
     review_lifecycle: createPropertySetupReviewLifecycleStateProvider({
       marketplace: marketplaceSetupLifecycleStatusRepository,
