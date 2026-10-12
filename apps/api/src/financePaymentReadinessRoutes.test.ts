@@ -224,16 +224,16 @@ describe("Finance payment readiness routes", () => {
 
     const asked: string[] = [];
     let fail = false;
-    const ports: FakePorts = {
-      ...fakePorts(),
+    // Added onto the fake itself: its read answers from its own `readValue`.
+    const ports: FakePorts = Object.assign(fakePorts(), {
       manualPayments: {
-        async acceptedMethods(request) {
+        async acceptedMethods(request: { propertyId: string }) {
           asked.push(request.propertyId);
           if (fail) throw new Error("private read failure");
-          return ["bank_transfer"];
+          return ["bank_transfer" as const];
         },
       },
-    };
+    });
     app = await testApp(ports);
     await expect(get(app)).resolves.toMatchObject({
       statusCode: 200,
