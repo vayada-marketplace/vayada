@@ -57,7 +57,10 @@ import { createReplacementPricingPublicationReader } from "./domains/replacement
 import { createHotelSetupOrdinaryLoginFixture } from "./hotelSetupOrdinaryLogin.fixture.js";
 import { createPgHotelMediaResolutionPort } from "./platform/hotelMediaResolver.js";
 import type { PlatformMediaServingConfig } from "./platform/mediaServing.js";
-import { createPgSharedHotelSetupStatusRepository } from "./platform/sharedHotelSetupStatusReadModel.js";
+import {
+  advancePublicProfileRevision,
+  createPgSharedHotelSetupStatusRepository,
+} from "./platform/sharedHotelSetupStatusReadModel.js";
 import { syncPropertyOfferReadModels } from "./routes/marketplaceAdmin.js";
 import { createTargetFinancePropertySettingsRepository } from "./routes/finance.js";
 
@@ -113,6 +116,7 @@ function parsed<T>(value: T | null, step: string): T {
  * commands, on the production-shaped API login, and replays the TEST ONLY history: payments
  * first saved through the older settings page, and a room added the day after the calendar
  * was prepared. Readiness must explain every gap and end `ready` with a published page.
+ * VAY-2140: no Vayada activation step; a suspended hotel can't publish or sell.
  */
 describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", () => {
   it("walks setup to ready and publishes the booking page", async () => {
@@ -298,7 +302,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         expect.arrayContaining([
           "booking.calendar:operating_calendar_missing",
           "booking.guest_experience:guest_policy_not_configured",
-          "booking.hotel_profile:hotel_setup_in_progress",
+          "booking.hotel_profile:hotel_profile_incomplete",
           "booking.page_style:booking_design_missing",
           "booking.payments:payment_methods_not_configured",
           "booking.pricing:pricing_not_published",
@@ -366,6 +370,19 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         }),
         "present your hotel",
       );
+      // VAY-2140: completing the profile activates the hotel; nobody at Vayada approves it.
+      expect(
+        (
+          await admin.query(
+            `SELECT property.lifecycle_status AS status, count(audit.id)::int AS audits
+             FROM hotel_catalog.properties property
+             LEFT JOIN platform.product_audit_events audit ON audit.property_id = property.id
+               AND audit.action = 'hotel_catalog.property.lifecycle.auto_activate'
+             WHERE property.id = $1 GROUP BY property.lifecycle_status`,
+            [propertyId],
+          )
+        ).rows,
+      ).toEqual([{ status: "active", audits: 1 }]);
 
       // 3. Style your booking page.
       ok(
@@ -803,57 +820,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       );
       await savePrices([gardenSuite, seaSuite], 2);
 
-      // 10. Everything is done, but the new hotel is still being provisioned.
-      const provisioning = await readiness();
-      expect(blockerCodes(provisioning)).toEqual([
-        "booking.hotel_profile:hotel_setup_in_progress",
-        "booking.pricing:pricing_hotel_setup_in_progress",
-      ]);
-      expect(provisioning).toMatchObject({ outcome: "evaluated", status: "pending" });
-
-      // Platform activation (VAY-2140 removes this manual step).
-      await admin.query("INSERT INTO identity.users(id,email,status) VALUES($1,$2,'active')", [
-        platformAdmin,
-        `admin-${suffix}@example.test`,
-      ]);
-      await admin.query(
-        "INSERT INTO identity.organizations(id,kind,name,slug,status) VALUES($1,'platform','Vayada',$2,'active')",
-        [platformOrganizationId, `platform-${suffix}`],
-      );
-      await admin.query(
-        "INSERT INTO identity.organization_memberships(organization_id,user_id,status,role_key,access_origin) VALUES($1,$2,'active','platform_admin','agency')",
-        [platformOrganizationId, platformAdmin],
-      );
-      await admin.query(
-        "INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship,status) VALUES($1,'platform','platform','vayada','operator','active')",
-        [platformOrganizationId],
-      );
-      const lifecycle = closing(
-        createPgPlatformPropertyLifecycleCommandRepository({ connectionString: cs }),
-      );
-      const lifecycleRevision = Number(
-        (
-          await admin.query("SELECT lifecycle_revision FROM hotel_catalog.properties WHERE id=$1", [
-            propertyId,
-          ])
-        ).rows[0]!.lifecycle_revision,
-      );
-      await lifecycle.changeStatus({
-        propertyId,
-        expectedLifecycleRevision: lifecycleRevision,
-        status: "active",
-        reason: "Setup walk",
-        idempotencyKey: `activate-${suffix}`,
-        audit: {
-          actorUserId: platformAdmin,
-          organizationId: platformOrganizationId,
-          requestId: `activate-${suffix}`,
-          correlationId: `activate-${suffix}`,
-          requestedAt: now(),
-        },
-      });
-
-      // 11. Ready, then "Publish booking page".
+      // 10. Ready with no admin action, then "Publish booking page".
       const ready = await readiness();
       expect(blockerCodes(ready)).toEqual([]);
       expect(ready).toMatchObject({ outcome: "evaluated", status: "ready" });
@@ -898,6 +865,87 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           .sort(),
       ).toEqual([gardenSuite, seaSuite].sort());
       expect(unavailable).toEqual([]);
+
+      // 11. Vayada can still suspend a hotel: it can't publish or take bookings any more.
+      const offers = createReplacementPricingPublicationReader(pool);
+      expect(await offers.getCurrentPricingOffers(scope)).not.toBeNull();
+      await admin.query("INSERT INTO identity.users(id,email,status) VALUES($1,$2,'active')", [
+        platformAdmin,
+        `admin-${suffix}@example.test`,
+      ]);
+      await admin.query(
+        "INSERT INTO identity.organizations(id,kind,name,slug,status) VALUES($1,'platform','Vayada',$2,'active')",
+        [platformOrganizationId, `platform-${suffix}`],
+      );
+      await admin.query(
+        "INSERT INTO identity.organization_memberships(organization_id,user_id,status,role_key,access_origin) VALUES($1,$2,'active','platform_admin','agency')",
+        [platformOrganizationId, platformAdmin],
+      );
+      await admin.query(
+        "INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship,status) VALUES($1,'platform','platform','vayada','operator','active')",
+        [platformOrganizationId],
+      );
+      const lifecycle = closing(
+        createPgPlatformPropertyLifecycleCommandRepository({ connectionString: cs }),
+      );
+      await lifecycle.changeStatus({
+        propertyId,
+        expectedLifecycleRevision: Number(
+          (
+            await admin.query(
+              "SELECT lifecycle_revision FROM hotel_catalog.properties WHERE id=$1",
+              [propertyId],
+            )
+          ).rows[0]!.lifecycle_revision,
+        ),
+        status: "suspended",
+        reason: "Setup walk suspension",
+        idempotencyKey: `suspend-${suffix}`,
+        audit: {
+          actorUserId: platformAdmin,
+          organizationId: platformOrganizationId,
+          requestId: `suspend-${suffix}`,
+          correlationId: `suspend-${suffix}`,
+          requestedAt: now(),
+        },
+      });
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM distribution.active_public_booking_revision WHERE property_id=$1",
+            [propertyId],
+          )
+        ).rows[0]!.n,
+      ).toBe(0);
+      expect(await offers.getCurrentPricingOffers(scope)).toBeNull();
+      expect(await readiness()).toMatchObject({ outcome: "provider_failure" });
+      expect(unavailable).toContainEqual(
+        expect.objectContaining({ port: "catalog", code: "catalog_property_unavailable" }),
+      );
+      expect(
+        await runtime.routes.repository.requestPublication({
+          ...scope,
+          actorUserId: owner,
+          idempotencyKey: `publish-suspended-${suffix}`,
+          expectedActiveContentRevisionId: null,
+          readiness: ready as ReadyBookingPublicationEvidence,
+          audit: { requestId: `publish-suspended-${suffix}`, source: "web" },
+        }),
+      ).toMatchObject({ ok: false });
+      // A later profile save never reactivates a suspended hotel.
+      await advancePublicProfileRevision(pool, propertyId);
+      expect(
+        (
+          await admin.query(
+            `SELECT property.lifecycle_status AS status, count(audit.id)::int AS audits
+             FROM hotel_catalog.properties property
+             LEFT JOIN platform.product_audit_events audit ON audit.property_id = property.id
+               AND audit.action = 'hotel_catalog.property.lifecycle.auto_activate'
+             WHERE property.id = $1 GROUP BY property.lifecycle_status`,
+            [propertyId],
+          )
+        ).rows,
+      ).toEqual([{ status: "suspended", audits: 1 }]);
     } finally {
       for (const close of closers.reverse()) await close().catch(() => undefined);
       // Some owners end their pools in the background; drop the login once they are gone.
