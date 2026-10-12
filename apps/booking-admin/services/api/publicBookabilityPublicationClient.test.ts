@@ -35,7 +35,7 @@ describe("publishPublicBookabilityProfile", () => {
       publishPublicBookabilityProfile(" booking/hotel 1 ", client),
     ).resolves.toMatchObject({ canonicalSlug: "hotel-alpenrose" });
     expect(post).toHaveBeenCalledWith(
-      "/api/booking/hotels/booking%2Fhotel%201/public-bookability",
+      "/api/booking/hotels/booking%2Fhotel%201/public-bookability?when=live",
       undefined,
       expect.objectContaining({ headers: expect.any(Object) }),
     );
