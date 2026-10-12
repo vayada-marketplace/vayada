@@ -32,6 +32,21 @@ describe("replacement pricing browser workflow", () => {
     http.put.mockResolvedValue({ revision: 99 });
     await expect(api.saveDraft({ draftId, baseRevision: 0, expectedDraftRevision: 0, sources, snapshot })).rejects.toBeInstanceOf(PricingResponseError);
   });
+  it("reads the bank-transfer and PayPal methods the rate pickers may offer (VAY-2139)", async () => {
+    http.get.mockResolvedValue({ acceptanceEnabled: true, readyMethods: ["bank_transfer"] });
+    expect(await client().paymentMethods()).toEqual(["bank_transfer"]);
+    expect(http.get.mock.calls[0][0]).toBe(`/api/pms/properties/${id}/pricing-v2/payment-methods`);
+    // Acceptance off, or an API without the read: the pickers offer neither.
+    http.get.mockResolvedValue({ acceptanceEnabled: false, readyMethods: [] });
+    expect(await client().paymentMethods()).toEqual([]);
+    http.get.mockRejectedValue(new ApiErrorResponse(404, { code: "not_found" }));
+    expect(await client().paymentMethods()).toEqual([]);
+    for (const value of [{ acceptanceEnabled: true, readyMethods: ["card"] }, { acceptanceEnabled: true },
+      { acceptanceEnabled: "yes", readyMethods: [] }, { acceptanceEnabled: true, readyMethods: ["paypal", "paypal"] }]) {
+      http.get.mockResolvedValue(value);
+      await expect(client().paymentMethods()).rejects.toThrow();
+    }
+  });
   it("reads exact saved data and only expected missing responses become null", async () => {
     const api = client(), stored = { snapshot, sources, revision: 1, baseRevision: 0, stale: false };
     http.get.mockResolvedValue(stored); expect(await api.readDraft(draftId)).toEqual(draft);

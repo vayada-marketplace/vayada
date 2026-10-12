@@ -25,6 +25,8 @@ export function createActiveBookingPublicationProfileRepository(config: {
   connectionString: string;
   max?: number;
   pool?: PublicHotelProfileReadPool;
+  /** Bank-transfer and PayPal pages count only while their acceptance is on (VAY-2139). */
+  manualPayments?: boolean;
 }): PublicHotelProfileRepository {
   if (!config.connectionString.trim()) {
     throw new Error("Active Booking publication profile connectionString must not be empty");
@@ -32,6 +34,7 @@ export function createActiveBookingPublicationProfileRepository(config: {
   const ownsPool = !config.pool;
   const pool =
     config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: config.max });
+  const content = { manualPayments: config.manualPayments === true };
 
   return {
     async findProfileBySlug(value) {
@@ -57,7 +60,7 @@ export function createActiveBookingPublicationProfileRepository(config: {
          LIMIT 1`,
         [slug],
       );
-      return currentActiveProfile(pool, result.rows[0]);
+      return currentActiveProfile(pool, result.rows[0], content);
     },
 
     async findProfileByCustomDomain(value) {
@@ -76,7 +79,7 @@ export function createActiveBookingPublicationProfileRepository(config: {
          LIMIT 1`,
         [domain],
       );
-      const profile = await currentActiveProfile(pool, result.rows[0]);
+      const profile = await currentActiveProfile(pool, result.rows[0], content);
       return profile && normalizedDomain(profile.hotel.customDomainUrl ?? "") === domain
         ? profile
         : null;
@@ -90,9 +93,10 @@ export function createActiveBookingPublicationProfileRepository(config: {
 
 function activeProfile(
   row: ActiveProfileRow | undefined,
+  content: { manualPayments: boolean },
 ): PublicBookabilityProfileProjection | null {
   if (!row) return null;
-  const profile = parseBookingPublicContent(row.publicContent)?.profile;
+  const profile = parseBookingPublicContent(row.publicContent, content)?.profile;
   return profile &&
     profile.hotel.propertyId === row.propertyId &&
     profile.hotel.trust.bookabilityStatus === "bookable" &&
@@ -104,8 +108,9 @@ function activeProfile(
 async function currentActiveProfile(
   pool: PublicHotelProfileReadPool,
   row: ActiveProfileRow | undefined,
+  content: { manualPayments: boolean },
 ): Promise<PublicBookabilityProfileProjection | null> {
-  const profile = activeProfile(row);
+  const profile = activeProfile(row, content);
   if (!profile || !row) return null;
   const domain = profile.hotel.customDomainUrl
     ? normalizedDomain(profile.hotel.customDomainUrl)

@@ -99,6 +99,7 @@ const client = {
   confirmationAction: vi.fn(() => confirm),
   publicationAction: vi.fn<(draft: PricingDraft) => typeof publish>(),
   readDraft: vi.fn(),
+  paymentMethods: vi.fn(),
 };
 /** A button by its text; icons beside the text (e.g. "+ Add linked offer") are ignored. */
 const button = (label: string) =>
@@ -173,6 +174,8 @@ beforeEach(() => {
   vi.stubGlobal("React", React);
   vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
   vi.stubGlobal("document", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  // Bank-transfer and PayPal acceptance off (VAY-2139).
+  client.paymentMethods.mockResolvedValue([]);
   client.readTerms.mockImplementation(async (roomTypeId, offerId, revision) => ({
     roomTypeId,
     offerId,

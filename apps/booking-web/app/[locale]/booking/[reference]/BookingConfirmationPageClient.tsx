@@ -676,11 +676,14 @@ export default function BookingConfirmationPageClient({
 
           {isPending && booking?.paymentMethod === "paypal" && paypalInfo && (
             <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl text-left">
-              <p className="text-sm font-semibold text-blue-900">PayPal payment pending</p>
+              <p className="text-sm font-semibold text-blue-900">{t("paypalPending")}</p>
               <p className="text-xs text-blue-700 mt-1">
-                Send {formatPrice(booking.totalAmount, booking.currency)} to {paypalInfo.email} and
-                include {booking.bookingReference} in the PayPal note so we can match it. Payment
-                must be confirmed within {paypalInfo.windowHours} hours.
+                {t("paypalInstructions", {
+                  amount: formatPrice(booking.totalAmount, booking.currency),
+                  email: paypalInfo.email,
+                  reference: booking.bookingReference,
+                  hours: paypalInfo.windowHours,
+                })}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
@@ -688,14 +691,14 @@ export default function BookingConfirmationPageClient({
                   onClick={() => navigator.clipboard?.writeText(paypalInfo.email)}
                   className="px-3 py-1.5 rounded-lg bg-white border border-blue-200 text-xs font-semibold text-blue-700"
                 >
-                  Copy email
+                  {t("copyEmail")}
                 </button>
                 <button
                   type="button"
                   onClick={() => navigator.clipboard?.writeText(booking.bookingReference)}
                   className="px-3 py-1.5 rounded-lg bg-white border border-blue-200 text-xs font-semibold text-blue-700"
                 >
-                  Copy booking reference
+                  {t("copyReference")}
                 </button>
               </div>
             </div>

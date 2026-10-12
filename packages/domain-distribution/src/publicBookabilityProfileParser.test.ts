@@ -145,4 +145,19 @@ describe("parsePublicBookabilityProfileProjection", () => {
 
     expect(parsePublicBookabilityProfileProjection(profile)).toBeNull();
   });
+
+  it("accepts a bookable hotel paid only by bank transfer or PayPal only with Finance's word (VAY-2139)", () => {
+    const profile = storedProfile() as any;
+    expect(profile.hotel.trust.bookabilityStatus).toBe("bookable");
+    profile.hotel.capabilities.onlinePayment = false;
+    profile.hotel.capabilities.payAtProperty = false;
+    expect(parsePublicBookabilityProfileProjection(profile)).toBeNull();
+    expect(
+      parsePublicBookabilityProfileProjection(profile, { manualPaymentReady: false }),
+    ).toBeNull();
+    expect(
+      parsePublicBookabilityProfileProjection(profile, { manualPaymentReady: true })?.hotel
+        .capabilities,
+    ).toMatchObject({ onlinePayment: false, payAtProperty: false });
+  });
 });

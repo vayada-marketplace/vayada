@@ -1347,7 +1347,31 @@ describe("Booking Web public bootstrap parity", () => {
       bankTransfer: true,
       paypalEnabled: true,
       paypalPaymentWindowHours: 48,
+      // The booking page keeps its fixed choice until bank transfer and PayPal acceptance is on.
+      bookingPagePaymentMethods: ["card", "pay_at_property"],
     });
+    await expect(
+      createTargetBookingWebCheckoutAdapter({
+        externalChanges: externalBookingChanges,
+        connectionString: "postgres://unused",
+        inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+        pool: pool as never,
+        replacementPricingManualPaymentAcceptanceEnabled: true,
+        bankTransfers: {} as never,
+      }).getCheckoutConfig("hotel-alpenrose"),
+    ).resolves.toMatchObject({
+      bookingPagePaymentMethods: ["pay_at_property", "bank_transfer", "paypal"],
+    });
+    // Without the bank-details binding bank transfer can't be accepted, so it isn't offered.
+    await expect(
+      createTargetBookingWebCheckoutAdapter({
+        externalChanges: externalBookingChanges,
+        connectionString: "postgres://unused",
+        inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+        pool: pool as never,
+        replacementPricingManualPaymentAcceptanceEnabled: true,
+      }).getCheckoutConfig("hotel-alpenrose"),
+    ).resolves.toMatchObject({ bookingPagePaymentMethods: ["pay_at_property", "paypal"] });
     paymentsEnabled = false;
     await expect(adapter.getCheckoutConfig("hotel-alpenrose")).resolves.toMatchObject({
       paymentsEnabled: false,

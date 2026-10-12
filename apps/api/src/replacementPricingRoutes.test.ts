@@ -100,7 +100,10 @@ const apps: ReturnType<typeof Fastify>[] = [];
 afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
 });
-async function fixture(auth: RequestContext | null = context) {
+async function fixture(
+  auth: RequestContext | null = context,
+  manualPayments?: ReplacementPricingRoutesOptions["manualPayments"],
+) {
   const app = Fastify();
   apps.push(app);
   app.decorateRequest("authContext", null);
@@ -118,11 +121,16 @@ async function fixture(auth: RequestContext | null = context) {
     saveDraft: vi.fn().mockResolvedValue(1),
     confirmCharges: vi.fn().mockResolvedValue({ id: draftId }),
     publish: vi.fn().mockResolvedValue({ revision: 1, replayed: false }),
+    authorizeRead: vi.fn().mockResolvedValue(true),
   };
   const factory = vi.fn(
     () => commands as unknown as ReturnType<ReplacementPricingRoutesOptions["commands"]>,
   );
-  await app.register(registerReplacementPricingRoutes, { prefix: "/api/pms", commands: factory });
+  await app.register(registerReplacementPricingRoutes, {
+    prefix: "/api/pms",
+    commands: factory,
+    ...(manualPayments ? { manualPayments } : {}),
+  });
   return {
     app,
     commands,
@@ -153,6 +161,36 @@ describe("replacement pricing HTTP boundary", () => {
     expect((await f.inject(3)).json()).toEqual({ revision: 1 });
     f.commands.publish.mockResolvedValue({ revision: 1, replayed: true });
     expect((await f.inject(5)).json()).toEqual({ revision: 1, replayed: true });
+  });
+  it("tells the rate pickers whether bank transfer and PayPal can be offered (VAY-2139)", async () => {
+    const get = (f: Awaited<ReturnType<typeof fixture>>) =>
+      f.app.inject({
+        method: "GET",
+        url: `/api/pms/properties/${id}/pricing-v2/payment-methods`,
+        headers: { authorization: "Bearer valid" },
+      });
+    expect((await get(await fixture())).json()).toEqual({
+      acceptanceEnabled: false,
+      readyMethods: [],
+    });
+    const acceptedMethods = vi.fn().mockResolvedValue(["paypal"]);
+    const on = await fixture(context, { acceptedMethods });
+    expect((await get(on)).json()).toEqual({ acceptanceEnabled: true, readyMethods: ["paypal"] });
+    expect(acceptedMethods).toHaveBeenCalledWith({ propertyId: id });
+    // Reading rates is enough, like the rest of the Prices tab.
+    const reader = {
+      ...context,
+      membership: { ...context.membership, permissions: ["pms.rooms_rates.read"] },
+    } as RequestContext;
+    expect((await get(await fixture(reader, { acceptedMethods }))).statusCode).toBe(200);
+    expect((await get(await fixture(null, { acceptedMethods }))).statusCode).toBe(401);
+    // Staff without access to this property in the database are refused before any read.
+    const denied = await fixture(context, { acceptedMethods });
+    denied.commands.authorizeRead.mockResolvedValue(false);
+    acceptedMethods.mockClear();
+    expect((await get(denied)).statusCode).toBe(403);
+    expect(denied.commands.authorizeRead).toHaveBeenCalledWith(id);
+    expect(acceptedMethods).not.toHaveBeenCalled();
   });
   it("rejects missing/invalid auth before malformed body parsing", async () => {
     const f = await fixture();

@@ -35,12 +35,15 @@ import {
   getAuthWorkosOrganizationId,
 } from "@/services/auth/sessionStore";
 import { AdaptiveRoomAuthoringSetupController } from "./adaptive/rooms/AdaptiveRoomAuthoringSetupController";
+import { productHandoffReturnTo } from "./productHandoffReturnTo";
 import { SetupTaskFormRouter } from "./SetupTaskFormRouter";
 
 import {
   PreparedHotelImportPanel,
   type PreparedImportResponse,
 } from "@vayada/product-onboarding/PreparedHotelImportPanel";
+
+export { productHandoffReturnTo };
 
 const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_URL || "https://pms.vayada.com";
 const BOOKING_ADMIN_URL =
@@ -422,26 +425,6 @@ export function setupPathForSelectedProperty(query: string, propertyId: string):
   searchParams.set("propertyId", propertyId);
   searchParams.delete("mode");
   return `${ROUTES.SETUP}?${searchParams.toString()}`;
-}
-
-export function productHandoffReturnTo(
-  targetPath: string,
-  propertyId: string | null,
-  organization: {
-    organizationId: string | null;
-    workosOrganizationId: string | null;
-  },
-): string {
-  const query = new URLSearchParams({ redirect: targetPath });
-  const fragment = new URLSearchParams();
-  if (propertyId) fragment.set("property_id", propertyId);
-  if (organization.organizationId) {
-    fragment.set("organization_id", organization.organizationId);
-  }
-  if (organization.workosOrganizationId) {
-    fragment.set("workos_organization_id", organization.workosOrganizationId);
-  }
-  return `/handoff?${query.toString()}${fragment.size > 0 ? `#${fragment.toString()}` : ""}`;
 }
 
 export function setupExitPathForContext(query: string, propertyId: string | null): string {

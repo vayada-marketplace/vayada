@@ -1,0 +1,187 @@
+import { expect, test } from "@playwright/test";
+import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
+
+const offerKey = `pricing-offer.v2:${"d".repeat(64)}`;
+
+// VAY-2139: a bank-transfer-only hotel. The guest books, the room is held, and the guest is
+// sent to the protected payment details.
+test("books by bank transfer and opens the protected payment details", async ({ page }) => {
+  await mockBookingApis(page);
+  await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/checkout-config`, (route) =>
+    route.fulfill({
+      json: {
+        addons: [],
+        payAtPropertyEnabled: false,
+        bookingPagePaymentMethods: ["bank_transfer"],
+      },
+    }),
+  );
+  await page.route("**/pricing-offers", (route) =>
+    route.fulfill({
+      json: {
+        version: "public-pricing-offers.v1",
+        rooms: [
+          {
+            roomTypeId: "double",
+            name: "Double",
+            offers: [{ publicOfferKey: offerKey, currency: "EUR", mealPlan: "room_only" }],
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/pricing-addons", (route) =>
+    route.fulfill({ json: { version: "public-pricing-addons.v1", addons: [] } }),
+  );
+  let issuedQuote: any;
+  await page.route("**/bookings/quote", (route) => {
+    const { selection, paymentMethod } = route.request().postDataJSON();
+    issuedQuote = {
+      version: "public-booking-quote.v1",
+      quoteId: "77777777-7777-4777-8777-777777777777",
+      replayed: false,
+      checkIn: selection.checkIn,
+      checkOut: selection.checkOut,
+      currency: "EUR",
+      paymentMethod,
+      acceptanceMode: "instant",
+      issuedAt: new Date(Date.now() - 1000).toISOString(),
+      expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      totalMinor: "24000",
+      dueNowMinor: "24000",
+      dueLaterMinor: "0",
+      lines: selection.rooms.map((room: any) => ({
+        kind: "room",
+        selectionId: room.selectionId,
+        amountMinor: "24000",
+      })),
+      rooms: selection.rooms.map((room: any) => ({
+        selectionId: room.selectionId,
+        mealPlan: "room_only",
+        cancellation: { kind: "non_refundable" },
+        payment: { kind: "full", acceptedMethods: ["bank_transfer"] },
+      })),
+    };
+    return route.fulfill({ json: issuedQuote });
+  });
+  await page.route("**/bookings/quotes/*/guest-disclosure", (route) =>
+    route.fulfill({
+      json: {
+        version: "public-quote-guest-disclosure.v1",
+        quoteId: issuedQuote.quoteId,
+        quoteEvidenceId: `sha256:${"a".repeat(64)}`,
+        guestPolicyEvidenceId: `sha256:${"b".repeat(64)}`,
+        issuedAt: issuedQuote.issuedAt,
+        expiresAt: issuedQuote.expiresAt,
+        checkedAt: new Date().toISOString(),
+        propertyTimeZone: "Europe/Berlin",
+        choices: {
+          defaultGuestLanguage: "en",
+          childrenEnabled: true,
+          adultAgeThreshold: 12,
+          phoneRequired: false,
+          arrivalTimeEnabled: false,
+          specialRequestsEnabled: false,
+          checkInTime: "15:00",
+          checkInUntil: "00:00",
+          checkOutFrom: "06:00",
+          checkOutTime: "11:00",
+        },
+      },
+    }),
+  );
+  const token = "t".repeat(43);
+  const reference = "VAY-77777777777747778777777777777777";
+  await page.route("**/bookings/quotes/*/accept", (route) => {
+    const acceptedAt = new Date(Date.now() - 500).toISOString();
+    return route.fulfill({
+      json: {
+        kind: "payment_pending",
+        bookingId: "88888888-8888-4888-8888-888888888888",
+        acceptanceId: "99999999-9999-4999-8999-999999999999",
+        acceptedAt,
+        bookingReference: reference,
+        payment: {
+          method: "bank_transfer",
+          amountMinor: "24000",
+          currency: "EUR",
+          deadlineAt: new Date(Date.parse(acceptedAt) + 48 * 3600_000).toISOString(),
+        },
+        checkedAt: new Date().toISOString(),
+        confirmationToken: token,
+        confirmationTokenExpiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+      },
+    });
+  });
+  let confirmations = 0;
+  await page.route(
+    `**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/bookings/confirmation`,
+    async (route) => {
+      confirmations++;
+      expect(route.request().postDataJSON()).toEqual({
+        bookingReference: reference,
+        confirmationToken: token,
+      });
+      await route.fulfill({
+        json: {
+          id: "88888888-8888-4888-8888-888888888888",
+          bookingReference: reference,
+          status: "pending_payment",
+          paymentStatus: "unpaid",
+          paymentMethod: "bank_transfer",
+          hotelName: "Hotel Alpenrose",
+          roomName: "Double",
+          guestFirstName: "Ada",
+          guestLastName: "Lovelace",
+          guestEmail: "ada@example.test",
+          checkIn: "2026-10-01",
+          checkOut: "2026-10-03",
+          nights: 2,
+          adults: 2,
+          children: 0,
+          numberOfRooms: 1,
+          currency: "EUR",
+          totalAmount: 240,
+          createdAt: new Date().toISOString(),
+          bankTransferDetails: "IBAN: DE89370400440532013000",
+        },
+      });
+    },
+  );
+
+  await page.goto(`/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-10-01&checkOut=2026-10-03`);
+  const method = page.getByLabel("Payment preference");
+  await expect(method.locator("option")).toHaveText(["Choose a payment method", "Bank transfer"]);
+  await page.getByRole("button", { name: "Add room", exact: true }).click();
+  const room = page.getByRole("group", { name: "Room 1", exact: true });
+  await room.getByLabel("Room and meal option").selectOption(offerKey);
+  await room.getByLabel(/Adults/).fill("2");
+  await method.selectOption("bank_transfer");
+  await page.getByRole("button", { name: "Get price", exact: true }).click();
+  await expect(page.getByText("Total: EUR 240.00", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText(
+      "We hold your room until the payment deadline and confirm your booking when your payment arrives.",
+    ),
+  ).toBeVisible();
+  await page.getByLabel("I have read the room and rate terms for this price preview.").check();
+  await page.getByLabel("I have read the guest rules for this price preview.").check();
+  await page.getByLabel("First name").fill("Ada");
+  await page.getByLabel("Last name").fill("Lovelace");
+  await page.getByLabel("Email", { exact: true }).fill("ada@example.test");
+  await page.getByRole("button", { name: "Confirm booking" }).click();
+
+  const reserved = page.getByRole("status").filter({ hasText: "Your room is reserved" });
+  await expect(reserved).toBeVisible();
+  await expect(reserved).toContainText(reference);
+  await expect(reserved).toContainText("by bank transfer");
+  await expect(reserved).toContainText("the booking expires and the room is released");
+  const details = reserved.getByRole("link", { name: "See payment details" });
+  await expect(details).toHaveAttribute(
+    "href",
+    `/confirmation?booking=${reference}&token=${token}`,
+  );
+  await details.click();
+  await expect(page.getByText("IBAN: DE89370400440532013000", { exact: true })).toBeVisible();
+  expect(confirmations).toBeGreaterThan(0);
+});
