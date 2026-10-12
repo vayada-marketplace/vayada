@@ -36,6 +36,7 @@ on:
       - "fm/vay-2099-*"
       - "fm/vay-2094-*"
       - "fm/vay-2100-*"
+      - "fm/vay-2108-*"
       - "fm/vay-2101-*"
       - "fm/vay-2102-*"
       - "fm/vay-2120-*"
@@ -677,6 +678,10 @@ jobs:
           src/domains/channexStagingCatalogEvidence.test.ts
           src/domains/channexStagingCatalogScope.test.ts
           src/jobs/channexBookings.integration.test.ts
+          src/jobs/channexOwnershipGate.integration.test.ts
+          src/jobs/channexFeedPull.integration.test.ts
+          src/domains/channexAlterationIntake.integration.test.ts
+          src/jobs/channexMessages.integration.test.ts
           src/jobs/channexStagingImport.integration.test.ts
           src/domains/channexStagingAlertRecovery.integration.test.ts
           src/routes/bookingWebPublicAttribution.integration.test.ts

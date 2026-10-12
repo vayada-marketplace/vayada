@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import pg from "pg";
 import { CHANNEX_JOB_LEASE_MS as LEASE_MS } from "./pmsChannexPricingJobLease.js";
+import { CHANNEX_RESERVED_TEST_IDS } from "../domains/channexOwnershipGate.js";
 
 import type { PmsChannexManagementCommandInput } from "../domains/pmsChannexManagementCommands.js";
 import { PMS_CHANNEX_MANAGEMENT_QUEUE } from "../domains/pmsChannexManagementReadModel.js";
@@ -58,6 +59,8 @@ export function createPgPmsChannexManagementWorkerStore(config: {
   stagingInventoryEnabled?: boolean;
   /** VAY-2055: claim only `enable` jobs for hotels without a Channex binding. */
   connectionOnly?: boolean;
+  /** VAY-2108: bindings never given ARI; defaults to the reserved staging/test ids. */
+  excludedIds?: readonly string[];
 }): ChannexManagementWorkerStore {
   const pool =
     config.pool ?? new pg.Pool({ connectionString: required(config.connectionString), max: 5 });
@@ -73,6 +76,7 @@ export function createPgPmsChannexManagementWorkerStore(config: {
         config.stagingPublishedOffersEnabled ?? false,
         config.stagingInventoryEnabled ?? false,
         config.connectionOnly ?? false,
+        config.excludedIds ?? CHANNEX_RESERVED_TEST_IDS,
       ),
     heartbeat: (job, input) => heartbeat(pool, job, input),
     continueUpload: (job, progress, input) => continueUpload(pool, job, progress, input),
@@ -94,18 +98,25 @@ async function claim(
   stagingPublishedOffersEnabled: boolean,
   stagingInventoryEnabled: boolean,
   connectionOnly: boolean,
+  excludedIds: readonly string[],
 ): Promise<ChannexManagementJob | null> {
   return transaction(pool, async (client) => {
+    // VAY-2108: only hotels the target owns (active claim on the binding) get the daily full sync.
     if (ariSyncMutating && !connectionOnly)
       await client.query(
         `SELECT pms.enqueue_restriction_ari(connection.property_id,
          'full:'||(now() AT TIME ZONE location.timezone)::date)
        FROM pms.channel_connections connection
        JOIN hotel_catalog.property_locations location ON location.property_id=connection.property_id
+       JOIN pms.channel_binding_claims claim ON claim.property_id=connection.property_id
+         AND claim.provider=connection.provider AND claim.external_property_id=connection.external_property_id
+         AND claim.claim_state='active'
        WHERE connection.provider='channex' AND location.timezone IS NOT NULL
+         AND NOT (connection.property_id::text = ANY($2::text[])
+           OR lower(connection.external_property_id) = ANY($2::text[]))
          AND connection.connection_status IN ('connected','degraded')
          AND ($1::uuid IS NULL OR connection.property_id = $1::uuid)`,
-        [stagingRestrictionsPropertyId],
+        [stagingRestrictionsPropertyId, excludedIds],
       );
     const result = await client.query<JobRow>(
       `SELECT id::text AS "jobId", property_id::text AS "propertyId",

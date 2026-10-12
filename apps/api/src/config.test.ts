@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { loadConfig, stripeSubscriptionRuntimeEnabled } from "./config.js";
+import { channexClaimedScope, loadConfig, stripeSubscriptionRuntimeEnabled } from "./config.js";
 
 const completeCreatorMarketplaceEnv = {
   TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
@@ -235,6 +235,94 @@ describe("api config", () => {
       workerEnabled: true,
       capabilityModes: { connection: "mutating", provisioning: "observe_only" },
     });
+  });
+
+  it("loads the VAY-2108 claimed scope only with a strict owned-property allowlist", () => {
+    const owned = "29f39aae-0000-4000-8000-000000000001,7d3f6dcc-0000-4000-8000-000000000002";
+    const production = {
+      TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
+      PMS_OPERATIONS_SOURCE: "target",
+      CHANNEX_API_BASE_URL: "https://app.channex.io",
+      CHANNEX_API_KEY: "secret",
+      CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE: "target-owned",
+      PMS_CHANNEX_SCOPE: "claimed",
+      PMS_CHANNEX_OWNED_PROPERTY_IDS: owned,
+      PMS_CHANNEX_CONNECTION_MODE: "mutating",
+      PMS_CHANNEX_BOOKING_SYNC_MODE: "mutating",
+      PMS_CHANNEX_WORKER_ENABLED: "true",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@target-db/app",
+    };
+    const config = loadConfig(production).channexManagement;
+    expect(config).toMatchObject({ scope: "claimed", ownedPropertyIds: owned.split(",") });
+    expect(channexClaimedScope(config)).toBe(true);
+    // The S1 canary: staging Channex, booking only, no worker, background workers off.
+    const canary = loadConfig({
+      ...production,
+      CHANNEX_API_BASE_URL: "https://staging.channex.io",
+      PMS_CHANNEX_OWNED_PROPERTY_IDS: "65f6b2fc-c783-4963-9d6b-a85f82319769",
+      PMS_CHANNEX_CONNECTION_MODE: "observe_only",
+      PMS_CHANNEX_WORKER_ENABLED: "false",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: undefined,
+      API_BACKGROUND_WORKERS_ENABLED: "false",
+    }).channexManagement;
+    expect(canary).toMatchObject({ workerEnabled: false, scope: "claimed" });
+    // Inert: an empty list owns nothing, and booking sync may be off under the scope.
+    expect(
+      loadConfig({
+        ...production,
+        PMS_CHANNEX_OWNED_PROPERTY_IDS: "",
+        PMS_CHANNEX_BOOKING_SYNC_MODE: "observe_only",
+      }).channexManagement.ownedPropertyIds,
+    ).toEqual([]);
+    expect(
+      loadConfig({
+        ...production,
+        PMS_CHANNEX_SCOPE: undefined,
+        PMS_CHANNEX_OWNED_PROPERTY_IDS: undefined,
+      }).channexManagement.scope,
+    ).toBeUndefined();
+    // Booking-only claimed defaults the management worker off.
+    expect(
+      loadConfig({
+        ...production,
+        PMS_CHANNEX_CONNECTION_MODE: undefined,
+        PMS_CHANNEX_WORKER_ENABLED: undefined,
+        PMS_CHANNEX_MANAGEMENT_DATABASE_URL: undefined,
+      }).channexManagement.workerEnabled,
+    ).toBe(false);
+    const only = /requires PMS_CHANNEX_OWNED_PROPERTY_IDS|required with, and only with/;
+    const format = /distinct lowercase UUIDs/;
+    const scope = /allows only connection, booking sync and reviews/;
+    for (const [invalid, message] of [
+      [{ PMS_CHANNEX_SCOPE: "all" }, /must be claimed/],
+      [{ PMS_CHANNEX_OWNED_PROPERTY_IDS: undefined }, only],
+      [{ PMS_CHANNEX_SCOPE: undefined }, only],
+      [{ PMS_CHANNEX_OWNED_PROPERTY_IDS: owned.toUpperCase() }, format],
+      [{ PMS_CHANNEX_OWNED_PROPERTY_IDS: owned.replace(",", ", ") }, format],
+      [{ PMS_CHANNEX_OWNED_PROPERTY_IDS: `${owned},` }, format],
+      [{ PMS_CHANNEX_OWNED_PROPERTY_IDS: `${owned.split(",")[0]},${owned.split(",")[0]}` }, format],
+      [{ PMS_CHANNEX_OWNED_PROPERTY_IDS: "65f6b2fc-c783-4963-9d6b-a85f82319769" }, /reserved/],
+      [{ PMS_CHANNEX_ARI_SYNC_MODE: "mutating" }, scope],
+      [{ PMS_CHANNEX_PROVISIONING_MODE: "mutating" }, scope],
+      [{ PMS_CHANNEX_MESSAGING_MODE: "mutating" }, scope],
+      [{ PMS_CHANNEX_IFRAME_MODE: "mutating" }, scope],
+      [{ CHANNEX_API_BASE_URL: "https://example.channex.test" }, scope],
+      [
+        { CHANNEX_WEBHOOK_INTAKE_MODE: "mutating", CHANNEX_WEBHOOK_SECRET: "token" },
+        /CHANNEX_WEBHOOK_INTAKE_MODE observe_only/,
+      ],
+      [{ PMS_CHANNEX_WORKER_ENABLED: "false" }, /PMS_CHANNEX_WORKER_ENABLED=true/],
+    ] as const)
+      expect(() => loadConfig({ ...production, ...invalid }), JSON.stringify(invalid)).toThrow(
+        message,
+      );
+    expect(() =>
+      loadConfig({
+        ...production,
+        CHANNEX_API_BASE_URL: "https://staging.channex.io",
+        PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "65f6b2fc-c783-4963-9d6b-a85f82319769",
+      }),
+    ).toThrow();
   });
 
   it("allows only isolated staging restrictions with the background workers disabled", () => {
