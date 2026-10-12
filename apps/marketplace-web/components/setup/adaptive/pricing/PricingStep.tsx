@@ -301,8 +301,8 @@ export function PricingStep({
           <div className="mt-6">
             <Panel
               title="Choose how guests pay first"
-              message="Rates are checked against the hotel's payment methods. Complete Payments, then come back here to set room rates."
-              actionLabel="Go to Payments"
+              message="Rates are checked against the hotel's payment methods, so Payments comes before prices. Go back to Payments, save how guests pay, then continue here."
+              actionLabel="Back to Payments"
               onAction={() => goToStep?.("payments")}
             />
           </div>

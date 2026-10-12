@@ -50,6 +50,8 @@ const RESOURCE_TYPE = BOOKING_GUEST_POLICY_RESOURCE_TYPE;
 export function createBookingGuestPolicyOutboxProjector(config: {
   pool: BookingGuestPolicyProjectionPool;
   handler: BookingGuestPolicyProjectionHandlerPort;
+  /** Best effort after an applied change, e.g. refreshing the live booking page (VAY-2129). */
+  afterApplied?: (input: { propertyId: string }) => Promise<void>;
   now?: () => Date;
   randomId?: () => string;
   leaseDurationMs?: number;
@@ -108,6 +110,8 @@ export function createBookingGuestPolicyOutboxProjector(config: {
             at: processedAt,
           });
           result[handled.outcome === "applied" ? "applied" : "conflicts"] += 1;
+          if (handled.outcome === "applied")
+            await config.afterApplied?.({ propertyId: claim.propertyId }).catch(() => undefined);
           continue;
         }
         const exhausted = handled.outcome !== "retry" || claim.attemptsCount >= claim.maxAttempts;

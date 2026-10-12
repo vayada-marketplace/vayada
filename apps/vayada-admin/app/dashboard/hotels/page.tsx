@@ -134,9 +134,7 @@ export default function HotelsPage() {
     const targetStatus = nextStatus(row.lifecycle_status);
     const reason = window.prompt(
       `Reason for moving "${row.name}" to ${targetStatus}:`,
-      targetStatus === "suspended"
-        ? "Platform admin safety hold"
-        : "Platform admin review complete",
+      targetStatus === "suspended" ? "Platform admin safety hold" : "Platform admin reactivation",
     );
     if (!reason?.trim()) return;
     try {
@@ -360,17 +358,19 @@ export default function HotelsPage() {
   );
 }
 
+// A hotel in setup goes live by itself once its profile is complete; Vayada does not
+// activate it (VAY-2140). Admins can still suspend (also during setup) and reactivate.
 function nextStatus(status: PlatformPropertyLifecycleStatus): "active" | "suspended" {
-  return status === "active" || status === "retired" ? "suspended" : "active";
+  return status === "suspended" ? "active" : "suspended";
 }
 
 function transitionLabel(status: PlatformPropertyLifecycleStatus): string {
-  if (status === "active") return "Suspend";
   if (status === "retired") return "Restore to review";
-  return "Activate";
+  return status === "suspended" ? "Reactivate" : "Suspend";
 }
 
 function lifecycleLabel(status: PlatformPropertyLifecycleStatus): string {
+  if (status === "provisioning") return "Setting up";
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 

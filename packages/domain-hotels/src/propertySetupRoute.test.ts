@@ -24,10 +24,10 @@ const operationsRoute = [
   "present_hotel",
   "booking_design",
   "rooms",
+  "payments",
   "pricing",
   "calendar",
   "guest_experience",
-  "payments",
   "review",
 ] as const;
 const combinedRoute = [
