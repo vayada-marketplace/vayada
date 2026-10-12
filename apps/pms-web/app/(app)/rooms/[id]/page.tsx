@@ -158,7 +158,8 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
   }
 
   return (
-    <div className="p-4 md:p-6 max-w-5xl">
+    // The Prices tab has two columns (VAY-2125), so it gets more width than the other tabs.
+    <div className={`p-4 md:p-6 ${tab === "prices" ? "max-w-6xl" : "max-w-5xl"}`}>
       <div className="flex items-center justify-between gap-3 mb-5 md:mb-6">
         <div className="flex items-center gap-3 min-w-0">
           <Link href="/rooms" className="text-gray-400 hover:text-gray-600 shrink-0">

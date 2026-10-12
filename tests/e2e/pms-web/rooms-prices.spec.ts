@@ -228,12 +228,21 @@ test("prices a room in its Prices tab and publishes the other rooms unchanged", 
   await main(page).locator(`a[href="/rooms/${SUITE}?tab=prices"]`).first().click();
 
   await expect(page).toHaveURL(new RegExp(`/rooms/${SUITE}\\?tab=prices$`));
-  await expect(main(page).getByRole("heading", { name: "Prices", exact: true })).toBeVisible();
-  await expect(priceInput(page, "Alpine Suite")).toHaveValue("120.00");
-  // VAY-2122: rows show short titles; their accessible names keep the room and offer.
-  await expect(main(page).getByText("Seasonal prices", { exact: true })).toBeVisible();
+  // VAY-2125: the tab asks numbered questions; the other editors sit under "More options".
   await expect(
-    main(page).getByLabel("Seasonal prices · Alpine Suite Offer 1", { exact: true }),
+    main(page).getByRole("heading", { name: "What does this room cost per night?" }),
+  ).toBeVisible();
+  await expect(priceInput(page, "Alpine Suite")).toHaveValue("120.00");
+  await expect(main(page).getByRole("button", { name: "Add season" })).toBeVisible();
+  await expect(main(page).getByRole("button", { name: "+15%" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+  await main(page).getByText("More options", { exact: true }).click();
+  // VAY-2122: rows show short titles; their accessible names keep the room and offer.
+  await expect(main(page).getByText("Monthly prices", { exact: true }).first()).toBeVisible();
+  await expect(
+    main(page).getByLabel("Monthly prices · Alpine Suite Offer 1", { exact: true }),
   ).toBeVisible();
   await expect(main(page).getByText("Garden Room")).toHaveCount(0);
   await priceInput(page, "Alpine Suite").fill("135.50");

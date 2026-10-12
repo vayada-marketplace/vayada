@@ -635,16 +635,20 @@ async function executeMaterialization(
         const previousRooms = new Set(
           previousConfiguration?.sourceInputs.roomBindings.map((binding) => binding.roomTypeId),
         );
-        // Adding a room must fill the retained horizon before coverage advances;
+        // Adding a room must fill the retained horizon's end before coverage advances;
         // otherwise a later extension cannot distinguish missing new rows from corruption.
+        // Days before the requested start leave coverage and are never read again, so a
+        // start that moved forward to the property's today is fine (VAY-2134). A start
+        // after today would leave today's old-room rows without the new room.
         const partialRoomAddition =
           coverage &&
           previousConfiguration &&
           exact.sourceInputs.roomBindings.some(
             (binding) => !previousRooms.has(binding.roomTypeId),
           ) &&
-          (command.horizon.from > requireDatabaseDate(coverage.coverageFrom) ||
-            command.horizon.through < requireDatabaseDate(coverage.coverageThrough));
+          (command.horizon.through < requireDatabaseDate(coverage.coverageThrough) ||
+            command.horizon.from >
+              propertyLocalDate(acceptedAt, exact.sourceInputs.propertyTimeZone));
         if (
           (priorRevision !== null &&
             priorRevision < exact.calendarRevision &&
@@ -2204,6 +2208,10 @@ function databaseTimestamp(value: Date | string): Date {
 function databaseDate(value: Date | string): string | null {
   if (typeof value === "string") return canonicalDate(value) ? value : null;
   return validDate(value) ? value.toISOString().slice(0, 10) : null;
+}
+
+function propertyLocalDate(instant: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("sv-SE", { timeZone }).format(instant);
 }
 
 function requireDatabaseDate(value: Date | string): string {
