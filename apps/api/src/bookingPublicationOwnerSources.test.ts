@@ -109,6 +109,13 @@ describe("production Booking publication owner sources", () => {
       outcome: "unavailable",
       owner: "hotel_catalog",
     });
+    // VAY-2140: an incomplete profile explains itself; setup activates the hotel once complete.
+    row.profileStatus = "incomplete";
+    const incomplete = await source.getBookingLaunchEvidence(scope);
+    if (incomplete.outcome !== "evidence") throw new Error("Expected Catalog evidence");
+    expect(incomplete.entities[0]?.blockers.map(({ code }) => code)).toEqual([
+      "hotel_profile_incomplete",
+    ]);
   });
 
   it.each([
