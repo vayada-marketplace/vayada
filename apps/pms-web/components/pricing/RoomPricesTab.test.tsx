@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { pmsOperationsRoomsReadService, type PmsOperationsRoomType } from "@/services/rooms";
+import { forgetKeptNewRoomPrices, readKeptNewRoomPrices } from "./keptNewRoomPrices";
 import { PricingEditor } from "./PricingEditor";
 import { RoomPricesTab } from "./RoomPricesTab";
 
@@ -11,6 +12,10 @@ vi.mock("@/services/api/pmsPropertyClient", () => ({
   resolveSelectedPmsPropertyId: async () => propertyId,
 }));
 vi.mock("./PricingEditor", () => ({ PricingEditor: () => null }));
+vi.mock("./keptNewRoomPrices", () => ({
+  readKeptNewRoomPrices: vi.fn(() => null),
+  forgetKeptNewRoomPrices: vi.fn(),
+}));
 
 let view: ReactTestRenderer;
 const roomType = (roomTypeId: string, name: string, extra: Partial<PmsOperationsRoomType> = {}) =>
@@ -60,4 +65,37 @@ it("refuses room information from another property", async () => {
   await mount();
   expect(view.root.findAllByType(PricingEditor)).toHaveLength(0);
   expect(JSON.stringify(view.toJSON())).toContain("pricing.page.roomMismatch");
+});
+it("hands this room's editor the prices the New room page could not save, for this property only, until saved (VAY-2147)", async () => {
+  vi.spyOn(pmsOperationsRoomsReadService, "listRoomTypes").mockResolvedValue({
+    propertyId,
+    items: [roomType("suite", "Suite")],
+  } as Awaited<ReturnType<typeof pmsOperationsRoomsReadService.listRoomTypes>>);
+  const kept = {
+    room: { propertyId, roomTypeId: "suite" },
+    terms: [],
+    error: null,
+    outcomeUnknown: false,
+  };
+  vi.mocked(readKeptNewRoomPrices).mockReturnValue(kept as never);
+  await mount();
+  const editor = () => view.root.findByType(PricingEditor).props;
+  expect(editor().kept).toBe(kept);
+  expect(readKeptNewRoomPrices).toHaveBeenCalledWith("suite");
+  // Kept for a reload until they are saved, or forgotten when they no longer apply.
+  expect(forgetKeptNewRoomPrices).not.toHaveBeenCalled();
+  act(() => editor().onHandover(true));
+  expect(forgetKeptNewRoomPrices).not.toHaveBeenCalled();
+  act(() => editor().onPublished());
+  expect(forgetKeptNewRoomPrices).toHaveBeenCalledWith("suite");
+  vi.mocked(forgetKeptNewRoomPrices).mockClear();
+  act(() => editor().onHandover(false));
+  expect(forgetKeptNewRoomPrices).toHaveBeenCalledWith("suite");
+  act(() => view.unmount());
+  vi.mocked(readKeptNewRoomPrices).mockReturnValue({
+    ...kept,
+    room: { propertyId: "other", roomTypeId: "suite" },
+  } as never);
+  await mount();
+  expect(editor().kept).toBeUndefined();
 });

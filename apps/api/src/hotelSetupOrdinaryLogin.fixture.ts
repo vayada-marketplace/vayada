@@ -212,6 +212,18 @@ export async function createHotelSetupOrdinaryLoginFixture(
     login,
     connectionString: connection.toString(),
     async drop() {
+      // pg-pool resolves end() before its sessions have closed. Terminating one that is still
+      // closing hands its client a 57P01 nothing listens to, which fails the whole run, so wait
+      // up to 5 seconds for them first. Only sessions still open after that (a leak) are ended.
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        await admin.query("SELECT pg_catalog.pg_stat_clear_snapshot()");
+        const open = await admin.query<{ sessions: number }>(
+          "SELECT count(*)::int AS sessions FROM pg_stat_activity WHERE usename=$1 AND pid<>pg_backend_pid()",
+          [login],
+        );
+        if (open.rows[0]?.sessions === 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
       await admin.query(
         "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename=$1 AND pid<>pg_backend_pid()",
         [login],

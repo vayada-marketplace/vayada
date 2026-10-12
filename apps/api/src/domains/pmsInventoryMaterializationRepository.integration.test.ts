@@ -33,6 +33,7 @@ import {
   PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
   createPmsOperatingCalendarSourceRevision,
   parsePmsOperatingCalendarConfigurationSnapshot,
+  planPmsInventoryMaterialization,
   type PmsInventoryMaterializationCommand,
   type PmsOperatingCalendarConfigurationSnapshot,
   type PmsOperatingCalendarPropertyProfileEvidencePort,
@@ -44,8 +45,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   createPgPmsInventoryMaterializationRepository,
+  lockPmsInventoryDaysForMaterialization,
+  persistPmsInventoryMaterializationDays,
   type PmsInventoryMaterializationAuthorizationPort,
   type PmsInventoryMaterializationRepository,
+  type PmsInventoryMaterializationRepositoryClient,
 } from "./pmsInventoryMaterializationRepository.js";
 
 import { assertChannexAlterationAvailability } from "./channexAlterationAvailability.js";
@@ -3213,20 +3217,22 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       },
     });
     await activateCalendarRevision(admin, fixture, 2);
-    // A horizon that ends before the stored one would leave old-room rows the new room lacks.
+    // A horizon that ends before the stored one also fills the stored end for the new room
+    // (VAY-2138); the result and coverage still describe the requested days only.
     await expect(
       fixture.repository.materializeInventory(
         materializationCommand(fixture, "partial-add-end", 2, "2026-08-04", "2026-08-05"),
       ),
-    ).resolves.toMatchObject({ ok: false, error: { code: "inventory_invariant_violation" } });
+    ).resolves.toMatchObject({ ok: true, outcome: "rematerialized", changedDayCount: 4 });
     expect(
       (
         await admin.query(
-          "SELECT calendar_revision FROM pms.inventory_materialization_coverage WHERE property_id=$1",
+          "SELECT calendar_revision, coverage_through::text FROM pms.inventory_materialization_coverage WHERE property_id=$1",
           [fixture.propertyId],
         )
       ).rows,
-    ).toEqual([{ calendar_revision: 1 }]);
+    ).toEqual([{ calendar_revision: 2, coverage_through: "2026-08-05" }]);
+    await expect(inventoryDayCount(admin, fixture.propertyId, newRoom)).resolves.toBe(3);
     const command = materializationCommand(fixture, "add-room", 2, "2026-08-04", "2026-08-06");
     const result = await fixture.repository.materializeInventory(command);
     expect(result).toMatchObject({ ok: true, outcome: "rematerialized" });
@@ -3328,6 +3334,169 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         [fixture.propertyId, newRoom],
       ),
     ).rejects.toThrow("inventory materialization coverage is not exact and gap-free");
+  });
+
+  it("adds a new room across an auto-open tail past the requested horizon (VAY-2138)", async () => {
+    const additionalRoomTypes: string[] = [];
+    const fixture = await createFixture(admin, repositories, [2, 2], additionalRoomTypes);
+    await expect(
+      fixture.repository.materializeInventory(
+        materializationCommand(fixture, "tail-initial", 1, "2026-08-03", "2027-08-03"),
+      ),
+    ).resolves.toMatchObject({ ok: true, outcome: "applied" });
+    // Auto-open opened eight weeks past the 366-day horizon; a guest booked one tail night.
+    await writeStoredTail(admin, fixture, "2027-08-04", "2027-09-30", true);
+    await admin.query(
+      "UPDATE pms.inventory_days SET assigned_count=1, available_count=1, booking_source_revision=1, inventory_revision=2 WHERE property_id=$1 AND stay_date='2027-09-01'",
+      [fixture.propertyId],
+    );
+    const oldTail = () =>
+      admin.query(
+        "SELECT to_jsonb(day) AS day FROM pms.inventory_days day WHERE property_id=$1 AND room_type_id=$2 AND stay_date>'2027-08-04' ORDER BY stay_date",
+        [fixture.propertyId, fixture.roomTypeId],
+      );
+    const before = (await oldTail()).rows;
+    const newRoom = await addRoomAtRevision(admin, fixture, additionalRoomTypes, 2);
+
+    // The setup client asks for 366 days from the property's today (2026-08-04), a day later.
+    const command = materializationCommand(fixture, "tail-add", 2, "2026-08-04", "2027-08-04");
+    const result = await fixture.repository.materializeInventory(command);
+    expect(result).toMatchObject({
+      ok: true,
+      outcome: "rematerialized",
+      changedDayCount: 732,
+      coverage: { coverageFrom: "2026-08-04", coverageThrough: "2027-08-04" },
+    });
+    await expect(fixture.repository.materializeInventory(command)).resolves.toEqual(result);
+    const rooms = await admin.query(
+      `SELECT room_type_id, count(*)::int AS days, min(stay_date)::text AS first,
+              max(stay_date)::text AS last, max(calendar_revision) AS revision
+       FROM pms.inventory_days WHERE property_id=$1 AND stay_date>='2026-08-04'
+       GROUP BY room_type_id ORDER BY room_type_id = $2`,
+      [fixture.propertyId, fixture.roomTypeId],
+    );
+    expect(rooms.rows).toEqual([
+      { room_type_id: newRoom, days: 423, first: "2026-08-04", last: "2027-09-30", revision: 2 },
+      {
+        room_type_id: fixture.roomTypeId,
+        days: 423,
+        first: "2026-08-04",
+        last: "2027-09-30",
+        revision: 2,
+      },
+    ]);
+    // Old-room tail rows, including the booking, are untouched and stay outside coverage.
+    expect((await oldTail()).rows).toEqual(before);
+    await expect(
+      fixture.repository.getInventoryLaunchReadiness({
+        propertyId: fixture.propertyId,
+        requiredCoverage: { from: "2026-08-04", through: "2027-08-04" },
+      }),
+    ).resolves.toMatchObject({ ready: true, blockers: [] });
+
+    // Auto-open's next pass plans the tail for every room without the previous calendar.
+    const configuration = fixture.configurations.get(2)!;
+    const horizon = { from: "2027-08-05", through: "2027-09-30" };
+    const tailRows = await lockPmsInventoryDaysForMaterialization(
+      admin as unknown as PmsInventoryMaterializationRepositoryClient,
+      { propertyId: fixture.propertyId, horizon },
+      configuration,
+    );
+    expect(tailRows).toHaveLength(114);
+    expect(
+      planPmsInventoryMaterialization({
+        propertyId: fixture.propertyId,
+        configurationSource: configuration.source,
+        configuration,
+        horizon,
+        currentDays: tailRows,
+      }),
+    ).toMatchObject({ ok: true, outcome: "rematerialized" });
+  });
+
+  it("adds a new room only over a complete stored tail (VAY-2138)", async () => {
+    const additionalRoomTypes: string[] = [];
+    const fixture = await createFixture(admin, repositories, [2, 2], additionalRoomTypes);
+    await fixture.repository.materializeInventory(
+      materializationCommand(fixture, "stale-initial", 1, "2026-08-04", "2026-08-06"),
+    );
+    // A later save shrank coverage back to the requested days, leaving a stale tail.
+    await writeStoredTail(admin, fixture, "2026-08-07", "2026-08-10", false);
+    const newRoom = await addRoomAtRevision(admin, fixture, additionalRoomTypes, 2);
+    const add = (key: string) =>
+      fixture.repository.materializeInventory(
+        materializationCommand(fixture, key, 2, "2026-08-04", "2026-08-06"),
+      );
+    const rejected = { ok: false, error: { code: "inventory_invariant_violation" } };
+    const unchanged = async () => {
+      await expect(inventoryDayCount(admin, fixture.propertyId, newRoom)).resolves.toBe(0);
+      expect(
+        (
+          await admin.query(
+            "SELECT calendar_revision FROM pms.inventory_materialization_coverage WHERE property_id=$1",
+            [fixture.propertyId],
+          )
+        ).rows,
+      ).toEqual([{ calendar_revision: 1 }]);
+    };
+
+    // An old room missing a tail day is corruption, not a room addition.
+    const removed = await admin.query(
+      "DELETE FROM pms.inventory_days day WHERE property_id=$1 AND stay_date='2026-08-08' RETURNING to_jsonb(day) AS day",
+      [fixture.propertyId],
+    );
+    await expect(add("stale-gap")).resolves.toEqual(rejected);
+    await unchanged();
+    await admin.query(
+      "INSERT INTO pms.inventory_days SELECT * FROM jsonb_populate_record(NULL::pms.inventory_days, $1::jsonb)",
+      [removed.rows[0].day],
+    );
+
+    // A new room that already holds some tail rows is partial, not new.
+    const configuration = fixture.configurations.get(2)!;
+    const partial = planPmsInventoryMaterialization({
+      propertyId: fixture.propertyId,
+      configurationSource: configuration.source,
+      configuration,
+      horizon: { from: "2026-08-09", through: "2026-08-09" },
+      currentDays: [],
+    });
+    if (!partial.ok) throw new Error(partial.error.code);
+    await persistPmsInventoryMaterializationDays(
+      admin as unknown as PmsInventoryMaterializationRepositoryClient,
+      partial.days.filter((day) => day.roomTypeId === newRoom),
+      ACCEPTED_AT,
+    );
+    await expect(add("stale-partial")).resolves.toEqual(rejected);
+    await admin.query("DELETE FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2", [
+      fixture.propertyId,
+      newRoom,
+    ]);
+    await unchanged();
+
+    // Coverage that claims days no longer stored also fails closed.
+    const setCoverageThrough = (through: string, days: number) =>
+      admin.query(
+        "UPDATE pms.inventory_materialization_coverage SET coverage_through=$2::date, expected_day_count=$3, materialized_day_count=$3 WHERE property_id=$1",
+        [fixture.propertyId, through, days],
+      );
+    await admin.query("BEGIN; SET LOCAL session_replication_role=replica");
+    await setCoverageThrough("2026-08-10", 7);
+    await admin.query(
+      "DELETE FROM pms.inventory_days WHERE property_id=$1 AND stay_date>'2026-08-08'",
+      [fixture.propertyId],
+    );
+    await admin.query("COMMIT");
+    await expect(add("stale-claimed")).resolves.toEqual(rejected);
+    await unchanged();
+    await writeStoredTail(admin, fixture, "2026-08-09", "2026-08-10", false);
+    await admin.query("BEGIN; SET LOCAL session_replication_role=replica");
+    await setCoverageThrough("2026-08-06", 3);
+    await admin.query("COMMIT");
+
+    // The complete stale tail fills, past the stored coverage end.
+    await expect(add("stale-add")).resolves.toMatchObject({ ok: true, outcome: "rematerialized" });
+    await expect(inventoryDayCount(admin, fixture.propertyId, newRoom)).resolves.toBe(7);
   });
 
   it("keeps a selected room current when only an unrelated room awaits materialization", async () => {
@@ -4342,13 +4511,86 @@ async function sideEffectCounts(admin: Pick<pg.PoolClient, "query">, propertyId:
 async function inventoryDayCount(
   admin: Pick<pg.PoolClient, "query">,
   propertyId: string,
+  roomTypeId: string | null = null,
 ): Promise<number> {
   const result = await admin.query<{ count: number }>(
     `SELECT count(*)::integer AS count
-     FROM pms.inventory_days WHERE property_id = $1::uuid`,
-    [propertyId],
+     FROM pms.inventory_days
+     WHERE property_id = $1::uuid AND ($2::uuid IS NULL OR room_type_id = $2::uuid)`,
+    [propertyId, roomTypeId],
   );
   return result.rows[0]?.count ?? -1;
+}
+
+async function addRoomAtRevision(
+  admin: Pick<pg.PoolClient, "query">,
+  fixture: Fixture,
+  additionalRoomTypes: string[],
+  revision: number,
+): Promise<string> {
+  const roomTypeId = randomUUID();
+  await admin.query("INSERT INTO pms.room_types (id,property_id,name) VALUES ($1,$2,'New room')", [
+    roomTypeId,
+    fixture.propertyId,
+  ]);
+  additionalRoomTypes.push(roomTypeId);
+  const next = fixture.configurations.get(revision)!;
+  (fixture.configurations as Map<number, PmsOperatingCalendarConfigurationSnapshot>).set(revision, {
+    ...next,
+    sourceInputs: {
+      ...next.sourceInputs,
+      roomBindings: [
+        ...next.sourceInputs.roomBindings,
+        { ...next.sourceInputs.roomBindings[0]!, roomTypeId },
+      ].sort((a, b) => a.roomTypeId.localeCompare(b.roomTypeId)),
+    },
+  });
+  await activateCalendarRevision(admin, fixture, revision);
+  return roomTypeId;
+}
+
+/** Stores calendar-revision-1 days past the horizon the way auto-open opens them. */
+async function writeStoredTail(
+  admin: pg.PoolClient,
+  fixture: Fixture,
+  from: string,
+  through: string,
+  extendCoverage: boolean,
+): Promise<void> {
+  const configuration = fixture.configurations.get(1)!;
+  const plan = planPmsInventoryMaterialization({
+    propertyId: fixture.propertyId,
+    configurationSource: configuration.source,
+    configuration,
+    horizon: { from, through },
+    currentDays: [],
+  });
+  if (!plan.ok) throw new Error(plan.error.code);
+  await admin.query("BEGIN");
+  try {
+    await persistPmsInventoryMaterializationDays(
+      admin as unknown as PmsInventoryMaterializationRepositoryClient,
+      plan.days,
+      ACCEPTED_AT,
+    );
+    if (extendCoverage) {
+      // Auto-open records its own materialization evidence with the coverage; the fixture
+      // skips that bookkeeping. The deferred check on the stored days still runs at commit.
+      await admin.query("SET LOCAL session_replication_role=replica");
+      await admin.query(
+        `UPDATE pms.inventory_materialization_coverage
+         SET coverage_through=$2::date,
+             expected_day_count=room_type_count*($2::date-coverage_from+1),
+             materialized_day_count=room_type_count*($2::date-coverage_from+1)
+         WHERE property_id=$1::uuid`,
+        [fixture.propertyId, through],
+      );
+    }
+    await admin.query("COMMIT");
+  } catch (error) {
+    await admin.query("ROLLBACK");
+    throw error;
+  }
 }
 
 async function backendProcessId(client: Pick<pg.PoolClient, "query">): Promise<number> {

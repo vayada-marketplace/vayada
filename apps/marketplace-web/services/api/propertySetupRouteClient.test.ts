@@ -97,22 +97,23 @@ describe("parsePropertySetupRouteReadModel", () => {
   });
 
   it("follows the server's step order, so a reordered route loads during a deploy", () => {
-    const route = paymentsFirst(routeWire(propertyId, ["hotel_operations"]));
+    // An older next-api still sends Payments after Guest experience.
+    const route = paymentsAfter(routeWire(propertyId, ["hotel_operations"]), "guest_experience");
     expect(route.steps.map(({ stepId }) => stepId)).toEqual([
       "present_hotel",
       "booking_design",
       "rooms",
-      "payments",
       "pricing",
       "calendar",
       "guest_experience",
+      "payments",
       "review",
     ]);
     expect(parsePropertySetupRouteReadModel(route)).toBe(route);
   });
 
   it("fails closed for a reordered route that is not exactly the active steps", () => {
-    const route = paymentsFirst(routeWire(propertyId, ["hotel_operations"]));
+    const route = paymentsAfter(routeWire(propertyId, ["hotel_operations"]), "guest_experience");
     const pricing = route.steps.find(({ stepId }) => stepId === "pricing")!;
     // A duplicate step in place of another active step.
     expect(
@@ -160,7 +161,8 @@ describe("parsePropertySetupRouteReadModel", () => {
                 ...step,
                 blockers: step.blockers.map((blocker) => ({
                   ...blocker,
-                  owningStepPosition: 7,
+                  owningStepPosition:
+                    getActivePropertySetupStepIds(["hotel_operations"]).indexOf("payments") + 1,
                 })),
               }
             : step,
@@ -196,12 +198,15 @@ describe("parsePropertySetupRouteReadModel", () => {
   });
 });
 
-/** The route as a server that puts Payments before Pricing sends it, with a Payments blocker. */
-function paymentsFirst(route: PropertySetupRouteReadModel): PropertySetupRouteReadModel {
+/** The route with Payments moved after another step, renumbered, with a Payments blocker. */
+function paymentsAfter(
+  route: PropertySetupRouteReadModel,
+  previousStepId: PropertySetupRouteReadModel["steps"][number]["stepId"],
+): PropertySetupRouteReadModel {
   const payments = route.steps.find(({ stepId }) => stepId === "payments")!;
   const others = route.steps.filter(({ stepId }) => stepId !== "payments");
-  const pricingIndex = others.findIndex(({ stepId }) => stepId === "pricing");
-  const steps = [...others.slice(0, pricingIndex), payments, ...others.slice(pricingIndex)];
+  const at = others.findIndex(({ stepId }) => stepId === previousStepId) + 1;
+  const steps = [...others.slice(0, at), payments, ...others.slice(at)];
   return {
     ...route,
     steps: steps.map((step, index) =>
