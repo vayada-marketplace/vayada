@@ -10,7 +10,11 @@ import { parseBookingPricingOfferTerms } from "@vayada/domain-booking/replacemen
 import type { PricingTermsInput } from "./replacementPricingClient";
 import type { Translate } from "./firstPricingSetupMessages";
 import { IncludedPricing, includedPrice, type IncludedInput } from "./IncludedPricing";
-import { AcceptedPaymentMethods, type PaymentMethod } from "./AcceptedPaymentMethods";
+import {
+  AcceptedPaymentMethods,
+  type ManualPaymentMethod,
+  type PaymentMethod,
+} from "./AcceptedPaymentMethods";
 import { defaultPricingFormLook, type PricingFormLook } from "./pricingFormLook";
 import { parseMinorInput, PricingError, setupErrorText } from "./pricingSetupAmounts";
 
@@ -168,6 +172,8 @@ export type FirstPricingSetupProps = {
   t: Translate;
   /** Class names; onboarding's look by default. */
   look?: PricingFormLook;
+  /** Bank transfer and PayPal the hotel can use now (VAY-2139). */
+  manualMethods?: readonly ManualPaymentMethod[];
 };
 export function FirstPricingSetup({
   propertyId,
@@ -179,6 +185,7 @@ export function FirstPricingSetup({
   existingRoom,
   t,
   look = defaultPricingFormLook,
+  manualMethods,
 }: FirstPricingSetupProps) {
   const [values, setValues] = useState<Values>({
     mode: "",
@@ -370,6 +377,7 @@ export function FirstPricingSetup({
         look={look}
         methods={values.methods}
         disabled={disabled}
+        manualMethods={manualMethods}
         onChange={(methods) => {
           setValues({ ...values, methods });
           setError("");

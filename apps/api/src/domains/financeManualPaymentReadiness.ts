@@ -11,32 +11,47 @@ export type FinanceManualPaymentReadinessReadPort = {
   readyMethods(request: { propertyId: string }): Promise<readonly ManualPricingPaymentMethod[]>;
 };
 
+/** For the owner's setup and rate screens: bank transfer and PayPal the hotel takes with their
+ * details in place, also next to card or pay at property. */
+export type FinanceManualPaymentMethodsReadPort = {
+  acceptedMethods(request: { propertyId: string }): Promise<readonly ManualPricingPaymentMethod[]>;
+};
+
 export function createFinanceManualPaymentReadinessReader(config: {
   pool: Pick<pg.Pool, "query">;
-}): FinanceManualPaymentReadinessReadPort {
+}): FinanceManualPaymentReadinessReadPort & FinanceManualPaymentMethodsReadPort {
   const { pool } = config;
-  return {
-    async readyMethods({ propertyId }) {
-      const row = (
-        await pool.query(
-          `SELECT settings.accepted_methods,settings.deposit_policy->>'paypalEmail' AS paypal_email,
+  const read = async (propertyId: string) => {
+    const row = (
+      await pool.query(
+        `SELECT settings.accepted_methods,settings.deposit_policy->>'paypalEmail' AS paypal_email,
             EXISTS(SELECT 1 FROM finance.bank_transfer_destinations destination
               WHERE destination.property_id=settings.property_id AND destination.enabled) AS bank_destination
           FROM finance.payment_settings settings
           WHERE settings.property_id=$1 AND settings.payments_enabled
             AND settings.payment_methods_revision IS NOT NULL`,
-          [propertyId],
-        )
-      ).rows[0];
-      const accepted: unknown[] = Array.isArray(row?.accepted_methods) ? row.accepted_methods : [];
-      if (accepted.includes("card") || accepted.includes("pay_at_property")) return [];
-      const methods: ManualPricingPaymentMethod[] = [];
-      if (accepted.includes("bank_transfer") && row.bank_destination === true)
-        methods.push("bank_transfer");
-      const email = typeof row?.paypal_email === "string" ? row.paypal_email.trim() : "";
-      if (accepted.includes("paypal") && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-        methods.push("paypal");
-      return methods;
+        [propertyId],
+      )
+    ).rows[0];
+    const accepted: unknown[] = Array.isArray(row?.accepted_methods) ? row.accepted_methods : [];
+    const methods: ManualPricingPaymentMethod[] = [];
+    if (accepted.includes("bank_transfer") && row.bank_destination === true)
+      methods.push("bank_transfer");
+    const email = typeof row?.paypal_email === "string" ? row.paypal_email.trim() : "";
+    if (accepted.includes("paypal") && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      methods.push("paypal");
+    return {
+      methods,
+      otherAccepted: accepted.includes("card") || accepted.includes("pay_at_property"),
+    };
+  };
+  return {
+    async readyMethods({ propertyId }) {
+      const { methods, otherAccepted } = await read(propertyId);
+      return otherAccepted ? [] : methods;
+    },
+    async acceptedMethods({ propertyId }) {
+      return (await read(propertyId)).methods;
     },
   };
 }

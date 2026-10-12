@@ -43,7 +43,8 @@ describe.skipIf(!url)("Finance bank-transfer and PayPal launch readiness (VAY-21
          VALUES($1,1,$2,'key','3000')`,
         [propertyId, Buffer.alloc(40)],
       );
-    return () => reader.readyMethods({ propertyId });
+    const ready = () => reader.readyMethods({ propertyId });
+    return Object.assign(ready, { accepted: () => reader.acceptedMethods({ propertyId }) });
   }
 
   it("counts bank transfer and PayPal only with their details, on a committed row", async () => {
@@ -65,7 +66,10 @@ describe.skipIf(!url)("Finance bank-transfer and PayPal launch readiness (VAY-21
   });
 
   it("leaves hotels with card or pay at property to the usual Finance readiness", async () => {
-    await expect((await hotel(["card", "bank_transfer"], { bank: true }))()).resolves.toEqual([]);
+    const cardAndBank = await hotel(["card", "bank_transfer"], { bank: true });
+    await expect(cardAndBank()).resolves.toEqual([]);
+    // The owner's setup and rate screens still see bank transfer as set up.
+    await expect(cardAndBank.accepted()).resolves.toEqual(["bank_transfer"]);
     await expect(
       (await hotel(["pay_at_property", "paypal"], { email: "pay@hotel.example" }))(),
     ).resolves.toEqual([]);
