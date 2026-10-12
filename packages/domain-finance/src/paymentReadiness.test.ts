@@ -6,6 +6,8 @@ import {
   FINANCE_PAYMENT_READINESS_SOURCE_ENTITY_TYPE,
   FINANCE_PAYMENT_READINESS_SOURCE_OWNER_DOMAIN,
   createFinancePaymentMethodsSourceEntityRevision,
+  financePaymentReadinessMethodsFromStored,
+  financeStoredMethodsAfterSetupSelection,
   parseReplaceFinancePaymentMethodsCommand,
   serializeFinancePaymentMethodsSourceRevision,
   serializeReplaceFinancePaymentMethodsFingerprint,
@@ -98,5 +100,67 @@ describe("Finance payment-method command contract", () => {
     [` ${propertyId}`, 3],
   ])("rejects a noncanonical source identity %#", (entityId, revision) => {
     expect(() => createFinancePaymentMethodsSourceEntityRevision(entityId, revision)).toThrow();
+  });
+});
+
+describe("Finance stored payment methods as readiness methods", () => {
+  it("reads settings-page names without counting checkout extras", () => {
+    expect(
+      financePaymentReadinessMethodsFromStored([
+        "paypal",
+        "manual_card",
+        "card",
+        "cash",
+        "bank_transfer",
+        "pay_at_property",
+        "xendit",
+        "wallet",
+        "other",
+      ]),
+    ).toEqual(["pay_at_property", "card"]);
+    expect(financePaymentReadinessMethodsFromStored(["card", "pay_at_property"])).toEqual([
+      "pay_at_property",
+      "card",
+    ]);
+    expect(financePaymentReadinessMethodsFromStored(["cash", "paypal"])).toEqual([]);
+    expect(financePaymentReadinessMethodsFromStored([])).toEqual([]);
+  });
+
+  it("rejects corrupt lists", () => {
+    for (const value of [null, "card", ["card", "card"], ["card", "crypto"], [1]]) {
+      expect(financePaymentReadinessMethodsFromStored(value)).toBeNull();
+    }
+  });
+});
+
+describe("Finance stored payment methods after a setup selection", () => {
+  it("keeps extras and pay-at-hotel details the setup step doesn't show", () => {
+    const stored = ["paypal", "pay_at_property", "cash", "manual_card", "bank_transfer", "xendit"];
+    expect(financeStoredMethodsAfterSetupSelection(stored, ["pay_at_property", "card"])).toEqual([
+      "pay_at_property",
+      "card",
+      "paypal",
+      "cash",
+      "manual_card",
+      "bank_transfer",
+      "xendit",
+    ]);
+    expect(financeStoredMethodsAfterSetupSelection(stored, ["card"])).toEqual([
+      "card",
+      "paypal",
+      "bank_transfer",
+      "xendit",
+    ]);
+    expect(financeStoredMethodsAfterSetupSelection(null, ["pay_at_property"])).toEqual([
+      "pay_at_property",
+    ]);
+    expect(financeStoredMethodsAfterSetupSelection(["cash"], ["pay_at_property"])).toEqual([
+      "pay_at_property",
+      "cash",
+    ]);
+  });
+
+  it("rejects a corrupt stored list", () => {
+    expect(financeStoredMethodsAfterSetupSelection(["card", "card"], ["card"])).toBeNull();
   });
 });
