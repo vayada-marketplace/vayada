@@ -71,13 +71,18 @@ export function createFinancePaymentReadinessClient(http: Http) {
         throw invalid();
       return { acceptanceEnabled: value.acceptanceEnabled, readyMethods: [...methods] };
     },
-    async save(propertyId: string, request: Request): Promise<FinancePaymentReadinessSnapshot> {
+    async save(
+      propertyId: string,
+      request: Request,
+      /** Only for a hotel paid by bank transfer or PayPal, which keep the payments on. */
+      options: { allowNoMethods?: boolean } = {},
+    ): Promise<FinancePaymentReadinessSnapshot> {
       if (
         !Number.isSafeInteger(request.expectedPaymentMethodsRevision) ||
         request.expectedPaymentMethodsRevision < 0 ||
         !Number.isSafeInteger(request.expectedPricingCurrencyRevision) ||
         request.expectedPricingCurrencyRevision < 1 ||
-        !request.selectedMethods.length ||
+        (!request.selectedMethods.length && !options.allowNoMethods) ||
         request.selectedMethods.some((method) => !["pay_at_property", "card"].includes(method)) ||
         new Set(request.selectedMethods).size !== request.selectedMethods.length
       )

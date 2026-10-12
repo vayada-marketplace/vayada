@@ -72,6 +72,30 @@ describe("payment readiness browser client", () => {
       await expect(h.client.manualPaymentMethods(propertyId)).rejects.toThrow();
     }
   });
+  it("saves no card or pay-at-hotel choice only when asked to (VAY-2139)", async () => {
+    const h = harness();
+    const none = { ...request, selectedMethods: [] as "card"[] };
+    await expect(h.client.save(propertyId, none)).rejects.toThrow();
+    expect(h.http.put).not.toHaveBeenCalled();
+    h.http.put.mockResolvedValue({
+      contractVersion: "finance-payment-readiness.v1",
+      outcome: "created",
+      paymentReadiness: createFinancePaymentReadinessSnapshot({
+        propertyId,
+        paymentMethodsRevision: 1,
+        selectedMethods: [],
+        committedPricing: pricing,
+        currentPricing: pricing,
+        onlineCardReadiness: "execution_unavailable",
+        updatedAt: "2026-09-11T00:00:00.000Z",
+      }),
+      acceptedAt: "2026-09-11T00:00:00.000Z",
+    });
+    await expect(h.client.save(propertyId, none, { allowNoMethods: true })).resolves.toMatchObject({
+      selectedMethodCount: 0,
+    });
+    expect(h.http.put.mock.calls[0]![1]).toMatchObject({ selectedMethods: [] });
+  });
   it("keeps selected but unready cards blocked", async () => {
     const h = harness();
     expect((await h.client.load(propertyId)).bookingPaymentReady).toBe(false);

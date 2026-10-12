@@ -4,7 +4,9 @@ import type {
   FinancePaymentReadinessSnapshot,
   FinancePaymentReadinessBlocker,
 } from "@vayada/domain-finance";
+import { createBrowserAuthHandoff, crossAppReauthenticationUrl } from "@vayada/product-onboarding";
 import { ApiErrorResponse } from "@/services/api/client";
+import { getAuthCsrfToken } from "@/services/auth/sessionStore";
 import {
   financePaymentReadinessClient as client,
   type ManualPaymentMethods,
@@ -47,9 +49,10 @@ const methods = [
   },
 ] as const;
 /** Bank transfer and PayPal are set up in Booking Engine settings for now (VAY-2139). */
-const BOOKING_ADMIN_PAYMENTS_URL = `${(
+const BOOKING_ADMIN_URL = (
   process.env.NEXT_PUBLIC_BOOKING_ADMIN_URL || "https://admin.booking.vayada.com"
-).replace(/\/$/, "")}/settings/payments`;
+).replace(/\/$/, "");
+const PAYMENT_SETTINGS_PATH = "/settings/payments";
 const MANUAL_OFF: ManualPaymentMethods = { acceptanceEnabled: false, readyMethods: [] };
 const manualLabels = { bank_transfer: "Bank transfer", paypal: "PayPal" } as const;
 const blockerCopy: Record<FinancePaymentReadinessBlocker, string> = {
@@ -209,6 +212,7 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
   const [retry, setRetry] = useState(0);
   const [notice, setNotice] = useState("");
   const [manual, setManual] = useState<ManualPaymentMethods>(MANUAL_OFF);
+  const [manualError, setManualError] = useState<string | null>(null);
   const { initialize } = draft;
   useEffect(() => {
     const controller = new AbortController();
@@ -254,10 +258,14 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
     .filter(({ field }) => Array.isArray(fields) && fields.includes(field))
     .map(({ method }) => method);
   const matchesSaved = !!snapshot && matchesSelection(snapshot, selection);
-  // A hotel paid only by bank transfer or PayPal selects no method here: the server marks the
-  // step complete once their details are in Booking Engine settings (VAY-2139).
+  // A hotel paid only by bank transfer or PayPal selects neither method here (VAY-2139). It can
+  // save that empty choice, and continue once the server counts its bank transfer or PayPal.
+  const manualReady = manual.acceptanceEnabled && manual.readyMethods.length > 0;
   const manualContinue =
-    manual.acceptanceEnabled && !selection.length && props.step.state === "complete";
+    manualReady &&
+    !selection.length &&
+    !snapshot?.methods.some((item) => item.selected) &&
+    props.step.state === "complete";
   async function continueWithManual() {
     setNotice("");
     await draft.commit(async () => {
@@ -265,11 +273,45 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
         throw new Error("Add your bank details or PayPal email in Booking Engine settings first.");
     }, true);
   }
+  async function openPaymentSettings() {
+    setManualError(null);
+    try {
+      // Unsaved choices wait in the setup draft while the hotel is in Booking Engine settings.
+      await draft.persist();
+    } catch (cause) {
+      setManualError(adaptiveStepErrorMessage(cause));
+      return;
+    }
+    const csrfToken = getAuthCsrfToken();
+    if (csrfToken) {
+      try {
+        window.location.assign(
+          await createBrowserAuthHandoff({
+            csrfToken,
+            routingHints: { propertyId: props.propertyId },
+            sourceSurface: "marketplace-web",
+            targetPath: PAYMENT_SETTINGS_PATH,
+            targetSurface: "booking-admin",
+          }),
+        );
+        return;
+      } catch {
+        // A failed handoff falls back to Booking Engine's own sign-in.
+      }
+    }
+    try {
+      window.location.assign(crossAppReauthenticationUrl(BOOKING_ADMIN_URL, PAYMENT_SETTINGS_PATH));
+    } catch {
+      setManualError("We couldn't open Booking Engine settings. Please try again.");
+    }
+  }
   async function save(advance: boolean) {
     setNotice("");
     await draft.commit(async () => {
       const current = canonical.current;
-      if (!current || !selected().length) throw new Error("Choose at least one payment method.");
+      const none = !selected().length;
+      if (!current || (none && !manualReady))
+        throw new Error("Choose at least one payment method.");
       const base = draft.revision.current.baseRevisions;
       if (
         !savedHere.current &&
@@ -282,22 +324,27 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
         throw new Error("Payment settings or currency changed. Refresh before saving.");
       }
       const same = matchesSelection(current, selected());
+      const request = {
+        expectedPaymentMethodsRevision: current.paymentMethodsRevision,
+        expectedPricingCurrencyRevision:
+          current.pricingCurrency.current?.pricingCurrencyRevision ?? 0,
+        selectedMethods: selected(),
+      };
       const value =
         same && current.pricingCurrency.matchesCurrent
           ? current
-          : await client.save(props.propertyId, {
-              expectedPaymentMethodsRevision: current.paymentMethodsRevision,
-              expectedPricingCurrencyRevision:
-                current.pricingCurrency.current?.pricingCurrencyRevision ?? 0,
-              selectedMethods: selected(),
-            });
+          : none
+            ? await client.save(props.propertyId, request, { allowNoMethods: true })
+            : await client.save(props.propertyId, request);
       canonical.current = value;
       savedHere.current = true;
       setSnapshot(value);
       setNotice(
         value.bookingPaymentReady
           ? "Payment selection saved."
-          : "Payment selection saved. No selected method is ready yet.",
+          : none
+            ? "Payment selection saved. Guests pay you by bank transfer or PayPal."
+            : "Payment selection saved. No selected method is ready yet.",
       );
       if (advance && !value.bookingPaymentReady)
         throw new Error("Select and save a ready payment method before continuing.");
@@ -391,20 +438,33 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
               : "Not set up"}
           </p>
           <div className="mt-4 flex flex-wrap gap-3">
-            <a className={adaptiveSecondaryButtonClass} href={BOOKING_ADMIN_PAYMENTS_URL}>
-              Open payment settings
-            </a>
             <button
               type="button"
               className={adaptiveSecondaryButtonClass}
               disabled={draft.saving}
+              onClick={() => void openPaymentSettings()}
+            >
+              Open payment settings
+            </button>
+            <button
+              type="button"
+              className={adaptiveSecondaryButtonClass}
+              disabled={draft.saving}
+              // Keeps the answers, moves onto the newest saved settings and reloads this step.
               onClick={() =>
-                void props.refreshRoute().finally(() => setRetry((value) => value + 1))
+                void draft
+                  .rebase()
+                  .catch((cause) => setManualError(adaptiveStepErrorMessage(cause)))
               }
             >
               Check again
             </button>
           </div>
+          {manualError && (
+            <p role="alert" className="mt-3 text-sm text-red-800">
+              {manualError}
+            </p>
+          )}
         </AdaptiveStepCard>
       )}
       <StripeSetupControls
@@ -438,7 +498,9 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
         <button
           type="button"
           className={adaptiveSecondaryButtonClass}
-          disabled={draft.saving || !selection.length || !snapshot.pricingCurrency.current}
+          disabled={
+            draft.saving || (!selection.length && !manualReady) || !snapshot.pricingCurrency.current
+          }
           onClick={() => void save(false)}
         >
           {draft.saving ? "Saving…" : "Save selection"}

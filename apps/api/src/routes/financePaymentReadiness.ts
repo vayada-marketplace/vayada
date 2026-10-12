@@ -85,9 +85,14 @@ export async function registerFinancePaymentReadinessRoutes(
       if (!options.manualPayments)
         return reply.status(200).send({ acceptanceEnabled: false, readyMethods: [] });
       try {
-        const readyMethods = await options.manualPayments.acceptedMethods({
+        // Finance's organization-scoped read first: an unconfigured hotel has none ready.
+        const readiness = await options.readPort.getPaymentReadiness({
+          organizationId: scope.context.selectedOrganization.organizationId,
           propertyId: scope.propertyId,
         });
+        const readyMethods = readiness
+          ? await options.manualPayments.acceptedMethods({ propertyId: scope.propertyId })
+          : [];
         return reply.status(200).send({ acceptanceEnabled: true, readyMethods });
       } catch {
         return portViolation(reply);

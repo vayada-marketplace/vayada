@@ -13,7 +13,14 @@ const mocks = vi.hoisted(() => ({
   route: vi.fn(),
   currencies: vi.fn(),
   saveCurrency: vi.fn(),
+  handoff: vi.fn(),
+  assign: vi.fn(),
 }));
+vi.mock("@vayada/product-onboarding", () => ({
+  createBrowserAuthHandoff: mocks.handoff,
+  crossAppReauthenticationUrl: (base: string, path: string) => `${base}/login?return=${path}`,
+}));
+vi.mock("@/services/auth/sessionStore", () => ({ getAuthCsrfToken: () => "csrf" }));
 vi.mock("@/services/api/financePaymentReadinessClient", () => ({
   financePaymentReadinessClient: {
     load: mocks.load,
@@ -58,6 +65,7 @@ function snapshot(
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
   mocks.load.mockResolvedValue(snapshot());
   mocks.manual.mockResolvedValue({ acceptanceEnabled: false, readyMethods: [] });
   mocks.draft.mockImplementation(async (_id, request) => ({
@@ -463,38 +471,71 @@ it("keeps the step as it is while bank transfer and PayPal are off (VAY-2139)", 
   mocks.manual.mockRejectedValueOnce(new Error("unavailable"));
   const h = await harness();
   expect(h.text()).not.toContain("Bank transfer or PayPal");
+  expect(h.button("Save selection").props.disabled).toBe(true);
   expect(h.button("Save and continue").props.disabled).toBe(true);
   h.view.unmount();
 });
-it("links bank transfer and PayPal to Booking Engine settings and continues once they count (VAY-2139)", async () => {
+it("sends the hotel to Booking Engine payment settings for bank transfer and PayPal (VAY-2139)", async () => {
   mocks.manual.mockResolvedValue({ acceptanceEnabled: true, readyMethods: [] });
-  const fresh = await harness();
-  expect(fresh.text()).toContain("Bank transfer or PayPal");
-  expect(fresh.text()).toContain("Bank transfer and PayPal bookings need your manual confirmation");
-  expect(fresh.text()).toContain("Not set up");
-  expect(fresh.view.root.findByType("a").props.href).toBe(
-    "https://admin.booking.vayada.com/settings/payments",
-  );
-  // Not counted yet: nothing to continue with.
-  expect(fresh.button("Save and continue").props.disabled).toBe(true);
+  mocks.handoff.mockResolvedValue("https://admin.booking.vayada.com/handoff#code");
+  vi.stubGlobal("window", { location: { assign: mocks.assign } });
+  const h = await harness();
+  expect(h.text()).toContain("Bank transfer or PayPal");
+  expect(h.text()).toContain("Bank transfer and PayPal bookings need your manual confirmation");
+  expect(h.text()).toContain("Not set up");
+  // Not counted yet: nothing to save or continue with.
+  expect(h.button("Save selection").props.disabled).toBe(true);
+  expect(h.button("Save and continue").props.disabled).toBe(true);
+  await act(async () => h.check(0).props.onChange());
   await act(async () => {
-    await fresh.button("Check again").props.onClick();
+    await h.button("Open payment settings").props.onClick();
   });
-  expect(fresh.props.refreshRoute).toHaveBeenCalledOnce();
+  // The unsaved answer waits in the setup draft; the handoff names this hotel.
+  expect(mocks.draft.mock.calls.at(-1)![1]).toMatchObject({
+    payload: { "payment.accepted_methods": ["pay_at_hotel"] },
+  });
+  expect(mocks.handoff).toHaveBeenCalledWith(
+    expect.objectContaining({
+      routingHints: { propertyId },
+      targetPath: "/settings/payments",
+      targetSurface: "booking-admin",
+    }),
+  );
+  expect(mocks.assign).toHaveBeenCalledWith("https://admin.booking.vayada.com/handoff#code");
+  await act(async () => {
+    await h.button("Check again").props.onClick();
+  });
+  expect(h.props.refreshRoute).toHaveBeenCalled();
   expect(mocks.manual).toHaveBeenCalledTimes(2);
-  fresh.view.unmount();
-
+  expect(h.check(0).props.checked).toBe(true);
+  vi.unstubAllGlobals();
+  h.view.unmount();
+});
+it("lets a hotel switch to bank transfer only and continue once it counts (VAY-2139)", async () => {
   mocks.manual.mockResolvedValue({ acceptanceEnabled: true, readyMethods: ["bank_transfer"] });
-  mocks.load.mockResolvedValue(snapshot([], 1));
-  const ready = await harness("hotel_operations", false, 1, 1, "complete");
-  expect(ready.text()).toContain("Ready: Bank transfer");
+  mocks.load.mockResolvedValue(snapshot(["pay_at_property"], 1));
+  const saved = await harness("hotel_operations", false, 1, 1, "complete");
+  expect(saved.text()).toContain("Ready: Bank transfer");
+  await act(async () => saved.check(0).props.onChange());
+  // Pay at hotel is still saved: no silent Continue that would drop the change.
+  expect(saved.button("Save and continue").props.disabled).toBe(true);
+  await act(async () => {
+    await saved.button("Save selection").props.onClick();
+  });
+  expect(mocks.save).toHaveBeenCalledWith(
+    propertyId,
+    { expectedPaymentMethodsRevision: 1, expectedPricingCurrencyRevision: 1, selectedMethods: [] },
+    { allowNoMethods: true },
+  );
+  expect(saved.text()).toContain("Guests pay you by bank transfer or PayPal.");
+  saved.view.unmount();
+
+  mocks.load.mockResolvedValue(snapshot([], 2));
+  const ready = await harness("hotel_operations", false, 2, 1, "complete");
   await act(async () => {
     await ready.button("Continue").props.onClick();
   });
-  expect(mocks.save).not.toHaveBeenCalled();
   expect(ready.props.saveAndContinue).toHaveBeenCalledOnce();
-  // Choosing pay at hotel as well goes back to the usual save.
-  await act(async () => ready.check(0).props.onChange());
-  expect(ready.button("Save and continue")).toBeDefined();
+  expect(mocks.save).toHaveBeenCalledOnce();
   ready.view.unmount();
 });

@@ -240,6 +240,15 @@ describe("Finance payment readiness routes", () => {
       body: { acceptanceEnabled: true, readyMethods: ["bank_transfer"] },
     });
     expect(asked).toEqual([propertyId]);
+    expect(ports.reads).toEqual([{ organizationId, propertyId }]);
+    // A hotel Finance does not know yet has none ready.
+    ports.readValue = null;
+    await expect(get(app)).resolves.toMatchObject({
+      statusCode: 200,
+      body: { acceptanceEnabled: true, readyMethods: [] },
+    });
+    expect(asked).toEqual([propertyId]);
+    ports.readValue = paymentReadiness();
     fail = true;
     await expect(get(app)).resolves.toMatchObject({
       statusCode: 500,
