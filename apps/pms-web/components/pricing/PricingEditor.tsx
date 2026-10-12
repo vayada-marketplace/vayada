@@ -11,6 +11,7 @@ import { baseAmounts, decimalAmount, editedSnapshot, errorText, type MessageKey,
 import { financeNotReady, pricingSave, pricingSaveError } from "./savePricing";
 import { FirstPricingSetup, type SetupRoom, type firstPricingInput } from "./FirstPricingSetup";
 import { PricingTerms } from "./PricingTerms";
+import { PricingManualMethodsProvider, useLoadedPricingManualMethods } from "./pricingManualMethods";
 import { PricingIncludedAdjustments } from "./PricingIncludedAdjustments";
 import { PricingStayOwnership } from "./PricingStayOwnership";
 import { PricingStaySeasons } from "./PricingStaySeasons";
@@ -50,6 +51,7 @@ type Kept = { room: Room; base: Room | null; terms: Record<string, PricingTermsI
  * exactly as read. `onAttention`: a leave confirmation is waiting, so the page should show this tab;
  * `onPublished`: prices were published; a new `refresh` reloads unless this room has unsaved work. */
 export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, roomTypeId: focus, onAttention, onPublished, refresh = 0 }: { client: Client; roomNames?: Record<string, string>; roomFacts?: Record<string, { size: number | null; photo: string | null }>; setup?: { propertyId: string; rooms: readonly SetupRoom[] }; roomTypeId: string; onAttention?: () => void; onPublished?: () => void; refresh?: number }) {
+  const manualMethods = useLoadedPricingManualMethods(client);
   const callbacks = useRef({ onAttention, onPublished });
   useEffect(() => { callbacks.current = { onAttention, onPublished }; }, [onAttention, onPublished]);
   const [policyEdits, setPolicyEdits] = useState<Record<string, PricingTermsInput>>({});
@@ -246,7 +248,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   // While editing, the button beside Save discards this room's changes; otherwise it reloads pricing.
   const cancels = leaveRisk && !needsReload && !retry && !busy && !done;
   // Laid out as the Paper design's numbered steps; the other editors sit under More options. Cancel and Save at the bottom.
-  return <section className="space-y-4">
+  return <PricingManualMethodsProvider value={manualMethods}><section className="space-y-4">
     {error !== null && <div role="alert" className={ui.errorBanner}>{pricingSaveError(error, t)}{retry && <p className="mt-2">{t("pricing.editor.retryHint")}</p>}{keepsOnReload && <p className="mt-2">{t("pricing.room.reloadKeeps")}</p>}</div>}
     {notice && <p role="status" className={warning ? ui.warningBanner : ui.successBanner}>{t(notice)}</p>}
     {loading && <p role="status" className={ui.text}>{t("pricing.editor.loading")}</p>}
@@ -387,7 +389,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     {/* Last, so they open above an option's window. */}
     {reloading && <ConfirmDialog title={t(cancels ? "pricing.steps.discardTitle" : "pricing.reloadTitle")} message={t(cancels ? "pricing.steps.discardMessage" : "pricing.reloadMessage")} confirmLabel={t(cancels ? "pricing.steps.discardConfirm" : "pricing.reloadConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { setReloading(false); void load(); }} onCancel={() => setReloading(false)} />}
     {leave && <ConfirmDialog title={t("pricing.leaveTitle")} message={t("pricing.leaveMessage")} confirmLabel={t("pricing.leaveConfirm")} cancelLabel={t("common.cancel")} variant="danger" onConfirm={() => { leaving.current = true; setLeave(null); leave(); }} onCancel={() => setLeave(null)} />}
-  </section>;
+  </section></PricingManualMethodsProvider>;
 }
 /** Edits survive only when the server still has this room exactly as it was loaded (or still has no prices for
  * it) in the same currency, so a save after the reload never overwrites someone else's change to this room. */

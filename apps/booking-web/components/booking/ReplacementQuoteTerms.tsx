@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
-import type { PublicBookingQuote } from "@vayada/domain-booking/replacement-pricing";
+import {
+  isManualPricingPaymentMethod,
+  type PublicBookingQuote,
+} from "@vayada/domain-booking/replacement-pricing";
+import { bookingPagePaymentMethodLabels } from "@/services/api/bookingPagePaymentMethods";
 
 export type QuoteTermsAcknowledgement = { quoteId: string; termsIdentity: string };
 export type ReplacementQuoteTermsProps = {
@@ -17,7 +21,7 @@ const mealNames: Record<string, string> = {
   full_board: "Full board",
   all_inclusive: "All inclusive",
 };
-const methodNames: Record<string, string> = { card: "Card", pay_at_property: "Pay at property" };
+const methodNames: Record<string, string> = bookingPagePaymentMethodLabels;
 
 /** The caller supplies a validated quote and retires it when the selection becomes stale. */
 export default function ReplacementQuoteTerms({
@@ -119,9 +123,11 @@ export default function ReplacementQuoteTerms({
       <div className="space-y-1">
         <h3 className="font-semibold">Booking confirmation</h3>
         <p>
-          {quote.acceptanceMode === "request"
-            ? "Your booking will need our approval. Sending a request does not confirm your stay."
-            : "Your booking will be confirmed when you complete the booking process. No separate approval from us is needed."}
+          {isManualPricingPaymentMethod(quote.paymentMethod)
+            ? "We hold your room until the payment deadline and confirm your booking when your payment arrives."
+            : quote.acceptanceMode === "request"
+              ? "Your booking will need our approval. Sending a request does not confirm your stay."
+              : "Your booking will be confirmed when you complete the booking process. No separate approval from us is needed."}
         </p>
       </div>
       <p>Selected payment method: {methodNames[quote.paymentMethod]}.</p>

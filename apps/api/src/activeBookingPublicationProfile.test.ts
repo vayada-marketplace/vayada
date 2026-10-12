@@ -23,6 +23,42 @@ describe("active immutable Booking publication profile reads", () => {
       longitude: null,
     });
   });
+  it("serves a bank-transfer or PayPal page only while their acceptance is on (VAY-2139)", async () => {
+    const manualProfile = structuredClone(profile);
+    manualProfile.hotel.capabilities.onlinePayment = false;
+    manualProfile.hotel.capabilities.payAtProperty = false;
+    const publicContent = content(manualProfile, {
+      rates: [
+        {
+          ratePlanId: `pricing-offer.v2:${"b".repeat(64)}`,
+          currency: "EUR",
+          pricing: {
+            kind: "quote_required",
+            publicationRevision: 7,
+            termsRevision: "11111111-1111-4111-8111-111111111111",
+          },
+          mealPlan: "room_only",
+        },
+      ],
+      finance: { onlinePayment: false, payAtProperty: false, readyPaymentMethods: ["paypal"] },
+    });
+    const read = (manualPayments?: boolean) =>
+      createActiveBookingPublicationProfileRepository({
+        connectionString: "postgresql://unused",
+        pool: pool(async (text) =>
+          text.includes("identity.product_entitlements")
+            ? [{ domainVerified: true, referralEnabled: true, latitude: null, longitude: null }]
+            : [{ propertyId: manualProfile.hotel.propertyId, publicContent }],
+        ),
+        manualPayments,
+      }).findProfileBySlug(manualProfile.hotel.slug);
+    await expect(read(true)).resolves.toMatchObject({
+      hotel: { propertyId: manualProfile.hotel.propertyId },
+    });
+    // Turning their acceptance off takes the page down again.
+    await expect(read()).resolves.toBeNull();
+    await expect(read(false)).resolves.toBeNull();
+  });
   it("returns only a profile reached through the active revision pointer", async () => {
     const calls: { text: string; values?: readonly unknown[] }[] = [];
     const repository = createActiveBookingPublicationProfileRepository({
@@ -141,7 +177,15 @@ describe("active immutable Booking publication profile reads", () => {
   });
 });
 
-function content(value: typeof profile) {
+type PublicContentInput = Parameters<typeof buildBookingPublicContent>[0];
+
+function content(
+  value: typeof profile,
+  payment: {
+    rates?: PublicContentInput["rooms"][number]["rates"];
+    finance?: Partial<PublicContentInput["finance"]>;
+  } = {},
+) {
   const result = buildBookingPublicContent({
     sourceManifestHash: `sha256:${"1".repeat(64)}`,
     readinessHash: `sha256:${"2".repeat(64)}`,
@@ -160,7 +204,7 @@ function content(value: typeof profile) {
         size: null,
         images: [{ url: "https://cdn.example/room.jpg" }],
         amenities: ["wifi"],
-        rates: [
+        rates: payment.rates ?? [
           {
             ratePlanId: "rate-1",
             currency: "EUR",
@@ -190,6 +234,7 @@ function content(value: typeof profile) {
       onlinePayment: true,
       payAtProperty: true,
       readyPaymentMethods: ["card", "pay_at_property"],
+      ...payment.finance,
     },
   });
   if (!result) throw new Error("Expected valid Booking public content fixture");

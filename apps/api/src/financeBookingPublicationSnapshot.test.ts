@@ -41,6 +41,42 @@ describe("Finance Booking publication snapshot", () => {
     expect(bookingPublicationOwnerSnapshotProvenanceMatches(result, "finance", request)).toBe(true);
   });
 
+  it("publishes a bank-transfer or PayPal hotel only while their acceptance is on (VAY-2139)", async () => {
+    const request = await snapshotRequest([source]);
+    const manualOnly = createFinancePaymentReadinessSnapshot({
+      ...readySnapshotInput(),
+      selectedMethods: [],
+    });
+    const financeReadPort: FinancePaymentReadinessReadPort = {
+      async getPaymentReadiness() {
+        return manualOnly;
+      },
+    };
+    await expect(
+      createFinanceBookingPublicationSnapshotPort({ financeReadPort }).getSnapshot(request),
+    ).resolves.toEqual({ outcome: "unavailable", owner: "finance" });
+    await expect(
+      createFinanceBookingPublicationSnapshotPort({
+        financeReadPort,
+        manualPayments: { readyMethods: async () => ["bank_transfer", "paypal"] },
+      }).getSnapshot(request),
+    ).resolves.toMatchObject({
+      outcome: "snapshot",
+      content: {
+        onlinePayment: false,
+        payAtProperty: false,
+        readyPaymentMethods: ["bank_transfer", "paypal"],
+      },
+    });
+    // A hotel with a ready pay-at-property method keeps its usual methods.
+    await expect(
+      createFinanceBookingPublicationSnapshotPort({
+        financeReadPort: { getPaymentReadiness: async () => readySnapshot() },
+        manualPayments: { readyMethods: async () => ["bank_transfer"] },
+      }).getSnapshot(request),
+    ).resolves.toMatchObject({ content: { readyPaymentMethods: ["pay_at_property"] } });
+  });
+
   it("fails closed for stale, missing, or provider-failed Finance evidence", async () => {
     const stale = await snapshotRequest([{ ...source, revision: "3" }]);
     await expect(port(readySnapshot()).getSnapshot(stale)).resolves.toEqual({
@@ -72,13 +108,13 @@ function port(value: ReturnType<typeof readySnapshot> | null) {
   return createFinanceBookingPublicationSnapshotPort({ financeReadPort });
 }
 
-function readySnapshot() {
+function readySnapshotInput(): Parameters<typeof createFinancePaymentReadinessSnapshot>[0] {
   const pricing = {
     contractVersion: "pms-pricing.v1",
     currency: "EUR",
     pricingCurrencyRevision: 7,
   };
-  return createFinancePaymentReadinessSnapshot({
+  return {
     propertyId,
     paymentMethodsRevision: 4,
     selectedMethods: ["pay_at_property", "card"],
@@ -86,7 +122,11 @@ function readySnapshot() {
     currentPricing: pricing,
     onlineCardReadiness: "execution_unavailable",
     updatedAt: "2026-08-03T12:00:00.000Z",
-  });
+  };
+}
+
+function readySnapshot() {
+  return createFinancePaymentReadinessSnapshot(readySnapshotInput());
 }
 
 async function snapshotRequest(sources: readonly SourceEntityRevision[]) {
