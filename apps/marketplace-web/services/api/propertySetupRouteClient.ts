@@ -135,11 +135,16 @@ export function parsePropertySetupRouteReadModel(
     return null;
   }
 
-  const expectedStepIds = getActivePropertySetupStepIds(selectedTracks);
+  // The server's step order is authoritative: accept any order of exactly the active steps, so
+  // setup keeps loading while next-api and marketplace-web deploy a reordered route (VAY-2137).
+  const activeStepIds = getActivePropertySetupStepIds(selectedTracks);
+  const stepIds = steps.map((step) => (isRecord(step) ? step.stepId : undefined));
   if (
-    steps.length !== expectedStepIds.length ||
+    steps.length !== activeStepIds.length ||
+    !stepIds.every((stepId) => isOneOf(stepId, activeStepIds)) ||
+    new Set(stepIds).size !== stepIds.length ||
     progress.total !== steps.length ||
-    !steps.every((step, index) => isRouteStep(step, expectedStepIds, index)) ||
+    !steps.every((step, index) => isRouteStep(step, stepIds as PropertySetupStepId[], index)) ||
     progress.complete !==
       steps.filter((step) => isRecord(step) && step.state === "complete").length ||
     (value.sessionId === null && steps.some((step) => isRecord(step) && step.draft !== null))
