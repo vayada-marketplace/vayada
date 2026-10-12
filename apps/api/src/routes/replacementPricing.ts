@@ -151,14 +151,15 @@ export async function registerReplacementPricingRoutes(
   }
   // Which of bank transfer and PayPal the rate pickers may offer: their acceptance is on and the
   // hotel takes them with their details in place (VAY-2139).
-  route("GET", "/payment-methods", async (_commands, id) =>
-    options.manualPayments
+  route("GET", "/payment-methods", async (commands, id) => {
+    if (!(await commands.authorizeRead(id))) throw new PricingStorageError("denied");
+    return options.manualPayments
       ? {
           acceptanceEnabled: true,
           readyMethods: await options.manualPayments.acceptedMethods({ propertyId: id }),
         }
-      : { acceptanceEnabled: false, readyMethods: [] },
-  );
+      : { acceptanceEnabled: false, readyMethods: [] };
+  });
   route("GET", "/rooms/:roomTypeId/offers/:offerId/terms", (commands, id, request) =>
     commands.readTerms(id, request.params.roomTypeId!, request.params.offerId!),
   );

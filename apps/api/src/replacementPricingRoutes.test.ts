@@ -121,6 +121,7 @@ async function fixture(
     saveDraft: vi.fn().mockResolvedValue(1),
     confirmCharges: vi.fn().mockResolvedValue({ id: draftId }),
     publish: vi.fn().mockResolvedValue({ revision: 1, replayed: false }),
+    authorizeRead: vi.fn().mockResolvedValue(true),
   };
   const factory = vi.fn(
     () => commands as unknown as ReturnType<ReplacementPricingRoutesOptions["commands"]>,
@@ -183,6 +184,13 @@ describe("replacement pricing HTTP boundary", () => {
     } as RequestContext;
     expect((await get(await fixture(reader, { acceptedMethods }))).statusCode).toBe(200);
     expect((await get(await fixture(null, { acceptedMethods }))).statusCode).toBe(401);
+    // Staff without access to this property in the database are refused before any read.
+    const denied = await fixture(context, { acceptedMethods });
+    denied.commands.authorizeRead.mockResolvedValue(false);
+    acceptedMethods.mockClear();
+    expect((await get(denied)).statusCode).toBe(403);
+    expect(denied.commands.authorizeRead).toHaveBeenCalledWith(id);
+    expect(acceptedMethods).not.toHaveBeenCalled();
   });
   it("rejects missing/invalid auth before malformed body parsing", async () => {
     const f = await fixture();
