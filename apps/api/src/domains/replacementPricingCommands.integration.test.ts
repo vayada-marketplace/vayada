@@ -461,6 +461,19 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
       [plain.id]: {},
     });
   });
+  it("checks only rates read access for the payment-methods read (VAY-2139)", async () => {
+    const f = await fixture(),
+      other = await fixture(),
+      id = f.scope.propertyId;
+    expect(await f.commands.authorizeRead(id)).toBe(true);
+    // Another hotel group's staff are refused, and so is a suspended membership.
+    expect(await other.commands.authorizeRead(id)).toBe(false);
+    await pool.query(
+      "UPDATE identity.organization_memberships SET status='suspended' WHERE id=$1",
+      [f.membershipId],
+    );
+    expect(await f.commands.authorizeRead(id)).toBe(false);
+  });
   it("rejects malformed, foreign, inactive and stale-term proposals and untrusted identity", async () => {
     const f = await fixture(),
       other = await fixture(),

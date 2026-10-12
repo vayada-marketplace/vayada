@@ -335,6 +335,10 @@ async function mockPaymentsPricingApis(page: Page) {
       });
       return;
     }
+    if (pathname.endsWith("/pricing-v2/payment-methods") && method === "GET") {
+      await ok(route, { acceptanceEnabled: false, readyMethods: [] });
+      return;
+    }
     if (pathname.endsWith("/pricing-v2") && method === "GET") {
       await route.fulfill({
         status: 404,

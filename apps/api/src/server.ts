@@ -1894,6 +1894,7 @@ const app = buildApp({
     config.pmsOperationsSource === "target"
       ? {
           commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context),
+          manualPayments: financeManualPaymentReadiness,
         }
       : undefined,
   pmsPricing: pmsGuestPolicySetupCommands
