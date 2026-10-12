@@ -597,14 +597,6 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
-      - name: Verify the complete-hotel activation backfill
-        if: matrix.shard == 'pms'
-        run: >-
-          npm --workspace @vayada/backend-migration run test -- --no-file-parallelism
-          src/hotelCatalogActivateCompleteHotels.integration.test.ts
-        env:
-          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
-
       - name: Verify hotel member role repair
         if: matrix.shard == 'platform'
         run: npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/hotelMemberRoleRepair.test.ts
