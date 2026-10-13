@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   parseBookingGuestPolicyChoices,
   type BookingGuestPolicyChoices,
@@ -18,6 +18,7 @@ import {
   guestRulesErrorMessage,
   type GuestRules,
 } from "@/services/api/bookingGuestRulesClient";
+import { DEFAULT_GUEST_TERMS } from "./defaultGuestTerms";
 const fields = {
   defaultGuestLanguage: "guest.default_language",
   childrenEnabled: "guest.children_enabled",
@@ -49,6 +50,15 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
     generation = useRef(0);
   const retryCommand = useRef<{ fingerprint: string; key: string } | null>(null);
   const [data, setData] = useState<Data>({});
+  // Guest terms are saved separately from the rules; null means the hotel has none (VAY-2176).
+  // "starting" pre-fills the default text; "unavailable" hides the terms but keeps the rules usable.
+  const terms = useRef(""),
+    savedTerms = useRef<string | null>(null),
+    termsDirty = useRef(false);
+  const [termsText, setTermsText] = useState("");
+  const [savedTermsText, setSavedTermsText] = useState<string | null>(null);
+  const [termsMode, setTermsMode] = useState<"unavailable" | "own" | "starting">("unavailable");
+  const termsIds = useId();
   const [loading, setLoading] = useState(true),
     [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null),
@@ -67,6 +77,8 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
         if (busy.current && !continuing.current)
           throw new Error("Wait for guest rules to finish saving.");
         if (dirty.current) throw new Error("Save your guest rules before leaving this step.");
+        if (termsDirty.current)
+          throw new Error("Save your terms & conditions before leaving this step.");
       }),
     [registerBeforeLeave],
   );
@@ -80,13 +92,25 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
     setConfirmed(false);
     setSaved(false);
     dirty.current = false;
+    termsDirty.current = false;
     busy.current = false;
     continuing.current = false;
     retryCommand.current = null;
-    void bookingGuestRulesClient
-      .load(propertyId, controller.signal)
-      .then((value) => {
+    void Promise.all([
+      bookingGuestRulesClient.load(propertyId, controller.signal),
+      // The rules don't depend on the terms: a failed terms read only hides the terms card.
+      bookingGuestRulesClient.loadTerms(propertyId, controller.signal).catch(() => undefined),
+    ])
+      .then(([value, storedTerms]) => {
         if (controller.signal.aborted) return;
+        savedTerms.current = storedTerms?.trim() || null;
+        setSavedTermsText(savedTerms.current);
+        terms.current =
+          storedTerms === undefined ? "" : (savedTerms.current ?? DEFAULT_GUEST_TERMS);
+        setTermsText(terms.current);
+        setTermsMode(
+          storedTerms === undefined ? "unavailable" : savedTerms.current ? "own" : "starting",
+        );
         canonical.current = value;
         const choices = value?.choices ?? {
           defaultGuestLanguage: null,
@@ -133,6 +157,14 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
     setSaved(false);
     setError(null);
   }
+  function updateTerms(value: string) {
+    if (busy.current) return;
+    terms.current = value;
+    setTermsText(value);
+    termsDirty.current = true;
+    setConfirmed(false);
+    setError(null);
+  }
   async function submit() {
     if (busy.current || !loaded) return;
     const base = canonical.current?.choices;
@@ -171,6 +203,18 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
         retryCommand.current = null;
         setSaved(true);
       }
+      const nextTerms = terms.current.trim() || null;
+      if (termsMode !== "unavailable" && nextTerms !== savedTerms.current) {
+        const stored = await bookingGuestRulesClient.saveTerms(
+          propertyId,
+          nextTerms,
+          savedTerms.current,
+        );
+        if (current !== generation.current) return;
+        savedTerms.current = stored;
+        setSavedTermsText(stored);
+      }
+      termsDirty.current = false;
       continuing.current = true;
       await props.saveAndContinue({ recheckBeforeLeaveOnRetry: true });
     } catch (cause) {
@@ -183,6 +227,7 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
       }
     }
   }
+  const termsPending = termsMode !== "unavailable" && (termsText.trim() || null) !== savedTermsText;
   if (loading) return <AdaptiveStepSkeleton columns />;
   if (!loaded)
     return (
@@ -347,15 +392,48 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
           <p className="mt-5 text-sm text-gray-600">
             Cancellation and payment terms are configured with your rates.
           </p>
-          <label className="mt-5 flex items-start gap-3 text-sm">
-            <input
-              type="checkbox"
-              checked={confirmed}
-              onChange={(event) => setConfirmed(event.target.checked)}
-            />
-            I confirm these guest rules and arrival times.
-          </label>
         </AdaptiveStepCard>
+        {termsMode !== "unavailable" && (
+          <AdaptiveStepCard className="lg:col-span-2">
+            <h2 id={`${termsIds}-title`} className="text-lg font-semibold">
+              Terms & Conditions
+            </h2>
+            <p id={`${termsIds}-help`} className="mt-2 text-sm text-gray-600">
+              Guests see these on your booking page before they book.
+              {termsMode === "starting" &&
+                " We've added a starting text. Edit it to match how you work."}
+            </p>
+            <textarea
+              aria-labelledby={`${termsIds}-title`}
+              aria-describedby={`${termsIds}-help${termsText.trim() ? "" : ` ${termsIds}-empty`}`}
+              className={inputClass}
+              rows={12}
+              maxLength={20_000}
+              value={termsText}
+              onChange={(event) => updateTerms(event.target.value)}
+            />
+            {!termsText.trim() && (
+              <p
+                id={`${termsIds}-empty`}
+                role="status"
+                className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900"
+              >
+                Without terms & conditions, guests won&apos;t see any terms when they book. We
+                recommend keeping at least the starting text.
+              </p>
+            )}
+          </AdaptiveStepCard>
+        )}
+        <label className="flex items-start gap-3 text-sm lg:col-span-2">
+          <input
+            type="checkbox"
+            checked={confirmed}
+            onChange={(event) => setConfirmed(event.target.checked)}
+          />
+          {termsMode === "unavailable"
+            ? "I confirm these guest rules and arrival times."
+            : "I confirm these guest rules, arrival times and terms & conditions."}
+        </label>
       </fieldset>
       <div className="mt-6 flex justify-end gap-3">
         <button
@@ -364,7 +442,7 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
           disabled={saving}
           onClick={() => {
             if (
-              !dirty.current ||
+              !(dirty.current || termsDirty.current) ||
               window.confirm("Discard your unsaved changes and reload saved guest rules?")
             )
               setRetry((v) => v + 1);
@@ -377,7 +455,7 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
           className={adaptivePrimaryButtonClass}
           disabled={saving || !confirmed}
         >
-          {saving ? "Please wait…" : saved ? "Continue" : "Save and continue"}
+          {saving ? "Please wait…" : saved && !termsPending ? "Continue" : "Save and continue"}
         </button>
       </div>
     </form>

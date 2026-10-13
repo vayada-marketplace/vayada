@@ -10,10 +10,14 @@ const uuid = (v: unknown): v is string =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 const record = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === "object" && !Array.isArray(v);
-const path = (propertyId: string) => {
+const path = (propertyId: string, resource: "guest-rules" | "guest-terms" = "guest-rules") => {
   if (!uuid(propertyId)) throw new Error("Choose a valid property before editing guest rules.");
-  return `/api/booking/properties/${propertyId.toLowerCase()}/guest-rules`;
+  return `/api/booking/properties/${propertyId.toLowerCase()}/${resource}`;
 };
+const termsText = (v: unknown): v is { termsText: string | null } =>
+  record(v) &&
+  Object.keys(v).join() === "termsText" &&
+  (v.termsText === null || typeof v.termsText === "string");
 export function createBookingGuestRulesClient(http: Http) {
   return {
     async load(propertyId: string, signal?: AbortSignal): Promise<GuestRules | null> {
@@ -45,6 +49,29 @@ export function createBookingGuestRulesClient(http: Http) {
         throw new Error("The save could not be confirmed. Retry to check the result.");
       return { revision: result.revision, choices: parsed };
     },
+    /** The hotel's guest Terms & Conditions; null when it has none. */
+    async loadTerms(propertyId: string, signal?: AbortSignal): Promise<string | null> {
+      const result = await http.get<unknown>(path(propertyId, "guest-terms"), {
+        signal,
+        cache: "no-store",
+      });
+      if (!termsText(result)) throw new Error("Terms & conditions could not be loaded.");
+      return result.termsText;
+    },
+    /** `expected` is the text loaded before editing; terms changed elsewhere are not overwritten. */
+    async saveTerms(
+      propertyId: string,
+      text: string | null,
+      expected: string | null,
+    ): Promise<string | null> {
+      const result = await http.put<unknown>(path(propertyId, "guest-terms"), {
+        termsText: text,
+        expectedTermsText: expected,
+      });
+      if (!termsText(result))
+        throw new Error("The save could not be confirmed. Retry to check the result.");
+      return result.termsText;
+    },
   };
 }
 export const bookingGuestRulesClient = createBookingGuestRulesClient(targetApiClient);
@@ -59,5 +86,11 @@ export function guestRulesErrorMessage(error: unknown): string {
     return "This save conflicts with an earlier request. Reload saved rules before trying again.";
   if (code === "invalid_guest_choices")
     return "Check the guest rules and arrival times before saving.";
+  if (code === "invalid_guest_terms")
+    return "Check your terms & conditions. They can be up to 20,000 characters.";
+  if (code === "guest_terms_denied")
+    return "You no longer have permission to manage these terms & conditions.";
+  if (code === "guest_terms_stale")
+    return "Terms & conditions changed elsewhere. Reload saved rules before editing again.";
   return error instanceof Error ? error.message : "Guest rules are unavailable. Please retry.";
 }
