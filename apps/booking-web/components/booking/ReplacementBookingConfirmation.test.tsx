@@ -58,7 +58,11 @@ afterEach(() => {
   act(() => root.unmount());
   vi.unstubAllGlobals();
 });
-function render(termsAccepted = true, rules: PublicQuoteGuestDisclosure | null = disclosure) {
+function render(
+  termsAccepted = true,
+  rules: PublicQuoteGuestDisclosure | null = disclosure,
+  hotelTerms = false,
+) {
   act(() =>
     root.render(
       createElement(ReplacementBookingConfirmation, {
@@ -66,6 +70,7 @@ function render(termsAccepted = true, rules: PublicQuoteGuestDisclosure | null =
         quote,
         disclosure: rules,
         termsAccepted,
+        hotelTerms,
       }),
     ),
   );
@@ -82,6 +87,14 @@ it("stays blocked until both exact consent sources are present", async () => {
   expect(acceptPricingQuote).not.toHaveBeenCalled();
   render(true, { ...disclosure, quoteId: "other" });
   expect(document.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
+});
+
+it("says booking accepts the hotel's terms only when the hotel has terms (VAY-2176)", () => {
+  const line = "By booking, you agree to our terms & conditions.";
+  render();
+  expect(document.body.textContent).not.toContain(line);
+  render(true, disclosure, true);
+  expect(document.body.textContent).toContain(line);
 });
 
 it("collects only enabled policy fields and shows the public confirmation reference", async () => {

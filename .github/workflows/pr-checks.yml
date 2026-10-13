@@ -803,6 +803,7 @@ jobs:
           src/pmsManualBookingPreviewRoutes.test.ts
           src/pmsManualBookingCreateRoutes.test.ts
           src/domains/bookingGuestPolicyRepository.integration.test.ts
+          src/domains/bookingGuestTermsStore.integration.test.ts
           src/bookingSettingsPropertyAddress.integration.test.ts
           src/domains/financeOtaCommissionRuleRepository.integration.test.ts
           src/domains/financeExpenseCategoryRepository.integration.test.ts

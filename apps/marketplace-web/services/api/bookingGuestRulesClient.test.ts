@@ -42,3 +42,24 @@ it("rejects malformed responses and preserves API conflicts", async () => {
     "save could not be confirmed",
   );
 });
+it("loads and saves the guest terms without other fields", async () => {
+  const get = vi
+    .fn()
+    .mockResolvedValueOnce({ termsText: null })
+    .mockResolvedValueOnce({ termsText: "Our terms." })
+    .mockResolvedValueOnce({ termsText: 3 });
+  const put = vi
+    .fn()
+    .mockResolvedValueOnce({ termsText: "Our terms." })
+    .mockResolvedValueOnce({ termsText: "Our terms.", propertyId: id });
+  const client = createBookingGuestRulesClient({ get, put });
+  expect(await client.loadTerms(id)).toBeNull();
+  expect(await client.loadTerms(id)).toBe("Our terms.");
+  await expect(client.loadTerms(id)).rejects.toThrow("could not be loaded");
+  expect(await client.saveTerms(id, "Our terms.", null)).toBe("Our terms.");
+  expect(put).toHaveBeenCalledWith(`/api/booking/properties/${id}/guest-terms`, {
+    termsText: "Our terms.",
+    expectedTermsText: null,
+  });
+  await expect(client.saveTerms(id, "Our terms.", null)).rejects.toThrow("could not be confirmed");
+});

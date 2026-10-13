@@ -34,6 +34,7 @@ import { createPgBookingDesignCatalogEvidenceRepository } from "./domains/bookin
 import { createPgBookingDesignRepository } from "./domains/bookingDesignRepository.js";
 import { createBookingGuestChoicePublicationReader } from "./domains/bookingGuestChoicePublication.js";
 import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore.js";
+import { createBookingGuestTermsStore } from "./domains/bookingGuestTermsStore.js";
 import { createPgBookingGuestPolicyScopeAuthorizationPort } from "./domains/bookingGuestPolicyScopeAuthorization.js";
 import { createBookingPublicationProductionRuntime } from "./domains/bookingPublicationProductionRuntime.js";
 import { createPgFinancePaymentReadinessCommandRepository } from "./domains/financePaymentReadinessCommandRepository.js";
@@ -796,6 +797,13 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           },
         },
       );
+      // The setup Guest step also saves the default guest terms, without touching the hotel
+      // profile revision the earlier steps' drafts were saved against (VAY-2176).
+      const profileBeforeTerms = await profileRevision();
+      await createBookingGuestTermsStore(pool, (client) =>
+        createPgBookingGuestPolicyScopeAuthorizationPort({ pool: client }),
+      ).save({ propertyId, organizationId, actorUserId: owner }, "Our guest terms.", null);
+      expect(await profileRevision()).toBe(profileBeforeTerms);
 
       // 8. Open your calendar. The first save happened "yesterday" in the hotel's time zone.
       const saveCalendarRevision = async (
@@ -1104,7 +1112,9 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         expect(offered.rooms.map(({ roomTypeId }) => roomTypeId).sort()).toEqual(
           [gardenSuite, seaSuite].sort(),
         );
-        await read(`/hotels/${slug}/checkout-config`);
+        expect(await read(`/hotels/${slug}/checkout-config`)).toMatchObject({
+          termsText: "Our guest terms.",
+        });
         const quoteSeaSuite = async () => {
           const offers = (await read(`/hotels/${slug}/pricing-offers`)) as Offers;
           return site.inject({

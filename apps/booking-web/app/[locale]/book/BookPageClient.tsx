@@ -11,6 +11,7 @@ import {
 import ReplacementQuoteTerms from "@/components/booking/ReplacementQuoteTerms";
 import type { QuoteTermsAcknowledgement } from "@/components/booking/ReplacementQuoteTerms";
 import ReplacementBookingConfirmation from "@/components/booking/ReplacementBookingConfirmation";
+import BookingPageTerms from "@/components/booking/BookingPageTerms";
 import type {
   PricingPaymentMethod,
   PublicQuoteGuestDisclosure,
@@ -96,6 +97,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const [pagePayment, setPagePayment] = useState<BookingPagePayment>({
     methods: ["card", "pay_at_property"],
     earliestArrival: {},
+    termsText: null,
   });
   useEffect(() => {
     const controller = new AbortController();
@@ -441,12 +443,14 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             quote={quote}
             onAcknowledgementChange={setGuestDisclosure}
           />
+          {pagePayment.termsText && <BookingPageTerms text={pagePayment.termsText} />}
           <ReplacementBookingConfirmation
             key={quote.quoteId}
             slug={slug}
             quote={quote}
             disclosure={guestDisclosure}
             termsAccepted={termsAcknowledgement?.quoteId === quote.quoteId}
+            hotelTerms={pagePayment.termsText !== null}
           />
         </section>
       )}
