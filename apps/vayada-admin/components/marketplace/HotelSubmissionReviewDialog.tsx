@@ -60,6 +60,11 @@ export function HotelSubmissionReviewDialog({ revisionId, onClose, renderActions
       ) : (
         <div className="space-y-4">
           <p className="text-sm text-gray-500">{describeSubmission(review)}</p>
+          {review.live?.status === "active" && (
+            <p className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+              An earlier version of this profile is live. Approving replaces it.
+            </p>
+          )}
           <Label>Public profile preview</Label>
           {review.preview ? <Preview preview={review.preview} /> : <PreviewUnavailable />}
           <Label>Collaboration preferences · not public</Label>

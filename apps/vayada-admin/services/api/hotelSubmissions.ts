@@ -1,6 +1,11 @@
 import {
+  buildMarketplaceAdminHotelSubmissionIdempotencyKey,
+  decideMarketplaceAdminHotelSubmission,
   getMarketplaceAdminHotelSubmission,
   getMarketplaceAdminHotelSubmissions,
+  isMarketplaceAdminCreatorModerationReason,
+  type MarketplaceAdminHotelSubmissionDecisionRequest,
+  type MarketplaceAdminHotelSubmissionDecisionResponse,
   type MarketplaceAdminHotelSubmissionQueueItem,
   type MarketplaceAdminHotelSubmissionReview,
 } from "@vayada/marketplace-shared/api/admin";
@@ -17,7 +22,92 @@ export const hotelSubmissionsService = {
   async get(revisionId: string): Promise<MarketplaceAdminHotelSubmissionReview> {
     return (await getMarketplaceAdminHotelSubmission(revisionId)).review;
   },
+  async decide(
+    revisionId: string,
+    request: MarketplaceAdminHotelSubmissionDecisionRequest,
+    idempotencyKey: string,
+  ): Promise<MarketplaceAdminHotelSubmissionDecisionResponse> {
+    return decideMarketplaceAdminHotelSubmission(revisionId, request, idempotencyKey);
+  },
 };
+
+export const HOTEL_NOTE_MAX_LENGTH = 1000;
+
+export function createDecisionKey(
+  revisionId: string,
+  decision: MarketplaceAdminHotelSubmissionDecisionRequest["decision"],
+): string {
+  return buildMarketplaceAdminHotelSubmissionIdempotencyKey({
+    revisionId,
+    decision,
+    nonce: crypto.randomUUID(),
+  });
+}
+
+/** The note is shown to the hotel in setup: one line, up to 1,000 characters. */
+export function hotelNoteError(note: string): string | null {
+  const trimmed = note.trim();
+  if (!trimmed) return "Write a note so the hotel knows what to change.";
+  if (trimmed.length > HOTEL_NOTE_MAX_LENGTH) return "Keep the note under 1,000 characters.";
+  if (!isMarketplaceAdminCreatorModerationReason(trimmed))
+    return "Use one line without line breaks or special characters.";
+  return null;
+}
+
+/** Link to the hotel's public Marketplace profile in the marketplace web app. */
+export function marketplaceProfileUrl(publicPath: string): string {
+  const base = process.env.NEXT_PUBLIC_MARKETPLACE_URL?.trim() || "https://marketplace.localhost";
+  return `${base.replace(/\/+$/, "")}${publicPath}`;
+}
+
+const DECISION_ERRORS: Record<string, { message: string; refresh: boolean }> = {
+  submission_not_found: {
+    message: "This submission no longer exists. Refresh the list.",
+    refresh: true,
+  },
+  submission_already_decided: {
+    message: "Another admin already decided on this submission. The list has been refreshed.",
+    refresh: true,
+  },
+  submission_superseded: {
+    message: "The hotel submitted a newer version. The list has been refreshed.",
+    refresh: true,
+  },
+  property_unavailable: {
+    message: "This hotel is suspended or retired, so its profile can’t be published.",
+    refresh: false,
+  },
+  marketplace_profile_unavailable: {
+    message: "This hotel’s Marketplace profile is suspended, so it can’t be published.",
+    refresh: false,
+  },
+  marketplace_publication_suspended: {
+    message:
+      "This hotel’s Marketplace profile is suspended. Reinstate it before approving an update.",
+    refresh: false,
+  },
+  marketplace_entitlement_inactive: {
+    message: "This hotel’s Marketplace access isn’t active, so its profile can’t be published.",
+    refresh: false,
+  },
+  submission_media_unavailable: {
+    message:
+      "The public preview can’t be shown, so this profile can’t be published yet. Request changes instead.",
+    refresh: false,
+  },
+  submission_snapshot_invalid: {
+    message: "This submission is incomplete and can’t be published. Request changes instead.",
+    refresh: false,
+  },
+};
+
+export function decisionErrorMessage(error: unknown): { message: string; refresh: boolean } {
+  const { status, code } = readApiError(error);
+  if (code && DECISION_ERRORS[code]) return DECISION_ERRORS[code];
+  if (status === 401 || status === 403)
+    return { message: "You don’t have permission to review hotel profiles.", refresh: false };
+  return { message: "The decision could not be saved. Try again.", refresh: false };
+}
 
 /** The shared API client throws its own error class; read its status and code structurally. */
 export function readApiError(error: unknown): { status?: number; code?: string } {
@@ -77,8 +167,13 @@ export function describeSubmissionHistory(
       detail: item.live ? "Current version is live" : "Previous version approved",
     };
   const date = previous.decidedAt ? ` ${formatSubmissionDate(previous.decidedAt)}` : "";
+  const stillLive = item.live ? " · current version is live" : "";
   if (previous.status === "changes_requested")
-    return { label: "Resubmitted", tone: "warning", detail: `Changes requested${date}` };
+    return {
+      label: "Resubmitted",
+      tone: "warning",
+      detail: `Changes requested${date}${stillLive}`,
+    };
   return { label: "Resubmitted", tone: "warning", detail: null };
 }
 

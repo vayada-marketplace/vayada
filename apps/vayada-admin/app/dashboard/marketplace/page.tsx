@@ -14,6 +14,10 @@ import { MarketplaceCreatorModal } from "@/components/marketplace/MarketplaceCre
 import { HotelReviewsTab } from "@/components/marketplace/HotelReviewsTab";
 import { HotelSubmissionReviewDialog } from "@/components/marketplace/HotelSubmissionReviewDialog";
 import {
+  HotelSubmissionDecision,
+  type HotelSubmissionDecided,
+} from "@/components/marketplace/HotelSubmissionDecision";
+import {
   hotelSubmissionsService,
   readApiError,
   type HotelSubmissionQueueItem,
@@ -43,7 +47,9 @@ export default function MarketplacePreviewPage() {
   const [submissions, setSubmissions] = useState<HotelSubmissionQueueItem[]>([]);
   const [loadingSubmissions, setLoadingSubmissions] = useState(true);
   const [submissionsError, setSubmissionsError] = useState<string | null>(null);
-  const [reviewing, setReviewing] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState<HotelSubmissionQueueItem | null>(null);
+  const [decided, setDecided] = useState<HotelSubmissionDecided | null>(null);
+  const [deciding, setDeciding] = useState(false);
 
   const [selectedListing, setSelectedListing] = useState<MarketplaceListing | null>(null);
   const [selectedCreator, setSelectedCreator] = useState<MarketplaceCreator | null>(null);
@@ -346,7 +352,11 @@ export default function MarketplacePreviewPage() {
             submissions={submissions}
             loading={loadingSubmissions}
             error={submissionsError}
-            onReview={(submission) => setReviewing(submission.revisionId)}
+            onReview={(submission) => {
+              setDecided(null);
+              setReviewing(submission);
+            }}
+            notice={decided && <DecisionNotice decided={decided} />}
           />
         )}
 
@@ -453,13 +463,66 @@ export default function MarketplacePreviewPage() {
         listing={selectedListing}
       />
 
-      <HotelSubmissionReviewDialog revisionId={reviewing} onClose={() => setReviewing(null)} />
+      <HotelSubmissionReviewDialog
+        revisionId={reviewing?.revisionId ?? null}
+        onClose={() => {
+          if (!deciding) setReviewing(null);
+        }}
+        renderActions={(review) => (
+          <HotelSubmissionDecision
+            key={review.revisionId}
+            review={review}
+            hotelName={review.preview?.displayName ?? reviewing?.displayName ?? "This hotel"}
+            onDecided={(outcome) => {
+              setReviewing(null);
+              setDecided(outcome);
+              setSubmissions((current) =>
+                current.filter((item) => item.revisionId !== review.revisionId),
+              );
+            }}
+            onStale={() => void loadSubmissions()}
+            onBusyChange={setDeciding}
+          />
+        )}
+      />
 
       <MarketplaceCreatorModal
         isOpen={!!selectedCreator}
         onClose={() => setSelectedCreator(null)}
         creator={selectedCreator}
       />
+    </div>
+  );
+}
+
+function DecisionNotice({ decided }: { decided: HotelSubmissionDecided }) {
+  if (decided.kind === "changes_requested")
+    return (
+      <div role="status" className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+        <p className="text-sm font-semibold text-gray-900">
+          Changes requested. {decided.hotelName} sees your note in setup.
+        </p>
+      </div>
+    );
+  return (
+    <div
+      role="status"
+      className="flex flex-wrap items-center gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3"
+    >
+      <CheckBadgeIcon className="h-4 w-4 text-green-700" />
+      <p className="text-sm font-semibold text-green-900">
+        {decided.hotelName} is live on the Marketplace.
+      </p>
+      {decided.publicUrl && (
+        <a
+          href={decided.publicUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm font-semibold text-green-700 underline"
+        >
+          View public profile
+        </a>
+      )}
     </div>
   );
 }
