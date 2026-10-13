@@ -61,7 +61,9 @@ async function harness(context: Partial<RequestContext> = {}) {
   });
   const repository = {
     listPending: vi.fn().mockResolvedValue([{ revisionId, propertyId }]),
-    getReview: vi.fn().mockResolvedValue({ revisionId, propertyId, status: "pending" }),
+    getReview: vi
+      .fn()
+      .mockResolvedValue({ revisionId, propertyId, status: "pending", preview: { revisionId } }),
     decide: vi.fn().mockResolvedValue(decided),
   };
   const mediaResolver = vi.fn().mockReturnValue(null);
@@ -92,7 +94,12 @@ it("lists and reads submissions for Vayada operators without caching", async () 
     headers: admin,
   });
   expect(read.statusCode).toBe(200);
-  expect(read.json().review).toEqual({ revisionId, propertyId, status: "pending" });
+  expect(read.json().review).toEqual({
+    revisionId,
+    propertyId,
+    status: "pending",
+    preview: { revisionId },
+  });
   expect(h.repository.getReview).toHaveBeenCalledWith(revisionId, null);
 
   h.repository.getReview.mockResolvedValueOnce(null);
@@ -184,6 +191,53 @@ it.each([
   expect(h.repository.listPending).not.toHaveBeenCalled();
   expect(h.repository.decide).not.toHaveBeenCalled();
 });
+
+it("refuses to publish a submission whose public preview can't be served", async () => {
+  const h = await harness();
+  h.repository.getReview.mockResolvedValueOnce({ revisionId, status: "pending", preview: null });
+  const refused = await h.app.inject({
+    method: "POST",
+    url: `/api/marketplace/admin/hotel-submissions/${revisionId}/decision`,
+    headers: { ...admin, "idempotency-key": "approve" },
+    payload: { decision: "approve" },
+  });
+  expect(refused.statusCode).toBe(409);
+  expect(refused.json().code).toBe("submission_media_unavailable");
+  expect(h.repository.decide).not.toHaveBeenCalled();
+
+  // Requesting changes doesn't publish anything, and a decided submission replays.
+  h.repository.getReview.mockResolvedValueOnce({ revisionId, status: "approved", preview: null });
+  for (const payload of [
+    { decision: "request_changes", note: "Upload the photos again." },
+    { decision: "approve" },
+  ]) {
+    const reply = await h.app.inject({
+      method: "POST",
+      url: `/api/marketplace/admin/hotel-submissions/${revisionId}/decision`,
+      headers: { ...admin, "idempotency-key": payload.decision },
+      payload,
+    });
+    expect(reply.statusCode).toBe(200);
+  }
+  expect(h.repository.decide).toHaveBeenCalledTimes(2);
+  expect(h.repository.getReview).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+  ["signed out", {}, 401, false],
+  ["missing permission", { membership: { permissions: [] } }, 403, true],
+] as const)(
+  "keeps the private review from %s callers",
+  async (_label, context, status, signedIn) => {
+    const h = await harness(context as Partial<RequestContext>);
+    const reply = await h.app.inject({
+      url: `/api/marketplace/admin/hotel-submissions/${revisionId}`,
+      headers: signedIn ? admin : {},
+    });
+    expect(reply.statusCode).toBe(status);
+    expect(h.repository.getReview).not.toHaveBeenCalled();
+  },
+);
 
 it("rejects a malformed revision id", async () => {
   const h = await harness();

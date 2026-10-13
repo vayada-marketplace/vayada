@@ -204,6 +204,23 @@ describe.skipIf(!database)("Marketplace approval from setup to the public page (
     expect(await phase()).toBe("pending_review");
     expect((await publicHotel()).statusCode).toBe(404);
 
+    // The hotel's own session can't see or decide the queue.
+    for (const url of [
+      "/api/marketplace/admin/hotel-submissions",
+      `/api/marketplace/admin/hotel-submissions/${first.revisionId}`,
+    ])
+      expect((await app.inject({ url, headers: owner })).statusCode).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/api/marketplace/admin/hotel-submissions/${first.revisionId}/decision`,
+          headers: { ...owner, "idempotency-key": "owner-approve" },
+          payload: { decision: "approve" },
+        })
+      ).statusCode,
+    ).toBe(403);
+
     const queue = await app.inject({
       url: "/api/marketplace/admin/hotel-submissions",
       headers: operator,

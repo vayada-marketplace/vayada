@@ -184,21 +184,36 @@ link) and have their own contract version:
 
 Approval marks the revision `approved`, points
 `marketplace.active_hotel_submission_revisions` at it (`active`), moves the
-older `marketplace_profile_status` from `pending` to `verified`, and writes a
-`marketplace.hotel_submission.approved` audit event, all in one transaction.
-An earlier approved revision stays public until then. Approval returns
-`409 property_unavailable` for a suspended or retired property,
-`409 marketplace_profile_unavailable` for a suspended or archived Marketplace
-profile, `409 marketplace_publication_suspended` for a held active revision,
-`409 marketplace_entitlement_inactive`, and `409 submission_snapshot_invalid`.
+older `marketplace_profile_status` from `pending` (or a hold's leftover
+`suspended`) to `verified`, and writes a `marketplace.hotel_submission.approved`
+audit event, all in one transaction. An earlier approved revision stays public
+until then. Approval is refused with:
+
+- `409 property_unavailable` while the property is suspended or retired;
+- `409 marketplace_profile_unavailable` for a `rejected` or `archived`
+  Marketplace profile;
+- `409 marketplace_publication_suspended` for a `deactivated` publication;
+- `409 marketplace_entitlement_inactive`;
+- `409 submission_snapshot_invalid`;
+- `409 submission_media_unavailable` when the public preview can't be built
+  (its media isn't publicly servable), so approval never publishes a page that
+  answers 404.
+
+A property hold suspends the Marketplace profile and the active revision, and
+releasing the hold doesn't restore them. Once the property is no longer held,
+approving a fresh submission publishes it again.
+
 Requesting changes records the note (confidential audit copy in
 `private_payload`) and leaves any live revision alone; the hotel can edit and
 resubmit. There is no permanent rejection; suspension handles bad actors.
 
 Either decision needs the revision to be the latest and still pending:
 otherwise `409 submission_already_decided` or `409 submission_superseded`.
-Unknown revisions return `404 submission_not_found`. Idempotency follows the
-creator moderation rules (`409 idempotency_key_conflict`).
+Unknown revisions return `404 submission_not_found`. Idempotency keys are
+scoped to the property: the same key and body replays the stored outcome, while
+the same key with another revision or body returns
+`409 idempotency_key_conflict`. Refusals are not recorded, so a refused key can
+succeed later. A decision that loses a deadlock is retried once.
 
 ## Fixtures
 

@@ -71,8 +71,16 @@ export async function registerMarketplaceHotelSubmissionModerationRoutes(
       if (!idempotencyKey) return sendError(reply, 422, "idempotency_required");
       const parsed = parseMarketplaceHotelSubmissionDecisionRequest(request.body);
       if (typeof parsed === "string") return sendError(reply, 422, parsed);
+      const revisionId = request.params.revisionId.toLowerCase();
+      if (parsed.decision === "approve") {
+        // Don't publish a page that would answer 404: the public projection needs servable media.
+        const review = await options.repository.getReview(revisionId, options.mediaResolver());
+        if (!review) return sendError(reply, 404, "submission_not_found");
+        if (review.status === "pending" && !review.preview)
+          return sendError(reply, 409, "submission_media_unavailable");
+      }
       const result = await options.repository.decide({
-        revisionId: request.params.revisionId.toLowerCase(),
+        revisionId,
         idempotencyKey,
         request: parsed,
         audit: {
