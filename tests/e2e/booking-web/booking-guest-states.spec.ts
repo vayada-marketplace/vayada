@@ -72,6 +72,11 @@ for (const width of [1440, 390]) {
     expect(withdrawals).toBe(0);
     await dialog.getByRole("button", { name: "Go Back" }).click();
     await expect(dialog).toHaveCount(0);
+    await expect(withdraw).toBeFocused();
+    await withdraw.click();
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
     await expect(heading).toBeVisible();
     expect(withdrawals).toBe(0);
 
@@ -84,16 +89,16 @@ for (const width of [1440, 390]) {
   });
 }
 
-for (const [status, heading] of [
-  ["cancelled", "Booking Cancelled"],
-  ["declined", "Booking Request Declined"],
-  ["expired", "Booking Request Expired"],
+for (const [status, heading, paymentStatus, paymentLabel] of [
+  ["cancelled", "Booking Cancelled", "refunded", "Refunded"],
+  ["declined", "Booking Request Declined", "unpaid", null],
+  ["expired", "Booking Request Expired", "unpaid", null],
 ] as const) {
   test(`shows a ${status} booking without an amount due or a confirmation email`, async ({
     page,
   }, testInfo) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await mockConfirmation(page, { ...booking, status });
+    await mockConfirmation(page, { ...booking, status, paymentStatus });
     await page.goto(`/confirmation?booking=VAY-1268&token=${token}`);
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     await page.screenshot({
@@ -103,6 +108,9 @@ for (const [status, heading] of [
     await expect(page.getByText("Total Due")).toHaveCount(0);
     await expect(row(page, "Total")).toContainText("€720");
     await expect(page.getByText(emailNotice)).toHaveCount(0);
+    // An ended booking says what was refunded, never "Not paid yet".
+    if (paymentLabel) await expect(row(page, "Payment Status")).toContainText(paymentLabel);
+    else await expect(page.getByText("Payment Status")).toHaveCount(0);
   });
 }
 

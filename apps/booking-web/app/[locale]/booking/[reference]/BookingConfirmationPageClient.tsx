@@ -105,6 +105,7 @@ export default function BookingConfirmationPageClient({
   const tp = useTranslations("payment");
   const tm = useTranslations("myBooking");
   const withdrawTitleId = useId();
+  const withdrawDialog = useRef<HTMLDialogElement>(null);
   const { hotel } = useHotel();
   const { slug } = useSlug();
   const { formatPrice } = useCurrency();
@@ -305,6 +306,14 @@ export default function BookingConfirmationPageClient({
   const isDeclined = status === "declined";
   const isExpired = status === "expired";
   const isEnded = isCancelled || isDeclined || isExpired;
+  // A native modal dialog traps focus, closes on Escape and returns focus to Withdraw. It also
+  // closes if a status update ends the request while it is open.
+  const showWithdrawDialog = confirmingWithdraw && isPending;
+  useEffect(() => {
+    const element = withdrawDialog.current;
+    if (showWithdrawDialog && element && !element.open) element.showModal();
+    if (!showWithdrawDialog && element?.open) element.close();
+  }, [showWithdrawDialog]);
   const displayedNights =
     booking && Number.isInteger(booking.nights) && booking.nights > 0 ? booking.nights : null;
   const displayedAdults =
@@ -334,6 +343,7 @@ export default function BookingConfirmationPageClient({
   const owed = booking?.balanceAmount;
   const paid = booking?.paymentStatus === "captured" || booking?.paymentStatus === "paid";
   // VAY-2163: a card deposit comes back as partially_paid, with what's still owed as the balance.
+  // A bank transfer's remainder is paid by transfer (see the transfer box), not at check-in.
   const partlyPaid =
     !!booking &&
     booking.paymentMethod !== "bank_transfer" &&
@@ -350,10 +360,14 @@ export default function BookingConfirmationPageClient({
     failed: t("paymentFailed"),
     waived: t("paymentWaived"),
   };
+  const paymentStatusKey = partlyPaid ? "partially_paid" : paid ? "paid" : booking?.paymentStatus;
+  // An ended booking says only what was paid or refunded: "Not paid yet" or a released card hold
+  // ("Payment failed") would read as money still owed.
   const paymentStatusLabel =
-    paymentStatusLabels[
-      partlyPaid ? "partially_paid" : paid ? "paid" : (booking?.paymentStatus ?? "")
-    ];
+    paymentStatusKey &&
+    (!isEnded || ["paid", "partially_paid", "refunded"].includes(paymentStatusKey))
+      ? paymentStatusLabels[paymentStatusKey]
+      : undefined;
 
   return (
     <div className="min-h-screen bg-surface">
@@ -620,11 +634,11 @@ export default function BookingConfirmationPageClient({
                     : "—"}
                 </span>
               </div>
-              {booking && !isEnded && (partlyPaid || booking.depositRequired) && (
+              {booking && (isPending || isConfirmed) && (partlyPaid || booking.depositRequired) && (
                 <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-600">
-                      {partlyPaid
+                      {partlyPaid || paid
                         ? t("depositPaid")
                         : booking.paymentStatus === "refunded"
                           ? t("depositRefunded")
@@ -852,47 +866,46 @@ export default function BookingConfirmationPageClient({
       </div>
 
       {/* Withdraw asks first, like My Booking (VAY-2163) */}
-      {confirmingWithdraw && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={withdrawTitleId}
-            className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl"
+      <dialog
+        ref={withdrawDialog}
+        aria-labelledby={withdrawTitleId}
+        className="m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl bg-white p-6 shadow-xl backdrop:bg-black/50"
+        onCancel={(event) => {
+          if (withdrawing) event.preventDefault();
+        }}
+        onClose={() => {
+          setConfirmingWithdraw(false);
+          setWithdrawError("");
+        }}
+      >
+        <h3 id={withdrawTitleId} className="text-lg font-bold text-gray-900 mb-3">
+          {tm("withdrawConfirmTitle")}
+        </h3>
+        {withdrawError && (
+          <p role="alert" className="mb-4 text-sm text-red-700">
+            {withdrawError}
+          </p>
+        )}
+        <div className="flex gap-3 mt-6">
+          <button
+            type="button"
+            autoFocus
+            onClick={() => withdrawDialog.current?.close()}
+            disabled={withdrawing}
+            className="flex-1 py-3 border border-gray-300 text-gray-700 font-semibold rounded-full hover:bg-gray-50 transition-colors"
           >
-            <h3 id={withdrawTitleId} className="text-lg font-bold text-gray-900 mb-3">
-              {tm("withdrawConfirmTitle")}
-            </h3>
-            {withdrawError && (
-              <p role="alert" className="mb-4 text-sm text-red-700">
-                {withdrawError}
-              </p>
-            )}
-            <div className="flex gap-3 mt-6">
-              <button
-                type="button"
-                autoFocus
-                onClick={() => {
-                  setConfirmingWithdraw(false);
-                  setWithdrawError("");
-                }}
-                disabled={withdrawing}
-                className="flex-1 py-3 border border-gray-300 text-gray-700 font-semibold rounded-full hover:bg-gray-50 transition-colors"
-              >
-                {tm("goBack")}
-              </button>
-              <button
-                type="button"
-                onClick={handleWithdraw}
-                disabled={withdrawing}
-                className="flex-1 py-3 bg-red-600 text-white font-semibold rounded-full hover:bg-red-700 transition-colors disabled:opacity-50"
-              >
-                {withdrawing ? t("withdrawing") : tm("confirmWithdraw")}
-              </button>
-            </div>
-          </div>
+            {tm("goBack")}
+          </button>
+          <button
+            type="button"
+            onClick={handleWithdraw}
+            disabled={withdrawing}
+            className="flex-1 py-3 bg-red-600 text-white font-semibold rounded-full hover:bg-red-700 transition-colors disabled:opacity-50"
+          >
+            {withdrawing ? t("withdrawing") : tm("confirmWithdraw")}
+          </button>
         </div>
-      )}
+      </dialog>
 
       <BookingFooter />
     </div>

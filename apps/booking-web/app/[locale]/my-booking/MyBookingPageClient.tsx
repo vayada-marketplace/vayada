@@ -19,7 +19,14 @@ import { readLastBooking } from "@/lib/storage/bookingDraft";
 /** Today's date (YYYY-MM-DD) in the hotel's time zone. */
 function todayIn(timeZone?: string): string {
   try {
-    return new Intl.DateTimeFormat("en-CA", { timeZone: timeZone || "UTC" }).format(new Date());
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timeZone || "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+    const part = (type: string) => parts.find((value) => value.type === type)?.value;
+    return `${part("year")}-${part("month")}-${part("day")}`;
   } catch {
     return new Date().toISOString().slice(0, 10);
   }
