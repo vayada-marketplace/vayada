@@ -61,4 +61,6 @@ export const BOOKING_LAUNCH_BLOCKER_MESSAGES: Readonly<Record<string, string>> =
   provider_capability_lost:
     "Stripe card capability is unavailable. Review your Stripe account requirements.",
   bank_transfer_contract_unavailable: "Bank transfer is not available for setup.",
+  billing_plan_not_selected:
+    "Choose your vayada plan so guests can book. A Fixed Fee plan counts once it is active in Stripe.",
 });

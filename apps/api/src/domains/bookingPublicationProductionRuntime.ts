@@ -26,6 +26,7 @@ import {
   type BookingPublicationProjector,
 } from "./bookingPublicationProjector.js";
 import { createPgDistributionBookingPublicationProjection } from "./distributionBookingPublicationProjection.js";
+import { createTargetFinanceBillingConfigReadPort } from "./financeBillingConfigReadModel.js";
 import { createFinanceBookingLaunchEvidenceAdapter } from "./financeBookingLaunchEvidence.js";
 import type { FinancePaymentReadinessScopePort } from "./financePaymentReadinessReadModel.js";
 import { createFinanceBookingPublicationSnapshotPort } from "./financeBookingPublicationSnapshot.js";
@@ -180,8 +181,13 @@ export function createBookingPublicationProductionRuntime(config: {
     operatingCalendar: config.operatingCalendar,
     inventory: config.inventory,
   });
+  const billingPlan = createTargetFinanceBillingConfigReadPort({
+    connectionString: config.connectionString,
+    max: 1,
+  });
   const financeEvidence = createFinanceBookingLaunchEvidenceAdapter({
     financeReadPort: config.finance,
+    billingPlan,
     manualPayments: config.manualPayments,
     ...(config.financeScope ? { scope: config.financeScope } : {}),
   });
@@ -251,6 +257,7 @@ export function createBookingPublicationProductionRuntime(config: {
         attempts.close?.(),
         catalog.close(),
         booking.close(),
+        billingPlan.close?.(),
       ]);
     },
   };

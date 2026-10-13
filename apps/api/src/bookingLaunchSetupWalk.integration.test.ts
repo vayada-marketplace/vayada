@@ -33,6 +33,8 @@ import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore
 import { createPgBookingGuestPolicyScopeAuthorizationPort } from "./domains/bookingGuestPolicyScopeAuthorization.js";
 import { createBookingPublicationProductionRuntime } from "./domains/bookingPublicationProductionRuntime.js";
 import { createPgFinancePaymentReadinessCommandRepository } from "./domains/financePaymentReadinessCommandRepository.js";
+import { createFinanceSubscriptionService } from "./domains/financeSubscriptionService.js";
+import { createPgFinanceSubscriptionStore } from "./domains/financeSubscriptionStore.js";
 import { createFinanceManualPaymentReadinessReader } from "./domains/financeManualPaymentReadiness.js";
 import { createPgFinancePaymentReadinessReadModel } from "./domains/financePaymentReadinessReadModel.js";
 import { createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort } from "./domains/hotelCatalogOperatingCalendarPropertyProfileEvidence.js";
@@ -46,6 +48,7 @@ import { createPgPmsPhysicalRoomUnitReconcileRepository } from "./domains/pmsPhy
 import { createPgPmsPricingCommandRepository } from "./domains/pmsPricingCommandRepository.js";
 import { PMS_PRICING_CURRENCY_CHANGE_FAIL_CLOSED_GUARD } from "./domains/pmsPricingCurrencyCapabilities.js";
 import { createPgPmsPricingReadModel } from "./domains/pmsPricingReadModel.js";
+import { createTargetPmsRoomInventoryReadPort } from "./domains/pmsRoomInventoryReadModel.js";
 import { createPmsRoomAmenityVocabularyValidationPort } from "./domains/pmsRoomAmenityVocabulary.js";
 import { createPgPmsRoomFactsCommandRepository } from "./domains/pmsRoomFactsCommandRepository.js";
 import { createPgPmsRoomFactsReadModel } from "./domains/pmsRoomFactsReadModel.js";
@@ -315,6 +318,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           "booking.guest_experience:guest_policy_not_configured",
           "booking.hotel_profile:hotel_profile_incomplete",
           "booking.page_style:booking_design_missing",
+          "booking.payments:billing_plan_not_selected",
           "booking.payments:payment_methods_not_configured",
           "booking.pricing:pricing_not_published",
           "booking.rooms:publishable_room_required",
@@ -893,7 +897,34 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       );
       await savePrices([gardenSuite, seaSuite], 2);
 
-      // 10. Ready with no admin action, then "Publish booking page".
+      // 10. Everything is set up but the billing plan: guests couldn't book yet (VAY-2171).
+      const withoutPlan = await readiness();
+      expect(blockerCodes(withoutPlan)).toEqual(["booking.payments:billing_plan_not_selected"]);
+      expect(withoutPlan).toMatchObject({ outcome: "evaluated", status: "blocked" });
+      // "Your vayada plan" in Payments confirms Commission, through the select-commission service.
+      const roomInventory = createTargetPmsRoomInventoryReadPort({ connectionString: cs });
+      const plans = createFinanceSubscriptionService({
+        store: createPgFinanceSubscriptionStore({ connectionString: cs, max: 2 }),
+        roomInventory,
+        pricing: pricingRead,
+        returnBaseUrls: { bookingAdmin: "https://admin.booking.example.test" },
+      });
+      closers.push(() => plans.close?.() ?? Promise.resolve());
+      expect(
+        await plans.selectCommissionPlan({
+          commandId: `plan-${suffix}`,
+          idempotencyKey: `plan-${suffix}`,
+          ...scope,
+          audit: {
+            actor: { kind: "user", userId: owner, organizationId },
+            requestId: `plan-${suffix}`,
+            reason: "Select Commission Plan",
+            requestedAt: now(),
+          },
+        }),
+      ).toMatchObject({ ok: true, value: { planStatus: { plan: "commission" } } });
+
+      // Ready with no admin action, then "Publish booking page".
       const ready = await readiness();
       expect(blockerCodes(ready)).toEqual([]);
       expect(ready).toMatchObject({ outcome: "evaluated", status: "ready" });
