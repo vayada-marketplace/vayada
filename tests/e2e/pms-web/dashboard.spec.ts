@@ -1,6 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Route } from "@playwright/test";
 
 import {
+  PMS_WEB_OWNER_PERMISSIONS,
   PMS_WEB_PROPERTY_ID,
   mockPmsWebAuthenticatedSession,
   mockPmsWebTargetRoutes,
@@ -252,3 +253,146 @@ test("browses arrivals and departures independently across property-local dates"
     true,
   );
 });
+
+// Staff permissions (packages/backend-auth lifecycle.ts). The API refuses each role the reads its
+// permissions lack, as the VAY-2152 PostgreSQL role suite shows. The 0203 presets differ for front
+// desk (no rooms & rates read) and housekeeping (no reservations); VAY-2168 tracks both.
+const FRONT_DESK_PERMISSIONS = [
+  "pms.dashboard.read",
+  "pms.dashboard.operations.read",
+  "pms.calendar.read",
+  "pms.calendar.manage",
+  "pms.reservation.read",
+  "pms.reservation.update",
+  "pms.inbox.read",
+  "pms.inbox.reply",
+  "pms.room_status.read",
+  "pms.rooms_rates.read",
+  "pms.guest_contact.read",
+];
+const RESERVATION_MANAGER_PERMISSIONS = [
+  "pms.dashboard.read",
+  "pms.dashboard.operations.read",
+  "pms.calendar.read",
+  "pms.calendar.manage",
+  "pms.reservation.read",
+  "pms.reservation.update",
+  "pms.reservation.cancel",
+  "pms.guest_contact.read",
+  "pms.inbox.read",
+  "pms.inbox.reply",
+  "pms.room_status.read",
+  "pms.rooms_rates.read",
+  "pms.rooms_rates.manage",
+  "pms.finance.read",
+  "pms.channel_manager.read",
+];
+const HOUSEKEEPING_PERMISSIONS = [
+  "pms.dashboard.read",
+  "pms.calendar.read",
+  "pms.room_status.read",
+];
+
+for (const testCase of [
+  { role: "owner", permissions: PMS_WEB_OWNER_PERMISSIONS, refused: [], finance: true },
+  {
+    role: "owner whose payment settings fail",
+    permissions: PMS_WEB_OWNER_PERMISSIONS,
+    refused: [],
+    failing: ["payment-settings"],
+    finance: true,
+  },
+  {
+    role: "front desk",
+    permissions: FRONT_DESK_PERMISSIONS,
+    refused: ["payment-settings"],
+    finance: false,
+  },
+  {
+    role: "reservation manager",
+    permissions: RESERVATION_MANAGER_PERMISSIONS,
+    refused: [],
+    finance: false,
+  },
+  {
+    role: "housekeeping",
+    permissions: HOUSEKEEPING_PERMISSIONS,
+    refused: ["payment-settings", "reservations*", "room-types*"],
+    finance: false,
+  },
+]) {
+  test(`shows revenue and average rate to the ${testCase.role} only with dashboard finance access`, async ({
+    page,
+  }) => {
+    await page.clock.install({ time: new Date("2026-08-15T10:00:00Z") });
+    await mockPmsWebAuthenticatedSession(page);
+    await mockPmsWebTargetRoutes(page);
+    await page.route("**/api/identity/staff/self-access", (route) =>
+      route.fulfill({
+        json: {
+          membershipId: `${testCase.role}-membership`,
+          roleKey: "hotel_custom",
+          permissions: testCase.permissions,
+        },
+      }),
+    );
+    await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/reservations*`, (route) =>
+      route.fulfill({
+        json: {
+          contractVersion: "pms-operations.v1",
+          propertyId: PMS_WEB_PROPERTY_ID,
+          items: [
+            {
+              ...pmsWebReservation,
+              pricing: {
+                totalAmount: { amountDecimal: "240.00", currency: "EUR" },
+                balanceAmount: { amountDecimal: "240.00", currency: "EUR" },
+              },
+            },
+          ],
+          pagination: { total: 1, limit: 500, offset: 0 },
+          sourceFreshness: {},
+        },
+      }),
+    );
+    const refuse = (route: Route) =>
+      route.fulfill({
+        status: 403,
+        json: { code: "missing_permission", message: "Missing required permission." },
+      });
+    for (const path of testCase.refused) {
+      await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/${path}`, refuse);
+    }
+    for (const path of testCase.failing ?? []) {
+      await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/${path}`, (route) =>
+        route.fulfill({ status: 500, json: { code: "internal_error" } }),
+      );
+    }
+    let paymentSettingsReads = 0;
+    page.on("request", (request) => {
+      if (request.url().includes("/payment-settings")) paymentSettingsReads += 1;
+    });
+
+    await page.goto("/dashboard");
+
+    const arrivals = page.locator('section[aria-labelledby="arrivals-heading"]');
+    await expect(page.getByText("Occupancy Tonight", { exact: true })).toBeVisible();
+    // Housekeeping cannot read reservations (VAY-2168); every other role keeps its desk lists.
+    if (testCase.refused.includes("reservations*")) {
+      await expect(arrivals).not.toContainText("Ada Lovelace");
+    } else {
+      await expect(arrivals).toContainText("Ada Lovelace");
+    }
+    const revenue = page.getByText("Revenue This Month", { exact: true });
+    const averageRateLegend = page.getByText("ADR (EUR)", { exact: true });
+    if (testCase.finance) {
+      await expect(revenue.locator("../..")).toContainText("€240");
+      await expect(averageRateLegend).toBeVisible();
+      expect(paymentSettingsReads).toBeGreaterThan(0);
+    } else {
+      await expect(revenue).toHaveCount(0);
+      await expect(averageRateLegend).toHaveCount(0);
+      expect(paymentSettingsReads).toBe(0);
+    }
+  });
+}
