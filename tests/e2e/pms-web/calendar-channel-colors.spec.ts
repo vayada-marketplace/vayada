@@ -84,7 +84,8 @@ test.describe("PMS calendar channel colours", () => {
     await page.goto("/calendar");
     await page.getByRole("button", { name: "Room view options" }).click();
     await page.getByRole("button", { name: "Month", exact: true }).click();
-    const bar = (guest: string) => page.locator("main button", { hasText: guest }).first();
+    // The hidden mobile calendar is in the DOM too; pick the visible month-view bar.
+    const bar = (guest: string) => page.locator("main button:visible", { hasText: guest }).first();
     await expect(bar("Eve Expedia")).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("calendar-month.png") });
 

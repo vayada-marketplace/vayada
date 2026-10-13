@@ -3,9 +3,17 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-// Folders without class names: assets, translations, and services/ (API
-// clients, no markup).
-const unstyledFolders = new Set(["node_modules", "public", "messages", "coverage", "services"]);
+// Folders without class names: dependencies, build output, assets, translations,
+// and services/ (API clients, no markup).
+const unstyledFolders = new Set([
+  "node_modules",
+  "out",
+  "build",
+  "coverage",
+  "public",
+  "messages",
+  "services",
+]);
 
 describe("PMS Web Tailwind content", () => {
   // VAY-2153: lib/ was not scanned, so classes that only appear there (the
