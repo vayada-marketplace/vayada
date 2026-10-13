@@ -21,6 +21,8 @@ export type ManualEarliestArrival = Partial<Record<ManualMethod, string>>;
 export type BookingPagePayment = {
   methods: PricingPaymentMethod[];
   earliestArrival: ManualEarliestArrival;
+  /** The hotel's own Terms & Conditions; null when it has none or they can't be read (VAY-2176). */
+  termsText: string | null;
 };
 
 /** The payment methods /book offers, from the hotel's checkout settings (VAY-2139). */
@@ -28,22 +30,26 @@ export async function getBookingPagePayment(
   slug: string,
   signal?: AbortSignal,
 ): Promise<BookingPagePayment> {
+  let config: Record<string, unknown> | null = null;
   try {
-    const config = await bookingWebPublic.get<Record<string, unknown>>(
+    config = await bookingWebPublic.get<Record<string, unknown>>(
       `/api/booking-web/hotels/${encodeURIComponent(slug)}/checkout-config`,
       { signal, cache: "no-store" },
     );
-    // An empty list means the hotel offers no method here; only a missing list means an older API.
-    const methods = config?.bookingPagePaymentMethods;
-    if (Array.isArray(methods) && methods.every(isPricingPaymentMethod))
-      return {
-        methods: Array.from(new Set(methods)),
-        earliestArrival: earliestArrival(config?.manualPaymentEarliestArrival),
-      };
   } catch (error) {
     if (signal?.aborted) throw error;
   }
-  return { methods: [...DEFAULT_METHODS], earliestArrival: {} };
+  const terms = config?.termsText;
+  const termsText = typeof terms === "string" && terms.trim() ? terms.trim() : null;
+  // An empty list means the hotel offers no method here; only a missing list means an older API.
+  const methods = config?.bookingPagePaymentMethods;
+  if (Array.isArray(methods) && methods.every(isPricingPaymentMethod))
+    return {
+      methods: Array.from(new Set(methods)),
+      earliestArrival: earliestArrival(config?.manualPaymentEarliestArrival),
+      termsText,
+    };
+  return { methods: [...DEFAULT_METHODS], earliestArrival: {}, termsText };
 }
 
 export async function getBookingPagePaymentMethods(
@@ -55,7 +61,7 @@ export async function getBookingPagePaymentMethods(
 
 /** The methods for this arrival date: bank transfer and PayPal only from their earliest date. */
 export function bookingPageMethodsForArrival(
-  { methods, earliestArrival: earliest }: BookingPagePayment,
+  { methods, earliestArrival: earliest }: Pick<BookingPagePayment, "methods" | "earliestArrival">,
   checkIn: string,
 ): PricingPaymentMethod[] {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(checkIn)) return methods;
