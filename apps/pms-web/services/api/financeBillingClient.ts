@@ -7,8 +7,15 @@ export type BillingPaymentMethod = "card" | "bank_transfer";
 export type BillingOverview = {
   propertyId: string;
   planStatus: {
-    plan: BillingPlan;
-    status: "commission" | "checkout_pending" | "active" | "past_due" | "cancel_at_period_end";
+    /** Null until the hotel chooses a plan (VAY-2171). */
+    plan: BillingPlan | null;
+    status:
+      | "not_selected"
+      | "commission"
+      | "checkout_pending"
+      | "active"
+      | "past_due"
+      | "cancel_at_period_end";
     currency: string;
     activeRoomCount: number;
     amountMinor: number;

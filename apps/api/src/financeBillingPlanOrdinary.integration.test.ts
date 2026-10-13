@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { FinanceSubscriptionCommandContext } from "@vayada/domain-finance";
 import pg from "pg";
 import { describe, expect, it } from "vitest";
+import { createTargetFinanceBillingConfigReadPort } from "./domains/financeBillingConfigReadModel.js";
 import { createPgFinanceSubscriptionStore } from "./domains/financeSubscriptionStore.js";
 import { createHotelSetupOrdinaryLoginFixture } from "./hotelSetupOrdinaryLogin.fixture.js";
 import {
@@ -27,7 +28,7 @@ describe.skipIf(!url)("billing plan writes on the ordinary API login (VAY-2171)"
     const store = createPgFinanceSubscriptionStore({ connectionString: "", pool });
     const webhooks = createPgFinanceSubscriptionWebhookStore(pool);
     const suffix = randomUUID().replaceAll("-", "");
-    const [organizationId, propertyId] = [randomUUID(), randomUUID()];
+    const [organizationId, propertyId, directId] = [randomUUID(), randomUUID(), randomUUID()];
     const command = (name: string): FinanceSubscriptionCommandContext => ({
       commandId: `${name}-${suffix}`,
       idempotencyKey: `${name}-${suffix}`,
@@ -57,10 +58,11 @@ describe.skipIf(!url)("billing plan writes on the ordinary API login (VAY-2171)"
         "INSERT INTO identity.organizations(id,kind,name,slug) VALUES($1,'hotel_group','Plan fixture',$2)",
         [organizationId, `p${suffix}`],
       );
-      await admin.query(
-        "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::uuid::text,'Plan fixture')",
-        [propertyId],
-      );
+      for (const id of [propertyId, directId])
+        await admin.query(
+          "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::uuid::text,'Plan fixture')",
+          [id],
+        );
 
       // Choose Commission: inserts the billing entitlement, so the trigger inserts the identity row.
       const planStatus = { propertyId } as never;
@@ -142,12 +144,38 @@ describe.skipIf(!url)("billing plan writes on the ordinary API login (VAY-2171)"
         }),
       ).resolves.toMatchObject({ planKey: "fixed" });
       expect(await identity()).toEqual([{ status: "active", planKey: "fixed", linked: true }]);
+
+      // PMS Fixed activation for a hotel that never chose a plan still writes the 5% booking rule,
+      // so Finance's billing config (what booking readiness reads) counts the plan.
+      const direct = (name: string) => ({ ...command(name), propertyId: directId });
+      await store.recordBillingDetails(
+        {
+          ...direct("direct-details"),
+          billingDetails: { companyName: "Direct", billingEmail: "d@example.test", taxId: null },
+        },
+        `cus_direct_${suffix}`,
+        {} as never,
+      );
+      await store.recordFixedActivation(
+        direct("direct-fixed"),
+        { ...snapshot, subscriptionId: `sub_direct_${suffix}`, customerId: `cus_direct_${suffix}` },
+        { planStatus: { amountMinor: 3_000, currency: "EUR", activeRoomCount: 1 } } as never,
+        "card",
+      );
+      await expect(
+        createTargetFinanceBillingConfigReadPort({ connectionString: "", pool }).getBillingConfig(
+          directId,
+        ),
+      ).resolves.toMatchObject({ activePlan: "fixed", bookingEngineFeePercent: 5 });
     } finally {
       await pool.end();
-      await admin.query("DELETE FROM finance.billing_entitlements WHERE property_id=$1", [
-        propertyId,
+      const properties = [propertyId, directId];
+      await admin.query("DELETE FROM finance.billing_entitlements WHERE property_id=ANY($1)", [
+        properties,
       ]);
-      await admin.query("DELETE FROM finance.commission_rules WHERE property_id=$1", [propertyId]);
+      await admin.query("DELETE FROM finance.commission_rules WHERE property_id=ANY($1)", [
+        properties,
+      ]);
       await admin.query("DELETE FROM identity.product_entitlements WHERE organization_id=$1", [
         organizationId,
       ]);
