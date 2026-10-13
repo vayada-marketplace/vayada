@@ -38,12 +38,13 @@ import { createBookingPublicationProductionRuntime } from "./domains/bookingPubl
 import { createPgFinancePaymentReadinessCommandRepository } from "./domains/financePaymentReadinessCommandRepository.js";
 import { configureActiveBookingPublicationGate } from "./domains/activeBookingPublicationGate.js";
 import { createFinanceManualPaymentReadinessReader } from "./domains/financeManualPaymentReadiness.js";
-import { createFixedChargePolicyStore } from "./domains/fixedChargePolicyStore.js";
+import { createPgFinanceSubscriptionStore } from "./domains/financeSubscriptionStore.js";
 import { createPgFinancePaymentReadinessReadModel } from "./domains/financePaymentReadinessReadModel.js";
 import { createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort } from "./domains/hotelCatalogOperatingCalendarPropertyProfileEvidence.js";
 import { createPgHotelCatalogStep1Repository } from "./domains/hotelCatalogStep1Repository.js";
 import { createPgHotelSetupTrackCommandRepository } from "./domains/hotelSetupTrackCommandRepository.js";
 import { createPgPlatformPropertyLifecycleCommandRepository } from "./domains/platformPropertyLifecycleCommandRepository.js";
+import { processNextPmsAcceptedPricingReservationJob } from "./domains/pmsAcceptedPricingReservationWorker.js";
 import { createTargetPmsInventoryReservationPort } from "./domains/pmsInventoryReservation.js";
 import { createPgPmsOperatingCalendarReadModel } from "./domains/pmsOperatingCalendarReadModel.js";
 import { createPmsOperatingCalendarProductionRuntime } from "./domains/pmsOperatingCalendarProductionRuntime.js";
@@ -691,11 +692,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       const pricing = createReplacementPricingCommands(pool, context);
       // Like the Prices step, terms are staged only for rooms that have none yet.
       const termsByRoom = new Map<string, string>();
-      const savePrices = async (
-        roomTypeIds: readonly string[],
-        revision: number,
-        fixedChargePolicy?: string,
-      ) => {
+      const savePrices = async (roomTypeIds: readonly string[], revision: number) => {
         const draftId = randomUUID();
         const draft = { draftId, baseRevision: revision - 1 };
         const priced = [];
@@ -733,22 +730,17 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           }),
         ).toBe(1);
         const review = (await pricing.reviewCharges(propertyId, draftId))!;
-        // Like the Prices step, unless the hotel adopted a fixed-charge policy.
-        const charges =
-          fixedChargePolicy ??
-          (
-            await pricing.confirmCharges(propertyId, {
-              draftId,
-              expectedDraftRevision: 1,
-              claimedFingerprint: review.fingerprint,
-              declaration: "all_mandatory_charges_included",
-              declaredVia: "save_prices",
-              requestId: randomUUID(),
-            })
-          ).id;
+        const charges = await pricing.confirmCharges(propertyId, {
+          draftId,
+          expectedDraftRevision: 1,
+          claimedFingerprint: review.fingerprint,
+          declaration: "all_mandatory_charges_included",
+          declaredVia: "save_prices",
+          requestId: randomUUID(),
+        });
         const snapshot = {
           ...review.snapshot,
-          ownerReferences: { ...review.snapshot.ownerReferences, charges },
+          ownerReferences: { ...review.snapshot.ownerReferences, charges: charges.id },
         };
         expect(
           await pricing.saveDraft(propertyId, {
@@ -1011,6 +1003,8 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
             pool,
             mediaServing: serving,
             inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+            replacementPricingAcceptanceEnabled: true,
+            replacementPricingRequestAcceptanceEnabled: true,
           }),
         });
         const slug = content.profile.hotel.slug;
@@ -1055,27 +1049,97 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
             },
           });
         };
-        // Prices saved the Prices-step way declare "all mandatory charges included", which public
-        // quotes can't price yet: they need a fixed-charge policy, which no route creates.
-        const unavailable = await quoteSeaSuite();
-        expect(unavailable.statusCode, unavailable.body).toBe(404);
-        expect(unavailable.json()).toMatchObject({ message: "Quote unavailable." });
-        const fixedCharges = await createFixedChargePolicyStore(pool).save(
-          context,
-          { propertyId, organizationId, actorUserId: owner },
-          {
-            requestId: randomUUID(),
-            expectedRevision: null,
-            policy: { version: "booking.fixed-charges.v1", currency: "EUR", charges: [] },
-          },
-        );
-        await savePrices(
-          [gardenSuite, seaSuite],
-          3,
-          `booking.fixed-charge-policy.v1:${fixedCharges.revision}`,
-        );
+        // TEST ONLY's prices declare "all mandatory charges included": the quote is the room price
+        // with no extra charges, and the guest can book the stay (VAY-2134).
         const quote = await quoteSeaSuite();
         expect(quote.statusCode, quote.body).toBe(200);
+        const quoted = quote.json() as {
+          quoteId: string;
+          totalMinor: string;
+          lines: { kind: string; amountMinor: string }[];
+        };
+        expect(quoted.lines.length).toBeGreaterThan(0);
+        expect(quoted.lines.filter(({ kind }) => kind === "charge")).toEqual([]);
+        const disclosure = (await read(
+          `/hotels/${slug}/bookings/quotes/${quoted.quoteId}/guest-disclosure`,
+        )) as { quoteEvidenceId: string; guestPolicyEvidenceId: string };
+        // Taking a booking needs a billing plan: the hotel picks the commission plan, as on the
+        // Billing page (POST /api/finance/properties/:id/select-commission). Setup doesn't ask for
+        // it yet, so a "Ready" hotel without one can't accept bookings. Test setup, written on the
+        // admin connection: the production-shaped login can't write the entitlement's identity row.
+        const billingPool = new pg.Pool({ connectionString: url, max: 1 });
+        closers.push(() => billingPool.end());
+        await createPgFinanceSubscriptionStore({
+          connectionString: url!,
+          pool: billingPool,
+        }).recordCommissionSelection(
+          {
+            commandId: randomUUID(),
+            idempotencyKey: `commission-${suffix}`,
+            propertyId,
+            organizationId,
+            audit: {
+              actor: { kind: "user", userId: owner, organizationId },
+              requestId: `commission-${suffix}`,
+              reason: "Select Commission Plan",
+              requestedAt: new Date().toISOString(),
+            },
+          },
+          // Stored as the command's idempotent result only.
+          { planStatus: { plan: "commission", status: "commission" } } as never,
+        );
+        const acceptanceKey = randomUUID();
+        const accepted = await site.inject({
+          method: "POST",
+          url: `/api/booking-web/hotels/${slug}/bookings/quotes/${quoted.quoteId}/accept`,
+          headers: { "Idempotency-Key": acceptanceKey },
+          payload: {
+            version: "booking-quote-acceptance.v1",
+            requestId: acceptanceKey,
+            quoteId: quoted.quoteId,
+            acceptance: {
+              accepted: true,
+              quoteEvidenceId: disclosure.quoteEvidenceId,
+              guestPolicyEvidenceId: disclosure.guestPolicyEvidenceId,
+            },
+            guest: {
+              firstName: "Walk",
+              lastName: "Guest",
+              email: `guest-${suffix}@example.test`,
+              phone: "+94 77 123 4567",
+              countryCode: "LK",
+              arrivalTime: null,
+              specialRequests: null,
+            },
+          },
+        });
+        expect(accepted.statusCode, accepted.body).toBe(200);
+        expect(accepted.json()).toMatchObject({
+          kind: "accepted",
+          bookingReference: expect.any(String),
+        });
+        // The booking queued its PMS reservation: the worker adopts it, which also leaves nothing
+        // queued for another suite's worker on the same database.
+        const outcomes: string[] = [];
+        const workerClient = await billingPool.connect();
+        try {
+          for (let attempt = 0; attempt < 5 && outcomes.at(-1) !== "empty"; attempt += 1) {
+            await workerClient.query("BEGIN");
+            try {
+              outcomes.push(
+                await processNextPmsAcceptedPricingReservationJob(workerClient, `walk-${suffix}`),
+              );
+              await workerClient.query("COMMIT");
+            } catch (error) {
+              await workerClient.query("ROLLBACK");
+              throw error;
+            }
+          }
+        } finally {
+          workerClient.release();
+        }
+        expect(outcomes).toContain("adopted");
+        expect(outcomes.at(-1)).toBe("empty");
       }
       if (manualMethod) {
         // Once the site serves setup publications, prices follow the page: hidden while bank
