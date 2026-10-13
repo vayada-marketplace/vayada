@@ -1,6 +1,5 @@
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
-import AddonsStep from "./AddonsStep";
 import { AddonEditor, emptyAddonValues } from "./AddonEditor";
 
 describe("shared add-on editor", () => {
@@ -139,50 +138,5 @@ it("picks a category chip, labels the price by pricing model and opens More opti
     perPerson: true,
     perNight: true,
     maxQuantity: "2",
-  });
-});
-
-it("onboarding retains managed media references in the same editor model", async () => {
-  const setAddons = vi.fn();
-  const upload = vi
-    .fn()
-    .mockResolvedValue({ mediaObjectId: "managed-photo", publicUrl: "https://media.test/photo" });
-  let view: ReactTestRenderer;
-  await act(async () => {
-    view = create(
-      <AddonsStep
-        addons={[]}
-        setAddons={setAddons}
-        currency="EUR"
-        error=""
-        canProceed
-        onBack={() => {}}
-        onContinue={() => {}}
-        stepIndicators={null}
-        uploadImage={upload}
-      />,
-    );
-  });
-  await act(async () => {
-    view!.root.findAllByType("button")[0].props.onClick();
-  });
-  const file = new File(["image"], "photo.png", { type: "image/png" });
-  await act(async () => {
-    await view!.root.findByType(AddonEditor).props.onSave({
-      ...emptyAddonValues("EUR"),
-      name: "Breakfast",
-      price: "15.00",
-      photos: [{ file, imageUrl: "blob:preview", mediaObjectId: null, isCover: true }],
-    });
-  });
-  expect(upload).toHaveBeenCalledWith(file);
-  expect(setAddons.mock.calls[0][0][0]).toMatchObject({
-    name: "Breakfast",
-    price: "15.00",
-    currency: "EUR",
-    image: "https://media.test/photo",
-    photos: [
-      { imageUrl: "https://media.test/photo", mediaObjectId: "managed-photo", isCover: true },
-    ],
   });
 });

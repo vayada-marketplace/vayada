@@ -901,7 +901,6 @@ function setupUrl(baseURL: string | undefined) {
     returnTo: "/marketplace",
     propertyId,
     step: "rooms",
-    _adaptive: "1",
   });
   if (!baseURL) return `/setup?${query.toString()}`;
   const url = new URL(baseURL);

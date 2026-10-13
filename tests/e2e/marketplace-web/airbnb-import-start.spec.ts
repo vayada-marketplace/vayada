@@ -55,7 +55,7 @@ for (const scenario of ["success", "not-ready", "failure", "unsafe-url", "retry"
   });
 }
 
-for (const entry of ["earlier", "adaptive", "invite-pms", "invite-combined"] as const) {
+for (const entry of ["adaptive", "invite-pms", "invite-combined"] as const) {
   test(`Airbnb entry for automatically selected hotel: ${entry}`, async ({ page }) => {
     const invited = entry.startsWith("invite-");
     const entryProduct = entry === "invite-combined" ? "marketplace" : "pms";
@@ -152,7 +152,7 @@ for (const entry of ["earlier", "adaptive", "invite-pms", "invite-combined"] as 
         await page.evaluate(() => sessionStorage.getItem("vayada.hotel-account-invite.v1")),
       ).toBeNull();
     } else {
-      await page.goto(`/setup?entryProduct=pms${entry === "adaptive" ? "&_adaptive=1" : ""}`);
+      await page.goto("/setup?entryProduct=pms");
     }
     const link = page.getByRole("link", {
       name: "Connect Airbnb to import rooms (opens in a new tab)",

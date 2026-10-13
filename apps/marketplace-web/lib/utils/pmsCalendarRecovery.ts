@@ -1,5 +1,5 @@
-// An explicit PMS repair entry uses canonical setup even before the general
-// onboarding rollout. The setup route and each command still authorize access.
+// An explicit PMS repair entry goes straight to canonical setup. The setup route
+// and each command still authorize access.
 export function isPmsCalendarRecovery(
   params: Record<string, string | string[] | undefined>,
 ): boolean {

@@ -1,6 +1,6 @@
 "use client";
 
-/** One plan option, shared by the old setup task and the Payments step (VAY-2171). */
+/** One plan option in the Payments step's billing plan choice (VAY-2171). */
 export function PlanCard({
   badge,
   checked,

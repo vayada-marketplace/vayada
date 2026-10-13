@@ -775,7 +775,6 @@ function setupUrl(baseURL: string | undefined, step: PropertySetupStepId) {
     returnTo: "/marketplace",
     propertyId,
     step,
-    _adaptive: "1",
   });
   if (!baseURL) return `/setup?${query.toString()}`;
   const url = new URL(baseURL);

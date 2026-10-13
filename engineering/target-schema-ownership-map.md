@@ -466,12 +466,13 @@ dispositions:
   `packages/backend-migration/migrations/0040_adaptive_hotel_setup.sql` and the
   `updateTracks` repository path. It is the existing canonical route-intent
   storage, not part of the retired task/handoff model.
-- **Delete or reduce Marketplace task routing:** remove
-  `apps/marketplace-web/components/setup/SetupTaskFormRouter.tsx`,
-  `MarketplaceSetupTaskForm.tsx`, `components/setup/operations/*`,
-  `services/api/hotelOperationsSetupClient.ts`, and their tests. Reduce
-  `components/setup/SharedHotelSetupPage.tsx` to prerequisite/canonical setup
-  hosting. Do not recreate the removed profile-completion task context. Preserve
+- **Delete or reduce Marketplace task routing:** done in VAY-2174.
+  `SetupTaskFormRouter.tsx`, `MarketplaceSetupTaskForm.tsx` and
+  `components/setup/operations/*` are deleted (`PlanCard` moved to
+  `adaptive/final/`). `services/api/hotelOperationsSetupClient.ts` keeps only
+  launch settings, billing plan and Stripe calls, and
+  `components/setup/SharedHotelSetupPage.tsx` only hosts prerequisite/canonical
+  setup. Do not recreate the removed profile-completion task context. Preserve
   Marketplace authentication handoff/login behavior and its tests.
 - **Keep cross-product task destinations absent:** the Booking Admin and PMS
   setup-task route utilities and destination adapters were removed before merge;

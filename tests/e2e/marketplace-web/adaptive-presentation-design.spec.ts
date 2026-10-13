@@ -809,7 +809,6 @@ function setupUrl(baseURL: string | undefined, step?: PropertySetupStepId) {
     returnProduct: "marketplace",
     returnTo: "/marketplace",
     propertyId,
-    _adaptive: "1",
   });
   if (step) query.set("step", step);
   if (!baseURL) return `/setup?${query.toString()}`;
