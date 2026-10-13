@@ -84,6 +84,8 @@
   "auth.login.unexpectedError": "Ocurrio un error inesperado. Por favor, intente nuevamente.",
   "auth.login.sessionExpiredBanner": "Su sesion ha expirado. Por favor, inicie sesion nuevamente.",
   "auth.login.signOut": "Cerrar sesion",
+  "auth.login.hotelWorkspaceRequired": "Esta cuenta todavía no está vinculada a ningún hotel. Si un hotel le invitó, abra el correo de invitación o pídale que se lo vuelva a enviar.",
+  "auth.login.setUpHotel": "Configurar su hotel",
   "auth.register.title": "vayada PMS",
   "auth.register.subtitle": "Cree su cuenta de gestion de propiedades",
   "auth.register.fullNameLabel": "Nombre completo",

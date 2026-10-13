@@ -23,6 +23,8 @@
   "auth.login.errorValidation": "Error de validación.",
   "auth.login.errorUnexpected": "Ha ocurrido un error inesperado. Por favor, inténtelo de nuevo.",
   "auth.login.errorSessionExpired": "Su sesión ha expirado. Por favor, inicie sesión de nuevo.",
+  "auth.login.hotelWorkspaceRequired": "Esta cuenta todavía no está vinculada a ningún hotel. Si un hotel le invitó, abra el correo de invitación o pídale que se lo vuelva a enviar.",
+  "auth.login.setUpHotel": "Configurar su hotel",
   "auth.register.fullNameLabel": "Nombre completo",
   "auth.register.fullNamePlaceholder": "Juan García",
   "auth.register.emailLabel": "Correo electrónico",

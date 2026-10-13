@@ -23,6 +23,8 @@
   "auth.login.errorValidation": "Validierungsfehler.",
   "auth.login.errorUnexpected": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es erneut.",
   "auth.login.errorSessionExpired": "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
+  "auth.login.hotelWorkspaceRequired": "Dieses Konto ist noch mit keinem Hotel verbunden. Wenn Sie von einem Hotel eingeladen wurden, öffnen Sie die Einladungs-E-Mail oder bitten Sie um eine neue Einladung.",
+  "auth.login.setUpHotel": "Hotel einrichten",
   "auth.register.fullNameLabel": "Vollständiger Name",
   "auth.register.fullNamePlaceholder": "Max Mustermann",
   "auth.register.emailLabel": "E-Mail-Adresse",

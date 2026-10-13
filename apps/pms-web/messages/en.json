@@ -94,6 +94,8 @@
   "auth.login.workosReturnComplete": "Continue by signing in with your email address. If you were invited to a team, use the invited address.",
   "auth.login.workosReturnFailed": "We could not finish this sign-in or invitation. Please reopen the email link or request a new one.",
   "auth.login.invitationPending": "We could not open this account. If you just accepted a team invitation, wait a moment and try again. Otherwise, contact your team admin.",
+  "auth.login.hotelWorkspaceRequired": "This account isn't connected to a hotel yet. If a hotel invited you, open the invitation email or ask them to send it again.",
+  "auth.login.setUpHotel": "Set up your hotel",
   "auth.login.googleLogin": "Continue with Google",
   "auth.login.or": "or",
   "auth.register.title": "vayada PMS",

@@ -83,6 +83,8 @@
   "auth.login.unexpectedError": "Une erreur inattendue s'est produite. Veuillez reessayer.",
   "auth.login.sessionExpiredBanner": "Votre session a expire. Veuillez vous reconnecter.",
   "auth.login.signOut": "Se deconnecter",
+  "auth.login.hotelWorkspaceRequired": "Ce compte n'est encore associé à aucun hôtel. Si un hôtel vous a invité, ouvrez l'e-mail d'invitation ou demandez-lui de vous le renvoyer.",
+  "auth.login.setUpHotel": "Configurer votre hôtel",
   "auth.register.title": "vayada PMS",
   "auth.register.subtitle": "Creez votre compte de gestion d'etablissement",
   "auth.register.fullNameLabel": "Nom complet",

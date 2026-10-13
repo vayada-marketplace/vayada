@@ -599,6 +599,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         reply,
         state.value,
         error instanceof Error ? error.message : "Google sign-in failed. Please try again.",
+        error instanceof HotelWorkspaceRequiredError ? HOTEL_WORKSPACE_REQUIRED : undefined,
       );
     }
 
@@ -726,7 +727,13 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         workosSessionId: session.sessionId,
       });
       request.log.warn({ err: error }, "Password login identity resolution failed");
-      return reply.code(403).send(toAuthError(error));
+      return reply
+        .code(403)
+        .send(
+          error instanceof HotelWorkspaceRequiredError
+            ? { ...toAuthError(error), state: HOTEL_WORKSPACE_REQUIRED }
+            : toAuthError(error),
+        );
     }
 
     if (parsed.organizationId && resolution.session.organizationId !== parsed.organizationId) {
@@ -2339,9 +2346,15 @@ function isPasswordSignupVerificationState(
   );
 }
 
-function redirectWithOAuthError(reply: FastifyReply, state: GoogleOAuthState, message: string) {
+function redirectWithOAuthError(
+  reply: FastifyReply,
+  state: GoogleOAuthState,
+  message: string,
+  code?: string,
+) {
   const url = new URL(state.errorReturnTo);
   url.searchParams.set("auth_error", message);
+  if (code) url.searchParams.set("auth_error_code", code);
   return reply.redirect(url.toString());
 }
 
@@ -3555,6 +3568,11 @@ class AuthAuthorizationError extends Error {
   }
 }
 
+// The account signed in but has no hotel workspace yet. Login pages offer hotel setup.
+const HOTEL_WORKSPACE_REQUIRED = "hotel_workspace_required";
+
+class HotelWorkspaceRequiredError extends AuthAuthorizationError {}
+
 function isTerminalHandoffAuthorizationError(error: unknown): boolean {
   return (
     error instanceof AuthAuthorizationError || error instanceof OrganizationSelectionRequiredError
@@ -3619,11 +3637,18 @@ async function resolveSelectableOrganization(
     return { session };
   }
 
-  throw new AuthAuthorizationError(
-    `No active ${requiredOrganizationKindLabel(
-      surfacePolicy.requiredOrganizationKind,
-    )} organization is available for this surface`,
-  );
+  const message = `No active ${requiredOrganizationKindLabel(
+    surfacePolicy.requiredOrganizationKind,
+  )} organization is available for this surface`;
+  if (surfacePolicy.requiredOrganizationKind === "hotel_group") {
+    // Only accounts that never belonged to a hotel get the setup offer; removed staff do not.
+    const memberships =
+      (await options.identityRepository.listMembershipOrganizations?.(user.userId)) ?? [];
+    if (!memberships.some((membership) => membership.kind === "hotel_group")) {
+      throw new HotelWorkspaceRequiredError(message);
+    }
+  }
+  throw new AuthAuthorizationError(message);
 }
 
 function shouldRequireOrganizationSelection(

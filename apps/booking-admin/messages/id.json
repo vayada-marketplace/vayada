@@ -23,6 +23,8 @@
   "auth.login.errorValidation": "Kesalahan validasi.",
   "auth.login.errorUnexpected": "Terjadi kesalahan tak terduga. Silakan coba lagi.",
   "auth.login.errorSessionExpired": "Sesi Anda telah berakhir. Silakan masuk kembali.",
+  "auth.login.hotelWorkspaceRequired": "Akun ini belum terhubung ke hotel mana pun. Jika Anda diundang oleh hotel, buka email undangan atau minta hotel mengirimkannya lagi.",
+  "auth.login.setUpHotel": "Siapkan hotel Anda",
   "auth.register.fullNameLabel": "Nama Lengkap",
   "auth.register.fullNamePlaceholder": "Budi Santoso",
   "auth.register.emailLabel": "Alamat email",

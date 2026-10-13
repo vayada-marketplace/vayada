@@ -23,6 +23,8 @@
   "auth.login.errorValidation": "Ошибка валидации.",
   "auth.login.errorUnexpected": "Произошла непредвиденная ошибка. Пожалуйста, попробуйте снова.",
   "auth.login.errorSessionExpired": "Ваша сессия истекла. Пожалуйста, войдите снова.",
+  "auth.login.hotelWorkspaceRequired": "Этот аккаунт пока не связан ни с одним отелем. Если вас пригласил отель, откройте письмо с приглашением или попросите отправить его повторно.",
+  "auth.login.setUpHotel": "Настроить отель",
   "auth.register.fullNameLabel": "Полное имя",
   "auth.register.fullNamePlaceholder": "Иван Иванов",
   "auth.register.emailLabel": "Электронная почта",
