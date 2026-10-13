@@ -344,39 +344,47 @@ async function openPms(page: Page) {
 const main = (page: Page) => page.locator("main");
 const prices = async (page: Page, id: string) => {
   await page.goto(`/rooms/${id}?tab=prices`);
-  // An unpriced room shows "Set this room's prices" and step 1's question together.
+  // An unpriced room shows "Set this room's prices"; a priced one the card's "Price per night".
   await expect(
     main(page)
-      .getByRole("heading", { name: /What does this room cost per night\?|Set this room's prices/ })
+      .getByRole("heading", { name: /^Price per night$|Set this room's prices/ })
       .first(),
   ).toBeVisible();
 };
 // Every option keeps a hidden Edit window mounted; the open window or form is the visible dialog.
 const dialog = (page: Page) => page.locator('[role="dialog"]:visible');
+/** The card's switch for an extra choice (VAY-2188). */
+const extra = (page: Page, name: string) =>
+  main(page).getByRole("switch", { name: `Offer “${name}”` });
+const openMoreOptions = async (page: Page) => {
+  // Editors inside keep their own <details>, so the row is found by its summary's first words.
+  const summary = main(page)
+    .locator("summary")
+    .filter({ hasText: /^More options/ })
+    .first();
+  if (!(await summary.evaluate((element) => (element.parentElement as HTMLDetailsElement).open)))
+    await summary.click();
+};
 
-test("answers the steps for a priced room and publishes only what changed", async ({
+test("edits a priced room on the simple card and publishes only what changed (VAY-2188)", async ({
   page,
 }, testInfo) => {
   await openPms(page);
   const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, DELUXE);
-  for (const heading of [
-    "Is it more expensive at certain times of year?",
-    "Do weekends cost more?",
-    "What can guests choose when they book?",
-    "Any rules for stays?",
-  ])
+  for (const heading of ["Cancellation", "Extra choices for guests", "Busier dates"])
     await expect(main(page).getByRole("heading", { name: heading })).toBeVisible();
-  // Step 4 matches the design: names from meal and terms, the engine's normal night.
-  for (const [name, price] of [
-    ["Flexible", "€100"],
-    ["Non-refundable", "€90"],
-    ["With breakfast", "€115"],
-  ])
-    await expect(
-      main(page).getByRole("listitem").filter({ hasText: name }).filter({ hasText: price }).first(),
-    ).toBeVisible();
+  // The design's options are the card's free cancellation and its two switches, with the engine's normal night.
+  await expect(
+    main(page).getByRole("button", { name: "Free cancellation", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(main(page).getByLabel("Days before arrival")).toHaveValue("7");
+  await expect(extra(page, "Non-refundable")).toHaveAttribute("aria-checked", "true");
+  await expect(main(page).getByLabel("How much cheaper, in percent")).toHaveValue("10");
+  await expect(main(page).getByText("€90 a night", { exact: true })).toBeVisible();
+  await expect(extra(page, "With breakfast")).toHaveAttribute("aria-checked", "true");
+  await expect(main(page).getByText("€115 a night for 2", { exact: true })).toBeVisible();
   await expect(main(page).getByText("Save 10%")).toBeVisible();
 
   await main(page).getByRole("button", { name: "+10%" }).click();
@@ -385,7 +393,7 @@ test("answers the steps for a priced room and publishes only what changed", asyn
     "true",
   );
 
-  await main(page).getByRole("button", { name: "Add season" }).click();
+  await main(page).getByRole("button", { name: "Add a season" }).click();
   await dialog(page).getByLabel("Season name").fill("Peak");
   await dialog(page).getByLabel("Starts: day").fill("20");
   await dialog(page).getByLabel("Starts: month").selectOption("12");
@@ -399,6 +407,8 @@ test("answers the steps for a priced room and publishes only what changed", asyn
       .first(),
   ).toBeVisible();
 
+  // Other options live under More options.
+  await openMoreOptions(page);
   await main(page).getByRole("button", { name: "Half board", exact: true }).click();
   await dialog(page).getByLabel("Half board price").fill("25");
   await dialog(page).getByRole("button", { name: "Add option" }).click();
@@ -406,12 +416,10 @@ test("answers the steps for a priced room and publishes only what changed", asyn
     main(page).getByRole("listitem").filter({ hasText: "Half board €25 per adult" }),
   ).toBeVisible();
 
-  await main(page).getByRole("button", { name: "Edit With breakfast" }).click();
-  await dialog(page).getByRole("button", { name: "Delete option" }).click();
+  // Switching breakfast off asks, then deletes its option.
+  await extra(page, "With breakfast").click();
   await page.getByRole("button", { name: "Delete option" }).last().click();
-  await expect(main(page).getByRole("listitem").filter({ hasText: "With breakfast" })).toHaveCount(
-    0,
-  );
+  await expect(extra(page, "With breakfast")).toHaveAttribute("aria-checked", "false");
 
   await main(page).getByRole("button", { name: "Save prices" }).click();
   await expect(main(page).getByText("Prices saved.", { exact: false })).toBeVisible();
@@ -454,11 +462,18 @@ test("answers the steps for a priced room and publishes only what changed", asyn
   await assertHealthy();
 });
 
-test("keeps a setup the steps can't show unchanged through a save", async ({ page }, testInfo) => {
+test("keeps a setup the simple card can't show unchanged through a save", async ({
+  page,
+}, testInfo) => {
   await openPms(page);
   const pricing = await mockPricing(page, publicationOf(3, [designRoom(3), complexRoom(3)]));
   const assertHealthy = watchPageHealth(page, testInfo);
   await prices(page, GARDEN);
+  await expect(
+    main(page).getByText("This room has more settings than the simple view shows.", {
+      exact: false,
+    }),
+  ).toBeVisible();
   await expect(main(page).getByRole("button", { name: "Other days…" })).toHaveAttribute(
     "aria-expanded",
     "true",
@@ -509,7 +524,7 @@ test("sets the first prices of an unpriced room as steps, then saves them next t
   await main(page).getByRole("button", { name: "Yes", exact: true }).click();
   await main(page).getByRole("button", { name: "Continue" }).click();
   await expect(
-    main(page).getByRole("heading", { name: "What does this room cost per night?" }),
+    main(page).getByRole("heading", { name: "Price per night", exact: true }),
   ).toBeVisible();
   await expect(main(page).getByLabel("Lake Loft Offer 1 Per room")).toHaveValue("120.00");
   await main(page).getByRole("button", { name: "Save prices" }).click();
@@ -543,13 +558,13 @@ test("shows one stale-prices warning, a plain Price-free main window and a retry
   failing = false;
   await main(page).getByRole("button", { name: "Retry" }).click();
   await expect(
-    main(page).getByRole("heading", { name: "What does this room cost per night?" }),
+    main(page).getByRole("heading", { name: "Price per night", exact: true }),
   ).toBeVisible();
   // The room page's banner, with its "Save prices again", is the only warning.
   await expect(main(page).getByRole("button", { name: "Save prices again" })).toBeVisible();
   await expect(main(page).getByText("Prices need to be saved again")).toHaveCount(1);
-  // The main option's price is step 1: its window has no empty "Price" group.
-  await main(page).getByRole("button", { name: "Edit Flexible" }).click();
+  // The main option's price is the card's: its window has no empty "Price" group.
+  await main(page).getByRole("button", { name: "Edit what the price includes" }).click();
   await expect(dialog(page).getByRole("heading", { name: "Meals" })).toBeVisible();
   await expect(dialog(page).getByRole("heading", { name: "Price", exact: true })).toHaveCount(0);
 });

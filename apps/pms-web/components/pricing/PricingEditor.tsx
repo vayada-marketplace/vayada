@@ -34,7 +34,11 @@ import { MoreOptions } from "./MoreOptions";
 import { StepPrice } from "./StepPrice";
 import { StepSeasons } from "./StepSeasons";
 import { StepWeekends } from "./StepWeekends";
-import { addDays, deleteBlocker, deleteOption, mainOffer, missingPresets, moreOptionsSummary, normalNight, optionNames, sampleStay, type OptionTerms, type PresetKey } from "./stepPricing";
+import { addDays, deleteBlocker, deleteOption, mainOffer, missingPresets, normalNight, optionNames, sampleStay, type OptionTerms, type PresetKey } from "./stepPricing";
+import { simpleRoom } from "./simplePricing";
+import { StepCancellation } from "./StepCancellation";
+import { StepExtras } from "./StepExtras";
+import { keptSettings, MoreGroup, SimpleGuests, SimplePayment, simpleSummary } from "./SimpleMoreOptions";
 import { PresetWindow } from "./PresetWindow";
 import { AddOptionButton, StepOptions } from "./StepOptions";
 import { StepStayRules } from "./StepStayRules";
@@ -74,6 +78,8 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const [pendingEntries, setPendingEntries] = useState<Record<string, boolean>>({});
   const exclusiveEditPending = addingOfferRoom !== null || preset !== null || Object.entries(pendingEntries).some(([key, pending]) => (key.startsWith("ownership:") || key.startsWith("mealPlan:") || key.startsWith("parent:") || key.startsWith("included:") || key.startsWith("policy:")) && pending);
   const hasPendingEntries = addingOfferRoom !== null || preset !== null || Object.values(pendingEntries).some(Boolean);
+  // The switches' typed amounts belong to no option position, so deleting an option can't strand them.
+  const pendingBesidesExtras = addingOfferRoom !== null || preset !== null || Object.entries(pendingEntries).some(([key, pending]) => pending && !key.startsWith("extras:"));
   const [empty, setEmpty] = useState(false);
   const [current, setCurrent] = useState<PricingSnapshot | null>(null), [baseRevision, setBaseRevision] = useState(0), [stale, setStale] = useState(false);
   const loadedRooms = useRef<readonly Room[]>([]);
@@ -229,9 +235,10 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     return null;
   }
   /** Deletes an option from this room's draft; saving publishes the room without it. Typed prices are folded into
-   * the room first, because they are kept by option position, which the deletion shifts. */
+   * the room first, because they are kept by option position, which the deletion shifts. A switch's unparsed amount
+   * doesn't block it (see `pendingBesidesExtras`). */
   function removeOption(offerId: string) {
-    if (!current || hasPendingEntries || busy || retry || needsReload || done) return;
+    if (!current || pendingBesidesExtras || busy || retry || needsReload || done) return;
     try {
       const edited = editedSnapshot(current, inputs);
       const rooms = edited.rooms.map((room) => room.roomTypeId === focus ? deleteOption(room, offerId) : room);
@@ -280,6 +287,14 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   const warning = notice === "pricing.room.noticeStale" || notice === "pricing.room.noticeDropped" || notice === "pricing.newRoom.noticeKept";
   const changeRoom = (ri: number) => (nextRoom: Room) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setNotice(""); };
   const pend = (key: string) => (pending: boolean) => setPendingEntries((previous) => ({ ...previous, [key]: pending }));
+  /** The card's terms changes (cancellation, payment) as this session's terms edits, like an option window's. */
+  const applyTerms = (roomTypeId: string) => (edits: readonly { offerId: string; terms: OptionTerms }[]) => {
+    setPolicyEdits((previous) => ({ ...previous, ...Object.fromEntries(edits.map(({ offerId, terms }) => {
+      const key = policyKey(roomTypeId, offerId);
+      return [key, { roomTypeId, offerId, expectedRevision: policyBases.current[key] ?? null, cancellation: terms.cancellation, payment: terms.payment }];
+    })) }));
+    setDirty(true); setNotice("");
+  };
   // While editing, the button beside Save discards this room's changes; otherwise it reloads pricing.
   const cancels = leaveRisk && !needsReload && !retry && !busy && !done;
   // Laid out as the Paper design's numbered steps; the other editors sit under More options. Cancel and Save at the bottom.
@@ -311,39 +326,60 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       const sample = sampleStay(edited ?? room, today), stayNights = Math.round((Date.parse(sample.checkOut) - Date.parse(sample.checkIn)) / 86400000);
       const stay = stayStart ? { checkIn: stayStart, checkOut: addDays(stayStart, stayNights) } : sample;
       const previewId = previewOffer && room.offers.some((offer) => offer.id === previewOffer) ? previewOffer : main.id;
+      const termsFailed = room.offers.some((offer) => !policyEdits[policyKey(focus, offer.id)] && savedTerms[termsKey(offer)] === null);
+      const simple = simpleRoom(room, optionTerms), kept = keptSettings(room, simple);
       return <div key={room.roomTypeId} className="grid items-start gap-7 xl:grid-cols-[minmax(0,1fr)_400px]">
         <div className="min-w-0 space-y-4">
-        <StepPrice room={room} roomIndex={ri} offerIndex={mi} label={mainLabel} inputs={inputs} disabled={disabled || exclusiveEditPending}
-          onInput={(key, value) => { setInputs((previous) => ({ ...previous, [key]: value })); setDirty(true); setNotice(""); }} />
-        <StepSeasons room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onPending={pend(`stepSeason:${ri}`)} />
-        <StepWeekends room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onPending={pend(`stepWeekday:${ri}`)} />
-        <StepOptions room={room} names={names} terms={optionTerms} prices={prices} disabled={disabled}
-          termsFailed={room.offers.some((offer) => !policyEdits[policyKey(focus, offer.id)] && savedTerms[termsKey(offer)] === null)} onRetryTerms={retryTerms} onEdit={(offerId) => setOptionOpen(offerId)}
-          add={<>
-            {missingPresets(room, optionTerms).slice(0, 3).map((key) => <AddOptionButton key={key} label={t(`pricing.steps.preset.button.${key}`)} disabled={disabled || hasPendingEntries}
-              onClick={() => { if (!disabled && !hasPendingEntries) { setPreset(key); setError(null); } }} />)}
-            <AddOptionButton label={t("pricing.steps.options.own")} disabled={disabled || hasPendingEntries}
-              onClick={() => { if (!disabled && !hasPendingEntries) { setIndependentOffer(null); setAddingOfferRoom(room.roomTypeId); setError(null); } }} />
-          </>} />
-        <StepStayRules room={room} names={names} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onEditChildren={() => setChildrenOpen(true)}>
-          <OptionWindow open={childrenOpen} title={t("pricing.steps.rules.childrenTitle")} closable={!pendingEntries[`children:${ri}`]} onClose={() => setChildrenOpen(false)}>
-            <PricingChildCharges room={room} label={roomName(room.roomTypeId, ri)} disabled={disabled || exclusiveEditPending} onPending={pend(`children:${ri}`)} onChange={changeRoom(ri)} />
-          </OptionWindow>
-        </StepStayRules>
-        <MoreOptions keepOpen={pendingIn(moreKeys)} summary={moreOptionsSummary(room, t)}>
-          {group(t("pricing.steps.more.prices"))}
-          <div className="space-y-2">
-            <PricingMonths room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onPending={pend(`month:${ri}:${mi}`)} onChange={changeRoom(ri)} />
-            <PricingDates room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onPending={pend(`date:${ri}:${mi}`)} onChange={changeRoom(ri)} />
-          </div>
-          {group(t("pricing.steps.more.rules"))}
-          <div className="space-y-2">
-            <PricingStayRules room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onPending={pend(`stay:${ri}:${mi}`)} onChange={changeRoom(ri)} />
-            <PricingStayDates room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onPending={pend(`stayDate:${ri}:${mi}`)} onChange={changeRoom(ri)} />
-            <PricingStaySeasons room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onPending={pend(`staySeason:${ri}:${mi}`)} onChange={changeRoom(ri)} />
-          </div>
-          {group(t("pricing.steps.more.check"))}
-          <PricingStayPreview key={focusIndex} roomTypeId={focus} names={names} snapshot={display} inputs={inputs} disabled={disabled || hasPendingEntries} saved={false} roomNames={roomNames} />
+        {kept && <p role="status" className={ui.infoBanner}>{t("pricing.simple.kept")}</p>}
+        {/* The simple Prices card (VAY-2188): price, cancellation, the two switches and busier dates; everything else under More options. */}
+        <div className={ui.pricesCard}>
+          <StepPrice room={room} roomIndex={ri} offerIndex={mi} label={mainLabel} inputs={inputs} disabled={disabled || exclusiveEditPending}
+            onInput={(key, value) => { setInputs((previous) => ({ ...previous, [key]: value })); setDirty(true); setNotice(""); }} onEditMeal={() => setOptionOpen(main.id)} />
+          <StepCancellation simple={simple} terms={optionTerms} failed={termsFailed} disabled={disabled || hasPendingEntries} onTerms={applyTerms(room.roomTypeId)} onRetry={retryTerms} onEditOwn={() => setOptionOpen(main.id)} />
+          {simple && <StepExtras room={room} simple={simple} prices={prices} disabled={disabled || (hasPendingEntries && !pendingEntries[`extras:${ri}`])}
+            onAdd={(input) => createInitial(input, true, room.roomTypeId)} onRemove={(offerId) => { if (!disabled && !pendingBesidesExtras) setDeleting(offerId); }} onChange={changeRoom(ri)} onPending={pend(`extras:${ri}`)} />}
+          <StepSeasons room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onPending={pend(`stepSeason:${ri}`)}>
+            <StepWeekends room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onPending={pend(`stepWeekday:${ri}`)} />
+          </StepSeasons>
+        </div>
+        <MoreOptions keepOpen={pendingIn(moreKeys)} summary={simpleSummary(room, simple, t)} marked={kept}>
+          <MoreGroup title={t("pricing.simple.more.payment")} hint={t("pricing.simple.more.paymentHint")}>
+            <SimplePayment simple={simple} terms={optionTerms} failed={termsFailed} disabled={disabled || hasPendingEntries} onTerms={applyTerms(room.roomTypeId)} />
+          </MoreGroup>
+          <StepStayRules room={room} names={names} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onEditChildren={() => setChildrenOpen(true)}>
+            <OptionWindow open={childrenOpen} title={t("pricing.steps.rules.childrenTitle")} closable={!pendingEntries[`children:${ri}`]} onClose={() => setChildrenOpen(false)}>
+              <PricingChildCharges room={room} label={roomName(room.roomTypeId, ri)} disabled={disabled || exclusiveEditPending} onPending={pend(`children:${ri}`)} onChange={changeRoom(ri)} />
+            </OptionWindow>
+          </StepStayRules>
+          {room.capacity.adults > 1 && main.price.kind === "independent" && main.price.calendar.base && <MoreGroup title={t("pricing.simple.more.guests")}>
+            <SimpleGuests room={edited ?? room} disabled={disabled || exclusiveEditPending || !edited} onChange={(next) => { changeRoom(ri)(next); setInputs((previous) => Object.fromEntries(Object.entries(previous).filter(([key]) => !key.startsWith(`${ri}:`)))); }} />
+          </MoreGroup>}
+          <MoreGroup title={t("pricing.simple.more.dates")}>
+            <div className="space-y-2">
+              <PricingMonths room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onPending={pend(`month:${ri}:${mi}`)} onChange={changeRoom(ri)} />
+              <PricingDates room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onPending={pend(`date:${ri}:${mi}`)} onChange={changeRoom(ri)} />
+            </div>
+          </MoreGroup>
+          <MoreGroup title={t("pricing.simple.more.rules")}>
+            <div className="space-y-2">
+              <PricingStayRules room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onPending={pend(`stay:${ri}:${mi}`)} onChange={changeRoom(ri)} />
+              <PricingStayDates room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onPending={pend(`stayDate:${ri}:${mi}`)} onChange={changeRoom(ri)} />
+              <PricingStaySeasons room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onPending={pend(`staySeason:${ri}:${mi}`)} onChange={changeRoom(ri)} />
+            </div>
+          </MoreGroup>
+          <MoreGroup title={t("pricing.simple.more.options")} hint={t("pricing.simple.more.optionsHint")}>
+            <StepOptions room={room} offers={simple ? simple.others : room.offers.filter((offer) => offer.id !== main.id)} names={names} terms={optionTerms} prices={prices} disabled={disabled}
+              termsFailed={termsFailed} onRetryTerms={retryTerms} onEdit={(offerId) => setOptionOpen(offerId)}
+              add={<>
+                {missingPresets(room, optionTerms).filter((key) => !(key === "non_refundable" && simple?.cancellation.kind === "free") && !(key === "breakfast" && simple && simple.cancellation.kind !== "own")).map((key) => <AddOptionButton key={key} label={t(`pricing.steps.preset.button.${key}`)} disabled={disabled || hasPendingEntries}
+                  onClick={() => { if (!disabled && !hasPendingEntries) { setPreset(key); setError(null); } }} />)}
+                <AddOptionButton label={t("pricing.steps.options.own")} disabled={disabled || hasPendingEntries}
+                  onClick={() => { if (!disabled && !hasPendingEntries) { setIndependentOffer(null); setAddingOfferRoom(room.roomTypeId); setError(null); } }} />
+              </>} />
+          </MoreGroup>
+          <MoreGroup title={t("pricing.steps.more.check")}>
+            <PricingStayPreview key={focusIndex} roomTypeId={focus} names={names} snapshot={display} inputs={inputs} disabled={disabled || hasPendingEntries} saved={false} roomNames={roomNames} />
+          </MoreGroup>
         </MoreOptions>
         {room.offers.map((offer, oi) => {
           const label = offerLabel(room.roomTypeId, ri, oi), other = oi !== mi;
@@ -413,7 +449,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
         </aside>
       </div>;
     })}
-    {!loading && editing && !newRoom && <p className={`text-right ${ui.hint}`}>{t("pricing.editor.keepOpen")}</p>}
+    {!loading && editing && !newRoom && busy && <p className={`text-right ${ui.hint}`}>{t("pricing.editor.keepOpen")}</p>}
     {/* Pressing Save is the declaration, so its text stays in the (sticky) bar beside the button. On the New room page
         the page's "Create Room Type" saves, and declares once prices are typed. */}
     {newRoom ? <div className={`flex-wrap ${ui.actionBar}`}>

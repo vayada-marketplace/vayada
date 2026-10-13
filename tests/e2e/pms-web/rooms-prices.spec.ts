@@ -231,12 +231,12 @@ test("prices a room in its Prices tab and publishes the other rooms unchanged", 
   await main(page).locator(`a[href="/rooms/${SUITE}?tab=prices"]`).first().click();
 
   await expect(page).toHaveURL(new RegExp(`/rooms/${SUITE}\\?tab=prices$`));
-  // VAY-2125: the tab asks numbered questions; the other editors sit under "More options".
+  // VAY-2188: one simple card; the other editors sit under "More options".
   await expect(
-    main(page).getByRole("heading", { name: "What does this room cost per night?" }),
+    main(page).getByRole("heading", { name: "Price per night", exact: true }),
   ).toBeVisible();
   await expect(priceInput(page, "Alpine Suite")).toHaveValue("120.00");
-  await expect(main(page).getByRole("button", { name: "Add season" })).toBeVisible();
+  await expect(main(page).getByRole("button", { name: "Add a season" })).toBeVisible();
   await expect(main(page).getByRole("button", { name: "+15%" })).toHaveAttribute(
     "aria-pressed",
     "false",
