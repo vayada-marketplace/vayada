@@ -5,6 +5,7 @@ import type { RequestContext } from "@vayada/backend-auth";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
+import { configureActiveBookingPublicationGate } from "./activeBookingPublicationGate.js";
 import { createRoomLastMinuteStore } from "./roomLastMinuteStore.js";
 import { lockReplacementLastMinute } from "./replacementLastMinute.js";
 import { composeReplacementDiscounts } from "./replacementDiscountComposition.js";
@@ -149,6 +150,23 @@ describe.skipIf(!url)("Public pricing access and booking pricing owners PostgreS
       [f.scope.propertyId, "alias-" + f.scope.propertyId],
     );
     expect(await f.readPublic("alias-" + f.scope.propertyId)).toBeNull();
+  });
+  it("keeps a hotel without a setup publication on its legacy profile after the switch (VAY-2134)", async () => {
+    const f = await publicFixture();
+    configureActiveBookingPublicationGate({ servesPublications: true, manualPayments: false });
+    try {
+      expect(await f.readPublic()).toEqual({
+        propertyId: f.scope.propertyId,
+        organizationId: f.scope.organizationId,
+      });
+      await pool.query(
+        "UPDATE distribution.public_hotel_bookability_profiles SET freshness_status='stale' WHERE property_id=$1",
+        [f.scope.propertyId],
+      );
+      expect(await f.readPublic()).toBeNull();
+    } finally {
+      configureActiveBookingPublicationGate({ servesPublications: false, manualPayments: false });
+    }
   });
   it("rejects hidden, stale, expired, incomplete and malformed public profiles", async () => {
     const f = await publicFixture();

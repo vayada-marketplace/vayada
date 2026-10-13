@@ -337,6 +337,7 @@ import { createPgSharedHotelSetupStatusRepository } from "./platform/sharedHotel
 import { createPgPropertyNearbyDiscoveryRepository } from "./domains/propertyNearbyDiscoveryRepository.js";
 import { createPgPropertyNearbyRepository } from "./domains/propertyNearbyRepository.js";
 import { createPgPublicNearbyRepository } from "./domains/publicNearbyRepository.js";
+import { configureActiveBookingPublicationGate } from "./domains/activeBookingPublicationGate.js";
 import { createPgIdentityAdminUsersReadRepository } from "./routes/identityAdminUsers.js";
 import { createPgIdentityPrivacyRepository } from "./routes/identityPrivacy.js";
 import { createPgMarketplaceCreatorPlatformConnectionRepository } from "./routes/marketplaceCreatorPlatformConnections.js";
@@ -414,6 +415,13 @@ const propertyLaunchSettingsRepository = {
   findPropertySettingsByHotelId: findPropertyLaunchSettings,
   updatePropertySettingsByHotelId: updatePropertyLaunchSettings,
 };
+
+// Checkout and pricing read the same pages as the public site: setup publications once it serves
+// them, legacy bookability profiles until then (VAY-2134).
+configureActiveBookingPublicationGate({
+  servesPublications: config.publicHotelProfileSource === "active_publication",
+  manualPayments: config.replacementPricingManualPaymentAcceptanceEnabled === true,
+});
 
 const publicBookabilityPublisher =
   config.publicHotelProfileSource === "target"

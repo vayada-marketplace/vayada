@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+
+import Fastify from "fastify";
 import type { RequestContext } from "@vayada/backend-auth";
 import {
   createBookingDesignReadinessProvider,
@@ -26,6 +28,7 @@ import {
 import pg from "pg";
 import { describe, expect, it } from "vitest";
 
+import type { ApiConfig } from "./config.js";
 import { createPgBookingDesignCatalogEvidenceRepository } from "./domains/bookingDesignCatalogEvidenceRepository.js";
 import { createPgBookingDesignRepository } from "./domains/bookingDesignRepository.js";
 import { createBookingGuestChoicePublicationReader } from "./domains/bookingGuestChoicePublication.js";
@@ -33,12 +36,15 @@ import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore
 import { createPgBookingGuestPolicyScopeAuthorizationPort } from "./domains/bookingGuestPolicyScopeAuthorization.js";
 import { createBookingPublicationProductionRuntime } from "./domains/bookingPublicationProductionRuntime.js";
 import { createPgFinancePaymentReadinessCommandRepository } from "./domains/financePaymentReadinessCommandRepository.js";
+import { configureActiveBookingPublicationGate } from "./domains/activeBookingPublicationGate.js";
 import { createFinanceManualPaymentReadinessReader } from "./domains/financeManualPaymentReadiness.js";
+import { createFixedChargePolicyStore } from "./domains/fixedChargePolicyStore.js";
 import { createPgFinancePaymentReadinessReadModel } from "./domains/financePaymentReadinessReadModel.js";
 import { createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort } from "./domains/hotelCatalogOperatingCalendarPropertyProfileEvidence.js";
 import { createPgHotelCatalogStep1Repository } from "./domains/hotelCatalogStep1Repository.js";
 import { createPgHotelSetupTrackCommandRepository } from "./domains/hotelSetupTrackCommandRepository.js";
 import { createPgPlatformPropertyLifecycleCommandRepository } from "./domains/platformPropertyLifecycleCommandRepository.js";
+import { createTargetPmsInventoryReservationPort } from "./domains/pmsInventoryReservation.js";
 import { createPgPmsOperatingCalendarReadModel } from "./domains/pmsOperatingCalendarReadModel.js";
 import { createPmsOperatingCalendarProductionRuntime } from "./domains/pmsOperatingCalendarProductionRuntime.js";
 import { createPgPmsPhysicalRoomOperationalLabelRepository } from "./domains/pmsPhysicalRoomOperationalLabelRepository.js";
@@ -53,16 +59,23 @@ import { createPmsRoomFactsVocabularyValidationPort } from "./domains/pmsRoomFac
 import { createPgPmsRoomPublicationCommandRepository } from "./domains/pmsRoomPublicationCommandRepository.js";
 import { createPgPmsRoomPublicationReadModel } from "./domains/pmsRoomPublicationReadModel.js";
 import { createPgS3PropertyMediaCommandRepository } from "./domains/propertyMediaCommandRepository.js";
+import { lockPublicPricingAuthority } from "./domains/publicPricingAuthority.js";
 import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
 import { createReplacementPricingPublicationReader } from "./domains/replacementPricingPublicationReader.js";
 import { createHotelSetupOrdinaryLoginFixture } from "./hotelSetupOrdinaryLogin.fixture.js";
+import { externalBookingChanges } from "./integrations/externalBookingChanges.js";
 import { createPgHotelMediaResolutionPort } from "./platform/hotelMediaResolver.js";
 import type { PlatformMediaServingConfig } from "./platform/mediaServing.js";
 import {
   advancePublicProfileRevision,
   createPgSharedHotelSetupStatusRepository,
 } from "./platform/sharedHotelSetupStatusReadModel.js";
+import { createPublicRuntimeRepositories } from "./publicRuntime.js";
 import { createActiveBookingPublicationProfileRepository } from "./routes/activeBookingPublicationProfile.js";
+import {
+  createTargetBookingWebCheckoutAdapter,
+  registerBookingWebPublicRoutes,
+} from "./routes/bookingWebPublic.js";
 import { syncPropertyOfferReadModels } from "./routes/marketplaceAdmin.js";
 import { createTargetFinancePropertySettingsRepository } from "./routes/finance.js";
 
@@ -678,7 +691,11 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       const pricing = createReplacementPricingCommands(pool, context);
       // Like the Prices step, terms are staged only for rooms that have none yet.
       const termsByRoom = new Map<string, string>();
-      const savePrices = async (roomTypeIds: readonly string[], revision: number) => {
+      const savePrices = async (
+        roomTypeIds: readonly string[],
+        revision: number,
+        fixedChargePolicy?: string,
+      ) => {
         const draftId = randomUUID();
         const draft = { draftId, baseRevision: revision - 1 };
         const priced = [];
@@ -716,17 +733,22 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           }),
         ).toBe(1);
         const review = (await pricing.reviewCharges(propertyId, draftId))!;
-        const charges = await pricing.confirmCharges(propertyId, {
-          draftId,
-          expectedDraftRevision: 1,
-          claimedFingerprint: review.fingerprint,
-          declaration: "all_mandatory_charges_included",
-          declaredVia: "save_prices",
-          requestId: randomUUID(),
-        });
+        // Like the Prices step, unless the hotel adopted a fixed-charge policy.
+        const charges =
+          fixedChargePolicy ??
+          (
+            await pricing.confirmCharges(propertyId, {
+              draftId,
+              expectedDraftRevision: 1,
+              claimedFingerprint: review.fingerprint,
+              declaration: "all_mandatory_charges_included",
+              declaredVia: "save_prices",
+              requestId: randomUUID(),
+            })
+          ).id;
         const snapshot = {
           ...review.snapshot,
-          ownerReferences: { ...review.snapshot.ownerReferences, charges: charges.id },
+          ownerReferences: { ...review.snapshot.ownerReferences, charges },
         };
         expect(
           await pricing.saveDraft(propertyId, {
@@ -952,7 +974,133 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       expect(await publicProfile(true)).toMatchObject({ hotel: { propertyId } });
       if (manualMethod) expect(await publicProfile(false)).toBeNull();
       else expect(await publicProfile(false)).toMatchObject({ hotel: { propertyId } });
+      // The public site in active_publication mode serves the page, its prices, checkout and a
+      // quote. The Sea Suite got its first price after the calendar, right before publishing, as
+      // TEST ONLY's rooms did on 10-13; production read only legacy profiles then (VAY-2134).
+      if (!manualMethod) {
+        configureActiveBookingPublicationGate({ servesPublications: true, manualPayments: false });
+        closers.push(async () =>
+          configureActiveBookingPublicationGate({
+            servesPublications: false,
+            manualPayments: false,
+          }),
+        );
+        const site = Fastify({ logger: false });
+        closers.push(() => site.close());
+        const publicRuntime = createPublicRuntimeRepositories(
+          {
+            publicHotelProfileSource: "active_publication",
+            targetDatabaseUrl: cs,
+            replacementPricingManualPaymentAcceptanceEnabled: false,
+          } as ApiConfig,
+          {
+            publicHotelProfilePool: pool,
+            publicHotelQuotePool: pool,
+            bookingWebCalendarPool: pool,
+            marketplaceDiscoveryPool: pool,
+          },
+        );
+        await site.register(registerBookingWebPublicRoutes, {
+          prefix: "/api/booking-web",
+          profileRepository: publicRuntime.publicHotelProfileRepository,
+          quoteRepository: publicRuntime.publicHotelQuoteRepository,
+          calendarRepository: publicRuntime.bookingWebCalendarRepository,
+          checkoutAdapter: createTargetBookingWebCheckoutAdapter({
+            externalChanges: externalBookingChanges,
+            connectionString: cs,
+            pool,
+            mediaServing: serving,
+            inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+          }),
+        });
+        const slug = content.profile.hotel.slug;
+        const read = async (path: string) => {
+          const response = await site.inject({ method: "GET", url: `/api/booking-web${path}` });
+          expect(response.statusCode, `${path}: ${response.body}`).toBe(200);
+          return response.json() as unknown;
+        };
+        await read(`/hosts/${slug}.next-booking.vayada.com`);
+        await read(`/hotels/${slug}?locale=en`);
+        type Offers = { rooms: { roomTypeId: string; offers: { publicOfferKey: string }[] }[] };
+        const offered = (await read(`/hotels/${slug}/pricing-offers`)) as Offers;
+        expect(offered.rooms.map(({ roomTypeId }) => roomTypeId).sort()).toEqual(
+          [gardenSuite, seaSuite].sort(),
+        );
+        await read(`/hotels/${slug}/checkout-config`);
+        const quoteSeaSuite = async () => {
+          const offers = (await read(`/hotels/${slug}/pricing-offers`)) as Offers;
+          return site.inject({
+            method: "POST",
+            url: `/api/booking-web/hotels/${slug}/bookings/quote`,
+            headers: { "Idempotency-Key": randomUUID() },
+            payload: {
+              version: "public-booking-quote-request.v1",
+              selection: {
+                version: "public-pricing-selection.v1",
+                checkIn: localDate(30),
+                checkOut: localDate(32),
+                currency: "EUR",
+                rooms: [
+                  {
+                    selectionId: "sea-suite",
+                    publicOfferKey: offers.rooms.find(({ roomTypeId }) => roomTypeId === seaSuite)!
+                      .offers[0]!.publicOfferKey,
+                    guests: { adults: 2, childAgesAtCheckIn: [] },
+                  },
+                ],
+                addons: [],
+                promoCode: null,
+              },
+              paymentMethod: "pay_at_property",
+            },
+          });
+        };
+        // Prices saved the Prices-step way declare "all mandatory charges included", which public
+        // quotes can't price yet: they need a fixed-charge policy, which no route creates.
+        const unavailable = await quoteSeaSuite();
+        expect(unavailable.statusCode, unavailable.body).toBe(404);
+        expect(unavailable.json()).toMatchObject({ message: "Quote unavailable." });
+        const fixedCharges = await createFixedChargePolicyStore(pool).save(
+          context,
+          { propertyId, organizationId, actorUserId: owner },
+          {
+            requestId: randomUUID(),
+            expectedRevision: null,
+            policy: { version: "booking.fixed-charges.v1", currency: "EUR", charges: [] },
+          },
+        );
+        await savePrices(
+          [gardenSuite, seaSuite],
+          3,
+          `booking.fixed-charge-policy.v1:${fixedCharges.revision}`,
+        );
+        const quote = await quoteSeaSuite();
+        expect(quote.statusCode, quote.body).toBe(200);
+      }
       if (manualMethod) {
+        // Once the site serves setup publications, prices follow the page: hidden while bank
+        // transfer and PayPal acceptance is off, quotable while it is on (VAY-2134).
+        const authority = async () => {
+          const client = await pool.connect();
+          try {
+            await client.query("BEGIN");
+            return await lockPublicPricingAuthority(client, content.profile.hotel.slug);
+          } finally {
+            await client.query("ROLLBACK");
+            client.release();
+          }
+        };
+        configureActiveBookingPublicationGate({ servesPublications: true, manualPayments: false });
+        try {
+          expect(await authority()).toBeNull();
+          configureActiveBookingPublicationGate({ servesPublications: true, manualPayments: true });
+          expect(await authority()).toMatchObject({ propertyId });
+        } finally {
+          configureActiveBookingPublicationGate({
+            servesPublications: false,
+            manualPayments: false,
+          });
+        }
         // Without its bank details or PayPal email the page is hidden; restored, it comes back
         // without a new publication.
         const [remove, restore] =
