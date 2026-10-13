@@ -6,7 +6,7 @@ import {
   hotelOperationsSetupApi,
   type FinancePlanStatus,
 } from "@/services/api/hotelOperationsSetupClient";
-import { PlanCard } from "../../operations/BillingPlanCard";
+import { PlanCard } from "./BillingPlanCard";
 import { AdaptiveStepCard, adaptiveSecondaryButtonClass } from "../AdaptiveStepPrimitives";
 
 /** Setup can continue once a plan is chosen, or while its Fixed Fee checkout runs in Stripe. */
