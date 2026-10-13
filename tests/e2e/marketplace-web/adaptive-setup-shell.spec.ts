@@ -975,6 +975,10 @@ test("verified Marketplace link opens the public page while preserving Review", 
   await page.goto(setupUrl(baseURL, { step: "review" }));
   const link = page.getByRole("link", { name: "View your Marketplace profile" });
   await expect(link).toBeVisible();
+  await expect(page.getByText("Live", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText(/Your hotel profile is live on the Creator Marketplace\./),
+  ).toBeVisible();
   const opened = page.waitForEvent("popup");
   await link.click();
   const popup = await opened;
