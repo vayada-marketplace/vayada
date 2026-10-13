@@ -737,6 +737,13 @@ amounts or availability promise. The existing date-specific /offers contract is
 not reinterpreted as this catalogue. Guest quoting and booking acceptance retain
 their own date, age, availability and current-evidence checks.
 
+Since VAY-2188 each catalogue offer also carries a short cancellation summary from
+its current terms: non-refundable, free until a number of days before arrival, or a
+partial refund. It lets the room choice be named in plain words before a quote
+("Free cancellation", "Non-refundable"); penalties, refund steps, free text and
+payment terms stay with the quote. A page that knows the stay dates words the
+deadline as a date, and a stay that starts inside it has no free cancellation.
+
 The browser room-selection step reads the unpriced catalogue, requires an explicit
 current offer for every physical room, and collects adults and each child's age
 at check-in. Blank ages cannot become zero. Mixed currencies cannot be combined.

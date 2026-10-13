@@ -6435,6 +6435,38 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       },
     );
   }
+  it("tells guests each option's cancellation before a quote (VAY-2188)", async () => {
+    const flexible = {
+      kind: "flexible",
+      terms: {
+        type: "free_until_days_before_arrival",
+        freeCancellationDeadlineDays: 3,
+        afterDeadlinePenalty: "full_booking_amount",
+        noShowPenalty: "full_booking_amount",
+      },
+    } as const;
+    const f = await publicFixture(true, undefined, undefined, (terms) =>
+      terms.offerId === "other" ? { ...terms, cancellation: flexible } : terms,
+    );
+    await publishBookingPage(f.scope);
+    const read = await createPublicPricingOfferCatalog(pool).read(f.scope.propertyId);
+    const shown = new Map(
+      (read?.rooms ?? []).flatMap((room) =>
+        room.offers.map((offer) => [offer.publicOfferKey, offer.cancellation] as const),
+      ),
+    );
+    // Each offer by its own key: only "other" has free cancellation.
+    const bindings = publicPricingOfferBindings((await f.readPublic())!);
+    expect(shown.size).toBe(bindings.length);
+    for (const binding of bindings)
+      expect(shown.get(binding.publicOfferKey), binding.offerId).toEqual(
+        binding.offerId === "other"
+          ? { kind: "free_until_days_before_arrival", days: 3 }
+          : { kind: "non_refundable" },
+      );
+    // Only what a guest may know before a quote: no penalties, revisions or payment terms.
+    expect(JSON.stringify(read)).not.toMatch(/Penalty|termsRevision|acceptedMethods/);
+  });
   it("serves every saved change after go-live without republishing (VAY-2129)", async () => {
     const f = await publicFixture(),
       id = f.scope.propertyId,
