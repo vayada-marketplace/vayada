@@ -2227,6 +2227,7 @@ const app = buildApp({
     ? {
         ...bookingPublicationRuntime.routes,
         propertyAccessRepository: bookingPropertyAccessRepository,
+        publicSiteServesPublications: config.publicHotelProfileSource === "active_publication",
       }
     : undefined,
   marketplaceDiscoveryAllowedOrigins: config.marketplaceDiscoveryAllowedOrigins,

@@ -33,6 +33,7 @@ type AuthOptions = {
   links?: readonly LinkedResource[];
   membershipStatus?: RequestContext["membership"]["status"];
   propertyScope?: Partial<MembershipPropertyScope> | null;
+  publicSiteServesPublications?: boolean;
 };
 type FakeRepository = BookingPublicationCommandPort &
   BookingPublicationReviewReadPort & {
@@ -100,6 +101,43 @@ describe("Booking publication routes", () => {
     ]);
     expect(repository.requestCalls).toHaveLength(0);
   });
+  it("says a published page waits for the booking site switch, without a link (VAY-2134)", async () => {
+    const repository = fakeRepository();
+    const review = repository.getPublicationReview.bind(repository);
+    repository.getPublicationReview = async (input) => {
+      const current = await review(input);
+      return (
+        current && {
+          ...current,
+          activeContentRevisionId: "85858585-8585-4585-8585-858585858599",
+          publishedUrl: "https://walk-hotel.next-booking.vayada.com/en",
+        }
+      );
+    };
+    const read = async (publicSiteServesPublications: boolean) => {
+      app = testApp(repository, readinessProvider(await readyEvidence()), {
+        publicSiteServesPublications,
+      });
+      const response = await injectJson(app, {
+        method: "GET",
+        url: `/api/hotel-setup/properties/${propertyId}/publications/booking`,
+        headers: { authorization: "Bearer valid-token" },
+      });
+      await app.close();
+      app = null;
+      return response.body;
+    };
+    expect(await read(false)).toMatchObject({
+      activeContentRevisionId: "85858585-8585-4585-8585-858585858599",
+      publishedUrl: null,
+      publicSite: "waiting_for_switch",
+    });
+    expect(await read(true)).toMatchObject({
+      publishedUrl: "https://walk-hotel.next-booking.vayada.com/en",
+      publicSite: "serving",
+    });
+  });
+
   it("keeps operation recovery available when readiness evaluation fails", async () => {
     const repository = fakeRepository(operation("succeeded"));
     app = testApp(repository, {
@@ -470,6 +508,7 @@ function testApp(
       },
       repository,
       readinessProvider: provider,
+      publicSiteServesPublications: options.publicSiteServesPublications ?? true,
     },
   });
   app.decorateRequest("authContext", null);

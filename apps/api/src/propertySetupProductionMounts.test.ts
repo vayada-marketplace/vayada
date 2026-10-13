@@ -43,6 +43,7 @@ describe("adaptive property setup production mounts", () => {
           getPublicationStatus: ownerPort,
         },
         readinessProvider: { getBookingReadiness: ownerPort },
+        publicSiteServesPublications: true,
       },
       pmsRoomPublication: {
         mediaCommandPort: { assignRoomTypeMedia: ownerPort },
