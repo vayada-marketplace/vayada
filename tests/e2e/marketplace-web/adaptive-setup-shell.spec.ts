@@ -914,7 +914,6 @@ function setupUrl(
     returnProduct: overrides.returnProduct ?? "marketplace",
     returnTo: overrides.returnTo ?? "/marketplace",
     propertyId,
-    _adaptive: "1",
   });
   if (overrides.step) query.set("step", overrides.step);
   if (!baseURL) return `/setup?${query.toString()}`;

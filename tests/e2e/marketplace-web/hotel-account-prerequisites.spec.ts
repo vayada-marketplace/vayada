@@ -1,5 +1,9 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+import {
+  createPropertySetupRouteMock,
+  mockPropertySetupRoute,
+} from "../support/propertySetupRouteMocks";
 import { createAdaptiveHotelSetupStatusMock } from "../support/sharedHotelSetupMocks";
 import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
 
@@ -116,6 +120,14 @@ test.describe("hotel account prerequisites", () => {
       },
     );
 
+    await mockPropertySetupRoute(
+      page,
+      createPropertySetupRouteMock({
+        propertyId,
+        selectedTracks: ["hotel_operations", "creator_marketplace"],
+        resumeStepId: "present_hotel",
+      }),
+    );
     await page.goto(setupUrl(baseURL));
     await page.getByLabel("Hotel Operations").locator("xpath=ancestor::label").click();
     await page.getByLabel("Creator Marketplace").locator("xpath=ancestor::label").click();
@@ -182,7 +194,7 @@ test.describe("hotel account prerequisites", () => {
     await expect(page.getByLabel("Website")).toHaveCount(0);
     await page.getByRole("button", { name: "Save and continue" }).click();
 
-    await expect(page.getByRole("heading", { name: "Review and next steps" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Present your hotel", level: 1 })).toBeVisible();
     expect(selectedTracks).toEqual(["hotel_operations", "creator_marketplace"]);
     const profileWrite = writes.find(({ path }) => path.endsWith("/hotel-setup/properties"));
     expect(profileWrite?.body).toMatchObject({
@@ -309,6 +321,14 @@ test.describe("hotel account prerequisites", () => {
       },
     );
 
+    await mockPropertySetupRoute(
+      page,
+      createPropertySetupRouteMock({
+        propertyId,
+        selectedTracks: ["creator_marketplace"],
+        resumeStepId: "present_hotel",
+      }),
+    );
     await page.goto(setupUrl(baseURL, propertyId));
     await expect(page.getByText("Logo ready to finish")).toBeVisible();
     await completePrefilledProfile(page);
@@ -317,7 +337,7 @@ test.describe("hotel account prerequisites", () => {
     await expect(page.getByText("Logo ready to finish")).toBeVisible();
     await completePrefilledProfile(page);
 
-    await expect(page.getByRole("heading", { name: "Review and next steps" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Present your hotel", level: 1 })).toBeVisible();
     expect(assignmentKeys).toEqual([
       pending.assignmentIdempotencyKey,
       pending.assignmentIdempotencyKey,

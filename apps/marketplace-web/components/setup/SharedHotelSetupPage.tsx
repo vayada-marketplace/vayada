@@ -58,12 +58,10 @@ const PROPERTY_LAUNCH_SETTINGS_API = {
 export function SharedHotelSetupPage({
   defaultEntryProduct,
   defaultReturnTo,
-  adaptiveShellEnabled = false,
   airbnbImportEnabled = false,
 }: {
   defaultEntryProduct: SharedHotelSetupEntryProduct;
   defaultReturnTo: string;
-  adaptiveShellEnabled?: boolean;
   airbnbImportEnabled?: boolean;
 }) {
   const router = useRouter();
@@ -351,17 +349,13 @@ export function SharedHotelSetupPage({
               )
             : undefined
         }
-        renderAfterHotelDetails={
-          adaptiveShellEnabled
-            ? (propertyId, onEditHotelDetails) => (
-                <AdaptiveSetupHandoff
-                  propertyId={propertyId}
-                  onEditHotelDetails={onEditHotelDetails}
-                  onExit={() => handleExit(propertyId)}
-                />
-              )
-            : undefined
-        }
+        renderAfterHotelDetails={(propertyId, onEditHotelDetails) => (
+          <AdaptiveSetupHandoff
+            propertyId={propertyId}
+            onEditHotelDetails={onEditHotelDetails}
+            onExit={() => handleExit(propertyId)}
+          />
+        )}
         renderTaskForm={(context: SharedSetupTaskFormContext) => (
           <SetupTaskFormRouter
             {...context}

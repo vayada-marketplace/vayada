@@ -462,7 +462,6 @@ function setupUrl(baseURL: string | undefined) {
     returnProduct: "marketplace",
     returnTo: "/marketplace",
     propertyId,
-    _adaptive: "1",
   });
   if (!baseURL) return `/setup?${query.toString()}`;
   const url = new URL(baseURL);

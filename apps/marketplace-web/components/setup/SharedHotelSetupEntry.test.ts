@@ -72,36 +72,32 @@ describe("invitation setup entry", () => {
     vi.unstubAllGlobals();
   });
 
-  async function render(adaptiveShellEnabled = true) {
+  async function render() {
     await act(async () => {
       renderer = create(
         createElement(SharedHotelSetupPage, {
           defaultEntryProduct: "marketplace",
           defaultReturnTo: "/marketplace",
-          adaptiveShellEnabled,
         }),
       );
     });
   }
 
-  it.each([true, false])(
-    "opens property setup without a property ID (adaptive=%s)",
-    async (flag) => {
-      await render(flag);
-      expect(mocks.wizard).toHaveBeenCalled();
-      expect(mocks.adaptive).not.toHaveBeenCalled();
-      const props = mocks.wizard.mock.calls.at(-1)?.[0] as unknown as {
-        entryProduct: string;
-        onPropertySelected: (id: string) => void;
-      };
-      expect(props.entryProduct).toBe("pms");
-      await act(async () => props.onPropertySelected("property-1"));
-      expect(mocks.replace).toHaveBeenCalledWith(
-        "/setup?entryProduct=pms&returnProduct=pms&propertyId=property-1",
-        { scroll: false },
-      );
-    },
-  );
+  it("opens property setup without a property ID", async () => {
+    await render();
+    expect(mocks.wizard).toHaveBeenCalled();
+    expect(mocks.adaptive).not.toHaveBeenCalled();
+    const props = mocks.wizard.mock.calls.at(-1)?.[0] as unknown as {
+      entryProduct: string;
+      onPropertySelected: (id: string) => void;
+    };
+    expect(props.entryProduct).toBe("pms");
+    await act(async () => props.onPropertySelected("property-1"));
+    expect(mocks.replace).toHaveBeenCalledWith(
+      "/setup?entryProduct=pms&returnProduct=pms&propertyId=property-1",
+      { scroll: false },
+    );
+  });
 
   it("retains the adaptive route when a property is already selected", async () => {
     mocks.params.set("propertyId", "property-1");
