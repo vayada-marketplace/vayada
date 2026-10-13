@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ListingFormData } from "@/lib/types";
 
-import { canRemoveListingImage, removeListingImageAt } from "./listingImageState";
+import { removeListingImageAt } from "./listingImageState";
 
 describe("removeListingImageAt", () => {
   it("removes a persisted media image without removing a local upload", () => {
@@ -48,25 +48,8 @@ describe("removeListingImageAt", () => {
   });
 });
 
-describe("canRemoveListingImage", () => {
-  it("keeps persisted images read-only when the offer already exists", () => {
-    const listing = listingWithMixedImages(true);
-
-    expect(canRemoveListingImage(listing, 0)).toBe(false);
-    expect(canRemoveListingImage(listing, 1)).toBe(false);
-    expect(canRemoveListingImage(listing, 2)).toBe(true);
-  });
-
-  it("allows source images to be removed before a new offer is created", () => {
-    const listing = listingWithMixedImages(false);
-
-    expect(canRemoveListingImage(listing, 0)).toBe(true);
-    expect(canRemoveListingImage(listing, 1)).toBe(true);
-  });
-});
-
-function listingWithMixedImages(existingOffer = false): ListingFormData {
-  const listing: ListingFormData = {
+function listingWithMixedImages(): ListingFormData {
+  return {
     name: "Creator stay",
     location: "Berlin",
     description: "A creator collaboration offer.",
@@ -85,12 +68,4 @@ function listingWithMixedImages(existingOffer = false): ListingFormData {
     lookingForPlatforms: ["Instagram"],
     targetGroupCountries: ["Germany"],
   };
-  if (existingOffer) {
-    listing.marketplaceOnboarding = {
-      idempotencyKey: "marketplace.hotel-offer.edit:offer-1:v1",
-      createdOfferId: "offer-1",
-      existingOffer: true,
-    };
-  }
-  return listing;
 }

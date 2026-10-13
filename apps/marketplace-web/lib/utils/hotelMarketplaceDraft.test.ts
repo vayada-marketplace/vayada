@@ -4,15 +4,11 @@ import {
   clearHotelMarketplaceDraft,
   createHotelMarketplaceDraft,
   ensureHotelMarketplaceOfferIdempotency,
-  firstHotelMarketplaceOfferCoverSource,
   initialHotelMarketplaceOfferImages,
   markHotelMarketplaceDraftOfferCreated,
   markHotelMarketplaceDraftOfferProgress,
   pendingHotelMarketplaceDraftListings,
   readHotelMarketplaceDraft,
-  replaceFirstOfferPhotoWithCanonicalCover,
-  resolveHotelMarketplaceCoverSource,
-  restoreHotelMarketplaceDraftForm,
   saveHotelMarketplaceDraft,
 } from "./hotelMarketplaceDraft";
 
@@ -52,58 +48,6 @@ describe("hotel Marketplace draft", () => {
     expect(initialHotelMarketplaceOfferImages(null)).toEqual([]);
   });
 
-  it("promotes one selected local photo to the canonical cover without uploading the file twice", () => {
-    const firstFile = new File(["first"], "first.webp", { type: "image/webp" });
-    const secondFile = new File(["second"], "second.webp", { type: "image/webp" });
-    const offer = listing({
-      images: ["data:image/webp;base64,Zmlyc3Q=", "data:image/webp;base64,c2Vjb25k"],
-      imageMediaObjectIds: [],
-      imageFiles: [firstFile, secondFile],
-    });
-
-    expect(firstHotelMarketplaceOfferCoverSource(offer)).toEqual({
-      kind: "file",
-      file: firstFile,
-    });
-    expect(
-      replaceFirstOfferPhotoWithCanonicalCover(offer, "https://cdn.example/canonical-cover.webp"),
-    ).toMatchObject({
-      images: ["https://cdn.example/canonical-cover.webp", "data:image/webp;base64,c2Vjb25k"],
-      imageFiles: [secondFile],
-    });
-  });
-
-  it("can promote the first remote photo from a restored draft", () => {
-    const offer = listing({
-      images: ["https://source.example/first.webp", "https://source.example/second.webp"],
-      imageMediaObjectIds: [],
-      imageFiles: [],
-    });
-
-    expect(firstHotelMarketplaceOfferCoverSource(offer)).toEqual({
-      kind: "remote_url",
-      url: "https://source.example/first.webp",
-    });
-    expect(
-      replaceFirstOfferPhotoWithCanonicalCover(offer, "https://cdn.example/canonical-cover.webp"),
-    ).toMatchObject({
-      images: ["https://cdn.example/canonical-cover.webp", "https://source.example/second.webp"],
-      imageFiles: [],
-    });
-  });
-
-  it("uses a selected replacement when an existing offer has no reusable cover media", () => {
-    const selectedFile = new File(["replacement"], "replacement.jpg", { type: "image/jpeg" });
-
-    expect(resolveHotelMarketplaceCoverSource({ existingOfferCoverUrl: null })).toBeNull();
-    expect(
-      resolveHotelMarketplaceCoverSource({
-        selectedFile,
-        existingOfferCoverUrl: null,
-      }),
-    ).toEqual({ kind: "file", file: selectedFile });
-  });
-
   it("restores serializable offer fields and remote media", () => {
     const storage = memoryStorage();
     saveHotelMarketplaceDraft(
@@ -124,27 +68,6 @@ describe("hotel Marketplace draft", () => {
         { name: "Creator stay", images: ["https://cdn.example/hotel.jpg"], imageFiles: [] },
       ],
       omittedLocalPhotos: false,
-    });
-  });
-
-  it("restores draft copy without overwriting current locality consent", () => {
-    expect(
-      restoreHotelMarketplaceDraftForm(
-        { about: "Saved creator-facing copy", localityPublic: true },
-        false,
-      ),
-    ).toEqual({
-      about: "Saved creator-facing copy",
-      localityPublic: false,
-    });
-    expect(
-      restoreHotelMarketplaceDraftForm(
-        { about: "Saved creator-facing copy", localityPublic: false },
-        true,
-      ),
-    ).toEqual({
-      about: "Saved creator-facing copy",
-      localityPublic: true,
     });
   });
 

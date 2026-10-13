@@ -12,7 +12,6 @@ import {
   useState,
 } from "react";
 import {
-  ArrowLeftIcon,
   ArrowRightIcon,
   BuildingOffice2Icon,
   BuildingOfficeIcon,
@@ -38,9 +37,6 @@ import type {
   PropertyProfilePatch,
   PropertyProfileResponse,
   PublicPropertyProfileResponse,
-  SetupComponentProduct,
-  SetupTask,
-  SetupTaskId,
   SetupTrack,
   UpdatePropertyProfileRequest,
 } from "@vayada/domain-hotels";
@@ -65,7 +61,6 @@ import GooglePlacesAddressField from "./GooglePlacesAddressField";
 import TimezoneField from "./TimezoneField";
 import { availableTimezones, defaultTimezoneForCountry, timezoneForCoordinates } from "./timezones";
 import {
-  isSetupTaskActionable,
   resolveSharedFirstRunSetupView,
   toggleSetupTrackSelection,
   type SharedFirstRunSetupViewModel,
@@ -87,15 +82,7 @@ import {
   type PropertyLaunchSettingsApi,
 } from "./propertyLaunchSettings";
 
-type ProductLabels = Record<SetupComponentProduct, string>;
 type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
-
-export type SharedFirstRunContinueInput = {
-  action: "enter_product";
-  product: SetupComponentProduct;
-  propertyId: string;
-  returnTo: string | null;
-};
 
 export type SharedFirstRunPropertySetupWizardProps = {
   initialProfileSuggestions?: PreparedHotelImport["property"];
@@ -103,27 +90,13 @@ export type SharedFirstRunPropertySetupWizardProps = {
   api: SharedHotelSetupApi;
   entryProduct: SharedHotelSetupEntryProduct;
   initialPropertyId?: string | null;
-  returnTo?: string | null;
   initialAddProperty?: boolean;
   embedded?: boolean;
-  productLabels?: Partial<ProductLabels>;
-  onContinue: (input: SharedFirstRunContinueInput) => void | Promise<void>;
-  renderTaskForm: (context: SharedSetupTaskFormContext) => ReactNode;
   propertyLaunchSettingsApi?: PropertyLaunchSettingsApi;
   onPropertySelected?: (propertyId: string) => void | Promise<void>;
-  renderAfterHotelDetails?: (propertyId: string, onEditHotelDetails: () => void) => ReactNode;
+  /** Renders the step-by-step setup once the selected hotel's basics are saved. */
+  renderAfterHotelDetails: (propertyId: string, onEditHotelDetails: () => void) => ReactNode;
   renderSetupActions?: (propertyId: string) => ReactNode;
-  onExit?: (propertyId: string | null) => void;
-};
-
-export type SharedSetupTaskFormContext = {
-  task: SetupTask;
-  propertyId: string;
-  selectedTracks: readonly SetupTrack[];
-  onBeforeSave: () => Promise<void>;
-  onComplete: () => Promise<void>;
-  onBack: (() => void) | null;
-  onDirty: () => void;
 };
 
 type ProfileDraft = {
@@ -198,12 +171,6 @@ export function hasMapCoordinates(location: Pick<ProfileDraft, "latitude" | "lon
   );
 }
 
-const DEFAULT_PRODUCT_LABELS: ProductLabels = {
-  booking: "Booking Engine",
-  pms: "PMS",
-  marketplace: "Creator Marketplace",
-};
-
 const TRACK_CONTENT: Record<
   SetupTrack,
   { title: string; subtitle: string | null; description: string; icon: IconComponent }
@@ -221,73 +188,6 @@ const TRACK_CONTENT: Record<
     icon: SparklesIcon,
   },
 };
-
-const TASK_CONTENT: Record<
-  SetupTaskId,
-  {
-    title: string;
-    description: string;
-  }
-> = {
-  shared_identity: {
-    title: "Add your hotel basics",
-    description: "Confirm the hotel name, type, address, timezone, and contact details.",
-  },
-  public_profile: {
-    title: "Describe your hotel",
-    description: "Add one description and cover that guests and creators will see.",
-  },
-  creator_offer: {
-    title: "Prepare your collaboration offer",
-    description: "Choose deliverables, compensation, and creator requirements.",
-  },
-  rooms_rates_availability: {
-    title: "Add your first room type",
-    description:
-      "Just the basics to get started. You can add more rooms and fine-tune pricing anytime.",
-  },
-  guest_settings_policies: {
-    title: "Review guest settings and policies",
-    description: "Set check-in details, booking preferences, and cancellation terms.",
-  },
-  billing_plan: {
-    title: "Choose your plan",
-    description: "How you pay for vayada.",
-  },
-  payment: {
-    title: "How guests can pay",
-    description: "Choose which payment options to offer. You can enable multiple.",
-  },
-  direct_booking_publication: {
-    title: "Design your booking page",
-    description: "Set up the look and feel of your direct booking site.",
-  },
-};
-
-type TaskStateCopy = {
-  label: string;
-  description: string;
-  tone: "neutral" | "success" | "warning" | "danger";
-};
-
-export const INLINE_SETUP_STALE_SAVE_MESSAGE =
-  "Your setup changed in another session. We refreshed the latest step—review it before saving again.";
-export const INLINE_SETUP_UNSAVED_CHANGES_MESSAGE =
-  "You have unsaved changes. Leave this step and discard them?";
-
-export function canLeaveInlineSetupTask(
-  hasUnsavedChanges: boolean,
-  confirmDiscard: () => boolean,
-): boolean {
-  return !hasUnsavedChanges || confirmDiscard();
-}
-
-export function blockInlineSetupUnload(
-  event: Pick<BeforeUnloadEvent, "preventDefault" | "returnValue">,
-) {
-  event.preventDefault();
-  event.returnValue = "";
-}
 
 const BASE_PROFILE_STEP_FIELDS: ReadonlyArray<ReadonlyArray<string>> = [
   ["displayName", "propertyType", "logo"],
@@ -342,26 +242,19 @@ export default function SharedFirstRunPropertySetupWizard({
   api,
   entryProduct,
   initialPropertyId = null,
-  returnTo = null,
   initialAddProperty = false,
   embedded = false,
-  productLabels,
-  onContinue,
-  renderTaskForm,
   propertyLaunchSettingsApi,
   onPropertySelected,
   renderAfterHotelDetails,
   renderSetupActions,
   initialProfileSuggestions,
   propertyCreateIdempotencyKey,
-  onExit,
 }: SharedFirstRunPropertySetupWizardProps) {
-  const labels = { ...DEFAULT_PRODUCT_LABELS, ...productLabels };
   const [status, setStatus] = useState<AdaptiveHotelSetupStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [statusReloadToken, setStatusReloadToken] = useState(0);
   const [forceCreateProperty, setForceCreateProperty] = useState(initialAddProperty);
-  const [forceTrackSelection, setForceTrackSelection] = useState(false);
   const [editPropertyProfile, setEditPropertyProfile] = useState(false);
   const [profileLoadFailed, setProfileLoadFailed] = useState(false);
   const [profileReloadToken, setProfileReloadToken] = useState(0);
@@ -380,7 +273,6 @@ export default function SharedFirstRunPropertySetupWizard({
   const [skipLaunchSettings, setSkipLaunchSettings] = useState(false);
   const [selectedTracks, setSelectedTracks] = useState<SetupTrack[]>([]);
   const [saving, setSaving] = useState(false);
-  const [selectedPlanTaskId, setSelectedPlanTaskId] = useState<SetupTaskId | null>(null);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [profileStep, setProfileStep] = useState(0);
@@ -404,14 +296,9 @@ export default function SharedFirstRunPropertySetupWizard({
     () =>
       resolveSharedFirstRunSetupView(status, {
         forceCreateProperty,
-        forceTrackSelection,
         editPropertyProfile,
       }),
-    [editPropertyProfile, forceCreateProperty, forceTrackSelection, status],
-  );
-  const entryContinueInput = useMemo(
-    () => buildEntryContinueInput(status, returnTo),
-    [returnTo, status],
+    [editPropertyProfile, forceCreateProperty, status],
   );
 
   useEffect(() => {
@@ -422,10 +309,6 @@ export default function SharedFirstRunPropertySetupWizard({
   useEffect(() => {
     setProfileStep(0);
   }, [view.profileMode, view.selectedPropertyId]);
-
-  useEffect(() => {
-    setSelectedPlanTaskId(status?.setupPlan?.recommendedTaskId ?? null);
-  }, [status?.setupPlan?.planRevision, status?.setupPlan?.recommendedTaskId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -717,7 +600,6 @@ export default function SharedFirstRunPropertySetupWizard({
         },
         (trackCommandKey.current = idempotencyKeyForRetry(trackCommandKey.current)),
       );
-      setForceTrackSelection(false);
       await reloadStatus(status.propertySelection.selectedPropertyId);
       trackCommandKey.current = null;
     } catch (err) {
@@ -731,7 +613,6 @@ export default function SharedFirstRunPropertySetupWizard({
           trackCommandKey.current = null;
           if (sameTrackSelection(selectedTracks, latestStatus.organization.selectedTracks)) {
             setSelectedTracks(latestStatus.organization.selectedTracks);
-            setForceTrackSelection(false);
           } else {
             setSelectedTracks(
               mergeTrackSelectionAfterConflict(
@@ -751,42 +632,6 @@ export default function SharedFirstRunPropertySetupWizard({
       }
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleCompleteTask = async (task: SetupTask) => {
-    setError("");
-    try {
-      const nextStatus = await reloadStatus(task.propertyId);
-      setSelectedPlanTaskId(recommendedInlineSetupTaskId(nextStatus));
-    } catch (err) {
-      setError(setupErrorMessage(err));
-      throw err;
-    }
-  };
-
-  const handleBeforeSaveTask = async (task: SetupTask, planRevision: string) => {
-    setError("");
-    try {
-      const nextStatus = await reloadStatus(task.propertyId);
-      if (
-        isInlineSetupTaskSaveCurrent(nextStatus, {
-          propertyId: task.propertyId,
-          taskId: task.taskId,
-          planRevision,
-        })
-      ) {
-        return;
-      }
-
-      setSelectedPlanTaskId(recommendedInlineSetupTaskId(nextStatus));
-      setError(INLINE_SETUP_STALE_SAVE_MESSAGE);
-      throw new Error(INLINE_SETUP_STALE_SAVE_MESSAGE);
-    } catch (err) {
-      if (setupErrorMessage(err) !== INLINE_SETUP_STALE_SAVE_MESSAGE) {
-        setError(setupErrorMessage(err));
-      }
-      throw err;
     }
   };
 
@@ -814,7 +659,7 @@ export default function SharedFirstRunPropertySetupWizard({
     return <WizardShell title="Setting up your property" view={view} loading embedded={embedded} />;
   }
 
-  if (view.screen === "setup_plan" && view.selectedPropertyId && renderAfterHotelDetails) {
+  if (view.screen === "setup_plan" && view.selectedPropertyId) {
     if (saving)
       return <WizardShell title="Saving hotel details" view={view} loading embedded={embedded} />;
     return (
@@ -833,9 +678,6 @@ export default function SharedFirstRunPropertySetupWizard({
       mapFirst={view.screen === "property_profile" && profileStep === 1}
       headingRef={view.screen === "property_profile" ? profileHeading : undefined}
     >
-      {view.screen === "setup_plan" &&
-        view.selectedPropertyId &&
-        renderSetupActions?.(view.selectedPropertyId)}
       {error && !(view.screen === "property_profile" && profileLoadFailed) && (
         <div
           className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
@@ -927,7 +769,6 @@ export default function SharedFirstRunPropertySetupWizard({
       {view.screen === "track_selection" && (
         <TrackSelection
           selectedTracks={selectedTracks}
-          lockedTracks={status.organization.selectedTracks}
           canManageTracks={status.organization.canManageTracks}
           saving={saving}
           onToggle={(track) => {
@@ -937,34 +778,6 @@ export default function SharedFirstRunPropertySetupWizard({
             );
           }}
           onSave={handleSaveTracks}
-          onCancel={
-            status.organization.selectedTracks.length > 0
-              ? () => {
-                  setSelectedTracks(status.organization.selectedTracks);
-                  setForceTrackSelection(false);
-                }
-              : undefined
-          }
-        />
-      )}
-
-      {view.screen === "setup_plan" && (
-        <SetupPlan
-          status={status}
-          labels={labels}
-          renderTaskForm={renderTaskForm}
-          onCompleteTask={handleCompleteTask}
-          onBeforeSaveTask={handleBeforeSaveTask}
-          selectedTaskId={selectedPlanTaskId}
-          onSelectTask={setSelectedPlanTaskId}
-          onEditHotelBasics={() => setEditPropertyProfile(true)}
-          onExit={onExit ? () => onExit(view.selectedPropertyId) : undefined}
-          onEnterProduct={entryContinueInput ? () => onContinue(entryContinueInput) : undefined}
-          onAddTrack={
-            status.organization.selectedTracks.length < 2 && status.organization.canManageTracks
-              ? () => setForceTrackSelection(true)
-              : undefined
-          }
         />
       )}
     </WizardShell>
@@ -2069,20 +1882,16 @@ function ProfileForm({
 
 function TrackSelection({
   selectedTracks,
-  lockedTracks,
   canManageTracks,
   saving,
   onToggle,
   onSave,
-  onCancel,
 }: {
   selectedTracks: SetupTrack[];
-  lockedTracks: SetupTrack[];
   canManageTracks: boolean;
   saving: boolean;
   onToggle: (track: SetupTrack) => void;
   onSave: () => void;
-  onCancel?: () => void;
 }) {
   const needsSelection = selectedTracks.length === 0;
 
@@ -2092,8 +1901,7 @@ function TrackSelection({
         {(["hotel_operations", "creator_marketplace"] as const).map((track) => {
           const content = TRACK_CONTENT[track];
           const checked = selectedTracks.includes(track);
-          const locked = lockedTracks.includes(track);
-          const disabled = locked || !canManageTracks;
+          const disabled = !canManageTracks;
           const Icon = content.icon;
           return (
             <label
@@ -2140,11 +1948,6 @@ function TrackSelection({
                 </span>
               )}
               <span className="mt-3 text-sm leading-6 text-gray-600">{content.description}</span>
-              {locked && (
-                <span className="mt-auto pt-5 text-xs font-medium text-gray-500">
-                  Already added. Remove or change this service from service management.
-                </span>
-              )}
             </label>
           );
         })}
@@ -2160,16 +1963,6 @@ function TrackSelection({
       )}
 
       <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
-        {onCancel && (
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={saving}
-            className="rounded-full px-6 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-60"
-          >
-            Cancel
-          </button>
-        )}
         <button
           type="button"
           disabled={saving || needsSelection || !canManageTracks}
@@ -2188,604 +1981,6 @@ function TrackSelection({
       </div>
     </section>
   );
-}
-
-type InlineSetupTaskCandidate = Pick<
-  SetupTask,
-  "taskId" | "track" | "readiness" | "callerCapability"
->;
-
-export function isInlineSetupTaskEditable(
-  task: Pick<SetupTask, "taskId" | "track" | "readiness" | "callerCapability">,
-): boolean {
-  if (task.taskId === "shared_identity") {
-    return (
-      task.callerCapability === "allowed" &&
-      (task.readiness === "actionable" || task.readiness === "complete")
-    );
-  }
-  return (
-    isSetupTaskActionable(task) ||
-    (task.readiness === "complete" && task.callerCapability === "allowed")
-  );
-}
-
-export function isInlineSetupTaskSelectable(
-  task: InlineSetupTaskCandidate,
-  recommendedTaskId: SetupTaskId | null,
-): boolean {
-  if (!isInlineSetupTaskEditable(task)) return false;
-  return task.taskId === recommendedTaskId || task.readiness === "complete";
-}
-
-export function previousEditableSetupTaskId(
-  tasks: readonly InlineSetupTaskCandidate[],
-  currentTaskId: SetupTaskId,
-): SetupTaskId | null {
-  const currentIndex = tasks.findIndex(({ taskId }) => taskId === currentTaskId);
-  for (let index = currentIndex - 1; index >= 0; index -= 1) {
-    const task = tasks[index];
-    if (task && isInlineSetupTaskEditable(task)) return task.taskId;
-  }
-  return null;
-}
-
-export function recommendedInlineSetupTaskId(status: AdaptiveHotelSetupStatus): SetupTaskId | null {
-  const plan = status.setupPlan;
-  if (!plan?.recommendedTaskId) return null;
-  const recommendedTask = plan.tasks.find(({ taskId }) => taskId === plan.recommendedTaskId);
-  return recommendedTask &&
-    recommendedTask.taskId !== "shared_identity" &&
-    isInlineSetupTaskEditable(recommendedTask)
-    ? recommendedTask.taskId
-    : null;
-}
-
-export function isInlineSetupTaskSaveCurrent(
-  status: AdaptiveHotelSetupStatus,
-  expected: {
-    propertyId: string;
-    taskId: SetupTaskId;
-    planRevision: string;
-  },
-): boolean {
-  const plan = status.setupPlan;
-  if (
-    !plan ||
-    plan.propertyId !== expected.propertyId ||
-    plan.planRevision !== expected.planRevision
-  ) {
-    return false;
-  }
-  const task = plan.tasks.find(({ taskId }) => taskId === expected.taskId);
-  return Boolean(
-    task &&
-    task.taskId !== "shared_identity" &&
-    isInlineSetupTaskSelectable(task, plan.recommendedTaskId),
-  );
-}
-
-function SetupPlan({
-  status,
-  labels,
-  renderTaskForm,
-  onCompleteTask,
-  onBeforeSaveTask,
-  selectedTaskId,
-  onSelectTask,
-  onEditHotelBasics,
-  onExit,
-  onEnterProduct,
-  onAddTrack,
-}: {
-  status: AdaptiveHotelSetupStatus;
-  labels: ProductLabels;
-  renderTaskForm: (context: SharedSetupTaskFormContext) => ReactNode;
-  onCompleteTask: (task: SetupTask) => Promise<void>;
-  onBeforeSaveTask: (task: SetupTask, planRevision: string) => Promise<void>;
-  selectedTaskId: SetupTaskId | null;
-  onSelectTask: (taskId: SetupTaskId | null) => void;
-  onEditHotelBasics: () => void;
-  onExit?: () => void;
-  onEnterProduct?: () => void;
-  onAddTrack?: () => void;
-}) {
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-
-  useEffect(() => {
-    if (!hasUnsavedChanges) return;
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => blockInlineSetupUnload(event);
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [hasUnsavedChanges]);
-
-  const plan = status.setupPlan;
-  if (!plan) {
-    return (
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-        Choose a hotel to see its setup plan.
-      </div>
-    );
-  }
-
-  const entryDecision = status.entryDecision;
-  const requestedProduct = entryDecision?.requestedProduct;
-  const recommendedTask = plan.recommendedTaskId
-    ? (plan.tasks.find(
-        (task) =>
-          task.taskId === plan.recommendedTaskId &&
-          task.taskId !== "shared_identity" &&
-          isInlineSetupTaskEditable(task),
-      ) ?? null)
-    : null;
-  const selectedTask = selectedTaskId
-    ? (plan.tasks.find(
-        (task) =>
-          task.taskId === selectedTaskId &&
-          task.taskId !== "shared_identity" &&
-          isInlineSetupTaskSelectable(task, plan.recommendedTaskId),
-      ) ?? null)
-    : null;
-  const currentTask = selectedTask ?? recommendedTask;
-  const attentionTask =
-    currentTask === null && plan.ownerProgress.complete < plan.ownerProgress.total
-      ? (plan.tasks.find(({ ownerProgress }) => ownerProgress !== "owner_complete") ?? null)
-      : null;
-  const activeTask = currentTask ?? attentionTask;
-  const currentTaskIndex = activeTask
-    ? plan.tasks.findIndex(({ taskId }) => taskId === activeTask.taskId)
-    : -1;
-  const reviewActive = activeTask === null;
-  const totalSteps = plan.tasks.length + 1;
-  const currentStepNumber = reviewActive ? totalSteps : currentTaskIndex + 1;
-  const previousTaskId = activeTask
-    ? previousEditableSetupTaskId(plan.tasks, activeTask.taskId)
-    : null;
-  const reviewBackTaskId = reviewActive
-    ? ([...plan.tasks].reverse().find((task) => isInlineSetupTaskEditable(task))?.taskId ?? null)
-    : null;
-  const navigateFromTask = (navigate: () => void) => {
-    if (
-      !canLeaveInlineSetupTask(hasUnsavedChanges, () =>
-        window.confirm(INLINE_SETUP_UNSAVED_CHANGES_MESSAGE),
-      )
-    ) {
-      return;
-    }
-    setHasUnsavedChanges(false);
-    navigate();
-  };
-  const selectTask = (taskId: SetupTaskId) => {
-    navigateFromTask(() => {
-      if (taskId === "shared_identity") {
-        onEditHotelBasics();
-        return;
-      }
-      onSelectTask(taskId);
-    });
-  };
-  const currentStepTitle = activeTask
-    ? TASK_CONTENT[activeTask.taskId].title
-    : "Review and next steps";
-  const canReturnToReview =
-    plan.ownerProgress.complete === plan.ownerProgress.total &&
-    recommendedTask === null &&
-    selectedTask?.readiness === "complete";
-  const showReviewAddTrackHelp =
-    !onAddTrack &&
-    status.organization.selectedTracks.length < 2 &&
-    !status.organization.canManageTracks;
-
-  return (
-    <section className="mx-auto max-w-5xl">
-      <div className="mb-3 flex justify-center">
-        <img src="/vayada-logo.png" alt="vayada" width={120} height={40} className="h-7 w-auto" />
-      </div>
-      <div className="relative mx-auto mb-10 w-full" data-testid="hotel-setup-progress">
-        <div className="mx-auto w-full max-w-xl">
-          <div
-            className={`flex items-center ${
-              onExit ? "justify-between sm:justify-center" : "justify-center"
-            }`}
-          >
-            <p className="text-xs font-semibold text-gray-500">
-              Step {currentStepNumber} of {totalSteps}
-            </p>
-            {onExit && (
-              <button
-                type="button"
-                onClick={() => navigateFromTask(onExit)}
-                className="text-xs font-semibold text-gray-500 transition hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2 sm:absolute sm:right-0 sm:top-0 sm:text-sm"
-              >
-                Exit setup
-              </button>
-            )}
-          </div>
-          <div
-            className="mt-3 flex w-full gap-2"
-            role="progressbar"
-            aria-label="Hotel setup progress"
-            aria-valuemin={1}
-            aria-valuemax={totalSteps}
-            aria-valuenow={currentStepNumber}
-            aria-valuetext={`Step ${currentStepNumber} of ${totalSteps}: ${currentStepTitle}`}
-          >
-            {Array.from({ length: totalSteps }, (_, index) => {
-              const reached = index < currentStepNumber;
-              return (
-                <span
-                  key={index}
-                  className={`h-2 flex-1 rounded-full transition-colors duration-300 motion-reduce:transition-none ${
-                    reached ? "bg-primary-600" : "bg-primary-100"
-                  }`}
-                  data-state={reached ? "reached" : "upcoming"}
-                  aria-hidden="true"
-                />
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {entryDecision?.decision === "unavailable" && requestedProduct && (
-        <div
-          className="mb-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"
-          role="alert"
-        >
-          {labels[requestedProduct]} is not available for this hotel right now. You can continue any
-          setup task below or ask an owner or support for help.
-        </div>
-      )}
-
-      <div className="min-w-0" onChangeCapture={() => setHasUnsavedChanges(true)}>
-        <div
-          className={`mx-auto ${
-            currentTask?.taskId === "direct_booking_publication" ? "max-w-5xl" : "max-w-3xl"
-          }`}
-        >
-          {currentTask ? (
-            <InlineSetupTaskStep
-              key={currentTask.taskId}
-              task={currentTask}
-              onReturnToReview={
-                canReturnToReview ? () => navigateFromTask(() => onSelectTask(null)) : null
-              }
-              form={renderTaskForm({
-                task: currentTask,
-                propertyId: plan.propertyId,
-                selectedTracks: status.organization.selectedTracks,
-                onBeforeSave: () => onBeforeSaveTask(currentTask, plan.planRevision),
-                onComplete: () => {
-                  setHasUnsavedChanges(false);
-                  return onCompleteTask(currentTask);
-                },
-                onBack: previousTaskId ? () => selectTask(previousTaskId) : null,
-                onDirty: () => setHasUnsavedChanges(true),
-              })}
-            />
-          ) : attentionTask ? (
-            <SetupAttentionStep
-              key={attentionTask.taskId}
-              task={attentionTask}
-              onBack={previousTaskId ? () => selectTask(previousTaskId) : null}
-            />
-          ) : (
-            <>
-              <SetupReview
-                launchReadiness={plan.launchReadiness}
-                onBack={reviewBackTaskId ? () => selectTask(reviewBackTaskId) : null}
-              />
-              {(onEnterProduct || onAddTrack || showReviewAddTrackHelp) && (
-                <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-3">
-                  {onEnterProduct && requestedProduct && (
-                    <button
-                      type="button"
-                      onClick={onEnterProduct}
-                      className="inline-flex items-center justify-center gap-2 rounded-full bg-gray-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-950 focus-visible:ring-offset-2"
-                    >
-                      Open {labels[requestedProduct]}
-                      <ArrowRightIcon className="h-4 w-4" aria-hidden="true" />
-                    </button>
-                  )}
-                  {onAddTrack && (
-                    <button
-                      type="button"
-                      onClick={onAddTrack}
-                      className="text-sm font-semibold text-primary-700 transition hover:text-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2"
-                    >
-                      Add another service
-                    </button>
-                  )}
-                  {showReviewAddTrackHelp && (
-                    <p className="max-w-xs text-xs text-gray-500">
-                      Ask a hotel group owner if you want to add another service.
-                    </p>
-                  )}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function SetupAttentionStep({ task, onBack }: { task: SetupTask; onBack: (() => void) | null }) {
-  const headingRef = useSetupStepHeadingFocus();
-  const content = TASK_CONTENT[task.taskId];
-  const state = setupTaskStateCopy(task);
-  const toneClass = {
-    neutral: "border-gray-200 bg-gray-50 text-gray-700",
-    success: "border-emerald-200 bg-emerald-50 text-emerald-800",
-    warning: "border-amber-200 bg-amber-50 text-amber-900",
-    danger: "border-red-200 bg-red-50 text-red-800",
-  }[state.tone];
-
-  return (
-    <section aria-labelledby="current-setup-step-title">
-      <h1
-        ref={headingRef}
-        id="current-setup-step-title"
-        tabIndex={-1}
-        className="text-2xl font-semibold tracking-tight text-gray-950 outline-none"
-      >
-        {content.title}
-      </h1>
-      <p className="mt-3 max-w-2xl text-base leading-7 text-gray-600">{content.description}</p>
-      {onBack && <SetupBackButton onClick={onBack} />}
-      <div className={`mt-7 rounded-2xl border px-4 py-3 text-sm ${toneClass}`} role="status">
-        <p className="font-semibold">{state.label}</p>
-        <p className="mt-1 leading-6">{state.description}</p>
-      </div>
-      <p className="mt-5 max-w-xl text-sm leading-6 text-gray-600">
-        Your saved work is safe. Return later or ask the indicated person to resolve this step.
-      </p>
-    </section>
-  );
-}
-
-function InlineSetupTaskStep({
-  task,
-  form,
-  onReturnToReview,
-}: {
-  task: SetupTask;
-  form: ReactNode;
-  onReturnToReview: (() => void) | null;
-}) {
-  const headingRef = useSetupStepHeadingFocus();
-  const content = TASK_CONTENT[task.taskId];
-
-  return (
-    <section aria-labelledby="current-setup-step-title">
-      <div className="text-center">
-        <h1
-          ref={headingRef}
-          id="current-setup-step-title"
-          tabIndex={-1}
-          className="text-2xl font-semibold tracking-tight text-gray-950 outline-none sm:text-3xl"
-        >
-          {content.title}
-        </h1>
-        <p className="mx-auto mt-3 max-w-2xl text-base leading-7 text-gray-600">
-          {content.description}
-        </p>
-        {onReturnToReview && (
-          <button
-            type="button"
-            onClick={onReturnToReview}
-            className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-primary-700 transition hover:text-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2"
-          >
-            Return to review
-            <ArrowRightIcon className="h-4 w-4" aria-hidden="true" />
-          </button>
-        )}
-      </div>
-      <div
-        className="mt-8 rounded-3xl border border-gray-200 bg-white p-5 shadow-sm sm:p-8"
-        data-testid="hotel-setup-form-card"
-      >
-        {form}
-      </div>
-    </section>
-  );
-}
-
-function SetupReview({
-  launchReadiness,
-  onBack,
-}: {
-  launchReadiness: NonNullable<AdaptiveHotelSetupStatus["setupPlan"]>["launchReadiness"];
-  onBack: (() => void) | null;
-}) {
-  const headingRef = useSetupStepHeadingFocus();
-  const readinessItems = [
-    {
-      label: "Creator Marketplace",
-      description: "Your public profile and creator collaboration offer.",
-      value: launchReadiness.marketplacePublish,
-    },
-    {
-      label: "Hotel operations",
-      description: "Your PMS rooms, rates, availability, and operating settings.",
-      value: launchReadiness.operationsUse,
-    },
-    {
-      label: "Direct booking",
-      description: "Your guest-facing booking page, policies, and payment setup.",
-      value: launchReadiness.directBookingPublish,
-    },
-  ] as const;
-
-  return (
-    <section aria-labelledby="setup-review-title">
-      <h1
-        ref={headingRef}
-        id="setup-review-title"
-        tabIndex={-1}
-        className="text-2xl font-semibold tracking-tight text-gray-950 outline-none"
-      >
-        Review and next steps
-      </h1>
-      <p className="mt-3 max-w-2xl text-base leading-7 text-gray-600">
-        Each vayada service has its own readiness status. You can use ready services while another
-        one is still being reviewed.
-      </p>
-      {onBack && <SetupBackButton onClick={onBack} />}
-
-      <dl className="mt-8 divide-y divide-gray-200 border-y border-gray-200">
-        {readinessItems.map((item) => {
-          const copy = launchReadinessCopy(item.value);
-          return (
-            <div
-              key={item.label}
-              className="flex flex-col gap-3 py-5 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div className="min-w-0">
-                <dt className="text-sm font-semibold text-gray-950">{item.label}</dt>
-                <dd className="mt-1 text-sm leading-6 text-gray-600">{item.description}</dd>
-              </div>
-              <dd className={`shrink-0 text-sm font-semibold ${copy.className}`}>{copy.label}</dd>
-            </div>
-          );
-        })}
-      </dl>
-
-      <p className="mt-6 text-sm leading-6 text-gray-600">
-        Your saved progress is safe. You can leave setup and return whenever a pending service is
-        ready.
-      </p>
-    </section>
-  );
-}
-
-function SetupBackButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-gray-600 transition hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2"
-    >
-      <ArrowLeftIcon className="h-4 w-4" aria-hidden="true" />
-      Back
-    </button>
-  );
-}
-
-function useSetupStepHeadingFocus(): RefObject<HTMLHeadingElement> {
-  const headingRef = useRef<HTMLHeadingElement>(null);
-
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => headingRef.current?.focus());
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
-
-  return headingRef;
-}
-
-function launchReadinessCopy(
-  readiness: NonNullable<
-    AdaptiveHotelSetupStatus["setupPlan"]
-  >["launchReadiness"][keyof NonNullable<AdaptiveHotelSetupStatus["setupPlan"]>["launchReadiness"]],
-): { label: string; className: string } {
-  if (readiness === "ready") return { label: "Ready", className: "text-emerald-700" };
-  if (readiness === "pending") {
-    return { label: "Pending", className: "text-amber-800" };
-  }
-  if (readiness === "blocked") {
-    return { label: "Needs attention", className: "text-red-700" };
-  }
-  return { label: "Not selected", className: "text-gray-500" };
-}
-
-function setupTaskStateCopy(task: SetupTask): TaskStateCopy {
-  if (task.readiness === "complete") {
-    return {
-      label: "Complete",
-      description: "Nothing else is needed for this step.",
-      tone: "success",
-    };
-  }
-  if (task.readiness === "pending_sync") {
-    return {
-      label: "Syncing",
-      description: "vayada is checking the latest saved information. No action is needed yet.",
-      tone: "neutral",
-    };
-  }
-  if (task.readiness === "pending_review") {
-    return {
-      label: "Under review",
-      description: "This step is waiting for review. You can continue with another task.",
-      tone: "neutral",
-    };
-  }
-  if (task.readiness === "rejected") {
-    return {
-      label: "Needs changes",
-      description: "Review the feedback in this workspace before submitting again.",
-      tone: "danger",
-    };
-  }
-  if (task.callerCapability === "ask_owner") {
-    return {
-      label: "Ask an owner",
-      description: "A hotel group owner has permission to complete this step.",
-      tone: "warning",
-    };
-  }
-  if (task.callerCapability === "forbidden") {
-    return {
-      label: "Permission required",
-      description: "You do not have permission to complete this step.",
-      tone: "warning",
-    };
-  }
-  if (task.callerCapability === "waiting") {
-    return {
-      label: "Waiting",
-      description: "Another team or an automated process needs to finish this step.",
-      tone: "neutral",
-    };
-  }
-  if (task.readiness === "blocked") {
-    return {
-      label: "Blocked",
-      description:
-        "A prerequisite or service issue must be resolved before this step can continue.",
-      tone: "danger",
-    };
-  }
-  return {
-    label: "Ready",
-    description: recommendedActionDescription(task),
-    tone: "success",
-  };
-}
-
-function recommendedActionDescription(task: SetupTask): string {
-  if (task.actionableBy === "operator") return "You can complete this step now.";
-  if (task.actionableBy === "support") return "vayada support can complete this step.";
-  if (task.actionableBy === "system") return "vayada will complete this step automatically.";
-  return "A hotel group owner can complete this step now.";
-}
-
-function buildEntryContinueInput(
-  status: AdaptiveHotelSetupStatus | null,
-  returnTo: string | null,
-): SharedFirstRunContinueInput | null {
-  if (!status) return null;
-  const decision = status.entryDecision;
-  if (decision?.decision !== "enter" || !decision.propertyId) {
-    return null;
-  }
-  return {
-    product: decision.requestedProduct,
-    propertyId: decision.propertyId,
-    returnTo,
-    action: "enter_product",
-  };
 }
 
 export function idempotencyKeyForRetry(

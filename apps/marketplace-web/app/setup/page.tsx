@@ -1,5 +1,4 @@
 import { Suspense } from "react";
-import { ROUTES } from "@/lib/constants";
 import { SharedHotelSetupPage } from "@/components/setup/SharedHotelSetupPage";
 
 // Server-only switches such as AIRBNB_IMPORT_CALLBACK_ENABLED are read per request.
@@ -10,7 +9,6 @@ export default function MarketplaceSetupPage() {
     <Suspense fallback={<SetupLoading />}>
       <SharedHotelSetupPage
         defaultEntryProduct="marketplace"
-        defaultReturnTo={ROUTES.MARKETPLACE}
         airbnbImportEnabled={process.env.AIRBNB_IMPORT_CALLBACK_ENABLED === "true"}
       />
     </Suspense>

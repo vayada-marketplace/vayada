@@ -78,10 +78,11 @@ onboarding, and reload back to the previously persisted provider.
 
 Closed by VAY-1342/#1208.
 
-Marketplace also starts property Stripe onboarding from
-apps/marketplace-web/components/setup/operations/PaymentSetupForm.tsx. Unlike
-Booking Admin, it saves payment settings before requesting an account or link
-and stops when that write fails. Its provider-selection order is sound.
+Marketplace's old setup form,
+apps/marketplace-web/components/setup/operations/PaymentSetupForm.tsx (deleted
+in VAY-2174), also started property Stripe onboarding. Unlike Booking Admin, it
+saved payment settings before requesting an account or link and stopped when
+that write failed. Its provider-selection order was sound.
 
 ### 2. Account creation, replay, and authorization
 

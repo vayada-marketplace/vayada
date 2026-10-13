@@ -281,13 +281,12 @@ automated.
 
 ## Shared Hotel Setup Smoke
 
-The focused first-run setup smoke lives in `tests/e2e/pms-web/setup.spec.ts`.
-It enters through PMS at `/setup?entryProduct=pms&returnTo=/dashboard`, mocks an
-empty shared hotel setup status, creates the first property under the resolved
-hotel-group organization, and verifies the flow selects a setup track before
-creating the property. The Hotel Operations track enables PMS and Booking
-Engine together; after track selection, the smoke verifies the adaptive,
-property-scoped setup plan only shows tasks for the selected track.
+The focused setup-entry smoke lives in `tests/e2e/pms-web/setup.spec.ts`. PMS
+no longer hosts setup: the smoke enters at `/setup` and verifies PMS hands off
+to the canonical Marketplace setup with the entry product and a safe return path
+preserved (defaulting to PMS and `/dashboard`). The Marketplace setup flow itself
+is covered by `tests/e2e/marketplace-web/adaptive-*.spec.ts`,
+`setup-activation.spec.ts`, and `hotel-account-prerequisites.spec.ts`.
 
 Run just that coverage from the repo root:
 

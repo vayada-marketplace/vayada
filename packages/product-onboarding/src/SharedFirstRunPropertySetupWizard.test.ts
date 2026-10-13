@@ -4,24 +4,16 @@ import { describe, expect, it, vi } from "vitest";
 import type { SharedHotelSetupApi } from "./sharedHotelSetupApi";
 
 import Wizard, {
-  blockInlineSetupUnload,
-  canLeaveInlineSetupTask,
   canConfirmLocation,
   createProfileFromDraft,
   draftFromProfile,
   hasMapCoordinates,
   idempotencyKeyForRetry,
-  INLINE_SETUP_STALE_SAVE_MESSAGE,
-  isInlineSetupTaskEditable,
-  isInlineSetupTaskSaveCurrent,
-  isInlineSetupTaskSelectable,
   locationResetForManualAddressEdit,
   mergeTrackSelectionAfterConflict,
   normalizedPhoneNumber,
   phoneWithCountryCallingCode,
-  previousEditableSetupTaskId,
   profileUpdateFromDraft,
-  recommendedInlineSetupTaskId,
   setupErrorMessage,
   validateProfileDraft,
 } from "./SharedFirstRunPropertySetupWizard";
@@ -421,8 +413,7 @@ describe("property profile requests", () => {
             createElement(Wizard, {
               api: api as unknown as SharedHotelSetupApi,
               entryProduct: "marketplace",
-              onContinue: () => undefined,
-              renderTaskForm: () => null,
+              renderAfterHotelDetails: () => null,
             }),
           );
         });
@@ -570,169 +561,6 @@ describe("mergeTrackSelectionAfterConflict", () => {
         ["hotel_operations"],
       ),
     ).toEqual(["hotel_operations", "creator_marketplace"]);
-  });
-});
-
-describe("inline setup task navigation", () => {
-  it("lets an authorized user revisit completed work without reopening blocked work", () => {
-    expect(
-      isInlineSetupTaskEditable({
-        taskId: "public_profile",
-        track: "creator_marketplace",
-        readiness: "complete",
-        callerCapability: "allowed",
-      }),
-    ).toBe(true);
-    expect(
-      isInlineSetupTaskEditable({
-        taskId: "public_profile",
-        track: "creator_marketplace",
-        readiness: "complete",
-        callerCapability: "ask_owner",
-      }),
-    ).toBe(false);
-    expect(
-      isInlineSetupTaskEditable({
-        taskId: "rooms_rates_availability",
-        track: "hotel_operations",
-        readiness: "blocked",
-        callerCapability: "allowed",
-      }),
-    ).toBe(false);
-    expect(
-      isInlineSetupTaskEditable({
-        taskId: "shared_identity",
-        track: "shared",
-        readiness: "complete",
-        callerCapability: "allowed",
-      }),
-    ).toBe(true);
-  });
-
-  it("keeps future ready tasks locked until they become the recommended wizard step", () => {
-    const creatorOffer = inlineTask(
-      "creator_offer",
-      "actionable",
-      "allowed",
-      "creator_marketplace",
-    );
-    const rooms = inlineTask(
-      "rooms_rates_availability",
-      "actionable",
-      "allowed",
-      "hotel_operations",
-    );
-    const completedProfile = inlineTask(
-      "public_profile",
-      "complete",
-      "allowed",
-      "creator_marketplace",
-    );
-
-    expect(isInlineSetupTaskSelectable(creatorOffer, "creator_offer")).toBe(true);
-    expect(isInlineSetupTaskSelectable(rooms, "creator_offer")).toBe(false);
-    expect(isInlineSetupTaskSelectable(completedProfile, "creator_offer")).toBe(true);
-  });
-
-  it("backs up to the nearest editable task and skips permission-blocked steps", () => {
-    expect(
-      previousEditableSetupTaskId(
-        [
-          inlineTask("shared_identity", "complete", "allowed", "shared"),
-          inlineTask("public_profile", "blocked", "forbidden", "creator_marketplace"),
-          inlineTask("creator_offer", "complete", "allowed", "creator_marketplace"),
-          inlineTask("rooms_rates_availability", "actionable", "allowed", "hotel_operations"),
-        ],
-        "rooms_rates_availability",
-      ),
-    ).toBe("creator_offer");
-    expect(
-      previousEditableSetupTaskId(
-        [
-          inlineTask("shared_identity", "complete", "allowed", "shared"),
-          inlineTask("public_profile", "blocked", "forbidden", "creator_marketplace"),
-        ],
-        "public_profile",
-      ),
-    ).toBe("shared_identity");
-  });
-
-  it("selects only the authoritative actionable recommendation after a save", () => {
-    const status = {
-      setupPlan: {
-        recommendedTaskId: "creator_offer",
-        tasks: [
-          inlineTask("public_profile", "complete", "allowed", "creator_marketplace"),
-          inlineTask("creator_offer", "actionable", "allowed", "creator_marketplace"),
-        ],
-      },
-    } as Parameters<typeof recommendedInlineSetupTaskId>[0];
-
-    expect(recommendedInlineSetupTaskId(status)).toBe("creator_offer");
-
-    status.setupPlan!.tasks[1]!.readiness = "pending_sync";
-    expect(recommendedInlineSetupTaskId(status)).toBeNull();
-  });
-
-  it("permits a save only while the task and plan revision are still current", () => {
-    const status = inlineStatus("plan-1", "public_profile", [
-      inlineTask("shared_identity", "complete", "allowed", "shared"),
-      inlineTask("public_profile", "actionable", "allowed", "creator_marketplace"),
-    ]);
-    const expected = {
-      propertyId: "property-1",
-      taskId: "public_profile" as const,
-      planRevision: "plan-1",
-    };
-
-    expect(isInlineSetupTaskSaveCurrent(status, expected)).toBe(true);
-    expect(
-      isInlineSetupTaskSaveCurrent(
-        { ...status, setupPlan: { ...status.setupPlan!, planRevision: "plan-2" } },
-        expected,
-      ),
-    ).toBe(false);
-    expect(
-      isInlineSetupTaskSaveCurrent(
-        inlineStatus("plan-1", "creator_offer", status.setupPlan!.tasks),
-        expected,
-      ),
-    ).toBe(false);
-    const revisitedStatus = inlineStatus("plan-1", "creator_offer", [
-      inlineTask("public_profile", "complete", "allowed", "creator_marketplace"),
-      inlineTask("creator_offer", "actionable", "allowed", "creator_marketplace"),
-    ]);
-    expect(isInlineSetupTaskSaveCurrent(revisitedStatus, expected)).toBe(true);
-    expect(INLINE_SETUP_STALE_SAVE_MESSAGE).toContain("refreshed the latest step");
-  });
-
-  it("navigates clean forms without prompting and asks before discarding dirty forms", () => {
-    let confirmationCount = 0;
-    const denyDiscard = () => {
-      confirmationCount += 1;
-      return false;
-    };
-
-    expect(canLeaveInlineSetupTask(false, denyDiscard)).toBe(true);
-    expect(confirmationCount).toBe(0);
-    expect(canLeaveInlineSetupTask(true, denyDiscard)).toBe(false);
-    expect(confirmationCount).toBe(1);
-    expect(canLeaveInlineSetupTask(true, () => true)).toBe(true);
-  });
-
-  it("blocks browser unload while the current step has unsaved changes", () => {
-    let prevented = false;
-    const event = {
-      preventDefault: () => {
-        prevented = true;
-      },
-      returnValue: "unchanged",
-    };
-
-    blockInlineSetupUnload(event);
-
-    expect(prevented).toBe(true);
-    expect(event.returnValue).toBe("");
   });
 });
 
@@ -891,30 +719,3 @@ describe("hasMapCoordinates", () => {
     expect(hasMapCoordinates({ latitude: 0, longitude: 180.1 })).toBe(false);
   });
 });
-
-function inlineTask(
-  taskId: Parameters<typeof previousEditableSetupTaskId>[0][number]["taskId"],
-  readiness: Parameters<typeof previousEditableSetupTaskId>[0][number]["readiness"],
-  callerCapability: Parameters<typeof previousEditableSetupTaskId>[0][number]["callerCapability"],
-  track: Parameters<typeof previousEditableSetupTaskId>[0][number]["track"],
-): Parameters<typeof previousEditableSetupTaskId>[0][number] {
-  return { taskId, readiness, callerCapability, track };
-}
-
-function inlineStatus(
-  planRevision: string,
-  recommendedTaskId: Parameters<typeof previousEditableSetupTaskId>[0][number]["taskId"] | null,
-  tasks: Parameters<typeof previousEditableSetupTaskId>[0],
-): Parameters<typeof isInlineSetupTaskSaveCurrent>[0] {
-  return {
-    setupPlan: {
-      propertyId: "property-1",
-      planRevision,
-      recommendedTaskId,
-      tasks: tasks.map((task) => ({
-        ...task,
-        propertyId: "property-1",
-      })),
-    },
-  } as Parameters<typeof isInlineSetupTaskSaveCurrent>[0];
-}

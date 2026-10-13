@@ -10,7 +10,6 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { enforcePropertyRoutePolicy, enforceRoutePolicy } from "./policy.js";
 
 type PropertyParams = { propertyId: string };
-type OperationParams = PropertyParams & { operationId: string };
 type PublicationRequestBody = {
   expectedActiveContentRevisionId: string | null;
   expectedSourceManifestHash: string;
@@ -195,28 +194,6 @@ export async function registerBookingPublicationRoutes(
       return reply
         .status(result.error.code === "setup_scope_unavailable" ? 404 : 409)
         .send(result.error);
-    },
-  );
-
-  app.get<{ Params: OperationParams }>(
-    "/properties/:propertyId/publications/booking/:operationId",
-    { onRequest: authorize },
-    async (request, reply) => {
-      const scope = authorizedScopes.get(request);
-      if (!scope) return forbidden(reply);
-      const operationId = request.params.operationId.toLowerCase();
-      if (!UUID_PATTERN.test(operationId)) {
-        return invalidRequest(reply, "The operation ID is invalid.");
-      }
-      const operation = await repository.getPublicationStatus({
-        organizationId: scope.context.selectedOrganization.organizationId,
-        propertyId: scope.propertyId,
-        operationId,
-        actorUserId: scope.context.actor.internalUserId,
-      });
-      return operation
-        ? reply.send(operation)
-        : reply.status(404).send({ code: "publication_operation_not_found" });
     },
   );
 }
