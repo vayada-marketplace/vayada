@@ -208,8 +208,8 @@ export function createCalendarApiClient(
       ) {
         throw ownerError;
       }
-      // A saved calendar whose availability was never prepared blocks every preview, so
-      // prepare the saved revision once and preview again (VAY-2134).
+      // Stored availability that doesn't match its calendar blocks a preview, so prepare the
+      // saved revision once and preview again (VAY-2134).
       await prepareSavedCalendar(http, propertyId);
       try {
         value = await post();

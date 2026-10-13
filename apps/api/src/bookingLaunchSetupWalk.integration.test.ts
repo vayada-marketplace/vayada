@@ -33,6 +33,7 @@ import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore
 import { createPgBookingGuestPolicyScopeAuthorizationPort } from "./domains/bookingGuestPolicyScopeAuthorization.js";
 import { createBookingPublicationProductionRuntime } from "./domains/bookingPublicationProductionRuntime.js";
 import { createPgFinancePaymentReadinessCommandRepository } from "./domains/financePaymentReadinessCommandRepository.js";
+import { createFinanceManualPaymentReadinessReader } from "./domains/financeManualPaymentReadiness.js";
 import { createPgFinancePaymentReadinessReadModel } from "./domains/financePaymentReadinessReadModel.js";
 import { createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort } from "./domains/hotelCatalogOperatingCalendarPropertyProfileEvidence.js";
 import { createPgHotelCatalogStep1Repository } from "./domains/hotelCatalogStep1Repository.js";
@@ -61,6 +62,7 @@ import {
   advancePublicProfileRevision,
   createPgSharedHotelSetupStatusRepository,
 } from "./platform/sharedHotelSetupStatusReadModel.js";
+import { createActiveBookingPublicationProfileRepository } from "./routes/activeBookingPublicationProfile.js";
 import { syncPropertyOfferReadModels } from "./routes/marketplaceAdmin.js";
 import { createTargetFinancePropertySettingsRepository } from "./routes/finance.js";
 
@@ -117,9 +119,14 @@ function parsed<T>(value: T | null, step: string): T {
  * first saved through the older settings page, and a room added the day after the calendar
  * was prepared. Readiness must explain every gap and end `ready` with a published page.
  * VAY-2140: no Vayada activation step; a suspended hotel can't publish or sell.
+ * VAY-2139 walks the same hotel paid only by bank transfer or only by PayPal, with their
+ * acceptance on: the page publishes with that method and stops counting once it is off.
  */
-describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", () => {
-  it("walks setup to ready and publishes the booking page", async () => {
+const METHODS = ["pay_at_property", "bank_transfer", "paypal"] as const;
+const WALK = { timeout: 300_000 };
+describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", WALK, () => {
+  it.each(METHODS)("walks setup to ready and publishes the booking page (%s)", async (method) => {
+    const manualMethod = method === "pay_at_property" ? null : method;
     const endpoint = new URL(url!);
     if (
       !["127.0.0.1", "localhost"].includes(endpoint.hostname) ||
@@ -242,6 +249,10 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         inventory: calendar.inventory,
         finance: financeRead,
         financeScope: financeRead,
+        // Bank transfer and PayPal count only while their acceptance is on (VAY-2139).
+        ...(manualMethod
+          ? { manualPayments: createFinanceManualPaymentReadinessReader({ pool }) }
+          : {}),
         warn: (fields) => unavailable.push(fields),
       });
       closers.push(() => runtime.close());
@@ -330,46 +341,49 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
             ])
           ).rows[0]!.profile_revision,
         );
-      const presentKey = `present-${suffix}`;
-      const presentCommand = {
-        organizationId,
-        propertyId,
-        actorUserId: owner,
-        idempotencyKey: presentKey,
-        audit: requestAudit("present"),
-        request: {
-          expectedProfileRevision: await profileRevision(),
-          locale: "en" as const,
-          shortDescription: SUMMARY,
-          amenities: { reviewed: true as const, keys: [] },
-          media: { coverMediaObjectId: coverId, galleryMediaObjectIds: [] },
-        },
-      };
-      const prepared = await step1.prepare(presentCommand);
-      if (prepared.kind !== "prepared") throw new Error(`present: ${JSON.stringify(prepared)}`);
-      const presentation = ok(
-        await media.replacePresentation({
+      const presentHotel = async (step: string, shortDescription: string) => {
+        const presentKey = `${step}-${suffix}`;
+        const presentCommand = {
           organizationId,
           propertyId,
           actorUserId: owner,
-          audit: presentCommand.audit,
-          idempotencyKey: `hotel-catalog-step1-media:${createHash("sha256").update(presentKey).digest("hex")}`,
-          expectedProfileRevision: presentCommand.request.expectedProfileRevision,
-          assignments: createHotelCatalogStep1MediaAssignments(
-            presentCommand.request.media,
-            prepared.state.readModel.displayName,
-          ),
-        }),
-        "hotel photo",
-      );
-      ok(
-        await step1.save({
-          ...presentCommand,
-          claimToken: prepared.claimToken,
-          writeProfileRevision: presentation.response.profileRevision,
-        }),
-        "present your hotel",
-      );
+          idempotencyKey: presentKey,
+          audit: requestAudit(step),
+          request: {
+            expectedProfileRevision: await profileRevision(),
+            locale: "en" as const,
+            shortDescription,
+            amenities: { reviewed: true as const, keys: [] },
+            media: { coverMediaObjectId: coverId, galleryMediaObjectIds: [] },
+          },
+        };
+        const prepared = await step1.prepare(presentCommand);
+        if (prepared.kind !== "prepared") throw new Error(`present: ${JSON.stringify(prepared)}`);
+        const presentation = ok(
+          await media.replacePresentation({
+            organizationId,
+            propertyId,
+            actorUserId: owner,
+            audit: presentCommand.audit,
+            idempotencyKey: `hotel-catalog-step1-media:${createHash("sha256").update(presentKey).digest("hex")}`,
+            expectedProfileRevision: presentCommand.request.expectedProfileRevision,
+            assignments: createHotelCatalogStep1MediaAssignments(
+              presentCommand.request.media,
+              prepared.state.readModel.displayName,
+            ),
+          }),
+          "hotel photo",
+        );
+        ok(
+          await step1.save({
+            ...presentCommand,
+            claimToken: prepared.claimToken,
+            writeProfileRevision: presentation.response.profileRevision,
+          }),
+          "present your hotel",
+        );
+      };
+      await presentHotel("present", SUMMARY);
       // VAY-2140: completing the profile activates the hotel; nobody at Vayada approves it.
       expect(
         (
@@ -547,6 +561,14 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       );
       const legacyPool = new pg.Pool({ connectionString: cs, max: 2 });
       closers.push(() => legacyPool.end());
+      if (manualMethod === "bank_transfer")
+        // TEST ONLY: production saves bank details, KMS-encrypted, through Booking Engine
+        // settings > Payments. The settings page then requires an enabled destination.
+        await admin.query(
+          `INSERT INTO finance.bank_transfer_destinations(property_id,revision,ciphertext,key_arn,account_last4)
+           VALUES($1,1,$2,'arn:aws:kms:eu-central-1:000000000000:key/walk','3000')`,
+          [propertyId, Buffer.alloc(40)],
+        );
       expect(
         await createTargetFinancePropertySettingsRepository({
           connectionString: cs,
@@ -563,7 +585,15 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
             reason: "Payments saved from the settings page",
             requestedAt: now(),
           },
-          payload: { paymentsEnabled: true, acceptedMethods: ["pay_at_property", "cash"] },
+          payload: manualMethod
+            ? {
+                paymentsEnabled: true,
+                acceptedMethods: [manualMethod],
+                ...(manualMethod === "paypal"
+                  ? { depositPolicy: { paypalEmail: `pay-${suffix}@example.test` } }
+                  : {}),
+              }
+            : { paymentsEnabled: true, acceptedMethods: ["pay_at_property", "cash"] },
         }),
       ).toMatchObject({ ok: true });
       // Before VAY-2134 this was "temporarily unavailable". Since VAY-2136 the settings page
@@ -587,25 +617,33 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           pricingReadPort: pricingRead,
         }),
       );
-      ok(
-        await payments.replacePaymentMethods({
-          command: parsed(
-            parseReplaceFinancePaymentMethodsCommand({
-              organizationId,
-              propertyId,
-              idempotencyKey: `payments-${suffix}`,
-              expectedPaymentMethodsRevision: paymentMethodsRevision,
-              expectedPricingCurrencyRevision:
-                currencySaved.response.pricingCurrency.pricingCurrencyRevision,
-              selectedMethods: ["pay_at_property"],
-              audit: commandAudit("payments"),
-            }),
-            "payments",
-          ),
-          currentPricing: null,
-        }),
-        "setup payments",
-      );
+      if (manualMethod) {
+        // A hotel paid only by bank transfer or PayPal selects no setup readiness method; the
+        // settings page save above is its payment choice (VAY-2139).
+        expect(blockerCodes(await readiness())).not.toContain(
+          "booking.payments:ready_payment_method_missing",
+        );
+      } else {
+        ok(
+          await payments.replacePaymentMethods({
+            command: parsed(
+              parseReplaceFinancePaymentMethodsCommand({
+                organizationId,
+                propertyId,
+                idempotencyKey: `payments-${suffix}`,
+                expectedPaymentMethodsRevision: paymentMethodsRevision,
+                expectedPricingCurrencyRevision:
+                  currencySaved.response.pricingCurrency.pricingCurrencyRevision,
+                selectedMethods: ["pay_at_property"],
+                audit: commandAudit("payments"),
+              }),
+              "payments",
+            ),
+            currentPricing: null,
+          }),
+          "setup payments",
+        );
+      }
 
       // 6. Set your room prices (pricing-v2 draft, charges, publish).
       const context: RequestContext = {
@@ -655,7 +693,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
                   roomTypeId,
                   offerId: "standard",
                   cancellation: { kind: "non_refundable" },
-                  payment: { kind: "full", acceptedMethods: ["pay_at_property"] },
+                  payment: { kind: "full", acceptedMethods: [method] },
                 },
               },
               draft,
@@ -738,10 +776,9 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       );
 
       // 8. Open your calendar. The first save happened "yesterday" in the hotel's time zone.
-      const saveCalendar = async (
+      const saveCalendarRevision = async (
         roomTypeIds: readonly string[],
         expectedCalendarRevision: number,
-        horizon: { from: string; through: string },
       ) => {
         const roomRows = (
           await admin.query(
@@ -775,7 +812,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           ),
           "calendar preview",
         );
-        const saved = ok(
+        return ok(
           await calendar.routes.commandPort.upsertOperatingCalendar(
             parsed(
               parseUpsertPmsOperatingCalendarCommand({
@@ -788,17 +825,27 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
             ),
           ),
           "calendar save",
-        );
-        return calendar.routes.materializationPort!.materializeInventory({
+        ).response.configuration;
+      };
+      const prepareCalendar = (
+        configuration: Awaited<ReturnType<typeof saveCalendarRevision>>,
+        horizon: { from: string; through: string },
+      ) =>
+        calendar.routes.materializationPort!.materializeInventory({
           organizationId,
           propertyId,
-          configurationSource: saved.response.configuration.source,
-          expectedMaterializedRevision: saved.response.configuration.calendarRevision,
+          configurationSource: configuration.source,
+          expectedMaterializedRevision: configuration.calendarRevision,
           horizon,
-          idempotencyKey: `materialize-${expectedCalendarRevision}-${suffix}`,
-          audit: commandAudit(`materialize-${expectedCalendarRevision}`),
+          idempotencyKey: `materialize-${configuration.calendarRevision}-${suffix}`,
+          audit: commandAudit(`materialize-${configuration.calendarRevision}`),
         });
-      };
+      const saveCalendar = async (
+        roomTypeIds: readonly string[],
+        expectedCalendarRevision: number,
+        horizon: { from: string; through: string },
+      ) =>
+        prepareCalendar(await saveCalendarRevision(roomTypeIds, expectedCalendarRevision), horizon);
       ok(
         await saveCalendar([gardenSuite], 0, { from: localDate(-1), through: localDate(364) }),
         "first calendar",
@@ -810,9 +857,35 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       const afterRoomAdded = blockerCodes(await readiness());
       expect(afterRoomAdded).toContain("booking.calendar:operating_calendar_source_stale");
       expect(afterRoomAdded).not.toContain("booking.pricing:pricing_rooms_changed");
-      // Before VAY-2134 this horizon, starting at today, was rejected with a 409.
+      // TEST ONLY on 10-11: the calendar with the added room was saved, but preparing its
+      // availability failed, so guests could still book only the first calendar.
+      const unprepared = await saveCalendarRevision([gardenSuite, seaSuite], 1);
+      // 10-12: the hotel edits its profile and style before it comes back to the calendar. The
+      // saved calendar pins the old profile revision, so it can never be prepared now.
+      await presentHotel("present-again", `${SUMMARY} Every suite now has a sea-view terrace.`);
       ok(
-        await saveCalendar([gardenSuite, seaSuite], 1, {
+        await designRepository.upsertDesign({
+          organizationId,
+          propertyId,
+          actorUserId: owner,
+          idempotencyKey: `design-again-${suffix}`,
+          expectedRevision: 1,
+          choices: { primaryColor: "#4F46E5", fontPairing: "high-end-serif" },
+          audit: {
+            requestId: `design-again-${suffix}`,
+            correlationId: `design-again-${suffix}`,
+            source: "web",
+          },
+        }),
+        "booking design again",
+      );
+      expect(
+        await prepareCalendar(unprepared, { from: localDate(0), through: localDate(365) }),
+      ).toMatchObject({ ok: false, error: { code: "configuration_not_current" } });
+      // Saving again previews against the first calendar instead of refusing (VAY-2134). Before
+      // VAY-2134 this horizon, starting at today, was also rejected with a 409.
+      ok(
+        await saveCalendar([gardenSuite, seaSuite], 2, {
           from: localDate(0),
           through: localDate(365),
         }),
@@ -864,6 +937,21 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           .map(({ roomTypeId }) => roomTypeId)
           .sort(),
       ).toEqual([gardenSuite, seaSuite].sort());
+      const content = active[0]!.content as {
+        payments: { readyMethods: string[] };
+        profile: { hotel: { slug: string } };
+      };
+      expect(content.payments.readyMethods).toEqual([method]);
+      // The public page counts bank transfer and PayPal only while their acceptance is on.
+      const publicProfile = (manualPayments: boolean) =>
+        createActiveBookingPublicationProfileRepository({
+          connectionString: cs,
+          pool,
+          manualPayments,
+        }).findProfileBySlug(content.profile.hotel.slug);
+      expect(await publicProfile(true)).toMatchObject({ hotel: { propertyId } });
+      if (manualMethod) expect(await publicProfile(false)).toBeNull();
+      else expect(await publicProfile(false)).toMatchObject({ hotel: { propertyId } });
       expect(unavailable).toEqual([]);
 
       // 11. Vayada can still suspend a hotel: it can't publish or take bookings any more.
@@ -960,7 +1048,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       await login.drop();
       await admin.end();
     }
-  }, 300_000);
+  });
 });
 
 function roomFacts2(name: string): RoomTypeFacts {

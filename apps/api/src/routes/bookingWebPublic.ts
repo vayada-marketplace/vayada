@@ -1453,6 +1453,8 @@ export type PgTargetBookingWebCheckoutAdapterConfig = {
   replacementPricingCardAcceptanceEnabled?: boolean;
   /** Request-mode pay-at-property quotes in acceptance; the hotel confirms each booking. */
   replacementPricingRequestAcceptanceEnabled?: boolean;
+  /** Bank-transfer and PayPal quotes in acceptance; the hotel confirms each payment. */
+  replacementPricingManualPaymentAcceptanceEnabled?: boolean;
   externalChanges: ExternalChangePresentationPort;
   /** Register only with the reviewed provider runtime; absent keeps Airbnb actions disabled. */
   airbnbAlterations?: {
@@ -1549,6 +1551,9 @@ export function createTargetBookingWebCheckoutAdapter(
   const guestDisclosure = createPublicQuoteGuestDisclosure(pool);
   const issueReplacementQuote = createReplacementBookingQuoteIssuer(
     createCurrentPricingQuoteStore(pool, 300),
+    config.replacementPricingManualPaymentAcceptanceEnabled === true
+      ? ["paypal", ...(config.bankTransfers ? ["bank_transfer"] : [])]
+      : [],
   );
   const serializeTargetChangeRequest = (row: TargetChangeRequestRow, enabled = false) =>
     serializeChangeRequest(
@@ -1929,7 +1934,10 @@ export function createTargetBookingWebCheckoutAdapter(
           propertyId: property.propertyId,
           resourceType: "checkout_config",
           resourceId: property.propertyId,
-          body: serializeTargetCheckoutConfig(property, row),
+          body: {
+            ...serializeTargetCheckoutConfig(property, row),
+            bookingPagePaymentMethods: bookingPagePaymentMethods(row, config),
+          },
         };
       });
     },
@@ -2117,13 +2125,30 @@ export function createTargetBookingWebCheckoutAdapter(
           config.replacementPricingCardAcceptanceEnabled && config.stripePaymentProvider
             ? { provider: config.stripePaymentProvider }
             : undefined;
-        return await writePricingAcceptance(
+        const result = await writePricingAcceptance(
           pool,
           { slug, command: request },
           contextId ? { affiliateContextId: contextId } : undefined,
           cardPayments,
           config.replacementPricingRequestAcceptanceEnabled === true,
+          config.replacementPricingManualPaymentAcceptanceEnabled
+            ? { bankTransfers: config.bankTransfers }
+            : undefined,
         );
+        if (result.kind !== "payment_pending") return result;
+        // Bank transfer or PayPal: the token lets the guest open the bank details or PayPal email
+        // (POST /bookings/confirmation); a replay gets a fresh one.
+        const { propertyId, ...body } = result;
+        const confirmation = await issueTargetBookingConfirmationToken(
+          pool,
+          { guestBookingId: result.bookingId, propertyId },
+          new Date(),
+        );
+        return {
+          ...body,
+          confirmationToken: confirmation.token,
+          confirmationTokenExpiresAt: confirmation.expiresAt,
+        };
       } catch (error) {
         if (error instanceof PricingAcceptanceError && error.code === "card_unavailable")
           throw Object.assign(createHttpError(404, "Online card payment is unavailable."), {
@@ -2133,6 +2158,11 @@ export function createTargetBookingWebCheckoutAdapter(
           throw Object.assign(createHttpError(404, "Online booking requests are unavailable."), {
             code: "REQUEST_ACCEPTANCE_UNAVAILABLE",
           });
+        if (error instanceof PricingAcceptanceError && error.code === "manual_unavailable")
+          throw Object.assign(
+            createHttpError(404, "Bank transfer and PayPal bookings are unavailable."),
+            { code: "MANUAL_PAYMENT_UNAVAILABLE" },
+          );
         const statusCode =
           error instanceof PricingAcceptanceError
             ? error.code === "conflict"
@@ -2893,6 +2923,33 @@ export function targetCheckoutReadyPaymentMethods(row: TargetCheckoutConfigRow |
     if (method === "paypal") return isValidPaymentEmail(depositPolicy["paypalEmail"]);
     return true;
   });
+}
+
+/** The methods the pricing-v2 booking page offers (VAY-2139). Until bank transfer and PayPal
+ * acceptance is on, it keeps its fixed card and pay-at-property choice. */
+function bookingPagePaymentMethods(
+  row: TargetCheckoutConfigRow | null,
+  config: Pick<
+    PgTargetBookingWebCheckoutAdapterConfig,
+    | "replacementPricingManualPaymentAcceptanceEnabled"
+    | "replacementPricingCardAcceptanceEnabled"
+    | "stripePaymentProvider"
+    | "bankTransfers"
+  >,
+): string[] {
+  if (config.replacementPricingManualPaymentAcceptanceEnabled !== true)
+    return ["card", "pay_at_property"];
+  if (row?.paymentsEnabled !== true) return [];
+  const ready = targetCheckoutReadyPaymentMethods(row);
+  const cardAcceptance =
+    config.replacementPricingCardAcceptanceEnabled === true && !!config.stripePaymentProvider;
+  // Bank transfer needs the bank-details binding (KMS settings) to be accepted.
+  return ["card", "pay_at_property", "bank_transfer", "paypal"].filter(
+    (method) =>
+      ready.includes(method) &&
+      (method !== "card" || cardAcceptance) &&
+      (method !== "bank_transfer" || !!config.bankTransfers),
+  );
 }
 
 function serializeTargetCheckoutConfig(

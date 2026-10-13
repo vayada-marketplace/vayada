@@ -68,6 +68,7 @@ const client = {
   reviewCharges: vi.fn(),
   confirmationAction: vi.fn(),
   publicationAction: vi.fn(),
+  paymentMethods: vi.fn(),
 };
 
 let view: ReactTestRenderer;
@@ -120,6 +121,8 @@ beforeEach(() => {
   vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
   vi.stubGlobal("document", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
   client.read.mockResolvedValue(published);
+  // Bank-transfer and PayPal acceptance off (VAY-2139).
+  client.paymentMethods.mockResolvedValue([]);
   take.current = null;
 });
 afterEach(() => {

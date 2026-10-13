@@ -602,6 +602,27 @@ describe("PMS target booking projection", () => {
     // prettier-ignore
     expect((await bookingsService.list()).bookings[0]!.stays[1]).toMatchObject({ checkIn: null, checkOut: null, adults: null, children: null, nightly: [] });
   });
+  it("marks booking-page bank transfers and PayPal as waiting for the hotel's payment confirmation", async () => {
+    mocks.get.mockImplementation(async (endpoint: string) =>
+      endpoint.endsWith("/room-types")
+        ? { items: [] }
+        : reservationPage({
+            ...reservation,
+            status: "pending_payment",
+            payment: { method: "bank_transfer", expectedMethod: "bank_transfer", status: "unpaid" },
+            awaitingHotelPaymentConfirmation: true,
+          }),
+    );
+    expect((await bookingsService.list()).bookings[0]).toMatchObject({
+      status: "pending",
+      paymentMethod: "bank_transfer",
+      awaitingPaymentConfirmation: true,
+    });
+    mocks.get.mockImplementation(async (endpoint: string) =>
+      endpoint.endsWith("/room-types") ? { items: [] } : reservationPage(reservation),
+    );
+    expect((await bookingsService.list()).bookings[0]?.awaitingPaymentConfirmation).toBe(false);
+  });
   it("filters the Pending and Cancelled tabs by the stored lifecycle statuses", async () => {
     for (const [tab, stored] of [
       ["pending", "pending_payment"],

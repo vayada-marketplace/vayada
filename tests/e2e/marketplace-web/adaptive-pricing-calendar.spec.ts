@@ -430,6 +430,14 @@ async function mockPricingCalendarApis(page: Page) {
     const pricingV2 = pathname.match(new RegExp(`/pricing-v2(/.*)?$`));
     if (pricingV2) {
       const suffix = pricingV2[1] ?? "";
+      // Bank-transfer and PayPal acceptance is off, as in production today (VAY-2139).
+      if (suffix === "/payment-methods" && method === "GET") {
+        await route.fulfill({
+          headers: corsHeaders(route),
+          json: { acceptanceEnabled: false, readyMethods: [] },
+        });
+        return;
+      }
       const body = (method === "GET" ? {} : request.postDataJSON()) as Record<string, any>;
       const write = (name: string) =>
         pricingV2Writes.push({

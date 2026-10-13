@@ -7,12 +7,20 @@ import {
   PUBLIC_BOOKABILITY_DATA_SOURCE_OWNERS,
   PUBLIC_BOOKABILITY_VISIBILITY,
   assertPublicBookabilityPublicSafe,
+  publicManualPaymentReady,
   type PublicBookabilityProfileProjection,
 } from "./index.js";
 import { parsePublicBookabilityProfileProjection } from "./publicBookabilityProfileParser.js";
 
 export const BOOKING_PUBLIC_CONTENT_CONTRACT_VERSION = "booking-public-content.v1" as const;
-export type BookingPublicPaymentMethod = "card" | "pay_at_property";
+/** Bank transfer and PayPal are paid to the hotel, which confirms the payment (VAY-2139). */
+export type BookingPublicPaymentMethod = "card" | "pay_at_property" | "bank_transfer" | "paypal";
+const BOOKING_PUBLIC_PAYMENT_METHODS: readonly string[] = [
+  "card",
+  "pay_at_property",
+  "bank_transfer",
+  "paypal",
+];
 type BookingPublicFinanceEvidence = Readonly<{
   defaultCurrency: string;
   supportedCurrencies: readonly string[];
@@ -92,11 +100,13 @@ export function buildBookingPublicContent(input: {
   finance: BookingPublicFinanceEvidence;
 }): BookingPublicContentBuild | null {
   if (!validHash(input.sourceManifestHash) || !validHash(input.readinessHash)) return null;
-  const profile = parsePublicBookabilityProfileProjection(input.profile);
-  if (!profile) return null;
   const readyMethods = [...new Set(input.finance.readyPaymentMethods)]
-    .filter((method) => method === "card" || method === "pay_at_property")
+    .filter((method) => BOOKING_PUBLIC_PAYMENT_METHODS.includes(method))
     .sort();
+  const profile = parsePublicBookabilityProfileProjection(input.profile, {
+    manualPaymentReady: publicManualPaymentReady(readyMethods),
+  });
+  if (!profile) return null;
   const rooms = sanitizeRooms(input.rooms, input.finance, readyMethods);
   const calendar = sanitizeCalendar(input.calendar, rooms, profile);
   if (
@@ -123,13 +133,21 @@ export function buildBookingPublicContent(input: {
   });
 }
 
-/** Parses stored immutable JSON into the exact public Booking content contract. */
-export function parseBookingPublicContent(value: unknown): BookingPublicContent | null {
+/** Parses stored immutable JSON into the exact public Booking content contract. Content
+ * published with bank transfer or PayPal counts only while their acceptance is on
+ * (`manualPayments`), so turning it off takes such pages down again (VAY-2139). */
+export function parseBookingPublicContent(
+  value: unknown,
+  context: { manualPayments?: boolean } = {},
+): BookingPublicContent | null {
   try {
     if (!record(value) || !Array.isArray(value.rooms) || !record(value.calendar)) return null;
-    const profile = parsePublicBookabilityProfileProjection(value.profile);
     const payments = record(value.payments) ? value.payments.readyMethods : null;
-    if (!profile || !Array.isArray(payments)) return null;
+    if (!Array.isArray(payments)) return null;
+    const manualPaymentReady = publicManualPaymentReady(payments);
+    if (manualPaymentReady && context.manualPayments !== true) return null;
+    const profile = parsePublicBookabilityProfileProjection(value.profile, { manualPaymentReady });
+    if (!profile) return null;
     const built = buildBookingPublicContent({
       sourceManifestHash: `sha256:${"0".repeat(64)}`,
       readinessHash: `sha256:${"0".repeat(64)}`,

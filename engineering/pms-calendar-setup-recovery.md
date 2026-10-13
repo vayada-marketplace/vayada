@@ -40,6 +40,11 @@ start: earlier days leave coverage and no later materialization reads them (VAY-
 Existing reservation and manual inventory owners are preserved. This is a
 prerequisite for VAY-910 mixed-room validation.
 
-When a saved calendar revision was never materialized, the impact preview answers
-`materialization_not_current`. Setup then prepares that saved revision once with its own
-idempotency key, so an earlier stored failure is not replayed, and previews again.
+When a saved calendar revision was never materialized, the impact preview compares the
+proposal with the last materialized revision, or with no inventory when none was ever
+materialized: that is what guests can book. A saved revision whose hotel profile or rooms
+changed after the save can never be materialized, so a preview that required it would block
+every later save (TEST ONLY, 2026-10-12). When stored inventory does not match its
+materialized revision, the preview still answers `materialization_not_current`. Setup then
+prepares the saved revision once with its own idempotency key, so an earlier stored failure
+is not replayed, and previews again.
