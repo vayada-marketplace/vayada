@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import Fastify from "fastify";
 import type { RequestContext } from "@vayada/backend-auth";
+import { createPgPropertyAccessRepository } from "@vayada/backend-authorization";
 import {
   createBookingDesignReadinessProvider,
   type ReadyBookingPublicationEvidence,
@@ -66,6 +67,7 @@ import { lockPublicPricingAuthority } from "./domains/publicPricingAuthority.js"
 import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
 import { createReplacementPricingPublicationReader } from "./domains/replacementPricingPublicationReader.js";
 import { createHotelSetupOrdinaryLoginFixture } from "./hotelSetupOrdinaryLogin.fixture.js";
+import { registerFinanceSubscriptionRoutes } from "./routes/financeSubscriptions.js";
 import { externalBookingChanges } from "./integrations/externalBookingChanges.js";
 import { createPgHotelMediaResolutionPort } from "./platform/hotelMediaResolver.js";
 import type { PlatformMediaServingConfig } from "./platform/mediaServing.js";
@@ -137,6 +139,9 @@ function parsed<T>(value: T | null, step: string): T {
  * VAY-2140: no Vayada activation step; a suspended hotel can't publish or sell.
  * VAY-2139 walks the same hotel paid only by bank transfer or only by PayPal, with their
  * acceptance on: the page publishes with that method and stops counting once it is off.
+ * VAY-2171: publishing waits for a billing plan. The owner confirms Commission through
+ * POST /api/finance/properties/:id/select-commission, and a guest's pay-at-hotel request is then
+ * accepted.
  */
 const METHODS = ["pay_at_property", "bank_transfer", "paypal"] as const;
 const WALK = { timeout: 300_000 };
@@ -914,28 +919,77 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       const withoutPlan = await readiness();
       expect(blockerCodes(withoutPlan)).toEqual(["booking.payments:billing_plan_not_selected"]);
       expect(withoutPlan).toMatchObject({ outcome: "evaluated", status: "blocked" });
-      // "Your vayada plan" in Payments confirms Commission, through the select-commission service.
-      const roomInventory = createTargetPmsRoomInventoryReadPort({ connectionString: cs });
+      // "Publish booking page" is refused while the plan is missing.
+      await expect(
+        runtime.refresh({
+          ...scope,
+          actorUserId: owner,
+          idempotencyKey: `publish-without-plan-${suffix}`,
+          audit: {
+            requestId: `no-plan-${suffix}`,
+            correlationId: `no-plan-${suffix}`,
+            source: "web",
+          },
+        }),
+      ).rejects.toThrow("Booking publication readiness is incomplete.");
+      // "Your vayada plan" in Payments: the owner confirms Commission through the API route.
       const plans = createFinanceSubscriptionService({
         store: createPgFinanceSubscriptionStore({ connectionString: cs, max: 2 }),
-        roomInventory,
+        roomInventory: createTargetPmsRoomInventoryReadPort({ connectionString: cs }),
         pricing: pricingRead,
         returnBaseUrls: { bookingAdmin: "https://admin.booking.example.test" },
       });
-      closers.push(() => plans.close?.() ?? Promise.resolve());
-      expect(
-        await plans.selectCommissionPlan({
-          commandId: `plan-${suffix}`,
-          idempotencyKey: `plan-${suffix}`,
-          ...scope,
-          audit: {
-            actor: { kind: "user", userId: owner, organizationId },
-            requestId: `plan-${suffix}`,
-            reason: "Select Commission Plan",
-            requestedAt: now(),
+      const propertyAccess = createPgPropertyAccessRepository({ connectionString: url!, max: 1 });
+      // The owner's session carries every active resource link setup created for the hotel.
+      const ownerLinks = (
+        await admin.query(
+          `SELECT product, resource_type AS "resourceType", resource_id AS "resourceId",
+             relationship, status
+           FROM identity.organization_resource_links
+           WHERE organization_id=$1 AND resource_id=$2 AND status='active'`,
+          [organizationId, propertyId],
+        )
+      ).rows as RequestContext["linkedResources"];
+      expect(ownerLinks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ product: "hotel_catalog", resourceType: "property" }),
+          expect.objectContaining({ product: "pms", resourceType: "pms_property" }),
+        ]),
+      );
+      const billingApi = Fastify({ logger: false });
+      billingApi.decorateRequest("authContext", null);
+      billingApi.addHook("onRequest", async (request) => {
+        request.authContext = {
+          ...context,
+          linkedResources: ownerLinks,
+          membership: {
+            ...context.membership,
+            permissions: ["booking.settings.manage", "pms.finance.read", "pms.operations.manage"],
           },
-        }),
-      ).toMatchObject({ ok: true, value: { planStatus: { plan: "commission" } } });
+          audit: requestAudit("plan"),
+        } as RequestContext;
+      });
+      await billingApi.register(registerFinanceSubscriptionRoutes, {
+        prefix: "/api",
+        service: plans,
+        propertyAccessRepository: propertyAccess,
+      });
+      closers.push(() => billingApi.close());
+      closers.push(async () => propertyAccess.close?.());
+      const chosen = await billingApi.inject({
+        method: "POST",
+        url: `/api/finance/properties/${propertyId}/select-commission`,
+        payload: { commandId: `plan-${suffix}`, idempotencyKey: `plan-${suffix}` },
+      });
+      expect(chosen.statusCode, chosen.body).toBe(201);
+      expect(chosen.json()).toMatchObject({ planStatus: { plan: "commission" } });
+      const planStatus = await billingApi.inject({
+        method: "GET",
+        url: `/api/finance/properties/${propertyId}/plan-status`,
+      });
+      expect(planStatus.json()).toMatchObject({
+        planStatus: { plan: "commission", status: "commission" },
+      });
 
       // Ready with no admin action, then "Publish booking page".
       const ready = await readiness();
