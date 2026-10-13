@@ -417,7 +417,9 @@
   "error": {
     "unableToLoad": "Tidak Dapat Memuat Hotel",
     "tryAgainLater": "Kami tidak dapat mengambil data hotel. Silakan coba lagi nanti.",
-    "retry": "Coba Lagi"
+    "retry": "Coba Lagi",
+    "notOnline": "Halaman pemesanan ini sedang tidak online",
+    "checkBackLater": "Silakan kembali lagi nanti."
   },
   "roomSelection": {
     "breakfastIncluded": "Termasuk sarapan",
