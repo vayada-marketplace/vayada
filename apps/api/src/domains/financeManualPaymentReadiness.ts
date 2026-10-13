@@ -17,8 +17,10 @@ export type FinanceManualPaymentMethodsReadPort = {
   acceptedMethods(request: { propertyId: string }): Promise<readonly ManualPricingPaymentMethod[]>;
 };
 
+type QueryPool = { query(text: string, values?: unknown[]): Promise<{ rows: any[] }> };
+
 export function createFinanceManualPaymentReadinessReader(config: {
-  pool: Pick<pg.Pool, "query">;
+  pool: Pick<pg.Pool, "query"> | QueryPool;
 }): FinanceManualPaymentReadinessReadPort & FinanceManualPaymentMethodsReadPort {
   const { pool } = config;
   const read = async (propertyId: string) => {
@@ -54,4 +56,22 @@ export function createFinanceManualPaymentReadinessReader(config: {
       return (await read(propertyId)).methods;
     },
   };
+}
+
+/**
+ * VAY-2139: a published page that lists only bank transfer or PayPal is served only while the hotel
+ * still takes at least one of them with its details in place (an enabled bank destination, a valid
+ * PayPal email). It comes back by itself once they are restored. Other pages always pass.
+ */
+export async function manualPublishedPagePayable(
+  pool: Pick<pg.Pool, "query"> | QueryPool,
+  propertyId: string,
+  readyMethods: readonly string[],
+): Promise<boolean> {
+  const manual = readyMethods.filter((method) => method === "bank_transfer" || method === "paypal");
+  if (!manual.length) return true;
+  const accepted = await createFinanceManualPaymentReadinessReader({ pool }).acceptedMethods({
+    propertyId,
+  });
+  return manual.some((method) => accepted.includes(method as (typeof accepted)[number]));
 }

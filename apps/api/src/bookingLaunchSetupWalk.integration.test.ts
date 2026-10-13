@@ -952,6 +952,29 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       expect(await publicProfile(true)).toMatchObject({ hotel: { propertyId } });
       if (manualMethod) expect(await publicProfile(false)).toBeNull();
       else expect(await publicProfile(false)).toMatchObject({ hotel: { propertyId } });
+      if (manualMethod) {
+        // Without its bank details or PayPal email the page is hidden; restored, it comes back
+        // without a new publication.
+        const [remove, restore] =
+          manualMethod === "bank_transfer"
+            ? [
+                "UPDATE finance.bank_transfer_destinations SET enabled=false WHERE property_id=$1",
+                "UPDATE finance.bank_transfer_destinations SET enabled=true WHERE property_id=$1",
+              ]
+            : [
+                "UPDATE finance.payment_settings SET deposit_policy=deposit_policy-'paypalEmail' WHERE property_id=$1",
+                `UPDATE finance.payment_settings
+                 SET deposit_policy=jsonb_set(deposit_policy,'{paypalEmail}',to_jsonb('pay-' || $2 || '@example.test'))
+                 WHERE property_id=$1`,
+              ];
+        await admin.query(remove, [propertyId]);
+        expect(await publicProfile(true)).toBeNull();
+        await admin.query(
+          restore,
+          manualMethod === "bank_transfer" ? [propertyId] : [propertyId, suffix],
+        );
+        expect(await publicProfile(true)).toMatchObject({ hotel: { propertyId } });
+      }
       expect(unavailable).toEqual([]);
 
       // 11. Vayada can still suspend a hotel: it can't publish or take bookings any more.

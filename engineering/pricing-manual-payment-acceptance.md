@@ -52,11 +52,14 @@ binding (KMS settings) exists.
 
 ## Known gaps
 
-A published bank-only or PayPal-only page stays up after the hotel disables its bank details or
-removes its PayPal email, until the next publication: Finance's publication source tracks the
-payment methods revision, which those edits do not bump. Quotes and acceptance check the bank
-destination and PayPal email again, so no booking goes through, as for a card hotel whose card
-acceptance lapses. Launch readiness and the setup state show the change at once.
+A published bank-only or PayPal-only page records the methods that were ready when it was
+published, and disabling the bank details or removing the PayPal email does not bump Finance's
+payment methods revision. So the readers of stored booking content (the public profile and the
+published URL) serve such a page only while the hotel still takes at least one of its methods with
+the details in place. Otherwise the page is hidden, as with the switch off, and it comes back by
+itself once the details are restored. Quotes and acceptance check the details too. Restoring a
+different PayPal email (or any other payment-settings change) still asks for the prices to be saved
+again, as every Finance change does, before guests can book.
 
 The payment deadline is the agreed window (48 h, or the hotel's PayPal window). VAY-2145 makes
 sure it ends before the guest arrives:
