@@ -1,4 +1,8 @@
 import type { PoolClient } from "pg";
+import {
+  activeBookingPublicationGateConfig,
+  lockActiveBookingPublication,
+} from "./activeBookingPublicationGate.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import { lockCurrentPmsPricingEntitlement } from "./replacementPricingAuthorization.js";
 
@@ -6,7 +10,9 @@ import { lockCurrentPmsPricingEntitlement } from "./replacementPricingAuthorizat
  * its locks through source reads/acceptance. This does not validate rates, stay eligibility,
  * calendar/inventory, payment readiness or other pricing owners. Never accept a client scope.
  * The owning organization is the single one linked as owner/operator to both the PMS
- * property and the catalog property (VAY-2079); none or several fail closed. */
+ * property and the catalog property (VAY-2079); none or several fail closed. Once the public
+ * site serves setup publications, a hotel that published in setup is public exactly while its
+ * page is visible; others still need their legacy bookability profile (VAY-2134). */
 export async function lockPublicPricingAuthority(client: PoolClient, slug: unknown) {
   if (typeof slug !== "string" || !slug.length || slug.length > 200 || slug !== slug.trim())
     return null;
@@ -31,10 +37,18 @@ export async function lockPublicPricingAuthority(client: PoolClient, slug: unkno
     [organizationId],
   );
   if (!organization.rowCount) return null;
+  const gate = activeBookingPublicationGateConfig();
+  const published = gate.servesPublications
+    ? await lockActiveBookingPublication(client, slug, propertyId, gate)
+    : "absent";
+  if (published === "hidden") return null;
   // Re-resolve after the property lock: the discovery lookup grants no access.
-  const profiles = (
-    await client.query(
-      `SELECT profile.expires_at
+  const profiles =
+    published === "visible"
+      ? []
+      : (
+          await client.query(
+            `SELECT profile.expires_at
     FROM hotel_catalog.property_slugs s
     JOIN hotel_catalog.properties p ON p.id=s.property_id
     JOIN hotel_catalog.property_locations location ON location.property_id=p.id
@@ -48,10 +62,10 @@ export async function lockPublicPricingAuthority(client: PoolClient, slug: unkno
       AND CASE WHEN jsonb_typeof(profile.capabilities->'paymentMethods')='array'
         THEN jsonb_array_length(profile.capabilities->'paymentMethods')>0 ELSE false END
     FOR SHARE OF s,p,location,profile`,
-      [slug, propertyId],
-    )
-  ).rows;
-  if (profiles.length !== 1) return null;
+            [slug, propertyId],
+          )
+        ).rows;
+  if (published === "absent" && profiles.length !== 1) return null;
   const links = (
     await client.query(
       `SELECT product FROM identity.organization_resource_links
@@ -69,7 +83,7 @@ export async function lockPublicPricingAuthority(client: PoolClient, slug: unkno
   if ((await owningOrganization(client, propertyId)) !== organizationId) return null;
   if (!(await lockCurrentPmsPricingEntitlement(client, organizationId, propertyId))) return null;
   const now = (await client.query("SELECT clock_timestamp() AS now")).rows[0].now as Date;
-  if (profiles[0].expires_at && profiles[0].expires_at <= now) return null;
+  if (profiles[0]?.expires_at && profiles[0].expires_at <= now) return null;
   return { propertyId, organizationId };
 }
 

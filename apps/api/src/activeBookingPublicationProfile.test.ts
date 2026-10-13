@@ -106,7 +106,7 @@ describe("active immutable Booking publication profile reads", () => {
     expect(calls[1]?.text).toContain("pms_resource.resource_type = 'pms_property'");
     expect(calls[1]?.text).toContain("booking_resource.product = 'booking'");
     expect(calls[1]?.text).toContain("booking_resource.resource_type = 'booking_hotel'");
-    expect(calls[1]?.values).toEqual([profile.hotel.propertyId, null]);
+    expect(calls[1]?.values).toEqual([profile.hotel.propertyId]);
   });
 
   it("fails closed for poisoned or unpublished profile content", async () => {
@@ -163,6 +163,26 @@ describe("active immutable Booking publication profile reads", () => {
     expect(calls[0]?.[0]).toContain("hotel_catalog.property_domains");
     expect(calls[0]?.[0]).toContain("verification_status = 'verified'");
     expect(calls[0]?.[1]).toEqual(["book.example.test"]);
+  });
+
+  it("hides a custom-domain page whose domain is no longer verified (VAY-2134)", async () => {
+    const domainProfile = structuredClone(profile);
+    domainProfile.hotel.canonicalUrl = "https://book.example.test/en";
+    domainProfile.hotel.bookingBaseUrl = "https://book.example.test/";
+    domainProfile.hotel.customDomainUrl = "https://book.example.test/";
+    domainProfile.hotel.trust.domainVerified = true;
+    const repository = createActiveBookingPublicationProfileRepository({
+      connectionString: "postgresql://unused",
+      pool: pool(async (text) => {
+        if (text.includes("identity.product_entitlements"))
+          return [{ referralEnabled: false, latitude: null, longitude: null }];
+        if (!text.includes("distribution.active_public_booking_revision")) return [];
+        return [
+          { propertyId: domainProfile.hotel.propertyId, publicContent: content(domainProfile) },
+        ];
+      }),
+    });
+    await expect(repository.findProfileBySlug(domainProfile.hotel.slug)).resolves.toBeNull();
   });
 
   it("fails Refer a Guest closed against the current property entitlement", async () => {
