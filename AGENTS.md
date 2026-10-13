@@ -234,6 +234,8 @@ Start with `.agents/skills/vayada-skills-storage/SKILL.md` to understand the thr
 
 Use `.agents/skills/typescript-rewrite-workflow/SKILL.md` for the TypeScript backend rewrite and adjacent WorkOS, Ask Intelligence, target-schema, migration, and cutover work.
 
+Use `.agents/skills/vayada-paper-design/SKILL.md` whenever work touches the Paper design files. That means new screens or visible layout changes (design first in Paper, approved by Flamur, before building), and keeping the "(current)" Paper files in sync after each release that changes visible UI.
+
 ## Gotchas
 
 - **SMTP** — port 587 SES uses `start_tls=True`, **not** `use_tls=True`. Recurring regression — check on any email/SMTP change.

@@ -54,6 +54,8 @@ git worktree add /tmp/vayada-<slug> -b <branch-name>
 
 ### 4. Implement
 
+**Design first for new screens and visible layout changes.** Before writing UI code, draw the change in Paper and get Flamur's approval, following `.agents/skills/vayada-paper-design/SKILL.md`. Small fixes (text, colours, spacing, bug fixes that keep the layout) skip this.
+
 Work through the acceptance criteria one at a time.
 
 - Treat each AC as a testable statement of done — do not mark work complete until the criterion is actually met.
@@ -105,7 +107,7 @@ When all checks pass:
 2. Push the branch: `git push -u origin <branch-name>`.
 3. Open a GitHub PR with:
    - **Title**: `[VAY-NNN] <short imperative description>` — ticket ID must appear in the title.
-   - **Description**: summary of changes, mapping back to each acceptance criterion, validation run, and any risk notes.
+   - **Description**: summary of changes, mapping back to each acceptance criterion, validation run, and any risk notes. If the PR changes what users see, add a **Screens changed** list of routes/states (e.g. `/rooms/[id] – Prices · no prices yet`), so the post-release Paper update knows what to re-capture.
 4. Leave the ticket at **In Progress**. The human moves it to **Done** after merging and smoke testing.
 
 Do not move the ticket to Done yourself. See `engineering/linear-workspace.md` § AI agent rules.
