@@ -19,13 +19,31 @@ it("reads the earliest arrival date for bank transfer and PayPal (VAY-2145)", as
   expect(await getBookingPagePayment("hotel")).toEqual({
     methods: ["pay_at_property", "bank_transfer", "paypal"],
     earliestArrival: { bank_transfer: "2026-10-14" },
+    termsText: null,
   });
   // An older API without the list keeps card and pay at property.
   mocks.get.mockResolvedValue({});
   expect(await getBookingPagePayment("hotel")).toEqual({
     methods: ["card", "pay_at_property"],
     earliestArrival: {},
+    termsText: null,
   });
+});
+
+it("reads the hotel's own terms from the same response, and none when blank or unreadable (VAY-2176)", async () => {
+  mocks.get.mockResolvedValueOnce({ termsText: "  Our terms.\n\n1. Booking  " });
+  expect((await getBookingPagePayment("hotel")).termsText).toBe("Our terms.\n\n1. Booking");
+  for (const config of [{ termsText: "   " }, {}, { termsText: 3 }, null]) {
+    mocks.get.mockResolvedValueOnce(config);
+    expect((await getBookingPagePayment("hotel")).termsText).toBeNull();
+  }
+  mocks.get.mockRejectedValueOnce(new Error("Too many requests"));
+  expect(await getBookingPagePayment("hotel")).toEqual({
+    methods: ["card", "pay_at_property"],
+    earliestArrival: {},
+    termsText: null,
+  });
+  expect(mocks.get).toHaveBeenCalledTimes(6);
 });
 
 it("offers bank transfer and PayPal only from their earliest arrival date (VAY-2145)", () => {

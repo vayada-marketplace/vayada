@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import {
   isManualPricingPaymentMethod,
   type PublicBookingQuote,
@@ -27,12 +27,16 @@ export default function ReplacementBookingConfirmation({
   quote,
   disclosure,
   termsAccepted,
+  hotelTerms = false,
 }: {
   slug: string;
   quote: PublicBookingQuote;
   disclosure: PublicQuoteGuestDisclosure | null;
   termsAccepted: boolean;
+  /** The hotel has its own Terms & Conditions on this page (VAY-2176). */
+  hotelTerms?: boolean;
 }) {
+  const termsNoticeId = useId();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [refreshRequired, setRefreshRequired] = useState(false);
@@ -248,7 +252,17 @@ export default function ReplacementBookingConfirmation({
         <p role="status">Read and accept both the room terms and guest rules to book.</p>
       ) : null}
       {error && <p role="alert">{error}</p>}
-      <button className={button} type="submit" disabled={!ready || loading}>
+      {hotelTerms && (
+        <p id={termsNoticeId} className="text-sm text-gray-600">
+          By booking, you agree to our terms & conditions.
+        </p>
+      )}
+      <button
+        className={button}
+        type="submit"
+        disabled={!ready || loading}
+        aria-describedby={hotelTerms ? termsNoticeId : undefined}
+      >
         {loading
           ? request
             ? "Sending request…"
