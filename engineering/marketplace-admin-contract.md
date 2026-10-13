@@ -19,6 +19,9 @@ Contract version: `marketplace-admin.v1`.
 | Create hotel-user offer  | `POST`   | `/api/marketplace/admin/users/{hotelUserId}/offers`               |
 | Update hotel-user offer  | `PUT`    | `/api/marketplace/admin/users/{hotelUserId}/offers/{offerId}`     |
 | Archive hotel-user offer | `DELETE` | `/api/marketplace/admin/users/{hotelUserId}/offers/{offerId}`     |
+| Hotel review queue       | `GET`    | `/api/marketplace/admin/hotel-submissions`                        |
+| Review hotel submission  | `GET`    | `/api/marketplace/admin/hotel-submissions/{revisionId}`           |
+| Decide hotel submission  | `POST`   | `/api/marketplace/admin/hotel-submissions/{revisionId}/decision`  |
 
 ## Authorization
 
@@ -158,6 +161,59 @@ Admin lifecycle actions use the same accepted-collaboration side effects as the
 hotel workflow. In particular, accepting an affiliate-enabled collaboration
 requests creator-specific affiliate provisioning with the stable collaboration
 idempotency key.
+
+## Hotel Submission Review (VAY-2169)
+
+A hotel's "Submit to Marketplace" in setup creates a pending submission
+revision. Its public `/hotels/{propertyId}` page exists only while an approved
+revision is the property's active Marketplace revision. These routes are how
+Vayada operators get it there. They use the creator-moderation authorization
+(`platform.user.suspend`, the `platform-admin` entitlement, the Vayada operator
+link) and have their own contract version:
+`marketplace-hotel-submission-moderation.v1`.
+
+- The queue lists each property's latest submission while it is pending, oldest
+  first, with its previous outcome and whether an earlier version is live.
+- The review returns the public preview built by the same projection as
+  `/hotels/{propertyId}` (`null` when its media can't be served), the private
+  collaboration preferences, and the property's submission history.
+- The decision requires exactly one `Idempotency-Key` header and a body of
+  either `{ "decision": "approve" }` or
+  `{ "decision": "request_changes", "note": string }`. The note follows the
+  creator `reason` rules and is shown to the hotel in setup.
+
+Approval marks the revision `approved`, points
+`marketplace.active_hotel_submission_revisions` at it (`active`), moves the
+older `marketplace_profile_status` from `pending` (or a hold's leftover
+`suspended`) to `verified`, and writes a `marketplace.hotel_submission.approved`
+audit event, all in one transaction. An earlier approved revision stays public
+until then. Approval is refused with:
+
+- `409 property_unavailable` while the property is suspended or retired;
+- `409 marketplace_profile_unavailable` for a `rejected` or `archived`
+  Marketplace profile;
+- `409 marketplace_publication_suspended` for a `deactivated` publication;
+- `409 marketplace_entitlement_inactive`;
+- `409 submission_snapshot_invalid`;
+- `409 submission_media_unavailable` when the public preview can't be built
+  (its media isn't publicly servable), so approval never publishes a page that
+  answers 404.
+
+A property hold suspends the Marketplace profile and the active revision, and
+releasing the hold doesn't restore them. Once the property is no longer held,
+approving a fresh submission publishes it again.
+
+Requesting changes records the note (confidential audit copy in
+`private_payload`) and leaves any live revision alone; the hotel can edit and
+resubmit. There is no permanent rejection; suspension handles bad actors.
+
+Either decision needs the revision to be the latest and still pending:
+otherwise `409 submission_already_decided` or `409 submission_superseded`.
+Unknown revisions return `404 submission_not_found`. Idempotency keys are
+scoped to the property: the same key and body replays the stored outcome, while
+the same key with another revision or body returns
+`409 idempotency_key_conflict`. Refusals are not recorded, so a refused key can
+succeed later. A decision that loses a deadlock is retried once.
 
 ## Fixtures
 
