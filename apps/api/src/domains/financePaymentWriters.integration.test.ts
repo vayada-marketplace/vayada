@@ -40,7 +40,11 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Finance payment-method writers",
     pool,
     pricingReadPort,
   });
-  const launch = createFinanceBookingLaunchEvidenceAdapter({ financeReadPort: readiness });
+  // These cases are about payment methods; the hotel already has a billing plan.
+  const launch = createFinanceBookingLaunchEvidenceAdapter({
+    financeReadPort: readiness,
+    billingPlan: { getBillingConfig: async () => ({}) as never },
+  });
 
   beforeAll(() => assertSafeTestDatabase(connectionString));
 

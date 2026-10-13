@@ -6,6 +6,7 @@ export const FINANCE_FIXED_PLAN_INTERVAL_MONTHS = 1 as const;
 export type FinanceSubscriptionPlan = "commission" | "fixed";
 
 export type FinanceSubscriptionLifecycleStatus =
+  | "not_selected"
   | "commission"
   | "checkout_pending"
   | "active"
@@ -14,7 +15,8 @@ export type FinanceSubscriptionLifecycleStatus =
 
 export type FinancePlanStatusReadModel = {
   propertyId: string;
-  plan: FinanceSubscriptionPlan;
+  /** Null until the hotel chooses Commission or a Fixed Plan is active: no plan is assumed. */
+  plan: FinanceSubscriptionPlan | null;
   status: FinanceSubscriptionLifecycleStatus;
   currency: string;
   activeRoomCount: number;

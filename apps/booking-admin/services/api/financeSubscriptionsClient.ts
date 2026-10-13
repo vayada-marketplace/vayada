@@ -3,8 +3,15 @@ import { apiClient, omitHotelContext, type ApiClient } from "./client";
 type FinanceSubscriptionsApiClient = Pick<ApiClient, "get" | "post">;
 
 export type FinancePlanStatus = {
-  plan: "commission" | "fixed";
-  status: "commission" | "checkout_pending" | "active" | "past_due" | "cancel_at_period_end";
+  /** Null until the hotel chooses a plan (VAY-2171). */
+  plan: "commission" | "fixed" | null;
+  status:
+    | "not_selected"
+    | "commission"
+    | "checkout_pending"
+    | "active"
+    | "past_due"
+    | "cancel_at_period_end";
   currency: "EUR";
   activeRoomCount: number;
   amountMinor: number;

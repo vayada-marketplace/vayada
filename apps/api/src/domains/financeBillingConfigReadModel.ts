@@ -15,17 +15,25 @@ type BillingConfigRow = QueryResultRow & {
   updatedAt: Date | string;
 };
 
+/** Booking readiness reads the plan of the hotel's own organization, as acceptance does. */
+export type BillingPlanReadPort = {
+  getBillingConfig(
+    propertyId: string,
+    organizationId: string,
+  ): Promise<BillingConfigReadModel | null>;
+};
+
 export function createTargetFinanceBillingConfigReadPort(config: {
   connectionString: string;
   max?: number;
   pool?: FinanceBillingQueryExecutor & { end?(): Promise<void> };
-}): BillingConfigReadPort & { close?(): Promise<void> } {
+}): BillingConfigReadPort & BillingPlanReadPort & { close?(): Promise<void> } {
   const ownsPool = !config.pool;
   const pool =
     config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: config.max ?? 3 });
 
   return {
-    async getBillingConfig(propertyId) {
+    async getBillingConfig(propertyId: string, organizationId?: string) {
       const result = await pool.query<BillingConfigRow>(
         `SELECT
            COALESCE(entitlement.plan_key, 'commission') AS "activePlan",
@@ -40,6 +48,7 @@ export function createTargetFinanceBillingConfigReadPort(config: {
            SELECT plan_key, updated_at
            FROM finance.billing_entitlements
            WHERE property_id = property.id
+             AND ($2::uuid IS NULL OR organization_id = $2::uuid)
              AND product = 'booking'
              AND entitlement_key = 'direct-booking-finance'
              AND billing_status IN ('trialing', 'active')
@@ -62,6 +71,7 @@ export function createTargetFinanceBillingConfigReadPort(config: {
            SELECT percentage_rate, rule_metadata, updated_at
            FROM finance.commission_rules
            WHERE property_id = property.id
+             AND (organization_id IS NULL OR $2::uuid IS NULL OR organization_id = $2::uuid)
              AND product = 'booking'
              AND source_system = 'finance'
              AND source_rule_id = 'onboarding-booking:' || property.id::text
@@ -75,7 +85,7 @@ export function createTargetFinanceBillingConfigReadPort(config: {
            FOR SHARE
          ) commission ON TRUE
          WHERE property.id = $1::uuid`,
-        [propertyId],
+        [propertyId, organizationId ?? null],
       );
       return result.rows[0] ? toBillingConfig(propertyId, result.rows[0]) : null;
     },
