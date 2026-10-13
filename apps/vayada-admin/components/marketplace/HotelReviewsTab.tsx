@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { CheckBadgeIcon, EyeIcon } from "@heroicons/react/24/outline";
 import {
   describeSubmissionHistory,
@@ -21,10 +22,21 @@ type Props = {
   loading: boolean;
   error: string | null;
   onReview: (submission: HotelSubmissionQueueItem) => void;
+  /** Outcome of the last decision, shown above the list. */
+  notice?: ReactNode;
 };
 
 /** Hotel profiles submitted from setup that wait for a Vayada decision, oldest first. */
-export function HotelReviewsTab({ submissions, loading, error, onReview }: Props) {
+export function HotelReviewsTab(props: Props) {
+  return (
+    <div className="space-y-6">
+      {props.notice}
+      <HotelReviewsList {...props} />
+    </div>
+  );
+}
+
+function HotelReviewsList({ submissions, loading, error, onReview }: Props) {
   if (loading)
     return (
       <div className="text-center py-12 bg-white rounded-lg shadow">
