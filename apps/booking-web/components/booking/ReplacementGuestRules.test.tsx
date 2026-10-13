@@ -141,3 +141,24 @@ it("supplies exact server evidence only while the current rules are acknowledged
   await render("hotel", next, changed);
   expect(changed).toHaveBeenLastCalledWith(null);
 });
+it("reports the loaded rules whether or not they are ticked, and none on failure (VAY-2163)", async () => {
+  const rules = vi.fn();
+  const renderWith = async (value = quote) =>
+    act(async () =>
+      root.render(
+        createElement(ReplacementGuestRules, { slug: "hotel", quote: value, onRulesChange: rules }),
+      ),
+    );
+  await renderWith();
+  expect(rules).toHaveBeenLastCalledWith(disclosure);
+  vi.setSystemTime(new Date(quote.expiresAt));
+  act(() => checkbox().click());
+  expect(checkbox().checked).toBe(false);
+  expect(rules).toHaveBeenLastCalledWith(disclosure);
+  const next = { ...quote, quoteId: "22222222-2222-4222-8222-222222222222" };
+  vi.mocked(getQuoteGuestDisclosure).mockRejectedValueOnce(new Error("unavailable"));
+  await renderWith(next);
+  expect(rules).toHaveBeenLastCalledWith(null);
+  act(() => root.render(null));
+  expect(rules).toHaveBeenLastCalledWith(null);
+});
