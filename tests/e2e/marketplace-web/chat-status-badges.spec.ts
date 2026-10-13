@@ -9,6 +9,8 @@ const CONVERSATIONS = [
   { partner: "Pending Lodge", status: "pending", tab: "Active" },
   { partner: "Negotiating Inn", status: "negotiating", tab: "Active" },
   { partner: "Accepted Resort", status: "accepted", tab: "Active" },
+  { partner: "Active Villa", status: "active", tab: "Active" },
+  { partner: "Rejected Motel", status: "rejected", tab: "Active" },
   { partner: "Declined Hostel", status: "declined", tab: "Archived" },
 ];
 
@@ -42,7 +44,7 @@ test("gives each collaboration status badge in the chat list its own background"
   });
 
   await page.goto("/chat");
-  const colors: string[] = [];
+  const colors: Record<string, string> = {};
   for (const tab of ["Active", "Archived"]) {
     await page.getByRole("button", { name: tab, exact: true }).click();
     const conversations = CONVERSATIONS.filter((conversation) => conversation.tab === tab);
@@ -52,7 +54,8 @@ test("gives each collaboration status badge in the chat list its own background"
         .filter({ has: page.getByRole("heading", { name: partner, exact: true }) })
         .getByText(status, { exact: true });
       await expect(badge).toBeVisible();
-      if (status === conversations[0].status) {
+      if (status === conversations.at(-1)?.status) {
+        await badge.scrollIntoViewIfNeeded();
         await page.screenshot({
           path: testInfo.outputPath(`chat-status-${tab.toLowerCase()}.png`),
         });
@@ -61,10 +64,16 @@ test("gives each collaboration status badge in the chat list its own background"
         "background-color",
         TRANSPARENT,
       );
-      colors.push(await badge.evaluate((element) => getComputedStyle(element).backgroundColor));
+      colors[status] = await badge.evaluate((element) => getComputedStyle(element).backgroundColor);
     }
   }
-  expect(new Set(colors).size, `status colours ${colors.join(" | ")}`).toBe(colors.length);
+  const distinct = ["pending", "negotiating", "accepted", "declined"].map(
+    (status) => colors[status],
+  );
+  expect(new Set(distinct).size, `status colours ${JSON.stringify(colors)}`).toBe(4);
+  // VAY-2153: active and rejected used to fall back to pending's yellow.
+  expect(colors.active, "active looks accepted").toBe(colors.accepted);
+  expect(colors.rejected, "rejected looks declined").toBe(colors.declined);
 });
 
 async function primeCreatorSession(page: Page) {
