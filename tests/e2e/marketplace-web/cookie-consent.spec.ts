@@ -38,11 +38,22 @@ test.beforeEach(async ({ page }) => {
       },
     }),
   );
+  // Account consent is not under test here. A 401 would sign the user out after the
+  // session refresh (VAY-1493), so answer the privacy page's reads with a settled record.
   await page.route(/\/api\/identity\/consent\/(me|history)/, (route) =>
     route.fulfill({
-      status: 401,
-      contentType: "application/json",
-      body: "{}",
+      json: route.request().url().includes("/history")
+        ? { history: [], total: 0 }
+        : {
+            terms_accepted: true,
+            terms_accepted_at: "2026-09-01T00:00:00Z",
+            terms_version: "1",
+            privacy_accepted: true,
+            privacy_accepted_at: "2026-09-01T00:00:00Z",
+            privacy_version: "1",
+            marketing_consent: false,
+            marketing_consent_at: null,
+          },
     }),
   );
 });

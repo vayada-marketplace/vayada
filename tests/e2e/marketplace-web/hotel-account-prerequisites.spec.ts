@@ -60,8 +60,12 @@ test.describe("hotel account prerequisites", () => {
     await mockPropertyTypes(page);
     await page.route(/\/api\/hotel-setup\/properties$/, async (route) => {
       writes.push(requestWrite(route));
-      const body = route.request().postDataJSON() as Record<string, unknown>;
-      await fulfillJson(route, { propertyId, profileRevision: 1, profile: body });
+      // A new hotel carries its guest preferences in the create command; the response
+      // returns only the stored profile.
+      const { initialLaunchSettings: _launchSettings, ...profile } = route
+        .request()
+        .postDataJSON() as Record<string, unknown>;
+      await fulfillJson(route, { propertyId, profileRevision: 1, profile });
     });
     await page.route(/\/api\/media\/upload-sessions(?:\/[^/]+\/finalize)?$/, async (route) => {
       writes.push(requestWrite(route));
@@ -225,13 +229,15 @@ test.describe("hotel account prerequisites", () => {
       },
     });
     expect(assignmentWrite?.idempotencyKey).toBeTruthy();
-    const launchSettingsWrite = writes.find(({ path }) => path.endsWith("/launch-settings"));
-    expect(launchSettingsWrite?.body).toMatchObject({
-      defaultCurrency: "EUR",
-      supportedCurrencies: ["USD", "LKR"],
-      defaultLanguage: "de",
-      supportedLanguages: ["en", "nl"],
+    expect(profileWrite?.body).toMatchObject({
+      initialLaunchSettings: {
+        defaultCurrency: "EUR",
+        supportedCurrencies: ["USD", "LKR"],
+        defaultLanguage: "de",
+        supportedLanguages: ["en", "nl"],
+      },
     });
+    expect(writes.filter(({ path }) => path.endsWith("/launch-settings"))).toEqual([]);
   });
 
   test("resumes a finalized logo assignment after reload and replays the exact command", async ({
@@ -332,7 +338,10 @@ test.describe("hotel account prerequisites", () => {
     await page.goto(setupUrl(baseURL, propertyId));
     await expect(page.getByText("Logo ready to finish")).toBeVisible();
     await completePrefilledProfile(page);
-    await expect(page.getByRole("main").getByRole("alert")).toContainText("Failed to fetch");
+    // A dropped connection shows the wizard's retry copy, not the raw fetch error.
+    await expect(page.getByRole("main").getByRole("alert")).toContainText(
+      "Couldn't save. Check your connection and try again.",
+    );
     await page.reload();
     await expect(page.getByText("Logo ready to finish")).toBeVisible();
     await completePrefilledProfile(page);

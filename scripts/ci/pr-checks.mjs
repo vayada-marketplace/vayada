@@ -13,6 +13,8 @@ export const SELECTABLE_JOBS = [
   "frontend",
   "first_party_auth",
   "pms_web_e2e",
+  "marketplace_web_e2e",
+  "booking_web_e2e",
   "api_unit",
   "api_postgres",
   "setup_draft_reset_postgres",
@@ -27,6 +29,9 @@ const TYPESCRIPT_JOBS = [
   "setup_draft_reset_postgres",
 ];
 
+// The mocked Playwright projects that gate PRs (one dev server each, no backend).
+const BROWSER_E2E_JOBS = ["pms_web_e2e", "marketplace_web_e2e", "booking_web_e2e"];
+
 // The first matching rule decides what a changed file selects. A file that matches no rule
 // selects every job, so new directories and tooling changes fail safe (run everything).
 export const RULES = [
@@ -39,29 +44,67 @@ export const RULES = [
     test: /^apps\/(marketplace-api|booking-api|pms-api)\//,
     jobs: ["backend"],
   },
-  // pms_web_e2e runs the mocked pms-web Playwright project.
+  // pms_web_e2e, marketplace_web_e2e and booking_web_e2e run each app's mocked Playwright project.
   {
     name: "pms-web",
     test: /^apps\/pms-web\//,
     jobs: ["frontend", "first_party_auth", "pms_web_e2e"],
   },
   {
+    name: "marketplace-web",
+    test: /^apps\/marketplace-web\//,
+    jobs: ["frontend", "first_party_auth", "marketplace_web_e2e"],
+  },
+  {
+    name: "booking-web",
+    test: /^apps\/booking-web\//,
+    jobs: ["frontend", "first_party_auth", "booking_web_e2e"],
+  },
+  {
     name: "frontend",
-    test: /^apps\/(marketplace-web|vayada-admin|booking-web|booking-admin|landing)\//,
+    test: /^apps\/(vayada-admin|booking-admin|landing)\//,
     jobs: ["frontend", "first_party_auth"],
   },
   {
     name: "pms-web-e2e",
-    test: /^tests\/e2e\/(pms-web|support|marketplace-web\/utils)\//,
+    test: /^tests\/e2e\/pms-web\//,
     jobs: ["frontend", "first_party_auth", "pms_web_e2e"],
   },
-  // The frontend job runs the landing Playwright suite; first_party_auth runs the auth suite.
-  { name: "e2e", test: /^tests\/e2e\//, jobs: ["frontend", "first_party_auth"] },
-  // Packages pms-web builds on (everything but backend-*) also run its browser specs.
+  // Shared mocks and helpers: every mocked browser project imports from these.
+  {
+    name: "browser-e2e-support",
+    test: /^tests\/e2e\/(support|helpers|marketplace-web\/utils)\//,
+    jobs: ["frontend", "first_party_auth", ...BROWSER_E2E_JOBS],
+  },
+  {
+    name: "marketplace-web-e2e",
+    test: /^tests\/e2e\/marketplace-web\//,
+    jobs: ["frontend", "first_party_auth", "marketplace_web_e2e"],
+  },
+  {
+    name: "booking-web-e2e",
+    test: /^tests\/e2e\/booking-web\//,
+    jobs: ["frontend", "first_party_auth", "booking_web_e2e"],
+  },
+  // The frontend job runs the landing Playwright suite; first_party_auth runs the auth suite. The
+  // other projects here are not PR-gated. A new folder under tests/e2e/ matches no rule (every job).
+  {
+    name: "e2e",
+    test: /^tests\/e2e\/(landing|first-party-auth|booking-admin|vayada-admin|next-stack-smoke|booking-public-canary)\//,
+    jobs: ["frontend", "first_party_auth"],
+  },
+  // Packages the apps build on (everything but backend-*) also run the mocked browser projects.
   {
     name: "frontend-packages",
     test: /^packages\/(?!backend-)/,
-    jobs: [...TYPESCRIPT_JOBS, "pms_web_e2e"],
+    jobs: [...TYPESCRIPT_JOBS, ...BROWSER_E2E_JOBS],
+  },
+  // The opt-in marketplace-web Airbnb database spec imports this read model at load time, so a
+  // change here can stop the whole marketplace-web project from loading.
+  {
+    name: "marketplace-web-e2e-import",
+    test: /^apps\/api\/src\/domains\/pmsRoomFactsReadModel\.ts$/,
+    jobs: [...TYPESCRIPT_JOBS, "marketplace_web_e2e"],
   },
   // apps/api, backend packages and packages/backend-migration/migrations: the full unit suites
   // plus PG16 + PG17 coverage.

@@ -506,19 +506,9 @@ test.describe("marketplace-web shared setup activation", () => {
 
     await page.getByRole("button", { name: "Continue" }).click();
 
-    await expect(page.getByRole("heading", { name: "Set up guest preferences" })).toBeVisible();
-    await expect(page.getByRole("combobox", { name: /Default currency/ })).toHaveValue("EUR");
-    await expect(page.getByRole("combobox", { name: /Default language/ })).toHaveValue("de");
-    await expect(page.getByRole("button", { name: "Remove English" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Skip for now, configure later" })).toBeVisible();
-    await page.getByRole("button", { name: "🇨🇭 CHF", exact: true }).click();
-    await page.getByRole("textbox", { name: /Instagram/ }).fill("https://instagram.com/alpenrose");
-    await page.getByRole("textbox", { name: /Facebook/ }).fill("https://facebook.com/alpenrose");
-    await page.getByRole("textbox", { name: /TikTok/ }).fill("https://tiktok.com/@alpenrose");
-    await page.getByRole("textbox", { name: /YouTube/ }).fill("https://youtube.com/@alpenrose");
-    await page.getByRole("button", { name: "Continue" }).click();
-
-    await expect(page.getByText("Step 4 of 4 · Contact information")).toBeVisible();
+    // Guest preferences (currencies, languages, socials) belong to Hotel Operations; a
+    // Marketplace-only hotel goes straight from Location to Contact information.
+    await expect(page.getByText("Step 3 of 3 · Contact information")).toBeVisible();
     await expect(page.getByRole("heading", { name: "How can guests reach you?" })).toBeVisible();
     await expect(
       page.getByText("This information is shown when guests click 'Contact' on your booking page."),
@@ -548,18 +538,8 @@ test.describe("marketplace-web shared setup activation", () => {
     expect(accountProfileWrites).toBe(0);
     expect(personalMediaRequests).toBe(0);
     expect(publicProfileWrites).toEqual([]);
-    expect(launchSettingsWrites).toEqual([
-      {
-        defaultCurrency: "EUR",
-        supportedCurrencies: ["CHF"],
-        defaultLanguage: "de",
-        supportedLanguages: ["en"],
-        instagram: "https://instagram.com/alpenrose",
-        facebook: "https://facebook.com/alpenrose",
-        tiktok: "https://tiktok.com/@alpenrose",
-        youtube: "https://youtube.com/@alpenrose",
-      },
-    ]);
+    expect(launchSettingsWrites).toEqual([]);
+    expect(createdPropertyPayload).not.toHaveProperty("initialLaunchSettings");
   };
   test("hands a newly created hotel to adaptive setup after saving contact and logo", async ({
     page,
