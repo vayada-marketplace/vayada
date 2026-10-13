@@ -82,12 +82,13 @@ describe.skipIf(!url)("guest terms and conditions (VAY-2176)", () => {
       "guest_terms_stale",
     );
     await pool.query(
-      "INSERT INTO hotel_catalog.property_policy_summaries(property_id,terms_and_conditions) VALUES($1,'Settings terms.')",
+      "INSERT INTO hotel_catalog.property_policy_summaries(property_id,terms_and_conditions) VALUES($1,'  Settings terms.\n')",
       [f.scope.propertyId],
     );
+    expect(await f.store.read(f.scope)).toEqual({ termsText: "Settings terms." });
     // Setup loaded no terms, then the hotel saved its own in booking settings.
     await expect(f.store.save(f.scope, "Setup terms.", null)).rejects.toThrow("guest_terms_stale");
-    expect(await f.facts()).toMatchObject({ terms: "Settings terms." });
+    expect(await f.facts()).toMatchObject({ terms: "  Settings terms.\n" });
     expect(await f.store.save(f.scope, "Setup terms.", "Settings terms.")).toEqual({
       termsText: "Setup terms.",
     });

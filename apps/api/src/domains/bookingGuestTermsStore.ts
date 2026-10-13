@@ -69,7 +69,10 @@ export function createBookingGuestTermsStore(
             [propertyId],
           )
         ).rows[0];
-        return { termsText: (row?.terms_and_conditions as string | null | undefined) ?? null };
+        // Trimmed like save, so a read value can be sent back as the expected text.
+        return {
+          termsText: (row?.terms_and_conditions as string | null | undefined)?.trim() || null,
+        };
       }),
     /**
      * Blank text clears the terms. `expected` is the text the caller loaded: a save over terms
