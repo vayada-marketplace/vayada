@@ -207,6 +207,39 @@ it("shows a live page without a republish step", async () => {
   expect(text(tree)).not.toContain("Publish booking page");
   expect(tree.root.findByType("a").props.href).toBe("https://hotel.example");
 });
+it("does not call a page live before the booking site serves it (VAY-2134)", async () => {
+  mocks.load.mockResolvedValue({
+    ...review,
+    activeContentRevisionId: "active",
+    publishedUrl: null,
+    publicSite: "waiting_for_switch",
+  });
+  const tree = await mount();
+  expect(text(tree)).toContain("Published · guests can't see it yet");
+  expect(text(tree)).toContain("still switching the booking site over");
+  expect(text(tree)).not.toContain('"Live"');
+  expect(text(tree)).not.toContain("go live automatically");
+  expect(text(tree)).not.toContain("Fix the items below");
+  expect(tree.root.findAllByType("a")).toHaveLength(0);
+});
+it("still asks to fix open items while the booking site switches (VAY-2134)", async () => {
+  mocks.load.mockResolvedValue({
+    ...review,
+    activeContentRevisionId: "active",
+    publishedUrl: null,
+    publicSite: "waiting_for_switch",
+    readiness: { ...review.readiness, status: "attention" },
+  });
+  const tree = await mount();
+  expect(text(tree)).toContain("Published · guests can't see it yet");
+  expect(text(tree)).toContain("Fix the items below so guests can book.");
+});
+it("tells a hotel before publishing that guests can't open the page yet (VAY-2134)", async () => {
+  mocks.load.mockResolvedValue({ ...review, publicSite: "waiting_for_switch" });
+  const tree = await mount();
+  expect(text(tree)).toContain("Ready to publish");
+  expect(text(tree)).toContain("once we finish switching the booking site over");
+});
 it("says when a live page needs attention", async () => {
   mocks.load.mockResolvedValue({
     ...review,
