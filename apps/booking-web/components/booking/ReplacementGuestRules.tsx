@@ -4,6 +4,7 @@ import type {
   PublicBookingQuote,
   PublicQuoteGuestDisclosure,
 } from "@vayada/domain-booking/replacement-pricing";
+import { serverNow } from "@/lib/serverClock";
 import { getQuoteGuestDisclosure } from "@/services/api/quoteGuestDisclosure";
 
 export default function ReplacementGuestRules({
@@ -37,7 +38,7 @@ export default function ReplacementGuestRules({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity, retry]);
   const current =
-    disclosure?.quoteId === quote.quoteId && Date.parse(disclosure.expiresAt) > Date.now();
+    disclosure?.quoteId === quote.quoteId && Date.parse(disclosure.expiresAt) > serverNow();
   const consent = disclosure
     ? JSON.stringify([identity, disclosure.quoteEvidenceId, disclosure.guestPolicyEvidenceId])
     : null;
@@ -99,7 +100,7 @@ export default function ReplacementGuestRules({
           disabled={!current}
           onChange={(event) =>
             setAcknowledged(
-              event.target.checked && Date.parse(disclosure.expiresAt) > Date.now()
+              event.target.checked && Date.parse(disclosure.expiresAt) > serverNow()
                 ? consent
                 : null,
             )

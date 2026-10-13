@@ -2,6 +2,7 @@ import {
   parsePublicBookingQuote,
   type PublicBookingQuoteRequest,
 } from "@vayada/domain-booking/replacement-pricing";
+import { deviceTimeOf, observeServerTime, serverNow } from "@/lib/serverClock";
 import { ApiError, bookingWebPublic } from "./client";
 import {
   expireCheckoutIdempotencyKeyAt,
@@ -39,10 +40,16 @@ export async function requestReplacementQuote(
   signal?.throwIfAborted();
   const quote = parsePublicBookingQuote(raw, body);
   if (!quote) throw new Error("The quote could not be verified. Please try again.");
-  if (Date.parse(quote.issuedAt) > Date.now())
-    throw new Error("The quote time could not be verified. Please check your device clock.");
-  expireCheckoutIdempotencyKeyAt("replacement-quote", identity, quote.expiresAt, key);
-  if (Date.parse(quote.expiresAt) <= Date.now())
+  // A fresh quote was issued just now: it calibrates the server clock, so a device clock that is
+  // behind or ahead no longer rejects it. A replay keeps its original, older issue time.
+  if (!quote.replayed) observeServerTime(quote.issuedAt);
+  expireCheckoutIdempotencyKeyAt(
+    "replacement-quote",
+    identity,
+    new Date(deviceTimeOf(quote.expiresAt)).toISOString(),
+    key,
+  );
+  if (Date.parse(quote.expiresAt) <= serverNow())
     throw new Error("This quote has expired. Please refresh the price.");
   return quote;
 }

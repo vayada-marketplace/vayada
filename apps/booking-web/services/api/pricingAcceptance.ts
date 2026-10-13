@@ -8,6 +8,7 @@ import {
   expireCheckoutIdempotencyKeyAt,
   getCheckoutIdempotencyKey,
 } from "@/lib/storage/bookingDraft";
+import { deviceTimeOf, serverNow } from "@/lib/serverClock";
 import { ApiError, bookingWebPublic } from "./client";
 
 export type PricingAcceptanceGuest = Readonly<{
@@ -242,7 +243,7 @@ export async function acceptPricingQuote(
   if (
     !pricingQuoteBookableOnline(quote) ||
     !verifiedDisclosure ||
-    (mode === "fresh" && Date.parse(quote.expiresAt) <= Date.now())
+    (mode === "fresh" && Date.parse(quote.expiresAt) <= serverNow())
   )
     throw new Error("This price cannot be booked online. Please refresh the price.");
 
@@ -293,12 +294,22 @@ export async function acceptPricingQuote(
   if (card) return card;
   const manual = parseManualPaymentPending(raw);
   if (manual) {
-    expireCheckoutIdempotencyKeyAt("pricing-acceptance", identity, quote.expiresAt, requestId);
+    expireCheckoutIdempotencyKeyAt(
+      "pricing-acceptance",
+      identity,
+      new Date(deviceTimeOf(quote.expiresAt)).toISOString(),
+      requestId,
+    );
     return manual;
   }
   const result = parsePricingAcceptanceResult(raw);
   if (!result) throw new Error("The booking confirmation could not be verified. Please try again.");
-  expireCheckoutIdempotencyKeyAt("pricing-acceptance", identity, quote.expiresAt, requestId);
+  expireCheckoutIdempotencyKeyAt(
+    "pricing-acceptance",
+    identity,
+    new Date(deviceTimeOf(quote.expiresAt)).toISOString(),
+    requestId,
+  );
   return result;
 }
 

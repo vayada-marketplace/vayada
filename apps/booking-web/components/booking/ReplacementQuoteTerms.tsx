@@ -5,6 +5,7 @@ import {
   isManualPricingPaymentMethod,
   type PublicBookingQuote,
 } from "@vayada/domain-booking/replacement-pricing";
+import { serverNow } from "@/lib/serverClock";
 import { bookingPagePaymentMethodLabels } from "@/services/api/bookingPagePaymentMethods";
 
 export type QuoteTermsAcknowledgement = { quoteId: string; termsIdentity: string };
@@ -37,21 +38,22 @@ export default function ReplacementQuoteTerms({
   ]);
   const [acknowledgedIdentity, setAcknowledgedIdentity] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
-  const issuedAt = Date.parse(quote.issuedAt);
+  // Judged on the server's clock: a device clock that is behind or ahead must not block a valid
+  // quote (VAY-2134).
   const expiresAt = Date.parse(quote.expiresAt);
-  const unavailable = stale || expired || issuedAt > Date.now() || expiresAt <= Date.now();
+  const unavailable = stale || expired || expiresAt <= serverNow();
   const missingLabels = quote.rooms.some((room) => !roomNames[room.selectionId]?.trim());
   const agreed = !unavailable && !missingLabels && acknowledgedIdentity === identity;
 
   useEffect(() => {
     setAcknowledgedIdentity(null);
-    setExpired(expiresAt <= Date.now());
+    setExpired(expiresAt <= serverNow());
     const timer = setTimeout(
       () => {
         setExpired(true);
         setAcknowledgedIdentity(null);
       },
-      Math.max(0, expiresAt - Date.now()),
+      Math.max(0, expiresAt - serverNow()),
     );
     return () => clearTimeout(timer);
   }, [identity, stale, expiresAt]);
@@ -150,7 +152,7 @@ export default function ReplacementQuoteTerms({
           disabled={unavailable || missingLabels}
           onChange={(event) =>
             setAcknowledgedIdentity(
-              event.target.checked && expiresAt > Date.now() ? identity : null,
+              event.target.checked && expiresAt > serverNow() ? identity : null,
             )
           }
         />

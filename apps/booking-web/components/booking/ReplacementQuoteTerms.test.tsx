@@ -190,9 +190,12 @@ it("revokes acknowledgement at exact expiry and on unmount", () => {
   expect(change).toHaveBeenLastCalledWith(null);
 });
 
-it("blocks agreement for future, expired or unnamed rooms", () => {
+it("does not block a quote issued after the device clock (VAY-2134)", () => {
   render({ quote: { ...quote, issuedAt: "2027-01-01T00:01:00.000Z" } });
-  expect(checkbox().disabled).toBe(true);
+  expect(checkbox().disabled).toBe(false);
+});
+
+it("blocks agreement for expired or unnamed rooms", () => {
   render({ roomNames: {} });
   expect(checkbox().disabled).toBe(true);
   expect(document.body.textContent).toContain("Room details are unavailable");

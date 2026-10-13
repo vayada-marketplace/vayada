@@ -5,6 +5,7 @@ import type {
   PublicBookingQuoteRequest,
 } from "@vayada/domain-booking/replacement-pricing";
 import { ApiError } from "@/services/api/client";
+import { serverNow } from "@/lib/serverClock";
 import { requestReplacementQuote } from "@/services/api/replacementQuote";
 
 /** The guest's message when a quote is refused. */
@@ -54,7 +55,7 @@ export function useReplacementQuote(slug: string, request: PublicBookingQuoteReq
               quote,
               error: "This price has expired. Get an updated price.",
             }),
-          Math.max(0, Date.parse(quote.expiresAt) - Date.now()),
+          Math.max(0, Date.parse(quote.expiresAt) - serverNow()),
         );
       })
       .catch((error: unknown) => {
