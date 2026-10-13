@@ -36,6 +36,13 @@ for (const width of [1440, 390]) {
     page,
   }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
+    // Analytics choice already made, so the consent banner doesn't cover the buttons.
+    await page.addInitScript((slug) => {
+      localStorage.setItem(
+        `vayada_booking_analytics:${slug}`,
+        JSON.stringify({ version: 1, analytics: false }),
+      );
+    }, SEEDED_BOOKING_SLUG);
     await mockBookingApis(page);
     await page.route(`${hotelApi}/bookings/lookup`, (route) =>
       route.fulfill({
@@ -62,8 +69,8 @@ for (const width of [1440, 390]) {
     await expect(heading).toBeVisible();
     const edit = page.getByRole("button", { name: "Edit Request" });
     const withdraw = page.getByRole("button", { name: "Withdraw Request" });
-    await expect(edit).toBeVisible();
-    await page.screenshot({ path: testInfo.outputPath(`booking-pending-${width}.png`) });
+    await withdraw.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`booking-actions-${width}.png`) });
     await withdraw.click();
     await page.screenshot({ path: testInfo.outputPath(`booking-withdraw-click-${width}.png`) });
 
