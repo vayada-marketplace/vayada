@@ -1255,6 +1255,32 @@ describe("Booking Web public bootstrap parity", () => {
     const pool = {
       async query(text: string) {
         calls.push(text);
+        // VAY-2145: where and when check-in happens, and the bank-transfer and PayPal terms.
+        if (text.includes('AS "checkInTime"'))
+          return {
+            rows: [
+              {
+                timeZone: "Europe/Vienna",
+                checkInTime: "15:00",
+                now: new Date("2026-10-12T10:00:00Z"),
+              },
+            ],
+          };
+        if (text.includes("SELECT payments_enabled,accepted_methods,deposit_policy"))
+          return {
+            rows: [
+              {
+                payments_enabled: true,
+                accepted_methods: ["bank_transfer", "paypal", "pay_at_property"],
+                deposit_policy: {
+                  paypalEmail: "payments@alpenrose.test",
+                  paypalPaymentWindowHours: 48,
+                },
+              },
+            ],
+          };
+        if (text.includes("SELECT id FROM finance.bank_transfer_destinations"))
+          return { rows: [{ id: "destination-1" }] };
         if (text.includes("FROM hotel_catalog.property_slugs")) {
           return {
             rows: [
@@ -1350,6 +1376,9 @@ describe("Booking Web public bootstrap parity", () => {
       // The booking page keeps its fixed choice until bank transfer and PayPal acceptance is on.
       bookingPagePaymentMethods: ["card", "pay_at_property"],
     });
+    await expect(adapter.getCheckoutConfig("hotel-alpenrose")).resolves.not.toHaveProperty(
+      "manualPaymentEarliestArrival",
+    );
     await expect(
       createTargetBookingWebCheckoutAdapter({
         externalChanges: externalBookingChanges,
@@ -1361,6 +1390,8 @@ describe("Booking Web public bootstrap parity", () => {
       }).getCheckoutConfig("hotel-alpenrose"),
     ).resolves.toMatchObject({
       bookingPagePaymentMethods: ["pay_at_property", "bank_transfer", "paypal"],
+      // 12:00 in Vienna; check-in at 15:00 on the 14th is 51 h away, enough for both windows.
+      manualPaymentEarliestArrival: { bank_transfer: "2026-10-14", paypal: "2026-10-14" },
     });
     // Without the bank-details binding bank transfer can't be accepted, so it isn't offered.
     await expect(

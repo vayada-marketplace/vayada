@@ -185,3 +185,52 @@ test("books by bank transfer and opens the protected payment details", async ({ 
   await expect(page.getByText("IBAN: DE89370400440532013000", { exact: true })).toBeVisible();
   expect(confirmations).toBeGreaterThan(0);
 });
+
+// VAY-2145: bank transfer only when its 48-hour deadline ends before check-in.
+test("hides bank transfer for arrivals closer than its payment deadline", async ({ page }) => {
+  await mockBookingApis(page);
+  await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/checkout-config`, (route) =>
+    route.fulfill({
+      json: {
+        addons: [],
+        payAtPropertyEnabled: true,
+        bookingPagePaymentMethods: ["pay_at_property", "bank_transfer"],
+        manualPaymentEarliestArrival: { bank_transfer: "2026-10-05" },
+      },
+    }),
+  );
+  await page.route("**/pricing-offers", (route) =>
+    route.fulfill({
+      json: {
+        version: "public-pricing-offers.v1",
+        rooms: [
+          {
+            roomTypeId: "double",
+            name: "Double",
+            offers: [{ publicOfferKey: offerKey, currency: "EUR", mealPlan: "room_only" }],
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/pricing-addons", (route) =>
+    route.fulfill({ json: { version: "public-pricing-addons.v1", addons: [] } }),
+  );
+
+  await page.goto(`/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-10-01&checkOut=2026-10-03`);
+  const method = page.getByLabel("Payment preference");
+  await expect(method.locator("option")).toHaveText(["Choose a payment method", "Pay at property"]);
+  await expect(
+    page.getByText("Bank transfer isn’t available this close to check-in."),
+  ).toBeVisible();
+
+  await page.goto(`/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-10-06&checkOut=2026-10-08`);
+  await expect(method.locator("option")).toHaveText([
+    "Choose a payment method",
+    "Pay at property",
+    "Bank transfer",
+  ]);
+  await expect(page.getByText("Bank transfer isn’t available this close to check-in.")).toHaveCount(
+    0,
+  );
+});

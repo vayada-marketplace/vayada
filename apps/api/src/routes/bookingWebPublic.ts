@@ -2,6 +2,11 @@ import { createPublicPricingOfferCatalog } from "../domains/publicPricingOfferCa
 import { createPublicQuoteGuestDisclosure } from "../domains/publicQuoteGuestDisclosure.js";
 import { createPublicPricingAddonCatalog } from "../domains/publicPricingAddonCatalog.js";
 import { createCurrentPricingQuoteStore } from "../domains/currentPricingQuoteStore.js";
+import { lockPricingManualPaymentTerms } from "../domains/pricingManualPayment.js";
+import {
+  manualPaymentEarliestArrival,
+  readPricingCheckInPlace,
+} from "../domains/pricingManualPaymentLead.js";
 import {
   PricingAcceptanceError,
   writePricingAcceptance,
@@ -28,11 +33,13 @@ import {
   evaluateSameDayBooking,
   FUNNEL_EVENT_TYPES,
   FUNNEL_PAYMENT_METHODS,
+  isManualPricingPaymentMethod,
   parseBookingFlexibleCancellationTerms,
   parseBookingRoomSelection,
   SAME_DAY_BOOKING_POLICY_DEFAULTS,
   type AddonEconomicTerms,
   type BookedCancellationOutcome,
+  type ManualPricingPaymentMethod,
 } from "@vayada/domain-booking";
 import { pricingCurrencyScale } from "@vayada/domain-booking/replacement-pricing";
 import {
@@ -1930,13 +1937,21 @@ export function createTargetBookingWebCheckoutAdapter(
       return withCommand(slug, context, async () => {
         const property = await resolveTargetCheckoutProperty(pool, slug);
         const row = await loadTargetCheckoutConfig(pool, property.propertyId);
+        const methods = bookingPagePaymentMethods(row, config);
+        const earliest = await bookingPageManualEarliestArrival(pool, property.propertyId, methods);
         return {
           propertyId: property.propertyId,
           resourceType: "checkout_config",
           resourceId: property.propertyId,
           body: {
             ...serializeTargetCheckoutConfig(property, row),
-            bookingPagePaymentMethods: bookingPagePaymentMethods(row, config),
+            // Without an earliest arrival date a method cannot be quoted, so /book leaves it out.
+            bookingPagePaymentMethods: earliest
+              ? methods.filter(
+                  (method) => !isManualPricingPaymentMethod(method) || earliest[method],
+                )
+              : methods,
+            ...(earliest ? { manualPaymentEarliestArrival: earliest } : {}),
           },
         };
       });
@@ -2950,6 +2965,33 @@ function bookingPagePaymentMethods(
       (method !== "card" || cardAcceptance) &&
       (method !== "bank_transfer" || !!config.bankTransfers),
   );
+}
+
+/** VAY-2145: the first property-local arrival date each offered bank-transfer or PayPal method
+ * can be booked for, so /book hides it for closer stays. Null when neither is offered. */
+async function bookingPageManualEarliestArrival(
+  pool: Pick<pg.Pool, "query">,
+  propertyId: string,
+  methods: readonly string[],
+): Promise<Partial<Record<ManualPricingPaymentMethod, string>> | null> {
+  const manual = methods.filter(isManualPricingPaymentMethod);
+  if (!manual.length) return null;
+  const read = await readPricingCheckInPlace(pool, propertyId);
+  const earliest: Partial<Record<ManualPricingPaymentMethod, string>> = {};
+  for (const method of manual) {
+    const terms = read && (await lockPricingManualPaymentTerms(pool, propertyId, method, false));
+    const date =
+      read && terms
+        ? manualPaymentEarliestArrival({
+            method,
+            paymentWindowHours: terms.paymentWindowHours,
+            place: read.place,
+            now: read.now,
+          })
+        : null;
+    if (date) earliest[method] = date;
+  }
+  return earliest;
 }
 
 function serializeTargetCheckoutConfig(
