@@ -8,13 +8,13 @@ Existing hotel selection and add-hotel prerequisite entry were also verified.
 
 This is evidence for the handoff, not acceptance of every adaptive step.
 
-## Safe cleanup
+## Safe cleanup (done)
 
-The private `@vayada/product-onboarding` workspace has no app consumers of
-`BenefitsStep`, `useSetupWizardState`, or `LastMinuteStep`. Their only references
-are package exports and the old state hook's last-minute configuration import.
-Remove these unused components, hook, and exports in small dependency-ordered
-PRs. Keep the live room benefits editor and pricing controls.
+`BenefitsStep`, `useSetupWizardState`, and `LastMinuteStep` were removed in
+VAY-1051. VAY-2174 removed the other unused steps of the earlier first-run
+onboarding (`PropertyStep`, `RoomsStep`, `PoliciesStep`, `AddonsStep`) and the
+old direct-booking form's `BrandMediaStep`. The live room benefits editor,
+pricing controls, and `AddonEditor` stay.
 
 ## Fallback retired (VAY-2174)
 
