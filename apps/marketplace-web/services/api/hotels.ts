@@ -319,17 +319,6 @@ export const hotelService = {
     });
   },
 
-  updatePublicSetupProfile: async (
-    data: Pick<UpdateHotelProfileRequest, "about" | "localityPublic">,
-    propertyId: string,
-    revisions: HotelProfileRevisionSnapshot,
-  ): Promise<HotelProfile> => {
-    return updateHotelProfile(data, propertyId, revisions, {
-      publicProfile: true,
-      marketplaceProfile: true,
-    });
-  },
-
   updateMarketplaceHostSummary: async (about: string, propertyId: string): Promise<void> => {
     await targetApiClient.put<TargetMarketplaceProfile>(marketplaceProfilePath(propertyId), {
       hostSummary: normalizedOptionalText(about),
@@ -379,20 +368,6 @@ export const hotelService = {
       throw new Error("The hotel cover was assigned but its public image is unavailable.");
     }
     return { url: publishedCover.url, mediaObjectId: uploaded.mediaObjectId };
-  },
-
-  /**
-   * Promote an already selected remote offer photo to the canonical hotel
-   * cover. The same guarded download path used for offer-photo reuse keeps
-   * third-party URLs out of the profile command.
-   */
-  uploadProfileImageFromSource: async (
-    sourceImageUrl: string,
-    profileId: string,
-    expectedProfileRevision: number,
-  ): Promise<PlatformImageUploadResponse> => {
-    const file = await remoteImageFile(sourceImageUrl, 0);
-    return hotelService.uploadProfileImage(file, profileId, expectedProfileRevision);
   },
 
   /**
