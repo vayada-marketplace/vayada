@@ -10,6 +10,7 @@ import type {
   ReadyProductReadinessEvidence,
 } from "@vayada/domain-hotels";
 import { parseBookingPublicContent } from "@vayada/domain-distribution/booking-publication";
+import { manualPublishedPagePayable } from "./financeManualPaymentReadiness.js";
 import type { BookingPublicContent } from "@vayada/domain-distribution/booking-publication";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
@@ -208,6 +209,12 @@ export function createPgDistributionBookingPublicationProjection(config: {
           manualPayments: config.manualPayments === true,
         });
         if (!content || content.profile.hotel.propertyId !== propertyId) return null;
+        // A bank-transfer or PayPal page counts only while the hotel can still be paid that way.
+        if (
+          config.manualPayments === true &&
+          !(await manualPublishedPagePayable(client, propertyId, content.payments.readyMethods))
+        )
+          return null;
         const url = new URL(content.profile.hotel.canonicalUrl);
         return url.protocol === "https:" && !url.username && !url.password ? url.toString() : null;
       } catch {

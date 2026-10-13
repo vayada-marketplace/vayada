@@ -1,7 +1,11 @@
 import type { PublicBookabilityProfileProjection } from "@vayada/domain-distribution";
-import { parseBookingPublicContent } from "@vayada/domain-distribution/booking-publication";
+import {
+  parseBookingPublicContent,
+  type BookingPublicContent,
+} from "@vayada/domain-distribution/booking-publication";
 import pg, { type QueryResultRow } from "pg";
 
+import { manualPublishedPagePayable } from "../domains/financeManualPaymentReadiness.js";
 import type { PublicHotelProfileReadPool, PublicHotelProfileRepository } from "./aiHotels.js";
 
 type ActiveProfileRow = QueryResultRow & { propertyId: string; publicContent: unknown };
@@ -91,17 +95,18 @@ export function createActiveBookingPublicationProfileRepository(config: {
   };
 }
 
-function activeProfile(
+function activeContent(
   row: ActiveProfileRow | undefined,
   content: { manualPayments: boolean },
-): PublicBookabilityProfileProjection | null {
+): BookingPublicContent | null {
   if (!row) return null;
-  const profile = parseBookingPublicContent(row.publicContent, content)?.profile;
+  const parsed = parseBookingPublicContent(row.publicContent, content);
+  const profile = parsed?.profile;
   return profile &&
     profile.hotel.propertyId === row.propertyId &&
     profile.hotel.trust.bookabilityStatus === "bookable" &&
     profile.freshness.status === "fresh"
-    ? profile
+    ? parsed
     : null;
 }
 
@@ -110,8 +115,15 @@ async function currentActiveProfile(
   row: ActiveProfileRow | undefined,
   content: { manualPayments: boolean },
 ): Promise<PublicBookabilityProfileProjection | null> {
-  const profile = activeProfile(row, content);
-  if (!profile || !row) return null;
+  const parsed = activeContent(row, content);
+  if (!parsed || !row) return null;
+  // A bank-transfer or PayPal page stays up only while the hotel can still be paid that way.
+  if (
+    content.manualPayments &&
+    !(await manualPublishedPagePayable(pool, row.propertyId, parsed.payments.readyMethods))
+  )
+    return null;
+  const profile = parsed.profile;
   const domain = profile.hotel.customDomainUrl
     ? normalizedDomain(profile.hotel.customDomainUrl)
     : null;

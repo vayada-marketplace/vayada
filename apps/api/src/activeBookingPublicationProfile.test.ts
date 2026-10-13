@@ -42,13 +42,22 @@ describe("active immutable Booking publication profile reads", () => {
       ],
       finance: { onlinePayment: false, payAtProperty: false, readyPaymentMethods: ["paypal"] },
     });
+    let paypalEmail = "pay@hotel.example";
     const read = (manualPayments?: boolean) =>
       createActiveBookingPublicationProfileRepository({
         connectionString: "postgresql://unused",
         pool: pool(async (text) =>
           text.includes("identity.product_entitlements")
             ? [{ domainVerified: true, referralEnabled: true, latitude: null, longitude: null }]
-            : [{ propertyId: manualProfile.hotel.propertyId, publicContent }],
+            : text.includes("FROM finance.payment_settings settings")
+              ? [
+                  {
+                    accepted_methods: ["paypal"],
+                    paypal_email: paypalEmail,
+                    bank_destination: false,
+                  },
+                ]
+              : [{ propertyId: manualProfile.hotel.propertyId, publicContent }],
         ),
         manualPayments,
       }).findProfileBySlug(manualProfile.hotel.slug);
@@ -58,6 +67,13 @@ describe("active immutable Booking publication profile reads", () => {
     // Turning their acceptance off takes the page down again.
     await expect(read()).resolves.toBeNull();
     await expect(read(false)).resolves.toBeNull();
+    // Without its PayPal email the hotel can't be paid: the page is hidden until it is back.
+    paypalEmail = "";
+    await expect(read(true)).resolves.toBeNull();
+    paypalEmail = "pay@hotel.example";
+    await expect(read(true)).resolves.toMatchObject({
+      hotel: { propertyId: manualProfile.hotel.propertyId },
+    });
   });
   it("returns only a profile reached through the active revision pointer", async () => {
     const calls: { text: string; values?: readonly unknown[] }[] = [];
