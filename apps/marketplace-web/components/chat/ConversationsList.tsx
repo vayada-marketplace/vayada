@@ -36,7 +36,9 @@ export function ConversationsList({
 }: ConversationsListProps) {
   const [activeTab, setActiveTab] = useState<"Active" | "Archived">("Active");
 
-  const archivedStatuses = ["completed", "cancelled", "declined"];
+  // End statuses. The API stores only completed, cancelled and declined today;
+  // rejected is in the shared status type, so it is archived too.
+  const archivedStatuses = ["completed", "cancelled", "declined", "rejected"];
   const filteredConversations = conversations.filter((chat) => {
     const isArchived = archivedStatuses.includes(chat.collaboration_status.toLowerCase());
     return activeTab === "Archived" ? isArchived : !isArchived;

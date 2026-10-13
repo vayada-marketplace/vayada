@@ -6,6 +6,7 @@ import {
   parseFixedChargePolicy,
 } from "./replacementFixedCharges.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
+import type { ReplacementChargeDeclaration } from "./replacementChargeDeclarations.js";
 /** Current fixed policy inside a caller-authorized READ COMMITTED transaction. */
 export async function lockCurrentFixedChargePolicy(client: PoolClient, propertyId: string) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(propertyId))
@@ -55,6 +56,39 @@ export async function lockCurrentFixedCharges(client: PoolClient, value: unknown
     ...calculated,
     sourceRevision,
     policyRevision: current.revision as string,
+    basisEvidenceId,
+    charges: calculated.charges.map((c) => ({ ...c, basisEvidenceId })),
+  };
+}
+
+/** Prices declared "all mandatory charges included" quote with no extra charges: the empty
+ * fixed-charge set, bound to that declaration instead of a policy revision (VAY-2134). Pass only
+ * a declaration the pricing owner verified against the current prices. */
+export function includedFixedCharges(value: unknown, declaration: ReplacementChargeDeclaration) {
+  const declarationId = declaration.id;
+  const stay = parseReplacementStay(value);
+  if (!stay || !declarationId.length) return null;
+  const propertyId = stay.propertyId.toLowerCase();
+  const calculated = calculateReplacementFixedCharges(stay, {
+    version: "booking.fixed-charges.v1",
+    currency: stay.currency,
+    charges: [],
+  });
+  if (!calculated) return null;
+  const sourceRevision =
+    "booking.included-charges.v1:" +
+    createHash("sha256")
+      .update(JSON.stringify([propertyId, declarationId, calculated.policyKey]))
+      .digest("hex");
+  const basisEvidenceId =
+    "booking.current-fixed-charge-basis.v1:" +
+    createHash("sha256")
+      .update(JSON.stringify([sourceRevision, calculated.requestKey]))
+      .digest("hex");
+  return {
+    ...calculated,
+    sourceRevision,
+    policyRevision: declarationId,
     basisEvidenceId,
     charges: calculated.charges.map((c) => ({ ...c, basisEvidenceId })),
   };

@@ -7292,7 +7292,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(longer?.additionalChargeMinor).toBe("1800");
     expect(longer?.charges.basisEvidenceId).not.toBe(result?.charges.basisEvidenceId);
   });
-  it("does not add included amounts twice and distinguishes explicit none from legacy confirmation", async () => {
+  it("does not add included amounts twice and quotes a legacy confirmation without charges", async () => {
     const included = await componentsFixture(fixedPolicy(true));
     expect(await chargeTotals(included)).toMatchObject({
       subtotalMinor: "20000",
@@ -7306,16 +7306,27 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       totalMinor: "20000",
       additionalChargeMinor: "0",
     });
+    // Prices declared "all mandatory charges included" quote the room price with no extra
+    // charges, bound to that declaration rather than a policy revision (VAY-2134).
     const legacy = await componentsFixture();
     expect(await legacy.components()).not.toBeNull();
-    expect(await chargeTotals(legacy)).toBeNull();
+    const confirmed = {
+      totalMinor: "20000",
+      includedChargeMinor: "0",
+      additionalChargeMinor: "0",
+      charges: {
+        charges: [],
+        sourceRevision: expect.stringMatching(/^booking\.included-charges\.v1:/),
+      },
+    };
+    expect(await chargeTotals(legacy)).toMatchObject(confirmed);
     // Saving a policy does not silently replace a legacy publication's confirmation.
     await createFixedChargePolicyStore(pool).save(legacy.context, legacy.scope, {
       requestId: randomUUID(),
       expectedRevision: null,
       policy: fixedPolicy(),
     });
-    expect(await chargeTotals(legacy)).toBeNull();
+    expect(await chargeTotals(legacy)).toMatchObject(confirmed);
   });
   it("invalidates publications after fee edits and rejects stale, foreign and wrong-currency adoption", async () => {
     const f = await componentsFixture(fixedPolicy()),

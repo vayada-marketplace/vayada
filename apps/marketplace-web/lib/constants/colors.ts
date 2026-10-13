@@ -28,6 +28,12 @@ export const STATUS_STYLES = {
     border: "border-success-200",
     dot: "bg-success-500",
   },
+  active: {
+    bg: "bg-success-100",
+    text: "text-success-700",
+    border: "border-success-200",
+    dot: "bg-success-500",
+  },
   staying: {
     bg: "bg-purple-100",
     text: "text-purple-700",
@@ -41,6 +47,12 @@ export const STATUS_STYLES = {
     dot: "bg-success-500",
   },
   declined: {
+    bg: "bg-error-100",
+    text: "text-error-700",
+    border: "border-error-200",
+    dot: "bg-error-500",
+  },
+  rejected: {
     bg: "bg-error-100",
     text: "text-error-700",
     border: "border-error-200",
@@ -62,7 +74,8 @@ export type StatusStyleKey = keyof typeof STATUS_STYLES;
  */
 export function getStatusClasses(status: string): string {
   const style = STATUS_STYLES[status.toLowerCase() as StatusStyleKey];
-  if (!style) return `${STATUS_STYLES.pending.bg} ${STATUS_STYLES.pending.text}`;
+  // An unknown status is neutral grey (cancelled's style), not a pending request.
+  if (!style) return `${STATUS_STYLES.cancelled.bg} ${STATUS_STYLES.cancelled.text}`;
   return `${style.bg} ${style.text}`;
 }
 
@@ -70,7 +83,7 @@ export function getStatusClasses(status: string): string {
  * Get full status style object for a given status
  */
 export function getStatusStyle(status: string) {
-  return STATUS_STYLES[status.toLowerCase() as StatusStyleKey] ?? STATUS_STYLES.pending;
+  return STATUS_STYLES[status.toLowerCase() as StatusStyleKey] ?? STATUS_STYLES.cancelled;
 }
 
 /**
