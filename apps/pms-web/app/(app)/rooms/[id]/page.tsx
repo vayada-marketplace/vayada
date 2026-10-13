@@ -208,6 +208,8 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
           <RoomPricesTab
             roomTypeId={id}
             refresh={pricesRefresh}
+            // The strip shows the stale-prices banner only while its own read succeeds.
+            staleShown={pricesNeedPublishing && stalePrices && !propertyPrices.error}
             onAttention={() => {
               setTab("prices");
               setPricesOpened(true);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
 import { pmsOperationsRoomsReadService, type PmsOperationsRoomType } from "@/services/rooms";
 import { roomSizeValue } from "@/services/rooms/roomFacts";
@@ -49,10 +49,12 @@ export function pricingSetupRooms(items: readonly PmsOperationsRoomType[]): Setu
 }
 
 /** The selected property's rooms for pricing: a name for every room and the rooms that can be priced. A new
- * `version` reads them again (room details changed); a failed re-read keeps the rooms already shown. */
+ * `version` reads them again (room details changed); a failed re-read keeps the rooms already shown. `retry` reads
+ * them again after a failed first read. */
 export function usePricingRooms(version = 0) {
   const [rooms, setRooms] = useState<PricingRooms | null>(null);
   const [error, setError] = useState<Error | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const loaded = useRef(false);
   useEffect(() => {
     let active = true;
@@ -62,6 +64,7 @@ export function usePricingRooms(version = 0) {
         if (listed.propertyId !== id) throw new PricingError("pricing.page.roomMismatch");
         if (!active) return;
         loaded.current = true;
+        setError(null);
         setRooms({
           propertyId: id,
           names: Object.fromEntries(listed.items.map((room) => [room.roomTypeId, room.name])),
@@ -78,6 +81,10 @@ export function usePricingRooms(version = 0) {
     return () => {
       active = false;
     };
-  }, [version]);
-  return { rooms, error };
+  }, [version, attempt]);
+  const retry = useCallback(() => {
+    setError(null);
+    setAttempt((value) => value + 1);
+  }, []);
+  return { rooms, error, retry };
 }
