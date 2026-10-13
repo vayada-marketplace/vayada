@@ -330,46 +330,49 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
             ])
           ).rows[0]!.profile_revision,
         );
-      const presentKey = `present-${suffix}`;
-      const presentCommand = {
-        organizationId,
-        propertyId,
-        actorUserId: owner,
-        idempotencyKey: presentKey,
-        audit: requestAudit("present"),
-        request: {
-          expectedProfileRevision: await profileRevision(),
-          locale: "en" as const,
-          shortDescription: SUMMARY,
-          amenities: { reviewed: true as const, keys: [] },
-          media: { coverMediaObjectId: coverId, galleryMediaObjectIds: [] },
-        },
-      };
-      const prepared = await step1.prepare(presentCommand);
-      if (prepared.kind !== "prepared") throw new Error(`present: ${JSON.stringify(prepared)}`);
-      const presentation = ok(
-        await media.replacePresentation({
+      const presentHotel = async (step: string, shortDescription: string) => {
+        const presentKey = `${step}-${suffix}`;
+        const presentCommand = {
           organizationId,
           propertyId,
           actorUserId: owner,
-          audit: presentCommand.audit,
-          idempotencyKey: `hotel-catalog-step1-media:${createHash("sha256").update(presentKey).digest("hex")}`,
-          expectedProfileRevision: presentCommand.request.expectedProfileRevision,
-          assignments: createHotelCatalogStep1MediaAssignments(
-            presentCommand.request.media,
-            prepared.state.readModel.displayName,
-          ),
-        }),
-        "hotel photo",
-      );
-      ok(
-        await step1.save({
-          ...presentCommand,
-          claimToken: prepared.claimToken,
-          writeProfileRevision: presentation.response.profileRevision,
-        }),
-        "present your hotel",
-      );
+          idempotencyKey: presentKey,
+          audit: requestAudit(step),
+          request: {
+            expectedProfileRevision: await profileRevision(),
+            locale: "en" as const,
+            shortDescription,
+            amenities: { reviewed: true as const, keys: [] },
+            media: { coverMediaObjectId: coverId, galleryMediaObjectIds: [] },
+          },
+        };
+        const prepared = await step1.prepare(presentCommand);
+        if (prepared.kind !== "prepared") throw new Error(`present: ${JSON.stringify(prepared)}`);
+        const presentation = ok(
+          await media.replacePresentation({
+            organizationId,
+            propertyId,
+            actorUserId: owner,
+            audit: presentCommand.audit,
+            idempotencyKey: `hotel-catalog-step1-media:${createHash("sha256").update(presentKey).digest("hex")}`,
+            expectedProfileRevision: presentCommand.request.expectedProfileRevision,
+            assignments: createHotelCatalogStep1MediaAssignments(
+              presentCommand.request.media,
+              prepared.state.readModel.displayName,
+            ),
+          }),
+          "hotel photo",
+        );
+        ok(
+          await step1.save({
+            ...presentCommand,
+            claimToken: prepared.claimToken,
+            writeProfileRevision: presentation.response.profileRevision,
+          }),
+          "present your hotel",
+        );
+      };
+      await presentHotel("present", SUMMARY);
       // VAY-2140: completing the profile activates the hotel; nobody at Vayada approves it.
       expect(
         (
@@ -738,10 +741,9 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       );
 
       // 8. Open your calendar. The first save happened "yesterday" in the hotel's time zone.
-      const saveCalendar = async (
+      const saveCalendarRevision = async (
         roomTypeIds: readonly string[],
         expectedCalendarRevision: number,
-        horizon: { from: string; through: string },
       ) => {
         const roomRows = (
           await admin.query(
@@ -775,7 +777,7 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           ),
           "calendar preview",
         );
-        const saved = ok(
+        return ok(
           await calendar.routes.commandPort.upsertOperatingCalendar(
             parsed(
               parseUpsertPmsOperatingCalendarCommand({
@@ -788,17 +790,27 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
             ),
           ),
           "calendar save",
-        );
-        return calendar.routes.materializationPort!.materializeInventory({
+        ).response.configuration;
+      };
+      const prepareCalendar = (
+        configuration: Awaited<ReturnType<typeof saveCalendarRevision>>,
+        horizon: { from: string; through: string },
+      ) =>
+        calendar.routes.materializationPort!.materializeInventory({
           organizationId,
           propertyId,
-          configurationSource: saved.response.configuration.source,
-          expectedMaterializedRevision: saved.response.configuration.calendarRevision,
+          configurationSource: configuration.source,
+          expectedMaterializedRevision: configuration.calendarRevision,
           horizon,
-          idempotencyKey: `materialize-${expectedCalendarRevision}-${suffix}`,
-          audit: commandAudit(`materialize-${expectedCalendarRevision}`),
+          idempotencyKey: `materialize-${configuration.calendarRevision}-${suffix}`,
+          audit: commandAudit(`materialize-${configuration.calendarRevision}`),
         });
-      };
+      const saveCalendar = async (
+        roomTypeIds: readonly string[],
+        expectedCalendarRevision: number,
+        horizon: { from: string; through: string },
+      ) =>
+        prepareCalendar(await saveCalendarRevision(roomTypeIds, expectedCalendarRevision), horizon);
       ok(
         await saveCalendar([gardenSuite], 0, { from: localDate(-1), through: localDate(364) }),
         "first calendar",
@@ -810,9 +822,35 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       const afterRoomAdded = blockerCodes(await readiness());
       expect(afterRoomAdded).toContain("booking.calendar:operating_calendar_source_stale");
       expect(afterRoomAdded).not.toContain("booking.pricing:pricing_rooms_changed");
-      // Before VAY-2134 this horizon, starting at today, was rejected with a 409.
+      // TEST ONLY on 10-11: the calendar with the added room was saved, but preparing its
+      // availability failed, so guests could still book only the first calendar.
+      const unprepared = await saveCalendarRevision([gardenSuite, seaSuite], 1);
+      // 10-12: the hotel edits its profile and style before it comes back to the calendar. The
+      // saved calendar pins the old profile revision, so it can never be prepared now.
+      await presentHotel("present-again", `${SUMMARY} Every suite now has a sea-view terrace.`);
       ok(
-        await saveCalendar([gardenSuite, seaSuite], 1, {
+        await designRepository.upsertDesign({
+          organizationId,
+          propertyId,
+          actorUserId: owner,
+          idempotencyKey: `design-again-${suffix}`,
+          expectedRevision: 1,
+          choices: { primaryColor: "#4F46E5", fontPairing: "high-end-serif" },
+          audit: {
+            requestId: `design-again-${suffix}`,
+            correlationId: `design-again-${suffix}`,
+            source: "web",
+          },
+        }),
+        "booking design again",
+      );
+      expect(
+        await prepareCalendar(unprepared, { from: localDate(0), through: localDate(365) }),
+      ).toMatchObject({ ok: false, error: { code: "configuration_not_current" } });
+      // Saving again previews against the first calendar instead of refusing (VAY-2134). Before
+      // VAY-2134 this horizon, starting at today, was also rejected with a 409.
+      ok(
+        await saveCalendar([gardenSuite, seaSuite], 2, {
           from: localDate(0),
           through: localDate(365),
         }),

@@ -249,6 +249,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS operating-calendar impact co
         }),
       ),
     ).resolves.toMatchObject({ ok: true, response: { configuration: { calendarRevision: 2 } } });
+    // Until revision 2 is prepared, guests still book revision 1, so the preview compares
+    // against it (VAY-2134).
     await expect(
       impact.previewOperatingCalendarImpact(
         previewCommand("awaiting-materialization", {
@@ -256,7 +258,68 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS operating-calendar impact co
           roomTypeLimits: limits,
         }),
       ),
-    ).resolves.toEqual({ ok: false, error: { code: "materialization_not_current" } });
+    ).resolves.toMatchObject({
+      ok: true,
+      preview: {
+        sourceRevisions: { calendarRevision: 2, inventory: { materializedRevision: 1 } },
+        impact: { summary: { availableRoomNightsRemoved: 6 } },
+      },
+    });
+  });
+
+  it("previews over a first calendar whose availability was never prepared (VAY-2134)", async () => {
+    const first = await requiredPreview(previewCommand("never-prepared"));
+    await expect(
+      calendar.upsertOperatingCalendar(finalCommand("never-prepared", first.confirmation)),
+    ).resolves.toMatchObject({ ok: true, response: { configuration: { calendarRevision: 1 } } });
+    // Nothing was ever prepared, so the next save previews like the first one.
+    const again = { expectedCalendarRevision: 1, defaultMinimumStayNights: 3 };
+    const preview = await requiredPreview(previewCommand("never-prepared-again", again));
+    expect(preview.sourceRevisions).toMatchObject({
+      calendarRevision: 1,
+      inventory: { materializedRevision: null, dayCount: 0 },
+    });
+    await expect(
+      calendar.upsertOperatingCalendar(
+        finalCommand("never-prepared-again", preview.confirmation, again),
+      ),
+    ).resolves.toMatchObject({ ok: true, response: { configuration: { calendarRevision: 2 } } });
+  });
+
+  it("saves over a stale calendar whose availability was never prepared (VAY-2134)", async () => {
+    await configureAndSeedInventory();
+    // Revision 2 is saved, but preparing it fails, so guests still book revision 1.
+    const narrowed = {
+      expectedCalendarRevision: 1,
+      schedule: { mode: "recurring", periods: [{ startsOn: "08-04", endsOn: "08-05" }] },
+    };
+    const first = await requiredPreview(previewCommand("unprepared", narrowed));
+    await expect(
+      calendar.upsertOperatingCalendar(finalCommand("unprepared", first.confirmation, narrowed)),
+    ).resolves.toMatchObject({ ok: true, response: { configuration: { calendarRevision: 2 } } });
+    // The hotel then edits its profile. Revision 2 pins the old profile and can't be prepared.
+    await admin.query(
+      "UPDATE hotel_catalog.properties SET profile_revision = profile_revision + 1 WHERE id = $1::uuid",
+      [propertyId],
+    );
+    await expect(
+      calendarRead.getCurrentOperatingCalendarConfiguration(propertyId),
+    ).resolves.toMatchObject({ sourceStatus: "stale" });
+
+    const again = { expectedCalendarRevision: 2, expectedPropertyProfileRevision: 8 };
+    const preview = await requiredPreview(previewCommand("after-profile-edit", again));
+    expect(preview.sourceRevisions).toMatchObject({
+      calendarRevision: 2,
+      propertyProfile: { revision: 8 },
+      inventory: { materializedRevision: 1, dayCount: 6 },
+    });
+    // Year-round again matches revision 1; against revision 2 it would reopen 08-06.
+    expect(preview.impact.categories).toEqual([]);
+    await expect(
+      calendar.upsertOperatingCalendar(
+        finalCommand("after-profile-edit", preview.confirmation, again),
+      ),
+    ).resolves.toMatchObject({ ok: true, response: { configuration: { calendarRevision: 3 } } });
   });
 
   it.each([
