@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg";
 import { lockPublicPricingComponents } from "./publicPricingComponents.js";
-import { lockCurrentFixedCharges } from "./currentFixedCharges.js";
+import { includedFixedCharges, lockCurrentFixedCharges } from "./currentFixedCharges.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { composeReplacementSettlementAmounts } from "./replacementSettlementAmounts.js";
 
@@ -13,11 +13,18 @@ export async function lockPublicPricingChargeTotals(
   const components = await lockPublicPricingComponents(client, slug, input);
   if (!components) return null;
   const coverage = components.room.owner.charges;
-  if (coverage.declaration !== "fixed_charge_policy") return null;
-  const charges = await lockCurrentFixedCharges(client, components.stay);
+  // An adopted fixed-charge policy prices its rules; prices declared "all mandatory charges
+  // included" add none (VAY-2134).
+  const charges =
+    coverage.declaration === "fixed_charge_policy"
+      ? await lockCurrentFixedCharges(client, components.stay)
+      : coverage.declaration === "all_mandatory_charges_included"
+        ? includedFixedCharges(components.stay, coverage)
+        : null;
   if (
     !charges ||
-    charges.policyRevision !== coverage.policyRevision ||
+    charges.policyRevision !==
+      (coverage.declaration === "fixed_charge_policy" ? coverage.policyRevision : coverage.id) ||
     charges.requestKey !== components.requestKey
   )
     return null;

@@ -1,4 +1,8 @@
 import { createPublicPricingOfferCatalog } from "../domains/publicPricingOfferCatalog.js";
+import {
+  activeBookingPublicationGateConfig,
+  visibleActiveBookingPublication,
+} from "../domains/activeBookingPublicationGate.js";
 import { createPublicQuoteGuestDisclosure } from "../domains/publicQuoteGuestDisclosure.js";
 import { createPublicPricingAddonCatalog } from "../domains/publicPricingAddonCatalog.js";
 import { createCurrentPricingQuoteStore } from "../domains/currentPricingQuoteStore.js";
@@ -2765,6 +2769,14 @@ export async function resolveTargetCheckoutProperty(
   slug: string,
   requireBookable = false,
 ): Promise<TargetCheckoutPropertyRow> {
+  const gate = activeBookingPublicationGateConfig();
+  if (gate.servesPublications && !requireBookable) {
+    const published = await publishedCheckoutProperty(pool, slug, gate);
+    if (published === "hidden") {
+      throw createHttpError(404, "Booking Web hotel checkout target not found.");
+    }
+    if (published !== "absent") return published;
+  }
   const bookabilityPredicate = requireBookable
     ? `AND profile.freshness_status = 'fresh'
        AND p.lifecycle_status = 'active'
@@ -2834,6 +2846,57 @@ export async function resolveTargetCheckoutProperty(
     throw createHttpError(404, "Booking Web hotel checkout target not found.");
   }
   return { ...property, ...policy };
+}
+
+/** Once the public site serves setup publications, a hotel that published in setup is the
+ * checkout target exactly while its page is visible; hotels without one still need their
+ * legacy profile (VAY-2134). The legacy card checkout (`requireBookable`) keeps the profile. */
+async function publishedCheckoutProperty(
+  pool: BookingWebQueryExecutor,
+  slug: string,
+  context: { manualPayments: boolean },
+): Promise<TargetCheckoutPropertyRow | "absent" | "hidden"> {
+  const result = await pool.query<
+    TargetCheckoutPropertyRow & { publicContent: unknown; propertyActive: boolean }
+  >(
+    `SELECT
+       p.id::text AS "propertyId",
+       p.display_name AS "displayName",
+       p.default_locale AS "defaultLocale",
+       location.timezone,
+       COALESCE(same_day.enabled, $2::boolean) AS "sameDayBookingsEnabled",
+       CASE WHEN same_day.property_id IS NULL THEN $3::text
+         ELSE same_day.cutoff_local_time END AS "sameDayBookingCutoffTime",
+       revision.public_content AS "publicContent",
+       p.lifecycle_status = 'active' AS "propertyActive"
+     FROM hotel_catalog.property_slugs s
+     JOIN hotel_catalog.properties p ON p.id = s.property_id
+     JOIN hotel_catalog.property_locations location ON location.property_id = p.id
+     JOIN distribution.active_public_booking_revision active ON active.property_id = p.id
+     JOIN distribution.public_booking_content_revisions revision
+       ON revision.id = active.content_revision_id AND revision.property_id = active.property_id
+     LEFT JOIN booking.same_day_booking_policies same_day
+       ON same_day.property_id = p.id
+     WHERE s.slug = $1
+       AND s.locale IS NULL
+       AND s.purpose = 'canonical'
+       AND s.status = 'active'`,
+    [
+      slug,
+      SAME_DAY_BOOKING_POLICY_DEFAULTS.enabled,
+      SAME_DAY_BOOKING_POLICY_DEFAULTS.cutoffLocalTime,
+    ],
+  );
+  const row = result.rows[0];
+  if (!row) return "absent";
+  const { publicContent, propertyActive, ...property } = row;
+  if (result.rows.length !== 1 || propertyActive !== true) return "hidden";
+  const content = await visibleActiveBookingPublication(
+    pool,
+    { propertyId: row.propertyId, publicContent },
+    context,
+  );
+  return content?.profile.hotel.slug === slug ? property : "hidden";
 }
 
 export async function resolveTargetHistoricalBookingProperty(

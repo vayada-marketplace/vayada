@@ -41,14 +41,17 @@ const publicBookabilityFixture = PUBLIC_BOOKABILITY_FIXTURES.find(
 
 const publicHotelProfilePool: PublicHotelProfileReadPool = {
   async query<T extends QueryResultRow>(text: string, values?: readonly unknown[]) {
-    if (text.includes('AS "domainVerified"')) {
-      expect(text).toContain("hotel_catalog.property_domains");
+    if (text.includes('AS "referralEnabled"')) {
       expect(text).toContain("identity.product_entitlements");
       return {
-        rows: [
-          { domainVerified: true, referralEnabled: false, latitude: null, longitude: null },
-        ] as unknown as T[],
+        rows: [{ referralEnabled: false, latitude: null, longitude: null }] as unknown as T[],
       };
+    }
+    // The custom domain must still be verified for the current property (VAY-2134 shared gate).
+    if (!text.includes("distribution.active_public_booking_revision")) {
+      expect(text).toContain("hotel_catalog.property_domains");
+      expect(text).toContain("verification_status = 'verified'");
+      return { rows: [{}] as unknown as T[] };
     }
     expect(text).toContain("distribution.active_public_booking_revision");
     expect(text).toContain("distribution.public_booking_content_revisions");
