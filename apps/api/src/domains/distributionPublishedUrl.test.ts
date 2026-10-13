@@ -88,6 +88,30 @@ it("withholds a bank-transfer or PayPal page while the hotel can't be paid that 
   paypalEmail = "";
   expect(await published()).toBeNull();
 });
+
+it("keeps a page that also takes card or pay at property up without a Finance read (VAY-2139)", async () => {
+  const publicContent = content(profile, {
+    finance: { readyPaymentMethods: ["card", "pay_at_property", "paypal"] },
+  });
+  const query = vi.fn(async (text: string) =>
+    text.includes("FROM finance.payment_settings settings")
+      ? { rows: [{ accepted_methods: ["card"], paypal_email: "", bank_destination: false }] }
+      : { rows: [{ publicContent }], rowCount: 1 },
+  );
+  const pool = {
+    connect: async () => ({ query, release: vi.fn() }),
+    end: async () => {},
+  } as unknown as DistributionBookingPublicationPool;
+  const repository = createPgDistributionBookingPublicationProjection({
+    connectionString: "postgresql://unused",
+    pool,
+    manualPayments: true,
+  });
+  expect(await repository.getPublishedUrl(profile.hotel.propertyId, "revision")).toBe(
+    new URL(profile.hotel.canonicalUrl).toString(),
+  );
+  expect(query.mock.calls.some(([text]) => text.includes("finance.payment_settings"))).toBe(false);
+});
 function content(
   value: typeof profile,
   payment: {

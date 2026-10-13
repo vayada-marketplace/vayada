@@ -61,13 +61,15 @@ export function createFinanceManualPaymentReadinessReader(config: {
 /**
  * VAY-2139: a published page that lists only bank transfer or PayPal is served only while the hotel
  * still takes at least one of them with its details in place (an enabled bank destination, a valid
- * PayPal email). It comes back by itself once they are restored. Other pages always pass.
+ * PayPal email). It comes back by itself once they are restored. Other pages always pass, including
+ * one that also lists card or pay at property (Finance doesn't publish those mixed today).
  */
 export async function manualPublishedPagePayable(
   pool: Pick<pg.Pool, "query"> | QueryPool,
   propertyId: string,
   readyMethods: readonly string[],
 ): Promise<boolean> {
+  if (readyMethods.some((method) => method === "card" || method === "pay_at_property")) return true;
   const manual = readyMethods.filter((method) => method === "bank_transfer" || method === "paypal");
   if (!manual.length) return true;
   const accepted = await createFinanceManualPaymentReadinessReader({ pool }).acceptedMethods({
