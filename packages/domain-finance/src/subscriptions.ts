@@ -262,6 +262,14 @@ export type StripeFinanceSubscriptionProvider = {
   }): Promise<StripeSubscriptionSnapshot>;
 };
 
+/**
+ * Commission counts as chosen only with a parseable planSelectedAt. Plan status, booking
+ * readiness's billing config and the booking acceptance terms all use this one rule (VAY-2171).
+ */
+export function isFinancePlanSelectedAt(value: unknown): boolean {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+
 export function fixedPlanAmountMinor(
   activeRoomCount: number,
   currency: string = FINANCE_FIXED_PLAN_CURRENCY,

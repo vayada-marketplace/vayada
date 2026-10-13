@@ -1,4 +1,8 @@
-import type { BillingConfigReadModel, BillingConfigReadPort } from "@vayada/domain-finance";
+import {
+  isFinancePlanSelectedAt,
+  type BillingConfigReadModel,
+  type BillingConfigReadPort,
+} from "@vayada/domain-finance";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 type FinanceBillingQueryExecutor = {
@@ -10,6 +14,8 @@ type FinanceBillingQueryExecutor = {
 
 type BillingConfigRow = QueryResultRow & {
   activePlan: string | null;
+  /** Only the reader selects it; acceptance applies the same rule to its own row. */
+  planSelectedAt?: string | null;
   percentageRate: string | number | null;
   ruleMetadata: unknown;
   updatedAt: Date | string;
@@ -37,6 +43,7 @@ export function createTargetFinanceBillingConfigReadPort(config: {
       const result = await pool.query<BillingConfigRow>(
         `SELECT
            COALESCE(entitlement.plan_key, 'commission') AS "activePlan",
+           entitlement.plan_selected_at AS "planSelectedAt",
            commission.percentage_rate AS "percentageRate",
            commission.rule_metadata AS "ruleMetadata",
            GREATEST(
@@ -45,7 +52,8 @@ export function createTargetFinanceBillingConfigReadPort(config: {
            ) AS "updatedAt"
          FROM hotel_catalog.properties property
          JOIN LATERAL (
-           SELECT plan_key, updated_at
+           SELECT plan_key, updated_at,
+             entitlement_metadata ->> 'planSelectedAt' AS plan_selected_at
            FROM finance.billing_entitlements
            WHERE property_id = property.id
              AND ($2::uuid IS NULL OR organization_id = $2::uuid)
@@ -87,7 +95,11 @@ export function createTargetFinanceBillingConfigReadPort(config: {
          WHERE property.id = $1::uuid`,
         [propertyId, organizationId ?? null],
       );
-      return result.rows[0] ? toBillingConfig(propertyId, result.rows[0]) : null;
+      const row = result.rows[0];
+      // The SQL prefilter only drops empty values; the shared rule decides (VAY-2171).
+      if (!row || (row.activePlan !== "fixed" && !isFinancePlanSelectedAt(row.planSelectedAt)))
+        return null;
+      return toBillingConfig(propertyId, row);
     },
     async close() {
       if (ownsPool) await pool.end?.();

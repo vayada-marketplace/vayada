@@ -141,6 +141,20 @@ describe.skipIf(!url)("billing plan: readiness and booking acceptance agree (VAY
       );
       expect(await usable(agencyChoice)).toEqual(both(false));
 
+      // A malformed choice (legacy or hand-edited metadata) is no plan for either.
+      const malformed = await hotel();
+      await store.recordCommissionSelection(command(malformed, `malformed-${malformed}`), {
+        planStatus: { propertyId: malformed } as never,
+      });
+      expect(await usable(malformed)).toEqual(both(true));
+      await pool.query(
+        `UPDATE finance.billing_entitlements
+         SET entitlement_metadata = entitlement_metadata || '{"planSelectedAt":"not a date"}'
+         WHERE property_id = $1`,
+        [malformed],
+      );
+      expect(await usable(malformed)).toEqual(both(false));
+
       // A Commission choice whose 5% rule has ended is no plan for either.
       await pool.query(
         "UPDATE finance.commission_rules SET ends_at=now() - interval '1 second' WHERE source_rule_id=$1",

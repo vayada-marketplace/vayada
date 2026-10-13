@@ -5,6 +5,7 @@ import type { PmsPricingReadPort } from "@vayada/domain-pms";
 import {
   FINANCE_FIXED_PLAN_CURRENCY,
   fixedPlanAmountMinor,
+  isFinancePlanSelectedAt,
   type ActivateFixedPlanByInvoiceCommand,
   type CreateFixedPlanCheckoutCommand,
   type CreateFixedPlanCheckoutResult,
@@ -669,10 +670,8 @@ function pendingCheckout(
   };
 }
 
-/** The same planSelectedAt rule the booking acceptance terms apply. */
 function isPlanSelected(metadata: unknown): boolean {
-  const selectedAt = object(metadata)["planSelectedAt"];
-  return typeof selectedAt === "string" && Number.isFinite(Date.parse(selectedAt));
+  return isFinancePlanSelectedAt(object(metadata)["planSelectedAt"]);
 }
 
 function isCheckoutPending(
