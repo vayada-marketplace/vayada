@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type MutableRefObject } from "react";
+import { useEffect, useId, useState, type MutableRefObject } from "react";
 import { useTranslation } from "@/lib/i18n";
 import { AcceptedPaymentMethods } from "./AcceptedPaymentMethods";
 import { firstPricingInput, type SetupRoom } from "./FirstPricingSetup";
@@ -13,6 +13,8 @@ import * as ui from "./pricingStyles";
 type Values = Parameters<typeof firstPricingInput>[3];
 type Field = Exclude<keyof Values, "occupancy" | "included" | "methods">;
 const modes = ["flat", "occupancy", "per_person", "included_guests"] as const;
+/** A required answer: its key, whether it is empty, and its field's name. */
+type Answer = [key: string, empty: boolean, name: string];
 
 /** "Set prices" for a room without prices, as the Paper design's numbered questions. It builds the room with the
  * shared `firstPricingInput` (the same configuration the old form made); "Continue" hands it to the editor, which shows
@@ -70,16 +72,18 @@ export function StepFirstPrices({
   const currency = fixedCurrency ?? values.currency.trim().toUpperCase();
   const symbol = currency ? currencySymbol(currency) : null;
   const blank = (value: string | undefined) => !value?.trim();
-  // Each required answer: its key, whether it is empty, and its field's name.
-  const answers: [string, boolean, string][] = [
+  const answers: Answer[] = [
     ...(values.mode === "occupancy"
-      ? Array.from({ length: room.capacity.adults }, (_, index): [string, boolean, string] => [
-          `occupancy:${index}`,
-          blank(values.occupancy[index]),
-          t(index ? "pricing.setup.occupancyPrice.other" : "pricing.setup.occupancyPrice.one", {
-            count: index + 1,
-          }),
-        ])
+      ? Array.from(
+          { length: room.capacity.adults },
+          (_, index): Answer => [
+            `occupancy:${index}`,
+            blank(values.occupancy[index]),
+            t(index ? "pricing.setup.occupancyPrice.other" : "pricing.setup.occupancyPrice.one", {
+              count: index + 1,
+            }),
+          ],
+        )
       : [
           [
             "base",
@@ -87,8 +91,35 @@ export function StepFirstPrices({
             t(
               values.mode === "per_person" ? "pricing.setup.adultPrice" : "pricing.setup.roomPrice",
             ),
-          ] as [string, boolean, string],
+          ] as Answer,
         ]),
+    // An included-guest price also needs its adult count and, for every other count, an adjustment type and amount.
+    ...(values.mode === "included_guests"
+      ? [
+          [
+            "included:adults",
+            blank(values.included.adults),
+            t("pricing.included.adults"),
+          ] as Answer,
+          ...Array.from({ length: room.capacity.adults }, (_, index): Answer[] => {
+            if (!values.included.adults || index + 1 === Number(values.included.adults)) return [];
+            const row = values.included.adjustments[index],
+              count = { count: index + 1 };
+            return [
+              [
+                `included:type:${index}`,
+                !row?.kind,
+                t(index ? "pricing.included.type.other" : "pricing.included.type.one", count),
+              ],
+              [
+                `included:amount:${index}`,
+                blank(row?.value),
+                t(index ? "pricing.included.amount.other" : "pricing.included.amount.one", count),
+              ],
+            ];
+          }).flat(),
+        ]
+      : []),
     ["currency", !fixedCurrency && blank(values.currency), t("pricing.setup.currency")],
     ["cancellation", !values.cancellation, t("pricing.steps.first.cancelTitle")],
     [
@@ -107,10 +138,24 @@ export function StepFirstPrices({
       ? answers.filter(([, empty]) => empty).map(([key, , name]) => [key, name] as const)
       : [],
   );
+  const formId = useId();
+  /** The error entries naming an answer, or every answer under a group key (such as "included"). */
+  const errorIds = (key: string) =>
+    Array.from(missing.keys())
+      .filter((entry) => entry === key || entry.startsWith(`${key}:`))
+      .map((entry) => `${formId}-missing-${entry}`)
+      .join(" ") || undefined;
   /** A missing answer's ring; a field keeps it until it is filled in. */
-  const mark = (key: string) => (missing.has(key) ? " ring-2 ring-red-400" : "");
-  const group = (key: string) =>
-    missing.has(key) ? "w-fit rounded-xl ring-2 ring-red-400 ring-offset-4" : "";
+  const mark = (key: string) => (errorIds(key) ? " ring-2 ring-red-400" : "");
+  const ring = (key: string) =>
+    errorIds(key) ? "w-fit rounded-xl ring-2 ring-red-400 ring-offset-4" : "";
+  /** A choice group's name and, while unanswered, its invalid state and error entries for assistive technology. */
+  const group = (key: string, name: string) => ({
+    role: "group",
+    "aria-label": name,
+    "aria-invalid": errorIds(key) ? true : undefined,
+    "aria-describedby": errorIds(key),
+  });
   const field = (
     key: Field,
     label: string,
@@ -122,6 +167,7 @@ export function StepFirstPrices({
       <input
         aria-label={label}
         aria-invalid={missing.has(key) || undefined}
+        aria-describedby={errorIds(key)}
         inputMode={inputMode}
         disabled={disabled}
         value={values[key]}
@@ -210,6 +256,7 @@ export function StepFirstPrices({
                       : "pricing.setup.roomPrice",
                   )}
                   aria-invalid={missing.has("base") || undefined}
+                  aria-describedby={errorIds("base")}
                   inputMode="decimal"
                   disabled={disabled}
                   value={values.base}
@@ -231,6 +278,7 @@ export function StepFirstPrices({
                   <input
                     aria-label={label}
                     aria-invalid={missing.has(`occupancy:${index}`) || undefined}
+                    aria-describedby={errorIds(`occupancy:${index}`)}
                     inputMode="decimal"
                     disabled={disabled}
                     value={values.occupancy[index] ?? ""}
@@ -263,6 +311,7 @@ export function StepFirstPrices({
             <input
               aria-label={t("pricing.setup.currency")}
               aria-invalid={missing.has("currency") || undefined}
+              aria-describedby={errorIds("currency")}
               disabled={disabled || !!fixedCurrency}
               value={fixedCurrency ?? values.currency}
               onChange={(event) => change({ currency: event.target.value })}
@@ -307,12 +356,17 @@ export function StepFirstPrices({
               </select>
             </label>
             {values.mode === "included_guests" && (
-              <IncludedPricing
-                value={values.included}
-                capacity={room.capacity.adults}
-                disabled={disabled}
-                onChange={(included) => change({ included })}
-              />
+              <div
+                {...group("included", t("pricing.setup.modeIncluded"))}
+                className={ring("included")}
+              >
+                <IncludedPricing
+                  value={values.included}
+                  capacity={room.capacity.adults}
+                  disabled={disabled}
+                  onChange={(included) => change({ included })}
+                />
+              </div>
             )}
           </div>
         )}
@@ -322,7 +376,10 @@ export function StepFirstPrices({
         title={t("pricing.steps.first.cancelTitle")}
         hint={t("pricing.steps.first.cancelHint")}
       >
-        <div className={`flex flex-wrap items-center gap-2 ${group("cancellation")}`}>
+        <div
+          {...group("cancellation", t("pricing.steps.first.cancelTitle"))}
+          className={`flex flex-wrap items-center gap-2 ${ring("cancellation")}`}
+        >
           {choice(values.cancellation === "flexible", t("pricing.steps.first.flexible"), () =>
             change({ cancellation: "flexible" }),
           )}
@@ -333,7 +390,7 @@ export function StepFirstPrices({
           )}
         </div>
         {values.cancellation === "flexible" && field("freeDays", t("pricing.freeCancellationDays"))}
-        <div className={group("methods")}>
+        <div {...group("methods", t("pricing.paymentMethods.legend"))} className={ring("methods")}>
           <AcceptedPaymentMethods
             methods={values.methods}
             disabled={disabled}
@@ -354,9 +411,13 @@ export function StepFirstPrices({
           {field("adultAge", t("pricing.setup.adultAge"))}
           {field("childPrice", t("pricing.setup.childPrice"), "w-36", "decimal")}
         </div>
-        <fieldset className="space-y-2">
+        <fieldset
+          className="space-y-2"
+          aria-invalid={errorIds("countChildren") ? true : undefined}
+          aria-describedby={errorIds("countChildren")}
+        >
           <legend className={ui.fieldLabel}>{t("pricing.setup.countChildren")}</legend>
-          <div className={`flex flex-wrap gap-2 ${group("countChildren")}`}>
+          <div className={`flex flex-wrap gap-2 ${ring("countChildren")}`}>
             {choice(values.countChildren === "yes", t("pricing.setup.yes"), () =>
               change({ countChildren: "yes" }),
             )}
@@ -375,7 +436,9 @@ export function StepFirstPrices({
               <p className={error ? "mt-1" : ""}>{t("pricing.steps.first.missing")}</p>
               <ul className="mt-1 list-disc pl-5">
                 {Array.from(missing, ([key, name]) => (
-                  <li key={key}>{name}</li>
+                  <li key={key} id={`${formId}-missing-${key}`}>
+                    {name}
+                  </li>
                 ))}
               </ul>
             </>
