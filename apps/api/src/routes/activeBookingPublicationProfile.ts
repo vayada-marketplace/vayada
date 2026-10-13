@@ -1,16 +1,15 @@
 import type { PublicBookabilityProfileProjection } from "@vayada/domain-distribution";
-import {
-  parseBookingPublicContent,
-  type BookingPublicContent,
-} from "@vayada/domain-distribution/booking-publication";
 import pg, { type QueryResultRow } from "pg";
 
-import { manualPublishedPagePayable } from "../domains/financeManualPaymentReadiness.js";
+import {
+  ACTIVE_BOOKING_PUBLICATION_CONTRACT,
+  normalizedDomain,
+  visibleActiveBookingPublication,
+  type ActiveBookingPublicationRow,
+} from "../domains/activeBookingPublicationGate.js";
 import type { PublicHotelProfileReadPool, PublicHotelProfileRepository } from "./aiHotels.js";
 
-type ActiveProfileRow = QueryResultRow & { propertyId: string; publicContent: unknown };
 type CurrentPublicGatesRow = QueryResultRow & {
-  domainVerified: boolean;
   referralEnabled: boolean;
   latitude: number | null;
   longitude: number | null;
@@ -23,7 +22,7 @@ FROM distribution.active_public_booking_revision active
 JOIN distribution.public_booking_content_revisions revision
   ON revision.id = active.content_revision_id
  AND revision.property_id = active.property_id
-WHERE revision.public_content ->> 'contractVersion' = 'booking-public-content.v1'`;
+WHERE revision.public_content ->> 'contractVersion' = '${ACTIVE_BOOKING_PUBLICATION_CONTRACT}'`;
 
 export function createActiveBookingPublicationProfileRepository(config: {
   connectionString: string;
@@ -44,7 +43,7 @@ export function createActiveBookingPublicationProfileRepository(config: {
     async findProfileBySlug(value) {
       const slug = normalizedSlug(value);
       if (!slug) return null;
-      const result = await pool.query<ActiveProfileRow>(
+      const result = await pool.query<ActiveBookingPublicationRow>(
         `${ACTIVE_PROFILE_SELECT}
          AND (
            lower(revision.public_content #>> '{profile,hotel,slug}') = $1
@@ -70,7 +69,7 @@ export function createActiveBookingPublicationProfileRepository(config: {
     async findProfileByCustomDomain(value) {
       const domain = normalizedDomain(value);
       if (!domain) return null;
-      const result = await pool.query<ActiveProfileRow>(
+      const result = await pool.query<ActiveBookingPublicationRow>(
         `${ACTIVE_PROFILE_SELECT}
          AND EXISTS (
            SELECT 1
@@ -95,39 +94,14 @@ export function createActiveBookingPublicationProfileRepository(config: {
   };
 }
 
-function activeContent(
-  row: ActiveProfileRow | undefined,
-  content: { manualPayments: boolean },
-): BookingPublicContent | null {
-  if (!row) return null;
-  const parsed = parseBookingPublicContent(row.publicContent, content);
-  const profile = parsed?.profile;
-  return profile &&
-    profile.hotel.propertyId === row.propertyId &&
-    profile.hotel.trust.bookabilityStatus === "bookable" &&
-    profile.freshness.status === "fresh"
-    ? parsed
-    : null;
-}
-
 async function currentActiveProfile(
   pool: PublicHotelProfileReadPool,
-  row: ActiveProfileRow | undefined,
+  row: ActiveBookingPublicationRow | undefined,
   content: { manualPayments: boolean },
 ): Promise<PublicBookabilityProfileProjection | null> {
-  const parsed = activeContent(row, content);
+  const parsed = await visibleActiveBookingPublication(pool, row, content);
   if (!parsed || !row) return null;
-  // A bank-transfer or PayPal page stays up only while the hotel can still be paid that way.
-  if (
-    content.manualPayments &&
-    !(await manualPublishedPagePayable(pool, row.propertyId, parsed.payments.readyMethods))
-  )
-    return null;
   const profile = parsed.profile;
-  const domain = profile.hotel.customDomainUrl
-    ? normalizedDomain(profile.hotel.customDomainUrl)
-    : null;
-  if (profile.hotel.customDomainUrl && !domain) return null;
   const result = await pool.query<CurrentPublicGatesRow>(
     `SELECT
        (SELECT CASE WHEN geo_public AND map_display_mode='exact' THEN latitude
@@ -138,14 +112,6 @@ async function currentActiveProfile(
          WHEN geo_public AND map_display_mode='approximate' THEN round(longitude,2) END::double precision
          FROM hotel_catalog.property_locations WHERE property_id=$1::uuid
            AND latitude IS NOT NULL AND longitude IS NOT NULL) AS longitude,
-       CASE WHEN $2::text IS NULL THEN TRUE ELSE EXISTS (
-         SELECT 1
-         FROM hotel_catalog.property_domains current_domain
-         WHERE current_domain.property_id = $1::uuid
-           AND current_domain.hostname = $2
-           AND current_domain.verification_status = 'verified'
-           AND current_domain.canonical_when_verified = TRUE
-       ) END AS "domainVerified",
        EXISTS (
          SELECT 1
          FROM identity.product_entitlements entitlement
@@ -178,11 +144,10 @@ async function currentActiveProfile(
                AND booking_resource.status = 'active'
            )
        ) AS "referralEnabled"`,
-    [row.propertyId, domain],
+    [row.propertyId],
   );
   const gates = result.rows[0];
-  if (gates?.domainVerified !== true) return null;
-  const referralEnabled = gates.referralEnabled === true;
+  const referralEnabled = gates?.referralEnabled === true;
   const branding = profile.hotel.branding;
   return {
     ...profile,
@@ -190,8 +155,8 @@ async function currentActiveProfile(
       ...profile.hotel,
       location: {
         ...profile.hotel.location,
-        latitude: gates.latitude ?? null,
-        longitude: gates.longitude ?? null,
+        latitude: gates?.latitude ?? null,
+        longitude: gates?.longitude ?? null,
       },
       capabilities: {
         ...profile.hotel.capabilities,
@@ -212,22 +177,4 @@ async function currentActiveProfile(
 const normalizedSlug = (value: string) => {
   const normalized = value.trim().toLowerCase();
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized) ? normalized : null;
-};
-
-const normalizedDomain = (value: string) => {
-  try {
-    const input = value.trim();
-    const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(input) ? input : `https://${input}`);
-    const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
-    return (url.protocol === "https:" || url.protocol === "http:") &&
-      !url.username &&
-      !url.password &&
-      hostname &&
-      !hostname.includes("..") &&
-      /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(hostname)
-      ? hostname
-      : null;
-  } catch {
-    return null;
-  }
 };

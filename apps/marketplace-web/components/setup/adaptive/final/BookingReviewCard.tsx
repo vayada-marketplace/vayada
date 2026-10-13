@@ -199,6 +199,8 @@ function ScopedBookingReviewCard({
   const unknownRequest = !!attempt && !!review && !review.recoveredOperation && !latestPending;
   // The first publication is the hotel's go-live; later saves go live by themselves (VAY-2129).
   const published = !!review?.activeContentRevisionId;
+  // Guests can't open setup pages until the booking site switches over to them (VAY-2134).
+  const waitingForSite = published && review?.publicSite === "waiting_for_switch";
   const canPublish =
     !published &&
     review?.readiness.outcome === "evaluated" &&
@@ -233,9 +235,11 @@ function ScopedBookingReviewCard({
                     ? "Update failed · previous page remains published"
                     : "Publication failed"
                   : published
-                    ? review.readiness.status === "ready"
-                      ? "Live"
-                      : "Live · needs attention"
+                    ? waitingForSite
+                      ? "Published · guests can't see it yet"
+                      : review.readiness.status === "ready"
+                        ? "Live"
+                        : "Live · needs attention"
                     : review.readiness.status === "ready"
                       ? "Ready to publish"
                       : review.readiness.status === "pending"
@@ -246,9 +250,20 @@ function ScopedBookingReviewCard({
           </p>
           {published && !pending && !unknownRequest && operation?.status !== "failed" && (
             <p className="mt-2 text-sm text-gray-600">
-              {review.readiness.status === "ready"
-                ? "Your booking page is live. Changes you save go live automatically."
-                : "Your booking page is live, but guests may not be able to book until the items below are fixed. Changes you save go live automatically."}
+              {waitingForSite
+                ? `Your booking page is published. Guests can't open it yet because we're still switching the booking site over.${
+                    review.readiness.status === "ready"
+                      ? ""
+                      : " Fix the items below so guests can book."
+                  }`
+                : review.readiness.status === "ready"
+                  ? "Your booking page is live. Changes you save go live automatically."
+                  : "Your booking page is live, but guests may not be able to book until the items below are fixed. Changes you save go live automatically."}
+            </p>
+          )}
+          {!published && review.publicSite === "waiting_for_switch" && (
+            <p className="mt-2 text-sm text-gray-600">
+              Guests can open a published page once we finish switching the booking site over.
             </p>
           )}
           {pending && (
@@ -272,7 +287,7 @@ function ScopedBookingReviewCard({
                 : "The booking page could not be updated. Refresh readiness before trying again."}
             </p>
           )}
-          {published && review.publishedUrl && (
+          {published && !waitingForSite && review.publishedUrl && (
             <a
               href={review.publishedUrl}
               target="_blank"

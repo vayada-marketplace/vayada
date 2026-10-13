@@ -169,3 +169,19 @@ it("offers only a safe URL tied to an active revision", async () => {
   });
   await expect(h.client.load(propertyId)).rejects.toThrow();
 });
+it("reads whether guests can open published pages yet (VAY-2134)", async () => {
+  const h = await harness();
+  const published = { ...h.review, activeContentRevisionId: operationId };
+  h.http.get.mockResolvedValue({ ...published, publicSite: "waiting_for_switch" });
+  expect((await h.client.load(propertyId)).publicSite).toBe("waiting_for_switch");
+  h.http.get.mockResolvedValue({ ...published, publicSite: "serving" });
+  expect((await h.client.load(propertyId)).publicSite).toBe("serving");
+  h.http.get.mockResolvedValue({
+    ...published,
+    publishedUrl: "https://hotel.booking.test",
+    publicSite: "waiting_for_switch",
+  });
+  await expect(h.client.load(propertyId)).rejects.toThrow();
+  h.http.get.mockResolvedValue({ ...published, publicSite: "maybe" });
+  await expect(h.client.load(propertyId)).rejects.toThrow();
+});

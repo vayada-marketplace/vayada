@@ -9,6 +9,7 @@ import { pmsSettingsService } from "@/services/settings";
 import { formatCurrency } from "@/lib/formatCurrency";
 import {
   addPropertyDays,
+  canSeeDashboardFinance,
   formatPropertyDate,
   getArrivalsToday,
   getDashboardBookings,
@@ -21,6 +22,7 @@ import {
   isNotCheckedInDeparture,
 } from "@/lib/dashboardBookings";
 import { useTranslation } from "@/lib/i18n";
+import { usePmsAccess } from "@/lib/settings/PmsAccessContext";
 import { pmsSetupExitPropertyId } from "@vayada/product-onboarding";
 
 const AVATAR_COLORS = [
@@ -100,6 +102,7 @@ type InventoryLoadStatus = "loading" | "ready" | "error";
 
 export default function DashboardPage() {
   const { locale, t } = useTranslation();
+  const showFinance = canSeeDashboardFinance(usePmsAccess().permissions);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [forecastInventoryDays, setForecastInventoryDays] = useState<CalendarInventoryDay[]>([]);
   const [tonightInventoryDays, setTonightInventoryDays] = useState<CalendarInventoryDay[]>([]);
@@ -109,7 +112,8 @@ export default function DashboardPage() {
     useState<InventoryLoadStatus>("loading");
   const [tonightInventoryDate, setTonightInventoryDate] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
-  const [hotelCurrency, setHotelCurrency] = useState("EUR");
+  // Null when neither payment settings nor a booking names one; finance figures then show no amount.
+  const [hotelCurrency, setHotelCurrency] = useState<string | null>(null);
   const [hotelTimezone, setHotelTimezone] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [inventoryRefresh, setInventoryRefresh] = useState(0);
@@ -145,17 +149,27 @@ export default function DashboardPage() {
   useEffect(() => {
     Promise.all([
       bookingsService.listAll(),
-      bookingsService.getPaymentSettings(),
+      // Only the finance figures need the currency, so a failed read never empties the desk lists.
+      showFinance
+        ? bookingsService.getPaymentSettings().catch((error) => {
+            console.error(error);
+            return null;
+          })
+        : null,
       pmsSettingsService.getHotelDetails().catch(() => null),
     ])
       .then(([bookingsList, settingsRes, hotelRes]) => {
         setBookings(bookingsList);
-        setHotelCurrency(settingsRes.paymentSettings.defaultCurrency || "EUR");
+        setHotelCurrency(
+          settingsRes
+            ? settingsRes.paymentSettings.defaultCurrency || "EUR"
+            : (bookingsList.find((booking) => booking.currency)?.currency ?? null),
+        );
         setHotelTimezone(hotelRes?.timezone || null);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [showFinance]);
 
   const forecastStart = addPropertyDays(today, weekOffset * 7);
   const forecastEnd = addPropertyDays(forecastStart, FORECAST_WINDOW_DAYS - 1);
@@ -297,8 +311,10 @@ export default function DashboardPage() {
       <div className="p-4 md:p-6">
         <div className="animate-pulse space-y-4 md:space-y-5">
           <div className="h-8 bg-gray-200 rounded w-40" />
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-            {[1, 2, 3, 4].map((i) => (
+          <div
+            className={`grid grid-cols-2 ${showFinance ? "md:grid-cols-4" : "md:grid-cols-3"} gap-3 md:gap-4`}
+          >
+            {(showFinance ? [1, 2, 3, 4] : [1, 2, 3]).map((i) => (
               <div key={i} className="h-24 md:h-28 bg-gray-200 rounded-xl" />
             ))}
           </div>
@@ -348,7 +364,9 @@ export default function DashboardPage() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div
+        className={`grid grid-cols-2 ${showFinance ? "md:grid-cols-4" : "md:grid-cols-3"} gap-3`}
+      >
         <StatCard
           label={t("dashboard.occupancyTonight")}
           value={
@@ -396,16 +414,22 @@ export default function DashboardPage() {
           }
           icon={<ArrowUpIcon />}
         />
-        <StatCard
-          label={t("dashboard.revenueThisMonth")}
-          value={
-            bookings.some((b) => b.checkIn >= monthStartStr && b.amountStatus === "unverified")
-              ? t("bookings.detail.amountUnverified")
-              : formatCurrency(revenueThisMonth, hotelCurrency)
-          }
-          sub={t("dashboard.monthToDate")}
-          icon={<DollarIcon />}
-        />
+        {showFinance && (
+          <StatCard
+            label={t("dashboard.revenueThisMonth")}
+            value={
+              hotelCurrency === null
+                ? "—"
+                : bookings.some(
+                      (b) => b.checkIn >= monthStartStr && b.amountStatus === "unverified",
+                    )
+                  ? t("bookings.detail.amountUnverified")
+                  : formatCurrency(revenueThisMonth, hotelCurrency)
+            }
+            sub={t("dashboard.monthToDate")}
+            icon={<DollarIcon />}
+          />
+        )}
       </div>
 
       {/* Arrivals & Departures */}
@@ -656,7 +680,7 @@ export default function DashboardPage() {
         <ForecastChart
           days={forecastDays}
           today={today}
-          currency={hotelCurrency}
+          currency={showFinance ? hotelCurrency : null}
           inventoryStatus={forecastInventoryStatus}
           locale={locale}
           t={t}
@@ -1000,7 +1024,8 @@ function ForecastChart({
 }: {
   days: ForecastDay[];
   today: string;
-  currency: string;
+  /** Null hides the average daily rate line, axis and legend. */
+  currency: string | null;
   inventoryStatus: InventoryLoadStatus;
   locale: string;
   t: (key: string, params?: Record<string, string | number>) => string;
@@ -1010,7 +1035,7 @@ function ForecastChart({
 
   const rawAdrMax = days.reduce((max, d) => (d.adr != null && d.adr > max ? d.adr : max), 0);
   const adrMax = niceAdrMax(rawAdrMax);
-  const hasAdr = days.some((d) => d.adr != null);
+  const hasAdr = currency !== null && days.some((d) => d.adr != null);
   const adrTicks = [adrMax, adrMax * 0.75, adrMax * 0.5, adrMax * 0.25, 0];
 
   // Build line segments — break the polyline where adr is null so the line gaps over empty days.
@@ -1115,7 +1140,7 @@ function ForecastChart({
                     <div>
                       {t("dashboard.occupancyAxis")}: {occupancyText}
                     </div>
-                    {day.adr != null && (
+                    {currency !== null && day.adr != null && (
                       <div>
                         {t("dashboard.avgPriceAxis")}:{" "}
                         {formatCurrency(Math.round(day.adr), currency)}
@@ -1170,16 +1195,18 @@ function ForecastChart({
         </div>
 
         {/* Right axis (ADR currency) */}
-        <div
-          className="flex flex-col justify-between pl-2 text-[9px] text-blue-400 select-none shrink-0"
-          style={{ height: chartHeight }}
-        >
-          {adrTicks.map((tick, idx) => (
-            <span key={idx} className="leading-none">
-              {formatAdrTick(tick, currency)}
-            </span>
-          ))}
-        </div>
+        {currency !== null && (
+          <div
+            className="flex flex-col justify-between pl-2 text-[9px] text-blue-400 select-none shrink-0"
+            style={{ height: chartHeight }}
+          >
+            {adrTicks.map((tick, idx) => (
+              <span key={idx} className="leading-none">
+                {formatAdrTick(tick, currency)}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Day labels (mirror axis layout to stay aligned with bars) */}
@@ -1202,9 +1229,11 @@ function ForecastChart({
             );
           })}
         </div>
-        <div className="invisible pl-2 text-[9px] select-none shrink-0">
-          <span>{formatAdrTick(adrMax, currency)}</span>
-        </div>
+        {currency !== null && (
+          <div className="invisible pl-2 text-[9px] select-none shrink-0">
+            <span>{formatAdrTick(adrMax, currency)}</span>
+          </div>
+        )}
       </div>
 
       {/* Legend */}
@@ -1217,13 +1246,15 @@ function ForecastChart({
           <span className="inline-block w-3 h-3 rounded-sm bg-blue-300" />
           <span>{t("dashboard.legendLow")}</span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <svg width="18" height="8" viewBox="0 0 18 8" className="shrink-0">
-            <line x1="0" y1="4" x2="18" y2="4" stroke="#60a5fa" strokeWidth="1.5" />
-            <circle cx="9" cy="4" r="2" fill="#ffffff" stroke="#60a5fa" strokeWidth="1.2" />
-          </svg>
-          <span>{t("dashboard.legendAdr", { currency })}</span>
-        </div>
+        {currency !== null && (
+          <div className="flex items-center gap-1.5">
+            <svg width="18" height="8" viewBox="0 0 18 8" className="shrink-0">
+              <line x1="0" y1="4" x2="18" y2="4" stroke="#60a5fa" strokeWidth="1.5" />
+              <circle cx="9" cy="4" r="2" fill="#ffffff" stroke="#60a5fa" strokeWidth="1.2" />
+            </svg>
+            <span>{t("dashboard.legendAdr", { currency })}</span>
+          </div>
+        )}
       </div>
     </div>
   );

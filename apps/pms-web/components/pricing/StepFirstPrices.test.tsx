@@ -122,3 +122,100 @@ it("keeps the property currency, offers the other price types and is disabled wh
       .every((node) => node.props.disabled),
   ).toBe(true);
 });
+it("marks and names the answers still missing after Continue, and drops each one as it is filled in (VAY-2157)", async () => {
+  const { onCreate } = await mount({ fixedCurrency: "EUR" });
+  // Marked inputs (the unanswered children group is checked by the next test).
+  const marked = () =>
+    view.root
+      .findAllByProps({ "aria-invalid": true })
+      .filter((node) => node.type === "input")
+      .map((node) => node.props["aria-label"]);
+  const named = () =>
+    view.root
+      .findByProps({ role: "alert" })
+      .findAllByType("li")
+      .map((node) => node.children.join(""));
+  await fill("Room price per night", "120");
+  await press("No, non-refundable");
+  await act(async () => view.root.findByType(AcceptedPaymentMethods).props.onChange(["card"]));
+  // Nothing is marked before Continue.
+  expect(marked()).toEqual([]);
+  await submit();
+  expect(onCreate).not.toHaveBeenCalled();
+  expect(named()).toEqual([
+    "Adult pricing starts at age (1–18)",
+    "Price per child per night (0 is allowed)",
+    "Children count toward room capacity",
+  ]);
+  expect(marked()).toEqual([
+    "Adult pricing starts at age (1–18)",
+    "Price per child per night (0 is allowed)",
+  ]);
+  await fill("Adult pricing starts at age (1–18)", "12");
+  expect(named()).toEqual([
+    "Price per child per night (0 is allowed)",
+    "Children count toward room capacity",
+  ]);
+  await fill("Price per child per night (0 is allowed)", "0");
+  await press("Yes");
+  expect(marked()).toEqual([]);
+  expect(view.root.findAllByProps({ role: "alert" })).toHaveLength(0);
+  await submit();
+  expect(onCreate).toHaveBeenCalledOnce();
+});
+it("names an included-guest price's missing answers and links every unanswered group to its entry (VAY-2157)", async () => {
+  await mount({ fixedCurrency: "EUR" });
+  const named = () =>
+    view.root
+      .findByProps({ role: "alert" })
+      .findAllByType("li")
+      .map((node) => node.children.join(""));
+  const entry = (name: string) =>
+    view.root.findAllByType("li").find((node) => node.children.join("") === name)!.props.id;
+  const group = (name: string) =>
+    view.root.find((node) => node.type === "div" && node.props["aria-label"] === name).props;
+  await press("Price depends on the number of guests");
+  await fill("How is the room priced?", "included_guests");
+  await fill("Room price per night", "130");
+  await submit();
+  expect(named()).toEqual([
+    "Adults included in the base price",
+    "Can guests cancel for free?",
+    "Accepted payment methods",
+    "Adult pricing starts at age (1–18)",
+    "Price per child per night (0 is allowed)",
+    "Children count toward room capacity",
+  ]);
+  // Unanswered groups say so and point at their entry; the children question is a fieldset.
+  expect(group("Can guests cancel for free?")).toMatchObject({
+    role: "group",
+    "aria-invalid": true,
+    "aria-describedby": entry("Can guests cancel for free?"),
+  });
+  expect(group("Accepted payment methods")["aria-describedby"]).toBe(
+    entry("Accepted payment methods"),
+  );
+  const children = view.root.find(
+    (node) => node.type === "fieldset" && node.props["aria-invalid"] === true,
+  );
+  expect(children.props["aria-describedby"]).toBe(entry("Children count toward room capacity"));
+  expect(field("Adult pricing starts at age (1–18)").props["aria-describedby"]).toBe(
+    entry("Adult pricing starts at age (1–18)"),
+  );
+  // Choosing two included adults asks for the 1-adult adjustment, type and amount.
+  await fill("Adults included in the base price", "2");
+  expect(named().slice(0, 2)).toEqual(["Adjustment type for 1 adult", "Adjustment for 1 adult"]);
+  expect(group("Base price with adult-count adjustments")["aria-describedby"].split(" ")).toEqual([
+    entry("Adjustment type for 1 adult"),
+    entry("Adjustment for 1 adult"),
+  ]);
+  await fill("Adjustment type for 1 adult", "fixed");
+  await fill("Adjustment for 1 adult", "-30");
+  expect(named()[0]).toBe("Can guests cancel for free?");
+  expect(group("Base price with adult-count adjustments")["aria-describedby"]).toBeUndefined();
+  await press("No, non-refundable");
+  expect(group("Can guests cancel for free?")).toMatchObject({
+    "aria-invalid": undefined,
+    "aria-describedby": undefined,
+  });
+});
