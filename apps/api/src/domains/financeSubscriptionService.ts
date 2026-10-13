@@ -5,6 +5,7 @@ import type { PmsPricingReadPort } from "@vayada/domain-pms";
 import {
   FINANCE_FIXED_PLAN_CURRENCY,
   fixedPlanAmountMinor,
+  isFinancePlanSelectedAt,
   type ActivateFixedPlanByInvoiceCommand,
   type CreateFixedPlanCheckoutCommand,
   type CreateFixedPlanCheckoutResult,
@@ -603,6 +604,8 @@ function planStatus(
   now: Date,
 ): FinancePlanStatusReadModel {
   const fixed = entitlement?.planKey === "fixed";
+  // Only an explicit choice counts: billing details or a started checkout alone create a row too.
+  const commission = entitlement?.planKey === "commission" && isPlanSelected(entitlement.metadata);
   const cancelAtPeriodEnd = fixed && Boolean(entitlement?.cancelAtPeriodEnd);
   const providerPastDue = ["past_due", "unpaid"].includes(
     entitlement?.providerSubscriptionStatus ?? "",
@@ -612,7 +615,7 @@ function planStatus(
   const configuredAmount = fixedPlanAmountOrNull(activeRoomCount, currency);
   return {
     propertyId,
-    plan: fixed ? "fixed" : "commission",
+    plan: fixed ? "fixed" : commission ? "commission" : null,
     status: fixed
       ? cancelAtPeriodEnd
         ? "cancel_at_period_end"
@@ -621,7 +624,9 @@ function planStatus(
           : "active"
       : checkoutPending
         ? "checkout_pending"
-        : "commission",
+        : commission
+          ? "commission"
+          : "not_selected",
     currency,
     activeRoomCount,
     amountMinor:
@@ -663,6 +668,10 @@ function pendingCheckout(
       0,
     activeRoomCount: checkoutRoomCount,
   };
+}
+
+function isPlanSelected(metadata: unknown): boolean {
+  return isFinancePlanSelectedAt(object(metadata)["planSelectedAt"]);
 }
 
 function isCheckoutPending(

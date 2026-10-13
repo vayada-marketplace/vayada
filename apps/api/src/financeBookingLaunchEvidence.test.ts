@@ -5,7 +5,7 @@ import {
 } from "@vayada/domain-finance";
 import { isBookingLaunchOwnerEvidenceValid } from "@vayada/domain-booking";
 import { PMS_PRICING_CONTRACT_VERSION } from "@vayada/domain-pms";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createFinanceBookingLaunchEvidenceAdapter } from "./domains/financeBookingLaunchEvidence.js";
 
@@ -34,11 +34,21 @@ function snapshot(
   });
 }
 
+type BillingPlanPort = Parameters<
+  typeof createFinanceBookingLaunchEvidenceAdapter
+>[0]["billingPlan"];
+/** A hotel with a usable billing plan; the config's contents don't matter to readiness. */
+const planChosen: BillingPlanPort = { getBillingConfig: async () => ({}) as never };
+
 function adapter(
   value: FinancePaymentReadinessSnapshot | null,
-  options: { manualMethods?: readonly ("bank_transfer" | "paypal")[]; inScope?: boolean } = {},
+  options: {
+    manualMethods?: readonly ("bank_transfer" | "paypal")[];
+    inScope?: boolean;
+    billingPlan?: BillingPlanPort;
+  } = {},
 ) {
-  const { manualMethods, inScope } = options;
+  const { manualMethods, inScope, billingPlan = planChosen } = options;
   const financeReadPort: FinancePaymentReadinessReadPort = {
     async getPaymentReadiness() {
       return value;
@@ -46,12 +56,49 @@ function adapter(
   };
   return createFinanceBookingLaunchEvidenceAdapter({
     financeReadPort,
+    billingPlan,
     ...(manualMethods ? { manualPayments: { readyMethods: async () => manualMethods } } : {}),
     ...(inScope === undefined ? {} : { scope: { hasPaymentReadinessScope: async () => inScope } }),
   });
 }
 
 describe("createFinanceBookingLaunchEvidenceAdapter", () => {
+  it("asks for a billing plan until the hotel has one (VAY-2171)", async () => {
+    const noPlan = { getBillingConfig: vi.fn(async () => null) };
+    const codes = async (value: FinancePaymentReadinessSnapshot | null) => {
+      const result = await adapter(value, { billingPlan: noPlan }).getBookingLaunchEvidence(
+        request,
+      );
+      if (result.outcome !== "evidence") throw new Error(result.outcome);
+      expect(isBookingLaunchOwnerEvidenceValid(result, request, "finance")).toBe(true);
+      return result.entities[0]!.blockers.map(({ code, kind }) => `${code}:${kind}`);
+    };
+    // Ready payments, no plan: guests could not book, so the page can't publish.
+    expect(await codes(snapshot(["pay_at_property"]))).toEqual([
+      "billing_plan_not_selected:user_fixable",
+    ]);
+    // The hotel's own organization: a plan another organization chose doesn't let guests book.
+    expect(noPlan.getBillingConfig).toHaveBeenCalledWith(propertyId, organizationId);
+    // A brand-new hotel sees both to-dos in Payments.
+    expect(await codes(null)).toEqual([
+      "payment_methods_not_configured:user_fixable",
+      "billing_plan_not_selected:user_fixable",
+    ]);
+    const failing = adapter(snapshot(["pay_at_property"]), {
+      billingPlan: {
+        getBillingConfig: async () => {
+          throw new Error("connection refused");
+        },
+      },
+    });
+    await expect(failing.getBookingLaunchEvidence(request)).resolves.toEqual({
+      outcome: "unavailable",
+      port: "finance",
+      errorSource: "system",
+      code: "billing_plan_read_failed",
+    });
+  });
+
   it("counts a bank-transfer or PayPal hotel only while their acceptance is on (VAY-2139)", async () => {
     const blockers = async (manual?: readonly ("bank_transfer" | "paypal")[]) => {
       const result = await adapter(snapshot([]), {
@@ -66,6 +113,7 @@ describe("createFinanceBookingLaunchEvidenceAdapter", () => {
     expect(await blockers(["paypal"])).toEqual([]);
     const failing = createFinanceBookingLaunchEvidenceAdapter({
       financeReadPort: { getPaymentReadiness: async () => snapshot([]) },
+      billingPlan: planChosen,
       manualPayments: {
         readyMethods: async () => {
           throw new Error("database unavailable");
@@ -250,6 +298,7 @@ describe("createFinanceBookingLaunchEvidenceAdapter", () => {
     });
     const failing = createFinanceBookingLaunchEvidenceAdapter({
       financeReadPort: { getPaymentReadiness: async () => null },
+      billingPlan: planChosen,
       scope: {
         async hasPaymentReadinessScope() {
           throw new Error("connection refused");
@@ -284,6 +333,7 @@ describe("createFinanceBookingLaunchEvidenceAdapter", () => {
           throw new Error("provider secret must stay private");
         },
       },
+      billingPlan: planChosen,
     });
     await expect(failed.getBookingLaunchEvidence(request)).resolves.toEqual({
       outcome: "unavailable",

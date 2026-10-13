@@ -20,6 +20,7 @@ import {
   onboardingPricingApi,
   type OnboardingPricingOwners,
 } from "@/services/api/onboardingPricingClient";
+import type { FinancePlanStatus } from "@/services/api/hotelOperationsSetupClient";
 import type { AdaptiveSetupStepComponentProps } from "../AdaptiveSetupStepFormDispatcher";
 import {
   AdaptiveSaveError,
@@ -31,6 +32,7 @@ import {
 import { adaptiveStepErrorMessage } from "../adaptiveSetupStepState";
 import { useFinalStepDraft } from "./useFinalStepDraft";
 import { StripeSetupControls } from "./StripeSetupControls";
+import { BillingPlanChoice, isBillingPlanSettled } from "./BillingPlanChoice";
 
 type Method = "pay_at_property" | "card";
 function matchesSelection(snapshot: FinancePaymentReadinessSnapshot, desired: Method[]) {
@@ -218,6 +220,9 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
   const [notice, setNotice] = useState("");
   const [manual, setManual] = useState<ManualPaymentMethods>(MANUAL_OFF);
   const [manualError, setManualError] = useState<string | null>(null);
+  // Bookings need a chosen plan, so the step continues only with one (VAY-2171).
+  const [plan, setPlan] = useState<FinancePlanStatus | null>(null);
+  const planSettled = isBillingPlanSettled(plan);
   const { initialize } = draft;
   useEffect(() => {
     const controller = new AbortController();
@@ -266,11 +271,16 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
   // A hotel paid only by bank transfer or PayPal selects neither method here (VAY-2139). It can
   // save that empty choice, and continue once the server counts its bank transfer or PayPal.
   const manualReady = manual.acceptanceEnabled && manual.readyMethods.length > 0;
+  // The server also blocks the step on the plan alone; a started Fixed checkout may continue.
+  const paymentsDone =
+    props.step.state === "complete" ||
+    (props.step.state === "blocked" &&
+      props.step.blockers.every(({ code }) => code === "billing_plan_not_selected"));
   const manualContinue =
     manualReady &&
     !selection.length &&
     !snapshot?.methods.some((item) => item.selected) &&
-    props.step.state === "complete";
+    paymentsDone;
   async function continueWithManual() {
     setNotice("");
     await draft.commit(async () => {
@@ -508,6 +518,15 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
           setSnapshot(value);
         }}
       />
+      <BillingPlanChoice
+        propertyId={props.propertyId}
+        disabled={draft.saving}
+        onStatus={setPlan}
+        onChanged={props.refreshRoute}
+      />
+      {plan && !planSettled && (
+        <p className="text-right text-sm text-gray-600">Confirm your vayada plan to continue.</p>
+      )}
       <div className="flex flex-wrap justify-end gap-3">
         <button
           type="button"
@@ -523,7 +542,9 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
           type="button"
           className={adaptivePrimaryButtonClass}
           disabled={
-            draft.saving || (!manualContinue && (!matchesSaved || !snapshot.bookingPaymentReady))
+            draft.saving ||
+            !planSettled ||
+            (!manualContinue && (!matchesSaved || !snapshot.bookingPaymentReady))
           }
           onClick={() => void (manualContinue ? continueWithManual() : save(true))}
         >

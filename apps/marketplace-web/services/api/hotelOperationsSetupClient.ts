@@ -89,11 +89,20 @@ export type FinancePaymentSettings = {
 };
 
 export type FinancePlanStatus = {
-  plan: "commission" | "fixed";
-  status: "commission" | "checkout_pending" | "active" | "past_due" | "cancel_at_period_end";
-  currency: "EUR";
+  /** Null until the hotel chooses a plan (VAY-2171). */
+  plan: "commission" | "fixed" | null;
+  status:
+    | "not_selected"
+    | "commission"
+    | "checkout_pending"
+    | "active"
+    | "past_due"
+    | "cancel_at_period_end";
+  /** The hotel's pricing currency; the Fixed Fee is billed in it where available. */
+  currency: string;
   activeRoomCount: number;
   amountMinor: number;
+  fixedPlanAvailable: boolean;
   checkoutPending: boolean;
   updatedAt: string;
 };
