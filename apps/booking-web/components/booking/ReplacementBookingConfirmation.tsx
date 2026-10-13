@@ -185,8 +185,10 @@ export default function ReplacementBookingConfirmation({
       />
     );
 
-  // Until the rules are known, the phone is required and the optional fields stay hidden.
-  const policy = rules ?? (pending?.disclosure ?? disclosure)?.choices;
+  // Until this quote's rules are known, the phone is required and the optional fields stay hidden.
+  const acknowledged = pending?.disclosure ?? disclosure;
+  const policy =
+    rules ?? (acknowledged?.quoteId === quote.quoteId ? acknowledged.choices : undefined);
   const phoneRequired = policy?.phoneRequired ?? true;
   return (
     <form className="space-y-4 rounded-xl border border-gray-200 p-5" onSubmit={submit}>

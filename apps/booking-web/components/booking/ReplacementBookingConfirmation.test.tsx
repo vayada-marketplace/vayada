@@ -198,6 +198,14 @@ it("requires the phone until the guest rules are known (VAY-2163)", () => {
   expect(document.body.textContent).not.toContain("Phone (optional)");
   expect(input("arrivalTime")).toBeNull();
   expect(document.querySelector('[name="specialRequests"]')).toBeNull();
+  // A previous quote's rules don't count while the new quote's rules load.
+  render(true, {
+    ...disclosure,
+    quoteId: "other",
+    choices: { ...disclosure.choices, phoneRequired: false },
+  });
+  expect(input("phone").required).toBe(true);
+  expect(input("arrivalTime")).toBeNull();
 });
 
 it("stops a request the hotel cannot receive online yet, without inviting a retry", async () => {
