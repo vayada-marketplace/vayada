@@ -52,7 +52,6 @@ vi.mock("@/services/api/hotelOperationsSetupClient", () => ({
 vi.mock("./adaptive/rooms/AdaptiveRoomAuthoringSetupController", () => ({
   AdaptiveRoomAuthoringSetupController: mocks.adaptive,
 }));
-vi.mock("./SetupTaskFormRouter", () => ({ SetupTaskFormRouter: () => null }));
 
 import { SharedHotelSetupPage } from "./SharedHotelSetupPage";
 
@@ -77,7 +76,6 @@ describe("invitation setup entry", () => {
       renderer = create(
         createElement(SharedHotelSetupPage, {
           defaultEntryProduct: "marketplace",
-          defaultReturnTo: "/marketplace",
         }),
       );
     });
