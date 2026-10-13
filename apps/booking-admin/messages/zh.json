@@ -23,6 +23,8 @@
   "auth.login.errorValidation": "验证错误。",
   "auth.login.errorUnexpected": "发生意外错误，请重试。",
   "auth.login.errorSessionExpired": "您的会话已过期，请重新登录。",
+  "auth.login.hotelWorkspaceRequired": "此账户尚未关联任何酒店。如果您是受酒店邀请的，请打开邀请邮件或请对方重新发送。",
+  "auth.login.setUpHotel": "设置您的酒店",
   "auth.register.fullNameLabel": "姓名",
   "auth.register.fullNamePlaceholder": "张三",
   "auth.register.emailLabel": "电子邮箱",

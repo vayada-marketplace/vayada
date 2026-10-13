@@ -83,6 +83,8 @@
   "auth.login.unexpectedError": "Er is een onverwachte fout opgetreden. Probeer het opnieuw.",
   "auth.login.sessionExpiredBanner": "Uw sessie is verlopen. Log opnieuw in.",
   "auth.login.signOut": "Uitloggen",
+  "auth.login.hotelWorkspaceRequired": "Dit account is nog niet aan een hotel gekoppeld. Bent u door een hotel uitgenodigd? Open dan de uitnodigingsmail of vraag om deze opnieuw te sturen.",
+  "auth.login.setUpHotel": "Stel uw hotel in",
   "auth.register.title": "vayada PMS",
   "auth.register.subtitle": "Maak uw accommodatiebeheeraccount aan",
   "auth.register.fullNameLabel": "Volledige naam",

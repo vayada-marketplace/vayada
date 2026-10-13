@@ -12,10 +12,13 @@ import {
 import { resolvePmsSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import { useTranslation } from "@/lib/i18n";
 
+const MARKETPLACE_URL = process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://app.vayada.com";
+
 type LoginContentProps = {
   returnTo?: string;
   resumeSession?: boolean;
   authError?: string;
+  hotelWorkspaceRequired?: boolean;
   workosReturn?: "complete" | "failed";
 };
 
@@ -23,12 +26,14 @@ export function LoginContent({
   returnTo = "/dashboard",
   resumeSession = false,
   authError,
+  hotelWorkspaceRequired = false,
   workosReturn,
 }: LoginContentProps) {
   const { t } = useTranslation();
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [hotelSetupRequired, setHotelSetupRequired] = useState(hotelWorkspaceRequired);
   const [submitError, setSubmitError] = useState(authError ?? "");
   const [showReturnFailure, setShowReturnFailure] = useState(workosReturn === "failed");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -54,6 +59,7 @@ export function LoginContent({
   const handleOrganizationSelect = useCallback(
     async (workosOrganizationId: string) => {
       setSubmitError("");
+      setHotelSetupRequired(false);
       setIsSubmitting(true);
       try {
         const response = passwordOrganizations.length
@@ -79,6 +85,7 @@ export function LoginContent({
       event.preventDefault();
       setShowReturnFailure(false);
       setSubmitError("");
+      setHotelSetupRequired(false);
       setIsSubmitting(true);
       setPasswordOrganizations([]);
       try {
@@ -97,13 +104,20 @@ export function LoginContent({
           setPasswordOrganizations(error.organizations);
           return;
         }
-        setSubmitError(
-          workosReturn === "complete" && error instanceof ApiErrorResponse && error.status === 403
-            ? t("auth.login.invitationPending")
-            : error instanceof Error
-              ? error.message
-              : t("auth.login.unexpectedError"),
-        );
+        const noHotelWorkspace =
+          error instanceof AuthStateError && error.state === "hotel_workspace_required";
+        if (
+          workosReturn === "complete" &&
+          ((error instanceof ApiErrorResponse && error.status === 403) || noHotelWorkspace)
+        ) {
+          setSubmitError(t("auth.login.invitationPending"));
+          return;
+        }
+        if (noHotelWorkspace) {
+          setHotelSetupRequired(true);
+          return;
+        }
+        setSubmitError(error instanceof Error ? error.message : t("auth.login.unexpectedError"));
       } finally {
         setIsSubmitting(false);
       }
@@ -170,7 +184,16 @@ export function LoginContent({
       email={email}
       password={password}
       isSubmitting={isSubmitting}
-      submitError={submitError || (showReturnFailure ? t("auth.login.workosReturnFailed") : "")}
+      submitError={
+        hotelSetupRequired
+          ? t("auth.login.hotelWorkspaceRequired")
+          : submitError || (showReturnFailure ? t("auth.login.workosReturnFailed") : "")
+      }
+      submitErrorAction={
+        hotelSetupRequired
+          ? { label: t("auth.login.setUpHotel"), href: `${MARKETPLACE_URL}/login` }
+          : undefined
+      }
       organizations={workspaceOptions ?? null}
       forgotPasswordHref="/forgot-password"
       onEmailChange={setEmail}
@@ -185,6 +208,7 @@ export function LoginContent({
               setPassword("");
               setPasswordOrganizations([]);
               setSubmitError("");
+              setHotelSetupRequired(false);
             }
           : undefined
       }

@@ -23,6 +23,8 @@
   "auth.login.errorValidation": "Errore di validazione.",
   "auth.login.errorUnexpected": "Si è verificato un errore imprevisto. Riprova.",
   "auth.login.errorSessionExpired": "La tua sessione è scaduta. Effettua nuovamente l'accesso.",
+  "auth.login.hotelWorkspaceRequired": "Questo account non è ancora collegato a nessun hotel. Se un hotel ti ha invitato, apri l'email di invito o chiedi di inviartela di nuovo.",
+  "auth.login.setUpHotel": "Configura il tuo hotel",
   "auth.register.fullNameLabel": "Nome completo",
   "auth.register.fullNamePlaceholder": "Mario Rossi",
   "auth.register.emailLabel": "Indirizzo email",

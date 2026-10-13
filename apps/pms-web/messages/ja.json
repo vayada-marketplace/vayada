@@ -83,6 +83,8 @@
   "auth.login.unexpectedError": "予期しないエラーが発生しました。もう一度お試しください。",
   "auth.login.sessionExpiredBanner": "セッションが期限切れです。再度サインインしてください。",
   "auth.login.signOut": "ログアウト",
+  "auth.login.hotelWorkspaceRequired": "このアカウントはまだホテルに接続されていません。ホテルから招待された場合は、招待メールを開くか、再送信を依頼してください。",
+  "auth.login.setUpHotel": "ホテルを設定する",
   "auth.register.title": "vayada PMS",
   "auth.register.subtitle": "施設管理アカウントを作成",
   "auth.register.fullNameLabel": "氏名",

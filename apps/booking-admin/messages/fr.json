@@ -23,6 +23,8 @@
   "auth.login.errorValidation": "Erreur de validation.",
   "auth.login.errorUnexpected": "Une erreur inattendue s'est produite. Veuillez réessayer.",
   "auth.login.errorSessionExpired": "Votre session a expiré. Veuillez vous reconnecter.",
+  "auth.login.hotelWorkspaceRequired": "Ce compte n'est encore associé à aucun hôtel. Si un hôtel vous a invité, ouvrez l'e-mail d'invitation ou demandez-lui de vous le renvoyer.",
+  "auth.login.setUpHotel": "Configurer votre hôtel",
   "auth.register.fullNameLabel": "Nom complet",
   "auth.register.fullNamePlaceholder": "Jean Dupont",
   "auth.register.emailLabel": "Adresse e-mail",

@@ -13,7 +13,7 @@ import { changeIncludedAdjustments } from "./PricingIncludedAdjustments";
 import { changeDatePrice } from "./PricingDates";
 import { NewLinkedOffer, linkedOfferInput } from "./NewLinkedOffer";
 import { changeLinkedParent, linkedParentChoices } from "./PricingLinkedParent";
-import { changeMealPlan } from "./PricingMealPlan";
+import { changeMealPlan, PricingMealPlan } from "./PricingMealPlan";
 import { changeMealCharges } from "./PricingMealCharges";
 import { changeChildCharges } from "./PricingChildCharges";
 import { changeLinkedAdjustment } from "./PricingLinkedAdjustment";
@@ -4104,7 +4104,7 @@ it("disables the stay preview for unapplied calendar edits", async () => {
 const familyId = "61000000-0000-4000-8000-000000000004", family = { ...snapshot.rooms[0], roomTypeId: familyId };
 const familySetup = { roomTypeId: familyId, name: "Family", capacity: family.capacity };
 const published = (rooms: PricingSnapshot["rooms"] = [snapshot.rooms[0], family], revision = 1) => ({ ...snapshot, rooms, revision, sources, stale: false });
-type RoomProps = Partial<Pick<Parameters<typeof PricingEditor>[0], "onAttention" | "onPublished" | "refresh">>;
+type RoomProps = Partial<Pick<Parameters<typeof PricingEditor>[0], "onAttention" | "onPublished" | "refresh" | "staleShown">>;
 const roomEditor = (rooms: { roomTypeId: string; name: string; capacity: PricingSnapshot["rooms"][number]["capacity"] }[], extra: RoomProps = {}) =>
   <PricingEditor client={client as ReturnType<typeof createReplacementPricingClient>} roomNames={{ room: "Existing", [familyId]: "Family" }} setup={{ propertyId: "property", rooms }} roomTypeId={familyId} {...extra} />;
 const mountRoom = async (rooms = [{ roomTypeId: "room", name: "Existing", capacity: snapshot.rooms[0].capacity }, familySetup], extra: RoomProps = {}) => {
@@ -4398,4 +4398,41 @@ it("says in the guest card whether free cancellation is still open for the sampl
   expect(text()).toContain("Free cancellation until 11 Jul");
   await act(async () => view.root.findByType(PriceCalendar).props.onPick("2020-07-18"));
   expect(text()).toContain("No free cancellation for these dates");
+});
+
+it("shows a Price group in an option's window only with something to edit, and says each card's meal plan (VAY-2157)", async () => {
+  const [flex] = snapshot.rooms[0].offers;
+  if (flex.price.kind !== "independent") throw new Error("fixture");
+  const price = flex.price;
+  const roomOnly = { ...flex, id: "plain", meal: { kind: "room_only" as const, charge: { kind: "room" as const, amountMinor: "0" } },
+    price: { kind: "linked" as const, parentId: "flex", adjustment: { kind: "percentage" as const, basisPoints: -1000 }, dateOverrides: [] }, restrictions: { kind: "inherit" as const } };
+  const read = (base: typeof price.calendar.base) => ({ ...snapshot, rooms: [{ ...snapshot.rooms[0], offers: [{ ...flex, price: { ...price, calendar: { ...price.calendar, base } } }, roomOnly] }], revision: 1, sources, stale: false });
+  // Option windows by offer, in order (step 5's children window has no meal plan).
+  const headings = () => view.root.findAllByType(OptionWindow).filter((node) => node.findAllByType(PricingMealPlan).length)
+    .map((node) => node.findAllByType("h3").map((heading) => heading.children.join("")));
+  client.read.mockResolvedValue(read({ mode: "flat", amountMinor: "10000" }));
+  await mount();
+  await act(async () => {});
+  // A flat main price is step 1, so its window starts with Meals; a linked option edits its link under Price.
+  expect(headings()).toEqual([["Meals", "Cancellation and payment"], ["Price", "Meals", "Cancellation and payment", "Stay rules"]]);
+  const text = JSON.stringify(view.toJSON());
+  expect(text).toContain("per normal night for 2 adults, breakfast included");
+  expect(text).toContain("per normal night for 2 adults, room only");
+  expect(text).not.toContain("meals included");
+  act(() => view.unmount());
+  // An included-guest main price keeps its other guest counts under Price.
+  client.read.mockResolvedValue(read({ mode: "included_guests", baseGuests: 2, baseMinor: "10000", adjustments: [{ kind: "fixed", deltaMinor: "-2000" }, { kind: "fixed", deltaMinor: "0" }] }));
+  await mount();
+  await act(async () => {});
+  expect(headings()[0]).toEqual(["Price", "Meals", "Cancellation and payment"]);
+});
+it("leaves the stale-prices warning to the room page when the page shows it, and still saves them (VAY-2157)", async () => {
+  client.read.mockResolvedValue({ ...published(), stale: true });
+  await mountRoom();
+  const text = () => JSON.stringify(view.toJSON());
+  expect(text()).toContain("Prices need to be saved again");
+  act(() => view.unmount());
+  await mountRoom(undefined, { staleShown: true });
+  expect(text()).not.toContain("Prices need to be saved again");
+  expect(button("Save prices").props.disabled).toBe(false);
 });

@@ -23,6 +23,8 @@
   "auth.login.errorValidation": "Validatiefout.",
   "auth.login.errorUnexpected": "Er is een onverwachte fout opgetreden. Probeer het opnieuw.",
   "auth.login.errorSessionExpired": "Je sessie is verlopen. Log opnieuw in.",
+  "auth.login.hotelWorkspaceRequired": "Dit account is nog niet aan een hotel gekoppeld. Ben je door een hotel uitgenodigd? Open dan de uitnodigingsmail of vraag om hem opnieuw te sturen.",
+  "auth.login.setUpHotel": "Stel je hotel in",
   "auth.register.fullNameLabel": "Volledige naam",
   "auth.register.fullNamePlaceholder": "Jan Jansen",
   "auth.register.emailLabel": "E-mailadres",
