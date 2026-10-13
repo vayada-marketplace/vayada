@@ -3,7 +3,7 @@ import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote"
 import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
 
 import { formatCheckInTime, formatCheckOutTime } from "@/lib/arrivalTimes";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useId, useRef } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { paymentMethodLabelKey, type PaymentMethodLabelKey } from "@vayada/locale-constants";
 import { Link, useRouter } from "@/i18n/navigation";
@@ -103,12 +103,15 @@ export default function BookingConfirmationPageClient({
   const locale = useLocale();
   const tc = useTranslations("common");
   const tp = useTranslations("payment");
+  const tm = useTranslations("myBooking");
+  const withdrawTitleId = useId();
   const { hotel } = useHotel();
   const { slug } = useSlug();
   const { formatPrice } = useCurrency();
   const [booking, setBooking] = useState<Booking | null>(null);
   const [status, setStatus] = useState<string>("");
   const [withdrawing, setWithdrawing] = useState(false);
+  const [confirmingWithdraw, setConfirmingWithdraw] = useState(false);
   const [withdrawError, setWithdrawError] = useState("");
   const [hydrating, setHydrating] = useState(false);
   const [hydrateError, setHydrateError] = useState(false);
@@ -278,6 +281,7 @@ export default function BookingConfirmationPageClient({
 
     try {
       await bookingService.withdraw(slug, booking.id, booking.guestEmail);
+      setConfirmingWithdraw(false);
       setStatus("cancelled");
       const updated = { ...booking, status: "cancelled" as const };
       setBooking(updated);
@@ -300,6 +304,7 @@ export default function BookingConfirmationPageClient({
   // but uses different copy so the guest doesn't think they cancelled.
   const isDeclined = status === "declined";
   const isExpired = status === "expired";
+  const isEnded = isCancelled || isDeclined || isExpired;
   const displayedNights =
     booking && Number.isInteger(booking.nights) && booking.nights > 0 ? booking.nights : null;
   const displayedAdults =
@@ -326,10 +331,29 @@ export default function BookingConfirmationPageClient({
     xendit: tp("xenditTitle"),
     other: t("otherPayment"),
   };
-  const isTotalPaid = booking?.paymentStatus === "captured" || booking?.paymentStatus === "paid";
-  const displayedTotal = isTotalPaid
-    ? booking?.totalAmount
-    : (booking?.balanceAmount ?? booking?.totalAmount);
+  const owed = booking?.balanceAmount;
+  const paid = booking?.paymentStatus === "captured" || booking?.paymentStatus === "paid";
+  // VAY-2163: a card deposit comes back as partially_paid, with what's still owed as the balance.
+  const partlyPaid =
+    !!booking &&
+    booking.paymentMethod !== "bank_transfer" &&
+    (booking.paymentStatus === "partially_paid" || (paid && (owed ?? 0) > 0));
+  const isTotalPaid = paid && !partlyPaid;
+  const displayedTotal =
+    isEnded || isTotalPaid || partlyPaid ? booking?.totalAmount : (owed ?? booking?.totalAmount);
+  const paymentStatusLabels: Record<string, string> = {
+    paid: t("paymentPaid"),
+    partially_paid: t("paymentPartlyPaid"),
+    authorized: t("paymentAuthorized"),
+    unpaid: t("paymentUnpaid"),
+    refunded: t("paymentRefunded"),
+    failed: t("paymentFailed"),
+    waived: t("paymentWaived"),
+  };
+  const paymentStatusLabel =
+    paymentStatusLabels[
+      partlyPaid ? "partially_paid" : paid ? "paid" : (booking?.paymentStatus ?? "")
+    ];
 
   return (
     <div className="min-h-screen bg-surface">
@@ -494,15 +518,9 @@ export default function BookingConfirmationPageClient({
             </div>
           ) : !booking && hydrateError ? (
             <div className="py-6 text-center">
-              <p className="text-sm text-gray-600 mb-3">
+              <p className="text-sm text-gray-600">
                 {t("detailsUnavailable") || "We couldn't load your booking details here."}
               </p>
-              <Link
-                href={manageBookingHref}
-                className="text-sm font-medium text-primary-600 hover:text-primary-700 underline"
-              >
-                {t("manageBooking") || "Manage your booking"}
-              </Link>
             </div>
           ) : (
             <div className="text-left space-y-0 divide-y divide-gray-100">
@@ -590,7 +608,11 @@ export default function BookingConfirmationPageClient({
               )}
               <div className="flex justify-between py-3">
                 <span className="text-gray-600">
-                  {isTotalPaid ? t("totalPaid") : t("totalDue")}
+                  {isEnded || partlyPaid
+                    ? t("total")
+                    : isTotalPaid
+                      ? t("totalPaid")
+                      : t("totalDue")}
                 </span>
                 <span className="font-bold text-gray-900 text-lg">
                   {booking && displayedTotal !== undefined
@@ -598,22 +620,27 @@ export default function BookingConfirmationPageClient({
                     : "—"}
                 </span>
               </div>
-              {booking?.depositRequired && (
+              {booking && !isEnded && (partlyPaid || booking.depositRequired) && (
                 <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-600">
-                      {booking.paymentStatus === "captured"
-                        ? "Deposit paid"
+                      {partlyPaid
+                        ? t("depositPaid")
                         : booking.paymentStatus === "refunded"
-                          ? "Deposit refunded"
-                          : "Deposit pending"}
+                          ? t("depositRefunded")
+                          : t("depositPending")}
                     </span>
                     <span className="font-semibold text-gray-900">
-                      {formatPrice(booking.depositAmount || 0, booking.currency)}
+                      {formatPrice(
+                        partlyPaid && owed !== undefined
+                          ? booking.totalAmount - owed
+                          : booking.depositAmount || 0,
+                        booking.currency,
+                      )}
                     </span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Remaining balance due at check-in</span>
+                    <span className="text-gray-600">{t("balanceDueAtCheckIn")}</span>
                     <span className="font-semibold text-gray-900">
                       {formatPrice(booking.balanceAmount || 0, booking.currency)}
                     </span>
@@ -631,12 +658,10 @@ export default function BookingConfirmationPageClient({
                   </span>
                 </div>
               )}
-              {booking?.paymentStatus && (
+              {paymentStatusLabel && (
                 <div className="flex justify-between py-3">
                   <span className="text-gray-600">{t("paymentStatusLabel")}</span>
-                  <span className="font-medium text-gray-900 capitalize">
-                    {booking.paymentStatus.replaceAll("_", " ")}
-                  </span>
+                  <span className="font-medium text-gray-900">{paymentStatusLabel}</span>
                 </div>
               )}
             </div>
@@ -742,46 +767,52 @@ export default function BookingConfirmationPageClient({
           {/* Pending request actions use server-owned eligibility. */}
           {isPending && (
             <div className="mt-8">
-              {withdrawError && <p className="text-sm text-red-600 mb-3">{withdrawError}</p>}
-              {booking?.canEditRequest &&
-                (!booking.hostResponseDeadline ||
-                  Date.parse(booking.hostResponseDeadline) > Date.now()) && (
-                  <button
-                    type="button"
-                    disabled={editing || withdrawing}
-                    className="mr-3 px-6 py-3 border border-gray-300 font-semibold rounded-full hover:bg-gray-50 disabled:opacity-50"
-                    onClick={async () => {
-                      setEditing(true);
-                      setWithdrawError("");
-                      try {
-                        const token =
-                          tokenParam ||
-                          (await bookingService.lookup(slug, reference, booking.guestEmail))
-                            .confirmationToken;
-                        router.push(
-                          `/booking/${encodeURIComponent(reference)}/edit-request?token=${encodeURIComponent(token)}`,
-                        );
-                      } catch (error) {
-                        setWithdrawError(
-                          error instanceof Error ? error.message : "Unable to edit request.",
-                        );
-                      } finally {
-                        setEditing(false);
-                      }
-                    }}
-                  >
-                    {editing ? "Opening…" : "Edit Request"}
-                  </button>
-                )}
-              <button
-                onClick={handleWithdraw}
-                disabled={withdrawing}
-                className="px-6 py-3 border border-red-300 text-red-600 font-semibold rounded-full hover:bg-red-50 transition-colors disabled:opacity-50"
-              >
-                {withdrawing
-                  ? t("withdrawing") || "Withdrawing..."
-                  : t("withdrawRequest") || "Withdraw Request"}
-              </button>
+              {withdrawError && !confirmingWithdraw && (
+                <p className="text-sm text-red-600 mb-3">{withdrawError}</p>
+              )}
+              <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                {booking?.canEditRequest &&
+                  (!booking.hostResponseDeadline ||
+                    Date.parse(booking.hostResponseDeadline) > Date.now()) && (
+                    <button
+                      type="button"
+                      disabled={editing || withdrawing}
+                      className="px-6 py-3 border border-gray-300 font-semibold rounded-full hover:bg-gray-50 disabled:opacity-50"
+                      onClick={async () => {
+                        setEditing(true);
+                        setWithdrawError("");
+                        try {
+                          const token =
+                            tokenParam ||
+                            (await bookingService.lookup(slug, reference, booking.guestEmail))
+                              .confirmationToken;
+                          router.push(
+                            `/booking/${encodeURIComponent(reference)}/edit-request?token=${encodeURIComponent(token)}`,
+                          );
+                        } catch (error) {
+                          setWithdrawError(
+                            error instanceof Error ? error.message : "Unable to edit request.",
+                          );
+                        } finally {
+                          setEditing(false);
+                        }
+                      }}
+                    >
+                      {editing ? "Opening…" : "Edit Request"}
+                    </button>
+                  )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWithdrawError("");
+                    setConfirmingWithdraw(true);
+                  }}
+                  disabled={withdrawing || editing}
+                  className="px-6 py-3 border border-red-300 text-red-600 font-semibold rounded-full hover:bg-red-50 transition-colors disabled:opacity-50"
+                >
+                  {t("withdrawRequest") || "Withdraw Request"}
+                </button>
+              </div>
             </div>
           )}
 
@@ -810,13 +841,58 @@ export default function BookingConfirmationPageClient({
           </div>
         </div>
 
-        {/* Email notice */}
-        <p className="text-center text-sm text-gray-500 mt-6">
-          {guestEmail
-            ? t("emailNotice", { email: guestEmail })
-            : "A confirmation email has been sent to your email address."}
-        </p>
+        {/* Email notice, only while the booking stands (VAY-2163) */}
+        {booking && !isEnded && (
+          <p className="text-center text-sm text-gray-500 mt-6">
+            {guestEmail
+              ? t("emailNotice", { email: guestEmail })
+              : "A confirmation email has been sent to your email address."}
+          </p>
+        )}
       </div>
+
+      {/* Withdraw asks first, like My Booking (VAY-2163) */}
+      {confirmingWithdraw && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={withdrawTitleId}
+            className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl"
+          >
+            <h3 id={withdrawTitleId} className="text-lg font-bold text-gray-900 mb-3">
+              {tm("withdrawConfirmTitle")}
+            </h3>
+            {withdrawError && (
+              <p role="alert" className="mb-4 text-sm text-red-700">
+                {withdrawError}
+              </p>
+            )}
+            <div className="flex gap-3 mt-6">
+              <button
+                type="button"
+                autoFocus
+                onClick={() => {
+                  setConfirmingWithdraw(false);
+                  setWithdrawError("");
+                }}
+                disabled={withdrawing}
+                className="flex-1 py-3 border border-gray-300 text-gray-700 font-semibold rounded-full hover:bg-gray-50 transition-colors"
+              >
+                {tm("goBack")}
+              </button>
+              <button
+                type="button"
+                onClick={handleWithdraw}
+                disabled={withdrawing}
+                className="flex-1 py-3 bg-red-600 text-white font-semibold rounded-full hover:bg-red-700 transition-colors disabled:opacity-50"
+              >
+                {withdrawing ? t("withdrawing") : tm("confirmWithdraw")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <BookingFooter />
     </div>

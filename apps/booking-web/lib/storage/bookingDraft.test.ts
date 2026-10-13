@@ -163,6 +163,11 @@ describe("toConfirmationBooking", () => {
     });
   });
 
+  it("keeps every payment status the booking API sends (VAY-2163)", () => {
+    for (const paymentStatus of ["partially_paid", "waived", "authorized", "paid"])
+      expect(toConfirmationBooking({ paymentStatus }).paymentStatus).toBe(paymentStatus);
+  });
+
   it("preserves guest-safe manual payment methods", () => {
     expect(toConfirmationBooking({ paymentMethod: "credit_card" }).paymentMethod).toBe(
       "credit_card",

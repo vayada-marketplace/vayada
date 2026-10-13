@@ -149,8 +149,10 @@ const PAYMENT_STATUSES = [
   "pending",
   "authorized",
   "captured",
+  "partially_paid",
   "paid",
   "refunded",
+  "waived",
   "failed",
   "cancelled",
 ] as const;

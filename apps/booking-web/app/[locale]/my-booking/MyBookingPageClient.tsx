@@ -16,6 +16,15 @@ import { useCurrency } from "@/contexts/CurrencyContext";
 import { bookingService, CancelPreview, type BookingLookupResponse } from "@/services/api/booking";
 import { readLastBooking } from "@/lib/storage/bookingDraft";
 
+/** Today's date (YYYY-MM-DD) in the hotel's time zone. */
+function todayIn(timeZone?: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: timeZone || "UTC" }).format(new Date());
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
 export default function MyBookingPageClient() {
   const t = useTranslations("myBooking");
   const tc = useTranslations("common");
@@ -150,6 +159,20 @@ export default function MyBookingPageClient() {
     declined: "text-red-700",
     expired: "text-gray-500",
   };
+  const statusLabels: Record<string, string> = {
+    pending: t("pending"),
+    confirmed: t("confirmed"),
+    checked_in: t("checkedIn"),
+    checked_out: t("checkedOut"),
+    completed: t("checkedOut"),
+    cancelled: t("cancelled"),
+    declined: t("declined"),
+    expired: t("expired"),
+    no_show: t("pastStay"),
+  };
+  // VAY-2163: the API keeps "confirmed" after check-out unless the hotel checked the guest out,
+  // and for no-shows, so a stay whose check-out date has passed gets a neutral name.
+  const isPastStay = isConfirmed && !!booking && booking.checkOut < todayIn(hotel.timezone);
 
   return (
     <div className="min-h-screen bg-surface flex flex-col">
@@ -280,13 +303,9 @@ export default function MyBookingPageClient() {
               <div>
                 <p className="font-bold text-gray-900">{t("bookingFound")}</p>
                 <p
-                  className={`text-sm font-medium capitalize ${statusColor[booking.status] || ""}`}
+                  className={`text-sm font-medium ${isPastStay ? "text-gray-600" : statusColor[booking.status] || ""}`}
                 >
-                  {booking.status === "cancelled"
-                    ? t("cancelled")
-                    : booking.status === "declined"
-                      ? t("declined") || "Declined"
-                      : booking.status}
+                  {isPastStay ? t("pastStay") : (statusLabels[booking.status] ?? "")}
                 </p>
               </div>
             </div>
