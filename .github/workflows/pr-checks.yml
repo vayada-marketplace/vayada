@@ -569,6 +569,12 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      - name: Verify PMS dashboard reads per staff role preset
+        if: matrix.shard == 'platform'
+        run: npm --workspace vayada-api run test -- --no-file-parallelism src/pmsDashboardRoleAccess.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Run PMS TypeScript PostgreSQL integration
         if: matrix.shard == 'pms'
         run: >-
