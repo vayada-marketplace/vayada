@@ -222,7 +222,6 @@ const profileSchema: z.ZodType<PublicBookabilityProfileProjection> = z
         !hotel.trust.profileVerified ||
         hotel.trust.reasonCodes.length > 0 ||
         hotel.images.length === 0 ||
-        (!hotel.capabilities.onlinePayment && !hotel.capabilities.payAtProperty) ||
         !hotel.capabilities.bookingDeepLinks)
     )
       issue(context, ["hotel", "trust"]);
@@ -235,12 +234,23 @@ const profileSchema: z.ZodType<PublicBookabilityProfileProjection> = z
       issue(context, ["freshness", "sources"]);
   });
 
-/** Parses stored JSON and returns a deeply frozen, allowlisted reconstruction. */
+/** Parses stored JSON and returns a deeply frozen, allowlisted reconstruction. A bookable hotel
+ * must be payable: by card online, at the property, or (only when the caller's Finance evidence
+ * says so) by bank transfer or PayPal. */
 export function parsePublicBookabilityProfileProjection(
   value: unknown,
+  context: { manualPaymentReady?: boolean } = {},
 ): PublicBookabilityProfileProjection | null {
   const parsed = profileSchema.safeParse(value);
   if (!parsed.success) return null;
+  const { hotel } = parsed.data;
+  if (
+    hotel.trust.bookabilityStatus === "bookable" &&
+    !hotel.capabilities.onlinePayment &&
+    !hotel.capabilities.payAtProperty &&
+    context.manualPaymentReady !== true
+  )
+    return null;
   try {
     assertPublicBookabilityPublicSafe(parsed.data);
     return deepFreeze(parsed.data);

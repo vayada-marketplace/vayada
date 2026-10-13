@@ -30,6 +30,7 @@ export function createPublicRuntimeRepositories(config: ApiConfig, pools: Public
       ? createActiveBookingPublicationProfileRepository({
           connectionString: requireTargetDatabaseUrl(config),
           pool: pools.publicHotelProfilePool,
+          manualPayments: config.replacementPricingManualPaymentAcceptanceEnabled,
         })
       : createTargetPublicHotelProfileRepository({
           connectionString: requireTargetDatabaseUrl(config),

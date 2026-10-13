@@ -16,6 +16,8 @@ const BOOKING_LIFECYCLE_EMAIL_JOB_TYPE_BY_KIND = {
   host_request_updated: "email.booking-host-request-updated",
   host_review_required: "email.booking-host-review-required",
   host_request_expired: "email.booking-host-request-expired",
+  host_payment_pending: "email.booking-host-payment-pending",
+  host_payment_expired: "email.booking-host-payment-expired",
 } as const;
 
 export type BookingLifecycleEmailKind = keyof typeof BOOKING_LIFECYCLE_EMAIL_JOB_TYPE_BY_KIND;
@@ -466,6 +468,26 @@ function emailCopy(input: BookingLifecycleEmailInput) {
   const { booking } = input;
   const name = booking.guestName?.trim() || "there";
   const property = booking.propertyName || "our property";
+  if (input.kind === "reserved_pending_payment" && manualPricingPayment(booking)) {
+    // Booking-page bank transfer or PayPal (VAY-2139); the bank details are added when sent.
+    const paypal = booking.paymentMethod === "paypal";
+    const paypalEmail = paypal
+      ? text(record(record(booking.bookingMetadata)["paymentInstructions"])["paypalEmail"])
+      : null;
+    return {
+      template: "booking_reserved_pending_payment",
+      subject: `Your room is reserved pending payment - ${booking.bookingReference}`,
+      text: [
+        `Hi ${name},`,
+        `We've reserved your room at ${property} while we wait for your ${paypal ? "PayPal payment" : "bank transfer"}.`,
+        `Amount due: ${money(booking.balanceAmount ?? booking.totalAmount, booking.currency)}`,
+        ...(paypalEmail ? [`Please send it by PayPal to ${paypalEmail}.`] : []),
+        `Payment deadline: ${deadlineText(input.paymentDeadlineAt)}`,
+        `Please add your booking reference to the payment: ${booking.bookingReference}`,
+        "If we don't receive it by the deadline, the booking expires and the room is released.",
+      ].join("\n\n"),
+    };
+  }
   if (input.kind === "reserved_pending_payment") {
     return {
       template: "booking_reserved_pending_payment",
@@ -552,6 +574,9 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       text: [
         `Hi ${name},`,
         `Your booking for ${property} has expired.`,
+        ...(manualPricingPayment(booking)
+          ? ["We didn't receive your payment by the deadline, so the room is no longer held."]
+          : []),
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
     };
@@ -564,6 +589,34 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         `${name} updated their pending booking request.`,
         `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
         ...confirmationDetails(booking),
+        `Booking reference: ${booking.bookingReference}`,
+      ].join("\n\n"),
+    };
+  }
+  if (input.kind === "host_payment_pending") {
+    return {
+      template: "booking_host_payment_pending",
+      subject: `New booking waiting for payment - ${booking.bookingReference}`,
+      text: [
+        `A guest booked and will pay by ${booking.paymentMethod === "paypal" ? "PayPal" : "bank transfer"}. The rooms are held until the payment deadline.`,
+        `Guest: ${name}`,
+        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        `Total: ${money(booking.totalAmount, booking.currency)}`,
+        `Payment deadline: ${deadlineText(input.paymentDeadlineAt)}`,
+        "When the money arrives, mark the payment as received in your PMS. If it doesn't arrive by the deadline, the booking expires and the rooms become available again.",
+        `Booking reference: ${booking.bookingReference}`,
+      ].join("\n\n"),
+    };
+  }
+  if (input.kind === "host_payment_expired") {
+    return {
+      template: "booking_host_payment_expired",
+      subject: `Booking expired without payment - ${booking.bookingReference}`,
+      text: [
+        "A booking expired because its payment didn't arrive by the deadline. The rooms are available again.",
+        `Guest: ${name}`,
+        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        `Total: ${money(booking.totalAmount, booking.currency)}`,
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
     };
@@ -639,6 +692,13 @@ function notificationsForTransition(
         { kind: "host_new_booking", role: "host" },
       ];
     }
+    // Pricing-v2 bank transfer or PayPal: the guest pays the hotel, which confirms the payment.
+    if (transition.toStatus === "pending_payment" && manualPricingPayment(booking)) {
+      return [
+        { kind: "reserved_pending_payment", role: "guest" },
+        { kind: "host_payment_pending", role: "host" },
+      ];
+    }
     const metadata = record(booking.bookingMetadata);
     const acceptanceMode = text(metadata["acceptanceMode"] ?? metadata["bookingAcceptanceMode"]);
     if (
@@ -702,6 +762,12 @@ function notificationsForTransition(
   ) {
     const metadata = record(booking.bookingMetadata);
     const acceptanceMode = text(metadata["acceptanceMode"] ?? metadata["bookingAcceptanceMode"]);
+    // The payment did not arrive; tell the hotel the rooms are free again.
+    if (transition.eventType === "guest_booking.expired" && manualPricingPayment(booking))
+      return [
+        { kind: "booking_expired", role: "guest" },
+        { kind: "host_payment_expired", role: "host" },
+      ];
     // The hotel let a request lapse; tell it the rooms are free again.
     return transition.eventType === "guest_booking.expired" && acceptanceMode === "request"
       ? [
@@ -772,6 +838,24 @@ function money(
   return Number.isFinite(amount)
     ? `${amount.toFixed(2)} ${currency || "EUR"}`
     : `0.00 ${currency || "EUR"}`;
+}
+
+/** Pricing-v2 bookings paid by bank transfer or PayPal to the hotel (VAY-2139). */
+function manualPricingPayment(booking: {
+  paymentMethod?: string | null;
+  bookingMetadata?: unknown;
+}) {
+  return (
+    record(booking.bookingMetadata)["targetSource"] === "pricing_quote_draft" &&
+    ["bank_transfer", "paypal"].includes(booking.paymentMethod ?? "")
+  );
+}
+
+function deadlineText(value: string | null | undefined): string {
+  const at = value ? new Date(value) : null;
+  return at && Number.isFinite(at.getTime())
+    ? `${at.toISOString().slice(0, 10)} ${at.toISOString().slice(11, 16)} UTC`
+    : "as soon as possible";
 }
 
 function dateOnly(value: string | Date): string {

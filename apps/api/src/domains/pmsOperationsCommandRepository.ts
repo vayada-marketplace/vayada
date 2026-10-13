@@ -13,6 +13,7 @@ import pg, { type QueryResult, type QueryResultRow } from "pg";
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
 import { publishAffiliateReservationLifecycle } from "./bookingAffiliateReservationLifecycle.js";
 import { acceptPricingRequest } from "./pricingRequestAcceptance.js";
+import { confirmPricingManualPayment } from "./pricingManualPaymentConfirmation.js";
 import {
   PMS_OPERATIONS_CONTRACT_VERSION,
   type PmsAssignmentCommand,
@@ -5901,6 +5902,43 @@ async function applyBookingMarkPaidCommandMutation(
   if (jsonObject(booking.bookingMetadata)["airbnbMoneyStatus"] === "unverified") {
     return invalidStatusTransition("booking_amount_unverified", "confirmed/paid");
   }
+  const recordPayment = async (
+    paymentMethod: FinanceBookingManualPaymentSettlementCommand["payload"]["paymentMethod"],
+  ) => {
+    const financeCommand: FinanceBookingManualPaymentSettlementCommand = {
+      commandId: command.commandId,
+      idempotencyKey: `pms.booking.mark-paid.finance:${command.idempotencyKey}`,
+      propertyId: command.propertyId,
+      audit: command.audit,
+      payload: {
+        invoiceId: booking.invoiceId,
+        amount: booking.balanceAmount,
+        currency: booking.currency,
+        paymentMethod,
+        reference: `PMS ${paymentMethod} confirmation`,
+      },
+    };
+    const financeResult = await recordBookingManualPaymentInClient(client, financeCommand);
+    if (!financeResult.ok) {
+      throw new Error(
+        `Finance rejected PMS booking payment ${command.guestBookingId}: ${financeResult.code}`,
+      );
+    }
+  };
+  // Pricing-v2 bank transfer or PayPal: the hotel's payment confirmation confirms the booking
+  // from its stored acceptance (VAY-2139).
+  if (
+    jsonObject(booking.bookingMetadata)["targetSource"] === "pricing_quote_draft" &&
+    (booking.paymentMethod === "bank_transfer" || booking.paymentMethod === "paypal")
+  ) {
+    const outcome = await confirmPricingManualPayment(client, command, acceptedAt, recordPayment);
+    return outcome === "confirmed"
+      ? { ok: true }
+      : invalidStatusTransition(
+          `${booking.lifecycleStatus}/${booking.paymentStatus}`,
+          "confirmed/paid",
+        );
+  }
   const isPayPalPending =
     booking.paymentMethod === "paypal" && booking.lifecycleStatus === "pending_payment";
   const isAcceptedBankTransfer =
@@ -5928,25 +5966,7 @@ async function applyBookingMarkPaidCommandMutation(
     : isAcceptedBankTransfer
       ? "bank_transfer"
       : "pay_at_property";
-  const financeCommand: FinanceBookingManualPaymentSettlementCommand = {
-    commandId: command.commandId,
-    idempotencyKey: `pms.booking.mark-paid.finance:${command.idempotencyKey}`,
-    propertyId: command.propertyId,
-    audit: command.audit,
-    payload: {
-      invoiceId: booking.invoiceId,
-      amount: booking.balanceAmount,
-      currency: booking.currency,
-      paymentMethod,
-      reference: `PMS ${paymentMethod} confirmation`,
-    },
-  };
-  const financeResult = await recordBookingManualPaymentInClient(client, financeCommand);
-  if (!financeResult.ok) {
-    throw new Error(
-      `Finance rejected PMS booking payment ${command.guestBookingId}: ${financeResult.code}`,
-    );
-  }
+  await recordPayment(paymentMethod);
 
   const updated = await client.query(
     `WITH booking_update AS (

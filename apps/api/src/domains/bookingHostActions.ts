@@ -154,6 +154,7 @@ export function createBookingHostActions(config: {
         typeof metadata["paymentMethod"] === "string" ? metadata["paymentMethod"] : null,
       acceptanceMode:
         typeof metadata["acceptanceMode"] === "string" ? metadata["acceptanceMode"] : null,
+      pricingQuoteBooking: metadata["targetSource"] === "pricing_quote_draft",
       operationalStayStarted: await config.guards.stayStarted(
         client,
         scope.propertyId,

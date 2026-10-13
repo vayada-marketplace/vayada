@@ -15,6 +15,7 @@ import {
 import { formatCurrency } from "@/lib/formatCurrency";
 import type { PricingTermsInput } from "@/services/api/replacementPricingClient";
 import { decimalAmount, parseMinorInput, PricingError, type Translate } from "./pricingAmounts";
+import type { PaymentMethod } from "./AcceptedPaymentMethods";
 
 /** The step-by-step Prices tab's view of one room's pricing-v2 configuration. Pure: every change goes back through
  * `parsePricingConfiguration`, so a step never writes a room the engine would refuse. */
@@ -423,7 +424,7 @@ export type PresetValues = {
   discount: string;
   mealAmount: string;
   mealBasis: "room" | "person";
-  methods: readonly ("card" | "pay_at_property")[];
+  methods: readonly PaymentMethod[];
 };
 /** A new option from a preset: linked to the main option (`discount` percent cheaper when non-refundable, otherwise the
  * same price), inheriting its stay rules, with the preset's meal at `mealAmount` per room or per adult (children 0).

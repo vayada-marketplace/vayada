@@ -214,5 +214,17 @@ export function useFinalStepDraft(props: AdaptiveSetupStepComponentProps, stepId
       setSaving(false);
     }
   }
-  return { data, values, revision, initialize, change, commit, rebase, saving, error, reload };
+  return {
+    data,
+    values,
+    revision,
+    initialize,
+    change,
+    commit,
+    rebase,
+    persist,
+    saving,
+    error,
+    reload,
+  };
 }

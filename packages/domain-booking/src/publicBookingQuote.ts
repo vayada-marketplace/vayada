@@ -6,12 +6,15 @@ import {
 } from "@vayada/domain-pms/replacement-pricing";
 import type { PublicPricingSelection } from "./publicPricingSelection.js";
 import type { ReplacementOfferTerms } from "./replacementPricingEvidence.js";
-import { validOptionalPricingPaymentMethods } from "./pricingPaymentMethods.js";
+import {
+  validOptionalPricingPaymentMethods,
+  type PricingPaymentMethod,
+} from "./pricingPaymentMethods.js";
 
 export type PublicBookingQuoteRequest = Readonly<{
   version: "public-booking-quote-request.v1";
   selection: PublicPricingSelection;
-  paymentMethod: "card" | "pay_at_property";
+  paymentMethod: PricingPaymentMethod;
 }>;
 export type PublicBookingQuote = Readonly<{
   version: "public-booking-quote.v1";

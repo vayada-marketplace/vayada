@@ -740,6 +740,7 @@ jobs:
           npm --workspace vayada-api run test -- --no-file-parallelism \
             src/domains/publicPricingOwners.integration.test.ts \
             src/domains/financeReplacementPricingSource.integration.test.ts \
+            src/domains/financeManualPaymentReadiness.integration.test.ts \
             src/domains/replacementPricingStore.integration.test.ts \
             src/domains/pmsInventoryPublicOfferProjection.integration.test.ts \
             src/domains/replacementPricingCommands.integration.test.ts \

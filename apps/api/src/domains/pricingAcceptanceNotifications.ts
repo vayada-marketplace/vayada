@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import type { PoolClient } from "pg";
+import { isManualPricingPaymentMethod } from "@vayada/domain-booking";
 import { pricingCurrencyScale } from "@vayada/domain-pms";
 import { pricingDecimalMinor } from "./pricingDecimalMinor.js";
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
@@ -47,7 +48,10 @@ export async function stagePricingAcceptanceNotifications(
     );
   const scale = history ? pricingCurrencyScale(history.quote.stay.currency) : null;
   // A request waits for the hotel: the guest hears it was received, the hotel is asked to review.
-  const request = history?.quote.acceptanceMode === "request";
+  // Bank transfer and PayPal wait for the payment: the guest gets the instructions (VAY-2139).
+  const manual = isManualPricingPaymentMethod(history?.quote.paymentMethod);
+  const request = history?.quote.acceptanceMode === "request" && !manual;
+  const deadline = row?.booking_metadata?.pendingExpiresAt;
   if (
     !history ||
     scale === null ||
@@ -55,9 +59,10 @@ export async function stagePricingAcceptanceNotifications(
     pricingDecimalMinor(row.total_amount, scale) !== history.quote.evidence.totalMinor ||
     pricingDecimalMinor(row.balance_amount, scale) !== history.quote.evidence.totalMinor ||
     history.acceptedAt !== accepted.acceptedAt ||
-    (history.quote.acceptanceMode !== "instant" && !request) ||
-    history.quote.paymentMethod !== "pay_at_property" ||
-    row.lifecycle_status !== (request ? "pending_payment" : "confirmed") ||
+    (history.quote.acceptanceMode !== "instant" && history.quote.acceptanceMode !== "request") ||
+    (history.quote.paymentMethod !== "pay_at_property" && !manual) ||
+    (manual && typeof deadline !== "string") ||
+    row.lifecycle_status !== (request || manual ? "pending_payment" : "confirmed") ||
     row.payment_status !== "unpaid" ||
     row.edit_revision !== 0 ||
     row.booking_metadata?.targetSource !== "pricing_quote_draft" ||
@@ -76,9 +81,10 @@ export async function stagePricingAcceptanceNotifications(
     transition: {
       eventType: "guest_booking.created",
       fromStatus: "draft",
-      toStatus: request ? "pending_payment" : "confirmed",
+      toStatus: request || manual ? "pending_payment" : "confirmed",
       revision: history.id,
     },
+    ...(manual ? { paymentDeadlineAt: deadline } : {}),
   });
   // The existing queue tolerates missing guest addresses; acceptance must not.
   const guestJobs = (
@@ -93,7 +99,7 @@ export async function stagePricingAcceptanceNotifications(
     guestJobs.length !== 1 ||
     guestJobs[0].payload.to !== history.command.guest.email ||
     guestJobs[0].payload.notificationType !==
-      (request ? "request_received" : "final_confirmation") ||
+      (manual ? "reserved_pending_payment" : request ? "request_received" : "final_confirmation") ||
     !isDeepStrictEqual(await lockPublicPricingAuthority(client, slug), scope)
   )
     return fail();

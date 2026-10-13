@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import { parsePublicPricingSelection, parseStoredPricingQuote } from "@vayada/domain-booking";
+import {
+  isPricingPaymentMethod,
+  parsePublicPricingSelection,
+  parseStoredPricingQuote,
+} from "@vayada/domain-booking";
 import { pricingKeys, pricingObject } from "@vayada/domain-pms";
 import type { Pool } from "pg";
 import { lockCurrentPricingQuote } from "./currentPricingQuote.js";
@@ -44,7 +48,7 @@ export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: numb
         !input.requestId.length ||
         input.requestId.length > 200 ||
         input.requestId !== input.requestId.trim() ||
-        !["card", "pay_at_property"].includes(input.paymentMethod as string)
+        !isPricingPaymentMethod(input.paymentMethod)
       )
         return fail("invalid");
       const selection = parsePublicPricingSelection(input.selection);
