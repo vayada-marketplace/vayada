@@ -103,7 +103,10 @@ export function StepOptions({
                     room.capacity.adults === 1
                       ? "pricing.steps.options.priceNote.one"
                       : "pricing.steps.options.priceNote.other",
-                    { count: Math.min(2, room.capacity.adults) },
+                    {
+                      count: Math.min(2, room.capacity.adults),
+                      meal: t(`pricing.steps.options.priceMeal.${offer.meal.kind}`),
+                    },
                   )}
                 </span>
               </span>

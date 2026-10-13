@@ -492,6 +492,18 @@ test("sets the first prices of an unpriced room as steps, then saves them next t
   await main(page).getByLabel("Room price per night").fill("120");
   await main(page).getByRole("button", { name: "No, non-refundable" }).click();
   await main(page).getByRole("checkbox", { name: "Card online" }).check();
+  // Continue names and marks what is still missing (VAY-2157).
+  await main(page).getByRole("button", { name: "Continue" }).click();
+  for (const name of [
+    "Adult pricing starts at age (1–18)",
+    "Price per child per night (0 is allowed)",
+    "Children count toward room capacity",
+  ])
+    await expect(main(page).getByRole("listitem").filter({ hasText: name })).toBeVisible();
+  await expect(main(page).getByLabel("Adult pricing starts at age (1–18)")).toHaveAttribute(
+    "aria-invalid",
+    "true",
+  );
   await main(page).getByLabel("Adult pricing starts at age (1–18)").fill("12");
   await main(page).getByLabel("Price per child per night (0 is allowed)").fill("0");
   await main(page).getByRole("button", { name: "Yes", exact: true }).click();
@@ -509,4 +521,35 @@ test("sets the first prices of an unpriced room as steps, then saves them next t
     expect.objectContaining({ cancellation: { kind: "non_refundable" } }),
   ]);
   await assertHealthy();
+});
+
+test("shows one stale-prices warning, a plain Price-free main window and a retry when rooms can't be read (VAY-2157)", async ({
+  page,
+}) => {
+  // No page-health watch: the failed room read (500) is the point of this test.
+  await openPms(page);
+  await mockPricing(page, { ...publicationOf(3, [designRoom(3)]), stale: true });
+  let failing = true;
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-types*`, (route) =>
+    failing
+      ? route.fulfill({ status: 500, json: { message: "Internal Server Error" } })
+      : route.fallback(),
+  );
+  await page.goto(`/rooms/${DELUXE}?tab=prices`);
+  await expect(
+    main(page).getByText("Prices couldn't be loaded right now. Try again in a moment."),
+  ).toBeVisible();
+  await expect(main(page).getByText("Internal Server Error")).toHaveCount(0);
+  failing = false;
+  await main(page).getByRole("button", { name: "Retry" }).click();
+  await expect(
+    main(page).getByRole("heading", { name: "What does this room cost per night?" }),
+  ).toBeVisible();
+  // The room page's banner, with its "Save prices again", is the only warning.
+  await expect(main(page).getByRole("button", { name: "Save prices again" })).toBeVisible();
+  await expect(main(page).getByText("Prices need to be saved again")).toHaveCount(1);
+  // The main option's price is step 1: its window has no empty "Price" group.
+  await main(page).getByRole("button", { name: "Edit Flexible" }).click();
+  await expect(dialog(page).getByRole("heading", { name: "Meals" })).toBeVisible();
+  await expect(dialog(page).getByRole("heading", { name: "Price", exact: true })).toHaveCount(0);
 });

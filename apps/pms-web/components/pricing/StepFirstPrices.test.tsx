@@ -122,3 +122,40 @@ it("keeps the property currency, offers the other price types and is disabled wh
       .every((node) => node.props.disabled),
   ).toBe(true);
 });
+it("marks and names the answers still missing after Continue, and drops each one as it is filled in (VAY-2157)", async () => {
+  const { onCreate } = await mount({ fixedCurrency: "EUR" });
+  const marked = () =>
+    view.root.findAllByProps({ "aria-invalid": true }).map((node) => node.props["aria-label"]);
+  const named = () =>
+    view.root
+      .findByProps({ role: "alert" })
+      .findAllByType("li")
+      .map((node) => node.children.join(""));
+  await fill("Room price per night", "120");
+  await press("No, non-refundable");
+  await act(async () => view.root.findByType(AcceptedPaymentMethods).props.onChange(["card"]));
+  // Nothing is marked before Continue.
+  expect(marked()).toEqual([]);
+  await submit();
+  expect(onCreate).not.toHaveBeenCalled();
+  expect(named()).toEqual([
+    "Adult pricing starts at age (1–18)",
+    "Price per child per night (0 is allowed)",
+    "Children count toward room capacity",
+  ]);
+  expect(marked()).toEqual([
+    "Adult pricing starts at age (1–18)",
+    "Price per child per night (0 is allowed)",
+  ]);
+  await fill("Adult pricing starts at age (1–18)", "12");
+  expect(named()).toEqual([
+    "Price per child per night (0 is allowed)",
+    "Children count toward room capacity",
+  ]);
+  await fill("Price per child per night (0 is allowed)", "0");
+  await press("Yes");
+  expect(marked()).toEqual([]);
+  expect(view.root.findAllByProps({ role: "alert" })).toHaveLength(0);
+  await submit();
+  expect(onCreate).toHaveBeenCalledOnce();
+});

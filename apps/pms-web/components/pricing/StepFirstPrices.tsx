@@ -60,6 +60,8 @@ export function StepFirstPrices({
   });
   const [guestPrices, setGuestPrices] = useState(false);
   const [error, setError] = useState("");
+  // After a Continue that failed, the answers still empty are marked and named, and update as they are filled in.
+  const [checked, setChecked] = useState(false);
   const change = (next: Partial<Values>) => {
     setValues({ ...values, ...next });
     setError("");
@@ -67,6 +69,48 @@ export function StepFirstPrices({
   };
   const currency = fixedCurrency ?? values.currency.trim().toUpperCase();
   const symbol = currency ? currencySymbol(currency) : null;
+  const blank = (value: string | undefined) => !value?.trim();
+  // Each required answer: its key, whether it is empty, and its field's name.
+  const answers: [string, boolean, string][] = [
+    ...(values.mode === "occupancy"
+      ? Array.from({ length: room.capacity.adults }, (_, index): [string, boolean, string] => [
+          `occupancy:${index}`,
+          blank(values.occupancy[index]),
+          t(index ? "pricing.setup.occupancyPrice.other" : "pricing.setup.occupancyPrice.one", {
+            count: index + 1,
+          }),
+        ])
+      : [
+          [
+            "base",
+            blank(values.base),
+            t(
+              values.mode === "per_person" ? "pricing.setup.adultPrice" : "pricing.setup.roomPrice",
+            ),
+          ] as [string, boolean, string],
+        ]),
+    ["currency", !fixedCurrency && blank(values.currency), t("pricing.setup.currency")],
+    ["cancellation", !values.cancellation, t("pricing.steps.first.cancelTitle")],
+    [
+      "freeDays",
+      values.cancellation === "flexible" && blank(values.freeDays),
+      t("pricing.freeCancellationDays"),
+    ],
+    ["methods", !values.methods.length, t("pricing.paymentMethods.legend")],
+    ["minimum", blank(values.minimum), t("pricing.steps.rules.minimum")],
+    ["adultAge", blank(values.adultAge), t("pricing.setup.adultAge")],
+    ["childPrice", blank(values.childPrice), t("pricing.setup.childPrice")],
+    ["countChildren", !values.countChildren, t("pricing.setup.countChildren")],
+  ];
+  const missing = new Map(
+    checked
+      ? answers.filter(([, empty]) => empty).map(([key, , name]) => [key, name] as const)
+      : [],
+  );
+  /** A missing answer's ring; a field keeps it until it is filled in. */
+  const mark = (key: string) => (missing.has(key) ? " ring-2 ring-red-400" : "");
+  const group = (key: string) =>
+    missing.has(key) ? "w-fit rounded-xl ring-2 ring-red-400 ring-offset-4" : "";
   const field = (
     key: Field,
     label: string,
@@ -77,11 +121,12 @@ export function StepFirstPrices({
       {label}
       <input
         aria-label={label}
+        aria-invalid={missing.has(key) || undefined}
         inputMode={inputMode}
         disabled={disabled}
         value={values[key]}
         onChange={(event) => change({ [key]: event.target.value })}
-        className={`mt-1.5 block ${className} ${ui.field}`}
+        className={`mt-1.5 block ${className} ${ui.field}${mark(key)}`}
       />
     </label>
   );
@@ -101,6 +146,7 @@ export function StepFirstPrices({
   const show = (cause: unknown) => setError(errorText(cause, t, "pricing.setup.errorCheck"));
   function submit() {
     if (disabled) return;
+    setChecked(true);
     try {
       onCreate(build());
     } catch (cause) {
@@ -113,6 +159,7 @@ export function StepFirstPrices({
       try {
         return build();
       } catch (cause) {
+        setChecked(true);
         show(cause);
         throw cause;
       }
@@ -148,7 +195,9 @@ export function StepFirstPrices({
                     : "pricing.setup.roomPrice",
                 )}
               </span>
-              <span className="flex h-12 w-[200px] items-center gap-2 rounded-[10px] bg-gray-100 px-4 focus-within:ring-2 focus-within:ring-primary-500">
+              <span
+                className={`flex h-12 w-[200px] items-center gap-2 rounded-[10px] bg-gray-100 px-4 focus-within:ring-2 focus-within:ring-primary-500${mark("base")}`}
+              >
                 {symbol && (
                   <span aria-hidden="true" className="text-[16px] text-gray-500">
                     {symbol}
@@ -160,6 +209,7 @@ export function StepFirstPrices({
                       ? "pricing.setup.adultPrice"
                       : "pricing.setup.roomPrice",
                   )}
+                  aria-invalid={missing.has("base") || undefined}
                   inputMode="decimal"
                   disabled={disabled}
                   value={values.base}
@@ -180,6 +230,7 @@ export function StepFirstPrices({
                   {label}
                   <input
                     aria-label={label}
+                    aria-invalid={missing.has(`occupancy:${index}`) || undefined}
                     inputMode="decimal"
                     disabled={disabled}
                     value={values.occupancy[index] ?? ""}
@@ -190,7 +241,7 @@ export function StepFirstPrices({
                         ),
                       })
                     }
-                    className={`mt-1.5 block w-36 ${ui.field}`}
+                    className={`mt-1.5 block w-36 ${ui.field}${mark(`occupancy:${index}`)}`}
                   />
                 </label>
               );
@@ -211,10 +262,11 @@ export function StepFirstPrices({
             {t("pricing.setup.currency")}
             <input
               aria-label={t("pricing.setup.currency")}
+              aria-invalid={missing.has("currency") || undefined}
               disabled={disabled || !!fixedCurrency}
               value={fixedCurrency ?? values.currency}
               onChange={(event) => change({ currency: event.target.value })}
-              className={`mt-1.5 block w-28 ${ui.field}`}
+              className={`mt-1.5 block w-28 ${ui.field}${mark("currency")}`}
             />
           </label>
         </div>
@@ -270,7 +322,7 @@ export function StepFirstPrices({
         title={t("pricing.steps.first.cancelTitle")}
         hint={t("pricing.steps.first.cancelHint")}
       >
-        <div className="flex flex-wrap items-center gap-2">
+        <div className={`flex flex-wrap items-center gap-2 ${group("cancellation")}`}>
           {choice(values.cancellation === "flexible", t("pricing.steps.first.flexible"), () =>
             change({ cancellation: "flexible" }),
           )}
@@ -281,11 +333,13 @@ export function StepFirstPrices({
           )}
         </div>
         {values.cancellation === "flexible" && field("freeDays", t("pricing.freeCancellationDays"))}
-        <AcceptedPaymentMethods
-          methods={values.methods}
-          disabled={disabled}
-          onChange={(methods) => change({ methods })}
-        />
+        <div className={group("methods")}>
+          <AcceptedPaymentMethods
+            methods={values.methods}
+            disabled={disabled}
+            onChange={(methods) => change({ methods })}
+          />
+        </div>
       </StepCard>
       <StepCard
         number={3}
@@ -302,7 +356,7 @@ export function StepFirstPrices({
         </div>
         <fieldset className="space-y-2">
           <legend className={ui.fieldLabel}>{t("pricing.setup.countChildren")}</legend>
-          <div className="flex flex-wrap gap-2">
+          <div className={`flex flex-wrap gap-2 ${group("countChildren")}`}>
             {choice(values.countChildren === "yes", t("pricing.setup.yes"), () =>
               change({ countChildren: "yes" }),
             )}
@@ -312,10 +366,21 @@ export function StepFirstPrices({
           </div>
         </fieldset>
       </StepCard>
-      {error && (
-        <p role="alert" className={ui.errorText}>
-          {error}
-        </p>
+      {(error || missing.size > 0) && (
+        // What stopped Continue, and the answers still empty (this list shrinks as they are filled in).
+        <div role="alert" className={ui.errorText}>
+          {error && <p>{error}</p>}
+          {missing.size > 0 && (
+            <>
+              <p className={error ? "mt-1" : ""}>{t("pricing.steps.first.missing")}</p>
+              <ul className="mt-1 list-disc pl-5">
+                {Array.from(missing, ([key, name]) => (
+                  <li key={key}>{name}</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
       )}
       <div className="flex flex-wrap items-center justify-end gap-3">
         <p className={`mr-auto ${ui.help}`}>
