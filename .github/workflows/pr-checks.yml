@@ -30,6 +30,8 @@ jobs:
       run_frontend: ${{ steps.select.outputs.run_frontend }}
       run_first_party_auth: ${{ steps.select.outputs.run_first_party_auth }}
       run_pms_web_e2e: ${{ steps.select.outputs.run_pms_web_e2e }}
+      run_marketplace_web_e2e: ${{ steps.select.outputs.run_marketplace_web_e2e }}
+      run_booking_web_e2e: ${{ steps.select.outputs.run_booking_web_e2e }}
       run_api_unit: ${{ steps.select.outputs.run_api_unit }}
       run_api_postgres: ${{ steps.select.outputs.run_api_postgres }}
       run_setup_draft_reset_postgres: ${{ steps.select.outputs.run_setup_draft_reset_postgres }}
@@ -248,6 +250,164 @@ jobs:
           path: |
             playwright-report
             test-results
+          retention-days: 7
+
+  # The mocked marketplace-web Playwright project against a plain-port dev server, then the
+  # opt-in Airbnb import specs against a second dev server with the callback preview on. Every API
+  # call is mocked in the specs and tests/e2e/support.
+  marketplace_web_e2e:
+    name: Marketplace Web Browser Specs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [changes]
+    if: needs.changes.outputs.run_marketplace_web_e2e == 'true'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the packages marketplace-web imports
+        run: npm --workspace vayada-api run build:backend-packages
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the marketplace-web browser specs
+        run: |
+          # The dev server's env matches playwright.config.ts's marketplace-web webServer entry.
+          # Usage: start_dev_server LOG_NAME [EXTRA_ENV=value ...]
+          start_dev_server() {
+            dev_log="$RUNNER_TEMP/$1-dev.log"
+            shift
+            env "$@" NEXT_PUBLIC_BOOKING_ADMIN_URL=http://admin.booking.localhost:3003 \
+              NEXT_PUBLIC_PMS_URL=http://pms.localhost:3004 PORT=3000 \
+              npm run dev:marketplace-web > "$dev_log" 2>&1 &
+            dev_pid=$!
+            for attempt in $(seq 1 120); do
+              kill -0 "$dev_pid" 2>/dev/null || break
+              if curl --silent --fail --max-time 5 http://127.0.0.1:3000/login >/dev/null; then return 0; fi
+              sleep 2
+            done
+            tail -50 "$dev_log"
+            return 1
+          }
+          stop_dev_server() {
+            kill "$dev_pid" 2>/dev/null || true
+            # npm runs next as a child: wait until nothing listens on the port (curl exit 7).
+            for attempt in $(seq 1 30); do
+              status=0
+              curl --silent --max-time 2 http://127.0.0.1:3000/login >/dev/null || status=$?
+              [ "$status" = 7 ] && return 0
+              pkill -f "[n]ext dev" || true
+              sleep 1
+            done
+            echo "The marketplace-web dev server still holds port 3000."
+            return 1
+          }
+          trap 'stop_dev_server || true' EXIT
+          start_dev_server marketplace-web
+          npm run e2e:marketplace-web -- --workers=1 --retries=1
+          stop_dev_server
+          start_dev_server marketplace-web-airbnb AIRBNB_IMPORT_CALLBACK_ENABLED=true
+          E2E_AIRBNB_IMPORT_CALLBACK=1 npm run e2e:marketplace-web -- --workers=1 --retries=1 \
+            tests/e2e/marketplace-web/airbnb-import-start.spec.ts \
+            tests/e2e/marketplace-web/airbnb-import-return.spec.ts
+        env:
+          # Any non-empty CI makes playwright.config.ts use CI reporters; "false" keeps it from
+          # starting every app's webServer (that needs CI === "true").
+          CI: "false"
+          PLAYWRIGHT_HTML_OPEN: never
+          E2E_START_SERVERS: "0"
+          E2E_MARKETPLACE_BASE_URL: http://127.0.0.1:3000
+          # The dev server's test Maps key (playwright.config.ts); in the Playwright process it also
+          # makes setup-activation require the Google address search.
+          NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: e2e-google-places
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: marketplace-web-playwright-report
+          path: |
+            playwright-report
+            test-results
+            ${{ runner.temp }}/*-dev.log
+          retention-days: 7
+
+  # The mocked booking-web Playwright project against a plain-port dev server on the seeded
+  # hotel-alpenrose tenant host. The project runs with one worker (playwright.config.ts).
+  booking_web_e2e:
+    name: Booking Web Browser Specs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [changes]
+    if: needs.changes.outputs.run_booking_web_e2e == 'true'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the packages booking-web imports
+        run: npm --workspace vayada-api run build:backend-packages
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the booking-web browser specs
+        run: |
+          npm run dev:booking-web > "$RUNNER_TEMP/booking-web-dev.log" 2>&1 &
+          dev_pid=$!
+          trap 'kill "$dev_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 120); do
+            kill -0 "$dev_pid" 2>/dev/null || break
+            if curl --silent --fail --max-time 5 http://127.0.0.1:3002/api/health >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --silent --fail --max-time 10 http://127.0.0.1:3002/api/health >/dev/null || { tail -50 "$RUNNER_TEMP/booking-web-dev.log"; exit 1; }
+          npm run e2e:booking-web -- --retries=1
+        env:
+          # See pms_web_e2e: "false" keeps playwright.config.ts from starting every webServer.
+          CI: "false"
+          PLAYWRIGHT_HTML_OPEN: never
+          E2E_START_SERVERS: "0"
+          PORT: "3002"
+          E2E_BOOKING_BASE_URL: http://hotel-alpenrose.booking.localhost:3002
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: booking-web-playwright-report
+          path: |
+            playwright-report
+            test-results
+            ${{ runner.temp }}/*-dev.log
           retention-days: 7
 
   # Every unit suite under apps/api and the backend packages, with no database. Files that need
@@ -1072,6 +1232,8 @@ jobs:
       - frontend
       - first_party_auth
       - pms_web_e2e
+      - marketplace_web_e2e
+      - booking_web_e2e
       - api_unit
       - api_postgres
       - setup_draft_reset_postgres
