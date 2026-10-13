@@ -279,6 +279,86 @@ export function isMarketplaceAdminCreatorModerationReason(value: unknown): value
   return true;
 }
 
+export type MarketplaceAdminHotelSubmissionStatus =
+  | "pending"
+  | "changes_requested"
+  | "approved"
+  | "rejected"
+  | "withdrawn";
+
+export type MarketplaceAdminHotelSubmissionQueueItem = {
+  revisionId: string;
+  propertyId: string;
+  revisionNumber: number;
+  submittedAt: string;
+  displayName: string | null;
+  propertyType: string | null;
+  city: string | null;
+  countryCode: string | null;
+  previous: { status: MarketplaceAdminHotelSubmissionStatus; decidedAt: string | null } | null;
+  live: boolean;
+};
+
+export type MarketplaceAdminHotelSubmissionQueueResponse = {
+  contractVersion: "marketplace-hotel-submission-moderation.v1";
+  submissions: MarketplaceAdminHotelSubmissionQueueItem[];
+};
+
+export type MarketplaceAdminHotelSubmissionPreview = {
+  propertyId: string;
+  revisionId: string;
+  displayName: string;
+  propertyType: string;
+  shortDescription: string;
+  locality: { city: string; countryCode: string } | null;
+  media: {
+    mediaType: "logo" | "hero_image" | "gallery_image";
+    url: string;
+    altText: string | null;
+  }[];
+};
+
+export type MarketplaceAdminHotelSubmissionReview = {
+  revisionId: string;
+  propertyId: string;
+  revisionNumber: number;
+  status: MarketplaceAdminHotelSubmissionStatus;
+  submittedAt: string;
+  submittedByEmail: string | null;
+  preview: MarketplaceAdminHotelSubmissionPreview | null;
+  preferences: {
+    compensationTypes: string[];
+    contentPlatforms: string[];
+    contentTypes: string[];
+    availability: { mode: string; selectedMonths: number[] };
+  } | null;
+  history: {
+    revisionId: string;
+    revisionNumber: number;
+    status: MarketplaceAdminHotelSubmissionStatus;
+    submittedAt: string;
+    decidedAt: string | null;
+    note: string | null;
+  }[];
+  live: { revisionId: string; status: "active" | "suspended" | "deactivated" } | null;
+};
+
+export type MarketplaceAdminHotelSubmissionDecisionRequest =
+  | { decision: "approve" }
+  | { decision: "request_changes"; note: string };
+
+export type MarketplaceAdminHotelSubmissionDecisionResponse = {
+  contractVersion: "marketplace-hotel-submission-moderation.v1";
+  revisionId: string;
+  propertyId: string;
+  revisionNumber: number;
+  status: "approved" | "changes_requested";
+  note: string | null;
+  decidedByUserId: string;
+  decidedAt: string;
+  publicPath: string | null;
+};
+
 export type MarketplaceAdminDeleteOfferResponse = {
   contractVersion: MarketplaceAdminContractVersion;
   authorizationMode: MarketplaceAdminAuthorizationMode;
@@ -303,6 +383,11 @@ export const marketplaceAdminEndpoints = {
     `/api/marketplace/admin/users/${encodeURIComponent(userId)}/review/creator`,
   creatorModeration: (creatorProfileId: string) =>
     `/api/marketplace/admin/creators/${encodeURIComponent(creatorProfileId)}/moderation`,
+  hotelSubmissions: () => "/api/marketplace/admin/hotel-submissions",
+  hotelSubmission: (revisionId: string) =>
+    `/api/marketplace/admin/hotel-submissions/${encodeURIComponent(revisionId)}`,
+  hotelSubmissionDecision: (revisionId: string) =>
+    `/api/marketplace/admin/hotel-submissions/${encodeURIComponent(revisionId)}/decision`,
   updateOffer: (hotelUserId: string, offerId: string) =>
     `/api/marketplace/admin/users/${encodeURIComponent(
       hotelUserId,
@@ -386,6 +471,41 @@ export async function moderateMarketplaceAdminCreatorProfile(
     request,
     toIdempotencyOptions(idempotencyKey),
   );
+}
+
+export async function getMarketplaceAdminHotelSubmissions(): Promise<MarketplaceAdminHotelSubmissionQueueResponse> {
+  return vayadaApiClient.get<MarketplaceAdminHotelSubmissionQueueResponse>(
+    marketplaceAdminEndpoints.hotelSubmissions(),
+  );
+}
+
+export async function getMarketplaceAdminHotelSubmission(revisionId: string): Promise<{
+  contractVersion: "marketplace-hotel-submission-moderation.v1";
+  review: MarketplaceAdminHotelSubmissionReview;
+}> {
+  return vayadaApiClient.get(marketplaceAdminEndpoints.hotelSubmission(revisionId));
+}
+
+export async function decideMarketplaceAdminHotelSubmission(
+  revisionId: string,
+  request: MarketplaceAdminHotelSubmissionDecisionRequest,
+  idempotencyKey: string,
+): Promise<MarketplaceAdminHotelSubmissionDecisionResponse> {
+  return vayadaApiClient.post<MarketplaceAdminHotelSubmissionDecisionResponse>(
+    marketplaceAdminEndpoints.hotelSubmissionDecision(revisionId),
+    request,
+    toIdempotencyOptions(idempotencyKey),
+  );
+}
+
+export function buildMarketplaceAdminHotelSubmissionIdempotencyKey(input: {
+  revisionId: string;
+  decision: MarketplaceAdminHotelSubmissionDecisionRequest["decision"];
+  nonce: string;
+}): string {
+  return `marketplace.admin.hotel_submission.${input.decision}:${sanitizeIdempotencySegment(
+    input.revisionId,
+  )}:${sanitizeIdempotencySegment(input.nonce)}:v1`;
 }
 
 export function buildMarketplaceAdminCreatorModerationIdempotencyKey(input: {
