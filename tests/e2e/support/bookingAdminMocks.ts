@@ -643,6 +643,32 @@ export async function mockBookingAdminShellRoutes(
       },
     }),
   );
+  // An unanswered dashboard read logs an error, and Next's dev overlay badge then covers the
+  // sidebar's Collapse button. dashboard-funnel.spec registers its own funnel after these mocks.
+  await page.route("**/api/booking/properties/*/dashboard/conversion-funnel**", (route) =>
+    route.fulfill({
+      json: {
+        funnel: {
+          steps: [
+            "page_visit",
+            "rate_selected",
+            "details_completed",
+            "complete_booking_clicked",
+            "payment_authorized",
+            "booking_completed",
+          ].map((stage) => ({
+            stage,
+            count: 0,
+            previousCount: 0,
+            percentOfVisits: null,
+            conversionPercent: null,
+          })),
+          paymentMethods: [],
+          biggestDrop: null,
+        },
+      },
+    }),
+  );
 }
 
 export async function mockBookingAdminDesignSettings(

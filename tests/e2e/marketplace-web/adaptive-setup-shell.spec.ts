@@ -1,5 +1,8 @@
 import path from "node:path";
-import { mockAdaptiveSetupOwnerReads } from "../support/adaptiveSetupOwnerReads";
+import {
+  mockAdaptiveSetupOwnerReads,
+  ownerReadsExpectedMissingUrls,
+} from "../support/adaptiveSetupOwnerReads";
 import { mockSetupExitHandoff } from "../support/setupExitHandoff";
 import {
   createAdaptiveHotelSetupStatusMock,
@@ -8,7 +11,6 @@ import {
 import { expect, test, type Page, type Request, type BrowserContext } from "@playwright/test";
 import {
   createProductReadinessResult,
-  parseSavePropertySetupDraftRequest,
   READINESS_GROUP_IDS_BY_PRODUCT,
   type PropertySetupStepId,
   type SetupTrack,
@@ -66,76 +68,41 @@ test.describe("marketplace-web adaptive hotel setup shell", () => {
       },
     );
   });
-  test("saves an incomplete first-entry guest draft before Exit setup", async ({
+  // Guest rules are saved as confirmed owner choices, not as a setup draft (VAY-1543), so
+  // leaving with unsaved edits stops on the step instead of saving an incomplete draft.
+  test("Exit setup keeps unsaved guest rules on the step and saves no draft", async ({
     page,
     baseURL,
   }) => {
     await primeBrowserState(page);
     await mockAuthSession(page);
-    const model = createPropertySetupRouteMock({
-      propertyId,
-      selectedTracks: ["hotel_operations", "creator_marketplace"],
-      resumeStepId: "guest_experience",
+    await mockPropertySetupRoute(
+      page,
+      createPropertySetupRouteMock({
+        propertyId,
+        selectedTracks: ["hotel_operations", "creator_marketplace"],
+        resumeStepId: "guest_experience",
+      }),
+    );
+    const writes: string[] = [];
+    page.on("request", (request) => {
+      const { pathname } = new URL(request.url());
+      if (
+        request.method() !== "GET" &&
+        request.method() !== "OPTIONS" &&
+        /\/(?:setup-drafts\/|guest-(?:rules|terms)$|auth\/handoff\/create$)/.test(pathname)
+      ) {
+        writes.push(`${request.method()} ${pathname}`);
+      }
     });
-    await mockPropertySetupRoute(page, model);
-    // The live owner can omit optional arrival times on first entry.
-    await page.route("**/booking-guest-policy", async (route) => {
-      if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
-      await route.fulfill({
-        headers: corsHeaders(route),
-        json: {
-          contractVersion: "booking-guest-policy.v1",
-          organizationId,
-          propertyId,
-          supportedLanguages: ["en", "de", "fr", "es", "id", "nl"],
-          current: null,
-          composition: null,
-          draft: {
-            defaultGuestLanguage: null,
-            childrenEnabled: null,
-            adultAgeThreshold: null,
-            phoneRequired: true,
-            arrivalTimeEnabled: false,
-            specialRequestsEnabled: true,
-          },
-        },
-      });
-    });
-    const writes: unknown[] = [];
-    await page.route("**/setup-drafts/guest_experience", async (route) => {
-      if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
-      const request = route.request().postDataJSON();
-      expect(parseSavePropertySetupDraftRequest(request).ok).toBe(true);
-      writes.push(request);
-      await route.fulfill({
-        headers: corsHeaders(route),
-        json: {
-          contractVersion: "property-setup-draft.v1",
-          sessionId: model.sessionId,
-          stepId: "guest_experience",
-          selectedTracks: model.selectedTracks,
-          trackRevision: model.trackRevision,
-          sessionRevision: model.sessionRevision + 1,
-          draftRevision: 1,
-          retentionExpiresAt: "2026-10-01T00:00:00.000Z",
-          updatedAt: "2026-09-13T00:00:00.000Z",
-          replayed: false,
-        },
-      });
-    });
-    const destination = await mockSetupExitHandoff(page, baseURL, propertyId);
     await page.goto(setupUrl(baseURL, { step: "guest_experience" }));
     await page.getByRole("combobox", { name: /Guest language/ }).selectOption("en");
     await page.getByRole("button", { name: "Exit setup", exact: true }).click();
-    await expect(page).toHaveURL(destination);
-    expect(writes).toHaveLength(1);
-    expect(writes[0]).toMatchObject({
-      payload: {
-        "guest.default_language": "en",
-        "guest.children_enabled": null,
-        "guest.adult_age_threshold": null,
-      },
-    });
+
+    await expect(page.getByText("Save your guest rules before leaving this step.")).toBeVisible();
+    await expect(page).toHaveURL(/[?&]step=guest_experience(?:&|$)/);
+    await expect(page.getByRole("combobox", { name: /Guest language/ })).toHaveValue("en");
+    expect(writes).toEqual([]);
   });
   for (const tracks of [
     ["creator_marketplace"],
@@ -488,7 +455,9 @@ test.describe("marketplace-web adaptive hotel setup shell", () => {
       page,
       baseURL,
     }, testInfo) => {
-      const assertHealthy = watchPageHealth(page, testInfo);
+      const assertHealthy = watchPageHealth(page, testInfo, {
+        expectedMissingUrls: ownerReadsExpectedMissingUrls,
+      });
       const forbiddenCalls = watchForbiddenSetupCalls(page);
       await primeBrowserState(page);
       await mockAuthSession(page);
@@ -527,7 +496,9 @@ test.describe("marketplace-web adaptive hotel setup shell", () => {
     page,
     baseURL,
   }, testInfo) => {
-    const assertHealthy = watchPageHealth(page, testInfo);
+    const assertHealthy = watchPageHealth(page, testInfo, {
+      expectedMissingUrls: ownerReadsExpectedMissingUrls,
+    });
     await primeBrowserState(page);
     await mockAuthSession(page);
     const routeMock = await mockPropertySetupRoute(
@@ -553,7 +524,9 @@ test.describe("marketplace-web adaptive hotel setup shell", () => {
     page,
     baseURL,
   }, testInfo) => {
-    const assertHealthy = watchPageHealth(page, testInfo);
+    const assertHealthy = watchPageHealth(page, testInfo, {
+      expectedMissingUrls: ownerReadsExpectedMissingUrls,
+    });
     await primeBrowserState(page);
     await mockAuthSession(page);
     await mockPropertySetupRoute(
@@ -744,7 +717,9 @@ test.describe("marketplace-web adaptive hotel setup shell", () => {
     const retry = recovery.getByRole("button", { name: "Retry", exact: true });
     await retry.focus();
     await expect(retry).toBeFocused();
-    const assertHealthyAfterRecovery = watchPageHealth(page, testInfo);
+    const assertHealthyAfterRecovery = watchPageHealth(page, testInfo, {
+      expectedMissingUrls: ownerReadsExpectedMissingUrls,
+    });
     await page.keyboard.press("Enter");
 
     await expect(page.getByRole("heading", { name: "Review and launch", level: 1 })).toBeVisible();
@@ -783,7 +758,9 @@ test.describe("marketplace-web adaptive hotel setup shell", () => {
     const refresh = staleAlert.getByRole("button", { name: "Refresh", exact: true });
     await refresh.focus();
     await expect(refresh).toBeFocused();
-    const assertHealthyAfterRecovery = watchPageHealth(page, testInfo);
+    const assertHealthyAfterRecovery = watchPageHealth(page, testInfo, {
+      expectedMissingUrls: ownerReadsExpectedMissingUrls,
+    });
     await page.keyboard.press("Enter");
 
     await expect(
@@ -798,7 +775,9 @@ test.describe("marketplace-web adaptive hotel setup shell", () => {
     page,
     baseURL,
   }, testInfo) => {
-    const assertHealthy = watchPageHealth(page, testInfo);
+    const assertHealthy = watchPageHealth(page, testInfo, {
+      expectedMissingUrls: ownerReadsExpectedMissingUrls,
+    });
     await page.setViewportSize({ width: 390, height: 844 });
     await primeBrowserState(page);
     await mockAuthSession(page);

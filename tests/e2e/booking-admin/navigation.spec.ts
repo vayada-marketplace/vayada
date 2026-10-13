@@ -27,7 +27,8 @@ test.describe("booking-admin navigation", () => {
     await expect(navigation.getByRole("link")).toHaveText(NAV_LABELS);
     await expect(navigation.getByRole("link", { name: "Reservations" })).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Collapse" }).click();
+    // exact: in dev, Next's "Collapse issues badge" button also matches "Collapse".
+    await page.getByRole("button", { name: "Collapse", exact: true }).click();
     await expect(navigation.getByRole("link")).toHaveCount(NAV_LABELS.length);
     expect(
       await navigation.locator("a").evaluateAll((links) => links.map((link) => link.title)),

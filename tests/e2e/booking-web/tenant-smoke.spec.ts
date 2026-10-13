@@ -98,7 +98,8 @@ test.describe("booking-web tenant smoke", () => {
     await expect(logo).toBeVisible();
     expect((await logo.boundingBox())?.height).toBeLessThanOrEqual(32);
     await expect(nav.getByTestId("mobile-contact-button")).toBeVisible();
-    await expect(nav.getByRole("button", { name: "Refer", exact: true })).toBeVisible();
+    // The Refer button was retired with public affiliate enrolment (VAY-1499).
+    await expect(nav.getByRole("button", { name: /Refer/ })).toHaveCount(0);
     await expect(nav.getByRole("button", { name: "EN", exact: true })).toBeVisible();
     await expect(nav.getByRole("button", { name: "EUR", exact: true })).toBeVisible();
     expect((await nav.boundingBox())?.height).toBe(64);

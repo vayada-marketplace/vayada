@@ -160,6 +160,20 @@ E2E_PMS_BASE_URL=http://localhost:3004 npm run e2e:pms-web
 E2E_VAYADA_ADMIN_BASE_URL=http://localhost:3001 npm run e2e:vayada-admin
 ```
 
+When you start booking-admin yourself (dev or production build), give it the env from its
+`webServer` entry in `playwright.config.ts`. `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places` lets
+the nearby cards reach the specs' mocked Google SDK. `NEXT_PUBLIC_MARKETPLACE_URL` must equal the
+`E2E_MARKETPLACE_BASE_URL` you pass to Playwright, because `setup.spec.ts` intercepts the Marketplace
+redirect at that origin:
+
+```bash
+NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=true NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=e2e-google-places \
+  NEXT_PUBLIC_PMS_FRONTEND_URL=http://pms.localhost:3004 \
+  NEXT_PUBLIC_MARKETPLACE_URL=http://marketplace.localhost:3000 PORT=3003 npm run dev:booking-admin &
+E2E_BOOKING_ADMIN_BASE_URL=http://127.0.0.1:3003 \
+  E2E_MARKETPLACE_BASE_URL=http://marketplace.localhost:3000 npm run e2e:booking-admin
+```
+
 ## Booking Tenant Smoke
 
 The booking-web pilot verifies tenant host routing with the seeded `hotel-alpenrose` slug. It mocks the browser-side hotel, room, add-on, and tracking API calls so the smoke test can prove the storefront shell and host-derived slug without requiring a full local database bootstrap.

@@ -1,8 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import {
-  createSharedHotelSetupStatusMock,
-  sharedHotelSetupProduct,
-} from "../support/sharedHotelSetupMocks";
+import { createAdaptiveHotelSetupStatusMock } from "../support/sharedHotelSetupMocks";
 import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
 
 const PROPERTY_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -141,27 +138,16 @@ function handoffFragment(propertyId: string) {
 }
 
 function marketplaceStatus(propertyId: string) {
-  return createSharedHotelSetupStatusMock({
+  // The hand-off reads only the hotels the session can open (propertySelection).
+  return createAdaptiveHotelSetupStatusMock({
     entryProduct: "marketplace",
-    returnTo: "/marketplace",
     organizationId: ORGANIZATION_ID,
     organizationDisplayName: "Alpenrose Hotel Group",
+    selectedTracks: ["hotel_operations", "creator_marketplace"],
     propertyId,
     publicId: `public-${propertyId}`,
     propertyDisplayName: "Alpenrose",
     locationSummary: "Munich, DE",
-    products: {
-      booking: sharedHotelSetupProduct("booking", "active"),
-      pms: sharedHotelSetupProduct("pms", "active"),
-      marketplace: sharedHotelSetupProduct("marketplace", "selected_incomplete"),
-    },
-    nextAction: {
-      action: "complete_product_activation",
-      propertyId,
-      product: "marketplace",
-      returnTo: "/marketplace",
-      reasonCodes: ["entry_product_activation_incomplete"],
-    },
   });
 }
 

@@ -37,6 +37,9 @@ test("searches from every main page and opens Domain directly with the keyboard"
   await page.getByRole("option", { name: "Payment Settings" }).click();
   await expect(page).toHaveURL(/\/settings\/payments$/);
   await expect(page.getByRole("heading", { name: "Payments", exact: true })).toBeVisible();
+  // The click above left the pointer over the results; hovering an option makes it active,
+  // so move it away before testing keyboard selection.
+  await page.mouse.move(0, 0);
   await page.getByRole("combobox", { name: "Search pages and settings" }).fill("");
   await expect(page.getByRole("option").first()).toBeVisible();
   await page.keyboard.press("ArrowDown");
