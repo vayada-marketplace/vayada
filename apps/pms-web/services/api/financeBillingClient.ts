@@ -84,6 +84,16 @@ export async function activateFixedPlanByCard(): Promise<BillingOverview> {
   );
 }
 
+/** A first plan choice; switching from an active Fixed Plan uses switchToCommissionNow. */
+export async function selectCommissionPlan(): Promise<void> {
+  const propertyId = await resolveSelectedPmsPropertyId("choosing a billing plan");
+  await pmsOperationsClient.post(
+    endpoint(propertyId, "select-commission"),
+    command("commission-select"),
+    requestOptions,
+  );
+}
+
 export async function switchToCommissionNow(): Promise<void> {
   const propertyId = await resolveSelectedPmsPropertyId("switching billing plans");
   await pmsOperationsClient.post(
