@@ -261,13 +261,14 @@ async function mockPricingCalendarApis(page: Page) {
     },
   );
 
-  // The Guest experience step opens after the calendar with no saved guest rules.
+  // The Guest experience step opens after the calendar with no saved guest rules or terms.
   await page.route(
-    new RegExp(`/api/booking/properties/${propertyId}/guest-rules(?:\\?|$)`),
+    new RegExp(`/api/booking/properties/${propertyId}/guest-(?:rules|terms)(?:\\?|$)`),
     async (route) => {
       if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
       if (route.request().method() !== "GET") return unexpected(route, unexpectedCalls);
-      await ok(route, { current: null });
+      const terms = new URL(route.request().url()).pathname.endsWith("/guest-terms");
+      await ok(route, terms ? { termsText: null } : { current: null });
     },
   );
 
@@ -276,7 +277,10 @@ async function mockPricingCalendarApis(page: Page) {
     // The Guest experience step, opened after the calendar, reads its own booking rules.
     const nextStepRead =
       request.method() === "GET" &&
-      pathname === `/api/booking/properties/${propertyId}/guest-rules`;
+      [
+        `/api/booking/properties/${propertyId}/guest-rules`,
+        `/api/booking/properties/${propertyId}/guest-terms`,
+      ].includes(pathname);
     if (
       !nextStepRead &&
       (/^\/api\/hotel-setup\/(?:tracks|handoffs)(?:\/|$)/.test(pathname) ||

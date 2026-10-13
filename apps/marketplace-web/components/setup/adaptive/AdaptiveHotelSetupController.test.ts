@@ -23,6 +23,8 @@ type CapturedShellProps = {
 const mocks = vi.hoisted(() => ({
   guestLoad: vi.fn(),
   guestSave: vi.fn(),
+  guestLoadTerms: vi.fn(),
+  guestSaveTerms: vi.fn(),
   getRoute: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
@@ -36,7 +38,12 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/services/api/bookingGuestRulesClient", () => ({
-  bookingGuestRulesClient: { load: mocks.guestLoad, save: mocks.guestSave },
+  bookingGuestRulesClient: {
+    load: mocks.guestLoad,
+    save: mocks.guestSave,
+    loadTerms: mocks.guestLoadTerms,
+    saveTerms: mocks.guestSaveTerms,
+  },
   guestRulesErrorMessage: (error: Error) => error.message,
 }));
 import { GuestExperienceStep } from "./final/GuestExperienceStep";
@@ -68,6 +75,8 @@ describe("AdaptiveHotelSetupController", () => {
   beforeEach(() => {
     mocks.guestLoad.mockReset();
     mocks.guestSave.mockReset();
+    mocks.guestLoadTerms.mockReset().mockResolvedValue("Our terms.");
+    mocks.guestSaveTerms.mockReset();
     mocks.getRoute.mockReset();
     mocks.push.mockReset();
     mocks.replace.mockReset();

@@ -86,6 +86,50 @@ describe("protected Booking guest-policy routes", () => {
       expect((await app.inject({ method: "PUT", url, headers, payload })).statusCode).toBe(status);
     }
   });
+  it("routes guest-term reads/writes with authenticated scope and rejects other fields", async () => {
+    const store = { read: vi.fn(async () => null), save: vi.fn() };
+    const terms = {
+      read: vi.fn(async () => ({ termsText: null })),
+      save: vi.fn(async () => ({ termsText: "Our terms." })),
+    };
+    app = await routeApp(
+      routeApplication(revisionFixture(), compositionFixture(), firstVisitReadiness(), []),
+      {},
+      store,
+      terms,
+    );
+    const url = `/properties/${propertyId}/guest-terms`;
+    const headers = { authorization: "Bearer valid-token" };
+    expect((await app.inject({ method: "GET", url, headers })).json()).toEqual({ termsText: null });
+    const put = (payload: Record<string, unknown>) =>
+      app!.inject({ method: "PUT", url, headers, payload });
+    const saved = await put({ termsText: " Our terms. ", expectedTermsText: null });
+    expect(saved.json()).toEqual({ termsText: "Our terms." });
+    expect(terms.save).toHaveBeenCalledWith(
+      { propertyId, organizationId, actorUserId },
+      " Our terms. ",
+      null,
+    );
+    for (const payload of [
+      {},
+      { termsText: "x" },
+      { termsText: "x", expectedTermsText: null, propertyId },
+      { termsText: "x", expectedTermsText: null, organizationId },
+    ])
+      expect((await put(payload)).statusCode).toBe(400);
+    for (const [code, status] of [
+      ["invalid_guest_terms", 400],
+      ["guest_terms_denied", 403],
+      ["guest_terms_stale", 409],
+      ["toString", 500],
+      ["database unavailable", 500],
+    ] as const) {
+      terms.save.mockRejectedValueOnce(new Error(code));
+      expect((await put({ termsText: "x", expectedTermsText: null })).statusCode).toBe(status);
+    }
+    expect(store.read).not.toHaveBeenCalled();
+    expect(store.save).not.toHaveBeenCalled();
+  });
   it("denies guest-rule access before owner reads or writes across the authorization matrix", async () => {
     for (const auth of [
       { authenticated: false },
@@ -107,21 +151,29 @@ describe("protected Booking guest-policy routes", () => {
         read: vi.fn(async () => null),
         save: vi.fn(async () => ({ revision: propertyId, replayed: false })),
       };
+      const terms = {
+        read: vi.fn(async () => ({ termsText: null })),
+        save: vi.fn(async () => ({ termsText: null })),
+      };
       app = await routeApp(
         routeApplication(revisionFixture(), compositionFixture(), firstVisitReadiness(), []),
         auth,
         store,
+        terms,
       );
-      for (const method of ["GET", "PUT"] as const) {
-        const response = await app.inject({
-          method,
-          url: `/properties/${propertyId}/guest-rules`,
-          headers: { authorization: "Bearer valid-token" },
-        });
-        expect(response.statusCode).toBe(auth.authenticated === false ? 401 : 403);
-      }
+      for (const path of ["guest-rules", "guest-terms"])
+        for (const method of ["GET", "PUT"] as const) {
+          const response = await app.inject({
+            method,
+            url: `/properties/${propertyId}/${path}`,
+            headers: { authorization: "Bearer valid-token" },
+          });
+          expect(response.statusCode).toBe(auth.authenticated === false ? 401 : 403);
+        }
       expect(store.read).not.toHaveBeenCalled();
       expect(store.save).not.toHaveBeenCalled();
+      expect(terms.read).not.toHaveBeenCalled();
+      expect(terms.save).not.toHaveBeenCalled();
       await app.close();
       app = null;
     }
@@ -440,6 +492,7 @@ async function routeApp(
   application: BookingGuestPolicyApplicationPort,
   auth: AuthOptions = {},
   guestStore?: BookingGuestChoiceRoutesOptions["store"],
+  termsStore?: BookingGuestChoiceRoutesOptions["termsStore"],
 ) {
   const app = Fastify({ logger: false });
   app.decorateRequest("authContext", null);
@@ -484,6 +537,7 @@ async function routeApp(
   if (guestStore)
     await app.register(registerBookingGuestChoiceRoutes, {
       store: guestStore,
+      termsStore: termsStore ?? { read: vi.fn(), save: vi.fn() },
       propertyAccessRepository: propertyAccessRepository(auth.propertyScope),
     });
   return app;

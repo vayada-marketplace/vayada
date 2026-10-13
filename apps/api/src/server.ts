@@ -2,6 +2,7 @@ import { createChannexInboxProviderActions } from "./integrations/channexInboxPr
 import { createReplacementPricingPublicationReader } from "./domains/replacementPricingPublicationReader.js";
 import { createBookingGuestChoicePublicationReader } from "./domains/bookingGuestChoicePublication.js";
 import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore.js";
+import { createBookingGuestTermsStore } from "./domains/bookingGuestTermsStore.js";
 import { dispatchNextChannexClosedUpload } from "./domains/channexNextClosedUpload.js";
 import { advancePublishedChannexOfferCreates } from "./domains/channexPublishedOfferCreate.js";
 import { createPgChannexAriSchedule } from "./jobs/pmsChannexAriSchedule.js";
@@ -1831,6 +1832,9 @@ const app = buildApp({
   publicPageRefresh: refreshLivePublicPage,
   bookingGuestChoices: {
     store: bookingGuestChoiceStore,
+    termsStore: createBookingGuestTermsStore(propertySetupOwnerPool, (client) =>
+      createPgBookingGuestPolicyScopeAuthorizationPort({ pool: client }),
+    ),
     propertyAccessRepository: bookingPropertyAccessRepository,
   },
   bookingGuestPolicy: bookingGuestPolicyApplication
