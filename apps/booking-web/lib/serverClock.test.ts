@@ -1,9 +1,11 @@
+/** @vitest-environment jsdom */
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { deviceTimeOf, observeServerTime, resetServerClock, serverNow } from "./serverClock";
 
 const server = Date.parse("2026-10-13T10:45:49.224Z");
 
 beforeEach(() => {
+  sessionStorage.clear();
   resetServerClock();
   vi.useFakeTimers();
 });
@@ -38,4 +40,26 @@ it("keeps the closest estimate: a late or old timestamp can't pull it back", () 
   expect(serverNow()).toBe(server + 200);
   observeServerTime("not a time");
   expect(serverNow()).toBe(server + 200);
+});
+
+it("restores a recent estimate after a reload, but not an old one", () => {
+  vi.setSystemTime(server + 360_000);
+  observeServerTime(new Date(server).toISOString());
+  resetServerClock();
+  vi.advanceTimersByTime(60_000);
+  expect(serverNow()).toBe(server + 60_000);
+  resetServerClock();
+  vi.advanceTimersByTime(16 * 60_000);
+  expect(serverNow()).toBe(server + 360_000 + 17 * 60_000);
+});
+
+it("works without tab storage", () => {
+  vi.stubGlobal("sessionStorage", undefined);
+  try {
+    vi.setSystemTime(server - 1000);
+    observeServerTime(new Date(server).toISOString());
+    expect(serverNow()).toBe(server);
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

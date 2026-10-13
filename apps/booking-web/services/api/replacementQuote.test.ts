@@ -142,3 +142,18 @@ it.each([
   vi.setSystemTime(Date.parse(reply().expiresAt) + skew);
   await expect(requestReplacementQuote("hotel", request)).rejects.toThrow("expired");
 });
+
+it("keeps the server clock across a reload, so a replayed quote is judged on it (VAY-2134)", async () => {
+  // The device is 6 minutes ahead; a fresh quote calibrates the server clock.
+  vi.setSystemTime(Date.parse(reply().issuedAt) + 360_000);
+  await requestReplacementQuote("hotel", request);
+  // After a reload the same checkout key replays the quote with its original timestamps.
+  resetServerClock();
+  fetcher.mockImplementation(async () => new Response(JSON.stringify({ ...reply(), replayed: true }), { status: 200 }));
+  await expect(requestReplacementQuote("hotel", request)).resolves.toMatchObject({ replayed: true });
+  expect(sentKey(1)).toBe(sentKey(0));
+  // Without the saved estimate the device clock would call the quote expired.
+  sessionStorage.clear();
+  resetServerClock();
+  await expect(requestReplacementQuote("hotel", request)).rejects.toThrow("expired");
+});
