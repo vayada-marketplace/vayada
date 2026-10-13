@@ -10,7 +10,7 @@ const CONVERSATIONS = [
   { partner: "Negotiating Inn", status: "negotiating", tab: "Active" },
   { partner: "Accepted Resort", status: "accepted", tab: "Active" },
   { partner: "Active Villa", status: "active", tab: "Active" },
-  { partner: "Rejected Motel", status: "rejected", tab: "Active" },
+  { partner: "Rejected Motel", status: "rejected", tab: "Archived" },
   { partner: "Declined Hostel", status: "declined", tab: "Archived" },
 ];
 
@@ -65,6 +65,10 @@ test("gives each collaboration status badge in the chat list its own background"
         TRANSPARENT,
       );
       colors[status] = await badge.evaluate((element) => getComputedStyle(element).backgroundColor);
+    }
+    // After this tab's rows are visible, the other tab's rows must be hidden.
+    for (const { partner } of CONVERSATIONS.filter((conversation) => conversation.tab !== tab)) {
+      await expect(page.getByRole("heading", { name: partner, exact: true })).toHaveCount(0);
     }
   }
   const distinct = ["pending", "negotiating", "accepted", "declined"].map(
