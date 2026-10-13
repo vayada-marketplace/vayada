@@ -244,6 +244,18 @@ test("pr-checks.yml wires every job through the change detector and the aggregat
   assert.equal(verify.env.NEEDS, "${{ toJSON(needs) }}");
 });
 
+test("pr-checks.yml runs for main and every stacked base branch without per-ticket entries", () => {
+  const workflow = parse(
+    readFileSync(new URL("../../.github/workflows/pr-checks.yml", import.meta.url), "utf8"),
+  );
+  assert.deepEqual(workflow.on.pull_request.branches, [
+    "main",
+    "fm/**",
+    "fix/**",
+    "flamurmaliqi2811/**",
+  ]);
+});
+
 test("every API PostgreSQL step belongs to exactly one shard or runs in all of them", () => {
   const workflow = parse(
     readFileSync(new URL("../../.github/workflows/pr-checks.yml", import.meta.url), "utf8"),

@@ -2,61 +2,13 @@ name: PR Checks
 
 on:
   pull_request:
+    # Every base branch a stack sits on, so a new stack never edits this list. GitHub matches
+    # these against the PR's base branch; `**` also matches `/`.
     branches:
       - main
-      # VAY-2147 New room prices stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2147-*"
-      # VAY-2138 room addition tail stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2138-*"
-      # VAY-2139 bank transfer / PayPal launch stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2139-*"
-      # VAY-2136 payment-method writers stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2136-*"
-      # VAY-2137 setup payments-before-pricing stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2137-*"
-      # VAY-2129 save-is-enough stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2129-*"
-      # VAY-2125 step-by-step Prices tab stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2125-*"
-      # VAY-2123 sellable room offers stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2123-*"
-      # VAY-2122 Prices tab restyle stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2122-*"
-      # VAY-2114 guest currency stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2114-*"
-      # VAY-2074 stack bases (top of the list to avoid append conflicts).
-      - "fm/vay-2113-*"
-      - "fm/vay-2074-*"
-      - "fm/vay-2075-*"
-      - "fm/vay-1092-*"
-      - "fix/vay-965-*"
-      - "fm/vay-965-*"
-      - "fm/vay-1943-*"
-      - "fm/vay-2056-*"
-      - "fm/vay-1543-*"
-      - "fm/vay-2066-*"
-      - "fm/vay-2078-*"
-      - "fm/vay-2079-*"
-      - "fm/vay-2088-*"
-      - "fm/vay-2082-*"
-      - "fm/vay-2084-*"
-      - "fm/vay-2089-*"
-      - "fm/vay-2110-*"
-      - "fm/vay-2093-*"
-      - "fm/vay-2072-*"
-      - "fm/vay-2077-*"
-      - "fm/vay-2099-*"
-      - "fm/vay-2094-*"
-      - "fm/vay-2100-*"
-      - "fm/vay-2101-*"
-      - "fm/vay-2102-*"
-      - "fm/vay-2120-*"
-      - "fm/vay-2134-*"
-      - "fm/vay-2140-*"
-      - flamurmaliqi2811/vay-2044-expense-worker-runtime
-      - fm/vay-2041-worker-permissions
-      - fm/vay-2041-worker-source-permissions
-      - fm/vay-2041-worker-preflight
+      - "fm/**"
+      - "fix/**"
+      - "flamurmaliqi2811/**"
 
 concurrency:
   group: pr-checks-${{ github.event.pull_request.number || github.ref }}

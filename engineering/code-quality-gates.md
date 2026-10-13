@@ -102,7 +102,7 @@ Currently the PR workflow runs `npm run check:architecture-boundaries`, root fro
 
 ### Which PR checks run
 
-`.github/workflows/pr-checks.yml` has one required status, **Required Checks**. A `changes` job diffs the PR merge commit against the base branch and `scripts/ci/pr-checks.mjs select` maps each changed file to the jobs that cover it. The first matching rule wins per file and the PR runs the union:
+`.github/workflows/pr-checks.yml` runs for PRs into `main` and into any `fm/**`, `fix/**` or `flamurmaliqi2811/**` branch, so a stacked PR gets checks without editing the trigger list. It has one required status, **Required Checks**. A `changes` job diffs the PR merge commit against the base branch and `scripts/ci/pr-checks.mjs select` maps each changed file to the jobs that cover it. The first matching rule wins per file and the PR runs the union:
 
 | Changed path                                                                                            | Jobs                                                                                                                              |
 | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
