@@ -302,7 +302,7 @@ describe.skipIf(!database)("Marketplace hotel submission moderation", () => {
         "property_unavailable",
       ],
       [
-        `UPDATE marketplace.marketplace_hotel_profiles SET marketplace_profile_status='suspended' WHERE property_id=$1::uuid`,
+        `UPDATE marketplace.marketplace_hotel_profiles SET marketplace_profile_status='archived' WHERE property_id=$1::uuid`,
         `UPDATE marketplace.marketplace_hotel_profiles SET marketplace_profile_status='pending' WHERE property_id=$1::uuid`,
         "marketplace_profile_unavailable",
       ],
@@ -322,16 +322,50 @@ describe.skipIf(!database)("Marketplace hotel submission moderation", () => {
     }
     expect((await moderation.decide(decision(first.revisionId, "approve-1"))).ok).toBe(true);
 
+    expect(await submissions.getPublicHotel(propertyId, resolver)).not.toBeNull();
+  });
+
+  it("publishes again after a released property hold, but not during it", async () => {
+    const first = await submit("first");
+    expect((await moderation.decide(decision(first.revisionId, "approve-1"))).ok).toBe(true);
     const second = await submit("second");
+    // What a property hold leaves behind (platformPropertyLifecycleCommandRepository).
+    await admin.query(
+      `UPDATE hotel_catalog.properties SET lifecycle_status='suspended' WHERE id=$1::uuid`,
+      [propertyId],
+    );
     await admin.query(
       `UPDATE marketplace.active_hotel_submission_revisions SET activation_status='suspended' WHERE property_id=$1::uuid`,
       [propertyId],
     );
-    expect(await moderation.decide(decision(second.revisionId, "approve-2"))).toEqual({
+    await admin.query(
+      `UPDATE marketplace.marketplace_hotel_profiles SET marketplace_profile_status='suspended' WHERE property_id=$1::uuid`,
+      [propertyId],
+    );
+    expect(await submissions.getPublicHotel(propertyId, resolver)).toBeNull();
+    expect(await moderation.decide(decision(second.revisionId, "held"))).toEqual({
+      ok: false,
+      error: { code: "property_unavailable" },
+    });
+    // Releasing the hold restores only the property; approving the waiting submission publishes it.
+    await admin.query(
+      `UPDATE hotel_catalog.properties SET lifecycle_status='active' WHERE id=$1::uuid`,
+      [propertyId],
+    );
+    expect((await moderation.decide(decision(second.revisionId, "released"))).ok).toBe(true);
+    expect((await submissions.getPublicHotel(propertyId, resolver))?.revisionId).toBe(
+      second.revisionId,
+    );
+    expect(await profileStatus()).toBe("verified");
+    await admin.query(
+      `UPDATE marketplace.active_hotel_submission_revisions SET activation_status='deactivated' WHERE property_id=$1::uuid`,
+      [propertyId],
+    );
+    const third = await submit("third");
+    expect(await moderation.decide(decision(third.revisionId, "deactivated"))).toEqual({
       ok: false,
       error: { code: "marketplace_publication_suspended" },
     });
-    expect(await submissions.getPublicHotel(propertyId, resolver)).toBeNull();
   });
 
   it("lets only one of two simultaneous decisions win", async () => {

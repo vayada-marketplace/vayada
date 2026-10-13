@@ -42,6 +42,7 @@ export type MarketplaceHotelSubmissionModerationErrorCode =
   | "marketplace_publication_suspended"
   | "marketplace_entitlement_inactive"
   | "submission_snapshot_invalid"
+  | "submission_media_unavailable"
   | "idempotency_key_conflict";
 
 export type MarketplaceHotelSubmissionDecisionResult =
