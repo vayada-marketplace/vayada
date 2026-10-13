@@ -36,6 +36,6 @@ of guests and dates through the quote and booking request. Max quantity limits
 packages for all four models; existing requests default to one package. Lead time is descriptive copy,
 not an availability cutoff rule.
 
-The shared AddonEditor is used by Booking Flow settings and the exported
-AddonsStep. Current first-run onboarding no longer mounts AddonsStep; restoring
-an onboarding navigation step is a separate product decision.
+The shared AddonEditor is used by Booking Flow settings. The unused onboarding
+AddonsStep was deleted in VAY-2174; restoring an onboarding navigation step is a
+separate product decision.
