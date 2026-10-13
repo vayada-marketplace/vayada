@@ -55,8 +55,9 @@ type Kept = { room: Room; base: Room | null; terms: Record<string, PricingTermsI
 type NewRoom = { take: MutableRefObject<(() => NewRoomPrices | null) | null>; actions: ReactNode; locked: boolean; onPrices?: (entered: boolean) => void };
 /** One room's prices (the room page's Prices tab). Saving publishes the whole property, with every other room
  * exactly as read. `onAttention`: a leave confirmation is waiting, so the page should show this tab;
- * `onPublished`: prices were published; a new `refresh` reloads unless this room has unsaved work. */
-export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, roomTypeId: focus, onAttention, onPublished, refresh = 0, newRoom, kept, onHandover }: { client: Client; roomNames?: Record<string, string>; roomFacts?: Record<string, { size: number | null; photo: string | null }>; setup?: { propertyId: string; rooms: readonly SetupRoom[] }; roomTypeId: string; onAttention?: () => void; onPublished?: () => void; refresh?: number; newRoom?: NewRoom; kept?: KeptNewRoomPrices; onHandover?: (kept: boolean) => void }) {
+ * `onPublished`: prices were published; a new `refresh` reloads unless this room has unsaved work; `staleShown`: the
+ * page already warns that the prices need saving again, so the editor does not repeat it. */
+export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, roomTypeId: focus, onAttention, onPublished, refresh = 0, newRoom, kept, onHandover, staleShown = false }: { client: Client; roomNames?: Record<string, string>; roomFacts?: Record<string, { size: number | null; photo: string | null }>; setup?: { propertyId: string; rooms: readonly SetupRoom[] }; roomTypeId: string; onAttention?: () => void; onPublished?: () => void; refresh?: number; newRoom?: NewRoom; kept?: KeptNewRoomPrices; onHandover?: (kept: boolean) => void; staleShown?: boolean }) {
   const manualMethods = useLoadedPricingManualMethods(client);
   const onPrices = newRoom?.onPrices;
   const callbacks = useRef({ onAttention, onPublished, onPrices, onHandover });
@@ -284,7 +285,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   // Laid out as the Paper design's numbered steps; the other editors sit under More options. Cancel and Save at the bottom.
   return <PricingManualMethodsProvider value={manualMethods}><section className="space-y-4">
     {error !== null && <div role="alert" className={ui.errorBanner}>{pricingSaveError(error, t)}{retry && <p className="mt-2">{t("pricing.editor.retryHint")}</p>}{keepsOnReload && <p className="mt-2">{t("pricing.room.reloadKeeps")}</p>}</div>}
-    {notice && <p role="status" className={warning ? ui.warningBanner : ui.successBanner}>{t(notice)}</p>}
+    {notice && !(staleShown && notice === "pricing.room.noticeStale") && <p role="status" className={warning ? ui.warningBanner : ui.successBanner}>{t(notice)}</p>}
     {loading && <p role="status" className={ui.text}>{t("pricing.editor.loading")}</p>}
     {!loading && (display || empty) && !editing && <div className={setup && roomSetup.length ? "space-y-4" : ui.card}>
       <div className="flex items-center justify-between gap-3"><h2 className={ui.cardHeading}>{t("pricing.room.title")}</h2><span className={`text-[11px] font-medium ${newRoom ? "text-gray-500" : "text-amber-600"}`}>{t(newRoom ? "pricing.newRoom.optional" : "pricing.room.notConfigured")}</span></div>
@@ -347,15 +348,17 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
         {room.offers.map((offer, oi) => {
           const label = offerLabel(room.roomTypeId, ri, oi), other = oi !== mi;
           const blocker = deleteBlocker(room, offer.id);
+          // The main option's normal price is step 1; only an included-guest price has more to edit here.
+          const priceShown = other || offer.price.kind !== "independent" || offer.price.calendar.base?.mode === "included_guests";
           return <OptionWindow key={offer.id} open={optionOpen === offer.id} title={names[offer.id] ?? ""} closable={!pendingIn(windowKeys(oi)) && !(oi !== mi && badPrice(oi))} onClose={() => { setOptionOpen(null); setDeleteError(null); }}
             footer={deleteError && optionOpen === offer.id ? <p role="alert" className={ui.errorText}>{errorText(deleteError, t, "pricing.steps.delete.errorBlocked")}</p> : blocker ? <p className={ui.help}>{blocker.kind === "only" ? t("pricing.steps.delete.only") : t("pricing.steps.delete.dependents", { names: blocker.ids.map((id) => names[id] ?? "").join(", ") })}</p>
               : <button type="button" disabled={disabled || hasPendingEntries} onClick={() => setDeleting(offer.id)} className="text-[13px] font-medium text-red-600 hover:text-red-700 disabled:opacity-50">{t("pricing.steps.delete.button")}</button>}>
-            {group(t("pricing.steps.option.price"))}
+            {priceShown && group(t("pricing.steps.option.price"))}
             {other && offer.price.kind === "independent" && <div><p className={ui.label}>{t("pricing.editor.baseNightlyPrices", { currency: display.currency })}</p>
               <div className="grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-4">{baseAmounts(offer.price.calendar.base, t).map(([name, minor], ai) => <label key={ai} className="block"><span className="mb-1.5 block text-[11px] text-gray-500">{name}</span><input aria-label={`${label} ${name}`} inputMode="decimal" className={ui.input} disabled={disabled || exclusiveEditPending}
                 value={inputs[`${ri}:${oi}:${ai}`] ?? decimalAmount(minor, scale)} onChange={(event) => { setInputs({ ...inputs, [`${ri}:${oi}:${ai}`]: event.target.value }); setDirty(true); setNotice(""); }} /></label>)}</div>
               {!offer.price.calendar.base && <p className={ui.hint}>{t("pricing.editor.calendarOnly")}</p>}</div>}
-            <div className="space-y-2">
+            <div className="space-y-2" hidden={!priceShown}>
               <PricingIncludedAdjustments room={room} offer={offer} label={label} baseValue={inputs[`${ri}:${oi}:0`]} disabled={disabled} blocked={hasPendingEntries} onPending={pend(`included:${ri}:${oi}`)} onChange={changeRoom(ri)} />
               <PricingLinkedParent room={room} offer={offer} names={names} label={label} disabled={disabled} blocked={hasPendingEntries} onPending={pend(`parent:${ri}:${oi}`)} onChange={changeRoom(ri)} />
               <PricingLinkedAdjustment room={room} offer={offer} names={names} label={label} disabled={disabled || exclusiveEditPending} onPending={pend(`linked:${ri}:${oi}`)} onChange={changeRoom(ri)} />

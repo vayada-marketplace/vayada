@@ -14,6 +14,8 @@ export type BookingPublicationReview = {
   propertyId: string;
   activeContentRevisionId: string | null;
   publishedUrl: string | null;
+  /** Whether guests can open published pages yet; absent from older APIs means serving (VAY-2134). */
+  publicSite?: "serving" | "waiting_for_switch";
   latestOperation: BookingPublicationOperation | null;
   recoveredOperation: BookingPublicationOperation | null;
   readiness: ProductReadinessResult | ReadinessProviderFailure;
@@ -47,7 +49,11 @@ export function createBookingPublicationReviewClient(http: Http) {
         !raw ||
         raw.contractVersion !== "booking-publication-review.v1" ||
         raw.propertyId !== propertyId ||
-        !nullableUuid(raw.activeContentRevisionId)
+        !nullableUuid(raw.activeContentRevisionId) ||
+        (raw.publicSite !== undefined &&
+          raw.publicSite !== "serving" &&
+          raw.publicSite !== "waiting_for_switch") ||
+        (raw.publicSite === "waiting_for_switch" && raw.publishedUrl !== null)
       )
         throw invalid();
       if (raw.publishedUrl !== null) {

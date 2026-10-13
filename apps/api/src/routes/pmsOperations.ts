@@ -3019,9 +3019,12 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          items: canReadGuestContact
-            ? result.items
-            : result.items.map(redactReservationGuestContact),
+          items: result.items.map((item) =>
+            redactReservationFinance(
+              canReadGuestContact ? item : redactReservationGuestContact(item),
+              context,
+            ),
+          ),
           pagination: {
             total: result.total,
             limit: filters.value.limit,
@@ -3078,12 +3081,15 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          item: await withAdditionalGuestProjection(
-            item,
-            bookingGuestPiiPort,
-            propertyId,
-            guestBookingId,
-            canReadGuestContact,
+          item: redactReservationFinance(
+            await withAdditionalGuestProjection(
+              item,
+              bookingGuestPiiPort,
+              propertyId,
+              guestBookingId,
+              canReadGuestContact,
+            ),
+            context,
           ),
           sourceFreshness: {},
         } satisfies PmsReservationDetailResponse;
@@ -3209,7 +3215,7 @@ export async function registerPmsOperationsRoutes(
           propertyId,
           guestBookingId,
           additionalGuest: result.additionalGuest,
-          reservation,
+          reservation: redactReservationFinance(reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsAdditionalGuestCommandResponse;
       },
@@ -3255,7 +3261,7 @@ export async function registerPmsOperationsRoutes(
           propertyId,
           guestBookingId,
           additionalGuest: result.additionalGuest,
-          reservation,
+          reservation: redactReservationFinance(reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsAdditionalGuestCommandResponse;
       },
@@ -3301,7 +3307,7 @@ export async function registerPmsOperationsRoutes(
           propertyId,
           guestBookingId,
           guestId: result.guestId,
-          reservation,
+          reservation: redactReservationFinance(reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsAdditionalGuestDeleteResponse;
       },
@@ -3792,7 +3798,7 @@ export async function registerPmsOperationsRoutes(
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
           guestBookingId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           checkout: result.checkout,
           charges: result.charges,
           commandMeta: result.commandMeta,
@@ -4066,7 +4072,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4095,7 +4101,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4126,7 +4132,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4157,7 +4163,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4186,7 +4192,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4215,7 +4221,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4251,7 +4257,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4279,7 +4285,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4309,7 +4315,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -4340,7 +4346,7 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          reservation: result.reservation,
+          reservation: redactReservationFinance(result.reservation, request.authContext),
           commandMeta: result.commandMeta,
         } satisfies PmsOperationsCommandResponse;
       },
@@ -5966,6 +5972,18 @@ function applyAdditionalGuestProjection(
         canExposeGuestContact ? guest : redactGuestContact(guest),
       ) ?? [],
   };
+}
+
+// The Stripe fee, Vayada commission and net payout are Financials data, not desk data (VAY-2152).
+function redactReservationFinance<T extends PmsOperationalReservation>(
+  reservation: T,
+  context: RequestContext | null | undefined,
+): T {
+  if (!reservation.payment?.breakdown || (context && hasPermission(context, "pms.finance.read")))
+    return reservation;
+  const payment = { ...reservation.payment };
+  delete payment.breakdown;
+  return { ...reservation, payment };
 }
 
 function redactReservationGuestContact(
