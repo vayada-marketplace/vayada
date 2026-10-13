@@ -171,18 +171,23 @@ export function createPgMarketplaceHotelSubmissionModerationRepository(config: {
     async decide(
       command: MarketplaceHotelSubmissionDecisionCommand,
     ): Promise<MarketplaceHotelSubmissionDecisionResult> {
-      const client = await pool.connect();
-      try {
-        await client.query("BEGIN");
-        await client.query("SET LOCAL lock_timeout = '5s'");
-        const result = await decide(client, command);
-        await client.query("COMMIT");
-        return result;
-      } catch (error) {
-        await client.query("ROLLBACK").catch(() => {});
-        throw error;
-      } finally {
-        client.release();
+      // Hotel self-service locks the profile before the property; a crossing decision may be
+      // chosen as the deadlock victim. The whole transaction is safe to run again.
+      for (let attempt = 1; ; attempt += 1) {
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("SET LOCAL lock_timeout = '5s'");
+          const result = await decide(client, command);
+          await client.query("COMMIT");
+          return result;
+        } catch (error) {
+          await client.query("ROLLBACK").catch(() => {});
+          if (attempt < 2 && (error as { code?: string }).code === "40P01") continue;
+          throw error;
+        } finally {
+          client.release();
+        }
       }
     },
 
@@ -255,14 +260,18 @@ async function decide(
     // A new hotel may still be provisioning (VAY-2140 activates it); only a held property can't go public.
     if (["suspended", "retired"].includes(property.rows[0].lifecycleStatus))
       return failure("property_unavailable");
-    if (!["pending", "verified"].includes(profile.rows[0].status))
+    // Only a property hold suspends the Marketplace profile and its active revision
+    // (platformPropertyLifecycleCommandRepository removePublicExposure), and releasing the hold
+    // doesn't undo that. Once the property is no longer held, approving a fresh submission is
+    // the explicit decision to publish it again.
+    if (!["pending", "verified", "suspended"].includes(profile.rows[0].status))
       return failure("marketplace_profile_unavailable");
     const active = await client.query<{ status: string }>(
       `SELECT activation_status AS status FROM marketplace.active_hotel_submission_revisions
        WHERE property_id=$1::uuid FOR UPDATE`,
       [scope.propertyId],
     );
-    if (active.rows[0] && active.rows[0].status !== "active")
+    if (active.rows[0]?.status === "deactivated")
       return failure("marketplace_publication_suspended");
     if (!(await hasActiveMarketplaceEntitlement(client, scope)))
       return failure("marketplace_entitlement_inactive");
@@ -298,7 +307,7 @@ async function decide(
     await client.query(
       `UPDATE marketplace.marketplace_hotel_profiles
        SET marketplace_profile_status='verified', updated_at=$2::timestamptz
-       WHERE property_id=$1::uuid AND marketplace_profile_status='pending'`,
+       WHERE property_id=$1::uuid AND marketplace_profile_status IN ('pending', 'suspended')`,
       [scope.propertyId, at],
     );
   }
