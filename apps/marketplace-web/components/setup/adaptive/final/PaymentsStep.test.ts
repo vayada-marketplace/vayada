@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   saveCurrency: vi.fn(),
   handoff: vi.fn(),
   assign: vi.fn(),
+  plan: vi.fn(),
+  selectCommission: vi.fn(),
 }));
 vi.mock("@vayada/product-onboarding", async (original) => ({
   ...(await original<object>()),
@@ -44,6 +46,13 @@ vi.mock("@/services/api/propertySetupRouteClient", () => ({
 vi.mock("@/services/api/onboardingPricingClient", () => ({
   onboardingPricingApi: { load: mocks.currencies, saveCurrency: mocks.saveCurrency },
 }));
+vi.mock("@/services/api/hotelOperationsSetupClient", async (original) => ({
+  ...(await original<object>()),
+  hotelOperationsSetupApi: {
+    getPlanStatus: mocks.plan,
+    selectCommissionPlan: mocks.selectCommission,
+  },
+}));
 vi.mock("./StripeSetupControls", () => ({
   StripeSetupControls: (props: unknown) => createElement("stripe-controls", props as {}),
 }));
@@ -66,9 +75,22 @@ function snapshot(
     updatedAt: revision ? "2026-09-11T00:00:00.000Z" : null,
   });
 }
+const planStatus = (plan: "commission" | null) => ({
+  plan,
+  status: plan ?? "not_selected",
+  currency: "EUR",
+  activeRoomCount: 1,
+  amountMinor: 3_000,
+  fixedPlanAvailable: true,
+  checkoutPending: false,
+  updatedAt: "2026-10-13T00:00:00.000Z",
+});
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
+  // Most cases are about payment methods; the hotel already chose its plan.
+  mocks.plan.mockResolvedValue(planStatus("commission"));
+  mocks.selectCommission.mockResolvedValue(planStatus("commission"));
   mocks.load.mockResolvedValue(snapshot());
   mocks.manual.mockResolvedValue({ acceptanceEnabled: false, readyMethods: [] });
   mocks.draft.mockImplementation(async (_id, request) => ({
@@ -91,11 +113,13 @@ async function harness(
   paymentRevision = 0,
   pricingRevision = 1,
   state = "not_started",
+  blockers: string[] = [],
 ) {
   let leave!: () => Promise<void>;
   const step = {
     stepId: "payments",
     state,
+    blockers: blockers.map((code) => ({ code })),
     currentBaseRevisions: {
       "finance.payment_methods": `payment-methods:${paymentRevision}`,
       "pms.pricing_settings": `pricing:${pricingRevision}`,
@@ -215,7 +239,9 @@ it("saves the complete selection when an unsupported method was previously selec
   const h = await harness("hotel_operations", false, 1);
   expect(h.text()).toContain("Selection not saved");
   expect(h.button("Save and continue").props.disabled).toBe(true);
-  await act(async () => { await h.button("Save selection").props.onClick(); });
+  await act(async () => {
+    await h.button("Save selection").props.onClick();
+  });
   expect(mocks.save).toHaveBeenCalledWith(propertyId, {
     expectedPaymentMethodsRevision: 1,
     expectedPricingCurrencyRevision: 1,
@@ -549,4 +575,50 @@ it("lets a hotel switch to bank transfer only and continue once it counts (VAY-2
   expect(ready.props.saveAndContinue).toHaveBeenCalledOnce();
   expect(mocks.save).toHaveBeenCalledOnce();
   ready.view.unmount();
+});
+it("continues only after the hotel confirms its vayada plan (VAY-2171)", async () => {
+  mocks.plan.mockResolvedValue(planStatus(null));
+  const h = await harness();
+  // Commission is pre-selected but not chosen until the hotel confirms it.
+  const radios = h.view.root.findAll(
+    (node) => node.type === "input" && node.props.type === "radio",
+  );
+  expect(radios.map((node) => node.props.checked)).toEqual([true, false]);
+  await act(async () => h.check(0).props.onChange());
+  await act(async () => {
+    await h.button("Save selection").props.onClick();
+  });
+  expect(h.text()).toContain("Confirm your vayada plan to continue.");
+  expect(h.button("Save and continue").props.disabled).toBe(true);
+  await act(async () => {
+    await h.button("Confirm Commission plan").props.onClick();
+  });
+  expect(mocks.selectCommission).toHaveBeenCalledOnce();
+  expect(mocks.selectCommission.mock.calls[0]![0]).toBe(propertyId);
+  expect(h.props.refreshRoute).toHaveBeenCalled();
+  expect(h.text()).toContain("Commission plan confirmed. You pay 5% per direct booking.");
+  expect(h.text()).toContain("Commission · 5% per direct booking");
+  expect(h.text()).not.toContain("Confirm your vayada plan to continue.");
+  expect(h.button("Save and continue").props.disabled).toBe(false);
+  h.view.unmount();
+});
+it("lets a bank-transfer hotel continue while its Fixed Fee checkout is pending (VAY-2171)", async () => {
+  mocks.manual.mockResolvedValue({ acceptanceEnabled: true, readyMethods: ["bank_transfer"] });
+  mocks.load.mockResolvedValue(snapshot([], 2));
+  mocks.plan.mockResolvedValue({
+    ...planStatus(null),
+    status: "checkout_pending",
+    checkoutPending: true,
+  });
+  // The server blocks Payments on the plan alone until Stripe confirms the Fixed Fee.
+  const h = await harness("hotel_operations", false, 2, 1, "blocked", [
+    "billing_plan_not_selected",
+  ]);
+  expect(h.text()).not.toContain("Confirm your vayada plan to continue.");
+  expect(h.button("Continue").props.disabled).toBe(false);
+  await act(async () => {
+    await h.button("Continue").props.onClick();
+  });
+  expect(h.props.saveAndContinue).toHaveBeenCalledOnce();
+  h.view.unmount();
 });

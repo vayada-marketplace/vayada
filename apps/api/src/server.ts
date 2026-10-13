@@ -1509,6 +1509,10 @@ const propertySetupRouteStateReadPort = createPropertySetupRouteStateReadPort({
       finance: financePaymentReadinessReadModel,
       pricing: pmsPricingReadModel,
       manualPayments: financeManualPaymentReadiness,
+      billingPlan: createTargetFinanceBillingConfigReadPort({
+        connectionString: targetDatabaseUrl,
+        pool: propertySetupOwnerPool,
+      }),
     }),
     review_lifecycle: createPropertySetupReviewLifecycleStateProvider({
       marketplace: marketplaceSetupLifecycleStatusRepository,

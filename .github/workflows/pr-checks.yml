@@ -671,6 +671,7 @@ jobs:
           src/routes/bookingWebPublicAttribution.integration.test.ts
           src/jobs/financeSubscriptions.integration.test.ts
           src/financeBillingPlanOrdinary.integration.test.ts
+          src/financeBillingPlanParity.integration.test.ts
           src/platform/postgresRuntime.integration.test.ts
           src/platform/workosWebhooks.integration.test.ts
         env:
