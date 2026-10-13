@@ -179,6 +179,10 @@ function ScopedMarketplaceReviewCard({ propertyId, organizationId, onEdit }: Pro
     }
   }
   const latest = review?.latestSubmission;
+  const sentBack = latest?.status === "changes_requested" || latest?.status === "rejected";
+  const live = published && !pending && !unknown && !suspended && !sentBack;
+  // Say "live" only once the public page has answered; a failed read keeps the cautious copy.
+  const confirmedLive = live && !!review?.publishedUrl;
   const canSubmit =
     readable && !pending && !unknown && !suspended && review?.readiness.status === "ready";
   return (
@@ -206,7 +210,7 @@ function ScopedMarketplaceReviewCard({ propertyId, organizationId, onEdit }: Pro
                     : latest?.status === "rejected"
                       ? "Submission rejected"
                       : published
-                        ? "Published"
+                        ? "Live"
                         : latest?.status === "approved"
                           ? "Approved · awaiting publication"
                           : review.readiness.status === "ready"
@@ -217,8 +221,9 @@ function ScopedMarketplaceReviewCard({ propertyId, organizationId, onEdit }: Pro
           </p>
           {pending && (
             <p className="mt-2 text-sm text-gray-600">
-              Your profile was submitted. Vayada will review this saved version. You can leave setup
-              and return to check its status.
+              {published
+                ? "Your changes were submitted. Your current profile stays live until Vayada approves the update."
+                : "Your profile was submitted. Vayada will review this saved version. You can leave setup and return to check its status."}
             </p>
           )}
           {unknown && (
@@ -234,12 +239,24 @@ function ScopedMarketplaceReviewCard({ propertyId, organizationId, onEdit }: Pro
               does not restore publication.
             </p>
           )}
-          {(latest?.status === "changes_requested" || latest?.status === "rejected") && (
+          {latest && sentBack && (
             <div className="mt-3 text-sm">
-              <p>
-                {latest.decisionReason ??
-                  "Review your hotel profile and collaboration preferences before submitting again."}
-              </p>
+              {latest.decisionReason ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                  <p className="text-xs font-semibold text-amber-800">Note from Vayada</p>
+                  <p className="mt-1 text-amber-900">{latest.decisionReason}</p>
+                </div>
+              ) : (
+                <p>
+                  Review your hotel profile and collaboration preferences before submitting again.
+                </p>
+              )}
+              {!suspended && (
+                <p className="mt-2 text-gray-600">
+                  Update your hotel profile, then submit it again.
+                  {published ? " Your current profile stays live." : ""}
+                </p>
+              )}
               <button
                 type="button"
                 className="mt-2 font-semibold text-primary-700"
@@ -249,8 +266,14 @@ function ScopedMarketplaceReviewCard({ propertyId, organizationId, onEdit }: Pro
               </button>
             </div>
           )}
+          {confirmedLive && (
+            <p className="mt-2 text-sm text-gray-600">
+              Your hotel profile is live on the Creator Marketplace. Later changes need a new review
+              before they go live.
+            </p>
+          )}
           {published && (
-            <p className="mt-4 text-sm text-gray-600">
+            <p className="mt-3 text-sm text-gray-600">
               {review.publishedUrl ? (
                 <a
                   href={review.publishedUrl}
