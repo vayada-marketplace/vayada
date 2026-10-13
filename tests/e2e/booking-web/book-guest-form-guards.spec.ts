@@ -28,7 +28,9 @@ test("keeps Confirm booking off after the general online-booking error", async (
 test("keeps the hotel's guest rules in the form when the price expires", async ({
   page,
 }, testInfo) => {
-  await openQuote(page, { lifetimeMs: 8000 });
+  // A fake clock, so a slow worker can't run out of price time while the form is filled in.
+  await page.clock.install();
+  await openQuote(page);
   await acknowledge(page);
   await fillGuest(page);
   await page.getByLabel("Expected arrival time (optional)").fill("17:30");
@@ -37,7 +39,8 @@ test("keeps the hotel's guest rules in the form when the price expires", async (
     path: testInfo.outputPath("book-price-current-1440.png"),
     fullPage: true,
   });
-  await expect(page.getByText(/This price has expired/)).toBeVisible({ timeout: 15_000 });
+  await page.clock.fastForward("05:05");
+  await expect(page.getByText(/This price has expired/)).toBeVisible();
   await page.screenshot({
     path: testInfo.outputPath("book-price-expired-1440.png"),
     fullPage: true,
@@ -67,7 +70,7 @@ test("requires the phone while the guest rules can't be loaded", async ({ page }
   await expect(page.getByRole("button", { name: "Confirm booking" })).toBeDisabled();
 });
 
-async function openQuote(page: Page, { lifetimeMs = 300_000, rulesStatus = 200 } = {}) {
+async function openQuote(page: Page, { rulesStatus = 200 } = {}) {
   await mockBookingApis(page);
   await page.route("**/pricing-offers", (route) =>
     route.fulfill({
@@ -100,7 +103,7 @@ async function openQuote(page: Page, { lifetimeMs = 300_000, rulesStatus = 200 }
       paymentMethod,
       acceptanceMode: "instant",
       issuedAt: new Date(issuedAt).toISOString(),
-      expiresAt: new Date(issuedAt + 1000 + lifetimeMs).toISOString(),
+      expiresAt: new Date(issuedAt + 301_000).toISOString(),
       totalMinor: "24000",
       dueNowMinor: "0",
       dueLaterMinor: "24000",
