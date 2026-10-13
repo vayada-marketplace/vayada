@@ -41,4 +41,32 @@ test("wraps a long error detail when the hotel cannot load", async ({ page }, te
   await expect(heading).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("hotel-error.png") });
   await expect(heading.locator("..").locator("p.font-mono")).toHaveCSS("word-break", "break-all");
+  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+});
+
+// VAY-2189: a hotel without an online booking page answers 404. Retrying never helps,
+// so guests get a calm message instead of "Something went wrong" and a Retry button.
+test("says the booking page isn't online when the hotel answers 404", async ({
+  page,
+}, testInfo) => {
+  await routeHotel(page, (route) =>
+    route.fulfill({
+      status: 404,
+      json: {
+        statusCode: 404,
+        error: "Not Found",
+        message: "Booking Web hotel profile not found.",
+      },
+    }),
+  );
+
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "This booking page isn't online right now" }),
+  ).toBeVisible();
+  await expect(page.getByText("Please check back later.")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("hotel-not-online.png") });
+  await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
+  await expect(page.getByText("Something went wrong")).toHaveCount(0);
+  await expect(page.getByText("Booking Web hotel profile not found.")).toHaveCount(0);
 });

@@ -20,7 +20,9 @@ for (const mobile of [false, true]) {
     await expect(page.getByRole("heading", { name: "Hotel Alpenrose", level: 1 })).toBeVisible();
     await expect(page.getByRole("button").filter({ hasText: "13 adults" })).toBeVisible();
     await expect(page.getByRole("status")).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Unable to Load Hotel" })).toHaveCount(0);
+    await expect(
+      page.getByRole("heading", { name: /Unable to Load Hotel|isn't online/ }),
+    ).toHaveCount(0);
     const entry = page.getByRole("link", { name: "Choose rooms and get a price" });
     await expect(entry).toHaveAttribute(
       "href",

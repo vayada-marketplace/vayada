@@ -421,7 +421,9 @@
   "error": {
     "unableToLoad": "Hotel konnte nicht geladen werden",
     "tryAgainLater": "Die Hoteldaten konnten nicht abgerufen werden. Bitte versuchen Sie es später erneut.",
-    "retry": "Erneut versuchen"
+    "retry": "Erneut versuchen",
+    "notOnline": "Diese Buchungsseite ist gerade nicht online",
+    "checkBackLater": "Bitte schauen Sie später noch einmal vorbei."
   },
   "roomSelection": {
     "breakfastIncluded": "Frühstück inklusive",

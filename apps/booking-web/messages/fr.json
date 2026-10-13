@@ -417,7 +417,9 @@
   "error": {
     "unableToLoad": "Impossible de charger l'hôtel",
     "tryAgainLater": "Nous n'avons pas pu récupérer les données de l'hôtel. Veuillez réessayer plus tard.",
-    "retry": "Réessayer"
+    "retry": "Réessayer",
+    "notOnline": "Cette page de réservation n'est pas en ligne pour le moment",
+    "checkBackLater": "Veuillez revenir plus tard."
   },
   "roomSelection": {
     "breakfastIncluded": "Petit-déjeuner inclus",
