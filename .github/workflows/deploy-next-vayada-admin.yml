@@ -71,6 +71,7 @@ jobs:
             NEXT_PUBLIC_PMS_URL=${{ env.NEXT_API_URL }}
             NEXT_PUBLIC_PMS_API_URL=${{ env.NEXT_API_URL }}
             NEXT_PUBLIC_BOOKING_URL_TEMPLATE=https://{slug}.next-booking.vayada.com
+            NEXT_PUBLIC_MARKETPLACE_URL=https://next-marketplace.vayada.com
           tags: |
             ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:next-latest
             ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:next-${{ github.sha }}
