@@ -57,9 +57,11 @@ test("gives each collaboration status badge in the chat list its own background"
           path: testInfo.outputPath(`chat-status-${tab.toLowerCase()}.png`),
         });
       }
-      const color = await badge.evaluate((element) => getComputedStyle(element).backgroundColor);
-      expect(color, `${status} badge has a background`).not.toBe(TRANSPARENT);
-      colors.push(color);
+      await expect(badge, `${status} badge has a background`).not.toHaveCSS(
+        "background-color",
+        TRANSPARENT,
+      );
+      colors.push(await badge.evaluate((element) => getComputedStyle(element).backgroundColor));
     }
   }
   expect(new Set(colors).size, `status colours ${colors.join(" | ")}`).toBe(colors.length);
@@ -72,7 +74,14 @@ async function primeCreatorSession(page: Page) {
     localStorage.setItem("isLoggedIn", "true");
     localStorage.setItem(
       "vayada_cookie_consent",
-      JSON.stringify({ necessary: true, functional: true, analytics: false, marketing: false }),
+      // pending: false means the choice is already synced, so no consent POST is sent.
+      JSON.stringify({
+        necessary: true,
+        functional: true,
+        analytics: false,
+        marketing: false,
+        pending: false,
+      }),
     );
   });
   await page.route(/\/auth\/session(?:\?|$)/, async (route) => {

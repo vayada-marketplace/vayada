@@ -8,6 +8,7 @@ module.exports = {
     "./contexts/**/*.{js,ts,jsx,tsx}",
     "./i18n/**/*.{js,ts,jsx,tsx}",
     "./lib/**/*.{js,ts,jsx,tsx}",
+    "./services/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
     extend: {
