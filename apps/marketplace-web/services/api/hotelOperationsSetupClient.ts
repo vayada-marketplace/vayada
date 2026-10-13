@@ -98,9 +98,11 @@ export type FinancePlanStatus = {
     | "active"
     | "past_due"
     | "cancel_at_period_end";
-  currency: "EUR";
+  /** The hotel's pricing currency; the Fixed Fee is billed in it where available. */
+  currency: string;
   activeRoomCount: number;
   amountMinor: number;
+  fixedPlanAvailable: boolean;
   checkoutPending: boolean;
   updatedAt: string;
 };
