@@ -27,6 +27,10 @@ export type BookingPublicationRoutesOptions = {
   propertyAccessRepository: PropertyAccessRepository;
   repository: BookingPublicationCommandPort & Partial<BookingPublicationReviewReadPort>;
   readinessProvider: BookingPublicationReadinessProvider;
+  /** Whether the public booking site serves setup publications (PUBLIC_HOTEL_PROFILE_SOURCE=
+   * active_publication). Until it does, guests can't open a published page, so the review says
+   * so and gives no link (VAY-2134). */
+  publicSiteServesPublications: boolean;
 };
 type AuthorizedPublicationScope = {
   context: Awaited<ReturnType<typeof enforcePropertyRoutePolicy>>;
@@ -38,7 +42,12 @@ const HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
 export async function registerBookingPublicationRoutes(
   app: FastifyInstance,
-  { propertyAccessRepository, repository, readinessProvider }: BookingPublicationRoutesOptions,
+  {
+    propertyAccessRepository,
+    repository,
+    readinessProvider,
+    publicSiteServesPublications,
+  }: BookingPublicationRoutesOptions,
 ): Promise<void> {
   const authorizedScopes = new WeakMap<FastifyRequest, AuthorizedPublicationScope>();
   app.addHook("onClose", async () => repository.close?.());
@@ -131,9 +140,14 @@ export async function registerBookingPublicationRoutes(
           evaluatedAt: new Date().toISOString(),
         };
       }
-      return reply
-        .header("Cache-Control", "no-store")
-        .send({ contractVersion: "booking-publication-review.v1", ...review, readiness });
+      return reply.header("Cache-Control", "no-store").send({
+        contractVersion: "booking-publication-review.v1",
+        ...review,
+        ...(publicSiteServesPublications
+          ? { publicSite: "serving" }
+          : { publishedUrl: null, publicSite: "waiting_for_switch" }),
+        readiness,
+      });
     },
   );
 
