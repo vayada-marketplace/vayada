@@ -49,6 +49,7 @@ const WORLD_CENTER = { lat: 20, lng: 0 };
 const PINNED_ZOOM = 17;
 // Below this zoom one pixel spans too much ground for a hotel pin, so a click zooms in instead.
 export const MIN_PIN_ZOOM = 14;
+const AREA_ZOOM = 16;
 
 export type MapClickResult =
   | { action: "zoom"; center: MapPosition; zoom: number }
@@ -65,6 +66,7 @@ export default function GoogleAddressMap({
   apiKey,
   latitude,
   longitude,
+  focus,
   onPick,
   onUnavailable,
 }: {
@@ -72,6 +74,8 @@ export default function GoogleAddressMap({
   apiKey: string;
   latitude: number | null;
   longitude: number | null;
+  // Shows an area without pinning it, close enough that the next click places the pin.
+  focus?: MapPosition | null;
   // Makes the map interactive: placing the first pin by click (zoomed in) or dragging it.
   onPick?: (position: MapPosition) => void;
   onUnavailable?: () => void;
@@ -185,6 +189,10 @@ export default function GoogleAddressMap({
     map.setCenter(nextPosition ?? WORLD_CENTER);
     map.setZoom(nextPosition ? PINNED_ZOOM : 2);
   }, [interactive, latitude, longitude]);
+
+  useEffect(() => {
+    if (focus) mapRef.current?.moveCamera({ center: focus, zoom: AREA_ZOOM });
+  }, [focus]);
 
   return (
     <div

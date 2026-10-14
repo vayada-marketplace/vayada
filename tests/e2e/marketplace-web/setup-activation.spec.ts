@@ -303,6 +303,92 @@ test.describe("marketplace-web shared setup activation", () => {
     });
   });
 
+  test("finds a typed address on the map and says when Google can't place it", async ({
+    page,
+    baseURL,
+  }) => {
+    await mockGooglePlaces(page);
+    await primeBrowserState(page, true);
+    await mockAuthSession(page);
+    await mockSharedSetupStatus(page, hotelBasicsOpenStatus());
+    const profileWrites: unknown[] = [];
+    await mockMarketplaceProfileApis(
+      page,
+      [],
+      [{ mediaType: "logo", url: "https://media.example/alpenrose-logo.webp" }],
+      { profile: profileWrites },
+    );
+    await routeJson(page, /\/api\/hotel-setup\/property-types/, {
+      contractVersion: "adaptive-hotel-property-types.v1",
+      propertyTypes: [{ value: "hotel", label: "Hotel" }],
+    });
+    await mockPropertySetupRoute(
+      page,
+      createPropertySetupRouteMock({
+        propertyId,
+        selectedTracks: ["creator_marketplace"],
+        resumeStepId: "present_hotel",
+      }),
+    );
+    await page.goto(setupUrl(baseURL));
+    await page.getByRole("button", { name: "Continue" }).click();
+
+    const locationActionBar = page.getByTestId("location-action-bar");
+    const map = page.getByTestId("google-address-map-canvas");
+    const streetAddress = page.getByRole("textbox", { name: /Street address/ });
+    const findOnMap = locationActionBar.getByRole("button", { name: "Find on map" });
+    await expect(locationActionBar.getByText("Add your map pin")).toBeVisible();
+
+    await streetAddress.fill("Nowhere 1");
+    await findOnMap.click();
+    await expect(
+      locationActionBar.getByText(
+        "We couldn’t find this address on the map. Click your property on the map instead.",
+      ),
+    ).toBeVisible();
+    await expect(map).not.toHaveAttribute("data-marker", /./);
+
+    // A postcode-level match only shows the area: no pin until the hotel clicks its property.
+    await streetAddress.fill("Unknown Street 5");
+    await findOnMap.click();
+    await expect(
+      locationActionBar.getByText(
+        "Google found the area, not the exact address. Click your property on the map.",
+      ),
+    ).toBeVisible();
+    await expect(map).toHaveAttribute("data-center", "48.1351,11.582");
+    await expect(map).toHaveAttribute("data-zoom", "16");
+    await expect(map).not.toHaveAttribute("data-marker", /./);
+
+    await streetAddress.fill("Marienplatz 1");
+    await expect(
+      locationActionBar.getByText("Needed for the Marketplace. Click your property on the map."),
+    ).toBeVisible();
+    await findOnMap.click();
+    await expect(map).toHaveAttribute("data-marker", "48.1373932,11.5754485");
+    await expect(map).toHaveAttribute("data-center", "48.1373932,11.5754485");
+    await expect(map).toHaveAttribute("data-zoom", "17");
+    await expect(locationActionBar.getByText("Is this the right location?")).toBeVisible();
+    await expect(findOnMap).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => (window as { vayadaE2ePlaceQueries?: string[] }).vayadaE2ePlaceQueries,
+      ),
+    ).toEqual([
+      "Nowhere 1, 80331 Munich, Germany | location,types",
+      "Unknown Street 5, 80331 Munich, Germany | location,types",
+      "Marienplatz 1, 80331 Munich, Germany | location,types",
+    ]);
+
+    await locationActionBar.getByRole("button", { name: "Continue" }).click();
+    await expect(page.getByRole("heading", { name: "How can guests reach you?" })).toBeVisible();
+    await page.getByRole("button", { name: "Save and continue" }).click();
+    await expect.poll(() => profileWrites.length).toBe(1);
+    expect(profileWrites[0]).toMatchObject({
+      patch: { location: { latitude: 48.1373932, longitude: 11.5754485 } },
+    });
+  });
+
   const recoverFirstHotel = async (
     { page, baseURL }: { page: Page; baseURL?: string },
     adding = false,
@@ -902,6 +988,20 @@ async function mockGooglePlaces(
           customElements.define(elementName, PlaceAutocompleteElement);
         }
         const latLng = (lat, lng) => ({ lat: () => lat, lng: () => lng });
+        // Text search knows one made-up building and one postcode area; queries are kept.
+        window.vayadaE2ePlaceQueries = [];
+        const Place = {
+          searchByText: async ({ textQuery, fields }) => {
+            window.vayadaE2ePlaceQueries.push(textQuery + " | " + fields.join(","));
+            return {
+              places: textQuery.startsWith("Marienplatz 1,")
+                ? [{ location: latLng(48.1373932, 11.5754485), types: ["street_address"] }]
+                : textQuery.startsWith("Unknown Street 5,")
+                  ? [{ location: latLng(48.1351, 11.582), types: ["postal_code"] }]
+                  : [],
+            };
+          },
+        };
         class GoogleMap {
           constructor(element, options) {
             this.element = element;
@@ -968,7 +1068,7 @@ async function mockGooglePlaces(
                     ? { ControlPosition: { RIGHT_TOP: 3 } }
                     : ${placesUnavailable}
                     ? Promise.reject(new Error("Places is unavailable."))
-                    : { PlaceAutocompleteElement },
+                    : { PlaceAutocompleteElement, Place },
           },
         };
         window.__vayadaGoogleMapsReady?.();

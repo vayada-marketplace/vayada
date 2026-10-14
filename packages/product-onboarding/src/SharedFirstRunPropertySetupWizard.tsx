@@ -22,6 +22,7 @@ import {
   ExclamationCircleIcon,
   HomeModernIcon,
   KeyIcon,
+  MagnifyingGlassIcon,
   MapPinIcon,
   PhotoIcon,
   PlusIcon,
@@ -58,6 +59,7 @@ import { HotelIcon } from "./HotelIcon";
 import { LocalizationMultiSelect } from "./LocalizationMultiSelect";
 import GoogleAddressMap, { type MapPosition } from "./GoogleAddressMap";
 import GooglePlacesAddressField from "./GooglePlacesAddressField";
+import { findAddressOnMap } from "./googleMaps";
 import TimezoneField from "./TimezoneField";
 import { availableTimezones, defaultTimezoneForCountry, timezoneForCoordinates } from "./timezones";
 import {
@@ -161,6 +163,19 @@ function isValidIanaTimezone(value: string): boolean {
 function parsedCoordinate(value: string): number | null {
   const coordinate = value.trim() === "" ? Number.NaN : Number(value);
   return Number.isFinite(coordinate) ? coordinate : null;
+}
+
+function locationAddressLine(
+  location: Pick<ProfileDraft, "streetAddress" | "postalCode" | "city" | "countryCode">,
+): string {
+  const country = COUNTRY_OPTIONS.find((option) => option.code === location.countryCode);
+  return [
+    location.streetAddress,
+    [location.postalCode, location.city].filter(Boolean).join(" "),
+    country?.name ?? location.countryCode,
+  ]
+    .filter(Boolean)
+    .join(", ");
 }
 
 export function hasMapCoordinates(location: Pick<ProfileDraft, "latitude" | "longitude">): boolean {
@@ -1102,6 +1117,15 @@ function ProfileForm({
     longitude: draft.longitude?.toString() ?? "",
   });
   const coordinateTyped = useRef(false);
+  // "Find on map" lookup of the typed address; `address` ties a result to the text it searched.
+  const [mapLookup, setMapLookup] = useState<{
+    status: "searching" | "not_found" | "area";
+    address: string;
+  } | null>(null);
+  const [mapFocus, setMapFocus] = useState<MapPosition | null>(null);
+  const latestDraft = useRef(draft);
+  latestDraft.current = draft;
+  const mounted = useRef(false);
   const [logoPreviewUrl, setLogoPreviewUrl] = useState(draft.logoPublicUrl);
   const addressRevision = useRef(0);
   const addressFields = useRef<HTMLDivElement>(null);
@@ -1141,6 +1165,13 @@ function ProfileForm({
       setShowAddressFields(!(canConfirmLocation(draft) && hasMapCoordinates(draft)));
     }
   }, [draft, googleMapsApiKey, loading, mode]);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     // Typed coordinates keep their text (e.g. "48."); others (a pin, a cleared pin) replace it.
@@ -1204,19 +1235,49 @@ function ProfileForm({
       ...locationReset,
     });
   };
-  const pickMapLocation = ({ lat, lng }: MapPosition) => {
-    // The hotel's own pin wins over a Places selection still loading for the old address.
-    addressRevision.current += 1;
-    const followPin = timezoneWasAutoDetected.current || !draft.timezone.trim();
+  const placePin = ({ lat, lng }: MapPosition) => {
+    // Read the latest draft: a "Find on map" result lands after other edits may have happened.
+    const current = latestDraft.current;
+    const followPin = timezoneWasAutoDetected.current || !current.timezone.trim();
     if (followPin) timezoneWasAutoDetected.current = true;
     onChange({
-      ...draft,
+      ...current,
       latitude: lat,
       longitude: lng,
       ...(followPin ? { timezone: timezoneForCoordinates(lat, lng) } : {}),
     });
     // Like a picked suggestion: fold the fields away so the pin is in view to confirm.
-    if (canConfirmLocation(draft)) setShowAddressFields(false);
+    if (canConfirmLocation(current)) setShowAddressFields(false);
+  };
+  const pickMapLocation = (position: MapPosition) => {
+    // The hotel's own pin wins over a Places selection still loading for the old address.
+    addressRevision.current += 1;
+    placePin(position);
+  };
+  const findTypedAddressOnMap = async (address: string) => {
+    if (!googleMapsApiKey) return;
+    setMapLookup({ status: "searching", address });
+    let result: Awaited<ReturnType<typeof findAddressOnMap>> = null;
+    try {
+      result = await findAddressOnMap(googleMapsApiKey, address);
+    } catch {
+      // A failed lookup reads like a miss: the hotel can still click its property on the map.
+    }
+    if (!mounted.current) return;
+    // Only the address it searched, still without a pin: a newer edit, suggestion or pin wins.
+    const current = latestDraft.current;
+    if (locationAddressLine(current) !== address || hasMapCoordinates(current)) {
+      setMapLookup(null);
+      return;
+    }
+    if (result?.precise) {
+      setMapLookup(null);
+      placePin(result.position);
+      return;
+    }
+    // An area match (street, postcode, town) shows the area; the hotel clicks its property there.
+    if (result) setMapFocus(result.position);
+    setMapLookup({ status: result ? "area" : "not_found", address });
   };
   const changeStep = (nextStep: number) => {
     onFieldErrors({});
@@ -1252,12 +1313,12 @@ function ProfileForm({
           ...propertyTypeOptions,
         ]
       : propertyTypeOptions;
-  const country = COUNTRY_OPTIONS.find((option) => option.code === draft.countryCode);
-  const countryName = country?.name ?? draft.countryCode;
   const hasCompleteLocation = canConfirmLocation(draft);
   const hasMappedLocation = hasCompleteLocation && hasMapCoordinates(draft);
   // The pin can only be placed on a map, so without one there's nothing to prompt for.
   const showLocationSummary = Boolean(googleMapsApiKey) && hasCompleteLocation;
+  const addressLine = locationAddressLine(draft);
+  const lookupForAddress = mapLookup?.address === addressLine ? mapLookup.status : null;
   const profileProgress = (
     <div
       className={
@@ -1671,6 +1732,7 @@ function ProfileForm({
               apiKey={googleMapsApiKey}
               latitude={draft.latitude}
               longitude={draft.longitude}
+              focus={mapFocus}
               onPick={pickMapLocation}
               onUnavailable={() => setMapUnavailable(true)}
             />
@@ -1928,15 +1990,7 @@ function ProfileForm({
                       <p className="text-sm font-semibold text-gray-950">
                         {hasMappedLocation ? "Is this the right location?" : "Add your map pin"}
                       </p>
-                      <p className="mt-0.5 text-sm text-gray-700 sm:truncate">
-                        {[
-                          draft.streetAddress,
-                          [draft.postalCode, draft.city].filter(Boolean).join(" "),
-                          countryName,
-                        ]
-                          .filter(Boolean)
-                          .join(", ")}
-                      </p>
+                      <p className="mt-0.5 text-sm text-gray-700 sm:truncate">{addressLine}</p>
                       <p className="mt-0.5 text-xs text-gray-500">
                         {hasMappedLocation
                           ? [
@@ -1948,15 +2002,39 @@ function ProfileForm({
                               .join(" · ")
                           : mapUnavailable
                             ? "Needed for the Marketplace. Enter your property’s coordinates above."
-                            : addressSearchUnavailable
-                              ? "Needed for the Marketplace. Zoom in and click your property; drag the pin to adjust."
-                              : "Needed for the Marketplace. Click your property on the map."}
+                            : lookupForAddress === "not_found"
+                              ? "We couldn’t find this address on the map. Click your property on the map instead."
+                              : lookupForAddress === "area"
+                                ? "Google found the area, not the exact address. Click your property on the map."
+                                : addressSearchUnavailable
+                                  ? "Needed for the Marketplace. Zoom in and click your property; drag the pin to adjust."
+                                  : "Needed for the Marketplace. Click your property on the map."}
                       </p>
                     </div>
                   </div>
                 )}
 
-                <div className={showLocationSummary ? "mt-4 sm:ml-6 sm:mt-0 sm:shrink-0" : ""}>
+                <div
+                  className={
+                    showLocationSummary
+                      ? "mt-4 flex flex-col gap-3 sm:ml-6 sm:mt-0 sm:shrink-0 sm:flex-row sm:items-center"
+                      : ""
+                  }
+                >
+                  {showLocationSummary &&
+                    !hasMappedLocation &&
+                    !addressSearchUnavailable &&
+                    !mapUnavailable && (
+                      <button
+                        type="button"
+                        disabled={saving || mapLookup?.status === "searching"}
+                        onClick={() => void findTypedAddressOnMap(addressLine)}
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-5 py-3 text-sm font-semibold text-primary-700 transition hover:bg-primary-100 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                      >
+                        <MagnifyingGlassIcon className="h-4 w-4" aria-hidden="true" />
+                        {mapLookup?.status === "searching" ? "Finding…" : "Find on map"}
+                      </button>
+                    )}
                   {actions}
                 </div>
               </div>
