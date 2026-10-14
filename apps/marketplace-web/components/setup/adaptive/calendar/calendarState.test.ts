@@ -12,6 +12,7 @@ import {
   buildCalendarDraftResetRequest,
   buildCalendarProposal,
   calendarDraftManifestIsCurrent,
+  calendarDraftMatchesSaved,
   calendarDraftRevisionContext,
   hydrateCalendarDraft,
   mergeCalendarLocalInput,
@@ -214,6 +215,36 @@ describe("calendarState", () => {
     expect(firstVisit.draftRevision).toBe(0);
     expect(firstVisit.baseRevisions).toEqual(firstVisitStep.currentBaseRevisions);
     expect(calendarDraftManifestIsCurrent(firstVisitStep)).toBe(true);
+  });
+
+  it("recognizes a historical draft that only repeats the saved calendar (VAY-2150)", () => {
+    const saved = currentWorkspace();
+    const savedOnly = { ...workspace(saved), rooms: [workspace(null).rooms[0]!] };
+    const repeated = calendarDraft({
+      "rate.operating_periods": { mode: "year_round", periods: [] },
+      "rate.minimum_stay": 2,
+      "rate.initial_availability": { limits: { [roomA]: 3 }, confirmed: true },
+    });
+    expect(calendarDraftMatchesSaved(savedOnly, repeated)).toBe(true);
+    // Untouched fields fall back to the saved calendar too.
+    expect(calendarDraftMatchesSaved(savedOnly, calendarDraft({}))).toBe(true);
+    expect(
+      calendarDraftMatchesSaved(
+        savedOnly,
+        calendarDraft({ ...repeated.payload, "rate.minimum_stay": 3 }),
+      ),
+    ).toBe(false);
+    expect(
+      calendarDraftMatchesSaved(
+        savedOnly,
+        calendarDraft({
+          ...repeated.payload,
+          "rate.initial_availability": { limits: { [roomA]: 4 }, confirmed: true },
+        }),
+      ),
+    ).toBe(false);
+    expect(calendarDraftMatchesSaved(workspace(null), repeated)).toBe(false);
+    expect(calendarDraftMatchesSaved(savedOnly, null)).toBe(false);
   });
 
   it("retains local calendar input while rebinding rooms to latest owner revisions", () => {

@@ -216,6 +216,33 @@ export function calendarDraftManifestIsCurrent(
   return keys.every((key) => current[key] === historical[key]);
 }
 
+/**
+ * A historical draft that only repeats the saved calendar holds nothing to lose. Setup saves its
+ * draft just before the calendar itself, so every save leaves one behind (VAY-2150).
+ */
+export function calendarDraftMatchesSaved(
+  workspace: CalendarWorkspace,
+  routeDraft: PropertySetupRouteReadModel["steps"][number]["draft"],
+): boolean {
+  if (!workspace.current || routeDraft?.stepId !== "calendar") return false;
+  const values = (draft: CalendarDraft) =>
+    JSON.stringify([
+      draft.mode,
+      draft.mode === "recurring"
+        ? draft.periods.map(({ startsOn, endsOn }) => [startsOn, endsOn])
+        : [],
+      draft.defaultMinimumStayNights,
+      draft.rooms.map(({ roomTypeId, startingSellableLimit }) => [
+        roomTypeId,
+        startingSellableLimit,
+      ]),
+    ]);
+  return (
+    values(hydrateCalendarDraft(workspace, routeDraft)) ===
+    values(hydrateCalendarDraft(workspace, null))
+  );
+}
+
 export function buildCalendarDraftResetRequest(
   route: PropertySetupRouteReadModel,
   step: PropertySetupRouteReadModel["steps"][number],

@@ -5,6 +5,10 @@ import type {
   PropertySetupStepDraft,
   SavePropertySetupDraftReceipt,
 } from "@vayada/domain-hotels";
+import {
+  PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
+  createPmsOperatingCalendarSourceRevision,
+} from "@vayada/domain-pms";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CalendarWorkspace } from "./calendarState";
@@ -353,6 +357,114 @@ describe("CalendarStep", () => {
     renderer?.unmount();
   });
 
+  it("quietly clears a draft that only repeats the saved calendar (VAY-2150)", async () => {
+    const leftBySave = {
+      ...emptyCalendarDraft(),
+      payload: {
+        "rate.operating_periods": { mode: "year_round", periods: [] },
+        "rate.minimum_stay": 2,
+        "rate.initial_availability": { limits: { [roomTypeId]: 3 }, confirmed: true },
+      },
+    };
+    const route = calendarRoute(leftBySave);
+    route.steps[0]!.currentBaseRevisions = {
+      ...exactManifest,
+      "pms.operating_calendar": "calendar:1",
+    };
+    mocks.loadWorkspace.mockResolvedValue(savedWorkspace());
+    const controller = controllerContext(route);
+    let renderer: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      renderer = create(createElement(CalendarStep, controller.props));
+    });
+    await vi.waitFor(() => expect(mocks.resetDraft).toHaveBeenCalledOnce());
+    expect(mocks.resetDraft).toHaveBeenCalledWith(propertyId, {
+      sessionId: route.sessionId,
+      stepId: "calendar",
+      expectedTrackRevision: 3,
+      expectedSessionRevision: 7,
+      expectedDraftRevision: 4,
+      expectedBaseRevisions: exactManifest,
+    });
+    expect(controller.refreshRoute).toHaveBeenCalledOnce();
+    expect(JSON.stringify(renderer!.toJSON())).not.toContain("Calendar sources changed");
+    renderer?.unmount();
+  });
+
+  it("keeps input typed while the quiet reset runs", async () => {
+    const leftBySave = {
+      ...emptyCalendarDraft(),
+      payload: {
+        "rate.operating_periods": { mode: "year_round", periods: [] },
+        "rate.minimum_stay": 2,
+        "rate.initial_availability": { limits: { [roomTypeId]: 3 }, confirmed: true },
+      },
+    };
+    const route = calendarRoute(leftBySave);
+    route.steps[0]!.currentBaseRevisions = {
+      ...exactManifest,
+      "pms.operating_calendar": "calendar:1",
+    };
+    const latestRoute = calendarRoute(null);
+    latestRoute.sessionRevision = 8;
+    latestRoute.steps[0]!.currentBaseRevisions = route.steps[0]!.currentBaseRevisions;
+    mocks.loadWorkspace.mockResolvedValue(savedWorkspace());
+    let finishReset: (value: ReturnType<typeof resetReceipt>) => void = () => undefined;
+    mocks.resetDraft.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishReset = resolve;
+      }),
+    );
+    const controller = controllerContext(route);
+    let renderer: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      renderer = create(createElement(CalendarStep, controller.props));
+    });
+    await vi.waitFor(() => expect(mocks.resetDraft).toHaveBeenCalledOnce());
+    await act(async () => {
+      input(renderer!.root, "calendar-minimum-stay").props.onChange({ target: { value: "6" } });
+    });
+    await act(async () => {
+      finishReset(resetReceipt());
+    });
+    await act(async () => {
+      renderer!.update(
+        createElement(CalendarStep, {
+          ...controller.props,
+          route: latestRoute,
+          step: latestRoute.steps[0]!,
+        }),
+      );
+    });
+    await vi.waitFor(() => expect(mocks.loadWorkspace).toHaveBeenCalledTimes(2));
+    expect(input(renderer!.root, "calendar-minimum-stay").props.value).toBe("6");
+    renderer?.unmount();
+  });
+
+  it("still asks before discarding a draft with unsaved differences", async () => {
+    const edited = {
+      ...emptyCalendarDraft(),
+      payload: { "rate.minimum_stay": 5 },
+    };
+    const route = calendarRoute(edited);
+    route.steps[0]!.currentBaseRevisions = {
+      ...exactManifest,
+      "pms.operating_calendar": "calendar:1",
+    };
+    mocks.loadWorkspace.mockResolvedValue(savedWorkspace());
+    const controller = controllerContext(route);
+    let renderer: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      renderer = create(createElement(CalendarStep, controller.props));
+    });
+    expect(JSON.stringify(renderer!.toJSON())).toContain("Calendar sources changed");
+    expect(mocks.resetDraft).not.toHaveBeenCalled();
+    renderer?.unmount();
+  });
+
   it("keeps input until reset refreshes, then hydrates only fresh calendar data", async () => {
     const route = calendarRoute(emptyCalendarDraft());
     route.steps[0]!.currentBaseRevisions = {
@@ -509,6 +621,44 @@ function workspace(physicalCapacityCount = 4): CalendarWorkspace {
       },
     ],
     current: null,
+  };
+}
+
+function savedWorkspace(): CalendarWorkspace {
+  return {
+    ...workspace(),
+    current: {
+      sourceStatus: "current",
+      sourceConflicts: [],
+      configuration: {
+        contractVersion: PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
+        propertyId,
+        calendarRevision: 1,
+        source: createPmsOperatingCalendarSourceRevision(propertyId, 1),
+        sourceInputs: {
+          propertyProfile: {
+            ownerDomain: "hotel_catalog",
+            entityType: "property_profile",
+            entityId: propertyId,
+            revision: "profile:3",
+          },
+          propertyTimeZone: "Europe/Berlin" as never,
+          roomBindings: [
+            {
+              roomTypeId,
+              sourceRoomFactsRevision: 2,
+              sourceRoomUnitsRevision: 3,
+              physicalCapacityCount: 4,
+              startingSellableLimitCount: 3,
+            },
+          ],
+        },
+        schedule: { mode: "year_round", periods: [] },
+        defaultMinimumStayNights: 2,
+        createdAt: "2026-08-04T12:00:00.000Z",
+        updatedAt: "2026-08-04T12:00:00.000Z",
+      },
+    },
   };
 }
 

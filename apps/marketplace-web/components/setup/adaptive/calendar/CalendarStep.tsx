@@ -29,6 +29,7 @@ import {
   buildCalendarDraftRequest,
   buildCalendarProposal,
   calendarDraftManifestIsCurrent,
+  calendarDraftMatchesSaved,
   calendarDraftRevisionContext,
   hydrateCalendarDraft,
   mergeCalendarLocalInput,
@@ -284,39 +285,38 @@ export function CalendarStep(props: AdaptiveSetupStepComponentProps) {
     setAnnouncement(`${label} removed.`);
   };
 
-  const resetStaleDraft = useCallback(async () => {
-    if (resetting) return;
-    retainLocalOnReloadRef.current = true;
-    setResetting(true);
-    setSaveError(null);
-    commitImpactReview(null);
-    try {
-      const request = buildCalendarDraftResetRequest(route, step);
-      await propertySetupDraftResetApi.reset(propertyId, request);
-      discardHistoricalOnReloadRef.current = true;
-      retainLocalOnReloadRef.current = false;
-      await refreshRoute();
-      if (mounted.current) {
-        setAnnouncement("The stale saved draft was removed. Review the current calendar.");
+  const resetStaleDraft = useCallback(
+    async (options?: { quiet?: boolean }) => {
+      if (resetting) return;
+      retainLocalOnReloadRef.current = true;
+      setResetting(true);
+      setSaveError(null);
+      commitImpactReview(null);
+      try {
+        const request = buildCalendarDraftResetRequest(route, step);
+        await propertySetupDraftResetApi.reset(propertyId, request);
+        // Input typed while a quiet reset ran is kept and merged onto the fresh calendar.
+        if (!options?.quiet || !draftRef.current?.dirty) {
+          discardHistoricalOnReloadRef.current = true;
+          retainLocalOnReloadRef.current = false;
+        }
+        await refreshRoute();
+        if (mounted.current && !options?.quiet) {
+          setAnnouncement("The stale saved draft was removed. Review the current calendar.");
+        }
+      } catch (error) {
+        if (options?.quiet) throw error;
+        if (error instanceof PropertySetupDraftResetError && error.requiresRefresh) {
+          reportRevisionConflict(error.message);
+        }
+        if (mounted.current) setSaveError(errorMessage(error));
+        throw error;
+      } finally {
+        if (mounted.current) setResetting(false);
       }
-    } catch (error) {
-      if (error instanceof PropertySetupDraftResetError && error.requiresRefresh) {
-        reportRevisionConflict(error.message);
-      }
-      if (mounted.current) setSaveError(errorMessage(error));
-      throw error;
-    } finally {
-      if (mounted.current) setResetting(false);
-    }
-  }, [
-    commitImpactReview,
-    propertyId,
-    refreshRoute,
-    reportRevisionConflict,
-    resetting,
-    route,
-    step,
-  ]);
+    },
+    [commitImpactReview, propertyId, refreshRoute, reportRevisionConflict, resetting, route, step],
+  );
 
   const refreshCurrentCalendar = useCallback(async () => {
     if (!discardHistoricalOnReloadRef.current) retainLocalOnReloadRef.current = true;
@@ -330,6 +330,27 @@ export function CalendarStep(props: AdaptiveSetupStepComponentProps) {
       throw error;
     }
   }, [commitImpactReview, refreshRoute]);
+
+  // A draft left behind by an earlier save only repeats the saved calendar: clear it quietly,
+  // once per draft, instead of asking the hotel to start from the latest calendar (VAY-2150).
+  const healKey = `${route.sessionId ?? "none"}:${step.draft?.revision ?? 0}`;
+  const healAttemptRef = useRef<string | null>(null);
+  const [healFailedKey, setHealFailedKey] = useState<string | null>(null);
+  const healingSavedDraft =
+    manifestStale &&
+    healFailedKey !== healKey &&
+    !draft?.dirty &&
+    workspaceState === "ready" &&
+    workspace !== null &&
+    calendarDraftMatchesSaved(workspace, step.draft);
+  useEffect(() => {
+    if (!healingSavedDraft || healAttemptRef.current === healKey) return;
+    if (resetting || saving || previewing || applying || draftRef.current?.dirty) return;
+    healAttemptRef.current = healKey;
+    void resetStaleDraft({ quiet: true }).catch(() => {
+      if (mounted.current) setHealFailedKey(healKey);
+    });
+  }, [applying, healKey, healingSavedDraft, previewing, resetStaleDraft, resetting, saving]);
 
   const recoverStaleDraft = useCallback(
     () => (step.draft ? resetStaleDraft() : refreshCurrentCalendar()),
@@ -470,6 +491,7 @@ export function CalendarStep(props: AdaptiveSetupStepComponentProps) {
   }
 
   const sourceStale = workspace.current?.sourceStatus === "stale";
+  const staleNotice = manifestStale && !healingSavedDraft;
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-10">
@@ -500,7 +522,7 @@ export function CalendarStep(props: AdaptiveSetupStepComponentProps) {
         </div>
       )}
 
-      {manifestStale && (
+      {staleNotice && (
         <StatusPanel
           title="Calendar sources changed since this draft was started"
           message="The saved draft keeps its historical revision manifest and cannot overwrite newer calendar data. Starting from the current calendar discards the historical saved values after fresh owner data loads."
@@ -509,7 +531,7 @@ export function CalendarStep(props: AdaptiveSetupStepComponentProps) {
         />
       )}
 
-      {sourceStale && !manifestStale && (
+      {sourceStale && !staleNotice && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4" role="status">
           <div className="flex items-start gap-3">
             <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 text-amber-700" aria-hidden="true" />
