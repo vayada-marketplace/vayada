@@ -23,7 +23,66 @@ export type BookingPagePayment = {
   earliestArrival: ManualEarliestArrival;
   /** The hotel's own Terms & Conditions; null when it has none or they can't be read (VAY-2176). */
   termsText: string | null;
+  /** How the extras step shows each extra, by id (VAY-2195). */
+  extras: Record<string, ExtraDisplay>;
+  /** The hotel's "group add-ons by category" setting: the category filter on the extras step. */
+  groupExtras: boolean;
 };
+
+/** An extra's photo, words, category and display price from the hotel's checkout settings. The
+ * pricing-addons catalogue decides what can be booked and the quote decides the price. */
+export type ExtraDisplay = {
+  description: string;
+  image: string | null;
+  category: "dining" | "experience" | "transport" | "wellness" | "other";
+  price: number | null;
+};
+const categories: readonly ExtraDisplay["category"][] = [
+  "dining",
+  "experience",
+  "transport",
+  "wellness",
+  "other",
+];
+
+/** A photo next/image may load: this site's own files or the hosts next.config allows. */
+function photoUrl(url: unknown): url is string {
+  if (typeof url !== "string") return false;
+  if (/^\/[^/\\]/.test(url)) return true;
+  try {
+    const { protocol, hostname } = new URL(url);
+    return (
+      protocol === "https:" &&
+      (["api.vayada.com", "cdn.vayada.com", "images.vayada.com", "images.unsplash.com"].includes(
+        hostname,
+      ) ||
+        hostname.endsWith(".amazonaws.com"))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function extraDisplay(value: unknown): Record<string, ExtraDisplay> {
+  const result: Record<string, ExtraDisplay> = {};
+  if (!Array.isArray(value)) return result;
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const v = item as Record<string, unknown>;
+    if (typeof v.id !== "string") continue;
+    const image = [v.image, ...(Array.isArray(v.images) ? v.images : [])].find(photoUrl);
+    const price = typeof v.price === "string" ? Number(v.price) : v.price;
+    result[v.id] = {
+      description: typeof v.description === "string" ? v.description.trim() : "",
+      image: image ?? null,
+      category: categories.includes(v.category as ExtraDisplay["category"])
+        ? (v.category as ExtraDisplay["category"])
+        : "other",
+      price: typeof price === "number" && Number.isFinite(price) && price >= 0 ? price : null,
+    };
+  }
+  return result;
+}
 
 /** The payment methods /book offers, from the hotel's checkout settings (VAY-2139). */
 export async function getBookingPagePayment(
@@ -41,6 +100,8 @@ export async function getBookingPagePayment(
   }
   const terms = config?.termsText;
   const termsText = typeof terms === "string" && terms.trim() ? terms.trim() : null;
+  const extras = extraDisplay(config?.addons);
+  const groupExtras = config?.groupAddonsByCategory !== false;
   // An empty list means the hotel offers no method here; only a missing list means an older API.
   const methods = config?.bookingPagePaymentMethods;
   if (Array.isArray(methods) && methods.every(isPricingPaymentMethod))
@@ -48,8 +109,10 @@ export async function getBookingPagePayment(
       methods: Array.from(new Set(methods)),
       earliestArrival: earliestArrival(config?.manualPaymentEarliestArrival),
       termsText,
+      extras,
+      groupExtras,
     };
-  return { methods: [...DEFAULT_METHODS], earliestArrival: {}, termsText };
+  return { methods: [...DEFAULT_METHODS], earliestArrival: {}, termsText, extras, groupExtras };
 }
 
 export async function getBookingPagePaymentMethods(

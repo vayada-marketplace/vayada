@@ -2,6 +2,7 @@ import {
   pricingAmountStep,
   pricingCurrencyScale,
   type PublicBookingQuoteRequest,
+  type PublicOfferCancellation,
 } from "@vayada/domain-booking/replacement-pricing";
 import { bookingWebPublic } from "./client";
 
@@ -12,13 +13,73 @@ export const mealLabels = {
   full_board: "Full board",
   all_inclusive: "All inclusive",
 };
-export type PricingRoom = {
+/** An offer's cancellation as the public catalog states it (VAY-2188); absent from older APIs. */
+export type OfferCancellation = PublicOfferCancellation;
+export type PricingOffer = {
+  publicOfferKey: string;
+  currency: string;
+  mealPlan: keyof typeof mealLabels;
+  cancellation?: OfferCancellation;
+};
+/** Room content for the booking page's room cards (VAY-2190). Each field is absent when the
+ * API doesn't send it or sends it malformed; selection never depends on it. */
+export type RoomContent = {
+  description?: string;
+  occupancy?: { maxGuests: number; maxAdults: number; maxChildren: number };
+  images?: { url: string; alt: string | null }[];
+  size?: { value: number; unit: "sqm" };
+  category?: string;
+  amenities?: string[];
+};
+export type PricingRoom = RoomContent & {
   roomTypeId: string;
   name: string;
-  offers: { publicOfferKey: string; currency: string; mealPlan: keyof typeof mealLabels }[];
+  offers: PricingOffer[];
 };
 const object = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === "object" && !Array.isArray(v);
+const count = (v: unknown, min: number): v is number =>
+  Number.isSafeInteger(v) && (v as number) >= min;
+const text = (v: unknown): v is string => typeof v === "string" && !!v.trim();
+const photoUrl = (v: unknown): v is string => {
+  try {
+    return typeof v === "string" && ["https:", "http:"].includes(new URL(v).protocol);
+  } catch {
+    return false;
+  }
+};
+function roomContent(room: Record<string, unknown>): RoomContent {
+  const { occupancy: o, size, images, amenities } = room;
+  return {
+    ...(text(room.description) && { description: room.description }),
+    ...(object(o) &&
+      count(o.maxGuests, 1) &&
+      count(o.maxAdults, 1) &&
+      count(o.maxChildren, 0) && {
+        occupancy: { maxGuests: o.maxGuests, maxAdults: o.maxAdults, maxChildren: o.maxChildren },
+      }),
+    ...(Array.isArray(images) && {
+      images: images.flatMap((image) =>
+        object(image) && photoUrl(image.url)
+          ? [{ url: image.url, alt: text(image.alt) ? image.alt : null }]
+          : [],
+      ),
+    }),
+    ...(object(size) &&
+      typeof size.value === "number" &&
+      size.value > 0 &&
+      size.unit === "sqm" && { size: { value: size.value, unit: "sqm" as const } }),
+    ...(text(room.category) && { category: room.category }),
+    ...(Array.isArray(amenities) && { amenities: amenities.filter(text) }),
+  };
+}
+function offerCancellation(v: unknown): OfferCancellation | undefined {
+  if (!object(v)) return undefined;
+  if (v.kind === "non_refundable" || v.kind === "partial_refund") return { kind: v.kind };
+  if (v.kind === "free_until_days_before_arrival" && count(v.days, 0) && v.days <= 365)
+    return { kind: v.kind, days: v.days };
+  return undefined;
+}
 /** Read only the fields needed for selection; never manufacture a nightly price. */
 export async function getReplacementOffers(
   slug: string,
@@ -47,6 +108,7 @@ export async function getReplacementOffers(
       throw new Error("Room options could not be verified.");
     ids.add(room.roomTypeId);
     return {
+      ...roomContent(room),
       roomTypeId: room.roomTypeId,
       name: room.name,
       offers: room.offers.map((offer) => {
@@ -62,10 +124,12 @@ export async function getReplacementOffers(
         )
           throw new Error("Room options could not be verified.");
         keys.add(offer.publicOfferKey);
+        const cancellation = offerCancellation(offer.cancellation);
         return {
           publicOfferKey: offer.publicOfferKey,
           currency: offer.currency,
           mealPlan: offer.mealPlan as keyof typeof mealLabels,
+          ...(cancellation && { cancellation }),
         };
       }),
     };

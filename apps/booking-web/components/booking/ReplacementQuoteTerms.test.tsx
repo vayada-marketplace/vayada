@@ -219,3 +219,18 @@ it("shows the frozen confirmation mode and revokes agreement when it changes", (
     "This price preview does not reserve a room or take payment.",
   );
 });
+
+it("shows the tick first and the terms behind Read on the payment step (VAY-2195)", () => {
+  render({ compact: true });
+  expect(document.body.textContent).toContain(
+    "I have read the room and rate terms for this price.",
+  );
+  expect(document.body.textContent).not.toContain("Free cancellation deadline");
+  const read = () =>
+    Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.includes("terms"))!;
+  act(() => read().click());
+  expect(read().getAttribute("aria-expanded")).toBe("true");
+  expect(document.querySelectorAll('input[type="checkbox"]')).toHaveLength(1);
+  acknowledge();
+  expect(change).toHaveBeenLastCalledWith(expect.objectContaining({ quoteId: quote.quoteId }));
+});

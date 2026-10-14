@@ -32,6 +32,8 @@ export function useReplacementQuote(slug: string, request: PublicBookingQuoteReq
     attempt: number;
     quote?: PublicBookingQuote;
     error?: string;
+    /** The HTTP status of a refused quote, when the server answered. */
+    errorStatus?: number;
   }>();
   useEffect(() => {
     if (submitted !== identity) {
@@ -60,7 +62,12 @@ export function useReplacementQuote(slug: string, request: PublicBookingQuoteReq
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted)
-          setResult({ identity, attempt, error: replacementQuoteErrorMessage(error) });
+          setResult({
+            identity,
+            attempt,
+            error: replacementQuoteErrorMessage(error),
+            errorStatus: error instanceof ApiError ? error.status : undefined,
+          });
       });
     return () => {
       controller.abort();
@@ -73,6 +80,7 @@ export function useReplacementQuote(slug: string, request: PublicBookingQuoteReq
   return {
     quote: current?.quote,
     error: current?.error,
+    errorStatus: current?.errorStatus,
     loading: !!request && submitted === identity && attempt > 0 && !current,
     submit: () => {
       setSubmitted(identity);

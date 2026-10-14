@@ -134,12 +134,12 @@ const designTerms = {
 describe("option names and summaries", () => {
   it("names options from meal and cancellation, falls back to the meal plan, and numbers repeats", () => {
     expect(optionNames(design, designTerms, english)).toEqual({
-      flexible: "Flexible",
+      flexible: "Free cancellation",
       nonrefundable: "Non-refundable",
-      breakfast: "With breakfast",
+      breakfast: "Breakfast included",
     });
     expect(optionNames(design, { flexible: flexibleTerms() }, english)).toEqual({
-      flexible: "Flexible",
+      flexible: "Free cancellation",
       nonrefundable: "Option 2 · room only",
       breakfast: "Option 3 · breakfast",
     });
@@ -150,10 +150,25 @@ describe("option names and summaries", () => {
         english,
       ),
     ).toEqual({
-      flexible: "Flexible",
-      nonrefundable: "Flexible 2",
-      breakfast: "Non-refundable + breakfast",
+      flexible: "Free cancellation",
+      nonrefundable: "Free cancellation 2",
+      breakfast: "Breakfast included, non-refundable",
     });
+    // The booking page's words (VAY-2188): a partial refund isn't called free cancellation.
+    const partial = {
+      ...flexibleTerms(14),
+      cancellation: {
+        kind: "flexible",
+        terms: {
+          ...(flexibleTerms(14).cancellation as { terms: object }).terms,
+          flexibleCancellationType: "partial_refund",
+          partialRefundAmountPercent: 50,
+        },
+      },
+    } as OptionTerms;
+    expect(optionNames(design, { ...designTerms, flexible: partial }, english).flexible).toBe(
+      "Partial refund",
+    );
   });
   it("summarises meal, price relation and cancellation like the design's cards", () => {
     const names = optionNames(design, designTerms, english);

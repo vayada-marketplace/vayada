@@ -1112,6 +1112,12 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         expect(offered.rooms.map(({ roomTypeId }) => roomTypeId).sort()).toEqual(
           [gardenSuite, seaSuite].sort(),
         );
+        // The room cards' facts: size, category and amenities as public labels (VAY-2190).
+        expect(offered.rooms.find(({ roomTypeId }) => roomTypeId === seaSuite)).toMatchObject({
+          size: { value: 28, unit: "sqm" },
+          category: "Suite",
+          amenities: ["Wi-Fi", "Air conditioning"],
+        });
         expect(await read(`/hotels/${slug}/checkout-config`)).toMatchObject({
           termsText: "Our guest terms.",
         });
@@ -1154,6 +1160,33 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         };
         expect(quoted.lines.length).toBeGreaterThan(0);
         expect(quoted.lines.filter(({ kind }) => kind === "charge")).toEqual([]);
+        // The room cards' stay prices use the quote's calculation and issue no quote (VAY-2190).
+        const quoteRows = async () =>
+          (
+            await pool.query(
+              "SELECT count(*)::int AS n FROM booking.pricing_quotes WHERE property_id=$1",
+              [propertyId],
+            )
+          ).rows[0].n as number;
+        const quotesBefore = await quoteRows();
+        type StayPrices = {
+          rooms: {
+            roomTypeId: string;
+            roomCount: number;
+            availability: string;
+            offers: { status: string; totalMinor?: string }[];
+          }[];
+        };
+        const stayPrices = (await read(
+          `/hotels/${slug}/pricing-offers/stay-prices?checkIn=${localDate(30)}&checkOut=${localDate(32)}&adults=2`,
+        )) as StayPrices;
+        const seaPrices = stayPrices.rooms.find(({ roomTypeId }) => roomTypeId === seaSuite)!;
+        expect(seaPrices).toMatchObject({ roomCount: 1, availability: "available" });
+        expect(seaPrices.offers[0]).toMatchObject({
+          status: "priced",
+          totalMinor: quoted.totalMinor,
+        });
+        expect(await quoteRows()).toBe(quotesBefore);
         const disclosure = (await read(
           `/hotels/${slug}/bookings/quotes/${quoted.quoteId}/guest-disclosure`,
         )) as { quoteEvidenceId: string; guestPolicyEvidenceId: string };
