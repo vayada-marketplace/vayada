@@ -31,6 +31,7 @@ import ReplacementBookingConfirmation, {
 } from "@/components/booking/ReplacementBookingConfirmation";
 import type {
   PricingPaymentMethod,
+  PublicBookingQuote,
   PublicQuoteGuestDisclosure,
 } from "@vayada/domain-booking/replacement-pricing";
 import {
@@ -295,8 +296,12 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     currency: string;
   } | null>(null);
   const [priceChange, setPriceChange] = useState<string | null>(null);
+  // The last price for these choices: when an updated price is refused, the summary keeps it as
+  // expired instead of disappearing.
+  const [seenQuote, setSeenQuote] = useState<{ identity: string; quote: PublicBookingQuote }>();
   useEffect(() => {
     if (!quote) return;
+    setSeenQuote({ identity: requestIdentity, quote });
     const before = shownQuote.current;
     if (before && before.quoteId !== quote.quoteId)
       setPriceChange(
@@ -588,6 +593,19 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const missingDay = (addonCatalogue ?? []).find((addon) =>
     extras?.items.some((item) => item.id === addon.id && item.dates.length === 0),
   )?.name;
+  // A refused price can't be booked: the step says so above its buttons and doesn't continue.
+  const priceFailed = !!error && !quote;
+  const summaryQuote =
+    quote ?? (priceFailed && seenQuote?.identity === requestIdentity ? seenQuote.quote : undefined);
+  const priceNotice = error && !quote && (
+    <Notice
+      tone="red"
+      title={error}
+      action={{ label: "Choose another room", onClick: backToRooms }}
+    >
+      No booking was made and nothing was charged.
+    </Notice>
+  );
   const titles: Record<BookStep, string> = {
     rooms: "Choose rooms and get a price",
     extras: "Enhance Your Stay",
@@ -827,11 +845,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                   value={extras}
                   onChange={setExtras}
                   quote={quote}
+                  priceFailed={priceFailed}
                   formatMoney={money}
                   formatDay={formatDay}
                 />
               )
             )}
+            {priceNotice}
             <div className="flex flex-col-reverse md:flex-row md:items-center justify-between gap-4 border-t border-gray-200 pt-6">
               <button
                 type="button"
@@ -860,13 +880,17 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                   <p
                     role="status"
                     aria-label="Your stay total"
-                    className="text-lg font-bold text-gray-900"
+                    className={
+                      quote || loading ? "text-lg font-bold text-gray-900" : "text-sm text-gray-600"
+                    }
                   >
                     {quote
                       ? money(quote.totalMinor, quote.currency)
                       : loading
                         ? "Checking price…"
-                        : ""}
+                        : missingDay
+                          ? "Choose a day to see your total"
+                          : ""}
                     {quote && (
                       <span className="text-xs font-normal text-gray-500">
                         {" "}
@@ -879,7 +903,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                   <button
                     type="button"
                     className={button}
-                    disabled={addons === null}
+                    disabled={addons === null || priceFailed}
                     onClick={() => go(next)}
                   >
                     {addonError ? "Continue without extras" : "Continue to your details"}
@@ -912,6 +936,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 rules={knownRules}
               />
               {!quote && loading && <p role="status">Checking price…</p>}
+              {priceNotice}
               <div className="flex items-center justify-between gap-4 pt-2">
                 <button
                   type="button"
@@ -937,7 +962,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 <button
                   type="button"
                   className={button}
-                  disabled={!detailsComplete}
+                  disabled={!detailsComplete || priceFailed}
                   onClick={() => go(next)}
                 >
                   Continue to payment
@@ -964,15 +989,6 @@ function RoomQuoteForm({ slug }: { slug: string }) {
               )}
             </div>
           </div>
-        )}
-        {settled && (step === "extras" || step === "details") && error && !quote && (
-          <Notice
-            tone="red"
-            title={error}
-            action={{ label: "Choose another room", onClick: backToRooms }}
-          >
-            No booking was made and nothing was charged.
-          </Notice>
         )}
         {settled && step === "payment" && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1005,13 +1021,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                       Nothing was booked or charged. Your extras and details are kept.
                     </Notice>
                   ) : error && !attemptOpen ? (
-                    <Notice
-                      tone="red"
-                      title={error}
-                      action={{ label: "Choose another room", onClick: backToRooms }}
-                    >
-                      No booking was made and nothing was charged.
-                    </Notice>
+                    priceNotice
                   ) : priceChange && quote ? (
                     <Notice
                       tone="amber"
@@ -1079,10 +1089,10 @@ function RoomQuoteForm({ slug }: { slug: string }) {
               />
             </div>
             <div className="lg:col-span-1 space-y-4">
-              {quote && (
+              {summaryQuote && (
                 <StaySummary
                   title="Order Summary"
-                  quote={quote}
+                  quote={summaryQuote}
                   rooms={summaryRooms}
                   guests={guestsLine}
                   rules={knownRules}
@@ -1092,7 +1102,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                   expired={!!error}
                 />
               )}
-              {quote && <ApproximateAmountsNote currency={quote.currency} />}
+              {summaryQuote && <ApproximateAmountsNote currency={summaryQuote.currency} />}
             </div>
           </div>
         )}
