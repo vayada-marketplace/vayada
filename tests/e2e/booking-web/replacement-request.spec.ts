@@ -109,9 +109,6 @@ test("sends a pay-at-property booking request to a hotel that confirms each book
   await expect(page.getByText(/Your booking will need our approval/)).toBeVisible();
   await page.getByLabel("I have read the room and rate terms for this price preview.").check();
   await page.getByLabel("I have read the guest rules for this price preview.").check();
-  await page.getByLabel("First name").fill("Ada");
-  await page.getByLabel("Last name").fill("Lovelace");
-  await page.getByLabel("Email", { exact: true }).fill("ada@example.test");
   const send = page.getByRole("button", { name: "Send booking request" });
   await expect(send).toBeEnabled();
   await send.click();

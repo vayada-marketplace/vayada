@@ -7,6 +7,16 @@ import { useRouter } from "@/i18n/navigation";
 import BookShell from "./BookShell";
 import ReplacementGuestRules from "@/components/booking/ReplacementGuestRules";
 import ExtrasStep from "@/components/booking/ExtrasStep";
+import DetailsStep from "@/components/booking/DetailsStep";
+import StaySummary, { type SummaryRoom } from "@/components/booking/StaySummary";
+import {
+  acceptanceGuest,
+  emptyGuest,
+  guestComplete,
+  phoneRequired,
+  type GuestDetails,
+} from "@/components/booking/GuestDetailsForm";
+import { useQuoteGuestDisclosure } from "@/lib/hooks/useQuoteGuestDisclosure";
 import { getReplacementAddons, type PricingAddon } from "@/services/api/replacementAddons";
 import {
   buildReplacementAddonSelection,
@@ -15,8 +25,9 @@ import {
 } from "@/services/api/replacementAddonSelection";
 import ReplacementQuoteTerms from "@/components/booking/ReplacementQuoteTerms";
 import type { QuoteTermsAcknowledgement } from "@/components/booking/ReplacementQuoteTerms";
-import ReplacementBookingConfirmation from "@/components/booking/ReplacementBookingConfirmation";
-import BookingPageTerms from "@/components/booking/BookingPageTerms";
+import ReplacementBookingConfirmation, {
+  type BookingAttempt,
+} from "@/components/booking/ReplacementBookingConfirmation";
 import type {
   PricingPaymentMethod,
   PublicQuoteGuestDisclosure,
@@ -53,6 +64,17 @@ import {
 
 const field = "block w-full rounded-lg border border-gray-300 p-3 mt-1 text-gray-900 bg-white";
 const button = "rounded-full bg-primary-600 px-5 py-3 font-semibold text-white disabled:opacity-40";
+/** "Fri, 6 Nov 2026" for a stay date (YYYY-MM-DD). */
+const formatStayDate = (date: string) =>
+  /^\d{4}-\d{2}-\d{2}$/.test(date)
+    ? new Date(`${date}T00:00:00Z`).toLocaleDateString("en-GB", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC",
+      })
+    : date;
 /** "Fri", "6 Nov" for a stay date (YYYY-MM-DD). */
 const formatDay = (date: string) => {
   const day = new Date(`${date}T00:00:00Z`);
@@ -84,7 +106,6 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const [termsAcknowledgement, setTermsAcknowledgement] =
     useState<QuoteTermsAcknowledgement | null>(null);
   const [guestDisclosure, setGuestDisclosure] = useState<PublicQuoteGuestDisclosure | null>(null);
-  const [guestRules, setGuestRules] = useState<PublicQuoteGuestDisclosure | null>(null);
   const [rooms, setRooms] = useState<PricingRoom[] | null>(null);
   const [catalogError, setCatalogError] = useState(false);
   const [reload, setReload] = useState(0);
@@ -114,6 +135,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   // Set once the first page decided where a room card's hand-off opens.
   const handedOver = useRef(false);
   const [payment, setPayment] = useState<"" | PricingPaymentMethod>("");
+  const [guest, setGuest] = useState<GuestDetails>(emptyGuest);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     // VAY-2195: a refresh or Back keeps what this tab chose for the same hand-off.
@@ -128,6 +150,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       setAllocationRevision(draft.allocationRevision);
       setExtras(draft.extras);
       setPayment(draft.payment);
+      setGuest(draft.guest);
       return;
     }
     setCheckIn(params.get("checkIn") ?? "");
@@ -276,13 +299,46 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       (addon) => !baseRequest || addon.currency === baseRequest.selection.currency,
     );
   const steps = bookSteps(extrasOffered);
+  // The guest rules of the price on screen; the last ones known keep the details form steady while
+  // a new price's rules load (VAY-2163).
+  const guestRulesQuote = useQuoteGuestDisclosure(
+    slug,
+    wanted === "details" || wanted === "payment" ? quote : undefined,
+  );
+  const [knownRules, setKnownRules] = useState<PublicQuoteGuestDisclosure["choices"] | null>(null);
+  useEffect(() => {
+    if (guestRulesQuote.disclosure) setKnownRules(guestRulesQuote.disclosure.choices);
+  }, [guestRulesQuote.disclosure]);
+  const detailsComplete = guestComplete(guest, knownRules);
+  // Booking sends the details under this price's own rules (the ticked ones, or as loaded);
+  // until they are known the phone is required (VAY-2163).
+  const rulesForQuote =
+    (guestDisclosure?.quoteId === quote?.quoteId ? guestDisclosure?.choices : undefined) ??
+    (guestRulesQuote.disclosure?.quoteId === quote?.quoteId
+      ? guestRulesQuote.disclosure?.choices
+      : undefined) ??
+    null;
+  // While the rules load (after a refresh), a blank phone doesn't send the guest back a step;
+  // booking itself still waits for this price's rules.
+  const detailsReady =
+    detailsComplete ||
+    (!knownRules &&
+      guestComplete(guest, { phoneRequired: false } as PublicQuoteGuestDisclosure["choices"]));
+  // A booking attempt whose outcome isn't known yet: the guest stays on the payment step with the
+  // same price, way to pay and details until it is settled, so a retry can't book twice.
+  const [attempt, setAttempt] = useState<BookingAttempt | null>(null);
+  const attemptOpen = !!attempt;
   const settled =
     entry !== null &&
     pagePaymentLoaded &&
     (rooms !== null || catalogError) &&
     (addonCatalogue !== null || addonError);
   const step = settled
-    ? reachableStep(wanted, steps, { rooms: roomsComplete, extras: addons !== null })
+    ? reachableStep(wanted, steps, {
+        rooms: roomsComplete,
+        extras: addons !== null,
+        details: detailsReady,
+      })
     : wanted;
   // The steps this tab moved forward from, so in-page Back returns through the browser history.
   const forwardFrom = useRef<BookStep[]>([]);
@@ -306,10 +362,11 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const next = steps[steps.indexOf(step) + 1] ?? "payment";
   const previous = steps[steps.indexOf(step) - 1] ?? "rooms";
   useEffect(() => {
-    if (settled && step !== wanted) go(step, true);
+    if (attemptOpen && wanted !== "payment") go("payment", true);
+    else if (settled && step !== wanted) go(step, true);
     // go reads the current URL.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settled, step, wanted]);
+  }, [settled, step, wanted, attemptOpen]);
   // A room card's complete choice opens at the first step after the rooms.
   useEffect(() => {
     if (!settled || handedOver.current) return;
@@ -331,8 +388,20 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       allocationRevision,
       extras,
       payment,
+      guest,
     });
-  }, [slug, entry, checkIn, checkOut, promoCode, choices, allocationRevision, extras, payment]);
+  }, [
+    slug,
+    entry,
+    checkIn,
+    checkOut,
+    promoCode,
+    choices,
+    allocationRevision,
+    extras,
+    payment,
+    guest,
+  ]);
   // After the rooms, the price follows every change; a refused way to pay moves to the next one.
   useEffect(() => {
     if (step === "rooms" || !request || quote || loading || error) return;
@@ -377,18 +446,60 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   ]
     .filter(Boolean)
     .join(" · ");
+  const summaryRooms: SummaryRoom[] = choices.flatMap((choice) => {
+    const room = rooms?.find((r) =>
+      r.offers.some((o) => o.publicOfferKey === choice.publicOfferKey),
+    );
+    return room
+      ? [
+          {
+            selectionId: choice.selectionId,
+            name: room.name,
+            choice: choiceName(room, choice.publicOfferKey),
+            image: room.images?.[0]?.url,
+          },
+        ]
+      : [];
+  });
+  const adultCount = choices.reduce((sum, choice) => sum + (Number(choice.adults) || 0), 0);
+  const childCount = choices.reduce((sum, choice) => sum + choice.childAges.length, 0);
+  const guestsLine = [
+    `${adultCount} ${adultCount === 1 ? "adult" : "adults"}`,
+    childCount ? `${childCount} ${childCount === 1 ? "child" : "children"}` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const stayDates = [
+    `${formatStayDate(checkIn)} – ${formatStayDate(checkOut)}`,
+    Number.isFinite(nights) ? `${nights} ${nights === 1 ? "night" : "nights"}` : null,
+    guestsLine,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const missingDay = (addonCatalogue ?? []).find((addon) =>
     extras?.items.some((item) => item.id === addon.id && item.dates.length === 0),
   )?.name;
   const titles: Record<BookStep, string> = {
     rooms: "Choose rooms and get a price",
-    extras: "Enhance your stay",
-    payment: "Secure payment",
+    extras: "Enhance Your Stay",
+    details: "Guest Information",
+    payment: "Secure Payment",
   };
 
   return (
-    <BookShell steps={steps} current={step} title={titles[step]}>
-      <div className={step === "extras" ? "space-y-6" : "max-w-3xl space-y-6"}>
+    <BookShell
+      steps={steps}
+      current={step}
+      title={titles[step]}
+      subtitle={
+        step === "extras"
+          ? "Add extras to your stay. We include them in your price straight away."
+          : undefined
+      }
+    >
+      <div
+        className={step === "extras" || step === "details" ? "space-y-6" : "max-w-3xl space-y-6"}
+      >
         {step !== "rooms" && !settled ? (
           <p role="status">Loading your booking…</p>
         ) : step !== "rooms" ? null : catalogError ? (
@@ -664,7 +775,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                     disabled={addons === null}
                     onClick={() => go(next)}
                   >
-                    {addonError ? "Continue without extras" : "Continue to payment"}
+                    {addonError ? "Continue without extras" : "Continue to your details"}
                   </button>
                   {missingDay && (
                     <p className="text-xs text-amber-700">
@@ -676,16 +787,104 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             </div>
           </>
         )}
+        {settled && step === "details" && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2 space-y-6">
+              <DetailsStep
+                quote={quote}
+                rooms={summaryRooms}
+                stayLine={stayDates}
+                formatMoney={money}
+                guest={guest}
+                onGuestChange={setGuest}
+                disclosure={guestRulesQuote.disclosure}
+                rulesFailed={guestRulesQuote.failed}
+                onRetryRules={guestRulesQuote.retry}
+                termsText={pagePayment.termsText}
+                locked={attemptOpen}
+                rules={knownRules}
+              />
+              {!quote && loading && <p role="status">Checking price…</p>}
+              <div className="flex items-center justify-between gap-4 pt-2">
+                <button
+                  type="button"
+                  className="text-sm font-medium text-gray-600 hover:text-gray-900 flex items-center gap-1"
+                  onClick={() => (previous === "rooms" ? backToRooms() : goBack(previous))}
+                >
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15 19l-7-7 7-7"
+                    />
+                  </svg>
+                  {previous === "extras" ? "Back to extras" : "Back to rooms"}
+                </button>
+                <button
+                  type="button"
+                  className={button}
+                  disabled={!detailsComplete}
+                  onClick={() => go(next)}
+                >
+                  Continue to payment
+                </button>
+              </div>
+              {!detailsComplete && (
+                <p className="text-sm text-gray-600 text-right">
+                  Fill in your name, email{phoneRequired(knownRules) ? " and phone" : ""} to
+                  continue.
+                </p>
+              )}
+            </div>
+            <div className="lg:col-span-1">
+              {quote && (
+                <StaySummary
+                  title="Your Stay"
+                  quote={quote}
+                  rooms={summaryRooms}
+                  guests={guestsLine}
+                  rules={knownRules}
+                  formatMoney={money}
+                  formatDate={formatStayDate}
+                />
+              )}
+            </div>
+          </div>
+        )}
         {settled && step === "payment" && (
           <>
-            <button type="button" className="underline" onClick={() => goBack(previous)}>
+            <button
+              type="button"
+              className="underline"
+              disabled={attemptOpen}
+              onClick={() => goBack(previous)}
+            >
               Back
             </button>
+            <p className="text-sm text-gray-700">
+              Booking for {guest.firstName} {guest.lastName} · {guest.email}{" "}
+              <button
+                type="button"
+                className="underline"
+                disabled={attemptOpen}
+                onClick={() => go("details")}
+              >
+                Change
+              </button>
+            </p>
             <label className="block">
               Payment preference
               <select
                 className={field}
                 required
+                disabled={attemptOpen}
                 value={method}
                 onChange={(event) => setPayment(event.target.value as typeof payment)}
               >
@@ -707,7 +906,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             {error && quote && (
               <p role="alert">
                 {error}{" "}
-                <button className="underline" onClick={submit}>
+                <button className="underline" disabled={attemptOpen} onClick={submit}>
                   Get an updated price
                 </button>
               </p>
@@ -762,17 +961,19 @@ function RoomQuoteForm({ slug }: { slug: string }) {
               slug={slug}
               quote={quote}
               onAcknowledgementChange={setGuestDisclosure}
-              onRulesChange={setGuestRules}
             />
-            {pagePayment.termsText && <BookingPageTerms text={pagePayment.termsText} />}
             <ReplacementBookingConfirmation
               key={quote.quoteId}
               slug={slug}
               quote={quote}
               disclosure={guestDisclosure}
-              rules={guestRules?.quoteId === quote.quoteId ? guestRules.choices : null}
+              guest={
+                guestComplete(guest, rulesForQuote) ? acceptanceGuest(guest, rulesForQuote) : null
+              }
               termsAccepted={termsAcknowledgement?.quoteId === quote.quoteId}
               hotelTerms={pagePayment.termsText !== null}
+              attempt={attempt}
+              onAttemptChange={setAttempt}
             />
           </section>
         )}

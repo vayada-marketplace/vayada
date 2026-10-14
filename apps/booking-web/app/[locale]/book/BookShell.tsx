@@ -28,6 +28,7 @@ export default function BookShell({
   const labels: Record<BookStep, string> = {
     rooms: t("rooms"),
     extras: t("addons"),
+    details: t("details"),
     payment: t("payment"),
   };
   return (

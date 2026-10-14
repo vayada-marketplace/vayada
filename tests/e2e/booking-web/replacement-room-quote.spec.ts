@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
-import { continueToPayment } from "../support/bookFlow";
+import { continueToPayment, fillGuestDetails } from "../support/bookFlow";
 
 const firstKey = `pricing-offer.v2:${"a".repeat(64)}`;
 const breakfastId = "22222222-2222-4222-8222-222222222222";
@@ -140,7 +140,7 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   const total = page.getByRole("status", { name: "Your stay total" });
   await expect(total).toContainText("€315");
   const extras = page.getByRole("region", { name: "Optional extras" });
-  const toPayment = page.getByRole("button", { name: "Continue to payment" });
+  const toPayment = page.getByRole("button", { name: "Continue to your details" });
   // Added for every guest it can take and every night, like the old page.
   await extras.getByRole("button", { name: "Add Extra breakfast" }).click();
   const night = (day: string) => extras.getByRole("button", { name: `Extra breakfast on ${day}` });
@@ -161,6 +161,8 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   await expect(total).toContainText("€320");
   await expect(extras.getByText("Your extras (1)")).toBeVisible();
   await toPayment.click();
+  await fillGuestDetails(page);
+  await page.getByRole("button", { name: "Continue to payment" }).click();
   await expect(page.getByLabel("Payment preference")).toHaveValue("pay_at_property");
   await expect(page.getByText("Total: EUR 320.00", { exact: true })).toBeVisible();
   const acknowledgement = page.getByLabel(
@@ -184,7 +186,6 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   );
   await guestAcknowledgement.check();
   await expect(guestAcknowledgement).toBeChecked();
-  await expect(page.getByRole("heading", { name: "Your details" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Confirm booking" })).toBeEnabled();
   await expect(page.getByRole("heading", { name: "Your room and rate terms" })).toBeVisible();
   expect(submitted.selection.rooms.map((room: any) => [room.publicOfferKey, room.guests])).toEqual([
@@ -206,12 +207,16 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   // Back to the rooms: a changed child retires the extras and the price, and its terms.
   await page.goBack();
   await page.goBack();
+  await page.goBack();
   await expect(page).not.toHaveURL(/[?&]step=/);
   lifetimeMs = 2500;
   await first.getByLabel("Child 1: age at check-in").selectOption("7");
   await next.click();
   await expect(extras.getByRole("button", { name: "Add Extra breakfast" })).toBeVisible();
   await toPayment.click();
+  // The details step keeps what the guest typed.
+  await expect(page.getByLabel("First name")).toHaveValue("Ada");
+  await page.getByRole("button", { name: "Continue to payment" }).click();
   await expect(page.getByText("Total: EUR 315.00", { exact: true })).toBeVisible();
   await expect(acknowledgement).not.toBeChecked();
   await expect(guestAcknowledgement).not.toBeChecked();

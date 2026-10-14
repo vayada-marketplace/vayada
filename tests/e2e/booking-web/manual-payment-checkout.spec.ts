@@ -167,9 +167,6 @@ test("books by bank transfer and opens the protected payment details", async ({ 
   ).toBeVisible();
   await page.getByLabel("I have read the room and rate terms for this price preview.").check();
   await page.getByLabel("I have read the guest rules for this price preview.").check();
-  await page.getByLabel("First name").fill("Ada");
-  await page.getByLabel("Last name").fill("Lovelace");
-  await page.getByLabel("Email", { exact: true }).fill("ada@example.test");
   await page.getByRole("button", { name: "Confirm booking" }).click();
 
   const reserved = page.getByRole("status").filter({ hasText: "Your room is reserved" });

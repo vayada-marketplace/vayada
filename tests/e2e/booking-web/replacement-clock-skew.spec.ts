@@ -105,7 +105,6 @@ for (const [label, skewMs] of [
     const rules = page.getByLabel("I have read the guest rules for this price preview.");
     await rules.check();
     await expect(rules).toBeChecked();
-    await expect(page.getByRole("heading", { name: "Your details" })).toBeVisible();
     await expect(page.getByText("Phone (optional)")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Confirm booking" })).toBeEnabled();
   });

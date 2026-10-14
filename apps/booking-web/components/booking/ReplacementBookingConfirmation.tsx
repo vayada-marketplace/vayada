@@ -19,25 +19,37 @@ import {
 import { displayQuoteMoney } from "@/services/api/replacementOffers";
 import ReplacementCardPayment from "./ReplacementCardPayment";
 
-const field = "mt-1 block w-full rounded-lg border border-gray-300 bg-white p-3 text-gray-900";
 const button = "rounded-full bg-primary-600 px-5 py-3 font-semibold text-white disabled:opacity-40";
+
+/** A booking attempt whose outcome isn't known yet: the quote, details and rules it sent. */
+export type BookingAttempt = {
+  quoteId: string;
+  guest: PricingAcceptanceGuest;
+  disclosure: PublicQuoteGuestDisclosure;
+};
 
 export default function ReplacementBookingConfirmation({
   slug,
   quote,
   disclosure,
-  rules,
+  guest,
   termsAccepted,
   hotelTerms = false,
+  attempt: heldAttempt,
+  onAttemptChange,
 }: {
   slug: string;
   quote: PublicBookingQuote;
   disclosure: PublicQuoteGuestDisclosure | null;
-  /** The guest rules loaded for this quote, ticked or not (VAY-2163). */
-  rules?: PublicQuoteGuestDisclosure["choices"] | null;
+  /** The guest's details from the details step (VAY-2195); null until they are complete. */
+  guest: PricingAcceptanceGuest | null;
   termsAccepted: boolean;
   /** The hotel has its own Terms & Conditions on this page (VAY-2176). */
   hotelTerms?: boolean;
+  /** The page keeps the open attempt (VAY-2195), so leaving and coming back to this step can't
+   * lose it: a retry then sends the same details as an uncertain retry. */
+  attempt?: BookingAttempt | null;
+  onAttemptChange?: (attempt: BookingAttempt | null) => void;
 }) {
   const termsNoticeId = useId();
   const [loading, setLoading] = useState(false);
@@ -48,10 +60,12 @@ export default function ReplacementBookingConfirmation({
   );
   const [cardPayment, setCardPayment] = useState<PricingCardPaymentRequired | null>(null);
   const [manualPayment, setManualPayment] = useState<PricingManualPaymentPending | null>(null);
-  const [pending, setPending] = useState<{
-    guest: PricingAcceptanceGuest;
-    disclosure: PublicQuoteGuestDisclosure;
-  } | null>(null);
+  const [ownAttempt, setOwnAttempt] = useState<BookingAttempt | null>(null);
+  const held = onAttemptChange !== undefined;
+  const open = held ? heldAttempt : ownAttempt;
+  const pending = open?.quoteId === quote.quoteId ? open : null;
+  const setPending = (value: BookingAttempt | null) =>
+    held ? onAttemptChange(value) : setOwnAttempt(value);
   const supported = pricingQuoteBookableOnline(quote);
   // A request-mode hotel confirms each booking itself; nothing is charged when the guest asks.
   // Bank transfer and PayPal wait for the payment instead, in either mode.
@@ -60,25 +74,14 @@ export default function ReplacementBookingConfirmation({
   const ready =
     supported &&
     !refreshRequired &&
-    (!!pending || (termsAccepted && disclosure?.quoteId === quote.quoteId));
+    (!!pending || (!!guest && termsAccepted && disclosure?.quoteId === quote.quoteId));
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const acceptedDisclosure = pending?.disclosure ?? disclosure;
-    if (!ready || !acceptedDisclosure || loading || result) return;
-    const data = new FormData(event.currentTarget);
-    const guest =
-      pending?.guest ??
-      ({
-        firstName: String(data.get("firstName") ?? ""),
-        lastName: String(data.get("lastName") ?? ""),
-        email: String(data.get("email") ?? ""),
-        phone: String(data.get("phone") ?? ""),
-        countryCode: String(data.get("countryCode") ?? ""),
-        arrivalTime: String(data.get("arrivalTime") ?? ""),
-        specialRequests: String(data.get("specialRequests") ?? ""),
-      } satisfies PricingAcceptanceGuest);
-    setPending({ guest, disclosure: acceptedDisclosure });
+    const attempted = pending?.guest ?? guest;
+    if (!ready || !acceptedDisclosure || !attempted || loading || result) return;
+    setPending({ quoteId: quote.quoteId, guest: attempted, disclosure: acceptedDisclosure });
     setLoading(true);
     setError("");
     try {
@@ -86,7 +89,7 @@ export default function ReplacementBookingConfirmation({
         slug,
         quote,
         acceptedDisclosure,
-        guest,
+        attempted,
         undefined,
         pending ? "uncertain-retry" : "fresh",
       );
@@ -107,6 +110,8 @@ export default function ReplacementBookingConfirmation({
       const manualUnavailable = unavailable && code === "MANUAL_PAYMENT_UNAVAILABLE";
       // Nothing was stored and a retry can't succeed, so only a new price can continue.
       setRefreshRequired(conflict || unavailable);
+      // Nothing was stored: the attempt is over and only a new price can continue.
+      if (conflict || unavailable) setPending(null);
       setError(
         conflict
           ? "This price is no longer available. Get a new price and review its terms again."
@@ -185,79 +190,16 @@ export default function ReplacementBookingConfirmation({
       />
     );
 
-  // Until this quote's rules are known, the phone is required and the optional fields stay hidden.
-  const acknowledged = pending?.disclosure ?? disclosure;
-  const policy =
-    rules ?? (acknowledged?.quoteId === quote.quoteId ? acknowledged.choices : undefined);
-  const phoneRequired = policy?.phoneRequired ?? true;
   return (
-    <form className="space-y-4 rounded-xl border border-gray-200 p-5" onSubmit={submit}>
-      <h2 className="text-xl font-semibold">Your details</h2>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label>
-          First name
-          <input className={field} name="firstName" maxLength={100} required disabled={!!pending} />
-        </label>
-        <label>
-          Last name
-          <input className={field} name="lastName" maxLength={100} required disabled={!!pending} />
-        </label>
-      </div>
-      <label className="block">
-        Email
-        <input
-          className={field}
-          name="email"
-          type="email"
-          maxLength={254}
-          required
-          disabled={!!pending}
-        />
-      </label>
-      <label className="block">
-        Phone {phoneRequired ? "" : "(optional)"}
-        <input
-          className={field}
-          name="phone"
-          type="tel"
-          maxLength={64}
-          required={phoneRequired}
-          disabled={!!pending}
-        />
-      </label>
-      <label className="block">
-        Country code (optional)
-        <input
-          className={field}
-          name="countryCode"
-          maxLength={2}
-          pattern="[A-Za-z]{2}"
-          placeholder="DE"
-          disabled={!!pending}
-        />
-      </label>
-      {policy?.arrivalTimeEnabled && (
-        <label className="block">
-          Expected arrival time (optional)
-          <input className={field} name="arrivalTime" type="time" disabled={!!pending} />
-        </label>
-      )}
-      {policy?.specialRequestsEnabled && (
-        <label className="block">
-          Special requests (optional)
-          <textarea
-            className={field}
-            name="specialRequests"
-            maxLength={2000}
-            rows={4}
-            disabled={!!pending}
-          />
-        </label>
-      )}
+    <form className="space-y-4" onSubmit={submit}>
       {!supported ? (
         <p role="status">Online confirmation is not available for this payment option.</p>
       ) : !ready && !refreshRequired ? (
-        <p role="status">Read and accept both the room terms and guest rules to book.</p>
+        <p role="status">
+          {guest
+            ? "Read and accept both the room terms and guest rules to book."
+            : "Fill in your details to book."}
+        </p>
       ) : null}
       {error && <p role="alert">{error}</p>}
       {hotelTerms && (
