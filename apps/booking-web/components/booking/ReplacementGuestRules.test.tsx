@@ -162,3 +162,27 @@ it("reports the loaded rules whether or not they are ticked, and none on failure
   act(() => root.render(null));
   expect(rules).toHaveBeenLastCalledWith(null);
 });
+
+it("shows the tick first and the rules behind Read on the payment step (VAY-2195)", async () => {
+  const change = vi.fn();
+  await act(async () =>
+    root.render(
+      createElement(ReplacementGuestRules, {
+        slug: "hotel",
+        quote,
+        onAcknowledgementChange: change,
+        compact: true,
+      }),
+    ),
+  );
+  expect(document.body.textContent).toContain("I have read our guest rules for this price.");
+  expect(document.querySelector('[aria-label="Guest rules"]')).toBeNull();
+  const read = Array.from(document.querySelectorAll("button")).find((b) =>
+    b.textContent?.includes("guest rules"),
+  )!;
+  act(() => read.click());
+  expect(document.querySelector('[aria-label="Guest rules"]')).not.toBeNull();
+  expect(document.querySelectorAll('input[type="checkbox"]')).toHaveLength(1);
+  act(() => checkbox().click());
+  expect(change).toHaveBeenLastCalledWith(disclosure);
+});

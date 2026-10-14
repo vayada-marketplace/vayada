@@ -12,7 +12,31 @@ export async function continueToPayment(
   await fillGuestDetails(page);
   await page.getByRole("button", { name: "Continue to payment" }).click();
   await expect(page).toHaveURL(/[?&]step=payment/);
-  if (method) await page.getByLabel("Payment preference").selectOption(method);
+  if (method) await choosePayment(page, method);
+}
+
+const paymentNames: Record<string, RegExp> = {
+  pay_at_property: /^Pay at the hotel/,
+  card: /^Pay by card now/,
+  bank_transfer: /^Bank transfer/,
+  paypal: /^PayPal/,
+};
+
+/** The payment step's way to pay, as a guest picks it. */
+export function paymentOption(page: Page, method: string) {
+  return page
+    .getByRole("radiogroup", { name: "Payment preference" })
+    .getByRole("radio", { name: paymentNames[method] });
+}
+
+export async function choosePayment(page: Page, method: string) {
+  await paymentOption(page, method).click();
+  await expect(paymentOption(page, method)).toHaveAttribute("aria-checked", "true");
+}
+
+/** The total in the payment step's order summary ("€240"). */
+export function orderTotal(page: Page) {
+  return page.getByRole("complementary", { name: "Order Summary" }).getByTestId("stay-total");
 }
 
 /** The details step's required fields, as a guest fills them in. */

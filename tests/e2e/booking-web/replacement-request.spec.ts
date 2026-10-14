@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
-import { continueToPayment } from "../support/bookFlow";
+import { continueToPayment, orderTotal } from "../support/bookFlow";
 
 const offerKey = `pricing-offer.v2:${"c".repeat(64)}`;
 
@@ -105,10 +105,11 @@ test("sends a pay-at-property booking request to a hotel that confirms each book
   await room.getByLabel("Room and meal option").selectOption(offerKey);
   await room.getByLabel(/Adults/).fill("2");
   await continueToPayment(page, { method: "pay_at_property" });
-  await expect(page.getByText("Total: EUR 240.00", { exact: true })).toBeVisible();
-  await expect(page.getByText(/Your booking will need our approval/)).toBeVisible();
-  await page.getByLabel("I have read the room and rate terms for this price preview.").check();
-  await page.getByLabel("I have read the guest rules for this price preview.").check();
+  await expect(orderTotal(page)).toHaveText("€240");
+  // VAY-2195: the payment step says what happens next for a hotel that confirms each booking.
+  await expect(page.getByText(/if we accept your request/)).toBeVisible();
+  await page.getByLabel("I have read the room and rate terms for this price").check();
+  await page.getByLabel("guest rules for this price").check();
   const send = page.getByRole("button", { name: "Send booking request" });
   await expect(send).toBeEnabled();
   await send.click();

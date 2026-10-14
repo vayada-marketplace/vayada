@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
-import { continueToPayment, fillGuestDetails } from "../support/bookFlow";
+import {
+  continueToPayment,
+  fillGuestDetails,
+  orderTotal,
+  paymentOption,
+} from "../support/bookFlow";
 
 const firstKey = `pricing-offer.v2:${"a".repeat(64)}`;
 const breakfastId = "22222222-2222-4222-8222-222222222222";
@@ -163,11 +168,11 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   await toPayment.click();
   await fillGuestDetails(page);
   await page.getByRole("button", { name: "Continue to payment" }).click();
-  await expect(page.getByLabel("Payment preference")).toHaveValue("pay_at_property");
-  await expect(page.getByText("Total: EUR 320.00", { exact: true })).toBeVisible();
-  const acknowledgement = page.getByLabel(
-    "I have read the room and rate terms for this price preview.",
-  );
+  await expect(paymentOption(page, "pay_at_property")).toHaveAttribute("aria-checked", "true");
+  await expect(orderTotal(page)).toHaveText("€320");
+  const acknowledgement = page.getByLabel("I have read the room and rate terms for this price");
+  // The payment step shows the ticks first and the full terms behind "Read".
+  await page.getByRole("button", { name: "Read the room and rate terms" }).click();
   await expect(
     page
       .getByRole("region", { name: "Room 1 terms" })
@@ -175,9 +180,8 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   ).toBeVisible();
   await acknowledgement.check();
   await expect(acknowledgement).toBeChecked();
-  const guestAcknowledgement = page.getByLabel(
-    "I have read the guest rules for this price preview.",
-  );
+  const guestAcknowledgement = page.getByLabel("guest rules for this price");
+  await page.getByRole("button", { name: "Read our guest rules" }).click();
   await expect(page.getByRole("region", { name: "Guest rules", exact: true })).toContainText(
     "midnight at the end of your arrival day",
   );
@@ -217,17 +221,17 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   // The details step keeps what the guest typed.
   await expect(page.getByLabel("First name")).toHaveValue("Ada");
   await page.getByRole("button", { name: "Continue to payment" }).click();
-  await expect(page.getByText("Total: EUR 315.00", { exact: true })).toBeVisible();
+  await expect(orderTotal(page)).toHaveText("€315");
   await expect(acknowledgement).not.toBeChecked();
   await expect(guestAcknowledgement).not.toBeChecked();
   expect(submitted.selection.addons).toEqual([]);
   await expect(page.getByText(/This price has expired/)).toBeVisible({ timeout: 6000 });
-  await expect(page.getByRole("region", { name: "Your stay price" })).toBeVisible();
+  await expect(orderTotal(page)).toBeVisible();
   await expect(acknowledgement).toBeDisabled();
   await expect(guestAcknowledgement).toBeDisabled();
   lifetimeMs = 60_000;
   await page.getByRole("button", { name: "Get an updated price" }).click();
-  await expect(page.getByText("Total: EUR 315.00", { exact: true })).toBeVisible();
+  await expect(orderTotal(page)).toHaveText("€315");
   await expect(acknowledgement).toBeEnabled();
   await page.screenshot({ path: testInfo.outputPath("room-quote-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -332,8 +336,10 @@ test("keeps the charged currency first when the guest views prices in another cu
   await room.getByLabel(/Adults/).fill("2");
   await continueToPayment(page, { method: "pay_at_property" });
 
-  await expect(page.getByText("Total: EUR 315.00 (≈ US$347)", { exact: true })).toBeVisible();
-  await expect(page.getByText("Due later: EUR 315.00 (≈ US$347)", { exact: true })).toBeVisible();
+  await expect(orderTotal(page)).toHaveText("€315 (≈ US$347)");
+  await expect(page.getByRole("complementary", { name: "Order Summary" })).toContainText(
+    /At the hotel\s*€315 \(≈ US\$347\)/,
+  );
   await expect(page.getByTestId("approximate-amounts-note")).toContainText(
     "We charge in EUR. Amounts marked ≈ are approximate conversions.",
   );
