@@ -36,8 +36,9 @@ type Translate = (key: string, values?: Record<string, string | number>) => stri
 export type ChoiceText = {
   name: string;
   terms: string;
-  /** The rate icon: a cross for no refund, the arrows for free or partial cancellation. */
-  refundable: boolean;
+  /** The rate icon: the arrows for free or partial cancellation, a cross for no refund, none
+   * when the cancellation isn't known or free cancellation has passed. */
+  refundable: boolean | null;
   /** Free cancellation whose deadline has passed for this stay. */
   cancellationPassed: boolean;
 };
@@ -84,7 +85,12 @@ export function choiceText(
   return {
     name: keys.number ? `${base} ${keys.number}` : base,
     terms: terms.join(" · "),
-    refundable: keys.cancellation !== "non_refundable",
+    refundable:
+      cancellation === "free" || cancellation === "partial_refund"
+        ? true
+        : cancellation === "non_refundable"
+          ? false
+          : null,
     cancellationPassed,
   };
 }

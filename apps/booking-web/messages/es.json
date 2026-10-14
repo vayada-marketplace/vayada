@@ -91,11 +91,11 @@
     "priceLowHigh": "Precio: de Menor a Mayor",
     "priceHighLow": "Precio: de Mayor a Menor",
     "upToGuests": "Hasta {count} huéspedes",
-    "viewDetails": "Ver Detalles",
+    "viewDetails": "Ver detalles",
     "viewFullAmenities": "Ver todos los servicios ({count})",
     "showLess": "Mostrar menos",
     "rateOptions": "Opciones de Tarifa",
-    "selectYourRate": "Selecciona tu Tarifa",
+    "selectYourRate": "Seleccione su tarifa",
     "flexibleRate": "Tarifa Flexible",
     "flexibleDesc": "Cancelación gratuita hasta {days} días antes",
     "flexibleNoLongerCancellable": "Cancelación no disponible",
@@ -109,7 +109,7 @@
     "welcomeDrink": "Bebida de bienvenida",
     "freeWifi": "WiFi gratuito",
     "airportTransfer": "Traslado al aeropuerto",
-    "selectThisRate": "Seleccionar Esta Tarifa",
+    "selectThisRate": "Seleccionar esta tarifa",
     "selectingRate": "Preparando el pago...",
     "soldOut": "Agotado",
     "gallery": {
@@ -155,8 +155,10 @@
     "childrenPricedLater": "Los precios son para los adultos. Añadimos a los niños cuando nos indique sus edades en el siguiente paso.",
     "severalRooms": "¿Reserva más de una habitación?",
     "notAvailable": "No disponible",
-    "tooManyGuests": "Esta habitación tiene capacidad para {count} huéspedes como máximo. Elija una habitación más grande o reserve más de una.",
-    "promoNotApplied": "Su código {code} no se aplica a esta estancia."
+    "tooManyGuests": "Esta habitación tiene capacidad para {count, plural, one {# huésped} other {# huéspedes}} como máximo. Elija una habitación más grande o reserve más de una.",
+    "promoNotApplied": "Su código {code} no se aplica a esta estancia.",
+    "noChildren": "Esta habitación no admite niños. Elija otra habitación para su grupo.",
+    "percentOff": "-{percent} % DTO."
   },
   "rooms": {
     "title": "Nuestras Habitaciones",

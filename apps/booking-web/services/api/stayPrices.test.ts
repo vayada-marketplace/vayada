@@ -21,6 +21,7 @@ const body = {
           promoApplied: false,
         },
         { publicOfferKey: "key-b", status: "unavailable" },
+        { publicOfferKey: "key-c", status: "unpriced" },
       ],
     },
     { roomTypeId: "loft", roomCount: null, availability: "sold_out", roomsLeft: null, offers: [] },

@@ -10,7 +10,9 @@ export type StayOfferPrice =
       /** False when a promo code was sent but doesn't apply to this stay. */
       promoApplied: boolean;
     }
-  | { publicOfferKey: string; status: "unavailable" };
+  | { publicOfferKey: string; status: "unavailable" }
+  /** Bookable but not priced in this read (past the API's per-request cap): /book prices it. */
+  | { publicOfferKey: string; status: "unpriced" };
 export type StayRoomPrices = {
   roomTypeId: string;
   /** Rooms of this type the party needs ("2× Deluxe Double Room"); null when it can't fit. */
@@ -86,8 +88,8 @@ export async function getStayPrices(
         roomsLeft: room.roomsLeft as number | null,
         offers: room.offers.map((offer): StayOfferPrice => {
           if (!object(offer) || typeof offer.publicOfferKey !== "string") throw invalid();
-          if (offer.status === "unavailable")
-            return { publicOfferKey: offer.publicOfferKey, status: "unavailable" };
+          if (offer.status === "unavailable" || offer.status === "unpriced")
+            return { publicOfferKey: offer.publicOfferKey, status: offer.status };
           if (
             offer.status !== "priced" ||
             typeof offer.totalMinor !== "string" ||

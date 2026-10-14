@@ -69,7 +69,7 @@ describe("room choices", () => {
     expect(choiceText(keys, { ...stay, checkIn: "2026-10-16" }, t, now)).toEqual({
       name: "Breakfast included",
       terms: "Breakfast every morning · Free cancellation is no longer available for these dates",
-      refundable: true,
+      refundable: null,
       cancellationPassed: true,
     });
     expect(

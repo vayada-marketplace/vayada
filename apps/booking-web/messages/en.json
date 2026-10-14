@@ -155,8 +155,10 @@
     "childrenPricedLater": "Prices are for the adults. We add children once you tell us their ages on the next step.",
     "severalRooms": "Booking more than one room?",
     "notAvailable": "Not available",
-    "tooManyGuests": "This room fits up to {count} guests. Choose a bigger room, or book more than one room.",
-    "promoNotApplied": "Your code {code} doesn't apply to this stay."
+    "tooManyGuests": "This room fits up to {count, plural, one {# guest} other {# guests}}. Choose a bigger room, or book more than one room.",
+    "promoNotApplied": "Your code {code} doesn't apply to this stay.",
+    "noChildren": "This room doesn't take children. Choose another room for your group.",
+    "percentOff": "-{percent}% OFF"
   },
   "rooms": {
     "title": "Our Rooms",

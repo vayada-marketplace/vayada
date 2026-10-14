@@ -95,7 +95,7 @@
     "viewFullAmenities": "Alle Ausstattungen anzeigen ({count})",
     "showLess": "Weniger anzeigen",
     "rateOptions": "Tarifoptionen",
-    "selectYourRate": "Wähle deinen Tarif",
+    "selectYourRate": "Wählen Sie Ihren Tarif",
     "flexibleRate": "Flexibler Tarif",
     "flexibleDesc": "Kostenlose Stornierung bis {days} Tage vorher",
     "flexibleNoLongerCancellable": "Stornierung nicht mehr möglich",
@@ -155,8 +155,10 @@
     "childrenPricedLater": "Die Preise gelten für die Erwachsenen. Kinder rechnen wir hinzu, sobald Sie uns im nächsten Schritt ihr Alter nennen.",
     "severalRooms": "Sie buchen mehr als ein Zimmer?",
     "notAvailable": "Nicht verfügbar",
-    "tooManyGuests": "Dieses Zimmer bietet Platz für bis zu {count} Gäste. Wählen Sie ein größeres Zimmer oder buchen Sie mehrere Zimmer.",
-    "promoNotApplied": "Ihr Code {code} gilt nicht für diesen Aufenthalt."
+    "tooManyGuests": "Dieses Zimmer bietet Platz für bis zu {count, plural, one {# Gast} other {# Gäste}}. Wählen Sie ein größeres Zimmer oder buchen Sie mehrere Zimmer.",
+    "promoNotApplied": "Ihr Code {code} gilt nicht für diesen Aufenthalt.",
+    "noChildren": "Dieses Zimmer ist nicht für Kinder geeignet. Wählen Sie bitte ein anderes Zimmer für Ihre Gruppe.",
+    "percentOff": "-{percent} % RABATT"
   },
   "rooms": {
     "title": "Unsere Zimmer",
