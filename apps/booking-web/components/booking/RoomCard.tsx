@@ -11,6 +11,7 @@ import type { PricingRoom } from "@/services/api/replacementOffers";
 import { quoteMoneyAmount } from "@/services/api/replacementOffers";
 import type { StayRoomPrices } from "@/services/api/stayPrices";
 import RateOption from "./RateOption";
+import RoomDetailModal from "./RoomDetailModal";
 
 /** "3 Nov" for a stay date (YYYY-MM-DD), the same in every time zone. */
 const shortDate = (date: string, locale: string) =>
@@ -33,7 +34,6 @@ export default function RoomCard({
   childGuests,
   promoCode,
   onSelect,
-  onView,
 }: {
   room: PricingRoom;
   /** Stay prices for this room; null while loading, when they failed or aren't offered. */
@@ -49,7 +49,6 @@ export default function RoomCard({
   /** The guest's promo code, to say when it doesn't apply to this room. */
   promoCode?: string | null;
   onSelect: (publicOfferKey: string, roomCount: number) => void;
-  onView?: () => void;
 }) {
   const t = useTranslations("home");
   const tc = useTranslations("common");
@@ -57,6 +56,8 @@ export default function RoomCard({
   const { approximate } = useCurrency();
   const [imageIndex, setImageIndex] = useState(0);
   const [picked, setPicked] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const onView = () => setDetailsOpen(true);
 
   const images = room.images ?? [];
   // Without prices for this room (failed, no read, or the room missing from the answer) the
@@ -133,6 +134,82 @@ export default function RoomCard({
     return own !== null && base ? Math.round((1 - own / base) * 100) : undefined;
   };
 
+  // The choices and "Select This Rate", on the card and again in "View Details".
+  const rates = (inDetails: boolean) => (
+    <div className="border-t border-gray-100 pt-4">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+        {t("selectYourRate")}
+      </p>
+      <div className="space-y-3">
+        {shown.map((choice) => {
+          const total = amount(choice);
+          return (
+            <RateOption
+              key={choice.offer.publicOfferKey}
+              publicOfferKey={choice.offer.publicOfferKey}
+              selected={choice === selected}
+              onSelect={() => setPicked(choice.offer.publicOfferKey)}
+              refundable={choice.text.refundable}
+              title={choice.text.name}
+              terms={choice.text.terms}
+              totalLabel={total === null ? null : money(total, choice.priced!.currency)}
+              nightlyLabel={
+                total === null
+                  ? null
+                  : money(
+                      Math.round((total / Math.max(nights, 1)) * 100) / 100,
+                      choice.priced!.currency,
+                    )
+              }
+              discountPercent={discount(choice)}
+              unavailable={
+                choice.unavailable ||
+                (!choice.bookable && !soldOut && !tooSmall && pricesState === "ready")
+              }
+              loading={pricesState === "loading"}
+              disabled={soldOut}
+            />
+          );
+        })}
+      </div>
+      {promoCode && selected?.priced && !selected.priced.promoApplied && (
+        <p className="text-xs text-gray-500 mt-2">{t("promoNotApplied", { code: promoCode })}</p>
+      )}
+      <button
+        type="button"
+        data-testid={inDetails ? undefined : `select-rate-${room.roomTypeId}`}
+        onClick={() => selected && onSelect(selected.offer.publicOfferKey, roomCount)}
+        disabled={!selected || tooSmall}
+        className="w-full mt-4 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-600"
+      >
+        {soldOut
+          ? t("soldOut")
+          : tooSmall || (prices && !selected)
+            ? t("notAvailable")
+            : t("selectThisRate")}
+      </button>
+      {tooSmall && room.occupancy && (
+        <p className="text-sm mt-3 text-gray-600">
+          {childGuests > 0 && room.occupancy.maxChildren === 0
+            ? t("noChildren")
+            : t("tooManyGuests", { count: room.occupancy.maxGuests })}
+        </p>
+      )}
+      {!soldOut && prices?.roomsLeft != null && (
+        <p
+          className={`text-sm mt-3 flex items-center gap-1.5 font-medium ${prices.roomsLeft === 1 ? "text-red-700" : "text-amber-800"}`}
+        >
+          <span
+            className={`w-2 h-2 rounded-full ${prices.roomsLeft === 1 ? "bg-red-500" : "bg-amber-500"}`}
+          />
+          {prices.roomsLeft === 1
+            ? tc("lastRoomLeft")
+            : tc("onlyLeft", { count: prices.roomsLeft })}
+        </p>
+      )}
+    </div>
+  );
+
   return (
     <div
       data-testid={`room-card-${room.roomTypeId}`}
@@ -140,7 +217,7 @@ export default function RoomCard({
     >
       <div className="flex flex-col md:flex-row">
         <div
-          className={`relative w-full h-64 md:w-[420px] md:min-h-[320px] md:h-auto flex-shrink-0 overflow-hidden ${images.length ? "" : "bg-gray-100 flex items-center justify-center"} ${onView ? "cursor-pointer" : ""}`}
+          className={`relative w-full h-64 md:w-[420px] md:min-h-[320px] md:h-auto flex-shrink-0 overflow-hidden ${images.length ? "" : "bg-gray-100 flex items-center justify-center"} cursor-pointer`}
           onClick={onView}
         >
           {images.length ? (
@@ -287,29 +364,27 @@ export default function RoomCard({
                 )}
               </div>
             </div>
-            {onView && (
-              <button
-                type="button"
-                onClick={onView}
-                className="flex items-center gap-1.5 text-sm font-medium text-gray-700 border border-gray-300 rounded-full px-4 py-1.5 hover:bg-gray-50 transition-colors flex-shrink-0"
+            <button
+              type="button"
+              onClick={onView}
+              className="flex items-center gap-1.5 text-sm font-medium text-gray-700 border border-gray-300 rounded-full px-4 py-1.5 hover:bg-gray-50 transition-colors flex-shrink-0"
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
               >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                {t("viewDetails")}
-              </button>
-            )}
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+              {t("viewDetails")}
+            </button>
           </div>
 
           {room.amenities && room.amenities.length > 0 && (
@@ -344,82 +419,19 @@ export default function RoomCard({
             </div>
           )}
 
-          <div className="border-t border-gray-100 pt-4">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-              {t("selectYourRate")}
-            </p>
-            <div className="space-y-3">
-              {shown.map((choice) => {
-                const total = amount(choice);
-                return (
-                  <RateOption
-                    key={choice.offer.publicOfferKey}
-                    publicOfferKey={choice.offer.publicOfferKey}
-                    selected={choice === selected}
-                    onSelect={() => setPicked(choice.offer.publicOfferKey)}
-                    refundable={choice.text.refundable}
-                    title={choice.text.name}
-                    terms={choice.text.terms}
-                    totalLabel={total === null ? null : money(total, choice.priced!.currency)}
-                    nightlyLabel={
-                      total === null
-                        ? null
-                        : money(
-                            Math.round((total / Math.max(nights, 1)) * 100) / 100,
-                            choice.priced!.currency,
-                          )
-                    }
-                    discountPercent={discount(choice)}
-                    unavailable={
-                      choice.unavailable ||
-                      (!choice.bookable && !soldOut && !tooSmall && pricesState === "ready")
-                    }
-                    loading={pricesState === "loading"}
-                    disabled={soldOut}
-                  />
-                );
-              })}
-            </div>
-            {promoCode && selected?.priced && !selected.priced.promoApplied && (
-              <p className="text-xs text-gray-500 mt-2">
-                {t("promoNotApplied", { code: promoCode })}
-              </p>
-            )}
-            <button
-              type="button"
-              data-testid={`select-rate-${room.roomTypeId}`}
-              onClick={() => selected && onSelect(selected.offer.publicOfferKey, roomCount)}
-              disabled={!selected || tooSmall}
-              className="w-full mt-4 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-600"
-            >
-              {soldOut
-                ? t("soldOut")
-                : tooSmall || (prices && !selected)
-                  ? t("notAvailable")
-                  : t("selectThisRate")}
-            </button>
-            {tooSmall && room.occupancy && (
-              <p className="text-sm mt-3 text-gray-600">
-                {childGuests > 0 && room.occupancy.maxChildren === 0
-                  ? t("noChildren")
-                  : t("tooManyGuests", { count: room.occupancy.maxGuests })}
-              </p>
-            )}
-            {!soldOut && prices?.roomsLeft != null && (
-              <p
-                className={`text-sm mt-3 flex items-center gap-1.5 font-medium ${prices.roomsLeft === 1 ? "text-red-700" : "text-amber-800"}`}
-              >
-                <span
-                  className={`w-2 h-2 rounded-full ${prices.roomsLeft === 1 ? "bg-red-500" : "bg-amber-500"}`}
-                />
-                {prices.roomsLeft === 1
-                  ? tc("lastRoomLeft")
-                  : tc("onlyLeft", { count: prices.roomsLeft })}
-              </p>
-            )}
-          </div>
+          {rates(false)}
         </div>
       </div>
+      {detailsOpen && (
+        <RoomDetailModal
+          room={room}
+          roomCount={roomCount}
+          soldOut={soldOut}
+          onClose={() => setDetailsOpen(false)}
+        >
+          {rates(true)}
+        </RoomDetailModal>
+      )}
     </div>
   );
 }
