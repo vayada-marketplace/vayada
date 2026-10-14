@@ -5,6 +5,10 @@ import {
 } from "../domains/activeBookingPublicationGate.js";
 import { createPublicQuoteGuestDisclosure } from "../domains/publicQuoteGuestDisclosure.js";
 import { createPublicPricingAddonCatalog } from "../domains/publicPricingAddonCatalog.js";
+import {
+  createPublicPricingStayPrices,
+  parseStayPricesQuery,
+} from "../domains/publicPricingStayPrices.js";
 import { createCurrentPricingQuoteStore } from "../domains/currentPricingQuoteStore.js";
 import { lockPricingManualPaymentTerms } from "../domains/pricingManualPayment.js";
 import {
@@ -280,6 +284,7 @@ export type BookingWebCheckoutAdapter = {
     context: BookingWebCheckoutCommandContext,
   ): Promise<void>;
   getPricingOffers?(slug: string): Promise<unknown>;
+  getPricingStayPrices?(slug: string, query: unknown): Promise<unknown>;
   getPricingAddons?(slug: string): Promise<unknown>;
   getQuoteGuestDisclosure?(slug: string, quoteId: string): Promise<unknown>;
   acceptPricingQuote?(
@@ -599,6 +604,19 @@ export async function registerBookingWebPublicRoutes(
       if (!checkoutAdapter.getPricingOffers)
         throw createHttpError(404, "Pricing offers unavailable.");
       return checkoutAdapter.getPricingOffers(request.params.slug);
+    },
+  );
+
+  // Room cards' read-only stay prices: no quote, no hold (VAY-2190).
+  app.get<{ Params: BookingWebHotelParams; Querystring: Record<string, string> }>(
+    "/hotels/:slug/pricing-offers/stay-prices",
+    async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Robots-Tag", "noindex");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-stay-prices-read");
+      if (!checkoutAdapter.getPricingStayPrices)
+        throw createHttpError(404, "Stay prices unavailable.");
+      return checkoutAdapter.getPricingStayPrices(request.params.slug, request.query);
     },
   );
 
@@ -1559,6 +1577,7 @@ export function createTargetBookingWebCheckoutAdapter(
     mediaServing: config.mediaServing,
   });
   const pricingAddons = createPublicPricingAddonCatalog(pool);
+  const stayPrices = createPublicPricingStayPrices(pool, pricingOffers);
   const guestDisclosure = createPublicQuoteGuestDisclosure(pool);
   const issueReplacementQuote = createReplacementBookingQuoteIssuer(
     createCurrentPricingQuoteStore(pool, 300),
@@ -2252,6 +2271,20 @@ export function createTargetBookingWebCheckoutAdapter(
       }
       if (!offers) throw createHttpError(404, "Pricing offers unavailable.");
       return offers;
+    },
+    async getPricingStayPrices(slug, query) {
+      const stay = parseStayPricesQuery(query);
+      if (!stay) throw createHttpError(400, "Invalid stay.");
+      let prices;
+      try {
+        prices = await stayPrices.read(slug, stay);
+      } catch (error) {
+        throw Object.assign(new Error("Stay prices temporarily unavailable.", { cause: error }), {
+          statusCode: 503,
+        });
+      }
+      if (!prices) throw createHttpError(404, "Stay prices unavailable.");
+      return prices;
     },
     async quoteBooking(slug, request, context) {
       return issueReplacementQuote(slug, request, context?.idempotencyKey);

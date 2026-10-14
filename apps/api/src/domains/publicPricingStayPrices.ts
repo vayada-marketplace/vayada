@@ -1,0 +1,204 @@
+import type { Pool, PoolClient } from "pg";
+import { PUBLIC_PRICING_SELECTION_VERSION } from "@vayada/domain-booking";
+import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
+import { lockPublicPricingChargeTotals } from "./publicPricingChargeTotals.js";
+
+type Occupancy = { maxGuests: number; maxAdults: number; maxChildren: number };
+type OfferCatalog = {
+  read(slug: string): Promise<{
+    rooms: {
+      roomTypeId: string;
+      occupancy: Occupancy;
+      offers: { publicOfferKey: string; currency: string }[];
+    }[];
+  } | null>;
+};
+
+export type StayPricesQuery = {
+  checkIn: string;
+  checkOut: string;
+  adults: number;
+  children: number;
+  promoCode: string | null;
+};
+
+/** A party never needs more rooms of one type than this on the booking page. */
+const MAX_ROOMS = 9;
+/** Rooms left at or below this are shown to guests ("Only 2 left"), as the old page did. */
+const FEW_LEFT = 3;
+
+const date = (value: unknown): value is string =>
+  typeof value === "string" &&
+  /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+  new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
+const count = (value: unknown, min: number) => {
+  const parsed = typeof value === "string" && /^\d{1,2}$/.test(value) ? Number(value) : NaN;
+  return parsed >= min ? parsed : null;
+};
+
+export function parseStayPricesQuery(query: unknown): StayPricesQuery | null {
+  if (!query || typeof query !== "object") return null;
+  const q = query as Record<string, unknown>;
+  const adults = count(q["adults"], 1),
+    children = q["children"] === undefined ? 0 : count(q["children"], 0),
+    promo = typeof q["promoCode"] === "string" ? q["promoCode"].trim() : "";
+  if (
+    !date(q["checkIn"]) ||
+    !date(q["checkOut"]) ||
+    q["checkOut"] <= q["checkIn"] ||
+    nights(q["checkIn"], q["checkOut"]) > 366 ||
+    adults === null ||
+    children === null ||
+    adults + children > 99 ||
+    promo.length > 200
+  )
+    return null;
+  return {
+    checkIn: q["checkIn"],
+    checkOut: q["checkOut"],
+    adults,
+    children,
+    promoCode: promo || null,
+  };
+}
+
+const nights = (checkIn: string, checkOut: string) =>
+  (Date.parse(checkOut) - Date.parse(checkIn)) / 86400000;
+
+/** Rooms of one type the party needs, split as the old booking page did: enough rooms for the
+ * adults and for everyone, each with at least one adult (VAY-2190). Null when it can't fit. */
+export function roomsForParty(occupancy: Occupancy, adults: number, children: number) {
+  const rooms = Math.max(
+    1,
+    Math.ceil(adults / occupancy.maxAdults),
+    Math.ceil((adults + children) / occupancy.maxGuests),
+  );
+  return rooms <= MAX_ROOMS && rooms <= adults ? rooms : null;
+}
+
+/** Adults spread evenly; the first rooms take any remainder. */
+export function splitAdults(adults: number, rooms: number) {
+  return Array.from(
+    { length: rooms },
+    (_, index) => Math.floor(adults / rooms) + (index < adults % rooms ? 1 : 0),
+  );
+}
+
+/** Read-only stay prices for the booking page's room cards: each offer's total for the stay,
+ * from the same calculation as the quote, and whether each room type is free on every night by
+ * the rule booking acceptance applies. No quote is issued, nothing is held and the transaction
+ * always rolls back. Children are counted for rooms but priced once their ages are known, on
+ * /book. The quote stays the binding price. */
+export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog) {
+  return {
+    async read(slug: string, query: StayPricesQuery) {
+      const offered = await catalog.read(slug);
+      if (!offered) return null;
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+        const scope = await lockPublicPricingAuthority(client, slug);
+        if (!scope) return null;
+        const free = await freeRooms(
+          client,
+          scope.propertyId,
+          offered.rooms.map(({ roomTypeId }) => roomTypeId),
+          query,
+        );
+        const rooms = [];
+        for (const room of offered.rooms) {
+          const roomCount = roomsForParty(room.occupancy, query.adults, query.children);
+          const left = free.get(room.roomTypeId) ?? 0;
+          const offers = [];
+          for (const offer of room.offers) {
+            const price =
+              roomCount === null ? null : await stayTotal(client, slug, query, offer, roomCount);
+            offers.push(
+              price
+                ? { publicOfferKey: offer.publicOfferKey, status: "priced" as const, ...price }
+                : { publicOfferKey: offer.publicOfferKey, status: "unavailable" as const },
+            );
+          }
+          rooms.push({
+            roomTypeId: room.roomTypeId,
+            roomCount,
+            availability: left >= (roomCount ?? 1) ? ("available" as const) : ("sold_out" as const),
+            roomsLeft: left > 0 && left <= FEW_LEFT ? left : null,
+            offers,
+          });
+        }
+        return {
+          version: "public-pricing-stay-prices.v1" as const,
+          checkIn: query.checkIn,
+          checkOut: query.checkOut,
+          rooms,
+        };
+      } finally {
+        try {
+          await client.query("ROLLBACK");
+        } finally {
+          client.release();
+        }
+      }
+    },
+  };
+}
+
+/** Rooms free on every night: an open inventory day for each night, counting what is available
+ * after assigned and blocked rooms (pmsInventoryReservationLifecycleRepository's reserve rule). */
+async function freeRooms(
+  client: PoolClient,
+  propertyId: string,
+  roomTypeIds: string[],
+  query: StayPricesQuery,
+) {
+  const result = await client.query<{ roomTypeId: string; nights: number; free: number }>(
+    `SELECT room_type_id::text AS "roomTypeId", COUNT(*)::int AS nights,
+            MIN(CASE WHEN status = 'open'
+                THEN LEAST(available_count, total_count - assigned_count - blocked_count)
+                ELSE 0 END)::int AS free
+       FROM pms.inventory_days
+      WHERE property_id = $1::uuid AND room_type_id = ANY($2::uuid[])
+        AND stay_date >= $3::date AND stay_date < $4::date
+      GROUP BY room_type_id`,
+    [propertyId, roomTypeIds, query.checkIn, query.checkOut],
+  );
+  const stay = nights(query.checkIn, query.checkOut);
+  return new Map(
+    result.rows.map((row) => [row.roomTypeId, row.nights === stay ? Math.max(row.free, 0) : 0]),
+  );
+}
+
+/** One offer's stay total for the party. A promo code that doesn't apply to this stay makes the
+ * calculation refuse, so the price without it is returned and says so. */
+async function stayTotal(
+  client: PoolClient,
+  slug: string,
+  query: StayPricesQuery,
+  offer: { publicOfferKey: string; currency: string },
+  roomCount: number,
+) {
+  const price = async (promoCode: string | null) =>
+    (
+      await lockPublicPricingChargeTotals(client, slug, {
+        version: PUBLIC_PRICING_SELECTION_VERSION,
+        checkIn: query.checkIn,
+        checkOut: query.checkOut,
+        currency: offer.currency,
+        rooms: splitAdults(query.adults, roomCount).map((adults, index) => ({
+          selectionId: `room-${index + 1}`,
+          publicOfferKey: offer.publicOfferKey,
+          guests: { adults, childAgesAtCheckIn: [] },
+        })),
+        addons: [],
+        promoCode,
+      })
+    )?.totalMinor ?? null;
+  const withCode = query.promoCode === null ? null : await price(query.promoCode);
+  if (withCode !== null)
+    return { totalMinor: withCode, currency: offer.currency, promoApplied: true };
+  const plain = await price(null);
+  return plain === null
+    ? null
+    : { totalMinor: plain, currency: offer.currency, promoApplied: false };
+}
