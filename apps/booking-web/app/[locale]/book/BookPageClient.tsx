@@ -528,7 +528,10 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     const item = (id: string) => extras?.items.find((current) => current.id === id);
     const context = {
       hotelName: hotel.name,
-      roomName: summaryRooms.map((room) => `${room.name} · ${room.choice}`).join(", "),
+      // Each kind of room once: the page puts "2×" in front when more rooms are booked.
+      roomName: Array.from(
+        new Set(summaryRooms.map((room) => `${room.name} · ${room.choice}`)),
+      ).join(", "),
       guestFirstName: guest.firstName.trim(),
       guestLastName: guest.lastName.trim(),
       guestEmail: guest.email.trim().toLowerCase(),
@@ -557,8 +560,14 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           checkOut: quote.checkOut,
           currency: quote.currency,
           totalAmount: quoteMoneyAmount(quote.totalMinor, quote.currency),
-          // What is still owed, as the server's own answer gives it; the page shows it as due.
-          balanceAmount: quoteMoneyAmount(quote.dueLaterMinor, quote.currency),
+          // As the server would answer: a card is paid when booked, or only held for a request,
+          // and what isn't paid yet is still owed.
+          paymentStatus:
+            quote.paymentMethod === "card" ? (requested ? "authorized" : "paid") : "unpaid",
+          balanceAmount: quoteMoneyAmount(
+            requested ? quote.totalMinor : quote.dueLaterMinor,
+            quote.currency,
+          ),
           numberOfRooms: quote.rooms.length,
           adults: adultCount,
           children: childCount,

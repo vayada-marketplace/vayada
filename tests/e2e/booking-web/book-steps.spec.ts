@@ -274,6 +274,10 @@ for (const width of [1440, 390]) {
     // The choice keeps the name the steps showed (VAY-2190 plain names).
     await expect(page.getByText("Deluxe Double Room · Room only")).toBeVisible();
     await expect(page.getByText("Total Due", { exact: true }).locator("..")).toContainText("€370");
+    // The page shows the server's answer, not the fallback this booking knows (its id is empty).
+    expect(
+      await page.evaluate(() => JSON.parse(sessionStorage.getItem("lastBooking") ?? "{}").id),
+    ).toBe("66666666-6666-4666-8666-666666666666");
     expect(accepted).toHaveLength(1);
     expect(accepted[0]).toMatchObject({
       guest: { firstName: "Ada", lastName: "Lovelace", specialRequests: "A quiet room, please." },
