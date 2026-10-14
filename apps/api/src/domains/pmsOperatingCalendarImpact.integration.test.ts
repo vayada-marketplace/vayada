@@ -286,7 +286,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS operating-calendar impact co
     ).resolves.toMatchObject({ ok: true, response: { configuration: { calendarRevision: 2 } } });
   });
 
-  it("saves over a stale calendar whose availability was never prepared (VAY-2134)", async () => {
+  it("saves over a calendar whose availability was never prepared (VAY-2134)", async () => {
     await configureAndSeedInventory();
     // Revision 2 is saved, but preparing it fails, so guests still book revision 1.
     const narrowed = {
@@ -297,14 +297,15 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS operating-calendar impact co
     await expect(
       calendar.upsertOperatingCalendar(finalCommand("unprepared", first.confirmation, narrowed)),
     ).resolves.toMatchObject({ ok: true, response: { configuration: { calendarRevision: 2 } } });
-    // The hotel then edits its profile. Revision 2 pins the old profile and can't be prepared.
+    // The hotel then edits its profile. Since VAY-2150 revision 2 stays current; it is still
+    // unprepared, so the next save previews against the prepared revision 1.
     await admin.query(
       "UPDATE hotel_catalog.properties SET profile_revision = profile_revision + 1 WHERE id = $1::uuid",
       [propertyId],
     );
     await expect(
       calendarRead.getCurrentOperatingCalendarConfiguration(propertyId),
-    ).resolves.toMatchObject({ sourceStatus: "stale" });
+    ).resolves.toMatchObject({ sourceStatus: "current" });
 
     const again = { expectedCalendarRevision: 2, expectedPropertyProfileRevision: 8 };
     const preview = await requiredPreview(previewCommand("after-profile-edit", again));

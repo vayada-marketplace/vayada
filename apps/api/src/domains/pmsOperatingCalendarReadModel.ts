@@ -4,7 +4,7 @@ import {
   parsePmsOperatingCalendarSourceRevision,
   parseRoomTypeCapacitySnapshot,
   parseRoomTypeFactsSnapshot,
-  resolvePmsOperatingCalendarPropertyProfileConflict,
+  resolvePmsOperatingCalendarTimeZoneConflict,
   sortPmsOperatingCalendarStaleSourceConflicts,
   type PmsOperatingCalendarCanonicalTimeZoneRegistry,
   type PmsOperatingCalendarConfigurationSnapshot,
@@ -292,9 +292,10 @@ function currentResult(
   if (profileSource.entityId !== configuration.propertyId) {
     throw new Error("PMS operating-calendar profile evidence escaped its property scope");
   }
-  const profileConflict = resolvePmsOperatingCalendarPropertyProfileConflict(
+  // VAY-2150: the calendar uses only the property's time zone, so other profile edits keep it.
+  const profileConflict = resolvePmsOperatingCalendarTimeZoneConflict(
     profileEvidence,
-    profileRevisionNumber(configuration.sourceInputs.propertyProfile.revision),
+    configuration.sourceInputs.propertyTimeZone,
     registry,
   );
   if (profileConflict) {
@@ -302,13 +303,6 @@ function currentResult(
       throw new Error("Hotel Catalog evidence returned an impossible room conflict");
     }
     conflicts.push(profileConflict);
-  }
-  if (
-    !profileConflict &&
-    profileEvidence.status === "available" &&
-    profileEvidence.evidence.timeZone !== configuration.sourceInputs.propertyTimeZone
-  ) {
-    throw new Error("Hotel Catalog timezone changed without advancing its profile source");
   }
 
   const activeFacts = facts.filter(({ lifecycle }) => lifecycle === "active");
@@ -324,15 +318,10 @@ function currentResult(
   const acceptedById = new Map(
     configuration.sourceInputs.roomBindings.map((binding) => [binding.roomTypeId, binding]),
   );
+  // Room details (name, description, beds, occupancy) don't change the calendar; the operating
+  // room set and its units do (VAY-2150).
   for (const factsSnapshot of activeFacts) {
     const accepted = acceptedById.get(factsSnapshot.roomTypeId);
-    if (accepted && factsSnapshot.roomFactsRevision !== accepted.sourceRoomFactsRevision) {
-      conflicts.push({
-        code: "room_facts_revision_conflict",
-        roomTypeId: factsSnapshot.roomTypeId,
-        currentRevision: factsSnapshot.roomFactsRevision,
-      });
-    }
     const capacity = capacities.get(factsSnapshot.roomTypeId) ?? null;
     if (!capacity || capacity.activeUnitCount === 0) {
       conflicts.push({ code: "room_capacity_unavailable", roomTypeId: factsSnapshot.roomTypeId });
@@ -556,10 +545,6 @@ function assertChildScope(
 
 function sourceRevisionNumber(source: PmsOperatingCalendarSourceRevision): number {
   return positiveInteger(source.revision.slice("calendar:".length), "source revision");
-}
-
-function profileRevisionNumber(value: string): number {
-  return positiveInteger(value.slice("profile:".length), "profile revision");
 }
 
 function sameSource(

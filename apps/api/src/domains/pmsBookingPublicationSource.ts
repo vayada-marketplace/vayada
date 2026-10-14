@@ -1,7 +1,6 @@
 import {
   type BookingLaunchOwnerBlocker,
   type BookingLaunchPmsEvidencePort,
-  type BookingLaunchSourceRevision,
 } from "@vayada/domain-booking";
 import {
   BOOKING_OWNER_SNAPSHOT_VERSION,
@@ -33,7 +32,6 @@ type LoadedPms = {
   pricingSource: PmsSource;
   pricingBlockers: BookingLaunchOwnerBlocker[];
   calendarSource: PmsSource;
-  calendarBindings: BookingLaunchSourceRevision[];
   calendarBlockers: BookingLaunchOwnerBlocker[];
   content: BookingPublicationSnapshotContent["pms"] | null;
 };
@@ -86,11 +84,9 @@ export function createPmsBookingPublicationSource(dependencies: {
               groupId: "booking.calendar",
               owningStepId: "calendar",
               source: loaded.calendarSource,
+              // No binding to the hotel profile revision: the PMS read model reports the only
+              // profile change the calendar uses, a new time zone, as stale (VAY-2150).
               blockers: loaded.calendarBlockers,
-              bindings: loaded.calendarBindings.map((expectedSource) => ({
-                expectedSource,
-                mismatchBlocker: blocker("operating_calendar_source_stale"),
-              })),
             },
           ],
         });
@@ -269,9 +265,6 @@ async function load(
     pricingSource,
     pricingBlockers,
     calendarSource,
-    calendarBindings: currentCalendar
-      ? [currentCalendar.configuration.sourceInputs.propertyProfile]
-      : [],
     calendarBlockers,
     content,
   };

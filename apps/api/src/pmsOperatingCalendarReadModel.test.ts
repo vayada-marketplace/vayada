@@ -95,7 +95,6 @@ describe("PMS operating-calendar read model", () => {
       sourceStatus: "stale",
       sourceConflicts: [
         { code: "property_timezone_missing" },
-        { code: "room_facts_revision_conflict", roomTypeId: roomTypeA, currentRevision: 4 },
         { code: "room_units_revision_conflict", roomTypeId: roomTypeA, currentRevision: 6 },
         { code: "room_capacity_unavailable", roomTypeId: roomTypeB },
       ],
@@ -146,14 +145,36 @@ describe("PMS operating-calendar read model", () => {
       sourceConflicts: [{ code: "room_capacity_unavailable", roomTypeId: roomTypeA }],
     });
 
-    const changedProfile = readFixture({
+    const invalidZone = readFixture({
       profileResult: profileResult("timezone_invalid", 8),
     });
     await expect(
-      changedProfile.read.getCurrentOperatingCalendarConfiguration(propertyId),
+      invalidZone.read.getCurrentOperatingCalendarConfiguration(propertyId),
     ).resolves.toMatchObject({
       sourceStatus: "stale",
-      sourceConflicts: [{ code: "property_profile_revision_conflict", currentRevision: 8 }],
+      sourceConflicts: [{ code: "property_timezone_invalid" }],
+    });
+  });
+
+  it("stays current after profile and room-detail edits, but not after a time zone change (VAY-2150)", async () => {
+    const edited = readFixture({
+      profileResult: availableProfile(9, "Europe/Berlin"),
+      facts: [facts(roomTypeA, 4), facts(roomTypeB, 6)],
+    });
+    await expect(edited.read.getCurrentOperatingCalendarConfiguration(propertyId)).resolves.toEqual(
+      {
+        configuration: expectedConfiguration(),
+        sourceStatus: "current",
+        sourceConflicts: [],
+      },
+    );
+
+    const moved = readFixture({ profileResult: availableProfile(7, "America/Nuuk") });
+    await expect(
+      moved.read.getCurrentOperatingCalendarConfiguration(propertyId),
+    ).resolves.toMatchObject({
+      sourceStatus: "stale",
+      sourceConflicts: [{ code: "property_profile_revision_conflict", currentRevision: 7 }],
     });
   });
 
@@ -174,10 +195,6 @@ describe("PMS operating-calendar read model", () => {
           ]),
         }),
         "changed without advancing",
-      ],
-      [
-        readFixture({ profileResult: availableProfile(7, "America/Nuuk") }),
-        "timezone changed without advancing",
       ],
     ];
     for (const [fixture, message] of cases) {

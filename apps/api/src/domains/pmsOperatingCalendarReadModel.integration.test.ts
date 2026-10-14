@@ -118,16 +118,32 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS operating-calendar read mode
     }
 
     const result = await readModel.getCurrentOperatingCalendarConfiguration(propertyId);
+    // The new time zone and units stale the calendar; room details alone would not (VAY-2150).
     expect(result).toMatchObject({
       configuration: expectedLatestConfiguration(),
       sourceStatus: "stale",
       sourceConflicts: [
         { code: "property_profile_revision_conflict", currentRevision: 8 },
-        { code: "room_facts_revision_conflict", roomTypeId: roomTypeA, currentRevision: 4 },
         { code: "room_units_revision_conflict", roomTypeId: roomTypeA, currentRevision: 6 },
       ],
     });
     expect(JSON.stringify(result)).not.toContain("Asia/Kolkata");
+  });
+
+  it("keeps the calendar current after hotel profile and room detail edits (VAY-2150)", async () => {
+    await admin.query(
+      "UPDATE hotel_catalog.properties SET profile_revision = 9, updated_at = now() WHERE id = $1",
+      [propertyId],
+    );
+    await admin.query(
+      "UPDATE pms.room_types SET room_facts_revision = 5, updated_at = now() WHERE id = $1",
+      [roomTypeA],
+    );
+    expect(await readModel.getCurrentOperatingCalendarConfiguration(propertyId)).toEqual({
+      configuration: expectedLatestConfiguration(),
+      sourceStatus: "current",
+      sourceConflicts: [],
+    });
   });
 
   it("reads uncommitted owner changes on the caller connection and leaves rollback to the caller", async () => {
@@ -148,8 +164,6 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS operating-calendar read mode
       expect(await lockPmsCurrentOperatingCalendar(admin, propertyId)).toMatchObject({
         sourceStatus: "stale",
         sourceConflicts: [
-          { code: "property_profile_revision_conflict", currentRevision: 8 },
-          { code: "room_facts_revision_conflict", roomTypeId: roomTypeA, currentRevision: 4 },
           { code: "room_units_revision_conflict", roomTypeId: roomTypeA, currentRevision: 6 },
         ],
       });

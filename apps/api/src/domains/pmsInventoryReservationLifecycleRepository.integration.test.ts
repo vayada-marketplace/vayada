@@ -53,7 +53,7 @@ type Fixture = Readonly<{
   configuration: PmsOperatingCalendarConfigurationSnapshot;
   calendarState: { stale: boolean };
   capacityState: { revision: number; count: number };
-  profileState: { available: boolean; revision: number };
+  profileState: { available: boolean; revision: number; timeZone: string | null };
   authorizationState: { allowed: boolean };
   authorize: ReturnType<typeof vi.fn>;
   materialization: PmsInventoryMaterializationRepository;
@@ -282,10 +282,12 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
                 })),
               }
             : command;
+      // Only the time zone of the hotel profile matters to the calendar (VAY-2150).
       if (reason === "profile")
-        await admin.query("UPDATE hotel_catalog.properties SET profile_revision=2 WHERE id=$1", [
-          f.propertyId,
-        ]);
+        await admin.query(
+          "UPDATE hotel_catalog.property_locations SET timezone='Asia/Kolkata' WHERE property_id=$1",
+          [f.propertyId],
+        );
       if (reason === "rate gate")
         await admin.query(
           "UPDATE pms.inventory_days SET rate_gate_open=false,inventory_revision=inventory_revision+1,generated_pricing_source_fingerprint=repeat('b',64) WHERE property_id=$1",
@@ -1572,7 +1574,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
 
     const staleProfile = await createFixture(admin, closeables, { capacity: 2, startingLimit: 2 });
     await materialize(staleProfile, "2026-08-04", "2026-08-04");
-    staleProfile.profileState.revision = 2;
+    // Only a new time zone makes the hotel profile stale for the calendar (VAY-2150).
+    staleProfile.profileState.timeZone = "Asia/Kolkata";
     await expect(
       staleProfile.reservation.reserveInventory(
         await reserveCommand(admin, staleProfile, "stale-profile", 1, "2026-08-04"),
@@ -2015,7 +2018,7 @@ async function createFixture(
 
   const calendarState = { stale: false };
   const capacityState = { revision: 1, count: options.capacity };
-  const profileState = { available: true, revision: 1 };
+  const profileState = { available: true, revision: 1, timeZone: null as string | null };
   const authorizationState = { allowed: true };
   const operatingCalendar: PmsOperatingCalendarReadPort = {
     async getCurrentOperatingCalendarConfiguration(requestedPropertyId) {
@@ -2053,7 +2056,7 @@ async function createFixture(
   const propertyProfileEvidence: PmsOperatingCalendarPropertyProfileEvidencePort = {
     ownerDomain: "hotel_catalog",
     registryVersion: "test.v1",
-    isCanonicalIanaTimeZone: (value) => value === "Europe/Berlin",
+    isCanonicalIanaTimeZone: (value) => value === "Europe/Berlin" || value === "Asia/Kolkata",
     async runWithPropertyProfileEvidence(_input, guarded) {
       const source = {
         ownerDomain: "hotel_catalog" as const,
@@ -2065,7 +2068,11 @@ async function createFixture(
         profileState.available
           ? {
               status: "available",
-              evidence: { source, timeZone: configuration.sourceInputs.propertyTimeZone },
+              evidence: {
+                source,
+                timeZone: (profileState.timeZone ??
+                  configuration.sourceInputs.propertyTimeZone) as never,
+              },
             }
           : { status: "timezone_missing", source },
       );
