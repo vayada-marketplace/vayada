@@ -6061,9 +6061,14 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
               requiredCoverage,
               snapshot: {
                 configuration: { source },
+                // Setup prepares a full year from today (VAY-2150: launch needs 11 months).
                 coverage: {
                   coverageFrom: requiredCoverage.from,
-                  coverageThrough: requiredCoverage.through,
+                  coverageThrough: new Date(
+                    Date.parse(`${requiredCoverage.from}T00:00:00.000Z`) + 365 * 86_400_000,
+                  )
+                    .toISOString()
+                    .slice(0, 10),
                   expectedDayCount: 732,
                   materializedDayCount: 732,
                   gaps: [],
