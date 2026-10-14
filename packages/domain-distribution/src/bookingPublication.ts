@@ -13,6 +13,13 @@ import {
 import { parsePublicBookabilityProfileProjection } from "./publicBookabilityProfileParser.js";
 
 export const BOOKING_PUBLIC_CONTENT_CONTRACT_VERSION = "booking-public-content.v1" as const;
+
+/**
+ * A booking page needs availability prepared from today through at least 334 more days (11
+ * months, VAY-2150). Setup prepares a full year and auto-open keeps 12+ months to a month end,
+ * so this leaves a month of slack. Launch readiness asks for the same window.
+ */
+export const BOOKING_PUBLICATION_MIN_OPEN_DAYS = 334;
 /** Bank transfer and PayPal are paid to the hotel, which confirms the payment (VAY-2139). */
 export type BookingPublicPaymentMethod = "card" | "pay_at_property" | "bank_transfer" | "paypal";
 const BOOKING_PUBLIC_PAYMENT_METHODS: readonly string[] = [
@@ -365,16 +372,21 @@ function sanitizeCalendar(
   const { generatedAt } = profile;
   const roomTypeIds = [...new Set(value.roomTypeIds)].sort();
   const expectedRooms = rooms.map(({ roomTypeId }) => roomTypeId).sort();
+  // Coverage may have started before today (prepared yesterday) and may run past a year
+  // (auto-open to a month end); it must cover today and the next 11 months.
+  const coveredDays = inclusiveDays(value.coverageFrom, value.coverageThrough);
   if (
     !validInstant(generatedAt) ||
     value.currentLocalDate !== localDateAt(generatedAt, profile.hotel.timezone) ||
     !nonEmpty(value.sourceRevision) ||
     value.sourceRevision !== value.materializedRevision ||
-    value.currentLocalDate !== value.coverageFrom ||
+    coveredDays < 1 ||
+    value.coverageFrom > value.currentLocalDate ||
+    inclusiveDays(value.currentLocalDate, value.coverageThrough) <
+      BOOKING_PUBLICATION_MIN_OPEN_DAYS + 1 ||
     value.coverageThrough !== value.materializedThrough ||
-    inclusiveDays(value.coverageFrom, value.coverageThrough) !== 366 ||
-    value.expectedDayCount !== 366 * rooms.length ||
-    value.materializedDayCount !== 366 * rooms.length ||
+    value.expectedDayCount !== coveredDays * rooms.length ||
+    value.materializedDayCount !== coveredDays * rooms.length ||
     value.gapCount !== 0 ||
     JSON.stringify(roomTypeIds) !== JSON.stringify(expectedRooms) ||
     !validInstant(value.observedAt) ||

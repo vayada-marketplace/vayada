@@ -2,6 +2,7 @@ import {
   type BookingLaunchOwnerBlocker,
   type BookingLaunchPmsEvidencePort,
 } from "@vayada/domain-booking";
+import { BOOKING_PUBLICATION_MIN_OPEN_DAYS } from "@vayada/domain-distribution/booking-publication";
 import {
   BOOKING_OWNER_SNAPSHOT_VERSION,
   type BookingPublicationOwnerSnapshotPort,
@@ -26,6 +27,7 @@ import type {
 import { buildPmsBookingPublicationContent } from "./pmsBookingPublicationContent.js";
 
 type PmsSource = Omit<SourceEntityRevision, "ownerDomain"> & { ownerDomain: "pms" };
+
 type LoadedPms = {
   sources: PmsSource[];
   rooms: readonly { source: PmsSource; blockers: BookingLaunchOwnerBlocker[] }[];
@@ -162,7 +164,11 @@ async function load(
     currentLocalDate
       ? dependencies.inventory.getInventoryLaunchReadiness({
           propertyId: scope.propertyId,
-          requiredCoverage: { from: currentLocalDate, through: addDays(currentLocalDate, 365) },
+          requiredCoverage: {
+            from: currentLocalDate,
+            // The same 11-month window the publication builder checks (VAY-2150).
+            through: addDays(currentLocalDate, BOOKING_PUBLICATION_MIN_OPEN_DAYS),
+          },
         })
       : null,
     dependencies.pricingCurrency.getPropertyPricingCurrency(scope.propertyId),
