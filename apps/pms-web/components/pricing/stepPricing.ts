@@ -10,6 +10,8 @@ import {
 } from "@vayada/domain-pms/replacement-pricing";
 import {
   parseBookingPricingOfferTerms,
+  pricingOfferNameKeys,
+  publicOfferCancellation,
   type ReplacementOfferTerms,
 } from "@vayada/domain-booking/replacement-pricing";
 import { formatCurrency } from "@/lib/formatCurrency";
@@ -53,30 +55,42 @@ export function headlineMinor(price: RoomPrice): string {
   return price.amountsMinor.reduce((low, amount) => (BigInt(amount) < BigInt(low) ? amount : low));
 }
 
-/** Option names, since the engine stores none: from the meal plan and the cancellation terms ("Flexible",
- * "Non-refundable + breakfast"). Without terms (still loading, or failed) the meal plan and position name it. Later
- * options with the same name are numbered. */
+/** Option names, since the engine stores none: from the meal plan and the cancellation terms ("Free cancellation",
+ * "Breakfast included, non-refundable"), with the booking page's rule (VAY-2188). Without terms (still loading, or
+ * failed) the meal plan and position name it. Later options with the same name are numbered. */
 export function optionNames(
   room: Room,
   terms: Readonly<Record<string, OptionTerms | undefined>>,
   t: Translate,
 ) {
-  const names: Record<string, string> = {},
-    used = new Map<string, number>();
-  room.offers.forEach((offer, index) => {
-    const cancellation = terms[offer.id]?.cancellation.kind;
-    const name = cancellation
-      ? t(`pricing.steps.name.${cancellation}.${offer.meal.kind}`)
-      : t("pricing.steps.name.fallback", {
-          number: index + 1,
-          meal: t(`pricing.meal.${offer.meal.kind}`),
-        });
-    const count = (used.get(name) ?? 0) + 1;
-    used.set(name, count);
-    names[offer.id] =
-      count === 1 ? name : t("pricing.steps.name.numbered", { name, number: count });
-  });
-  return names;
+  const keys = pricingOfferNameKeys(
+    room.offers.map((offer) => {
+      const known = terms[offer.id];
+      return {
+        mealPlan: offer.meal.kind,
+        cancellation: known ? publicOfferCancellation(known.cancellation) : null,
+      };
+    }),
+  );
+  return Object.fromEntries(
+    room.offers.map((offer, index) => {
+      const key = keys[index];
+      if (!key.cancellation)
+        return [
+          offer.id,
+          t("pricing.steps.name.fallback", {
+            number: index + 1,
+            meal: t(`pricing.meal.${offer.meal.kind}`),
+          }),
+        ];
+      const kind = key.cancellation === "free" ? "flexible" : key.cancellation;
+      const name = t(`pricing.steps.name.${kind}.${key.meal}`);
+      return [
+        offer.id,
+        key.number ? t("pricing.steps.name.numbered", { name, number: key.number }) : name,
+      ];
+    }),
+  );
 }
 
 /** The option card's one-line summary: meal, price relation, cancellation ("Breakfast +€15 · Free cancellation up to 7

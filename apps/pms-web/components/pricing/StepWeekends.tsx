@@ -12,12 +12,11 @@ import {
   weekendChoice,
   weekendChoices,
 } from "./stepPricing";
-import { StepCard } from "./StepCard";
 import * as ui from "./pricingStyles";
 
 type Offer = PricingConfiguration["offers"][number];
-/** Step 3: one weekend surcharge for Friday and Saturday nights. "Other days…" opens the full weekday editor, which
- * stays mounted while hidden so its unapplied entry and the Save guard survive closing it. */
+/** The weekend row under "Busier dates": one surcharge for Friday and Saturday nights. "Other days…" opens the full
+ * weekday editor, which stays mounted while hidden so its unapplied entry and the Save guard survive closing it. */
 export function StepWeekends({
   room,
   offer,
@@ -52,16 +51,15 @@ export function StepWeekends({
     }
   };
   return (
-    <StepCard
-      number={3}
-      title={t("pricing.steps.weekends.title")}
-      hint={t("pricing.steps.weekends.hint")}
-    >
+    <div className="space-y-3 pt-2">
       <div
         role="group"
         aria-label={t("pricing.steps.weekends.title")}
-        className="flex flex-wrap gap-2"
+        className="flex flex-wrap items-center gap-2"
       >
+        <span aria-hidden="true" className="mr-2 text-[15px] text-gray-700">
+          {t("pricing.steps.weekends.title")}
+        </span>
         {([null, ...weekendChoices] as const).map((basisPoints) => {
           const selected = basisPoints === null ? choice === "none" : choice === basisPoints;
           return (
@@ -118,6 +116,6 @@ export function StepWeekends({
           }}
         />
       </div>
-    </StepCard>
+    </div>
   );
 }

@@ -54,6 +54,17 @@ export const formLook = {
 /** The step-by-step tab (Paper design "Prices tab – step by step"): numbered question cards, their chips and buttons. */
 export const stepCard =
   "flex gap-4 rounded-2xl border border-gray-200 bg-white p-5 md:gap-[18px] md:p-7";
+/** The simple Prices card (VAY-2188): one white card whose sections are split by lines. */
+export const pricesCard = "rounded-2xl border border-gray-200 bg-white px-5 md:px-7";
+export const pricesSection = "space-y-4 border-gray-100 py-6 [&:not(:first-child)]:border-t";
+/** A blue line saying the room keeps settings the card's top doesn't show. */
+export const infoBanner =
+  "rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-[14px] leading-5 text-blue-800";
+/** An on/off switch's track; the knob sits right when on. */
+export const switchTrack = (on: boolean) =>
+  `inline-flex h-6 w-10 shrink-0 items-center rounded-full px-[3px] transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+    on ? "justify-end bg-primary-600" : "justify-start bg-gray-300"
+  }`;
 export const stepNumber =
   "flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-600 text-[14px] font-bold text-white";
 export const stepTitle = "text-[17px] font-semibold leading-6 text-gray-900";
