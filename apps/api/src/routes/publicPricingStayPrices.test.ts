@@ -36,7 +36,7 @@ it("serves the room cards' stay prices through the public no-store route", async
   }
 });
 
-it("refuses an invalid stay and hides database errors", async () => {
+it("is missing without the read, refuses an invalid stay and hides database errors", async () => {
   const app = buildApp({
     logger: false,
     publicHotelProfileRepository: { findProfileBySlug: async () => null },

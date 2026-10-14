@@ -1577,7 +1577,16 @@ export function createTargetBookingWebCheckoutAdapter(
     mediaServing: config.mediaServing,
   });
   const pricingAddons = createPublicPricingAddonCatalog(pool);
-  const stayPrices = createPublicPricingStayPrices(pool, pricingOffers);
+  // Room cards price every offer for each page view (VAY-2190). A small pool of their own keeps
+  // guests' browsing from using up the booking flow's connections; a busy pool fails fast.
+  const stayPricesPool = ownsPool
+    ? new pg.Pool({
+        connectionString: config.connectionString,
+        max: 2,
+        connectionTimeoutMillis: 2000,
+      })
+    : pool;
+  const stayPrices = createPublicPricingStayPrices(stayPricesPool, pricingOffers);
   const guestDisclosure = createPublicQuoteGuestDisclosure(pool);
   const issueReplacementQuote = createReplacementBookingQuoteIssuer(
     createCurrentPricingQuoteStore(pool, 300),
@@ -2731,6 +2740,7 @@ export function createTargetBookingWebCheckoutAdapter(
       if (editCleanupTimer) clearInterval(editCleanupTimer);
       if (ownsPool) {
         await pool.end();
+        await stayPricesPool.end();
       }
     },
   };
