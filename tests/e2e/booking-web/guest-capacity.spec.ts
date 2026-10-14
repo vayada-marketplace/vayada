@@ -29,7 +29,10 @@ for (const mobile of [false, true]) {
       /^\/(en\/)?book\?checkIn=2026-09-12&checkOut=2026-09-15&adults=13&children=1$/,
     );
     await page.screenshot({ path: test.info().outputPath("guest-capacity.png"), fullPage: true });
+    // The room cards show this stay, so Check Availability stays on the page (VAY-2190).
     await page.getByRole("button", { name: "Check Availability", exact: true }).click();
+    await expect(page).not.toHaveURL(/\/book/);
+    await entry.click();
     await expect(page).toHaveURL(
       /\/(en\/)?book\?checkIn=2026-09-12&checkOut=2026-09-15&adults=13&children=1$/,
     );
