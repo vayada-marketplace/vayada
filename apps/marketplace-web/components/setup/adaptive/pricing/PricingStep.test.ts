@@ -1,7 +1,6 @@
 import { createElement } from "react";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import type { PropertySetupRouteReadModel } from "@vayada/domain-hotels";
-import { FirstPricingSetup } from "@vayada/product-onboarding/FirstPricingSetup";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -9,6 +8,10 @@ const mocks = vi.hoisted(() => ({
   saveCurrency: vi.fn(),
   read: vi.fn(),
   publish: vi.fn(),
+  readiness: vi.fn(),
+}));
+vi.mock("@/services/api/financePaymentReadinessClient", () => ({
+  financePaymentReadinessClient: { load: mocks.readiness },
 }));
 
 vi.mock("@/services/api/onboardingPricingClient", async () => ({
@@ -39,6 +42,13 @@ describe("PricingStep", () => {
     mocks.load.mockResolvedValue(owners());
     mocks.read.mockResolvedValue(null);
     mocks.publish.mockResolvedValue(undefined);
+    // The Payments step chose pay at the hotel, and it is ready.
+    mocks.readiness.mockResolvedValue({
+      methods: [
+        { method: "pay_at_property", selected: true, readiness: "ready" },
+        { method: "card", selected: false, readiness: "unready" },
+      ],
+    });
   });
   afterEach(() => vi.unstubAllGlobals());
 
@@ -46,7 +56,7 @@ describe("PricingStep", () => {
     mocks.load.mockResolvedValue(owners({ currency: null }));
     mocks.saveCurrency.mockResolvedValue(owners());
     const view = await render();
-    expect(view.root.findAllByType(FirstPricingSetup)).toHaveLength(0);
+    expect(priceInputs(view.root)).toHaveLength(0);
     const select = view.root.findByType("select");
     expect(select.findAllByType("option").map((option) => option.props.value)).toEqual([
       "",
@@ -57,21 +67,24 @@ describe("PricingStep", () => {
     await act(async () => button(view.root, "Save currency").props.onClick());
     expect(mocks.saveCurrency).toHaveBeenCalledWith(propertyId, "EUR", owners({ currency: null }));
     expect(text(view.root)).toContain("All prices are in EUR.");
-    expect(view.root.findByType(FirstPricingSetup).props).toMatchObject({
-      fixedCurrency: "EUR",
-      rooms: [{ roomTypeId, name: "Garden Suite", capacity: { total: 3, adults: 2, children: 1 } }],
-    });
+    expect(priceInputs(view.root).map((input) => input.props["aria-label"])).toEqual([
+      "Price per night for Garden Suite",
+    ]);
     view.unmount();
   });
 
-  it("publishes the first rate of every room as the final-price declaration and continues", async () => {
+  it("publishes one price per room with the defaults as the final-price declaration and continues (VAY-2188)", async () => {
     const context = props();
     const view = await render(context);
     const publishButton = () => button(view.root, "Publish prices and continue");
-    await act(async () => view.root.findByType(FirstPricingSetup).props.onCreate(firstRate()));
-    expect(text(view.root)).toContain("Ready to publish");
-    expect(view.root.findAllByType(FirstPricingSetup)).toHaveLength(0);
-    // Publishing is the mandatory-charges declaration: no checkbox, one visible line (VAY-2079).
+    // Without a price, publishing names what is missing and sends nothing.
+    await act(async () => publishButton().props.onClick());
+    expect(text(view.root)).toContain("A price per night for Garden Suite");
+    expect(mocks.publish).not.toHaveBeenCalled();
+    await type(view.root, "120");
+    // How guests pay comes from the Payments step; publishing is the mandatory-charges declaration
+    // (no checkbox, one visible line, VAY-2079).
+    expect(text(view.root)).toContain("Pay at hotel");
     expect(view.root.findAll((node) => node.props.type === "checkbox")).toHaveLength(0);
     expect(publishButton().props.disabled).toBe(false);
     expect(text(view.root)).toContain(
@@ -89,9 +102,31 @@ describe("PricingStep", () => {
     expect(mocks.publish).toHaveBeenCalledWith(
       expect.anything(),
       null,
-      [firstRate()],
+      [expect.anything()],
       expect.objectContaining({ draftId: expect.any(String) }),
     );
+    const [rate] = mocks.publish.mock.calls[0]![2] as {
+      configuration: Record<string, any>;
+      terms: Record<string, any>;
+    }[];
+    expect(rate!.configuration).toMatchObject({
+      roomTypeId,
+      currency: "EUR",
+      children: {
+        adultFromAge: 12,
+        bands: [{ fromAge: 0, throughAge: 11, nightlyMinor: "0", countsTowardCapacity: true }],
+      },
+      offers: [
+        {
+          price: { calendar: { base: { mode: "flat", amountMinor: "12000" } } },
+          restrictions: { rules: { minArrivalNights: 1, maxStayNights: null } },
+        },
+      ],
+    });
+    expect(rate!.terms).toMatchObject({
+      cancellation: { kind: "flexible", terms: { freeCancellationDeadlineDays: 3 } },
+      payment: { kind: "full", acceptedMethods: ["pay_at_property"] },
+    });
     expect(context.refreshRoute).toHaveBeenCalledOnce();
     expect(context.saveAndContinue).toHaveBeenCalledOnce();
     view.unmount();
@@ -100,7 +135,7 @@ describe("PricingStep", () => {
   it("sends the owner to Payments before any rate is entered", async () => {
     const context = props("not_started");
     const view = await render(context);
-    expect(view.root.findAllByType(FirstPricingSetup)).toHaveLength(0);
+    expect(priceInputs(view.root)).toHaveLength(0);
     expect(button(view.root, "Publish prices and continue").props.disabled).toBe(true);
     await act(async () => button(view.root, "Back to Payments").props.onClick());
     expect(context.goToStep).toHaveBeenCalledWith("payments");
@@ -110,7 +145,7 @@ describe("PricingStep", () => {
 
   it("resumes the same publish attempt after a lost response", async () => {
     const view = await render();
-    await act(async () => view.root.findByType(FirstPricingSetup).props.onCreate(firstRate()));
+    await type(view.root, "120");
     mocks.publish.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     await act(async () => button(view.root, "Publish prices and continue").props.onClick());
     expect(text(view.root)).toContain("Pricing was not saved");
@@ -120,9 +155,63 @@ describe("PricingStep", () => {
     view.unmount();
   });
 
+  it("keeps the offer ids when Publish is pressed again after a failure", async () => {
+    const view = await render();
+    await type(view.root, "120");
+    mocks.publish.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await act(async () => button(view.root, "Publish prices and continue").props.onClick());
+    await act(async () => button(view.root, "Publish prices and continue").props.onClick());
+    const offerId = (call: number) =>
+      (mocks.publish.mock.calls[call]![2] as { terms: { offerId: string } }[])[0]!.terms.offerId;
+    expect(offerId(1)).toBe(offerId(0));
+    view.unmount();
+  });
+
+  it("names a price that isn't a number with its room, and never publishes an older price (VAY-2188)", async () => {
+    const view = await render();
+    await type(view.root, "120");
+    mocks.publish.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await act(async () => button(view.root, "Publish prices and continue").props.onClick());
+    expect(text(view.root)).toContain("Pricing was not saved");
+    await type(view.root, "89,50");
+    expect(text(view.root)).not.toContain("Pricing was not saved");
+    await act(async () => button(view.root, "Publish prices and continue").props.onClick());
+    expect(text(view.root)).toContain(
+      "A price per night for Garden Suite in numbers only, like 89.50",
+    );
+    expect(text(view.root)).not.toContain("Pricing was not saved");
+    expect(priceInputs(view.root)[0]!.props["aria-invalid"]).toBe(true);
+    expect(mocks.publish).toHaveBeenCalledTimes(1);
+    await type(view.root, "89.50");
+    expect(text(view.root)).not.toContain("Fill in what is still missing:");
+    await act(async () => button(view.root, "Publish prices and continue").props.onClick());
+    const [rate] = mocks.publish.mock.calls[1]![2] as { configuration: Record<string, any> }[];
+    expect(rate!.configuration.offers[0].price.calendar.base).toEqual({
+      mode: "flat",
+      amountMinor: "8950",
+    });
+    view.unmount();
+  });
+
+  it("waits for the Payments step's choice, and says when none of its ways to pay is ready", async () => {
+    let answer!: (value: unknown) => void;
+    mocks.readiness.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    const view = await render();
+    await type(view.root, "120");
+    expect(button(view.root, "Publish prices and continue").props.disabled).toBe(true);
+    await act(async () =>
+      answer({ methods: [{ method: "card", selected: true, readiness: "unready" }] }),
+    );
+    expect(button(view.root, "Publish prices and continue").props.disabled).toBe(false);
+    expect(text(view.root)).toContain(
+      "None of the ways to pay from the Payments step is ready yet.",
+    );
+    view.unmount();
+  });
+
   it("explains a refused preparation and asks for a reload after a conflict", async () => {
     const view = await render();
-    await act(async () => view.root.findByType(FirstPricingSetup).props.onCreate(firstRate()));
+    await type(view.root, "120");
     mocks.publish.mockRejectedValueOnce(new ApiErrorResponse(403, { code: "denied" }));
     await act(async () => button(view.root, "Publish prices and continue").props.onClick());
     expect(text(view.root)).toContain("Check that Payments is complete");
@@ -132,13 +221,31 @@ describe("PricingStep", () => {
     );
     await act(async () => button(view.root, "Try again").props.onClick());
     expect(text(view.root)).toContain("Change the rate to accept pay at property");
-    expect(text(view.root)).toContain("Ready to publish");
+    expect(priceInputs(view.root)[0]!.props.value).toBe("120");
     mocks.publish.mockRejectedValueOnce(new ApiErrorResponse(409, { code: "stale" }));
     await act(async () => button(view.root, "Try again").props.onClick());
     expect(text(view.root)).toContain("Pricing changed in another session");
     await act(async () => button(view.root, "Reload pricing").props.onClick());
     expect(mocks.load).toHaveBeenCalledTimes(2);
-    expect(text(view.root)).not.toContain("Ready to publish");
+    expect(priceInputs(view.root)[0]!.props.value).toBe("");
+    view.unmount();
+  });
+
+  it("asks how guests pay when the Payments step's choice can't be read (VAY-2188)", async () => {
+    mocks.readiness.mockRejectedValue(new TypeError("Failed to fetch"));
+    const view = await render();
+    await type(view.root, "95");
+    await act(async () => button(view.root, "Publish prices and continue").props.onClick());
+    expect(text(view.root)).toContain("Fill in what is still missing:");
+    expect(text(view.root)).toContain("How guests pay");
+    expect(mocks.publish).not.toHaveBeenCalled();
+    const atHotel = view.root.find(
+      (node) => node.type === "input" && node.props["aria-label"] === "Pay at property",
+    );
+    await act(async () => atHotel.props.onChange({ target: { checked: true } }));
+    await act(async () => button(view.root, "Publish prices and continue").props.onClick());
+    const [rate] = mocks.publish.mock.calls[0]![2] as { terms: Record<string, any> }[];
+    expect(rate!.terms.payment).toEqual({ kind: "full", acceptedMethods: ["pay_at_property"] });
     view.unmount();
   });
 
@@ -147,7 +254,7 @@ describe("PricingStep", () => {
     const context = props("complete", "complete");
     const view = await render(context);
     expect(text(view.root)).toContain("Published · 1 rate");
-    expect(view.root.findAllByType(FirstPricingSetup)).toHaveLength(0);
+    expect(priceInputs(view.root)).toHaveLength(0);
     expect(view.root.findAll((node) => node.props.type === "checkbox")).toHaveLength(0);
     await act(async () => button(view.root, "Continue").props.onClick());
     expect(context.saveAndContinue).toHaveBeenCalledOnce();
@@ -214,11 +321,15 @@ function publication() {
   return { currency: "EUR", revision: 1, rooms: [{ roomTypeId, offers: [{ id: "flex" }] }] };
 }
 
-function firstRate() {
-  return {
-    configuration: { roomTypeId, currency: "EUR", offers: [{ id: "flex" }] },
-    terms: { roomTypeId, offerId: "flex" },
-  };
+function priceInputs(root: ReactTestInstance) {
+  return root.findAll(
+    (node) =>
+      node.type === "input" && String(node.props["aria-label"]).startsWith("Price per night for"),
+  );
+}
+
+async function type(root: ReactTestInstance, value: string) {
+  await act(async () => priceInputs(root)[0]!.props.onChange({ target: { value } }));
 }
 
 function route(

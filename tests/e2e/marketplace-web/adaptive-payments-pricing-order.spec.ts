@@ -85,7 +85,7 @@ test.describe("adaptive setup asks how guests pay before prices", () => {
     await expect(page.getByText("Step 5 of 8")).toBeVisible();
     await expect(page.getByText("All prices are in EUR.")).toBeVisible();
     await expect(page.getByText("Choose how guests pay first")).toHaveCount(0);
-    await expect(page.getByRole("combobox", { name: "Room type" })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: /^Price per night for / })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("payments-2-pricing.png"), fullPage: true });
 
     // Going back and continuing with the same selection writes nothing, so prices never go stale.

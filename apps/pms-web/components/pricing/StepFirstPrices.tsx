@@ -1,29 +1,52 @@
 "use client";
 
 import { useEffect, useId, useState, type MutableRefObject } from "react";
+import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
+import { PlusIcon } from "@heroicons/react/24/outline";
 import { useTranslation } from "@/lib/i18n";
-import { AcceptedPaymentMethods } from "./AcceptedPaymentMethods";
+import type { PricingTermsInput } from "@/services/api/replacementPricingClient";
+import { AcceptedPaymentMethods, type PaymentMethod } from "./AcceptedPaymentMethods";
+import { CancellationChoice } from "./StepCancellation";
+import { extraField, SwitchRow } from "./StepExtras";
 import { firstPricingInput, type SetupRoom } from "./FirstPricingSetup";
 import { IncludedPricing } from "./IncludedPricing";
+import { MoreOptions } from "./MoreOptions";
 import { errorText } from "./pricingAmounts";
-import { currencySymbol } from "./stepPricing";
+import { MoreGroup, paymentText } from "./SimpleMoreOptions";
+import {
+  defaultDiscount,
+  defaultFreeDays,
+  switchOption,
+  type SimpleCancellation,
+} from "./simplePricing";
+import { currencySymbol, setWeekend, weekendChoices } from "./stepPricing";
 import { StepCard } from "./StepCard";
 import * as ui from "./pricingStyles";
 
 type Values = Parameters<typeof firstPricingInput>[3];
-type Field = Exclude<keyof Values, "occupancy" | "included" | "methods">;
+type Field = "minimum" | "maximum" | "adultAge" | "childPrice";
 const modes = ["flat", "occupancy", "per_person", "included_guests"] as const;
 /** A required answer: its key, whether it is empty, and its field's name. */
 type Answer = [key: string, empty: boolean, name: string];
+/** A discount the non-refundable switch takes: more than 0 and less than 100 percent, up to two decimals. */
+const validPercent = (value: string) =>
+  /^\d+(?:\.\d{1,2})?$/.test(value.trim()) && Number(value) > 0 && Number(value) < 100;
+/** A first price: the room with its options, and each option's terms. */
+export type FirstPrices = { configuration: PricingConfiguration; terms: PricingTermsInput[] };
+/** After the first prices are built: save them, add them unsaved, or add them and open the season window. */
+export type FirstThen = "save" | "add" | "season";
 
-/** "Set prices" for a room without prices, as the Paper design's numbered questions. It builds the room with the
- * shared `firstPricingInput` (the same configuration the old form made); "Continue" hands it to the editor, which shows
- * the full steps, unsaved, so seasons, weekends and more options can be added before "Save prices". */
+/** "Set prices" for a room without prices, as the simple Prices card (VAY-2188): a price per night is the only answer
+ * needed. Free cancellation until 3 days before arrival, the ways to pay from Payment settings, children under 12 free
+ * and no minimum stay are filled in; the switches, busier dates and More options change them. "Save prices" saves at
+ * once; "Add a season" adds the prices unsaved and opens the season window. On the New room page the page's create
+ * saves them (`pending`), and Enter only adds them, unsaved. */
 export function StepFirstPrices({
   propertyId,
   rooms,
   fixedCurrency,
   disabled,
+  defaultMethods,
   onDirty,
   onCreate,
   pending,
@@ -33,11 +56,14 @@ export function StepFirstPrices({
   rooms: readonly SetupRoom[];
   fixedCurrency?: string;
   disabled: boolean;
+  /** Payment settings' ways to pay, ticked from the start; null when they can't be read (the form asks), undefined
+   * while they load. */
+  defaultMethods: readonly PaymentMethod[] | null | undefined;
   onDirty: () => void;
-  onCreate: (input: ReturnType<typeof firstPricingInput>) => void;
-  /** Filled with a builder for the answers as they stand, for a page that saves them without "Continue" (the New
-   * room page's "Create Room Type"). It shows and throws what is missing. */
-  pending?: MutableRefObject<(() => ReturnType<typeof firstPricingInput>) | null>;
+  onCreate: (input: FirstPrices, then: FirstThen) => void;
+  /** Filled with a builder for the answers as they stand, for the New room page, which saves them with the room. It
+   * shows and throws what is missing. */
+  pending?: MutableRefObject<(() => FirstPrices) | null>;
 }) {
   const { t } = useTranslation();
   const room = rooms[0]!;
@@ -49,29 +75,46 @@ export function StepFirstPrices({
     room: room.roomTypeId,
     currency: fixedCurrency ?? "",
     base: "",
-    // Like the first-price form before it, nothing the guest agrees to is preselected: cancellation, payment methods
-    // and the children rules are explicit choices. One night is the engine's "no minimum".
-    adultAge: "",
-    childPrice: "",
-    countChildren: "",
+    adultAge: "12",
+    childPrice: "0",
+    countChildren: "yes",
     minimum: "1",
     maximum: "",
-    cancellation: "",
-    freeDays: "",
+    cancellation: "flexible",
+    freeDays: String(defaultFreeDays),
     payment: "full",
   });
-  const [guestPrices, setGuestPrices] = useState(false);
+  const [cancel, setCancel] = useState<Exclude<SimpleCancellation, { kind: "own" }>>({
+    kind: "free",
+    days: defaultFreeDays,
+  });
+  const [nonRefundable, setNonRefundable] = useState({ on: false, percent: defaultDiscount });
+  const [breakfast, setBreakfast] = useState({ on: false, amount: "" });
+  const [weekend, setWeekendChoice] = useState<number | null>(null);
+  const [methodsTouched, setMethodsTouched] = useState(false);
   const [error, setError] = useState("");
-  // After a Continue that failed, the answers still empty are marked and named, and update as they are filled in.
+  // After a save that failed, the answers still empty are marked and named, and update as they are filled in.
   const [checked, setChecked] = useState(false);
-  const change = (next: Partial<Values>) => {
-    setValues({ ...values, ...next });
+  const loadingMethods = defaultMethods === undefined && !values.methods.length;
+  // Payment settings' ways to pay are ticked once they arrive, unless the hotel already chose.
+  useEffect(() => {
+    if (defaultMethods && !methodsTouched)
+      setValues((previous) =>
+        previous.methods.length ? previous : { ...previous, methods: [...defaultMethods] },
+      );
+  }, [defaultMethods, methodsTouched]);
+  const touch = () => {
     setError("");
     onDirty();
+  };
+  const change = (next: Partial<Values>) => {
+    setValues({ ...values, ...next });
+    touch();
   };
   const currency = fixedCurrency ?? values.currency.trim().toUpperCase();
   const symbol = currency ? currencySymbol(currency) : null;
   const blank = (value: string | undefined) => !value?.trim();
+  const children = room.capacity.children > 0;
   const answers: Answer[] = [
     ...(values.mode === "occupancy"
       ? Array.from(
@@ -93,45 +136,24 @@ export function StepFirstPrices({
             ),
           ] as Answer,
         ]),
-    // An included-guest price also needs its adult count and, for every other count, an adjustment type and amount.
     ...(values.mode === "included_guests"
-      ? [
-          [
-            "included:adults",
-            blank(values.included.adults),
-            t("pricing.included.adults"),
-          ] as Answer,
-          ...Array.from({ length: room.capacity.adults }, (_, index): Answer[] => {
-            if (!values.included.adults || index + 1 === Number(values.included.adults)) return [];
-            const row = values.included.adjustments[index],
-              count = { count: index + 1 };
-            return [
-              [
-                `included:type:${index}`,
-                !row?.kind,
-                t(index ? "pricing.included.type.other" : "pricing.included.type.one", count),
-              ],
-              [
-                `included:amount:${index}`,
-                blank(row?.value),
-                t(index ? "pricing.included.amount.other" : "pricing.included.amount.one", count),
-              ],
-            ];
-          }).flat(),
-        ]
+      ? [["included", blank(values.included.adults), t("pricing.included.adults")] as Answer]
       : []),
     ["currency", !fixedCurrency && blank(values.currency), t("pricing.setup.currency")],
-    ["cancellation", !values.cancellation, t("pricing.steps.first.cancelTitle")],
+    ["methods", !values.methods.length, t("pricing.simple.more.payment")],
     [
-      "freeDays",
-      values.cancellation === "flexible" && blank(values.freeDays),
-      t("pricing.freeCancellationDays"),
+      "discount",
+      nonRefundable.on && !validPercent(nonRefundable.percent),
+      t("pricing.simple.extras.discountLabel"),
     ],
-    ["methods", !values.methods.length, t("pricing.paymentMethods.legend")],
-    ["minimum", blank(values.minimum), t("pricing.steps.rules.minimum")],
-    ["adultAge", blank(values.adultAge), t("pricing.setup.adultAge")],
-    ["childPrice", blank(values.childPrice), t("pricing.setup.childPrice")],
-    ["countChildren", !values.countChildren, t("pricing.setup.countChildren")],
+    ["minimum", blank(values.minimum), t("pricing.simple.first.minimum")],
+    ["adultAge", blank(values.adultAge), t("pricing.simple.first.adultAge")],
+    ["childPrice", blank(values.childPrice), t("pricing.simple.first.childPrice")],
+    [
+      "breakfast",
+      breakfast.on && blank(breakfast.amount),
+      t("pricing.simple.extras.breakfastLabel"),
+    ],
   ];
   const missing = new Map(
     checked
@@ -139,62 +161,71 @@ export function StepFirstPrices({
       : [],
   );
   const formId = useId();
-  /** The error entries naming an answer, or every answer under a group key (such as "included"). */
-  const errorIds = (key: string) =>
-    Array.from(missing.keys())
-      .filter((entry) => entry === key || entry.startsWith(`${key}:`))
-      .map((entry) => `${formId}-missing-${entry}`)
-      .join(" ") || undefined;
-  /** A missing answer's ring; a field keeps it until it is filled in. */
-  const mark = (key: string) => (errorIds(key) ? " ring-2 ring-red-400" : "");
-  const ring = (key: string) =>
-    errorIds(key) ? "w-fit rounded-xl ring-2 ring-red-400 ring-offset-4" : "";
-  /** A choice group's name and, while unanswered, its invalid state and error entries for assistive technology. */
-  const group = (key: string, name: string) => ({
-    role: "group",
-    "aria-label": name,
-    "aria-invalid": errorIds(key) ? true : undefined,
-    "aria-describedby": errorIds(key),
-  });
-  const field = (
-    key: Field,
-    label: string,
-    className = "w-28",
-    inputMode: "numeric" | "decimal" = "numeric",
-  ) => (
+  const errorIds = (key: string) => (missing.has(key) ? `${formId}-missing-${key}` : undefined);
+  const mark = (key: string) => (missing.has(key) ? " ring-2 ring-red-400" : "");
+  const field = (key: Field, label: string, hint?: string) => (
     <label className={ui.fieldLabel}>
       {label}
       <input
         aria-label={label}
         aria-invalid={missing.has(key) || undefined}
         aria-describedby={errorIds(key)}
-        inputMode={inputMode}
+        inputMode={key === "childPrice" ? "decimal" : "numeric"}
         disabled={disabled}
         value={values[key]}
         onChange={(event) => change({ [key]: event.target.value })}
-        className={`mt-1.5 block ${className} ${ui.field}${mark(key)}`}
+        className={`mt-1.5 block w-36 ${ui.field}${mark(key)}`}
       />
+      {hint && <span className={`mt-1 block font-normal ${ui.help}`}>{hint}</span>}
     </label>
   );
-  const choice = (selected: boolean, label: string, onClick: () => void) => (
-    <button
-      type="button"
-      aria-pressed={selected}
-      disabled={disabled}
-      onClick={onClick}
-      className={ui.chip(selected)}
-    >
-      {label}
-    </button>
-  );
-  const build = () =>
-    firstPricingInput(propertyId, room, crypto.randomUUID(), { ...values, currency });
+  /** The room, its first option and the switches' options, with their terms; throws what stops it. */
+  const build = (): FirstPrices => {
+    const offerId = crypto.randomUUID();
+    const first = firstPricingInput(propertyId, room, offerId, {
+      ...values,
+      currency,
+      cancellation: cancel.kind === "free" ? "flexible" : "non_refundable",
+      freeDays: String(cancel.kind === "free" ? cancel.days : defaultFreeDays),
+    });
+    let configuration = first.configuration;
+    const terms = [first.terms];
+    const mainTerms = { cancellation: first.terms.cancellation, payment: first.terms.payment };
+    if (weekend !== null) configuration = setWeekend(configuration, offerId, weekend);
+    const extras = [
+      ...(nonRefundable.on && cancel.kind === "free"
+        ? [{ kind: "non_refundable" as const, value: { percent: nonRefundable.percent } }]
+        : []),
+      ...(breakfast.on
+        ? [
+            {
+              kind: "breakfast" as const,
+              value: { amount: breakfast.amount, basis: "person" as const },
+            },
+          ]
+        : []),
+    ];
+    for (const extra of extras) {
+      const added = switchOption(
+        configuration,
+        crypto.randomUUID(),
+        extra.kind,
+        extra.value,
+        mainTerms,
+      );
+      configuration = added.configuration;
+      terms.push(added.terms);
+    }
+    return { configuration, terms };
+  };
   const show = (cause: unknown) => setError(errorText(cause, t, "pricing.setup.errorCheck"));
-  function submit() {
-    if (disabled) return;
+  function submit(then: FirstThen) {
+    // Payment settings' ways to pay are still loading: a Save now would call them missing.
+    if (disabled || loadingMethods) return;
     setChecked(true);
+    if (answers.some(([, empty]) => empty)) return;
     try {
-      onCreate(build());
+      onCreate(build(), then);
     } catch (cause) {
       show(cause);
     }
@@ -203,6 +234,7 @@ export function StepFirstPrices({
     if (!pending) return;
     pending.current = () => {
       try {
+        if (answers.some(([, empty]) => empty)) throw new Error(t("pricing.steps.first.missing"));
         return build();
       } catch (cause) {
         setChecked(true);
@@ -214,122 +246,320 @@ export function StepFirstPrices({
       pending.current = null;
     };
   });
+  // When Payment settings can't be read, How guests pay is asked at once (More options opens and stays open).
+  const moreMissing =
+    (defaultMethods === null && !values.methods.length) ||
+    ["methods", "minimum", "adultAge", "childPrice", "included"].some((key) => missing.has(key));
+  const summary = [
+    values.methods.length
+      ? t("pricing.simple.summary.payment", { methods: paymentText(values.methods, t) })
+      : t("pricing.simple.summary.choosePayment"),
+    Number(values.minimum) > 1
+      ? t("pricing.simple.summary.minimum", { count: Number(values.minimum) })
+      : t("pricing.simple.summary.noMinimum"),
+    ...(children
+      ? [
+          values.childPrice.trim() === "0"
+            ? t("pricing.simple.summary.childrenFree", { age: values.adultAge })
+            : t("pricing.simple.summary.childrenPrice", {
+                age: values.adultAge,
+                amount: `${symbol ?? `${currency} `}${values.childPrice}`,
+              }),
+        ]
+      : []),
+  ].join(" · ");
+  const amountInput = (
+    label: string,
+    value: string,
+    key: "base" | `occupancy:${number}`,
+    onChange: (value: string) => void,
+  ) => (
+    <span
+      className={`flex h-12 w-[200px] items-center gap-2 rounded-[10px] bg-gray-100 px-4 focus-within:ring-2 focus-within:ring-primary-500${mark(key)}`}
+    >
+      {symbol && (
+        <span aria-hidden="true" className="text-[16px] text-gray-500">
+          {symbol}
+        </span>
+      )}
+      <input
+        aria-label={label}
+        aria-invalid={missing.has(key) || undefined}
+        aria-describedby={errorIds(key)}
+        inputMode="decimal"
+        disabled={disabled}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="min-w-0 grow bg-transparent text-[18px] font-semibold text-gray-900 outline-none disabled:cursor-not-allowed"
+      />
+    </span>
+  );
   return (
     <form
       className="space-y-4"
       onSubmit={(event) => {
         event.preventDefault();
-        submit();
+        submit(pending ? "add" : "save");
       }}
     >
-      <h2 className={ui.stepTitle}>{t("pricing.steps.first.title")}</h2>
-      <p className={ui.stepHint}>{t("pricing.steps.first.intro")}</p>
-      <StepCard
-        number={1}
-        title={t("pricing.steps.price.title")}
-        hint={t("pricing.steps.first.priceHint")}
+      <p
+        role="status"
+        className={
+          pending
+            ? "rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-[14px] leading-5 text-gray-700"
+            : ui.warningBanner
+        }
       >
-        <div className="flex flex-wrap items-end gap-3">
-          {(values.mode === "flat" ||
-            values.mode === "per_person" ||
-            values.mode === "included_guests") && (
-            <label className="block">
-              <span className="sr-only">
-                {t(
-                  values.mode === "per_person"
-                    ? "pricing.setup.adultPrice"
-                    : "pricing.setup.roomPrice",
-                )}
-              </span>
-              <span
-                className={`flex h-12 w-[200px] items-center gap-2 rounded-[10px] bg-gray-100 px-4 focus-within:ring-2 focus-within:ring-primary-500${mark("base")}`}
-              >
-                {symbol && (
-                  <span aria-hidden="true" className="text-[16px] text-gray-500">
-                    {symbol}
-                  </span>
-                )}
-                <input
-                  aria-label={t(
+        {pending
+          ? t("pricing.simple.first.newRoom")
+          : t("pricing.simple.first.noPrice", { room: room.name })}
+      </p>
+      <div className={ui.pricesCard}>
+        <StepCard title={t("pricing.steps.price.title")}>
+          <div className="flex flex-wrap items-end gap-3">
+            {values.mode === "occupancy" ? (
+              Array.from({ length: room.capacity.adults }, (_, index) => {
+                const label = t(
+                  index ? "pricing.setup.occupancyPrice.other" : "pricing.setup.occupancyPrice.one",
+                  { count: index + 1 },
+                );
+                return (
+                  <label key={index} className="block">
+                    <span className="mb-1.5 block text-[13px] font-medium text-gray-700">
+                      {t(index ? "pricing.adults.other" : "pricing.adults.one", {
+                        count: index + 1,
+                      })}
+                    </span>
+                    {amountInput(
+                      label,
+                      values.occupancy[index] ?? "",
+                      `occupancy:${index}`,
+                      (value) =>
+                        change({
+                          occupancy: Array.from({ length: room.capacity.adults }, (_, i) =>
+                            i === index ? value : (values.occupancy[i] ?? ""),
+                          ),
+                        }),
+                    )}
+                  </label>
+                );
+              })
+            ) : (
+              <label className="block">
+                {amountInput(
+                  t(
                     values.mode === "per_person"
                       ? "pricing.setup.adultPrice"
                       : "pricing.setup.roomPrice",
-                  )}
-                  aria-invalid={missing.has("base") || undefined}
-                  aria-describedby={errorIds("base")}
-                  inputMode="decimal"
+                  ),
+                  values.base,
+                  "base",
+                  (value) => change({ base: value }),
+                )}
+              </label>
+            )}
+            <span className="flex h-12 items-center text-[15px] text-gray-700">
+              {t(
+                values.mode === "per_person"
+                  ? "pricing.steps.price.perAdultNight"
+                  : values.mode === "flat"
+                    ? "pricing.simple.perRoomNight"
+                    : "pricing.steps.price.perNight",
+              )}
+            </span>
+            {fixedCurrency ? (
+              !symbol && (
+                <span className="flex h-12 items-center rounded-[10px] border border-gray-200 px-3.5 text-[14px] text-gray-700">
+                  {fixedCurrency}
+                </span>
+              )
+            ) : (
+              <label className={ui.fieldLabel}>
+                {t("pricing.setup.currency")}
+                <input
+                  aria-label={t("pricing.setup.currency")}
+                  aria-invalid={missing.has("currency") || undefined}
                   disabled={disabled}
-                  value={values.base}
-                  onChange={(event) => change({ base: event.target.value })}
-                  className="min-w-0 grow bg-transparent text-[18px] font-semibold text-gray-900 outline-none disabled:cursor-not-allowed"
+                  value={values.currency}
+                  onChange={(event) => change({ currency: event.target.value })}
+                  className={`mt-1.5 block w-28 ${ui.field}${mark("currency")}`}
                 />
-              </span>
-            </label>
-          )}
-          {values.mode === "occupancy" &&
-            Array.from({ length: room.capacity.adults }, (_, index) => {
-              const label = t(
-                index ? "pricing.setup.occupancyPrice.other" : "pricing.setup.occupancyPrice.one",
-                { count: index + 1 },
-              );
-              return (
-                <label key={index} className={ui.fieldLabel}>
-                  {label}
+              </label>
+            )}
+          </div>
+        </StepCard>
+        <StepCard title={t("pricing.simple.cancellation.title")}>
+          <CancellationChoice
+            value={cancel}
+            disabled={disabled}
+            onChange={(choice) => {
+              setCancel(choice);
+              touch();
+            }}
+          />
+        </StepCard>
+        <StepCard
+          title={t("pricing.simple.extras.title")}
+          hint={t("pricing.simple.extras.hint")}
+          optional
+        >
+          <div>
+            {cancel.kind === "free" && (
+              <SwitchRow
+                on={nonRefundable.on}
+                name={t("pricing.simple.extras.nonRefundable")}
+                disabled={disabled}
+                onToggle={() => {
+                  setNonRefundable({ ...nonRefundable, on: !nonRefundable.on });
+                  touch();
+                }}
+                field={
+                  <>
+                    <input
+                      aria-label={t("pricing.simple.extras.discountLabel")}
+                      aria-invalid={missing.has("discount") || undefined}
+                      aria-describedby={errorIds("discount")}
+                      inputMode="decimal"
+                      disabled={disabled}
+                      value={nonRefundable.percent}
+                      onChange={(event) => {
+                        setNonRefundable({ ...nonRefundable, percent: event.target.value });
+                        touch();
+                      }}
+                      className={`w-16 ${extraField}${mark("discount")}`}
+                    />
+                    {t("pricing.simple.extras.cheaper")}
+                  </>
+                }
+              />
+            )}
+            <SwitchRow
+              on={breakfast.on}
+              name={t("pricing.simple.extras.breakfast")}
+              disabled={disabled}
+              onToggle={() => {
+                setBreakfast({ ...breakfast, on: !breakfast.on });
+                touch();
+              }}
+              field={
+                <>
+                  +
                   <input
-                    aria-label={label}
-                    aria-invalid={missing.has(`occupancy:${index}`) || undefined}
-                    aria-describedby={errorIds(`occupancy:${index}`)}
+                    aria-label={t("pricing.simple.extras.breakfastLabel")}
+                    aria-invalid={missing.has("breakfast") || undefined}
+                    aria-describedby={errorIds("breakfast")}
                     inputMode="decimal"
                     disabled={disabled}
-                    value={values.occupancy[index] ?? ""}
-                    onChange={(event) =>
-                      change({
-                        occupancy: Array.from({ length: room.capacity.adults }, (_, i) =>
-                          i === index ? event.target.value : (values.occupancy[i] ?? ""),
-                        ),
-                      })
-                    }
-                    className={`mt-1.5 block w-36 ${ui.field}${mark(`occupancy:${index}`)}`}
+                    value={breakfast.amount}
+                    onChange={(event) => {
+                      setBreakfast({ ...breakfast, amount: event.target.value });
+                      touch();
+                    }}
+                    className={`w-24 ${extraField}${mark("breakfast")}`}
                   />
-                </label>
-              );
-            })}
-          <span className="flex h-12 items-center text-[15px] text-gray-700">
-            {t(
-              values.mode === "per_person"
-                ? "pricing.steps.price.perAdultNight"
-                : "pricing.steps.price.perNight",
-            )}
-          </span>
-          {fixedCurrency ? (
-            <span className="flex h-12 items-center rounded-[10px] border border-gray-200 px-3.5 text-[14px] text-gray-700">
-              {fixedCurrency}
-            </span>
-          ) : null}
-          <label className={fixedCurrency ? "sr-only" : ui.fieldLabel}>
-            {t("pricing.setup.currency")}
-            <input
-              aria-label={t("pricing.setup.currency")}
-              aria-invalid={missing.has("currency") || undefined}
-              aria-describedby={errorIds("currency")}
-              disabled={disabled || !!fixedCurrency}
-              value={fixedCurrency ?? values.currency}
-              onChange={(event) => change({ currency: event.target.value })}
-              className={`mt-1.5 block w-28 ${ui.field}${mark("currency")}`}
+                  {t("pricing.simple.extras.perAdult")}
+                </>
+              }
             />
-          </label>
-        </div>
-        {!guestPrices ? (
+          </div>
+        </StepCard>
+        <StepCard
+          title={t("pricing.steps.seasons.title")}
+          hint={t("pricing.steps.seasons.hint")}
+          optional
+        >
           <button
             type="button"
-            disabled={disabled}
-            onClick={() => setGuestPrices(true)}
-            className={ui.stepLink}
+            disabled={disabled || loadingMethods}
+            onClick={() => submit("season")}
+            className={`inline-flex items-center gap-1.5 ${ui.stepLink}`}
           >
-            {t("pricing.steps.first.guestPrices")}
+            <PlusIcon aria-hidden="true" className="h-4 w-4" /> {t("pricing.steps.seasons.add")}
           </button>
-        ) : (
-          <div className="space-y-3">
+          <div
+            role="group"
+            aria-label={t("pricing.steps.weekends.title")}
+            className="flex flex-wrap items-center gap-2 pt-2"
+          >
+            <span aria-hidden="true" className="mr-2 text-[15px] text-gray-700">
+              {t("pricing.steps.weekends.title")}
+            </span>
+            {([null, ...weekendChoices] as const).map((basisPoints) => (
+              <button
+                key={String(basisPoints)}
+                type="button"
+                aria-pressed={weekend === basisPoints}
+                disabled={disabled}
+                className={ui.chip(weekend === basisPoints)}
+                onClick={() => {
+                  setWeekendChoice(basisPoints);
+                  touch();
+                }}
+              >
+                {basisPoints === null
+                  ? t("pricing.steps.weekends.no")
+                  : t("pricing.steps.weekends.percent", { percent: basisPoints / 100 })}
+              </button>
+            ))}
+          </div>
+        </StepCard>
+      </div>
+      <MoreOptions keepOpen={moreMissing} summary={summary}>
+        <MoreGroup
+          title={t("pricing.simple.more.payment")}
+          hint={
+            defaultMethods === null && !values.methods.length
+              ? t("pricing.simple.first.methodsUnknown")
+              : undefined
+          }
+        >
+          <div
+            role="group"
+            aria-label={t("pricing.simple.more.payment")}
+            aria-describedby={errorIds("methods")}
+            className={
+              missing.has("methods") ? "w-fit rounded-xl ring-2 ring-red-400 ring-offset-4" : ""
+            }
+          >
+            <AcceptedPaymentMethods
+              methods={values.methods}
+              disabled={disabled}
+              onChange={(methods) => {
+                setMethodsTouched(true);
+                change({ methods });
+              }}
+            />
+          </div>
+        </MoreGroup>
+        <MoreGroup title={t("pricing.simple.more.stay")}>
+          <div className="flex flex-wrap items-start gap-4">
+            {field("minimum", t("pricing.simple.first.minimum"))}
+            {field("maximum", t("pricing.simple.first.maximum"))}
+          </div>
+        </MoreGroup>
+        {children && (
+          <MoreGroup title={t("pricing.steps.rules.children")}>
+            <div className="flex flex-wrap items-start gap-4">
+              {field("adultAge", t("pricing.simple.first.adultAge"))}
+              {field(
+                "childPrice",
+                t("pricing.simple.first.childPrice"),
+                t("pricing.simple.first.childPriceHint"),
+              )}
+            </div>
+            <label className="flex items-center gap-2 text-[14px] text-gray-700">
+              <input
+                type="checkbox"
+                disabled={disabled}
+                checked={values.countChildren === "yes"}
+                onChange={(event) => change({ countChildren: event.target.checked ? "yes" : "no" })}
+              />
+              {t("pricing.simple.first.countChildren", { count: room.capacity.total })}
+            </label>
+          </MoreGroup>
+        )}
+        {room.capacity.adults > 1 && (
+          <MoreGroup title={t("pricing.simple.more.guests")}>
             <label className={ui.fieldLabel}>
               {t("pricing.setup.mode")}
               <select
@@ -357,8 +587,9 @@ export function StepFirstPrices({
             </label>
             {values.mode === "included_guests" && (
               <div
-                {...group("included", t("pricing.setup.modeIncluded"))}
-                className={ring("included")}
+                className={
+                  missing.has("included") ? "rounded-xl ring-2 ring-red-400 ring-offset-4" : ""
+                }
               >
                 <IncludedPricing
                   value={values.included}
@@ -368,67 +599,10 @@ export function StepFirstPrices({
                 />
               </div>
             )}
-          </div>
+          </MoreGroup>
         )}
-      </StepCard>
-      <StepCard
-        number={2}
-        title={t("pricing.steps.first.cancelTitle")}
-        hint={t("pricing.steps.first.cancelHint")}
-      >
-        <div
-          {...group("cancellation", t("pricing.steps.first.cancelTitle"))}
-          className={`flex flex-wrap items-center gap-2 ${ring("cancellation")}`}
-        >
-          {choice(values.cancellation === "flexible", t("pricing.steps.first.flexible"), () =>
-            change({ cancellation: "flexible" }),
-          )}
-          {choice(
-            values.cancellation === "non_refundable",
-            t("pricing.steps.first.nonRefundable"),
-            () => change({ cancellation: "non_refundable" }),
-          )}
-        </div>
-        {values.cancellation === "flexible" && field("freeDays", t("pricing.freeCancellationDays"))}
-        <div {...group("methods", t("pricing.paymentMethods.legend"))} className={ring("methods")}>
-          <AcceptedPaymentMethods
-            methods={values.methods}
-            disabled={disabled}
-            onChange={(methods) => change({ methods })}
-          />
-        </div>
-      </StepCard>
-      <StepCard
-        number={3}
-        title={t("pricing.steps.rules.title")}
-        hint={t("pricing.steps.first.rulesHint")}
-      >
-        <div className="flex flex-wrap items-end gap-4">
-          {field("minimum", t("pricing.steps.rules.minimum"))}
-          {field("maximum", t("pricing.setup.maximum"), "w-40")}
-        </div>
-        <div className="flex flex-wrap items-end gap-4">
-          {field("adultAge", t("pricing.setup.adultAge"))}
-          {field("childPrice", t("pricing.setup.childPrice"), "w-36", "decimal")}
-        </div>
-        <fieldset
-          className="space-y-2"
-          aria-invalid={errorIds("countChildren") ? true : undefined}
-          aria-describedby={errorIds("countChildren")}
-        >
-          <legend className={ui.fieldLabel}>{t("pricing.setup.countChildren")}</legend>
-          <div className={`flex flex-wrap gap-2 ${ring("countChildren")}`}>
-            {choice(values.countChildren === "yes", t("pricing.setup.yes"), () =>
-              change({ countChildren: "yes" }),
-            )}
-            {choice(values.countChildren === "no", t("pricing.setup.no"), () =>
-              change({ countChildren: "no" }),
-            )}
-          </div>
-        </fieldset>
-      </StepCard>
+      </MoreOptions>
       {(error || missing.size > 0) && (
-        // What stopped Continue, and the answers still empty (this list shrinks as they are filled in).
         <div role="alert" className={ui.errorText}>
           {error && <p>{error}</p>}
           {missing.size > 0 && (
@@ -445,15 +619,15 @@ export function StepFirstPrices({
           )}
         </div>
       )}
-      <div className="flex flex-wrap items-center justify-end gap-3">
-        <p className={`mr-auto ${ui.help}`}>
-          {/* Only the New room page reads answers without Continue; there the room's create saves them. */}
-          {t(pending ? "pricing.newRoom.continueHint" : "pricing.steps.first.continueHint")}
-        </p>
-        <button type="submit" disabled={disabled} className={ui.primaryButton}>
-          {t("pricing.steps.first.continue")}
-        </button>
-      </div>
+      {/* The New room page saves with the room; here Save is the declaration. */}
+      {!pending && (
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <p className={`mr-auto ${ui.help}`}>{t("pricing.editor.saveDeclaration")}</p>
+          <button type="submit" disabled={disabled || loadingMethods} className={ui.primaryButton}>
+            {t("pricing.editor.save")}
+          </button>
+        </div>
+      )}
     </form>
   );
 }
