@@ -163,6 +163,18 @@ describe("toConfirmationBooking", () => {
     });
   });
 
+  it("keeps every payment status the booking API sends (VAY-2163)", () => {
+    for (const paymentStatus of ["partially_paid", "waived", "authorized", "paid"])
+      expect(toConfirmationBooking({ paymentStatus }).paymentStatus).toBe(paymentStatus);
+  });
+
+  it("never shows a finished legacy stay as a pending request (VAY-2163)", () => {
+    const status = (value: string) =>
+      toConfirmationBooking({ status: value } as unknown as BookingConfirmationSource).status;
+    expect(status("completed")).toBe("checked_out");
+    expect(status("no_show")).toBe("confirmed");
+  });
+
   it("preserves guest-safe manual payment methods", () => {
     expect(toConfirmationBooking({ paymentMethod: "credit_card" }).paymentMethod).toBe(
       "credit_card",
