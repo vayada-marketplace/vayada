@@ -1,11 +1,17 @@
 // VAY-2169 end to end on PostgreSQL: a hotel submits its profile from setup, a Vayada operator
 // approves it, the public /hotels/[id] read answers 200 and setup reports it live. Then the operator
 // requests changes on an update, the hotel resubmits, and the approved update becomes public.
+import { createHash, randomUUID } from "node:crypto";
+
 import type { RequestContext } from "@vayada/backend-auth";
 import Fastify from "fastify";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { createHotelMediaResolutionPort } from "@vayada/domain-hotels";
+import {
+  PROPERTY_MEDIA_PUBLIC_VARIANTS,
+  createHotelCatalogStep1MediaAssignments,
+  createHotelMediaResolutionPort,
+} from "@vayada/domain-hotels";
 
 import { createPgHotelMediaResolutionPort } from "./platform/hotelMediaResolver.js";
 import { createPgSharedHotelSetupStatusRepository } from "./platform/sharedHotelSetupStatusReadModel.js";
@@ -14,6 +20,10 @@ import { createPgMarketplaceHotelCollaborationPreferencesRepository } from "./do
 import { createPgMarketplaceHotelSubmissionModerationRepository } from "./domains/marketplaceHotelSubmissionModerationRepository.js";
 import { createPgMarketplaceSetupLifecycleStatusRepository } from "./domains/marketplaceSetupLifecycleStatusRepository.js";
 import { createPgMarketplaceSubmissionRepository } from "./domains/marketplaceSubmissionRepository.js";
+import { createPgHotelCatalogStep1Repository } from "./domains/hotelCatalogStep1Repository.js";
+import { createPgS3PropertyMediaCommandRepository } from "./domains/propertyMediaCommandRepository.js";
+import type { PlatformMediaServingConfig } from "./platform/mediaServing.js";
+import { syncPropertyOfferReadModels } from "./routes/marketplaceAdmin.js";
 import { registerMarketplaceHotelSubmissionModerationRoutes } from "./routes/marketplaceHotelSubmissionModeration.js";
 import { registerMarketplacePublicHotelRoutes } from "./routes/marketplacePublicHotel.js";
 import { registerMarketplaceSubmissionRoutes } from "./routes/marketplaceSubmission.js";
@@ -28,6 +38,15 @@ const roleKey = "vay2169_approval_e2e";
 const storageKey = `public/media/${mediaId}/original_safe/logo.webp`;
 const publicUrl = `https://cdn.example.test/${storageKey.slice("public/".length)}`;
 const audit = { requestId: "req", correlationId: "corr", receivedAt: new Date().toISOString() };
+const serving: PlatformMediaServingConfig = {
+  bucketName: "test-media",
+  cdnBaseUrl: "https://cdn.example.test",
+  cdnOriginHost: "test-media.s3.example.test",
+  publicPathPrefix: "media",
+  publicCacheControl: "public, max-age=31536000, immutable",
+  privateDownloadTtlSeconds: 300,
+  privateDownloadMaxTtlSeconds: 900,
+};
 
 describe.skipIf(!database)("Marketplace approval from setup to the public page (VAY-2169)", () => {
   const admin = new pg.Client({ connectionString: database });
@@ -197,6 +216,36 @@ describe.skipIf(!database)("Marketplace approval from setup to the public page (
     ).phase;
   }
 
+  // Live check 2026-10-14: setup uploads every photo as a gallery image and stores the chosen
+  // cover as the hero, so the preview refused the cover and Approve stayed off.
+  it("previews and publishes the cover photo a hotel picked in setup", async () => {
+    await completeMarketplaceSetup("Hotel Alpenrose Munich");
+    const coverId = await presentHotelWithCover();
+    const submitted = await ownerSubmits("submit-cover");
+    const review = await app.inject({
+      url: `/api/marketplace/admin/hotel-submissions/${submitted.revisionId}`,
+      headers: operator,
+    });
+    expect(review.json().review.preview?.media).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ mediaType: "logo", url: publicUrl }),
+        expect.objectContaining({ mediaType: "hero_image", url: expect.stringContaining(coverId) }),
+      ]),
+    );
+    const approved = await operatorDecides(submitted.revisionId, "approve-cover", {
+      decision: "approve",
+    });
+    expect(approved.statusCode).toBe(200);
+    const live = await publicHotel();
+    expect(live.statusCode).toBe(200);
+    expect(live.json().media).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ mediaType: "hero_image", url: expect.stringContaining(coverId) }),
+      ]),
+    );
+    expect(await phase()).toBe("published");
+  });
+
   it("publishes an approved submission and replaces it only with an approved update", async () => {
     await completeMarketplaceSetup("Hotel Alpenrose Munich");
     const first = await ownerSubmits("submit-1");
@@ -359,6 +408,127 @@ describe.skipIf(!database)("Marketplace approval from setup to the public page (
     expect(saved.ok).toBe(true);
   }
 
+  /** "Present your hotel" as setup does it: a staged gallery upload, chosen as the cover. */
+  async function presentHotelWithCover(): Promise<string> {
+    const coverId = randomUUID();
+    await insertStagedGalleryPhoto(coverId);
+    const step1 = createPgHotelCatalogStep1Repository({ connectionString: database! });
+    const commands = createPgS3PropertyMediaCommandRepository({
+      connectionString: database!,
+      serving,
+      syncReadModels: syncPropertyOfferReadModels,
+      publisher: { copyToPublic: async () => {}, deletePublic: async () => {} },
+    });
+    try {
+      const revision = await admin.query<{ revision: number }>(
+        `SELECT profile_revision AS revision FROM hotel_catalog.properties WHERE id=$1::uuid`,
+        [propertyId],
+      );
+      const command = {
+        organizationId,
+        propertyId,
+        actorUserId: ownerUserId,
+        idempotencyKey: "present-cover",
+        audit: {
+          requestId: "present",
+          correlationId: "present",
+          source: "web" as const,
+          receivedAt: new Date().toISOString(),
+        },
+        request: {
+          expectedProfileRevision: Number(revision.rows[0]!.revision),
+          locale: "en" as const,
+          shortDescription:
+            "A family-run boutique hotel near the English Garden with a rooftop terrace and bikes.",
+          amenities: { reviewed: true as const, keys: [] },
+          media: { coverMediaObjectId: coverId, galleryMediaObjectIds: [] },
+        },
+      };
+      const prepared = await step1.prepare(command);
+      if (prepared.kind !== "prepared") throw new Error(`present: ${JSON.stringify(prepared)}`);
+      const presentation = await commands.replacePresentation({
+        organizationId,
+        propertyId,
+        actorUserId: ownerUserId,
+        audit: command.audit,
+        idempotencyKey: `hotel-catalog-step1-media:${createHash("sha256").update("present-cover").digest("hex")}`,
+        expectedProfileRevision: command.request.expectedProfileRevision,
+        assignments: createHotelCatalogStep1MediaAssignments(
+          command.request.media,
+          prepared.state.readModel.displayName,
+        ),
+      });
+      if (!presentation.ok) throw new Error(`photo: ${JSON.stringify(presentation)}`);
+      const saved = await step1.save({
+        ...command,
+        claimToken: prepared.claimToken,
+        writeProfileRevision: presentation.response.profileRevision,
+      });
+      if (!saved.ok) throw new Error(`present: ${JSON.stringify(saved)}`);
+      return coverId;
+    } finally {
+      await step1.close?.();
+      await commands.close?.();
+    }
+  }
+
+  /** As the setup walk stages an uploaded photo (bookingLaunchSetupWalk insertPhoto, private). */
+  async function insertStagedGalleryPhoto(objectId: string): Promise<void> {
+    const sizes = {
+      original_safe: { widthPx: 1200, heightPx: 800, sizeBytes: 900 },
+      large: { widthPx: 1080, heightPx: 720, sizeBytes: 800 },
+      thumbnail: { widthPx: 270, heightPx: 180, sizeBytes: 300 },
+      blur_preview: { widthPx: 27, heightPx: 18, sizeBytes: 50 },
+    } as const;
+    const variant = (name: (typeof PROPERTY_MEDIA_PUBLIC_VARIANTS)[number]) => {
+      const checksum = createHash("sha256").update(`${objectId}:${name}`).digest("hex");
+      return {
+        checksum,
+        ...sizes[name],
+        storageKey: `private/media/${objectId}/${name}/sha256-${checksum}.webp`,
+      };
+    };
+    const original = variant("original_safe");
+    await admin.query(
+      `INSERT INTO platform.media_objects (
+         id, bucket, storage_key, storage_kind, visibility, purpose, owner_organization_id,
+         property_id, resource_product, resource_type, resource_id, lifecycle_status, content_type,
+         width_px, height_px, size_bytes, checksum_sha256, public_approved, created_by_user_id
+       ) VALUES ($1, $2, $3, 'vayada_managed', 'private', 'property.gallery_image', $4, $5::uuid,
+         'hotel_catalog', 'property', $5::text, 'staged', 'image/webp', $8, $9, $10, $6, FALSE, $7)`,
+      [
+        objectId,
+        serving.bucketName,
+        original.storageKey,
+        organizationId,
+        propertyId,
+        original.checksum,
+        ownerUserId,
+        original.widthPx,
+        original.heightPx,
+        original.sizeBytes,
+      ],
+    );
+    for (const name of PROPERTY_MEDIA_PUBLIC_VARIANTS) {
+      const item = variant(name);
+      await admin.query(
+        `INSERT INTO platform.media_variants (
+           media_object_id, variant_name, visibility, storage_key, content_type,
+           width_px, height_px, size_bytes, checksum_sha256, public_cdn_url
+         ) VALUES ($1, $2, 'private', $3, 'image/webp', $5, $6, $7, $4, NULL)`,
+        [
+          objectId,
+          name,
+          item.storageKey,
+          item.checksum,
+          item.widthPx,
+          item.heightPx,
+          item.sizeBytes,
+        ],
+      );
+    }
+  }
+
   async function renameHotel(displayName: string) {
     const current = await admin.query<{ revision: number }>(
       `SELECT profile_revision AS revision FROM hotel_catalog.properties WHERE id=$1::uuid`,
@@ -468,6 +638,9 @@ describe.skipIf(!database)("Marketplace approval from setup to the public page (
         "hotel_catalog.property_profiles",
         "hotel_catalog.property_locations",
         "hotel_catalog.property_contact_channels",
+        "hotel_catalog.property_amenities",
+        "hotel_catalog.property_amenity_review_state",
+        "hotel_catalog.property_setup_sessions",
       ])
         await admin.query(`DELETE FROM ${table} WHERE property_id=$1::uuid`, [propertyId]);
       for (const table of [
@@ -476,10 +649,13 @@ describe.skipIf(!database)("Marketplace approval from setup to the public page (
         "identity.organization_memberships",
       ])
         await admin.query(`DELETE FROM ${table} WHERE organization_id=$1::uuid`, [organizationId]);
-      await admin.query(`DELETE FROM platform.media_variants WHERE media_object_id=$1::uuid`, [
-        mediaId,
+      await admin.query(
+        `DELETE FROM platform.media_variants WHERE media_object_id IN (SELECT id FROM platform.media_objects WHERE property_id=$1::uuid)`,
+        [propertyId],
+      );
+      await admin.query(`DELETE FROM platform.media_objects WHERE property_id=$1::uuid`, [
+        propertyId,
       ]);
-      await admin.query(`DELETE FROM platform.media_objects WHERE id=$1::uuid`, [mediaId]);
       await admin.query(`DELETE FROM hotel_catalog.properties WHERE id=$1::uuid`, [propertyId]);
       await admin.query(`DELETE FROM identity.organizations WHERE id=$1::uuid`, [organizationId]);
       await admin.query(`DELETE FROM identity.users WHERE id = ANY($1::uuid[])`, [

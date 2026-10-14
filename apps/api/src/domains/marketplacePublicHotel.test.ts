@@ -80,6 +80,47 @@ describe("approved Marketplace public projection", () => {
       mediaObjectIds: [mediaObjectId],
     });
   });
+  it("serves a cover photo that setup uploaded as a gallery image (VAY-2169)", async () => {
+    const f = fixture();
+    f.row.snapshot.catalog.media[0]!.mediaType = "hero_image";
+    f.loadPublicMedia.mockImplementation(async (input) => ({
+      ok: true,
+      resolvedTarget: input.target,
+      media: [
+        {
+          mediaObjectId,
+          ownerOrganizationId: organizationId,
+          propertyId,
+          purpose: "property.gallery_image",
+          publicVariants: [
+            { variantName: "original_safe", publicUrl: "https://cdn.example.test/cover.webp" },
+          ],
+        },
+      ],
+    }));
+    expect((await readMarketplacePublicHotel(f, f.resolver, propertyId))?.media).toEqual([
+      { mediaType: "hero_image", url: "https://cdn.example.test/cover.webp", altText: null },
+    ]);
+  });
+  it("still requires the logo upload purpose for the logo", async () => {
+    const f = fixture();
+    f.loadPublicMedia.mockImplementation(async (input) => ({
+      ok: true,
+      resolvedTarget: input.target,
+      media: [
+        {
+          mediaObjectId,
+          ownerOrganizationId: organizationId,
+          propertyId,
+          purpose: "property.gallery_image",
+          publicVariants: [
+            { variantName: "original_safe", publicUrl: "https://cdn.example.test/photo.webp" },
+          ],
+        },
+      ],
+    }));
+    expect(await readMarketplacePublicHotel(f, f.resolver, propertyId)).toBeNull();
+  });
   it("does not return a revision withdrawn while resolving media", async () => {
     const f = fixture();
     f.query.mockResolvedValueOnce({ rows: [f.row] }).mockResolvedValueOnce({ rows: [] });
