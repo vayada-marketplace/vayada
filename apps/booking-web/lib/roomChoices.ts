@@ -10,7 +10,9 @@ import type { PricingOffer } from "@/services/api/replacementOffers";
 export type ChoiceKeys = PricingOfferNameKey;
 
 export function choiceKeys(offers: readonly PricingOffer[]): ChoiceKeys[] {
-  return pricingOfferNameKeys(offers);
+  return pricingOfferNameKeys(
+    offers.map(({ mealPlan, cancellation }) => ({ mealPlan, cancellation })),
+  );
 }
 
 /** The last day free cancellation is possible for a stay (YYYY-MM-DD): the cutoff day itself
