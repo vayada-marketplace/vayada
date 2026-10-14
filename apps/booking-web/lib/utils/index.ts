@@ -13,7 +13,7 @@ const LOCALE_MAP: Record<string, string> = {
   id: "id-ID",
 };
 
-function resolveLocale(locale?: string): string {
+export function resolveLocale(locale?: string): string {
   return LOCALE_MAP[locale || "en"] || "en-GB";
 }
 
