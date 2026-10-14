@@ -166,6 +166,21 @@ export default function GoogleAddressMap({
   }, [active, apiKey, interactive]);
 
   useEffect(() => {
+    if (!active) return;
+    // Google reports a rejected key (or billing) through this global, after the script loaded.
+    const googleWindow = window as Window & { gm_authFailure?: () => void };
+    const previous = googleWindow.gm_authFailure;
+    googleWindow.gm_authFailure = () => {
+      previous?.();
+      setStatus("unavailable");
+      onUnavailableRef.current?.();
+    };
+    return () => {
+      googleWindow.gm_authFailure = previous;
+    };
+  }, [active]);
+
+  useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const nextPosition = mapPosition(latitude, longitude);
