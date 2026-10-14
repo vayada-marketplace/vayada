@@ -118,6 +118,27 @@ describe("Booking public content", () => {
   it("scales calendar evidence across rooms", () => expect(build({ rooms: [rooms()[0]!, { ...rooms()[0]!, roomTypeId: "room-suite" }], calendar: { ...calendar(), roomTypeIds: ["room-deluxe", "room-suite"], expectedDayCount: 732, materializedDayCount: 732 } })).not.toBeNull());
 
   it.each([
+    ["prepared yesterday", { coverageFrom: "2026-06-05", coverageThrough: "2027-06-05" }, 366],
+    ["opened to a month end", { coverageThrough: "2027-06-30" }, 390],
+    ["an 11-month floor", { coverageFrom: "2026-05-07", coverageThrough: "2027-05-06" }, 365],
+  ] as const)("accepts calendar coverage %s (VAY-2150)", (_label, window, days) => {
+    const value = { ...calendar(), ...window, materializedThrough: window.coverageThrough };
+    expect(
+      build({ calendar: { ...value, expectedDayCount: days, materializedDayCount: days } }),
+    ).not.toBeNull();
+  });
+
+  it.each([
+    ["shorter than 11 months", { coverageFrom: "2026-05-06", coverageThrough: "2027-05-05" }, 365],
+    ["starting after today", { coverageFrom: "2026-06-07", coverageThrough: "2027-06-07" }, 366],
+  ] as const)("rejects calendar coverage %s (VAY-2150)", (_label, window, days) => {
+    const value = { ...calendar(), ...window, materializedThrough: window.coverageThrough };
+    expect(
+      build({ calendar: { ...value, expectedDayCount: days, materializedDayCount: days } }),
+    ).toBeNull();
+  });
+
+  it.each([
     [
       "rate",
       () => {

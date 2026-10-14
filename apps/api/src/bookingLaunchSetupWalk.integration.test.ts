@@ -62,6 +62,7 @@ import { createPgPmsRoomFactsCommandRepository } from "./domains/pmsRoomFactsCom
 import { createPgPmsRoomFactsReadModel } from "./domains/pmsRoomFactsReadModel.js";
 import { createPmsRoomFactsVocabularyValidationPort } from "./domains/pmsRoomFactsVocabulary.js";
 import { createPgPmsRoomPublicationCommandRepository } from "./domains/pmsRoomPublicationCommandRepository.js";
+import { createPmsBookingPublicationSource } from "./domains/pmsBookingPublicationSource.js";
 import { createPgPmsRoomPublicationReadModel } from "./domains/pmsRoomPublicationReadModel.js";
 import { createPgS3PropertyMediaCommandRepository } from "./domains/propertyMediaCommandRepository.js";
 import { lockPublicPricingAuthority } from "./domains/publicPricingAuthority.js";
@@ -1003,6 +1004,33 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       const ready = await readiness();
       expect(blockerCodes(ready)).toEqual([]);
       expect(ready).toMatchObject({ outcome: "evaluated", status: "ready" });
+      // VAY-2150: availability prepared today (TEST ONLY prepared it "yesterday") stays ready the
+      // next days; launch needs it open at least 11 months ahead, not a full year from today.
+      const calendarBlockersInDays = async (days: number) => {
+        const evidence = await createPmsBookingPublicationSource({
+          rooms: closing(
+            createPgPmsRoomPublicationReadModel({
+              connectionString: cs,
+              roomFacts,
+              roomCapacity: roomFacts,
+              amenityVocabulary,
+              mediaResolver,
+            }),
+          ),
+          pricing: createReplacementPricingPublicationReader(pool),
+          pricingCurrency: pricingRead,
+          operatingCalendar,
+          inventory: calendar.inventory,
+          now: () => new Date(Date.now() + days * 86_400_000),
+        }).getBookingLaunchEvidence(scope);
+        if (evidence.outcome !== "evidence") throw new Error(JSON.stringify(evidence));
+        return evidence.entities
+          .filter(({ groupId }) => groupId === "booking.calendar")
+          .flatMap(({ blockers }) => blockers.map(({ code }) => code));
+      };
+      expect(await calendarBlockersInDays(1)).toEqual([]);
+      expect(await calendarBlockersInDays(31)).toEqual([]);
+      expect(await calendarBlockersInDays(32)).toEqual(["inventory_launch_readiness_incomplete"]);
       const requested = await runtime.routes.repository.requestPublication({
         ...scope,
         actorUserId: owner,
