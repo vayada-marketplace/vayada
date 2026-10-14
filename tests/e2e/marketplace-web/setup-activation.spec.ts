@@ -206,6 +206,10 @@ test.describe("marketplace-web shared setup activation", () => {
     await expect(map).toHaveAttribute("data-marker-draggable", "true");
 
     await expect(map).toHaveAttribute("data-zoom-control-position", "3");
+    // The open fields stop above the action bar that asks for the pin.
+    const panelBox = await locationSearchPanel.boundingBox();
+    const actionBarBox = await locationActionBar.boundingBox();
+    expect((panelBox?.y ?? 0) + (panelBox?.height ?? 0)).toBeLessThanOrEqual(actionBarBox?.y ?? 0);
 
     // Zoomed out, a click zooms in on that spot instead of dropping a vague pin.
     const clickMap = () => map.click({ position: { x: 1000, y: 300 } });
