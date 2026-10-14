@@ -995,7 +995,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                     >
                       Nothing was booked or charged. Your extras and details are kept.
                     </Notice>
-                  ) : error ? (
+                  ) : error && !attemptOpen ? (
                     <Notice
                       tone="red"
                       title={error}
