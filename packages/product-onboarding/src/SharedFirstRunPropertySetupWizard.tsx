@@ -22,6 +22,7 @@ import {
   ExclamationCircleIcon,
   HomeModernIcon,
   KeyIcon,
+  MagnifyingGlassIcon,
   MapPinIcon,
   PhotoIcon,
   PlusIcon,
@@ -56,8 +57,9 @@ import {
 
 import { HotelIcon } from "./HotelIcon";
 import { LocalizationMultiSelect } from "./LocalizationMultiSelect";
-import GoogleAddressMap from "./GoogleAddressMap";
+import GoogleAddressMap, { type MapPosition } from "./GoogleAddressMap";
 import GooglePlacesAddressField from "./GooglePlacesAddressField";
+import { findAddressOnMap } from "./googleMaps";
 import TimezoneField from "./TimezoneField";
 import { availableTimezones, defaultTimezoneForCountry, timezoneForCoordinates } from "./timezones";
 import {
@@ -156,6 +158,24 @@ function isValidIanaTimezone(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function parsedCoordinate(value: string): number | null {
+  const coordinate = value.trim() === "" ? Number.NaN : Number(value);
+  return Number.isFinite(coordinate) ? coordinate : null;
+}
+
+function locationAddressLine(
+  location: Pick<ProfileDraft, "streetAddress" | "postalCode" | "city" | "countryCode">,
+): string {
+  const country = COUNTRY_OPTIONS.find((option) => option.code === location.countryCode);
+  return [
+    location.streetAddress,
+    [location.postalCode, location.city].filter(Boolean).join(" "),
+    country?.name ?? location.countryCode,
+  ]
+    .filter(Boolean)
+    .join(", ");
 }
 
 export function hasMapCoordinates(location: Pick<ProfileDraft, "latitude" | "longitude">): boolean {
@@ -1090,6 +1110,25 @@ function ProfileForm({
       (mode === "update" && !(canConfirmLocation(draft) && hasMapCoordinates(draft))),
   );
   const [addressSearchUnavailable, setAddressSearchUnavailable] = useState(false);
+  // Without a map (blocked script, key failure) coordinates are typed in; text keeps partial input.
+  const [mapUnavailable, setMapUnavailable] = useState(false);
+  const [coordinateText, setCoordinateText] = useState({
+    latitude: draft.latitude?.toString() ?? "",
+    longitude: draft.longitude?.toString() ?? "",
+  });
+  const coordinateTyped = useRef(false);
+  // "Find on map" lookup of the typed address; `address` ties a result to the text it searched.
+  const [mapLookup, setMapLookup] = useState<{
+    status: "searching" | "not_found" | "area";
+    address: string;
+  } | null>(null);
+  const [mapFocus, setMapFocus] = useState<MapPosition | null>(null);
+  const latestDraft = useRef(draft);
+  latestDraft.current = draft;
+  const mounted = useRef(false);
+  // A keyboard path to a pin when the address search is down (the map itself needs a pointer).
+  const [coordinatesRequested, setCoordinatesRequested] = useState(false);
+  const coordinateFields = useRef<HTMLDivElement>(null);
   const [logoPreviewUrl, setLogoPreviewUrl] = useState(draft.logoPublicUrl);
   const addressRevision = useRef(0);
   const addressFields = useRef<HTMLDivElement>(null);
@@ -1129,6 +1168,25 @@ function ProfileForm({
       setShowAddressFields(!(canConfirmLocation(draft) && hasMapCoordinates(draft)));
     }
   }, [draft, googleMapsApiKey, loading, mode]);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    // Typed coordinates keep their text (e.g. "48."); others (a pin, a cleared pin) replace it.
+    if (coordinateTyped.current) {
+      coordinateTyped.current = false;
+      return;
+    }
+    setCoordinateText({
+      latitude: draft.latitude?.toString() ?? "",
+      longitude: draft.longitude?.toString() ?? "",
+    });
+  }, [draft.latitude, draft.longitude]);
 
   useEffect(() => {
     if (showAddressFields && focusAddressFieldsWhenShown.current) {
@@ -1180,6 +1238,50 @@ function ProfileForm({
       ...locationReset,
     });
   };
+  const placePin = ({ lat, lng }: MapPosition) => {
+    // Read the latest draft: a "Find on map" result lands after other edits may have happened.
+    const current = latestDraft.current;
+    const followPin = timezoneWasAutoDetected.current || !current.timezone.trim();
+    if (followPin) timezoneWasAutoDetected.current = true;
+    onChange({
+      ...current,
+      latitude: lat,
+      longitude: lng,
+      ...(followPin ? { timezone: timezoneForCoordinates(lat, lng) } : {}),
+    });
+    // Like a picked suggestion: fold the fields away so the pin is in view to confirm.
+    if (canConfirmLocation(current)) setShowAddressFields(false);
+  };
+  const pickMapLocation = (position: MapPosition) => {
+    // The hotel's own pin wins over a Places selection still loading for the old address.
+    addressRevision.current += 1;
+    placePin(position);
+  };
+  const findTypedAddressOnMap = async (address: string) => {
+    if (!googleMapsApiKey) return;
+    setMapLookup({ status: "searching", address });
+    let result: Awaited<ReturnType<typeof findAddressOnMap>> = null;
+    try {
+      result = await findAddressOnMap(googleMapsApiKey, address);
+    } catch {
+      // A failed lookup reads like a miss: the hotel can still click its property on the map.
+    }
+    if (!mounted.current) return;
+    // Only the address it searched, still without a pin: a newer edit, suggestion or pin wins.
+    const current = latestDraft.current;
+    if (locationAddressLine(current) !== address || hasMapCoordinates(current)) {
+      setMapLookup(null);
+      return;
+    }
+    if (result?.precise) {
+      setMapLookup(null);
+      placePin(result.position);
+      return;
+    }
+    // An area match (street, postcode, town) shows the area; the hotel clicks its property there.
+    if (result) setMapFocus(result.position);
+    setMapLookup({ status: result ? "area" : "not_found", address });
+  };
   const changeStep = (nextStep: number) => {
     onFieldErrors({});
     onStepChange(nextStep);
@@ -1214,10 +1316,13 @@ function ProfileForm({
           ...propertyTypeOptions,
         ]
       : propertyTypeOptions;
-  const country = COUNTRY_OPTIONS.find((option) => option.code === draft.countryCode);
-  const countryName = country?.name ?? draft.countryCode;
   const hasCompleteLocation = canConfirmLocation(draft);
   const hasMappedLocation = hasCompleteLocation && hasMapCoordinates(draft);
+  // The pin can only be placed on a map, so without one there's nothing to prompt for.
+  const showLocationSummary = Boolean(googleMapsApiKey) && hasCompleteLocation;
+  const addressLine = locationAddressLine(draft);
+  const lookupForAddress = mapLookup?.address === addressLine ? mapLookup.status : null;
+  const showCoordinateFields = mapUnavailable || !googleMapsApiKey || coordinatesRequested;
   const profileProgress = (
     <div
       className={
@@ -1631,16 +1736,20 @@ function ProfileForm({
               apiKey={googleMapsApiKey}
               latitude={draft.latitude}
               longitude={draft.longitude}
+              focus={mapFocus}
+              onPick={pickMapLocation}
+              onUnavailable={() => setMapUnavailable(true)}
             />
           )}
 
           <div className="pointer-events-none absolute inset-0 z-10 flex items-end p-3 sm:block sm:p-0">
-            <div className="pointer-events-auto flex max-h-[calc(100dvh-1.5rem)] w-full flex-col rounded-3xl border border-white/80 bg-white/95 shadow-[0_18px_50px_-20px_rgba(15,23,42,0.35)] backdrop-blur focus-within:self-start sm:contents">
+            <div className="pointer-events-auto flex max-h-[70dvh] w-full flex-col rounded-3xl border border-white/80 bg-white/95 shadow-[0_18px_50px_-20px_rgba(15,23,42,0.35)] backdrop-blur focus-within:self-start sm:contents">
               <div
                 data-testid="location-search-panel"
                 className={`pointer-events-auto min-h-0 flex-1 p-4 sm:absolute sm:left-6 sm:top-6 sm:flex-none sm:rounded-2xl sm:border sm:border-white/80 sm:bg-white/95 sm:shadow-[0_18px_50px_-20px_rgba(15,23,42,0.35)] sm:backdrop-blur lg:left-8 lg:top-8 ${
                   showAddressFields
-                    ? "overflow-y-auto sm:max-h-[calc(100dvh-10rem)] sm:w-[calc(100%-3rem)] sm:max-w-md"
+                    ? // Leaves room for the action bar, which asks for the pin while the fields are open.
+                      "overflow-y-auto sm:max-h-[calc(100dvh-13rem)] sm:w-[calc(100%-3rem)] sm:max-w-md"
                     : "sm:w-[calc(100%-3rem)] sm:max-w-lg"
                 }`}
               >
@@ -1695,6 +1804,14 @@ function ProfileForm({
                   />
                 )}
 
+                {googleMapsApiKey && showAddressFields && !addressSearchUnavailable && (
+                  <p className="mt-1.5 text-xs text-gray-500">
+                    {mode === "update"
+                      ? "Or correct the address below, then place the pin."
+                      : "Or enter the address below, then place the pin."}
+                  </p>
+                )}
+
                 {!showAddressFields && (
                   <button
                     ref={editAddressButton}
@@ -1724,7 +1841,8 @@ function ProfileForm({
                         className="mb-4 rounded-xl bg-gray-50 px-3 py-2.5 text-sm text-gray-600"
                         role="status"
                       >
-                        Address suggestions are unavailable. Enter the address manually.
+                        Address suggestions are unavailable. Enter the address, then click your
+                        property on the map.
                       </p>
                     )}
                     {googleMapsApiKey && hasCompleteLocation && (
@@ -1798,6 +1916,70 @@ function ProfileForm({
                     </div>
                   </div>
                 )}
+                {!showCoordinateFields && addressSearchUnavailable && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCoordinatesRequested(true);
+                      requestAnimationFrame(() =>
+                        coordinateFields.current?.querySelector<HTMLElement>("input")?.focus(),
+                      );
+                    }}
+                    className="mt-3 text-sm font-semibold text-primary-700 transition hover:text-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2"
+                  >
+                    Enter coordinates instead
+                  </button>
+                )}
+                {showCoordinateFields && (
+                  <div
+                    ref={coordinateFields}
+                    className="mt-4 rounded-xl border border-gray-200 p-3"
+                  >
+                    <p className="text-sm text-gray-600">
+                      {mapUnavailable ? "The map couldn’t load. " : ""}Enter your property’s
+                      coordinates, for example copied from Google Maps.
+                    </p>
+                    <div className="mt-3 grid grid-cols-2 gap-3">
+                      {(["latitude", "longitude"] as const).map((field) => (
+                        <TextField
+                          key={field}
+                          label={field === "latitude" ? "Latitude" : "Longitude"}
+                          value={coordinateText[field]}
+                          placeholder={field === "latitude" ? "48.137154" : "11.576124"}
+                          required
+                          onChange={(value) => {
+                            setCoordinateText((text) => ({ ...text, [field]: value }));
+                            const coordinate = parsedCoordinate(value);
+                            const limit = field === "latitude" ? 90 : 180;
+                            const next =
+                              coordinate !== null && Math.abs(coordinate) <= limit
+                                ? coordinate
+                                : null;
+                            if (next === draft[field]) return;
+                            coordinateTyped.current = true;
+                            const nextDraft = { ...draft, [field]: next };
+                            const { latitude, longitude } = nextDraft;
+                            // Like a pin: an auto-detected time zone follows complete coordinates.
+                            const followPin =
+                              latitude !== null &&
+                              longitude !== null &&
+                              hasMapCoordinates(nextDraft) &&
+                              (timezoneWasAutoDetected.current || !draft.timezone.trim());
+                            if (followPin) timezoneWasAutoDetected.current = true;
+                            onChange(
+                              followPin
+                                ? {
+                                    ...nextDraft,
+                                    timezone: timezoneForCoordinates(latitude, longitude),
+                                  }
+                                : nextDraft,
+                            );
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3 text-left">
                   <input
                     type="checkbox"
@@ -1823,48 +2005,74 @@ function ProfileForm({
               <div
                 data-testid="location-action-bar"
                 className={`pointer-events-auto shrink-0 border-t border-gray-100 p-4 sm:absolute sm:bottom-8 sm:left-1/2 sm:flex sm:-translate-x-1/2 sm:items-center sm:justify-between sm:rounded-2xl sm:border sm:border-white/80 sm:bg-white/95 sm:shadow-[0_18px_50px_-20px_rgba(15,23,42,0.35)] sm:backdrop-blur ${
-                  !showAddressFields && hasCompleteLocation
+                  showLocationSummary
                     ? "sm:w-[calc(100%-3rem)] sm:max-w-4xl"
                     : "sm:w-auto sm:min-w-[19rem]"
                 }`}
               >
-                {!showAddressFields && hasCompleteLocation && (
+                {showLocationSummary && (
                   <div
                     className="flex min-w-0 items-start gap-3 sm:flex-1 sm:items-center"
                     aria-live="polite"
                   >
-                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-600 text-white sm:mt-0">
+                    <span
+                      className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full sm:mt-0 ${
+                        hasMappedLocation
+                          ? "bg-primary-600 text-white"
+                          : "bg-amber-100 text-amber-700"
+                      }`}
+                    >
                       <MapPinIcon className="h-4 w-4" aria-hidden="true" />
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-gray-950">
+                        {hasMappedLocation ? "Is this the right location?" : "Add your map pin"}
+                      </p>
+                      <p className="mt-0.5 text-sm text-gray-700 sm:truncate">{addressLine}</p>
+                      <p className="mt-0.5 text-xs text-gray-500">
                         {hasMappedLocation
-                          ? "Is this the right location?"
-                          : "Address details entered"}
+                          ? [
+                              !mapUnavailable &&
+                                "Drag the pin if it isn’t exactly on your property",
+                              draft.timezone && `Time zone · ${draft.timezone}`,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")
+                          : mapUnavailable
+                            ? "Needed for the Marketplace. Enter your property’s coordinates above."
+                            : lookupForAddress === "not_found"
+                              ? "We couldn’t find this address on the map. Click your property on the map instead."
+                              : lookupForAddress === "area"
+                                ? "Google found the area, not the exact address. Click your property on the map."
+                                : addressSearchUnavailable
+                                  ? "Needed for the Marketplace. Zoom in and click your property; drag the pin to adjust."
+                                  : "Needed for the Marketplace. Click your property on the map."}
                       </p>
-                      <p className="mt-0.5 text-sm text-gray-700 sm:truncate">
-                        {[
-                          draft.streetAddress,
-                          [draft.postalCode, draft.city].filter(Boolean).join(" "),
-                          countryName,
-                        ]
-                          .filter(Boolean)
-                          .join(", ")}
-                      </p>
-                      {draft.timezone && (
-                        <p className="mt-0.5 text-xs text-gray-500">Time zone · {draft.timezone}</p>
-                      )}
                     </div>
                   </div>
                 )}
 
                 <div
                   className={
-                    !showAddressFields && hasCompleteLocation
-                      ? "mt-4 sm:ml-6 sm:mt-0 sm:shrink-0"
+                    showLocationSummary
+                      ? "mt-4 flex flex-col gap-3 sm:ml-6 sm:mt-0 sm:shrink-0 sm:flex-row sm:items-center"
                       : ""
                   }
                 >
+                  {showLocationSummary &&
+                    !hasMappedLocation &&
+                    !addressSearchUnavailable &&
+                    !mapUnavailable && (
+                      <button
+                        type="button"
+                        disabled={saving || mapLookup?.status === "searching"}
+                        onClick={() => void findTypedAddressOnMap(addressLine)}
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-5 py-3 text-sm font-semibold text-primary-700 transition hover:bg-primary-100 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                      >
+                        <MagnifyingGlassIcon className="h-4 w-4" aria-hidden="true" />
+                        {mapLookup?.status === "searching" ? "Finding…" : "Find on map"}
+                      </button>
+                    )}
                   {actions}
                 </div>
               </div>
