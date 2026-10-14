@@ -959,7 +959,8 @@ test.describe("pms-web smoke", () => {
 
     await page.goto("/rooms/new");
     await page.getByRole("button", { name: "Preise", exact: true }).click();
-    await expect(page.getByText("Optional: Sie können Preise auch später festlegen")).toBeVisible();
+    // VAY-2188: the first-price card says prices are optional and saved with the room.
+    await expect(page.getByText("Preise sind hier optional.", { exact: false })).toBeVisible();
     await expect(page.getByRole("button", { name: "Zimmertyp erstellen" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Preise öffnen" })).toHaveCount(0);
   });

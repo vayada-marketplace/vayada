@@ -1,3 +1,4 @@
+import { publicOfferCancellation, type PublicOfferCancellation } from "@vayada/domain-booking";
 import type { BookingPublicQuotedOffer } from "@vayada/domain-distribution/booking-publication";
 import type { lockCurrentPricingPublication } from "./currentPricingPublication.js";
 import { publicPricingOfferBindings } from "./publicPricingRoomStay.js";
@@ -41,4 +42,28 @@ export function mapReplacementPublicOffers(owner: Owner):
   return !rooms.length || rooms.some((room) => !room)
     ? null
     : (rooms as { roomTypeId: string; offers: BookingPublicQuotedOffer[] }[]);
+}
+
+/** Each offer's cancellation as guests may see it before a quote, by public offer key, so the booking page can name
+ * options "Free cancellation" or "Non-refundable" (VAY-2188). An offer without its exact terms has no entry. */
+export function publicOfferCancellations(
+  owner: Owner,
+): ReadonlyMap<string, PublicOfferCancellation> {
+  const bindings = publicPricingOfferBindings(owner);
+  const cancellations = new Map<string, PublicOfferCancellation>();
+  for (const room of owner.publication.rooms)
+    for (const offer of room.offers) {
+      const terms = owner.terms.find(
+        (t) =>
+          t.roomTypeId === room.roomTypeId &&
+          t.offerId === offer.id &&
+          t.revision === offer.termsRevision,
+      );
+      const binding = bindings.find(
+        (b) => b.roomTypeId === room.roomTypeId && b.offerId === offer.id,
+      );
+      if (terms && binding)
+        cancellations.set(binding.publicOfferKey, publicOfferCancellation(terms.cancellation));
+    }
+  return cancellations;
 }

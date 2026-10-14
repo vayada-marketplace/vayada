@@ -124,7 +124,43 @@
       "checkingAvailability": "Checking availability",
       "availabilityUnavailable": "Availability is temporarily unavailable for these dates.",
       "availabilityUnavailableTooltip": "Availability unavailable"
-    }
+    },
+    "choice": {
+      "freeCancellation": "Free cancellation",
+      "nonRefundable": "Non-refundable",
+      "partialRefund": "Partial refund",
+      "mealNonRefundable": "{meal}, non-refundable",
+      "mealPartialRefund": "{meal}, partial refund",
+      "freeUntil": "Free cancellation until {date}",
+      "noRefund": "No refund if you cancel or don't arrive",
+      "partialRefundTerms": "Part of the price is refunded if you cancel. See our terms on the next step",
+      "noLongerFree": "Free cancellation is no longer available for these dates",
+      "meal": {
+        "room_only": "Room only",
+        "breakfast": "Breakfast included",
+        "half_board": "Half board",
+        "full_board": "Full board",
+        "all_inclusive": "All inclusive"
+      },
+      "mealTerms": {
+        "breakfast": "Breakfast every morning",
+        "half_board": "Breakfast and dinner every day",
+        "full_board": "Breakfast, lunch and dinner every day",
+        "all_inclusive": "All meals and drinks included"
+      }
+    },
+    "sortRooms": "Sort rooms",
+    "pricesFailed": "We couldn't load prices for these dates. You can still choose a room; we'll check the price on the next step.",
+    "retryPrices": "Try again",
+    "childrenPricedLater": "Prices are for the adults. We add children once you tell us their ages on the next step.",
+    "severalRooms": "Booking more than one room?",
+    "notAvailable": "Not available",
+    "tooManyGuests": "This room fits up to {count, plural, one {# guest} other {# guests}}. Choose a bigger room, or book more than one room.",
+    "promoNotApplied": "Your code {code} doesn't apply to this stay.",
+    "noChildren": "This room doesn't take children. Choose another room for your group.",
+    "percentOff": "-{percent}% OFF",
+    "closeRoomDetails": "Close room details",
+    "soldOutForDates": "Sold out for your dates"
   },
   "rooms": {
     "title": "Our Rooms",
