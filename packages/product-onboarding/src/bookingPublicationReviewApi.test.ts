@@ -3,7 +3,7 @@ import {
   createProductReadinessResult,
   READINESS_GROUP_IDS_BY_PRODUCT,
 } from "@vayada/domain-hotels";
-import { createBookingPublicationReviewClient } from "./bookingPublicationReviewClient";
+import { createBookingPublicationReviewClient } from "./bookingPublicationReviewApi";
 const propertyId = "22222222-2222-4222-8222-222222222222";
 const operationId = "33333333-3333-4333-8333-333333333333";
 const source = {

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "@/lib/i18n";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { settingsService, type PropertySettings } from "@/services/settings";
+import { BookingPageStatusCard } from "@/components/dashboard/BookingPageStatusCard";
 import { ConversionFunnelCard } from "@/components/dashboard/ConversionFunnelCard";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
 import { compareRate, compareSummary, type SummaryChange } from "@/lib/utils/dashboardSummary";
@@ -218,6 +219,8 @@ export default function DashboardPage() {
       <div>
         <h1 className="text-xl md:text-2xl font-bold text-gray-900">{t("dashboard.title")}</h1>
       </div>
+
+      <BookingPageStatusCard />
 
       {/* Time Range Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-full sm:w-fit">

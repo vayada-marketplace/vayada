@@ -2,6 +2,9 @@ import { getScopedBookingHotelIds } from "../auth/sessionStore";
 
 type HotelScopeStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
+/** Fired by the header when it stores the selected hotel. */
+export const SELECTED_HOTEL_CHANGED_EVENT = "booking-admin:selected-hotel-changed";
+
 export function listScopedBookingHotelIds(): string[] {
   return getScopedBookingHotelIds();
 }

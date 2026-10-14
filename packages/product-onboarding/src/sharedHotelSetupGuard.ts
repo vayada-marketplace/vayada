@@ -1,4 +1,9 @@
-import type { AdaptiveHotelSetupStatus, ProductEntryDecision } from "@vayada/domain-hotels";
+import {
+  PROPERTY_SETUP_STEP_DEFINITIONS,
+  type AdaptiveHotelSetupStatus,
+  type ProductEntryDecision,
+  type PropertySetupStepId,
+} from "@vayada/domain-hotels";
 
 import {
   isSafeSharedHotelSetupReturnTo,
@@ -130,12 +135,16 @@ export function buildSharedHotelSetupRedirectPath(input: {
   propertyId?: string | null;
   setupBaseUrl?: string;
   mode?: "add";
+  /** Opens setup on this step, e.g. to fix a Booking readiness item (VAY-2187). */
+  step?: PropertySetupStepId;
 }): string {
   const query = new URLSearchParams({ entryProduct: input.entryProduct });
   if (input.returnProduct) query.set("returnProduct", input.returnProduct);
   if (isSafeSharedHotelSetupReturnTo(input.returnTo)) query.set("returnTo", input.returnTo);
   if (input.propertyId?.trim()) query.set("propertyId", input.propertyId.trim());
   if (input.mode === "add") query.set("mode", "add");
+  if (input.step && PROPERTY_SETUP_STEP_DEFINITIONS.some(({ stepId }) => stepId === input.step))
+    query.set("step", input.step);
   const path = `/setup?${query.toString()}`;
   return input.setupBaseUrl ? new URL(path, input.setupBaseUrl).toString() : path;
 }
