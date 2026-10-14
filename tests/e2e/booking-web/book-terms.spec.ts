@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
+import { fillGuestDetails, orderTotal } from "../support/bookFlow";
 
 const offerKey = `pricing-offer.v2:${"c".repeat(64)}`;
 const terms = "These are our house terms.\n\n1. Your booking\nWe confirm by email.";
@@ -13,12 +14,14 @@ test("shows the hotel's terms under the guest rules and says booking accepts the
   await expect(section).toBeVisible();
   await expect(section).toContainText("These are our house terms.");
   await expect(section).toContainText("We confirm by email.");
+  await toPayment(page);
   await expect(page.getByText("By booking, you agree to our terms & conditions.")).toBeVisible();
 });
 
 test("shows no terms section or agreement line when the hotel has no terms", async ({ page }) => {
   await openQuote(page, "  ");
   await expect(page.getByRole("heading", { name: "Our terms & conditions" })).toHaveCount(0);
+  await toPayment(page);
   await expect(page.getByText("By booking, you agree to our terms & conditions.")).toHaveCount(0);
 });
 
@@ -116,8 +119,13 @@ async function openQuote(page: Page, termsText: string) {
   const room = page.getByRole("group", { name: "Room 1", exact: true });
   await room.getByLabel("Room and meal option").selectOption(offerKey);
   await room.getByLabel(/Adults/).fill("2");
-  await page.getByLabel("Payment preference").selectOption("pay_at_property");
-  await page.getByRole("button", { name: "Get price", exact: true }).click();
-  await expect(page.getByText("Total: EUR 240.00", { exact: true })).toBeVisible();
+  // VAY-2195: the terms are read on the details step; booking accepts them on the payment step.
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Our guest rules" })).toBeVisible();
+}
+
+async function toPayment(page: Page) {
+  await fillGuestDetails(page);
+  await page.getByRole("button", { name: "Continue to payment" }).click();
+  await expect(orderTotal(page)).toHaveText("€240");
 }

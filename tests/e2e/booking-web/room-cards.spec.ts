@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockBookingApis, mockStayPrices } from "../support/bookingMocks";
 import { watchPageHealth } from "../support/pageHealth";
+import { mockAnyPrice } from "../support/bookFlow";
 
 // VAY-2190: the booking page's room cards, restored from the old booking page on pricing v2.
 const key = (letter: string) => `pricing-offer.v2:${letter.repeat(64)}`;
@@ -97,6 +98,7 @@ for (const width of [1440, 390]) {
     if (width === 390) await page.setViewportSize({ width: 390, height: 844 });
     await mockBookingApis(page);
     await mockRooms(page);
+    await mockAnyPrice(page);
     const stayRequests: string[] = [];
     page.on("request", (request) => {
       if (request.url().includes("/stay-prices")) stayRequests.push(request.url());
@@ -137,7 +139,7 @@ for (const width of [1440, 390]) {
     await page.getByTestId("select-rate-deluxe").click();
     await expect(page).toHaveURL(
       new RegExp(
-        `/(en/)?book\\?checkIn=2026-11-06&checkOut=2026-11-08&adults=2&offer=${encodeURIComponent(key("a")).replace(/[.]/g, "\\.")}$`,
+        `/(en/)?book\\?checkIn=2026-11-06&checkOut=2026-11-08&adults=2&offer=${encodeURIComponent(key("a")).replace(/[.]/g, "\\.")}(&step=[a-z]+)?$`,
       ),
     );
     await assertHealthy();
@@ -165,9 +167,10 @@ test("fills in /book from a room card, with plain option names", async ({ page }
   const assertHealthy = watchPageHealth(page, testInfo);
   await mockBookingApis(page);
   await mockRooms(page);
-  // A group of three in rooms for two: the card sends two rooms of its choice.
+  // A group of three in rooms for two: the card sends two rooms of its choice. With a child
+  // whose age isn't known yet, /book opens at the room form (VAY-2195) to ask for it.
   await page.goto(
-    `/book?checkIn=2026-11-06&checkOut=2026-11-08&adults=3&offer=${key("a")}&rooms=2`,
+    `/book?checkIn=2026-11-06&checkOut=2026-11-08&adults=3&children=1&offer=${key("a")}&rooms=2`,
   );
 
   const first = page.getByRole("group", { name: "Room 1" });

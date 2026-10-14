@@ -14,6 +14,8 @@ export type ReplacementQuoteTermsProps = {
   roomNames: Readonly<Record<string, string>>;
   stale?: boolean;
   onAcknowledgementChange?: (value: QuoteTermsAcknowledgement | null) => void;
+  /** The payment step's short form (VAY-2195): the tick first, the terms behind "Read". */
+  compact?: boolean;
 };
 const mealNames: Record<string, string> = {
   room_only: "Room only (no meals)",
@@ -30,8 +32,10 @@ export default function ReplacementQuoteTerms({
   roomNames,
   stale = false,
   onAcknowledgementChange,
+  compact = false,
 }: ReplacementQuoteTermsProps) {
   const headingId = useId();
+  const [open, setOpen] = useState(false);
   const identity = JSON.stringify([
     { ...quote, replayed: undefined },
     quote.rooms.map((room) => roomNames[room.selectionId] ?? null),
@@ -63,7 +67,32 @@ export default function ReplacementQuoteTerms({
     return () => onAcknowledgementChange?.(null);
   }, [agreed, identity, quote.quoteId, onAcknowledgementChange]);
 
-  return (
+  const status = (unavailable || missingLabels) && (
+    <p role="status">
+      {unavailable
+        ? "This price is no longer current. Get an updated price to review and acknowledge its terms."
+        : "Room details are unavailable. Refresh your room selection before acknowledging these terms."}
+    </p>
+  );
+  const tick = (
+    <label className={`flex items-start gap-3 ${compact ? "text-sm text-gray-700" : ""}`}>
+      <input
+        type="checkbox"
+        className={`mt-1 h-5 w-5 shrink-0 ${compact ? "accent-primary-600" : ""}`}
+        checked={agreed}
+        disabled={unavailable || missingLabels}
+        onChange={(event) =>
+          setAcknowledgedIdentity(event.target.checked && expiresAt > serverNow() ? identity : null)
+        }
+      />
+      <span>
+        {compact
+          ? "I have read the room and rate terms for this price."
+          : "I have read the room and rate terms for this price preview."}
+      </span>
+    </label>
+  );
+  const terms = (
     <section
       aria-labelledby={headingId}
       className="space-y-4 rounded-xl border border-gray-200 p-5"
@@ -133,32 +162,31 @@ export default function ReplacementQuoteTerms({
         </p>
       </div>
       <p>Selected payment method: {methodNames[quote.paymentMethod]}.</p>
-      <p className="text-sm text-gray-600">
-        This price preview does not reserve a room or take payment. These are rate terms only.
-        Please also review our guest rules before booking.
-      </p>
-      {(unavailable || missingLabels) && (
-        <p role="status">
-          {unavailable
-            ? "This price is no longer current. Get an updated price to review and acknowledge its terms."
-            : "Room details are unavailable. Refresh your room selection before acknowledging these terms."}
+      {!compact && (
+        <p className="text-sm text-gray-600">
+          This price preview does not reserve a room or take payment. These are rate terms only.
+          Please also review our guest rules before booking.
         </p>
       )}
-      <label className="flex items-start gap-3">
-        <input
-          type="checkbox"
-          className="mt-1 h-5 w-5 shrink-0"
-          checked={agreed}
-          disabled={unavailable || missingLabels}
-          onChange={(event) =>
-            setAcknowledgedIdentity(
-              event.target.checked && expiresAt > serverNow() ? identity : null,
-            )
-          }
-        />
-        <span>I have read the room and rate terms for this price preview.</span>
-      </label>
+      {!compact && status}
+      {!compact && tick}
     </section>
+  );
+  if (!compact) return terms;
+  return (
+    <div className="space-y-2">
+      {tick}
+      {status}
+      <button
+        type="button"
+        className="ml-8 text-xs font-medium text-primary-600 underline"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {open ? "Hide the room and rate terms" : "Read the room and rate terms"}
+      </button>
+      {open && terms}
+    </div>
   );
 }
 

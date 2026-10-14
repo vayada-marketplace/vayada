@@ -20,6 +20,8 @@ it("reads the earliest arrival date for bank transfer and PayPal (VAY-2145)", as
     methods: ["pay_at_property", "bank_transfer", "paypal"],
     earliestArrival: { bank_transfer: "2026-10-14" },
     termsText: null,
+    extras: {},
+    groupExtras: true,
   });
   // An older API without the list keeps card and pay at property.
   mocks.get.mockResolvedValue({});
@@ -27,6 +29,8 @@ it("reads the earliest arrival date for bank transfer and PayPal (VAY-2145)", as
     methods: ["card", "pay_at_property"],
     earliestArrival: {},
     termsText: null,
+    extras: {},
+    groupExtras: true,
   });
 });
 
@@ -42,6 +46,8 @@ it("reads the hotel's own terms from the same response, and none when blank or u
     methods: ["card", "pay_at_property"],
     earliestArrival: {},
     termsText: null,
+    extras: {},
+    groupExtras: true,
   });
   expect(mocks.get).toHaveBeenCalledTimes(6);
 });
@@ -62,4 +68,33 @@ it("offers bank transfer and PayPal only from their earliest arrival date (VAY-2
   expect(
     bookingPageMethodsForArrival({ methods: ["paypal"], earliestArrival: {} }, "2026-10-12"),
   ).toEqual(["paypal"]);
+});
+
+it("reads how the extras step shows each extra (VAY-2195)", async () => {
+  mocks.get.mockResolvedValue({
+    addons: [
+      {
+        id: "breakfast",
+        description: " Fresh bread. ",
+        price: 18,
+        category: "dining",
+        image: "",
+        images: ["https://elsewhere.example/b.jpg", "https://images.vayada.com/media/b.webp"],
+      },
+      { id: "spa", price: "35.50", category: "massage", image: "javascript:alert(1)" },
+      { id: 7 },
+      null,
+    ],
+    groupAddonsByCategory: false,
+  });
+  expect((await getBookingPagePayment("hotel")).extras).toEqual({
+    breakfast: {
+      description: "Fresh bread.",
+      image: "https://images.vayada.com/media/b.webp",
+      category: "dining",
+      price: 18,
+    },
+    spa: { description: "", image: null, category: "other", price: 35.5 },
+  });
+  expect((await getBookingPagePayment("hotel")).groupExtras).toBe(false);
 });

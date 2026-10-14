@@ -3,6 +3,7 @@ import { act, createElement, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { useReplacementQuote } from "./useReplacementQuote";
+import { ApiError } from "@/services/api/client";
 import { requestReplacementQuote } from "@/services/api/replacementQuote";
 import type { PublicBookingQuoteRequest } from "@vayada/domain-booking/replacement-pricing";
 vi.mock("@/services/api/replacementQuote", () => ({ requestReplacementQuote: vi.fn() }));
@@ -83,4 +84,15 @@ it("marks a displayed price expired, preserves recovery context and allows expli
   await act(async () => root.render(createElement(Harness, { slug: "hotel", input: request })));
   expect(latest.quote).toBeUndefined();
   expect(requestReplacementQuote).toHaveBeenCalledTimes(2);
+});
+
+it("tells a refusal (with its status) from a failed request (VAY-2195)", async () => {
+  vi.mocked(requestReplacementQuote).mockRejectedValueOnce(new ApiError("refused", 422, null));
+  await act(async () => root.render(createElement(Harness, { slug: "hotel", input: request })));
+  await act(async () => latest.submit());
+  expect(latest.errorStatus).toBe(422);
+  vi.mocked(requestReplacementQuote).mockRejectedValueOnce(new Error("offline"));
+  await act(async () => latest.submit());
+  expect(latest.error).toBeTruthy();
+  expect(latest.errorStatus).toBeUndefined();
 });

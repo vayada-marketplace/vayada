@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
+import { continueToPayment, orderTotal, paymentOption } from "../support/bookFlow";
 
 const offerKey = `pricing-offer.v2:${"d".repeat(64)}`;
 
@@ -150,38 +151,29 @@ test("books by bank transfer and opens the protected payment details", async ({ 
   );
 
   await page.goto(`/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-10-01&checkOut=2026-10-03`);
-  const method = page.getByLabel("Payment preference");
-  await expect(method.locator("option")).toHaveText(["Choose a payment method", "Bank transfer"]);
   await page.getByRole("button", { name: "Add room", exact: true }).click();
   const room = page.getByRole("group", { name: "Room 1", exact: true });
   await room.getByLabel("Room and meal option").selectOption(offerKey);
   await room.getByLabel(/Adults/).fill("2");
-  await method.selectOption("bank_transfer");
-  await page.getByRole("button", { name: "Get price", exact: true }).click();
-  await expect(page.getByText("Total: EUR 240.00", { exact: true })).toBeVisible();
+  await continueToPayment(page);
+  const methods = page.getByRole("radiogroup", { name: "Payment preference" }).getByRole("radio");
+  await expect(methods).toHaveCount(1);
+  await expect(paymentOption(page, "bank_transfer")).toHaveAttribute("aria-checked", "true");
+  await expect(orderTotal(page)).toHaveText("€240");
   await expect(
     page.getByText(
       "We hold your room until the payment deadline and confirm your booking when your payment arrives.",
     ),
   ).toBeVisible();
-  await page.getByLabel("I have read the room and rate terms for this price preview.").check();
-  await page.getByLabel("I have read the guest rules for this price preview.").check();
-  await page.getByLabel("First name").fill("Ada");
-  await page.getByLabel("Last name").fill("Lovelace");
-  await page.getByLabel("Email", { exact: true }).fill("ada@example.test");
+  await page.getByLabel("I have read the room and rate terms for this price").check();
+  await page.getByLabel("guest rules for this price").check();
   await page.getByRole("button", { name: "Confirm booking" }).click();
 
-  const reserved = page.getByRole("status").filter({ hasText: "Your room is reserved" });
-  await expect(reserved).toBeVisible();
-  await expect(reserved).toContainText(reference);
-  await expect(reserved).toContainText("by bank transfer");
-  await expect(reserved).toContainText("the booking expires and the room is released");
-  const details = reserved.getByRole("link", { name: "See payment details" });
-  await expect(details).toHaveAttribute(
-    "href",
-    `/confirmation?booking=${reference}&token=${token}`,
-  );
-  await details.click();
+  // VAY-2195: the reservation opens its protected confirmation page, as a booking does.
+  await expect(page).toHaveURL(new RegExp(`/confirmation\\?booking=${reference}&token=${token}$`));
+  expect(
+    await page.evaluate((slug) => sessionStorage.getItem(`bookFlow:${slug}`), SEEDED_BOOKING_SLUG),
+  ).toBeNull();
   await expect(page.getByText("IBAN: DE89370400440532013000", { exact: true })).toBeVisible();
   expect(confirmations).toBeGreaterThan(0);
 });
@@ -217,19 +209,25 @@ test("hides bank transfer for arrivals closer than its payment deadline", async 
     route.fulfill({ json: { version: "public-pricing-addons.v1", addons: [] } }),
   );
 
-  await page.goto(`/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-10-01&checkOut=2026-10-03`);
-  const method = page.getByLabel("Payment preference");
-  await expect(method.locator("option")).toHaveText(["Choose a payment method", "Pay at property"]);
-  await expect(
-    page.getByText("Bank transfer isn’t available this close to check-in."),
-  ).toBeVisible();
-
-  await page.goto(`/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-10-06&checkOut=2026-10-08`);
-  await expect(method.locator("option")).toHaveText([
-    "Choose a payment method",
-    "Pay at property",
-    "Bank transfer",
-  ]);
+  const methods = page.getByRole("radiogroup", { name: "Payment preference" }).getByRole("radio");
+  for (const checkIn of ["2026-10-01", "2026-10-06"]) {
+    const checkOut = checkIn === "2026-10-01" ? "2026-10-03" : "2026-10-08";
+    await page.goto(`/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=${checkIn}&checkOut=${checkOut}`);
+    await page.getByRole("button", { name: "Add room", exact: true }).click();
+    const room = page.getByRole("group", { name: "Room 1", exact: true });
+    await room.getByLabel("Room and meal option").selectOption(offerKey);
+    await room.getByLabel(/Adults/).fill("2");
+    await continueToPayment(page);
+    if (checkIn === "2026-10-01") {
+      await expect(methods).toHaveCount(1);
+      await expect(paymentOption(page, "pay_at_property")).toBeVisible();
+      await expect(
+        page.getByText("Bank transfer isn’t available this close to check-in."),
+      ).toBeVisible();
+    }
+  }
+  await expect(methods).toHaveCount(2);
+  await expect(paymentOption(page, "bank_transfer")).toBeVisible();
   await expect(page.getByText("Bank transfer isn’t available this close to check-in.")).toHaveCount(
     0,
   );
