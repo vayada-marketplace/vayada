@@ -204,7 +204,10 @@ import { createPgPmsRecurringPricingReadModel } from "./domains/pmsRecurringPric
 import { createPgPmsRecurringPricingCommandRepository } from "./domains/pmsRecurringPricingCommandRepository.js";
 import { createPgPmsMandatoryChargeConfirmationReadModel } from "./domains/pmsMandatoryChargeConfirmationReadModel.js";
 import { createPgPmsMandatoryChargeConfirmationCommandRepository } from "./domains/pmsMandatoryChargeConfirmationCommandRepository.js";
-import { createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort } from "./domains/hotelCatalogOperatingCalendarPropertyProfileEvidence.js";
+import {
+  createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort,
+  lockHotelCatalogOperatingCalendarPropertyProfileEvidence,
+} from "./domains/hotelCatalogOperatingCalendarPropertyProfileEvidence.js";
 import { createPgPmsOperatingCalendarReadModel } from "./domains/pmsOperatingCalendarReadModel.js";
 import { createPmsOperatingCalendarProductionRuntime } from "./domains/pmsOperatingCalendarProductionRuntime.js";
 import { createPgPmsInventoryMaterializationRepository } from "./domains/pmsInventoryMaterializationRepository.js";
@@ -1179,6 +1182,12 @@ const propertySetupPmsRuntime = (() => {
     propertyProfileEvidence: readOnlyPropertyProfileEvidence,
     roomEvidence: { roomFacts, roomCapacity: roomFacts },
   });
+  // Setup reads the time zone the calendar is pinned to: the same SELECT, without the command lock.
+  const timeZonePool = new pg.Pool({
+    connectionString: targetDatabaseUrl,
+    connectionTimeoutMillis: 5_000,
+    max: 2,
+  });
   return {
     roomFacts,
     propertyProfileEvidence,
@@ -1193,6 +1202,10 @@ const propertySetupPmsRuntime = (() => {
       mandatoryCharges,
       operatingCalendar,
       calendarRegistry: propertyProfileEvidence,
+      propertyTimeZone: {
+        getPropertyProfileEvidence: (propertyId) =>
+          lockHotelCatalogOperatingCalendarPropertyProfileEvidence(timeZonePool, propertyId, true),
+      },
       catalogLocation: hotelCatalogCurrentOwnerEvidence.location,
     }),
     bookingGuestPolicyEvidence: createPropertySetupBookingGuestPolicyPmsCurrentOwnerEvidenceAdapter(
@@ -1209,6 +1222,7 @@ const propertySetupPmsRuntime = (() => {
       propertyProfileEvidence,
       readOnlyPropertyProfileEvidence,
       operatingCalendar,
+      { close: () => timeZonePool.end() },
     ],
   };
 })();
