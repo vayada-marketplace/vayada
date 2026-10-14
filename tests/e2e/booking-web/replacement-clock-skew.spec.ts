@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
-import { continueToPayment } from "../support/bookFlow";
+import { continueToPayment, orderTotal } from "../support/bookFlow";
 
 const offerKey = `pricing-offer.v2:${"a".repeat(64)}`;
 
@@ -96,16 +96,15 @@ for (const [label, skewMs] of [
     await room.getByLabel("Room and meal option").selectOption(offerKey);
     await room.getByLabel(/Adults/).fill("2");
     await continueToPayment(page, { method: "pay_at_property" });
-    await expect(page.getByText("Total: EUR 180.00", { exact: true })).toBeVisible();
+    await expect(orderTotal(page)).toHaveText("€180");
 
-    const terms = page.getByLabel("I have read the room and rate terms for this price preview.");
+    const terms = page.getByLabel("I have read the room and rate terms for this price");
     await expect(terms).toBeEnabled();
     await terms.check();
     await expect(page.getByText(/couldn.t verify our guest rules/)).toHaveCount(0);
-    const rules = page.getByLabel("I have read the guest rules for this price preview.");
+    const rules = page.getByLabel("guest rules for this price");
     await rules.check();
     await expect(rules).toBeChecked();
-    await expect(page.getByRole("heading", { name: "Your details" })).toBeVisible();
     await expect(page.getByText("Phone (optional)")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Confirm booking" })).toBeEnabled();
   });

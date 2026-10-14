@@ -15,8 +15,8 @@ import {
 beforeEach(() => sessionStorage.clear());
 
 it("shows Extras only for a hotel with extras", () => {
-  expect(bookSteps(true)).toEqual(["rooms", "extras", "payment"]);
-  expect(bookSteps(false)).toEqual(["rooms", "payment"]);
+  expect(bookSteps(true)).toEqual(["rooms", "extras", "details", "payment"]);
+  expect(bookSteps(false)).toEqual(["rooms", "details", "payment"]);
   expect(parseBookStep("extras")).toBe("extras");
   expect(parseBookStep("addons")).toBe("rooms");
   expect(parseBookStep(null)).toBe("rooms");
@@ -24,11 +24,14 @@ it("shows Extras only for a hotel with extras", () => {
 
 it("opens a later step only when the steps before it are complete", () => {
   const steps = bookSteps(true);
-  expect(reachableStep("payment", steps, { rooms: true, extras: true })).toBe("payment");
+  expect(reachableStep("payment", steps, { rooms: true, extras: true, details: true })).toBe(
+    "payment",
+  );
+  expect(reachableStep("payment", steps, { rooms: true, extras: true })).toBe("details");
   expect(reachableStep("payment", steps, { rooms: true, extras: false })).toBe("extras");
-  expect(reachableStep("payment", steps, {})).toBe("rooms");
+  expect(reachableStep("details", steps, {})).toBe("rooms");
   // A hotel without extras: a link to Extras goes on to the next step.
-  expect(reachableStep("extras", bookSteps(false), { rooms: true })).toBe("payment");
+  expect(reachableStep("extras", bookSteps(false), { rooms: true })).toBe("details");
 });
 
 it("keeps the hand-off in the step URL and tells hand-offs apart", () => {
@@ -51,6 +54,15 @@ const draft: BookFlowDraft = {
   allocationRevision: 3,
   extras: null,
   payment: "card",
+  guest: {
+    firstName: "Ada",
+    lastName: "Lovelace",
+    email: "ada@example.test",
+    phone: "",
+    countryCode: "",
+    arrivalTime: "",
+    specialRequests: "",
+  },
 };
 
 it("brings a tab's draft back for the same hand-off only", () => {
@@ -60,6 +72,18 @@ it("brings a tab's draft back for the same hand-off only", () => {
   expect(readBookFlowDraft("other-hotel", draft.entry)).toBeNull();
   clearBookFlowDraft("alpenrose");
   expect(readBookFlowDraft("alpenrose", draft.entry)).toBeNull();
+});
+
+it("keeps only the guest's text fields from a draft", () => {
+  sessionStorage.setItem(
+    "bookFlow:alpenrose",
+    JSON.stringify({ ...draft, guest: { firstName: "Ada", phone: 49, terms: true } }),
+  );
+  expect(readBookFlowDraft("alpenrose", draft.entry)?.guest).toEqual({
+    ...draft.guest,
+    lastName: "",
+    email: "",
+  });
 });
 
 it("ignores a draft it can't trust", () => {

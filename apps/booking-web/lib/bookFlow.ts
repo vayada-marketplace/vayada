@@ -2,11 +2,12 @@ import type { PricingPaymentMethod } from "@vayada/domain-booking/replacement-pr
 import { isPricingPaymentMethod } from "@vayada/domain-booking/replacement-pricing";
 import type { RoomChoice } from "@/services/api/replacementOffers";
 import type { ReplacementExtrasValue } from "@/services/api/replacementAddonSelection";
+import { emptyGuest, type GuestDetails } from "@/components/booking/GuestDetailsForm";
 
 /** The booking steps on /book (VAY-2195): `step` in the URL, no step is the room form. */
-export type BookStep = "rooms" | "extras" | "payment";
+export type BookStep = "rooms" | "extras" | "details" | "payment";
 
-const ORDER: readonly BookStep[] = ["rooms", "extras", "payment"];
+const ORDER: readonly BookStep[] = ["rooms", "extras", "details", "payment"];
 
 /** The steps this hotel's flow shows: Extras only when it has extras to offer. */
 export function bookSteps(hasExtras: boolean): BookStep[] {
@@ -54,6 +55,7 @@ export type BookFlowDraft = {
   allocationRevision: number;
   extras: ReplacementExtrasValue | null;
   payment: PricingPaymentMethod | "";
+  guest: GuestDetails;
 };
 
 const ENTRY_PARAMS = ["checkIn", "checkOut", "adults", "children", "promoCode", "offer", "rooms"];
@@ -108,6 +110,12 @@ export function readBookFlowDraft(slug: string, entry: string): BookFlowDraft | 
     // The extras builder re-checks every item against the current catalogue and stay.
     extras: extras && typeof extras === "object" && Array.isArray(extras.items) ? extras : null,
     payment: d.payment as BookFlowDraft["payment"],
+    guest: Object.fromEntries(
+      (Object.keys(emptyGuest) as (keyof GuestDetails)[]).map((field) => {
+        const value = (d.guest as Record<string, unknown> | undefined)?.[field];
+        return [field, text(value) ? value : ""];
+      }),
+    ) as GuestDetails,
   };
 }
 

@@ -1,15 +1,51 @@
 import { expect, type Page } from "@playwright/test";
 
 /** VAY-2195: /book is a series of steps. From a filled room form, through the extras (when the
- * hotel offers any), to the payment step, choosing how to pay there. */
+ * hotel offers any) and the guest's details, to the payment step, choosing how to pay there. */
 export async function continueToPayment(
   page: Page,
   { method, extras = false }: { method?: string; extras?: boolean } = {},
 ) {
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  if (extras) await page.getByRole("button", { name: "Continue to payment" }).click();
+  if (extras) await page.getByRole("button", { name: "Continue to your details" }).click();
+  await expect(page).toHaveURL(/[?&]step=details/);
+  await fillGuestDetails(page);
+  await page.getByRole("button", { name: "Continue to payment" }).click();
   await expect(page).toHaveURL(/[?&]step=payment/);
-  if (method) await page.getByLabel("Payment preference").selectOption(method);
+  if (method) await choosePayment(page, method);
+}
+
+const paymentNames: Record<string, RegExp> = {
+  pay_at_property: /^Pay at the hotel/,
+  card: /^Pay by card now/,
+  bank_transfer: /^Bank transfer/,
+  paypal: /^PayPal/,
+};
+
+/** The payment step's way to pay, as a guest picks it. */
+export function paymentOption(page: Page, method: string) {
+  return page
+    .getByRole("radiogroup", { name: "Payment preference" })
+    .getByRole("radio", { name: paymentNames[method] });
+}
+
+export async function choosePayment(page: Page, method: string) {
+  await paymentOption(page, method).click();
+  await expect(paymentOption(page, method)).toHaveAttribute("aria-checked", "true");
+}
+
+/** The total in the payment step's order summary ("€240"). */
+export function orderTotal(page: Page) {
+  return page.getByRole("complementary", { name: "Order Summary" }).getByTestId("stay-total");
+}
+
+/** The details step's required fields, as a guest fills them in. */
+export async function fillGuestDetails(page: Page) {
+  await page.getByLabel("First name").fill("Ada");
+  await page.getByLabel("Last name").fill("Lovelace");
+  await page.getByLabel("Email", { exact: true }).fill("ada@example.test");
+  // "Phone", or "Phone (optional)" when our guest rules don't ask for one.
+  await page.getByRole("textbox", { name: /^Phone( \(optional\))?$/ }).fill("+49 30 1234567");
 }
 
 /** A price for whatever is asked (each room 100.00 a stay, pay at the property) and its guest
@@ -72,8 +108,6 @@ export async function mockAnyPrice(page: Page) {
           arrivalTimeEnabled: false,
           specialRequestsEnabled: false,
           checkInTime: "15:00",
-          checkInUntil: null,
-          checkOutFrom: null,
           checkOutTime: "11:00",
         },
       },
