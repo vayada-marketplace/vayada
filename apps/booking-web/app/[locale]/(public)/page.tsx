@@ -468,7 +468,7 @@ function HomePageContent() {
       </div>
 
       {/* Main Content */}
-      <div id="rooms" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 scroll-mt-4">
+      <div id="rooms" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 scroll-mt-36">
         {/* Section Header + Step Indicator */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
           <h2 className="text-2xl md:text-3xl font-heading text-gray-900">
@@ -571,10 +571,19 @@ function HomePageContent() {
                   key={room.roomTypeId}
                   room={room}
                   prices={roomPrices(room)}
-                  pricesState={stay.failed ? "failed" : stay.loading ? "loading" : "ready"}
+                  pricesState={
+                    stay.failed
+                      ? "failed"
+                      : stay.missing
+                        ? "missing"
+                        : stay.loading
+                          ? "loading"
+                          : "ready"
+                  }
                   checkIn={checkIn}
                   nights={nights}
                   timezone={hotel.timezone}
+                  childGuests={effectiveChildren}
                   promoCode={appliedPromo?.code ?? null}
                   onSelect={selectRoom}
                 />

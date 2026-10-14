@@ -105,7 +105,7 @@ for (const width of [1440, 390]) {
 
     const deluxe = page.getByTestId("room-card-deluxe");
     await expect(deluxe.getByRole("heading", { name: "Deluxe Double Room" })).toBeVisible();
-    await expect(deluxe.getByText("32 m²")).toBeVisible();
+    await expect(deluxe.getByText("32m²")).toBeVisible();
     await expect(deluxe.getByText("Up to 2 guests")).toBeVisible();
     await expect(deluxe.getByText("+1 more")).toBeVisible();
     // Cheapest first and selected, as the old card did with non-refundable.
@@ -152,7 +152,9 @@ test("keeps the rooms choosable when prices can't be loaded", async ({ page }) =
   );
   await page.goto(STAY);
 
-  await expect(page.getByRole("alert")).toContainText("We couldn't load prices for these dates");
+  await expect(
+    page.getByRole("alert").filter({ hasText: "We couldn't load prices for these dates" }),
+  ).toBeVisible();
   const deluxe = page.getByTestId("room-card-deluxe");
   await expect(deluxe.locator("[data-offer-key]")).toHaveCount(3);
   await page.getByTestId("select-rate-deluxe").click();

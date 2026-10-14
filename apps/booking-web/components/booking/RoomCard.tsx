@@ -30,18 +30,22 @@ export default function RoomCard({
   checkIn,
   nights,
   timezone,
+  childGuests,
   promoCode,
   onSelect,
   onView,
 }: {
   room: PricingRoom;
-  /** Stay prices for this room; null while loading or when they couldn't be loaded. */
+  /** Stay prices for this room; null while loading, when they failed or aren't offered. */
   prices: StayRoomPrices | null;
-  /** Without prices the choices can still be picked: /book prices the stay. */
-  pricesState: "loading" | "ready" | "failed";
+  /** Without prices ("failed", or "missing" when the API has no stay-prices read) the choices
+   * can still be picked: /book prices the stay. */
+  pricesState: "loading" | "ready" | "failed" | "missing";
   checkIn: string;
   nights: number;
   timezone?: string;
+  /** Children in the search, to say why a room that takes none doesn't fit. */
+  childGuests: number;
   /** The guest's promo code, to say when it doesn't apply to this room. */
   promoCode?: string | null;
   onSelect: (publicOfferKey: string, roomCount: number) => void;
@@ -50,11 +54,15 @@ export default function RoomCard({
   const t = useTranslations("home");
   const tc = useTranslations("common");
   const locale = useLocale();
-  const { formatPrice } = useCurrency();
+  const { approximate } = useCurrency();
   const [imageIndex, setImageIndex] = useState(0);
   const [picked, setPicked] = useState<string | null>(null);
 
   const images = room.images ?? [];
+  // Without prices for this room (failed, no read, or the room missing from the answer) the
+  // choices stay choosable and /book prices the stay.
+  const unpricedRoom =
+    pricesState === "failed" || pricesState === "missing" || (pricesState === "ready" && !prices);
   // A room the party doesn't fit isn't sold out: it says how many guests it takes instead.
   const tooSmall = prices !== null && prices.roomCount === null;
   const soldOut = prices?.availability === "sold_out" && !tooSmall;
@@ -70,29 +78,55 @@ export default function RoomCard({
         t,
       ),
       priced: price?.status === "priced" ? price : null,
-      unavailable: !!prices && price?.status !== "priced",
+      unavailable: !!prices && price?.status !== "priced" && price?.status !== "unpriced",
+      bookable:
+        !soldOut &&
+        !tooSmall &&
+        (unpricedRoom || price?.status === "priced" || price?.status === "unpriced"),
     };
   });
-  // A free cancellation that has passed is hidden while another choice remains (old VAY-370 rule).
-  const open = all.filter(({ text }) => !text.cancellationPassed);
-  const shown = (open.length ? open : all).sort((a, b) => {
-    if (!a.priced || !b.priced) return Number(!a.priced) - Number(!b.priced);
-    return (
-      quoteMoneyAmount(a.priced.totalMinor, a.priced.currency) -
-      quoteMoneyAmount(b.priced.totalMinor, b.priced.currency)
-    );
-  });
-  const selectable =
-    pricesState === "failed" ? shown : shown.filter(({ priced }) => priced && !soldOut);
+  // A choice whose free cancellation has passed is hidden while the same meal is still bookable
+  // in another choice (old VAY-370 rule); otherwise it stays, saying cancellation has passed.
+  const shown = all
+    .filter(
+      (choice) =>
+        !choice.text.cancellationPassed ||
+        !all.some(
+          (other) =>
+            other !== choice &&
+            !other.text.cancellationPassed &&
+            other.bookable &&
+            other.offer.mealPlan === choice.offer.mealPlan,
+        ),
+    )
+    .sort((a, b) => {
+      if (!a.priced || !b.priced) return Number(!a.priced) - Number(!b.priced);
+      return (
+        quoteMoneyAmount(a.priced.totalMinor, a.priced.currency) -
+        quoteMoneyAmount(b.priced.totalMinor, b.priced.currency)
+      );
+    });
+  const selectable = shown.filter(({ bookable }) => bookable);
   // The cheapest choice starts selected, as the old card did with non-refundable.
   const selected = selectable.find(({ offer }) => offer.publicOfferKey === picked) ?? selectable[0];
 
   const amount = (choice: (typeof shown)[number]) =>
     choice.priced ? quoteMoneyAmount(choice.priced.totalMinor, choice.priced.currency) : null;
+  // The charged amount in its own currency, with cents when it has them, then any approximation.
+  const money = (value: number, currency: string) => {
+    const exact = new Intl.NumberFormat("en-GB", {
+      style: "currency",
+      currency,
+      minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+      maximumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    }).format(value);
+    const approx = approximate(value, currency);
+    return approx ? `${exact} (${approx})` : exact;
+  };
   const discount = (choice: (typeof shown)[number]) => {
-    if (choice.text.refundable) return undefined;
+    if (choice.text.refundable !== false) return undefined;
     const refundable = shown.find(
-      (other) => other.text.refundable && other.offer.mealPlan === choice.offer.mealPlan,
+      (other) => other.text.refundable === true && other.offer.mealPlan === choice.offer.mealPlan,
     );
     const own = amount(choice),
       base = refundable ? amount(refundable) : null;
@@ -326,17 +360,20 @@ export default function RoomCard({
                     refundable={choice.text.refundable}
                     title={choice.text.name}
                     terms={choice.text.terms}
-                    totalLabel={total === null ? null : formatPrice(total, choice.priced!.currency)}
+                    totalLabel={total === null ? null : money(total, choice.priced!.currency)}
                     nightlyLabel={
                       total === null
                         ? null
-                        : formatPrice(
-                            Math.round(total / Math.max(nights, 1)),
+                        : money(
+                            Math.round((total / Math.max(nights, 1)) * 100) / 100,
                             choice.priced!.currency,
                           )
                     }
                     discountPercent={discount(choice)}
-                    unavailable={choice.unavailable}
+                    unavailable={
+                      choice.unavailable ||
+                      (!choice.bookable && !soldOut && !tooSmall && pricesState === "ready")
+                    }
                     loading={pricesState === "loading"}
                     disabled={soldOut}
                   />
@@ -363,7 +400,9 @@ export default function RoomCard({
             </button>
             {tooSmall && room.occupancy && (
               <p className="text-sm mt-3 text-gray-600">
-                {t("tooManyGuests", { count: room.occupancy.maxGuests })}
+                {childGuests > 0 && room.occupancy.maxChildren === 0
+                  ? t("noChildren")
+                  : t("tooManyGuests", { count: room.occupancy.maxGuests })}
               </p>
             )}
             {!soldOut && prices?.roomsLeft != null && (
