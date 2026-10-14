@@ -1,34 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { PlusIcon } from "@heroicons/react/24/outline";
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
-import type { Translate } from "./pricingAmounts";
 import { recurringTemplate } from "./recurringPricingInputs";
-import { headlineMinor, money, yearPieces, type RoomPrice, type YearPiece } from "./stepPricing";
+import { headlineMinor, money, type RoomPrice } from "./stepPricing";
 import { SeasonWindow } from "./SeasonWindow";
 import { StepCard } from "./StepCard";
 import * as ui from "./pricingStyles";
 
 type Offer = PricingConfiguration["offers"][number];
-const tones: Record<YearPiece["tone"] | "none", string> = {
-  low: "bg-amber-100 font-semibold text-amber-800",
-  high: "bg-amber-500 font-semibold text-amber-950",
-  normal: "bg-gray-100 text-gray-500",
-  none: "bg-gray-50 text-gray-400",
-};
-/** Days per month in the leap year 2000, so month labels line up with the bar's day-based widths. */
-const monthDays = Array.from({ length: 12 }, (_, month) =>
-  new Date(Date.UTC(2000, month + 1, 0)).getUTCDate(),
-);
-const dayText = (day: number, t: Translate) => {
-  const date = new Date(Date.UTC(2000, 0, 1 + day));
-  return `${date.getUTCDate()} ${t(`pricing.steps.monthShort.${date.getUTCMonth() + 1}`)}`;
-};
+const tones = { low: "bg-amber-300", high: "bg-amber-500", normal: "bg-gray-300" };
 
-/** Step 2: the main option's seasons as a year bar. Seasons open the season window; month prices and the normal price
- * fill the gaps (month prices are edited under More options). */
+/** The card's "Busier dates": the main option's seasons as a list, each with its dates, price and Edit (the season
+ * window), and "Add a season". `children` is the weekend row. Month prices are edited under More options.
+ * `addOnMount`: the first-price form's "Add a season" added the prices; the new-season window opens straight away. */
 export function StepSeasons({
   room,
   offer,
@@ -36,6 +23,9 @@ export function StepSeasons({
   disabled,
   onChange,
   onPending,
+  addOnMount = false,
+  onAddStarted,
+  children,
 }: {
   room: PricingConfiguration;
   offer: Offer;
@@ -43,25 +33,31 @@ export function StepSeasons({
   disabled: boolean;
   onChange: (room: PricingConfiguration) => void;
   onPending: (pending: boolean) => void;
+  addOnMount?: boolean;
+  onAddStarted?: () => void;
+  children?: ReactNode;
 }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState<number | "new" | null>(null);
+  useEffect(() => {
+    if (!addOnMount || disabled) return;
+    setEditing("new");
+    onPending(true);
+    onAddStarted?.();
+  }, [addOnMount, disabled, onPending, onAddStarted]);
   if (offer.price.kind !== "independent") return null;
-  const seasons = offer.price.calendar.seasons;
-  const price = (value: RoomPrice | null) =>
-    !value
-      ? ""
-      : value.mode === "flat"
-        ? money(value.amountMinor, room.currency)
-        : t("pricing.steps.seasons.from", { amount: money(headlineMinor(value), room.currency) });
-  const text = (piece: YearPiece) =>
-    piece.source.kind === "season"
-      ? `${seasons[piece.source.index].name} · ${price(piece.price)}`
-      : piece.source.kind === "month"
-        ? `${t(`pricing.steps.monthShort.${piece.source.month}`)} · ${price(piece.price)}`
-        : piece.source.kind === "base"
-          ? `${t("pricing.steps.seasons.normal")} · ${price(piece.price)}`
-          : t("pricing.steps.seasons.noPrice");
+  const { seasons, base } = offer.price.calendar;
+  const normal = base ? BigInt(headlineMinor(base)) : null;
+  const price = (value: RoomPrice) =>
+    value.mode === "flat"
+      ? money(value.amountMinor, room.currency)
+      : t("pricing.steps.seasons.from", { amount: money(headlineMinor(value), room.currency) });
+  const tone = (value: RoomPrice) => {
+    const figure = BigInt(headlineMinor(value));
+    return normal === null || figure === normal ? "normal" : figure < normal ? "low" : "high";
+  };
+  const day = (monthDay: string) =>
+    `${Number(monthDay.slice(3))} ${t(`pricing.steps.monthShort.${Number(monthDay.slice(0, 2))}`)}`;
   const open = (target: number | "new") => {
     if (disabled) return;
     setEditing(target);
@@ -73,84 +69,57 @@ export function StepSeasons({
   };
   return (
     <StepCard
-      number={2}
       title={t("pricing.steps.seasons.title")}
       hint={t("pricing.steps.seasons.hint")}
+      optional
     >
-      <div className="space-y-2">
-        <div aria-hidden="true" className="flex">
-          {monthDays.map((days, month) => (
-            <span
-              key={month}
-              style={{ flexGrow: days, flexBasis: 0 }}
-              className="min-w-0 truncate text-[12px] leading-4 text-gray-400"
-            >
-              {/* Phones show the month's initial; the short name would collide. */}
-              <span className="sm:hidden">
-                {t(`pricing.steps.monthShort.${month + 1}`).slice(0, 1)}
-              </span>
-              <span className="hidden sm:inline">{t(`pricing.steps.monthShort.${month + 1}`)}</span>
-            </span>
-          ))}
-        </div>
-        <div className="flex h-10 gap-0.5 overflow-hidden rounded-[10px]">
-          {yearPieces(offer).map((piece) => {
-            const span = `${dayText(piece.start, t)} – ${dayText(piece.start + piece.days - 1, t)}`;
-            const className = `flex min-w-0 items-center px-3 text-left text-[13px] leading-4 ${tones[piece.source.kind === "none" ? "none" : piece.tone]}`;
-            const style = { flexGrow: piece.days, flexBasis: 0 };
-            return piece.source.kind === "season" ? (
-              <button
-                key={piece.start}
-                type="button"
-                title={`${text(piece)} (${span})`}
-                aria-label={t("pricing.steps.seasons.editAria", {
-                  season: text(piece),
-                  days: span,
-                })}
-                disabled={disabled}
-                onClick={() => open((piece.source as { index: number }).index)}
-                style={style}
-                className={`${className} transition-[filter] hover:brightness-95 disabled:cursor-not-allowed`}
-              >
-                <span className="truncate">{text(piece)}</span>
-              </button>
-            ) : (
-              <div
-                key={piece.start}
-                title={`${text(piece)} (${span})`}
-                style={style}
-                className={className}
-              >
-                <span className="truncate">{text(piece)}</span>
-              </div>
+      {seasons.length > 0 && (
+        <ul className="divide-y divide-gray-100 border-b border-gray-100">
+          {seasons.map((season, index) => {
+            const days = `${day(season.from)} – ${day(season.through)}`;
+            return (
+              <li key={index} className="flex min-h-12 items-center gap-3.5 py-2">
+                <span
+                  aria-hidden="true"
+                  className={`h-2.5 w-2.5 shrink-0 rounded-full ${tones[tone(season.price)]}`}
+                />
+                <span className="w-32 min-w-0 truncate text-[15px] font-medium text-gray-900">
+                  {season.name}
+                </span>
+                <span className="min-w-0 grow text-[14px] text-gray-500">{days}</span>
+                <span className="text-[15px] font-semibold text-gray-900">
+                  {price(season.price)}
+                </span>
+                <button
+                  type="button"
+                  aria-label={t("pricing.steps.seasons.editAria", {
+                    season: `${season.name} · ${price(season.price)}`,
+                    days,
+                  })}
+                  disabled={disabled}
+                  onClick={() => open(index)}
+                  className={`w-10 text-right ${ui.stepLink}`}
+                >
+                  {t("pricing.steps.options.edit")}
+                </button>
+              </li>
             );
           })}
-        </div>
-        {/* On phones the bar is too narrow for its labels, so the seasons and month prices are listed too (the bar's
-            buttons already carry the full names for screen readers). */}
-        <ul aria-hidden="true" className="space-y-1 text-[13px] text-gray-600 sm:hidden">
-          {yearPieces(offer)
-            .filter((piece) => piece.source.kind === "season" || piece.source.kind === "month")
-            .map((piece) => (
-              <li key={piece.start}>
-                {text(piece)} · {dayText(piece.start, t)} –{" "}
-                {dayText(piece.start + piece.days - 1, t)}
-              </li>
-            ))}
         </ul>
-      </div>
+      )}
       {recurringTemplate(offer) ? (
         <button
           type="button"
           disabled={disabled}
           onClick={() => open("new")}
-          className={ui.stepButton}
+          className={`inline-flex items-center gap-1.5 ${ui.stepLink}`}
         >
           <PlusIcon aria-hidden="true" className="h-4 w-4" /> {t("pricing.steps.seasons.add")}
         </button>
       ) : (
         <p className={ui.stepHint}>{t("pricing.seasons.noTemplate")}</p>
       )}
+      {children}
       {editing !== null && (
         <SeasonWindow
           room={room}

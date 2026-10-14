@@ -4,8 +4,12 @@ import type { PlatformMediaServingConfig } from "../platform/mediaServing.js";
 import { createPgHotelMediaResolutionPort } from "../platform/hotelMediaResolver.js";
 import { lockPublicPricingPublication } from "./publicPricingPublication.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
-import { mapReplacementPublicOffers } from "./replacementPublicOfferMapping.js";
+import {
+  mapReplacementPublicOffers,
+  publicOfferCancellations,
+} from "./replacementPublicOfferMapping.js";
 import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
+import { toPublicPmsRoomAmenityLabelsV1 } from "./pmsRoomAmenityVocabulary.js";
 
 type MediaServing = Pick<
   PlatformMediaServingConfig,
@@ -17,6 +21,9 @@ type RoomRow = {
   name: string;
   description: string | null;
   occupancyLimits: unknown;
+  category: string | null;
+  attributes: unknown;
+  amenities: unknown;
   media: { mediaObjectId: string; altText: string | null }[];
 };
 
@@ -37,6 +44,7 @@ export function createPublicPricingOfferCatalog(
         if (!owner) return null;
         const mapped = mapReplacementPublicOffers(owner);
         if (!mapped) return null;
+        const cancellations = publicOfferCancellations(owner);
         const { propertyId, organizationId } = owner.scope;
         const live = await client.query(
           "SELECT 1 FROM distribution.active_public_booking_revision WHERE property_id=$1 FOR SHARE",
@@ -61,11 +69,14 @@ export function createPublicPricingOfferCatalog(
             name: facts.name,
             description: facts.description,
             occupancy: facts.occupancy,
+            ...roomCardFacts(row),
             images: await roomImages(client, options.mediaServing, organizationId, row),
             offers: room.offers.map((rate) => ({
               publicOfferKey: rate.ratePlanId,
               currency: rate.currency,
               mealPlan: rate.mealPlan,
+              // Additive (VAY-2188). A mapped offer always has its terms; null would mean unknown.
+              cancellation: cancellations.get(rate.ratePlanId) ?? null,
             })),
           });
         }
@@ -96,6 +107,9 @@ async function readRoomContent(
        room_type.name,
        room_type.description,
        room_type.occupancy_limits AS "occupancyLimits",
+       room_type.category,
+       room_type.room_attributes AS "attributes",
+       room_type.amenities_snapshot AS "amenities",
        COALESCE(
          jsonb_agg(
            jsonb_build_object(
@@ -140,6 +154,40 @@ function roomFacts(row: RoomRow) {
         occupancy: occupancy as { maxGuests: number; maxAdults: number; maxChildren: number },
       }
     : null;
+}
+
+/** What the booking page's room cards show besides name and photos (VAY-2190): size in square
+ * metres, the room's category and its amenities as public labels. Each is empty when unusable. */
+export function roomCardFacts(row: Pick<RoomRow, "category" | "attributes" | "amenities">) {
+  const attributes = (
+    row.attributes && typeof row.attributes === "object" ? row.attributes : {}
+  ) as Record<string, unknown>;
+  const raw = attributes["size"];
+  const sqm =
+    typeof raw === "number"
+      ? raw
+      : raw && typeof raw === "object" && (raw as Record<string, unknown>)["unit"] === "sqm"
+        ? (raw as Record<string, unknown>)["value"]
+        : null;
+  const key = row.category?.trim() ?? "";
+  // Category keys ("suite", "family_room") read as labels like the amenity labels do.
+  const category = /^[a-z0-9_]+$/.test(key)
+    ? `${key.charAt(0).toUpperCase()}${key.slice(1).replaceAll("_", " ")}`
+    : key;
+  const amenities = Array.isArray(row.amenities)
+    ? row.amenities.filter(
+        (amenity): amenity is string =>
+          typeof amenity === "string" && !!amenity.trim() && amenity.length <= 80,
+      )
+    : [];
+  return {
+    size:
+      typeof sqm === "number" && Number.isFinite(sqm) && sqm > 0
+        ? { value: sqm, unit: "sqm" as const }
+        : null,
+    category: category && category.length <= 80 ? category : null,
+    amenities: toPublicPmsRoomAmenityLabelsV1(amenities).slice(0, 40),
+  };
 }
 
 /** Approved public photos through the shared media resolver. A room is shown without photos

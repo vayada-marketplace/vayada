@@ -95,3 +95,81 @@ it("sends the entered promo with the exact selection and clears it explicitly", 
   expect(request(" ")?.selection.promoCode).toBeNull();
   expect(request("x".repeat(201))).toBeNull();
 });
+
+it("keeps the room cards' content and drops malformed parts without failing selection", async () => {
+  const fetcher = vi.fn().mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        version: "public-pricing-offers.v1",
+        rooms: [
+          {
+            ...rooms[0],
+            description: "Our quietest room.",
+            occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 0 },
+            images: [
+              { url: "https://images.vayada.com/room.jpg", alt: "Garden view" },
+              { url: "javascript:alert(1)", alt: "x" },
+              { url: "https://images.vayada.com/two.jpg", alt: "" },
+            ],
+            size: { value: 32, unit: "sqm" },
+            category: "Double",
+            amenities: ["Free WiFi", "", 3],
+            offers: [
+              {
+                ...rooms[0].offers[0],
+                cancellation: { kind: "free_until_days_before_arrival", days: 3 },
+              },
+            ],
+          },
+          {
+            roomTypeId: "loft",
+            name: "Loft",
+            description: 7,
+            occupancy: { maxGuests: 0 },
+            size: { value: 30, unit: "sqft" },
+            offers: [
+              {
+                publicOfferKey: `pricing-offer.v2:${"c".repeat(64)}`,
+                currency: "EUR",
+                mealPlan: "room_only",
+                cancellation: { kind: "free_until_days_before_arrival", days: -1 },
+              },
+            ],
+          },
+        ],
+      }),
+    ),
+  );
+  vi.stubGlobal("fetch", fetcher);
+  expect(await getReplacementOffers("hotel")).toEqual([
+    {
+      ...rooms[0],
+      description: "Our quietest room.",
+      occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 0 },
+      images: [
+        { url: "https://images.vayada.com/room.jpg", alt: "Garden view" },
+        { url: "https://images.vayada.com/two.jpg", alt: null },
+      ],
+      size: { value: 32, unit: "sqm" },
+      category: "Double",
+      amenities: ["Free WiFi"],
+      offers: [
+        {
+          ...rooms[0].offers[0],
+          cancellation: { kind: "free_until_days_before_arrival", days: 3 },
+        },
+      ],
+    },
+    {
+      roomTypeId: "loft",
+      name: "Loft",
+      offers: [
+        {
+          publicOfferKey: `pricing-offer.v2:${"c".repeat(64)}`,
+          currency: "EUR",
+          mealPlan: "room_only",
+        },
+      ],
+    },
+  ]);
+});
