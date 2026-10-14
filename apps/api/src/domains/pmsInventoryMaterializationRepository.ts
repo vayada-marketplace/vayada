@@ -8,10 +8,10 @@ import {
   PMS_INVENTORY_PROJECTION_REFRESH_DESTINATION,
   evaluatePmsInventoryLaunchReadiness,
   isPmsInventoryDayConsistent,
-  parsePmsOperatingCalendarPropertyProfileEvidence,
   parsePmsOperatingCalendarSourceRevision,
   planPmsInventoryMaterialization,
   planPmsInventoryRoomAdditionTail,
+  pmsOperatingCalendarTimeZoneIsCurrent,
   type PmsInventoryCoverageEvidence,
   type PmsInventoryDaySnapshot,
   type PmsInventoryLaunchReadinessReadPort,
@@ -23,7 +23,6 @@ import {
   type PmsInventorySellableLimitEvidence,
   type PmsOperatingCalendarConfigurationSnapshot,
   type PmsOperatingCalendarPropertyProfileEvidencePort,
-  type PmsOperatingCalendarPropertyProfileEvidenceResult,
   type PmsOperatingCalendarReadPort,
   type RoomCapacityReadPort,
   type RoomFactsCommandAudit,
@@ -155,7 +154,7 @@ type InventoryDayRow = {
 };
 
 type CurrentCalendarRevisionRow = { calendarRevision: number | string | null };
-type CurrentRoomFactsRow = { roomTypeId: string; roomFactsRevision: number | string };
+type CurrentRoomRow = { roomTypeId: string };
 
 type CoverageRow = {
   organizationId: string;
@@ -228,7 +227,7 @@ export function createPgPmsInventoryMaterializationRepository(
         { propertyId, expectedProfileRevision },
         async (profileEvidence) => {
           if (
-            !profileEvidenceMatchesConfiguration(
+            !pmsOperatingCalendarTimeZoneIsCurrent(
               profileEvidence,
               current.configuration,
               config.propertyProfileEvidence,
@@ -306,7 +305,7 @@ async function readCurrentInventoryDay(
       { propertyId, expectedProfileRevision },
       async (profile) => {
         if (
-          !profileEvidenceMatchesConfiguration(
+          !pmsOperatingCalendarTimeZoneIsCurrent(
             profile,
             current.configuration,
             config.propertyProfileEvidence,
@@ -344,7 +343,7 @@ async function readCurrentInventoryDay(
         if (
           !exact ||
           !sameConfigurationIdentity(current.configuration, exact) ||
-          !(await roomFactsStillMatch(client, exact, roomScoped ? roomTypeId : undefined)) ||
+          !(await roomSetStillMatches(client, exact, roomScoped ? roomTypeId : undefined)) ||
           !(await capacitiesStillMatch(
             config.roomCapacity,
             exact,
@@ -383,7 +382,7 @@ async function readCurrentInventoryDay(
           !materialized ||
           !materializedBinding ||
           !sameRoomMaterializationInputs(exact, materialized, roomTypeId) ||
-          !profileEvidenceMatchesConfiguration(
+          !pmsOperatingCalendarTimeZoneIsCurrent(
             profile,
             materialized,
             config.propertyProfileEvidence,
@@ -520,7 +519,7 @@ async function executeMaterialization(
       { propertyId: command.propertyId, expectedProfileRevision },
       async (profileEvidence) => {
         if (
-          !profileEvidenceMatchesConfiguration(
+          !pmsOperatingCalendarTimeZoneIsCurrent(
             profileEvidence,
             immutable,
             config.propertyProfileEvidence,
@@ -551,7 +550,7 @@ async function executeMaterialization(
         if (
           !exact ||
           !sameConfigurationIdentity(immutable, exact) ||
-          !(await roomFactsStillMatch(client, exact))
+          !(await roomSetStillMatches(client, exact))
         ) {
           return finalizeMaterialization(
             client,
@@ -805,13 +804,14 @@ async function loadLockedCurrentConfiguration(
     : loadPmsOperatingCalendarConfigurationByRevision(client, propertyId, revision, registry);
 }
 
-async function roomFactsStillMatch(
+/** The operating room set is unchanged; room details don't affect inventory (VAY-2150). */
+async function roomSetStillMatches(
   client: PmsInventoryMaterializationRepositoryClient,
   configuration: PmsOperatingCalendarConfigurationSnapshot,
   roomTypeId?: string,
 ): Promise<boolean> {
-  const result = await client.query<CurrentRoomFactsRow>(
-    `SELECT id::text AS "roomTypeId", room_facts_revision AS "roomFactsRevision"
+  const result = await client.query<CurrentRoomRow>(
+    `SELECT id::text AS "roomTypeId"
      FROM pms.room_types
      WHERE property_id = $1::uuid AND active IS TRUE
      ORDER BY id::text`,
@@ -831,9 +831,7 @@ async function roomFactsStillMatch(
   return (
     operatingRows.length === expected.length &&
     operatingRows.every(
-      (row, index) =>
-        normalizeUuid(row.roomTypeId) === expected[index]?.roomTypeId &&
-        positiveInteger(row.roomFactsRevision) === expected[index]?.sourceRoomFactsRevision,
+      (row, index) => normalizeUuid(row.roomTypeId) === expected[index]?.roomTypeId,
     )
   );
 }
@@ -876,15 +874,25 @@ function sameRoomMaterializationInputs(
       entityType: configuration.source.entityType,
       entityId: configuration.source.entityId,
     },
-    propertyProfile: configuration.sourceInputs.propertyProfile,
+    // The profile and room-facts pins are history only; they don't change inventory (VAY-2150).
     propertyTimeZone: configuration.sourceInputs.propertyTimeZone,
-    roomBinding: configuration.sourceInputs.roomBindings.find(
-      (binding) => binding.roomTypeId === roomTypeId,
+    roomBinding: roomBindingInputs(
+      configuration.sourceInputs.roomBindings.find((binding) => binding.roomTypeId === roomTypeId),
     ),
     schedule: configuration.schedule,
     defaultMinimumStayNights: configuration.defaultMinimumStayNights,
   });
   return isDeepStrictEqual(selected(current), selected(materialized));
+}
+
+function roomBindingInputs(
+  binding:
+    | PmsOperatingCalendarConfigurationSnapshot["sourceInputs"]["roomBindings"][number]
+    | undefined,
+) {
+  if (!binding) return undefined;
+  const { sourceRoomFactsRevision: _history, ...inputs } = binding;
+  return inputs;
 }
 
 function propertyProfileRevision(
@@ -893,20 +901,6 @@ function propertyProfileRevision(
   const match = /^profile:([1-9]\d*)$/.exec(configuration.sourceInputs.propertyProfile.revision);
   const revision = match?.[1] ? Number(match[1]) : 0;
   return positiveRevision(revision) ? revision : null;
-}
-
-function profileEvidenceMatchesConfiguration(
-  result: PmsOperatingCalendarPropertyProfileEvidenceResult,
-  configuration: PmsOperatingCalendarConfigurationSnapshot,
-  registry: PmsOperatingCalendarPropertyProfileEvidencePort,
-): boolean {
-  if (result.status !== "available") return false;
-  const evidence = parsePmsOperatingCalendarPropertyProfileEvidence(result.evidence, registry);
-  return (
-    evidence !== null &&
-    stableJson(evidence.source) === stableJson(configuration.sourceInputs.propertyProfile) &&
-    evidence.timeZone === configuration.sourceInputs.propertyTimeZone
-  );
 }
 
 async function lockCoverage(

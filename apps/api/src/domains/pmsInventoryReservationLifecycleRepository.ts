@@ -14,7 +14,7 @@ import {
   parsePmsInventoryReservationReserveResult,
   parsePmsInventoryReservationStatus,
   parsePmsInventoryReservationStatusRequest,
-  parsePmsOperatingCalendarPropertyProfileEvidence,
+  pmsOperatingCalendarTimeZoneIsCurrent,
   serializePmsInventoryReservationReleaseFingerprint,
   serializePmsInventoryReservationReserveFingerprint,
   type PmsInventoryReservationDayWatermark,
@@ -29,7 +29,6 @@ import {
   type PmsInventoryReservationStatusRequest,
   type PmsOperatingCalendarConfigurationSnapshot,
   type PmsOperatingCalendarPropertyProfileEvidencePort,
-  type PmsOperatingCalendarPropertyProfileEvidenceResult,
   type PmsOperatingCalendarReadPort,
   type RoomCapacityReadPort,
   type RoomFactsCommandAudit,
@@ -568,7 +567,7 @@ async function executeReserve(
       { propertyId: command.propertyId, expectedProfileRevision: profileRevision },
       async (profileEvidence) => {
         if (
-          !profileEvidenceMatchesConfiguration(
+          !pmsOperatingCalendarTimeZoneIsCurrent(
             profileEvidence,
             immutable,
             config.propertyProfileEvidence,
@@ -2131,20 +2130,6 @@ function propertyProfileRevision(
   const match = /^profile:([1-9]\d*)$/.exec(configuration.sourceInputs.propertyProfile.revision);
   const revision = match?.[1] ? Number(match[1]) : 0;
   return positiveRevision(revision) ? revision : null;
-}
-
-function profileEvidenceMatchesConfiguration(
-  result: PmsOperatingCalendarPropertyProfileEvidenceResult,
-  configuration: PmsOperatingCalendarConfigurationSnapshot,
-  registry: PmsOperatingCalendarPropertyProfileEvidencePort,
-): boolean {
-  if (result.status !== "available") return false;
-  const evidence = parsePmsOperatingCalendarPropertyProfileEvidence(result.evidence, registry);
-  return (
-    evidence !== null &&
-    stableJson(evidence.source) === stableJson(configuration.sourceInputs.propertyProfile) &&
-    evidence.timeZone === configuration.sourceInputs.propertyTimeZone
-  );
 }
 
 function sameConfigurationIdentity(

@@ -22,6 +22,7 @@ import {
   parsePreviewPmsOperatingCalendarImpactCommand,
   parseReconcilePhysicalRoomUnitsCommand,
   parseSetPhysicalRoomOperationalLabelCommand,
+  parseUpdateRoomTypeFactsCommand,
   parseUpsertPmsOperatingCalendarCommand,
   parseUpsertPropertyPricingCurrencyCommand,
   type RoomTypeFacts,
@@ -890,8 +891,8 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
       // TEST ONLY on 10-11: the calendar with the added room was saved, but preparing its
       // availability failed, so guests could still book only the first calendar.
       const unprepared = await saveCalendarRevision([gardenSuite, seaSuite], 1);
-      // 10-12: the hotel edits its profile and style before it comes back to the calendar. The
-      // saved calendar pins the old profile revision, so it can never be prepared now.
+      // 10-12: the hotel edits its profile and style before it comes back to the calendar. Before
+      // VAY-2150 that made the saved calendar stale, so it could never be prepared.
       await presentHotel("present-again", `${SUMMARY} Every suite now has a sea-view terrace.`);
       ok(
         await designRepository.upsertDesign({
@@ -909,9 +910,10 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         }),
         "booking design again",
       );
+      expect(unprepared.calendarRevision).toBe(2);
       expect(
-        await prepareCalendar(unprepared, { from: localDate(0), through: localDate(365) }),
-      ).toMatchObject({ ok: false, error: { code: "configuration_not_current" } });
+        await operatingCalendar.getCurrentOperatingCalendarConfiguration(propertyId),
+      ).toMatchObject({ sourceStatus: "current", configuration: { calendarRevision: 2 } });
       // Saving again previews against the first calendar instead of refusing (VAY-2134). Before
       // VAY-2134 this horizon, starting at today, was also rejected with a 409.
       ok(
@@ -1187,65 +1189,133 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
           totalMinor: quoted.totalMinor,
         });
         expect(await quoteRows()).toBe(quotesBefore);
-        const disclosure = (await read(
-          `/hotels/${slug}/bookings/quotes/${quoted.quoteId}/guest-disclosure`,
-        )) as { quoteEvidenceId: string; guestPolicyEvidenceId: string };
         // The hotel chose Commission in setup Payments before publishing (VAY-2171), which is the
         // billing plan the acceptance terms need. The PMS reservation worker below runs as admin.
         const billingPool = new pg.Pool({ connectionString: url, max: 1 });
         closers.push(() => billingPool.end());
-        const acceptanceKey = randomUUID();
-        const accepted = await site.inject({
-          method: "POST",
-          url: `/api/booking-web/hotels/${slug}/bookings/quotes/${quoted.quoteId}/accept`,
-          headers: { "Idempotency-Key": acceptanceKey },
-          payload: {
-            version: "booking-quote-acceptance.v1",
-            requestId: acceptanceKey,
-            quoteId: quoted.quoteId,
-            acceptance: {
-              accepted: true,
-              quoteEvidenceId: disclosure.quoteEvidenceId,
-              guestPolicyEvidenceId: disclosure.guestPolicyEvidenceId,
+        const acceptQuote = async ({ quoteId }: { quoteId: string }, guest: string) => {
+          const disclosure = (await read(
+            `/hotels/${slug}/bookings/quotes/${quoteId}/guest-disclosure`,
+          )) as { quoteEvidenceId: string; guestPolicyEvidenceId: string };
+          const acceptanceKey = randomUUID();
+          const accepted = await site.inject({
+            method: "POST",
+            url: `/api/booking-web/hotels/${slug}/bookings/quotes/${quoteId}/accept`,
+            headers: { "Idempotency-Key": acceptanceKey },
+            payload: {
+              version: "booking-quote-acceptance.v1",
+              requestId: acceptanceKey,
+              quoteId,
+              acceptance: {
+                accepted: true,
+                quoteEvidenceId: disclosure.quoteEvidenceId,
+                guestPolicyEvidenceId: disclosure.guestPolicyEvidenceId,
+              },
+              guest: {
+                firstName: "Walk",
+                lastName: "Guest",
+                email: `${guest}-${suffix}@example.test`,
+                phone: "+94 77 123 4567",
+                countryCode: "LK",
+                arrivalTime: null,
+                specialRequests: null,
+              },
             },
-            guest: {
-              firstName: "Walk",
-              lastName: "Guest",
-              email: `guest-${suffix}@example.test`,
-              phone: "+94 77 123 4567",
-              countryCode: "LK",
-              arrivalTime: null,
-              specialRequests: null,
-            },
-          },
-        });
-        expect(accepted.statusCode, accepted.body).toBe(200);
-        expect(accepted.json()).toMatchObject({
-          kind: "accepted",
-          bookingReference: expect.any(String),
-        });
-        // The booking queued its PMS reservation: the worker adopts it, which also leaves nothing
-        // queued for another suite's worker on the same database.
-        const outcomes: string[] = [];
-        const workerClient = await billingPool.connect();
-        try {
-          for (let attempt = 0; attempt < 5 && outcomes.at(-1) !== "empty"; attempt += 1) {
-            await workerClient.query("BEGIN");
-            try {
-              outcomes.push(
-                await processNextPmsAcceptedPricingReservationJob(workerClient, `walk-${suffix}`),
-              );
-              await workerClient.query("COMMIT");
-            } catch (error) {
-              await workerClient.query("ROLLBACK");
-              throw error;
+          });
+          expect(accepted.statusCode, accepted.body).toBe(200);
+          expect(accepted.json()).toMatchObject({
+            kind: "accepted",
+            bookingReference: expect.any(String),
+          });
+          // The booking queued its PMS reservation: the worker adopts it, which also leaves
+          // nothing queued for another suite's worker on the same database.
+          const outcomes: string[] = [];
+          const workerClient = await billingPool.connect();
+          try {
+            for (let attempt = 0; attempt < 5 && outcomes.at(-1) !== "empty"; attempt += 1) {
+              await workerClient.query("BEGIN");
+              try {
+                outcomes.push(
+                  await processNextPmsAcceptedPricingReservationJob(workerClient, `walk-${suffix}`),
+                );
+                await workerClient.query("COMMIT");
+              } catch (error) {
+                await workerClient.query("ROLLBACK");
+                throw error;
+              }
             }
+          } finally {
+            workerClient.release();
           }
-        } finally {
-          workerClient.release();
-        }
-        expect(outcomes).toContain("adopted");
-        expect(outcomes.at(-1)).toBe("empty");
+          expect(outcomes).toContain("adopted");
+          expect(outcomes.at(-1)).toBe("empty");
+        };
+        await acceptQuote(quoted, "guest");
+
+        // VAY-2150: hotel and room detail edits after the calendar save keep it current, so the
+        // page stays ready and guests can still book. Before, accepting failed with "Quote
+        // inventory is unavailable" until the calendar was saved again.
+        await presentHotel("present-after-calendar", `${SUMMARY} Breakfast is served until noon.`);
+        await advancePublicProfileRevision(pool, propertyId); // a hotel photo finished processing
+        const seaSuiteRevisions = async () =>
+          (
+            await admin.query<{ facts: string; units: string }>(
+              `SELECT room_facts_revision AS facts, room_units_revision AS units
+               FROM pms.room_types WHERE id=$1`,
+              [seaSuite],
+            )
+          ).rows[0]!;
+        ok(
+          await rooms.facts.updateRoomTypeFacts(
+            parsed(
+              parseUpdateRoomTypeFactsCommand({
+                organizationId,
+                propertyId,
+                roomTypeId: seaSuite,
+                expectedRevision: Number((await seaSuiteRevisions()).facts),
+                facts: { ...roomFacts2("Sea Suite"), description: "Sea Suite with a bathtub." },
+                idempotencyKey: `facts-after-calendar-${suffix}`,
+                audit: commandAudit("facts-after-calendar"),
+              }),
+              "room details edit",
+            ),
+          ),
+          "room details edit",
+        );
+        expect(
+          await operatingCalendar.getCurrentOperatingCalendarConfiguration(propertyId),
+        ).toMatchObject({ sourceStatus: "current", sourceConflicts: [] });
+        expect(blockerCodes(await readiness())).toEqual([]);
+        const quoteAfterEdits = await quoteSeaSuite();
+        expect(quoteAfterEdits.statusCode, quoteAfterEdits.body).toBe(200);
+        await acceptQuote(quoteAfterEdits.json() as { quoteId: string }, "guest-after-edits");
+        // A changed unit count still changes the calendar.
+        ok(
+          await rooms.units.reconcilePhysicalRoomUnits(
+            parsed(
+              parseReconcilePhysicalRoomUnitsCommand({
+                organizationId,
+                propertyId,
+                roomTypeId: seaSuite,
+                expectedRevision: Number((await seaSuiteRevisions()).units),
+                targetActiveUnitCount: 3,
+                idempotencyKey: `units-after-calendar-${suffix}`,
+                audit: commandAudit("units-after-calendar"),
+              }),
+              "room units change",
+            ),
+          ),
+          "room units change",
+        );
+        expect(
+          await operatingCalendar.getCurrentOperatingCalendarConfiguration(propertyId),
+        ).toMatchObject({
+          sourceStatus: "stale",
+          sourceConflicts: [{ code: "room_units_revision_conflict", roomTypeId: seaSuite }],
+        });
+        expect(blockerCodes(await readiness())).toContain(
+          "booking.calendar:operating_calendar_source_stale",
+        );
       }
       if (manualMethod) {
         // Once the site serves setup publications, prices follow the page: hidden while bank

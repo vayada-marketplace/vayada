@@ -554,7 +554,16 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
       jobKey: `pms.calendar-auto-open:property:${second.propertyId}:open-through-2028-09-30:source-${secondSourceFingerprint}:v2`,
     });
 
+    // Room details keep the calendar's pinned source, so they don't re-run auto-open (VAY-2150).
     await admin.query("UPDATE pms.room_types SET room_facts_revision = 2 WHERE id = $1::uuid", [
+      second.roomTypeId,
+    ]);
+    expect(
+      (await store.findCalendarAutoOpenCandidates(now, 2)).candidates.map(
+        ({ propertyId }) => propertyId,
+      ),
+    ).not.toContain(second.propertyId);
+    await admin.query("UPDATE pms.room_types SET room_units_revision = 2 WHERE id = $1::uuid", [
       second.roomTypeId,
     ]);
     const changedSource = await store.findCalendarAutoOpenCandidates(now, 2);
@@ -563,7 +572,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
       propertyId: second.propertyId,
       openThrough: "2028-09-30",
       generatedCoverageThrough: null,
-      source: { rooms: [{ roomFactsRevision: 2 }] },
+      source: { rooms: [{ roomFactsRevision: 1, roomUnitsRevision: 2 }] },
     });
     expect(changedSource.candidates[0]!.sourceFingerprint).not.toBe(secondSourceFingerprint);
     expect(changedSource.candidates[1]).toMatchObject({
