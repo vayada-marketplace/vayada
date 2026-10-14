@@ -160,3 +160,42 @@ test("keeps the rooms choosable when prices can't be loaded", async ({ page }) =
   await page.getByTestId("select-rate-deluxe").click();
   await expect(page).toHaveURL(/\/(en\/)?book\?.*offer=/);
 });
+
+test("fills in /book from a room card, with plain option names", async ({ page }, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockBookingApis(page);
+  await mockRooms(page);
+  // A group of three in rooms for two: the card sends two rooms of its choice.
+  await page.goto(
+    `/book?checkIn=2026-11-06&checkOut=2026-11-08&adults=3&offer=${key("a")}&rooms=2`,
+  );
+
+  const first = page.getByRole("group", { name: "Room 1" });
+  const second = page.getByRole("group", { name: "Room 2" });
+  await expect(first.getByLabel("Room and meal option")).toHaveValue(key("a"));
+  await expect(second.getByLabel("Room and meal option")).toHaveValue(key("a"));
+  await expect(first.getByRole("spinbutton", { name: /Adults/ })).toHaveValue("2");
+  await expect(second.getByRole("spinbutton", { name: /Adults/ })).toHaveValue("1");
+  await expect(first.locator(`option[value="${key("a")}"]`)).toHaveText(
+    "Deluxe Double Room — Free cancellation",
+  );
+  await expect(first.locator(`option[value="${key("c")}"]`)).toHaveText(
+    "Deluxe Double Room — Breakfast included",
+  );
+  await expect(first.locator(`option[value="${key("e")}"]`)).toHaveText(
+    "Garden Suite — Non-refundable",
+  );
+  await assertHealthy();
+});
+
+test("lets the guest choose again when the card's choice is no longer offered", async ({
+  page,
+}) => {
+  await mockBookingApis(page);
+  await mockRooms(page);
+  await page.goto(`/book?checkIn=2026-11-06&checkOut=2026-11-08&adults=2&offer=${key("f")}`);
+  const room = page.getByRole("group", { name: "Room 1" });
+  await expect(room.locator(`option[value="${key("a")}"]`)).toHaveCount(1);
+  await expect(room.getByLabel("Room and meal option")).toHaveValue("");
+  await expect(page.getByRole("group", { name: "Room 2" })).toHaveCount(0);
+});

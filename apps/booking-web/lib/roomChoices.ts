@@ -54,7 +54,13 @@ export function choiceText(
   t: Translate,
   now = new Date(),
 ): ChoiceText {
-  const until = keys.days === null ? null : freeCancellationUntil(stay.checkIn, keys.days);
+  // Without a stay (/book before dates are chosen) there is no deadline to word yet.
+  const until =
+    keys.days === null ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(stay.checkIn) ||
+    Number.isNaN(Date.parse(stay.checkIn))
+      ? null
+      : freeCancellationUntil(stay.checkIn, keys.days);
   const cancellationPassed = until !== null && hotelToday(stay.timezone, now) > until;
   const cancellation = cancellationPassed ? null : keys.cancellation;
   const meal = t(`choice.meal.${keys.meal}`);

@@ -82,6 +82,16 @@ describe("room choices", () => {
     ).toBe("Room only");
   });
 
+  it("names a choice before the stay's dates are known", () => {
+    const keys = choiceKeys([offer("room_only", free(3))])[0]!;
+    expect(choiceText(keys, { ...stay, checkIn: "" }, t, now)).toEqual({
+      name: "Free cancellation",
+      terms: "",
+      refundable: true,
+      cancellationPassed: false,
+    });
+  });
+
   it("counts deadlines in calendar days and the hotel's today", () => {
     expect(freeCancellationUntil("2026-03-02", 3)).toBe("2026-02-27");
     expect(hotelToday("Pacific/Auckland", new Date("2026-10-14T12:30:00Z"))).toBe("2026-10-15");
