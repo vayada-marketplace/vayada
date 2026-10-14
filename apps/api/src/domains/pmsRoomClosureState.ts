@@ -75,15 +75,14 @@ export async function readPmsRoomClosureState(
         AND day.room_type_id=room.id AND day.stay_date>=calendar.cutoff) AS "futureInventoryDays",
       EXISTS(SELECT 1 FROM eligible WHERE id=room.id) AS operating,
       room.linked_inventory_group_id IS NOT NULL AS linked,
-      COALESCE(calendar.property_profile_revision=property.profile_revision
-        AND calendar.property_time_zone=location.timezone, false) AS "calendarCurrent",
+      -- The calendar uses the time zone, room set and units, not other profile or room details (VAY-2150).
+      COALESCE(calendar.property_time_zone=location.timezone, false) AS "calendarCurrent",
       COALESCE(calendar.room_binding_count=(SELECT count(*) FROM eligible)
         AND NOT EXISTS (
           SELECT 1 FROM eligible candidate LEFT JOIN pms.operating_calendar_room_bindings binding
             ON binding.property_id=candidate.property_id AND binding.room_type_id=candidate.id
               AND binding.calendar_revision=calendar.calendar_revision
           WHERE binding.room_type_id IS NULL
-            OR binding.source_room_facts_revision<>candidate.room_facts_revision
             OR binding.source_room_units_revision<>candidate.room_units_revision
             OR binding.physical_capacity_count<>(SELECT count(*) FROM pms.rooms unit
               WHERE unit.property_id=candidate.property_id AND unit.room_type_id=candidate.id AND unit.status<>'retired')
