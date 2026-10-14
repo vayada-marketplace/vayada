@@ -4,7 +4,10 @@ import type { PlatformMediaServingConfig } from "../platform/mediaServing.js";
 import { createPgHotelMediaResolutionPort } from "../platform/hotelMediaResolver.js";
 import { lockPublicPricingPublication } from "./publicPricingPublication.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
-import { mapReplacementPublicOffers } from "./replacementPublicOfferMapping.js";
+import {
+  mapReplacementPublicOffers,
+  publicOfferCancellations,
+} from "./replacementPublicOfferMapping.js";
 import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 
 type MediaServing = Pick<
@@ -37,6 +40,7 @@ export function createPublicPricingOfferCatalog(
         if (!owner) return null;
         const mapped = mapReplacementPublicOffers(owner);
         if (!mapped) return null;
+        const cancellations = publicOfferCancellations(owner);
         const { propertyId, organizationId } = owner.scope;
         const live = await client.query(
           "SELECT 1 FROM distribution.active_public_booking_revision WHERE property_id=$1 FOR SHARE",
@@ -66,6 +70,8 @@ export function createPublicPricingOfferCatalog(
               publicOfferKey: rate.ratePlanId,
               currency: rate.currency,
               mealPlan: rate.mealPlan,
+              // Additive (VAY-2188). A mapped offer always has its terms; null would mean unknown.
+              cancellation: cancellations.get(rate.ratePlanId) ?? null,
             })),
           });
         }
