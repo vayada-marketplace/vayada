@@ -89,7 +89,7 @@ export async function refreshPhysicalRoomInventory(
       `SELECT 1 FROM pms.operating_calendar_room_bindings binding
       JOIN pms.room_types room ON room.id=binding.room_type_id AND room.property_id=binding.property_id
       WHERE binding.property_id=$1::uuid AND binding.calendar_revision=$3 AND
-      (NOT room.active OR room.room_facts_revision<>binding.source_room_facts_revision OR
+      (NOT room.active OR
        binding.source_room_units_revision<>CASE WHEN room.id=$2::uuid THEN $4 ELSE room.room_units_revision END)
       LIMIT 1`,
       [...scope, calendar.revision, command.expectedRevision],

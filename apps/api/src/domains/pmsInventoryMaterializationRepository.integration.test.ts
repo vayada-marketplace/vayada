@@ -1320,15 +1320,16 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     await book(randomUUID(), "2026-08-06", "2026-08-07");
     await expect(check()).rejects.toThrow("alteration_rooms_unavailable");
     input.changes.requestedCheckOut = "2026-08-06";
+    // Changed units make the inventory not current; room details would not (VAY-2150).
     await admin.query(
-      `UPDATE pms.room_types SET room_facts_revision=room_facts_revision+1 WHERE id=$1`,
+      `UPDATE pms.room_types SET room_units_revision=room_units_revision+1 WHERE id=$1`,
       [roomTypeId],
     );
     await expect(check()).rejects.toThrow("alteration_inventory_not_current");
     // Full tracked sequence: accepted alteration, ordinary modification, cancellation and replay.
     financeEnabled = true;
     await admin.query(
-      "UPDATE pms.room_types SET room_facts_revision=room_facts_revision-1 WHERE id=$1",
+      "UPDATE pms.room_types SET room_units_revision=room_units_revision-1 WHERE id=$1",
       [roomTypeId],
     );
     await admin.query(
@@ -1435,14 +1436,21 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     } finally {
       await admin.query("ROLLBACK");
     }
+    // Only a new time zone conflicts with the calendar; other profile edits don't (VAY-2150).
+    const zone = (
+      await admin.query<{ timezone: string }>(
+        "SELECT timezone FROM hotel_catalog.property_locations WHERE property_id=$1",
+        [propertyId],
+      )
+    ).rows[0]!.timezone;
     await admin.query(
-      "UPDATE hotel_catalog.properties SET profile_revision=profile_revision+1 WHERE id=$1",
+      "UPDATE hotel_catalog.property_locations SET timezone='Asia/Kolkata' WHERE property_id=$1",
       [propertyId],
     );
     await rejectTrackedRevision("nightly_revenue_evidence_conflict");
     await admin.query(
-      "UPDATE hotel_catalog.properties SET profile_revision=profile_revision-1 WHERE id=$1",
-      [propertyId],
+      "UPDATE hotel_catalog.property_locations SET timezone=$2 WHERE property_id=$1",
+      [propertyId, zone],
     );
     // Ordinary modifications must roll back canonical changes when evidence is unavailable.
     providerRevision.attributes.amount = "40.00";
