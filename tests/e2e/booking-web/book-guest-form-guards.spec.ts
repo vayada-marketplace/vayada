@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
-import { continueToPayment } from "../support/bookFlow";
+import { fillGuestDetails, orderTotal } from "../support/bookFlow";
 
 const offerKey = `pricing-offer.v2:${"d".repeat(64)}`;
 
@@ -16,7 +16,6 @@ test("keeps Confirm booking off after the general online-booking error", async (
     route.fulfill({ status: 404, json: { statusCode: 404, message: "Not Found" } }),
   );
   await acknowledge(page);
-  await fillGuest(page);
   const confirm = page.getByRole("button", { name: "Confirm booking" });
   await confirm.click();
   await expect(
@@ -31,17 +30,21 @@ test("keeps the hotel's guest rules in the form when the price expires", async (
 }, testInfo) => {
   // A fake clock, so a slow worker can't run out of price time while the form is filled in.
   await page.clock.install();
-  await openQuote(page);
-  await acknowledge(page);
-  await fillGuest(page);
+  await openDetails(page);
+  await fillGuestDetails(page);
   await page.getByLabel("Expected arrival time (optional)").fill("17:30");
   await page.getByLabel("Special requests (optional)").fill("Quiet room, please.");
   await page.screenshot({
     path: testInfo.outputPath("book-price-current-1440.png"),
     fullPage: true,
   });
+  await page.getByRole("button", { name: "Continue to payment" }).click();
+  await acknowledge(page);
   await page.clock.fastForward("05:05");
   await expect(page.getByText(/This price has expired/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Confirm booking" })).toBeDisabled();
+  // VAY-2195: the details are a step of their own; they stay as typed after the price expires.
+  await page.getByRole("button", { name: "Change", exact: true }).click();
   await page.screenshot({
     path: testInfo.outputPath("book-price-expired-1440.png"),
     fullPage: true,
@@ -53,12 +56,11 @@ test("keeps the hotel's guest rules in the form when the price expires", async (
   );
   await expect(page.getByLabel("Expected arrival time (optional)")).toHaveValue("17:30");
   await expect(page.getByLabel("Special requests (optional)")).toHaveValue("Quiet room, please.");
-  await expect(page.getByRole("button", { name: "Confirm booking" })).toBeDisabled();
 });
 
 test("requires the phone while the guest rules can't be loaded", async ({ page }, testInfo) => {
-  await openQuote(page, { rulesStatus: 503 });
-  await expect(page.getByText(/couldn.t verify our guest rules/)).toBeVisible();
+  await openDetails(page, { rulesStatus: 503 });
+  await expect(page.getByText(/couldn.t check our guest rules/)).toBeVisible();
   await page.screenshot({
     path: testInfo.outputPath("book-guest-rules-failed-1440.png"),
     fullPage: true,
@@ -68,10 +70,22 @@ test("requires the phone while the guest rules can't be loaded", async ({ page }
     "required",
     "",
   );
+  const toPayment = page.getByRole("button", { name: "Continue to payment" });
+  await expect(toPayment).toBeDisabled();
+  await fillGuestDetails(page);
+  await toPayment.click();
+  await expect(page.getByText(/couldn.t verify our guest rules/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Confirm booking" })).toBeDisabled();
 });
 
-async function openQuote(page: Page, { rulesStatus = 200 } = {}) {
+async function openQuote(page: Page) {
+  await openDetails(page);
+  await fillGuestDetails(page);
+  await page.getByRole("button", { name: "Continue to payment" }).click();
+  await expect(orderTotal(page)).toHaveText("€240");
+}
+
+async function openDetails(page: Page, { rulesStatus = 200 } = {}) {
   await mockBookingApis(page);
   await page.route("**/pricing-offers", (route) =>
     route.fulfill({
@@ -154,19 +168,12 @@ async function openQuote(page: Page, { rulesStatus = 200 } = {}) {
   const room = page.getByRole("group", { name: "Room 1", exact: true });
   await room.getByLabel("Room and meal option").selectOption(offerKey);
   await room.getByLabel(/Adults/).fill("2");
-  await continueToPayment(page, { method: "pay_at_property" });
-  await expect(page.getByText("Total: EUR 240.00", { exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Your details" })).toBeVisible();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(page).toHaveURL(/[?&]step=details/);
+  await expect(page.getByRole("heading", { name: "Guest Information" })).toBeVisible();
 }
 
 async function acknowledge(page: Page) {
-  await page.getByLabel("I have read the room and rate terms for this price preview.").check();
-  await page.getByLabel("I have read the guest rules for this price preview.").check();
-}
-
-async function fillGuest(page: Page) {
-  await page.getByLabel("First name").fill("Ada");
-  await page.getByLabel("Last name").fill("Lovelace");
-  await page.getByLabel("Email", { exact: true }).fill("ada@example.test");
-  await page.getByRole("textbox", { name: "Phone", exact: true }).fill("+49 30 1234567");
+  await page.getByLabel("I have read the room and rate terms for this price").check();
+  await page.getByLabel("guest rules for this price").check();
 }

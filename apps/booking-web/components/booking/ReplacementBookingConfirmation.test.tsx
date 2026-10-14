@@ -37,6 +37,16 @@ const disclosure = {
     specialRequestsEnabled: true,
   },
 } as PublicQuoteGuestDisclosure;
+// The guest's details come from the details step (VAY-2195).
+const ada = {
+  firstName: "Ada",
+  lastName: "Lovelace",
+  email: "ada@example.test",
+  phone: "+49 123",
+  countryCode: "DE",
+  arrivalTime: "17:30",
+  specialRequests: "Quiet room",
+};
 const result = {
   kind: "accepted" as const,
   bookingId: "22222222-2222-4222-8222-222222222222",
@@ -62,6 +72,7 @@ function render(
   termsAccepted = true,
   rules: PublicQuoteGuestDisclosure | null = disclosure,
   hotelTerms = false,
+  guest: typeof ada | null = ada,
 ) {
   act(() =>
     root.render(
@@ -69,13 +80,13 @@ function render(
         slug: "hotel",
         quote,
         disclosure: rules,
+        guest,
         termsAccepted,
         hotelTerms,
       }),
     ),
   );
 }
-const input = (name: string) => document.querySelector<HTMLInputElement>(`[name="${name}"]`)!;
 async function submit() {
   await act(async () => document.querySelector<HTMLFormElement>("form")!.requestSubmit());
 }
@@ -97,21 +108,16 @@ it("says booking accepts the hotel's terms only when the hotel has terms (VAY-21
   expect(document.body.textContent).toContain(line);
 });
 
-it("collects only enabled policy fields and shows the public confirmation reference", async () => {
+it("waits for the guest's details from the details step", async () => {
+  render(true, disclosure, false, null);
+  expect(document.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
+  expect(document.body.textContent).toContain("Fill in your details to book.");
+  await submit();
+  expect(acceptPricingQuote).not.toHaveBeenCalled();
+});
+
+it("books with the guest's details and shows the public confirmation reference", async () => {
   render();
-  expect(input("phone").required).toBe(true);
-  expect(input("arrivalTime")).not.toBeNull();
-  expect(document.querySelector('[name="specialRequests"]')).not.toBeNull();
-  for (const [name, value] of [
-    ["firstName", "Ada"],
-    ["lastName", "Lovelace"],
-    ["email", "ada@example.test"],
-    ["phone", "+49 123"],
-    ["countryCode", "DE"],
-    ["arrivalTime", "17:30"],
-    ["specialRequests", "Quiet room"],
-  ])
-    input(name).value = value;
   await submit();
   expect(acceptPricingQuote).toHaveBeenCalledWith(
     "hotel",
@@ -136,10 +142,6 @@ it("collects only enabled policy fields and shows the public confirmation refere
 
 it("retires a rejected quote", async () => {
   render();
-  input("firstName").value = "Ada";
-  input("lastName").value = "Lovelace";
-  input("email").value = "ada@example.test";
-  input("phone").value = "+49";
   vi.mocked(acceptPricingQuote).mockRejectedValueOnce(new ApiError("hidden", 409, null));
   await submit();
   expect(document.querySelector('[role="alert"]')?.textContent).toContain(
@@ -150,10 +152,6 @@ it("retires a rejected quote", async () => {
 
 it("says nothing was booked when online booking is unavailable", async () => {
   render();
-  input("firstName").value = "Ada";
-  input("lastName").value = "Lovelace";
-  input("email").value = "ada@example.test";
-  input("phone").value = "+49";
   vi.mocked(acceptPricingQuote).mockRejectedValueOnce(new ApiError("hidden", 404, null));
   await submit();
   expect(document.querySelector('[role="alert"]')?.textContent).toContain(
@@ -161,51 +159,6 @@ it("says nothing was booked when online booking is unavailable", async () => {
   );
   // VAY-2163: a retry can't succeed, so the button stays off like the card-off case.
   expect(document.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
-});
-
-it("keeps the loaded guest rules in the form whether or not they are ticked (VAY-2163)", () => {
-  const renderRules = (rules: PublicQuoteGuestDisclosure["choices"]) =>
-    act(() =>
-      root.render(
-        createElement(ReplacementBookingConfirmation, {
-          slug: "hotel",
-          quote,
-          disclosure: null,
-          rules,
-          termsAccepted: false,
-        }),
-      ),
-    );
-  renderRules(disclosure.choices);
-  expect(input("phone").required).toBe(true);
-  expect(input("arrivalTime")).not.toBeNull();
-  expect(document.querySelector('[name="specialRequests"]')).not.toBeNull();
-  renderRules({
-    ...disclosure.choices,
-    phoneRequired: false,
-    arrivalTimeEnabled: false,
-    specialRequestsEnabled: false,
-  });
-  expect(input("phone").required).toBe(false);
-  expect(document.body.textContent).toContain("Phone (optional)");
-  expect(input("arrivalTime")).toBeNull();
-  expect(document.querySelector('[name="specialRequests"]')).toBeNull();
-});
-
-it("requires the phone until the guest rules are known (VAY-2163)", () => {
-  render(true, null);
-  expect(input("phone").required).toBe(true);
-  expect(document.body.textContent).not.toContain("Phone (optional)");
-  expect(input("arrivalTime")).toBeNull();
-  expect(document.querySelector('[name="specialRequests"]')).toBeNull();
-  // A previous quote's rules don't count while the new quote's rules load.
-  render(true, {
-    ...disclosure,
-    quoteId: "other",
-    choices: { ...disclosure.choices, phoneRequired: false },
-  });
-  expect(input("phone").required).toBe(true);
-  expect(input("arrivalTime")).toBeNull();
 });
 
 it("stops a request the hotel cannot receive online yet, without inviting a retry", async () => {
@@ -216,13 +169,10 @@ it("stops a request the hotel cannot receive online yet, without inviting a retr
         quote: { ...quote, acceptanceMode: "request" } as PublicBookingQuote,
         disclosure,
         termsAccepted: true,
+        guest: ada,
       }),
     ),
   );
-  input("firstName").value = "Ada";
-  input("lastName").value = "Lovelace";
-  input("email").value = "ada@example.test";
-  input("phone").value = "+49";
   vi.mocked(acceptPricingQuote).mockRejectedValueOnce(
     new ApiError("hidden", 404, { code: "REQUEST_ACCEPTANCE_UNAVAILABLE" }),
   );
@@ -236,19 +186,13 @@ it("stops a request the hotel cannot receive online yet, without inviting a retr
 
 it("keeps an uncertain attempt retryable", async () => {
   render();
-  input("firstName").value = "Ada";
-  input("lastName").value = "Lovelace";
-  input("email").value = "ada@example.test";
-  input("phone").value = "+49";
   vi.mocked(acceptPricingQuote).mockRejectedValueOnce(new Error("network"));
   await submit();
   expect(document.querySelector('[role="alert"]')?.textContent).toContain(
     "room may still have been booked",
   );
-  expect(input("firstName").disabled).toBe(true);
   const firstGuest = vi.mocked(acceptPricingQuote).mock.calls[0]![3];
-  input("firstName").value = "Grace";
-  render(false, null);
+  render(false, null, false, { ...ada, firstName: "Grace" });
   await submit();
   expect(acceptPricingQuote).toHaveBeenCalledTimes(2);
   expect(vi.mocked(acceptPricingQuote).mock.calls[1]![3]).toEqual(firstGuest);
@@ -271,6 +215,7 @@ it.each([
         quote: { ...quote, ...change } as PublicBookingQuote,
         disclosure,
         termsAccepted: true,
+        guest: ada,
       }),
     ),
   );
@@ -294,19 +239,13 @@ it("sends a pay-at-property request and says the hotel still has to accept it", 
         quote: request,
         disclosure,
         termsAccepted: true,
+        guest: ada,
       }),
     ),
   );
   const send = document.querySelector<HTMLButtonElement>('button[type="submit"]')!;
   expect(send.disabled).toBe(false);
   expect(send.textContent).toBe("Send booking request");
-  for (const [name, value] of [
-    ["firstName", "Ada"],
-    ["lastName", "Lovelace"],
-    ["email", "ada@example.test"],
-    ["phone", "+49 123"],
-  ])
-    input(name).value = value;
   await submit();
   expect(acceptPricingQuote).toHaveBeenCalledWith(
     "hotel",
@@ -351,16 +290,13 @@ it("authorises a card request and says the card is charged only if the hotel acc
         quote: card as PublicBookingQuote,
         disclosure,
         termsAccepted: true,
+        guest: ada,
       }),
     ),
   );
   expect(document.querySelector('button[type="submit"]')?.textContent).toBe(
     "Continue to card authorisation",
   );
-  input("firstName").value = "Ada";
-  input("lastName").value = "Lovelace";
-  input("email").value = "ada@example.test";
-  input("phone").value = "+49";
   await submit();
   expect(cardStep.props).toMatchObject({ required, request: true });
   act(() =>
@@ -400,16 +336,13 @@ it("hands a fully paid card quote to the card step, then shows the confirmation"
         quote: card as PublicBookingQuote,
         disclosure,
         termsAccepted: true,
+        guest: ada,
       }),
     ),
   );
   expect(document.querySelector('button[type="submit"]')?.textContent).toBe(
     "Continue to card payment",
   );
-  input("firstName").value = "Ada";
-  input("lastName").value = "Lovelace";
-  input("email").value = "ada@example.test";
-  input("phone").value = "+49";
   await submit();
   expect(document.querySelector('[aria-label="Card payment"]')).not.toBeNull();
   expect(cardStep.props).toMatchObject({ slug: "hotel", quoteId: quote.quoteId, required });
@@ -422,4 +355,55 @@ it("hands a fully paid card quote to the card step, then shows the confirmation"
     }),
   );
   expect(document.body.textContent).toContain(result.bookingReference);
+});
+
+it("keeps an open attempt with the page, so a new form still retries it (VAY-2195)", async () => {
+  const held = vi.fn();
+  const renderHeld = (attempt: unknown, guest = ada) =>
+    act(() =>
+      root.render(
+        createElement(ReplacementBookingConfirmation, {
+          slug: "hotel",
+          quote,
+          disclosure,
+          guest,
+          termsAccepted: true,
+          attempt: attempt as never,
+          onAttemptChange: held,
+        }),
+      ),
+    );
+  renderHeld(null);
+  vi.mocked(acceptPricingQuote).mockRejectedValueOnce(new Error("network"));
+  await submit();
+  const open = held.mock.calls.at(-1)![0];
+  expect(open).toEqual({ quoteId: quote.quoteId, guest: ada, disclosure });
+  // The guest left the step and came back: a fresh form gets the open attempt from the page.
+  act(() => root.unmount());
+  root = createRoot(document.getElementById("root")!);
+  renderHeld(open, { ...ada, email: "other@example.test" });
+  await submit();
+  expect(vi.mocked(acceptPricingQuote).mock.calls[1]![3]).toEqual(ada);
+  expect(vi.mocked(acceptPricingQuote).mock.calls[1]![5]).toBe("uncertain-retry");
+});
+
+it("hands a made booking to the page so it can open the confirmation (VAY-2195)", async () => {
+  const booked = vi.fn();
+  act(() =>
+    root.render(
+      createElement(ReplacementBookingConfirmation, {
+        slug: "hotel",
+        quote,
+        disclosure,
+        guest: ada,
+        termsAccepted: true,
+        onBooked: booked,
+      }),
+    ),
+  );
+  await submit();
+  expect(booked).toHaveBeenCalledWith({
+    bookingReference: result.bookingReference,
+    requested: false,
+  });
 });
