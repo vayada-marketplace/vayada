@@ -124,7 +124,39 @@
       "checkingAvailability": "Verfügbarkeit wird geprüft",
       "availabilityUnavailable": "Die Verfügbarkeit für diese Reisedaten ist vorübergehend nicht abrufbar.",
       "availabilityUnavailableTooltip": "Verfügbarkeit derzeit nicht abrufbar"
-    }
+    },
+    "choice": {
+      "freeCancellation": "Kostenlose Stornierung",
+      "nonRefundable": "Nicht erstattbar",
+      "partialRefund": "Teilerstattung",
+      "mealNonRefundable": "{meal}, nicht erstattbar",
+      "mealPartialRefund": "{meal}, Teilerstattung",
+      "freeUntil": "Kostenlose Stornierung bis {date}",
+      "noRefund": "Keine Erstattung bei Stornierung oder Nichterscheinen",
+      "partialRefundTerms": "Bei Stornierung erstatten wir einen Teil des Preises. Unsere Bedingungen sehen Sie im nächsten Schritt",
+      "noLongerFree": "Für diese Daten ist keine kostenlose Stornierung mehr möglich",
+      "meal": {
+        "room_only": "Nur Zimmer",
+        "breakfast": "Frühstück inklusive",
+        "half_board": "Halbpension",
+        "full_board": "Vollpension",
+        "all_inclusive": "All inclusive"
+      },
+      "mealTerms": {
+        "breakfast": "Frühstück jeden Morgen",
+        "half_board": "Frühstück und Abendessen jeden Tag",
+        "full_board": "Frühstück, Mittag- und Abendessen jeden Tag",
+        "all_inclusive": "Alle Mahlzeiten und Getränke inklusive"
+      }
+    },
+    "sortRooms": "Zimmer sortieren",
+    "pricesFailed": "Wir konnten die Preise für diese Daten nicht laden. Sie können trotzdem ein Zimmer wählen; den Preis prüfen wir im nächsten Schritt.",
+    "retryPrices": "Erneut versuchen",
+    "childrenPricedLater": "Die Preise gelten für die Erwachsenen. Kinder rechnen wir hinzu, sobald Sie uns im nächsten Schritt ihr Alter nennen.",
+    "severalRooms": "Sie buchen mehr als ein Zimmer?",
+    "notAvailable": "Nicht verfügbar",
+    "tooManyGuests": "Dieses Zimmer bietet Platz für bis zu {count} Gäste. Wählen Sie ein größeres Zimmer oder buchen Sie mehrere Zimmer.",
+    "promoNotApplied": "Ihr Code {code} gilt nicht für diesen Aufenthalt."
   },
   "rooms": {
     "title": "Unsere Zimmer",
