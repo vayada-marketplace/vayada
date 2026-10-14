@@ -26,7 +26,7 @@ export type StayPricesQuery = {
 const MAX_ROOMS = 9;
 /** Rooms left at or below this are shown to guests ("Only 2 left"), as the old page did. */
 const FEW_LEFT = 3;
-/** Offers priced per request; a larger catalog shows the rest without a price. */
+/** Offers priced per request; the rest are "unpriced" (bookable, priced on /book). */
 const MAX_PRICED_OFFERS = 30;
 
 const date = (value: unknown): value is string => {
@@ -125,8 +125,13 @@ export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog)
         const available = roomCount !== null && left >= roomCount;
         const offers = [];
         for (const offer of room.offers) {
+          // Past the per-request cap an offer is "unpriced": still bookable, priced on /book.
+          if (available && budget-- <= 0) {
+            offers.push({ publicOfferKey: offer.publicOfferKey, status: "unpriced" as const });
+            continue;
+          }
           const price =
-            available && roomCount !== null && budget-- > 0
+            available && roomCount !== null
               ? await short(pool, (client) => stayTotal(client, slug, query, offer, roomCount))
               : null;
           offers.push(

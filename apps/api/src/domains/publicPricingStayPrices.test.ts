@@ -305,6 +305,11 @@ describe("createPublicPricingStayPrices", () => {
     const prices = await env.reader.read("hotel", stay);
     expect(totals).toHaveBeenCalledTimes(30);
     expect(prices!.rooms[0]!.offers.filter(({ status }) => status === "priced")).toHaveLength(30);
+    // The rest stay bookable without a price, not "unavailable".
+    expect(prices!.rooms[0]!.offers.slice(30).map(({ status }) => status)).toEqual([
+      "unpriced",
+      "unpriced",
+    ]);
   });
 
   it("returns nothing for a hotel without public offers or authority, and rolls back", async () => {
