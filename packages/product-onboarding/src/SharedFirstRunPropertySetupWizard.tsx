@@ -56,7 +56,7 @@ import {
 
 import { HotelIcon } from "./HotelIcon";
 import { LocalizationMultiSelect } from "./LocalizationMultiSelect";
-import GoogleAddressMap from "./GoogleAddressMap";
+import GoogleAddressMap, { type MapPosition } from "./GoogleAddressMap";
 import GooglePlacesAddressField from "./GooglePlacesAddressField";
 import TimezoneField from "./TimezoneField";
 import { availableTimezones, defaultTimezoneForCountry, timezoneForCoordinates } from "./timezones";
@@ -156,6 +156,11 @@ function isValidIanaTimezone(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function parsedCoordinate(value: string): number | null {
+  const coordinate = value.trim() === "" ? Number.NaN : Number(value);
+  return Number.isFinite(coordinate) ? coordinate : null;
 }
 
 export function hasMapCoordinates(location: Pick<ProfileDraft, "latitude" | "longitude">): boolean {
@@ -1090,6 +1095,13 @@ function ProfileForm({
       (mode === "update" && !(canConfirmLocation(draft) && hasMapCoordinates(draft))),
   );
   const [addressSearchUnavailable, setAddressSearchUnavailable] = useState(false);
+  // Without a map (blocked script, key failure) coordinates are typed in; text keeps partial input.
+  const [mapUnavailable, setMapUnavailable] = useState(false);
+  const [coordinateText, setCoordinateText] = useState({
+    latitude: draft.latitude?.toString() ?? "",
+    longitude: draft.longitude?.toString() ?? "",
+  });
+  const coordinateTyped = useRef(false);
   const [logoPreviewUrl, setLogoPreviewUrl] = useState(draft.logoPublicUrl);
   const addressRevision = useRef(0);
   const addressFields = useRef<HTMLDivElement>(null);
@@ -1129,6 +1141,18 @@ function ProfileForm({
       setShowAddressFields(!(canConfirmLocation(draft) && hasMapCoordinates(draft)));
     }
   }, [draft, googleMapsApiKey, loading, mode]);
+
+  useEffect(() => {
+    // Typed coordinates keep their text (e.g. "48."); others (a pin, a cleared pin) replace it.
+    if (coordinateTyped.current) {
+      coordinateTyped.current = false;
+      return;
+    }
+    setCoordinateText({
+      latitude: draft.latitude?.toString() ?? "",
+      longitude: draft.longitude?.toString() ?? "",
+    });
+  }, [draft.latitude, draft.longitude]);
 
   useEffect(() => {
     if (showAddressFields && focusAddressFieldsWhenShown.current) {
@@ -1180,6 +1204,20 @@ function ProfileForm({
       ...locationReset,
     });
   };
+  const pickMapLocation = ({ lat, lng }: MapPosition) => {
+    // The hotel's own pin wins over a Places selection still loading for the old address.
+    addressRevision.current += 1;
+    const followPin = timezoneWasAutoDetected.current || !draft.timezone.trim();
+    if (followPin) timezoneWasAutoDetected.current = true;
+    onChange({
+      ...draft,
+      latitude: lat,
+      longitude: lng,
+      ...(followPin ? { timezone: timezoneForCoordinates(lat, lng) } : {}),
+    });
+    // Like a picked suggestion: fold the fields away so the pin is in view to confirm.
+    if (canConfirmLocation(draft)) setShowAddressFields(false);
+  };
   const changeStep = (nextStep: number) => {
     onFieldErrors({});
     onStepChange(nextStep);
@@ -1218,6 +1256,8 @@ function ProfileForm({
   const countryName = country?.name ?? draft.countryCode;
   const hasCompleteLocation = canConfirmLocation(draft);
   const hasMappedLocation = hasCompleteLocation && hasMapCoordinates(draft);
+  // The pin can only be placed on a map, so without one there's nothing to prompt for.
+  const showLocationSummary = Boolean(googleMapsApiKey) && hasCompleteLocation;
   const profileProgress = (
     <div
       className={
@@ -1631,11 +1671,13 @@ function ProfileForm({
               apiKey={googleMapsApiKey}
               latitude={draft.latitude}
               longitude={draft.longitude}
+              onPick={pickMapLocation}
+              onUnavailable={() => setMapUnavailable(true)}
             />
           )}
 
           <div className="pointer-events-none absolute inset-0 z-10 flex items-end p-3 sm:block sm:p-0">
-            <div className="pointer-events-auto flex max-h-[calc(100dvh-1.5rem)] w-full flex-col rounded-3xl border border-white/80 bg-white/95 shadow-[0_18px_50px_-20px_rgba(15,23,42,0.35)] backdrop-blur focus-within:self-start sm:contents">
+            <div className="pointer-events-auto flex max-h-[70dvh] w-full flex-col rounded-3xl border border-white/80 bg-white/95 shadow-[0_18px_50px_-20px_rgba(15,23,42,0.35)] backdrop-blur focus-within:self-start sm:contents">
               <div
                 data-testid="location-search-panel"
                 className={`pointer-events-auto min-h-0 flex-1 p-4 sm:absolute sm:left-6 sm:top-6 sm:flex-none sm:rounded-2xl sm:border sm:border-white/80 sm:bg-white/95 sm:shadow-[0_18px_50px_-20px_rgba(15,23,42,0.35)] sm:backdrop-blur lg:left-8 lg:top-8 ${
@@ -1695,6 +1737,14 @@ function ProfileForm({
                   />
                 )}
 
+                {googleMapsApiKey && showAddressFields && !addressSearchUnavailable && (
+                  <p className="mt-1.5 text-xs text-gray-500">
+                    {mode === "update"
+                      ? "Or correct the address below, then place the pin."
+                      : "Or enter the address below, then place the pin."}
+                  </p>
+                )}
+
                 {!showAddressFields && (
                   <button
                     ref={editAddressButton}
@@ -1724,7 +1774,8 @@ function ProfileForm({
                         className="mb-4 rounded-xl bg-gray-50 px-3 py-2.5 text-sm text-gray-600"
                         role="status"
                       >
-                        Address suggestions are unavailable. Enter the address manually.
+                        Address suggestions are unavailable. Enter the address, then click your
+                        property on the map.
                       </p>
                     )}
                     {googleMapsApiKey && hasCompleteLocation && (
@@ -1798,6 +1849,37 @@ function ProfileForm({
                     </div>
                   </div>
                 )}
+                {mapUnavailable && (
+                  <div className="mt-4 rounded-xl border border-gray-200 p-3">
+                    <p className="text-sm text-gray-600">
+                      The map couldn’t load. Enter your property’s coordinates instead, for example
+                      copied from Google Maps.
+                    </p>
+                    <div className="mt-3 grid grid-cols-2 gap-3">
+                      {(["latitude", "longitude"] as const).map((field) => (
+                        <TextField
+                          key={field}
+                          label={field === "latitude" ? "Latitude" : "Longitude"}
+                          value={coordinateText[field]}
+                          placeholder={field === "latitude" ? "48.137154" : "11.576124"}
+                          required
+                          onChange={(value) => {
+                            setCoordinateText((text) => ({ ...text, [field]: value }));
+                            const coordinate = parsedCoordinate(value);
+                            const limit = field === "latitude" ? 90 : 180;
+                            const next =
+                              coordinate !== null && Math.abs(coordinate) <= limit
+                                ? coordinate
+                                : null;
+                            if (next === draft[field]) return;
+                            coordinateTyped.current = true;
+                            onChange({ ...draft, [field]: next });
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3 text-left">
                   <input
                     type="checkbox"
@@ -1823,24 +1905,28 @@ function ProfileForm({
               <div
                 data-testid="location-action-bar"
                 className={`pointer-events-auto shrink-0 border-t border-gray-100 p-4 sm:absolute sm:bottom-8 sm:left-1/2 sm:flex sm:-translate-x-1/2 sm:items-center sm:justify-between sm:rounded-2xl sm:border sm:border-white/80 sm:bg-white/95 sm:shadow-[0_18px_50px_-20px_rgba(15,23,42,0.35)] sm:backdrop-blur ${
-                  !showAddressFields && hasCompleteLocation
+                  showLocationSummary
                     ? "sm:w-[calc(100%-3rem)] sm:max-w-4xl"
                     : "sm:w-auto sm:min-w-[19rem]"
                 }`}
               >
-                {!showAddressFields && hasCompleteLocation && (
+                {showLocationSummary && (
                   <div
                     className="flex min-w-0 items-start gap-3 sm:flex-1 sm:items-center"
                     aria-live="polite"
                   >
-                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-600 text-white sm:mt-0">
+                    <span
+                      className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full sm:mt-0 ${
+                        hasMappedLocation
+                          ? "bg-primary-600 text-white"
+                          : "bg-amber-100 text-amber-700"
+                      }`}
+                    >
                       <MapPinIcon className="h-4 w-4" aria-hidden="true" />
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-gray-950">
-                        {hasMappedLocation
-                          ? "Is this the right location?"
-                          : "Address details entered"}
+                        {hasMappedLocation ? "Is this the right location?" : "Add your map pin"}
                       </p>
                       <p className="mt-0.5 text-sm text-gray-700 sm:truncate">
                         {[
@@ -1851,20 +1937,26 @@ function ProfileForm({
                           .filter(Boolean)
                           .join(", ")}
                       </p>
-                      {draft.timezone && (
-                        <p className="mt-0.5 text-xs text-gray-500">Time zone · {draft.timezone}</p>
-                      )}
+                      <p className="mt-0.5 text-xs text-gray-500">
+                        {hasMappedLocation
+                          ? [
+                              !mapUnavailable &&
+                                "Drag the pin if it isn’t exactly on your property",
+                              draft.timezone && `Time zone · ${draft.timezone}`,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")
+                          : mapUnavailable
+                            ? "Needed for the Marketplace. Enter your property’s coordinates above."
+                            : addressSearchUnavailable
+                              ? "Needed for the Marketplace. Zoom in and click your property; drag the pin to adjust."
+                              : "Needed for the Marketplace. Click your property on the map."}
+                      </p>
                     </div>
                   </div>
                 )}
 
-                <div
-                  className={
-                    !showAddressFields && hasCompleteLocation
-                      ? "mt-4 sm:ml-6 sm:mt-0 sm:shrink-0"
-                      : ""
-                  }
-                >
+                <div className={showLocationSummary ? "mt-4 sm:ml-6 sm:mt-0 sm:shrink-0" : ""}>
                   {actions}
                 </div>
               </div>

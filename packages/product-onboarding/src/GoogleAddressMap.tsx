@@ -4,12 +4,19 @@ import { useEffect, useRef, useState } from "react";
 
 import { importGoogleMapsLibrary } from "./googleMaps";
 
-type MapPosition = { lat: number; lng: number };
+export type MapPosition = { lat: number; lng: number };
+type GoogleLatLng = { lat: () => number; lng: () => number };
+type GoogleMapsEvent = { latLng?: GoogleLatLng | null };
 type GoogleMap = {
+  addListener: (eventName: "click", handler: (event: GoogleMapsEvent) => void) => void;
+  getZoom: () => number | undefined;
+  // One camera move: a pan followed by a zoom can cut the pan animation short.
+  moveCamera: (camera: { center: MapPosition; zoom: number }) => void;
   setCenter: (position: MapPosition) => void;
   setZoom: (zoom: number) => void;
 };
 type GoogleMarker = {
+  addListener: (eventName: "dragend", handler: (event: GoogleMapsEvent) => void) => void;
   setPosition: (position: MapPosition | null) => void;
 };
 type GoogleMapsLibrary = {
@@ -20,35 +27,69 @@ type GoogleMapsLibrary = {
       zoom: number;
       clickableIcons: boolean;
       disableDefaultUI: boolean;
+      draggableCursor?: string;
       gestureHandling: string;
       keyboardShortcuts: boolean;
+      zoomControl: boolean;
+      zoomControlOptions?: { position: number };
     },
   ) => GoogleMap;
 };
+type GoogleCoreLibrary = { ControlPosition?: { RIGHT_TOP: number } };
 type GoogleMarkerLibrary = {
-  Marker: new (options: { map: GoogleMap; position?: MapPosition; title: string }) => GoogleMarker;
+  Marker: new (options: {
+    draggable: boolean;
+    map: GoogleMap;
+    position?: MapPosition;
+    title: string;
+  }) => GoogleMarker;
 };
 
 const WORLD_CENTER = { lat: 20, lng: 0 };
+const PINNED_ZOOM = 17;
+// Below this zoom one pixel spans too much ground for a hotel pin, so a click zooms in instead.
+export const MIN_PIN_ZOOM = 14;
+
+export type MapClickResult =
+  | { action: "zoom"; center: MapPosition; zoom: number }
+  | { action: "pin"; position: MapPosition; zoom: number };
+
+export function mapClickResult(position: MapPosition, zoom: number): MapClickResult {
+  return zoom < MIN_PIN_ZOOM
+    ? { action: "zoom", center: position, zoom: Math.min(zoom + 4, MIN_PIN_ZOOM) }
+    : { action: "pin", position, zoom: Math.max(zoom, PINNED_ZOOM) };
+}
 
 export default function GoogleAddressMap({
   active,
   apiKey,
   latitude,
   longitude,
+  onPick,
+  onUnavailable,
 }: {
   active: boolean;
   apiKey: string;
   latitude: number | null;
   longitude: number | null;
+  // Makes the map interactive: placing the first pin by click (zoomed in) or dragging it.
+  onPick?: (position: MapPosition) => void;
+  onUnavailable?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<GoogleMap | null>(null);
   const markerRef = useRef<GoogleMarker | null>(null);
   const position = mapPosition(latitude, longitude);
   const positionRef = useRef(position);
+  const onPickRef = useRef(onPick);
+  const onUnavailableRef = useRef(onUnavailable);
+  // The map already shows a position the hotel picked on it; don't recenter for that one.
+  const pickedRef = useRef<MapPosition | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "unavailable">("idle");
+  const interactive = Boolean(onPick);
   positionRef.current = position;
+  onPickRef.current = onPick;
+  onUnavailableRef.current = onUnavailable;
 
   useEffect(() => {
     if (!active || !containerRef.current || mapRef.current) return;
@@ -58,46 +99,99 @@ export default function GoogleAddressMap({
     void Promise.all([
       importGoogleMapsLibrary<GoogleMapsLibrary>(apiKey, "maps"),
       importGoogleMapsLibrary<GoogleMarkerLibrary>(apiKey, "marker"),
+      interactive
+        ? importGoogleMapsLibrary<GoogleCoreLibrary>(apiKey, "core")
+        : Promise.resolve<GoogleCoreLibrary>({}),
     ])
-      .then(([{ Map }, { Marker }]) => {
+      .then(([{ Map }, { Marker }, { ControlPosition }]) => {
         if (disposed || !containerRef.current) return;
         const map = new Map(containerRef.current, {
           center: positionRef.current ?? WORLD_CENTER,
-          zoom: positionRef.current ? 17 : 2,
+          zoom: positionRef.current ? PINNED_ZOOM : 2,
           clickableIcons: false,
           disableDefaultUI: true,
+          ...(interactive ? { draggableCursor: "crosshair" } : {}),
           gestureHandling: "cooperative",
-          keyboardShortcuts: false,
+          keyboardShortcuts: interactive,
+          zoomControl: interactive,
+          // Bottom right (the default) sits under the setup action bar on narrower screens.
+          ...(interactive && ControlPosition
+            ? { zoomControlOptions: { position: ControlPosition.RIGHT_TOP } }
+            : {}),
         });
         mapRef.current = map;
         // ponytail: Legacy Marker avoids a required cloud map ID; migrate when map IDs are configured.
-        markerRef.current = new Marker({
+        const marker = new Marker({
+          draggable: interactive,
           map,
           ...(positionRef.current ? { position: positionRef.current } : {}),
           title: "Hotel location",
         });
+        markerRef.current = marker;
+        if (interactive) {
+          const pick = (next: MapPosition) => {
+            pickedRef.current = next;
+            onPickRef.current?.(next);
+          };
+          map.addListener("click", ({ latLng }) => {
+            // An existing pin only moves by dragging, so a stray click can't shift it.
+            if (!latLng || positionRef.current) return;
+            const result = mapClickResult(
+              { lat: latLng.lat(), lng: latLng.lng() },
+              map.getZoom() ?? 2,
+            );
+            if (result.action === "zoom") {
+              map.moveCamera({ center: result.center, zoom: result.zoom });
+              return;
+            }
+            marker.setPosition(result.position);
+            map.moveCamera({ center: result.position, zoom: result.zoom });
+            pick(result.position);
+          });
+          marker.addListener("dragend", ({ latLng }) => {
+            if (latLng) pick({ lat: latLng.lat(), lng: latLng.lng() });
+          });
+        }
         setStatus("ready");
       })
       .catch(() => {
-        if (!disposed) setStatus("unavailable");
+        if (disposed) return;
+        setStatus("unavailable");
+        onUnavailableRef.current?.();
       });
 
     return () => {
       disposed = true;
     };
-  }, [active, apiKey]);
+  }, [active, apiKey, interactive]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const nextPosition = mapPosition(latitude, longitude);
-    map.setCenter(nextPosition ?? WORLD_CENTER);
-    map.setZoom(nextPosition ? 17 : 2);
     markerRef.current?.setPosition(nextPosition);
-  }, [latitude, longitude]);
+    const picked = pickedRef.current;
+    pickedRef.current = null;
+    if (
+      picked &&
+      nextPosition &&
+      picked.lat === nextPosition.lat &&
+      picked.lng === nextPosition.lng
+    ) {
+      return;
+    }
+    // A cleared pin keeps the hotel's current view so it can place the pin again from there.
+    if (!nextPosition && interactive) return;
+    map.setCenter(nextPosition ?? WORLD_CENTER);
+    map.setZoom(nextPosition ? PINNED_ZOOM : 2);
+  }, [interactive, latitude, longitude]);
 
   return (
-    <div className="absolute inset-0 overflow-hidden bg-slate-100" aria-hidden="true">
+    <div
+      className="absolute inset-0 overflow-hidden bg-slate-100"
+      // An interactive map has focusable zoom controls, which must not sit in a hidden subtree.
+      aria-hidden={interactive ? undefined : "true"}
+    >
       <div
         ref={containerRef}
         className="absolute inset-0"

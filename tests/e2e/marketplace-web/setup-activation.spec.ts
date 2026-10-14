@@ -159,6 +159,7 @@ test.describe("marketplace-web shared setup activation", () => {
       "data-marker",
       /./,
     );
+    await expect(locationActionBar.getByText("Add your map pin")).toBeVisible();
 
     await selectExactGoogleAddress(googleAddressSearch);
     await expect(locationActionBar.getByText("Is this the right location?")).toBeVisible();
@@ -173,6 +174,132 @@ test.describe("marketplace-web shared setup activation", () => {
     await expect.poll(() => profileWrites.length).toBe(1);
     expect(profileWrites[0]).toMatchObject({
       patch: { location: { latitude: 48.1373932, longitude: 11.5754485 } },
+    });
+  });
+
+  test("lets a hotel place and drag its map pin when Google address search is unavailable", async ({
+    page,
+    baseURL,
+  }) => {
+    const profileWrites = await openLocationWithOpenBasics(page, baseURL, {
+      placesUnavailable: true,
+    });
+
+    const locationSearchPanel = page.getByTestId("location-search-panel");
+    const locationActionBar = page.getByTestId("location-action-bar");
+    const map = page.getByTestId("google-address-map-canvas");
+    await expect(
+      locationSearchPanel.getByText(
+        "Address suggestions are unavailable. Enter the address, then click your property on the map.",
+      ),
+    ).toBeVisible();
+    await expect(
+      locationSearchPanel.getByText("Search for your address", { exact: true }),
+    ).toHaveCount(0);
+    await expect(locationActionBar.getByText("Add your map pin")).toBeVisible();
+    await expect(
+      locationActionBar.getByText(
+        "Needed for the Marketplace. Zoom in and click your property; drag the pin to adjust.",
+      ),
+    ).toBeVisible();
+    await expect(map).toHaveAttribute("data-zoom-control", "true");
+    await expect(map).toHaveAttribute("data-marker-draggable", "true");
+
+    await expect(map).toHaveAttribute("data-zoom-control-position", "3");
+
+    // Zoomed out, a click zooms in on that spot instead of dropping a vague pin.
+    const clickMap = () => map.click({ position: { x: 1000, y: 300 } });
+    await clickMap();
+    await expect(map).toHaveAttribute("data-zoom", "6");
+    await expect(map).toHaveAttribute("data-center", "48.1374,11.5754");
+    await clickMap();
+    await expect(map).toHaveAttribute("data-zoom", "10");
+    await clickMap();
+    await expect(map).toHaveAttribute("data-zoom", "14");
+    await expect(map).not.toHaveAttribute("data-marker", /./);
+    await expect(locationActionBar.getByText("Add your map pin")).toBeVisible();
+
+    await clickMap();
+    await expect(map).toHaveAttribute("data-marker", "48.1374,11.5754");
+    await expect(map).toHaveAttribute("data-zoom", "17");
+    await expect(locationActionBar.getByText("Is this the right location?")).toBeVisible();
+    await expect(
+      locationActionBar.getByText(
+        "Drag the pin if it isn’t exactly on your property · Time zone · Europe/Berlin",
+      ),
+    ).toBeVisible();
+    // The complete address folds away so the pin is in view.
+    await expect(page.getByRole("textbox", { name: /Street address/ })).toHaveCount(0);
+
+    await map.evaluate((element) =>
+      (
+        element as HTMLElement & { vayadaE2eDragMarker: (lat: number, lng: number) => void }
+      ).vayadaE2eDragMarker(48.13745, 11.5756),
+    );
+    await expect(map).toHaveAttribute("data-marker", "48.13745,11.5756");
+    // Dragging keeps the hotel's view: the map doesn't jump to recenter on the pin.
+    await expect(map).toHaveAttribute("data-center", "48.1374,11.5754");
+    // Once there is a pin, a stray click can't move it; only a drag does.
+    await clickMap();
+    await expect(map).toHaveAttribute("data-marker", "48.13745,11.5756");
+
+    await locationActionBar.getByRole("button", { name: "Continue" }).click();
+    await expect(page.getByRole("heading", { name: "How can guests reach you?" })).toBeVisible();
+    await page.getByRole("button", { name: "Save and continue" }).click();
+    await expect.poll(() => profileWrites.length).toBe(1);
+    expect(profileWrites[0]).toMatchObject({
+      patch: { location: { latitude: 48.13745, longitude: 11.5756 } },
+    });
+  });
+
+  test("keeps the map clickable on a phone while the address fields are open", async ({
+    page,
+    baseURL,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openLocationWithOpenBasics(page, baseURL, { placesUnavailable: true });
+    const map = page.getByTestId("google-address-map-canvas");
+    await expect(page.getByRole("textbox", { name: /Street address/ })).toBeVisible();
+
+    // The card moves to the top only while it holds focus, and a touch keeps the pointer on the
+    // map while it moves; Playwright's mouse doesn't, so settle focus before measuring.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    // The card stays below 70% of the screen, so part of the map is always free to tap.
+    const card = await page.getByTestId("location-search-panel").locator("..").boundingBox();
+    const mapBox = await map.boundingBox();
+    if (!card || !mapBox) throw new Error("The location card or map has no box.");
+    const y = card.y > 120 ? card.y / 2 : Math.min(card.y + card.height + 60, 844 - 60);
+    await map.click({ position: { x: 300 - mapBox.x, y: y - mapBox.y } });
+    await expect(map).toHaveAttribute("data-zoom", "6");
+  });
+
+  test("takes typed coordinates when the map itself can't load", async ({ page, baseURL }) => {
+    const profileWrites = await openLocationWithOpenBasics(page, baseURL, {
+      placesUnavailable: true,
+      mapsUnavailable: true,
+    });
+    const locationActionBar = page.getByTestId("location-action-bar");
+    await expect(page.getByText("Map unavailable")).toBeVisible();
+    await expect(
+      locationActionBar.getByText(
+        "Needed for the Marketplace. Enter your property’s coordinates above.",
+      ),
+    ).toBeVisible();
+
+    await page.getByRole("textbox", { name: "Latitude" }).fill("48.1374");
+    await expect(locationActionBar.getByText("Add your map pin")).toBeVisible();
+    await page.getByRole("textbox", { name: "Longitude" }).fill("181");
+    await expect(locationActionBar.getByText("Add your map pin")).toBeVisible();
+    await page.getByRole("textbox", { name: "Longitude" }).fill("11.5754");
+    await expect(locationActionBar.getByText("Is this the right location?")).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Longitude" })).toHaveValue("11.5754");
+
+    await locationActionBar.getByRole("button", { name: "Continue" }).click();
+    await expect(page.getByRole("heading", { name: "How can guests reach you?" })).toBeVisible();
+    await page.getByRole("button", { name: "Save and continue" }).click();
+    await expect.poll(() => profileWrites.length).toBe(1);
+    expect(profileWrites[0]).toMatchObject({
+      patch: { location: { latitude: 48.1374, longitude: 11.5754 } },
     });
   });
 
@@ -565,7 +692,7 @@ test.describe("marketplace-web shared setup activation", () => {
 
     if (searchFirst) {
       await locationSearchPanel.getByRole("button", { name: "Done editing" }).click();
-      await expect(locationActionBar.getByText("Address details entered")).toBeVisible();
+      await expect(locationActionBar.getByText("Add your map pin")).toBeVisible();
       await expect(
         locationActionBar.getByText("Marienplatz 1, 80331 Munich, Germany"),
       ).toBeVisible();
@@ -707,7 +834,51 @@ test.describe("marketplace-web shared setup activation", () => {
   });
 });
 
-async function mockGooglePlaces(page: Page) {
+// An existing hotel with open hotel basics: setup opens the shared profile editor on its
+// identity step; Continue moves to Location. Returns the profile PUT bodies.
+async function openLocationWithOpenBasics(
+  page: Page,
+  baseURL: string | undefined,
+  google: Parameters<typeof mockGooglePlaces>[1] = {},
+) {
+  await mockGooglePlaces(page, google);
+  await primeBrowserState(page, true);
+  await mockAuthSession(page);
+  await mockSharedSetupStatus(page, hotelBasicsOpenStatus());
+  const profileWrites: unknown[] = [];
+  await mockMarketplaceProfileApis(
+    page,
+    [],
+    [{ mediaType: "logo", url: "https://media.example/alpenrose-logo.webp" }],
+    { profile: profileWrites },
+  );
+  await routeJson(page, /\/api\/hotel-setup\/property-types/, {
+    contractVersion: "adaptive-hotel-property-types.v1",
+    propertyTypes: [{ value: "hotel", label: "Hotel" }],
+  });
+  await mockPropertySetupRoute(
+    page,
+    createPropertySetupRouteMock({
+      propertyId,
+      selectedTracks: ["creator_marketplace"],
+      resumeStepId: "present_hotel",
+    }),
+  );
+  await page.goto(setupUrl(baseURL));
+  await expect(page.getByRole("textbox", { name: /Hotel name/ })).toHaveValue("Alpenrose Munich");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(
+    page.getByTestId("location-search-panel").getByRole("heading", {
+      name: "Where is your property?",
+    }),
+  ).toBeVisible();
+  return profileWrites;
+}
+
+async function mockGooglePlaces(
+  page: Page,
+  { placesUnavailable = false, mapsUnavailable = false } = {},
+) {
   await page.route(/https:\/\/maps\.googleapis\.com\/maps\/api\/js/, async (route) => {
     expect(new URL(route.request().url()).searchParams.get("language")).toBe("en");
     await route.fulfill({
@@ -730,23 +901,51 @@ async function mockGooglePlaces(page: Page) {
           };
           customElements.define(elementName, PlaceAutocompleteElement);
         }
+        const latLng = (lat, lng) => ({ lat: () => lat, lng: () => lng });
         class GoogleMap {
           constructor(element, options) {
             this.element = element;
+            this.listeners = {};
             this.setCenter(options.center);
             this.setZoom(options.zoom);
+            element.dataset.zoomControl = String(Boolean(options.zoomControl));
+            element.dataset.zoomControlPosition = String(options.zoomControlOptions?.position ?? "");
+            // A real click anywhere on the map lands on one made-up spot.
+            element.addEventListener("click", () =>
+              this.listeners.click?.({ latLng: latLng(48.1374, 11.5754) }),
+            );
+          }
+          addListener(eventName, handler) {
+            this.listeners[eventName] = handler;
+          }
+          getZoom() {
+            return this.zoom;
+          }
+          moveCamera({ center, zoom }) {
+            this.setCenter(center);
+            this.setZoom(zoom);
           }
           setCenter(position) {
             this.element.dataset.center = position.lat + "," + position.lng;
           }
           setZoom(zoom) {
+            this.zoom = zoom;
             this.element.dataset.zoom = String(zoom);
           }
         }
         class GoogleMarker {
           constructor(options) {
             this.element = options.map.element;
+            this.listeners = {};
+            this.element.dataset.markerDraggable = String(Boolean(options.draggable));
+            this.element.vayadaE2eDragMarker = (lat, lng) => {
+              this.setPosition({ lat, lng });
+              this.listeners.dragend?.({ latLng: latLng(lat, lng) });
+            };
             this.setPosition(options.position);
+          }
+          addListener(eventName, handler) {
+            this.listeners[eventName] = handler;
           }
           setPosition(position) {
             if (position) {
@@ -760,10 +959,16 @@ async function mockGooglePlaces(page: Page) {
           maps: {
             importLibrary: async (library) =>
               library === "maps"
-                ? { Map: GoogleMap }
+                ? ${mapsUnavailable}
+                  ? Promise.reject(new Error("Maps is unavailable."))
+                  : { Map: GoogleMap }
                 : library === "marker"
                   ? { Marker: GoogleMarker }
-                  : { PlaceAutocompleteElement },
+                  : library === "core"
+                    ? { ControlPosition: { RIGHT_TOP: 3 } }
+                    : ${placesUnavailable}
+                    ? Promise.reject(new Error("Places is unavailable."))
+                    : { PlaceAutocompleteElement },
           },
         };
         window.__vayadaGoogleMapsReady?.();
