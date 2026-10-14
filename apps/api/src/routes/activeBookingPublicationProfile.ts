@@ -7,7 +7,11 @@ import {
   visibleActiveBookingPublication,
   type ActiveBookingPublicationRow,
 } from "../domains/activeBookingPublicationGate.js";
-import type { PublicHotelProfileReadPool, PublicHotelProfileRepository } from "./aiHotels.js";
+import {
+  createTargetPublicHotelProfileRepository,
+  type PublicHotelProfileReadPool,
+  type PublicHotelProfileRepository,
+} from "./aiHotels.js";
 
 type CurrentPublicGatesRow = QueryResultRow & {
   referralEnabled: boolean;
@@ -38,6 +42,16 @@ export function createActiveBookingPublicationProfileRepository(config: {
   const pool =
     config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: config.max });
   const content = { manualPayments: config.manualPayments === true };
+  // A hotel that never published in setup keeps the page it had before the public site switched to
+  // setup publications, as checkout and pricing already do. Once it publishes, only its
+  // publication counts, even while that is hidden. Only the legacy publisher writes those
+  // profiles and it doesn't run in this mode, so this is the set that was online at the switch,
+  // less hotels suspended or retired since (VAY-2186).
+  const legacy = createTargetPublicHotelProfileRepository({
+    connectionString: config.connectionString,
+    pool,
+    unpublishedOnly: true,
+  });
 
   return {
     async findProfileBySlug(value) {
@@ -63,7 +77,9 @@ export function createActiveBookingPublicationProfileRepository(config: {
          LIMIT 1`,
         [slug],
       );
-      return currentActiveProfile(pool, result.rows[0], content);
+      const row = result.rows[0];
+      if (!row) return legacy.findProfileBySlug(slug);
+      return currentActiveProfile(pool, row, content);
     },
 
     async findProfileByCustomDomain(value) {
@@ -82,7 +98,9 @@ export function createActiveBookingPublicationProfileRepository(config: {
          LIMIT 1`,
         [domain],
       );
-      const profile = await currentActiveProfile(pool, result.rows[0], content);
+      const row = result.rows[0];
+      if (!row) return (await legacy.findProfileByCustomDomain?.(domain)) ?? null;
+      const profile = await currentActiveProfile(pool, row, content);
       return profile && normalizedDomain(profile.hotel.customDomainUrl ?? "") === domain
         ? profile
         : null;

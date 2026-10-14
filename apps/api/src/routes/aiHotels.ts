@@ -143,10 +143,18 @@ export function createTargetPublicHotelProfileRepository(config: {
   max?: number;
   pool?: PublicHotelProfileReadPool;
   now?: () => Date;
+  /** Only hotels that never published in setup (VAY-2186). */
+  unpublishedOnly?: boolean;
 }): PublicHotelProfileRepository {
   if (!config.connectionString.trim()) {
     throw new Error("Target public hotel profile repository connectionString must not be empty");
   }
+  const unpublished = config.unpublishedOnly
+    ? `AND NOT EXISTS (
+           SELECT 1 FROM distribution.active_public_booking_revision active
+           WHERE active.property_id = profile.property_id
+         )`
+    : "";
 
   const ownsPool = !config.pool;
   const pool =
@@ -172,6 +180,7 @@ export function createTargetPublicHotelProfileRepository(config: {
            AND profile.profile_status = 'public'
            AND ${TARGET_PUBLIC_CATALOG_PROFILE_READY}
            AND (profile.expires_at IS NULL OR profile.expires_at > now())
+           ${unpublished}
          ORDER BY CASE WHEN profile.canonical_slug = lower($1) THEN 0 ELSE 1 END
          LIMIT 1`,
         [slug],
@@ -198,6 +207,7 @@ export function createTargetPublicHotelProfileRepository(config: {
            AND profile.profile_status = 'public'
            AND ${TARGET_PUBLIC_CATALOG_PROFILE_READY}
            AND (profile.expires_at IS NULL OR profile.expires_at > now())
+           ${unpublished}
          LIMIT 1`,
         [normalizedDomain],
       );
