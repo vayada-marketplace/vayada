@@ -11,10 +11,13 @@ export default function ReplacementGuestRules({
   slug,
   quote,
   onAcknowledgementChange,
+  onRulesChange,
 }: {
   slug: string;
   quote: PublicBookingQuote;
   onAcknowledgementChange?: (value: PublicQuoteGuestDisclosure | null) => void;
+  /** The loaded rules, ticked or not and after the price expires, so the guest form keeps them. */
+  onRulesChange?: (value: PublicQuoteGuestDisclosure | null) => void;
 }) {
   const [disclosure, setDisclosure] = useState<PublicQuoteGuestDisclosure | null>(null);
   const [error, setError] = useState(false);
@@ -47,6 +50,10 @@ export default function ReplacementGuestRules({
     onAcknowledgementChange?.(agreed ? disclosure : null);
     return () => onAcknowledgementChange?.(null);
   }, [agreed, disclosure, onAcknowledgementChange]);
+  useEffect(() => {
+    onRulesChange?.(disclosure);
+    return () => onRulesChange?.(null);
+  }, [disclosure, onRulesChange]);
   if (error)
     return (
       <p role="alert">

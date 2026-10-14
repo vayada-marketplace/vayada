@@ -159,6 +159,53 @@ it("says nothing was booked when online booking is unavailable", async () => {
   expect(document.querySelector('[role="alert"]')?.textContent).toContain(
     "No room was reserved and no payment was taken",
   );
+  // VAY-2163: a retry can't succeed, so the button stays off like the card-off case.
+  expect(document.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
+});
+
+it("keeps the loaded guest rules in the form whether or not they are ticked (VAY-2163)", () => {
+  const renderRules = (rules: PublicQuoteGuestDisclosure["choices"]) =>
+    act(() =>
+      root.render(
+        createElement(ReplacementBookingConfirmation, {
+          slug: "hotel",
+          quote,
+          disclosure: null,
+          rules,
+          termsAccepted: false,
+        }),
+      ),
+    );
+  renderRules(disclosure.choices);
+  expect(input("phone").required).toBe(true);
+  expect(input("arrivalTime")).not.toBeNull();
+  expect(document.querySelector('[name="specialRequests"]')).not.toBeNull();
+  renderRules({
+    ...disclosure.choices,
+    phoneRequired: false,
+    arrivalTimeEnabled: false,
+    specialRequestsEnabled: false,
+  });
+  expect(input("phone").required).toBe(false);
+  expect(document.body.textContent).toContain("Phone (optional)");
+  expect(input("arrivalTime")).toBeNull();
+  expect(document.querySelector('[name="specialRequests"]')).toBeNull();
+});
+
+it("requires the phone until the guest rules are known (VAY-2163)", () => {
+  render(true, null);
+  expect(input("phone").required).toBe(true);
+  expect(document.body.textContent).not.toContain("Phone (optional)");
+  expect(input("arrivalTime")).toBeNull();
+  expect(document.querySelector('[name="specialRequests"]')).toBeNull();
+  // A previous quote's rules don't count while the new quote's rules load.
+  render(true, {
+    ...disclosure,
+    quoteId: "other",
+    choices: { ...disclosure.choices, phoneRequired: false },
+  });
+  expect(input("phone").required).toBe(true);
+  expect(input("arrivalTime")).toBeNull();
 });
 
 it("stops a request the hotel cannot receive online yet, without inviting a retry", async () => {

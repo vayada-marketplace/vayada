@@ -26,12 +26,15 @@ export default function ReplacementBookingConfirmation({
   slug,
   quote,
   disclosure,
+  rules,
   termsAccepted,
   hotelTerms = false,
 }: {
   slug: string;
   quote: PublicBookingQuote;
   disclosure: PublicQuoteGuestDisclosure | null;
+  /** The guest rules loaded for this quote, ticked or not (VAY-2163). */
+  rules?: PublicQuoteGuestDisclosure["choices"] | null;
   termsAccepted: boolean;
   /** The hotel has its own Terms & Conditions on this page (VAY-2176). */
   hotelTerms?: boolean;
@@ -102,7 +105,8 @@ export default function ReplacementBookingConfirmation({
       const requestUnavailable = unavailable && code === "REQUEST_ACCEPTANCE_UNAVAILABLE";
       // Bank transfer and PayPal on the booking page are not switched on (VAY-2139).
       const manualUnavailable = unavailable && code === "MANUAL_PAYMENT_UNAVAILABLE";
-      setRefreshRequired(conflict || cardUnavailable || requestUnavailable || manualUnavailable);
+      // Nothing was stored and a retry can't succeed, so only a new price can continue.
+      setRefreshRequired(conflict || unavailable);
       setError(
         conflict
           ? "This price is no longer available. Get a new price and review its terms again."
@@ -181,7 +185,11 @@ export default function ReplacementBookingConfirmation({
       />
     );
 
-  const policy = disclosure?.choices;
+  // Until this quote's rules are known, the phone is required and the optional fields stay hidden.
+  const acknowledged = pending?.disclosure ?? disclosure;
+  const policy =
+    rules ?? (acknowledged?.quoteId === quote.quoteId ? acknowledged.choices : undefined);
+  const phoneRequired = policy?.phoneRequired ?? true;
   return (
     <form className="space-y-4 rounded-xl border border-gray-200 p-5" onSubmit={submit}>
       <h2 className="text-xl font-semibold">Your details</h2>
@@ -207,13 +215,13 @@ export default function ReplacementBookingConfirmation({
         />
       </label>
       <label className="block">
-        Phone {policy?.phoneRequired ? "" : "(optional)"}
+        Phone {phoneRequired ? "" : "(optional)"}
         <input
           className={field}
           name="phone"
           type="tel"
           maxLength={64}
-          required={policy?.phoneRequired}
+          required={phoneRequired}
           disabled={!!pending}
         />
       </label>

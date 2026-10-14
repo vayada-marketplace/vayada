@@ -54,6 +54,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const [termsAcknowledgement, setTermsAcknowledgement] =
     useState<QuoteTermsAcknowledgement | null>(null);
   const [guestDisclosure, setGuestDisclosure] = useState<PublicQuoteGuestDisclosure | null>(null);
+  const [guestRules, setGuestRules] = useState<PublicQuoteGuestDisclosure | null>(null);
   const [rooms, setRooms] = useState<PricingRoom[] | null>(null);
   const [catalogError, setCatalogError] = useState(false);
   const [reload, setReload] = useState(0);
@@ -442,6 +443,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             slug={slug}
             quote={quote}
             onAcknowledgementChange={setGuestDisclosure}
+            onRulesChange={setGuestRules}
           />
           {pagePayment.termsText && <BookingPageTerms text={pagePayment.termsText} />}
           <ReplacementBookingConfirmation
@@ -449,6 +451,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             slug={slug}
             quote={quote}
             disclosure={guestDisclosure}
+            rules={guestRules?.quoteId === quote.quoteId ? guestRules.choices : null}
             termsAccepted={termsAcknowledgement?.quoteId === quote.quoteId}
             hotelTerms={pagePayment.termsText !== null}
           />
