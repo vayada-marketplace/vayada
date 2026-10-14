@@ -114,11 +114,13 @@ test("sends a pay-at-property booking request to a hotel that confirms each book
   await expect(send).toBeEnabled();
   await send.click();
 
-  const sent = page.getByRole("status").filter({ hasText: "Booking request sent" });
-  await expect(sent).toBeVisible();
-  await expect(sent).toContainText("Nothing has been charged");
-  await expect(sent).toContainText("VAY-55555555555545558555555555555555");
-  await expect(page.getByText("Booking confirmed")).toHaveCount(0);
+  // VAY-2195: a sent request opens its confirmation page, as on the old booking pages.
+  await expect(page).toHaveURL(/\/booking\/VAY-55555555555545558555555555555555$/);
+  await expect(page.getByRole("heading", { name: "Booking Request Submitted" })).toBeVisible();
+  await expect(page.getByText("VAY-55555555555545558555555555555555")).toBeVisible();
+  await expect(page.getByText("Your booking is confirmed!")).toHaveCount(0);
+  // Without the server's answer, the page still shows what is owed at the hotel.
+  await expect(page.getByText("Total Due", { exact: true }).locator("..")).toContainText("€240");
   expect(accepted).toMatchObject({
     version: "booking-quote-acceptance.v1",
     quoteId: issuedQuote.quoteId,
