@@ -91,11 +91,11 @@
     "priceLowHigh": "Precio: de Menor a Mayor",
     "priceHighLow": "Precio: de Mayor a Menor",
     "upToGuests": "Hasta {count} huéspedes",
-    "viewDetails": "Ver Detalles",
+    "viewDetails": "Ver detalles",
     "viewFullAmenities": "Ver todos los servicios ({count})",
     "showLess": "Mostrar menos",
     "rateOptions": "Opciones de Tarifa",
-    "selectYourRate": "Selecciona tu Tarifa",
+    "selectYourRate": "Seleccione su tarifa",
     "flexibleRate": "Tarifa Flexible",
     "flexibleDesc": "Cancelación gratuita hasta {days} días antes",
     "flexibleNoLongerCancellable": "Cancelación no disponible",
@@ -109,7 +109,7 @@
     "welcomeDrink": "Bebida de bienvenida",
     "freeWifi": "WiFi gratuito",
     "airportTransfer": "Traslado al aeropuerto",
-    "selectThisRate": "Seleccionar Esta Tarifa",
+    "selectThisRate": "Seleccionar esta tarifa",
     "selectingRate": "Preparando el pago...",
     "soldOut": "Agotado",
     "gallery": {
@@ -124,7 +124,43 @@
       "checkingAvailability": "Comprobando disponibilidad",
       "availabilityUnavailable": "No podemos consultar temporalmente la disponibilidad para estas fechas.",
       "availabilityUnavailableTooltip": "No se puede consultar la disponibilidad"
-    }
+    },
+    "choice": {
+      "freeCancellation": "Cancelación gratuita",
+      "nonRefundable": "No reembolsable",
+      "partialRefund": "Reembolso parcial",
+      "mealNonRefundable": "{meal}, no reembolsable",
+      "mealPartialRefund": "{meal}, reembolso parcial",
+      "freeUntil": "Cancelación gratuita hasta el {date}",
+      "noRefund": "Sin reembolso si cancela o no se presenta",
+      "partialRefundTerms": "Si cancela, le devolvemos parte del precio. Verá nuestras condiciones en el siguiente paso",
+      "noLongerFree": "Para estas fechas ya no hay cancelación gratuita",
+      "meal": {
+        "room_only": "Solo alojamiento",
+        "breakfast": "Desayuno incluido",
+        "half_board": "Media pensión",
+        "full_board": "Pensión completa",
+        "all_inclusive": "Todo incluido"
+      },
+      "mealTerms": {
+        "breakfast": "Desayuno cada mañana",
+        "half_board": "Desayuno y cena todos los días",
+        "full_board": "Desayuno, almuerzo y cena todos los días",
+        "all_inclusive": "Todas las comidas y bebidas incluidas"
+      }
+    },
+    "sortRooms": "Ordenar habitaciones",
+    "pricesFailed": "No pudimos cargar los precios para estas fechas. Puede elegir una habitación igualmente; comprobaremos el precio en el siguiente paso.",
+    "retryPrices": "Reintentar",
+    "childrenPricedLater": "Los precios son para los adultos. Añadimos a los niños cuando nos indique sus edades en el siguiente paso.",
+    "severalRooms": "¿Reserva más de una habitación?",
+    "notAvailable": "No disponible",
+    "tooManyGuests": "Esta habitación tiene capacidad para {count, plural, one {# huésped} other {# huéspedes}} como máximo. Elija una habitación más grande o reserve más de una.",
+    "promoNotApplied": "Su código {code} no se aplica a esta estancia.",
+    "noChildren": "Esta habitación no admite niños. Elija otra habitación para su grupo.",
+    "percentOff": "-{percent} % DTO.",
+    "closeRoomDetails": "Cerrar los detalles de la habitación",
+    "soldOutForDates": "Agotada para sus fechas"
   },
   "rooms": {
     "title": "Nuestras Habitaciones",

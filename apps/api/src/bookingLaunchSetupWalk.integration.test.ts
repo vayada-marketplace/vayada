@@ -1112,6 +1112,12 @@ describe.skipIf(!url)("new hotel setup to a published booking page (VAY-2134)", 
         expect(offered.rooms.map(({ roomTypeId }) => roomTypeId).sort()).toEqual(
           [gardenSuite, seaSuite].sort(),
         );
+        // The room cards' facts: size, category and amenities as public labels (VAY-2190).
+        expect(offered.rooms.find(({ roomTypeId }) => roomTypeId === seaSuite)).toMatchObject({
+          size: { value: 28, unit: "sqm" },
+          category: "Suite",
+          amenities: ["Wi-Fi", "Air conditioning"],
+        });
         expect(await read(`/hotels/${slug}/checkout-config`)).toMatchObject({
           termsText: "Our guest terms.",
         });

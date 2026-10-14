@@ -124,7 +124,43 @@
       "checkingAvailability": "Vérification des disponibilités",
       "availabilityUnavailable": "Les disponibilités pour ces dates sont temporairement indisponibles.",
       "availabilityUnavailableTooltip": "Disponibilités indisponibles"
-    }
+    },
+    "choice": {
+      "freeCancellation": "Annulation gratuite",
+      "nonRefundable": "Non remboursable",
+      "partialRefund": "Remboursement partiel",
+      "mealNonRefundable": "{meal}, non remboursable",
+      "mealPartialRefund": "{meal}, remboursement partiel",
+      "freeUntil": "Annulation gratuite jusqu'au {date}",
+      "noRefund": "Aucun remboursement en cas d'annulation ou de non-présentation",
+      "partialRefundTerms": "En cas d'annulation, nous remboursons une partie du prix. Nos conditions sont à l'étape suivante",
+      "noLongerFree": "L'annulation gratuite n'est plus possible pour ces dates",
+      "meal": {
+        "room_only": "Chambre seule",
+        "breakfast": "Petit-déjeuner inclus",
+        "half_board": "Demi-pension",
+        "full_board": "Pension complète",
+        "all_inclusive": "Tout compris"
+      },
+      "mealTerms": {
+        "breakfast": "Petit-déjeuner chaque matin",
+        "half_board": "Petit-déjeuner et dîner chaque jour",
+        "full_board": "Petit-déjeuner, déjeuner et dîner chaque jour",
+        "all_inclusive": "Tous les repas et boissons inclus"
+      }
+    },
+    "sortRooms": "Trier les chambres",
+    "pricesFailed": "Nous n'avons pas pu charger les prix pour ces dates. Vous pouvez tout de même choisir une chambre ; nous vérifierons le prix à l'étape suivante.",
+    "retryPrices": "Réessayer",
+    "childrenPricedLater": "Les prix sont pour les adultes. Nous ajoutons les enfants dès que vous nous indiquez leur âge à l'étape suivante.",
+    "severalRooms": "Vous réservez plus d'une chambre ?",
+    "notAvailable": "Indisponible",
+    "tooManyGuests": "Cette chambre accueille jusqu'à {count, plural, one {# personne} other {# personnes}}. Choisissez une chambre plus grande ou réservez plusieurs chambres.",
+    "promoNotApplied": "Votre code {code} ne s'applique pas à ce séjour.",
+    "noChildren": "Cette chambre n'accueille pas d'enfants. Choisissez une autre chambre pour votre groupe.",
+    "percentOff": "-{percent} %",
+    "closeRoomDetails": "Fermer les détails de la chambre",
+    "soldOutForDates": "Complet pour vos dates"
   },
   "rooms": {
     "title": "Nos chambres",
