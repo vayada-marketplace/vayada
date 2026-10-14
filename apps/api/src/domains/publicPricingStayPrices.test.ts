@@ -226,7 +226,7 @@ describe("createPublicPricingStayPrices", () => {
 
   it("returns nothing for a hotel without public offers or authority, and rolls back", async () => {
     const { reader, catalog, queries, client } = setup([]);
-    catalog.read.mockResolvedValueOnce(null);
+    catalog.read.mockResolvedValueOnce(null as never);
     await expect(reader.read("hotel", stay)).resolves.toBeNull();
     authority.mockResolvedValueOnce(null);
     await expect(reader.read("hotel", stay)).resolves.toBeNull();
