@@ -51,9 +51,16 @@ import {
   reachableStep,
   readBookFlowDraft,
   saveBookFlowDraft,
+  clearBookFlowDraft,
   type BookStep,
 } from "@/lib/bookFlow";
 import { useReplacementQuote } from "@/lib/hooks/useReplacementQuote";
+import { bookingService } from "@/services/api/booking";
+import {
+  saveGuestDetails,
+  saveLastBooking,
+  toConfirmationBooking,
+} from "@/lib/storage/bookingDraft";
 import {
   getReplacementOffers,
   quoteMoneyAmount,
@@ -499,6 +506,76 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   ]
     .filter(Boolean)
     .join(" · ");
+  // VAY-2195: a made booking opens its confirmation page, as on the old pages. The page shows
+  // what the server has for it; the room and extras names come from this booking.
+  const openConfirmation = async ({
+    bookingReference,
+    requested,
+    confirmationUrl,
+  }: {
+    bookingReference: string;
+    requested: boolean;
+    confirmationUrl?: string;
+  }) => {
+    // The steps are done: nothing of them is kept, so Back can't send them again.
+    clearBookFlowDraft(slug);
+    // A bank transfer or PayPal reservation has its own protected confirmation link.
+    if (confirmationUrl) return router.replace(confirmationUrl);
+    if (!quote) return;
+    const chosen = (addonCatalogue ?? []).filter((addon) =>
+      extras?.items.some((item) => item.id === addon.id),
+    );
+    const item = (id: string) => extras?.items.find((current) => current.id === id);
+    const context = {
+      hotelName: hotel.name,
+      roomName: summaryRooms.map((room) => `${room.name} · ${room.choice}`).join(", "),
+      guestFirstName: guest.firstName.trim(),
+      guestLastName: guest.lastName.trim(),
+      guestEmail: guest.email.trim().toLowerCase(),
+      paymentMethod: quote.paymentMethod,
+      addonIds: chosen.map((addon) => addon.id),
+      addonNames: chosen.map((addon) => addon.name),
+      addonQuantities: Object.fromEntries(
+        chosen.map((addon) => [
+          addon.id,
+          item(addon.id)!.people.length || Number(item(addon.id)!.quantity) || 1,
+        ]),
+      ),
+      addonDates: Object.fromEntries(chosen.map((addon) => [addon.id, item(addon.id)!.dates])),
+    };
+    // What the server has for the booking, if it answers quickly; otherwise what this booking knows.
+    const answer = await Promise.race([
+      bookingService.lookup(slug, bookingReference, context.guestEmail).catch(() => null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+    ]);
+    const found = answer?.bookingReference === bookingReference ? answer : null;
+    saveLastBooking(
+      toConfirmationBooking(
+        found ?? {
+          bookingReference,
+          checkIn: quote.checkIn,
+          checkOut: quote.checkOut,
+          currency: quote.currency,
+          totalAmount: quoteMoneyAmount(quote.totalMinor, quote.currency),
+          // What is still owed, as the server's own answer gives it; the page shows it as due.
+          balanceAmount: quoteMoneyAmount(quote.dueLaterMinor, quote.currency),
+          numberOfRooms: quote.rooms.length,
+          adults: adultCount,
+          children: childCount,
+          status: requested ? "pending" : "confirmed",
+        },
+        context,
+      ),
+    );
+    saveGuestDetails({
+      roomTypeId: "",
+      guestFirstName: context.guestFirstName,
+      guestLastName: context.guestLastName,
+      guestEmail: context.guestEmail,
+      guestPhone: guest.phone.trim(),
+    });
+    router.replace(`/booking/${encodeURIComponent(bookingReference)}`);
+  };
   const missingDay = (addonCatalogue ?? []).find((addon) =>
     extras?.items.some((item) => item.id === addon.id && item.dates.length === 0),
   )?.name;
@@ -985,6 +1062,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                       hotelTerms={pagePayment.termsText !== null}
                       attempt={attempt}
                       onAttemptChange={setAttempt}
+                      onBooked={openConfirmation}
                     />
                   )
                 }

@@ -169,17 +169,11 @@ test("books by bank transfer and opens the protected payment details", async ({ 
   await page.getByLabel("guest rules for this price").check();
   await page.getByRole("button", { name: "Confirm booking" }).click();
 
-  const reserved = page.getByRole("status").filter({ hasText: "Your room is reserved" });
-  await expect(reserved).toBeVisible();
-  await expect(reserved).toContainText(reference);
-  await expect(reserved).toContainText("by bank transfer");
-  await expect(reserved).toContainText("the booking expires and the room is released");
-  const details = reserved.getByRole("link", { name: "See payment details" });
-  await expect(details).toHaveAttribute(
-    "href",
-    `/confirmation?booking=${reference}&token=${token}`,
-  );
-  await details.click();
+  // VAY-2195: the reservation opens its protected confirmation page, as a booking does.
+  await expect(page).toHaveURL(new RegExp(`/confirmation\\?booking=${reference}&token=${token}$`));
+  expect(
+    await page.evaluate((slug) => sessionStorage.getItem(`bookFlow:${slug}`), SEEDED_BOOKING_SLUG),
+  ).toBeNull();
   await expect(page.getByText("IBAN: DE89370400440532013000", { exact: true })).toBeVisible();
   expect(confirmations).toBeGreaterThan(0);
 });

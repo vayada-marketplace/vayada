@@ -108,8 +108,6 @@ export async function mockAnyPrice(page: Page) {
           arrivalTimeEnabled: false,
           specialRequestsEnabled: false,
           checkInTime: "15:00",
-          checkInUntil: null,
-          checkOutFrom: null,
           checkOutTime: "11:00",
         },
       },

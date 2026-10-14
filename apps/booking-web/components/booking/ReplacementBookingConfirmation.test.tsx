@@ -386,3 +386,24 @@ it("keeps an open attempt with the page, so a new form still retries it (VAY-219
   expect(vi.mocked(acceptPricingQuote).mock.calls[1]![3]).toEqual(ada);
   expect(vi.mocked(acceptPricingQuote).mock.calls[1]![5]).toBe("uncertain-retry");
 });
+
+it("hands a made booking to the page so it can open the confirmation (VAY-2195)", async () => {
+  const booked = vi.fn();
+  act(() =>
+    root.render(
+      createElement(ReplacementBookingConfirmation, {
+        slug: "hotel",
+        quote,
+        disclosure,
+        guest: ada,
+        termsAccepted: true,
+        onBooked: booked,
+      }),
+    ),
+  );
+  await submit();
+  expect(booked).toHaveBeenCalledWith({
+    bookingReference: result.bookingReference,
+    requested: false,
+  });
+});
