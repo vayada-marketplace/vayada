@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
-import { continueToPayment } from "../support/bookFlow";
+import { continueToPayment, orderTotal } from "../support/bookFlow";
 
 const offerKey = `pricing-offer.v2:${"c".repeat(64)}`;
 
@@ -105,19 +105,22 @@ test("sends a pay-at-property booking request to a hotel that confirms each book
   await room.getByLabel("Room and meal option").selectOption(offerKey);
   await room.getByLabel(/Adults/).fill("2");
   await continueToPayment(page, { method: "pay_at_property" });
-  await expect(page.getByText("Total: EUR 240.00", { exact: true })).toBeVisible();
-  await expect(page.getByText(/Your booking will need our approval/)).toBeVisible();
-  await page.getByLabel("I have read the room and rate terms for this price preview.").check();
-  await page.getByLabel("I have read the guest rules for this price preview.").check();
+  await expect(orderTotal(page)).toHaveText("€240");
+  // VAY-2195: the payment step says what happens next for a hotel that confirms each booking.
+  await expect(page.getByText(/if we accept your request/)).toBeVisible();
+  await page.getByLabel("I have read the room and rate terms for this price").check();
+  await page.getByLabel("guest rules for this price").check();
   const send = page.getByRole("button", { name: "Send booking request" });
   await expect(send).toBeEnabled();
   await send.click();
 
-  const sent = page.getByRole("status").filter({ hasText: "Booking request sent" });
-  await expect(sent).toBeVisible();
-  await expect(sent).toContainText("Nothing has been charged");
-  await expect(sent).toContainText("VAY-55555555555545558555555555555555");
-  await expect(page.getByText("Booking confirmed")).toHaveCount(0);
+  // VAY-2195: a sent request opens its confirmation page, as on the old booking pages.
+  await expect(page).toHaveURL(/\/booking\/VAY-55555555555545558555555555555555$/);
+  await expect(page.getByRole("heading", { name: "Booking Request Submitted" })).toBeVisible();
+  await expect(page.getByText("VAY-55555555555545558555555555555555")).toBeVisible();
+  await expect(page.getByText("Your booking is confirmed!")).toHaveCount(0);
+  // Without the server's answer, the page still shows what is owed at the hotel.
+  await expect(page.getByText("Total Due", { exact: true }).locator("..")).toContainText("€240");
   expect(accepted).toMatchObject({
     version: "booking-quote-acceptance.v1",
     quoteId: issuedQuote.quoteId,

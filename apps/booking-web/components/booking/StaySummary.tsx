@@ -123,6 +123,7 @@ export default function StaySummary({
           <span className="text-base font-bold text-gray-900">Total</span>
           <div className="text-right">
             <p
+              data-testid="stay-total"
               className={`text-xl font-bold ${expired ? "text-gray-400 line-through" : "text-gray-900"}`}
             >
               {money(quote.totalMinor)}

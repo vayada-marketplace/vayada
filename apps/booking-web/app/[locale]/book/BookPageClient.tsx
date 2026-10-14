@@ -1,13 +1,14 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import BookShell from "./BookShell";
 import ReplacementGuestRules from "@/components/booking/ReplacementGuestRules";
 import ExtrasStep from "@/components/booking/ExtrasStep";
-import DetailsStep from "@/components/booking/DetailsStep";
+import DetailsStep, { rateTerms } from "@/components/booking/DetailsStep";
+import PaymentStep from "@/components/booking/PaymentStep";
 import StaySummary, { type SummaryRoom } from "@/components/booking/StaySummary";
 import {
   acceptanceGuest,
@@ -50,11 +51,17 @@ import {
   reachableStep,
   readBookFlowDraft,
   saveBookFlowDraft,
+  clearBookFlowDraft,
   type BookStep,
 } from "@/lib/bookFlow";
 import { useReplacementQuote } from "@/lib/hooks/useReplacementQuote";
+import { bookingService } from "@/services/api/booking";
 import {
-  displayQuoteMoney,
+  saveGuestDetails,
+  saveLastBooking,
+  toConfirmationBooking,
+} from "@/lib/storage/bookingDraft";
+import {
   getReplacementOffers,
   quoteMoneyAmount,
   roomQuoteRequest,
@@ -275,15 +282,38 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     setFallback(0);
   };
   const { quote, error, errorStatus, loading, submit } = useReplacementQuote(slug, request);
-  const { approximate, formatPrice } = useCurrency();
+  const { formatPrice } = useCurrency();
   // The old pages' prices: the charged currency ("€410"), then any approximation.
   const money = (minor: string, currency: string) =>
     formatPrice(quoteMoneyAmount(minor, currency), currency);
-  // The charged amount in the quote currency, then any approximation in the guest's currency.
-  const chargedMoney = (minor: string, currency: string) => {
-    const approx = approximate(quoteMoneyAmount(minor, currency), currency);
-    return `${displayQuoteMoney(minor, currency)}${approx ? ` (${approx})` : ""}`;
-  };
+  // An updated price for the same choices that differs from the one the guest saw says so.
+  const requestIdentity = JSON.stringify(request);
+  const shownQuote = useRef<{
+    identity: string;
+    quoteId: string;
+    total: string;
+    currency: string;
+  } | null>(null);
+  const [priceChange, setPriceChange] = useState<string | null>(null);
+  useEffect(() => {
+    if (!quote) return;
+    const before = shownQuote.current;
+    if (before && before.quoteId !== quote.quoteId)
+      setPriceChange(
+        before.identity === requestIdentity && before.total !== quote.totalMinor
+          ? money(before.total, before.currency)
+          : null,
+      );
+    shownQuote.current = {
+      identity: requestIdentity,
+      quoteId: quote.quoteId,
+      total: quote.totalMinor,
+      currency: quote.currency,
+    };
+    // A new quote is the only change that matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quote?.quoteId]);
+
   const update = (id: string, patch: Partial<RoomChoice>) =>
     changeChoices((current) =>
       current.map((choice) => (choice.selectionId === id ? { ...choice, ...patch } : choice)),
@@ -476,6 +506,85 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   ]
     .filter(Boolean)
     .join(" · ");
+  // VAY-2195: a made booking opens its confirmation page, as on the old pages. The page shows
+  // what the server has for it; the room and extras names come from this booking.
+  const openConfirmation = async ({
+    bookingReference,
+    requested,
+    confirmationUrl,
+  }: {
+    bookingReference: string;
+    requested: boolean;
+    confirmationUrl?: string;
+  }) => {
+    // The steps are done: nothing of them is kept, so Back can't send them again.
+    clearBookFlowDraft(slug);
+    // A bank transfer or PayPal reservation has its own protected confirmation link.
+    if (confirmationUrl) return router.replace(confirmationUrl);
+    if (!quote) return;
+    const chosen = (addonCatalogue ?? []).filter((addon) =>
+      extras?.items.some((item) => item.id === addon.id),
+    );
+    const item = (id: string) => extras?.items.find((current) => current.id === id);
+    const context = {
+      hotelName: hotel.name,
+      // Each kind of room once: the page puts "2×" in front when more rooms are booked.
+      roomName: Array.from(
+        new Set(summaryRooms.map((room) => `${room.name} · ${room.choice}`)),
+      ).join(", "),
+      guestFirstName: guest.firstName.trim(),
+      guestLastName: guest.lastName.trim(),
+      guestEmail: guest.email.trim().toLowerCase(),
+      paymentMethod: quote.paymentMethod,
+      addonIds: chosen.map((addon) => addon.id),
+      addonNames: chosen.map((addon) => addon.name),
+      addonQuantities: Object.fromEntries(
+        chosen.map((addon) => [
+          addon.id,
+          item(addon.id)!.people.length || Number(item(addon.id)!.quantity) || 1,
+        ]),
+      ),
+      addonDates: Object.fromEntries(chosen.map((addon) => [addon.id, item(addon.id)!.dates])),
+    };
+    // What the server has for the booking, if it answers quickly; otherwise what this booking knows.
+    const answer = await Promise.race([
+      bookingService.lookup(slug, bookingReference, context.guestEmail).catch(() => null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+    ]);
+    const found = answer?.bookingReference === bookingReference ? answer : null;
+    saveLastBooking(
+      toConfirmationBooking(
+        found ?? {
+          bookingReference,
+          checkIn: quote.checkIn,
+          checkOut: quote.checkOut,
+          currency: quote.currency,
+          totalAmount: quoteMoneyAmount(quote.totalMinor, quote.currency),
+          // As the server would answer: a card is paid when booked, or only held for a request,
+          // and what isn't paid yet is still owed.
+          paymentStatus:
+            quote.paymentMethod === "card" ? (requested ? "authorized" : "paid") : "unpaid",
+          balanceAmount: quoteMoneyAmount(
+            requested ? quote.totalMinor : quote.dueLaterMinor,
+            quote.currency,
+          ),
+          numberOfRooms: quote.rooms.length,
+          adults: adultCount,
+          children: childCount,
+          status: requested ? "pending" : "confirmed",
+        },
+        context,
+      ),
+    );
+    saveGuestDetails({
+      roomTypeId: "",
+      guestFirstName: context.guestFirstName,
+      guestLastName: context.guestLastName,
+      guestEmail: context.guestEmail,
+      guestPhone: guest.phone.trim(),
+    });
+    router.replace(`/booking/${encodeURIComponent(bookingReference)}`);
+  };
   const missingDay = (addonCatalogue ?? []).find((addon) =>
     extras?.items.some((item) => item.id === addon.id && item.dates.length === 0),
   )?.name;
@@ -497,9 +606,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           : undefined
       }
     >
-      <div
-        className={step === "extras" || step === "details" ? "space-y-6" : "max-w-3xl space-y-6"}
-      >
+      <div className={step === "rooms" ? "max-w-3xl space-y-6" : "space-y-6"}>
         {step !== "rooms" && !settled ? (
           <p role="status">Loading your booking…</p>
         ) : step !== "rooms" ? null : catalogError ? (
@@ -858,126 +965,174 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             </div>
           </div>
         )}
-        {settled && step === "payment" && (
-          <>
-            <button
-              type="button"
-              className="underline"
-              disabled={attemptOpen}
-              onClick={() => goBack(previous)}
-            >
-              Back
-            </button>
-            <p className="text-sm text-gray-700">
-              Booking for {guest.firstName} {guest.lastName} · {guest.email}{" "}
-              <button
-                type="button"
-                className="underline"
-                disabled={attemptOpen}
-                onClick={() => go("details")}
-              >
-                Change
-              </button>
-            </p>
-            <label className="block">
-              Payment preference
-              <select
-                className={field}
-                required
-                disabled={attemptOpen}
-                value={method}
-                onChange={(event) => setPayment(event.target.value as typeof payment)}
-              >
-                {!method && <option value="">Choose a payment method</option>}
-                {paymentMethods.map((value) => (
-                  <option key={value} value={value}>
-                    {bookingPagePaymentMethodLabels[value]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {tooSoon.length > 0 && (
-              <p className="text-sm text-gray-600">
-                {tooSoon.map((value) => bookingPagePaymentMethodLabels[value]).join(" and ")}{" "}
-                {tooSoon.length > 1 ? "aren’t" : "isn’t"} available this close to check-in.
-              </p>
-            )}
-            {loading && <p role="status">Checking price…</p>}
-            {error && quote && (
-              <p role="alert">
-                {error}{" "}
-                <button className="underline" disabled={attemptOpen} onClick={submit}>
-                  Get an updated price
-                </button>
-              </p>
-            )}
-          </>
-        )}
-        {step !== "rooms" && error && !quote && (
-          <p role="alert">
-            {error}{" "}
-            <button
-              className="underline"
-              onClick={() => {
-                changeChoices((current) =>
-                  current.map((choice) => ({ ...choice, publicOfferKey: "" })),
-                );
-                setReload((value) => value + 1);
-              }}
-            >
-              Reload room options
-            </button>
-          </p>
-        )}
-        {settled && step === "payment" && quote && (
-          <section
-            aria-label="Your stay price"
-            className="rounded-xl border border-gray-200 p-5 space-y-3"
+        {settled && (step === "extras" || step === "details") && error && !quote && (
+          <Notice
+            tone="red"
+            title={error}
+            action={{ label: "Choose another room", onClick: backToRooms }}
           >
-            <h2 className="text-xl font-semibold">Your stay price</h2>
-            <p>
-              {quote.checkIn} to {quote.checkOut}
-            </p>
-            <p className="text-2xl font-bold">
-              Total: {chargedMoney(quote.totalMinor, quote.currency)}
-            </p>
-            <p>Due now: {chargedMoney(quote.dueNowMinor, quote.currency)}</p>
-            <p>Due later: {chargedMoney(quote.dueLaterMinor, quote.currency)}</p>
-            <ApproximateAmountsNote currency={quote.currency} />
-            <ReplacementQuoteTerms
-              quote={quote}
-              onAcknowledgementChange={setTermsAcknowledgement}
-              roomNames={Object.fromEntries(
-                choices.map((choice) => [
-                  choice.selectionId,
-                  rooms?.find((room) =>
-                    room.offers.some((offer) => offer.publicOfferKey === choice.publicOfferKey),
-                  )?.name ?? "",
-                ]),
+            No booking was made and nothing was charged.
+          </Notice>
+        )}
+        {settled && step === "payment" && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2">
+              <PaymentStep
+                guestName={`${guest.firstName} ${guest.lastName}`}
+                guestEmail={guest.email}
+                onChangeDetails={() => goBack("details")}
+                method={method}
+                available={paymentMethods}
+                tooSoon={
+                  tooSoon.length
+                    ? `${tooSoon.map((value) => bookingPagePaymentMethodLabels[value]).join(" and ")} ${
+                        tooSoon.length > 1 ? "aren’t" : "isn’t"
+                      } available this close to check-in.`
+                    : null
+                }
+                onMethod={setPayment}
+                locked={attemptOpen}
+                termsText={pagePayment.termsText}
+                quote={quote}
+                total={quote ? money(quote.totalMinor, quote.currency) : ""}
+                notice={
+                  error && quote && !attemptOpen ? (
+                    <Notice
+                      tone="amber"
+                      title={error}
+                      action={{ label: "Get an updated price", onClick: submit }}
+                    >
+                      Nothing was booked or charged. Your extras and details are kept.
+                    </Notice>
+                  ) : error && !attemptOpen ? (
+                    <Notice
+                      tone="red"
+                      title={error}
+                      action={{ label: "Choose another room", onClick: backToRooms }}
+                    >
+                      No booking was made and nothing was charged.
+                    </Notice>
+                  ) : priceChange && quote ? (
+                    <Notice
+                      tone="amber"
+                      title={`Your price changed from ${priceChange} to ${money(quote.totalMinor, quote.currency)}.`}
+                    >
+                      Please check it and tick both boxes again.
+                    </Notice>
+                  ) : loading ? (
+                    <p role="status">Checking price…</p>
+                  ) : null
+                }
+                acknowledgements={
+                  quote && (
+                    <>
+                      <ReplacementQuoteTerms
+                        compact
+                        quote={quote}
+                        onAcknowledgementChange={setTermsAcknowledgement}
+                        roomNames={Object.fromEntries(
+                          summaryRooms.map((room) => [room.selectionId, room.name]),
+                        )}
+                      />
+                      <ReplacementGuestRules
+                        key={quote.quoteId}
+                        compact
+                        slug={slug}
+                        quote={quote}
+                        onAcknowledgementChange={setGuestDisclosure}
+                      />
+                    </>
+                  )
+                }
+                cancellation={
+                  quote
+                    ? Array.from(
+                        new Set(
+                          quote.rooms.map((room) =>
+                            rateTerms(room)[1]!.replace(/^Cancellation: /, ""),
+                          ),
+                        ),
+                      ).map((line) => line.charAt(0).toUpperCase() + line.slice(1))
+                    : []
+                }
+                confirm={
+                  quote && (
+                    <ReplacementBookingConfirmation
+                      key={quote.quoteId}
+                      slug={slug}
+                      quote={quote}
+                      disclosure={guestDisclosure}
+                      guest={
+                        guestComplete(guest, rulesForQuote)
+                          ? acceptanceGuest(guest, rulesForQuote)
+                          : null
+                      }
+                      termsAccepted={termsAcknowledgement?.quoteId === quote.quoteId}
+                      hotelTerms={pagePayment.termsText !== null}
+                      attempt={attempt}
+                      onAttemptChange={setAttempt}
+                      onBooked={openConfirmation}
+                    />
+                  )
+                }
+                onBack={() => goBack("details")}
+              />
+            </div>
+            <div className="lg:col-span-1 space-y-4">
+              {quote && (
+                <StaySummary
+                  title="Order Summary"
+                  quote={quote}
+                  rooms={summaryRooms}
+                  guests={guestsLine}
+                  rules={knownRules}
+                  formatMoney={money}
+                  formatDate={formatStayDate}
+                  payment
+                  expired={!!error}
+                />
               )}
-            />
-            <ReplacementGuestRules
-              key={quote.quoteId}
-              slug={slug}
-              quote={quote}
-              onAcknowledgementChange={setGuestDisclosure}
-            />
-            <ReplacementBookingConfirmation
-              key={quote.quoteId}
-              slug={slug}
-              quote={quote}
-              disclosure={guestDisclosure}
-              guest={
-                guestComplete(guest, rulesForQuote) ? acceptanceGuest(guest, rulesForQuote) : null
-              }
-              termsAccepted={termsAcknowledgement?.quoteId === quote.quoteId}
-              hotelTerms={pagePayment.termsText !== null}
-              attempt={attempt}
-              onAttemptChange={setAttempt}
-            />
-          </section>
+              {quote && <ApproximateAmountsNote currency={quote.currency} />}
+            </div>
+          </div>
         )}
       </div>
     </BookShell>
+  );
+}
+
+/** The old pages' notice boxes: amber for a price to refresh, red when nothing can be booked. */
+function Notice({
+  tone,
+  title,
+  children,
+  action,
+}: {
+  tone: "amber" | "red";
+  title: string;
+  children?: ReactNode;
+  action?: { label: string; onClick: () => void };
+}) {
+  return (
+    <div
+      role="alert"
+      className={`p-4 border rounded-xl text-sm ${
+        tone === "amber"
+          ? "bg-amber-50 border-amber-200 text-amber-800"
+          : "bg-red-50 border-red-200 text-red-700"
+      }`}
+    >
+      <p className="font-semibold">{title}</p>
+      {children && <p className="mt-1">{children}</p>}
+      {action && (
+        <button
+          type="button"
+          className="mt-3 rounded-lg bg-primary-600 px-4 py-2 font-semibold text-white"
+          onClick={action.onClick}
+        >
+          {action.label}
+        </button>
+      )}
+    </div>
   );
 }

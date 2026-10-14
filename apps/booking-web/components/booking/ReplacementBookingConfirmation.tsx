@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useState, type FormEvent } from "react";
 import {
   isManualPricingPaymentMethod,
   type PublicBookingQuote,
@@ -37,6 +37,7 @@ export default function ReplacementBookingConfirmation({
   hotelTerms = false,
   attempt: heldAttempt,
   onAttemptChange,
+  onBooked,
 }: {
   slug: string;
   quote: PublicBookingQuote;
@@ -50,6 +51,13 @@ export default function ReplacementBookingConfirmation({
    * lose it: a retry then sends the same details as an uncertain retry. */
   attempt?: BookingAttempt | null;
   onAttemptChange?: (attempt: BookingAttempt | null) => void;
+  /** The booking (or request, or bank-transfer/PayPal reservation) is made: the page moves on to
+   * its confirmation (VAY-2195). */
+  onBooked?: (booking: {
+    bookingReference: string;
+    requested: boolean;
+    confirmationUrl?: string;
+  }) => void;
 }) {
   const termsNoticeId = useId();
   const [loading, setLoading] = useState(false);
@@ -75,6 +83,28 @@ export default function ReplacementBookingConfirmation({
     supported &&
     !refreshRequired &&
     (!!pending || (!!guest && termsAccepted && disclosure?.quoteId === quote.quoteId));
+  useEffect(() => {
+    if (result)
+      onBooked?.({
+        bookingReference: result.bookingReference,
+        requested: result.kind === "requested" || (result.kind === "replayed" && request),
+      });
+    // Once per booking.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result]);
+  useEffect(() => {
+    if (manualPayment)
+      onBooked?.({
+        bookingReference: manualPayment.bookingReference,
+        requested: false,
+        confirmationUrl: `/confirmation?${new URLSearchParams({
+          booking: manualPayment.bookingReference,
+          token: manualPayment.confirmationToken,
+        })}`,
+      });
+    // Once per reservation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualPayment]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

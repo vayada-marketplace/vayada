@@ -522,7 +522,9 @@ export default function BookingConfirmationPageClient({
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
               {t("bookingReference")}
             </p>
-            <p className="text-2xl font-bold text-primary-600 tracking-wider">{reference}</p>
+            <p className="text-2xl font-bold text-primary-600 tracking-wider [overflow-wrap:anywhere]">
+              {reference}
+            </p>
           </div>
 
           {/* Booking Details */}

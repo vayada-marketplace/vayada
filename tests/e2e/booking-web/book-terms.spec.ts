@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
-import { fillGuestDetails } from "../support/bookFlow";
+import { fillGuestDetails, orderTotal } from "../support/bookFlow";
 
 const offerKey = `pricing-offer.v2:${"c".repeat(64)}`;
 const terms = "These are our house terms.\n\n1. Your booking\nWe confirm by email.";
@@ -127,5 +127,5 @@ async function openQuote(page: Page, termsText: string) {
 async function toPayment(page: Page) {
   await fillGuestDetails(page);
   await page.getByRole("button", { name: "Continue to payment" }).click();
-  await expect(page.getByText("Total: EUR 240.00", { exact: true })).toBeVisible();
+  await expect(orderTotal(page)).toHaveText("€240");
 }
