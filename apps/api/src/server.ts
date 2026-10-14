@@ -19,6 +19,7 @@ import { externalBookingChanges } from "./integrations/externalBookingChanges.js
 import { createAirbnbAlterationRuntime } from "./airbnbAlterationRuntime.js";
 import { createAirbnbImportRuntime } from "./airbnbImportRuntime.js";
 import { createPgMarketplaceSubmissionRepository } from "./domains/marketplaceSubmissionRepository.js";
+import { createPgMarketplaceHotelSubmissionModerationRepository } from "./domains/marketplaceHotelSubmissionModerationRepository.js";
 import { marketplaceSubmissionTransactionSources } from "./platform/marketplaceSubmissionTransactionSources.js";
 import { createPgPmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { createPgPreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
@@ -968,6 +969,8 @@ const marketplaceSubmissionRepository = createPgMarketplaceSubmissionRepository(
   connectionString: targetDatabaseUrl,
   sources: marketplaceSubmissionTransactionSources,
 });
+const marketplaceHotelSubmissionModerationRepository =
+  createPgMarketplaceHotelSubmissionModerationRepository({ connectionString: targetDatabaseUrl });
 const marketplaceHotelCollaborationPreferencesRepository =
   createPgMarketplaceHotelCollaborationPreferencesRepository({
     connectionString: targetDatabaseUrl,
@@ -2202,6 +2205,11 @@ const app = buildApp({
       }
     : undefined,
   marketplaceSubmission: { repository: marketplaceSubmissionRepository },
+  marketplaceHotelSubmissionModeration: {
+    repository: marketplaceHotelSubmissionModerationRepository,
+    mediaResolver: () =>
+      bookingDesignMediaAdapter ? createHotelMediaResolutionPort(bookingDesignMediaAdapter) : null,
+  },
   marketplacePublicHotel: {
     read: async (propertyId) => {
       if (!bookingDesignMediaAdapter) throw new Error("Public media resolver unavailable");
@@ -2411,6 +2419,7 @@ app.addHook("onClose", async () => {
   await bookingPublicationRuntime?.close();
   await Promise.all([
     marketplaceSubmissionRepository.close(),
+    marketplaceHotelSubmissionModerationRepository.close(),
     marketplaceHotelCollaborationPreferencesRepository.close(),
     marketplaceCommunicationPreferencesRepository.close(),
     bookingDesignRepository.close(),

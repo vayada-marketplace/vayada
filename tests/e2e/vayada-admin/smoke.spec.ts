@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { Route } from "@playwright/test";
+import { mockFirstPartyAuth } from "../support/firstPartyAuth";
 import { watchNoLegacyCalls } from "../support/noLegacyCalls";
 import { watchPageHealth } from "../support/pageHealth";
 
@@ -114,11 +115,29 @@ test.describe("vayada-admin smoke", () => {
       },
     );
 
+    // The Hotel reviews tab is an operator read, so the page now asks the /auth gateway for a session.
+    await mockFirstPartyAuth(page, {
+      baseURL: marketplaceBaseURL,
+      key: "admin",
+      label: "Vayada Admin",
+      surface: "platform-admin",
+    });
+    await page.route(
+      /https:\/\/api\.localhost(?::\d+)?\/api\/marketplace\/admin\/hotel-submissions$/,
+      async (route) => {
+        await fulfillJson(route, pageOrigin, {
+          contractVersion: "marketplace-hotel-submission-moderation.v1",
+          submissions: [],
+        });
+      },
+    );
+
     await page.goto(new URL("/dashboard/marketplace", marketplaceBaseURL).toString());
 
     await expect(page.getByRole("heading", { name: "Marketplace", level: 1 })).toBeVisible();
     await expect(page.getByRole("button", { name: /Offers \(1\)/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /Creators \(1\)/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Hotel reviews (0)" })).toBeVisible();
     await expect(page.getByText("Target creator stay")).toBeVisible();
 
     await assertNoLegacyCalls();

@@ -16,6 +16,7 @@ export * from "./affiliateAdmin.js";
 export * from "./affiliateLink.js";
 export * from "./affiliateOfferTerms.js";
 export * from "./creatorProfileModeration.js";
+export * from "./hotelSubmissionModeration.js";
 export * from "./creatorMatchingPreferences.js";
 export * from "./offerMatchingCriteria.js";
 export * from "./matchingEvents.js";
