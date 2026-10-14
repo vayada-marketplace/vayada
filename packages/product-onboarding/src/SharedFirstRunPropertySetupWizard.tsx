@@ -1655,10 +1655,12 @@ function ProfileForm({
                   {step === 1 && profileProgress}
                 </div>
 
-                {googleMapsApiKey && !showAddressFields && (
+                {/* Search stays visible next to the fields: they never set map coordinates. */}
+                {googleMapsApiKey && (
                   <GooglePlacesAddressField
                     addressRevision={addressRevision}
                     apiKey={googleMapsApiKey}
+                    label="Search for your address"
                     onUnavailable={(autocompleteWasFocused) => {
                       setAddressSearchUnavailable(true);
                       if (!showAddressFields) focusAddressFieldsWhenShown.current = true;
@@ -1715,7 +1717,7 @@ function ProfileForm({
                   <div
                     ref={addressFields}
                     id={addressFieldsId}
-                    className="border-t border-gray-100 pt-4"
+                    className={`${googleMapsApiKey && !addressSearchUnavailable ? "mt-4 " : ""}border-t border-gray-100 pt-4`}
                   >
                     {addressSearchUnavailable && (
                       <p

@@ -107,6 +107,75 @@ test.describe("marketplace-web shared setup activation", () => {
     await expect(page.getByRole("button", { name: "Add External Creator" })).toHaveCount(0);
   });
 
+  test("offers the address search when an existing hotel has an address but no map pin", async ({
+    page,
+    baseURL,
+  }) => {
+    await mockGooglePlaces(page);
+    await primeBrowserState(page, true);
+    await mockAuthSession(page);
+    // Open hotel basics land straight in the shared profile editor (update mode).
+    await mockSharedSetupStatus(page, hotelBasicsOpenStatus());
+    const profileWrites: unknown[] = [];
+    await mockMarketplaceProfileApis(
+      page,
+      [],
+      [{ mediaType: "logo", url: "https://media.example/alpenrose-logo.webp" }],
+      { profile: profileWrites },
+    );
+    await routeJson(page, /\/api\/hotel-setup\/property-types/, {
+      contractVersion: "adaptive-hotel-property-types.v1",
+      propertyTypes: [{ value: "hotel", label: "Hotel" }],
+    });
+    await mockPropertySetupRoute(
+      page,
+      createPropertySetupRouteMock({
+        propertyId,
+        selectedTracks: ["creator_marketplace"],
+        resumeStepId: "present_hotel",
+      }),
+    );
+    await page.goto(setupUrl(baseURL));
+
+    await expect(page.getByRole("textbox", { name: /Hotel name/ })).toHaveValue("Alpenrose Munich");
+    await page.getByRole("button", { name: "Continue" }).click();
+
+    // The saved address (Marienplatz 1, no coordinates) keeps its fields open, and the
+    // labelled Google search sits above them: typed fields never set a map pin.
+    const locationSearchPanel = page.getByTestId("location-search-panel");
+    const locationActionBar = page.getByTestId("location-action-bar");
+    await expect(
+      locationSearchPanel.getByRole("heading", { name: "Where is your property?" }),
+    ).toBeVisible();
+    await expect(page.getByRole("textbox", { name: /Street address/ })).toHaveValue(
+      "Marienplatz 1",
+    );
+    await expect(
+      locationSearchPanel.getByText("Search for your address", { exact: true }),
+    ).toBeVisible();
+    const googleAddressSearch = page.locator(".vayada-google-place-autocomplete");
+    await expect(locationSearchPanel.getByPlaceholder("Search for an address")).toBeVisible();
+    await expect(page.getByTestId("google-address-map-canvas")).not.toHaveAttribute(
+      "data-marker",
+      /./,
+    );
+
+    await selectExactGoogleAddress(googleAddressSearch);
+    await expect(locationActionBar.getByText("Is this the right location?")).toBeVisible();
+    await expect(page.getByTestId("google-address-map-canvas")).toHaveAttribute(
+      "data-marker",
+      "48.1373932,11.5754485",
+    );
+    await locationActionBar.getByRole("button", { name: "Continue" }).click();
+
+    await expect(page.getByRole("heading", { name: "How can guests reach you?" })).toBeVisible();
+    await page.getByRole("button", { name: "Save and continue" }).click();
+    await expect.poll(() => profileWrites.length).toBe(1);
+    expect(profileWrites[0]).toMatchObject({
+      patch: { location: { latitude: 48.1373932, longitude: 11.5754485 } },
+    });
+  });
+
   const recoverFirstHotel = async (
     { page, baseURL }: { page: Page; baseURL?: string },
     adding = false,
@@ -836,6 +905,7 @@ async function mockMarketplaceProfileApis(
   offers: unknown[] = [],
   media: unknown[] = [],
   writes?: {
+    profile?: unknown[];
     publicProfile?: unknown[];
     marketplaceProfile?: unknown[];
     propertyPresentation?: unknown[];
@@ -919,6 +989,7 @@ async function mockMarketplaceProfileApis(
       }
       if (route.request().method() === "PUT") {
         const request = route.request().postDataJSON() as Record<string, unknown>;
+        writes?.profile?.push(request);
         expect(request).toEqual({
           expectedProfileRevision: canonicalProfile.profileRevision,
           patch: expect.any(Object),
@@ -1131,6 +1202,24 @@ async function routeJson(page: Page, pattern: RegExp, json: unknown) {
     await route.fulfill({ status: 200, headers: corsHeaders(route), json });
   });
 }
+function hotelBasicsOpenStatus(): AdaptiveHotelSetupStatus {
+  return createAdaptiveHotelSetupStatusMock({
+    entryProduct: "marketplace",
+    organizationId: "11111111-1111-4111-8111-111111111111",
+    organizationDisplayName: "Alpenrose Hotel Group",
+    selectedTracks: ["creator_marketplace"],
+    propertyId,
+    propertyDisplayName: "Alpenrose Munich",
+    taskOverrides: {
+      shared_identity: {
+        ownerProgress: "not_started",
+        readiness: "actionable",
+        actionableBy: "owner",
+      },
+    },
+  });
+}
+
 function sharedSetupStatus(
   missingSteps = [
     "publicProfile",
