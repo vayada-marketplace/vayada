@@ -158,7 +158,9 @@
     "tooManyGuests": "Esta habitación tiene capacidad para {count, plural, one {# huésped} other {# huéspedes}} como máximo. Elija una habitación más grande o reserve más de una.",
     "promoNotApplied": "Su código {code} no se aplica a esta estancia.",
     "noChildren": "Esta habitación no admite niños. Elija otra habitación para su grupo.",
-    "percentOff": "-{percent} % DTO."
+    "percentOff": "-{percent} % DTO.",
+    "closeRoomDetails": "Cerrar los detalles de la habitación",
+    "soldOutForDates": "Agotada para sus fechas"
   },
   "rooms": {
     "title": "Nuestras Habitaciones",
