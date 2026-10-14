@@ -158,7 +158,9 @@
     "tooManyGuests": "Kamar ini muat hingga {count} tamu. Pilih kamar yang lebih besar, atau pesan lebih dari satu kamar.",
     "promoNotApplied": "Kode Anda {code} tidak berlaku untuk masa inap ini.",
     "noChildren": "Kamar ini tidak menerima anak-anak. Pilih kamar lain untuk rombongan Anda.",
-    "percentOff": "-{percent}% HEMAT"
+    "percentOff": "-{percent}% HEMAT",
+    "closeRoomDetails": "Tutup detail kamar",
+    "soldOutForDates": "Habis untuk tanggal Anda"
   },
   "rooms": {
     "title": "Kamar Kami",
