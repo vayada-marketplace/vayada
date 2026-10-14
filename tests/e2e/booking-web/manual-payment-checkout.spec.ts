@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
+import { continueToPayment } from "../support/bookFlow";
 
 const offerKey = `pricing-offer.v2:${"d".repeat(64)}`;
 
@@ -150,14 +151,14 @@ test("books by bank transfer and opens the protected payment details", async ({ 
   );
 
   await page.goto(`/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-10-01&checkOut=2026-10-03`);
-  const method = page.getByLabel("Payment preference");
-  await expect(method.locator("option")).toHaveText(["Choose a payment method", "Bank transfer"]);
   await page.getByRole("button", { name: "Add room", exact: true }).click();
   const room = page.getByRole("group", { name: "Room 1", exact: true });
   await room.getByLabel("Room and meal option").selectOption(offerKey);
   await room.getByLabel(/Adults/).fill("2");
-  await method.selectOption("bank_transfer");
-  await page.getByRole("button", { name: "Get price", exact: true }).click();
+  await continueToPayment(page);
+  const method = page.getByLabel("Payment preference");
+  await expect(method.locator("option")).toHaveText(["Bank transfer"]);
+  await expect(method).toHaveValue("bank_transfer");
   await expect(page.getByText("Total: EUR 240.00", { exact: true })).toBeVisible();
   await expect(
     page.getByText(
@@ -217,19 +218,23 @@ test("hides bank transfer for arrivals closer than its payment deadline", async 
     route.fulfill({ json: { version: "public-pricing-addons.v1", addons: [] } }),
   );
 
-  await page.goto(`/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-10-01&checkOut=2026-10-03`);
   const method = page.getByLabel("Payment preference");
-  await expect(method.locator("option")).toHaveText(["Choose a payment method", "Pay at property"]);
-  await expect(
-    page.getByText("Bank transfer isn’t available this close to check-in."),
-  ).toBeVisible();
-
-  await page.goto(`/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=2026-10-06&checkOut=2026-10-08`);
-  await expect(method.locator("option")).toHaveText([
-    "Choose a payment method",
-    "Pay at property",
-    "Bank transfer",
-  ]);
+  for (const checkIn of ["2026-10-01", "2026-10-06"]) {
+    const checkOut = checkIn === "2026-10-01" ? "2026-10-03" : "2026-10-08";
+    await page.goto(`/en/book?slug=${SEEDED_BOOKING_SLUG}&checkIn=${checkIn}&checkOut=${checkOut}`);
+    await page.getByRole("button", { name: "Add room", exact: true }).click();
+    const room = page.getByRole("group", { name: "Room 1", exact: true });
+    await room.getByLabel("Room and meal option").selectOption(offerKey);
+    await room.getByLabel(/Adults/).fill("2");
+    await continueToPayment(page);
+    if (checkIn === "2026-10-01") {
+      await expect(method.locator("option")).toHaveText(["Pay at property"]);
+      await expect(
+        page.getByText("Bank transfer isn’t available this close to check-in."),
+      ).toBeVisible();
+    }
+  }
+  await expect(method.locator("option")).toHaveText(["Pay at property", "Bank transfer"]);
   await expect(page.getByText("Bank transfer isn’t available this close to check-in.")).toHaveCount(
     0,
   );

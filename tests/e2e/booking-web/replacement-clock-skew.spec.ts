@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
+import { continueToPayment } from "../support/bookFlow";
 
 const offerKey = `pricing-offer.v2:${"a".repeat(64)}`;
 
@@ -94,8 +95,7 @@ for (const [label, skewMs] of [
     const room = page.getByRole("group", { name: "Room 1", exact: true });
     await room.getByLabel("Room and meal option").selectOption(offerKey);
     await room.getByLabel(/Adults/).fill("2");
-    await page.getByLabel("Payment preference").selectOption("pay_at_property");
-    await page.getByRole("button", { name: "Get price", exact: true }).click();
+    await continueToPayment(page, { method: "pay_at_property" });
     await expect(page.getByText("Total: EUR 180.00", { exact: true })).toBeVisible();
 
     const terms = page.getByLabel("I have read the room and rate terms for this price preview.");

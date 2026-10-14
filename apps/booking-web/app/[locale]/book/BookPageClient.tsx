@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { useRouter } from "@/i18n/navigation";
+import BookShell from "./BookShell";
 import ReplacementGuestRules from "@/components/booking/ReplacementGuestRules";
 import ReplacementQuoteExtras from "@/components/booking/ReplacementQuoteExtras";
 import { getReplacementAddons, type PricingAddon } from "@/services/api/replacementAddons";
 import {
   buildReplacementAddonSelection,
+  replacementExtrasScope,
   type ReplacementExtrasValue,
 } from "@/services/api/replacementAddonSelection";
 import ReplacementQuoteTerms from "@/components/booking/ReplacementQuoteTerms";
@@ -27,6 +31,16 @@ import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote"
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { choiceKeys, choiceText } from "@/lib/roomChoices";
+import {
+  bookEntry,
+  bookStepQuery,
+  bookSteps,
+  parseBookStep,
+  reachableStep,
+  readBookFlowDraft,
+  saveBookFlowDraft,
+  type BookStep,
+} from "@/lib/bookFlow";
 import { useReplacementQuote } from "@/lib/hooks/useReplacementQuote";
 import {
   displayQuoteMoney,
@@ -48,7 +62,12 @@ const newRoom = (): RoomChoice => ({
 
 export default function BookPageClient() {
   const { slug } = useSlug();
-  return <RoomQuoteForm key={slug} slug={slug} />;
+  // The step is read from the URL (VAY-2195).
+  return (
+    <Suspense fallback={null}>
+      <RoomQuoteForm key={slug} slug={slug} />
+    </Suspense>
+  );
 }
 
 function RoomQuoteForm({ slug }: { slug: string }) {
@@ -83,8 +102,26 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const [checkIn, setCheckIn] = useState("");
   const [checkOut, setCheckOut] = useState("");
   const [promoCode, setPromoCode] = useState("");
+  const [entry, setEntry] = useState<string | null>(null);
+  // Set once the first page decided where a room card's hand-off opens.
+  const handedOver = useRef(false);
+  const [payment, setPayment] = useState<"" | PricingPaymentMethod>("");
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    // VAY-2195: a refresh or Back keeps what this tab chose for the same hand-off.
+    const handOff = bookEntry(window.location.search);
+    setEntry(handOff);
+    const draft = readBookFlowDraft(slug, handOff);
+    if (draft) {
+      setCheckIn(draft.checkIn);
+      setCheckOut(draft.checkOut);
+      setPromoCode(draft.promoCode);
+      setChoices(draft.choices);
+      setAllocationRevision(draft.allocationRevision);
+      setExtras(draft.extras);
+      setPayment(draft.payment);
+      return;
+    }
     setCheckIn(params.get("checkIn") ?? "");
     setCheckOut(params.get("checkOut") ?? "");
     setPromoCode(params.get("promoCode") ?? "");
@@ -110,18 +147,21 @@ function RoomQuoteForm({ slug }: { slug: string }) {
         })),
       );
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const [payment, setPayment] = useState<"" | PricingPaymentMethod>("");
   const [pagePayment, setPagePayment] = useState<BookingPagePayment>({
     methods: ["card", "pay_at_property"],
     earliestArrival: {},
     termsText: null,
   });
+  const [pagePaymentLoaded, setPagePaymentLoaded] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
     void getBookingPagePayment(slug, controller.signal)
       .then((value) => {
-        if (!controller.signal.aborted) setPagePayment(value);
+        if (controller.signal.aborted) return;
+        setPagePayment(value);
+        setPagePaymentLoaded(true);
       })
       .catch(() => undefined);
     return () => controller.abort();
@@ -130,10 +170,12 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const paymentMethods = bookingPageMethodsForArrival(pagePayment, checkIn);
   const tooSoon = pagePayment.methods.filter((method) => !paymentMethods.includes(method));
   useEffect(() => {
+    // A restored choice waits for the hotel's own methods before it is judged.
+    if (!pagePaymentLoaded) return;
     setPayment((current) => (current && !paymentMethods.includes(current) ? "" : current));
     // paymentMethods is derived from these two.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pagePayment, checkIn]);
+  }, [pagePayment, checkIn, pagePaymentLoaded]);
   useEffect(() => {
     const controller = new AbortController();
     setRooms(null);
@@ -155,10 +197,17 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       });
     return () => controller.abort();
   }, [slug, reload]);
+  // Until the guest picks how to pay, the price uses the first way the hotel offers, paying at
+  // the hotel first (nothing is charged now); a way the rooms don't accept moves on to the next.
+  const [fallback, setFallback] = useState(0);
+  const defaultMethods = [...paymentMethods].sort(
+    (a, b) => Number(b === "pay_at_property") - Number(a === "pay_at_property"),
+  );
+  const method = payment || (pagePaymentLoaded ? (defaultMethods[fallback] ?? "") : "");
   const baseRequest =
-    rooms && payment
-      ? roomQuoteRequest(rooms, choices, checkIn, checkOut, payment, promoCode)
-      : null;
+    rooms && method ? roomQuoteRequest(rooms, choices, checkIn, checkOut, method, promoCode) : null;
+  const roomsComplete =
+    !!rooms && !!roomQuoteRequest(rooms, choices, checkIn, checkOut, "card", promoCode);
   const addons = buildReplacementAddonSelection(
     addonCatalogue ?? [],
     baseRequest?.selection ?? null,
@@ -176,12 +225,23 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           },
         }
       : null;
+  // Extras chosen for another stay or another list of extras (a restored draft, changed dates or
+  // extras that can't load) can't be priced: they are cleared, so the step never gets stuck.
+  useEffect(() => {
+    if (!extras || !baseRequest || (addonCatalogue === null && !addonError)) return;
+    if (
+      extras.scope !==
+      replacementExtrasScope(addonCatalogue ?? [], baseRequest.selection, allocationRevision)
+    )
+      setExtras(null);
+  }, [extras, baseRequest, addonCatalogue, addonError, allocationRevision]);
   const changeChoices = (change: (current: RoomChoice[]) => RoomChoice[]) => {
     setChoices(change);
     setAllocationRevision((value) => value + 1);
     setExtras(null);
+    setFallback(0);
   };
-  const { quote, error, loading, submit } = useReplacementQuote(slug, request);
+  const { quote, error, errorStatus, loading, submit } = useReplacementQuote(slug, request);
   const { approximate } = useCurrency();
   // The charged amount in the quote currency, then any approximation in the guest's currency.
   const chargedMoney = (minor: string, currency: string) => {
@@ -193,305 +253,432 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       current.map((choice) => (choice.selectionId === id ? { ...choice, ...patch } : choice)),
     );
 
+  // VAY-2195: the booking steps, `step` in the URL. A step only opens once the steps before it
+  // are complete; until the catalogues are in, a later step waits.
+  const router = useRouter();
+  const wanted = parseBookStep(useSearchParams().get("step"));
+  const extrasOffered =
+    addonError ||
+    (addonCatalogue ?? []).some(
+      (addon) => !baseRequest || addon.currency === baseRequest.selection.currency,
+    );
+  const steps = bookSteps(extrasOffered);
+  const settled =
+    entry !== null &&
+    pagePaymentLoaded &&
+    (rooms !== null || catalogError) &&
+    (addonCatalogue !== null || addonError);
+  const step = settled
+    ? reachableStep(wanted, steps, { rooms: roomsComplete, extras: addons !== null })
+    : wanted;
+  // The steps this tab moved forward from, so in-page Back returns through the browser history.
+  const forwardFrom = useRef<BookStep[]>([]);
+  const go = (next: BookStep, replace = false) => {
+    const href = `/book?${bookStepQuery(window.location.search, next)}`;
+    if (replace) return router.replace(href);
+    if (steps.indexOf(next) > steps.indexOf(step)) forwardFrom.current.push(step);
+    router.push(href);
+  };
+  const goBack = (target: BookStep) => {
+    const from = forwardFrom.current;
+    if (from[from.length - 1] !== target) return go(target);
+    from.pop();
+    router.back();
+  };
+  useEffect(() => {
+    // The browser's own Back lands on a step this tab moved forward from.
+    const from = forwardFrom.current;
+    while (from.length && from[from.length - 1] === step) from.pop();
+  }, [step]);
+  const next = steps[steps.indexOf(step) + 1] ?? "payment";
+  const previous = steps[steps.indexOf(step) - 1] ?? "rooms";
+  useEffect(() => {
+    if (settled && step !== wanted) go(step, true);
+    // go reads the current URL.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settled, step, wanted]);
+  // A room card's complete choice opens at the first step after the rooms.
+  useEffect(() => {
+    if (!settled || handedOver.current) return;
+    handedOver.current = true;
+    if (wanted === "rooms" && new URLSearchParams(window.location.search).get("offer"))
+      if (roomsComplete) go(steps[1] ?? "payment", true);
+    // Only the first settled render decides.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settled]);
+  useEffect(() => {
+    if (entry === null) return;
+    saveBookFlowDraft(slug, {
+      version: 1,
+      entry,
+      checkIn,
+      checkOut,
+      promoCode,
+      choices,
+      allocationRevision,
+      extras,
+      payment,
+    });
+  }, [slug, entry, checkIn, checkOut, promoCode, choices, allocationRevision, extras, payment]);
+  // After the rooms, the price follows every change; a refused way to pay moves to the next one.
+  useEffect(() => {
+    if (step === "rooms" || !request || quote || loading || error) return;
+    const timer = setTimeout(submit, 400);
+    return () => clearTimeout(timer);
+    // submit belongs to this request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(request), step, quote, loading, error]);
+  useEffect(() => {
+    // Only a refusal of this price moves on; a failed request keeps the guest's default.
+    const refused = !!errorStatus && errorStatus >= 400 && errorStatus < 500 && errorStatus !== 429;
+    if (error && refused && !quote && !payment && fallback + 1 < defaultMethods.length)
+      setFallback((value) => value + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [error]);
+  const stepButtons = (label: string, ready: boolean) => (
+    <div className="flex items-center justify-between gap-4 pt-2">
+      <button type="button" className="underline" onClick={() => goBack(previous)}>
+        Back
+      </button>
+      <button type="button" className={button} disabled={!ready} onClick={() => go(next)}>
+        {label}
+      </button>
+    </div>
+  );
+  const titles: Record<BookStep, string> = {
+    rooms: "Choose rooms and get a price",
+    extras: "Enhance your stay",
+    payment: "Secure payment",
+  };
+
   return (
-    <main className="mx-auto max-w-3xl px-4 py-10 space-y-6">
-      <h1 className="text-3xl font-bold">Choose rooms and get a price</h1>
-      <p className="text-gray-600">
-        Tell us who will stay in each room. We’ll check the price for your dates and guests.
-      </p>
-      {catalogError ? (
-        <div role="alert">
-          We couldn’t load room options.{" "}
-          <button className={button} onClick={() => setReload((value) => value + 1)}>
-            Retry room options
-          </button>
-        </div>
-      ) : rooms === null ? (
-        <p role="status">Loading room options…</p>
-      ) : rooms.length === 0 ? (
-        <p role="status">Room options are currently unavailable.</p>
-      ) : (
-        <form
-          className="space-y-6"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (request && !loading) submit();
-          }}
-        >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label>
-              Check-in
-              <input
-                className={field}
-                type="date"
-                required
-                value={checkIn}
-                onChange={(event) => setCheckIn(event.target.value)}
-              />
-            </label>
-            <label>
-              Check-out
-              <input
-                className={field}
-                type="date"
-                required
-                value={checkOut}
-                onChange={(event) => setCheckOut(event.target.value)}
-              />
-            </label>
+    <BookShell steps={steps} current={step} title={titles[step]}>
+      <div className="max-w-3xl space-y-6">
+        {step !== "rooms" && !settled ? (
+          <p role="status">Loading your booking…</p>
+        ) : step !== "rooms" ? null : catalogError ? (
+          <div role="alert">
+            We couldn’t load room options.{" "}
+            <button className={button} onClick={() => setReload((value) => value + 1)}>
+              Retry room options
+            </button>
           </div>
-          {choices.map((choice, index) => (
-            <fieldset
-              key={choice.selectionId}
-              className="rounded-xl border border-gray-200 p-5 space-y-4"
-            >
-              <legend className="font-semibold px-2">Room {index + 1}</legend>
-              <label className="block">
-                Room and meal option
-                <select
-                  className={field}
-                  required
-                  value={choice.publicOfferKey}
-                  onChange={(event) =>
-                    update(choice.selectionId, { publicOfferKey: event.target.value })
-                  }
-                >
-                  <option value="">Choose an option</option>
-                  {rooms.map((room) => {
-                    // The plain names the room cards use: "Deluxe Double Room — Non-refundable".
-                    const keys = choiceKeys(room.offers);
-                    return (
-                      <optgroup key={room.roomTypeId} label={room.name}>
-                        {room.offers.map((offer, offerIndex) => (
-                          <option key={offer.publicOfferKey} value={offer.publicOfferKey}>
-                            {room.name} —{" "}
-                            {
-                              choiceText(
-                                keys[offerIndex]!,
-                                { checkIn, timezone: hotel?.timezone, formatDate: (date) => date },
-                                t,
-                              ).name
-                            }
-                          </option>
-                        ))}
-                      </optgroup>
-                    );
-                  })}
-                </select>
-              </label>
-              <label className="block">
-                Adults (ages 18+)
+        ) : rooms === null ? (
+          <p role="status">Loading room options…</p>
+        ) : rooms.length === 0 ? (
+          <p role="status">Room options are currently unavailable.</p>
+        ) : (
+          <form
+            className="space-y-6"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (roomsComplete && settled) go(next);
+            }}
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label>
+                Check-in
                 <input
                   className={field}
-                  type="number"
-                  min={1}
-                  max={99}
-                  step={1}
+                  type="date"
                   required
-                  value={choice.adults}
-                  onChange={(event) => update(choice.selectionId, { adults: event.target.value })}
+                  value={checkIn}
+                  onChange={(event) => setCheckIn(event.target.value)}
                 />
               </label>
-              {choice.childAges.map((age, child) => (
-                <div className="flex items-end gap-3" key={child}>
-                  <label className="flex-1">
-                    Child {child + 1}: age at check-in
-                    <select
-                      className={field}
-                      required
-                      value={age}
-                      onChange={(event) =>
+              <label>
+                Check-out
+                <input
+                  className={field}
+                  type="date"
+                  required
+                  value={checkOut}
+                  onChange={(event) => setCheckOut(event.target.value)}
+                />
+              </label>
+            </div>
+            {choices.map((choice, index) => (
+              <fieldset
+                key={choice.selectionId}
+                className="rounded-xl border border-gray-200 p-5 space-y-4"
+              >
+                <legend className="font-semibold px-2">Room {index + 1}</legend>
+                <label className="block">
+                  Room and meal option
+                  <select
+                    className={field}
+                    required
+                    value={choice.publicOfferKey}
+                    onChange={(event) =>
+                      update(choice.selectionId, { publicOfferKey: event.target.value })
+                    }
+                  >
+                    <option value="">Choose an option</option>
+                    {rooms.map((room) => {
+                      // The plain names the room cards use: "Deluxe Double Room — Non-refundable".
+                      const keys = choiceKeys(room.offers);
+                      return (
+                        <optgroup key={room.roomTypeId} label={room.name}>
+                          {room.offers.map((offer, offerIndex) => (
+                            <option key={offer.publicOfferKey} value={offer.publicOfferKey}>
+                              {room.name} —{" "}
+                              {
+                                choiceText(
+                                  keys[offerIndex]!,
+                                  {
+                                    checkIn,
+                                    timezone: hotel?.timezone,
+                                    formatDate: (date) => date,
+                                  },
+                                  t,
+                                ).name
+                              }
+                            </option>
+                          ))}
+                        </optgroup>
+                      );
+                    })}
+                  </select>
+                </label>
+                <label className="block">
+                  Adults (ages 18+)
+                  <input
+                    className={field}
+                    type="number"
+                    min={1}
+                    max={99}
+                    step={1}
+                    required
+                    value={choice.adults}
+                    onChange={(event) => update(choice.selectionId, { adults: event.target.value })}
+                  />
+                </label>
+                {choice.childAges.map((age, child) => (
+                  <div className="flex items-end gap-3" key={child}>
+                    <label className="flex-1">
+                      Child {child + 1}: age at check-in
+                      <select
+                        className={field}
+                        required
+                        value={age}
+                        onChange={(event) =>
+                          update(choice.selectionId, {
+                            childAges: choice.childAges.map((value, position) =>
+                              position === child ? event.target.value : value,
+                            ),
+                          })
+                        }
+                      >
+                        <option value="">Choose age</option>
+                        {Array.from({ length: 18 }, (_, value) => (
+                          <option key={value} value={value}>
+                            {value === 0 ? "Under 1" : value}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="p-3 underline"
+                      aria-label={`Remove child ${child + 1} from room ${index + 1}`}
+                      onClick={() =>
                         update(choice.selectionId, {
-                          childAges: choice.childAges.map((value, position) =>
-                            position === child ? event.target.value : value,
-                          ),
+                          childAges: choice.childAges.filter((_, position) => position !== child),
                         })
                       }
                     >
-                      <option value="">Choose age</option>
-                      {Array.from({ length: 18 }, (_, value) => (
-                        <option key={value} value={value}>
-                          {value === 0 ? "Under 1" : value}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                <div className="flex flex-wrap gap-4">
                   <button
                     type="button"
-                    className="p-3 underline"
-                    aria-label={`Remove child ${child + 1} from room ${index + 1}`}
+                    className="underline"
+                    disabled={choice.childAges.length + Number(choice.adults || 1) >= 99}
                     onClick={() =>
-                      update(choice.selectionId, {
-                        childAges: choice.childAges.filter((_, position) => position !== child),
-                      })
+                      update(choice.selectionId, { childAges: [...choice.childAges, ""] })
                     }
                   >
-                    Remove
+                    Add child to room {index + 1}
+                  </button>
+                  <button
+                    type="button"
+                    className="underline"
+                    onClick={() =>
+                      changeChoices((current) =>
+                        current.filter((room) => room.selectionId !== choice.selectionId),
+                      )
+                    }
+                  >
+                    Remove room {index + 1}
                   </button>
                 </div>
-              ))}
-              <div className="flex flex-wrap gap-4">
-                <button
-                  type="button"
-                  className="underline"
-                  disabled={choice.childAges.length + Number(choice.adults || 1) >= 99}
-                  onClick={() =>
-                    update(choice.selectionId, { childAges: [...choice.childAges, ""] })
-                  }
-                >
-                  Add child to room {index + 1}
-                </button>
-                <button
-                  type="button"
-                  className="underline"
-                  onClick={() =>
-                    changeChoices((current) =>
-                      current.filter((room) => room.selectionId !== choice.selectionId),
-                    )
-                  }
-                >
-                  Remove room {index + 1}
-                </button>
-              </div>
-            </fieldset>
-          ))}
-          <button
-            type="button"
-            className={button}
-            disabled={choices.length >= 99}
-            onClick={() => changeChoices((current) => [...current, newRoom()])}
-          >
-            Add room
-          </button>
-          {addonError ? (
-            <p role="alert">
-              Extra options are unavailable.{" "}
-              <button
-                type="button"
-                className="underline"
-                onClick={() => setAddonReload((value) => value + 1)}
-              >
-                Retry extras
-              </button>
-            </p>
-          ) : addonCatalogue === null ? (
-            <p role="status">Loading optional extras…</p>
-          ) : (
-            <ReplacementQuoteExtras
-              catalogue={addonCatalogue}
-              selection={baseRequest?.selection ?? null}
-              allocationRevision={allocationRevision}
-              value={extras}
-              onChange={setExtras}
-            />
-          )}
-          <label className="block">
-            Promo code (optional)
-            <input
-              className={field}
-              value={promoCode}
-              maxLength={200}
-              onChange={(event) => setPromoCode(event.target.value)}
-            />
-          </label>
-          <label className="block">
-            Payment preference
-            <select
-              className={field}
-              required
-              value={payment}
-              onChange={(event) => setPayment(event.target.value as typeof payment)}
+              </fieldset>
+            ))}
+            <button
+              type="button"
+              className={button}
+              disabled={choices.length >= 99}
+              onClick={() => changeChoices((current) => [...current, newRoom()])}
             >
-              <option value="">Choose a payment method</option>
-              {paymentMethods.map((method) => (
-                <option key={method} value={method}>
-                  {bookingPagePaymentMethodLabels[method]}
-                </option>
-              ))}
-            </select>
-          </label>
-          {tooSoon.length > 0 && (
+              Add room
+            </button>
+            <label className="block">
+              Promo code (optional)
+              <input
+                className={field}
+                value={promoCode}
+                maxLength={200}
+                onChange={(event) => setPromoCode(event.target.value)}
+              />
+            </label>
             <p className="text-sm text-gray-600">
-              {tooSoon.map((method) => bookingPagePaymentMethodLabels[method]).join(" and ")}{" "}
-              {tooSoon.length > 1 ? "aren’t" : "isn’t"} available this close to check-in.
+              We’ll check the price for your choices next. All rooms must use the same currency.
             </p>
-          )}
-          <p className="text-sm text-gray-600">
-            We’ll check whether your choices and payment method are supported. All rooms must use
-            the same currency.
-          </p>
-          <button className={button} type="submit" disabled={!request || loading}>
-            {loading ? "Checking price…" : "Get price"}
-          </button>
-          {!request && (
-            <p className="text-sm text-gray-600">
-              Choose dates, at least one room, adults, every child’s age and a payment preference.
-            </p>
-          )}
-        </form>
-      )}
-      {error && (
-        <p role="alert">
-          {error}{" "}
-          <button
-            className="underline"
-            onClick={() => {
-              changeChoices((current) =>
-                current.map((choice) => ({ ...choice, publicOfferKey: "" })),
-              );
-              setReload((value) => value + 1);
-            }}
-          >
-            Reload room options
-          </button>
-        </p>
-      )}
-      {quote && (
-        <section
-          aria-label="Your stay price"
-          className="rounded-xl border border-gray-200 p-5 space-y-3"
-        >
-          <h2 className="text-xl font-semibold">Your stay price</h2>
-          <p>
-            {quote.checkIn} to {quote.checkOut}
-          </p>
-          <p className="text-2xl font-bold">
-            Total: {chargedMoney(quote.totalMinor, quote.currency)}
-          </p>
-          <p>Due now: {chargedMoney(quote.dueNowMinor, quote.currency)}</p>
-          <p>Due later: {chargedMoney(quote.dueLaterMinor, quote.currency)}</p>
-          <ApproximateAmountsNote currency={quote.currency} />
-          <ReplacementQuoteTerms
-            quote={quote}
-            onAcknowledgementChange={setTermsAcknowledgement}
-            roomNames={Object.fromEntries(
-              choices.map((choice) => [
-                choice.selectionId,
-                rooms?.find((room) =>
-                  room.offers.some((offer) => offer.publicOfferKey === choice.publicOfferKey),
-                )?.name ?? "",
-              ]),
+            <button className={button} type="submit" disabled={!roomsComplete || !settled}>
+              Continue
+            </button>
+            {!roomsComplete && (
+              <p className="text-sm text-gray-600">
+                Choose dates, at least one room, adults and every child’s age.
+              </p>
             )}
-          />
-          <ReplacementGuestRules
-            key={quote.quoteId}
-            slug={slug}
-            quote={quote}
-            onAcknowledgementChange={setGuestDisclosure}
-            onRulesChange={setGuestRules}
-          />
-          {pagePayment.termsText && <BookingPageTerms text={pagePayment.termsText} />}
-          <ReplacementBookingConfirmation
-            key={quote.quoteId}
-            slug={slug}
-            quote={quote}
-            disclosure={guestDisclosure}
-            rules={guestRules?.quoteId === quote.quoteId ? guestRules.choices : null}
-            termsAccepted={termsAcknowledgement?.quoteId === quote.quoteId}
-            hotelTerms={pagePayment.termsText !== null}
-          />
-        </section>
-      )}
-    </main>
+          </form>
+        )}
+        {settled && step === "extras" && (
+          <>
+            {addonError ? (
+              <p role="alert">
+                Extra options are unavailable.{" "}
+                <button
+                  type="button"
+                  className="underline"
+                  onClick={() => setAddonReload((value) => value + 1)}
+                >
+                  Retry extras
+                </button>
+              </p>
+            ) : (
+              <ReplacementQuoteExtras
+                catalogue={addonCatalogue ?? []}
+                selection={baseRequest?.selection ?? null}
+                allocationRevision={allocationRevision}
+                value={extras}
+                onChange={setExtras}
+              />
+            )}
+            <p role="status">
+              {quote
+                ? `Your stay with extras: ${chargedMoney(quote.totalMinor, quote.currency)}`
+                : loading
+                  ? "Checking price…"
+                  : ""}
+            </p>
+            {stepButtons("Continue to payment", addons !== null)}
+          </>
+        )}
+        {settled && step === "payment" && (
+          <>
+            <button type="button" className="underline" onClick={() => goBack(previous)}>
+              Back
+            </button>
+            <label className="block">
+              Payment preference
+              <select
+                className={field}
+                required
+                value={method}
+                onChange={(event) => setPayment(event.target.value as typeof payment)}
+              >
+                {!method && <option value="">Choose a payment method</option>}
+                {paymentMethods.map((value) => (
+                  <option key={value} value={value}>
+                    {bookingPagePaymentMethodLabels[value]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {tooSoon.length > 0 && (
+              <p className="text-sm text-gray-600">
+                {tooSoon.map((value) => bookingPagePaymentMethodLabels[value]).join(" and ")}{" "}
+                {tooSoon.length > 1 ? "aren’t" : "isn’t"} available this close to check-in.
+              </p>
+            )}
+            {loading && <p role="status">Checking price…</p>}
+            {error && quote && (
+              <p role="alert">
+                {error}{" "}
+                <button className="underline" onClick={submit}>
+                  Get an updated price
+                </button>
+              </p>
+            )}
+          </>
+        )}
+        {step !== "rooms" && error && !quote && (
+          <p role="alert">
+            {error}{" "}
+            <button
+              className="underline"
+              onClick={() => {
+                changeChoices((current) =>
+                  current.map((choice) => ({ ...choice, publicOfferKey: "" })),
+                );
+                setReload((value) => value + 1);
+              }}
+            >
+              Reload room options
+            </button>
+          </p>
+        )}
+        {settled && step === "payment" && quote && (
+          <section
+            aria-label="Your stay price"
+            className="rounded-xl border border-gray-200 p-5 space-y-3"
+          >
+            <h2 className="text-xl font-semibold">Your stay price</h2>
+            <p>
+              {quote.checkIn} to {quote.checkOut}
+            </p>
+            <p className="text-2xl font-bold">
+              Total: {chargedMoney(quote.totalMinor, quote.currency)}
+            </p>
+            <p>Due now: {chargedMoney(quote.dueNowMinor, quote.currency)}</p>
+            <p>Due later: {chargedMoney(quote.dueLaterMinor, quote.currency)}</p>
+            <ApproximateAmountsNote currency={quote.currency} />
+            <ReplacementQuoteTerms
+              quote={quote}
+              onAcknowledgementChange={setTermsAcknowledgement}
+              roomNames={Object.fromEntries(
+                choices.map((choice) => [
+                  choice.selectionId,
+                  rooms?.find((room) =>
+                    room.offers.some((offer) => offer.publicOfferKey === choice.publicOfferKey),
+                  )?.name ?? "",
+                ]),
+              )}
+            />
+            <ReplacementGuestRules
+              key={quote.quoteId}
+              slug={slug}
+              quote={quote}
+              onAcknowledgementChange={setGuestDisclosure}
+              onRulesChange={setGuestRules}
+            />
+            {pagePayment.termsText && <BookingPageTerms text={pagePayment.termsText} />}
+            <ReplacementBookingConfirmation
+              key={quote.quoteId}
+              slug={slug}
+              quote={quote}
+              disclosure={guestDisclosure}
+              rules={guestRules?.quoteId === quote.quoteId ? guestRules.choices : null}
+              termsAccepted={termsAcknowledgement?.quoteId === quote.quoteId}
+              hotelTerms={pagePayment.termsText !== null}
+            />
+          </section>
+        )}
+      </div>
+    </BookShell>
   );
 }

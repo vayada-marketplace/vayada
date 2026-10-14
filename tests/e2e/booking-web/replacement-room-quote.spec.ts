@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
+import { continueToPayment } from "../support/bookFlow";
 
 const firstKey = `pricing-offer.v2:${"a".repeat(64)}`;
 const breakfastId = "22222222-2222-4222-8222-222222222222";
@@ -76,6 +77,8 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   });
   let submitted: any;
   let requests = 0;
+  // Generous by default; the test shortens it to watch a price expire.
+  let lifetimeMs = 60_000;
   await page.route("**/bookings/quote", (route) => {
     submitted = route.request().postDataJSON();
     requests++;
@@ -91,7 +94,7 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
       paymentMethod,
       acceptanceMode: "instant",
       issuedAt: new Date(Date.now() - 1000).toISOString(),
-      expiresAt: new Date(Date.now() + (requests === 1 ? 8000 : 2500)).toISOString(),
+      expiresAt: new Date(Date.now() + lifetimeMs).toISOString(),
       totalMinor: withExtra ? "32000" : "31500",
       dueNowMinor: "0",
       dueLaterMinor: withExtra ? "32000" : "31500",
@@ -123,28 +126,37 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   await first.getByRole("button", { name: "Add child to room 1" }).click();
   await second.getByLabel("Room and meal option").selectOption(secondKey);
   await second.getByLabel(/Adults/).fill("1");
-  await page.getByLabel("Payment preference").selectOption("pay_at_property");
   await page.getByLabel("Promo code (optional)").fill("SAVE10");
-  await expect(page.getByRole("button", { name: "Get price", exact: true })).toBeDisabled();
+  const next = page.getByRole("button", { name: "Continue", exact: true });
+  await expect(next).toBeDisabled();
   expect(requests).toBe(0);
   await expect(
     first.getByLabel("Child 1: age at check-in").getByRole("option", { name: "17", exact: true }),
   ).toHaveCount(1);
   await first.getByLabel("Child 1: age at check-in").selectOption("0");
+  await next.click();
+  // VAY-2195: the extras are their own step, priced as they change.
+  await expect(page).toHaveURL(/[?&]step=extras/);
+  await expect(page.getByRole("status").filter({ hasText: "Your stay with extras" })).toContainText(
+    "EUR 315.00",
+  );
   const extras = page.getByRole("region", { name: "Optional extras" });
+  const toPayment = page.getByRole("button", { name: "Continue to payment" });
   await extras.getByLabel("Add Extra breakfast", { exact: true }).check();
-  const getPrice = page.getByRole("button", { name: "Get price", exact: true });
-  await expect(getPrice).toBeDisabled();
+  await expect(toPayment).toBeDisabled();
   await expect(extras.getByLabel("2026-10-03", { exact: true })).toHaveCount(0);
   await extras.getByLabel("Room 1, child 1 (age 0 at check-in)", { exact: true }).check();
-  await expect(getPrice).toBeDisabled();
+  await expect(toPayment).toBeDisabled();
   await extras.getByLabel("2026-10-02", { exact: true }).check();
-  await expect(getPrice).toBeEnabled();
+  await expect(toPayment).toBeEnabled();
   await extras.getByLabel("2026-10-02", { exact: true }).uncheck();
-  await expect(getPrice).toBeDisabled();
-  expect(requests).toBe(0);
+  await expect(toPayment).toBeDisabled();
   await extras.getByLabel("2026-10-02", { exact: true }).check();
-  await page.getByRole("button", { name: "Get price", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Your stay with extras" })).toContainText(
+    "EUR 320.00",
+  );
+  await toPayment.click();
+  await expect(page.getByLabel("Payment preference")).toHaveValue("pay_at_property");
   await expect(page.getByText("Total: EUR 320.00", { exact: true })).toBeVisible();
   const acknowledgement = page.getByLabel(
     "I have read the room and rate terms for this price preview.",
@@ -186,11 +198,15 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
     },
   ]);
   expect(new Set(submitted.selection.rooms.map((room: any) => room.selectionId)).size).toBe(2);
+  // Back to the rooms: a changed child retires the extras and the price, and its terms.
+  await page.goBack();
+  await page.goBack();
+  await expect(page).not.toHaveURL(/[?&]step=/);
+  lifetimeMs = 2500;
   await first.getByLabel("Child 1: age at check-in").selectOption("7");
-  await expect(page.getByRole("region", { name: "Your stay price" })).toHaveCount(0);
-  await expect(guestAcknowledgement).toHaveCount(0);
+  await next.click();
   await expect(extras.getByLabel("Add Extra breakfast", { exact: true })).not.toBeChecked();
-  await page.getByRole("button", { name: "Get price", exact: true }).click();
+  await toPayment.click();
   await expect(page.getByText("Total: EUR 315.00", { exact: true })).toBeVisible();
   await expect(acknowledgement).not.toBeChecked();
   await expect(guestAcknowledgement).not.toBeChecked();
@@ -199,11 +215,13 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   await expect(page.getByRole("region", { name: "Your stay price" })).toBeVisible();
   await expect(acknowledgement).toBeDisabled();
   await expect(guestAcknowledgement).toBeDisabled();
-  await page.getByRole("button", { name: "Get price", exact: true }).click();
+  lifetimeMs = 60_000;
+  await page.getByRole("button", { name: "Get an updated price" }).click();
   await expect(page.getByText("Total: EUR 315.00", { exact: true })).toBeVisible();
+  await expect(acknowledgement).toBeEnabled();
   await page.screenshot({ path: testInfo.outputPath("room-quote-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole("button", { name: "Get price", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Confirm booking" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
@@ -230,7 +248,7 @@ test("retries unavailable catalogue without inventing a room option", async ({
   unavailable = false;
   await page.getByRole("button", { name: "Retry room options" }).click();
   await expect(page.getByText("Room options are currently unavailable.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Get price", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Continue", exact: true })).toHaveCount(0);
 });
 
 test("keeps the charged currency first when the guest views prices in another currency", async ({
@@ -302,8 +320,7 @@ test("keeps the charged currency first when the guest views prices in another cu
   const room = page.getByRole("group", { name: "Room 1", exact: true });
   await room.getByLabel("Room and meal option").selectOption(firstKey);
   await room.getByLabel(/Adults/).fill("2");
-  await page.getByLabel("Payment preference").selectOption("pay_at_property");
-  await page.getByRole("button", { name: "Get price", exact: true }).click();
+  await continueToPayment(page, { method: "pay_at_property" });
 
   await expect(page.getByText("Total: EUR 315.00 (≈ US$347)", { exact: true })).toBeVisible();
   await expect(page.getByText("Due later: EUR 315.00 (≈ US$347)", { exact: true })).toBeVisible();

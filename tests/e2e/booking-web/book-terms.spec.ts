@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
+import { continueToPayment } from "../support/bookFlow";
 
 const offerKey = `pricing-offer.v2:${"c".repeat(64)}`;
 const terms = "These are our house terms.\n\n1. Your booking\nWe confirm by email.";
@@ -116,8 +117,7 @@ async function openQuote(page: Page, termsText: string) {
   const room = page.getByRole("group", { name: "Room 1", exact: true });
   await room.getByLabel("Room and meal option").selectOption(offerKey);
   await room.getByLabel(/Adults/).fill("2");
-  await page.getByLabel("Payment preference").selectOption("pay_at_property");
-  await page.getByRole("button", { name: "Get price", exact: true }).click();
+  await continueToPayment(page, { method: "pay_at_property" });
   await expect(page.getByText("Total: EUR 240.00", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Our guest rules" })).toBeVisible();
 }
