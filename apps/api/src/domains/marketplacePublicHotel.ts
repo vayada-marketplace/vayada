@@ -85,13 +85,13 @@ export async function projectMarketplaceSubmission(
     const current = resolved.batch.media.find(
       (value) => value.mediaObjectId === item.mediaObjectId.toLowerCase(),
     );
-    const expectedPurpose =
+    // Setup uploads every hotel photo as a gallery image and lets the hotel pick the cover, as
+    // the presentation command allows; only the logo has an upload purpose of its own.
+    const allowedPurposes: readonly string[] =
       item.mediaType === "logo"
-        ? "property.logo"
-        : item.mediaType === "hero_image"
-          ? "property.hero_image"
-          : "property.gallery_image";
-    if (!current || current.purpose !== expectedPurpose) return null;
+        ? ["property.logo"]
+        : ["property.hero_image", "property.gallery_image"];
+    if (!current || !allowedPurposes.includes(current.purpose)) return null;
     media.push({
       mediaType: item.mediaType,
       url: current.publicVariants.find((variant) => variant.variantName === "original_safe")!

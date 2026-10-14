@@ -6,12 +6,13 @@ import {
 } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
 import { baseAmounts, decimalAmount } from "./pricingAmounts";
-import { adjustmentText, currencySymbol } from "./stepPricing";
+import { adjustmentText, currencySymbol, money } from "./stepPricing";
 import { StepCard } from "./StepCard";
 import * as ui from "./pricingStyles";
 
-/** Step 1: the main option's normal price. Typing keeps the editor's `ri:oi:ai` inputs, so saving parses them as
- * before. A price per guest count shows one field per amount; the accessible names stay "<room> Offer N <amount>". */
+/** The card's price section: the main option's normal price. Typing keeps the editor's `ri:oi:ai` inputs, so saving
+ * parses them as before. A price per guest count shows one field per amount; the accessible names stay "<room> Offer
+ * N <amount>". A main price with a meal says so, and its Edit opens the option's window. */
 export function StepPrice({
   room,
   roomIndex,
@@ -20,6 +21,7 @@ export function StepPrice({
   inputs,
   disabled,
   onInput,
+  onEditMeal,
 }: {
   room: PricingConfiguration;
   roomIndex: number;
@@ -28,6 +30,7 @@ export function StepPrice({
   inputs: Record<string, string>;
   disabled: boolean;
   onInput: (key: string, value: string) => void;
+  onEditMeal: () => void;
 }) {
   const { t } = useTranslation();
   const offer = room.offers[offerIndex];
@@ -49,12 +52,9 @@ export function StepPrice({
           .join(" · ")
       : "";
   const key = (ai: number) => `${roomIndex}:${offerIndex}:${ai}`;
+  const meal = offer.meal;
   return (
-    <StepCard
-      number={1}
-      title={t("pricing.steps.price.title")}
-      hint={t("pricing.steps.price.hint")}
-    >
+    <StepCard title={t("pricing.steps.price.title")}>
       {!base ? (
         <p className={ui.stepHint}>{t("pricing.steps.price.noBase")}</p>
       ) : (
@@ -85,12 +85,17 @@ export function StepPrice({
             {t(
               base.mode === "per_person"
                 ? "pricing.steps.price.perAdultNight"
-                : "pricing.steps.price.perNight",
+                : base.mode === "flat"
+                  ? "pricing.simple.perRoomNight"
+                  : "pricing.steps.price.perNight",
             )}
           </span>
-          <span className="flex h-12 items-center rounded-[10px] border border-gray-200 px-3.5 text-[14px] text-gray-700">
-            {room.currency}
-          </span>
+          {/* The field shows the symbol; a currency without one (CHF) is named here. */}
+          {!symbol && (
+            <span className="flex h-12 items-center rounded-[10px] border border-gray-200 px-3.5 text-[14px] text-gray-700">
+              {room.currency}
+            </span>
+          )}
           {/* Included-guest prices change by guest count; the option's Edit window edits these steps. */}
           {base.mode === "included_guests" && (
             <p className={`w-full ${ui.stepHint}`}>
@@ -104,6 +109,34 @@ export function StepPrice({
           )}
         </div>
       )}
+      {/* What the price includes, with the option's window (meal, cancellation and payment details) behind Edit. */}
+      <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[14px] text-gray-600">
+        {meal.kind === "room_only"
+          ? t("pricing.simple.roomOnly")
+          : t("pricing.simple.mealIncluded", {
+              meal: t(`pricing.meal.${meal.kind}`),
+              amount: t(
+                meal.charge.kind === "room"
+                  ? "pricing.simple.extras.perRoomAmount"
+                  : "pricing.simple.extras.perAdultAmount",
+                {
+                  amount: money(
+                    meal.charge.kind === "room" ? meal.charge.amountMinor : meal.charge.adultMinor,
+                    room.currency,
+                  ),
+                },
+              ),
+            })}
+        <button
+          type="button"
+          aria-label={t("pricing.simple.mealEdit")}
+          disabled={disabled}
+          onClick={onEditMeal}
+          className={ui.stepLink}
+        >
+          {t("pricing.steps.options.edit")}
+        </button>
+      </p>
     </StepCard>
   );
 }

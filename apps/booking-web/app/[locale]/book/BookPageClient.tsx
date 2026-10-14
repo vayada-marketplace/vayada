@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import ReplacementGuestRules from "@/components/booking/ReplacementGuestRules";
 import ReplacementQuoteExtras from "@/components/booking/ReplacementQuoteExtras";
 import { getReplacementAddons, type PricingAddon } from "@/services/api/replacementAddons";
@@ -24,13 +25,13 @@ import {
 } from "@/services/api/bookingPagePaymentMethods";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import { useCurrency } from "@/contexts/CurrencyContext";
-import { useSlug } from "@/contexts/HotelContext";
+import { useHotel, useSlug } from "@/contexts/HotelContext";
+import { choiceKeys, choiceText } from "@/lib/roomChoices";
 import { useReplacementQuote } from "@/lib/hooks/useReplacementQuote";
 import {
   displayQuoteMoney,
   getReplacementOffers,
   quoteMoneyAmount,
-  mealLabels,
   roomQuoteRequest,
   type PricingRoom,
   type RoomChoice,
@@ -51,6 +52,8 @@ export default function BookPageClient() {
 }
 
 function RoomQuoteForm({ slug }: { slug: string }) {
+  const t = useTranslations("home");
+  const { hotel } = useHotel();
   const [termsAcknowledgement, setTermsAcknowledgement] =
     useState<QuoteTermsAcknowledgement | null>(null);
   const [guestDisclosure, setGuestDisclosure] = useState<PublicQuoteGuestDisclosure | null>(null);
@@ -86,12 +89,26 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     setCheckOut(params.get("checkOut") ?? "");
     setPromoCode(params.get("promoCode") ?? "");
     // The hotel page hands over its party as a first room the guest can adjust or split;
-    // child ages stay blank until chosen.
+    // child ages stay blank until chosen. A room card also hands over its choice and the rooms
+    // the party needs (VAY-2190): adults spread evenly, children in the first room.
     const adults = Number(params.get("adults"));
     if (Number.isInteger(adults) && adults >= 1 && adults <= 99) {
       const children = Math.trunc(Number(params.get("children")) || 0);
       const childCount = Math.min(Math.max(children, 0), 99 - adults);
-      setChoices([{ ...newRoom(), adults: String(adults), childAges: Array(childCount).fill("") }]);
+      const offer = params.get("offer") ?? "";
+      const roomCount = Math.min(
+        Math.max(Math.trunc(Number(params.get("rooms")) || 1), 1),
+        adults,
+        9,
+      );
+      setChoices(
+        Array.from({ length: roomCount }, (_, index) => ({
+          ...newRoom(),
+          publicOfferKey: /^pricing-offer\.v2:[a-f0-9]{64}$/.test(offer) ? offer : "",
+          adults: String(Math.floor(adults / roomCount) + (index < adults % roomCount ? 1 : 0)),
+          childAges: index === 0 ? Array(childCount).fill("") : [],
+        })),
+      );
     }
   }, []);
   const [payment, setPayment] = useState<"" | PricingPaymentMethod>("");
@@ -123,7 +140,15 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     setCatalogError(false);
     void getReplacementOffers(slug, controller.signal)
       .then((value) => {
-        if (!controller.signal.aborted) setRooms(value);
+        if (controller.signal.aborted) return;
+        setRooms(value);
+        // A choice handed over by a room card that is no longer offered is chosen again.
+        const offered = new Set(value.flatMap(({ offers }) => offers.map((o) => o.publicOfferKey)));
+        setChoices((current) =>
+          current.map((choice) =>
+            offered.has(choice.publicOfferKey) ? choice : { ...choice, publicOfferKey: "" },
+          ),
+        );
       })
       .catch(() => {
         if (!controller.signal.aborted) setCatalogError(true);
@@ -232,16 +257,26 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                   }
                 >
                   <option value="">Choose an option</option>
-                  {rooms.map((room) => (
-                    <optgroup key={room.roomTypeId} label={room.name}>
-                      {room.offers.map((offer, offerIndex) => (
-                        <option key={offer.publicOfferKey} value={offer.publicOfferKey}>
-                          {room.name} — {mealLabels[offer.mealPlan]} — option {offerIndex + 1} (
-                          {offer.currency})
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
+                  {rooms.map((room) => {
+                    // The plain names the room cards use: "Deluxe Double Room — Non-refundable".
+                    const keys = choiceKeys(room.offers);
+                    return (
+                      <optgroup key={room.roomTypeId} label={room.name}>
+                        {room.offers.map((offer, offerIndex) => (
+                          <option key={offer.publicOfferKey} value={offer.publicOfferKey}>
+                            {room.name} —{" "}
+                            {
+                              choiceText(
+                                keys[offerIndex]!,
+                                { checkIn, timezone: hotel?.timezone, formatDate: (date) => date },
+                                t,
+                              ).name
+                            }
+                          </option>
+                        ))}
+                      </optgroup>
+                    );
+                  })}
                 </select>
               </label>
               <label className="block">

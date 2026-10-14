@@ -50,13 +50,7 @@ export function GuestPreview({
         : 0;
     if (saving > 0)
       return { text: t("pricing.steps.guests.save", { percent: saving }), green: true };
-    if (offer.meal.kind !== "room_only")
-      return {
-        text: t("pricing.steps.guests.included", {
-          meal: t(`pricing.steps.meal.${offer.meal.kind}`),
-        }),
-        green: false,
-      };
+    // The option's name already says its meal (VAY-2188), so the line says its cancellation.
     // Free cancellation ends `freeCancellationDeadlineDays` before arrival; a sample stay inside that window has none.
     const cancellation = terms[offer.id]?.cancellation;
     if (!cancellation) return { text: "", green: false };

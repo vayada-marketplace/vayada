@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { createFinancePaymentReadinessSnapshot } from "@vayada/domain-finance";
 import { createMarketplaceHotelCollaborationPreferencesEvidence } from "@vayada/domain-marketplace";
 import {
   PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
@@ -137,6 +138,17 @@ export async function mockAdaptiveSetupOwnerReads(page: Page) {
       acceptanceEnabled: false,
       readyMethods: [],
     },
+    // The Pricing step reads how guests pay from the Payments step: pay at the hotel (VAY-2188).
+    [`/api/finance/properties/${propertyId}/payment-readiness`]:
+      createFinancePaymentReadinessSnapshot({
+        propertyId,
+        selectedMethods: ["pay_at_property"],
+        paymentMethodsRevision: 1,
+        committedPricing: pricingCurrency(),
+        currentPricing: pricingCurrency(),
+        onlineCardReadiness: "execution_unavailable",
+        updatedAt: acceptedAt,
+      }),
     // The Guest experience step: no confirmed guest rules or saved terms yet (terms: VAY-2176).
     [`/api/booking/properties/${propertyId}/guest-rules`]: { current: null },
     [`/api/booking/properties/${propertyId}/guest-terms`]: { termsText: null },
@@ -179,6 +191,14 @@ export async function mockAdaptiveSetupOwnerReads(page: Page) {
   await page.route("https://fonts.googleapis.com/**", (route) =>
     route.fulfill({ status: 200, contentType: "text/css", body: "" }),
   );
+}
+
+function pricingCurrency() {
+  return {
+    contractVersion: PMS_PRICING_CONTRACT_VERSION,
+    currency: "EUR",
+    pricingCurrencyRevision: 2,
+  };
 }
 
 export function roomList() {
