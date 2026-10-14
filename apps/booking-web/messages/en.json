@@ -158,7 +158,9 @@
     "tooManyGuests": "This room fits up to {count, plural, one {# guest} other {# guests}}. Choose a bigger room, or book more than one room.",
     "promoNotApplied": "Your code {code} doesn't apply to this stay.",
     "noChildren": "This room doesn't take children. Choose another room for your group.",
-    "percentOff": "-{percent}% OFF"
+    "percentOff": "-{percent}% OFF",
+    "closeRoomDetails": "Close room details",
+    "soldOutForDates": "Sold out for your dates"
   },
   "rooms": {
     "title": "Our Rooms",

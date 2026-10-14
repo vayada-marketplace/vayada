@@ -199,3 +199,27 @@ test("lets the guest choose again when the card's choice is no longer offered", 
   await expect(room.getByLabel("Room and meal option")).toHaveValue("");
   await expect(page.getByRole("group", { name: "Room 2" })).toHaveCount(0);
 });
+
+test("shows a room's details with its choices, as the old page did", async ({ page }, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  await mockBookingApis(page);
+  await mockRooms(page);
+  await page.goto(STAY);
+
+  const deluxe = page.getByTestId("room-card-deluxe");
+  await deluxe.getByRole("button", { name: "View Details" }).click();
+  const dialog = page.getByRole("dialog", { name: "Deluxe Double Room" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Our quietest room, facing the garden.")).toBeVisible();
+  await expect(dialog.getByText("Desk")).toBeVisible();
+  await expect(dialog.locator("[data-offer-key]")).toHaveCount(3);
+  await page.screenshot({ path: testInfo.outputPath("room-details.png") });
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+
+  await deluxe.getByRole("button", { name: "View Details" }).click();
+  await dialog.locator(`[data-offer-key="${key("c")}"]`).click();
+  await dialog.getByRole("button", { name: "Select This Rate" }).click();
+  await expect(page).toHaveURL(new RegExp(`/(en/)?book\\?.*offer=${encodeURIComponent(key("c"))}`));
+  await assertHealthy();
+});

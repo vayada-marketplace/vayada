@@ -158,7 +158,9 @@
     "tooManyGuests": "Cette chambre accueille jusqu'à {count, plural, one {# personne} other {# personnes}}. Choisissez une chambre plus grande ou réservez plusieurs chambres.",
     "promoNotApplied": "Votre code {code} ne s'applique pas à ce séjour.",
     "noChildren": "Cette chambre n'accueille pas d'enfants. Choisissez une autre chambre pour votre groupe.",
-    "percentOff": "-{percent} %"
+    "percentOff": "-{percent} %",
+    "closeRoomDetails": "Fermer les détails de la chambre",
+    "soldOutForDates": "Complet pour vos dates"
   },
   "rooms": {
     "title": "Nos chambres",
