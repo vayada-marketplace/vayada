@@ -103,16 +103,14 @@ const field = (label: string) => view.root.findByProps({ "aria-label": label });
 const fill = async (label: string, value: string) =>
   act(async () => field(label).props.onChange({ target: { value } }));
 const text = () => JSON.stringify(view.toJSON());
-/** Step 1-3's answers for a €120 non-refundable room, without pressing Continue. */
+/** The first-price form's answers for a €120 non-refundable room paid at the property (Payment settings can't be read
+ * here, so the form asks how guests pay). */
 const answer = async () => {
   await fill("Room price per night", "120");
-  await click("No, non-refundable");
+  await click("Non-refundable");
   await act(async () =>
     view.root.findByType(AcceptedPaymentMethods).props.onChange(["pay_at_property"]),
   );
-  await fill("Adult pricing starts at age (1–18)", "12");
-  await fill("Price per child per night (0 is allowed)", "0");
-  await click("Yes");
 };
 
 beforeEach(() => {
@@ -132,9 +130,9 @@ afterEach(() => {
 
 it("starts empty and optional, with the page's button in place of Save prices (VAY-2147)", async () => {
   await mount();
-  expect(text()).toContain("Optional: you can also set prices later");
-  expect(text()).toContain("the prices are saved when the room is created.");
-  expect(text()).not.toContain("then press Save prices");
+  expect(text()).toContain("Prices are optional here.");
+  expect(text()).toContain("it is saved together with the room when you press Create Room Type.");
+  expect(text()).not.toContain("press Save prices");
   expect(view.root.findByType(StepFirstPrices).props).toMatchObject({
     rooms: [setupRoom],
     fixedCurrency: "EUR",
@@ -161,10 +159,8 @@ it("takes first answers given without Continue, and shows what is missing", asyn
   expect(text()).toContain(
     "By creating the room type, you confirm these prices include all mandatory taxes and fees.",
   );
-  // The step shows what is missing, as Continue would.
-  await act(async () =>
-    expect(() => take.current!()).toThrow("Complete every required pricing and policy setting."),
-  );
+  // The form shows what is missing (here: how guests pay).
+  await act(async () => expect(() => take.current!()).toThrow("Fill in what is still missing:"));
   expect(view.root.findAllByProps({ role: "alert" }).length).toBeGreaterThan(0);
   await answer();
   const prices = take.current!()!;
@@ -187,7 +183,7 @@ it("takes first answers given without Continue, and shows what is missing", asyn
   expect(client.termsAction).not.toHaveBeenCalled();
 });
 
-it("after Continue, takes the edited room and its options' terms; an open window or a bad amount stops it", async () => {
+it("after Enter adds them, takes the edited room and its options' terms; an open window or a bad amount stops it", async () => {
   await mount();
   await answer();
   await act(async () => view.root.findByType("form").props.onSubmit({ preventDefault() {} }));

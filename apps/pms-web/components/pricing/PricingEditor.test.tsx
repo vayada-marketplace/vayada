@@ -584,9 +584,12 @@ it.each([new Error("lost preparation response")])(
       freeDays: "",
       payment: "full",
     });
-    await act(async () => view.root.findByType(StepFirstPrices).props.onCreate(input));
-    expect(client.termsAction).not.toHaveBeenCalled();
-    await click("Save prices");
+    // VAY-2188: the first prices save at once.
+    await act(async () =>
+      view.root
+        .findByType(StepFirstPrices)
+        .props.onCreate({ configuration: input.configuration, terms: [input.terms] }, "save"),
+    );
     expect(button("Reload pricing").props.disabled).toBe(true);
     await click("Retry last action");
     expect(policy).toHaveBeenCalledOnce();
@@ -4163,8 +4166,10 @@ it("starts an unpriced room with the first setup in the property currency and pu
   const policy = vi.fn().mockResolvedValue({ revision: familyId }); client.termsAction.mockReturnValue(policy);
   await mountRoom();
   expect(view.root.findByType(StepFirstPrices).props).toMatchObject({ rooms: [familySetup], fixedCurrency: "EUR" });
-  expect(button("Save prices")).toBeUndefined(); expect(view.root.findAllByType(PricingStayPreview)).toHaveLength(0);
-  await act(async () => view.root.findByType(StepFirstPrices).props.onCreate(familyInput("90"))); await click("Save prices");
+  // The first-price form has its own Save; the bar's comes with prices.
+  expect(view.root.findAllByType("button").filter((node) => node.props.type !== "submit" && node.children.includes("Save prices"))).toHaveLength(0); expect(view.root.findAllByType(PricingStayPreview)).toHaveLength(0);
+  const first = familyInput("90");
+  await act(async () => view.root.findByType(StepFirstPrices).props.onCreate({ configuration: first.configuration, terms: [first.terms] }, "save"));
   expect(saved.baseRevision).toBe(3); expect(saved.snapshot.rooms.map((room) => [room.roomTypeId, room.revision])).toEqual([["room", 4], [familyId, 4]]);
   expect(saved.snapshot.rooms[0]).toEqual({ ...snapshot.rooms[0], revision: 4 }); expect(policy).toHaveBeenCalledOnce();
 });

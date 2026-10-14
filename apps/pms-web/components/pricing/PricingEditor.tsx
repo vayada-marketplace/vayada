@@ -42,7 +42,9 @@ import { keptSettings, MoreGroup, SimpleGuests, SimplePayment, simpleSummary } f
 import { PresetWindow } from "./PresetWindow";
 import { AddOptionButton, StepOptions } from "./StepOptions";
 import { StepStayRules } from "./StepStayRules";
-import { StepFirstPrices } from "./StepFirstPrices";
+import { StepFirstPrices, type FirstPrices, type FirstThen } from "./StepFirstPrices";
+import { paymentSettingsMethods } from "./pricingPaymentDefaults";
+import type { PaymentMethod } from "./AcceptedPaymentMethods";
 import { GuestPreview } from "./GuestPreview";
 import { PriceCalendar } from "./PriceCalendar";
 import { OptionWindow } from "./OptionWindow";
@@ -75,6 +77,9 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   // The guest preview's sample stay (a picked calendar night, or the next weekend), the calendar's month and option.
   const [stayStart, setStayStart] = useState<string | null>(null), [shownMonth, setShownMonth] = useState<string | null>(null), [previewOffer, setPreviewOffer] = useState<string | null>(null);
   const [addingOfferRoom, setAddingOfferRoom] = useState<string | null>(null);
+  // A first price's ways to pay from Payment settings (undefined: loading; null: unknown), and a season window to open
+  // once "Add a season" has added the first prices (VAY-2188).
+  const [defaultMethods, setDefaultMethods] = useState<readonly PaymentMethod[] | null | undefined>(undefined), [seasonOnStart, setSeasonOnStart] = useState(false);
   const [pendingEntries, setPendingEntries] = useState<Record<string, boolean>>({});
   const exclusiveEditPending = addingOfferRoom !== null || preset !== null || Object.entries(pendingEntries).some(([key, pending]) => (key.startsWith("ownership:") || key.startsWith("mealPlan:") || key.startsWith("parent:") || key.startsWith("included:") || key.startsWith("policy:")) && pending);
   const hasPendingEntries = addingOfferRoom !== null || preset !== null || Object.values(pendingEntries).some(Boolean);
@@ -254,7 +259,11 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     if (!current || hasPendingEntries || done || !(dirty || stale)) return;
     let edited: PricingSnapshot;
     try { edited = editedSnapshot(current, inputs); } catch (e) { setError(e); return; }
-    const step = pricingSave(client, { snapshot: edited, baseRevision, terms: Object.values(policyEdits) });
+    publish(edited, Object.values(policyEdits));
+  }
+  /** Publishes `edited` with these terms (see `pricingSave`); the room's first prices go through it straight away. */
+  function publish(edited: PricingSnapshot, terms: PricingTermsInput[]) {
+    const step = pricingSave(client, { snapshot: edited, baseRevision, terms });
     void run(async () => {
       const attached = await step();
       if (!alive.current) return;
@@ -263,7 +272,25 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
       callbacks.current.onPublished?.();
     }, financeNotReady);
   }
-  const firstPrices = useRef<(() => ReturnType<typeof firstPricingInput>) | null>(null);
+  /** The room's first prices (VAY-2188): added to the draft with their options' terms, then saved at once, left
+   * unsaved (the New room page saves them with the room), or left unsaved with the season window opening. */
+  function startFirst(input: FirstPrices, then: FirstThen) {
+    if (locked.current || busy || retry || needsReload || done) return;
+    const configuration = input.configuration;
+    if (configuration.roomTypeId !== focus || (current && (current.currency !== configuration.currency || current.rooms.some((room) => room.roomTypeId === focus))) ||
+        !setup?.rooms.some((room) => room.roomTypeId === focus) || setup.propertyId !== configuration.propertyId) { setError(new PricingError("pricing.editor.errorUnconfiguredRoom")); return; }
+    let existing: PricingSnapshot | null;
+    try { existing = current ? editedSnapshot(current, inputs) : null; } catch (e) { setError(e); return; }
+    const room = { ...configuration, revision: baseRevision + 1 };
+    const snapshot = { currency: room.currency, rooms: [...(existing?.rooms ?? []), room], ownerReferences: existing?.ownerReferences ?? { finance: "" } };
+    const edits = { ...policyEdits };
+    for (const terms of input.terms) { const key = policyKey(terms.roomTypeId, terms.offerId); policyBases.current[key] = terms.expectedRevision; edits[key] = terms; }
+    setPolicyEdits(edits); setCurrent(snapshot); setInputs({}); setDirty(true); setError(null);
+    setNotice(newRoom ? "pricing.newRoom.noticeAdded" : then === "save" ? "" : "pricing.editor.noticeSetupAdded");
+    if (then === "season") setSeasonOnStart(true);
+    if (then === "save" && !newRoom) publish(snapshot, Object.values(edits));
+  }
+  const firstPrices = useRef<(() => FirstPrices) | null>(null);
   /** The New room page's prices: the room as edited and its options' terms; unapplied first answers count, an open
    * window or an amount that does not parse stops the create. While loading there are none ("Remove prices" reloads). */
   function takeNewRoomPrices(): NewRoomPrices | null {
@@ -272,7 +299,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     const room = current && focusRoom ? editedSnapshot(current, inputs).rooms.find((value) => value.roomTypeId === focus) : undefined;
     if (room) return { room, terms: Object.values(policyEdits).filter((terms) => terms.roomTypeId === focus) };
     const first = dirty ? firstPrices.current?.() : undefined;
-    return first ? { room: { ...first.configuration, revision: baseRevision + 1 }, terms: [first.terms] } : null;
+    return first ? { room: { ...first.configuration, revision: baseRevision + 1 }, terms: first.terms } : null;
   }
   const take = newRoom?.take;
   useEffect(() => { if (!take) return; take.current = takeNewRoomPrices; return () => { take.current = null; }; }); // Gone with the tab.
@@ -281,6 +308,13 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
   // Edits survive a reload after a conflict; a denial (no permission) would only be refused again.
   const keepsOnReload = needsReload && dirty && !(error instanceof ApiErrorResponse && error.status === 403);
   const roomSetup = setup?.rooms.filter((room) => room.roomTypeId === focus) ?? [];
+  const firstTime = !loading && !focusRoom && roomSetup.length > 0;
+  useEffect(() => {
+    if (!firstTime) return;
+    let live = true;
+    void paymentSettingsMethods(client).then((methods) => { if (live) setDefaultMethods(methods); });
+    return () => { live = false; };
+  }, [firstTime, client]);
   const focusIndex = display ? display.rooms.findIndex((room) => room.roomTypeId === focus) : -1, editing = focusIndex >= 0;
   const shownRooms = (display?.rooms ?? []).map((room, ri) => [room, ri] as const).filter(([room]) => room.roomTypeId === focus);
   const scale = display ? pricingCurrencyScale(display.currency)! : 2;
@@ -303,8 +337,9 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
     {notice && !(staleShown && notice === "pricing.room.noticeStale") && <p role="status" className={warning ? ui.warningBanner : ui.successBanner}>{t(notice)}</p>}
     {loading && <p role="status" className={ui.text}>{t("pricing.editor.loading")}</p>}
     {!loading && (display || empty) && !editing && <div className={setup && roomSetup.length ? "space-y-4" : ui.card}>
-      <div className="flex items-center justify-between gap-3"><h2 className={ui.cardHeading}>{t("pricing.room.title")}</h2><span className={`text-[11px] font-medium ${newRoom ? "text-gray-500" : "text-amber-600"}`}>{t(newRoom ? "pricing.newRoom.optional" : "pricing.room.notConfigured")}</span></div>
-      {setup && roomSetup.length ? <StepFirstPrices propertyId={setup.propertyId} rooms={roomSetup} fixedCurrency={display?.currency} disabled={disabled} onDirty={() => setDirty(true)} onCreate={createInitial} pending={newRoom ? firstPrices : undefined} /> : <p className={ui.text}>{t(setup ? "pricing.room.notReady" : "pricing.editor.setupUnavailable")}</p>}
+      {/* The first-price form says itself that the room has no price (VAY-2188). */}
+      {!(setup && roomSetup.length) && <div className="flex items-center justify-between gap-3"><h2 className={ui.cardHeading}>{t("pricing.room.title")}</h2><span className={`text-[11px] font-medium ${newRoom ? "text-gray-500" : "text-amber-600"}`}>{t(newRoom ? "pricing.newRoom.optional" : "pricing.room.notConfigured")}</span></div>}
+      {setup && roomSetup.length ? <StepFirstPrices propertyId={setup.propertyId} rooms={roomSetup} fixedCurrency={display?.currency} disabled={disabled} defaultMethods={defaultMethods} onDirty={() => setDirty(true)} onCreate={startFirst} pending={newRoom ? firstPrices : undefined} /> : <p className={ui.text}>{t(setup ? "pricing.room.notReady" : "pricing.editor.setupUnavailable")}</p>}
       {retry && <button disabled={busy} className={ui.secondaryButton} onClick={() => void run()}>{t("pricing.editor.retry")}</button>}</div>}
     {!loading && display && shownRooms.map(([room, ri]) => {
       const main = mainOffer(room), mi = room.offers.indexOf(main), mainLabel = offerLabel(room.roomTypeId, ri, mi);
@@ -338,7 +373,7 @@ export function PricingEditor({ client, roomNames = {}, roomFacts = {}, setup, r
           <StepCancellation simple={simple} terms={optionTerms} failed={termsFailed} disabled={disabled || hasPendingEntries} onTerms={applyTerms(room.roomTypeId)} onRetry={retryTerms} onEditOwn={() => setOptionOpen(main.id)} />
           {simple && <StepExtras room={room} simple={simple} prices={prices} disabled={disabled || (hasPendingEntries && !pendingEntries[`extras:${ri}`])}
             onAdd={(input) => createInitial(input, true, room.roomTypeId)} onRemove={(offerId) => { if (!disabled && !pendingBesidesExtras) setDeleting(offerId); }} onChange={changeRoom(ri)} onPending={pend(`extras:${ri}`)} />}
-          <StepSeasons room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onPending={pend(`stepSeason:${ri}`)}>
+          <StepSeasons room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onPending={pend(`stepSeason:${ri}`)} addOnMount={seasonOnStart} onAddStarted={() => setSeasonOnStart(false)}>
             <StepWeekends room={room} offer={main} label={mainLabel} disabled={disabled || exclusiveEditPending} onChange={changeRoom(ri)} onPending={pend(`stepWeekday:${ri}`)} />
           </StepSeasons>
         </div>

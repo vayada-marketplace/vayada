@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { PlusIcon } from "@heroicons/react/24/outline";
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { useTranslation } from "@/lib/i18n";
@@ -14,7 +14,8 @@ type Offer = PricingConfiguration["offers"][number];
 const tones = { low: "bg-amber-300", high: "bg-amber-500", normal: "bg-gray-300" };
 
 /** The card's "Busier dates": the main option's seasons as a list, each with its dates, price and Edit (the season
- * window), and "Add a season". `children` is the weekend row. Month prices are edited under More options. */
+ * window), and "Add a season". `children` is the weekend row. Month prices are edited under More options.
+ * `addOnMount`: the first-price form's "Add a season" added the prices; the new-season window opens straight away. */
 export function StepSeasons({
   room,
   offer,
@@ -22,6 +23,8 @@ export function StepSeasons({
   disabled,
   onChange,
   onPending,
+  addOnMount = false,
+  onAddStarted,
   children,
 }: {
   room: PricingConfiguration;
@@ -30,10 +33,18 @@ export function StepSeasons({
   disabled: boolean;
   onChange: (room: PricingConfiguration) => void;
   onPending: (pending: boolean) => void;
+  addOnMount?: boolean;
+  onAddStarted?: () => void;
   children?: ReactNode;
 }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState<number | "new" | null>(null);
+  useEffect(() => {
+    if (!addOnMount || disabled) return;
+    setEditing("new");
+    onPending(true);
+    onAddStarted?.();
+  }, [addOnMount, disabled, onPending, onAddStarted]);
   if (offer.price.kind !== "independent") return null;
   const { seasons, base } = offer.price.calendar;
   const normal = base ? BigInt(headlineMinor(base)) : null;
