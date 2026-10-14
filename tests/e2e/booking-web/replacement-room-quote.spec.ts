@@ -137,24 +137,29 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   await next.click();
   // VAY-2195: the extras are their own step, priced as they change.
   await expect(page).toHaveURL(/[?&]step=extras/);
-  await expect(page.getByRole("status").filter({ hasText: "Your stay with extras" })).toContainText(
-    "EUR 315.00",
-  );
+  const total = page.getByRole("status", { name: "Your stay total" });
+  await expect(total).toContainText("€315");
   const extras = page.getByRole("region", { name: "Optional extras" });
   const toPayment = page.getByRole("button", { name: "Continue to payment" });
-  await extras.getByLabel("Add Extra breakfast", { exact: true }).check();
-  await expect(toPayment).toBeDisabled();
-  await expect(extras.getByLabel("2026-10-03", { exact: true })).toHaveCount(0);
-  await extras.getByLabel("Room 1, child 1 (age 0 at check-in)", { exact: true }).check();
-  await expect(toPayment).toBeDisabled();
-  await extras.getByLabel("2026-10-02", { exact: true }).check();
+  // Added for every guest it can take and every night, like the old page.
+  await extras.getByRole("button", { name: "Add Extra breakfast" }).click();
+  const night = (day: string) => extras.getByRole("button", { name: `Extra breakfast on ${day}` });
+  await expect(extras.getByText("4/4", { exact: true })).toBeVisible();
+  await expect(night("Thu 1 Oct")).toHaveAttribute("aria-pressed", "true");
+  await expect(night("Fri 2 Oct")).toHaveAttribute("aria-pressed", "true");
+  await expect(night("Sat 3 Oct")).toHaveCount(0);
+  await night("Thu 1 Oct").click();
+  await expect(night("Thu 1 Oct")).toHaveAttribute("aria-pressed", "false");
+  // The last night stays: a nightly extra needs one.
+  await night("Fri 2 Oct").click();
+  await expect(night("Fri 2 Oct")).toHaveAttribute("aria-pressed", "true");
+  for (let i = 0; i < 3; i++)
+    await extras.getByRole("button", { name: "Fewer for Extra breakfast" }).click();
+  await expect(extras.getByText("1/4", { exact: true })).toBeVisible();
+  await expect(extras.getByRole("button", { name: "Fewer for Extra breakfast" })).toBeDisabled();
   await expect(toPayment).toBeEnabled();
-  await extras.getByLabel("2026-10-02", { exact: true }).uncheck();
-  await expect(toPayment).toBeDisabled();
-  await extras.getByLabel("2026-10-02", { exact: true }).check();
-  await expect(page.getByRole("status").filter({ hasText: "Your stay with extras" })).toContainText(
-    "EUR 320.00",
-  );
+  await expect(total).toContainText("€320");
+  await expect(extras.getByText("Your extras (1)")).toBeVisible();
   await toPayment.click();
   await expect(page.getByLabel("Payment preference")).toHaveValue("pay_at_property");
   await expect(page.getByText("Total: EUR 320.00", { exact: true })).toBeVisible();
@@ -193,7 +198,7 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
       version: "addon-selection.v2",
       id: breakfastId,
       quantity: 1,
-      people: [{ selectionId: submitted.selection.rooms[0].selectionId, kind: "child", index: 0 }],
+      people: [{ selectionId: submitted.selection.rooms[0].selectionId, kind: "adult", index: 0 }],
       dates: ["2026-10-02"],
     },
   ]);
@@ -205,7 +210,7 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   lifetimeMs = 2500;
   await first.getByLabel("Child 1: age at check-in").selectOption("7");
   await next.click();
-  await expect(extras.getByLabel("Add Extra breakfast", { exact: true })).not.toBeChecked();
+  await expect(extras.getByRole("button", { name: "Add Extra breakfast" })).toBeVisible();
   await toPayment.click();
   await expect(page.getByText("Total: EUR 315.00", { exact: true })).toBeVisible();
   await expect(acknowledgement).not.toBeChecked();

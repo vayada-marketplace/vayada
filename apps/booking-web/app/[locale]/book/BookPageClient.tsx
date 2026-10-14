@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import BookShell from "./BookShell";
 import ReplacementGuestRules from "@/components/booking/ReplacementGuestRules";
-import ReplacementQuoteExtras from "@/components/booking/ReplacementQuoteExtras";
+import ExtrasStep from "@/components/booking/ExtrasStep";
 import { getReplacementAddons, type PricingAddon } from "@/services/api/replacementAddons";
 import {
   buildReplacementAddonSelection,
@@ -53,6 +53,14 @@ import {
 
 const field = "block w-full rounded-lg border border-gray-300 p-3 mt-1 text-gray-900 bg-white";
 const button = "rounded-full bg-primary-600 px-5 py-3 font-semibold text-white disabled:opacity-40";
+/** "Fri", "6 Nov" for a stay date (YYYY-MM-DD). */
+const formatDay = (date: string) => {
+  const day = new Date(`${date}T00:00:00Z`);
+  return {
+    weekday: day.toLocaleDateString("en-GB", { weekday: "short", timeZone: "UTC" }),
+    day: day.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }),
+  };
+};
 const newRoom = (): RoomChoice => ({
   selectionId: crypto.randomUUID(),
   publicOfferKey: "",
@@ -153,6 +161,8 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     methods: ["card", "pay_at_property"],
     earliestArrival: {},
     termsText: null,
+    extras: {},
+    groupExtras: true,
   });
   const [pagePaymentLoaded, setPagePaymentLoaded] = useState(false);
   useEffect(() => {
@@ -242,7 +252,10 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     setFallback(0);
   };
   const { quote, error, errorStatus, loading, submit } = useReplacementQuote(slug, request);
-  const { approximate } = useCurrency();
+  const { approximate, formatPrice } = useCurrency();
+  // The old pages' prices: the charged currency ("€410"), then any approximation.
+  const money = (minor: string, currency: string) =>
+    formatPrice(quoteMoneyAmount(minor, currency), currency);
   // The charged amount in the quote currency, then any approximation in the guest's currency.
   const chargedMoney = (minor: string, currency: string) => {
     const approx = approximate(quoteMoneyAmount(minor, currency), currency);
@@ -335,16 +348,38 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       setFallback((value) => value + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [error]);
-  const stepButtons = (label: string, ready: boolean) => (
-    <div className="flex items-center justify-between gap-4 pt-2">
-      <button type="button" className="underline" onClick={() => goBack(previous)}>
-        Back
-      </button>
-      <button type="button" className={button} disabled={!ready} onClick={() => go(next)}>
-        {label}
-      </button>
-    </div>
+  // A room card's hand-off goes back to the cards; the room form goes back to itself.
+  const backToRooms = () => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.get("offer")) return goBack("rooms");
+    const home = new URLSearchParams();
+    for (const name of ["checkIn", "checkOut", "adults", "children", "promoCode"])
+      if (params.get(name)) home.set(name, params.get(name)!);
+    router.push(`/?${home}`);
+  };
+  const choiceName = (room: PricingRoom, publicOfferKey: string) => {
+    const index = room.offers.findIndex((offer) => offer.publicOfferKey === publicOfferKey);
+    return choiceText(
+      choiceKeys(room.offers)[index]!,
+      { checkIn, timezone: hotel?.timezone, formatDate: (date) => date },
+      t,
+    ).name;
+  };
+  const nights = Math.round((Date.parse(checkOut) - Date.parse(checkIn)) / 86_400_000);
+  const firstRoom = rooms?.find((room) =>
+    room.offers.some((offer) => offer.publicOfferKey === choices[0]?.publicOfferKey),
   );
+  const stayLine = [
+    choices.length === 1 && firstRoom
+      ? `${firstRoom.name} · ${choiceName(firstRoom, choices[0]!.publicOfferKey)}`
+      : `${choices.length} rooms`,
+    Number.isFinite(nights) ? `${nights} ${nights === 1 ? "night" : "nights"}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const missingDay = (addonCatalogue ?? []).find((addon) =>
+    extras?.items.some((item) => item.id === addon.id && item.dates.length === 0),
+  )?.name;
   const titles: Record<BookStep, string> = {
     rooms: "Choose rooms and get a price",
     extras: "Enhance your stay",
@@ -353,7 +388,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
 
   return (
     <BookShell steps={steps} current={step} title={titles[step]}>
-      <div className="max-w-3xl space-y-6">
+      <div className={step === "extras" ? "space-y-6" : "max-w-3xl space-y-6"}>
         {step !== "rooms" && !settled ? (
           <p role="status">Loading your booking…</p>
         ) : step !== "rooms" ? null : catalogError ? (
@@ -549,33 +584,96 @@ function RoomQuoteForm({ slug }: { slug: string }) {
         {settled && step === "extras" && (
           <>
             {addonError ? (
-              <p role="alert">
-                Extra options are unavailable.{" "}
+              <div
+                role="alert"
+                className="p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700"
+              >
+                <p className="font-semibold">We couldn’t load our extras right now.</p>
+                <p className="mt-1">Your rooms are kept. You can continue without extras.</p>
                 <button
                   type="button"
-                  className="underline"
+                  className="mt-3 rounded-lg bg-primary-600 px-4 py-2 font-semibold text-white"
                   onClick={() => setAddonReload((value) => value + 1)}
                 >
-                  Retry extras
+                  Try again
                 </button>
-              </p>
+              </div>
             ) : (
-              <ReplacementQuoteExtras
-                catalogue={addonCatalogue ?? []}
-                selection={baseRequest?.selection ?? null}
-                allocationRevision={allocationRevision}
-                value={extras}
-                onChange={setExtras}
-              />
+              baseRequest && (
+                <ExtrasStep
+                  catalogue={addonCatalogue ?? []}
+                  display={pagePayment.extras}
+                  showCategories={pagePayment.groupExtras}
+                  selection={baseRequest.selection}
+                  allocationRevision={allocationRevision}
+                  value={extras}
+                  onChange={setExtras}
+                  quote={quote}
+                  formatMoney={money}
+                  formatDay={formatDay}
+                />
+              )
             )}
-            <p role="status">
-              {quote
-                ? `Your stay with extras: ${chargedMoney(quote.totalMinor, quote.currency)}`
-                : loading
-                  ? "Checking price…"
-                  : ""}
-            </p>
-            {stepButtons("Continue to payment", addons !== null)}
+            <div className="flex flex-col-reverse md:flex-row md:items-center justify-between gap-4 border-t border-gray-200 pt-6">
+              <button
+                type="button"
+                className="text-sm font-medium text-gray-600 hover:text-gray-900 flex items-center gap-1"
+                onClick={backToRooms}
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 19l-7-7 7-7"
+                  />
+                </svg>
+                Back to rooms
+              </button>
+              <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-6">
+                <div className="md:text-right">
+                  <p className="text-xs text-gray-500">{stayLine}</p>
+                  <p
+                    role="status"
+                    aria-label="Your stay total"
+                    className="text-lg font-bold text-gray-900"
+                  >
+                    {quote
+                      ? money(quote.totalMinor, quote.currency)
+                      : loading
+                        ? "Checking price…"
+                        : ""}
+                    {quote && (
+                      <span className="text-xs font-normal text-gray-500">
+                        {" "}
+                        total, includes taxes &amp; fees
+                      </span>
+                    )}
+                  </p>
+                </div>
+                <div className="flex flex-col items-start md:items-end gap-1">
+                  <button
+                    type="button"
+                    className={button}
+                    disabled={addons === null}
+                    onClick={() => go(next)}
+                  >
+                    {addonError ? "Continue without extras" : "Continue to payment"}
+                  </button>
+                  {missingDay && (
+                    <p className="text-xs text-amber-700">
+                      Choose a day for {missingDay}, or remove it.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
           </>
         )}
         {settled && step === "payment" && (
