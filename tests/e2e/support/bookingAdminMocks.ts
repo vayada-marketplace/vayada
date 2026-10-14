@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { mockBookingPublication } from "./bookingPublicationMocks";
 import { createAdaptiveHotelSetupStatusMock } from "./sharedHotelSetupMocks";
 
 export const BOOKING_ADMIN_HOTEL_ID = "booking_hotel_alpenrose";
@@ -389,6 +390,8 @@ export async function mockBookingAdminShellRoutes(
   let bookingAcceptanceMode: "instant" | "request" = "instant";
   let sameDayEnabled = true;
   let sameDayCutoff: string | null = "18:00";
+  // The dashboard's booking page card; specs override it with their own state.
+  await mockBookingPublication(page, BOOKING_ADMIN_PROPERTY_ID);
   await page.route("**/api/pms/properties/*/module-activations", (route) =>
     route.fulfill({
       json: {

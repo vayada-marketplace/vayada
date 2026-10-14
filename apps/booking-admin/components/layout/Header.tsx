@@ -18,8 +18,7 @@ import { CURRENCY_OPTIONS } from "@/lib/constants/options";
 import NavigationSearch from "./NavigationSearch";
 import ManagePropertiesModal from "./ManagePropertiesModal";
 import { buildBookingPreviewUrl } from "@/lib/utils/bookingPreviewUrl";
-
-const SELECTED_HOTEL_CHANGED_EVENT = "booking-admin:selected-hotel-changed";
+import { SELECTED_HOTEL_CHANGED_EVENT } from "@/services/api/bookingHotelScope";
 
 function storeSelectedHotelId(hotelId: string): void {
   localStorage.setItem("selectedHotelId", hotelId);

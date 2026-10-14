@@ -89,6 +89,8 @@ jobs:
         run: |
           npm --workspace @vayada/domain-hotels run build
           npm --workspace @vayada/domain-hotels run test
+          # product-onboarding's publication client imports @vayada/domain-booking at runtime.
+          npm --workspace @vayada/domain-booking run build
           npm --workspace @vayada/product-onboarding run test
 
       - name: Typecheck

@@ -29,7 +29,8 @@
     "./IncludedPricing": "./src/IncludedPricing.tsx",
     "./AcceptedPaymentMethods": "./src/AcceptedPaymentMethods.tsx",
     "./pricingSetupAmounts": "./src/pricingSetupAmounts.ts",
-    "./firstPricingSetupMessages": "./src/firstPricingSetupMessages.ts"
+    "./firstPricingSetupMessages": "./src/firstPricingSetupMessages.ts",
+    "./bookingPublicationReviewApi": "./src/bookingPublicationReviewApi.ts"
   },
   "dependencies": {
     "@vayada/domain-booking": "*",
