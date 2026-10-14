@@ -1126,6 +1126,9 @@ function ProfileForm({
   const latestDraft = useRef(draft);
   latestDraft.current = draft;
   const mounted = useRef(false);
+  // A keyboard path to a pin when the address search is down (the map itself needs a pointer).
+  const [coordinatesRequested, setCoordinatesRequested] = useState(false);
+  const coordinateFields = useRef<HTMLDivElement>(null);
   const [logoPreviewUrl, setLogoPreviewUrl] = useState(draft.logoPublicUrl);
   const addressRevision = useRef(0);
   const addressFields = useRef<HTMLDivElement>(null);
@@ -1319,6 +1322,7 @@ function ProfileForm({
   const showLocationSummary = Boolean(googleMapsApiKey) && hasCompleteLocation;
   const addressLine = locationAddressLine(draft);
   const lookupForAddress = mapLookup?.address === addressLine ? mapLookup.status : null;
+  const showCoordinateFields = mapUnavailable || !googleMapsApiKey || coordinatesRequested;
   const profileProgress = (
     <div
       className={
@@ -1912,11 +1916,28 @@ function ProfileForm({
                     </div>
                   </div>
                 )}
-                {mapUnavailable && (
-                  <div className="mt-4 rounded-xl border border-gray-200 p-3">
+                {!showCoordinateFields && addressSearchUnavailable && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCoordinatesRequested(true);
+                      requestAnimationFrame(() =>
+                        coordinateFields.current?.querySelector<HTMLElement>("input")?.focus(),
+                      );
+                    }}
+                    className="mt-3 text-sm font-semibold text-primary-700 transition hover:text-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2"
+                  >
+                    Enter coordinates instead
+                  </button>
+                )}
+                {showCoordinateFields && (
+                  <div
+                    ref={coordinateFields}
+                    className="mt-4 rounded-xl border border-gray-200 p-3"
+                  >
                     <p className="text-sm text-gray-600">
-                      The map couldn’t load. Enter your property’s coordinates instead, for example
-                      copied from Google Maps.
+                      {mapUnavailable ? "The map couldn’t load. " : ""}Enter your property’s
+                      coordinates, for example copied from Google Maps.
                     </p>
                     <div className="mt-3 grid grid-cols-2 gap-3">
                       {(["latitude", "longitude"] as const).map((field) => (
@@ -1936,7 +1957,23 @@ function ProfileForm({
                                 : null;
                             if (next === draft[field]) return;
                             coordinateTyped.current = true;
-                            onChange({ ...draft, [field]: next });
+                            const nextDraft = { ...draft, [field]: next };
+                            const { latitude, longitude } = nextDraft;
+                            // Like a pin: an auto-detected time zone follows complete coordinates.
+                            const followPin =
+                              latitude !== null &&
+                              longitude !== null &&
+                              hasMapCoordinates(nextDraft) &&
+                              (timezoneWasAutoDetected.current || !draft.timezone.trim());
+                            if (followPin) timezoneWasAutoDetected.current = true;
+                            onChange(
+                              followPin
+                                ? {
+                                    ...nextDraft,
+                                    timezone: timezoneForCoordinates(latitude, longitude),
+                                  }
+                                : nextDraft,
+                            );
                           }}
                         />
                       ))}

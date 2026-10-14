@@ -210,6 +210,9 @@ test.describe("marketplace-web shared setup activation", () => {
     const panelBox = await locationSearchPanel.boundingBox();
     const actionBarBox = await locationActionBar.boundingBox();
     expect((panelBox?.y ?? 0) + (panelBox?.height ?? 0)).toBeLessThanOrEqual(actionBarBox?.y ?? 0);
+    // Keyboard users get the coordinates instead of the pointer-only map.
+    await locationSearchPanel.getByRole("button", { name: "Enter coordinates instead" }).click();
+    await expect(page.getByRole("textbox", { name: "Latitude" })).toBeFocused();
 
     // Zoomed out, a click zooms in on that spot instead of dropping a vague pin.
     const clickMap = () => map.click({ position: { x: 1000, y: 300 } });
@@ -246,6 +249,7 @@ test.describe("marketplace-web shared setup activation", () => {
     // Once there is a pin, a stray click can't move it; only a drag does.
     await clickMap();
     await expect(map).toHaveAttribute("data-marker", "48.13745,11.5756");
+    await expect(page.getByRole("textbox", { name: "Latitude" })).toHaveValue("48.13745");
 
     await locationActionBar.getByRole("button", { name: "Continue" }).click();
     await expect(page.getByRole("heading", { name: "How can guests reach you?" })).toBeVisible();
@@ -275,6 +279,17 @@ test.describe("marketplace-web shared setup activation", () => {
     const y = card.y > 120 ? card.y / 2 : Math.min(card.y + card.height + 60, 844 - 60);
     await map.click({ position: { x: 300 - mapBox.x, y: y - mapBox.y } });
     await expect(map).toHaveAttribute("data-zoom", "6");
+  });
+
+  test("offers typed coordinates when Google rejects the map key", async ({ page, baseURL }) => {
+    await openLocationWithOpenBasics(page, baseURL, { mapsAuthFailure: true });
+    await expect(page.getByText("Map unavailable")).toBeVisible();
+    await expect(
+      page.getByText(
+        "The map couldn’t load. Enter your property’s coordinates, for example copied from Google Maps.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Latitude" })).toBeVisible();
   });
 
   test("takes typed coordinates when the map itself can't load", async ({ page, baseURL }) => {
@@ -967,7 +982,7 @@ async function openLocationWithOpenBasics(
 
 async function mockGooglePlaces(
   page: Page,
-  { placesUnavailable = false, mapsUnavailable = false } = {},
+  { placesUnavailable = false, mapsUnavailable = false, mapsAuthFailure = false } = {},
 ) {
   await page.route(/https:\/\/maps\.googleapis\.com\/maps\/api\/js/, async (route) => {
     expect(new URL(route.request().url()).searchParams.get("language")).toBe("en");
@@ -1014,6 +1029,8 @@ async function mockGooglePlaces(
             this.setZoom(options.zoom);
             element.dataset.zoomControl = String(Boolean(options.zoomControl));
             element.dataset.zoomControlPosition = String(options.zoomControlOptions?.position ?? "");
+            // Google reports a rejected key after loading, through a global callback.
+            if (${mapsAuthFailure}) setTimeout(() => window.gm_authFailure?.(), 0);
             // A real click anywhere on the map lands on one made-up spot.
             element.addEventListener("click", () =>
               this.listeners.click?.({ latLng: latLng(48.1374, 11.5754) }),
