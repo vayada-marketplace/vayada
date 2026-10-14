@@ -1744,7 +1744,8 @@ function ProfileForm({
                 data-testid="location-search-panel"
                 className={`pointer-events-auto min-h-0 flex-1 p-4 sm:absolute sm:left-6 sm:top-6 sm:flex-none sm:rounded-2xl sm:border sm:border-white/80 sm:bg-white/95 sm:shadow-[0_18px_50px_-20px_rgba(15,23,42,0.35)] sm:backdrop-blur lg:left-8 lg:top-8 ${
                   showAddressFields
-                    ? "overflow-y-auto sm:max-h-[calc(100dvh-10rem)] sm:w-[calc(100%-3rem)] sm:max-w-md"
+                    ? // Leaves room for the action bar, which asks for the pin while the fields are open.
+                      "overflow-y-auto sm:max-h-[calc(100dvh-13rem)] sm:w-[calc(100%-3rem)] sm:max-w-md"
                     : "sm:w-[calc(100%-3rem)] sm:max-w-lg"
                 }`}
               >
