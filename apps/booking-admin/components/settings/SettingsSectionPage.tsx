@@ -60,6 +60,7 @@ import { useTranslation } from "@/lib/i18n";
 import { SettingsSubPage } from "@/components/settings/SettingsSubPage";
 import type { SettingsPageId } from "@/lib/utils/settingsSectionUrl";
 import { continueStripeAfterSavingSettings } from "@/lib/utils/stripeOnboarding";
+import { fixedPlanUnitPrices, formatBillingAmount } from "@/lib/utils/fixedPlanPricing";
 import {
   coordinateStripeRefresh,
   refreshStripeAfterOnboarding,
@@ -99,9 +100,43 @@ function isFinanceStripeReady(response: FinancePaymentSettingsResponse): boolean
   );
 }
 
-function formatBillingAmount(amountMinor: number, locale: string): string {
-  return new Intl.NumberFormat(locale, { style: "currency", currency: "EUR" }).format(
-    amountMinor / 100,
+/** "$30 for the first active unit + $5 per additional unit · 6 active units", on two lines at most. */
+function FixedPlanUnitPricing({
+  planStatus,
+  locale,
+  t,
+}: {
+  planStatus: FinancePlanStatus;
+  locale: string;
+  t: (key: string, params?: Record<string, string | number>) => string;
+}) {
+  const prices = fixedPlanUnitPrices(planStatus.currency);
+  const count = t(
+    planStatus.activeRoomCount === 1 ? "admin.activeUnitCountOne" : "admin.activeUnitCount",
+    { count: planStatus.activeRoomCount },
+  );
+  // Each part wraps as a whole, so a narrow card puts the count on the second line.
+  return (
+    <p className="text-[10px] text-gray-400 mt-0.5" data-testid="fixed-plan-unit-pricing">
+      {prices && (
+        <>
+          <span className="inline-block">
+            {t("admin.fixedPlanUnitPricing", {
+              base: formatBillingAmount(prices.baseAmountMinor, planStatus.currency, locale, {
+                whole: true,
+              }),
+              extra: formatBillingAmount(prices.extraUnitAmountMinor, planStatus.currency, locale, {
+                whole: true,
+              }),
+            })}
+          </span>{" "}
+        </>
+      )}
+      <span className="inline-block">
+        {prices && "· "}
+        {count}
+      </span>
+    </p>
   );
 }
 
@@ -1460,17 +1495,22 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                 )}
               </div>
               <p className="text-[12px] text-gray-500 mb-3">
-                {t("admin.fixedFeeBasedOnActiveRooms")}
+                {t("admin.fixedFeeBasedOnActiveUnits")}
               </p>
               <div className="bg-gray-50 rounded-xl p-4 text-center mb-4">
                 <span className="text-3xl font-bold text-gray-900">
-                  {formatBillingAmount(financePlanStatus?.amountMinor ?? 3_000, locale)}
+                  {financePlanStatus
+                    ? formatBillingAmount(
+                        financePlanStatus.amountMinor,
+                        financePlanStatus.currency,
+                        locale,
+                      )
+                    : "—"}
                 </span>
-                <p className="text-[11px] text-gray-400 mt-1">{t("admin.every30Days")}</p>
-                <p className="text-[10px] text-gray-400 mt-0.5">
-                  {t("admin.30ForTheFirstActiveRoom5PerAdditionalRoom")}{" "}
-                  {financePlanStatus?.activeRoomCount ?? 0} {t("admin.activeRooms")}
-                </p>
+                <p className="text-[11px] text-gray-400 mt-1">{t("admin.everyMonth")}</p>
+                {financePlanStatus && (
+                  <FixedPlanUnitPricing planStatus={financePlanStatus} locale={locale} t={t} />
+                )}
               </div>
               {financePlanStatus?.plan !== "fixed" && (
                 <button
@@ -1565,7 +1605,11 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                 <p className="mt-3 text-[13px] leading-5 text-gray-600">
                   {billingPlanModal === "fixed"
                     ? t("admin.youReSwitchingToTheFixedPlanAtAmountMonth", {
-                        amount: formatBillingAmount(financePlanStatus.amountMinor, locale),
+                        amount: formatBillingAmount(
+                          financePlanStatus.amountMinor,
+                          financePlanStatus.currency,
+                          locale,
+                        ),
                       })
                     : t("admin.youReSwitchingBackToTheCommissionPlanYourCurrent", {
                         date: formatBillingDate(financePlanStatus.currentPeriodEnd, locale),
