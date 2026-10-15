@@ -10,8 +10,8 @@ import { bookingImageSizes } from "@/components/booking/imageSizes";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
+import StayRange from "@/components/booking/StayRange";
 import { Booking } from "@/lib/types";
-import { formatStayRange } from "@/lib/utils";
 import { readLastBooking } from "@/lib/storage/bookingDraft";
 import { bookingService, ChangeRequestPreview } from "@/services/api/booking";
 
@@ -268,7 +268,11 @@ export default function RequestChangePage({
                     {t("currentDates") || "Current dates"}
                   </span>
                   <span className="text-right font-medium text-gray-900">
-                    {formatStayRange(booking.checkIn, booking.checkOut, locale)}
+                    <StayRange
+                      checkIn={booking.checkIn}
+                      checkOut={booking.checkOut}
+                      locale={locale}
+                    />
                   </span>
                 </div>
                 <div className="flex justify-between gap-4">
@@ -276,7 +280,7 @@ export default function RequestChangePage({
                     {t("requestedDates") || "Requested dates"}
                   </span>
                   <span className="text-right font-medium text-gray-900">
-                    {formatStayRange(checkIn, checkOut, locale)}
+                    <StayRange checkIn={checkIn} checkOut={checkOut} locale={locale} />
                   </span>
                 </div>
                 <div className="flex justify-between pt-2 border-t border-gray-100">
