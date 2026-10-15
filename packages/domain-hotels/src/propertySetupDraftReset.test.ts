@@ -30,6 +30,36 @@ describe("property setup draft reset contract", () => {
     expectTypeOf<ResetPropertySetupDraftReceipt>().not.toHaveProperty("payload");
   });
 
+  it("accepts a calendar draft's current or legacy manifest (VAY-2198)", () => {
+    const calendar = {
+      ...request,
+      stepId: "calendar",
+      expectedBaseRevisions: {
+        "pms.operating_calendar": "calendar:2",
+        "pms.inventory": "inventory:2",
+        "pms.room_units": "room-units:6",
+        "hotel_catalog.time_zone": "time-zone:abc",
+      },
+    };
+    const legacy = {
+      ...calendar,
+      expectedBaseRevisions: {
+        "pms.operating_calendar": "calendar:2",
+        "pms.inventory": "inventory:2",
+        "pms.room_types": "room-types:9",
+        "hotel_catalog.location": "hotel_catalog.location:property:r3",
+      },
+    };
+    expect(parseResetPropertySetupDraftRequest(calendar)).toEqual({ ok: true, value: calendar });
+    expect(parseResetPropertySetupDraftRequest(legacy)).toEqual({ ok: true, value: legacy });
+    expect(
+      parseResetPropertySetupDraftRequest({
+        ...request,
+        expectedBaseRevisions: legacy.expectedBaseRevisions,
+      }),
+    ).toMatchObject({ ok: false });
+  });
+
   it.each([
     ["unknown field", { ...request, payload: {} }],
     ["invalid session", { ...request, sessionId: "not-a-session" }],

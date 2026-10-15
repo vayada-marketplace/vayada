@@ -523,8 +523,8 @@ describe("CalendarStep", () => {
 const exactManifest = {
   "pms.operating_calendar": "calendar:0",
   "pms.inventory": "inventory:1",
-  "pms.room_types": "types:2",
-  "hotel_catalog.location": "location:3",
+  "pms.room_units": "units:2",
+  "hotel_catalog.time_zone": "time-zone:3",
 };
 
 function controllerContext(route: PropertySetupRouteReadModel) {

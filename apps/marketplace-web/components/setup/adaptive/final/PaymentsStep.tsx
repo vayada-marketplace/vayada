@@ -285,7 +285,7 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
     setNotice("");
     await draft.commit(async () => {
       if (!manualContinue)
-        throw new Error("Add your bank details or PayPal email in Booking Engine settings first.");
+        throw new Error("Add your bank details or PayPal email in Booking Engine Settings first.");
     }, true);
   }
   async function openPaymentSettings() {
@@ -326,7 +326,7 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
         ),
       );
     } catch {
-      setManualError("We couldn't open Booking Engine settings. Please try again.");
+      setManualError("We couldn't open Booking Engine Settings. Please try again.");
     }
   }
   async function save(advance: boolean) {
