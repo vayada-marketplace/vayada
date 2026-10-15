@@ -17,9 +17,9 @@ describe("affiliate click occurrence persistence", () => {
     slug: "hotel",
     referralCode: "A",
     sessionId: "session",
+    referrerSource: "unknown" as const,
     requestId: "request",
     occurredAt: new Date("2026-09-09T12:00:00Z"),
-    metadata: {},
   };
 
   it("retains A → B → A while retrying the final click uses the same event and audit identity", async () => {
@@ -49,6 +49,33 @@ describe("affiliate click occurrence persistence", () => {
       ["A", "click-3", "session"],
       ["A", "click-3", "session"],
     ]);
+  });
+
+  it("stores only attribution fields in the event and its audit copy", async () => {
+    const sink = createPgBookingWebEventSink({ connectionString: "unused" });
+    await sink.recordAffiliateClick({
+      ...event,
+      clickId: "click-1",
+      referrerSource: "tiktok",
+      userAgent: "Mozilla/5.0 Safari/605.1.15",
+    });
+    const [sql, values] = query.mock.calls[0] as [string, unknown[]];
+    const payload = {
+      clickId: "click-1",
+      hotelSlug: "hotel",
+      referralCode: "A",
+      sessionId: "session",
+      referrerSource: "tiktok",
+    };
+    const metadata = {
+      requestId: "request",
+      source: "apps/api-booking-web-public",
+      trafficClass: "human",
+    };
+    expect(JSON.parse(values[11] as string)).toEqual(payload);
+    expect(JSON.parse(values[12] as string)).toEqual(metadata);
+    // The audit row's redacted_payload and audit_metadata reuse the same two parameters.
+    expect(sql).toMatch(/\$10,\s*\$12,\s*'\{\}'::jsonb,\s*\$13,/);
   });
 
   it("does not collapse callers without a click ID or collide across hotels/referrals", async () => {

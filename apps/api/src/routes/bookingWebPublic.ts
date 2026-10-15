@@ -26,6 +26,7 @@ import {
   voidPricingCardPayment,
 } from "../domains/pricingCardPaymentCompletion.js";
 import { admitAffiliateArrivalForCurrentHost } from "../domains/bookingAffiliateArrivalHost.js";
+import { affiliateTrafficSource } from "../domains/marketplaceAffiliateClickOccurrence.js";
 import { readBookingAffiliateContextForQuote } from "../domains/bookingAffiliateContextForQuote.js";
 import {
   bindLiveAffiliateOriginal,
@@ -199,10 +200,7 @@ type BookingWebAttributionClickRequest = {
   referral_code?: string;
   sessionId?: string;
   session_id?: string;
-  landingUrl?: string;
-  landing_url?: string;
   referrer?: string;
-  metadata?: Record<string, unknown>;
 };
 type BookingWebTelemetryEventRequest = {
   analyticsConsent?: boolean;
@@ -234,13 +232,10 @@ export type BookingWebAffiliateClickEvent = {
   slug: string;
   referralCode: string;
   sessionId?: string;
-  landingUrl?: string;
-  referrer?: string;
+  referrerSource: ReturnType<typeof affiliateTrafficSource>;
   requestId: string;
   occurredAt: Date;
   userAgent?: string;
-  ipAddress?: string;
-  metadata: Record<string, unknown>;
 };
 
 export type BookingWebTelemetryEvent = {
@@ -1129,13 +1124,14 @@ export async function registerBookingWebPublicRoutes(
           slug: request.params.slug,
           referralCode,
           sessionId: firstString(request.body?.sessionId, request.body?.session_id),
-          landingUrl: firstString(request.body?.landingUrl, request.body?.landing_url),
-          referrer: firstString(request.body?.referrer, request.headers.referer),
+          // Attribution needs no page address (VAY-2215): booking-web URLs can carry a guest's
+          // email, booking reference or access token. Older browsers still send landingUrl,
+          // the full referrer and metadata; only the referrer's site is kept. The Referer
+          // header is never read: it is the booking page itself.
+          referrerSource: affiliateTrafficSource(request.body?.referrer),
           requestId: String(request.id),
           occurredAt: now(),
           userAgent: request.headers["user-agent"],
-          ipAddress: request.ip,
-          metadata: recordBody(request.body?.metadata),
         });
       }
       reply.header("Cache-Control", "no-store");
