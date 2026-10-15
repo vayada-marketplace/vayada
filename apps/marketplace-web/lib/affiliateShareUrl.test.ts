@@ -1,4 +1,3 @@
-import { VAYADA_API_BASE_URL } from "@vayada/marketplace-shared/api/client";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { affiliateShareUrl } from "./affiliateShareUrl";
@@ -14,9 +13,12 @@ it("builds share links on the configured affiliate origin", () => {
   );
 });
 
-it("keeps the API host when no affiliate origin is configured", () => {
-  vi.stubEnv("NEXT_PUBLIC_AFFILIATE_LINK_ORIGIN", "");
-  expect(affiliateShareUrl("/r/va_abcdefghijklmnopqrstuv")).toBe(
-    new URL("/r/va_abcdefghijklmnopqrstuv", VAYADA_API_BASE_URL).toString(),
-  );
-});
+it.each(["", "affiliate.vayada.com"])(
+  "keeps the API host when the affiliate origin is unset or unusable (%j)",
+  (origin) => {
+    vi.stubEnv("NEXT_PUBLIC_AFFILIATE_LINK_ORIGIN", origin);
+    expect(affiliateShareUrl("/r/va_abcdefghijklmnopqrstuv")).toBe(
+      "https://api.localhost/r/va_abcdefghijklmnopqrstuv",
+    );
+  },
+);
