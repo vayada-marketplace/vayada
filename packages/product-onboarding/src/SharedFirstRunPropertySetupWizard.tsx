@@ -57,7 +57,11 @@ import {
 
 import { HotelIcon } from "./HotelIcon";
 import { LocalizationMultiSelect } from "./LocalizationMultiSelect";
-import GoogleAddressMap, { type MapPosition } from "./GoogleAddressMap";
+import GoogleAddressMap, {
+  coveredMapInsets,
+  type MapCoveredInsets,
+  type MapPosition,
+} from "./GoogleAddressMap";
 import GooglePlacesAddressField from "./GooglePlacesAddressField";
 import { findAddressOnMap } from "./googleMaps";
 import TimezoneField from "./TimezoneField";
@@ -1047,6 +1051,63 @@ function HotelFacadeIllustration() {
   );
 }
 
+/**
+ * On a phone the location card spans the screen width, at the bottom or (while focused) the top.
+ * Reports how much of the map it covers there; null from Tailwind's `sm` up, where the panels sit
+ * beside the pin.
+ */
+function useCoveredMapInsets(
+  active: boolean,
+  areaRef: RefObject<HTMLDivElement | null>,
+  cardRef: RefObject<HTMLDivElement | null>,
+): MapCoveredInsets | null {
+  const [insets, setInsets] = useState<MapCoveredInsets | null>(null);
+
+  useEffect(() => {
+    const area = areaRef.current;
+    const card = cardRef.current;
+    if (!active || !area || !card) return;
+    const narrow = window.matchMedia("(max-width: 639.98px)");
+    let frame = 0;
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      // Next frame: :focus-within has moved the card by then.
+      frame = requestAnimationFrame(() => {
+        const next = narrow.matches
+          ? coveredMapInsets(area.getBoundingClientRect(), card.getBoundingClientRect())
+          : null;
+        setInsets((current) =>
+          current?.top === next?.top && current?.bottom === next?.bottom ? current : next,
+        );
+      });
+    };
+    measure();
+    const resize = new ResizeObserver(measure);
+    resize.observe(area);
+    resize.observe(card);
+    // Focus can also leave without an event (a focused button turning disabled drops the card to
+    // the bottom), so any change inside the card re-measures too.
+    const changes = new MutationObserver(measure);
+    changes.observe(card, {
+      attributes: true,
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+    card.addEventListener("focusin", measure);
+    card.addEventListener("focusout", measure);
+    return () => {
+      cancelAnimationFrame(frame);
+      resize.disconnect();
+      changes.disconnect();
+      card.removeEventListener("focusin", measure);
+      card.removeEventListener("focusout", measure);
+    };
+  }, [active, areaRef, cardRef]);
+
+  return insets;
+}
+
 function ProfileForm({
   draft,
   launchSettings,
@@ -1123,6 +1184,10 @@ function ProfileForm({
     address: string;
   } | null>(null);
   const [mapFocus, setMapFocus] = useState<MapPosition | null>(null);
+  // The map keeps the pin in the strip the location card leaves visible on a phone.
+  const locationMapArea = useRef<HTMLDivElement>(null);
+  const locationCard = useRef<HTMLDivElement>(null);
+  const mapCoveredInsets = useCoveredMapInsets(step === 1, locationMapArea, locationCard);
   const latestDraft = useRef(draft);
   latestDraft.current = draft;
   const mounted = useRef(false);
@@ -1729,7 +1794,10 @@ function ProfileForm({
       )}
 
       <section aria-busy={saving} className={step === 1 ? "block" : "hidden"}>
-        <div className="relative isolate min-h-[100dvh] overflow-hidden bg-slate-100 text-left">
+        <div
+          ref={locationMapArea}
+          className="relative isolate min-h-[100dvh] overflow-hidden bg-slate-100 text-left"
+        >
           {googleMapsApiKey && (
             <GoogleAddressMap
               active={step === 1}
@@ -1737,13 +1805,17 @@ function ProfileForm({
               latitude={draft.latitude}
               longitude={draft.longitude}
               focus={mapFocus}
+              coveredInsets={mapCoveredInsets}
               onPick={pickMapLocation}
               onUnavailable={() => setMapUnavailable(true)}
             />
           )}
 
           <div className="pointer-events-none absolute inset-0 z-10 flex items-end p-3 sm:block sm:p-0">
-            <div className="pointer-events-auto flex max-h-[70dvh] w-full flex-col rounded-3xl border border-white/80 bg-white/95 shadow-[0_18px_50px_-20px_rgba(15,23,42,0.35)] backdrop-blur focus-within:self-start sm:contents">
+            <div
+              ref={locationCard}
+              className="pointer-events-auto flex max-h-[70dvh] w-full flex-col rounded-3xl border border-white/80 bg-white/95 shadow-[0_18px_50px_-20px_rgba(15,23,42,0.35)] backdrop-blur focus-within:self-start sm:contents"
+            >
               <div
                 data-testid="location-search-panel"
                 className={`pointer-events-auto min-h-0 flex-1 p-4 sm:absolute sm:left-6 sm:top-6 sm:flex-none sm:rounded-2xl sm:border sm:border-white/80 sm:bg-white/95 sm:shadow-[0_18px_50px_-20px_rgba(15,23,42,0.35)] sm:backdrop-blur lg:left-8 lg:top-8 ${

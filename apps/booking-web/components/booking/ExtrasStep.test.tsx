@@ -113,3 +113,14 @@ it("shows per-extra amounts only when they add up to the quote", () => {
   render({ value: { scope, items: [newExtraItem(breakfast, selection)] }, quote: quote("7000") });
   expect(host.querySelector("li")!.textContent).not.toContain("€");
 });
+
+it("asks for a missing day instead of waiting for a total that can't come", () => {
+  const scope = replacementExtrasScope(catalogue, selection, 0);
+  const breakfastOnly = { scope, items: [newExtraItem(breakfast, selection)] };
+  render({ value: { scope, items: [...breakfastOnly.items, newExtraItem(transfer, selection)] } });
+  expect(host.textContent).toContain("Extras totalChoose a day");
+  render({ value: breakfastOnly });
+  expect(host.textContent).toContain("Extras totalUpdating…");
+  render({ value: breakfastOnly, priceFailed: true });
+  expect(host.textContent).toContain("Extras total—");
+});
