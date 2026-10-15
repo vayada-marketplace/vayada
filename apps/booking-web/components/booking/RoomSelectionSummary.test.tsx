@@ -62,6 +62,7 @@ it("says until when cancelling is free as a readable date in the hotel's time zo
 
 it("falls back to UTC and follows the page's language", () => {
   expect(render({})).toContain("Free cancellation until Fri, 6 Nov 2026 (UTC).");
+  expect(render({ timezone: "" })).toContain("Free cancellation until Fri, 6 Nov 2026 (UTC).");
   expect(render({ timezone: "Europe/Zurich", locale: "de" })).toContain(
     "Fr., 6. Nov. 2026 (Mitteleuropäische Zeit)",
   );

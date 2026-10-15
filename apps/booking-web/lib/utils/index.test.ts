@@ -13,6 +13,8 @@ it("shows a stay as two readable dates", () => {
   expect(formatStayRange("2026-11-20", "2026-11-24", "de")).toBe(
     "Fr., 20. Nov. 2026 → Di., 24. Nov. 2026",
   );
+  // While the guest is still choosing, an empty side reads "—", not a dangling arrow.
+  expect(formatStayRange("2026-11-20", "")).toBe("Fri, 20 Nov 2026 → —");
 });
 
 it("names the hotel's time zone in the page's language", () => {
@@ -20,6 +22,9 @@ it("names the hotel's time zone in the page's language", () => {
   expect(formatTimeZoneName("Europe/Zurich", "de")).toBe("Mitteleuropäische Zeit");
   expect(formatTimeZoneName("UTC")).toBe("UTC");
   expect(formatTimeZoneName("Etc/UTC", "de")).toBe("UTC");
+  for (const alias of ["Etc/UCT", "Zulu", "Etc/Universal", "GMT0", ""]) {
+    expect(formatTimeZoneName(alias)).toBe("UTC");
+  }
   // A zone the browser doesn't know is shown as it came.
   expect(formatTimeZoneName("Mars/Olympus_Mons")).toBe("Mars/Olympus_Mons");
 });

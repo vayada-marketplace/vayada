@@ -263,15 +263,19 @@ export default function RequestChangePage({
                 {t("summary") || "Summary"}
               </h2>
               <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-500">{t("currentDates") || "Current dates"}</span>
-                  <span className="font-medium text-gray-900">
+                <div className="flex justify-between gap-4">
+                  <span className="shrink-0 text-gray-500">
+                    {t("currentDates") || "Current dates"}
+                  </span>
+                  <span className="text-right font-medium text-gray-900">
                     {formatStayRange(booking.checkIn, booking.checkOut, locale)}
                   </span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">{t("requestedDates") || "Requested dates"}</span>
-                  <span className="font-medium text-gray-900">
+                <div className="flex justify-between gap-4">
+                  <span className="shrink-0 text-gray-500">
+                    {t("requestedDates") || "Requested dates"}
+                  </span>
+                  <span className="text-right font-medium text-gray-900">
                     {formatStayRange(checkIn, checkOut, locale)}
                   </span>
                 </div>

@@ -47,14 +47,15 @@ export function formatStayDate(date: string, locale?: string): string {
   });
 }
 
-/** "Fri, 20 Nov 2026 → Tue, 24 Nov 2026" for a stay (YYYY-MM-DD dates). */
+/** "Fri, 20 Nov 2026 → Tue, 24 Nov 2026" for a stay (YYYY-MM-DD dates); a date not chosen yet is "—". */
 export function formatStayRange(checkIn: string, checkOut: string, locale?: string): string {
-  return `${formatStayDate(checkIn, locale)} → ${formatStayDate(checkOut, locale)}`;
+  const side = (date: string) => (date ? formatStayDate(date, locale) : "—");
+  return `${side(checkIn)} → ${side(checkOut)}`;
 }
 
-/** "Central European Time" for an IANA time zone, in the guest's language; "UTC" stays "UTC". */
+/** "Central European Time" for an IANA time zone, in the guest's language; UTC and no zone read "UTC". */
 export function formatTimeZoneName(timeZone: string, locale?: string): string {
-  if (/^(Etc\/)?(UTC|GMT)$/i.test(timeZone)) return "UTC";
+  if (!timeZone.trim() || /^(Etc\/)?(UTC|UCT|GMT0?|Universal|Zulu)$/i.test(timeZone)) return "UTC";
   try {
     return (
       new Intl.DateTimeFormat(resolveLocale(locale), { timeZone, timeZoneName: "longGeneric" })
