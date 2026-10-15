@@ -424,6 +424,67 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
     ]);
   });
 
+  it("names the staff note author, also on notes saved without a name (VAY-2210)", async () => {
+    const authors = async (guestBookingId: string) =>
+      (await operations.listPrivateNotes(propertyId, guestBookingId))!.map(
+        (note) => note.authorDisplayName,
+      );
+    // A staff member without a name is shown by email, as on notes added in Booking Detail.
+    const unnamed = await repository.createManualBooking(
+      command("author-email", "unpaid", "cash", "2027-01-01", false),
+    );
+    expect(await authors(unnamed.guestBookingId)).toEqual(["vay-1254@example.test"]);
+
+    await admin.query("UPDATE identity.users SET name = ' Ada Staff ' WHERE id = $1::uuid", [
+      actorId,
+    ]);
+    try {
+      const named = await repository.createManualBooking(
+        command("author-name", "unpaid", "cash", "2027-01-05", false),
+      );
+      const stored = await admin.query(
+        `SELECT author_display_name AS name FROM pms.booking_notes_private
+         WHERE guest_booking_id = $1::uuid`,
+        [named.guestBookingId],
+      );
+      expect(stored.rows).toEqual([{ name: "Ada Staff" }]);
+
+      // Notes saved before VAY-2210 have a blank name: reads and edits show the author's name.
+      await admin.query(
+        `UPDATE pms.booking_notes_private SET author_display_name = ''
+         WHERE guest_booking_id = $1::uuid`,
+        [unnamed.guestBookingId],
+      );
+      expect(await authors(unnamed.guestBookingId)).toEqual(["Ada Staff"]);
+      const [blank] = (await operations.listPrivateNotes(propertyId, unnamed.guestBookingId))!;
+      await expect(
+        operations.updatePrivateNote({
+          commandId: "edit-blank-author",
+          idempotencyKey: "edit-blank-author",
+          body: "VIP, late arrival",
+          propertyId,
+          guestBookingId: unnamed.guestBookingId,
+          noteId: blank!.noteId,
+          actorUserId: actorId,
+          editorDisplayName: "Ada Staff",
+        }),
+      ).resolves.toMatchObject({
+        ok: true,
+        note: { authorDisplayName: "Ada Staff", body: "VIP, late arrival" },
+      });
+
+      // Imported notes without an author stay blank, so Booking Detail shows "Unknown".
+      await admin.query(
+        `UPDATE pms.booking_notes_private SET author_user_id = NULL, author_display_name = ''
+         WHERE guest_booking_id = $1::uuid`,
+        [named.guestBookingId],
+      );
+      expect(await authors(named.guestBookingId)).toEqual([""]);
+    } finally {
+      await admin.query("UPDATE identity.users SET name = NULL WHERE id = $1::uuid", [actorId]);
+    }
+  });
+
   it("atomically clears manual room nights on no-show and replays exactly", async () => {
     const created = await repository.createManualBooking(
       command("no-show", "unpaid", "cash", "2026-08-10", true),
