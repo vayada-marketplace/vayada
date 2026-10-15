@@ -99,11 +99,10 @@ export function DashboardWorkspace({ canManage }: { canManage: boolean }) {
     );
 
   return (
-    <div className="mx-auto max-w-7xl p-4 md:p-6">
+    <div>
       <div className="flex flex-col gap-4 border-b border-gray-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-sm font-medium text-blue-700">Financials</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-gray-900">
+          <h2 className="text-lg font-semibold text-gray-900">
             {tab === "dashboard"
               ? "Dashboard"
               : tab === "revenue"
@@ -111,7 +110,7 @@ export function DashboardWorkspace({ canManage }: { canManage: boolean }) {
                 : tab === "expenses"
                   ? "Expenses"
                   : "Profit & Loss"}
-          </h1>
+          </h2>
           <p className="mt-1 text-sm text-gray-600">
             {tab === "dashboard"
               ? "Revenue, costs, and upcoming property transactions."

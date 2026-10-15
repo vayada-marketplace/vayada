@@ -171,10 +171,11 @@ export default function FinancialsPage() {
   };
 
   return (
-    <div>
+    <div className="max-w-7xl p-4 md:p-6">
+      <h1 className="text-xl font-bold text-gray-900">Financials</h1>
       <nav
         aria-label="Financials sections"
-        className="mx-auto flex max-w-7xl gap-1 overflow-x-auto border-b border-gray-200 px-4 pt-4 md:px-6"
+        className="mt-4 flex gap-1 overflow-x-auto border-b border-gray-200"
         role="tablist"
       >
         {(["dashboard", "folios"] as const).map((item) => (
@@ -197,6 +198,7 @@ export default function FinancialsPage() {
           aria-labelledby="financials-dashboard-tab"
           id="financials-dashboard-panel"
           role="tabpanel"
+          className="pt-5"
         >
           <DashboardWorkspace canManage={canManage} />
         </div>
@@ -206,12 +208,12 @@ export default function FinancialsPage() {
           data-testid="folios-workspace"
           id="financials-folios-panel"
           role="tabpanel"
-          className="p-4 md:p-6"
+          className="pt-5"
         >
-          <div className="mx-auto max-w-6xl space-y-5">
+          <div className="max-w-6xl space-y-5">
             <header className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">Folios</h1>
+                <h2 className="text-lg font-semibold text-gray-900">Folios</h2>
                 <p className="mt-1 max-w-2xl text-sm text-gray-600">
                   Operational guest statements. They are not official invoices and do not receive
                   invoice numbers.

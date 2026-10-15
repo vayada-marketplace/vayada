@@ -17,6 +17,7 @@ const TOP_LEVEL = [
   "/rooms",
   "/pricing",
   "/channel-manager",
+  "/financials",
   "/reviews",
   "/settings",
   "/settings/team",
@@ -125,6 +126,7 @@ test("the title stays put while clicking through the sidebar", async ({ page }) 
   for (const [label, path] of [
     ["Reservations", /\/bookings$/],
     ["Reviews", /\/reviews$/],
+    ["Financials", /\/financials$/],
     ["Rooms & Rates", /\/rooms$/],
     ["Settings", /\/settings$/],
     ["Dashboard", /\/dashboard$/],
