@@ -67,7 +67,7 @@ it("discloses every guest rule without inventing booking submission or dropping 
   await render();
   const text = document.body.textContent;
   for (const phrase of [
-    "Europe/Berlin",
+    "Times are in Central European Time.",
     "15:00",
     "midnight at the end of your arrival day",
     "from 06:00 by 11:00",
@@ -77,6 +77,7 @@ it("discloses every guest rule without inventing booking submission or dropping 
     "include special requests",
   ])
     expect(text).toContain(phrase);
+  expect(text).not.toContain("Europe/Berlin");
   expect(checkbox().checked).toBe(false);
   expect(document.querySelector("button")).toBeNull();
 });
@@ -105,8 +106,8 @@ it("aborts superseded reads and ignores a late result", async () => {
   await render("other");
   expect(firstSignal.aborted).toBe(true);
   await act(async () => resolve({ ...disclosure, propertyTimeZone: "Asia/Tokyo" }));
-  expect(document.body.textContent).toContain("Europe/Berlin");
-  expect(document.body.textContent).not.toContain("Asia/Tokyo");
+  expect(document.body.textContent).toContain("Central European Time");
+  expect(document.body.textContent).not.toContain("Japan");
 });
 it("fails closed on fetch failure and retries without prior agreement", async () => {
   vi.mocked(getQuoteGuestDisclosure).mockRejectedValueOnce(new Error("private diagnostic"));

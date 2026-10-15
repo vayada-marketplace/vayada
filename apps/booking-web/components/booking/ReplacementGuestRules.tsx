@@ -5,6 +5,7 @@ import type {
   PublicQuoteGuestDisclosure,
 } from "@vayada/domain-booking/replacement-pricing";
 import { serverNow } from "@/lib/serverClock";
+import { formatTimeZoneName } from "@/lib/utils";
 import { getQuoteGuestDisclosure } from "@/services/api/quoteGuestDisclosure";
 
 export default function ReplacementGuestRules({
@@ -90,7 +91,7 @@ export default function ReplacementGuestRules({
   const section = (
     <section aria-label="Guest rules" className="rounded-xl border border-gray-200 p-5 space-y-3">
       <h2 className="text-xl font-semibold">Our guest rules</h2>
-      <p>Times are in {disclosure.propertyTimeZone}.</p>
+      <p>Times are in {formatTimeZoneName(disclosure.propertyTimeZone)}.</p>
       <p>
         Check-in from {rules.checkInTime}
         {rules.checkInUntil
