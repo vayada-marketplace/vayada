@@ -31,17 +31,6 @@ export default function LocationPage() {
       disposed = true;
     };
   }, []);
-  if (!propertyId)
-    return (
-      <PageLayout role={error ? "alert" : "status"}>
-        {error || "Loading location…"}
-        {error && (
-          <a href="/settings/location" className="ml-3 text-blue-700 underline">
-            Reload
-          </a>
-        )}
-      </PageLayout>
-    );
   return (
     <PageLayout>
       <SettingsBreadcrumb
@@ -50,13 +39,24 @@ export default function LocationPage() {
         fullPageLinks
         className="mb-2"
       />
-      <NearbyEditor
-        key={propertyId}
-        propertyId={propertyId}
-        api={nearbyApi}
-        profileApi={sharedHotelSetupApi}
-        apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? ""}
-      />
+      {propertyId ? (
+        <NearbyEditor
+          key={propertyId}
+          propertyId={propertyId}
+          api={nearbyApi}
+          profileApi={sharedHotelSetupApi}
+          apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? ""}
+        />
+      ) : (
+        <div role={error ? "alert" : "status"}>
+          {error || "Loading location…"}
+          {error && (
+            <a href="/settings/location" className="ml-3 text-blue-700 underline">
+              Reload
+            </a>
+          )}
+        </div>
+      )}
     </PageLayout>
   );
 }

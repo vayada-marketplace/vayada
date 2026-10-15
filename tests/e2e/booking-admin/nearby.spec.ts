@@ -241,7 +241,10 @@ test("fallback protects same-document back, forward and app navigation", async (
     await expect(page.getByLabel("Street address", { exact: true })).toHaveValue("Keep this draft");
   }
   page.once("dialog", (dialog) => dialog.dismiss());
-  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await page
+    .getByRole("complementary")
+    .getByRole("link", { name: "Settings", exact: true })
+    .click();
   await expect(page).toHaveURL(/step=1/);
 });
 test("late Google imports cannot mount cards after timeout", async ({ page }) => {

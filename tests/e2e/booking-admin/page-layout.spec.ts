@@ -6,7 +6,16 @@ import {
 } from "../support/bookingAdminMocks";
 
 // VAY-2199: every page renders in one shared frame, so the title never jumps between pages.
-const TOP_LEVEL = ["/dashboard", "/design-studio", "/add-ons", "/promo-codes", "/settings"];
+const TOP_LEVEL = [
+  "/dashboard",
+  "/design-studio",
+  "/add-ons",
+  "/promo-codes",
+  "/settings",
+  "/settings/feature-hub",
+  "/reservations",
+  "/affiliates",
+];
 // Sub-pages put a breadcrumb above the title: same left edge, and one shared (lower) top.
 const SUB_PAGES = [
   "/settings/general",
@@ -58,6 +67,8 @@ async function titlePosition(page: Page) {
 
 for (const viewport of VIEWPORTS) {
   test(`every page title starts at the same place at ${viewport.width}px`, async ({ page }) => {
+    // One test walks every page, so allow for a dev server compiling each route once.
+    test.setTimeout(120_000);
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await mockPages(page);
 
@@ -79,6 +90,7 @@ for (const viewport of VIEWPORTS) {
 }
 
 test("the title stays put while clicking through the sidebar", async ({ page }) => {
+  test.setTimeout(90_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockPages(page);
   await page.goto("/dashboard");

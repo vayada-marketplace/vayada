@@ -761,15 +761,11 @@ export default function DesignStudioPage() {
 
   if (loadFailed) {
     return (
-      <div className="p-4 md:p-6 h-full flex items-center justify-center">
+      <PageLayout>
         <link href={BOOKING_PAGE_FONT_STYLESHEET_URL} rel="stylesheet" />
-        <div className="w-full max-w-md text-center">
+        <div className="max-w-md">
           <h1 className="text-xl font-bold text-gray-900">{t("designStudio.title")}</h1>
-          <FeedbackAlert
-            type="error"
-            message={t("designStudio.loadFailure")}
-            className="mt-4 text-left"
-          />
+          <FeedbackAlert type="error" message={t("designStudio.loadFailure")} className="mt-4" />
           <button
             type="button"
             onClick={() => {
@@ -781,12 +777,13 @@ export default function DesignStudioPage() {
             {t("dashboard.pageViewsModal.retry")}
           </button>
         </div>
-      </div>
+      </PageLayout>
     );
   }
 
   return (
-    <PageLayout variant="full" className="pb-24 md:pb-6 lg:h-full flex flex-col">
+    // pb-24 keeps content clear of the fixed Save bar below lg.
+    <PageLayout variant="full" className="pb-24 lg:pb-6 lg:h-full flex flex-col">
       <link href={BOOKING_PAGE_FONT_STYLESHEET_URL} rel="stylesheet" />
       <div className="shrink-0 flex items-start justify-between gap-3">
         <div className="min-w-0">
