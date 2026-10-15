@@ -1618,6 +1618,27 @@ test("starts a newly switched-on Pay at Hotel with Cash and Card", async ({ page
   expect(writes).toEqual([{ acceptedMethods: ["pay_at_property", "cash", "manual_card"] }]);
 });
 
+// A click made before the saved methods arrived was undone when they did, which also made
+// the test above flaky on a slow load.
+test("waits for the saved payment methods before a click counts", async ({ page }) => {
+  const writes = await mockPaymentWrites(page, [], [], false);
+  let releaseRead = () => {};
+  const readReleased = new Promise<void>((resolve) => (releaseRead = resolve));
+  await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH}`, async (route) => {
+    if (route.request().method() === "GET") await readReleased;
+    await route.fallback();
+  });
+  await page.goto("/settings/payments");
+  const click = page.getByText("Pay at Hotel", { exact: true }).click();
+  await page.waitForTimeout(500);
+  releaseRead();
+  await click;
+  await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();
+  await savePaymentsButton(page).click();
+  await expect(page.getByText("Payment settings saved").first()).toBeVisible();
+  expect(writes).toEqual([{ acceptedMethods: ["pay_at_property", "cash", "manual_card"] }]);
+});
+
 test("says what went wrong when payments don't save, and offers Try again", async ({
   page,
 }, testInfo) => {
