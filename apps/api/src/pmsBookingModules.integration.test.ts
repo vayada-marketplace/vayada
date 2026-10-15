@@ -57,7 +57,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking Engine module switches (runtime log
     const privileges = await admin.query<Record<string, boolean>>(
       `SELECT
          has_table_privilege($1, 'booking.booking_settings', 'SELECT') AS "select",
-         has_column_privilege($1, 'booking.booking_settings', 'show_addons_step', 'UPDATE')
+         has_column_privilege($1, 'booking.booking_settings', 'addons_enabled', 'UPDATE')
            AS "addOnsUpdate",
          has_column_privilege($1, 'booking.booking_settings', 'promo_codes_enabled', 'UPDATE')
            AS "promosUpdate",
@@ -77,7 +77,11 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking Engine module switches (runtime log
   it("starts on, switches each module with an audit row and leaves the settings revision alone", async () => {
     const propertyId = await seedProperty(admin, true);
     const before = await settingsRow(admin, propertyId);
-    expect(before).toMatchObject({ showAddonsStep: true, promoCodesEnabled: true });
+    expect(before).toMatchObject({
+      addonsEnabled: true,
+      showAddonsStep: true,
+      promoCodesEnabled: true,
+    });
     expect(await repository.read(propertyId)).toEqual({
       "add-ons": true,
       promos: true,
@@ -97,9 +101,10 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking Engine module switches (runtime log
 
     expect(await repository.read(propertyId)).toMatchObject({ "add-ons": false, promos: true });
     // The booking page publication hashes this row; a switch must not make a live page look edited.
+    // The Add-ons page's own "show the step" choice is a separate column and stays as it was.
     expect(await settingsRow(admin, propertyId)).toEqual({
       ...before,
-      showAddonsStep: false,
+      addonsEnabled: false,
       promoCodesEnabled: true,
     });
 
@@ -147,7 +152,7 @@ async function seedProperty(admin: pg.Pool, withSettings: boolean): Promise<stri
      VALUES ($1::uuid, $2, 'Booking Modules')`,
     [propertyId, `${PUBLIC_ID_PREFIX}${propertyId}`],
   );
-  // Rows written before 0484 never name the new column; the default keeps them on.
+  // Rows written before 0484 never name the new columns; the defaults keep them on.
   if (withSettings)
     await admin.query(
       "INSERT INTO booking.booking_settings (property_id, updated_at) VALUES ($1::uuid, $2)",
@@ -158,11 +163,13 @@ async function seedProperty(admin: pg.Pool, withSettings: boolean): Promise<stri
 
 async function settingsRow(admin: pg.Pool, propertyId: string) {
   const result = await admin.query<{
+    addonsEnabled: boolean;
     showAddonsStep: boolean;
     promoCodesEnabled: boolean;
     updatedAt: Date;
   }>(
-    `SELECT show_addons_step AS "showAddonsStep", promo_codes_enabled AS "promoCodesEnabled",
+    `SELECT addons_enabled AS "addonsEnabled", show_addons_step AS "showAddonsStep",
+            promo_codes_enabled AS "promoCodesEnabled",
             updated_at AS "updatedAt"
      FROM booking.booking_settings WHERE property_id=$1::uuid`,
     [propertyId],

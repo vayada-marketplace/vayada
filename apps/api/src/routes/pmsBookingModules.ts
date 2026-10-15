@@ -11,9 +11,10 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { enforcePmsPropertyRoutePolicy } from "./pmsPropertyPolicy.js";
 
-/** Feature Hub switches for Booking Engine modules (VAY-2200). Add-ons is the existing
- * booking_settings.show_addons_step; Promos is promo_codes_enabled (0484). Off hides the module's
- * Booking Engine page and its guest step or field; stored add-ons, codes and bookings stay. */
+/** Feature Hub switches for Booking Engine modules (VAY-2200): booking_settings.addons_enabled and
+ * promo_codes_enabled (0484). Off hides the module's Booking Engine page and its guest step or
+ * field; stored add-ons, codes and bookings stay. The Add-ons page's "show the step" choice
+ * (show_addons_step) is separate and unchanged. */
 export const BOOKING_MODULE_IDS = ["add-ons", "promos"] as const;
 export type BookingModuleId = (typeof BOOKING_MODULE_IDS)[number];
 
@@ -283,7 +284,7 @@ export function createPgBookingModuleRepository(config: {
   return {
     async read(propertyId) {
       const result = await pool.query<SwitchRow>(
-        `SELECT show_addons_step AS "addOns", promo_codes_enabled AS "promos",
+        `SELECT addons_enabled AS "addOns", promo_codes_enabled AS "promos",
                 updated_at AS "updatedAt"
          FROM booking.booking_settings WHERE property_id = $1::uuid`,
         [propertyId],
@@ -298,11 +299,11 @@ export function createPgBookingModuleRepository(config: {
       const result = await pool.query<{ isActive: boolean; updatedAt: Date }>(
         `WITH updated AS (
            UPDATE booking.booking_settings SET
-             show_addons_step = CASE WHEN $2 = 'add-ons' THEN $3::boolean ELSE show_addons_step END,
+             addons_enabled = CASE WHEN $2 = 'add-ons' THEN $3::boolean ELSE addons_enabled END,
              promo_codes_enabled =
                CASE WHEN $2 = 'promos' THEN $3::boolean ELSE promo_codes_enabled END
            WHERE property_id = $1::uuid
-           RETURNING CASE WHEN $2 = 'add-ons' THEN show_addons_step ELSE promo_codes_enabled END
+           RETURNING CASE WHEN $2 = 'add-ons' THEN addons_enabled ELSE promo_codes_enabled END
              AS "isActive"
          ), audited AS (
            INSERT INTO platform.product_audit_events (
