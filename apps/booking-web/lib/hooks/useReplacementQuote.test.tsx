@@ -96,3 +96,14 @@ it("tells a refusal (with its status) from a failed request (VAY-2195)", async (
   expect(latest.error).toBeTruthy();
   expect(latest.errorStatus).toBeUndefined();
 });
+it("passes on why the hotel refused a quote, so /book can drop a switched-off code (VAY-2200)", async () => {
+  vi.mocked(requestReplacementQuote).mockRejectedValueOnce(
+    new ApiError("refused", 422, { code: "PROMO_CODES_UNAVAILABLE" }),
+  );
+  await act(async () => root.render(createElement(Harness, { slug: "hotel", input: request })));
+  await act(async () => latest.submit());
+  expect(latest).toMatchObject({ errorStatus: 422, errorCode: "PROMO_CODES_UNAVAILABLE" });
+  vi.mocked(requestReplacementQuote).mockRejectedValueOnce(new ApiError("refused", 422, null));
+  await act(async () => latest.submit());
+  expect(latest.errorCode).toBeUndefined();
+});
