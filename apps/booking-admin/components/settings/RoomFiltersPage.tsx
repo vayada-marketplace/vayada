@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import RoomsTab from "@/components/booking-flow/RoomsTab";
 import { SettingsSubPage } from "@/components/settings/SettingsSubPage";
 import { FeedbackAlert } from "@/components/ui";
@@ -11,7 +11,10 @@ import {
   type BookingRoomFilterSettings,
 } from "@/services/api/bookingRoomFilterSettingsClient";
 import { normalizeBookingRoomFilterSettings } from "@/services/api/bookingFlowSettingsLoader";
-import { getSelectedBookingHotelId } from "@/services/api/bookingHotelScope";
+import {
+  getSelectedBookingHotelId,
+  SELECTED_HOTEL_CHANGED_EVENT,
+} from "@/services/api/bookingHotelScope";
 import { apiClient } from "@/services/api/client";
 import { settingsService } from "@/services/settings";
 
@@ -63,18 +66,27 @@ export function RoomFiltersPage() {
     return hotelId;
   };
 
+  // The latest load wins: an older hotel's answer must never land on the form a Save writes from.
+  const loadVersion = useRef(0);
+  const loadingHotelId = useRef<string | null>(null);
+
   // A failed read must not show "filters off", which a Save would write over the real filters.
   const load = useCallback(async () => {
+    const version = ++loadVersion.current;
+    const isCurrent = () => version === loadVersion.current;
     setLoading(true);
     setLoadFailed(false);
     try {
       const hotelId =
         getSelectedBookingHotelId() || (await settingsService.getPropertySettings()).id || null;
       if (!hotelId) throw new Error("No booking hotel selected");
+      if (!isCurrent()) return;
+      loadingHotelId.current = hotelId;
       const settings = normalizeBookingRoomFilterSettings(
         await getBookingRoomFilterSettings({ hotelId }),
         DEFAULT_ROOM_FILTER_SETTINGS,
       );
+      if (!isCurrent()) return;
       setBookingHotelId(hotelId);
       setBookingFilters(settings.bookingFilters);
       setFiltersEnabled(settings.bookingFilters.length > 0);
@@ -83,25 +95,39 @@ export function RoomFiltersPage() {
       setPmsRoomsLoading(true);
       apiClient
         .get<PmsRoomsResponse>(`/api/pms/properties/${encodeURIComponent(hotelId)}/rooms`)
-        .then((response) =>
+        .then((response) => {
+          if (!isCurrent()) return;
           setPmsRooms(
             (response.items ?? []).map((room) => ({
               id: room.roomId,
               name: room.roomNumber,
             })),
-          ),
-        )
-        .catch(() => setPmsRooms([]))
-        .finally(() => setPmsRoomsLoading(false));
+          );
+        })
+        .catch(() => {
+          if (isCurrent()) setPmsRooms([]);
+        })
+        .finally(() => {
+          if (isCurrent()) setPmsRoomsLoading(false);
+        });
     } catch {
-      setLoadFailed(true);
+      if (isCurrent()) setLoadFailed(true);
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void load();
+    // The header confirms or changes the hotel after the page starts loading.
+    const onHotelSelected = () => {
+      if (getSelectedBookingHotelId() !== loadingHotelId.current) void load();
+    };
+    window.addEventListener(SELECTED_HOTEL_CHANGED_EVENT, onHotelSelected);
+    return () => {
+      loadVersion.current += 1;
+      window.removeEventListener(SELECTED_HOTEL_CHANGED_EVENT, onHotelSelected);
+    };
   }, [load]);
 
   const handleToggleFiltersEnabled = async () => {
@@ -119,6 +145,7 @@ export function RoomFiltersPage() {
           },
         });
         setBookingFilters(saved.bookingFilters);
+        setCustomFilters(saved.customFilters);
         setFilterRooms(saved.filterRooms);
       } catch {
         setFiltersEnabled(true);

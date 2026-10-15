@@ -3,6 +3,7 @@ import {
   BOOKING_ADMIN_GUEST_FORM_SETTINGS_PATH,
   BOOKING_ADMIN_HOTEL_ID,
   BOOKING_ADMIN_HOTEL_SLUG,
+  mockBookingAdminAuthenticatedSession,
   mockBookingAdminBookingFlow,
 } from "../support/bookingAdminMocks";
 import { watchPageHealth } from "../support/pageHealth";
@@ -165,5 +166,67 @@ test.describe("booking-admin guest-form settings cutover", () => {
     await expect(page.getByRole("button", { name: /^Save Changes$/ })).toHaveCount(0);
     await page.getByRole("button", { name: "Retry", exact: true }).click();
     await expect(page.getByRole("spinbutton", { name: "Adult age threshold" })).toHaveValue("16");
+  });
+
+  test("keeps the hotel picked in the header when an older hotel's form arrives late", async ({
+    page,
+  }) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+    const secondHotelId = "booking_hotel_seeblick";
+    await mockBookingAdminBookingFlow(page);
+    await mockBookingAdminAuthenticatedSession(page, [BOOKING_ADMIN_HOTEL_ID, secondHotelId]);
+    let releaseFirstHotel = () => {};
+    const firstHotelHeld = new Promise<void>((resolve) => {
+      releaseFirstHotel = resolve;
+    });
+    const form = (adultAgeThreshold: number) => ({
+      specialRequestsEnabled: true,
+      arrivalTimeEnabled: false,
+      guestCountEnabled: false,
+      adultAgeThreshold,
+      childrenEnabled: true,
+    });
+    const writes: string[] = [];
+    await page.route("**/api/booking/hotels/*/settings/guest-form*", async (route) => {
+      const hotelId = new URL(route.request().url()).pathname.split("/")[4]!;
+      if (route.request().method() === "PUT") {
+        writes.push(hotelId);
+        await route.fulfill({ json: route.request().postDataJSON() });
+        return;
+      }
+      if (hotelId === BOOKING_ADMIN_HOTEL_ID) {
+        await firstHotelHeld;
+        await route.fulfill({ json: form(16) });
+        return;
+      }
+      await route.fulfill({ json: form(21) });
+    });
+
+    const firstHotelRequested = page.waitForRequest((request) =>
+      request.url().includes(`/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/guest-form`),
+    );
+    await page.goto("/settings/guest-form");
+    await firstHotelRequested;
+    // The header stores the new hotel and announces it (SELECTED_HOTEL_CHANGED_EVENT).
+    await page.evaluate((hotelId) => {
+      localStorage.setItem("selectedHotelId", hotelId);
+      window.dispatchEvent(new Event("booking-admin:selected-hotel-changed"));
+    }, secondHotelId);
+    const adultAge = page.getByRole("spinbutton", { name: "Adult age threshold" });
+    await expect(adultAge).toHaveValue("21");
+
+    const lateAnswer = page.waitForResponse((response) =>
+      response.url().includes(`/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/guest-form`),
+    );
+    releaseFirstHotel();
+    await lateAnswer;
+    // Give a stale answer the chance to land before checking it didn't.
+    await page.waitForTimeout(300);
+    await expect(adultAge).toHaveValue("21");
+    await page.getByRole("button", { name: /^Save Changes$/ }).click();
+    await expect.poll(() => writes).toEqual([secondHotelId]);
   });
 });

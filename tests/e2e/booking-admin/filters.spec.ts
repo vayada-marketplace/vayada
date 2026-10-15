@@ -3,6 +3,7 @@ import {
   BOOKING_ADMIN_HOTEL_ID,
   BOOKING_ADMIN_ROOMS_PATH,
   BOOKING_ADMIN_ROOM_FILTER_SETTINGS_PATH,
+  mockBookingAdminAuthenticatedSession,
   mockBookingAdminBookingFlow,
 } from "../support/bookingAdminMocks";
 import { watchNoLegacyCalls } from "../support/noLegacyCalls";
@@ -129,5 +130,85 @@ test.describe("booking-admin room-filter settings cutover", () => {
     await expect(page.getByRole("button", { name: /^Save Filters$/ })).toHaveCount(0);
     await page.getByRole("button", { name: "Retry", exact: true }).click();
     await expect(page.getByText("Rooftop Terrace")).toBeVisible();
+  });
+
+  test("keeps the hotel picked in the header when an older hotel's filters arrive late", async ({
+    page,
+  }) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+    const secondHotelId = "booking_hotel_seeblick";
+    await mockBookingAdminBookingFlow(page);
+    await mockBookingAdminAuthenticatedSession(page, [BOOKING_ADMIN_HOTEL_ID, secondHotelId]);
+    let releaseFirstHotel = () => {};
+    const firstHotelHeld = new Promise<void>((resolve) => {
+      releaseFirstHotel = resolve;
+    });
+    const writes: string[] = [];
+    await page.route("**/api/booking/hotels/*/settings/room-filters*", async (route) => {
+      const hotelId = new URL(route.request().url()).pathname.split("/")[4]!;
+      if (route.request().method() === "PUT") {
+        writes.push(hotelId);
+        await route.fulfill({ json: route.request().postDataJSON() });
+        return;
+      }
+      if (hotelId === BOOKING_ADMIN_HOTEL_ID) {
+        await firstHotelHeld;
+        await route.fulfill({
+          json: {
+            bookingFilters: ["rooftop"],
+            customFilters: { rooftop: "Rooftop Terrace" },
+            filterRooms: { rooftop: ["room-a"] },
+          },
+        });
+        return;
+      }
+      await route.fulfill({
+        json: {
+          bookingFilters: ["sauna"],
+          customFilters: { sauna: "Lakeside Sauna" },
+          filterRooms: { sauna: ["room-b"] },
+        },
+      });
+    });
+    await page.route("**/api/pms/properties/*/rooms*", (route) =>
+      route.fulfill({
+        json: {
+          contractVersion: "pms-operations.v1",
+          propertyId: secondHotelId,
+          items: [
+            { roomId: "room-a", roomNumber: "Alpine Suite" },
+            { roomId: "room-b", roomNumber: "Lake Loft" },
+          ],
+          sourceFreshness: {},
+        },
+      }),
+    );
+
+    const firstHotelRequested = page.waitForRequest((request) =>
+      request.url().includes(`/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/room-filters`),
+    );
+    await page.goto("/settings/room-filters");
+    await firstHotelRequested;
+    // The header stores the new hotel and announces it (SELECTED_HOTEL_CHANGED_EVENT).
+    await page.evaluate((hotelId) => {
+      localStorage.setItem("selectedHotelId", hotelId);
+      window.dispatchEvent(new Event("booking-admin:selected-hotel-changed"));
+    }, secondHotelId);
+    await expect(page.getByText("Lakeside Sauna")).toBeVisible();
+
+    const lateAnswer = page.waitForResponse((response) =>
+      response.url().includes(`/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/room-filters`),
+    );
+    releaseFirstHotel();
+    await lateAnswer;
+    // Give a stale answer the chance to land before checking it didn't.
+    await page.waitForTimeout(300);
+    await expect(page.getByText("Lakeside Sauna")).toBeVisible();
+    await expect(page.getByText("Rooftop Terrace")).toHaveCount(0);
+    await page.getByRole("button", { name: /^Save Filters$/ }).click();
+    await expect.poll(() => writes).toEqual([secondHotelId]);
   });
 });

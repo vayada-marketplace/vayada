@@ -1,13 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import GuestFormTab from "@/components/booking-flow/GuestFormTab";
 import { useGuestFormSettingsTab } from "@/components/booking-flow/useBookingFlowSettingsTabs";
 import { SettingsSubPage } from "@/components/settings/SettingsSubPage";
 import { FeedbackAlert } from "@/components/ui";
 import { useTranslation } from "@/lib/i18n";
 import { getBookingGuestFormSettings } from "@/services/api/bookingGuestFormSettingsClient";
-import { getSelectedBookingHotelId } from "@/services/api/bookingHotelScope";
+import {
+  getSelectedBookingHotelId,
+  SELECTED_HOTEL_CHANGED_EVENT,
+} from "@/services/api/bookingHotelScope";
 import { settingsService } from "@/services/settings";
 
 /** Settings → Guest Form: extra checkout fields for guests (VAY-2144, was Booking Flow → Guest Form). */
@@ -32,25 +35,44 @@ export function GuestFormPage() {
   });
   const { applyGuestFormSettings } = guestForm;
 
+  // The latest load wins: an older hotel's answer must never land on the form a Save writes from.
+  const loadVersion = useRef(0);
+  const loadingHotelId = useRef<string | null>(null);
+
   // A failed read must not show the defaults, which a Save would write over the real form.
   const load = useCallback(async () => {
+    const version = ++loadVersion.current;
+    const isCurrent = () => version === loadVersion.current;
     setLoading(true);
     setLoadFailed(false);
     try {
       const hotelId =
         getSelectedBookingHotelId() || (await settingsService.getPropertySettings()).id || null;
       if (!hotelId) throw new Error("No booking hotel selected");
-      applyGuestFormSettings(await getBookingGuestFormSettings({ hotelId }));
+      if (!isCurrent()) return;
+      loadingHotelId.current = hotelId;
+      const settings = await getBookingGuestFormSettings({ hotelId });
+      if (!isCurrent()) return;
+      applyGuestFormSettings(settings);
       setBookingHotelId(hotelId);
     } catch {
-      setLoadFailed(true);
+      if (isCurrent()) setLoadFailed(true);
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [applyGuestFormSettings]);
 
   useEffect(() => {
     void load();
+    // The header confirms or changes the hotel after the page starts loading.
+    const onHotelSelected = () => {
+      if (getSelectedBookingHotelId() !== loadingHotelId.current) void load();
+    };
+    window.addEventListener(SELECTED_HOTEL_CHANGED_EVENT, onHotelSelected);
+    return () => {
+      loadVersion.current += 1;
+      window.removeEventListener(SELECTED_HOTEL_CHANGED_EVENT, onHotelSelected);
+    };
   }, [load]);
 
   return (
