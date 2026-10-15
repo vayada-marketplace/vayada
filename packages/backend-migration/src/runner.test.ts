@@ -2641,6 +2641,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
       expect(distributionTableRows.map((row) => row.table_name)).toEqual([
         "active_public_booking_revision",
         "booking_deep_link_contexts",
+        "booking_web_events",
         "external_api_clients",
         "external_api_usage_events",
         "live_ari_watermarks",
