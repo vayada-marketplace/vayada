@@ -24,12 +24,14 @@ const SUB_PAGES = [
   "/settings/location",
 ];
 
+// `padding` is the page token at that width. Wider than the 1280px frame, the frame is centred in
+// <main>, whose inner width depends on the scrollbar gutter: (1920 - 208 sidebar - gutter - 1280) / 2.
 const VIEWPORTS = [
-  { width: 1440, height: 900, x: 24, y: 24 },
-  // Wider than the 1280px frame: centred, (1920 - 208 sidebar - 1280) / 2 + 24.
-  { width: 1920, height: 1080, x: 240, y: 24 },
-  { width: 390, height: 844, x: 16, y: 16 },
+  { width: 1440, height: 900, padding: 24 },
+  { width: 1920, height: 1080, padding: 24 },
+  { width: 390, height: 844, padding: 16 },
 ];
+const FRAME_MAX_WIDTH = 1280;
 
 async function mockPages(page: Page) {
   await mockBookingAdminBookingFlow(page);
@@ -65,6 +67,12 @@ async function titlePosition(page: Page) {
   });
 }
 
+/** Where the frame puts the title: centred within <main>'s inner width, then padded. */
+async function expectedTitleX(page: Page, padding: number) {
+  const innerWidth = await page.locator("main").evaluate((main) => main.clientWidth);
+  return Math.round(Math.max(0, (innerWidth - FRAME_MAX_WIDTH) / 2) + padding);
+}
+
 for (const viewport of VIEWPORTS) {
   test(`every page title starts at the same place at ${viewport.width}px`, async ({ page }) => {
     // One test walks every page, so allow for a dev server compiling each route once.
@@ -72,20 +80,25 @@ for (const viewport of VIEWPORTS) {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await mockPages(page);
 
+    await page.goto(TOP_LEVEL[0]);
+    const x = await expectedTitleX(page, viewport.padding);
+    // Only 1920 is wide enough for the frame to be centred; narrower screens are just padded.
+    expect(x > viewport.padding).toBe(viewport.width === 1920);
+
     for (const route of TOP_LEVEL) {
       await page.goto(route);
-      expect(await titlePosition(page), route).toEqual({ x: viewport.x, y: viewport.y });
+      expect(await titlePosition(page), route).toEqual({ x, y: viewport.padding });
     }
 
     let subPageY: number | undefined;
     for (const route of SUB_PAGES) {
       await page.goto(route);
-      const { x, y } = await titlePosition(page);
-      expect(x, route).toBe(viewport.x);
-      subPageY ??= y;
-      expect(y, route).toBe(subPageY);
+      const position = await titlePosition(page);
+      expect(position.x, route).toBe(x);
+      subPageY ??= position.y;
+      expect(position.y, route).toBe(subPageY);
     }
-    expect(subPageY).toBeGreaterThan(viewport.y);
+    expect(subPageY).toBeGreaterThan(viewport.padding);
   });
 }
 
