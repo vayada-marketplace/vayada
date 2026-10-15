@@ -4,8 +4,12 @@ import NearbyEditor from "@vayada/product-onboarding/NearbyEditor";
 import { sharedHotelSetupApi, nearbyApi } from "@/services/api/sharedHotelSetupClient";
 import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
 import { getSelectedBookingHotelId } from "@/services/api/bookingHotelScope";
+import { PageLayout } from "@/components/layout/PageLayout";
+import { SettingsBreadcrumb } from "@/components/settings/SettingsSubPage";
+import { useTranslation } from "@/lib/i18n";
 
 export default function LocationPage() {
+  const { t } = useTranslation();
   const [propertyId, setPropertyId] = useState<string | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -29,23 +33,23 @@ export default function LocationPage() {
   }, []);
   if (!propertyId)
     return (
-      <div className="p-8" role={error ? "alert" : "status"}>
+      <PageLayout role={error ? "alert" : "status"}>
         {error || "Loading location…"}
         {error && (
           <a href="/settings/location" className="ml-3 text-blue-700 underline">
             Reload
           </a>
         )}
-      </div>
+      </PageLayout>
     );
   return (
-    <>
-      <a
-        href="/settings/general"
-        className="ml-4 mt-6 inline-block text-sm text-blue-700 underline sm:ml-8"
-      >
-        Back to settings
-      </a>
+    <PageLayout>
+      <SettingsBreadcrumb
+        current="Location & surroundings"
+        trail={[{ label: t("settings.cards.general.title"), href: "/settings/general" }]}
+        fullPageLinks
+        className="mb-2"
+      />
       <NearbyEditor
         key={propertyId}
         propertyId={propertyId}
@@ -53,6 +57,6 @@ export default function LocationPage() {
         profileApi={sharedHotelSetupApi}
         apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? ""}
       />
-    </>
+    </PageLayout>
   );
 }

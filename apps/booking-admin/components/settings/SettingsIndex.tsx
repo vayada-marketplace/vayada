@@ -17,6 +17,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { useTranslation } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { PageLayout } from "@/components/layout/PageLayout";
 import { legacySettingsPageUrl } from "@/lib/utils/settingsSectionUrl";
 
 type SettingsCardLink = {
@@ -132,7 +133,7 @@ export function SettingsIndex() {
   if (!legacyChecked) return null;
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 lg:px-8 lg:py-8">
+    <PageLayout>
       <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">
         {t("settings.index.title")}
       </h1>
@@ -166,6 +167,6 @@ export function SettingsIndex() {
           </li>
         ))}
       </ul>
-    </div>
+    </PageLayout>
   );
 }

@@ -31,6 +31,7 @@ import CustomDomainCard from "@/components/design-studio/CustomDomainCard";
 import MediaTab, { type PropertyGalleryImage } from "@/components/design-studio/MediaTab";
 import ColorsTab from "@/components/design-studio/ColorsTab";
 import FontsTab from "@/components/design-studio/FontsTab";
+import { PageLayout } from "@/components/layout/PageLayout";
 
 type Tab = "media" | "colors" | "fonts" | "layout" | "domain";
 
@@ -785,7 +786,7 @@ export default function DesignStudioPage() {
   }
 
   return (
-    <div className="p-4 md:p-6 pb-24 lg:pb-6 lg:h-full flex flex-col">
+    <PageLayout variant="full" className="pb-24 md:pb-6 lg:h-full flex flex-col">
       <link href={BOOKING_PAGE_FONT_STYLESHEET_URL} rel="stylesheet" />
       <div className="shrink-0 flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -1001,7 +1002,7 @@ export default function DesignStudioPage() {
           {t("common.save")}
         </button>
       </div>
-    </div>
+    </PageLayout>
   );
 }
 

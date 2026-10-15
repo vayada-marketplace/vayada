@@ -3,14 +3,17 @@
 import { useTranslation } from "@/lib/i18n";
 import { FeatureHubPage } from "@vayada/feature-hub";
 import { moduleActivationClient } from "@/services/api/moduleActivationClient";
+import { PageLayout } from "@/components/layout/PageLayout";
 
 export default function BookingFeatureHubRoute() {
   const { t } = useTranslation();
   return (
-    <FeatureHubPage
-      translate={t}
-      activationClient={moduleActivationClient}
-      initialProduct="booking_engine"
-    />
+    <PageLayout className="p-0 md:p-0">
+      <FeatureHubPage
+        translate={t}
+        activationClient={moduleActivationClient}
+        initialProduct="booking_engine"
+      />
+    </PageLayout>
   );
 }
