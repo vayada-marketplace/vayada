@@ -109,6 +109,19 @@ describe("Booking Engine module store (VAY-2200)", () => {
 });
 
 describe("optional module stores", () => {
+  it("still fails the hub when no store at all can be read", async () => {
+    const navigation = store({});
+    const booking = store({});
+    navigation.list.mockRejectedValueOnce(new Error("forbidden"));
+    booking.list.mockRejectedValueOnce(new Error("offline"));
+    const client = combineActivationClients([
+      { client: navigation, modules: PMS_NAVIGATION_MODULE_IDS, optional: true },
+      { client: booking, modules: BOOKING_MODULE_IDS, optional: true },
+    ]);
+
+    await expect(client.list()).rejects.toThrow("forbidden");
+  });
+
   it("leaves an unreadable optional store out instead of failing the hub", async () => {
     const navigation = store({});
     navigation.list.mockRejectedValueOnce(new Error("forbidden"));

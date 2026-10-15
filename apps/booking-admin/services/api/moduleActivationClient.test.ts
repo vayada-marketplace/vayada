@@ -81,4 +81,26 @@ describe("moduleActivationClient", () => {
       ],
     ]);
   });
+
+  it("keeps the Add-ons and Promos switches when staff can't read Financials (VAY-2200)", async () => {
+    propertyLinkMock.mockResolvedValue({ propertyId: "pms_property_alpenrose" });
+    apiClientMock.get.mockImplementation(async (url: string) => {
+      if (url.endsWith("/module-activations")) throw new Error("forbidden");
+      const booking = url.endsWith("/booking-modules");
+      return {
+        hotelId: "pms_property_alpenrose",
+        canManage: true,
+        supportedModules: booking ? ["add-ons", "promos"] : ["inbox", "reviews"],
+        activeModules: booking ? ["add-ons"] : [],
+        activations: [],
+      };
+    });
+
+    const { moduleActivationClient } = await import("./moduleActivationClient");
+
+    await expect(moduleActivationClient.list()).resolves.toMatchObject({
+      supportedModules: ["inbox", "reviews", "add-ons", "promos"],
+      activeModules: ["add-ons"],
+    });
+  });
 });
