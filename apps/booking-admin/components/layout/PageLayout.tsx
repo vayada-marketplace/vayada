@@ -37,8 +37,9 @@ export function PageHeader({
   return (
     <div className={cn("page-header", className)}>
       {breadcrumb && <div className="mb-2">{breadcrumb}</div>}
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
+      {/* Actions sit right of the title while it keeps at least 14rem, otherwise below it. */}
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+        <div className="min-w-0 flex-[1_1_14rem]">
           <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">{title}</h1>
           {subtitle && (
             <p className="mt-[var(--page-subtitle-gap)] text-[13px] text-gray-500">{subtitle}</p>

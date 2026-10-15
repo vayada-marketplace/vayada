@@ -101,8 +101,8 @@ export default function NearbyEditor({
   return (
     <div className="space-y-6">
       {/* page-header: Booking Admin's shared header spacing (VAY-2199). */}
-      <div className="page-header flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
+      <div className="page-header flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+        <div className="min-w-0 flex-[1_1_14rem]">
           <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">
             Location & surroundings
           </h1>
