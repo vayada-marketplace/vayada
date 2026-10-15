@@ -146,7 +146,8 @@ export default function AddonsTab({
   const liveCount = addons.filter((addon) => addon.live !== false).length;
   const maxAddons = propertyPlan.limits.maxAddons;
   const addonLimitReached = addons.length >= maxAddons;
-  // Add-on prices use the PMS pricing currency, which only setup's Pricing step sets (VAY-2141).
+  // Add-on prices use the PMS pricing currency, which only setup's Pricing step sets. The API
+  // refuses to create or reprice add-ons without it, so the editor stays closed (VAY-2141).
   const currencyMissing = !propertyCurrency;
   const addonLimitMessage =
     propertyPlan.plan === "commission"
@@ -164,7 +165,7 @@ export default function AddonsTab({
 
   const openEditEditor = (addon: AddonItem) => {
     setEditingAddon(addon);
-    setDraft(toDraft(addon, propertyCurrency || addon.currency));
+    setDraft(toDraft(addon, propertyCurrency));
     setItemError(null);
     setIsEditorOpen(true);
   };
@@ -524,6 +525,7 @@ export default function AddonsTab({
                   <button
                     type="button"
                     onClick={() => openEditEditor(addon)}
+                    disabled={currencyMissing}
                     aria-label={t("admin.editName", { name: addon.name })}
                     className={iconButtonClass}
                   >
@@ -585,7 +587,7 @@ export default function AddonsTab({
         <AddonEditor
           translate={t}
           initialValues={draft}
-          currency={propertyCurrency || editingAddon?.currency || ""}
+          currency={propertyCurrency}
           editing={Boolean(editingAddon)}
           onSave={handleSave}
           onCancel={closeEditor}

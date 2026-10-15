@@ -550,11 +550,12 @@ test("asks for the hotel currency before add-ons can be created", async ({ page 
     contentType: "image/png",
   });
 
-  // An existing add-on keeps its own saved currency.
-  await page.getByRole("button", { name: "Edit Airport transfer" }).click();
-  const dialog = page.getByRole("dialog");
-  await expect(dialog.getByLabel(/^Price per booking \(LKR\) \*/)).toHaveValue("2500.00");
-  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  // A saved add-on still shows its price in its own currency, but can't be repriced yet.
+  await expect(
+    page.getByTestId("booking-addon-item-addon_transfer").getByText(/LKR\s*2,500\.00/),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit Airport transfer" })).toBeDisabled();
+  await expect(page.getByRole("switch", { name: /Airport transfer/ })).toBeEnabled();
   expect(writes).toEqual([]);
 
   propertyCurrency = "LKR";
@@ -565,5 +566,5 @@ test("asks for the hotel currency before add-ons can be created", async ({ page 
     page.getByText("1 add-on · 1 live on your booking engine · prices in LKR"),
   ).toBeVisible();
   await page.getByRole("button", { name: "New add-on" }).click();
-  await expect(dialog.getByLabel(/^Price per booking \(LKR\) \*/)).toBeVisible();
+  await expect(page.getByRole("dialog").getByLabel(/^Price per booking \(LKR\) \*/)).toBeVisible();
 });

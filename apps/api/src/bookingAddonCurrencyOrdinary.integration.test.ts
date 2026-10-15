@@ -59,15 +59,16 @@ describe.skipIf(!url)("Booking add-on currency on the ordinary API login", () =>
 
   afterAll(async () => {
     await pool?.end();
-    await admin.query("DELETE FROM booking.addon_definitions WHERE property_id=$1::uuid", [
-      propertyId,
-    ]);
-    await admin.query("DELETE FROM pms.property_pricing_settings WHERE property_id=$1::uuid", [
-      propertyId,
-    ]);
-    await admin.query("DELETE FROM booking.booking_settings WHERE property_id=$1::uuid", [
-      propertyId,
-    ]);
+    await admin.query("BEGIN");
+    await admin.query("SET LOCAL session_replication_role = replica");
+    for (const table of [
+      "booking.addon_definitions",
+      "pms.property_pricing_settings",
+      "booking.booking_settings",
+    ])
+      await admin.query(`DELETE FROM ${table} WHERE property_id=$1::uuid`, [propertyId]);
+    await admin.query("DELETE FROM hotel_catalog.properties WHERE id=$1::uuid", [propertyId]);
+    await admin.query("COMMIT");
     await fixture?.drop();
     await admin.end();
   });
