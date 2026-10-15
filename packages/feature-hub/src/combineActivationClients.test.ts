@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { combineActivationClients, PMS_NAVIGATION_MODULE_IDS } from "./combineActivationClients";
+import {
+  BOOKING_MODULE_IDS,
+  combineActivationClients,
+  PMS_NAVIGATION_MODULE_IDS,
+} from "./combineActivationClients";
 import { activeNavModules, CORE_NAV_ITEMS, FEATURE_MODULE_NAV_INDEX } from "./registry";
 import type { FeatureActivationClient, ModuleActivationsResponse } from "./types";
 
@@ -74,6 +78,33 @@ describe("combineActivationClients", () => {
     ]);
 
     await expect(client.list()).rejects.toThrow("navigation unavailable");
+  });
+});
+
+describe("Booking Engine module store (VAY-2200)", () => {
+  it("merges Add-ons and Promos with per-module rights and routes their switches", async () => {
+    const navigation = store({ canManage: true, supportedModules: ["inbox", "reviews"] });
+    const booking = store({
+      canManage: true,
+      supportedModules: ["add-ons", "promos"],
+      activeModules: ["add-ons"],
+      manageableModules: ["add-ons"],
+    });
+    const financials = store({ supportedModules: ["financials"] });
+    const client = combineActivationClients([
+      { client: navigation, modules: PMS_NAVIGATION_MODULE_IDS, optional: true },
+      { client: booking, modules: BOOKING_MODULE_IDS, optional: true },
+      { client: financials },
+    ]);
+
+    await expect(client.list()).resolves.toMatchObject({
+      supportedModules: ["inbox", "reviews", "add-ons", "promos", "financials"],
+      activeModules: ["add-ons"],
+      manageableModules: ["inbox", "reviews", "add-ons"],
+    });
+    await client.update("promos", false);
+    expect(booking.update).toHaveBeenCalledExactlyOnceWith("promos", false);
+    expect(financials.update).not.toHaveBeenCalled();
   });
 });
 

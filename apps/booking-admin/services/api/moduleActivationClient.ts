@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BOOKING_MODULE_IDS,
   combineActivationClients,
   PMS_NAVIGATION_MODULE_IDS,
   type FeatureActivationClient,
@@ -12,7 +13,7 @@ import { getSelectedBookingHotelId } from "./bookingHotelScope";
 import { apiClient, omitHotelContext } from "./client";
 import { getBookingHotelPropertyLink } from "./bookingPropertyLinkClient";
 
-type ModuleStore = "module-activations" | "navigation-modules";
+type ModuleStore = "module-activations" | "navigation-modules" | "booking-modules";
 
 async function moduleStoreEndpoint(store: ModuleStore): Promise<string> {
   const hotelId = getSelectedBookingHotelId();
@@ -42,13 +43,15 @@ function propertyModuleClient(store: ModuleStore): FeatureActivationClient {
   };
 }
 
-// The PMS Inbox and Reviews sidebar switches are managed here too (VAY-2078). Their store is
-// optional: if it cannot be read, Financials still loads.
+// The PMS Inbox and Reviews sidebar switches (VAY-2078) and the Add-ons and Promos switches
+// (VAY-2200) are managed here too. Their stores are optional: if one cannot be read, the rest
+// still loads.
 export const moduleActivationClient: FeatureActivationClient = combineActivationClients([
   {
     client: propertyModuleClient("navigation-modules"),
     modules: PMS_NAVIGATION_MODULE_IDS,
     optional: true,
   },
+  { client: propertyModuleClient("booking-modules"), modules: BOOKING_MODULE_IDS, optional: true },
   { client: propertyModuleClient("module-activations") },
 ]);

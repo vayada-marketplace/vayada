@@ -28,13 +28,17 @@ describe("moduleActivationClient", () => {
     propertyLinkMock.mockReset();
   });
 
-  it("manages the PMS Inbox and Reviews switches beside Financials", async () => {
+  it("manages the PMS Inbox and Reviews and the Add-ons and Promos switches beside Financials", async () => {
     const options = { headers: { "X-Vayada-Omit-Hotel-Context": "true" } };
     propertyLinkMock.mockResolvedValue({ propertyId: "pms_property_alpenrose" });
     apiClientMock.get.mockImplementation(async (url: string) => ({
       hotelId: "pms_property_alpenrose",
       canManage: true,
-      supportedModules: url.endsWith("/navigation-modules") ? ["inbox", "reviews"] : ["financials"],
+      supportedModules: url.endsWith("/navigation-modules")
+        ? ["inbox", "reviews"]
+        : url.endsWith("/booking-modules")
+          ? ["add-ons", "promos"]
+          : ["financials"],
       activeModules: [],
       activations: [],
     }));
@@ -49,23 +53,32 @@ describe("moduleActivationClient", () => {
 
     await expect(moduleActivationClient.list()).resolves.toMatchObject({
       hotelId: "pms_property_alpenrose",
-      supportedModules: ["inbox", "reviews", "financials"],
-      manageableModules: ["inbox", "reviews", "financials"],
+      supportedModules: ["inbox", "reviews", "add-ons", "promos", "financials"],
+      manageableModules: ["inbox", "reviews", "add-ons", "promos", "financials"],
     });
     await expect(moduleActivationClient.update("inbox", true)).resolves.toMatchObject({
       moduleId: "inbox",
       isActive: true,
     });
+    await moduleActivationClient.update("promos", false);
 
     expect(propertyLinkMock).toHaveBeenCalledWith({ hotelId: "booking_hotel_alpenrose" });
     expect(apiClientMock.get.mock.calls).toEqual([
       ["/api/pms/properties/pms_property_alpenrose/navigation-modules", options],
+      ["/api/pms/properties/pms_property_alpenrose/booking-modules", options],
       ["/api/pms/properties/pms_property_alpenrose/module-activations", options],
     ]);
-    expect(apiClientMock.patch).toHaveBeenCalledExactlyOnceWith(
-      "/api/pms/properties/pms_property_alpenrose/navigation-modules/inbox",
-      { moduleId: "inbox", isActive: true },
-      options,
-    );
+    expect(apiClientMock.patch.mock.calls).toEqual([
+      [
+        "/api/pms/properties/pms_property_alpenrose/navigation-modules/inbox",
+        { moduleId: "inbox", isActive: true },
+        options,
+      ],
+      [
+        "/api/pms/properties/pms_property_alpenrose/booking-modules/promos",
+        { moduleId: "promos", isActive: false },
+        options,
+      ],
+    ]);
   });
 });

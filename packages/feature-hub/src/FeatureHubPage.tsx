@@ -1,31 +1,22 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   ArrowPathIcon,
   CheckCircleIcon,
-  ChevronDownIcon,
-  MagnifyingGlassIcon,
-  PowerIcon,
-  SparklesIcon,
-  StarIcon,
+  CheckIcon,
+  InformationCircleIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 
 import {
-  activeModuleCount,
   activeNavModules,
   CORE_NAV_ITEMS,
-  FEATURE_CATEGORIES,
   FEATURE_MODULE_NAV_INDEX,
-  modulesForProduct,
+  FEATURE_MODULES,
+  isModuleNew,
 } from "./registry";
-import type {
-  FeatureActivationClient,
-  FeatureCategory,
-  FeatureModule,
-  FeatureProduct,
-} from "./types";
+import type { FeatureActivationClient, FeatureModule, FeatureProduct } from "./types";
 import { useFeatureModuleActivations } from "./useFeatureModuleActivations";
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
@@ -37,32 +28,16 @@ interface FeatureHubPageProps {
    * in a ref so refresh callbacks stay stable across renders.
    */
   activationClient: FeatureActivationClient;
-  initialProduct?: FeatureProduct;
-  products?: FeatureProduct[];
 }
 
 function cx(...classes: Array<string | false | null | undefined>): string {
   return classes.filter(Boolean).join(" ");
 }
 
-const PRODUCT_LABELS: Record<FeatureProduct, string> = {
-  pms: "PMS Modules",
-  booking_engine: "Booking Engine Modules",
-};
+const PREVIEW_PRODUCTS: FeatureProduct[] = ["pms", "booking_engine"];
 
-const PRODUCT_PREVIEW_LABELS: Record<FeatureProduct, string> = {
-  pms: "PMS navigation",
-  booking_engine: "Booking Engine navigation",
-};
-
-const ALL_PRODUCTS = Object.keys(PRODUCT_LABELS) as FeatureProduct[];
-
-export function FeatureHubPage({
-  translate,
-  activationClient,
-  initialProduct = "pms",
-  products,
-}: FeatureHubPageProps) {
+/** One list of every module, whichever app shows it (VAY-2200). */
+export function FeatureHubPage({ translate, activationClient }: FeatureHubPageProps) {
   // Module copy the host catalog lacks falls back to the English defaults, not to the raw key.
   const t = useMemo<Translate>(
     () =>
@@ -74,9 +49,6 @@ export function FeatureHubPage({
         : defaultTranslate,
     [translate],
   );
-  const [product, setProduct] = useState<FeatureProduct>(initialProduct);
-  const [query, setQuery] = useState("");
-  const [category, setCategory] = useState<"All" | FeatureCategory>("All");
   const [selectedModule, setSelectedModule] = useState<FeatureModule | null>(null);
   const [notice, setNotice] = useState("");
   const [updateError, setUpdateError] = useState("");
@@ -93,56 +65,27 @@ export function FeatureHubPage({
   } = useFeatureModuleActivations(activationClient);
   const canManageModule = (moduleId: string) =>
     manageableModuleSet ? manageableModuleSet.has(moduleId) : canManage;
-  const supportedModuleSet = useMemo(() => new Set(supportedModuleIds), [supportedModuleIds]);
+  const now = useMemo(() => new Date(), []);
 
-  const availableProducts = useMemo(() => {
-    const requested = products?.length ? products : ALL_PRODUCTS;
-    const ordered = requested.includes(initialProduct) ? requested : [initialProduct, ...requested];
-    return ordered.filter((key) =>
-      modulesForProduct(key).some((module) => supportedModuleSet.has(module.id)),
-    );
-  }, [initialProduct, products, supportedModuleSet]);
-  const displayedProduct = availableProducts.includes(product)
-    ? product
-    : (availableProducts[0] ?? product);
-  const waitingForInventory = loading && availableProducts.length === 0;
-  const inventoryFailed = Boolean(error) && availableProducts.length === 0;
-
-  useEffect(() => {
-    if (availableProducts.length > 0 && !availableProducts.includes(product)) {
-      setProduct(availableProducts[0]);
-    }
-  }, [availableProducts, product]);
+  // A store that could not be read leaves its modules out; unavailable modules always show.
+  const { listed, switchable } = useMemo(() => {
+    const supported = new Set(supportedModuleIds);
+    return {
+      listed: FEATURE_MODULES.filter((module) => module.unavailable || supported.has(module.id)),
+      switchable: FEATURE_MODULES.filter(
+        (module) => !module.unavailable && supported.has(module.id),
+      ),
+    };
+  }, [supportedModuleIds]);
+  const activeCount = switchable.filter((module) => activeModuleIds.includes(module.id)).length;
+  const waitingForInventory = loading && switchable.length === 0;
+  const inventoryFailed = Boolean(error) && switchable.length === 0;
 
   useEffect(() => {
     if (!notice) return;
     const id = window.setTimeout(() => setNotice(""), 3800);
     return () => window.clearTimeout(id);
   }, [notice]);
-
-  const productActiveCount = useMemo(
-    () => activeModuleCount(displayedProduct, activeModuleIds),
-    [displayedProduct, activeModuleIds],
-  );
-
-  const filteredModules = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    return modulesForProduct(displayedProduct).filter((module) => {
-      if (!supportedModuleSet.has(module.id)) return false;
-      const matchesCategory = category === "All" || module.category === category;
-      const matchesSearch =
-        !normalized ||
-        [
-          t(`featureHub.module.${module.id}.name`),
-          t(`featureHub.module.${module.id}.description`),
-          t(`featureHub.category.${module.category}`),
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(normalized);
-      return matchesCategory && matchesSearch;
-    });
-  }, [category, displayedProduct, query, supportedModuleSet, t]);
 
   const toggleModule = async (module: FeatureModule, isActive: boolean) => {
     if (savingModuleId) return;
@@ -152,11 +95,9 @@ export function FeatureHubPage({
     try {
       await setModuleActive(module.id, isActive);
       setNotice(
-        isActive && module.settingsNote
-          ? t("admin.activatedNote", { note: module.settingsNote ?? "" })
-          : t(isActive ? "featureHub.activated" : "featureHub.deactivated", {
-              name: t(`featureHub.module.${module.id}.name`),
-            }),
+        t(isActive ? "featureHub.activated" : "featureHub.deactivated", {
+          name: t(`featureHub.modules.${module.id}.name`),
+        }),
       );
     } catch (error) {
       setUpdateError(
@@ -169,277 +110,226 @@ export function FeatureHubPage({
     }
   };
 
-  const clearSearch = () => setQuery("");
+  const switchProps = (module: FeatureModule) => ({
+    isActive: configuredModuleSet.has(module.id),
+    disabled: loading || !canManageModule(module.id) || savingModuleId !== null,
+    saving: savingModuleId === module.id,
+    onToggle: (isActive: boolean) => toggleModule(module, isActive),
+  });
 
   return (
     <div className="min-h-full bg-gray-50 p-4 text-gray-950 md:p-6">
-      <div className="pb-4">
-        <header className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-          <div className="min-w-0">
-            <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">
-              {t("featureHub.copy.featureHub")}
-            </h1>
-            <p className="mt-1 max-w-2xl text-[13px] text-gray-500">
-              {t("featureHub.copy.activatePropertyModulesAndKeepNavigationFocusedOnTheTools")}
-            </p>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-xs font-medium text-gray-700">
-                <CheckCircleIcon className="h-3.5 w-3.5 text-primary-600" />
-                {productActiveCount} {t("featureHub.copy.active")}
-              </span>
-              {loading && (
-                <span className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-500">
-                  <ArrowPathIcon className="h-3.5 w-3.5 animate-spin" />
-                  {t("featureHub.copy.syncing")}
-                </span>
-              )}
-            </div>
-          </div>
-          {availableProducts.length > 1 && (
-            <div className="flex flex-col gap-2 sm:flex-row">
-              {availableProducts.map((key) => {
-                const count = activeModuleCount(key, activeModuleIds);
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setProduct(key)}
-                    className={cx(
-                      "inline-flex min-h-9 items-center justify-center rounded-md border px-3 text-[13px] font-medium transition-colors",
-                      displayedProduct === key
-                        ? "border-primary-600 bg-primary-600 text-white"
-                        : "border-gray-200 bg-white text-gray-700 hover:border-gray-400",
-                    )}
-                  >
-                    {t(`featureHub.product.${key}`)}{" "}
-                    <span className="ml-1 text-xs opacity-75">
-                      · {count} {t("featureHub.copy.active")}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </header>
-      </div>
-
-      <div>
-        <div className="max-w-5xl">
-          {(error || (updateError && !selectedModule)) && (
-            <div
-              role="alert"
-              className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
-            >
-              {updateError
-                ? t(updateError) || updateError
-                : t("featureHub.copy.couldNotLoadModules")}
-            </div>
-          )}
-          {notice && (
-            <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-700">
-              {notice}
-            </div>
-          )}
-
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px] xl:grid-cols-[minmax(0,1fr)_300px]">
-            <main className="min-w-0">
-              <div className="mb-4 rounded-lg border border-gray-200 bg-white">
-                <div className="space-y-3 px-4 py-4 md:px-5">
-                  <label className="relative block">
-                    <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                    <input
-                      value={query}
-                      onChange={(event) => setQuery(event.target.value)}
-                      placeholder={t("featureHub.copy.searchModules")}
-                      className="h-10 w-full rounded-md border border-gray-200 bg-white pl-9 pr-9 text-sm outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
-                    />
-                    {query && (
-                      <button
-                        type="button"
-                        onClick={clearSearch}
-                        aria-label={t("featureHub.copy.clearSearch")}
-                        title={t("featureHub.copy.clearSearch")}
-                        className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900"
-                      >
-                        <XMarkIcon className="h-4 w-4" />
-                      </button>
-                    )}
-                  </label>
-                  <div className="flex gap-2 overflow-x-auto pb-1">
-                    {FEATURE_CATEGORIES.map((item) => (
-                      <button
-                        key={item}
-                        type="button"
-                        onClick={() => setCategory(item)}
-                        className={cx(
-                          "h-8 shrink-0 rounded-full px-3 text-[12px] font-medium transition-colors",
-                          category === item
-                            ? "bg-primary-600 text-white"
-                            : "bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-900",
-                        )}
-                      >
-                        {item}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {waitingForInventory ? (
-                <div
-                  role="status"
-                  className="flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-5 py-12 text-sm text-gray-500"
-                >
-                  <ArrowPathIcon className="h-4 w-4 animate-spin" />
-                  {t("featureHub.copy.loadingModules")}
-                </div>
-              ) : inventoryFailed ? null : filteredModules.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-gray-300 bg-white px-5 py-12 text-center">
-                  <SparklesIcon className="mx-auto h-8 w-8 text-gray-400" />
-                  <p className="mt-3 text-sm font-semibold text-gray-900">
-                    {query
-                      ? t("featureHub.noSearchResults", { query })
-                      : t("featureHub.copy.noModulesInThisCategory")}
-                  </p>
-                  {query && (
-                    <button
-                      type="button"
-                      onClick={clearSearch}
-                      className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:border-gray-400"
-                    >
-                      <XMarkIcon className="h-4 w-4" />
-                      {t("featureHub.copy.clearSearch")}
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
-                  <div className="divide-y divide-gray-100">
-                    {filteredModules.map((module) => (
-                      <ModuleCard
-                        t={t}
-                        key={module.id}
-                        module={module}
-                        isActive={configuredModuleSet.has(module.id)}
-                        disabled={loading || !canManageModule(module.id) || savingModuleId !== null}
-                        saving={savingModuleId === module.id}
-                        onOpen={() => setSelectedModule(module)}
-                        onToggle={(isActive) => toggleModule(module, isActive)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </main>
-
-            {!waitingForInventory && !inventoryFailed && (
-              <aside className="lg:sticky lg:top-4 lg:self-start">
-                <NavigationPreview
-                  t={t}
-                  product={displayedProduct}
-                  activeModuleIds={activeModuleIds}
-                />
-              </aside>
-            )}
-          </div>
+      <header className="flex flex-col gap-3 pb-5 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">
+            {t("featureHub.copy.featureHub")}
+          </h1>
+          <p className="mt-1 max-w-2xl text-[13px] text-gray-500">
+            {t("featureHub.copy.activatePropertyModulesAndKeepNavigationFocusedOnTheTools")}
+          </p>
         </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {loading && (
+            <span className="inline-flex h-7 items-center gap-1 rounded-full border border-gray-200 bg-white px-3 text-xs font-medium text-gray-500">
+              <ArrowPathIcon className="h-3.5 w-3.5 animate-spin" />
+              {t("featureHub.copy.syncing")}
+            </span>
+          )}
+          <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 text-xs font-medium text-gray-700">
+            <CheckCircleIcon className="h-3.5 w-3.5 text-primary-600" />
+            <span className="font-semibold text-primary-700">{activeCount}</span>
+            <span>{t("featureHub.copy.ofTotalActive", { total: switchable.length })}</span>
+          </span>
+        </div>
+      </header>
+
+      {(error || (updateError && !selectedModule)) && (
+        <div
+          role="alert"
+          className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+        >
+          {updateError ? t(updateError) || updateError : t("featureHub.copy.couldNotLoadModules")}
+        </div>
+      )}
+      {notice && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-700">
+          <CheckCircleIcon className="h-4 w-4 shrink-0" />
+          {notice}
+        </div>
+      )}
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px] xl:grid-cols-[minmax(0,1fr)_300px]">
+        <main className="min-w-0">
+          {waitingForInventory ? (
+            <div
+              role="status"
+              className="flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-5 py-12 text-sm text-gray-500"
+            >
+              <ArrowPathIcon className="h-4 w-4 animate-spin" />
+              {t("featureHub.copy.loadingModules")}
+            </div>
+          ) : inventoryFailed ? null : (
+            <div className="grid gap-4 md:grid-cols-2">
+              {listed.map((module) =>
+                module.unavailable ? (
+                  <UnavailableCard key={module.id} t={t} module={module} />
+                ) : (
+                  <ModuleCard
+                    key={module.id}
+                    t={t}
+                    module={module}
+                    isNew={isModuleNew(module, now)}
+                    onOpen={() => setSelectedModule(module)}
+                    {...switchProps(module)}
+                  />
+                ),
+              )}
+            </div>
+          )}
+          <p className="mt-4 text-[13px] leading-5 text-gray-500">
+            {t("featureHub.copy.disabledModulesStayHidden")}
+          </p>
+        </main>
+
+        {!waitingForInventory && !inventoryFailed && (
+          <aside className="lg:sticky lg:top-4 lg:self-start">
+            <NavigationPreview t={t} activeModuleIds={activeModuleIds} />
+          </aside>
+        )}
       </div>
 
       {selectedModule && (
         <DetailModal
           t={t}
           module={selectedModule}
-          isActive={configuredModuleSet.has(selectedModule.id)}
-          disabled={loading || !canManageModule(selectedModule.id) || savingModuleId !== null}
-          saving={savingModuleId === selectedModule.id}
+          isNew={isModuleNew(selectedModule, now)}
           error={updateError ? t(updateError) || updateError : ""}
           onClose={() => setSelectedModule(null)}
-          onToggle={(isActive) => toggleModule(selectedModule, isActive)}
+          {...switchProps(selectedModule)}
         />
       )}
     </div>
   );
 }
 
-function ModuleCard({
-  t,
-  module,
-  isActive,
-  disabled,
-  saving,
-  onOpen,
-  onToggle,
-}: {
-  t: Translate;
-  module: FeatureModule;
+type SwitchProps = {
   isActive: boolean;
   disabled: boolean;
   saving: boolean;
-  onOpen: () => void;
   onToggle: (isActive: boolean) => void;
-}) {
+};
+
+function ModuleCard({
+  t,
+  module,
+  isNew,
+  onOpen,
+  isActive,
+  disabled,
+  saving,
+  onToggle,
+}: SwitchProps & { t: Translate; module: FeatureModule; isNew: boolean; onOpen: () => void }) {
+  const name = t(`featureHub.modules.${module.id}.name`);
   return (
+    // The name is the keyboard way in; the rest of the card is a larger pointer target.
     <article
+      onClick={onOpen}
       className={cx(
-        "flex flex-col gap-4 px-4 py-4 transition sm:flex-row sm:items-center sm:justify-between md:px-5",
-        isActive ? "bg-primary-50/40" : "bg-white hover:bg-gray-50/70",
+        "flex cursor-pointer items-start gap-3.5 rounded-xl border p-5 transition-colors",
+        isActive
+          ? "border-primary-200 bg-primary-50/50"
+          : "border-gray-200 bg-white hover:border-gray-300",
       )}
     >
-      <div className="flex min-w-0 items-start gap-3">
-        <ModuleIcon module={module} active={isActive} />
-        <div className="min-w-0">
-          <div className="flex min-h-6 flex-wrap items-center gap-2">
-            <h2 className="text-[14px] font-semibold text-gray-900">
-              {t(`featureHub.module.${module.id}.name`)}
-            </h2>
-            {module.isNew && (
-              <span className="shrink-0 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
-                {t("featureHub.copy.new")}
-              </span>
-            )}
-            <span
-              className={cx(
-                "rounded-md px-2 py-0.5 text-[11px] font-medium",
-                isActive ? "bg-primary-100 text-primary-700" : "bg-gray-100 text-gray-600",
-              )}
+      <ModuleIcon module={module} active={isActive} />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-h-6 flex-wrap items-center gap-2">
+          <h2 className="text-[15px] font-semibold text-gray-900">
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpen();
+              }}
+              className="rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
             >
-              {isActive ? t("featureHub.copy.active") : t("featureHub.copy.inactive")}
-            </span>
-          </div>
-          <p className="mt-1 text-[13px] leading-5 text-gray-500">
-            {t(`featureHub.module.${module.id}.description`)}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            <span className="rounded-md bg-gray-100 px-2 py-1 text-[11px] font-medium text-gray-600">
-              {t(`featureHub.category.${module.category}`)}
-            </span>
-            {module.type === "external" && (
-              <span className="rounded-md bg-primary-50 px-2 py-1 text-[11px] font-medium text-primary-700">
-                {t("featureHub.copy.external")}
-              </span>
-            )}
-          </div>
+              {name}
+            </button>
+          </h2>
+          {isNew && <NewBadge t={t} />}
         </div>
+        <p className="mt-1 text-[13px] leading-5 text-gray-500">
+          {t(`featureHub.modules.${module.id}.description`)}
+        </p>
+        <CategoryTag t={t} module={module} className="mt-2.5" />
       </div>
-      <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
-        <button
-          type="button"
-          onClick={onOpen}
-          className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[13px] font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900"
-        >
-          {t("featureHub.copy.details")}
-        </button>
+      <span onClick={(event: MouseEvent) => event.stopPropagation()}>
         <ToggleSwitch
           checked={isActive}
           disabled={disabled || saving}
           ariaLabel={t("admin.actionName", {
             action: isActive ? t("featureHub.copy.deactivate") : t("admin.activate"),
-            name: t(`featureHub.module.${module.id}.name`),
+            name,
           })}
-          onChange={(checked) => onToggle(checked)}
+          onChange={onToggle}
         />
+      </span>
+    </article>
+  );
+}
+
+function UnavailableCard({ t, module }: { t: Translate; module: FeatureModule }) {
+  return (
+    <article className="flex items-start gap-3.5 rounded-xl border border-dashed border-gray-300 bg-gray-50 p-5">
+      <ModuleIcon module={module} active={false} muted />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-h-6 flex-wrap items-center gap-2">
+          <h2 className="text-[15px] font-semibold text-gray-600">
+            {t(`featureHub.modules.${module.id}.name`)}
+          </h2>
+          <span className="rounded-md bg-gray-200 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600">
+            {t("featureHub.copy.unavailable")}
+          </span>
+        </div>
+        <p className="mt-1 text-[13px] leading-5 text-gray-500">
+          {t(`featureHub.modules.${module.id}.description`)}
+        </p>
+        <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-gray-500">
+          <InformationCircleIcon className="h-3.5 w-3.5 shrink-0" />
+          {t("featureHub.copy.currentlyUnavailable")}
+        </p>
+        <CategoryTag t={t} module={module} className="mt-2.5" />
       </div>
     </article>
+  );
+}
+
+function NewBadge({ t }: { t: Translate }) {
+  return (
+    <span className="shrink-0 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
+      {t("featureHub.copy.new")}
+    </span>
+  );
+}
+
+function CategoryTag({
+  t,
+  module,
+  className,
+}: {
+  t: Translate;
+  module: FeatureModule;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cx(
+        "inline-block rounded-md bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600",
+        className,
+      )}
+    >
+      {t(`featureHub.category.${module.category}`)}
+    </span>
   );
 }
 
@@ -477,35 +367,23 @@ function ToggleSwitch({
   );
 }
 
-function ModuleIcon({ module, active }: { module: FeatureModule; active: boolean }) {
-  if (module.type === "external") {
-    return (
-      <div
-        className={cx(
-          "flex h-11 w-11 items-center justify-center rounded-md border text-sm font-black",
-          active
-            ? "border-primary-200 bg-primary-50 text-primary-700"
-            : "border-gray-200 bg-gray-50 text-gray-700",
-        )}
-      >
-        <BrandMark id={module.icon} />
-      </div>
-    );
-  }
-  const icons = {
-    chart: ChartGlyph,
-    chat: ChatGlyph,
-    star: StarIcon,
-    users: UsersGlyph,
-  };
-  const Icon = icons[module.icon as keyof typeof icons] || ChatGlyph;
+function ModuleIcon({
+  module,
+  active,
+  muted = false,
+}: {
+  module: FeatureModule;
+  active: boolean;
+  muted?: boolean;
+}) {
+  const Icon = module.icon;
   return (
     <div
       className={cx(
-        "flex h-11 w-11 items-center justify-center rounded-md border",
+        "flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border",
         active
           ? "border-primary-200 bg-primary-50 text-primary-700"
-          : "border-gray-200 bg-gray-50 text-gray-600",
+          : cx("border-gray-200 bg-gray-50", muted ? "text-gray-400" : "text-gray-600"),
       )}
     >
       <Icon className="h-5 w-5" />
@@ -513,101 +391,82 @@ function ModuleIcon({ module, active }: { module: FeatureModule; active: boolean
   );
 }
 
-function BrandMark({ id }: { id: string }) {
-  if (id === "stripe") return <span className="text-[15px] tracking-normal">S</span>;
-  if (id === "paypal") return <span className="text-[15px] tracking-normal">P</span>;
-  if (id === "xendit") return <span className="text-[12px] tracking-normal">XDT</span>;
-  if (id === "lodgify") return <span className="text-[12px] tracking-normal">LDG</span>;
-  return <span className="text-[12px] tracking-normal">{id.slice(0, 3).toUpperCase()}</span>;
-}
-
-function NavigationPreview({
-  t,
-  product,
-  activeModuleIds,
-}: {
-  t: Translate;
-  product: FeatureProduct;
-  activeModuleIds: string[];
-}) {
-  const navModules = activeNavModules(product, activeModuleIds);
-  const active = new Set(activeModuleIds);
-  const nonNavActive = modulesForProduct(product).filter(
-    (module) => active.has(module.id) && !module.navItem && module.settingsNote,
-  );
-  const coreNavItems = CORE_NAV_ITEMS[product];
-  const moduleNavIndex = FEATURE_MODULE_NAV_INDEX[product];
-  const previewItems = [
-    ...coreNavItems.slice(0, moduleNavIndex).map((item) => ({
-      key: `core:${item.href}`,
-      label: item.label,
+function NavigationPreview({ t, activeModuleIds }: { t: Translate; activeModuleIds: string[] }) {
+  const groups = PREVIEW_PRODUCTS.map((product) => {
+    const modules = activeNavModules(product, activeModuleIds);
+    const core = CORE_NAV_ITEMS[product];
+    const at = FEATURE_MODULE_NAV_INDEX[product];
+    const coreItem = ({ label, href }: { label: string; href: string }) => ({
+      key: `core:${href}`,
+      label,
       isModule: false,
-    })),
-    ...navModules.map((module) => ({
-      key: `module:${module.id}`,
-      label: module.navItem!.label,
-      isModule: true,
-    })),
-    ...coreNavItems.slice(moduleNavIndex).map((item) => ({
-      key: `core:${item.href}`,
-      label: item.label,
-      isModule: false,
-    })),
-  ];
+    });
+    return {
+      product,
+      items: [
+        ...core.slice(0, at).map(coreItem),
+        ...modules.map((module) => ({
+          key: `module:${module.id}`,
+          label: module.navItem!.label,
+          isModule: true,
+        })),
+        ...core.slice(at).map(coreItem),
+      ],
+      moduleCount: modules.length,
+    };
+  });
 
   return (
-    <section className="rounded-lg border border-gray-200 bg-white">
-      <button
-        type="button"
-        className="flex w-full items-center justify-between border-b border-gray-100 px-4 py-3 text-left lg:pointer-events-none"
-      >
-        <div>
-          <h2 className="text-[14px] font-semibold text-gray-900">
-            {t(`featureHub.navigation.${product}`)}
-          </h2>
-          <p className="mt-0.5 text-xs text-gray-500">{t("admin.livePreview2")}</p>
-        </div>
-        <ChevronDownIcon className="h-4 w-4 text-gray-400 lg:hidden" />
-      </button>
+    <section
+      aria-labelledby="feature-hub-navigation-preview"
+      className="rounded-lg border border-gray-200 bg-white"
+    >
+      <div className="border-b border-gray-100 px-4 py-3">
+        <h2 id="feature-hub-navigation-preview" className="text-[14px] font-semibold text-gray-900">
+          {t("featureHub.copy.navigation")}
+        </h2>
+        <p className="mt-0.5 text-xs text-gray-500">{t("admin.livePreview2")}</p>
+      </div>
       <div className="p-3">
-        <ol className="space-y-1.5">
-          {previewItems.map((item) => (
-            <li
-              key={item.key}
-              className={cx(
-                "flex h-9 items-center gap-2 rounded-md px-2 text-[13px]",
-                item.isModule ? "bg-primary-50 font-semibold text-primary-700" : "text-gray-500",
-              )}
-            >
-              <span
-                className={cx(
-                  "rounded-full",
-                  item.isModule ? "h-2 w-2 bg-primary-500" : "h-1.5 w-1.5 bg-gray-300",
-                )}
-              />
-              <span className="truncate">{t(`featureHub.navigationItem.${item.label}`)}</span>
-            </li>
-          ))}
-        </ol>
-        {nonNavActive.length > 0 && (
-          <div className="mt-4 space-y-2 border-t border-gray-100 pt-3">
-            {nonNavActive.map((module) => (
-              <div
-                key={module.id}
-                className="rounded-md bg-primary-50 px-3 py-2 text-xs text-primary-700"
-              >
-                <span className="font-semibold">{t(`featureHub.module.${module.id}.name`)}</span>:{" "}
-                {module.settingsNote}
-              </div>
-            ))}
+        {groups.map((group, index) => (
+          <div
+            key={group.product}
+            className={cx(index > 0 && "mt-3 border-t border-gray-100 pt-3")}
+          >
+            <h3 className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+              {t(`featureHub.navigationGroup.${group.product}`)}
+            </h3>
+            <ol className="space-y-0.5">
+              {group.items.map((item) => (
+                <li
+                  key={item.key}
+                  className={cx(
+                    "flex h-8 items-center gap-2 rounded-md px-2 text-[13px]",
+                    item.isModule
+                      ? "bg-primary-50 font-semibold text-primary-700"
+                      : "text-gray-500",
+                  )}
+                >
+                  <span
+                    className={cx(
+                      "shrink-0 rounded-full",
+                      item.isModule ? "h-2 w-2 bg-primary-500" : "h-1.5 w-1.5 bg-gray-300",
+                    )}
+                  />
+                  <span className="truncate">{t(`featureHub.navigationItem.${item.label}`)}</span>
+                </li>
+              ))}
+            </ol>
           </div>
-        )}
-        <div className="mt-4 flex items-center justify-between border-t border-gray-100 pt-3 text-xs font-medium text-gray-500">
+        ))}
+        <div className="mt-3 flex items-center justify-between border-t border-gray-100 pt-3 text-xs font-medium text-gray-500">
           <span>
-            {previewItems.length} {t("featureHub.copy.items")}
+            {groups.reduce((total, group) => total + group.items.length, 0)}{" "}
+            {t("featureHub.copy.items")}
           </span>
           <span>
-            {navModules.length} {t("featureHub.copy.moduleItems")}
+            {groups.reduce((total, group) => total + group.moduleCount, 0)}{" "}
+            {t("featureHub.copy.fromModules")}
           </span>
         </div>
       </div>
@@ -617,26 +476,26 @@ function NavigationPreview({
 
 function DetailModal({
   t,
-  error,
   module,
+  isNew,
+  error,
+  onClose,
   isActive,
   disabled,
   saving,
-  onClose,
   onToggle,
-}: {
+}: SwitchProps & {
   t: Translate;
   module: FeatureModule;
-  isActive: boolean;
-  disabled: boolean;
-  saving: boolean;
+  isNew: boolean;
   error: string;
   onClose: () => void;
-  onToggle: (isActive: boolean) => void;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const titleId = `feature-hub-detail-${module.id}`;
+  const name = t(`featureHub.modules.${module.id}.name`);
+  const Icon = module.icon;
 
   useEffect(() => {
     const previousActiveElement =
@@ -692,36 +551,30 @@ function DetailModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="flex max-h-[100dvh] w-full flex-col overflow-hidden rounded-t-lg bg-white shadow-2xl sm:max-h-[92vh] sm:max-w-3xl sm:rounded-lg"
+        className="max-h-[100dvh] w-full overflow-y-auto rounded-t-2xl bg-white p-6 shadow-2xl sm:max-h-[92vh] sm:max-w-xl sm:rounded-2xl"
       >
         {error && (
-          <div role="alert" className="bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <div
+            role="alert"
+            className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800"
+          >
             {error}
           </div>
         )}
-        <div className="flex items-start gap-3 border-b border-gray-100 px-4 py-4 sm:px-5">
-          <ModuleIcon module={module} active={isActive} />
+        <div className="flex items-start gap-3.5">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[10px] bg-primary-50 text-primary-700">
+            <Icon className="h-[22px] w-[22px]" />
+          </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h2 id={titleId} className="text-xl font-semibold text-gray-950">
-                {t(`featureHub.module.${module.id}.name`)}
+                {name}
               </h2>
-              {module.isNew && (
-                <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
-                  {t("featureHub.copy.new")}
-                </span>
-              )}
+              {isNew && <NewBadge t={t} />}
             </div>
-            <div className="mt-1 flex flex-wrap gap-1.5">
-              <span className="rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600">
-                {t(`featureHub.category.${module.category}`)}
-              </span>
-              {module.type === "external" && (
-                <span className="rounded-md bg-primary-50 px-2 py-1 text-xs font-medium text-primary-700">
-                  {t("featureHub.copy.externalIntegration")}
-                </span>
-              )}
-            </div>
+            <p className="mt-0.5 text-sm text-gray-500">
+              {t(`featureHub.modules.${module.id}.description`)}
+            </p>
           </div>
           <button
             ref={closeButtonRef}
@@ -735,554 +588,130 @@ function DetailModal({
           </button>
         </div>
 
-        <div className="overflow-y-auto px-4 py-4 sm:px-5">
-          <p className="text-base font-medium leading-7 text-gray-900">
-            {t(`featureHub.module.${module.id}.headline`)}
+        <p className="mt-5 text-[15px] leading-6 text-gray-800">
+          {t(`featureHub.modules.${module.id}.detail`)}
+        </p>
+        <ul className="mt-4 space-y-2.5">
+          {Array.from({ length: module.points }, (_, index) => (
+            <li key={index} className="flex items-start gap-2.5 text-sm text-gray-600">
+              <CheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-primary-600" strokeWidth={2} />
+              {t(`featureHub.modules.${module.id}.point.${index}`)}
+            </li>
+          ))}
+        </ul>
+        {module.offNote && (
+          <p className="mt-4 flex items-start gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-[13px] leading-5 text-gray-600">
+            <InformationCircleIcon className="mt-0.5 h-4 w-4 shrink-0 text-gray-500" />
+            {t(`featureHub.modules.${module.id}.offNote`)}
           </p>
-          <div className="mt-4 overflow-hidden rounded-md border border-gray-200 bg-gray-50">
-            <ModuleVisual type={module.detail.visualType} t={t} />
-          </div>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            {module.detail.features.map((feature, index) => (
-              <div
-                key={t(`featureHub.module.${module.id}.feature.${index}`)}
-                className="flex min-h-14 items-start gap-2 rounded-md border border-gray-200 bg-white p-3"
-              >
-                <feature.icon className="mt-0.5 h-4 w-4 shrink-0 text-primary-600" />
-                <p className="text-sm leading-5 text-gray-700">
-                  {t(`featureHub.module.${module.id}.feature.${index}`)}
-                </p>
-              </div>
-            ))}
-          </div>
-          {isActive && (
-            <p className="mt-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              {t("featureHub.copy.deactivatingHidesThisModuleFromNavigationOrSettingsYourData")}
-            </p>
-          )}
-        </div>
+        )}
 
-        <div className="flex flex-col gap-3 border-t border-gray-100 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-          <div className="flex items-center gap-3">
-            <ToggleSwitch
-              checked={isActive}
-              disabled={disabled || saving}
-              ariaLabel={t("admin.actionName", {
-                action: isActive ? t("featureHub.copy.deactivate") : t("admin.activate"),
-                name: t(`featureHub.module.${module.id}.name`),
-              })}
-              onChange={onToggle}
-            />
-            <span className="text-sm font-semibold text-gray-700">
-              {isActive ? t("featureHub.copy.active") : t("featureHub.copy.inactive")}
-            </span>
-          </div>
-          <button
-            type="button"
+        <div className="mt-5 flex items-center gap-3 border-t border-gray-200 pt-4">
+          <CategoryTag t={t} module={module} />
+          <span className="ml-auto text-[13px] font-medium text-gray-600">
+            {isActive ? t("featureHub.copy.active") : t("featureHub.copy.inactive")}
+          </span>
+          <ToggleSwitch
+            checked={isActive}
             disabled={disabled || saving}
-            onClick={() => onToggle(!isActive)}
-            className={cx(
-              "inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60",
-              isActive
-                ? "border border-gray-200 bg-white text-gray-700 hover:border-gray-400"
-                : "bg-primary-600 text-white hover:bg-primary-700",
-            )}
-          >
-            <PowerIcon className="h-4 w-4" />
-            {isActive ? t("featureHub.copy.deactivate") : t("featureHub.copy.activateModule")}
-          </button>
+            ariaLabel={t("admin.actionName", {
+              action: isActive ? t("featureHub.copy.deactivate") : t("admin.activate"),
+              name,
+            })}
+            onChange={onToggle}
+          />
         </div>
       </div>
     </div>
   );
 }
 
-function ModuleVisual({ type, t }: { type: FeatureModule["detail"]["visualType"]; t: Translate }) {
-  if (type === "financials") return <FinancialsVisual />;
-  if (type === "affiliates") return <AffiliatesVisual t={t} />;
-  if (type === "stripe") return <StripeVisual />;
-  if (type === "paypal") return <PayPalVisual />;
-  if (type === "xendit") return <XenditVisual />;
-  if (type === "lodgify") return <LodgifyVisual />;
-  if (type === "reviews") return <ReviewsVisual />;
-  return <InboxVisual />;
-}
-
-function ReviewsVisual() {
-  const rows = [
-    ["Booking.com", "Marta Silva", "Lovely garden and a calm room.", 5],
-    ["Airbnb", "Jon Keller", "Great host, easy check-in.", 4],
-    ["Direct", "Ari Putra", "Breakfast was the highlight.", 5],
-  ] as const;
-  return (
-    <svg viewBox="0 0 760 300" className="h-auto w-full" role="img" aria-label="Reviews preview">
-      <rect width="760" height="300" fill="#f8faf8" />
-      <rect x="34" y="34" width="692" height="232" rx="10" fill="#fff" stroke="#d6d3d1" />
-      {rows.map(([channel, guest, text, stars], index) => {
-        const y = 58 + index * 66;
-        return (
-          <g key={guest}>
-            <rect x="58" y={y} width="644" height="52" rx="8" fill="#fff" stroke="#e7e5e4" />
-            <text x="78" y={y + 22} fontSize="12" fontWeight="700" fill="#111827">
-              {guest}
-            </text>
-            <text x="78" y={y + 39} fontSize="10" fill="#78716c">
-              {text}
-            </text>
-            {Array.from({ length: 5 }, (_, star) => (
-              <text
-                key={star}
-                x={440 + star * 16}
-                y={y + 31}
-                fontSize="14"
-                fill={star < stars ? "#f59e0b" : "#e7e5e4"}
-              >
-                ★
-              </text>
-            ))}
-            <rect x="560" y={y + 17} width="96" height="18" rx="9" fill="#e0f2fe" />
-            <text x="574" y={y + 30} fontSize="9" fontWeight="700" fill="#0369a1">
-              {channel}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
-
-function InboxVisual() {
-  const rows = [
-    ["Booking.com", "Marta Silva", "Can we arrive at 21:30?", "08:42"],
-    ["Airbnb", "Jon Keller", "Thanks, parking looks good.", "09:18"],
-    ["Email", "Ari Putra", "Do you offer airport pickup?", "10:04"],
-  ];
-  return (
-    <svg viewBox="0 0 760 300" className="h-auto w-full" role="img" aria-label="Inbox preview">
-      <rect width="760" height="300" fill="#f8faf8" />
-      <rect x="34" y="34" width="692" height="232" rx="10" fill="#fff" stroke="#d6d3d1" />
-      <rect x="56" y="58" width="156" height="180" rx="8" fill="#f0fdf4" />
-      <rect x="72" y="78" width="88" height="12" rx="6" fill="#16a34a" />
-      <rect x="72" y="112" width="126" height="8" rx="4" fill="#bbf7d0" />
-      <rect x="72" y="136" width="104" height="8" rx="4" fill="#bbf7d0" />
-      {rows.map((row, index) => {
-        const y = 62 + index * 64;
-        return (
-          <g key={row[1]}>
-            <rect
-              x="236"
-              y={y}
-              width="454"
-              height="48"
-              rx="8"
-              fill={index === 0 ? "#ecfdf5" : "#fff"}
-              stroke="#e7e5e4"
-            />
-            <circle cx="258" cy={y + 24} r="8" fill={index === 0 ? "#10b981" : "#a8a29e"} />
-            <text x="278" y={y + 20} fontSize="12" fontWeight="700" fill="#111827">
-              {row[1]}
-            </text>
-            <text x="278" y={y + 36} fontSize="10" fill="#78716c">
-              {row[2]}
-            </text>
-            <rect x="560" y={y + 13} width="76" height="18" rx="9" fill="#e0f2fe" />
-            <text x="574" y={y + 26} fontSize="9" fontWeight="700" fill="#0369a1">
-              {row[0]}
-            </text>
-            <text x="650" y={y + 26} fontSize="10" fill="#78716c">
-              {row[3]}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
-
-function FinancialsVisual() {
-  const bars = [64, 92, 74, 128, 104, 148, 118, 168, 134, 184, 158, 204];
-  const cards = [
-    ["Revenue", "42k"],
-    ["Expenses", "13k"],
-    ["Profit", "29k"],
-    ["Folios", "12"],
-  ];
-  return (
-    <svg viewBox="0 0 760 300" className="h-auto w-full" role="img" aria-label="Financials preview">
-      <rect width="760" height="300" fill="#f8faf8" />
-      {cards.map(([label, value], index) => (
-        <g key={label}>
-          <rect
-            x={34 + index * 178}
-            y="34"
-            width="154"
-            height="74"
-            rx="9"
-            fill="#fff"
-            stroke="#d6d3d1"
-          />
-          <text x={50 + index * 178} y="62" fontSize="11" fill="#78716c">
-            {label}
-          </text>
-          <text x={50 + index * 178} y="88" fontSize="23" fontWeight="700" fill="#111827">
-            {value}
-          </text>
-        </g>
-      ))}
-      <rect x="34" y="132" width="692" height="230" rx="10" fill="#fff" stroke="#d6d3d1" />
-      {bars.map((height, index) => (
-        <rect
-          key={index}
-          x={62 + index * 54}
-          y={260 - height}
-          width="28"
-          height={height}
-          rx="5"
-          fill={index > 8 ? "#10b981" : "#a7f3d0"}
-        />
-      ))}
-      <path
-        d="M56 220 C160 192 214 210 300 172 C390 132 446 164 520 118 C590 76 646 110 702 64"
-        fill="none"
-        stroke="#0369a1"
-        strokeWidth="4"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function AffiliatesVisual({ t = defaultTranslate }: { t?: Translate }) {
-  const rows = [
-    ["Bali Stay Guide", "1,248", "36", "EUR 9,420", "EUR 471"],
-    ["Surf School Co", "642", "18", "EUR 4,820", "EUR 241"],
-    ["Villa Concierge", "388", "11", "EUR 3,104", "EUR 155"],
-  ];
-  return (
-    <svg
-      viewBox="0 0 760 300"
-      className="h-auto w-full"
-      role="img"
-      aria-label={t("featureHub.copy.affiliatesPreview")}
-    >
-      <rect width="760" height="300" fill="#f8faf8" />
-      <rect x="38" y="40" width="684" height="220" rx="10" fill="#fff" stroke="#d6d3d1" />
-      <rect x="60" y="66" width="640" height="34" rx="6" fill="#f5f5f4" />
-      {[
-        t("featureHub.copy.partner"),
-        t("featureHub.copy.clicks"),
-        t("featureHub.copy.bookings"),
-        t("featureHub.copy.revenue"),
-        t("featureHub.copy.commission"),
-      ].map((label, index) => (
-        <text
-          key={label}
-          x={[78, 286, 388, 504, 620][index]}
-          y="88"
-          fontSize="11"
-          fontWeight="700"
-          fill="#57534e"
-        >
-          {label}
-        </text>
-      ))}
-      {rows.map((row, index) => {
-        const y = 122 + index * 48;
-        return (
-          <g key={row[0]}>
-            <rect
-              x="60"
-              y={y - 22}
-              width="640"
-              height="44"
-              rx="6"
-              fill={index === 0 ? "#ecfdf5" : "#fff"}
-              stroke="#e7e5e4"
-            />
-            {row.map((value, column) => (
-              <text
-                key={value}
-                x={[78, 286, 388, 504, 620][column]}
-                y={y + 5}
-                fontSize="12"
-                fontWeight={column === 0 ? "700" : "500"}
-                fill={column === 4 ? "#047857" : "#111827"}
-              >
-                {value}
-              </text>
-            ))}
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
-
-function StripeVisual() {
-  return (
-    <PaymentVisual brand="Stripe" accent="#635bff" labels={["Visa", "MC", "Amex", "Apple Pay"]} />
-  );
-}
-
-function PayPalVisual() {
-  return (
-    <PaymentVisual
-      brand="PayPal"
-      accent="#0070ba"
-      labels={["PayPal", "Balance", "Card", "Buyer"]}
-    />
-  );
-}
-
-function XenditVisual() {
-  return <PaymentVisual brand="Xendit" accent="#7c3aed" labels={["BCA", "BNI", "BRI", "OVO"]} />;
-}
-
-function PaymentVisual({
-  brand,
-  accent,
-  labels,
-}: {
-  brand: string;
-  accent: string;
-  labels: string[];
-}) {
-  return (
-    <svg
-      viewBox="0 0 760 300"
-      className="h-auto w-full"
-      role="img"
-      aria-label={`${brand} payment preview`}
-    >
-      <rect width="760" height="300" fill="#f8faf8" />
-      <rect x="48" y="52" width="220" height="178" rx="12" fill="#fff" stroke="#d6d3d1" />
-      <text x="72" y="92" fontSize="27" fontWeight="800" fill={accent}>
-        {brand}
-      </text>
-      <rect x="72" y="122" width="148" height="34" rx="17" fill={accent} opacity="0.92" />
-      <text x="104" y="145" fontSize="12" fontWeight="700" fill="#fff">
-        Pay now
-      </text>
-      <text x="72" y="188" fontSize="12" fill="#78716c">
-        Settlement profile
-      </text>
-      <rect x="72" y="202" width="128" height="8" rx="4" fill="#d6d3d1" />
-      <rect x="310" y="52" width="404" height="178" rx="12" fill="#fff" stroke="#d6d3d1" />
-      <path
-        d="M342 144 H442 L486 96 H588 L636 144 H682"
-        fill="none"
-        stroke={accent}
-        strokeWidth="5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {labels.map((label, index) => (
-        <g key={label}>
-          <rect
-            x={342 + index * 84}
-            y="170"
-            width="66"
-            height="34"
-            rx="7"
-            fill="#f5f5f4"
-            stroke="#e7e5e4"
-          />
-          <text x={360 + index * 84} y="192" fontSize="11" fontWeight="700" fill="#44403c">
-            {label}
-          </text>
-        </g>
-      ))}
-      <text x="342" y="82" fontSize="12" fontWeight="700" fill="#111827">
-        Payment flow
-      </text>
-      <text x="342" y="238" fontSize="11" fill="#78716c">
-        Fees and availability are configured after activation.
-      </text>
-    </svg>
-  );
-}
-
-function LodgifyVisual() {
-  return (
-    <svg
-      viewBox="0 0 760 300"
-      className="h-auto w-full"
-      role="img"
-      aria-label="Lodgify sync preview"
-    >
-      <rect width="760" height="300" fill="#f8faf8" />
-      <rect x="62" y="86" width="210" height="124" rx="12" fill="#fff" stroke="#d6d3d1" />
-      <text x="96" y="132" fontSize="26" fontWeight="800" fill="#0f766e">
-        Lodgify
-      </text>
-      <rect x="98" y="154" width="124" height="10" rx="5" fill="#ccfbf1" />
-      <rect x="98" y="176" width="92" height="10" rx="5" fill="#ccfbf1" />
-      <rect x="488" y="86" width="210" height="124" rx="12" fill="#fff" stroke="#d6d3d1" />
-      <text x="540" y="132" fontSize="26" fontWeight="800" fill="#047857">
-        Vayada
-      </text>
-      <rect x="528" y="154" width="124" height="10" rx="5" fill="#bbf7d0" />
-      <rect x="528" y="176" width="92" height="10" rx="5" fill="#bbf7d0" />
-      <path
-        d="M292 126 C354 78 432 78 468 126"
-        fill="none"
-        stroke="#0f766e"
-        strokeWidth="5"
-        strokeLinecap="round"
-      />
-      <path
-        d="M468 174 C404 222 338 222 292 174"
-        fill="none"
-        stroke="#10b981"
-        strokeWidth="5"
-        strokeLinecap="round"
-      />
-      <polygon points="462,118 482,126 462,136" fill="#0f766e" />
-      <polygon points="298,166 278,174 298,184" fill="#10b981" />
-      <text x="338" y="144" fontSize="12" fontWeight="700" fill="#44403c">
-        Rooms, rates, availability
-      </text>
-      <text x="348" y="168" fontSize="12" fontWeight="700" fill="#44403c">
-        Bookings and updates
-      </text>
-    </svg>
-  );
-}
-
-function ChatGlyph({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-    >
-      <path d="M4 5h16v11H8l-4 4V5Z" />
-      <path d="M8 9h8M8 12h5" />
-    </svg>
-  );
-}
-
-function ChartGlyph({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-    >
-      <path d="M4 19V5M4 19h16" />
-      <path d="M8 16v-5M12 16V8M16 16v-9" />
-    </svg>
-  );
-}
-
-function UsersGlyph({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-    >
-      <path d="M9 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM3 21a6 6 0 0 1 12 0" />
-      <path d="M16 8a3 3 0 1 1 0 6M17 17a5 5 0 0 1 4 4" />
-    </svg>
-  );
-}
-
 export const featureHubMessages = {
-  "featureHub.noSearchResults": "No modules match “{query}”",
   "featureHub.activated": "{name} activated.",
   "featureHub.deactivated": "{name} deactivated.",
   "featureHub.copy.couldNotLoadModules": "Could not load modules. Please retry.",
+  "featureHub.copy.couldNotUpdateModuleActivation": "Could not update module activation.",
   "featureHub.copy.deactivate": "Deactivate",
   "admin.activate": "Activate",
-  "manageProperties.activeBadge": "Active",
-  "bookingFlow.promoCodes.inactive": "Inactive",
   "admin.actionName": "{action} {name}",
-  "admin.activatedNote": "Activated. {note}",
-  "admin.nameStatus": "{name}: {status}",
   "admin.livePreview2": "Live preview",
-  "featureHub.module.affiliates.name": "Affiliates",
-  "featureHub.module.affiliates.description":
-    "Let partners earn commission on the bookings they refer to you.",
-  "featureHub.module.affiliates.headline":
-    "Open a partner channel without adding manual commission tracking.",
-  "featureHub.module.inbox.name": "Inbox",
-  "featureHub.module.inbox.description":
-    "Guest messaging, automations, and templates. Chat with guests and automate pre-arrival and post-stay messages.",
-  "featureHub.module.inbox.headline": "Keep every guest conversation in one place.",
-  "featureHub.module.inbox.feature.0": "Reply to guests from connected channels and email.",
-  "featureHub.module.inbox.feature.1": "Save quick replies for common questions.",
-  "featureHub.module.inbox.feature.2": "See unread conversations at a glance.",
-  "featureHub.module.reviews.name": "Reviews",
-  "featureHub.module.reviews.description": "View and manage guest reviews from connected channels.",
-  "featureHub.module.reviews.headline": "See what guests say about your stay.",
-  "featureHub.module.reviews.feature.0": "Read reviews from your connected channels in one list.",
-  "featureHub.module.reviews.feature.1": "Reply to reviews where the channel allows it.",
-  "featureHub.module.reviews.feature.2": "Collect reviews from direct guests after their stay.",
-  "featureHub.module.financials.name": "Financials",
-  "featureHub.module.financials.description":
-    "Revenue, expenses, profit and loss, and operational folios for your property.",
-  "featureHub.module.financials.headline": "Review your property's finances in one place.",
-  "featureHub.category.All": "All",
-  "featureHub.category.Distribution": "Distribution",
-  "featureHub.category.Operations": "Operations",
-  "featureHub.product.pms": "PMS Modules",
-  "featureHub.product.booking_engine": "Booking Engine Modules",
-  "featureHub.navigation.pms": "PMS navigation",
-  "featureHub.navigation.booking_engine": "Booking Engine navigation",
-  "featureHub.module.affiliates.feature.0": "Invite partners and track their referral activity.",
-  "featureHub.module.affiliates.feature.1": "See clicks, bookings, revenue, and commission earned.",
-  "featureHub.module.affiliates.feature.2": "Issue partner links tied to your booking engine.",
-  "featureHub.module.affiliates.feature.3": "Prepare payout-ready commission records.",
-  "featureHub.module.financials.feature.0": "Reconcile stay revenue and channel attribution.",
-  "featureHub.module.financials.feature.1": "Track manual and generated expenses.",
-  "featureHub.module.financials.feature.2": "Export reports and operational folios.",
+  "featureHub.copy.featureHub": "Feature Hub",
+  "featureHub.copy.activatePropertyModulesAndKeepNavigationFocusedOnTheTools":
+    "Activate property modules and keep navigation focused on the tools your team uses.",
+  "featureHub.copy.ofTotalActive": "/ {total} active",
+  "featureHub.copy.disabledModulesStayHidden":
+    "Disabled modules stay hidden from the sidebar. Their data is preserved and reappears when you reactivate them.",
+  "featureHub.copy.unavailable": "Unavailable",
+  "featureHub.copy.currentlyUnavailable": "This feature is currently unavailable.",
+  "featureHub.copy.navigation": "Navigation",
+  "featureHub.copy.items": "items",
+  "featureHub.copy.fromModules": "from modules",
+  "featureHub.copy.active": "Active",
+  "featureHub.copy.inactive": "Inactive",
+  "featureHub.copy.syncing": "Syncing",
+  "featureHub.copy.loadingModules": "Loading modules...",
+  "featureHub.copy.new": "NEW",
+  "featureHub.copy.close": "Close",
+  "featureHub.category.Guest": "Guest",
+  "featureHub.category.Revenue": "Revenue",
+  "featureHub.navigationGroup.pms": "PMS",
+  "featureHub.navigationGroup.booking_engine": "Booking Engine",
   "featureHub.navigationItem.Dashboard": "Dashboard",
   "featureHub.navigationItem.Calendar": "Calendar",
   "featureHub.navigationItem.Reservations": "Reservations",
+  "featureHub.navigationItem.Inbox": "Inbox",
   "featureHub.navigationItem.Reviews": "Reviews",
+  "featureHub.navigationItem.Financials": "Financials",
   "featureHub.navigationItem.Rooms & Rates": "Rooms & Rates",
   "featureHub.navigationItem.Channel Manager": "Channel Manager",
   "featureHub.navigationItem.Settings": "Settings",
   "featureHub.navigationItem.Design Studio": "Design Studio",
-  "featureHub.navigationItem.Booking Flow": "Booking Flow",
-  "featureHub.navigationItem.Promo Codes": "Promo Codes",
-  "featureHub.navigationItem.Affiliates": "Affiliates",
-  "featureHub.navigationItem.Financials": "Financials",
-  "featureHub.navigationItem.Inbox": "Inbox",
-  "featureHub.copy.couldNotUpdateModuleActivation": "Could not update module activation.",
-  "featureHub.copy.featureHub": "Feature Hub",
-  "featureHub.copy.activatePropertyModulesAndKeepNavigationFocusedOnTheTools":
-    "Activate property modules and keep navigation focused on the tools your team uses.",
-  "featureHub.copy.active": "Active",
-  "featureHub.copy.syncing": "Syncing",
-  "featureHub.copy.searchModules": "Search modules...",
-  "featureHub.copy.clearSearch": "Clear search",
-  "featureHub.copy.loadingModules": "Loading modules...",
-  "featureHub.copy.noModulesInThisCategory": "No modules in this category.",
-  "featureHub.copy.new": "NEW",
-  "featureHub.copy.inactive": "Inactive",
-  "featureHub.copy.external": "External",
-  "featureHub.copy.details": "Details",
-  "featureHub.copy.items": "items",
-  "featureHub.copy.moduleItems": "module items",
-  "featureHub.copy.externalIntegration": "External integration",
-  "featureHub.copy.close": "Close",
-  "featureHub.copy.deactivatingHidesThisModuleFromNavigationOrSettingsYourData":
-    "Deactivating hides this module from navigation or settings. Your data is preserved and will be available if you reactivate.",
-  "featureHub.copy.activateModule": "Activate Module",
-  "featureHub.copy.affiliatesPreview": "Affiliates preview",
-  "featureHub.copy.partner": "Partner",
-  "featureHub.copy.clicks": "Clicks",
-  "featureHub.copy.bookings": "Bookings",
-  "featureHub.copy.revenue": "Revenue",
-  "featureHub.copy.commission": "Commission",
+  "featureHub.navigationItem.Add-ons": "Add-ons",
+  "featureHub.navigationItem.Promos": "Promos",
+  // Module copy (VAY-2200). It says only what the product does today.
+  "featureHub.modules.inbox.name": "Inbox",
+  "featureHub.modules.inbox.description": "Unified guest conversations across channels.",
+  "featureHub.modules.inbox.detail":
+    "Inbox brings guest messages from Airbnb, Booking.com and email into one place, so your team never misses a conversation. Assign threads and reply with saved quick replies.",
+  "featureHub.modules.inbox.point.0": "All channels in one thread view",
+  "featureHub.modules.inbox.point.1": "Assign conversations to team members",
+  "featureHub.modules.inbox.point.2": "Shared quick replies",
+  "featureHub.modules.inbox.point.3": "Unread conversations at a glance",
+  "featureHub.modules.reviews.name": "Reviews",
+  "featureHub.modules.reviews.description":
+    "View and manage guest reviews from connected channels.",
+  "featureHub.modules.reviews.detail":
+    "See reviews from Booking.com, Airbnb and direct guests in one place, and reply where the channel allows it.",
+  "featureHub.modules.reviews.point.0": "All channel reviews in one view",
+  "featureHub.modules.reviews.point.1": "Reply to reviews",
+  "featureHub.modules.reviews.point.2": "Collect reviews from direct guests after their stay",
+  "featureHub.modules.financials.name": "Financials",
+  "featureHub.modules.financials.description":
+    "Revenue, expenses and profit and loss for your property.",
+  "featureHub.modules.financials.detail":
+    "Review your property's finances in one place: stay revenue by channel, manual and generated expenses, and reports you can export.",
+  "featureHub.modules.financials.point.0": "Stay revenue and channel attribution",
+  "featureHub.modules.financials.point.1": "Manual and generated expenses",
+  "featureHub.modules.financials.point.2": "Reports and operational folios to export",
+  "featureHub.modules.add-ons.name": "Add-ons",
+  "featureHub.modules.add-ons.description": "Sell experiences and extras during booking.",
+  "featureHub.modules.add-ons.detail":
+    "Offer guests extras like airport transfers, breakfast, spa treatments and activities while they book.",
+  "featureHub.modules.add-ons.point.0": "Add-ons in several categories",
+  "featureHub.modules.add-ons.point.1": "Per-stay and per-night pricing",
+  "featureHub.modules.add-ons.point.2": "An extras step in the guest booking flow",
+  "featureHub.modules.promos.name": "Promos",
+  "featureHub.modules.promos.description": "Promo codes and automatic promotions.",
+  "featureHub.modules.promos.detail":
+    "Create discount codes guests enter at checkout, and last-minute deals that apply without a code.",
+  "featureHub.modules.promos.point.0": "Promo codes with usage limits",
+  "featureHub.modules.promos.point.1": "Last-minute discounts",
+  "featureHub.modules.promos.point.2": "Room and stay-date targeting",
+  "featureHub.modules.promos.offNote":
+    "Turning Promos off hides the promo code field from guests and the Promos page from the menu. Last-minute discounts keep running: switch them off on the Promos page first if you don't want them.",
+  "featureHub.modules.affiliates.name": "Affiliate Tracking",
+  "featureHub.modules.affiliates.description":
+    "Track referrals and partner bookings, including the Refer a Guest button.",
 };
 
 function defaultTranslate(key: string, params?: Record<string, string | number>): string {

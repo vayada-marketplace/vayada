@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { mockBookingPublication } from "./bookingPublicationMocks";
 import { createAdaptiveHotelSetupStatusMock } from "./sharedHotelSetupMocks";
+import { mockBookingModules } from "./featureHubModuleMocks";
 
 export const BOOKING_ADMIN_HOTEL_ID = "booking_hotel_alpenrose";
 export const BOOKING_ADMIN_PROPERTY_ID = "f6853000-0000-4000-8000-000000000001";
@@ -403,6 +404,7 @@ export async function mockBookingAdminShellRoutes(
       },
     }),
   );
+  await mockBookingModules(page, BOOKING_ADMIN_PROPERTY_ID);
   await page.route(/\/api\/pms\/properties\/[^/]+\/navigation-modules$/, (route) =>
     route.fulfill({
       json: {

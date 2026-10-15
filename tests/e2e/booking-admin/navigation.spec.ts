@@ -1,8 +1,10 @@
 import { expect, test } from "@playwright/test";
 import {
+  BOOKING_ADMIN_PROPERTY_ID,
   mockBookingAdminAuthenticatedSession,
   mockBookingAdminShellRoutes,
 } from "../support/bookingAdminMocks";
+import { mockBookingModules } from "../support/featureHubModuleMocks";
 
 const NAV_LABELS = [
   "Dashboard",
@@ -33,6 +35,17 @@ test.describe("booking-admin navigation", () => {
     expect(
       await navigation.locator("a").evaluateAll((links) => links.map((link) => link.title)),
     ).toEqual(NAV_LABELS);
+  });
+
+  test("hides Add-ons or Promos only once Feature Hub says they are off (VAY-2200)", async ({
+    page,
+  }) => {
+    await mockBookingModules(page, BOOKING_ADMIN_PROPERTY_ID, ["add-ons"]);
+    await page.goto("/");
+
+    const navigation = page.getByRole("navigation");
+    await expect(navigation.getByRole("link", { name: "Add-ons" })).toBeVisible();
+    await expect(navigation.getByRole("link", { name: "Promos" })).toHaveCount(0);
   });
 
   test("shows the same order in the mobile drawer", async ({ page }) => {
