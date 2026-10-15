@@ -393,6 +393,37 @@ describe("Booking Web public bootstrap parity", () => {
     await app.close();
   });
 
+  it("writes no access log line for funnel events (VAY-2197)", async () => {
+    let logs = "";
+    const app = buildApp({
+      logger: { level: "info", stream: { write: (chunk: string) => (logs += chunk) } },
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
+      bookingWebAttributionSink: {
+        async recordAffiliateClick() {},
+        async recordTelemetryEvent() {},
+      },
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/events",
+      remoteAddress: "203.0.113.7",
+      payload: {
+        analyticsConsent: true,
+        consentVersion: 1,
+        hotelSlug: "hotel-alpenrose",
+        eventType: "page_visit",
+        eventId: randomUUID(),
+        sessionId: randomUUID(),
+        metadata: { funnelVersion: 1, funnelSequence: 1 },
+      },
+    });
+    expect(response.statusCode).toBe(204);
+    expect(logs).not.toContain("203.0.113.7");
+    expect(logs).not.toContain("/api/booking-web/events");
+    await app.close();
+  });
+
   it("rejects telemetry that cannot be resolved to a canonical property", async () => {
     const events: unknown[] = [];
     const app = buildApp({
