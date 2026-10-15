@@ -644,6 +644,8 @@
   "settings.paymentsSave.noMethod": "请至少选择一种支付方式。",
   "settings.paymentsSave.bankDetails": "请添加银行信息以提供银行转账，然后重新保存。",
   "settings.paymentsSave.currencyChanged": "酒店的货币已更改。请重新加载页面，然后重新保存。",
+  "settings.paymentsSave.currencyMismatch": "房价与预订设置使用的货币不同。请在两处使用相同的货币，然后重新保存。",
+  "settings.paymentsSave.reload": "这些设置已在此期间更改。请重新加载页面，然后重新保存。",
   "settings.paymentsSave.noPermission": "您无权更改支付设置。",
   "settings.paymentsSave.failed": "无法保存支付设置。请重试。",
   "settings.paymentsSave.tryAgain": "重试",

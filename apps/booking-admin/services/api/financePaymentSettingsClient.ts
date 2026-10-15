@@ -70,7 +70,7 @@ export interface BookingAdminPaymentSettingsDraft {
   defaultCurrency: string;
   requiresManualReview?: boolean;
   commandPrefix?: string;
-  /** Setup saved plain Pay at Hotel and the host left it alone: send it back unchanged. */
+  /** Setup saved plain Pay at Hotel and the page still shows Cash and Card: send it back unchanged. */
   keepPlainPayAtHotel?: boolean;
 }
 

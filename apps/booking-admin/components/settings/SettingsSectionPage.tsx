@@ -325,7 +325,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   const bankSaveAttempt = useRef<BankTransferSaveAttempt>({});
   const [bankDestination, setBankDestination] = useState<SavedBankTransferDestination | null>(null);
   const [paymentSettingsLoaded, setPaymentSettingsLoaded] = useState(false);
-  // Setup's plain Pay at Hotel, still untouched here (VAY-2185).
+  // The saved row has setup's plain Pay at Hotel, without a Cash/Card choice (VAY-2185).
   const [plainPayAtHotel, setPlainPayAtHotel] = useState(false);
   const [billingPropertyId, setBillingPropertyId] = useState<string | null>(null);
   const [savedPropertyName, setSavedPropertyName] = useState("");
@@ -919,7 +919,12 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
             commandPrefix: `settings-payment-settings-${hotelId}`,
           }),
         });
-      let keptPlain = plainPayAtHotel && settings.pay_at_property_enabled;
+      // Plain still means what the page shows (Cash and Card), so it goes back unchanged.
+      let keptPlain =
+        plainPayAtHotel &&
+        settings.pay_at_property_enabled &&
+        settings.pay_at_hotel_methods.includes("cash") &&
+        settings.pay_at_hotel_methods.includes("card");
       try {
         await save(keptPlain);
       } catch (error) {
@@ -1116,7 +1121,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
             message={t(feedback.message)}
             className="mt-4"
             action={
-              feedback.retry && !saving
+              feedback.retry && !saving && !savingPayment
                 ? { label: t("settings.paymentsSave.tryAgain"), onClick: () => void handleSave() }
                 : undefined
             }
@@ -1897,10 +1902,9 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                 }`}
               >
                 <div
-                  onClick={() => {
-                    setPlainPayAtHotel(false);
-                    updateSetting("pay_at_property_enabled", !settings.pay_at_property_enabled);
-                  }}
+                  onClick={() =>
+                    updateSetting("pay_at_property_enabled", !settings.pay_at_property_enabled)
+                  }
                 >
                   <div
                     className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center ${settings.pay_at_property_enabled ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
@@ -2004,7 +2008,6 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                           type="button"
                           aria-pressed={selected}
                           onClick={() => {
-                            setPlainPayAtHotel(false);
                             if (selected && settings.pay_at_hotel_methods.length > 1) {
                               updateSetting(
                                 "pay_at_hotel_methods",

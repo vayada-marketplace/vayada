@@ -644,6 +644,8 @@
   "settings.paymentsSave.noMethod": "Выберите хотя бы один способ оплаты.",
   "settings.paymentsSave.bankDetails": "Добавьте банковские реквизиты, чтобы предлагать банковский перевод, затем сохраните снова.",
   "settings.paymentsSave.currencyChanged": "Валюта вашего отеля изменилась. Перезагрузите страницу, затем сохраните снова.",
+  "settings.paymentsSave.currencyMismatch": "Цены номеров и настройки бронирования используют разные валюты. Укажите одну валюту в обоих местах, затем сохраните снова.",
+  "settings.paymentsSave.reload": "Эти настройки за это время изменились. Перезагрузите страницу, затем сохраните снова.",
   "settings.paymentsSave.noPermission": "У вас нет прав на изменение настроек оплаты.",
   "settings.paymentsSave.failed": "Не удалось сохранить настройки оплаты. Повторите попытку.",
   "settings.paymentsSave.tryAgain": "Повторить",

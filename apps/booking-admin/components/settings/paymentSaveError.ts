@@ -46,13 +46,24 @@ export function paymentSaveError(error: unknown): PaymentSaveError {
     const fieldMessage = error.statusCode === 400 ? FINANCE_MESSAGES[error.detail] : undefined;
     if (fieldMessage) return { message: fieldMessage, retry: false };
     if (error.code === "property_currency_conflict") {
-      return { message: "settings.paymentsSave.currencyChanged", retry: false };
+      // Reloading fixes a currency that changed meanwhile, not prices and settings that disagree.
+      return {
+        message: error.detail.startsWith("Prices use ")
+          ? "settings.paymentsSave.currencyMismatch"
+          : "settings.paymentsSave.currencyChanged",
+        retry: false,
+      };
     }
   }
-  if (statusOf(error) === 403) {
-    return { message: "settings.paymentsSave.noPermission", retry: false };
-  }
-  return { message: "settings.paymentsSave.failed", retry: true };
+  const status = statusOf(error);
+  if (status === 403) return { message: "settings.paymentsSave.noPermission", retry: false };
+  // A stale version (bank details, a command in flight) fails the same way until reloaded.
+  if (status === 409) return { message: "settings.paymentsSave.reload", retry: false };
+  // Only a server or network failure can pass when the same request is sent again.
+  return {
+    message: "settings.paymentsSave.failed",
+    retry: status === null || status >= 500,
+  };
 }
 
 function statusOf(error: unknown): number | null {

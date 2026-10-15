@@ -1044,7 +1044,9 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     expect(order).toEqual(["save"]);
     expect(accountCreates).toBe(1);
-    await expect(page.getByText("Failed to save")).toBeVisible();
+    await expect(
+      page.getByText("Could not save payment settings. Please try again."),
+    ).toBeVisible();
     await expect(page).toHaveURL(/\/settings\/payments$/);
   });
 
@@ -1447,11 +1449,18 @@ test("keeps setup's plain Pay at Hotel when it is saved untouched", async ({ pag
   await expect(page.getByText("Payment settings saved").first()).toBeVisible();
   expect(writes).toEqual([{ acceptedMethods: ["pay_at_property"] }]);
 
+  // Off and on again still shows Cash and Card, so nothing changed.
+  await page.getByText("Pay at Hotel", { exact: true }).click();
+  await page.getByText("Pay at Hotel", { exact: true }).click();
+  await savePaymentsButton(page).click();
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes[1]).toEqual({ acceptedMethods: ["pay_at_property"] });
+
   // A changed choice is sent as shown.
   await page.getByRole("button", { name: "Card", exact: true }).click();
   await savePaymentsButton(page).click();
-  await expect.poll(() => writes.length).toBe(2);
-  expect(writes[1]).toEqual({ acceptedMethods: ["pay_at_property", "cash"] });
+  await expect.poll(() => writes.length).toBe(3);
+  expect(writes[2]).toEqual({ acceptedMethods: ["pay_at_property", "cash"] });
   await assertHealthy();
 });
 

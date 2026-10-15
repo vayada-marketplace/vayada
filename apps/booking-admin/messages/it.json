@@ -644,6 +644,8 @@
   "settings.paymentsSave.noMethod": "Scegli almeno un metodo di pagamento.",
   "settings.paymentsSave.bankDetails": "Aggiungi i tuoi dati bancari per offrire il bonifico bancario, poi salva di nuovo.",
   "settings.paymentsSave.currencyChanged": "La valuta del tuo hotel è cambiata. Ricarica la pagina, poi salva di nuovo.",
+  "settings.paymentsSave.currencyMismatch": "I prezzi delle camere e le impostazioni di prenotazione usano valute diverse. Usa la stessa valuta in entrambi, poi salva di nuovo.",
+  "settings.paymentsSave.reload": "Queste impostazioni sono cambiate nel frattempo. Ricarica la pagina, poi salva di nuovo.",
   "settings.paymentsSave.noPermission": "Non hai l'autorizzazione per modificare le impostazioni di pagamento.",
   "settings.paymentsSave.failed": "Impossibile salvare le impostazioni di pagamento. Riprova.",
   "settings.paymentsSave.tryAgain": "Riprova",

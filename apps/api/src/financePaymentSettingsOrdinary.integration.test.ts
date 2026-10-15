@@ -50,12 +50,22 @@ describe.skipIf(!url)("Booking Admin payment settings on the ordinary API login"
 
   afterAll(async () => {
     await pool?.end();
-    await admin.query("DELETE FROM finance.payment_settings WHERE property_id=$1::uuid", [
-      propertyId,
-    ]);
-    await admin.query("DELETE FROM booking.booking_settings WHERE property_id=$1::uuid", [
-      propertyId,
-    ]);
+    // Same cleanup as financePaymentWriters: the save's audit, outbox and idempotency rows too.
+    await admin.query("BEGIN");
+    await admin.query("SET LOCAL session_replication_role = replica");
+    for (const table of [
+      "platform.product_audit_events",
+      "platform.outbox_events",
+      "platform.domain_events",
+      "platform.idempotency_keys",
+      "finance.payment_settings",
+      "booking.booking_settings",
+    ])
+      await admin.query(`DELETE FROM ${table} WHERE property_id=$1::uuid`, [propertyId]);
+    await admin.query("DELETE FROM hotel_catalog.properties WHERE id=$1::uuid", [propertyId]);
+    await admin.query("DELETE FROM identity.organizations WHERE id=$1::uuid", [organizationId]);
+    await admin.query("DELETE FROM identity.users WHERE id=$1::uuid", [owner]);
+    await admin.query("COMMIT");
     await fixture?.drop();
     await admin.end();
   });

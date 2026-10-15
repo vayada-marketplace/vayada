@@ -644,6 +644,8 @@
   "settings.paymentsSave.noMethod": "Wählen Sie mindestens eine Zahlungsmethode.",
   "settings.paymentsSave.bankDetails": "Fügen Sie Ihre Bankdaten hinzu, um Banküberweisung anzubieten, und speichern Sie erneut.",
   "settings.paymentsSave.currencyChanged": "Die Währung Ihres Hotels hat sich geändert. Laden Sie die Seite neu und speichern Sie dann erneut.",
+  "settings.paymentsSave.currencyMismatch": "Ihre Zimmerpreise und Buchungseinstellungen verwenden unterschiedliche Währungen. Verwenden Sie in beiden dieselbe Währung und speichern Sie dann erneut.",
+  "settings.paymentsSave.reload": "Diese Einstellungen wurden zwischenzeitlich geändert. Laden Sie die Seite neu und speichern Sie dann erneut.",
   "settings.paymentsSave.noPermission": "Sie haben keine Berechtigung, die Zahlungseinstellungen zu ändern.",
   "settings.paymentsSave.failed": "Die Zahlungseinstellungen konnten nicht gespeichert werden. Bitte versuchen Sie es erneut.",
   "settings.paymentsSave.tryAgain": "Erneut versuchen",

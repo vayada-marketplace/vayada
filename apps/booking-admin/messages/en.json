@@ -646,6 +646,8 @@
   "settings.paymentsSave.noMethod": "Choose at least one payment method.",
   "settings.paymentsSave.bankDetails": "Add your bank details to offer Bank Transfer, then save again.",
   "settings.paymentsSave.currencyChanged": "Your hotel's currency changed. Reload the page, then save again.",
+  "settings.paymentsSave.currencyMismatch": "Your room prices and booking settings use different currencies. Use the same currency in both, then save again.",
+  "settings.paymentsSave.reload": "These settings changed in the meantime. Reload the page, then save again.",
   "settings.paymentsSave.noPermission": "You don't have permission to change payment settings.",
   "settings.paymentsSave.failed": "Could not save payment settings. Please try again.",
   "settings.paymentsSave.tryAgain": "Try again",

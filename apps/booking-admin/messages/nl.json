@@ -644,6 +644,8 @@
   "settings.paymentsSave.noMethod": "Kies ten minste één betaalmethode.",
   "settings.paymentsSave.bankDetails": "Voeg je bankgegevens toe om bankoverschrijving aan te bieden en sla daarna opnieuw op.",
   "settings.paymentsSave.currencyChanged": "De valuta van je hotel is gewijzigd. Laad de pagina opnieuw en sla daarna opnieuw op.",
+  "settings.paymentsSave.currencyMismatch": "Je kamerprijzen en boekingsinstellingen gebruiken verschillende valuta's. Gebruik in beide dezelfde valuta en sla daarna opnieuw op.",
+  "settings.paymentsSave.reload": "Deze instellingen zijn intussen gewijzigd. Laad de pagina opnieuw en sla daarna opnieuw op.",
   "settings.paymentsSave.noPermission": "Je hebt geen toestemming om de betaalinstellingen te wijzigen.",
   "settings.paymentsSave.failed": "Kon de betaalinstellingen niet opslaan. Probeer het opnieuw.",
   "settings.paymentsSave.tryAgain": "Opnieuw proberen",

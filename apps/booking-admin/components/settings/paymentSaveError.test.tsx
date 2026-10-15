@@ -67,9 +67,27 @@ describe("paymentSaveError (VAY-2185)", () => {
       { message: "settings.paymentsSave.bankDetails", retry: false },
     ],
     [
-      "a currency conflict",
-      financeError(409, "property_currency_conflict", "Payment currency changed to LKR."),
+      "a currency that changed meanwhile",
+      financeError(
+        409,
+        "property_currency_conflict",
+        "Payment currency changed to LKR. Reload before saving.",
+      ),
       { message: "settings.paymentsSave.currencyChanged", retry: false },
+    ],
+    [
+      "prices and booking settings in different currencies",
+      financeError(
+        409,
+        "property_currency_conflict",
+        "Prices use EUR but booking settings use LKR. Use one currency before saving payments.",
+      ),
+      { message: "settings.paymentsSave.currencyMismatch", retry: false },
+    ],
+    [
+      "a stale bank destination version",
+      new ApiErrorResponse(409, { detail: "Version conflict" }),
+      { message: "settings.paymentsSave.reload", retry: false },
     ],
     [
       "no permission on the property link",
@@ -94,7 +112,7 @@ describe("paymentSaveError (VAY-2185)", () => {
     [
       "an unknown 400",
       financeError(400, "invalid_command", "Something else."),
-      { message: "settings.paymentsSave.failed", retry: true },
+      { message: "settings.paymentsSave.failed", retry: false },
     ],
     [
       "a server error",
