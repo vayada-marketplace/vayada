@@ -39,18 +39,21 @@ export function createPgBookingWebEventSink(
         resourceProduct: "marketplace",
         resourceType: "affiliate_referral",
         resourceId: `${event.slug}:${event.referralCode}`,
-        correlationId: event.sessionId ?? event.requestId,
+        correlationId: event.sessionId ?? clickId,
         idempotencyKeyHash: hashKey(event.slug, event.referralCode, clickId),
         payload: {
           clickId,
           hotelSlug: event.slug,
           referralCode: event.referralCode,
           sessionId: event.sessionId ?? null,
-          landingUrl: event.landingUrl ?? null,
-          referrer: event.referrer ?? null,
-          metadata: event.metadata,
+          referrerSource: event.referrerSource,
         },
-        eventMetadata: requestMetadata(event.requestId, event.userAgent, event.ipAddress),
+        // VAY-2215: no request id (it joins the access log's IP address) and no IP or
+        // user-agent hash; attribution needs none of them.
+        eventMetadata: {
+          source: "apps/api-booking-web-public",
+          trafficClass: classifyBookingWebTraffic(event.userAgent),
+        },
         auditProduct: "marketplace",
         auditAction: "affiliate_click.recorded",
         auditTargetProduct: "marketplace",

@@ -6,7 +6,8 @@ import {
   type NearbyWriteError,
 } from "@vayada/domain-hotels";
 import pg from "pg";
-import { NEARBY_POLICY_VERSION } from "../integrations/googleNearbyPlaces.js";
+import { NEARBY_POLICY_VERSION, nearbyOriginKey } from "../integrations/googleNearbyPlaces.js";
+import { readNearbyOrigin, samePin } from "./propertyNearbyDiscoveryRepository.js";
 
 export type NearbyScope = { organizationId: string; propertyId: string };
 export type NearbySaveResult =
@@ -30,9 +31,9 @@ export function createPgPropertyNearbyRepository(
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        const state = await lockState(client, scope);
+        const locked = await lockState(client, scope);
         await client.query("COMMIT");
-        return state;
+        return locked?.state ?? null;
       } catch (error) {
         await client.query("ROLLBACK");
         throw error;
@@ -46,16 +47,17 @@ export function createPgPropertyNearbyRepository(
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        const current = await lockState(client, scope);
-        if (!current) {
+        const locked = await lockState(client, scope);
+        if (!locked) {
           await client.query("ROLLBACK");
           return { ok: false, code: "missing_property_resource_link" };
         }
+        const { state: current, originKey } = locked;
         const discovery = await client.query<{ places: { placeId: string }[] }>(
           `SELECT places FROM hotel_catalog.property_nearby_discovery
-           WHERE property_id=$1::uuid AND profile_revision=$2 AND policy_version=$3
+           WHERE property_id=$1::uuid AND (profile_revision=$2 OR origin=$4) AND policy_version=$3
              AND status IN ('ready','empty') AND valid_until>clock_timestamp()`,
-          [scope.propertyId, current.profileRevision, NEARBY_POLICY_VERSION],
+          [scope.propertyId, current.profileRevision, NEARBY_POLICY_VERSION, originKey],
         );
         const trustedIds = new Set(
           discovery.rows.flatMap((row) => row.places.map((place) => place.placeId)),
@@ -75,17 +77,18 @@ export function createPgPropertyNearbyRepository(
         };
         await client.query(
           `INSERT INTO hotel_catalog.property_nearby_curation
-          (property_id, revision, saved_profile_revision, choices, custom_places)
-          VALUES ($1::uuid, $2, $3, $4::jsonb, $5::jsonb)
+          (property_id, revision, saved_profile_revision, saved_origin, choices, custom_places)
+          VALUES ($1::uuid, $2, $3, $6, $4::jsonb, $5::jsonb)
           ON CONFLICT (property_id) DO UPDATE SET revision=EXCLUDED.revision,
-          saved_profile_revision=EXCLUDED.saved_profile_revision, choices=EXCLUDED.choices,
-          custom_places=EXCLUDED.custom_places, updated_at=now()`,
+          saved_profile_revision=EXCLUDED.saved_profile_revision, saved_origin=EXCLUDED.saved_origin,
+          choices=EXCLUDED.choices, custom_places=EXCLUDED.custom_places, updated_at=now()`,
           [
             scope.propertyId,
             state.curationRevision,
             state.savedProfileRevision,
             JSON.stringify(state.choices),
             JSON.stringify(state.customPlaces),
+            originKey,
           ],
         );
         await client.query(
@@ -126,7 +129,7 @@ export function createPgPropertyNearbyRepository(
 async function lockState(
   client: pg.PoolClient,
   scope: NearbyScope,
-): Promise<NearbyCurationState | null> {
+): Promise<{ state: NearbyCurationState; originKey: string | null } | null> {
   // Shared profile writes lock this same property row. Lock the resource link
   // too so revocation cannot race a save after the route's authorization check.
   const property = await client.query<{ profile_revision: string }>(
@@ -140,20 +143,24 @@ async function lockState(
   );
   if (!property.rows.length) return null;
   const profileRevision = Number(property.rows[0].profile_revision);
+  const originKey = nearbyOriginKey(await readNearbyOrigin(client, scope.propertyId));
   const result = await client.query(
-    `SELECT revision, saved_profile_revision, choices, custom_places
+    `SELECT revision, saved_profile_revision, saved_origin, choices, custom_places
     FROM hotel_catalog.property_nearby_curation WHERE property_id=$1::uuid`,
     [scope.propertyId],
   );
   const row = result.rows[0];
   if (!row)
     return {
-      schemaVersion: 1,
-      profileRevision,
-      curationRevision: 0,
-      savedProfileRevision: null,
-      choices: [],
-      customPlaces: [],
+      originKey,
+      state: {
+        schemaVersion: 1,
+        profileRevision,
+        curationRevision: 0,
+        savedProfileRevision: null,
+        choices: [],
+        customPlaces: [],
+      },
     };
   const parsed = parseNearbyCurationWrite({
     schemaVersion: 1,
@@ -164,11 +171,17 @@ async function lockState(
   });
   if (!parsed.ok) throw new Error("Stored nearby curation is invalid");
   return {
-    schemaVersion: 1,
-    profileRevision,
-    curationRevision: Number(row.revision),
-    savedProfileRevision: Number(row.saved_profile_revision),
-    choices: parsed.value.choices,
-    customPlaces: parsed.value.customPlaces,
+    originKey,
+    state: {
+      schemaVersion: 1,
+      profileRevision,
+      curationRevision: Number(row.revision),
+      // Saved for this same pin: still confirmed after saves that left the location alone.
+      savedProfileRevision: samePin(row.saved_origin, originKey)
+        ? profileRevision
+        : Number(row.saved_profile_revision),
+      choices: parsed.value.choices,
+      customPlaces: parsed.value.customPlaces,
+    },
   };
 }

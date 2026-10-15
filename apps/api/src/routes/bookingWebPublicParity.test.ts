@@ -231,21 +231,84 @@ describe("Booking Web public bootstrap parity", () => {
         referralCode: "REF-123",
         clickId: "click-123",
         sessionId: "sid_123",
-        landingUrl: "https://hotel-alpenrose.booking.localhost/?ref=REF-123",
+        referrer: "https://www.instagram.com",
       },
     });
 
     expect(response.statusCode).toBe(204);
-    expect(events).toMatchObject([
+    expect(events).toEqual([
       {
         slug: "hotel-alpenrose",
         referralCode: "REF-123",
         clickId: "click-123",
         sessionId: "sid_123",
-        landingUrl: "https://hotel-alpenrose.booking.localhost/?ref=REF-123",
+        referrerSource: "instagram",
+        occurredAt: new Date("2026-06-06T11:00:00.000Z"),
+        userAgent: "lightMyRequest",
       },
     ]);
     await app.close();
+  });
+
+  it("keeps only the referrer's site and a token session ID from callers that send guest details", async () => {
+    const events: Record<string, unknown>[] = [];
+    const app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
+      bookingWebAttributionSink: {
+        async recordAffiliateClick(event) {
+          events.push(event);
+        },
+        async recordTelemetryEvent() {},
+      },
+    });
+    const guestPage =
+      "https://hotel.booking.localhost/en/confirmation?booking=VAY-1&email=guest%40example.test&token=secret&ref=A";
+    try {
+      for (const [body, referer, source] of [
+        [
+          { landingUrl: guestPage, referrer: "https://l.instagram.com/?u=x&e=guest" },
+          guestPage,
+          "instagram",
+        ],
+        [
+          {
+            landing_url: guestPage,
+            referrer: "",
+            metadata: { email: "guest@example.test" },
+            session_id: "guest@example.test",
+          },
+          "https://www.tiktok.com/@creator",
+          "unknown",
+        ],
+        [{ referrer: guestPage }, undefined, "unknown"],
+      ] as const) {
+        const response = await app.inject({
+          method: "POST",
+          url: "/api/booking-web/hotels/hotel/attribution/clicks",
+          headers: referer ? { referer } : {},
+          payload: { referralCode: "A", ...body },
+        });
+        expect(response.statusCode).toBe(204);
+        expect(events.at(-1)?.referrerSource).toBe(source);
+      }
+      expect(events).toHaveLength(3);
+      for (const event of events) {
+        expect(Object.keys(event).sort()).toEqual([
+          "clickId",
+          "occurredAt",
+          "referralCode",
+          "referrerSource",
+          "sessionId",
+          "slug",
+          "userAgent",
+        ]);
+        expect(JSON.stringify(event)).not.toMatch(/guest|secret|VAY-1|confirmation|\?/);
+      }
+    } finally {
+      await app.close();
+    }
   });
 
   it("rejects malformed click IDs before intake and accepts older callers without one", async () => {

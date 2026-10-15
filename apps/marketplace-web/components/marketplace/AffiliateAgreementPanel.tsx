@@ -13,7 +13,9 @@ import {
   type MarketplaceAffiliateAssentRead,
   type MarketplaceAffiliateLinkDiagnosticResponse,
 } from "@vayada/marketplace-shared/api/collaborations";
-import { ApiErrorResponse, VAYADA_API_BASE_URL } from "@vayada/marketplace-shared/api/client";
+import { ApiErrorResponse } from "@vayada/marketplace-shared/api/client";
+
+import { affiliateShareUrl } from "@/lib/affiliateShareUrl";
 
 type AgreementState =
   | { kind: "loading"; collaborationId: string }
@@ -458,7 +460,7 @@ function AgreementDetails({
       );
       setAffiliateLink({
         publicToken: result.publicToken,
-        url: new URL(result.path, VAYADA_API_BASE_URL).toString(),
+        url: affiliateShareUrl(result.path),
       });
       setLinkAction("idle");
     } catch (error) {
@@ -481,7 +483,7 @@ function AgreementDetails({
     }
     setAffiliateLink({
       publicToken: affiliateLink.publicToken,
-      url: new URL(share.path, VAYADA_API_BASE_URL).toString(),
+      url: affiliateShareUrl(share.path),
     });
     setSelectedCampaignLabel(share.campaignLabel);
     setShareNotice(share.campaignLabel ? "Labeled variant selected." : "Default link selected.");

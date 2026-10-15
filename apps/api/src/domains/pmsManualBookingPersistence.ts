@@ -347,10 +347,19 @@ async function insertPrivateNote(
   command: PmsManualBookingCreateCommand,
   guestBookingId: string,
 ): Promise<void> {
+  // VAY-2210: name the author like notes added in Booking Detail (name, else email).
   await transaction.query(
     `INSERT INTO pms.booking_notes_private (
-       property_id, guest_booking_id, author_user_id, body, source
-     ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'pms')`,
+       property_id, guest_booking_id, author_user_id, author_display_name, body, source
+     ) VALUES (
+       $1::uuid, $2::uuid, $3::uuid,
+       COALESCE((
+         SELECT COALESCE(NULLIF(BTRIM(author.name), ''), author.email)
+         FROM identity.users author
+         WHERE author.id = $3::uuid
+       ), ''),
+       $4, 'pms'
+     )`,
     [command.propertyId, guestBookingId, command.audit.actor.userId, command.privateNote],
   );
 }
