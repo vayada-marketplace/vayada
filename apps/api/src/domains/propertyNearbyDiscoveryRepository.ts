@@ -3,6 +3,7 @@ import pg from "pg";
 import type { NearbyCategory } from "@vayada/domain-hotels";
 import {
   NEARBY_POLICY_VERSION,
+  nearbyOriginKey,
   type NearbyDiscoveryResult,
   type NearbyOrigin,
 } from "../integrations/googleNearbyPlaces.js";
@@ -19,6 +20,7 @@ export type NearbyClaim =
   | { status: "missing_property_resource_link" };
 type Row = {
   profile_revision: string;
+  origin: string | null;
   policy_version: string;
   status: NearbyDiscoveryResult["status"] | "refreshing";
   places: NearbyReference[];
@@ -31,6 +33,7 @@ type Row = {
 type Current = {
   profileRevision: number;
   origin: NearbyOrigin | null;
+  originKey: string | null;
   row: Row | undefined;
   now: Date;
 };
@@ -57,13 +60,7 @@ export function createPgPropertyNearbyDiscoveryRepository(connectionString: stri
       );
       let current: Current | null = null;
       if (property.rows.length) {
-        const location = await client.query<NearbyOrigin>(
-          `SELECT CASE WHEN map_display_mode='approximate' THEN round(latitude,2) ELSE latitude END::double precision AS latitude,
-           CASE WHEN map_display_mode='approximate' THEN round(longitude,2) ELSE longitude END::double precision AS longitude
-           FROM hotel_catalog.property_locations WHERE property_id=$1::uuid AND geo_public=true
-             AND map_display_mode IN ('exact','approximate') AND latitude IS NOT NULL AND longitude IS NOT NULL`,
-          [scope.propertyId],
-        );
+        const origin = await readNearbyOrigin(client, scope.propertyId);
         const stored = await client.query<Row>(
           "SELECT * FROM hotel_catalog.property_nearby_discovery WHERE property_id=$1::uuid",
           [scope.propertyId],
@@ -71,7 +68,8 @@ export function createPgPropertyNearbyDiscoveryRepository(connectionString: stri
         current = {
           profileRevision: Number(property.rows[0].profile_revision),
           now: (await client.query("SELECT clock_timestamp() AS now")).rows[0].now,
-          origin: location.rows[0] ?? null,
+          origin,
+          originKey: nearbyOriginKey(origin),
           row: stored.rows[0],
         };
       }
@@ -119,14 +117,21 @@ export function createPgPropertyNearbyDiscoveryRepository(connectionString: stri
         const token = randomUUID();
         await client.query(
           `INSERT INTO hotel_catalog.property_nearby_discovery
-           (property_id,profile_revision,policy_version,status,lease_token,lease_expires_at,retry_after,explicit_refresh_after)
-           VALUES ($1,$2,$3,'refreshing',$4,clock_timestamp()+interval '30 seconds',clock_timestamp()+interval '15 minutes',CASE WHEN $5 THEN clock_timestamp()+interval '1 hour' ELSE NULL END)
+           (property_id,profile_revision,origin,policy_version,status,lease_token,lease_expires_at,retry_after,explicit_refresh_after)
+           VALUES ($1,$2,$6,$3,'refreshing',$4,clock_timestamp()+interval '30 seconds',clock_timestamp()+interval '15 minutes',CASE WHEN $5 THEN clock_timestamp()+interval '1 hour' ELSE NULL END)
            ON CONFLICT(property_id) DO UPDATE SET profile_revision=EXCLUDED.profile_revision,
-           policy_version=EXCLUDED.policy_version,status='refreshing',places='[]'::jsonb,
+           origin=EXCLUDED.origin,policy_version=EXCLUDED.policy_version,status='refreshing',places='[]'::jsonb,
            fetched_at=NULL,valid_until=NULL,lease_token=EXCLUDED.lease_token,
            lease_expires_at=EXCLUDED.lease_expires_at,retry_after=EXCLUDED.retry_after,
            explicit_refresh_after=COALESCE(EXCLUDED.explicit_refresh_after,property_nearby_discovery.explicit_refresh_after)`,
-          [scope.propertyId, current.profileRevision, NEARBY_POLICY_VERSION, token, force],
+          [
+            scope.propertyId,
+            current.profileRevision,
+            NEARBY_POLICY_VERSION,
+            token,
+            force,
+            current.originKey,
+          ],
         );
         return {
           status: "claimed",
@@ -143,9 +148,10 @@ export function createPgPropertyNearbyDiscoveryRepository(connectionString: stri
     ) =>
       transaction(scope, async (client, current): Promise<NearbyDiscoveryState | null> => {
         if (!current) return null;
-        // An old request cannot publish after a source change or a replacement lease.
+        // An old request cannot publish after the pin moved or a replacement lease.
         if (
-          current.profileRevision !== profileRevision ||
+          (current.profileRevision !== profileRevision &&
+            !samePin(current.row?.origin, current.originKey)) ||
           current.row?.lease_token !== token ||
           !current.row.lease_expires_at ||
           current.row.lease_expires_at <= current.now ||
@@ -177,7 +183,25 @@ export function createPgPropertyNearbyDiscoveryRepository(connectionString: stri
     close: () => pool.end(),
   };
 }
-function state({ profileRevision, origin, row, now }: Current): NearbyDiscoveryState {
+/** Rows written before VAY-2104 have no origin and keep the old same-revision rule. */
+export function samePin(stored: string | null | undefined, current: string | null): boolean {
+  return stored != null && stored === current;
+}
+/** The public search origin: exact, or rounded like the guest map when approximate. */
+export async function readNearbyOrigin(
+  client: pg.PoolClient,
+  propertyId: string,
+): Promise<NearbyOrigin | null> {
+  const location = await client.query<NearbyOrigin>(
+    `SELECT CASE WHEN map_display_mode='approximate' THEN round(latitude,2) ELSE latitude END::double precision AS latitude,
+     CASE WHEN map_display_mode='approximate' THEN round(longitude,2) ELSE longitude END::double precision AS longitude
+     FROM hotel_catalog.property_locations WHERE property_id=$1::uuid AND geo_public=true
+       AND map_display_mode IN ('exact','approximate') AND latitude IS NOT NULL AND longitude IS NOT NULL`,
+    [propertyId],
+  );
+  return location.rows[0] ?? null;
+}
+function state({ profileRevision, origin, originKey, row, now }: Current): NearbyDiscoveryState {
   const base = {
     schemaVersion: 1 as const,
     profileRevision,
@@ -187,7 +211,7 @@ function state({ profileRevision, origin, row, now }: Current): NearbyDiscoveryS
   if (!origin) return { ...base, status: "location_required" };
   if (
     !row ||
-    Number(row.profile_revision) !== profileRevision ||
+    (Number(row.profile_revision) !== profileRevision && !samePin(row.origin, originKey)) ||
     row.policy_version !== NEARBY_POLICY_VERSION
   )
     return { ...base, status: "stale" };
