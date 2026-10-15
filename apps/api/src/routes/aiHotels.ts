@@ -15,6 +15,7 @@ import {
 } from "@vayada/domain-distribution";
 import type { FastifyInstance } from "fastify";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
+import { LIVE_PROMO_CODES_SQL } from "../domains/bookingGuestModules.js";
 
 export type PublicHotelProfileRepository = {
   findProfileBySlug(slug: string): Promise<PublicBookabilityProfileProjection | null>;
@@ -87,6 +88,7 @@ type TargetPublicHotelProfileRow = {
   bookingShowCurrencySelector: boolean | null;
   bookingDisplayCurrencies: unknown;
   bookingReferAGuestModuleEnabled: boolean;
+  bookingPromoCodes: boolean;
   bookingHeroImage: string | null;
   bookingHeroHeading: string | null;
   bookingHeroSubtext: string | null;
@@ -577,6 +579,7 @@ const TARGET_PUBLIC_PROFILE_SELECT = `SELECT
                    AND booking_resource.status = 'active'
                )
            ) AS "bookingReferAGuestModuleEnabled",
+           ${LIVE_PROMO_CODES_SQL("profile.property_id")} AS "bookingPromoCodes",
            booking_branding.hero_image_url AS "bookingHeroImage",
            booking_branding.hero_heading AS "bookingHeroHeading",
            booking_branding.hero_subtext AS "bookingHeroSubtext",
@@ -640,7 +643,8 @@ function toTargetPublicHotelProfileProjection(
     instantBook: booleanValue(capabilities["instantBook"]),
     onlinePayment: booleanValue(capabilities["onlinePayment"]),
     payAtProperty: booleanValue(capabilities["payAtProperty"]),
-    promoCodes: booleanValue(capabilities["promoCodes"]),
+    // Live: the Feature Hub Promos switch (VAY-2200) and codes made after the profile refresh.
+    promoCodes: row.bookingPromoCodes === true,
     referralCodes: row.bookingReferAGuestModuleEnabled,
     bookingDeepLinks: booleanValue(capabilities["bookingDeepLinks"]),
   };

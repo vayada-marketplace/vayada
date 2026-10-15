@@ -40,9 +40,6 @@ interface MediaTabProps {
   uploadingLogo: boolean;
   showContactButton: boolean;
   setShowContactButton: (value: boolean) => void;
-  showReferAGuestButton: boolean;
-  setShowReferAGuestButton: (value: boolean) => void;
-  referAGuestModuleEnabled: boolean | null;
   showLanguageSelector: boolean;
   setShowLanguageSelector: (value: boolean) => void;
   languageSelectorAvailable: boolean;
@@ -85,9 +82,6 @@ export default function MediaTab({
   uploadingLogo,
   showContactButton,
   setShowContactButton,
-  showReferAGuestButton,
-  setShowReferAGuestButton,
-  referAGuestModuleEnabled,
   showLanguageSelector,
   setShowLanguageSelector,
   languageSelectorAvailable,
@@ -466,21 +460,15 @@ export default function MediaTab({
             onChange={() => setShowContactButton(!showContactButton)}
             label={t("admin.contactButton")}
           />
-          <div
-            title={
-              referAGuestModuleEnabled
-                ? undefined
-                : referAGuestModuleEnabled === false
-                  ? t("admin.enableReferAGuestInFeatureHubFirst")
-                  : t("admin.featureHubStatusIsUnavailable")
-            }
-          >
+          {/* The old referral product is retired (VAY-1499); the switch stays off and says so,
+              instead of sending hosts to Feature Hub (VAY-2143). */}
+          <div title={t("featureHub.copy.currentlyUnavailable")}>
             <ToggleSwitch
-              enabled={Boolean(referAGuestModuleEnabled && showReferAGuestButton)}
-              onChange={() => setShowReferAGuestButton(!showReferAGuestButton)}
+              enabled={false}
+              onChange={() => {}}
               label={t("admin.referAGuestButton")}
-              description={t("admin.tiedToFeatureHubActivation")}
-              disabled={!referAGuestModuleEnabled}
+              description={t("featureHub.copy.currentlyUnavailable")}
+              disabled
             />
           </div>
           <ToggleSwitch

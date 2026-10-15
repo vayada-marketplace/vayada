@@ -206,6 +206,7 @@ export function toLegacyHotel(data: BookingWebPublicHotelResponse): Hotel {
     // New public enrolment is retired; existing referral-code attribution remains supported.
     referAGuestEnabled: false,
     instantBook: hotel.capabilities.instantBook,
+    promoCodesEnabled: hotel.capabilities.promoCodes,
   };
 }
 

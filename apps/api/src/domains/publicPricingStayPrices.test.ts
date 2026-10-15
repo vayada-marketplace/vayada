@@ -292,6 +292,33 @@ describe("createPublicPricingStayPrices", () => {
     });
   });
 
+  it("ignores a promo code while the hotel has Promos switched off (VAY-2200)", async () => {
+    const env = setup([
+      { roomTypeId: ROOM_A, nights: 2, free: 5 },
+      { roomTypeId: ROOM_B, nights: 2, free: 5 },
+    ]);
+    const read = env.client.query.getMockImplementation()!;
+    const promosOff = { rows: [{ addOns: true, promoCodes: false }] };
+    env.client.query.mockImplementation(async (text: string) =>
+      text.includes("booking.booking_settings")
+        ? (promosOff as unknown as Awaited<ReturnType<typeof read>>)
+        : read(text),
+    );
+    totals.mockImplementation(async (_client, _slug, selection) => ({
+      totalMinor: selection.promoCode === null ? "29800" : "25000",
+    }));
+    const prices = await env.reader.read("hotel", { ...stay, promoCode: "AUTUMN" });
+    for (const room of prices!.rooms)
+      for (const offer of room.offers)
+        expect(offer).toMatchObject({ totalMinor: "29800", promoApplied: false });
+    expect(totals).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ promoCode: "AUTUMN" }),
+    );
+    expectShortReads(env);
+  });
+
   it("prices at most 30 offers per request", async () => {
     const many = Array.from({ length: 32 }, (_, i) => ({
       publicOfferKey: `offer-${i}`,

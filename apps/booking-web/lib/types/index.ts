@@ -70,6 +70,8 @@ export interface Hotel {
   guestTypeSettings?: GuestTypeSettings;
   referAGuestEnabled?: boolean;
   instantBook?: boolean;
+  /** Guests can enter a promo code: the hotel's Promos switch is on and a code is live (VAY-2200). */
+  promoCodesEnabled?: boolean;
 }
 
 export type RoomSelectionLine = {
