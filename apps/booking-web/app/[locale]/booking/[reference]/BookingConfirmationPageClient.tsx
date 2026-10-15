@@ -3,6 +3,7 @@ import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote"
 import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
 
 import { formatCheckInTime, formatCheckOutTime } from "@/lib/arrivalTimes";
+import { formatStayDate, resolveLocale } from "@/lib/utils";
 import { useState, useEffect, useId, useRef } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { paymentMethodLabelKey, type PaymentMethodLabelKey } from "@vayada/locale-constants";
@@ -59,12 +60,13 @@ function formatPropertyDateTime(value: string, locale: string, timeZone?: string
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   try {
-    return new Intl.DateTimeFormat(locale, {
+    return new Intl.DateTimeFormat(resolveLocale(locale), {
       year: "numeric",
       month: "short",
       day: "numeric",
-      hour: "numeric",
+      hour: "2-digit",
       minute: "2-digit",
+      hourCycle: "h23",
       timeZone: timeZone || "UTC",
       timeZoneName: "short",
     }).format(date);
@@ -77,7 +79,7 @@ function formatPropertyDate(value: string, locale: string, timeZone?: string): s
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   try {
-    return new Intl.DateTimeFormat(locale, {
+    return new Intl.DateTimeFormat(resolveLocale(locale), {
       year: "numeric",
       month: "short",
       day: "numeric",
@@ -578,13 +580,17 @@ export default function BookingConfirmationPageClient({
               <div className="flex justify-between py-3">
                 <span className="text-gray-600">{t("checkIn")}</span>
                 <span className="font-medium text-gray-900">
-                  {booking?.checkIn ? `${booking.checkIn}, ${formatCheckInTime(hotel)}` : "—"}
+                  {booking?.checkIn
+                    ? `${formatStayDate(booking.checkIn, locale)}, ${formatCheckInTime(hotel)}`
+                    : "—"}
                 </span>
               </div>
               <div className="flex justify-between py-3">
                 <span className="text-gray-600">{t("checkOut")}</span>
                 <span className="font-medium text-gray-900">
-                  {booking?.checkOut ? `${booking.checkOut}, ${formatCheckOutTime(hotel)}` : "—"}
+                  {booking?.checkOut
+                    ? `${formatStayDate(booking.checkOut, locale)}, ${formatCheckOutTime(hotel)}`
+                    : "—"}
                 </span>
               </div>
               <div className="flex justify-between py-3">

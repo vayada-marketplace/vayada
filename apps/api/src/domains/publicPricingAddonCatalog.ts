@@ -23,12 +23,13 @@ export function createPublicPricingAddonCatalog(pool: Pool) {
         ]);
         const settings = (
           await client.query(
-            "SELECT show_addons_step FROM booking.booking_settings WHERE property_id=$1 FOR SHARE",
+            "SELECT show_addons_step, addons_enabled FROM booking.booking_settings WHERE property_id=$1 FOR SHARE",
             [propertyId],
           )
         ).rows[0];
         const ids =
-          settings?.show_addons_step === false
+          // VAY-2200: the Feature Hub Add-ons switch hides the list like the page's own choice.
+          settings?.show_addons_step === false || settings?.addons_enabled === false
             ? []
             : (
                 await client.query(

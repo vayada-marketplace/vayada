@@ -32,7 +32,7 @@ export default function PendingRequestFields({
     roomSelectionPartyMatches(input.roomSelection, input.adults, input.children);
   const methods = settings
     ? [
-        ...(settings.payAtPropertyEnabled ? [["pay_at_property", "Pay at property"]] : []),
+        ...(settings.payAtPropertyEnabled ? [["pay_at_property", "Pay at the hotel"]] : []),
         ...(settings.onlineCardPayment ? [["card", "Card"]] : []),
         ...(settings.bankTransfer ? [["bank_transfer", "Bank transfer"]] : []),
         ...(settings.paypalEnabled ? [["paypal", "PayPal"]] : []),
