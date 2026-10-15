@@ -108,6 +108,7 @@ it("aborts superseded reads and ignores a late result", async () => {
   await act(async () => resolve({ ...disclosure, propertyTimeZone: "Asia/Tokyo" }));
   expect(document.body.textContent).toContain("Central European Time");
   expect(document.body.textContent).not.toContain("Japan");
+  expect(document.body.textContent).not.toContain("Asia/Tokyo");
 });
 it("fails closed on fetch failure and retries without prior agreement", async () => {
   vi.mocked(getQuoteGuestDisclosure).mockRejectedValueOnce(new Error("private diagnostic"));
