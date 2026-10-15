@@ -673,7 +673,8 @@ function confirmationDetails(booking: BookingLifecycleEmailInput["booking"]): st
   return [
     `Total: ${money(booking.totalAmount, booking.currency)}`,
     `Balance: ${money(booking.balanceAmount, booking.currency)}`,
-    // The words the guest chose on the booking page (VAY-2195); staff screens keep the shared label.
+    // The booking page's words, in guest and hotel emails alike (VAY-2195); PMS screens keep the
+    // shared label.
     `Payment method: ${booking.paymentMethod === "pay_at_property" ? "Pay at the hotel" : paymentMethodLabel(booking.paymentMethod)}`,
     ...(booking.adults == null
       ? []

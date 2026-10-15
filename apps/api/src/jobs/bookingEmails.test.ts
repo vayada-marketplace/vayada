@@ -214,6 +214,17 @@ describe("booking lifecycle email jobs", () => {
     expect(text).not.toMatch(/\d{4}-\d{2}-\d{2}|\b(AM|PM)\b|Pay at Property/);
   });
 
+  it("falls back to UTC for a time zone the runtime doesn't know", async () => {
+    const target = createTargetEmailStore();
+    const input = bookingEmailInput({ paymentDeadlineAt: "2026-09-02T10:00:00.000Z" });
+    input.booking.propertyTimeZone = "Asia/Bali";
+    await enqueueBookingLifecycleEmailJob(target, input);
+    const { text } = JSON.parse(
+      String(target.requiredCall("INSERT INTO platform.jobs").values?.[8]),
+    ) as { text: string };
+    expect(text).toMatch(/Payment deadline: Wed, 2 Sept? 2026, 10:00 UTC/);
+  });
+
   it("keeps readable stay dates in the hotel's emails", async () => {
     const target = createTargetEmailStore();
     await enqueueBookingLifecycleEmailJob(

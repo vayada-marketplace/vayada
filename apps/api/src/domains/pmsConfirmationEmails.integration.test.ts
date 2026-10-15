@@ -29,6 +29,10 @@ describe.skipIf(!url)("confirmation resend with target PostgreSQL", () => {
       [property],
     );
     await pool.query(
+      `INSERT INTO hotel_catalog.property_locations(property_id, timezone) VALUES ($1, 'Europe/Berlin')`,
+      [property],
+    );
+    await pool.query(
       `INSERT INTO identity.users(id, email) VALUES ($1::uuid, $1::text || '@example.test')`,
       [actor],
     );
@@ -87,6 +91,15 @@ describe.skipIf(!url)("confirmation resend with target PostgreSQL", () => {
       .rows[0].payload;
     for (const value of ["400.00 EUR", "Pay at the hotel", "Breakfast × 2"])
       expect(payload.text).toContain(value);
+    // The hotel's time zone comes with the booking, for payment deadlines (VAY-2195).
+    expect(
+      (
+        await loadBookingNotificationSnapshot(pool, {
+          propertyId: property,
+          guestBookingId: booking,
+        })
+      )?.propertyTimeZone,
+    ).toBe("Europe/Berlin");
     expect(await emails.request(property, booking, "one", actor)).toEqual({ jobId });
     expect(await emails.request(property, booking, "two", actor)).toEqual({ jobId });
     expect(await emails.status(property, booking, jobId)).toEqual({ status: "succeeded" });
