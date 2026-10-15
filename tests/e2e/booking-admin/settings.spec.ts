@@ -541,7 +541,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await assertHealthy();
   });
 
-  test("keeps Refer a Guest visible in the mobile Design Studio preview", async ({
+  test("keeps Refer a Guest off even with a legacy affiliate activation (VAY-2143)", async ({
     page,
   }, testInfo) => {
     test.skip(
@@ -574,14 +574,18 @@ test.describe("booking-admin settings no-legacy guard", () => {
     );
 
     await page.goto("/design-studio");
+    // The old referral product is retired: the switch says so instead of pointing to Feature Hub.
     const referToggle = page.getByRole("switch", { name: "Refer a Guest button" });
-    await expect(referToggle).toBeEnabled();
-    await referToggle.click();
+    await expect(referToggle).toBeDisabled();
+    await expect(referToggle).not.toBeChecked();
+    await expect(
+      page.getByText("This feature is currently unavailable.", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Enable Refer a Guest in Feature Hub first.")).toHaveCount(0);
     await page.setViewportSize({ width: 375, height: 812 });
     await page.getByRole("button", { name: "Preview" }).click();
 
-    await expect(page.getByTestId("booking-preview-refer")).toBeVisible();
-    await expect(page.getByTestId("booking-preview-refer")).toContainText("Refer");
+    await expect(page.getByTestId("booking-preview-refer")).toHaveCount(0);
     await assertHealthy();
   });
 

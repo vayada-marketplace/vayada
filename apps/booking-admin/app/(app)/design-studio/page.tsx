@@ -25,7 +25,6 @@ import {
 } from "@/lib/utils/headerLogo";
 import { buildBookingPreviewUrl } from "@/lib/utils/bookingPreviewUrl";
 import { useTranslation } from "@/lib/i18n";
-import { moduleActivationClient } from "@/services/api/moduleActivationClient";
 
 import CustomDomainCard from "@/components/design-studio/CustomDomainCard";
 import MediaTab, { type PropertyGalleryImage } from "@/components/design-studio/MediaTab";
@@ -62,8 +61,6 @@ export default function DesignStudioPage() {
   const [headerLogoUrl, setHeaderLogoUrl] = useState("");
   const [headerLogoMediaObjectId, setHeaderLogoMediaObjectId] = useState<string | null>(null);
   const [showContactButton, setShowContactButton] = useState(true);
-  const [showReferAGuestButton, setShowReferAGuestButton] = useState(false);
-  const [referAGuestModuleEnabled, setReferAGuestModuleEnabled] = useState<boolean | null>(null);
   const [showLanguageSelector, setShowLanguageSelector] = useState(true);
   const [showCurrencySelector, setShowCurrencySelector] = useState(true);
   const [heroHeading, setHeroHeading] = useState("");
@@ -164,7 +161,6 @@ export default function DesignStudioPage() {
   useEffect(() => {
     setLoadFailed(false);
     setDomainStatus(null);
-    setReferAGuestModuleEnabled(null);
     propertyIdRef.current = null;
     profileRevisionRef.current = null;
     try {
@@ -185,12 +181,6 @@ export default function DesignStudioPage() {
         const message = "admin.failedToLoadCustomDomainStatus";
         setFeedback({ type: "error", message });
       });
-    moduleActivationClient
-      .list()
-      .then(({ activeModules }) =>
-        setReferAGuestModuleEnabled(activeModules.includes("affiliates")),
-      )
-      .catch(() => setReferAGuestModuleEnabled(null));
     Promise.all([
       settingsService.getDesignSettings(hotelId),
       settingsService.getPropertySettings(hotelId).catch(() => null),
@@ -207,7 +197,6 @@ export default function DesignStudioPage() {
         setHeaderLogo(settings.header_logo || "");
         setHeaderLogoMediaObjectId(settings.header_logo_media_object_id);
         setShowContactButton(settings.show_contact_button);
-        setShowReferAGuestButton(settings.show_refer_a_guest_button);
         setShowLanguageSelector(settings.show_language_selector);
         setShowCurrencySelector(settings.show_currency_selector);
         // Guests see the canonical cover; the settings URL only covers heroes saved before it existed.
@@ -695,7 +684,6 @@ export default function DesignStudioPage() {
         {
           header_logo_media_object_id: headerLogoMediaObjectId,
           show_contact_button: showContactButton,
-          ...(referAGuestModuleEnabled ? { show_refer_a_guest_button: showReferAGuestButton } : {}),
           show_language_selector: showLanguageSelector,
           show_currency_selector: showCurrencySelector,
           hero_image: heroImage,
@@ -867,9 +855,6 @@ export default function DesignStudioPage() {
                 uploadingLogo={uploadingLogo}
                 showContactButton={showContactButton}
                 setShowContactButton={setShowContactButton}
-                showReferAGuestButton={showReferAGuestButton}
-                setShowReferAGuestButton={setShowReferAGuestButton}
-                referAGuestModuleEnabled={referAGuestModuleEnabled}
                 showLanguageSelector={showLanguageSelector}
                 setShowLanguageSelector={setShowLanguageSelector}
                 languageSelectorAvailable={languageSelectorAvailable}
@@ -960,7 +945,7 @@ export default function DesignStudioPage() {
             font={currentFont}
             headerLogo={headerLogo}
             showContactButton={showContactButton}
-            showReferAGuestButton={Boolean(referAGuestModuleEnabled && showReferAGuestButton)}
+            showReferAGuestButton={false}
             showLanguageSelector={showLanguageSelector && languageSelectorAvailable}
             showCurrencySelector={showCurrencySelector && currencySelectorAvailable}
             supportedLanguages={supportedLanguages ?? undefined}
