@@ -430,7 +430,7 @@ export default function CheckInPage() {
 
   if (confirmationFlags) {
     return (
-      <main className="mx-auto max-w-3xl p-4 md:p-6">
+      <div className="max-w-3xl p-4 md:p-6">
         <div className="rounded-2xl border border-green-200 bg-white p-6 shadow-sm">
           <p className="text-sm font-semibold uppercase tracking-wide text-green-700">
             {t("dashboard.checkedIn")}
@@ -472,13 +472,13 @@ export default function CheckInPage() {
             </Link>
           </div>
         </div>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="min-h-[100dvh] overflow-x-hidden bg-gray-50 p-4 md:p-6">
-      <div className="mx-auto max-w-7xl space-y-5">
+    <div className="overflow-x-hidden p-4 md:p-6">
+      <div className="max-w-7xl space-y-5">
         <header className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">
             <Link
@@ -762,7 +762,7 @@ export default function CheckInPage() {
           </aside>
         </section>
       </div>
-    </main>
+    </div>
   );
 }
 
