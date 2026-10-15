@@ -8,7 +8,7 @@ import {
   type PublicBookabilityHotelProfile,
   type PublicBookabilityQuoteProjection,
 } from "@vayada/domain-distribution";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { QueryResultRow } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -313,64 +313,83 @@ describe("Booking Web public bootstrap parity", () => {
       expect(events).toEqual([]);
     }
 
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/booking-web/events",
-      payload: {
-        analyticsConsent: true,
-        consentVersion: 1,
-        hotelSlug: "hotel-alpenrose",
-        eventType: "page_visit",
-        eventId: "event_page_visit_001",
-        sessionId: "sid_123",
-        metadata: { locale: "de" },
-      },
-    });
-
-    for (const metadata of [
-      { funnelVersion: 1, funnelSequence: 0 },
-      { funnelVersion: 1, funnelSequence: 2, paymentMethod: "unknown" },
-    ]) {
-      const invalid = await app.inject({
+    // VAY-2197: funnel events only, with each type's allowlisted properties and random ids.
+    const sessionId = "0b6f0f6e-6a1b-4c39-9d1e-5d3c2a1b0f9e";
+    const event = (eventType: string, metadata: unknown, ids = {}) =>
+      app.inject({
         method: "POST",
         url: "/api/booking-web/events",
         payload: {
           analyticsConsent: true,
           consentVersion: 1,
           hotelSlug: "hotel-alpenrose",
-          eventType: "complete_booking_clicked",
-          sessionId: "sid",
+          eventType,
+          eventId: randomUUID(),
+          sessionId,
           metadata,
+          ...ids,
         },
       });
+    const response = await event("page_visit", { funnelVersion: 1, funnelSequence: 1 });
+
+    for (const [eventType, metadata, ids] of [
+      ["page_visit", { funnelVersion: 1, funnelSequence: 0 }],
+      ["page_visit", { locale: "de" }],
+      ["page_visit", { funnelVersion: 1, funnelSequence: 2, email: "guest@example.com" }],
+      [
+        "complete_booking_clicked",
+        { funnelVersion: 1, funnelSequence: 2, paymentMethod: "unknown", mode: "instant" },
+      ],
+      ["searched_dates", { funnelVersion: 1, funnelSequence: 2 }],
+      ["page_visit", { funnelVersion: 1, funnelSequence: 2 }, { sessionId: "sid_123" }],
+      ["page_visit", { funnelVersion: 1, funnelSequence: 2 }, { eventId: undefined }],
+    ] as const) {
+      const invalid = await event(eventType, metadata, ids);
       expect(invalid.statusCode).toBe(400);
     }
-    // Room-detail views stay accepted funnel telemetry although they are no longer a stage.
-    const roomViewed = await app.inject({
-      method: "POST",
-      url: "/api/booking-web/events",
-      payload: {
-        analyticsConsent: true,
-        consentVersion: 1,
-        hotelSlug: "hotel-alpenrose",
-        eventType: "room_viewed",
-        sessionId: "sid_123",
-        metadata: { funnelVersion: 1, funnelSequence: 2 },
-      },
+    const oversized = await event("page_visit", {
+      funnelVersion: 1,
+      funnelSequence: 2,
+      pad: "x".repeat(4096),
     });
-    expect(response.statusCode).toBe(204);
-    expect(roomViewed.statusCode).toBe(204);
+    expect(oversized.statusCode).toBe(413);
+    // Room-detail views, step views and errors are accepted although none is a stage.
+    const roomViewed = await event("room_viewed", {
+      funnelVersion: 1,
+      funnelSequence: 2,
+      roomTypeId: "suite",
+    });
+    const stepViewed = await event("step_viewed", {
+      funnelVersion: 1,
+      funnelSequence: 3,
+      step: "extras",
+    });
+    const failed = await event("booking_error", {
+      funnelVersion: 1,
+      funnelSequence: 4,
+      step: "payment",
+      reason: "booking_unavailable",
+      code: "CARD_PAYMENT_UNAVAILABLE",
+    });
+    expect([response, roomViewed, stepViewed, failed].map((r) => r.statusCode)).toEqual([
+      204, 204, 204, 204,
+    ]);
     expect(events).toMatchObject([
       {
         propertyId: "booking_hotel_alpenrose",
         hotelSlug: "hotel-alpenrose",
         eventType: "page_visit",
-        eventId: "event_page_visit_001",
-        sessionId: "sid_123",
-        metadata: { locale: "de" },
+        sessionId,
+        metadata: { funnelVersion: 1, funnelSequence: 1 },
       },
-      { eventType: "room_viewed", sessionId: "sid_123" },
+      { eventType: "room_viewed", sessionId, metadata: { roomTypeId: "suite" } },
+      { eventType: "step_viewed", metadata: { step: "extras" } },
+      { eventType: "booking_error", metadata: { code: "CARD_PAYMENT_UNAVAILABLE" } },
     ]);
+    for (const recorded of events) {
+      expect(recorded).not.toHaveProperty("ipAddress");
+      expect(recorded).not.toHaveProperty("requestId");
+    }
     await app.close();
   });
 
@@ -396,6 +415,9 @@ describe("Booking Web public bootstrap parity", () => {
         consentVersion: 1,
         hotelSlug: "unknown-hotel",
         eventType: "page_visit",
+        eventId: randomUUID(),
+        sessionId: randomUUID(),
+        metadata: { funnelVersion: 1, funnelSequence: 1 },
       },
     });
 

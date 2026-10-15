@@ -62,6 +62,32 @@ describe("affiliate click occurrence persistence", () => {
   });
 });
 
+describe("Booking Web funnel event persistence", () => {
+  beforeEach(() => query.mockClear());
+
+  it("stores no request id and no IP or user-agent hashes (VAY-2197)", async () => {
+    const sink = createPgBookingWebEventSink({ connectionString: "unused" });
+    await sink.recordTelemetryEvent({
+      propertyId: "11111111-1111-4111-8111-111111111111",
+      hotelSlug: "hotel",
+      eventType: "step_viewed",
+      eventId: "22222222-2222-4222-8222-222222222222",
+      sessionId: "33333333-3333-4333-8333-333333333333",
+      occurredAt: new Date("2026-10-15T12:00:00Z"),
+      userAgent: "Googlebot/2.1",
+      metadata: { funnelVersion: 1, funnelSequence: 2, step: "extras" },
+    });
+    const values = query.mock.calls[0]![1] as unknown[];
+    const stored = JSON.stringify(values);
+    expect(JSON.parse(values[12] as string)).toEqual({
+      source: "apps/api-booking-web-public",
+      trafficClass: "bot",
+    });
+    expect(values[9]).toBe("33333333-3333-4333-8333-333333333333");
+    expect(stored).not.toMatch(/requestId|ipAddress|userAgent|Googlebot/);
+  });
+});
+
 describe("Booking Web telemetry traffic policy", () => {
   it.each([
     "Googlebot/2.1 (+http://www.google.com/bot.html)",
