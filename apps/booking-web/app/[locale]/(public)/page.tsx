@@ -138,6 +138,7 @@ function HomePageContent() {
   const [appliedPromo, setAppliedPromo] = useState<AppliedPromo | null>(null);
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoError, setPromoError] = useState("");
+  const promoCodesEnabled = hotel?.promoCodesEnabled !== false;
 
   const nights = calculateNights(checkIn, checkOut);
   const { steps: STEPS } = useBookingSteps("rooms");
@@ -343,111 +344,126 @@ function HomePageContent() {
             />
           </div>
 
-          {/* Divider */}
-          <div className="hidden md:block w-px h-12 bg-gray-200" />
+          {/* VAY-2200: no promo field while the hotel has Promos off or no live code. */}
+          {promoCodesEnabled && (
+            <>
+              {/* Divider */}
+              <div className="hidden md:block w-px h-12 bg-gray-200" />
 
-          {/* Promo */}
-          <div className="relative flex justify-center md:justify-start w-full md:w-auto">
-            {appliedPromo ? (
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 text-primary-700 rounded-full text-xs font-semibold">
-                  <svg
-                    className="w-3.5 h-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M5 13l4 4L19 7"
-                    />
-                  </svg>
-                  {appliedPromo.code}
-                  {appliedPromo.discountType === "percentage"
-                    ? ` (-${appliedPromo.discountValue}%)`
-                    : ` (-${appliedPromo.discountValue})`}
-                </span>
-                <button
-                  onClick={() => {
-                    setAppliedPromo(null);
-                    setPromoCode("");
-                    setPromoError("");
-                  }}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </div>
-            ) : (
-              <>
-                <button
-                  onClick={() => {
-                    setPromoOpen(!promoOpen);
-                    setCalendarOpen(false);
-                    setGuestsOpen(false);
-                  }}
-                  className="flex items-center gap-2 text-gray-500 hover:text-primary-600 transition-colors"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
-                    />
-                  </svg>
-                  <span className="text-sm font-medium">{t("addPromo")}</span>
-                </button>
-                {promoOpen && (
-                  <PromoPopover
-                    open={promoOpen}
-                    onClose={() => setPromoOpen(false)}
-                    value={promoCode}
-                    onChange={(v) => {
-                      setPromoCode(v);
-                      setPromoError("");
-                    }}
-                    onApply={async () => {
-                      if (!promoCode.trim() || !slug) return;
-                      setPromoLoading(true);
-                      setPromoError("");
-                      try {
-                        const result = await hotelService.validatePromoCode(slug, promoCode, {
-                          checkIn: checkIn || undefined,
-                        });
-                        if (result.valid) {
-                          setAppliedPromo({
-                            code: result.code,
-                            discountType: result.discountType!,
-                            discountValue: result.discountValue!,
-                          });
-                          setPromoOpen(false);
-                        } else {
-                          setPromoError(result.message);
-                        }
-                      } catch {
-                        setPromoError("Failed to validate promo code");
-                      } finally {
-                        setPromoLoading(false);
-                      }
-                    }}
-                    loading={promoLoading}
-                    error={promoError}
-                    t={t}
-                  />
+              {/* Promo */}
+              <div className="relative flex justify-center md:justify-start w-full md:w-auto">
+                {appliedPromo ? (
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary-50 text-primary-700 rounded-full text-xs font-semibold">
+                      <svg
+                        className="w-3.5 h-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M5 13l4 4L19 7"
+                        />
+                      </svg>
+                      {appliedPromo.code}
+                      {appliedPromo.discountType === "percentage"
+                        ? ` (-${appliedPromo.discountValue}%)`
+                        : ` (-${appliedPromo.discountValue})`}
+                    </span>
+                    <button
+                      onClick={() => {
+                        setAppliedPromo(null);
+                        setPromoCode("");
+                        setPromoError("");
+                      }}
+                      className="text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M6 18L18 6M6 6l12 12"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => {
+                        setPromoOpen(!promoOpen);
+                        setCalendarOpen(false);
+                        setGuestsOpen(false);
+                      }}
+                      className="flex items-center gap-2 text-gray-500 hover:text-primary-600 transition-colors"
+                    >
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+                        />
+                      </svg>
+                      <span className="text-sm font-medium">{t("addPromo")}</span>
+                    </button>
+                    {promoOpen && (
+                      <PromoPopover
+                        open={promoOpen}
+                        onClose={() => setPromoOpen(false)}
+                        value={promoCode}
+                        onChange={(v) => {
+                          setPromoCode(v);
+                          setPromoError("");
+                        }}
+                        onApply={async () => {
+                          if (!promoCode.trim() || !slug) return;
+                          setPromoLoading(true);
+                          setPromoError("");
+                          try {
+                            const result = await hotelService.validatePromoCode(slug, promoCode, {
+                              checkIn: checkIn || undefined,
+                            });
+                            if (result.valid) {
+                              setAppliedPromo({
+                                code: result.code,
+                                discountType: result.discountType!,
+                                discountValue: result.discountValue!,
+                              });
+                              setPromoOpen(false);
+                            } else {
+                              setPromoError(result.message);
+                            }
+                          } catch {
+                            setPromoError("Failed to validate promo code");
+                          } finally {
+                            setPromoLoading(false);
+                          }
+                        }}
+                        loading={promoLoading}
+                        error={promoError}
+                        t={t}
+                      />
+                    )}
+                  </>
                 )}
-              </>
-            )}
-          </div>
+              </div>
+            </>
+          )}
 
           {/* Check Availability Button */}
           <button
