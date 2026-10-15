@@ -9,7 +9,10 @@ import {
   BOOKING_ADMIN_PROPERTY_SETTINGS_PATH,
   BOOKING_ADMIN_SAME_DAY_PATH,
   BOOKING_ADMIN_PROPERTY_PROFILE_PATH,
+  BOOKING_ADMIN_PUBLIC_BOOKABILITY_PATH,
+  BOOKING_ADMIN_PUBLIC_PROPERTY_PROFILE_PATH,
   defaultBookingAdminPropertyProfile,
+  defaultBookingAdminPublicPropertyProfile,
   defaultBookingAdminPropertySettings,
   defaultCustomDomain,
   mockBookingAdminDesignSettings,
@@ -279,6 +282,113 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await expect(page.getByText("Settings saved successfully")).toHaveCount(0);
     expect(settingsWrites).toHaveLength(2);
     expect(profileWrites).toHaveLength(1);
+  });
+
+  test("edits the property description shown in the booking site footer", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+    // VAY-2142: the footer description had no edit field in Booking Admin.
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingAdminAuthenticatedSession(page);
+    const persisted = { ...defaultBookingAdminPropertySettings, property_name: "Alpenrose" };
+    await mockBookingAdminShellRoutes(page, { propertySettings: persisted });
+    const writes: string[] = [];
+    const publicProfile = structuredClone(defaultBookingAdminPublicPropertyProfile);
+    const descriptionWrites: unknown[] = [];
+    let failDescriptionWrite = false;
+    await page.route(`**${BOOKING_ADMIN_PUBLIC_PROPERTY_PROFILE_PATH}*`, async (route) => {
+      if (route.request().method() === "PUT") {
+        if (failDescriptionWrite) {
+          await route.fulfill({ status: 500, json: { message: "Unavailable" } });
+          return;
+        }
+        const body = route.request().postDataJSON() as {
+          expectedProfileRevision: number;
+          patch: { shortDescription: string };
+        };
+        writes.push("description");
+        descriptionWrites.push(body);
+        publicProfile.profileRevision += 1;
+        publicProfile.publicProfile.shortDescription = body.patch.shortDescription;
+      }
+      await route.fulfill({ json: publicProfile });
+    });
+    await page.route(`**${BOOKING_ADMIN_PROPERTY_SETTINGS_PATH}*`, async (route) => {
+      if (route.request().method() === "PATCH") writes.push("settings");
+      await route.fulfill({ json: persisted });
+    });
+    const clientRefreshes: string[] = [];
+    await page.route(`**${BOOKING_ADMIN_PUBLIC_BOOKABILITY_PATH}*`, async (route) => {
+      clientRefreshes.push(route.request().url());
+      await route.fallback();
+    });
+    const save = page.getByRole("button", { name: "Save property details", exact: true });
+
+    await page.goto("/settings/general");
+    const description = page.getByLabel("Property description");
+    await expect(description).toHaveValue(
+      defaultBookingAdminPublicPropertyProfile.publicProfile.shortDescription,
+    );
+    await expect(
+      page.getByText("A short line about your property, shown in the booking site footer."),
+    ).toBeVisible();
+
+    // Setup's rule for the same text: 50 to 500 characters, checked before anything is saved.
+    await description.fill("Too short.");
+    await save.click();
+    await expect(
+      page.getByText("The property description needs 50 to 500 characters."),
+    ).toBeVisible();
+    expect(writes).toEqual([]);
+
+    const text = "A family-run alpine hotel in the heart of Munich, ten minutes from the old town.";
+    await description.fill(`  ${text}  `);
+    await save.click();
+    await expect(page.getByText("Settings saved successfully")).toBeVisible();
+    expect(descriptionWrites).toEqual([
+      { expectedProfileRevision: 1, patch: { shortDescription: text } },
+    ]);
+    // The description lands first, so the settings save's own refresh of a live booking page
+    // carries it; the page sends no refresh of its own.
+    expect(writes).toEqual(["description", "settings"]);
+    expect(clientRefreshes).toEqual([]);
+    await expect(description).toHaveValue(text);
+
+    // Editing hides the success banner; saving without changes writes no description.
+    await description.fill(`${text} `);
+    await expect(page.getByText("Settings saved successfully")).toHaveCount(0);
+    await save.click();
+    await expect(page.getByText("Settings saved successfully")).toBeVisible();
+    expect(writes).toEqual(["description", "settings", "settings"]);
+    await testInfo.attach("settings-general-description", {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
+    await assertHealthy();
+
+    // A failed description write stops the save, so nothing changes.
+    // (The refused requests log console errors, so page health is checked above.)
+    failDescriptionWrite = true;
+    await description.fill(`${text} Breakfast is served on the terrace.`);
+    await save.click();
+    await expect(
+      page.getByText("The property description couldn't be saved, so nothing was changed."),
+    ).toBeVisible();
+    expect(writes).toEqual(["description", "settings", "settings"]);
+
+    // A failed read keeps the field locked, so a Save can never clear the text.
+    await page.route(`**${BOOKING_ADMIN_PUBLIC_PROPERTY_PROFILE_PATH}*`, (route) =>
+      route.fulfill({ status: 503, json: { message: "Unavailable" } }),
+    );
+    await page.reload();
+    await expect(
+      page.getByText("The description couldn't be loaded. Reload the page to edit it."),
+    ).toBeVisible();
+    await expect(description).toBeDisabled();
   });
 
   test("loads migrated settings surfaces without helper calls", async ({ page }, testInfo) => {
