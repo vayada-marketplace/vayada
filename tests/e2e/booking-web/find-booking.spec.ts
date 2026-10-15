@@ -321,7 +321,7 @@ for (const [status, heading] of [
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     await expect(page.getByText("VAY-1268", { exact: true })).toBeVisible();
     if (status === "cancelled") {
-      await expect(page.getByText("Cancelled on: Sep 5, 2026")).toBeVisible();
+      await expect(page.getByText(/Cancelled on: 5 Sept? 2026/)).toBeVisible();
     }
   });
 }
@@ -350,7 +350,9 @@ for (const status of ["pending", "confirmed"] as const) {
     await page.goto(`/confirmation?booking=VAY-1268&token=${confirmationToken}`);
     await expect(page.getByText("Bank transfer pending")).toBeVisible();
     await expect(page.getByText("IBAN: CH93 0076 2011 6238 5295 7")).toBeVisible();
-    await expect(page.getByText(/Payment deadline: 2 Sept? 2026, 12:00 (CEST|GMT\+2)/)).toBeVisible();
+    await expect(
+      page.getByText(/Payment deadline: 2 Sept? 2026, 12:00 (CEST|GMT\+2)/),
+    ).toBeVisible();
     await expect(page.getByText("Total Due")).toBeVisible();
   });
 }

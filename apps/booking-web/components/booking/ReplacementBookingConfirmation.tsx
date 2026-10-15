@@ -182,8 +182,8 @@ export default function ReplacementBookingConfirmation({
             hour: "2-digit",
             minute: "2-digit",
           })}
-          . We’ll confirm your booking when your payment
-          arrives. If it doesn’t arrive by then, the booking expires and the room is released.
+          . We’ll confirm your booking when your payment arrives. If it doesn’t arrive by then, the
+          booking expires and the room is released.
         </p>
         <p>We sent the payment details to the email address you provided.</p>
         <a className={`${button} inline-block`} href={`/confirmation?${details}`}>
