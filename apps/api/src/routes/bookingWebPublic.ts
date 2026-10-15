@@ -5,6 +5,7 @@ import {
 } from "../domains/activeBookingPublicationGate.js";
 import { createPublicQuoteGuestDisclosure } from "../domains/publicQuoteGuestDisclosure.js";
 import { createPublicPricingAddonCatalog } from "../domains/publicPricingAddonCatalog.js";
+import { readGuestModuleSwitches } from "../domains/bookingGuestModules.js";
 import {
   createPublicPricingStayPrices,
   parseStayPricesQuery,
@@ -1593,6 +1594,8 @@ export function createTargetBookingWebCheckoutAdapter(
     config.replacementPricingManualPaymentAcceptanceEnabled === true
       ? ["paypal", ...(config.bankTransfers ? ["bank_transfer"] : [])]
       : [],
+    async (slug) =>
+      readGuestModuleSwitches(pool, (await resolveTargetCheckoutProperty(pool, slug)).propertyId),
   );
   const serializeTargetChangeRequest = (row: TargetChangeRequestRow, enabled = false) =>
     serializeChangeRequest(
@@ -5282,6 +5285,13 @@ async function validateTargetPromo(
     occurredAt: Date;
   },
 ): Promise<Record<string, unknown>> {
+  // VAY-2200: the Feature Hub Promos switch; stored codes stay for when it is back on.
+  if (!(await readGuestModuleSwitches(pool, property.propertyId)).promoCodes)
+    return {
+      valid: false,
+      code: code.toUpperCase(),
+      message: "Promo codes aren't available at this hotel.",
+    };
   const promo = await loadTargetPromoDefinition(pool, property.propertyId, code);
   if (!promo) return { valid: false, code: code.toUpperCase(), message: "Invalid promo code." };
   const message = targetPromoValidationMessage(promo, {
