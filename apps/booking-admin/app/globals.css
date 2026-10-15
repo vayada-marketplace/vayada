@@ -6,6 +6,32 @@
   --foreground-rgb: 17, 24, 39;
   --background-start-rgb: 255, 255, 255;
   --background-end-rgb: 255, 255, 255;
+
+  /* Page frame shared by every admin page (VAY-2199): same left edge, top and width. */
+  --page-padding-x: 16px;
+  --page-padding-y: 16px;
+  --page-max-width: 1280px;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --page-padding-x: 24px;
+    --page-padding-y: 24px;
+  }
+}
+
+@layer components {
+  .page-frame {
+    margin-inline: auto;
+    max-width: var(--page-max-width);
+    padding: var(--page-padding-y) var(--page-padding-x);
+  }
+
+  /* Full width to the right, same left edge as a centred .page-frame. */
+  .page-frame-full {
+    margin-left: max(0px, calc((100% - var(--page-max-width)) / 2));
+    padding: var(--page-padding-y) var(--page-padding-x);
+  }
 }
 
 body {

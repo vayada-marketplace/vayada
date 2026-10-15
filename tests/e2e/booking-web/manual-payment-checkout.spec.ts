@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
-import { continueToPayment, orderTotal, paymentOption } from "../support/bookFlow";
+import { continueToPayment, mockAnyPrice, orderTotal, paymentOption } from "../support/bookFlow";
 
 const offerKey = `pricing-offer.v2:${"d".repeat(64)}`;
 
@@ -181,6 +181,8 @@ test("books by bank transfer and opens the protected payment details", async ({ 
 // VAY-2145: bank transfer only when its 48-hour deadline ends before check-in.
 test("hides bank transfer for arrivals closer than its payment deadline", async ({ page }) => {
   await mockBookingApis(page);
+  // The steps continue with a price (VAY-2195).
+  await mockAnyPrice(page);
   await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/checkout-config`, (route) =>
     route.fulfill({
       json: {

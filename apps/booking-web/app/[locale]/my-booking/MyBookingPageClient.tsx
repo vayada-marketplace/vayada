@@ -1,13 +1,14 @@
 "use client";
 
 import { formatCheckInTime, formatCheckOutTime } from "@/lib/arrivalTimes";
+import { formatStayDate } from "@/lib/utils";
 import { Link } from "@/i18n/navigation";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
 import { bookingImageSizes } from "@/components/booking/imageSizes";
@@ -34,6 +35,7 @@ function todayIn(timeZone?: string): string {
 
 export default function MyBookingPageClient() {
   const t = useTranslations("myBooking");
+  const locale = useLocale();
   const tc = useTranslations("common");
   const tr = useTranslations("roomSelection");
   const { hotel } = useHotel();
@@ -343,13 +345,13 @@ export default function MyBookingPageClient() {
               <div className="flex justify-between py-3">
                 <span className="text-gray-600 text-sm">{t("checkIn")}</span>
                 <span className="font-medium text-gray-900 text-sm">
-                  {booking.checkIn}, {formatCheckInTime(hotel)}
+                  {formatStayDate(booking.checkIn, locale)}, {formatCheckInTime(hotel)}
                 </span>
               </div>
               <div className="flex justify-between py-3">
                 <span className="text-gray-600 text-sm">{t("checkOut")}</span>
                 <span className="font-medium text-gray-900 text-sm">
-                  {booking.checkOut}, {formatCheckOutTime(hotel)}
+                  {formatStayDate(booking.checkOut, locale)}, {formatCheckOutTime(hotel)}
                 </span>
               </div>
               <div className="flex justify-between py-3">

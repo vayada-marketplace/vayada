@@ -69,6 +69,7 @@ export default function ExtrasStep({
   value,
   onChange,
   quote,
+  priceFailed = false,
   formatMoney,
   formatDay,
   showCategories = true,
@@ -80,6 +81,8 @@ export default function ExtrasStep({
   value: ReplacementExtrasValue | null;
   onChange: (value: ReplacementExtrasValue | null) => void;
   quote?: PublicBookingQuote;
+  /** The stay couldn't be priced: there is no extras total to wait for. */
+  priceFailed?: boolean;
   formatMoney: (minor: string, currency: string) => string;
   formatDay: (date: string) => { weekday: string; day: string };
   /** The hotel's "group add-ons by category" setting. */
@@ -99,6 +102,8 @@ export default function ExtrasStep({
     extraAmountMinor(addon, items.find((item) => item.id === addon.id)!, display[addon.id]?.price),
   );
   const quoted = quote ? quoteExtrasMinor(quote) : null;
+  // An extra without its day isn't priced yet.
+  const dayMissing = items.some((item) => item.dates.length === 0);
   // Display maths only when it adds up to what the quote charges for the extras.
   const showLines =
     quoted !== null &&
@@ -338,8 +343,21 @@ export default function ExtrasStep({
           </ul>
           <div className="flex items-center justify-between pt-4 border-t border-primary-100">
             <p className="text-sm text-gray-500">Extras total</p>
-            <p className="text-xl font-bold text-gray-900" aria-live="polite">
-              {quoted !== null ? formatMoney(String(quoted), selection.currency) : "Updating…"}
+            <p
+              className={
+                quoted !== null
+                  ? "text-xl font-bold text-gray-900"
+                  : `text-sm ${dayMissing ? "font-medium text-amber-700" : "text-gray-500"}`
+              }
+              aria-live="polite"
+            >
+              {quoted !== null
+                ? formatMoney(String(quoted), selection.currency)
+                : dayMissing
+                  ? "Choose a day"
+                  : priceFailed
+                    ? "—"
+                    : "Updating…"}
             </p>
           </div>
         </div>

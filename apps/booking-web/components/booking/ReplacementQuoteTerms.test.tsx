@@ -90,7 +90,7 @@ it("discloses each physical room's actual name, meal, cancellation and payment t
   expect(rooms[0].textContent).toContain(
     "Contact us with cancellation requests.\nKeep your reference.",
   );
-  expect(rooms[0].textContent).toContain("Accepted methods: Card, Pay at property.");
+  expect(rooms[0].textContent).toContain("Accepted methods: Card, Pay at the hotel.");
   expect(rooms[1].textContent).toContain("Room 2: Garden suite");
   expect(rooms[1].textContent).toContain("Room only (no meals)");
   expect(rooms[1].textContent).toContain("Non-refundable.");
