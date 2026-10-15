@@ -110,3 +110,11 @@ describe("PMS navigation preview", () => {
     );
   });
 });
+
+describe("Booking Engine navigation preview", () => {
+  it("mirrors the sidebar: no Booking Flow, modules after Add-ons (VAY-2144)", () => {
+    const core = CORE_NAV_ITEMS.booking_engine.map(({ label }) => label);
+    expect(core).toEqual(["Dashboard", "Design Studio", "Add-ons", "Promo Codes", "Settings"]);
+    expect(core[FEATURE_MODULE_NAV_INDEX.booking_engine - 1]).toBe("Add-ons");
+  });
+});

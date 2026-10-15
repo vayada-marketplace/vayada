@@ -1,7 +1,5 @@
 "use client";
 
-import { BankTransferValidationError } from "@vayada/product-onboarding/bankTransferDestination";
-
 import {
   saveBankTransferDestination,
   type SavedBankTransferDestination,
@@ -17,12 +15,15 @@ import {
   createFinanceStripeProviderAccount,
   FinancePaymentSettingsClientError,
   getFinancePaymentSettings,
+  isPlainPayAtHotel,
   issueFinanceStripeOnboardingLink,
+  needsExplicitPayAtHotelChoice,
   reconcileFinanceStripeProviderAccount,
   updateFinancePaymentSettings,
   payAtHotelMethodsFromFinance,
   type FinancePaymentSettingsResponse,
 } from "@/services/api/financePaymentSettingsClient";
+import { paymentSaveError } from "@/components/settings/paymentSaveError";
 import {
   createFixedPlanCheckout,
   getFinancePlanStatus,
@@ -61,6 +62,12 @@ import { SettingsSubPage } from "@/components/settings/SettingsSubPage";
 import type { SettingsPageId } from "@/lib/utils/settingsSectionUrl";
 import { continueStripeAfterSavingSettings } from "@/lib/utils/stripeOnboarding";
 import { fixedPlanUnitPrices, formatBillingAmount } from "@/lib/utils/fixedPlanPricing";
+import {
+  normalizePropertyDescription,
+  PROPERTY_DESCRIPTION_MAX_LENGTH,
+  propertyDescriptionLength,
+  savePropertyDescription,
+} from "@/lib/utils/propertyDescription";
 import {
   coordinateStripeRefresh,
   refreshStripeAfterOnboarding,
@@ -263,9 +270,11 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   const [sameDayLoading, setSameDayLoading] = useState(true);
   const [sameDaySaving, setSameDaySaving] = useState(false);
   const [sameDayError, setSameDayError] = useState("");
-  const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(
-    null,
-  );
+  const [feedback, setFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+    retry?: boolean;
+  } | null>(null);
   const [localizationLoading, setLocalizationLoading] = useState(true);
   const [localizationLoadError, setLocalizationLoadError] = useState("");
   const [canonicalDefaultCurrency, setCanonicalDefaultCurrency] = useState<string | null>(null);
@@ -322,8 +331,14 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   const bankSaveAttempt = useRef<BankTransferSaveAttempt>({});
   const [bankDestination, setBankDestination] = useState<SavedBankTransferDestination | null>(null);
   const [paymentSettingsLoaded, setPaymentSettingsLoaded] = useState(false);
+  // The saved row has setup's plain Pay at Hotel, without a Cash/Card choice (VAY-2185).
+  const [plainPayAtHotel, setPlainPayAtHotel] = useState(false);
   const [billingPropertyId, setBillingPropertyId] = useState<string | null>(null);
   const [savedPropertyName, setSavedPropertyName] = useState("");
+  // Null until the public profile loads, so a failed read can never save over the text.
+  const [savedDescription, setSavedDescription] = useState<string | null>(null);
+  const [description, setDescription] = useState("");
+  const [descriptionLoadError, setDescriptionLoadError] = useState("");
   const [financePlanStatus, setFinancePlanStatus] = useState<FinancePlanStatus | null>(null);
   const [billingPlanLoading, setBillingPlanLoading] = useState(true);
   const [billingPlanAction, setBillingPlanAction] = useState<
@@ -437,6 +452,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       payout_swift: "",
     }));
     setBankDestination(res.bankDestination ?? null);
+    setPlainPayAtHotel(isPlainPayAtHotel(ps.acceptedMethods));
     setPaymentSettingsLoaded(true);
   }, []);
 
@@ -835,9 +851,9 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     setSavingPayment(true);
     setPaymentError("");
     setPaymentSuccess("");
-    const fail = (message: string) => {
+    const fail = (message: string, retry = false) => {
       setPaymentError(message);
-      if (showPageFeedback) setFeedback({ type: "error", message });
+      if (showPageFeedback) setFeedback({ type: "error", message, retry });
     };
     try {
       if (!paymentSettingsLoaded) {
@@ -890,27 +906,44 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
         },
       );
       setBankDestination(destination ?? null);
-      await updateFinancePaymentSettings({
-        propertyId: propertyLink.propertyId,
-        body: buildFinancePaymentSettingsBody({
-          payAtPropertyEnabled: settings.pay_at_property_enabled,
-          payAtHotelMethods: settings.pay_at_hotel_methods,
-          onlineCardPayment: settings.online_card_payment ?? false,
-          bankTransfer: settings.bank_transfer ?? false,
-          paypalEnabled: settings.paypal_enabled ?? false,
-          paypalEmail: settings.paypal_email,
-          paypalPaymentWindowHours: settings.paypal_payment_window_hours,
-          payoutAccountHolder: settings.payout_account_holder,
-          payoutAccountType: settings.payout_account_type,
-          payoutIban: settings.payout_iban,
-          payoutAccountNumber: settings.payout_account_number,
-          payoutBankName: settings.payout_bank_name,
-          payoutSwift: settings.payout_swift,
-          paymentProvider,
-          defaultCurrency: canonicalDefaultCurrency,
-          commandPrefix: `settings-payment-settings-${hotelId}`,
-        }),
-      });
+      const save = (keepPlainPayAtHotel: boolean) =>
+        updateFinancePaymentSettings({
+          propertyId: propertyLink.propertyId,
+          body: buildFinancePaymentSettingsBody({
+            payAtPropertyEnabled: settings.pay_at_property_enabled,
+            payAtHotelMethods: settings.pay_at_hotel_methods,
+            keepPlainPayAtHotel,
+            onlineCardPayment: settings.online_card_payment ?? false,
+            bankTransfer: settings.bank_transfer ?? false,
+            paypalEnabled: settings.paypal_enabled ?? false,
+            paypalEmail: settings.paypal_email,
+            paypalPaymentWindowHours: settings.paypal_payment_window_hours,
+            payoutAccountHolder: settings.payout_account_holder,
+            payoutAccountType: settings.payout_account_type,
+            payoutIban: settings.payout_iban,
+            payoutAccountNumber: settings.payout_account_number,
+            payoutBankName: settings.payout_bank_name,
+            payoutSwift: settings.payout_swift,
+            paymentProvider,
+            defaultCurrency: canonicalDefaultCurrency,
+            commandPrefix: `settings-payment-settings-${hotelId}`,
+          }),
+        });
+      // Plain still means what the page shows (Cash and Card), so it goes back unchanged.
+      let keptPlain =
+        plainPayAtHotel &&
+        settings.pay_at_property_enabled &&
+        settings.pay_at_hotel_methods.includes("cash") &&
+        settings.pay_at_hotel_methods.includes("card");
+      try {
+        await save(keptPlain);
+      } catch (error) {
+        // An old row setup never saved needs the choice spelled out: send the Cash + Card shown.
+        if (!keptPlain || !needsExplicitPayAtHotelChoice(error)) throw error;
+        keptPlain = false;
+        await save(false);
+      }
+      setPlainPayAtHotel(keptPlain);
       setSettings((previous) => ({
         ...previous,
         payout_account_holder: "",
@@ -924,16 +957,40 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       if (showPageFeedback) setFeedback({ type: "success", message });
       return propertyLink.propertyId;
     } catch (error) {
-      fail(
-        error instanceof BankTransferValidationError
-          ? "admin.enterTheCompleteBankDetailsOrLeaveAllFieldsEmpty"
-          : "settings.billing.errorPaymentSaveFailed",
-      );
+      const { message, retry } = paymentSaveError(error);
+      fail(message, retry);
       return null;
     } finally {
       setSavingPayment(false);
     }
   };
+
+  // The footer description is setup's hotel summary in the public profile (VAY-2142).
+  useEffect(() => {
+    if (activeSection !== "general" || !billingPropertyId) return;
+    let cancelled = false;
+    setDescriptionLoadError("");
+    sharedHotelSetupApi.getPublicPropertyProfile(billingPropertyId).then(
+      (profile) => {
+        if (cancelled) return;
+        const text = profile.publicProfile.shortDescription ?? "";
+        setSavedDescription(text);
+        setDescription(text);
+      },
+      (error: unknown) => {
+        if (cancelled) return;
+        const forbidden = (error as { status?: unknown } | null)?.status === 403;
+        setDescriptionLoadError(
+          forbidden
+            ? "settings.property.descriptionNoAccess"
+            : "settings.property.descriptionLoadError",
+        );
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSection, billingPropertyId]);
 
   // The property name lives in the shared property profile (hotel setup, PMS). Only the
   // owner can rename, and the profile must be complete, so it is saved last and on its own.
@@ -970,10 +1027,34 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       setFeedback({ type: "error", message: targetSettingsUpdate.message });
       return;
     }
+    const descriptionChanged =
+      activeSection === "general" &&
+      savedDescription !== null &&
+      description.trim() !== savedDescription.trim();
+    const nextDescription = descriptionChanged ? normalizePropertyDescription(description) : null;
+    if (descriptionChanged && !nextDescription) {
+      setFeedback({ type: "error", message: "settings.property.descriptionLengthError" });
+      return;
+    }
 
     try {
       setSaving(true);
       setFeedback(null);
+      // Saved before the settings: their save refreshes a live booking page with this text.
+      if (nextDescription && billingPropertyId) {
+        try {
+          const savedText = await savePropertyDescription(
+            sharedHotelSetupApi,
+            billingPropertyId,
+            nextDescription,
+          );
+          setSavedDescription(savedText);
+          setDescription(savedText);
+        } catch {
+          setFeedback({ type: "error", message: "settings.feedback.propertyDescriptionNotSaved" });
+          return;
+        }
+      }
       const data = await settingsService.updatePropertySettings(targetSettingsUpdate.data);
       // Apply only what was saved: this response carries placeholder payment settings.
       const saved = Object.keys(targetSettingsUpdate.data);
@@ -1096,7 +1177,16 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       {/* Feedback banner */}
       {feedback && (
         <div role={feedback.type === "error" ? "alert" : "status"} aria-live="polite">
-          <FeedbackAlert type={feedback.type} message={t(feedback.message)} className="mt-4" />
+          <FeedbackAlert
+            type={feedback.type}
+            message={t(feedback.message)}
+            className="mt-4"
+            action={
+              feedback.retry && !saving && !savingPayment
+                ? { label: t("settings.paymentsSave.tryAgain"), onClick: () => void handleSave() }
+                : undefined
+            }
+          />
         </div>
       )}
 
@@ -1137,6 +1227,42 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                       className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                       placeholder={t("settings.property.namePlaceholder")}
                     />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="property-description"
+                      className="block text-[13px] font-medium text-gray-700 mb-0.5"
+                    >
+                      {t("settings.property.descriptionLabel")}
+                    </label>
+                    <textarea
+                      id="property-description"
+                      rows={2}
+                      value={description}
+                      disabled={savedDescription === null}
+                      onChange={(e) => {
+                        setDescription(e.target.value);
+                        // A success banner next to unsaved edits reads as if they were saved.
+                        setFeedback((current) => (current?.type === "success" ? null : current));
+                      }}
+                      aria-describedby="property-description-hint"
+                      className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
+                    />
+                    <div className="mt-0.5 flex justify-between gap-3 text-[12px] text-gray-500">
+                      <span id="property-description-hint">
+                        {t(descriptionLoadError || "settings.property.descriptionHint")}
+                      </span>
+                      <span
+                        className={
+                          description.trim() === (savedDescription ?? "").trim() ||
+                          normalizePropertyDescription(description)
+                            ? "shrink-0 tabular-nums"
+                            : "shrink-0 tabular-nums text-red-600"
+                        }
+                      >
+                        {propertyDescriptionLength(description)} / {PROPERTY_DESCRIPTION_MAX_LENGTH}
+                      </span>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
@@ -1977,6 +2103,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                         <button
                           key={m.key}
                           type="button"
+                          aria-pressed={selected}
                           onClick={() => {
                             if (selected && settings.pay_at_hotel_methods.length > 1) {
                               updateSetting(

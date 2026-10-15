@@ -1,0 +1,74 @@
+import { BankTransferValidationError } from "@vayada/product-onboarding/bankTransferDestination";
+
+import { ApiErrorResponse } from "@/services/api/client";
+import {
+  FinancePaymentSettingsClientError,
+  PaymentSettingsValidationError,
+  type PaymentSettingsField,
+} from "@/services/api/financePaymentSettingsClient";
+
+const FIELD_MESSAGES: Record<PaymentSettingsField, string> = {
+  payAtHotelMethods: "settings.paymentsSave.payAtHotelMethods",
+  paypalEmail: "settings.paymentsSave.paypalEmail",
+  acceptedMethods: "settings.paymentsSave.noMethod",
+};
+
+// Finance's wording for the same checks (apps/api routes/finance.ts paymentSettingsCompletenessError).
+const FINANCE_MESSAGES: Record<string, string> = {
+  "Choose at least one payment method.": FIELD_MESSAGES.acceptedMethods,
+  "Pay at Hotel requires cash, card, or both.": FIELD_MESSAGES.payAtHotelMethods,
+  "PayPal requires a valid email address.": FIELD_MESSAGES.paypalEmail,
+  "Bank Transfer requires an enabled destination.": "settings.paymentsSave.bankDetails",
+};
+
+export interface PaymentSaveError {
+  /** Translation key. */
+  message: string;
+  /** Saving again unchanged may work, so the page offers Try again. */
+  retry: boolean;
+}
+
+/** What Payments says when Save fails (VAY-2185): the field to fix, or what to do next. */
+export function paymentSaveError(error: unknown): PaymentSaveError {
+  if (error instanceof PaymentSettingsValidationError) {
+    return { message: FIELD_MESSAGES[error.field], retry: false };
+  }
+  if (error instanceof BankTransferValidationError) {
+    return { message: "admin.enterTheCompleteBankDetailsOrLeaveAllFieldsEmpty", retry: false };
+  }
+  if (
+    error instanceof TypeError ||
+    (error instanceof FinancePaymentSettingsClientError && error.code === "network_unavailable")
+  ) {
+    return { message: "settings.billing.errorPaymentServerUnreachable", retry: true };
+  }
+  if (error instanceof FinancePaymentSettingsClientError) {
+    const fieldMessage = error.statusCode === 400 ? FINANCE_MESSAGES[error.detail] : undefined;
+    if (fieldMessage) return { message: fieldMessage, retry: false };
+    if (error.code === "property_currency_conflict") {
+      // Reloading fixes a currency that changed meanwhile, not prices and settings that disagree.
+      return {
+        message: error.detail.startsWith("Prices use ")
+          ? "settings.paymentsSave.currencyMismatch"
+          : "settings.paymentsSave.currencyChanged",
+        retry: false,
+      };
+    }
+  }
+  const status = statusOf(error);
+  if (status === 403) return { message: "settings.paymentsSave.noPermission", retry: false };
+  // A stale version (bank details, a command in flight) fails the same way until reloaded.
+  if (status === 409) return { message: "settings.paymentsSave.reload", retry: false };
+  // Only a server or network failure can pass when the same request is sent again.
+  return {
+    message: "settings.paymentsSave.failed",
+    retry: status === null || status >= 500,
+  };
+}
+
+function statusOf(error: unknown): number | null {
+  if (error instanceof ApiErrorResponse) return error.status;
+  const statusCode =
+    typeof error === "object" && error !== null && "statusCode" in error ? error.statusCode : null;
+  return typeof statusCode === "number" ? statusCode : null;
+}
