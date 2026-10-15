@@ -31,7 +31,14 @@ function loadedHeadingFaces(page: Page) {
   });
 }
 
-for (const fontPairing of ["high-end-serif", "modern-minimalist"]) {
+// Every Design Studio pairing (packages/domain-booking BOOKING_DESIGN_FONT_PAIRINGS).
+for (const fontPairing of [
+  "high-end-serif",
+  "modern-minimalist",
+  "grand-classic",
+  "imperial-serif",
+  "italiana-serif",
+]) {
   test(`serves the ${fontPairing} fonts from the booking site itself`, async ({
     page,
     baseURL,
