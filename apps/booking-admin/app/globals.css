@@ -11,6 +11,9 @@
   --page-padding-x: 16px;
   --page-padding-y: 16px;
   --page-max-width: 1280px;
+  /* Page header (PageHeader): title → subtitle, and header → first section. */
+  --page-subtitle-gap: 4px;
+  --page-header-gap: 24px;
 }
 
 @media (min-width: 768px) {
@@ -31,6 +34,15 @@
   .page-frame-full {
     margin-left: max(0px, calc((100% - var(--page-max-width)) / 2));
     padding: var(--page-padding-y) var(--page-padding-x);
+  }
+
+  /* The header owns the gap to the first section, whatever space-y / mt-* either side has. */
+  .page-header {
+    margin-bottom: var(--page-header-gap) !important;
+  }
+
+  .page-header + * {
+    margin-top: 0 !important;
   }
 }
 

@@ -15,7 +15,7 @@ import {
   type BookingReservation,
   type BookingReservationList,
 } from "@/services/api/bookingReservationsClient";
-import { PageLayout } from "@/components/layout/PageLayout";
+import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
 
 const PAGE_SIZE = 20;
 
@@ -155,25 +155,25 @@ export default function ReservationsPage() {
 
   return (
     <PageLayout className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold text-gray-900">{t("admin.reservations")}</h1>
-          <p className="text-[13px] text-gray-500 mt-1">
-            {bookings
-              ? t("admin.matchingBookingsCount", { count: bookings.total.toLocaleString(locale) })
-              : t("admin.bookingList")}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={handleRefresh}
-          disabled={!hotelId || loading || refreshing}
-          className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-gray-200 bg-white px-3 text-[13px] font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <ArrowPathIcon className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-          {t("settings.booking.refresh")}
-        </button>
-      </div>
+      <PageHeader
+        title={t("admin.reservations")}
+        subtitle={
+          bookings
+            ? t("admin.matchingBookingsCount", { count: bookings.total.toLocaleString(locale) })
+            : t("admin.bookingList")
+        }
+        actions={
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={!hotelId || loading || refreshing}
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-gray-200 bg-white px-3 text-[13px] font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <ArrowPathIcon className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+            {t("settings.booking.refresh")}
+          </button>
+        }
+      />
 
       <div className="bg-white border border-gray-200 rounded-lg p-3 md:p-4">
         <form onSubmit={handleSearch} className="grid gap-3 md:grid-cols-[1fr_180px_auto]">
