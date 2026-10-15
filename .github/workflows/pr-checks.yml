@@ -794,6 +794,8 @@ jobs:
           src/domains/pmsCalendarAutoOpenSettingsRepository.integration.test.ts
           src/pmsNavigationModules.integration.test.ts
           src/pmsNavigationModules.test.ts
+          src/pmsBookingModules.integration.test.ts
+          src/pmsBookingModules.test.ts
           src/jobs/pmsChannexScheduler.integration.test.ts
           src/jobs/pmsCalendarAutoOpenScheduler.integration.test.ts
           src/domains/pmsInboxProviderActionCommand.integration.test.ts
