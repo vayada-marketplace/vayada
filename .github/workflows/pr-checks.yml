@@ -446,7 +446,8 @@ jobs:
   # Each shard gets its own PostgreSQL cluster, so cluster-wide role proofs stay isolated:
   #   platform    - identity, legacy owner, finance worker, Channex worker and authorization proofs
   #   pms         - the PMS/booking/finance integration batch and the migration suites
-  #   hotel-setup - hotel setup on the ordinary API login, shared setup profile and logo media
+  #   hotel-setup - hotel setup on the ordinary API login, shared setup profile, logo media and
+  #                 nearby places
   # Steps without a `matrix.shard` condition run in every shard.
   api_postgres:
     name: TypeScript API PostgreSQL Integration (PG${{ matrix.postgres }}, ${{ matrix.shard }})
@@ -842,6 +843,7 @@ jobs:
           src/jobs/channexStagingImport.integration.test.ts
           src/domains/channexStagingAlertRecovery.integration.test.ts
           src/routes/bookingWebPublicAttribution.integration.test.ts
+          src/platform/bookingWebEvents.integration.test.ts
           src/jobs/financeSubscriptions.integration.test.ts
           src/financeBillingPlanOrdinary.integration.test.ts
           src/financeBillingPlanParity.integration.test.ts
@@ -966,6 +968,17 @@ jobs:
           src/domains/marketplaceSubmissionRepository.integration.test.ts
           src/domains/marketplaceHotelSubmissionModerationRepository.integration.test.ts
           src/marketplaceHotelSubmissionApproval.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify nearby places on PostgreSQL
+        if: matrix.shard == 'hotel-setup'
+        run: >-
+          npm --workspace vayada-api run test -- --no-file-parallelism
+          src/domains/propertyNearbyRepository.integration.test.ts
+          src/domains/propertyNearbyDiscoveryRepository.integration.test.ts
+          src/domains/publicNearbyRepository.integration.test.ts
+          src/domains/nearbyProfileSave.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 

@@ -111,9 +111,26 @@ export function useNearbyEditor(
       setProfile(next);
       setLocation(next.profile.location);
       setDiscovery(null);
-      setSaved((current) => current && { ...current, profileRevision: next.profileRevision });
-      setDraft((current) => current && { ...current, profileRevision: next.profileRevision });
-      setNotice("Location saved. Review your saved places for this location.");
+      // The server keeps saved places confirmed while the public pin is unchanged (VAY-2104).
+      const curation = await api.read(propertyId).catch(() => null);
+      const revisions = curation ?? {
+        profileRevision: next.profileRevision,
+        savedProfileRevision: saved?.savedProfileRevision ?? null,
+      };
+      setSaved((current) => curation ?? (current && { ...current, ...revisions }));
+      setDraft(
+        (current) =>
+          current && {
+            ...current,
+            profileRevision: revisions.profileRevision,
+            savedProfileRevision: revisions.savedProfileRevision,
+          },
+      );
+      setNotice(
+        revisions.savedProfileRevision === revisions.profileRevision
+          ? "Location saved."
+          : "Location saved. Review your saved places for this location.",
+      );
       await refresh(next.profileRevision, false);
     } catch (error) {
       setError(saveError(error));
