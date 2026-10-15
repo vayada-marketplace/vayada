@@ -303,11 +303,13 @@ type PmsPrivateNoteReplay = {
 };
 
 // VAY-2210: New Booking saved notes with a blank author name; show the author's name, else email.
+// Erased users keep "Unknown" rather than their placeholder email.
 const PRIVATE_NOTE_AUTHOR_NAME_SQL = `COALESCE(
   NULLIF(BTRIM(note.author_display_name), ''),
   (SELECT COALESCE(NULLIF(BTRIM(author.name), ''), author.email)
    FROM identity.users author
-   WHERE author.id = note.author_user_id),
+   WHERE author.id = note.author_user_id
+     AND author.status <> 'deleted'),
   ''
 )`;
 
