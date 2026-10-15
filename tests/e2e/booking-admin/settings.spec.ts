@@ -1623,14 +1623,22 @@ test("starts a newly switched-on Pay at Hotel with Cash and Card", async ({ page
 test("waits for the saved payment methods before a click counts", async ({ page }) => {
   const writes = await mockPaymentWrites(page, [], [], false);
   let releaseRead = () => {};
+  let readHeld = () => {};
   const readReleased = new Promise<void>((resolve) => (releaseRead = resolve));
+  const readIsHeld = new Promise<void>((resolve) => (readHeld = resolve));
   await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH}`, async (route) => {
-    if (route.request().method() === "GET") await readReleased;
+    if (route.request().method() === "GET") {
+      readHeld();
+      await readReleased;
+    }
     await route.fallback();
   });
   await page.goto("/settings/payments");
+  // The cards are on screen and the saved methods are still on their way.
+  await expect(page.getByText("Pay at Hotel", { exact: true })).toBeVisible();
+  await readIsHeld;
   const click = page.getByText("Pay at Hotel", { exact: true }).click();
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(300);
   releaseRead();
   await click;
   await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();

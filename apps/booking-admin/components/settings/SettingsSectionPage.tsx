@@ -1779,19 +1779,22 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
           {localizationLoadError && localizationRetryCard}
           {/* Payment Methods */}
           <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
-            <h2 className="text-sm font-semibold text-gray-900">
+            <h2 id="payment-methods-heading" className="text-sm font-semibold text-gray-900">
               {t("settings.billing.paymentMethods")}
             </h2>
             <p className="text-[12px] text-gray-500 mt-0.5 mb-4">
               {t("settings.billing.paymentMethodsDesc")}
             </p>
-            {/* Until the saved methods arrive, a click here would be undone when they do (VAY-2185). */}
+            {/* Until the saved methods arrive (or while a Stripe refresh reloads them), a click
+                here would be undone when they do (VAY-2185). pointer-events-none also stops the
+                Pay at Hotel card, which is a div the disabled fieldset doesn't cover. */}
             <fieldset
-              disabled={!paymentSettingsLoaded}
-              aria-disabled={!paymentSettingsLoaded}
-              aria-busy={!paymentSettingsLoaded}
+              aria-labelledby="payment-methods-heading"
+              disabled={!paymentSettingsLoaded || refreshingStripe}
+              aria-disabled={!paymentSettingsLoaded || refreshingStripe}
+              aria-busy={(!paymentSettingsLoaded && !paymentError) || refreshingStripe}
               className={`grid min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 ${
-                paymentSettingsLoaded ? "" : "pointer-events-none opacity-60"
+                paymentSettingsLoaded && !refreshingStripe ? "" : "pointer-events-none opacity-60"
               }`}
             >
               {/* Online Card Payment */}
