@@ -168,7 +168,7 @@ Flamur's decision, recorded on VAY-2209:
   (`/earnings` and the collaboration agreement panel); hotels use their Marketplace
   profile.
 - `affiliate.vayada.com` stays as the public affiliate address with two jobs:
-  a permanent redirect to Marketplace earnings, and later the stable host for
+  a redirect to Marketplace earnings, and later the stable host for
   creator share links (`https://affiliate.vayada.com/r/va_…`). Shared links then
   never depend on the API host's name.
 - `next-affiliate.vayada.com` is removed.
@@ -213,15 +213,16 @@ coordinator or Flamur. Step 5 is application code.
 
 1. **Check:** legacy PMS counts of affiliates by status and of affiliate payouts by
    status (read-only). Continue only if no approved affiliate has a scheduled payout.
+   On 2026-10-15: 90 affiliates (32 approved) and no affiliate payout ever, in any status.
 2. **Redirect** ([vayada-platform#538](https://github.com/vayada-marketplace/vayada-platform/pull/538)):
-   - rules 45 and 56 change from forward to a `301` to
+   - rules 45 and 56 change from forward to a temporary `302` to
      `https://next-marketplace.vayada.com/earnings`, dropping the query so a legacy
      `set-password` token is never forwarded;
    - a new rule 47 keeps `next-affiliate.vayada.com/auth/*` forwarding to its service.
      `tf-apply` probes every gateway in `auth-gateways.json` after each apply and fails
      on a redirect, so the next portal's gateway stays reachable until step 6.
 3. **Verify:** `curl -sI` on `/`, `/login` and `/set-password?token=x` for both hosts
-   returns `301` with `location` exactly the earnings URL (no `?`).
+   returns `302` with `location` exactly the earnings URL (no `?`).
    `next-affiliate.vayada.com/auth/session?surface=affiliate-dashboard` still returns
    `401`. A fresh `terraform plan` shows no changes. Then, manually in the WorkOS
    production environment (coordinator, with Flamur's go), remove next-affiliate's only
@@ -251,8 +252,14 @@ coordinator or Flamur. Step 5 is application code.
 Rollback for steps 2–4: revert the platform change(s); both task definitions and tagged
 images stay until step 6.
 
-Browsers cache a `301`. When Marketplace moves to its final host, re-point rule 45/56
-and keep `next-marketplace.vayada.com/earnings` redirecting to the new host.
+The redirect is a `302`, not a `301`: browsers cache a `301` indefinitely, the target
+is a temporary `next-*` host, and `affiliate.vayada.com` will later serve `/r/*` share
+links. When Marketplace moves to its final host, re-point rules 45/56.
+
+Step 4 is [vayada-platform#543](https://github.com/vayada-marketplace/vayada-platform/pull/543)
+and covers only the old portal. `vayada-next-affiliate-dashboard-service` stays at 1
+until step 6: the auth-gateway probe reaches `/auth/*` through that app, which proxies
+to `next-api`, so with no task the probe gets a `503` and the apply fails.
 
 ### Share links on affiliate.vayada.com
 
