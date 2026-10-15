@@ -56,6 +56,16 @@ export default function PrivacyPage() {
                   </a>
                 </p>
                 <p className="mt-3">
+                  For hotel booking sites that run on vayada, see{" "}
+                  <a
+                    href="#booking-guests"
+                    className="text-primary-600 hover:text-primary-700 underline"
+                  >
+                    Section 9
+                  </a>
+                  .
+                </p>
+                <p className="mt-3">
                   For full legal details, please refer to our{" "}
                   <a href="/imprint" className="text-primary-600 hover:text-primary-700 underline">
                     Imprint
@@ -478,7 +488,9 @@ export default function PrivacyPage() {
                   The hotel named on the booking site is the controller for your booking and for the
                   optional analytics on its booking site. vayada runs the booking site and processes
                   this data on the hotel&apos;s behalf and on its instructions (Article 28 GDPR).
-                  The hotel&apos;s contact details are shown at the bottom of its booking site.
+                  vayada is the controller for its own server logs and for the partner-link records
+                  described below. The hotel&apos;s contact details are shown at the bottom of its
+                  booking site.
                 </p>
               </div>
 
@@ -491,28 +503,36 @@ export default function PrivacyPage() {
                     <strong>Your booking:</strong> your name, email address, phone number, country,
                     stay dates, rooms, guests, extras, price and payment method, and any arrival
                     time or requests you add. The hotel uses this data to take and manage your
-                    booking and to contact you about it (Article 6(1) lit. b GDPR).
+                    booking and to contact you about it (Article 6(1) lit. b GDPR), and keeps it as
+                    long as it needs it for your stay and as tax and accounting rules require
+                    (Article 6(1) lit. c GDPR).
                   </li>
                   <li>
                     <strong>Technical data:</strong> our servers log each request, including your IP
                     address, to keep the booking site secure and working. These logs are kept for 30
-                    days (Article 6(1) lit. f GDPR).
+                    days. When you look up a booking, we also keep a pseudonymous record of the
+                    attempt to stop abuse (Article 6(1) lit. f GDPR).
                   </li>
                   <li>
                     <strong>Optional analytics (only if you allow it):</strong> which pages and
-                    booking steps you reach, with a random identifier for your browser tab, so the
-                    hotel can see where guests leave the booking. These events contain no name,
-                    email address or phone number, and we do not store your IP address with them. We
-                    keep them for 13 months (Article 6(1) lit. a GDPR). Your choice is saved in your
-                    browser&apos;s local storage, for that hotel&apos;s booking site only. You can
-                    change it at any time with the &quot;Privacy choices&quot; button on the booking
-                    site; turning analytics off stops further events.
+                    booking steps you reach, the room, extras and payment method you choose, whether
+                    the booking goes through, and any error, together with a random identifier for
+                    your browser tab. The hotel uses this to see where guests leave the booking.
+                    These events contain no name, email address or phone number, and we do not keep
+                    your IP address, or anything derived from it, with them. We keep them for 13
+                    months (Article 6(1) lit. a GDPR). Your choice is saved in your browser&apos;s
+                    local storage, for that hotel&apos;s booking site only.
                   </li>
                   <li>
                     <strong>Partner links:</strong> if you arrive through a link from one of the
-                    hotel&apos;s partners, such as a travel creator, we record that link and the
-                    page you came from, so the hotel can credit the partner (Article 6(1) lit. f
-                    GDPR).
+                    hotel&apos;s partners, such as a travel creator, we record the partner code, the
+                    page you arrived on and the site you came from, so the partner can be credited
+                    (Article 6(1) lit. f GDPR).
+                  </li>
+                  <li>
+                    <strong>Your browser:</strong> the booking site also keeps a few necessary items
+                    in your browser: which hotel and currency you chose, and the booking details you
+                    are filling in (for the current tab only).
                   </li>
                 </ul>
               </div>
@@ -522,10 +542,10 @@ export default function PrivacyPage() {
                   C. Card Payments and Other Services
                 </h3>
                 <p className="mb-3">
-                  If you pay by card, your card details go directly to Stripe, our payment provider;
-                  neither the hotel nor vayada sees your full card number. Stripe&apos;s payment
-                  form (Stripe.js) loads only when you open the card payment form, and Stripe
-                  processes your data under its own{" "}
+                  If you pay by card, your card details go directly to Stripe, the payment provider
+                  for card payments on the booking site; neither the hotel nor vayada sees your full
+                  card number. Stripe&apos;s payment form (Stripe.js) loads only when you open the
+                  card payment form, and Stripe processes your data under its own{" "}
                   <a
                     href="https://stripe.com/privacy"
                     className="text-primary-600 hover:text-primary-700 underline"
@@ -534,26 +554,40 @@ export default function PrivacyPage() {
                   </a>
                   .
                 </p>
+                <p className="mb-3">
+                  The booking site and booking data are hosted by Amazon Web Services in the
+                  European Union (Ireland). Booking emails are sent through Resend. Stripe and
+                  Resend may process data in the United States; these transfers are covered by the
+                  EU–US Data Privacy Framework or the European Commission&apos;s standard
+                  contractual clauses.
+                </p>
                 <p>
                   Fonts, images and all other parts of the booking site are served by vayada. Before
                   you pay by card, the booking site does not load content from other companies, such
-                  as Google Fonts. Booking data is hosted in the European Union.
+                  as Google Fonts.
                 </p>
               </div>
 
               <div className="mt-6">
                 <h3 className="text-xl font-semibold text-gray-900 mb-3">D. Your Rights</h3>
+                <p className="mb-3">
+                  You can ask for access to your data, for its correction or deletion, for its use
+                  to be restricted, or to receive it in a portable format. You can object to
+                  processing based on legitimate interests (Article 6(1) lit. f GDPR). You can
+                  withdraw your analytics consent at any time with the &quot;Privacy choices&quot;
+                  button on the booking site; this stops further events and does not affect
+                  processing before you withdrew it.
+                </p>
                 <p>
-                  You have the rights described in Section 5, and you can complain to a data
-                  protection supervisory authority. To use them, please contact the hotel. You can
-                  also write to us at{" "}
+                  Please send requests to the hotel. You can also write to us at{" "}
                   <a
                     href="mailto:privacy@vayada.com"
                     className="text-primary-600 hover:text-primary-700 underline"
                   >
                     privacy@vayada.com
                   </a>
-                  , and we will pass your request on to the hotel.
+                  , and we will pass your request on to the hotel. You also have the right to
+                  complain to a data protection supervisory authority.
                 </p>
               </div>
             </section>
