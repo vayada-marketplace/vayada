@@ -78,7 +78,7 @@ test.describe("booking-web promo validation", () => {
     await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Add promo" })).toHaveCount(0);
 
-    // A code from an old link is neither shown nor sent.
+    // A code from an old link isn't shown (/book also leaves it out of the quote request).
     await page.goto("/book?checkIn=2026-09-12&checkOut=2026-09-15&promoCode=SUMMER20");
     await expect(page.getByRole("button", { name: "Add room" })).toBeVisible();
     await expect(page.getByLabel("Promo code (optional)")).toHaveCount(0);
