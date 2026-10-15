@@ -3,7 +3,7 @@ import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote"
 import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
 
 import { formatCheckInTime, formatCheckOutTime } from "@/lib/arrivalTimes";
-import { formatStayDate, resolveLocale } from "@/lib/utils";
+import { formatStayDate, formatStayRange, resolveLocale } from "@/lib/utils";
 import { useState, useEffect, useId, useRef } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { paymentMethodLabelKey, type PaymentMethodLabelKey } from "@vayada/locale-constants";
@@ -762,7 +762,11 @@ export default function BookingConfirmationPageClient({
                   "We'll review your requested change and email you once we respond."}
               </p>
               <p className="text-xs text-blue-700 mt-2">
-                {changeRequest.requestedCheckIn} → {changeRequest.requestedCheckOut}
+                {formatStayRange(
+                  changeRequest.requestedCheckIn,
+                  changeRequest.requestedCheckOut,
+                  locale,
+                )}
                 {" · "}
                 {changeRequest.priceDifference > 0
                   ? `+${formatPrice(changeRequest.priceDifference, changeRequest.currency)}`

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, use } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import Image from "next/image";
 import BookingNavigation from "@/components/layout/BookingNavigation";
@@ -11,6 +11,7 @@ import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import { Booking } from "@/lib/types";
+import { formatStayRange } from "@/lib/utils";
 import { readLastBooking } from "@/lib/storage/bookingDraft";
 import { bookingService, ChangeRequestPreview } from "@/services/api/booking";
 
@@ -24,6 +25,7 @@ export default function RequestChangePage({
   const { reference } = use(params);
   const { email: emailParam } = use(searchParams);
   const t = useTranslations("requestChange");
+  const locale = useLocale();
   const { hotel } = useHotel();
   const { slug } = useSlug();
   const { formatPrice } = useCurrency();
@@ -264,13 +266,13 @@ export default function RequestChangePage({
                 <div className="flex justify-between">
                   <span className="text-gray-500">{t("currentDates") || "Current dates"}</span>
                   <span className="font-medium text-gray-900">
-                    {booking.checkIn} → {booking.checkOut}
+                    {formatStayRange(booking.checkIn, booking.checkOut, locale)}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">{t("requestedDates") || "Requested dates"}</span>
                   <span className="font-medium text-gray-900">
-                    {checkIn} → {checkOut}
+                    {formatStayRange(checkIn, checkOut, locale)}
                   </span>
                 </div>
                 <div className="flex justify-between pt-2 border-t border-gray-100">

@@ -47,6 +47,25 @@ export function formatStayDate(date: string, locale?: string): string {
   });
 }
 
+/** "Fri, 20 Nov 2026 → Tue, 24 Nov 2026" for a stay (YYYY-MM-DD dates). */
+export function formatStayRange(checkIn: string, checkOut: string, locale?: string): string {
+  return `${formatStayDate(checkIn, locale)} → ${formatStayDate(checkOut, locale)}`;
+}
+
+/** "Central European Time" for an IANA time zone, in the guest's language; "UTC" stays "UTC". */
+export function formatTimeZoneName(timeZone: string, locale?: string): string {
+  if (/^(Etc\/)?(UTC|GMT)$/i.test(timeZone)) return "UTC";
+  try {
+    return (
+      new Intl.DateTimeFormat(resolveLocale(locale), { timeZone, timeZoneName: "longGeneric" })
+        .formatToParts(new Date())
+        .find((part) => part.type === "timeZoneName")?.value ?? timeZone
+    );
+  } catch {
+    return timeZone;
+  }
+}
+
 export function formatDateShort(date: string | Date, locale?: string): string {
   const d = typeof date === "string" ? new Date(date) : date;
   return d.toLocaleDateString(resolveLocale(locale), {
