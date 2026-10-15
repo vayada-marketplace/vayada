@@ -13,7 +13,8 @@ not stop ECS, change DNS, move users, or retire an API.
 Marketplace currently accepts creator_workspace and hotel_group organizations;
 it does not accept affiliate_partner. Do not replace the affiliate login with a
 Marketplace redirect until an accepted, verified existing-user path exists.
-Do not manufacture creator memberships for affiliate-only accounts.
+Do not manufacture creator memberships for affiliate-only accounts. VAY-2209
+waives the redirect rule under one condition; see its section below.
 
 Keep the deployed portal's auth, reporting, payout-settings and payout-history
 API contracts during source removal. VAY-1499 and VAY-1500 must retain these
@@ -158,6 +159,87 @@ The integrated account destination and service cutover remain VAY-1498 work; con
 Finance cleanup remains VAY-1500 work. Keep VAY-1499 In Progress until required validation
 and explicit acceptance are complete. Do not delete the retained continuity boundary
 merely because the standalone source has been removed.
+
+## VAY-2209 production address and portal shutdown (2026-10-15)
+
+Flamur's decision, recorded on VAY-2209 and in the coordinator log:
+
+- No standalone affiliate app runs in production. Creators use Marketplace
+  (`/earnings` and the collaboration agreement panel); hotels use their Marketplace
+  profile.
+- `affiliate.vayada.com` stays as the public affiliate address with two jobs:
+  a permanent redirect to Marketplace earnings, and later the stable host for
+  creator share links (`https://affiliate.vayada.com/r/va_…`). Shared links then
+  never depend on the API host's name.
+- `next-affiliate.vayada.com` is removed.
+- The "no Marketplace redirect without a verified existing-user path" rule above is
+  waived for this cutover, **only if** the legacy PMS database shows no approved
+  affiliates with scheduled affiliate payouts. If any exist, the old portal stays up
+  until those payouts are settled.
+
+### What runs today (read-only check, 2026-10-15)
+
+| Host                        | Load balancer rule (`vayada-backend-alb`, 443) | ECS service                               | Talks to                                        |
+| --------------------------- | ---------------------------------------------- | ----------------------------------------- | ----------------------------------------------- |
+| `affiliate.vayada.com`      | priority 45 → `affiliate-dashboard-tg`         | `vayada-affiliate-dashboard-service`      | legacy `pms-api` and `booking-api` (Python)     |
+| `next-affiliate.vayada.com` | priority 56 → `next-affiliate-tg`              | `vayada-next-affiliate-dashboard-service` | `next-api` (auth surface `affiliate-dashboard`) |
+
+Both run the deleted `apps/affiliate-dashboard` image (see the baseline above). Public
+DNS is Cloudflare; `next-affiliate` is in platform Terraform, the `affiliate` record is
+hand-managed. The `*.vayada.com` certificate covers both hosts, so no certificate work is
+needed.
+
+In the 30 days to 2026-10-14 neither portal's dashboard was used: legacy `pms-api` got
+no `/affiliate/*` call and `next-api` no `/affiliate/*` contract call. The load balancer
+counted 1,723 and 213 requests, almost all sign-in pages. No `/r` link or `?ref` click
+arrived either. The legacy PMS service still runs its monthly `process_affiliate_payouts`
+job, which is why the payout count above is a precondition.
+
+Links that may still exist: legacy invite emails
+(`https://affiliate.vayada.com/set-password?token=…`), login bookmarks on both hosts,
+and the next portal's sign-in settings (`AUTH_AFFILIATE_DASHBOARD_*` on `next-api`,
+WorkOS redirect URIs). Old `{slug}.booking.vayada.com?ref=` links live on the booking
+host and are not affected.
+
+### Cutover runbook
+
+All steps are platform changes in `vayada-platform`, reviewed and applied by the
+coordinator or Flamur.
+
+1. **Check:** legacy PMS counts of affiliates by status and of affiliate payouts by
+   status (read-only). Continue only if no approved affiliate has a scheduled payout.
+2. **Redirect:** change rules 45 and 56 from forward to a `301` redirect to
+   Marketplace earnings (`https://next-marketplace.vayada.com/earnings` until
+   Marketplace moves to its final host, then re-point). Drop the query string so a
+   legacy `set-password` token is never forwarded. Drafted as
+   [vayada-platform#538](https://github.com/vayada-marketplace/vayada-platform/pull/538).
+3. **Verify:** `curl -sI` both hosts on `/`, `/login` and `/set-password?token=x`
+   returns `301` to the earnings URL without a query.
+4. **Scale to 0:** set both portal services to desired count 0.
+5. **After 30 days, delete:** both ECS services and task definitions, the two target
+   groups, ECR repositories and log groups, the `next-affiliate` Route53 and
+   Cloudflare records, the `next-affiliate-dashboard` entry in `auth-gateways.json`,
+   `next-api`'s `AUTH_AFFILIATE_DASHBOARD_*` settings and the WorkOS redirect URIs.
+   Keep the `affiliate` DNS record and the redirect rule.
+6. **Code follow-up:** remove the `affiliate-dashboard` auth surface, the
+   `/affiliate/*` continuity contract and the legacy affiliate JWT secret from
+   `apps/api`.
+
+Rollback for steps 2–4: restore the forward action on rules 45/56 and the desired
+count of 1; both task definitions and tagged images stay until step 5.
+
+### Share links on affiliate.vayada.com
+
+Creator share links are not live in production: `next-api` does not mount `/r`
+(`AFFILIATE_CAPTURE_ENABLED` and `AFFILIATE_PUBLIC_REDIRECT_ENABLED` are unset) and
+Booking Web arrival is off. When they are switched on, in one release:
+
+- add a load balancer rule above the redirect: host `affiliate.vayada.com` and path
+  `/r/*` → the `next-api` target group;
+- build Marketplace Web with `NEXT_PUBLIC_AFFILIATE_LINK_ORIGIN=https://affiliate.vayada.com`
+  (without it, links fall back to the API host);
+- make the booking host checks configurable first: `/r` and the arrival transport still
+  only accept `*.next-booking.vayada.com` destinations.
 
 ## VAY-1500 commission configuration retirement
 
