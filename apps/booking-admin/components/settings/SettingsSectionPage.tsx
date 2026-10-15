@@ -1,7 +1,5 @@
 "use client";
 
-import { BankTransferValidationError } from "@vayada/product-onboarding/bankTransferDestination";
-
 import {
   saveBankTransferDestination,
   type SavedBankTransferDestination,
@@ -17,12 +15,15 @@ import {
   createFinanceStripeProviderAccount,
   FinancePaymentSettingsClientError,
   getFinancePaymentSettings,
+  isPlainPayAtHotel,
   issueFinanceStripeOnboardingLink,
+  needsExplicitPayAtHotelChoice,
   reconcileFinanceStripeProviderAccount,
   updateFinancePaymentSettings,
   payAtHotelMethodsFromFinance,
   type FinancePaymentSettingsResponse,
 } from "@/services/api/financePaymentSettingsClient";
+import { paymentSaveError } from "@/components/settings/paymentSaveError";
 import {
   createFixedPlanCheckout,
   getFinancePlanStatus,
@@ -263,9 +264,11 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   const [sameDayLoading, setSameDayLoading] = useState(true);
   const [sameDaySaving, setSameDaySaving] = useState(false);
   const [sameDayError, setSameDayError] = useState("");
-  const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(
-    null,
-  );
+  const [feedback, setFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+    retry?: boolean;
+  } | null>(null);
   const [localizationLoading, setLocalizationLoading] = useState(true);
   const [localizationLoadError, setLocalizationLoadError] = useState("");
   const [canonicalDefaultCurrency, setCanonicalDefaultCurrency] = useState<string | null>(null);
@@ -322,6 +325,8 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
   const bankSaveAttempt = useRef<BankTransferSaveAttempt>({});
   const [bankDestination, setBankDestination] = useState<SavedBankTransferDestination | null>(null);
   const [paymentSettingsLoaded, setPaymentSettingsLoaded] = useState(false);
+  // Setup's plain Pay at Hotel, still untouched here (VAY-2185).
+  const [plainPayAtHotel, setPlainPayAtHotel] = useState(false);
   const [billingPropertyId, setBillingPropertyId] = useState<string | null>(null);
   const [savedPropertyName, setSavedPropertyName] = useState("");
   const [financePlanStatus, setFinancePlanStatus] = useState<FinancePlanStatus | null>(null);
@@ -437,6 +442,7 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       payout_swift: "",
     }));
     setBankDestination(res.bankDestination ?? null);
+    setPlainPayAtHotel(isPlainPayAtHotel(ps.acceptedMethods));
     setPaymentSettingsLoaded(true);
   }, []);
 
@@ -835,9 +841,9 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
     setSavingPayment(true);
     setPaymentError("");
     setPaymentSuccess("");
-    const fail = (message: string) => {
+    const fail = (message: string, retry = false) => {
       setPaymentError(message);
-      if (showPageFeedback) setFeedback({ type: "error", message });
+      if (showPageFeedback) setFeedback({ type: "error", message, retry });
     };
     try {
       if (!paymentSettingsLoaded) {
@@ -890,27 +896,39 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
         },
       );
       setBankDestination(destination ?? null);
-      await updateFinancePaymentSettings({
-        propertyId: propertyLink.propertyId,
-        body: buildFinancePaymentSettingsBody({
-          payAtPropertyEnabled: settings.pay_at_property_enabled,
-          payAtHotelMethods: settings.pay_at_hotel_methods,
-          onlineCardPayment: settings.online_card_payment ?? false,
-          bankTransfer: settings.bank_transfer ?? false,
-          paypalEnabled: settings.paypal_enabled ?? false,
-          paypalEmail: settings.paypal_email,
-          paypalPaymentWindowHours: settings.paypal_payment_window_hours,
-          payoutAccountHolder: settings.payout_account_holder,
-          payoutAccountType: settings.payout_account_type,
-          payoutIban: settings.payout_iban,
-          payoutAccountNumber: settings.payout_account_number,
-          payoutBankName: settings.payout_bank_name,
-          payoutSwift: settings.payout_swift,
-          paymentProvider,
-          defaultCurrency: canonicalDefaultCurrency,
-          commandPrefix: `settings-payment-settings-${hotelId}`,
-        }),
-      });
+      const save = (keepPlainPayAtHotel: boolean) =>
+        updateFinancePaymentSettings({
+          propertyId: propertyLink.propertyId,
+          body: buildFinancePaymentSettingsBody({
+            payAtPropertyEnabled: settings.pay_at_property_enabled,
+            payAtHotelMethods: settings.pay_at_hotel_methods,
+            keepPlainPayAtHotel,
+            onlineCardPayment: settings.online_card_payment ?? false,
+            bankTransfer: settings.bank_transfer ?? false,
+            paypalEnabled: settings.paypal_enabled ?? false,
+            paypalEmail: settings.paypal_email,
+            paypalPaymentWindowHours: settings.paypal_payment_window_hours,
+            payoutAccountHolder: settings.payout_account_holder,
+            payoutAccountType: settings.payout_account_type,
+            payoutIban: settings.payout_iban,
+            payoutAccountNumber: settings.payout_account_number,
+            payoutBankName: settings.payout_bank_name,
+            payoutSwift: settings.payout_swift,
+            paymentProvider,
+            defaultCurrency: canonicalDefaultCurrency,
+            commandPrefix: `settings-payment-settings-${hotelId}`,
+          }),
+        });
+      let keptPlain = plainPayAtHotel && settings.pay_at_property_enabled;
+      try {
+        await save(keptPlain);
+      } catch (error) {
+        // An old row setup never saved needs the choice spelled out: send the Cash + Card shown.
+        if (!keptPlain || !needsExplicitPayAtHotelChoice(error)) throw error;
+        keptPlain = false;
+        await save(false);
+      }
+      setPlainPayAtHotel(keptPlain);
       setSettings((previous) => ({
         ...previous,
         payout_account_holder: "",
@@ -924,11 +942,8 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       if (showPageFeedback) setFeedback({ type: "success", message });
       return propertyLink.propertyId;
     } catch (error) {
-      fail(
-        error instanceof BankTransferValidationError
-          ? "admin.enterTheCompleteBankDetailsOrLeaveAllFieldsEmpty"
-          : "settings.billing.errorPaymentSaveFailed",
-      );
+      const { message, retry } = paymentSaveError(error);
+      fail(message, retry);
       return null;
     } finally {
       setSavingPayment(false);
@@ -1096,7 +1111,16 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
       {/* Feedback banner */}
       {feedback && (
         <div role={feedback.type === "error" ? "alert" : "status"} aria-live="polite">
-          <FeedbackAlert type={feedback.type} message={t(feedback.message)} className="mt-4" />
+          <FeedbackAlert
+            type={feedback.type}
+            message={t(feedback.message)}
+            className="mt-4"
+            action={
+              feedback.retry && !saving
+                ? { label: t("settings.paymentsSave.tryAgain"), onClick: () => void handleSave() }
+                : undefined
+            }
+          />
         </div>
       )}
 
@@ -1873,9 +1897,10 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                 }`}
               >
                 <div
-                  onClick={() =>
-                    updateSetting("pay_at_property_enabled", !settings.pay_at_property_enabled)
-                  }
+                  onClick={() => {
+                    setPlainPayAtHotel(false);
+                    updateSetting("pay_at_property_enabled", !settings.pay_at_property_enabled);
+                  }}
                 >
                   <div
                     className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center ${settings.pay_at_property_enabled ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
@@ -1977,7 +2002,9 @@ export default function SettingsSectionPage({ section: activeSection }: { sectio
                         <button
                           key={m.key}
                           type="button"
+                          aria-pressed={selected}
                           onClick={() => {
+                            setPlainPayAtHotel(false);
                             if (selected && settings.pay_at_hotel_methods.length > 1) {
                               updateSetting(
                                 "pay_at_hotel_methods",
