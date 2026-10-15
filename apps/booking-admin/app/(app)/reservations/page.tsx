@@ -15,6 +15,7 @@ import {
   type BookingReservation,
   type BookingReservationList,
 } from "@/services/api/bookingReservationsClient";
+import { PageLayout } from "@/components/layout/PageLayout";
 
 const PAGE_SIZE = 20;
 
@@ -153,7 +154,7 @@ export default function ReservationsPage() {
   };
 
   return (
-    <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-4">
+    <PageLayout className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-gray-900">{t("admin.reservations")}</h1>
@@ -279,7 +280,7 @@ export default function ReservationsPage() {
           </>
         )}
       </div>
-    </div>
+    </PageLayout>
   );
 }
 

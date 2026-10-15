@@ -7,6 +7,7 @@ import { settingsService, type PropertySettings } from "@/services/settings";
 import { BookingPageStatusCard } from "@/components/dashboard/BookingPageStatusCard";
 import { ConversionFunnelCard } from "@/components/dashboard/ConversionFunnelCard";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
+import { PageLayout } from "@/components/layout/PageLayout";
 import { compareRate, compareSummary, type SummaryChange } from "@/lib/utils/dashboardSummary";
 import {
   dashboardService,
@@ -214,7 +215,7 @@ export default function DashboardPage() {
     : [];
 
   return (
-    <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-3 md:space-y-4">
+    <PageLayout className="space-y-3 md:space-y-4">
       {/* Header */}
       <div>
         <h1 className="text-xl md:text-2xl font-bold text-gray-900">{t("dashboard.title")}</h1>
@@ -409,7 +410,7 @@ export default function DashboardPage() {
           onTimeRangeChange={selectTimeRange}
         />
       </div>
-    </div>
+    </PageLayout>
   );
 }
 
