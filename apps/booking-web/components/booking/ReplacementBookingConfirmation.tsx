@@ -146,15 +146,15 @@ export default function ReplacementBookingConfirmation({
         conflict
           ? "This price is no longer available. Get a new price and review its terms again."
           : requestUnavailable
-            ? "This hotel confirms each booking itself, and booking requests can’t be sent online yet. No room was reserved and no payment was taken."
+            ? "We confirm each booking ourselves, and booking requests can’t be sent online yet. No room was reserved and no payment was taken."
             : cardUnavailable
-              ? "Paying by card online isn’t available right now. Get a new price with “Pay at property”. No room was reserved and no payment was taken."
+              ? "Paying by card online isn’t available right now. Get a new price with “Pay at the hotel”. No room was reserved and no payment was taken."
               : manualUnavailable
                 ? "Paying by bank transfer or PayPal isn’t available right now. Get a new price with another payment method. No room was reserved."
                 : unavailable
                   ? "Online booking is not available for this hotel right now. No room was reserved and no payment was taken."
                   : request
-                    ? "We couldn’t confirm your request was sent. It may still have reached the hotel, so retry with the same details."
+                    ? "We couldn’t confirm your request was sent. It may still have reached us, so retry with the same details."
                     : "We couldn’t confirm your booking. Your room may still have been booked, so retry with the same details.",
       );
     } finally {
@@ -175,8 +175,16 @@ export default function ReplacementBookingConfirmation({
         <p>
           Please pay {displayQuoteMoney(amountMinor, currency)} by{" "}
           {method === "paypal" ? "PayPal" : "bank transfer"} by{" "}
-          {new Date(deadlineAt).toLocaleString()}. We’ll confirm your booking when your payment
-          arrives. If it doesn’t arrive by then, the booking expires and the room is released.
+          {new Date(deadlineAt).toLocaleString("en-GB", {
+            weekday: "short",
+            day: "numeric",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZoneName: "short",
+          })}
+          . We’ll confirm your booking when your payment arrives. If it doesn’t arrive by then, the
+          booking expires and the room is released.
         </p>
         <p>We sent the payment details to the email address you provided.</p>
         <a className={`${button} inline-block`} href={`/confirmation?${details}`}>
