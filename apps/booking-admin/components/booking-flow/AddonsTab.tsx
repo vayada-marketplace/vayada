@@ -7,6 +7,7 @@ import {
   emptyAddonValues,
   type AddonEditorValues,
 } from "@vayada/product-onboarding/AddonEditor";
+import { buildSharedHotelSetupRedirectPath } from "@vayada/product-onboarding";
 import Link from "next/link";
 import {
   DocumentDuplicateIcon,
@@ -19,6 +20,9 @@ import {
 import { ToggleSwitch } from "@/components/ui";
 import type { AddonItem, AddonSettings } from "@/services/settings";
 import { cn, formatCurrency } from "@/lib/utils";
+
+const MARKETPLACE_FRONTEND_URL =
+  process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://app.vayada.com";
 
 // The redesign's filter chips; "other" appears only when an add-on uses it.
 const FILTER_CATEGORIES = ["dining", "transport", "wellness", "experience"];
@@ -93,6 +97,7 @@ interface AddonsTabProps {
   addonSettings: AddonSettings;
   propertyCurrency: string;
   propertyPlan: {
+    propertyId?: string;
     plan: "commission" | "fixed";
     limits: { maxAddons: number };
   };
@@ -141,6 +146,8 @@ export default function AddonsTab({
   const liveCount = addons.filter((addon) => addon.live !== false).length;
   const maxAddons = propertyPlan.limits.maxAddons;
   const addonLimitReached = addons.length >= maxAddons;
+  // Add-on prices use the PMS pricing currency, which only setup's Pricing step sets (VAY-2141).
+  const currencyMissing = !propertyCurrency;
   const addonLimitMessage =
     propertyPlan.plan === "commission"
       ? addons.length > maxAddons
@@ -157,7 +164,7 @@ export default function AddonsTab({
 
   const openEditEditor = (addon: AddonItem) => {
     setEditingAddon(addon);
-    setDraft(toDraft(addon, propertyCurrency));
+    setDraft(toDraft(addon, propertyCurrency || addon.currency));
     setItemError(null);
     setIsEditorOpen(true);
   };
@@ -269,22 +276,53 @@ export default function AddonsTab({
             {t("bookingFlow.tabs.addons")}
           </h1>
           <p className="mt-1 text-[13px] text-gray-500">
-            {t(addons.length === 1 ? "addons.list.summaryOne" : "addons.list.summary", {
-              count: addons.length,
-              live: liveCount,
-              currency: propertyCurrency,
-            })}
+            {currencyMissing
+              ? t(
+                  addons.length === 1
+                    ? "addons.list.summaryOneNoCurrency"
+                    : "addons.list.summaryNoCurrency",
+                  { count: addons.length, live: liveCount },
+                )
+              : t(addons.length === 1 ? "addons.list.summaryOne" : "addons.list.summary", {
+                  count: addons.length,
+                  live: liveCount,
+                  currency: propertyCurrency,
+                })}
           </p>
         </div>
         <button
           onClick={openCreateEditor}
-          disabled={addonLimitReached}
+          disabled={addonLimitReached || currencyMissing}
           className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2 text-[13px] font-medium text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <PlusIcon className="h-4 w-4" />
           {t("addons.list.new")}
         </button>
       </div>
+
+      {currencyMissing && (
+        <div
+          role="status"
+          className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800"
+        >
+          <p>{t("addons.currencyMissing.message")}</p>
+          {propertyPlan.propertyId && (
+            <a
+              href={buildSharedHotelSetupRedirectPath({
+                entryProduct: "booking",
+                returnProduct: "booking",
+                returnTo: "/add-ons",
+                propertyId: propertyPlan.propertyId,
+                setupBaseUrl: MARKETPLACE_FRONTEND_URL,
+                step: "pricing",
+              })}
+              className="mt-1 inline-block font-semibold underline underline-offset-2"
+            >
+              {t("addons.currencyMissing.action")}
+            </a>
+          )}
+        </div>
+      )}
 
       {addonLimitReached && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
@@ -437,7 +475,7 @@ export default function AddonsTab({
                     )}
                     <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-gray-500">
                       <li className="font-semibold text-gray-900">
-                        {formatCurrency(addon.price, propertyCurrency, locale, {
+                        {formatCurrency(addon.price, propertyCurrency || addon.currency, locale, {
                           minimumFractionDigits: 2,
                           maximumFractionDigits: 2,
                         })}
@@ -494,7 +532,7 @@ export default function AddonsTab({
                   <button
                     type="button"
                     onClick={() => handleDuplicate(addon)}
-                    disabled={addonLimitReached || busyAddonId === addon.id}
+                    disabled={addonLimitReached || currencyMissing || busyAddonId === addon.id}
                     aria-label={t("addons.list.duplicate", { name: addon.name })}
                     className={iconButtonClass}
                   >
@@ -547,7 +585,7 @@ export default function AddonsTab({
         <AddonEditor
           translate={t}
           initialValues={draft}
-          currency={propertyCurrency}
+          currency={propertyCurrency || editingAddon?.currency || ""}
           editing={Boolean(editingAddon)}
           onSave={handleSave}
           onCancel={closeEditor}
