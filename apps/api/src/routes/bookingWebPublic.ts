@@ -39,6 +39,7 @@ import type { ExternalChangePresentationPort } from "../domains/booking/external
 import { pmsRoomStayRestrictionReason } from "../domains/pmsRoomSelectionConflicts.js";
 import {
   bestBookingPromotion,
+  BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
   evaluateSameDayBooking,
   isFunnelId,
   isManualPricingPaymentMethod,
@@ -1148,7 +1149,10 @@ export async function registerBookingWebPublicRoutes(
     "/events",
     { bodyLimit: 2048 },
     async (request, reply) => {
-      if (request.body?.analyticsConsent !== true || request.body?.consentVersion !== 1) {
+      if (
+        request.body?.analyticsConsent !== true ||
+        request.body?.consentVersion !== BOOKING_WEB_ANALYTICS_CONSENT_VERSION
+      ) {
         return reply.header("Cache-Control", "no-store").status(204).send();
       }
       const hotelSlug = firstString(request.body?.hotelSlug, request.body?.hotel_slug);
