@@ -66,4 +66,22 @@ test.describe("booking-web promo validation", () => {
     );
     await assertHealthy();
   });
+
+  test("hides the promo field while the hotel has Promos off (VAY-2200)", async ({
+    page,
+  }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingApis(page, { promoCodes: false });
+    await mockPricingCatalogue(page);
+
+    await page.goto("/?checkIn=2026-09-12&checkOut=2026-09-15");
+    await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add promo" })).toHaveCount(0);
+
+    // A code from an old link is neither shown nor sent.
+    await page.goto("/book?checkIn=2026-09-12&checkOut=2026-09-15&promoCode=SUMMER20");
+    await expect(page.getByRole("button", { name: "Add room" })).toBeVisible();
+    await expect(page.getByLabel("Promo code (optional)")).toHaveCount(0);
+    await assertHealthy();
+  });
 });

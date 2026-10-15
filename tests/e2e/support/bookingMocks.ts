@@ -305,6 +305,8 @@ type MockBookingApisOptions = {
     showCurrencySelector: boolean;
   };
   publicContacts?: typeof publicHotelProfile.hotel.publicContacts;
+  /** VAY-2200: false while the hotel has Promos off or no live code. */
+  promoCodes?: boolean;
 };
 
 export async function mockBookingApis(page: Page, options: MockBookingApisOptions = {}) {
@@ -331,6 +333,10 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
           }
         : {}),
       policies: { ...publicHotelProfile.hotel.policies, ...options.arrivalBounds },
+      capabilities: {
+        ...publicHotelProfile.hotel.capabilities,
+        promoCodes: options.promoCodes ?? true,
+      },
       publicContacts: options.publicContacts ?? publicHotelProfile.hotel.publicContacts,
       supportedLocales: options.supportedLocales ?? publicHotelProfile.hotel.supportedLocales,
       supportedQuoteParameters: {

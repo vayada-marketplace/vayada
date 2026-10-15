@@ -122,6 +122,13 @@ describe("Booking Web public hotel adapter", () => {
     expect(toLegacyHotel(response).referAGuestEnabled).toBe(false);
   });
 
+  it("tells the booking pages whether guests can use promo codes (VAY-2200)", () => {
+    const response = publicHotelResponse();
+    expect(toLegacyHotel(response).promoCodesEnabled).toBe(false);
+    response.hotel.capabilities.promoCodes = true;
+    expect(toLegacyHotel(response).promoCodesEnabled).toBe(true);
+  });
+
   it("maps public contacts and uses only public city/region/country for the address", () => {
     const hotel = toLegacyHotel(
       publicHotelResponse([

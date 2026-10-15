@@ -244,10 +244,15 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     (a, b) => Number(b === "pay_at_property") - Number(a === "pay_at_property"),
   );
   const method = payment || (pagePaymentLoaded ? (defaultMethods[fallback] ?? "") : "");
+  // VAY-2200: without promo codes a code from an old link or draft is never sent.
+  const promoCodesEnabled = hotel?.promoCodesEnabled !== false;
+  const quotedPromoCode = promoCodesEnabled ? promoCode : "";
   const baseRequest =
-    rooms && method ? roomQuoteRequest(rooms, choices, checkIn, checkOut, method, promoCode) : null;
+    rooms && method
+      ? roomQuoteRequest(rooms, choices, checkIn, checkOut, method, quotedPromoCode)
+      : null;
   const roomsComplete =
-    !!rooms && !!roomQuoteRequest(rooms, choices, checkIn, checkOut, "card", promoCode);
+    !!rooms && !!roomQuoteRequest(rooms, choices, checkIn, checkOut, "card", quotedPromoCode);
   const addons = buildReplacementAddonSelection(
     addonCatalogue ?? [],
     baseRequest?.selection ?? null,
@@ -777,15 +782,17 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             >
               Add room
             </button>
-            <label className="block">
-              Promo code (optional)
-              <input
-                className={field}
-                value={promoCode}
-                maxLength={200}
-                onChange={(event) => setPromoCode(event.target.value)}
-              />
-            </label>
+            {promoCodesEnabled && (
+              <label className="block">
+                Promo code (optional)
+                <input
+                  className={field}
+                  value={promoCode}
+                  maxLength={200}
+                  onChange={(event) => setPromoCode(event.target.value)}
+                />
+              </label>
+            )}
             <p className="text-sm text-gray-600">
               We’ll check the price for your choices next. All rooms must use the same currency.
             </p>
