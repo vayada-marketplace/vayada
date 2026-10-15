@@ -6,7 +6,8 @@ import {
   type PmsOperatingCalendarImpactPreviewRequest,
 } from "@vayada/domain-pms";
 import {
-  isPropertySetupBaseRevisionManifest,
+  getPropertySetupBaseRevisionKeys,
+  type PropertySetupBaseRevisions,
   type PropertySetupRouteReadModel,
   type ResetPropertySetupDraftRequest,
   type SavePropertySetupDraftRequest,
@@ -58,13 +59,11 @@ export type CalendarDraftRevisionContext = {
   trackRevision: number;
   sessionRevision: number;
   draftRevision: number;
-  baseRevisions: {
-    "pms.operating_calendar": string;
-    "pms.inventory": string;
-    "pms.room_types": string;
-    "hotel_catalog.location": string;
-  } | null;
+  baseRevisions: CalendarBaseRevisions | null;
 };
+
+/** The time zone, rooms and units manifest, or a legacy one from an older draft or API (VAY-2198). */
+type CalendarBaseRevisions = PropertySetupBaseRevisions<"calendar">;
 
 export type CalendarValidationErrors = Record<string, string>;
 
@@ -77,21 +76,21 @@ export function calendarDraftRevisionContext(
 ): CalendarDraftRevisionContext {
   const draft = step.stepId === "calendar" ? step.draft : null;
   const candidate = draft?.stepId === "calendar" ? draft.baseRevisions : step.currentBaseRevisions;
-  const base = isPropertySetupBaseRevisionManifest("calendar", candidate) ? candidate : null;
   return {
     sessionId: route.sessionId,
     trackRevision: route.trackRevision,
     sessionRevision: route.sessionRevision ?? 0,
     draftRevision: draft?.stepId === "calendar" ? draft.revision : 0,
-    baseRevisions: base
-      ? {
-          "pms.operating_calendar": base["pms.operating_calendar"]!,
-          "pms.inventory": base["pms.inventory"]!,
-          "pms.room_types": base["pms.room_types"]!,
-          "hotel_catalog.location": base["hotel_catalog.location"]!,
-        }
-      : null,
+    baseRevisions: calendarBaseRevisions(candidate),
   };
+}
+
+/** A copy of a valid calendar manifest in the key set it was written with; null otherwise. */
+function calendarBaseRevisions(value: unknown): CalendarBaseRevisions | null {
+  const keys = getPropertySetupBaseRevisionKeys("calendar", value);
+  if (!keys) return null;
+  const revisions = value as Readonly<Record<string, string>>;
+  return Object.fromEntries(keys.map((key) => [key, revisions[key]!])) as CalendarBaseRevisions;
 }
 
 export function hydrateCalendarDraft(
@@ -199,21 +198,19 @@ export function calendarDraftManifestIsCurrent(
   step: PropertySetupRouteReadModel["steps"][number],
 ): boolean {
   if (step.stepId !== "calendar" || step.draft?.stepId !== "calendar") return true;
-  const current = step.currentBaseRevisions;
-  const historical = step.draft.baseRevisions;
-  if (
-    !isPropertySetupBaseRevisionManifest("calendar", current) ||
-    !isPropertySetupBaseRevisionManifest("calendar", historical)
-  ) {
-    return false;
-  }
-  const keys = [
-    "pms.operating_calendar",
-    "pms.inventory",
-    "pms.room_types",
-    "hotel_catalog.location",
-  ] as const;
-  return keys.every((key) => current[key] === historical[key]);
+  const current: Readonly<Record<string, string>> | null = calendarBaseRevisions(
+    step.currentBaseRevisions,
+  );
+  const historical: Readonly<Record<string, string>> | null = calendarBaseRevisions(
+    step.draft.baseRevisions,
+  );
+  if (!current || !historical) return false;
+  // Both sides use the same key set unless a legacy draft meets a converted API; that one is stale.
+  const keys = Object.keys(current);
+  return (
+    keys.length === Object.keys(historical).length &&
+    keys.every((key) => current[key] === historical[key])
+  );
 }
 
 /**
@@ -248,12 +245,8 @@ export function buildCalendarDraftResetRequest(
   step: PropertySetupRouteReadModel["steps"][number],
 ): Extract<ResetPropertySetupDraftRequest, { stepId: "calendar" }> {
   const draft = step.stepId === "calendar" && step.draft?.stepId === "calendar" ? step.draft : null;
-  if (
-    !draft ||
-    !route.sessionId ||
-    route.sessionRevision === null ||
-    !isPropertySetupBaseRevisionManifest("calendar", draft.baseRevisions)
-  ) {
+  const historical = draft ? calendarBaseRevisions(draft.baseRevisions) : null;
+  if (!draft || !route.sessionId || route.sessionRevision === null || !historical) {
     throw new Error("The stale calendar draft cannot be reset without its historical manifest.");
   }
   return {
@@ -262,12 +255,7 @@ export function buildCalendarDraftResetRequest(
     expectedTrackRevision: route.trackRevision,
     expectedSessionRevision: route.sessionRevision,
     expectedDraftRevision: draft.revision,
-    expectedBaseRevisions: {
-      "pms.operating_calendar": draft.baseRevisions["pms.operating_calendar"]!,
-      "pms.inventory": draft.baseRevisions["pms.inventory"]!,
-      "pms.room_types": draft.baseRevisions["pms.room_types"]!,
-      "hotel_catalog.location": draft.baseRevisions["hotel_catalog.location"]!,
-    },
+    expectedBaseRevisions: historical,
   };
 }
 

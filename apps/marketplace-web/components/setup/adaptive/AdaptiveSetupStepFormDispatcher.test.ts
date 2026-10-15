@@ -206,8 +206,8 @@ function setupRoute(): PropertySetupRouteReadModel {
                   : {
                       "pms.operating_calendar": "calendar:1",
                       "pms.inventory": "inventory:1",
-                      "pms.room_types": "room-types:1",
-                      "hotel_catalog.location": "location:1",
+                      "pms.room_units": "room-units:1",
+                      "hotel_catalog.time_zone": "time-zone:1",
                     },
       draft: null,
       blockers: [],
