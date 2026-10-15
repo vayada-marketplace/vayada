@@ -12,7 +12,8 @@ export type FinancePlanStatus = {
     | "active"
     | "past_due"
     | "cancel_at_period_end";
-  currency: "EUR";
+  /** The hotel's pricing currency: what the Fixed Plan is charged in (EUR, USD, IDR). */
+  currency: string;
   activeRoomCount: number;
   amountMinor: number;
   currentPeriodStart: string | null;
@@ -52,7 +53,7 @@ export async function createFixedPlanCheckout(
     checkout: {
       checkoutSessionId: string;
       checkoutUrl: string;
-      currency: "EUR";
+      currency: string;
       amountMinor: number;
       activeRoomCount: number;
     };
