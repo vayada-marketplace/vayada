@@ -52,25 +52,6 @@ describe("PMS Channex management command routes", () => {
     app = harness.app;
 
     expect((await command(app)).statusCode).toBe(statusCode);
-    expect(
-      (
-        await app.inject({
-          method: "PUT",
-          url: `/properties/${propertyId}/channex/stay-restrictions`,
-          headers: { authorization: "Bearer valid" },
-          payload: {},
-        })
-      ).statusCode,
-    ).toBe(statusCode);
-    expect(
-      (
-        await app.inject({
-          method: "GET",
-          url: `/properties/${propertyId}/channex/stay-restrictions`,
-          headers: { authorization: "Bearer valid" },
-        })
-      ).statusCode,
-    ).toBe(statusCode);
     for (const [method, path] of [
       ["GET", "alerts"],
       ["GET", `alerts/${operationId}/diagnostics`],
@@ -576,42 +557,21 @@ describe("PMS Channex management command routes", () => {
     expect(observe.enqueue).not.toHaveBeenCalled();
   });
 
-  it("validates restriction scope and queues explicit empty resets", async () => {
+  it("no longer serves the retired stay-restrictions route", async () => {
     const harness = await testApp();
     app = harness.app;
-    const request = {
-      method: "PUT" as const,
-      url: `/properties/${propertyId}/channex/stay-restrictions`,
-      headers: { authorization: "Bearer valid" },
-      payload: {
-        commandId: "restriction-1",
-        idempotencyKey: "restriction-1",
-        restrictions: { roomTypeId: propertyId, ratePlanId: null, rules: [] },
-      },
-    };
-    expect((await app.inject(request)).statusCode).toBe(202);
-    expect(harness.enqueue).toHaveBeenCalledWith(expect.anything(), propertyId, {
-      ...request.payload,
-      operationType: "sync_ari",
-    });
-    expect(
-      (
-        await app.inject({
-          ...request,
-          payload: {
-            ...request.payload,
-            restrictions: {
-              ...request.payload.restrictions,
-              rules: [{ minStayNights: 0 }],
-            },
-          },
-        })
-      ).statusCode,
-    ).toBe(400);
-    await app.close();
-    app = null;
-    app = (await testApp({}, { ...mutating, ariSync: "observe_only" })).app;
-    expect((await app.inject(request)).statusCode).toBe(409);
+    for (const method of ["GET", "PUT"] as const)
+      expect(
+        (
+          await app.inject({
+            method,
+            url: `/properties/${propertyId}/channex/stay-restrictions`,
+            headers: { authorization: "Bearer valid" },
+            payload: method === "PUT" ? {} : undefined,
+          })
+        ).statusCode,
+      ).toBe(404);
+    expect(harness.enqueue).not.toHaveBeenCalled();
   });
 
   it("guards short-lived iframe sessions with the iframe cutover mode", async () => {
