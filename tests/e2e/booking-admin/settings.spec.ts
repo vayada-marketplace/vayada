@@ -739,24 +739,31 @@ test.describe("booking-admin settings no-legacy guard", () => {
       "href",
       "/settings/feature-hub",
     );
-    for (const [card, href] of [
+    // Timo's card order (VAY-2144): Room Filters and Guest Form joined from Booking Flow.
+    const cards: [string, string | null][] = [
       ["Booking rules", "/settings/booking-rules"],
       ["General", "/settings/general"],
       ["Payments", "/settings/payments"],
+      ["Book Direct Benefits", "/settings/book-direct-benefits"],
       ["Policies", "/settings/policies"],
+      ["Room Filters", "/settings/room-filters"],
+      ["Guest Form", "/settings/guest-form"],
       ["Billing", "/settings/billing"],
-    ]) {
-      await expect(main.getByRole("link", { name: new RegExp(`^${card}`) })).toHaveAttribute(
-        "href",
-        href,
-      );
+      ["Account", null],
+    ];
+    const items = main.getByRole("listitem");
+    await expect(items).toHaveCount(cards.length);
+    for (const [index, [card, href]] of cards.entries()) {
+      await expect(items.nth(index)).toContainText(card);
+      if (href) {
+        await expect(items.nth(index).getByRole("link")).toHaveAttribute("href", href);
+      } else {
+        await expect(items.nth(index).getByRole("link")).toHaveCount(0);
+        await expect(items.nth(index).getByText("Coming soon")).toBeVisible();
+      }
     }
-    for (const card of ["Email & notifications", "Account"]) {
-      await expect(main.getByRole("link", { name: new RegExp(`^${card}`) })).toHaveCount(0);
-      await expect(
-        main.getByRole("listitem").filter({ hasText: card }).getByText("Coming soon"),
-      ).toBeVisible();
-    }
+    // Email & notifications stays hidden until it has a page.
+    await expect(main.getByText("Email & notifications")).toHaveCount(0);
     await testInfo.attach("settings-grid-desktop", {
       body: await page.screenshot({ fullPage: true }),
       contentType: "image/png",
