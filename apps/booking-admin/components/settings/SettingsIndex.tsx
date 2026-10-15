@@ -7,10 +7,11 @@ import {
   AdjustmentsHorizontalIcon,
   ArrowRightIcon,
   BoltIcon,
+  ClipboardDocumentListIcon,
   Cog6ToothIcon,
   CreditCardIcon,
   DocumentTextIcon,
-  EnvelopeIcon,
+  FunnelIcon,
   GiftIcon,
   ReceiptPercentIcon,
   UserCircleIcon,
@@ -35,6 +36,7 @@ const FEATURE_HUB = {
   href: "/settings/feature-hub",
 } satisfies SettingsCardLink;
 
+// Timo's order (VAY-2144). Email & notifications stays hidden until it has a page.
 const CARDS: SettingsCardLink[] = [
   {
     title: "settings.cards.bookingRules.title",
@@ -67,20 +69,27 @@ const CARDS: SettingsCardLink[] = [
     href: "/settings/policies",
   },
   {
-    title: "settings.cards.email.title",
-    description: "settings.cards.email.description",
-    icon: EnvelopeIcon,
+    title: "settings.cards.roomFilters.title",
+    description: "settings.cards.roomFilters.description",
+    icon: FunnelIcon,
+    href: "/settings/room-filters",
   },
   {
-    title: "settings.cards.account.title",
-    description: "settings.cards.account.description",
-    icon: UserCircleIcon,
+    title: "settings.cards.guestForm.title",
+    description: "settings.cards.guestForm.description",
+    icon: ClipboardDocumentListIcon,
+    href: "/settings/guest-form",
   },
   {
     title: "settings.tabs.billing",
     description: "settings.cards.billing.description",
     icon: ReceiptPercentIcon,
     href: "/settings/billing",
+  },
+  {
+    title: "settings.cards.account.title",
+    description: "settings.cards.account.description",
+    icon: UserCircleIcon,
   },
 ];
 

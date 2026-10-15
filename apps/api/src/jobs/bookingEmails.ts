@@ -60,6 +60,8 @@ export type BookingLifecycleEmailInput = {
     guestEmail: string | null;
     guestName?: string | null;
     propertyName?: string | null;
+    /** The hotel's IANA time zone, for deadlines; UTC when unknown. */
+    propertyTimeZone?: string | null;
     checkIn: string | Date;
     checkOut: string | Date;
     totalAmount?: string | number | null;
@@ -292,6 +294,7 @@ type BookingNotificationSnapshot = QueryResultRow & {
   guestName: string | null;
   hostEmail: string | null;
   propertyName: string;
+  propertyTimeZone: string | null;
   checkIn: string;
   checkOut: string;
   totalAmount: string;
@@ -321,6 +324,8 @@ export async function loadBookingNotificationSnapshot(
        NULLIF(trim(concat_ws(' ', guest.first_name, guest.last_name)), '') AS "guestName",
        host_contact.value AS "hostEmail",
        property.display_name AS "propertyName",
+       (SELECT location.timezone FROM hotel_catalog.property_locations location
+        WHERE location.property_id = booking.property_id LIMIT 1) AS "propertyTimeZone",
        booking.check_in::text AS "checkIn",
        booking.check_out::text AS "checkOut",
        booking.total_amount::text AS "totalAmount",
@@ -482,7 +487,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         `We've reserved your room at ${property} while we wait for your ${paypal ? "PayPal payment" : "bank transfer"}.`,
         `Amount due: ${money(booking.balanceAmount ?? booking.totalAmount, booking.currency)}`,
         ...(paypalEmail ? [`Please send it by PayPal to ${paypalEmail}.`] : []),
-        `Payment deadline: ${deadlineText(input.paymentDeadlineAt)}`,
+        `Payment deadline: ${deadlineText(input.paymentDeadlineAt, booking.propertyTimeZone)}`,
         `Please add your booking reference to the payment: ${booking.bookingReference}`,
         "If we don't receive it by the deadline, the booking expires and the room is released.",
       ].join("\n\n"),
@@ -496,7 +501,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         `Hi ${name},`,
         `We've reserved your room at ${property} while we wait for your bank transfer.`,
         `Amount due: ${money(booking.balanceAmount ?? booking.totalAmount, booking.currency)}`,
-        `Payment deadline: ${input.paymentDeadlineAt ?? "as soon as possible"}`,
+        `Payment deadline: ${deadlineText(input.paymentDeadlineAt, booking.propertyTimeZone)}`,
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
     };
@@ -508,7 +513,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       text: [
         `Hi ${name},`,
         `We've received your booking request for ${property}.`,
-        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         "We'll review it and let you know as soon as possible.",
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
@@ -521,7 +526,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       text: [
         `Hi ${name},`,
         `We've accepted your booking request for ${property}.`,
-        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         ...confirmationDetails(booking),
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
@@ -534,7 +539,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       text: [
         `Hi ${name},`,
         `We've updated your booking at ${property}.`,
-        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         ...confirmationDetails(booking),
         ...(input.guestMessage ? [`Message from us:\n${input.guestMessage}`] : []),
         `Booking reference: ${booking.bookingReference}`,
@@ -562,7 +567,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         `Hi ${name},`,
         `We've canceled your booking at ${property}.`,
         ...(message ? [`Message from us:\n${message}`] : []),
-        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
     };
@@ -587,7 +592,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       subject: `Booking request updated - ${booking.bookingReference}`,
       text: [
         `${name} updated their pending booking request.`,
-        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         ...confirmationDetails(booking),
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
@@ -600,9 +605,9 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       text: [
         `A guest booked and will pay by ${booking.paymentMethod === "paypal" ? "PayPal" : "bank transfer"}. The rooms are held until the payment deadline.`,
         `Guest: ${name}`,
-        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         `Total: ${money(booking.totalAmount, booking.currency)}`,
-        `Payment deadline: ${deadlineText(input.paymentDeadlineAt)}`,
+        `Payment deadline: ${deadlineText(input.paymentDeadlineAt, booking.propertyTimeZone)}`,
         "When the money arrives, mark the payment as received in your PMS. If it doesn't arrive by the deadline, the booking expires and the rooms become available again.",
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
@@ -615,7 +620,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       text: [
         "A booking expired because its payment didn't arrive by the deadline. The rooms are available again.",
         `Guest: ${name}`,
-        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         `Total: ${money(booking.totalAmount, booking.currency)}`,
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
@@ -628,7 +633,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       text: [
         "A booking request expired before it was accepted. The rooms are available again.",
         `Guest: ${name}`,
-        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         `Total: ${money(booking.totalAmount, booking.currency)}`,
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
@@ -644,7 +649,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       text: [
         reviewRequired ? "A new booking request requires review." : "A new booking is confirmed.",
         `Guest: ${name}`,
-        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
         `Total: ${money(booking.totalAmount, booking.currency)}`,
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
@@ -656,7 +661,7 @@ function emailCopy(input: BookingLifecycleEmailInput) {
     text: [
       `Hi ${name},`,
       `Your booking at ${property} is confirmed.`,
-      `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+      `Stay: ${stayDate(booking.checkIn)} to ${stayDate(booking.checkOut)}`,
       ...confirmationDetails(booking),
       `Booking reference: ${booking.bookingReference}`,
       "We look forward to welcoming you!",
@@ -668,7 +673,9 @@ function confirmationDetails(booking: BookingLifecycleEmailInput["booking"]): st
   return [
     `Total: ${money(booking.totalAmount, booking.currency)}`,
     `Balance: ${money(booking.balanceAmount, booking.currency)}`,
-    `Payment method: ${paymentMethodLabel(booking.paymentMethod)}`,
+    // The booking page's words, in guest and hotel emails alike (VAY-2195); PMS screens keep the
+    // shared label.
+    `Payment method: ${booking.paymentMethod === "pay_at_property" ? "Pay at the hotel" : paymentMethodLabel(booking.paymentMethod)}`,
     ...(booking.adults == null
       ? []
       : [`Guests: ${booking.adults} adults, ${booking.children ?? 0} children`]),
@@ -851,15 +858,42 @@ function manualPricingPayment(booking: {
   );
 }
 
-function deadlineText(value: string | null | undefined): string {
+/** "Tue, 10 Nov 2026, 12:00 CET": 24-hour, in the hotel's time zone (UTC when it isn't known). */
+function deadlineText(value: string | null | undefined, timeZone?: string | null): string {
   const at = value ? new Date(value) : null;
-  return at && Number.isFinite(at.getTime())
-    ? `${at.toISOString().slice(0, 10)} ${at.toISOString().slice(11, 16)} UTC`
-    : "as soon as possible";
+  if (!at || !Number.isFinite(at.getTime())) return "as soon as possible";
+  const format = (zone: string) =>
+    new Intl.DateTimeFormat("en-GB", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      timeZone: zone,
+      timeZoneName: "short",
+    }).format(at);
+  try {
+    return format(timeZone || "UTC");
+  } catch {
+    return format("UTC");
+  }
 }
 
-function dateOnly(value: string | Date): string {
-  return value instanceof Date ? value.toISOString().slice(0, 10) : value.slice(0, 10);
+/** "Fri, 13 Nov 2026" for a stay date: the hotel's calendar day. */
+function stayDate(value: string | Date): string {
+  const day = value instanceof Date ? value.toISOString().slice(0, 10) : value.slice(0, 10);
+  const at = new Date(`${day}T00:00:00Z`);
+  return Number.isFinite(at.getTime())
+    ? at.toLocaleDateString("en-GB", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC",
+      })
+    : day;
 }
 
 function normalizeEmail(value: string | null | undefined): string | null {

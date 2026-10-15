@@ -4,13 +4,15 @@ import {
   getBookingHotelPropertyLink,
   type BookingHotelPropertyLink,
 } from "./bookingPropertyLinkClient";
-import { omitHotelContext, type ApiClient } from "./client";
+import { ApiErrorResponse, omitHotelContext, type ApiClient } from "./client";
 import {
   buildFinancePaymentSettingsBody,
   createFinanceStripeDashboardLink,
   createFinanceStripeProviderAccount,
   getFinancePaymentSettings,
+  isPlainPayAtHotel,
   issueFinanceStripeOnboardingLink,
+  needsExplicitPayAtHotelChoice,
   payAtHotelMethodsFromFinance,
   reconcileFinanceStripeProviderAccount,
   updateFinancePaymentSettings,
@@ -330,5 +332,84 @@ describe("payment settings target clients", () => {
         defaultCurrency: "EUR",
       }),
     ).toThrow("Choose at least one payment method.");
+  });
+
+  // VAY-2185: setup saves plain pay_at_property; Booking Admin showed no choice and couldn't save.
+  it("shows Cash and Card for setup's plain Pay at Hotel and when none was saved", () => {
+    expect(payAtHotelMethodsFromFinance(["pay_at_property"])).toEqual(["cash", "card"]);
+    expect(payAtHotelMethodsFromFinance([])).toEqual(["cash", "card"]);
+    expect(payAtHotelMethodsFromFinance(["pay_at_property", "manual_card"])).toEqual(["card"]);
+    expect(isPlainPayAtHotel(["pay_at_property", "paypal"])).toBe(true);
+    expect(isPlainPayAtHotel(["pay_at_property", "cash"])).toBe(false);
+    expect(isPlainPayAtHotel(["card"])).toBe(false);
+  });
+
+  it("sends setup's plain Pay at Hotel back unchanged, or with the shown choice", () => {
+    const draft = {
+      payAtPropertyEnabled: true,
+      payAtHotelMethods: payAtHotelMethodsFromFinance(["pay_at_property"]),
+      onlineCardPayment: false,
+      bankTransfer: false,
+      paypalEnabled: true,
+      paypalEmail: "pay@example.test",
+      paymentProvider: "stripe" as const,
+      defaultCurrency: "EUR",
+    };
+
+    expect(
+      buildFinancePaymentSettingsBody({ ...draft, keepPlainPayAtHotel: true }).paymentSettings
+        .acceptedMethods,
+    ).toEqual(["pay_at_property", "paypal"]);
+    expect(buildFinancePaymentSettingsBody(draft).paymentSettings.acceptedMethods).toEqual([
+      "pay_at_property",
+      "cash",
+      "manual_card",
+      "paypal",
+    ]);
+  });
+
+  it("names the field a draft is missing", () => {
+    expect(() =>
+      buildFinancePaymentSettingsBody({
+        payAtPropertyEnabled: true,
+        payAtHotelMethods: [],
+        onlineCardPayment: false,
+        bankTransfer: false,
+        paymentProvider: "stripe",
+        defaultCurrency: "EUR",
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        name: "PaymentSettingsValidationError",
+        field: "payAtHotelMethods",
+      }),
+    );
+  });
+
+  it("recognises Finance asking for an explicit Pay at Hotel choice and an unreachable API", async () => {
+    const reject = (error: unknown) =>
+      updateFinancePaymentSettings(
+        {
+          propertyId: "property_target_123",
+          body: { commandId: "c", idempotencyKey: "c", paymentSettings: {} },
+        },
+        { patch: async () => Promise.reject(error) },
+      ).catch((caught: unknown) => caught);
+
+    const choice = await reject(
+      new ApiErrorResponse(400, {
+        statusCode: 400,
+        code: "invalid_command",
+        message: "Pay at Hotel requires cash, card, or both.",
+      } as never),
+    );
+    expect(needsExplicitPayAtHotelChoice(choice)).toBe(true);
+    const other = await reject(
+      new ApiErrorResponse(400, { message: "Choose at least one payment method." } as never),
+    );
+    expect(needsExplicitPayAtHotelChoice(other)).toBe(false);
+    expect(await reject(new TypeError("Failed to fetch"))).toMatchObject({
+      code: "network_unavailable",
+    });
   });
 });
