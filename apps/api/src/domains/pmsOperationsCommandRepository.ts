@@ -302,6 +302,17 @@ type PmsPrivateNoteReplay = {
   note?: PmsPrivateNote;
 };
 
+// VAY-2210: New Booking saved notes with a blank author name; show the author's name, else email.
+// Erased users keep "Unknown" rather than their placeholder email.
+const PRIVATE_NOTE_AUTHOR_NAME_SQL = `COALESCE(
+  NULLIF(BTRIM(note.author_display_name), ''),
+  (SELECT COALESCE(NULLIF(BTRIM(author.name), ''), author.email)
+   FROM identity.users author
+   WHERE author.id = note.author_user_id
+     AND author.status <> 'deleted'),
+  ''
+)`;
+
 type PmsPrivateNoteRow = {
   noteId: string;
   body: string;
@@ -996,7 +1007,7 @@ export function createTargetPmsOperationsCommandRepository(
              note.id::text AS "noteId",
              note.body,
              note.author_user_id::text AS "authorUserId",
-             note.author_display_name AS "authorDisplayName",
+             ${PRIVATE_NOTE_AUTHOR_NAME_SQL} AS "authorDisplayName",
              note.source,
              note.created_at AS "createdAt",
              note.edited_by_user_id::text AS "editedByUserId",
@@ -1215,7 +1226,7 @@ export function createTargetPmsOperationsCommandRepository(
         }
 
         const updated = await client.query<PmsPrivateNoteRow>(
-          `UPDATE pms.booking_notes_private
+          `UPDATE pms.booking_notes_private note
            SET body = $4,
                edited_by_user_id = $5::uuid,
                edited_by_display_name = $6,
@@ -1227,7 +1238,7 @@ export function createTargetPmsOperationsCommandRepository(
              id::text AS "noteId",
              body,
              author_user_id::text AS "authorUserId",
-             author_display_name AS "authorDisplayName",
+             ${PRIVATE_NOTE_AUTHOR_NAME_SQL} AS "authorDisplayName",
              source,
              created_at AS "createdAt",
              edited_by_user_id::text AS "editedByUserId",
