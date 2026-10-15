@@ -5,7 +5,7 @@ import pg from "pg";
  * Test-only login shaped like the production API role `vayada_next_api_runtime` in the
  * VAY-2054 product-DML posture (engineering/api-runtime-database-role.md). The lists below
  * mirror platform `scripts/grant-target-database-runtime-product-dml.mjs` on main as of
- * 2026-10-07 (#454 merged); update both together, notably when VAY-2057 slice 0.3 edits the
+ * 2026-10-15 (e8876a7, after #507/#512); update both together, notably when VAY-2057 slice 0.3 edits the
  * protected list. listOrdinaryPostureViolations re-runs the preflight's own posture queries. Production additionally keeps legacy
  * SELECT grants on identity tables, which the fixture reproduces with schema-wide SELECT.
  * No default privileges are set: the fixture is applied after migrations.
@@ -52,9 +52,10 @@ const NO_WRITE = [
   "booking.affiliate_referral_production_preflight_revocations",
 ];
 const NO_WRITE_PATTERNS = [
-  /^platform\.(production_|source_extraction_|legacy_|channex_adoption_|identity_migration_)/,
+  /^platform\.(production_|source_extraction_|legacy_|channex_adoption_|channex_management_worker_|identity_migration_)/,
   /^pms\.channex_room_availability_/,
   /^pms\.channex_ari_schedule_/,
+  /^pms\.channex_offer_ari_deliver/,
   /^(marketplace|booking)\.affiliate_click_/,
   /^finance\.expense_generation_/,
 ];
