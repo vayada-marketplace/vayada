@@ -305,6 +305,10 @@ import {
   createPgPropertySetupDraftRetentionStore,
   startPropertySetupDraftRetentionWorker,
 } from "./jobs/propertySetupDraftRetention.js";
+import {
+  createPgBookingWebEventRetentionStore,
+  startBookingWebEventRetentionWorker,
+} from "./jobs/bookingWebEventRetention.js";
 import { createTargetPublicHotelProfileRepository } from "./routes/aiHotels.js";
 import {
   createPgBookingWebAffiliateHotelResolver,
@@ -3339,6 +3343,18 @@ const propertySetupDraftRetentionWorker = startPropertySetupDraftRetentionWorker
 
 app.addHook("onClose", async () => {
   await propertySetupDraftRetentionWorker.close();
+});
+
+const bookingWebEventRetentionWorker = startBookingWebEventRetentionWorker({
+  store: createPgBookingWebEventRetentionStore({ connectionString: targetDatabaseUrl, max: 1 }),
+  enabled: config.backgroundWorkersEnabled && config.bookingWebEventRetentionEnabled,
+  intervalMs: config.bookingWebEventRetentionIntervalMs,
+  batchSize: config.bookingWebEventRetentionBatchSize,
+  logger: app.log,
+});
+
+app.addHook("onClose", async () => {
+  await bookingWebEventRetentionWorker.close();
 });
 
 if (authSessionHandoffRepository) {

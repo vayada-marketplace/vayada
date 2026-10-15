@@ -953,6 +953,12 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      - name: Verify booking web event retention on PostgreSQL
+        if: matrix.shard == 'hotel-setup'
+        run: npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/bookingWebEventRetention.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Verify Marketplace submission review on PostgreSQL
         if: matrix.shard == 'hotel-setup'
         run: >-
