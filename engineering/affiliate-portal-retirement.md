@@ -13,7 +13,8 @@ not stop ECS, change DNS, move users, or retire an API.
 Marketplace currently accepts creator_workspace and hotel_group organizations;
 it does not accept affiliate_partner. Do not replace the affiliate login with a
 Marketplace redirect until an accepted, verified existing-user path exists.
-Do not manufacture creator memberships for affiliate-only accounts.
+Do not manufacture creator memberships for affiliate-only accounts. VAY-2209
+replaces these continuity rules under one condition; see its section below.
 
 Keep the deployed portal's auth, reporting, payout-settings and payout-history
 API contracts during source removal. VAY-1499 and VAY-1500 must retain these
@@ -158,6 +159,116 @@ The integrated account destination and service cutover remain VAY-1498 work; con
 Finance cleanup remains VAY-1500 work. Keep VAY-1499 In Progress until required validation
 and explicit acceptance are complete. Do not delete the retained continuity boundary
 merely because the standalone source has been removed.
+
+## VAY-2209 production address and portal shutdown (2026-10-15)
+
+Flamur's decision, recorded on VAY-2209:
+
+- No standalone affiliate app runs in production. Creators use Marketplace
+  (`/earnings` and the collaboration agreement panel); hotels use their Marketplace
+  profile.
+- `affiliate.vayada.com` stays as the public affiliate address with two jobs:
+  a permanent redirect to Marketplace earnings, and later the stable host for
+  creator share links (`https://affiliate.vayada.com/r/va_…`). Shared links then
+  never depend on the API host's name.
+- `next-affiliate.vayada.com` is removed.
+- This decision replaces the rules above about keeping the portal, its redirect and
+  its continuity APIs, **only while** the legacy PMS database shows no approved
+  affiliate with a scheduled affiliate payout. If one exists, the old portal stays up
+  until those payouts are settled.
+
+### What runs today (read-only check, 2026-10-15)
+
+| Host                        | Load balancer rule (`vayada-backend-alb`, 443) | ECS service                               | Talks to                                        |
+| --------------------------- | ---------------------------------------------- | ----------------------------------------- | ----------------------------------------------- |
+| `affiliate.vayada.com`      | priority 45 → `affiliate-dashboard-tg`         | `vayada-affiliate-dashboard-service`      | legacy `pms-api` and `booking-api` (Python)     |
+| `next-affiliate.vayada.com` | priority 56 → `next-affiliate-tg`              | `vayada-next-affiliate-dashboard-service` | `next-api` (auth surface `affiliate-dashboard`) |
+
+Both run the deleted `apps/affiliate-dashboard` image (see the baseline above). Public
+DNS is Cloudflare: its `next-affiliate` record is in platform Terraform, its `affiliate`
+record is managed by hand. Both Route 53 records are in Terraform. The `*.vayada.com`
+certificate covers both hosts, so no certificate work is needed.
+
+In the 30 days to 2026-10-14 neither portal's dashboard was used: legacy `pms-api` got
+no `/affiliate/*` call and `next-api` no `/affiliate/*` contract call. The load balancer
+counted 1,723 and 213 requests, almost all sign-in pages. The `next-api` sign-in calls
+on the affiliate surface (69 session checks, 66 Google starts, never followed by a
+dashboard call) match the platform's own auth-gateway probes. No `/r` link or `?ref`
+click arrived either.
+
+The legacy PMS service still runs its monthly `process_affiliate_payouts` job, and old
+`?ref` links still create scheduled affiliate payouts for attributed bookings. That is
+why the payout count is re-checked before every step that removes something.
+
+Links that may still exist: legacy invite emails
+(`https://affiliate.vayada.com/set-password?token=…`), login bookmarks on both hosts,
+and the next portal's sign-in settings (`AUTH_AFFILIATE_DASHBOARD_*` on `next-api`, and
+one WorkOS production redirect URI, `https://next-affiliate.vayada.com/auth/oauth/google/callback`). Old `{slug}.booking.vayada.com?ref=` links live on the booking
+host and are not affected.
+
+### Cutover runbook
+
+Steps 2, 4 and 6 are `vayada-platform` Terraform changes, reviewed and applied by the
+coordinator or Flamur. Step 5 is application code.
+
+1. **Check:** legacy PMS counts of affiliates by status and of affiliate payouts by
+   status (read-only). Continue only if no approved affiliate has a scheduled payout.
+2. **Redirect** ([vayada-platform#538](https://github.com/vayada-marketplace/vayada-platform/pull/538)):
+   - rules 45 and 56 change from forward to a `301` to
+     `https://next-marketplace.vayada.com/earnings`, dropping the query so a legacy
+     `set-password` token is never forwarded;
+   - a new rule 47 keeps `next-affiliate.vayada.com/auth/*` forwarding to its service.
+     `tf-apply` probes every gateway in `auth-gateways.json` after each apply and fails
+     on a redirect, so the next portal's gateway stays reachable until step 6.
+3. **Verify:** `curl -sI` on `/`, `/login` and `/set-password?token=x` for both hosts
+   returns `301` with `location` exactly the earnings URL (no `?`).
+   `next-affiliate.vayada.com/auth/session?surface=affiliate-dashboard` still returns
+   `401`. A fresh `terraform plan` shows no changes. Then, manually in the WorkOS
+   production environment (coordinator, with Flamur's go), remove next-affiliate's only
+   redirect URI, `https://next-affiliate.vayada.com/auth/oauth/google/callback`. The
+   gateway probe only checks that Google start answers `302` to WorkOS; it does not
+   follow it.
+4. **Scale the old portal to 0:** re-run the step 1 count, then set
+   `desired_count = 0` on `affiliate-dashboard` in `infra/ecs.tf`. A CLI scale-down is
+   reverted by the next apply. Its target group is no longer attached, so a
+   replacement task could not register anyway.
+5. **Code:** remove the `affiliate-dashboard` auth surface (today
+   `AUTH_AFFILIATE_DASHBOARD_ORIGIN` is required whenever auth is configured), the
+   `/affiliate/*` continuity contract and the legacy affiliate JWT setting from
+   `apps/api`. Release it before step 6, or `next-api` fails its config check.
+6. **After 30 days, delete** (re-run the step 1 count first):
+   - the `next-affiliate-dashboard` entry in `auth-gateways.json` and its expected
+     origins, `next-api`'s `AUTH_AFFILIATE_DASHBOARD_*` and the
+     `AUTH_LEGACY_AFFILIATE_PMS_JWT_SECRET` mapping (keep the shared JWT parameter
+     itself), and rule 47;
+   - both ECS services and task definitions, the two target groups, log groups,
+     `ecr_repo_map` entries and the `deploy.yml` service cases;
+   - the two ECR repositories, after emptying them (`force_delete = false`);
+   - the `next-affiliate` Route 53 and Cloudflare records.
+
+   Keep the `affiliate` DNS records, rule 45 and the certificate.
+
+Rollback for steps 2–4: revert the platform change(s); both task definitions and tagged
+images stay until step 6.
+
+Browsers cache a `301`. When Marketplace moves to its final host, re-point rule 45/56
+and keep `next-marketplace.vayada.com/earnings` redirecting to the new host.
+
+### Share links on affiliate.vayada.com
+
+Creator share links are not live in production: `next-api` does not mount `/r`
+(`AFFILIATE_CAPTURE_ENABLED` and `AFFILIATE_PUBLIC_REDIRECT_ENABLED` are unset) and
+Booking Web arrival is off. To switch them on:
+
+1. Make the booking host checks configurable: `/r` and the arrival transport still only
+   accept `*.next-booking.vayada.com` destinations.
+2. Add a load balancer rule above rule 45: host `affiliate.vayada.com` and path `/r/*`
+   → the `next-api` target group, and turn on `/r` and capture in `next-api`.
+3. Only then build Marketplace Web with
+   `NEXT_PUBLIC_AFFILIATE_LINK_ORIGIN=https://affiliate.vayada.com`. Pass it as a
+   build argument in `deploy-next-marketplace-web.yml` and `build-coordinated-release.yml`
+   (the Dockerfile declares it). Without it, links fall back to the API host. Links
+   printed before step 2 would hit the cached earnings redirect.
 
 ## VAY-1500 commission configuration retirement
 
