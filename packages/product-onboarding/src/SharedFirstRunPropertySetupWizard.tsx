@@ -57,7 +57,11 @@ import {
 
 import { HotelIcon } from "./HotelIcon";
 import { LocalizationMultiSelect } from "./LocalizationMultiSelect";
-import GoogleAddressMap, { type MapPosition } from "./GoogleAddressMap";
+import GoogleAddressMap, {
+  coveredMapInsets,
+  type MapCoveredInsets,
+  type MapPosition,
+} from "./GoogleAddressMap";
 import GooglePlacesAddressField from "./GooglePlacesAddressField";
 import { findAddressOnMap } from "./googleMaps";
 import TimezoneField from "./TimezoneField";
@@ -1123,8 +1127,46 @@ function ProfileForm({
     address: string;
   } | null>(null);
   const [mapFocus, setMapFocus] = useState<MapPosition | null>(null);
+  // On a phone the location card spans the screen width, at the bottom or (while focused) the top;
+  // the map keeps the pin in the strip the card leaves visible.
+  const locationMapArea = useRef<HTMLDivElement>(null);
+  const locationCard = useRef<HTMLDivElement>(null);
+  const [mapCoveredInsets, setMapCoveredInsets] = useState<MapCoveredInsets | null>(null);
   const latestDraft = useRef(draft);
   latestDraft.current = draft;
+
+  useEffect(() => {
+    const area = locationMapArea.current;
+    const card = locationCard.current;
+    if (step !== 1 || !area || !card) return;
+    // Below Tailwind's `sm` the card is a full-width sheet; from `sm` up the panels sit beside the pin.
+    const narrow = window.matchMedia("(max-width: 639.98px)");
+    let frame = 0;
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      // Next frame: :focus-within has moved the card by then.
+      frame = requestAnimationFrame(() => {
+        const next = narrow.matches
+          ? coveredMapInsets(area.getBoundingClientRect(), card.getBoundingClientRect())
+          : null;
+        setMapCoveredInsets((current) =>
+          current?.top === next?.top && current?.bottom === next?.bottom ? current : next,
+        );
+      });
+    };
+    measure();
+    const resize = new ResizeObserver(measure);
+    resize.observe(area);
+    resize.observe(card);
+    card.addEventListener("focusin", measure);
+    card.addEventListener("focusout", measure);
+    return () => {
+      cancelAnimationFrame(frame);
+      resize.disconnect();
+      card.removeEventListener("focusin", measure);
+      card.removeEventListener("focusout", measure);
+    };
+  }, [step]);
   const mounted = useRef(false);
   // A keyboard path to a pin when the address search is down (the map itself needs a pointer).
   const [coordinatesRequested, setCoordinatesRequested] = useState(false);
@@ -1729,7 +1771,10 @@ function ProfileForm({
       )}
 
       <section aria-busy={saving} className={step === 1 ? "block" : "hidden"}>
-        <div className="relative isolate min-h-[100dvh] overflow-hidden bg-slate-100 text-left">
+        <div
+          ref={locationMapArea}
+          className="relative isolate min-h-[100dvh] overflow-hidden bg-slate-100 text-left"
+        >
           {googleMapsApiKey && (
             <GoogleAddressMap
               active={step === 1}
@@ -1737,13 +1782,17 @@ function ProfileForm({
               latitude={draft.latitude}
               longitude={draft.longitude}
               focus={mapFocus}
+              coveredInsets={mapCoveredInsets}
               onPick={pickMapLocation}
               onUnavailable={() => setMapUnavailable(true)}
             />
           )}
 
           <div className="pointer-events-none absolute inset-0 z-10 flex items-end p-3 sm:block sm:p-0">
-            <div className="pointer-events-auto flex max-h-[70dvh] w-full flex-col rounded-3xl border border-white/80 bg-white/95 shadow-[0_18px_50px_-20px_rgba(15,23,42,0.35)] backdrop-blur focus-within:self-start sm:contents">
+            <div
+              ref={locationCard}
+              className="pointer-events-auto flex max-h-[70dvh] w-full flex-col rounded-3xl border border-white/80 bg-white/95 shadow-[0_18px_50px_-20px_rgba(15,23,42,0.35)] backdrop-blur focus-within:self-start sm:contents"
+            >
               <div
                 data-testid="location-search-panel"
                 className={`pointer-events-auto min-h-0 flex-1 p-4 sm:absolute sm:left-6 sm:top-6 sm:flex-none sm:rounded-2xl sm:border sm:border-white/80 sm:bg-white/95 sm:shadow-[0_18px_50px_-20px_rgba(15,23,42,0.35)] sm:backdrop-blur lg:left-8 lg:top-8 ${
