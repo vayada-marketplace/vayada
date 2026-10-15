@@ -184,6 +184,28 @@ test("shows a fully paid booking as paid in guest wording", async ({ page }) => 
   await expect(page.getByText(/captured/i)).toHaveCount(0);
 });
 
+test("shows a pending change request's dates the way guests read them", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockBookingApis(page);
+  await page.route(`${hotelApi}/bookings/lookup`, (route) => route.fulfill({ json: booking }));
+  await page.route(`${hotelApi}/bookings/*/change-request**`, (route) =>
+    route.fulfill({
+      json: {
+        id: "change-1",
+        bookingId: booking.id,
+        status: "pending",
+        requestedCheckIn: "2026-11-20",
+        requestedCheckOut: "2026-11-24",
+        priceDifference: 240,
+        currency: "EUR",
+      },
+    }),
+  );
+  await page.goto(`/booking/VAY-1268?email=${encodeURIComponent(email)}`);
+  await expect(page.getByText("Change request pending approval")).toBeVisible();
+  await expect(page.getByText(/^Fri, 20 Nov 2026 → Tue, 24 Nov 2026 · \+€240$/)).toBeVisible();
+});
+
 for (const [label, change] of [
   ["Past stay", { checkIn: day(-30), checkOut: day(-27) }],
   ["Confirmed", {}],

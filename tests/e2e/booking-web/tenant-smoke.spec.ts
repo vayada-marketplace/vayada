@@ -261,9 +261,12 @@ test.describe("booking-web tenant smoke", () => {
     await expect(dateInputs).toHaveCount(2);
     await expect(dateInputs.nth(0)).toHaveValue("2026-09-12");
     await expect(dateInputs.nth(1)).toHaveValue("2026-09-15");
+    // The summary reads like the rest of the page: "Sat, 12 Sept 2026", not "2026-09-12".
+    await expect(page.getByText(/^Sat, 12 Sept? 2026 → Tue, 15 Sept? 2026$/)).toHaveCount(2);
 
     await dateInputs.nth(0).fill("2026-09-16");
     await dateInputs.nth(1).fill("2026-09-18");
+    await expect(page.getByText(/^Wed, 16 Sept? 2026 → Fri, 18 Sept? 2026$/)).toBeVisible();
 
     await expect.poll(() => previewPayload?.checkIn).toBe("2026-09-16");
     expect(previewPayload).toMatchObject({

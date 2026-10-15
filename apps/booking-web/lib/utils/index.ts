@@ -47,6 +47,20 @@ export function formatStayDate(date: string, locale?: string): string {
   });
 }
 
+/** "Central European Time" for an IANA time zone, in the guest's language; UTC and no zone read "UTC". */
+export function formatTimeZoneName(timeZone: string, locale?: string): string {
+  if (!timeZone.trim() || /^(Etc\/)?(UTC|UCT|GMT0?|Universal|Zulu)$/i.test(timeZone)) return "UTC";
+  try {
+    return (
+      new Intl.DateTimeFormat(resolveLocale(locale), { timeZone, timeZoneName: "longGeneric" })
+        .formatToParts(new Date())
+        .find((part) => part.type === "timeZoneName")?.value ?? timeZone
+    );
+  } catch {
+    return timeZone;
+  }
+}
+
 export function formatDateShort(date: string | Date, locale?: string): string {
   const d = typeof date === "string" ? new Date(date) : date;
   return d.toLocaleDateString(resolveLocale(locale), {

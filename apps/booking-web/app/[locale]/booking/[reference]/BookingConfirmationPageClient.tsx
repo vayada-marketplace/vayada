@@ -1,6 +1,7 @@
 "use client";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
 import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
+import StayRange from "@/components/booking/StayRange";
 
 import { formatCheckInTime, formatCheckOutTime } from "@/lib/arrivalTimes";
 import { formatStayDate, resolveLocale } from "@/lib/utils";
@@ -762,7 +763,11 @@ export default function BookingConfirmationPageClient({
                   "We'll review your requested change and email you once we respond."}
               </p>
               <p className="text-xs text-blue-700 mt-2">
-                {changeRequest.requestedCheckIn} → {changeRequest.requestedCheckOut}
+                <StayRange
+                  checkIn={changeRequest.requestedCheckIn}
+                  checkOut={changeRequest.requestedCheckOut}
+                  locale={locale}
+                />
                 {" · "}
                 {changeRequest.priceDifference > 0
                   ? `+${formatPrice(changeRequest.priceDifference, changeRequest.currency)}`

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, use } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import Image from "next/image";
 import BookingNavigation from "@/components/layout/BookingNavigation";
@@ -10,6 +10,7 @@ import { bookingImageSizes } from "@/components/booking/imageSizes";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import ApproximateAmountsNote from "@/components/booking/ApproximateAmountsNote";
+import StayRange from "@/components/booking/StayRange";
 import { Booking } from "@/lib/types";
 import { readLastBooking } from "@/lib/storage/bookingDraft";
 import { bookingService, ChangeRequestPreview } from "@/services/api/booking";
@@ -24,6 +25,7 @@ export default function RequestChangePage({
   const { reference } = use(params);
   const { email: emailParam } = use(searchParams);
   const t = useTranslations("requestChange");
+  const locale = useLocale();
   const { hotel } = useHotel();
   const { slug } = useSlug();
   const { formatPrice } = useCurrency();
@@ -261,16 +263,20 @@ export default function RequestChangePage({
                 {t("summary") || "Summary"}
               </h2>
               <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
+                <div className="flex justify-between gap-4">
                   <span className="text-gray-500">{t("currentDates") || "Current dates"}</span>
-                  <span className="font-medium text-gray-900">
-                    {booking.checkIn} → {booking.checkOut}
+                  <span className="text-right font-medium text-gray-900">
+                    <StayRange
+                      checkIn={booking.checkIn}
+                      checkOut={booking.checkOut}
+                      locale={locale}
+                    />
                   </span>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex justify-between gap-4">
                   <span className="text-gray-500">{t("requestedDates") || "Requested dates"}</span>
-                  <span className="font-medium text-gray-900">
-                    {checkIn} → {checkOut}
+                  <span className="text-right font-medium text-gray-900">
+                    <StayRange checkIn={checkIn} checkOut={checkOut} locale={locale} />
                   </span>
                 </div>
                 <div className="flex justify-between pt-2 border-t border-gray-100">

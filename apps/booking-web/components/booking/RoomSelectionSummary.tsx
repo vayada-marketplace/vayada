@@ -2,6 +2,7 @@
 import { useLocale, useTranslations } from "next-intl";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import type { SelectedRoomLine } from "@/lib/types";
+import { formatStayDate, formatTimeZoneName } from "@/lib/utils";
 
 export default function RoomSelectionSummary({
   lines,
@@ -40,13 +41,13 @@ export default function RoomSelectionSummary({
           Number.isInteger(days) &&
           Number(days) >= 0 &&
           Number(days) <= 365 &&
-          Number.isFinite(Date.parse(checkIn))
+          Number.isFinite(Date.parse(`${checkIn}T00:00:00Z`))
         ) {
-          const date = new Intl.DateTimeFormat(locale, {
-            dateStyle: "medium",
-            timeZone: "UTC",
-          }).format(new Date(Date.parse(`${checkIn}T00:00:00Z`) - Number(days) * 86_400_000));
-          cancellation = t("freeUntil", { date, timezone: timezone ?? "UTC" });
+          const until = new Date(Date.parse(`${checkIn}T00:00:00Z`) - Number(days) * 86_400_000);
+          cancellation = t("freeUntil", {
+            date: formatStayDate(until.toISOString().slice(0, 10), locale),
+            timezone: formatTimeZoneName(timezone ?? "UTC", locale),
+          });
         }
         const tiers =
           policy.flexibleCancellationType === "partial_refund"
