@@ -499,9 +499,10 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [error]);
   // VAY-2197: an error the guest sees, once per price; a refusal the steps recover from by
-  // themselves (pricing again without promo codes or extras, or another way to pay) isn't one.
+  // themselves (pricing again without promo codes or extras, or another way to pay) isn't one,
+  // and neither is one hidden behind an open booking attempt or on the room form.
   useEffect(() => {
-    if (!error || !settled) return;
+    if (!error || !settled || attemptOpen || step === "rooms") return;
     const recovers =
       refused &&
       !quote &&

@@ -1,4 +1,5 @@
 import {
+  BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
   FUNNEL_ERROR_CODES,
   parseFunnelEventMetadata,
   type FunnelEventProperties,
@@ -37,7 +38,7 @@ export function trackEvent<T extends FunnelEventType>(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         analyticsConsent: true,
-        consentVersion: 1,
+        consentVersion: BOOKING_WEB_ANALYTICS_CONSENT_VERSION,
         hotelSlug,
         eventType,
         sessionId,

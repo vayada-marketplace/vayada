@@ -187,7 +187,7 @@ describe("funnel event allowlist (VAY-2197)", () => {
     expect(FUNNEL_STAGES).not.toContain("booking_error");
   });
 
-  it("counts the same when step views and errors take sequence numbers between the stages", () => {
+  it("counts the same with gaps in the sequence (step views and errors aren't read as stages)", () => {
     const plain = journey("plain", "pay_at_property", true);
     const gapped = journey("gapped", "pay_at_property", true).map((event) => ({
       ...event,

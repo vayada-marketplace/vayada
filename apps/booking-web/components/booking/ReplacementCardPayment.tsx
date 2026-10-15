@@ -84,8 +84,10 @@ function CardForm({
         redirect: "if_required",
       });
       if (stripeError) {
-        // Never Stripe's decline code: it says something about the guest's card.
-        trackEvent(slug, "booking_error", { step: "payment", reason: "payment_failed" });
+        // A card form that isn't filled in yet isn't a failed payment. Never Stripe's decline
+        // code: it says something about the guest's card.
+        if (stripeError.type !== "validation_error")
+          trackEvent(slug, "booking_error", { step: "payment", reason: "payment_failed" });
         setError(stripeError.message || "The card payment did not go through. Please try again.");
         started.current = false;
         return;
