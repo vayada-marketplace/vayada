@@ -202,8 +202,8 @@ why the payout count is re-checked before every step that removes something.
 
 Links that may still exist: legacy invite emails
 (`https://affiliate.vayada.com/set-password?token=…`), login bookmarks on both hosts,
-and the next portal's sign-in settings (`AUTH_AFFILIATE_DASHBOARD_*` on `next-api`,
-WorkOS redirect URIs). Old `{slug}.booking.vayada.com?ref=` links live on the booking
+and the next portal's sign-in settings (`AUTH_AFFILIATE_DASHBOARD_*` on `next-api`, and
+one WorkOS production redirect URI, `https://next-affiliate.vayada.com/auth/oauth/google/callback`). Old `{slug}.booking.vayada.com?ref=` links live on the booking
 host and are not affected.
 
 ### Cutover runbook
@@ -223,7 +223,11 @@ coordinator or Flamur. Step 5 is application code.
 3. **Verify:** `curl -sI` on `/`, `/login` and `/set-password?token=x` for both hosts
    returns `301` with `location` exactly the earnings URL (no `?`).
    `next-affiliate.vayada.com/auth/session?surface=affiliate-dashboard` still returns
-   `401`. A fresh `terraform plan` shows no changes.
+   `401`. A fresh `terraform plan` shows no changes. Then, manually in the WorkOS
+   production environment (coordinator, with Flamur's go), remove next-affiliate's only
+   redirect URI, `https://next-affiliate.vayada.com/auth/oauth/google/callback`. The
+   gateway probe only checks that Google start answers `302` to WorkOS; it does not
+   follow it.
 4. **Scale the old portal to 0:** re-run the step 1 count, then set
    `desired_count = 0` on `affiliate-dashboard` in `infra/ecs.tf`. A CLI scale-down is
    reverted by the next apply. Its target group is no longer attached, so a
@@ -240,7 +244,7 @@ coordinator or Flamur. Step 5 is application code.
    - both ECS services and task definitions, the two target groups, log groups,
      `ecr_repo_map` entries and the `deploy.yml` service cases;
    - the two ECR repositories, after emptying them (`force_delete = false`);
-   - the `next-affiliate` Route 53 and Cloudflare records and the WorkOS redirect URIs.
+   - the `next-affiliate` Route 53 and Cloudflare records.
 
    Keep the `affiliate` DNS records, rule 45 and the certificate.
 
