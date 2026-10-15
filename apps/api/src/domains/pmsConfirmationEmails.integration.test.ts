@@ -80,12 +80,12 @@ describe.skipIf(!url)("confirmation resend with target PostgreSQL", () => {
     expect(send.mock.calls[0]).toEqual([
       expect.objectContaining({
         to: "updated@example.test",
-        text: expect.stringContaining("2026-10-05"),
+        text: expect.stringContaining("Mon, 5 Oct 2026"),
       }),
     ]);
     const payload = (await pool.query(`SELECT payload FROM platform.jobs WHERE id=$1`, [jobId]))
       .rows[0].payload;
-    for (const value of ["400.00 EUR", "Pay at Property", "Breakfast × 2"])
+    for (const value of ["400.00 EUR", "Pay at the hotel", "Breakfast × 2"])
       expect(payload.text).toContain(value);
     expect(await emails.request(property, booking, "one", actor)).toEqual({ jobId });
     expect(await emails.request(property, booking, "two", actor)).toEqual({ jobId });

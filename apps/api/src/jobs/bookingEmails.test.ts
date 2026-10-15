@@ -133,7 +133,8 @@ describe("booking lifecycle email jobs", () => {
     expect(jobInsert.text).toContain("ON CONFLICT (queue_name, job_key) DO NOTHING");
     expect(payload.subject).toContain("reserved pending payment");
     expect(payload.text).toContain("We've reserved your room");
-    expect(payload.text).toContain("Payment deadline: 2026-09-02T10:00:00.000Z");
+    // 24-hour and readable, in UTC when the hotel's time zone isn't known (VAY-2195).
+    expect(payload.text).toMatch(/Payment deadline: Wed, 2 Sept? 2026, 10:00 UTC/);
     expect(JSON.stringify(payload)).not.toContain("DE89370400440532013000");
     expect(payload.bankTransferDetails).toBeUndefined();
     expect(payload.requiresBankTransferInstructions).toBe(true);
@@ -184,6 +185,63 @@ describe("booking lifecycle email jobs", () => {
       expect(payload.text).not.toContain(paymentMethod);
     },
   );
+
+  // VAY-2195: every guest email shows stay dates as days, 24-hour times and the booking page's
+  // "Pay at the hotel"; no raw YYYY-MM-DD or ISO instant is left in the text.
+  it.each([
+    ["final_confirmation", true, true],
+    ["booking_accepted", true, true],
+    ["booking_updated", true, true],
+    ["request_received", true, false],
+    ["booking_canceled", true, false],
+    ["booking_rejected", false, false],
+    ["booking_expired", false, false],
+    ["reserved_pending_payment", false, false],
+  ] as const)("renders the %s guest email as guests read it", async (kind, stay, details) => {
+    const target = createTargetEmailStore();
+    const input = bookingEmailInput({ kind, paymentDeadlineAt: "2026-09-02T10:00:00.000Z" });
+    input.booking.paymentMethod =
+      kind === "reserved_pending_payment" ? "bank_transfer" : "pay_at_property";
+    input.booking.propertyTimeZone = "Asia/Makassar";
+    await enqueueBookingLifecycleEmailJob(target, input);
+    const { text } = JSON.parse(
+      String(target.requiredCall("INSERT INTO platform.jobs").values?.[8]),
+    ) as { text: string };
+    if (stay) expect(text).toMatch(/Stay: Sat, 12 Sept? 2026 to Tue, 15 Sept? 2026/);
+    if (details) expect(text).toContain("Payment method: Pay at the hotel");
+    if (kind === "reserved_pending_payment")
+      expect(text).toMatch(/Payment deadline: Wed, 2 Sept? 2026, 18:00 GMT\+8/);
+    expect(text).not.toMatch(/\d{4}-\d{2}-\d{2}|\b(AM|PM)\b|Pay at Property/);
+  });
+
+  it("keeps readable stay dates in the hotel's emails", async () => {
+    const target = createTargetEmailStore();
+    await enqueueBookingLifecycleEmailJob(
+      target,
+      bookingEmailInput({
+        kind: "host_new_booking",
+        recipient: { role: "host", email: "reservations@alpenrose.test" },
+      }),
+    );
+    const { text } = JSON.parse(
+      String(target.requiredCall("INSERT INTO platform.jobs").values?.[8]),
+    ) as { text: string };
+    expect(text).toMatch(/Stay: Sat, 12 Sept? 2026 to Tue, 15 Sept? 2026/);
+    expect(text).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+  });
+
+  it("reads the hotel's time zone with the booking", async () => {
+    const target = createTargetEmailStore();
+    await enqueueBookingTransitionNotifications(target, {
+      propertyId: "f2000000-0000-0000-0000-000000000951",
+      guestBookingId: "book_bank_001",
+      occurredAt: "2026-09-01T00:00:00.000Z",
+      transition: { eventType: "guest_booking.confirmed", toStatus: "confirmed" },
+    });
+    expect(target.requiredCall('AS "hostEmail"').text).toContain(
+      "FROM hotel_catalog.property_locations location",
+    );
+  });
 
   it("reuses the same customer-facing job for duplicate command retries", async () => {
     const target = createTargetEmailStore();
@@ -285,6 +343,7 @@ describe("booking lifecycle email jobs", () => {
     const created = async (paymentMethod: string, paymentInstructions?: object) => {
       const target = createTargetEmailStore({
         paymentMethod,
+        propertyTimeZone: "Europe/Zurich",
         bookingMetadata: { targetSource: "pricing_quote_draft", paymentInstructions },
       });
       const enqueued = await enqueueBookingTransitionNotifications(target, {
@@ -305,7 +364,9 @@ describe("booking lifecycle email jobs", () => {
       const [guest, host] = target.calls
         .filter((call) => call.text.includes("INSERT INTO platform.jobs"))
         .map((call) => JSON.parse(String(call.values?.[8])));
-      expect(guest.text).toContain("Payment deadline: 2026-09-03 10:00 UTC");
+      // The deadline in the hotel's own time, 24-hour, with its zone (VAY-2195).
+      expect(guest.text).toMatch(/Payment deadline: Thu, 3 Sept? 2026, 12:00 CEST/);
+      expect(host.text).toMatch(/Payment deadline: Thu, 3 Sept? 2026, 12:00 CEST/);
       expect(guest.text).toContain("the booking expires and the room is released");
       expect(host.recipientRole).toBe("host");
       expect(host.text).toContain("mark the payment as received in your PMS");
