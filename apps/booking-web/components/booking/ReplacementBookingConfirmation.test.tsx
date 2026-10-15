@@ -181,7 +181,7 @@ it("stops a request the hotel cannot receive online yet, without inviting a retr
     "booking requests can’t be sent online yet",
   );
   expect(document.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
-  expect(document.body.textContent).not.toContain("may still have reached the hotel");
+  expect(document.body.textContent).not.toContain("may still have reached us");
 });
 
 it("keeps an uncertain attempt retryable", async () => {

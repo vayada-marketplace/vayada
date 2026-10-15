@@ -90,8 +90,10 @@ test("switches language through the profile menu and translates the live preview
 
 test("a visible module inventory error follows a later language change", async ({ page }) => {
   await mockBookingAdminBookingFlow(page);
-  await page.route("**/api/pms/properties/*/module-activations**", (route) =>
-    route.fulfill({ status: 503, json: { detail: "Backend failure in English" } }),
+  // No module store can be read (VAY-2200: each one alone is optional in Booking Admin).
+  await page.route(
+    /\/api\/pms\/properties\/[^/]+\/(?:module-activations|navigation-modules|booking-modules)/,
+    (route) => route.fulfill({ status: 503, json: { detail: "Backend failure in English" } }),
   );
   const en = catalog("en"),
     de = catalog("de");

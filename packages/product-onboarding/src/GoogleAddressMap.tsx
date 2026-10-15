@@ -5,13 +5,22 @@ import { useEffect, useRef, useState } from "react";
 import { importGoogleMapsLibrary } from "./googleMaps";
 
 export type MapPosition = { lat: number; lng: number };
+type MapBounds = { north: number; south: number; east: number; west: number };
+type MapPadding = { top: number; right: number; bottom: number; left: number };
+// Map pixels hidden behind an overlay along its top or bottom edge.
+export type MapCoveredInsets = { top: number; bottom: number };
 type GoogleLatLng = { lat: () => number; lng: () => number };
 type GoogleMapsEvent = { latLng?: GoogleLatLng | null };
 type GoogleMap = {
-  addListener: (eventName: "click", handler: (event: GoogleMapsEvent) => void) => void;
+  addListener: (
+    eventName: "click" | "idle",
+    handler: (event: GoogleMapsEvent) => void,
+  ) => { remove: () => void };
   getZoom: () => number | undefined;
   // One camera move: a pan followed by a zoom can cut the pan animation short.
   moveCamera: (camera: { center: MapPosition; zoom: number }) => void;
+  // Pans by the least amount that brings the bounds inside the map minus the padding.
+  panToBounds: (bounds: MapBounds, padding: MapPadding) => void;
   setCenter: (position: MapPosition) => void;
   setZoom: (zoom: number) => void;
 };
@@ -50,6 +59,40 @@ const PINNED_ZOOM = 17;
 // Below this zoom one pixel spans too much ground for a hotel pin, so a click zooms in instead.
 export const MIN_PIN_ZOOM = 14;
 const AREA_ZOOM = 16;
+// Google's default pin is drawn above its point; keep it, plus a margin, clear of what covers the map.
+const PIN_HEIGHT = 43;
+const VISIBLE_MARGIN = 12;
+
+/** The pan padding that keeps a pin (and its point) inside the part of the map left uncovered. */
+export function visibleMapPadding(insets: MapCoveredInsets): MapPadding {
+  return {
+    top: insets.top + PIN_HEIGHT + VISIBLE_MARGIN,
+    right: VISIBLE_MARGIN,
+    bottom: insets.bottom + VISIBLE_MARGIN,
+    left: VISIBLE_MARGIN,
+  };
+}
+
+/**
+ * How much of the map a full-width card covers: from the top when the card sits in the upper half,
+ * otherwise from the bottom. Rounded, so sub-pixel layout changes don't pan the map.
+ */
+export function coveredMapInsets(
+  map: { top: number; bottom: number },
+  card: { top: number; bottom: number },
+): MapCoveredInsets {
+  const onTop = card.top - map.top < map.bottom - card.bottom;
+  return onTop
+    ? { top: Math.max(0, Math.round(card.bottom - map.top)), bottom: 0 }
+    : { top: 0, bottom: Math.max(0, Math.round(map.bottom - card.top)) };
+}
+
+function keepInView(map: GoogleMap, point: MapPosition, insets: MapCoveredInsets) {
+  map.panToBounds(
+    { north: point.lat, south: point.lat, east: point.lng, west: point.lng },
+    visibleMapPadding(insets),
+  );
+}
 
 export type MapClickResult =
   | { action: "zoom"; center: MapPosition; zoom: number }
@@ -67,6 +110,7 @@ export default function GoogleAddressMap({
   latitude,
   longitude,
   focus,
+  coveredInsets,
   onPick,
   onUnavailable,
 }: {
@@ -76,6 +120,8 @@ export default function GoogleAddressMap({
   longitude: number | null;
   // Shows an area without pinning it, close enough that the next click places the pin.
   focus?: MapPosition | null;
+  // Overlays hiding part of the map (narrow screens): the pin and a found area stay in the rest.
+  coveredInsets?: MapCoveredInsets | null;
   // Makes the map interactive: placing the first pin by click (zoomed in) or dragging it.
   onPick?: (position: MapPosition) => void;
   onUnavailable?: () => void;
@@ -87,6 +133,9 @@ export default function GoogleAddressMap({
   const positionRef = useRef(position);
   const onPickRef = useRef(onPick);
   const onUnavailableRef = useRef(onUnavailable);
+  const coveredInsetsRef = useRef(coveredInsets);
+  // The area "Find on map" moved to, kept in view like a pin until a pin replaces it.
+  const focusRef = useRef<MapPosition | null>(null);
   // The map already shows a position the hotel picked on it; don't recenter for that one.
   const pickedRef = useRef<MapPosition | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "unavailable">("idle");
@@ -94,6 +143,7 @@ export default function GoogleAddressMap({
   positionRef.current = position;
   onPickRef.current = onPick;
   onUnavailableRef.current = onUnavailable;
+  coveredInsetsRef.current = coveredInsets;
 
   useEffect(() => {
     if (!active || !containerRef.current || mapRef.current) return;
@@ -133,6 +183,15 @@ export default function GoogleAddressMap({
         });
         markerRef.current = marker;
         if (interactive) {
+          // A pan asked for before the first render can be lost: keep a saved pin in view once drawn.
+          let drawn = false;
+          const firstIdle = map.addListener("idle", () => {
+            if (drawn) return;
+            drawn = true;
+            firstIdle.remove();
+            const pin = positionRef.current;
+            if (pin && coveredInsetsRef.current) keepInView(map, pin, coveredInsetsRef.current);
+          });
           const pick = (next: MapPosition) => {
             pickedRef.current = next;
             onPickRef.current?.(next);
@@ -206,8 +265,33 @@ export default function GoogleAddressMap({
   }, [interactive, latitude, longitude]);
 
   useEffect(() => {
-    if (focus) mapRef.current?.moveCamera({ center: focus, zoom: AREA_ZOOM });
+    const map = mapRef.current;
+    if (!map || !focus) return;
+    focusRef.current = focus;
+    map.moveCamera({ center: focus, zoom: AREA_ZOOM });
   }, [focus]);
+
+  // After the pin (or a found area) is set or moved, and whenever the covering card moves (it jumps
+  // between the top and the bottom of a phone screen as it gains and loses focus), pan just enough
+  // to show it.
+  const coveredTop = coveredInsets?.top;
+  const coveredBottom = coveredInsets?.bottom;
+  useEffect(() => {
+    const map = mapRef.current;
+    const pin = mapPosition(latitude, longitude);
+    if (pin) focusRef.current = null;
+    const point = pin ?? focusRef.current;
+    if (
+      status !== "ready" ||
+      !map ||
+      !point ||
+      coveredTop === undefined ||
+      coveredBottom === undefined
+    ) {
+      return;
+    }
+    keepInView(map, point, { top: coveredTop, bottom: coveredBottom });
+  }, [status, latitude, longitude, focus, coveredTop, coveredBottom]);
 
   return (
     <div

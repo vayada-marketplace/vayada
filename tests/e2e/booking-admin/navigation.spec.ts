@@ -48,6 +48,26 @@ test.describe("booking-admin navigation", () => {
     await expect(navigation.getByRole("link", { name: "Promos" })).toHaveCount(0);
   });
 
+  test("hides a switched-off module for staff who can't read Financials (VAY-2200)", async ({
+    page,
+  }) => {
+    await mockBookingModules(page, BOOKING_ADMIN_PROPERTY_ID, ["add-ons"]);
+    await page.route("**/api/pms/properties/*/module-activations", (route) =>
+      route.fulfill({ status: 403, json: { code: "forbidden" } }),
+    );
+    await page.goto("/");
+
+    const navigation = page.getByRole("navigation");
+    await expect(navigation.getByRole("link", { name: "Add-ons" })).toBeVisible();
+    await expect(navigation.getByRole("link", { name: "Promos" })).toHaveCount(0);
+
+    await page.goto("/settings/feature-hub");
+    await expect(
+      page.getByRole("heading", { level: 2, name: "Promos", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Could not load modules. Please retry.")).toHaveCount(0);
+  });
+
   test("shows the same order in the mobile drawer", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/");

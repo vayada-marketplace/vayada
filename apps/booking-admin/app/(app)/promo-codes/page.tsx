@@ -20,6 +20,7 @@ import {
 } from "@/services/api/bookingPromoCodesClient";
 import { apiClient } from "@/services/api/client";
 import { settingsService } from "@/services/settings";
+import { PageLayout } from "@/components/layout/PageLayout";
 
 type RoomTypesResponse = {
   items: PromoRoomType[];
@@ -139,7 +140,7 @@ export default function PromoCodesPage() {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-7xl p-6 lg:p-8">
+      <PageLayout>
         <div className="rounded-xl border border-red-200 bg-white p-6">
           <h1 className="text-lg font-semibold text-gray-950">
             {t("admin.promoCodesUnavailable")}
@@ -153,12 +154,12 @@ export default function PromoCodesPage() {
             {t("dashboard.pageViewsModal.retry")}
           </button>
         </div>
-      </div>
+      </PageLayout>
     );
   }
 
   return (
-    <div className="mx-auto max-w-7xl p-6 lg:p-8">
+    <PageLayout>
       <PromoCodesTab
         promoCodes={promoCodes}
         propertyCurrency={propertyCurrency}
@@ -170,6 +171,6 @@ export default function PromoCodesPage() {
         onTogglePromoCode={togglePromo}
       />
       {hotelId && <Promotions hotelId={hotelId} roomTypes={roomTypes} />}
-    </div>
+    </PageLayout>
   );
 }

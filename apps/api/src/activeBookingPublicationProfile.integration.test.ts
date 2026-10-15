@@ -213,22 +213,21 @@ describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in Postgre
     }
   });
 
-  it("says promo codes are usable only while Promos is on and a code is live (VAY-2200)", async () => {
+  it("says guests can enter promo codes only while the Promos switch is on (VAY-2200)", async () => {
     const promoCodes = async () =>
       (await repository.findProfileBySlug("hotel-alpenrose"))?.hotel.capabilities.promoCodes;
-    // Read live, whatever the published revision said: no codes yet.
-    expect(await promoCodes()).toBe(false);
-    await admin.query(
-      `INSERT INTO booking.promo_definitions (property_id, code, discount_type, discount_value)
-       VALUES ($1::uuid, 'AUTUMN', 'percentage', 10)`,
-      [propertyA],
-    );
+    // Read live, whatever the published revision said; no booking settings row keeps it on.
     expect(await promoCodes()).toBe(true);
     await admin.query(
       "INSERT INTO booking.booking_settings (property_id, promo_codes_enabled) VALUES ($1::uuid, FALSE)",
       [propertyA],
     );
     expect(await promoCodes()).toBe(false);
+    await admin.query(
+      "UPDATE booking.booking_settings SET promo_codes_enabled = TRUE WHERE property_id = $1::uuid",
+      [propertyA],
+    );
+    expect(await promoCodes()).toBe(true);
   });
 
   async function seedLegacyProperty(propertyId: string, slug: string): Promise<void> {
