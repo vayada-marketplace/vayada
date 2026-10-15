@@ -2565,6 +2565,7 @@ function targetPublicHotelProfileRow(): QueryResultRow {
     bookingShowLanguageSelector: false,
     bookingShowCurrencySelector: true,
     bookingReferAGuestModuleEnabled: true,
+    bookingPromoCodes: true,
     bookingHeroImage: "https://cdn.vayada.example/hotels/distribution-alpenrose/booking.jpg",
     bookingHeroHeading: "Stay in the heart of the Alps",
     bookingHeroSubtext: "Book direct for our best available rates.",

@@ -7,6 +7,7 @@ import {
   createHotelSetupOrdinaryLoginFixture,
   type HotelSetupOrdinaryLoginFixture,
 } from "./hotelSetupOrdinaryLogin.fixture.js";
+import { readGuestModuleSwitches } from "./domains/bookingGuestModules.js";
 import {
   createPgBookingModuleRepository,
   type BookingModuleRepository,
@@ -127,6 +128,33 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking Engine module switches (runtime log
         organizationId,
       })),
     );
+  });
+
+  it("gives guests the switches live, and both on before booking settings exist", async () => {
+    const withSettings = await seedProperty(admin, true);
+    const withoutSettings = await seedProperty(admin, false);
+    const audit = { actorUserId, organizationId, requestId: randomUUID(), correlationId: null };
+
+    expect(await readGuestModuleSwitches(admin, withoutSettings)).toEqual({
+      addOns: true,
+      promoCodes: true,
+    });
+    await repository.update({
+      propertyId: withSettings,
+      moduleId: "promos",
+      isActive: false,
+      audit,
+    });
+    expect(await readGuestModuleSwitches(admin, withSettings)).toEqual({
+      addOns: true,
+      promoCodes: false,
+    });
+    // Guests get no extras while the Add-ons page hides its step, even with the module on.
+    await admin.query(
+      "UPDATE booking.booking_settings SET show_addons_step = FALSE WHERE property_id = $1::uuid",
+      [withSettings],
+    );
+    expect(await readGuestModuleSwitches(admin, withSettings)).toMatchObject({ addOns: false });
   });
 
   it("switches nothing and audits nothing for a property without booking settings", async () => {

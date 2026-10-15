@@ -32,9 +32,6 @@ function renderMediaTab(
         uploadingLogo={false}
         showContactButton
         setShowContactButton={vi.fn()}
-        showReferAGuestButton={false}
-        setShowReferAGuestButton={vi.fn()}
-        referAGuestModuleEnabled={false}
         showLanguageSelector
         setShowLanguageSelector={vi.fn()}
         languageSelectorAvailable={selectorsAvailable}
@@ -134,5 +131,18 @@ describe("MediaTab hero image", () => {
     expect(markup).toContain('type="button" disabled="" aria-label="Remove hero image"');
     expect(markup).toMatch(/<button type="button" disabled=""[^>]*>Replace Image<\/button>/);
     expect(markup).toContain('accept="image/jpeg,image/png,image/webp"');
+  });
+});
+
+describe("MediaTab Refer a Guest button (VAY-2143)", () => {
+  it("stays off and says the feature is unavailable instead of pointing to Feature Hub", () => {
+    const markup = renderMediaTab([]);
+    const refer = switchTag(markup, "Refer a Guest button");
+
+    expect(markup).toContain('title="This feature is currently unavailable."');
+    expect(refer).toContain('aria-checked="false"');
+    expect(refer).toContain('disabled=""');
+    expect(markup).not.toContain("Enable Refer a Guest in Feature Hub first.");
+    expect(markup).not.toContain("Tied to Feature Hub activation.");
   });
 });

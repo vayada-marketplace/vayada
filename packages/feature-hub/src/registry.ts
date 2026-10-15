@@ -1,82 +1,69 @@
 import {
   BanknotesIcon,
-  ChartBarIcon,
   ChatBubbleLeftRightIcon,
-  ClipboardDocumentCheckIcon,
-  EnvelopeIcon,
-  SparklesIcon,
+  CubeIcon,
   StarIcon,
+  TicketIcon,
+  UsersIcon,
 } from "@heroicons/react/24/outline";
-import type { CoreNavItem, FeatureCategory, FeatureModule, FeatureProduct } from "./types";
+import type { CoreNavItem, FeatureModule, FeatureProduct } from "./types";
 
-export const FEATURE_CATEGORIES: Array<"All" | FeatureCategory> = [
-  "All",
-  "Distribution",
-  "Operations",
-];
+/** NEW marks a module for this long after it joins Feature Hub (VAY-2200). */
+const NEW_FOR_MS = 30 * 24 * 60 * 60 * 1000;
 
-// Order matches the PMS sidebar: Inbox, Reviews, Financials after Reservations.
+// Grid order. PMS modules keep the sidebar order: Inbox, Reviews, Financials after Reservations.
 export const FEATURE_MODULES: FeatureModule[] = [
   {
     id: "inbox",
-    name: "Inbox",
-    description:
-      "Guest messaging, automations, and templates. Chat with guests and automate pre-arrival and post-stay messages.",
-    category: "Operations",
-    type: "internal",
+    category: "Guest",
     product: "pms",
-    icon: "chat",
+    icon: ChatBubbleLeftRightIcon,
+    launchedOn: "2026-10-10",
     navItem: { label: "Inbox", href: "/inbox", icon: ChatBubbleLeftRightIcon },
-    detail: {
-      headline: "Keep every guest conversation in one place.",
-      visualType: "inbox",
-      features: [
-        {
-          icon: ChatBubbleLeftRightIcon,
-          text: "Reply to guests from connected channels and email.",
-        },
-        { icon: EnvelopeIcon, text: "Save quick replies for common questions." },
-        { icon: SparklesIcon, text: "See unread conversations at a glance." },
-      ],
-    },
+    points: 4,
   },
   {
     id: "reviews",
-    name: "Reviews",
-    description: "View and manage guest reviews from connected channels.",
-    category: "Distribution",
-    type: "internal",
+    category: "Guest",
     product: "pms",
-    icon: "star",
+    icon: StarIcon,
+    launchedOn: "2026-10-10",
     navItem: { label: "Reviews", href: "/reviews", icon: StarIcon },
-    detail: {
-      headline: "See what guests say about your stay.",
-      visualType: "reviews",
-      features: [
-        { icon: StarIcon, text: "Read reviews from your connected channels in one list." },
-        { icon: ChatBubbleLeftRightIcon, text: "Reply to reviews where the channel allows it." },
-        { icon: EnvelopeIcon, text: "Collect reviews from direct guests after their stay." },
-      ],
-    },
+    points: 3,
   },
   {
     id: "financials",
-    name: "Financials",
-    description: "Revenue, expenses, profit and loss, and operational folios for your property.",
-    category: "Operations",
-    type: "internal",
+    category: "Revenue",
     product: "pms",
-    icon: "chart",
-    navItem: { label: "Financials", href: "/financials", icon: ChartBarIcon },
-    detail: {
-      headline: "Review your property's finances in one place.",
-      visualType: "financials",
-      features: [
-        { icon: ChartBarIcon, text: "Reconcile stay revenue and channel attribution." },
-        { icon: BanknotesIcon, text: "Track manual and generated expenses." },
-        { icon: ClipboardDocumentCheckIcon, text: "Export reports and operational folios." },
-      ],
-    },
+    icon: BanknotesIcon,
+    navItem: { label: "Financials", href: "/financials", icon: BanknotesIcon },
+    points: 3,
+  },
+  {
+    id: "add-ons",
+    category: "Revenue",
+    product: "booking_engine",
+    icon: CubeIcon,
+    navItem: { label: "Add-ons", href: "/add-ons", icon: CubeIcon },
+    points: 3,
+  },
+  {
+    id: "promos",
+    category: "Revenue",
+    product: "booking_engine",
+    icon: TicketIcon,
+    navItem: { label: "Promos", href: "/promo-codes", icon: TicketIcon },
+    points: 3,
+    offNote: true,
+  },
+  // The old referral product was retired (VAY-1499); the card says so until it returns.
+  {
+    id: "affiliates",
+    category: "Revenue",
+    product: "booking_engine",
+    icon: UsersIcon,
+    unavailable: true,
+    points: 0,
   },
 ];
 
@@ -92,16 +79,14 @@ export const CORE_NAV_ITEMS: Record<FeatureProduct, CoreNavItem[]> = {
   booking_engine: [
     { label: "Dashboard", href: "/" },
     { label: "Design Studio", href: "/design-studio" },
-    { label: "Add-ons", href: "/add-ons" },
-    { label: "Promo Codes", href: "/promo-codes" },
     { label: "Settings", href: "/settings" },
   ],
 };
 
-// PMS modules (Inbox, Reviews, Financials) sit right after Reservations, as in the sidebar.
+// Module items sit after Reservations in the PMS and after Design Studio in the Booking Engine.
 export const FEATURE_MODULE_NAV_INDEX: Record<FeatureProduct, number> = {
   pms: 3,
-  booking_engine: 3,
+  booking_engine: 2,
 };
 
 export function modulesForProduct(product: FeatureProduct): FeatureModule[] {
@@ -115,8 +100,26 @@ export function activeNavModules(product: FeatureProduct, activeModuleIds: strin
   );
 }
 
-export function activeModuleCount(product: FeatureProduct, activeModuleIds: string[]): number {
+/** A sidebar keeps a module's item unless its store says it is off, so a slow or failed read
+ * never hides a page. */
+export function visibleNavModules(
+  product: FeatureProduct,
+  activeModuleIds: readonly string[],
+  supportedModuleIds: readonly string[],
+) {
   const active = new Set(activeModuleIds);
-  return FEATURE_MODULES.filter((module) => module.product === product && active.has(module.id))
-    .length;
+  const supported = new Set(supportedModuleIds);
+  return FEATURE_MODULES.filter(
+    (module) =>
+      module.product === product &&
+      module.navItem &&
+      !module.unavailable &&
+      (!supported.has(module.id) || active.has(module.id)),
+  );
+}
+
+export function isModuleNew(module: FeatureModule, now: Date = new Date()): boolean {
+  if (!module.launchedOn) return false;
+  const launched = Date.parse(`${module.launchedOn}T00:00:00Z`);
+  return now.getTime() >= launched && now.getTime() < launched + NEW_FOR_MS;
 }

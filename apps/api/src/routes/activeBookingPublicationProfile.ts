@@ -1,5 +1,6 @@
 import type { PublicBookabilityProfileProjection } from "@vayada/domain-distribution";
 import pg, { type QueryResultRow } from "pg";
+import { LIVE_PROMO_CODES_SQL } from "../domains/bookingGuestModules.js";
 
 import {
   ACTIVE_BOOKING_PUBLICATION_CONTRACT,
@@ -15,6 +16,7 @@ import {
 
 type CurrentPublicGatesRow = QueryResultRow & {
   referralEnabled: boolean;
+  promoCodes: boolean;
   latitude: number | null;
   longitude: number | null;
 };
@@ -161,7 +163,8 @@ async function currentActiveProfile(
                AND booking_resource.relationship IN ('owner', 'operator')
                AND booking_resource.status = 'active'
            )
-       ) AS "referralEnabled"`,
+       ) AS "referralEnabled",
+       ${LIVE_PROMO_CODES_SQL("$1::uuid")} AS "promoCodes"`,
     [row.propertyId],
   );
   const gates = result.rows[0];
@@ -179,6 +182,8 @@ async function currentActiveProfile(
       capabilities: {
         ...profile.hotel.capabilities,
         referralCodes: profile.hotel.capabilities.referralCodes && referralEnabled,
+        // Live, not from the publication: the Promos switch (VAY-2200) and codes made later.
+        promoCodes: gates?.promoCodes === true,
       },
       ...(branding
         ? {

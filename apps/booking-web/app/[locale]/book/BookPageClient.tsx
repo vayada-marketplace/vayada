@@ -246,10 +246,15 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     (a, b) => Number(b === "pay_at_property") - Number(a === "pay_at_property"),
   );
   const method = payment || (pagePaymentLoaded ? (defaultMethods[fallback] ?? "") : "");
+  // VAY-2200: without promo codes a code from an old link or draft is never sent.
+  const promoCodesEnabled = hotel?.promoCodesEnabled !== false;
+  const quotedPromoCode = promoCodesEnabled ? promoCode : "";
   const baseRequest =
-    rooms && method ? roomQuoteRequest(rooms, choices, checkIn, checkOut, method, promoCode) : null;
+    rooms && method
+      ? roomQuoteRequest(rooms, choices, checkIn, checkOut, method, quotedPromoCode)
+      : null;
   const roomsComplete =
-    !!rooms && !!roomQuoteRequest(rooms, choices, checkIn, checkOut, "card", promoCode);
+    !!rooms && !!roomQuoteRequest(rooms, choices, checkIn, checkOut, "card", quotedPromoCode);
   const addons = buildReplacementAddonSelection(
     addonCatalogue ?? [],
     baseRequest?.selection ?? null,
@@ -283,7 +288,10 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     setExtras(null);
     setFallback(0);
   };
-  const { quote, error, errorStatus, loading, submit } = useReplacementQuote(slug, request);
+  const { quote, error, errorStatus, errorCode, loading, submit } = useReplacementQuote(
+    slug,
+    request,
+  );
   const { formatPrice } = useCurrency();
   // The old pages' prices: the charged currency ("€410"), then any approximation.
   const money = (minor: string, currency: string) =>
@@ -450,6 +458,13 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const refused = !!errorStatus && errorStatus >= 400 && errorStatus < 500 && errorStatus !== 429;
   useEffect(() => {
     if (!error || !refused || quote) return;
+    // VAY-2200: the hotel switched promo codes or extras off meanwhile. Price again without them;
+    // the way to pay wasn't the problem.
+    if (errorCode === "PROMO_CODES_UNAVAILABLE" || errorCode === "ADDONS_UNAVAILABLE") {
+      if (errorCode === "PROMO_CODES_UNAVAILABLE") setPromoCode("");
+      else setExtras(null);
+      return;
+    }
     // A way to pay picked on Payment can only change there: before it, a refused one goes back
     // to the hotel's own order, starting with another way to pay.
     if (payment && step !== "payment") {
@@ -816,15 +831,17 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             >
               Add room
             </button>
-            <label className="block">
-              Promo code (optional)
-              <input
-                className={field}
-                value={promoCode}
-                maxLength={200}
-                onChange={(event) => setPromoCode(event.target.value)}
-              />
-            </label>
+            {promoCodesEnabled && (
+              <label className="block">
+                Promo code (optional)
+                <input
+                  className={field}
+                  value={promoCode}
+                  maxLength={200}
+                  onChange={(event) => setPromoCode(event.target.value)}
+                />
+              </label>
+            )}
             <p className="text-sm text-gray-600">
               We’ll check the price for your choices next. All rooms must use the same currency.
             </p>

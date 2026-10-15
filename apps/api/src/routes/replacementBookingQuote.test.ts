@@ -70,4 +70,51 @@ describe("replacement booking quote issuer", () => {
       statusCode: 404,
     });
   });
+
+  it("refuses new quotes with extras or a code the hotel switched off in Feature Hub (VAY-2200)", async () => {
+    const issue = vi.fn().mockRejectedValue(new PricingStorageError("stale"));
+    const switches = { addOns: false, promoCodes: false };
+    const guestModules = vi.fn(async () => switches);
+    const quote = createReplacementBookingQuoteIssuer({ issue }, [], guestModules);
+    const withSelection = (extra: Record<string, unknown>) => ({
+      ...request("card"),
+      selection: { ...selection, ...extra },
+    });
+    const extras = { addons: [{ id: "breakfast", quantity: 1, dates: null }] };
+
+    // A plain stay never reads the switches.
+    await expect(quote("hotel", request("card"), "key")).rejects.toMatchObject({ statusCode: 409 });
+    expect(guestModules).not.toHaveBeenCalled();
+
+    await expect(quote("hotel", withSelection(extras), "key")).rejects.toMatchObject({
+      statusCode: 422,
+      code: "ADDONS_UNAVAILABLE",
+    });
+    await expect(
+      quote("hotel", withSelection({ promoCode: "SUMMER" }), "key"),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: "PROMO_CODES_UNAVAILABLE",
+    });
+    expect(guestModules).toHaveBeenCalledWith("hotel");
+    expect(issue).toHaveBeenCalledTimes(1);
+
+    switches.addOns = true;
+    switches.promoCodes = true;
+    await expect(
+      quote("hotel", withSelection({ ...extras, promoCode: "SUMMER" }), "key"),
+    ).rejects.toMatchObject({ statusCode: 409, code: "QUOTE_REFRESH_REQUIRED" });
+    expect(issue).toHaveBeenCalledTimes(2);
+
+    // A failed switch read is a temporary outage, not a refusal; a hidden hotel stays a 404.
+    guestModules.mockRejectedValueOnce(new Error("database unavailable"));
+    await expect(quote("hotel", withSelection(extras), "key")).rejects.toMatchObject({
+      statusCode: 503,
+    });
+    guestModules.mockRejectedValueOnce(Object.assign(new Error("not found"), { statusCode: 404 }));
+    await expect(quote("hotel", withSelection(extras), "key")).rejects.toMatchObject({
+      statusCode: 404,
+    });
+    expect(issue).toHaveBeenCalledTimes(2);
+  });
 });

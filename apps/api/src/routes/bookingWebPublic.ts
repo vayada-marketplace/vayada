@@ -5,6 +5,7 @@ import {
 } from "../domains/activeBookingPublicationGate.js";
 import { createPublicQuoteGuestDisclosure } from "../domains/publicQuoteGuestDisclosure.js";
 import { createPublicPricingAddonCatalog } from "../domains/publicPricingAddonCatalog.js";
+import { readGuestModuleSwitches } from "../domains/bookingGuestModules.js";
 import {
   createPublicPricingStayPrices,
   parseStayPricesQuery,
@@ -1593,6 +1594,8 @@ export function createTargetBookingWebCheckoutAdapter(
     config.replacementPricingManualPaymentAcceptanceEnabled === true
       ? ["paypal", ...(config.bankTransfers ? ["bank_transfer"] : [])]
       : [],
+    async (slug) =>
+      readGuestModuleSwitches(pool, (await resolveTargetCheckoutProperty(pool, slug)).propertyId),
   );
   const serializeTargetChangeRequest = (row: TargetChangeRequestRow, enabled = false) =>
     serializeChangeRequest(
@@ -2980,7 +2983,8 @@ export async function loadTargetCheckoutConfig(
        bs.default_currency AS "defaultCurrency",
        bs.benefits,
        bs.last_minute_discount AS "promotionSettings",
-       bs.show_addons_step AS "showAddonsStep",
+       -- VAY-2200: the Feature Hub Add-ons switch hides the step like the page's own choice.
+       (bs.show_addons_step AND bs.addons_enabled) AS "showAddonsStep",
        (SELECT COALESCE(jsonb_agg(jsonb_build_object(
          'id', addon.id::text, 'name', addon.name, 'description', COALESCE(addon.description, ''),
          'price', addon.price_amount, 'currency', addon.currency, 'category', COALESCE(addon.category, 'other'),
@@ -2994,7 +2998,7 @@ export async function loadTargetCheckoutConfig(
        ) ORDER BY COALESCE((addon.metadata ->> 'sortOrder')::int, 0), addon.created_at, addon.id), '[]'::jsonb)
        FROM booking.addon_definitions addon WHERE addon.property_id = p.id
          AND addon.status = 'active' AND addon.public_visible
-         AND COALESCE(bs.show_addons_step, TRUE)) AS "publicAddons",
+         AND COALESCE(bs.show_addons_step AND bs.addons_enabled, TRUE)) AS "publicAddons",
        bs.group_addons_by_category AS "groupAddonsByCategory",
        bs.special_requests_enabled AS "specialRequestsEnabled",
        bs.arrival_time_enabled AS "arrivalTimeEnabled",
@@ -5282,6 +5286,13 @@ async function validateTargetPromo(
     occurredAt: Date;
   },
 ): Promise<Record<string, unknown>> {
+  // VAY-2200: the Feature Hub Promos switch; stored codes stay for when it is back on.
+  if (!(await readGuestModuleSwitches(pool, property.propertyId)).promoCodes)
+    return {
+      valid: false,
+      code: code.toUpperCase(),
+      message: "Promo codes aren't available at this hotel.",
+    };
   const promo = await loadTargetPromoDefinition(pool, property.propertyId, code);
   if (!promo) return { valid: false, code: code.toUpperCase(), message: "Invalid promo code." };
   const message = targetPromoValidationMessage(promo, {
