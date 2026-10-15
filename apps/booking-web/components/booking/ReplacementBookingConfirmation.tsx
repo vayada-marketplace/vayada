@@ -148,7 +148,7 @@ export default function ReplacementBookingConfirmation({
           : requestUnavailable
             ? "This hotel confirms each booking itself, and booking requests can’t be sent online yet. No room was reserved and no payment was taken."
             : cardUnavailable
-              ? "Paying by card online isn’t available right now. Get a new price with “Pay at property”. No room was reserved and no payment was taken."
+              ? "Paying by card online isn’t available right now. Get a new price with “Pay at the hotel”. No room was reserved and no payment was taken."
               : manualUnavailable
                 ? "Paying by bank transfer or PayPal isn’t available right now. Get a new price with another payment method. No room was reserved."
                 : unavailable
@@ -175,7 +175,14 @@ export default function ReplacementBookingConfirmation({
         <p>
           Please pay {displayQuoteMoney(amountMinor, currency)} by{" "}
           {method === "paypal" ? "PayPal" : "bank transfer"} by{" "}
-          {new Date(deadlineAt).toLocaleString()}. We’ll confirm your booking when your payment
+          {new Date(deadlineAt).toLocaleString("en-GB", {
+            weekday: "short",
+            day: "numeric",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+          . We’ll confirm your booking when your payment
           arrives. If it doesn’t arrive by then, the booking expires and the room is released.
         </p>
         <p>We sent the payment details to the email address you provided.</p>

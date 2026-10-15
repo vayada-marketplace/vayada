@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
 import StripeProvider from "@/components/StripeProvider";
 import { ApiError } from "@/services/api/client";
+import { deviceTimeOf } from "@/lib/serverClock";
 import {
   completePricingCardPayment,
   type PricingCardPaymentRequired,
@@ -104,13 +105,13 @@ function CardForm({
       <h3 className="text-lg font-semibold">{request ? "Authorise your card" : "Pay by card"}</h3>
       {request && (
         <p className="text-sm">
-          Your card is authorised now and charged only if the hotel accepts your request. The hotel
-          answers within 24 hours.
+          Your card is authorised now and charged only if we accept your request. We answer within
+          24 hours.
         </p>
       )}
       <p className="text-sm text-gray-600">
         Your rooms are held until{" "}
-        {new Date(required.payment.expiresAt).toLocaleTimeString([], {
+        {new Date(deviceTimeOf(required.payment.expiresAt)).toLocaleTimeString("en-GB", {
           hour: "2-digit",
           minute: "2-digit",
         })}

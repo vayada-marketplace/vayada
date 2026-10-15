@@ -72,6 +72,9 @@ test("finds a booking from the shared footer on mobile", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Your booking is confirmed!" })).toBeVisible();
   await expect(page.getByText("2× Alpine Suite")).toBeVisible();
   await expect(page.getByText("Suite 204, Suite 205")).toBeVisible();
+  // Stay dates read as days, not as raw YYYY-MM-DD.
+  await expect(page.getByText(/^Sat, 12 Sept? 2026, /)).toBeVisible();
+  await expect(page.getByText(/^Tue, 15 Sept? 2026, /)).toBeVisible();
   await expect(page.getByText("Payment Status")).toBeVisible();
   await expect(page.getByRole("link", { name: "Contact Property" })).toHaveAttribute(
     "href",
@@ -97,10 +100,11 @@ test("finds a booking from the shared footer on mobile", async ({ page }) => {
   await page.getByRole("link", { name: "Manage Booking" }).click();
   await expect(page).toHaveURL(/\/my-booking\?reference=VAY-1268$/);
   await expect(page.getByText("Booking Found")).toBeVisible();
+  await expect(page.getByText(/^Sat, 12 Sept? 2026, /)).toBeVisible();
 });
 
 for (const [paymentMethod, label] of [
-  ["pay_at_property", "Pay at Property"],
+  ["pay_at_property", "Pay at the hotel"],
   ["credit_card", "Credit Card"],
   ["bank_transfer", "Bank Transfer"],
   ["cash", "Cash"],
@@ -346,7 +350,7 @@ for (const status of ["pending", "confirmed"] as const) {
     await page.goto(`/confirmation?booking=VAY-1268&token=${confirmationToken}`);
     await expect(page.getByText("Bank transfer pending")).toBeVisible();
     await expect(page.getByText("IBAN: CH93 0076 2011 6238 5295 7")).toBeVisible();
-    await expect(page.getByText(/Payment deadline: Sep 2, 2026, 12:00 PM GMT\+2/)).toBeVisible();
+    await expect(page.getByText(/Payment deadline: 2 Sept? 2026, 12:00 (CEST|GMT\+2)/)).toBeVisible();
     await expect(page.getByText("Total Due")).toBeVisible();
   });
 }
