@@ -604,7 +604,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const missingDay = (addonCatalogue ?? []).find((addon) =>
     extras?.items.some((item) => item.id === addon.id && item.dates.length === 0),
   )?.name;
-  // A refused price can't be booked: the step says so above its buttons and doesn't continue.
+  // Each step continues with a price: a refused one says so above the step's buttons.
   const priceFailed = !!error && !quote;
   // The last price for these choices stays in the summary, struck through, once it has run out.
   const summaryQuote =
@@ -924,7 +924,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                   <button
                     type="button"
                     className={button}
-                    disabled={addons === null || priceFailed}
+                    disabled={addons === null || !quote}
                     onClick={() => go(next)}
                   >
                     {addonError ? "Continue without extras" : "Continue to your details"}
@@ -983,7 +983,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                 <button
                   type="button"
                   className={button}
-                  disabled={!detailsComplete || priceFailed}
+                  disabled={!detailsComplete || !quote}
                   onClick={() => go(next)}
                 >
                   Continue to payment
