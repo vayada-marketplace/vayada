@@ -36,11 +36,11 @@
     padding: var(--page-padding-y) var(--page-padding-x);
   }
 
+  /* The header owns the gap to the first section, whatever space-y / mt-* either side has. */
   .page-header {
-    margin-bottom: var(--page-header-gap);
+    margin-bottom: var(--page-header-gap) !important;
   }
 
-  /* The header owns the gap to the first section, whatever space-y / mt-* that section has. */
   .page-header + * {
     margin-top: 0 !important;
   }

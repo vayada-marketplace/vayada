@@ -94,6 +94,8 @@ function orderAddons(addons: AddonItem[]): AddonItem[] {
 }
 
 interface AddonsTabProps {
+  /** Shown right under the page header (e.g. the save message), so the title never moves. */
+  banner?: React.ReactNode;
   addons: AddonItem[];
   addonSettings: AddonSettings;
   propertyCurrency: string;
@@ -111,6 +113,7 @@ interface AddonsTabProps {
 }
 
 export default function AddonsTab({
+  banner,
   addons,
   addonSettings,
   propertyCurrency,
@@ -299,6 +302,7 @@ export default function AddonsTab({
           </button>
         }
       />
+      {banner}
 
       {currencyMissing && (
         <div

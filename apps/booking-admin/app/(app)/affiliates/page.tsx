@@ -10,7 +10,7 @@ export default function AffiliatesPage() {
     <PageLayout>
       <section className="max-w-3xl space-y-4">
         <PageHeader title={t("admin.affiliateManagementIsUnavailable")} />
-        <Link href="/" className="text-sm font-medium text-primary-700 underline">
+        <Link href="/" className="block w-fit text-sm font-medium text-primary-700 underline">
           {t("layout.sidebar.dashboard")}
         </Link>
       </section>

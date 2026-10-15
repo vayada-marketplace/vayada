@@ -100,12 +100,15 @@ export default function NearbyEditor({
   );
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
-        <div className="min-w-0">
+      {/* page-header: Booking Admin's shared header spacing (VAY-2199). */}
+      <div className="page-header flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
           <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">
             Location & surroundings
           </h1>
-          <p className="mt-1 text-[13px] text-gray-500">{profile.profile.displayName}</p>
+          <p className="mt-[var(--page-subtitle-gap,4px)] text-[13px] text-gray-500">
+            {profile.profile.displayName}
+          </p>
         </div>
         <button
           className={button}

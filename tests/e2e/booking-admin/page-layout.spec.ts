@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
+  BOOKING_ADMIN_ADDON_SETTINGS_PATH,
   BOOKING_ADMIN_PROPERTY_ID,
   mockBookingAdminBookingFlow,
   mockBookingAdminDesignSettings,
@@ -26,9 +27,9 @@ const SUB_PAGES = [
   "/settings/guest-form",
   "/settings/location",
 ];
-// Pages whose header comes from a shared package rather than PageHeader: same title style, own
+// Feature Hub's header comes from the shared @vayada/feature-hub page: same title style, its own
 // spacing below the header.
-const PACKAGE_HEADERS = new Set(["/settings/feature-hub", "/settings/location"]);
+const PACKAGE_HEADERS = new Set(["/settings/feature-hub"]);
 const SUBTITLE_GAP = 4;
 const HEADER_GAP = 24;
 
@@ -166,4 +167,22 @@ test("the title stays put while clicking through the sidebar", async ({ page }) 
     await expect(title).not.toHaveText(previous);
     expect(await titlePosition(page), label).toEqual(start);
   }
+});
+
+test("a save message appears under the header without moving the title", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockPages(page);
+  await page.route(`**${BOOKING_ADMIN_ADDON_SETTINGS_PATH}*`, (route) =>
+    route.request().method() === "PUT"
+      ? route.fulfill({ status: 500, json: { detail: "Unavailable" } })
+      : route.fallback(),
+  );
+  await page.goto("/add-ons");
+  const before = await titlePosition(page);
+
+  await page.getByRole("switch", { name: /Group by Category/ }).click();
+  // The message shows for 3 seconds, right below the header.
+  await expect(page.getByText("Failed to update setting", { exact: true })).toBeVisible();
+  expect(await titlePosition(page)).toEqual(before);
+  expect((await headerMetrics(page)).sectionGap).toBe(HEADER_GAP);
 });
