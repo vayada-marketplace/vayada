@@ -476,3 +476,95 @@ test.describe("booking-admin add-ons settings cutover", () => {
     await assertHealthy();
   });
 });
+
+// VAY-2141: add-on prices use the hotel's pricing currency, which only setup's Pricing step
+// sets. Without it the editor opened with "Price per booking ()" and failed at the bottom.
+test("asks for the hotel currency before add-ons can be created", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await mockBookingAdminBookingFlow(page);
+  let propertyCurrency: string | undefined;
+  const writes: string[] = [];
+  await page.route(`**${BOOKING_ADMIN_ADDON_ITEMS_PATH}**`, async (route) => {
+    if (route.request().method() !== "GET") {
+      writes.push(route.request().method());
+      return route.fulfill({ status: 500, json: {} });
+    }
+    return route.fulfill({
+      json: {
+        addonItems: [
+          {
+            hotelId: BOOKING_ADMIN_HOTEL_ID,
+            propertyId: "property_alpenrose",
+            addonItemId: "addon_transfer",
+            name: "Airport transfer",
+            description: "Pick-up from the airport.",
+            price: "2500.00",
+            currency: "LKR",
+            category: "transport",
+            imageUrl: null,
+            duration: null,
+            maxQuantity: 1,
+            pricingModel: "per_stay",
+            publicVisible: true,
+            status: "active",
+            sortOrder: 0,
+            ownershipKind: "property",
+            partnerCommissionRate: null,
+            createdAt: "2026-06-01T10:00:00.000Z",
+            updatedAt: "2026-06-01T10:00:00.000Z",
+          },
+        ],
+        ...(propertyCurrency ? { propertyCurrency } : {}),
+        propertyPlan: {
+          propertyId: "property_alpenrose",
+          plan: "fixed",
+          limits: { maxRoomPhotosPerType: 10, maxAddons: 9, guestContactAccess: "always" },
+        },
+      },
+    });
+  });
+
+  await page.goto("/add-ons");
+  const notice = page
+    .getByRole("status")
+    .filter({ hasText: "Set your hotel's currency before adding add-ons." });
+  await expect(notice).toBeVisible();
+  const href = new URL(
+    (await notice.getByRole("link", { name: "Set currency" }).getAttribute("href")) ?? "",
+  );
+  expect(href.pathname).toBe("/setup");
+  expect(Object.fromEntries(href.searchParams)).toMatchObject({
+    entryProduct: "booking",
+    returnProduct: "booking",
+    returnTo: "/add-ons",
+    propertyId: "property_alpenrose",
+    step: "pricing",
+  });
+  await expect(
+    page.getByText("1 add-on · 1 live on your booking engine", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "New add-on" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Duplicate Airport transfer" })).toBeDisabled();
+  await testInfo.attach("addons-no-currency", {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+
+  // A saved add-on still shows its price in its own currency, but can't be repriced yet.
+  await expect(
+    page.getByTestId("booking-addon-item-addon_transfer").getByText(/LKR\s*2,500\.00/),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit Airport transfer" })).toBeDisabled();
+  await expect(page.getByRole("switch", { name: /Airport transfer/ })).toBeEnabled();
+  expect(writes).toEqual([]);
+
+  propertyCurrency = "LKR";
+  await page.reload();
+  await expect(page.getByRole("button", { name: "New add-on" })).toBeEnabled();
+  await expect(notice).toHaveCount(0);
+  await expect(
+    page.getByText("1 add-on · 1 live on your booking engine · prices in LKR"),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "New add-on" }).click();
+  await expect(page.getByRole("dialog").getByLabel(/^Price per booking \(LKR\) \*/)).toBeVisible();
+});

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { stripeOnboardingPropertyKey } from "../../../apps/booking-admin/lib/utils/stripeOnboardingRefresh";
 import {
   BOOKING_ADMIN_CUSTOM_DOMAIN_PATH,
@@ -1154,7 +1154,9 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     expect(order).toEqual(["save"]);
     expect(accountCreates).toBe(1);
-    await expect(page.getByText("Failed to save")).toBeVisible();
+    await expect(
+      page.getByText("Could not save payment settings. Please try again."),
+    ).toBeVisible();
     await expect(page).toHaveURL(/\/settings\/payments$/);
   });
 
@@ -1480,4 +1482,181 @@ test("saves direct-only transfers while retaining an existing hosted provider", 
       { exact: true },
     ),
   ).toBeVisible();
+});
+
+// VAY-2185: setup saves plain Pay at Hotel (no Cash/Card choice); Booking Admin showed nothing
+// picked and every Save failed in the browser with "Failed to save".
+function financePaymentSettings(acceptedMethods: string[], paymentsEnabled = true) {
+  return {
+    contractVersion: "finance-route-contracts.v1",
+    propertyId: BOOKING_ADMIN_PROPERTY_ID,
+    paymentSettings: {
+      paymentsEnabled,
+      paymentProvider: "manual",
+      acceptedMethods,
+      defaultCurrency: "EUR",
+      supportedCurrencies: ["EUR"],
+      depositPolicy: {},
+      requiresManualReview: false,
+      providerAccount: {
+        providerAccountId: null,
+        provider: null,
+        status: "not_configured",
+        onboardingStatus: "not_started",
+        chargesEnabled: false,
+        payoutsEnabled: false,
+        capabilities: [],
+      },
+    },
+  };
+}
+
+async function mockPaymentWrites(
+  page: Page,
+  acceptedMethods: string[],
+  responses: Array<{ status: number; json: Record<string, unknown> }> = [],
+  paymentsEnabled = true,
+) {
+  await mockBookingAdminAuthenticatedSession(page);
+  await mockBookingAdminShellRoutes(page);
+  const writes: Array<{ acceptedMethods: string[] }> = [];
+  await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH}`, async (route) => {
+    if (route.request().method() === "PATCH") {
+      const body = route.request().postDataJSON() as {
+        paymentSettings: { acceptedMethods: string[] };
+      };
+      writes.push({ acceptedMethods: body.paymentSettings.acceptedMethods });
+      const response = responses.shift();
+      if (response) return route.fulfill(response);
+      return route.fulfill({ json: financePaymentSettings(body.paymentSettings.acceptedMethods) });
+    }
+    return route.fulfill({ json: financePaymentSettings(acceptedMethods, paymentsEnabled) });
+  });
+  return writes;
+}
+
+const savePaymentsButton = (page: Page) =>
+  page.getByRole("button", { name: "Save Changes", exact: true });
+
+test("keeps setup's plain Pay at Hotel when it is saved untouched", async ({ page }, testInfo) => {
+  const assertHealthy = watchPageHealth(page, testInfo);
+  const writes = await mockPaymentWrites(page, ["pay_at_property"]);
+  await page.goto("/settings/payments");
+  await expect(page.getByRole("button", { name: "Cash", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByRole("button", { name: "Card", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();
+  await testInfo.attach("settings-payments-plain-pay-at-hotel", {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+  await savePaymentsButton(page).click();
+  await expect(page.getByText("Payment settings saved").first()).toBeVisible();
+  expect(writes).toEqual([{ acceptedMethods: ["pay_at_property"] }]);
+
+  // Off and on again still shows Cash and Card, so nothing changed.
+  await page.getByText("Pay at Hotel", { exact: true }).click();
+  await page.getByText("Pay at Hotel", { exact: true }).click();
+  await savePaymentsButton(page).click();
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes[1]).toEqual({ acceptedMethods: ["pay_at_property"] });
+
+  // A changed choice is sent as shown.
+  await page.getByRole("button", { name: "Card", exact: true }).click();
+  await savePaymentsButton(page).click();
+  await expect.poll(() => writes.length).toBe(3);
+  expect(writes[2]).toEqual({ acceptedMethods: ["pay_at_property", "cash"] });
+  await assertHealthy();
+});
+
+test("re-sends Cash and Card once when Finance needs the Pay at Hotel choice", async ({ page }) => {
+  const writes = await mockPaymentWrites(
+    page,
+    ["pay_at_property"],
+    [
+      {
+        status: 400,
+        json: {
+          statusCode: 400,
+          code: "invalid_command",
+          category: "validation",
+          message: "Pay at Hotel requires cash, card, or both.",
+        },
+      },
+    ],
+  );
+  await page.goto("/settings/payments");
+  await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();
+  await savePaymentsButton(page).click();
+  await expect(page.getByText("Payment settings saved").first()).toBeVisible();
+  expect(writes).toEqual([
+    { acceptedMethods: ["pay_at_property"] },
+    { acceptedMethods: ["pay_at_property", "cash", "manual_card"] },
+  ]);
+});
+
+test("starts a newly switched-on Pay at Hotel with Cash and Card", async ({ page }) => {
+  const writes = await mockPaymentWrites(page, [], [], false);
+  await page.goto("/settings/payments");
+  await expect(page.getByRole("heading", { name: "Payment Methods" })).toBeVisible();
+  await page.getByText("Pay at Hotel", { exact: true }).click();
+  await expect(page.getByText("Cash & Card accepted", { exact: true })).toBeVisible();
+  await savePaymentsButton(page).click();
+  await expect(page.getByText("Payment settings saved").first()).toBeVisible();
+  expect(writes).toEqual([{ acceptedMethods: ["pay_at_property", "cash", "manual_card"] }]);
+});
+
+test("says what went wrong when payments don't save, and offers Try again", async ({
+  page,
+}, testInfo) => {
+  const writes = await mockPaymentWrites(
+    page,
+    ["pay_at_property", "cash"],
+    [
+      {
+        status: 409,
+        json: {
+          statusCode: 409,
+          code: "property_currency_conflict",
+          category: "conflict",
+          message: "Payment currency changed to LKR. Reload before saving.",
+        },
+      },
+      {
+        status: 503,
+        json: {
+          statusCode: 503,
+          code: "write_model_unavailable",
+          category: "write_model",
+          message: "Finance is unavailable.",
+        },
+      },
+    ],
+  );
+  await page.goto("/settings/payments");
+  await expect(page.getByText("Cash only", { exact: true })).toBeVisible();
+  await savePaymentsButton(page).click();
+  const banner = page.getByRole("alert").filter({ hasText: "Your hotel's currency changed." });
+  await expect(banner).toHaveText(
+    "Your hotel's currency changed. Reload the page, then save again.",
+  );
+  await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(0);
+
+  await savePaymentsButton(page).click();
+  await expect(
+    page.getByText("Could not save payment settings. Please try again.").first(),
+  ).toBeVisible();
+  await testInfo.attach("settings-payments-save-error", {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByText("Payment settings saved").first()).toBeVisible();
+  expect(writes).toHaveLength(3);
+  await expect(page.getByText("Failed to save", { exact: true })).toHaveCount(0);
 });
