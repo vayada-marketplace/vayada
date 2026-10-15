@@ -149,6 +149,12 @@ describe.skipIf(!TEST_DATABASE_URL)("Booking Engine module switches (runtime log
       addOns: true,
       promoCodes: false,
     });
+    // Guests get no extras while the Add-ons page hides its step, even with the module on.
+    await admin.query(
+      "UPDATE booking.booking_settings SET show_addons_step = FALSE WHERE property_id = $1::uuid",
+      [withSettings],
+    );
+    expect(await readGuestModuleSwitches(admin, withSettings)).toMatchObject({ addOns: false });
   });
 
   it("switches nothing and audits nothing for a property without booking settings", async () => {
