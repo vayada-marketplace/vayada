@@ -1,11 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
+  BOOKING_ADMIN_ADDON_SETTINGS_PATH,
   BOOKING_ADMIN_PROPERTY_ID,
   mockBookingAdminBookingFlow,
   mockBookingAdminDesignSettings,
 } from "../support/bookingAdminMocks";
 
-// VAY-2199: every page renders in one shared frame, so the title never jumps between pages.
+// VAY-2199: every page renders in one shared frame and header, so the title never jumps between
+// pages and the title, subtitle and first section are spaced the same everywhere.
 const TOP_LEVEL = [
   "/dashboard",
   "/design-studio",
@@ -21,8 +23,15 @@ const SUB_PAGES = [
   "/settings/general",
   "/settings/payments",
   "/settings/book-direct-benefits",
+  "/settings/room-filters",
+  "/settings/guest-form",
   "/settings/location",
 ];
+// Feature Hub's header comes from the shared @vayada/feature-hub page: same title style, its own
+// spacing below the header.
+const PACKAGE_HEADERS = new Set(["/settings/feature-hub"]);
+const SUBTITLE_GAP = 4;
+const HEADER_GAP = 24;
 
 // `padding` is the page token at that width. Wider than the 1280px frame, the frame is centred in
 // <main>, whose inner width depends on the scrollbar gutter: (1920 - 208 sidebar - gutter - 1280) / 2.
@@ -67,6 +76,39 @@ async function titlePosition(page: Page) {
   });
 }
 
+/** Title style, title → subtitle gap and header → first section gap (null when absent). */
+async function headerMetrics(page: Page) {
+  return page
+    .locator("main h1")
+    .first()
+    .evaluate((h1) => {
+      const style = getComputedStyle(h1);
+      const subtitle = h1.nextElementSibling;
+      const header = h1.closest(".page-header");
+      let section = header?.nextElementSibling ?? null;
+      while (
+        section &&
+        ((section as HTMLElement).offsetHeight === 0 ||
+          ["fixed", "absolute"].includes(getComputedStyle(section).position))
+      )
+        section = section.nextElementSibling;
+      const top = (element: Element) => element.getBoundingClientRect().top;
+      const bottom = (element: Element) => element.getBoundingClientRect().bottom;
+      return {
+        font: `${style.fontSize}/${style.fontWeight}`,
+        subtitleGap: subtitle?.tagName === "P" ? Math.round(top(subtitle) - bottom(h1)) : null,
+        sectionGap: header && section ? Math.round(top(section) - bottom(header)) : null,
+      };
+    });
+}
+
+async function expectHeaderStyle(page: Page, route: string, viewportWidth: number) {
+  const { font, subtitleGap, sectionGap } = await headerMetrics(page);
+  expect(font, route).toBe(viewportWidth >= 768 ? "24px/600" : "20px/600");
+  if (subtitleGap !== null) expect(subtitleGap, `${route} subtitle`).toBe(SUBTITLE_GAP);
+  if (!PACKAGE_HEADERS.has(route)) expect(sectionGap, `${route} first section`).toBe(HEADER_GAP);
+}
+
 /** Where the frame puts the title: centred within <main>'s inner width, then padded. */
 async function expectedTitleX(page: Page, padding: number) {
   const innerWidth = await page.locator("main").evaluate((main) => main.clientWidth);
@@ -76,7 +118,7 @@ async function expectedTitleX(page: Page, padding: number) {
 for (const viewport of VIEWPORTS) {
   test(`every page title starts at the same place at ${viewport.width}px`, async ({ page }) => {
     // One test walks every page, so allow for a dev server compiling each route once.
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await mockPages(page);
 
@@ -88,6 +130,7 @@ for (const viewport of VIEWPORTS) {
     for (const route of TOP_LEVEL) {
       await page.goto(route);
       expect(await titlePosition(page), route).toEqual({ x, y: viewport.padding });
+      await expectHeaderStyle(page, route, viewport.width);
     }
 
     let subPageY: number | undefined;
@@ -97,6 +140,7 @@ for (const viewport of VIEWPORTS) {
       expect(position.x, route).toBe(x);
       subPageY ??= position.y;
       expect(position.y, route).toBe(subPageY);
+      await expectHeaderStyle(page, route, viewport.width);
     }
     expect(subPageY).toBeGreaterThan(viewport.padding);
   });
@@ -123,4 +167,22 @@ test("the title stays put while clicking through the sidebar", async ({ page }) 
     await expect(title).not.toHaveText(previous);
     expect(await titlePosition(page), label).toEqual(start);
   }
+});
+
+test("a save message appears under the header without moving the title", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockPages(page);
+  await page.route(`**${BOOKING_ADMIN_ADDON_SETTINGS_PATH}*`, (route) =>
+    route.request().method() === "PUT"
+      ? route.fulfill({ status: 500, json: { detail: "Unavailable" } })
+      : route.fallback(),
+  );
+  await page.goto("/add-ons");
+  const before = await titlePosition(page);
+
+  await page.getByRole("switch", { name: /Group by Category/ }).click();
+  // The message shows for 3 seconds, right below the header.
+  await expect(page.getByText("Failed to update setting", { exact: true })).toBeVisible();
+  expect(await titlePosition(page)).toEqual(before);
+  expect((await headerMetrics(page)).sectionGap).toBe(HEADER_GAP);
 });

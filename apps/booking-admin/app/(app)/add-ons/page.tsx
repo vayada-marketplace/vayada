@@ -391,10 +391,8 @@ export default function AddonsPage() {
 
   return (
     <PageLayout>
-      {feedback && (
-        <FeedbackAlert type={feedback.type} message={feedback.message} className="mb-4" />
-      )}
       <AddonsTab
+        banner={feedback && <FeedbackAlert type={feedback.type} message={feedback.message} />}
         addons={addons}
         addonSettings={addonSettings}
         propertyCurrency={addonCurrency}

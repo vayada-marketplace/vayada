@@ -20,6 +20,7 @@ import {
 import { ToggleSwitch } from "@/components/ui";
 import type { AddonItem, AddonSettings } from "@/services/settings";
 import { cn, formatCurrency } from "@/lib/utils";
+import { PageHeader } from "@/components/layout/PageLayout";
 
 const MARKETPLACE_FRONTEND_URL =
   process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://app.vayada.com";
@@ -93,6 +94,8 @@ function orderAddons(addons: AddonItem[]): AddonItem[] {
 }
 
 interface AddonsTabProps {
+  /** Shown right under the page header (e.g. the save message), so the title never moves. */
+  banner?: React.ReactNode;
   addons: AddonItem[];
   addonSettings: AddonSettings;
   propertyCurrency: string;
@@ -110,6 +113,7 @@ interface AddonsTabProps {
 }
 
 export default function AddonsTab({
+  banner,
   addons,
   addonSettings,
   propertyCurrency,
@@ -271,35 +275,34 @@ export default function AddonsTab({
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">
-            {t("bookingFlow.tabs.addons")}
-          </h1>
-          <p className="mt-1 text-[13px] text-gray-500">
-            {currencyMissing
-              ? t(
-                  addons.length === 1
-                    ? "addons.list.summaryOneNoCurrency"
-                    : "addons.list.summaryNoCurrency",
-                  { count: addons.length, live: liveCount },
-                )
-              : t(addons.length === 1 ? "addons.list.summaryOne" : "addons.list.summary", {
-                  count: addons.length,
-                  live: liveCount,
-                  currency: propertyCurrency,
-                })}
-          </p>
-        </div>
-        <button
-          onClick={openCreateEditor}
-          disabled={addonLimitReached || currencyMissing}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2 text-[13px] font-medium text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <PlusIcon className="h-4 w-4" />
-          {t("addons.list.new")}
-        </button>
-      </div>
+      <PageHeader
+        title={t("bookingFlow.tabs.addons")}
+        subtitle={
+          currencyMissing
+            ? t(
+                addons.length === 1
+                  ? "addons.list.summaryOneNoCurrency"
+                  : "addons.list.summaryNoCurrency",
+                { count: addons.length, live: liveCount },
+              )
+            : t(addons.length === 1 ? "addons.list.summaryOne" : "addons.list.summary", {
+                count: addons.length,
+                live: liveCount,
+                currency: propertyCurrency,
+              })
+        }
+        actions={
+          <button
+            onClick={openCreateEditor}
+            disabled={addonLimitReached || currencyMissing}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2 text-[13px] font-medium text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <PlusIcon className="h-4 w-4" />
+            {t("addons.list.new")}
+          </button>
+        }
+      />
+      {banner}
 
       {currencyMissing && (
         <div

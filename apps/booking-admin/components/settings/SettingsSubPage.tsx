@@ -3,15 +3,14 @@
 import { Fragment } from "react";
 import Link from "next/link";
 import { useTranslation } from "@/lib/i18n";
-import { PageLayout } from "@/components/layout/PageLayout";
+import { PageHeader, PageLayout } from "@/components/layout/PageLayout";
 
 /** Page shell for a Settings card: a breadcrumb back to the card grid and the page title. */
 export function SettingsSubPage({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <PageLayout>
       <div className="max-w-3xl">
-        <SettingsBreadcrumb current={title} />
-        <h1 className="mt-2 text-xl font-semibold text-gray-900 md:text-2xl">{title}</h1>
+        <PageHeader breadcrumb={<SettingsBreadcrumb current={title} />} title={title} />
         {children}
       </div>
     </PageLayout>
