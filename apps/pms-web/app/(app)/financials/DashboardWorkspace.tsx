@@ -216,9 +216,9 @@ function Dashboard({ data, locale }: { data: FinanceDashboardResponse; locale: s
       {isZero ? (
         <section className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center">
           <ChartBarIcon className="mx-auto h-8 w-8 text-gray-400" aria-hidden="true" />
-          <h2 className="mt-3 text-base font-semibold text-gray-900">
+          <h3 className="mt-3 text-base font-semibold text-gray-900">
             No financial activity for this period
-          </h2>
+          </h3>
           <p className="mt-1 text-sm text-gray-600">
             Transactions will appear here once this property has recorded activity.
           </p>
@@ -288,7 +288,7 @@ function DailyChart({
   return (
     <section className="overflow-x-auto rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
       <div>
-        <h2 className="text-base font-semibold text-gray-900">Last 14 days</h2>
+        <h3 className="text-base font-semibold text-gray-900">Last 14 days</h3>
         <p className="mt-1 text-sm text-gray-600">Revenue and expenses in property currency.</p>
       </div>
       <div
@@ -334,7 +334,7 @@ function UpcomingTransactions({
 }) {
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-      <h2 className="text-base font-semibold text-gray-900">Upcoming transactions</h2>
+      <h3 className="text-base font-semibold text-gray-900">Upcoming transactions</h3>
       <div className="mt-4 max-h-[30rem] space-y-3 overflow-y-auto pr-1">
         {data.upcoming.length ? (
           data.upcoming.map((entry) => (
@@ -405,7 +405,7 @@ function StatusPanel({
   return (
     <section className="mt-6 rounded-xl border border-gray-200 bg-white p-8 text-center">
       <ExclamationTriangleIcon className="mx-auto h-8 w-8 text-gray-400" aria-hidden="true" />
-      <h2 className="mt-3 text-base font-semibold text-gray-900">{copy[0]}</h2>
+      <h3 className="mt-3 text-base font-semibold text-gray-900">{copy[0]}</h3>
       <p className="mx-auto mt-1 max-w-md text-sm text-gray-600">{copy[1]}</p>
       {kind === "error" && (
         <button

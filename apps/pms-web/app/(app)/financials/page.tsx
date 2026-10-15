@@ -270,9 +270,9 @@ export default function FinancialsPage() {
                 onSubmit={create}
                 className="grid gap-3 rounded-xl border border-gray-200 bg-white p-4 sm:grid-cols-2"
               >
-                <h2 className="sm:col-span-2 text-base font-semibold text-gray-900">
+                <h3 className="sm:col-span-2 text-base font-semibold text-gray-900">
                   Prepare a folio
-                </h2>
+                </h3>
                 <fieldset disabled={saving} className="contents">
                   <Field
                     label="Guest or recipient"
@@ -410,9 +410,9 @@ export default function FinancialsPage() {
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-lg font-semibold text-gray-900">
+                    <h3 className="text-lg font-semibold text-gray-900">
                       Folio {selected.folioId.slice(0, 8)}
-                    </h2>
+                    </h3>
                     <p className="text-sm text-gray-600">
                       {selected.recipient.name}
                       {selected.recipient.email ? ` · ${selected.recipient.email}` : ""}
@@ -436,7 +436,7 @@ export default function FinancialsPage() {
                   />
                   <Definition label="Total" value={money(selected.total)} />
                 </dl>
-                <h3 className="mt-5 font-semibold text-gray-900">Line items</h3>
+                <h4 className="mt-5 font-semibold text-gray-900">Line items</h4>
                 <ul className="mt-2 space-y-2">
                   {selected.lines.map((line) => (
                     <li
@@ -453,7 +453,7 @@ export default function FinancialsPage() {
                     </li>
                   ))}
                 </ul>
-                <h3 className="mt-5 font-semibold text-gray-900">Payment references</h3>
+                <h4 className="mt-5 font-semibold text-gray-900">Payment references</h4>
                 {selected.paymentRefs.length ? (
                   <ul className="mt-2 space-y-2">
                     {selected.paymentRefs.map((payment) => (
