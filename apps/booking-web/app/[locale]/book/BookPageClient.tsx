@@ -56,6 +56,7 @@ import {
   type BookStep,
 } from "@/lib/bookFlow";
 import { useReplacementQuote } from "@/lib/hooks/useReplacementQuote";
+import { serverNow } from "@/lib/serverClock";
 import { bookingService } from "@/services/api/booking";
 import {
   saveGuestDetails,
@@ -445,11 +446,21 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     // submit belongs to this request.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(request), step, quote, loading, error]);
+  // Only a refusal of this price moves on; a failed request can be tried again.
+  const refused = !!errorStatus && errorStatus >= 400 && errorStatus < 500 && errorStatus !== 429;
   useEffect(() => {
-    // Only a refusal of this price moves on; a failed request keeps the guest's default.
-    const refused = !!errorStatus && errorStatus >= 400 && errorStatus < 500 && errorStatus !== 429;
-    if (error && refused && !quote && !payment && fallback + 1 < defaultMethods.length)
-      setFallback((value) => value + 1);
+    if (!error || !refused || quote) return;
+    // A way to pay picked on Payment can only change there: before it, a refused one goes back
+    // to the hotel's own order, starting with another way to pay.
+    if (payment && step !== "payment") {
+      setPayment("");
+      setFallback(
+        Math.max(
+          0,
+          defaultMethods.findIndex((value) => value !== payment),
+        ),
+      );
+    } else if (!payment && fallback + 1 < defaultMethods.length) setFallback((value) => value + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [error]);
   // A room card's hand-off goes back to the cards; the room form goes back to itself.
@@ -595,13 +606,23 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   )?.name;
   // A refused price can't be booked: the step says so above its buttons and doesn't continue.
   const priceFailed = !!error && !quote;
+  // The last price for these choices stays in the summary, struck through, once it has run out.
   const summaryQuote =
-    quote ?? (priceFailed && seenQuote?.identity === requestIdentity ? seenQuote.quote : undefined);
+    quote ??
+    (priceFailed &&
+    seenQuote?.identity === requestIdentity &&
+    Date.parse(seenQuote.quote.expiresAt) <= serverNow()
+      ? seenQuote.quote
+      : undefined);
   const priceNotice = error && !quote && (
     <Notice
       tone="red"
       title={error}
-      action={{ label: "Choose another room", onClick: backToRooms }}
+      action={
+        refused
+          ? { label: "Choose another room", onClick: backToRooms }
+          : { label: "Try again", onClick: submit }
+      }
     >
       No booking was made and nothing was charged.
     </Notice>

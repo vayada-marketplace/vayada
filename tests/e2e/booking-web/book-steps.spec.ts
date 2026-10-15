@@ -78,12 +78,19 @@ async function mockFlow(page: Page, { extras = true } = {}) {
   );
   const quotes = new Map<string, { issuedAt: string; expiresAt: string }>();
   const unit: Record<string, number> = { [breakfast]: 1800, [lateCheckOut]: 3000 };
-  // A test can refuse the next prices or make them run out quickly.
-  const prices = { refuse: false, lastsMs: 600_000 };
+  // A test can refuse the next prices (all of them, or one way to pay's), fail them with another
+  // status, or make them run out quickly.
+  const prices = {
+    refuse: false as boolean | string,
+    status: 422,
+    lastsMs: 600_000,
+    asked: [] as string[],
+  };
   await page.route("**/bookings/quote", (route) => {
-    if (prices.refuse)
-      return route.fulfill({ status: 422, json: { detail: "Room is not available." } });
     const { selection, paymentMethod } = route.request().postDataJSON();
+    prices.asked.push(paymentMethod);
+    if (prices.refuse === true || prices.refuse === paymentMethod)
+      return route.fulfill({ status: prices.status, json: { detail: "Room is not available." } });
     const quoteId = `55555555-5555-4555-8555-${String(quotes.size + 1).padStart(12, "0")}`;
     const times = {
       issuedAt: new Date(Date.now() - 1000).toISOString(),
@@ -329,7 +336,10 @@ test("a selection we can't price stops at Extras, above the buttons", async ({ p
   await expect(page).toHaveURL(/[?&]step=extras/);
   const notice = page.getByRole("alert").filter({ hasText: "We couldn't price this selection" });
   const next = page.getByRole("button", { name: "Continue to your details" });
+  // Paying at the hotel is refused, then paying by card: only then does the notice stay.
+  await expect.poll(() => prices.asked.includes("card")).toBe(true);
   await expect(notice).toBeVisible();
+  await expect(notice.getByRole("button", { name: "Choose another room" })).toBeVisible();
   await expect(next).toBeDisabled();
   expect((await notice.boundingBox())!.y).toBeLessThan((await next.boundingBox())!.y);
   // Another choice is priced again and the step continues.
@@ -368,4 +378,39 @@ test("a refused updated price keeps the stay on the payment step", async ({ page
   await expect(
     page.getByRole("complementary", { name: "Order Summary" }).getByText(/This price expired at/),
   ).toBeVisible();
+});
+
+test("a price that failed to load can be tried again", async ({ page }) => {
+  const { prices } = await mockFlow(page);
+  Object.assign(prices, { refuse: true, status: 503 });
+  await page.goto(STAY);
+  const notice = page.getByRole("alert").filter({ hasText: "We couldn't price this selection" });
+  await expect(notice).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continue to your details" })).toBeDisabled();
+  prices.refuse = false;
+  await notice.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByRole("status", { name: "Your stay total" })).toContainText("€268");
+  await expect(page.getByRole("button", { name: "Continue to your details" })).toBeEnabled();
+});
+
+test("a way to pay the new choices don't take goes back to the hotel's own", async ({ page }) => {
+  const { prices } = await mockFlow(page);
+  await page.goto(STAY);
+  await page.getByRole("button", { name: "Continue to your details" }).click();
+  await fillGuestDetails(page);
+  await page.getByRole("button", { name: "Continue to payment" }).click();
+  await paymentOption(page, "card").click();
+  await expect(orderTotal(page)).toHaveText("€268");
+  // Back at Extras, the new choice can't be paid by card: it is priced to pay at the hotel.
+  prices.refuse = "card";
+  await page.getByRole("button", { name: "Back to your details" }).click();
+  await page.getByRole("button", { name: "Back to extras" }).click();
+  await page
+    .getByRole("region", { name: "Optional extras" })
+    .getByRole("button", { name: "Add Garden breakfast" })
+    .click();
+  await expect(page.getByRole("status", { name: "Your stay total" })).toContainText("€340");
+  await page.getByRole("button", { name: "Continue to your details" }).click();
+  await page.getByRole("button", { name: "Continue to payment" }).click();
+  await expect(paymentOption(page, "pay_at_property")).toHaveAttribute("aria-checked", "true");
 });
