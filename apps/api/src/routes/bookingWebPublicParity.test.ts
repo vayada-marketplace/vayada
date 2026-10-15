@@ -243,7 +243,6 @@ describe("Booking Web public bootstrap parity", () => {
         clickId: "click-123",
         sessionId: "sid_123",
         referrerSource: "instagram",
-        requestId: expect.any(String),
         occurredAt: new Date("2026-06-06T11:00:00.000Z"),
         userAgent: "lightMyRequest",
       },
@@ -251,7 +250,7 @@ describe("Booking Web public bootstrap parity", () => {
     await app.close();
   });
 
-  it("keeps only the referrer's site from older callers that send guest page addresses", async () => {
+  it("keeps only the referrer's site and a token session ID from callers that send guest details", async () => {
     const events: Record<string, unknown>[] = [];
     const app = buildApp({
       logger: false,
@@ -274,7 +273,12 @@ describe("Booking Web public bootstrap parity", () => {
           "instagram",
         ],
         [
-          { landing_url: guestPage, referrer: "", metadata: { email: "guest@example.test" } },
+          {
+            landing_url: guestPage,
+            referrer: "",
+            metadata: { email: "guest@example.test" },
+            session_id: "guest@example.test",
+          },
           "https://www.tiktok.com/@creator",
           "unknown",
         ],
@@ -296,7 +300,6 @@ describe("Booking Web public bootstrap parity", () => {
           "occurredAt",
           "referralCode",
           "referrerSource",
-          "requestId",
           "sessionId",
           "slug",
           "userAgent",

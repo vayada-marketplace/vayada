@@ -22,7 +22,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Affiliate click storage on PostgreSQL (VAY-
     await admin.end();
   });
 
-  it("stores no page address, referrer, metadata or visitor hashes in the event or its audit row", async () => {
+  it("stores no page address, referrer, metadata, request id or visitor hashes in the event or its audit row", async () => {
     const sink = createPgBookingWebEventSink({ connectionString: TEST_DATABASE_URL!, max: 1 });
     const click = {
       clickId: "vay-2215-click",
@@ -30,12 +30,11 @@ describe.skipIf(!TEST_DATABASE_URL)("Affiliate click storage on PostgreSQL (VAY-
       referralCode: "REF-2215",
       sessionId: "vay-2215-session",
       referrerSource: "instagram" as const,
-      requestId: "vay-2215-request",
       occurredAt: new Date("2027-01-01T10:00:00.000Z"),
       userAgent: "Mozilla/5.0 Safari/605.1.15",
     };
     await sink.recordAffiliateClick(click);
-    await sink.recordAffiliateClick({ ...click, requestId: "vay-2215-retry" });
+    await sink.recordAffiliateClick(click);
 
     const payload = {
       clickId: "vay-2215-click",
@@ -44,13 +43,10 @@ describe.skipIf(!TEST_DATABASE_URL)("Affiliate click storage on PostgreSQL (VAY-
       sessionId: "vay-2215-session",
       referrerSource: "instagram",
     };
-    const metadata = {
-      requestId: "vay-2215-request",
-      source: "apps/api-booking-web-public",
-      trafficClass: "human",
-    };
+    const metadata = { source: "apps/api-booking-web-public", trafficClass: "human" };
     const stored = await admin.query(
       `SELECT event.payload, event.event_metadata, event.tenant_scope, event.property_id,
+              event.correlation_id, audit.correlation_id AS audit_correlation_id,
               audit.redacted_payload, audit.private_payload, audit.audit_metadata
        FROM platform.domain_events event
        JOIN platform.product_audit_events audit ON audit.domain_event_id = event.id
@@ -64,6 +60,8 @@ describe.skipIf(!TEST_DATABASE_URL)("Affiliate click storage on PostgreSQL (VAY-
         event_metadata: metadata,
         tenant_scope: "external",
         property_id: null,
+        correlation_id: "vay-2215-session",
+        audit_correlation_id: "vay-2215-session",
         redacted_payload: payload,
         private_payload: {},
         audit_metadata: metadata,

@@ -18,19 +18,18 @@ describe("affiliate click occurrence persistence", () => {
     referralCode: "A",
     sessionId: "session",
     referrerSource: "unknown" as const,
-    requestId: "request",
     occurredAt: new Date("2026-09-09T12:00:00Z"),
   };
 
   it("retains A → B → A while retrying the final click uses the same event and audit identity", async () => {
     const sink = createPgBookingWebEventSink({ connectionString: "unused" });
-    for (const [referralCode, clickId, requestId] of [
-      ["A", "click-1", "request-1"],
-      ["B", "click-2", "request-2"],
-      ["A", "click-3", "request-3"],
-      ["A", "click-3", "retry-request"],
+    for (const [referralCode, clickId] of [
+      ["A", "click-1"],
+      ["B", "click-2"],
+      ["A", "click-3"],
+      ["A", "click-3"],
     ]) {
-      await sink.recordAffiliateClick({ ...event, referralCode, clickId, requestId });
+      await sink.recordAffiliateClick({ ...event, referralCode, clickId });
     }
     const values = query.mock.calls.map(([, values]) => values as unknown[]);
     expect(new Set(values.map((v) => v[1])).size).toBe(3);
@@ -67,15 +66,20 @@ describe("affiliate click occurrence persistence", () => {
       sessionId: "session",
       referrerSource: "tiktok",
     };
-    const metadata = {
-      requestId: "request",
-      source: "apps/api-booking-web-public",
-      trafficClass: "human",
-    };
+    const metadata = { source: "apps/api-booking-web-public", trafficClass: "human" };
+    expect(values[9]).toBe("session");
     expect(JSON.parse(values[11] as string)).toEqual(payload);
     expect(JSON.parse(values[12] as string)).toEqual(metadata);
     // The audit row's redacted_payload and audit_metadata reuse the same two parameters.
     expect(sql).toMatch(/\$10,\s*\$12,\s*'\{\}'::jsonb,\s*\$13,/);
+  });
+
+  it("correlates a click without an analytics session by its click ID, not the request", async () => {
+    const sink = createPgBookingWebEventSink({ connectionString: "unused" });
+    await sink.recordAffiliateClick({ ...event, sessionId: undefined, clickId: "click-9" });
+    const values = query.mock.calls[0][1] as unknown[];
+    expect(values[9]).toBe("click-9");
+    expect(JSON.stringify(values)).not.toContain("request");
   });
 
   it("does not collapse callers without a click ID or collide across hotels/referrals", async () => {

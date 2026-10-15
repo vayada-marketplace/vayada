@@ -39,7 +39,7 @@ export function createPgBookingWebEventSink(
         resourceProduct: "marketplace",
         resourceType: "affiliate_referral",
         resourceId: `${event.slug}:${event.referralCode}`,
-        correlationId: event.sessionId ?? event.requestId,
+        correlationId: event.sessionId ?? clickId,
         idempotencyKeyHash: hashKey(event.slug, event.referralCode, clickId),
         payload: {
           clickId,
@@ -48,9 +48,9 @@ export function createPgBookingWebEventSink(
           sessionId: event.sessionId ?? null,
           referrerSource: event.referrerSource,
         },
-        // No IP or user-agent hash: attribution needs neither (VAY-2215).
+        // VAY-2215: no request id (it joins the access log's IP address) and no IP or
+        // user-agent hash; attribution needs none of them.
         eventMetadata: {
-          requestId: event.requestId,
           source: "apps/api-booking-web-public",
           trafficClass: classifyBookingWebTraffic(event.userAgent),
         },

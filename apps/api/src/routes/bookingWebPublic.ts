@@ -233,7 +233,6 @@ export type BookingWebAffiliateClickEvent = {
   referralCode: string;
   sessionId?: string;
   referrerSource: ReturnType<typeof affiliateTrafficSource>;
-  requestId: string;
   occurredAt: Date;
   userAgent?: string;
 };
@@ -1118,18 +1117,19 @@ export async function registerBookingWebPublicRoutes(
       ) {
         throw createHttpError(400, "Invalid click ID.");
       }
+      // Booking Web sends a random analytics session id; anything else is not stored.
+      const sessionId = firstString(request.body?.sessionId, request.body?.session_id);
       if (options.attributionSink) {
         await options.attributionSink.recordAffiliateClick({
           clickId,
           slug: request.params.slug,
           referralCode,
-          sessionId: firstString(request.body?.sessionId, request.body?.session_id),
+          sessionId: sessionId && /^[A-Za-z0-9_-]{1,128}$/.test(sessionId) ? sessionId : undefined,
           // Attribution needs no page address (VAY-2215): booking-web URLs can carry a guest's
           // email, booking reference or access token. Older browsers still send landingUrl,
           // the full referrer and metadata; only the referrer's site is kept. The Referer
           // header is never read: it is the booking page itself.
           referrerSource: affiliateTrafficSource(request.body?.referrer),
-          requestId: String(request.id),
           occurredAt: now(),
           userAgent: request.headers["user-agent"],
         });
