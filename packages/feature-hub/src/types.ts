@@ -2,14 +2,7 @@ import type { ComponentType } from "react";
 
 export type FeatureProduct = "pms" | "booking_engine";
 
-export type FeatureCategory =
-  | "Distribution"
-  | "Guest Experience"
-  | "Operations"
-  | "Payments"
-  | "PMS Integrations";
-
-export type FeatureModuleType = "internal" | "external";
+export type FeatureCategory = "Guest" | "Revenue";
 
 export interface FeatureNavItem {
   label: string;
@@ -17,33 +10,22 @@ export interface FeatureNavItem {
   icon: ComponentType<{ className?: string }>;
 }
 
+/** Copy lives under `featureHub.modules.<id>.*`: name, description, detail and point.<n>. */
 export interface FeatureModule {
   id: string;
-  name: string;
-  description: string;
   category: FeatureCategory;
-  type: FeatureModuleType;
   product: FeatureProduct;
-  icon: string;
-  isNew?: boolean;
+  icon: ComponentType<{ className?: string }>;
+  /** ISO date the module joined Feature Hub; it is marked NEW for 30 days after. */
+  launchedOn?: string;
+  /** Listed as currently unavailable: no switch, not counted as active. */
+  unavailable?: boolean;
   navItem?: FeatureNavItem;
-  settingsNote?: string;
-  detail: {
-    headline: string;
-    features: Array<{ icon: ComponentType<{ className?: string }>; text: string }>;
-    visualType: FeatureVisualType;
-  };
+  /** Number of feature points in the detail window. */
+  points: number;
+  /** The detail window says what keeps running when the module is off (`offNote`). */
+  offNote?: boolean;
 }
-
-export type FeatureVisualType =
-  | "inbox"
-  | "reviews"
-  | "financials"
-  | "affiliates"
-  | "stripe"
-  | "paypal"
-  | "xendit"
-  | "lodgify";
 
 export interface ModuleActivation {
   moduleId: string;

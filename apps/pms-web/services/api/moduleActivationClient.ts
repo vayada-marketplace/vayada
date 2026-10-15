@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BOOKING_MODULE_IDS,
   combineActivationClients,
   PMS_NAVIGATION_MODULE_IDS,
   type FeatureActivationClient,
@@ -8,8 +9,14 @@ import {
 
 import { pmsNavigationModuleClient, propertyModuleClient } from "./pmsNavigationModuleClient";
 
-// The Inbox and Reviews store is optional: if it cannot be read, Financials still loads.
+// The Inbox/Reviews and Add-ons/Promos stores are optional: if one cannot be read, the rest
+// still loads.
 export const moduleActivationClient: FeatureActivationClient = combineActivationClients([
   { client: pmsNavigationModuleClient, modules: PMS_NAVIGATION_MODULE_IDS, optional: true },
+  {
+    client: propertyModuleClient("booking-modules"),
+    modules: BOOKING_MODULE_IDS,
+    optional: true,
+  },
   { client: propertyModuleClient("module-activations") },
 ]);

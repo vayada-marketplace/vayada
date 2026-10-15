@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from "pg";
 import { PUBLIC_PRICING_SELECTION_VERSION } from "@vayada/domain-booking";
+import { readGuestModuleSwitches } from "./bookingGuestModules.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { lockPublicPricingChargeTotals } from "./publicPricingChargeTotals.js";
 
@@ -102,21 +103,26 @@ export function splitAdults(adults: number, rooms: number) {
  * so (`childrenPriced`). The quote on /book stays the binding price. */
 export function createPublicPricingStayPrices(pool: Pool, catalog: OfferCatalog) {
   return {
-    async read(slug: string, query: StayPricesQuery) {
+    async read(slug: string, requested: StayPricesQuery) {
       const offered = await catalog.read(slug);
       if (!offered) return null;
-      const free = await short(pool, async (client) => {
+      const scoped = await short(pool, async (client) => {
         const scope = await lockPublicPricingAuthority(client, slug);
-        return scope
-          ? freeRooms(
-              client,
-              scope.propertyId,
-              offered.rooms.map(({ roomTypeId }) => roomTypeId),
-              query,
-            )
-          : null;
+        if (!scope) return null;
+        return {
+          free: await freeRooms(
+            client,
+            scope.propertyId,
+            offered.rooms.map(({ roomTypeId }) => roomTypeId),
+            requested,
+          ),
+          // VAY-2200: with Promos off a code is ignored, so cards show the plain price.
+          promoCodes: (await readGuestModuleSwitches(client, scope.propertyId)).promoCodes,
+        };
       });
-      if (!free) return null;
+      if (!scoped) return null;
+      const { free } = scoped;
+      const query = scoped.promoCodes ? requested : { ...requested, promoCode: null };
       let budget = MAX_PRICED_OFFERS;
       const rooms = [];
       for (const room of offered.rooms) {

@@ -1,5 +1,6 @@
 import type { Page, Route } from "@playwright/test";
 import { createAdaptiveHotelSetupStatusMock } from "./sharedHotelSetupMocks";
+import { mockBookingModules } from "./featureHubModuleMocks";
 
 export const PMS_WEB_PROPERTY_ID = "f6853000-0000-4000-8000-000000000001";
 export const PMS_WEB_ROOM_TYPE_ID = "room_type_alpine_suite";
@@ -503,6 +504,7 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
     }),
   );
   await mockNavigationModules(page, PMS_WEB_PROPERTY_ID);
+  await mockBookingModules(page, PMS_WEB_PROPERTY_ID);
   await page.route(
     `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/linked-inventory-groups`,
     (route) => route.fulfill({ json: { propertyId: PMS_WEB_PROPERTY_ID, items: [] } }),

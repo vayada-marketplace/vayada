@@ -2,6 +2,7 @@ import type { PublicBookingQuote } from "@vayada/domain-booking/replacement-pric
 import type { FastifyRequest } from "fastify";
 import { isManualPricingPaymentMethod, parsePublicPricingSelection } from "@vayada/domain-booking";
 import { pricingKeys, pricingObject } from "@vayada/domain-pms";
+import type { GuestModuleSwitches } from "../domains/bookingGuestModules.js";
 import type { createCurrentPricingQuoteStore } from "../domains/currentPricingQuoteStore.js";
 import { PricingStorageError } from "../domains/replacementPricingStore.js";
 
@@ -26,6 +27,8 @@ export function createReplacementBookingQuoteIssuer(
    * REPLACEMENT_PRICING_MANUAL_PAYMENT_ACCEPTANCE_ENABLED is off, and bank transfer only with the
    * bank-details binding. */
   manualMethods: readonly string[] = [],
+  /** The hotel's Feature Hub Add-ons and Promos switches (VAY-2200). */
+  guestModules?: (slug: string) => Promise<GuestModuleSwitches>,
 ) {
   return async (slug: string, input: unknown, requestId: unknown, signal?: AbortSignal) => {
     if (
@@ -42,6 +45,26 @@ export function createReplacementBookingQuoteIssuer(
       throw httpError(400, "Invalid quote request.");
     const selection = parsePublicPricingSelection(input.selection);
     if (!selection) throw httpError(400, "Invalid quote selection.");
+    // Only new quotes are gated: accepting a quote issued before a switch keeps the shown price.
+    if (guestModules && (selection.addons.length > 0 || selection.promoCode !== null)) {
+      let switches: GuestModuleSwitches;
+      try {
+        switches = await guestModules(slug);
+      } catch (error) {
+        if (typeof (error as { statusCode?: unknown }).statusCode === "number") throw error;
+        throw Object.assign(new Error("Quote temporarily unavailable.", { cause: error }), {
+          statusCode: 503,
+        });
+      }
+      if (selection.addons.length > 0 && !switches.addOns)
+        throw Object.assign(httpError(422, "Extras aren't available at this hotel."), {
+          code: "ADDONS_UNAVAILABLE",
+        });
+      if (selection.promoCode !== null && !switches.promoCodes)
+        throw Object.assign(httpError(422, "Promo codes aren't available at this hotel."), {
+          code: "PROMO_CODES_UNAVAILABLE",
+        });
+    }
     try {
       const { quote, replayed } = await store.issue(
         slug,

@@ -86,6 +86,7 @@ describe("active immutable Booking publication profile reads", () => {
             {
               domainVerified: true,
               referralEnabled: true,
+              promoCodes: true,
               latitude: profile.hotel.location.latitude,
               longitude: profile.hotel.location.longitude,
             },
@@ -146,6 +147,7 @@ describe("active immutable Booking publication profile reads", () => {
             {
               domainVerified: true,
               referralEnabled: true,
+              promoCodes: true,
               latitude: profile.hotel.location.latitude,
               longitude: profile.hotel.location.longitude,
             },
@@ -210,6 +212,23 @@ describe("active immutable Booking publication profile reads", () => {
 
     expect(result?.hotel.capabilities.referralCodes).toBe(false);
     expect(result?.hotel.branding?.showReferAGuestButton).toBe(false);
+  });
+
+  it("takes promo code availability from the live Promos gate, not the publication (VAY-2200)", async () => {
+    const published = structuredClone(profile);
+    published.hotel.capabilities.promoCodes = true;
+    const read = async (promoCodes: boolean) =>
+      createActiveBookingPublicationProfileRepository({
+        connectionString: "postgresql://unused",
+        pool: pool(async (text) =>
+          text.includes("identity.product_entitlements")
+            ? [{ domainVerified: true, referralEnabled: true, promoCodes }]
+            : [{ propertyId: published.hotel.propertyId, publicContent: content(published) }],
+        ),
+      }).findProfileBySlug(published.hotel.slug);
+
+    expect((await read(false))?.hotel.capabilities.promoCodes).toBe(false);
+    expect((await read(true))?.hotel.capabilities.promoCodes).toBe(true);
   });
 });
 

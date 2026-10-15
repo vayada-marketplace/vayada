@@ -3,6 +3,9 @@ import type { FeatureActivationClient, ModuleActivationsResponse } from "./types
 /** Inbox and Reviews are stored as PMS navigation modules, apart from Financials (VAY-2078). */
 export const PMS_NAVIGATION_MODULE_IDS = ["inbox", "reviews"] as const;
 
+/** Add-ons and Promos are stored in the Booking Engine settings (VAY-2200). */
+export const BOOKING_MODULE_IDS = ["add-ons", "promos"] as const;
+
 export type ActivationSource = {
   client: FeatureActivationClient;
   /** Modules this store owns; omit for the store that takes every other module. */
@@ -14,8 +17,8 @@ export type ActivationSource = {
 /**
  * Reads several module stores as one Feature Hub list and sends each switch to the store that owns
  * the module. A failed required read fails the list, so the page shows its load error; a failed
- * optional read only leaves that store's modules out. Manage rights stay per store: switching
- * Inbox does not need the Financials Owner permission.
+ * optional read only leaves that store's modules out, unless no store could be read at all. Manage
+ * rights stay per store: switching Inbox does not need the Financials Owner permission.
  */
 export function combineActivationClients(sources: ActivationSource[]): FeatureActivationClient {
   return {
@@ -26,6 +29,8 @@ export function combineActivationClients(sources: ActivationSource[]): FeatureAc
         if (sources[index]?.optional) return [];
         throw result.reason;
       });
+      const failed = results.find((result) => result.status === "rejected");
+      if (responses.length === 0 && failed) throw failed.reason;
       const manageableModules = responses.flatMap(
         (response) =>
           response.manageableModules ?? (response.canManage ? response.supportedModules : []),

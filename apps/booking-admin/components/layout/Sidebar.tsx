@@ -8,10 +8,8 @@ import {
   ChevronDownIcon,
   CheckIcon,
   Cog6ToothIcon,
-  CubeIcon,
-  TicketIcon,
 } from "@heroicons/react/24/outline";
-import { activeNavModules, useFeatureModuleActivations } from "@vayada/feature-hub";
+import { useFeatureModuleActivations, visibleNavModules } from "@vayada/feature-hub";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 import { moduleActivationClient } from "@/services/api/moduleActivationClient";
@@ -38,13 +36,12 @@ interface NavItem {
 const coreNavItems: NavItem[] = [
   { labelKey: "layout.sidebar.dashboard", href: "/", icon: DashboardIcon },
   { labelKey: "layout.sidebar.designStudio", href: "/design-studio", icon: DesignStudioIcon },
-  { labelKey: "bookingFlow.tabs.addons", href: "/add-ons", icon: CubeIcon },
 ];
 
-const promoCodesNavItem: NavItem = {
-  labelKey: "bookingFlow.tabs.promos",
-  href: "/promo-codes",
-  icon: TicketIcon,
+// Feature Hub module items keep the labels of their pages (VAY-2200).
+const MODULE_LABEL_KEYS: Record<string, string> = {
+  "add-ons": "bookingFlow.tabs.addons",
+  promos: "bookingFlow.tabs.promos",
 };
 
 const settingsNavItem: NavItem = {
@@ -63,15 +60,15 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   );
   const switcherRef = useRef<HTMLDivElement>(null);
   const { t } = useTranslation();
-  const { activeModuleIds, hotelId: activationPropertyId } =
+  const { activeModuleIds, supportedModuleIds } =
     useFeatureModuleActivations(moduleActivationClient);
-  const activeFeatureNavItems: NavItem[] = activationPropertyId
-    ? activeNavModules("booking_engine", activeModuleIds).map((module) => ({
-        ...module.navItem!,
-        labelKey: `featureHub.module.${module.id}.name`,
-      }))
-    : [];
-  const navItems = [...coreNavItems, ...activeFeatureNavItems, promoCodesNavItem, settingsNavItem];
+  // Add-ons and Promos stay listed unless Feature Hub says they are off (VAY-2200).
+  const moduleNavItems: NavItem[] = visibleNavModules(
+    "booking_engine",
+    activeModuleIds,
+    supportedModuleIds,
+  ).map((module) => ({ ...module.navItem!, labelKey: MODULE_LABEL_KEYS[module.id] }));
+  const navItems = [...coreNavItems, ...moduleNavItems, settingsNavItem];
 
   const switchApp = async (
     baseUrl: string,
