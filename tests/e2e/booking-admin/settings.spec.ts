@@ -623,7 +623,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     );
 
     await page.goto("/settings", { waitUntil: "networkidle" });
-    await expect(page.getByRole("heading", { name: "Booking Engine settings" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Booking Engine Settings" })).toBeVisible();
     const main = page.getByRole("main");
     await expect(main.getByRole("link", { name: /^Feature Hub/ })).toHaveAttribute(
       "href",
@@ -681,7 +681,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     for (const unknown of ["unknown", "account", "location", "notifications"]) {
       await page.goto(`/settings?section=${unknown}`, { waitUntil: "networkidle" });
-      await expect(page.getByRole("heading", { name: "Booking Engine settings" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Booking Engine Settings" })).toBeVisible();
     }
     await page.goto("/settings/account", { waitUntil: "networkidle" });
     await expect(page.getByRole("heading", { name: "Account", exact: true })).toHaveCount(0);
@@ -692,7 +692,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     ] as const) {
       await page.setViewportSize({ width, height });
       await page.goto("/settings", { waitUntil: "networkidle" });
-      await expect(page.getByRole("heading", { name: "Booking Engine settings" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Booking Engine Settings" })).toBeVisible();
       await testInfo.attach(`settings-grid-${name}`, {
         body: await page.screenshot({ fullPage: true }),
         contentType: "image/png",
@@ -753,9 +753,10 @@ test.describe("booking-admin settings no-legacy guard", () => {
           : plan === "fixed"
             ? "active"
             : "commission",
-        currency: "EUR",
-        activeRoomCount: 3,
-        amountMinor: 4_000,
+        // A USD-priced hotel: the card shows the plan's own currency, never a hard-coded one (VAY-2201).
+        currency: "USD",
+        activeRoomCount: 6,
+        amountMinor: 5_500,
         currentPeriodStart: plan === "fixed" ? "2026-08-11T12:00:00.000Z" : null,
         currentPeriodEnd: plan === "fixed" ? "2026-09-10T12:00:00.000Z" : null,
         nextBillingDate: plan === "fixed" && !cancelAtPeriodEnd ? "2026-09-10T12:00:00.000Z" : null,
@@ -788,9 +789,9 @@ test.describe("booking-admin settings no-legacy guard", () => {
             checkout: {
               checkoutSessionId: "cs_fixed",
               checkoutUrl: new URL("/settings?billing=success", page.url()).toString(),
-              currency: "EUR",
-              amountMinor: 4_000,
-              activeRoomCount: 3,
+              currency: "USD",
+              amountMinor: 5_500,
+              activeRoomCount: 6,
             },
           },
         });
@@ -812,14 +813,37 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await page.goto("/settings/billing");
     // Billing is only the Vayada plan; guest payment methods live on Payments.
     await expect(page.getByRole("heading", { name: "Payment Methods" })).toHaveCount(0);
-    await testInfo.attach("settings-billing", {
-      body: await page.screenshot({ fullPage: true }),
-      contentType: "image/png",
-    });
+    await expect(page.getByText("Fixed fee based on active units")).toBeVisible();
+    await expect(page.getByText("$55.00", { exact: true })).toBeVisible();
+    await expect(page.getByText("every month", { exact: true })).toBeVisible();
+    const unitPricing = page.getByTestId("fixed-plan-unit-pricing");
+    await expect(unitPricing).toHaveText(
+      "$30 for the first active unit + $5 per additional unit · 6 active units",
+    );
+    await expect(page.getByRole("main").getByText(/€|rooms|30 days/)).toHaveCount(0);
+    for (const [width, height, name] of [
+      [1440, 900, "desktop"],
+      [820, 1180, "tablet"],
+      [390, 844, "mobile"],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      // The description takes two lines at most: the formula, then the unit count (VAY-2201).
+      const [paragraph, line] = await Promise.all([
+        unitPricing.boundingBox(),
+        unitPricing.locator("span").last().boundingBox(),
+      ]);
+      expect(Math.round(paragraph!.height / line!.height), name).toBeLessThanOrEqual(2);
+      await testInfo.attach(`settings-billing-${name}`, {
+        body: await page.screenshot({ fullPage: true }),
+        contentType: "image/png",
+      });
+    }
+    await page.setViewportSize({ width: 1280, height: 720 });
     await page.getByRole("button", { name: "Switch to Fixed Plan" }).click();
     const fixedDialog = page.getByRole("dialog");
+    await expect(fixedDialog).toContainText("You're switching to the Fixed Plan at $55.00/month.");
     await expect(fixedDialog).toContainText(
-      "Your first payment will be charged today. Future payments will be charged every 30 days.",
+      "Your first payment will be charged today. Future payments will be charged every month.",
     );
     await fixedDialog.getByRole("button", { name: "Continue to payment" }).click();
     await expect(page.getByText("Fixed Plan is active.")).toBeVisible();
