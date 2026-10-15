@@ -15,7 +15,7 @@ type GoogleMap = {
   addListener: (
     eventName: "click" | "idle",
     handler: (event: GoogleMapsEvent) => void,
-  ) => { remove: () => void } | undefined;
+  ) => { remove: () => void };
   getZoom: () => number | undefined;
   // One camera move: a pan followed by a zoom can cut the pan animation short.
   moveCamera: (camera: { center: MapPosition; zoom: number }) => void;
@@ -134,6 +134,8 @@ export default function GoogleAddressMap({
   const onPickRef = useRef(onPick);
   const onUnavailableRef = useRef(onUnavailable);
   const coveredInsetsRef = useRef(coveredInsets);
+  // The area "Find on map" moved to, kept in view like a pin until a pin replaces it.
+  const focusRef = useRef<MapPosition | null>(null);
   // The map already shows a position the hotel picked on it; don't recenter for that one.
   const pickedRef = useRef<MapPosition | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "unavailable">("idle");
@@ -182,8 +184,11 @@ export default function GoogleAddressMap({
         markerRef.current = marker;
         if (interactive) {
           // A pan asked for before the first render can be lost: keep a saved pin in view once drawn.
+          let drawn = false;
           const firstIdle = map.addListener("idle", () => {
-            firstIdle?.remove();
+            if (drawn) return;
+            drawn = true;
+            firstIdle.remove();
             const pin = positionRef.current;
             if (pin && coveredInsetsRef.current) keepInView(map, pin, coveredInsetsRef.current);
           });
@@ -262,28 +267,31 @@ export default function GoogleAddressMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !focus) return;
+    focusRef.current = focus;
     map.moveCamera({ center: focus, zoom: AREA_ZOOM });
-    if (coveredInsetsRef.current) keepInView(map, focus, coveredInsetsRef.current);
   }, [focus]);
 
-  // After the pin is set or moved, and whenever the covering card moves (it jumps between the top
-  // and the bottom of a phone screen as it gains and loses focus), pan just enough to show the pin.
+  // After the pin (or a found area) is set or moved, and whenever the covering card moves (it jumps
+  // between the top and the bottom of a phone screen as it gains and loses focus), pan just enough
+  // to show it.
   const coveredTop = coveredInsets?.top;
   const coveredBottom = coveredInsets?.bottom;
   useEffect(() => {
     const map = mapRef.current;
     const pin = mapPosition(latitude, longitude);
+    if (pin) focusRef.current = null;
+    const point = pin ?? focusRef.current;
     if (
       status !== "ready" ||
       !map ||
-      !pin ||
+      !point ||
       coveredTop === undefined ||
       coveredBottom === undefined
     ) {
       return;
     }
-    keepInView(map, pin, { top: coveredTop, bottom: coveredBottom });
-  }, [status, latitude, longitude, coveredTop, coveredBottom]);
+    keepInView(map, point, { top: coveredTop, bottom: coveredBottom });
+  }, [status, latitude, longitude, focus, coveredTop, coveredBottom]);
 
   return (
     <div

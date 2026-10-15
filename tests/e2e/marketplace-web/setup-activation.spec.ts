@@ -287,33 +287,48 @@ test.describe("marketplace-web shared setup activation", () => {
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openLocationWithOpenBasics(page, baseURL);
-    const map = page.getByTestId("google-address-map-canvas");
-    const card = page.getByTestId("location-search-panel").locator("..");
     await selectExactGoogleAddress(page.locator(".vayada-google-place-autocomplete"));
     await expect(
       page.getByTestId("location-action-bar").getByText("Is this the right location?"),
     ).toBeVisible();
 
-    // The pin is drawn 43px tall above the centred point the mock tracks.
-    const pinClearOfCard = async () => {
-      const mapBox = await map.boundingBox();
-      const cardBox = await card.boundingBox();
-      const pointY = Number(await map.getAttribute("data-center-y"));
-      if (!mapBox || !cardBox || !Number.isFinite(pointY)) return false;
-      const tip = mapBox.y + pointY;
-      const onMap = tip - 43 >= mapBox.y && tip <= mapBox.y + mapBox.height;
-      return onMap && (tip - 43 >= cardBox.y + cardBox.height || tip <= cardBox.y);
-    };
-    const cardTop = async () => (await card.boundingBox())?.y ?? Number.NaN;
-
     // Focused on arrival, the card sits at the top of the screen: the pin shows below it.
-    await expect.poll(cardTop).toBeLessThan(100);
-    await expect.poll(pinClearOfCard).toBe(true);
+    await expect.poll(() => locationCardTop(page)).toBeLessThan(100);
+    await expect.poll(() => mapPointClearOfLocationCard(page)).toBe(true);
 
     // A tap on the map takes focus from the card, which drops to the bottom: the pin shows above it.
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-    await expect.poll(cardTop).toBeGreaterThan(200);
-    await expect.poll(pinClearOfCard).toBe(true);
+    await expect.poll(() => locationCardTop(page)).toBeGreaterThan(200);
+    await expect.poll(() => mapPointClearOfLocationCard(page)).toBe(true);
+  });
+
+  test("keeps a found area clear of the location card on a phone", async ({ page, baseURL }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openLocationWithOpenBasics(page, baseURL);
+    const locationActionBar = page.getByTestId("location-action-bar");
+    await page.getByRole("textbox", { name: /Street address/ }).fill("Unknown Street 5");
+    await locationActionBar.getByRole("button", { name: "Find on map" }).click();
+    await expect(
+      locationActionBar.getByText(
+        "Google found the area, not the exact address. Click your property on the map.",
+      ),
+    ).toBeVisible();
+    const map = page.getByTestId("google-address-map-canvas");
+    await expect(map).toHaveAttribute("data-center", "48.1351,11.582");
+    await expect(map).not.toHaveAttribute("data-marker", /./);
+
+    // The button is disabled while it searches, so focus may have left the card without an event:
+    // wherever the card ended up, the area is clear of it.
+    await expect.poll(() => mapPointClearOfLocationCard(page)).toBe(true);
+
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await expect.poll(() => locationCardTop(page)).toBeGreaterThan(200);
+    await expect.poll(() => mapPointClearOfLocationCard(page)).toBe(true);
+
+    // Back in the address fields, the card moves to the top: the area shows below it.
+    await page.getByRole("textbox", { name: /Street address/ }).focus();
+    await expect.poll(() => locationCardTop(page)).toBeLessThan(100);
+    await expect.poll(() => mapPointClearOfLocationCard(page)).toBe(true);
   });
 
   test("offers typed coordinates when Google rejects the map key", async ({ page, baseURL }) => {
@@ -1015,6 +1030,28 @@ async function openLocationWithOpenBasics(
   return profileWrites;
 }
 
+// The phone location card: the search panel's parent, a full-width sheet over the map.
+function locationCard(page: Page) {
+  return page.getByTestId("location-search-panel").locator("..");
+}
+
+async function locationCardTop(page: Page) {
+  return (await locationCard(page).boundingBox())?.y ?? Number.NaN;
+}
+
+// The map mock tracks where the point it was last centred on is drawn (data-center-y). A pin there
+// stands 43px tall above it; the whole pin must be on the map and outside the card.
+async function mapPointClearOfLocationCard(page: Page) {
+  const map = page.getByTestId("google-address-map-canvas");
+  const mapBox = await map.boundingBox();
+  const cardBox = await locationCard(page).boundingBox();
+  const pointY = Number(await map.getAttribute("data-center-y"));
+  if (!mapBox || !cardBox || !Number.isFinite(pointY)) return false;
+  const tip = mapBox.y + pointY;
+  const onMap = tip - 43 >= mapBox.y && tip <= mapBox.y + mapBox.height;
+  return onMap && (tip - 43 >= cardBox.y + cardBox.height || tip <= cardBox.y);
+}
+
 async function mockGooglePlaces(
   page: Page,
   { placesUnavailable = false, mapsUnavailable = false, mapsAuthFailure = false } = {},
@@ -1073,6 +1110,7 @@ async function mockGooglePlaces(
           }
           addListener(eventName, handler) {
             this.listeners[eventName] = handler;
+            return { remove: () => delete this.listeners[eventName] };
           }
           getZoom() {
             return this.zoom;

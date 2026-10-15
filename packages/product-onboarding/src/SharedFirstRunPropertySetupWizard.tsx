@@ -1051,6 +1051,63 @@ function HotelFacadeIllustration() {
   );
 }
 
+/**
+ * On a phone the location card spans the screen width, at the bottom or (while focused) the top.
+ * Reports how much of the map it covers there; null from Tailwind's `sm` up, where the panels sit
+ * beside the pin.
+ */
+function useCoveredMapInsets(
+  active: boolean,
+  areaRef: RefObject<HTMLDivElement | null>,
+  cardRef: RefObject<HTMLDivElement | null>,
+): MapCoveredInsets | null {
+  const [insets, setInsets] = useState<MapCoveredInsets | null>(null);
+
+  useEffect(() => {
+    const area = areaRef.current;
+    const card = cardRef.current;
+    if (!active || !area || !card) return;
+    const narrow = window.matchMedia("(max-width: 639.98px)");
+    let frame = 0;
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      // Next frame: :focus-within has moved the card by then.
+      frame = requestAnimationFrame(() => {
+        const next = narrow.matches
+          ? coveredMapInsets(area.getBoundingClientRect(), card.getBoundingClientRect())
+          : null;
+        setInsets((current) =>
+          current?.top === next?.top && current?.bottom === next?.bottom ? current : next,
+        );
+      });
+    };
+    measure();
+    const resize = new ResizeObserver(measure);
+    resize.observe(area);
+    resize.observe(card);
+    // Focus can also leave without an event (a focused button turning disabled drops the card to
+    // the bottom), so any change inside the card re-measures too.
+    const changes = new MutationObserver(measure);
+    changes.observe(card, {
+      attributes: true,
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+    card.addEventListener("focusin", measure);
+    card.addEventListener("focusout", measure);
+    return () => {
+      cancelAnimationFrame(frame);
+      resize.disconnect();
+      changes.disconnect();
+      card.removeEventListener("focusin", measure);
+      card.removeEventListener("focusout", measure);
+    };
+  }, [active, areaRef, cardRef]);
+
+  return insets;
+}
+
 function ProfileForm({
   draft,
   launchSettings,
@@ -1127,46 +1184,12 @@ function ProfileForm({
     address: string;
   } | null>(null);
   const [mapFocus, setMapFocus] = useState<MapPosition | null>(null);
-  // On a phone the location card spans the screen width, at the bottom or (while focused) the top;
-  // the map keeps the pin in the strip the card leaves visible.
+  // The map keeps the pin in the strip the location card leaves visible on a phone.
   const locationMapArea = useRef<HTMLDivElement>(null);
   const locationCard = useRef<HTMLDivElement>(null);
-  const [mapCoveredInsets, setMapCoveredInsets] = useState<MapCoveredInsets | null>(null);
+  const mapCoveredInsets = useCoveredMapInsets(step === 1, locationMapArea, locationCard);
   const latestDraft = useRef(draft);
   latestDraft.current = draft;
-
-  useEffect(() => {
-    const area = locationMapArea.current;
-    const card = locationCard.current;
-    if (step !== 1 || !area || !card) return;
-    // Below Tailwind's `sm` the card is a full-width sheet; from `sm` up the panels sit beside the pin.
-    const narrow = window.matchMedia("(max-width: 639.98px)");
-    let frame = 0;
-    const measure = () => {
-      cancelAnimationFrame(frame);
-      // Next frame: :focus-within has moved the card by then.
-      frame = requestAnimationFrame(() => {
-        const next = narrow.matches
-          ? coveredMapInsets(area.getBoundingClientRect(), card.getBoundingClientRect())
-          : null;
-        setMapCoveredInsets((current) =>
-          current?.top === next?.top && current?.bottom === next?.bottom ? current : next,
-        );
-      });
-    };
-    measure();
-    const resize = new ResizeObserver(measure);
-    resize.observe(area);
-    resize.observe(card);
-    card.addEventListener("focusin", measure);
-    card.addEventListener("focusout", measure);
-    return () => {
-      cancelAnimationFrame(frame);
-      resize.disconnect();
-      card.removeEventListener("focusin", measure);
-      card.removeEventListener("focusout", measure);
-    };
-  }, [step]);
   const mounted = useRef(false);
   // A keyboard path to a pin when the address search is down (the map itself needs a pointer).
   const [coordinatesRequested, setCoordinatesRequested] = useState(false);
