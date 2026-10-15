@@ -477,7 +477,7 @@ export default function CheckInPage() {
   }
 
   return (
-    <div className="overflow-x-hidden p-4 md:p-6">
+    <div className="overflow-x-clip p-4 md:p-6">
       <div className="max-w-7xl space-y-5">
         <header className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">

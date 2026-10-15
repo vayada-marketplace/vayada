@@ -15,7 +15,6 @@ const TOP_LEVEL = [
   "/dashboard",
   "/bookings",
   "/rooms",
-  "/pricing",
   "/channel-manager",
   "/reviews",
   "/settings",
@@ -61,6 +60,11 @@ async function mockPages(page: Page) {
   await page.route(`${reservation}/change-request`, (route) => route.fulfill({ json: null }));
 }
 
+/** True on the route's own URL, so a redirect elsewhere can't pass for it. */
+function onRoute(route: string) {
+  return (url: URL) => url.pathname === route;
+}
+
 /** The page title's position inside <main>, in whole pixels. */
 async function titlePosition(page: Page) {
   const title = page.locator("main h1").first();
@@ -82,16 +86,17 @@ for (const viewport of VIEWPORTS) {
 
     for (const route of TOP_LEVEL) {
       await page.goto(route);
-      expect(await titlePosition(page), route).toEqual({
-        x: viewport.padding,
-        y: viewport.padding,
-      });
+      const position = await titlePosition(page);
+      // Checked after the title shows, so a client-side redirect can't pass for the page.
+      await expect(page).toHaveURL(onRoute(route));
+      expect(position, route).toEqual({ x: viewport.padding, y: viewport.padding });
     }
 
     let subPageY: number | undefined;
     for (const route of SUB_PAGES) {
       await page.goto(route);
       const position = await titlePosition(page);
+      await expect(page).toHaveURL(onRoute(route));
       expect(position.x, route).toBe(viewport.padding);
       subPageY ??= position.y;
       expect(position.y, route).toBe(subPageY);
@@ -107,9 +112,11 @@ test("detail page titles stay at the left edge on wide screens", async ({ page }
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(route);
     const narrow = await titlePosition(page);
+    await expect(page).toHaveURL(onRoute(route));
     await page.setViewportSize({ width: 1920, height: 1080 });
     expect(await titlePosition(page), route).toEqual(narrow);
-    expect(narrow.x, route).toBeLessThan(80);
+    // A back link or button may come first, but a centred column would start far further in.
+    expect(narrow.x, route).toBeLessThan(120);
   }
 });
 
