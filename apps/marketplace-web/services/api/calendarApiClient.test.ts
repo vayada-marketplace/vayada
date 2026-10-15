@@ -1009,8 +1009,8 @@ function revisionContext(): CalendarDraftRevisionContext {
     baseRevisions: {
       "pms.operating_calendar": "calendar:2",
       "pms.inventory": "inventory:2",
-      "pms.room_types": "types:3",
-      "hotel_catalog.location": "location:7",
+      "pms.room_units": "units:3",
+      "hotel_catalog.time_zone": "time-zone:7",
     },
   };
 }

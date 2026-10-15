@@ -6,7 +6,9 @@ import {
   PROPERTY_SETUP_DRAFT_PII_CLASSIFICATION,
   PROPERTY_SETUP_STEP_DEFINITIONS,
   getActivePropertySetupStepIds,
+  getPropertySetupBaseRevisionKeys,
   isPropertySetupBaseRevisionManifest,
+  isPropertySetupLegacyCalendarBaseRevisionManifest,
   type PropertySetupBaseRevisions,
   type PropertySetupDraftPayload,
   type JsonValue,
@@ -31,6 +33,52 @@ describe("property setup draft contract", () => {
       }),
     ).toBe(false);
   });
+  it("pins a calendar draft to the time zone, rooms and units, and still reads legacy drafts", () => {
+    const current = {
+      "pms.operating_calendar": "calendar:2",
+      "pms.inventory": "inventory:2",
+      "pms.room_units": "room-units:abc",
+      "hotel_catalog.time_zone": "time-zone:def",
+    };
+    const legacy = {
+      "pms.operating_calendar": "calendar:2",
+      "pms.inventory": "inventory:2",
+      "pms.room_types": "room-types:abc",
+      "hotel_catalog.location": "hotel_catalog.location:property:r3",
+    };
+    expect(getPropertySetupBaseRevisionKeys("calendar", current)).toEqual([
+      "pms.operating_calendar",
+      "pms.inventory",
+      "pms.room_units",
+      "hotel_catalog.time_zone",
+    ]);
+    expect(getPropertySetupBaseRevisionKeys("calendar", legacy)).toEqual([
+      "pms.operating_calendar",
+      "pms.inventory",
+      "pms.room_types",
+      "hotel_catalog.location",
+    ]);
+    expect(isPropertySetupBaseRevisionManifest("calendar", legacy)).toBe(true);
+    expect(isPropertySetupLegacyCalendarBaseRevisionManifest(legacy)).toBe(true);
+    expect(isPropertySetupLegacyCalendarBaseRevisionManifest(current)).toBe(false);
+    // Mixed or partial key sets, and the legacy calendar keys on another step, stay invalid.
+    const { ["pms.room_units"]: _units, ...partial } = current;
+    expect(
+      isPropertySetupBaseRevisionManifest("calendar", {
+        ...partial,
+        "pms.room_types": "room-types:abc",
+      }),
+    ).toBe(false);
+    expect(isPropertySetupBaseRevisionManifest("calendar", { ...current, ...legacy })).toBe(false);
+    expect(isPropertySetupBaseRevisionManifest("calendar", partial)).toBe(false);
+    expect(isPropertySetupBaseRevisionManifest("rooms", legacy)).toBe(false);
+    expect(
+      isPropertySetupBaseRevisionManifest("calendar", { ...current, "pms.inventory": "" }),
+    ).toBe(false);
+    expectTypeOf(legacy).toMatchTypeOf<PropertySetupBaseRevisions<"calendar">>();
+    expectTypeOf(current).toMatchTypeOf<PropertySetupBaseRevisions<"calendar">>();
+  });
+
   it("defines the approved retention, PII posture, and nine stable steps", () => {
     expect(PROPERTY_SETUP_ACTIVE_RETENTION_DAYS).toBe(90);
     expect(PROPERTY_SETUP_COMPLETED_RETENTION_DAYS).toBe(30);
@@ -86,7 +134,7 @@ describe("property setup draft contract", () => {
       booking_design: "booking.design|hotel_catalog.profile|hotel_catalog.media",
       rooms: "pms.room_types|pms.room_units|pms.room_media",
       pricing: "pms.pricing_settings|pms.rate_plans|pms.rate_rules",
-      calendar: "pms.operating_calendar|pms.inventory|pms.room_types|hotel_catalog.location",
+      calendar: "pms.operating_calendar|pms.inventory|pms.room_units|hotel_catalog.time_zone",
       guest_experience: "booking.guest_experience",
       payments: "finance.payment_methods|pms.pricing_settings",
       review: "",

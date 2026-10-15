@@ -39,7 +39,6 @@ const OWNER_DOMAINS: readonly PropertySetupOwnerDomain[] = [
   "distribution",
 ];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const BASE_REVISION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const MAX_REVISION = 2_147_483_646;
 const MAX_SOURCE_REVISION_LENGTH = 8_192;
 const ROUTE_KEYS = [
@@ -255,9 +254,8 @@ function isStepDraft(
       dirtyFields,
       definition.fields.filter((field) => dirtyFields.includes(field)),
     ) ||
-    !isRecord(baseRevisions) ||
-    !hasExactKeys(baseRevisions, definition.baseRevisionKeys) ||
-    !Object.values(baseRevisions).every(isBaseRevision) ||
+    // Accepts a calendar draft saved before VAY-2198 with its legacy manifest.
+    !isPropertySetupBaseRevisionManifest(expectedStepId, baseRevisions) ||
     value.piiClassification !== PROPERTY_SETUP_DRAFT_PII_CLASSIFICATION ||
     !isIsoTimestamp(value.retentionExpiresAt) ||
     !isRevision(value.revision) ||
@@ -302,10 +300,6 @@ function isUuid(value: unknown): value is string {
 
 function isRevision(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= MAX_REVISION;
-}
-
-function isBaseRevision(value: unknown): value is string {
-  return typeof value === "string" && BASE_REVISION_PATTERN.test(value);
 }
 
 function isSourceRevision(value: unknown): value is string {
